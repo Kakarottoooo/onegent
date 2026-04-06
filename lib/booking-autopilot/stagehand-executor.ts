@@ -1580,9 +1580,12 @@ KEY RULES:
 The user will enter CVV and confirm payment themselves.`,
     });
 
+    trace(`Agent starting main run (maxSteps=25, model=${modelName})`);
+    const t0 = Date.now();
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const result = await agent.execute({ instruction, maxSteps: 25 }) as any;
     const raw = getRawPage(page);
+    trace(`Agent finished main run in ${((Date.now() - t0) / 1000).toFixed(1)}s — message: "${(result.message ?? "").slice(0, 120)}"`);
 
     // Check ALL open pages ― booking sites often open a new tab for the
     // checkout flow, so activePage() may still point to the original hotel
@@ -1652,8 +1655,10 @@ Do NOT stop at the review summary and do NOT treat this as the final payment ste
             return true;
           }
           trace("No deterministic room-selection advance button was found, so a stage-specific agent recovery pass is running.");
+          const tr0 = Date.now();
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          await agent.execute({ instruction: buildStageRecoveryInstruction(stage), maxSteps: 10 } as any);
+          const rResult = await agent.execute({ instruction: buildStageRecoveryInstruction(stage), maxSteps: 10 } as any);
+          trace(`Room-selection recovery finished in ${((Date.now() - tr0) / 1000).toFixed(1)}s — "${((rResult as any)?.message ?? "").slice(0, 80)}"`);
           return true;
         }
         case "intermediate_gate": {
