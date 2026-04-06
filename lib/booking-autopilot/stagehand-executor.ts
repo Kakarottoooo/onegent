@@ -1285,6 +1285,10 @@ export async function runBrowserTask(
   const debugTrace: string[] = [];
   const trace = (message: string) => {
     debugTrace.push(message);
+    // Print to terminal in dev so you can follow execution without opening the DB.
+    if (process.env.NODE_ENV !== "production") {
+      console.log(`[stagehand] ${message}`);
+    }
   };
 
   const useCloud =
@@ -1345,6 +1349,15 @@ export async function runBrowserTask(
     model: modelName,  // just the string — Stagehand reads key from env vars above
     verbose: 0,
     disablePino: true,
+    // Dev: set PLAYWRIGHT_HEADLESS=false to watch the browser window with a visible
+    // cursor. Set PLAYWRIGHT_SLOW_MO=500 to slow down each action by 500ms so you
+    // can follow what the agent is doing. Both are ignored in production/Browserbase.
+    ...(!useCloud && {
+      localBrowserLaunchOptions: {
+        headless: process.env.PLAYWRIGHT_HEADLESS !== "false",
+        slowMo: process.env.PLAYWRIGHT_SLOW_MO ? parseInt(process.env.PLAYWRIGHT_SLOW_MO) : 0,
+      },
+    }),
   });
 
   trace(`Executor starting — model: ${modelName}, browser: ${useCloud ? "Browserbase" : "local"}, proxies: ${process.env.BROWSERBASE_USE_PROXIES === "true"}`);
