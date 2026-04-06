@@ -1591,7 +1591,22 @@ The user will enter CVV and confirm payment themselves.`,
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const result = await agent.execute({ instruction, maxSteps: 25 }) as any;
     const raw = getRawPage(page);
-    trace(`Agent finished main run in ${((Date.now() - t0) / 1000).toFixed(1)}s — message: "${(result.message ?? "").slice(0, 120)}"`);
+    const mainMsg = (result.message ?? "").slice(0, 200);
+    trace(`Agent finished main run in ${((Date.now() - t0) / 1000).toFixed(1)}s — message: "${mainMsg.slice(0, 120)}"`);
+
+    // Detect fatal API errors (out of credits, invalid key, quota exceeded).
+    // Continuing the recovery loop is pointless — every agent call will fail too.
+    const fatalApiError = /credit balance is too low|insufficient_quota|invalid.{0,20}api.{0,20}key|rate limit exceeded|billing/i.test(mainMsg);
+    if (fatalApiError) {
+      return {
+        status: "error" as const,
+        error: `AI model API error: ${mainMsg.slice(0, 300)}`,
+        handoffUrl: input.startUrl,
+        sessionUrl,
+        summary: "Booking stopped: the AI model API returned a billing or quota error. Check your API key credits.",
+        debugTrace,
+      };
+    }
 
     // Check ALL open pages ― booking sites often open a new tab for the
     // checkout flow, so activePage() may still point to the original hotel
