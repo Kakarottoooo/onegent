@@ -255,12 +255,10 @@ export function buildPreferenceProfile(events: AgentFeedbackEvent[]): UserPrefer
       if (isOverride) p.overrides++;
       providerMap.set(e.provider, p);
     }
-    {
-      const t = typeMap.get(e.step_type) ?? { overrides: 0, total: 0 };
-      t.total++;
-      if (isOverride) t.overrides++;
-      typeMap.set(e.step_type, t);
-    }
+    const st = typeMap.get(e.step_type) ?? { overrides: 0, total: 0 };
+    st.total++;
+    if (isOverride) st.overrides++;
+    typeMap.set(e.step_type, st);
   }
 
   // ── Negative signals: entities with high override rates ──

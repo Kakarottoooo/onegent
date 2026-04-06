@@ -1331,6 +1331,8 @@ export async function runBrowserTask(
     disablePino: true,
   });
 
+  trace(`Executor starting — model: ${modelName}, browser: ${useCloud ? "Browserbase" : "local"}, proxies: ${process.env.BROWSERBASE_USE_PROXIES === "true"}`);
+
   try {
     await stagehand.init();
     // v3 API: get active page from context (resolvePage is private)
@@ -1909,6 +1911,8 @@ Do NOT stop at the review summary and do NOT treat this as the final payment ste
   } catch (err) {
     const { message: error, statusCode, serialized } = extractErrorDetails(err);
     const stack = err instanceof Error ? err.stack : undefined;
+    // Preserve the raw error string before any further interpretation, for diagnostics.
+    const rawError = serialized ?? error;
 
     // Write to persistent agent log for debugging
     await writeAgentLog({
@@ -1924,6 +1928,8 @@ Do NOT stop at the review summary and do NOT treat this as the final payment ste
         statusCode,
         serializedError: serialized?.slice(0, 2000),
         stack: stack?.slice(0, 1000),
+        model: input.agentModel?.model ?? modelName,
+        usingCloud: useCloud,
       },
     });
 
@@ -1948,14 +1954,42 @@ Do NOT stop at the review summary and do NOT treat this as the final payment ste
       error.toLowerCase().includes("billing") ||
       error.toLowerCase().includes("credits") ||
       error.toLowerCase().includes("quota") ||
-      error.toLowerCase().includes("payment required")
+      error.toLowerCase().includes("payment required") ||
+      rawError.toLowerCase().includes("minutes limit")
     ) {
-      trace(`Executor hit provider billing/quota failure: ${error}`);
+      trace(`Executor hit 402. Raw: ${rawError.slice(0, 400)}`);
+
+      // Specific Browserbase free-plan minutes exhaustion
+      if (rawError.toLowerCase().includes("browser minutes limit") ||
+          rawError.toLowerCase().includes("free plan")) {
+        return {
+          status: "error",
+          handoffUrl: input.startUrl,
+          summary: "Browserbase free plan browser minutes exhausted.",
+          error: "Browserbase free plan limit reached — upgrade at browserbase.com/plans, or remove BROWSERBASE_API_KEY to run locally.",
+          debugTrace,
+        };
+      }
+
+      // Generic 402 — try to name the provider
+      const isBrowserbase = rawError.toLowerCase().includes("browserbase") ||
+        rawError.toLowerCase().includes("session") ||
+        rawError.toLowerCase().includes("concurren");
+      const isModelApi = rawError.toLowerCase().includes("openai") ||
+        rawError.toLowerCase().includes("anthropic") ||
+        rawError.toLowerCase().includes("google") ||
+        rawError.toLowerCase().includes("gemini");
+      const providerHint = isBrowserbase
+        ? "Browserbase"
+        : isModelApi
+        ? `Model API (${modelName})`
+        : `unknown provider — model: ${modelName}`;
+
       return {
         status: "error",
         handoffUrl: input.startUrl,
         summary: "The automation provider rejected this run before the booking flow could finish.",
-        error: "Automation provider quota/billing issue (HTTP 402). Check Browserbase or model API credits, then retry.",
+        error: `Quota/billing issue (HTTP 402) from ${providerHint}. Check credits and retry.`,
         debugTrace,
       };
     }

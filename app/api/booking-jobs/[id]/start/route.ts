@@ -48,7 +48,8 @@ import { buildAutoMonitors } from "@/lib/monitors";
 import { createBookingMonitor } from "@/lib/db";
 import { sendPushNotification } from "@/lib/push";
 import type { PushSubscription } from "web-push";
-import type { AutopilotResult, BrowserTaskResult } from "@/lib/booking-autopilot/types";
+import type { AutopilotResult, BrowserTaskResult, BrowserTaskInput } from "@/lib/booking-autopilot/types";
+import { runBrowserTask } from "@/lib/booking-autopilot/stagehand-executor";
 import { buildPreferenceProfile } from "@/lib/policy";
 
 // ── Agent-runtime: activity skill dispatch ─────────────────────────────────
@@ -113,7 +114,6 @@ async function runStepWithRecovery(
       primaryData = data;
 
       if (data.status === "ready") {
-        const timeStr = typeof step.body.time === "string" ? ` at ${step.body.time}` : "";
         log.push({ ts: now(), type: "succeeded",
           message: Explain.timeTry(step.label, typeof step.body.time === "string" ? step.body.time : ""),
           outcome: "Booked ✓" });
@@ -334,11 +334,6 @@ async function runUniversalStep(
     typeof rawProfileId === "string" && rawProfileId ? parseInt(rawProfileId) :
     null;
 
-  const hasInlineProfile = (() => {
-    const rp = resolvedBody.profile as Record<string, string> | undefined;
-    return !!(rp?.first_name || rp?.last_name || rp?.email || rp?.phone);
-  })();
-
   // Fetch card number from DB and merge into inline profile (card never stored in step body).
   // Also serves as fallback if inline profile is missing.
   if (jobUserId) {
@@ -392,27 +387,46 @@ async function runUniversalStep(
   }
 
   try {
-    const res = await fetch(`${BASE_URL}/api/booking-autopilot/universal`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(resolvedBody),
-    });
+    const input: BrowserTaskInput = {
+      startUrl: resolvedBody.startUrl as string,
+      task: resolvedBody.task as string,
+      profile: (resolvedBody.profile ?? { first_name: "", last_name: "", email: "", phone: "" }) as BrowserTaskInput["profile"],
+      jobId: (resolvedBody.jobId as string | undefined) ?? step.label,
+      stepIndex: (resolvedBody.stepIndex as number | undefined) ?? 0,
+      agentModel: resolvedBody.agentModel as BrowserTaskInput["agentModel"] | undefined,
+    };
 
-    let data: BrowserTaskResult;
-    try {
-      data = await res.json() as BrowserTaskResult;
-    } catch (parseErr) {
-      const rawText = await res.text().catch(() => "(empty body)");
-      const errMsg = `Autopilot API returned non-JSON (HTTP ${res.status}): ${rawText.slice(0, 400)}`;
-      await writeAgentLog({
-        session_id: "",
-        job_id: step.label,
-        level: "error",
-        source: "start-route/universal",
-        message: errMsg,
-        details: { status: res.status, rawText: rawText.slice(0, 1000) },
+    // Call runBrowserTask directly — avoids the self-HTTP fetch that fails when
+    // NEXT_PUBLIC_APP_URL is not set (or the loopback is unavailable in serverless).
+    const data: BrowserTaskResult = await runBrowserTask(input);
+
+    // ── Persist result immediately after runBrowserTask returns ──────────────
+    // Vercel's 5-min maxDuration can kill the function at any moment. Writing
+    // the agent's debugTrace + summary/error to DB right here ensures the tasks
+    // UI shows what happened even if the process is killed before we return.
+    const earlyLog: typeof log = [...log];
+    for (const entry of data.debugTrace ?? []) {
+      earlyLog.push({ ts: now(), type: "attempt", message: entry, outcome: "Executor trace" });
+    }
+    const earlyOutcome =
+      data.status === "completed" || data.status === "paused_payment" ? "succeeded" :
+      data.status === "no_availability" ? "skipped" : "failed";
+    earlyLog.push({
+      ts: now(),
+      type: earlyOutcome,
+      message: data.summary || data.error || `Agent status: ${data.status}`,
+      outcome: data.status,
+    });
+    // Fire-and-forget — we don't await so the main path isn't delayed
+    onProgress({ ...step, status: "loading", decisionLog: earlyLog }).catch(() => {});
+
+    for (const entry of data.debugTrace ?? []) {
+      log.push({
+        ts: now(),
+        type: "attempt",
+        message: entry,
+        outcome: "Executor fallback",
       });
-      throw new Error(errMsg);
     }
 
     if (data.status === "completed" || data.status === "paused_payment") {
@@ -496,9 +510,19 @@ export async function POST(_req: NextRequest, { params }: Params) {
 
   const job = await getBookingJob(id);
   if (!job) return NextResponse.json({ error: "Job not found" }, { status: 404 });
-  // Allow re-running failed jobs (e.g. after a scheduled retry or user-triggered retry)
+  // Allow re-running failed jobs (e.g. after a scheduled retry or user-triggered retry).
+  // Also allow re-running a "running" job that has been stuck for > 7 minutes — this
+  // happens when the Vercel function hit its 5-min maxDuration and was killed before the
+  // final updateBookingJobStatus() call could write "failed" to the DB.
   if (job.status === "running") {
-    return NextResponse.json({ error: "Job already running" }, { status: 409 });
+    const updatedAt = new Date(job.updated_at).getTime();
+    const stuckThresholdMs = 7 * 60 * 1000; // 7 minutes
+    const isStuck = Date.now() - updatedAt > stuckThresholdMs;
+    if (!isStuck) {
+      return NextResponse.json({ error: "Job already running" }, { status: 409 });
+    }
+    // Reset stuck job so the run below can proceed
+    await updateBookingJobStatus(id, "pending");
   }
 
   // Use the autonomy settings saved at job-creation time, fall back to defaults

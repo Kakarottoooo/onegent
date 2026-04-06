@@ -14,13 +14,14 @@ export async function GET(_req: NextRequest, { params }: Params) {
 }
 
 /** DELETE /api/booking-jobs/[id] — remove a job (not while running) */
-export async function DELETE(_req: NextRequest, { params }: Params) {
+export async function DELETE(req: NextRequest, { params }: Params) {
   const { id } = await params;
   const job = await getBookingJob(id);
   if (!job) return NextResponse.json({ error: "Not found" }, { status: 404 });
-  if (job.status === "running") {
+  const force = req.nextUrl.searchParams.get("force") === "true";
+  if (job.status === "running" && !force) {
     return NextResponse.json({ error: "Cannot delete a running job" }, { status: 409 });
   }
   await deleteBookingJob(id);
-  return NextResponse.json({ deleted: true });
+  return NextResponse.json({ deleted: true, forced: force });
 }

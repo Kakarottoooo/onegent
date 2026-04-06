@@ -395,11 +395,10 @@ function fromMinutes(minutes: number): string {
  */
 function regenerateTimeFallbacks(newBase: string, oldFallbacks: string[]): string[] {
   const baseMin = toMinutes(newBase);
-  return [...new Set([
+  return [
     fromMinutes(baseMin - 30),
     fromMinutes(baseMin + 30),
     fromMinutes(baseMin - 60),
     fromMinutes(baseMin + 60),
-    ...oldFallbacks.map(() => fromMinutes(baseMin)), // placeholder — will be deduped
-  ].filter((t) => t !== newBase))].slice(0, 4);
+  ].filter((t) => t !== newBase).slice(0, 4);
 }

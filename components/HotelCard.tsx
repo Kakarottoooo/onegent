@@ -48,19 +48,16 @@ export default function HotelCard({ card, index, checkIn, checkOut, guests }: Ho
       const rawSearch = locationHint ? `${hotel.name} ${locationHint}` : hotel.name;
       const searchTerm = rawSearch.replace(/[/\\|]/g, " ").replace(/\s+/g, " ").trim();
 
-      const bookingComParams = new URLSearchParams({
+      const bookingComParams: Record<string, string> = {
         ss: searchTerm,
-        checkin: checkIn ?? "",
-        checkout: checkOut ?? "",
         group_adults: String(numAdults),
         no_rooms: "1",
         selected_currency: "USD",
         lang: "en-us",
-      });
-      for (const [k, v] of bookingComParams.entries()) {
-        if (!v) bookingComParams.delete(k);
-      }
-      const bookingComUrl = `https://www.booking.com/searchresults.html?${bookingComParams.toString()}`;
+      };
+      if (checkIn) bookingComParams.checkin = checkIn;
+      if (checkOut) bookingComParams.checkout = checkOut;
+      const bookingComUrl = `https://www.booking.com/searchresults.html?${new URLSearchParams(bookingComParams)}`;
 
       const task = [
         `Book "${hotel.name}" for ${numAdults} adult(s).`,
@@ -115,6 +112,8 @@ export default function HotelCard({ card, index, checkIn, checkOut, guests }: Ho
       setBooking(false);
     }
   }
+
+  const starCount = Math.min(5, Math.max(1, Math.round(hotel.star_rating)));
 
   return (
     <>
@@ -207,8 +206,7 @@ export default function HotelCard({ card, index, checkIn, checkOut, guests }: Ho
             {/* Stars + Rating */}
             <div style={{ display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
               <span style={{ fontFamily: "var(--font-dm-sans)", fontSize: "13px", color: "var(--gold)" }}>
-                {"★".repeat(Math.min(5, Math.max(1, Math.round(hotel.star_rating))))}
-                {"☆".repeat(Math.max(0, 5 - Math.min(5, Math.max(1, Math.round(hotel.star_rating)))))}
+                {"★".repeat(starCount)}{"☆".repeat(5 - starCount)}
               </span>
               {hotel.rating > 0 && (
                 <span style={{ fontFamily: "var(--font-dm-sans)", fontSize: "13px", color: "var(--gold)" }}>

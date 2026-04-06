@@ -79,10 +79,9 @@ export function computeJobSemanticStatus(job: BookingJob): JobSemanticStatus {
   const errorCount = job.steps.filter((s) => s.status === "error").length;
   const total      = job.steps.length;
 
-  const hasRetrying    = stepStatuses.some((s) => s === "retrying");
-  const hasBlocked     = stepStatuses.some((s) => s === "blocked_needs_input");
-  const allFirstTry    = stepStatuses.every((s) => s === "succeeded_first_try");
-  const allAdjusted    = doneCount === total;
+  const hasRetrying = stepStatuses.some((s) => s === "retrying");
+  const hasBlocked  = stepStatuses.some((s) => s === "blocked_needs_input");
+  const allFirstTry = stepStatuses.every((s) => s === "succeeded_first_try");
 
   if (hasRetrying) return "retrying";
 

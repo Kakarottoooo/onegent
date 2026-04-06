@@ -142,7 +142,7 @@ function StarRating({ value, onChange, hint }: { value: number; onChange: (v: nu
             color: value >= sv && value > 0 ? "var(--gold, #C9A84C)" : "var(--border, #e5e7eb)",
             transition: "color 0.15s",
           }} title={`${sv} stars`}>
-            {i < 2 ? "★" : i === 2 ? "⭑" : "★"}
+            {i === 2 ? "⭑" : "★"}
           </button>
         ))}
       </div>
@@ -808,16 +808,15 @@ function AgentModelTab() {
             <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
               {group.models.map((m) => {
                 const active = activeModel === m.model;
-                const canSelect = hasKey;
                 return (
                   <div
                     key={m.model}
-                    onClick={() => canSelect && selectModel(m.model)}
-                    title={!canSelect ? `Enter a ${group.label} API key first` : m.hint}
+                    onClick={() => hasKey && selectModel(m.model)}
+                    title={!hasKey ? `Enter a ${group.label} API key first` : m.hint}
                     style={{
                       padding: "10px 14px", borderRadius: 12,
-                      cursor: canSelect ? "pointer" : "not-allowed",
-                      opacity: canSelect ? 1 : 0.45,
+                      cursor: hasKey ? "pointer" : "not-allowed",
+                      opacity: hasKey ? 1 : 0.45,
                       border: active ? "1.5px solid var(--gold, #C9A84C)" : "0.5px solid var(--border, #e5e7eb)",
                       backgroundColor: active ? "rgba(201,168,76,0.08)" : "var(--card, #fff)",
                       transition: "border-color 0.15s, background 0.15s",
@@ -874,14 +873,6 @@ function TasteProfileTab() {
   const { profile, updateProfile, updateDiscoveredPreference, removeDiscoveredPreference } = usePreferences();
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editingVal, setEditingVal] = useState("");
-
-  const CAT_META: Record<string, { emoji: string; label: string }> = {
-    dining:   { emoji: "🍽", label: "Dining" },
-    travel:   { emoji: "✈️", label: "Travel" },
-    hotels:   { emoji: "🏨", label: "Hotels" },
-    shopping: { emoji: "🛍", label: "Shopping" },
-    general:  { emoji: "⭐", label: "General" },
-  };
 
   const discovered = profile.discovered ?? [];
   const hasSignals = discovered.length > 0;
@@ -1045,6 +1036,14 @@ function TasteProfileTab() {
     </div>
   );
 }
+
+const CAT_META: Record<string, { emoji: string; label: string }> = {
+  dining:   { emoji: "🍽", label: "Dining" },
+  travel:   { emoji: "✈️", label: "Travel" },
+  hotels:   { emoji: "🏨", label: "Hotels" },
+  shopping: { emoji: "🛍", label: "Shopping" },
+  general:  { emoji: "⭐", label: "General" },
+};
 
 // ── Agent Permissions tab ──────────────────────────────────────────────────
 
@@ -1228,21 +1227,20 @@ export default function PermissionsPage() {
         {activeTab === "profile" && <BookingProfileTab />}
         {activeTab === "model" && <AgentModelTab />}
         {activeTab === "taste" && <TasteProfileTab />}
-        {activeTab === "permissions" && mounted && (
-          <PermissionsTab settings={settings} update={update} tp={tp} />
-        )}
-        {activeTab === "permissions" && !mounted && (
-          <p style={{ fontFamily: "var(--font-dm-sans)", fontSize: 13, color: "var(--text-muted, #aaa)" }}>Loading…</p>
+        {activeTab === "permissions" && (
+          mounted
+            ? <PermissionsTab settings={settings} update={update} tp={tp} />
+            : <p style={{ fontFamily: "var(--font-dm-sans)", fontSize: 13, color: "var(--text-muted, #aaa)" }}>Loading…</p>
         )}
 
         {/* Auto-save notice (permissions tab only) */}
         {activeTab === "permissions" && saved && (
           <p style={{
             fontFamily: "var(--font-dm-sans)", fontSize: 12,
-            color: saved ? "var(--gold, #C9A84C)" : "var(--text-muted, #aaa)",
+            color: "var(--gold, #C9A84C)",
             textAlign: "center", marginTop: 36, transition: "color 0.3s",
           }}>
-            {saved ? "✓ " : ""}{tp.autoSaved}
+            ✓ {tp.autoSaved}
           </p>
         )}
       </main>

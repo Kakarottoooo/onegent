@@ -252,6 +252,31 @@ function diagnoseFail(step: BookingJobStep): { reason: string; suggestion: strin
   };
 }
 
+function shouldUseStaticHelp(step: BookingJobStep): boolean {
+  const actionMessage = step.actionItem?.message?.toLowerCase() ?? "";
+  const error = step.error?.toLowerCase() ?? "";
+
+  return (
+    !!step.actionItem?.options?.length ||
+    actionMessage.includes("manually") ||
+    actionMessage.includes("sign in") ||
+    error.includes("captcha") ||
+    error.includes("blocked") ||
+    error.includes("manual") ||
+    error.includes("stalled before checkout form") ||
+    error.includes("site requires login") ||
+    error.includes("no availability")
+  );
+}
+
+function getStaticHelpMessage(step: BookingJobStep): string {
+  const actionMessage = step.actionItem?.message?.trim();
+  if (actionMessage) return actionMessage;
+
+  const diagnosis = diagnoseFail(step);
+  return `${diagnosis.reason} ${diagnosis.suggestion}`;
+}
+
 function NeedsHelpCard({ step, onManualLink, jobId, stepIndex, onRefresh }: {
   step: BookingJobStep;
   onManualLink: (label: string, url: string, idx: number) => void;
@@ -268,11 +293,18 @@ function NeedsHelpCard({ step, onManualLink, jobId, stepIndex, onRefresh }: {
   const [readyToRetry, setReadyToRetry] = useState(false);
   const [enrichedTask, setEnrichedTask] = useState<string | undefined>();
   const [retrying, setRetrying] = useState(false);
+  const staticHelp = shouldUseStaticHelp(step);
 
   const originalTask = typeof step.body?.task === "string" ? step.body.task : "";
 
   // Load agent's question automatically
   useEffect(() => {
+    if (staticHelp) {
+      setQuestion(getStaticHelpMessage(step));
+      setQuestionLoading(false);
+      return;
+    }
+
     setQuestionLoading(true);
     fetch("/api/agent-chat", {
       method: "POST",
@@ -290,7 +322,7 @@ function NeedsHelpCard({ step, onManualLink, jobId, stepIndex, onRefresh }: {
       .catch(() => setQuestion("What would you like to do next?"))
       .finally(() => setQuestionLoading(false));
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [step.label, step.error]);
+  }, [staticHelp, step]);
 
   async function sendAnswer() {
     if (!answer.trim() || sendingAnswer) return;
@@ -415,7 +447,7 @@ function NeedsHelpCard({ step, onManualLink, jobId, stepIndex, onRefresh }: {
         )}
 
         {/* Answer input — shown until agent has enough to retry */}
-        {!readyToRetry && !questionLoading && (
+        {!staticHelp && !readyToRetry && !questionLoading && (
           <div style={{
             display: "flex", gap: 8, alignItems: "flex-end",
             backgroundColor: "var(--card, #fff)", borderRadius: 14,
@@ -445,6 +477,18 @@ function NeedsHelpCard({ step, onManualLink, jobId, stepIndex, onRefresh }: {
               {sendingAnswer ? "…" : "↑"}
             </button>
           </div>
+        )}
+
+        {staticHelp && step.error && (
+          <p style={{
+            marginTop: 8,
+            fontFamily: "var(--font-dm-sans)",
+            fontSize: 11,
+            color: "var(--text-muted, #aaa)",
+            lineHeight: 1.5,
+          }}>
+            {step.error}
+          </p>
         )}
 
         {/* Manual fallback — subtle */}
@@ -663,6 +707,31 @@ function StepCard({ step, stepIndex, jobId, onRefresh }: {
             {stepStatusLabel(step)}
             {step.selected_time && ` · ${step.type === "flight" ? "Price:" : "Time:"} ${step.selected_time}`}
           </p>
+          {/* Show last log entry inline when step is still loading — surfaces agent result
+              even if the Vercel function was killed before writing the final step status */}
+          {step.status === "loading" && hasLog && (() => {
+            const last = step.decisionLog!.at(-1);
+            return last ? (
+              <p style={{
+                fontFamily: "var(--font-dm-sans)", fontSize: 11, marginTop: 3,
+                color: last.type === "failed" ? "rgba(220,38,38,0.75)" :
+                       last.type === "succeeded" ? "rgba(22,163,74,0.85)" :
+                       "var(--text-secondary, #666)",
+                maxWidth: 280, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+              }} title={last.message}>
+                {last.message}
+              </p>
+            ) : null;
+          })()}
+          {step.status === "error" && step.error && (
+            <p style={{
+              fontFamily: "var(--font-dm-sans)", fontSize: 11, marginTop: 3,
+              color: "rgba(220,38,38,0.75)",
+              maxWidth: 280, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+            }} title={step.error}>
+              {step.error}
+            </p>
+          )}
           {hasLog && (
             <button onClick={() => setLogOpen((o) => !o)} style={{
               marginTop: 4, background: "none", border: "none", padding: 0,
@@ -865,12 +934,31 @@ function InterventionBanner({ step }: { step: BookingJobStep }) {
 function JobCard({ job, onRefresh, sessionId }: { job: BookingJob; onRefresh?: () => void; sessionId: string }) {
   const [expanded, setExpanded] = useState(job.status !== "pending");
   const [deleting, setDeleting] = useState(false);
+  const [resetting, setResetting] = useState(false);
   const doneCount = job.steps.filter((s) => s.status === "done").length;
   const actionCount = job.steps.filter((s) => s.actionItem).length;
   const adjustedCount = job.steps.filter((s) => s.timeAdjusted || s.usedFallback).length;
   const replanCount = job.steps.filter((s) => s.replanAdjusted || s.replanFlagged).length;
   const isRunning = job.status === "running" || job.status === "pending";
   const isComplete = job.status === "done" || job.status === "failed";
+
+  // Detect stuck "running" jobs: Vercel function timeout kills the process before
+  // updateBookingJobStatus() runs, leaving the job permanently in "running" state.
+  const isStuck = job.status === "running" &&
+    Date.now() - new Date(job.updated_at).getTime() > 7 * 60 * 1000;
+
+  async function handleResetStuck(e: React.MouseEvent) {
+    e.stopPropagation();
+    if (resetting) return;
+    setResetting(true);
+    try {
+      // POST to start again — start/route.ts detects stuck jobs and auto-resets them
+      await fetch(`/api/booking-jobs/${job.id}/start`, { method: "POST" });
+      onRefresh?.();
+    } finally {
+      setResetting(false);
+    }
+  }
 
   const semanticStatus = computeJobSemanticStatus(job);
   const statusDisplay = JOB_SEMANTIC_DISPLAY[semanticStatus];
@@ -886,7 +974,8 @@ function JobCard({ job, onRefresh, sessionId }: { job: BookingJob; onRefresh?: (
     if (deleting) return;
     setDeleting(true);
     try {
-      await fetch(`/api/booking-jobs/${job.id}`, { method: "DELETE" });
+      const force = job.status === "running" || job.status === "pending";
+      await fetch(`/api/booking-jobs/${job.id}${force ? "?force=true" : ""}`, { method: "DELETE" });
       onRefresh?.();
     } finally {
       setDeleting(false);
@@ -952,33 +1041,46 @@ function JobCard({ job, onRefresh, sessionId }: { job: BookingJob; onRefresh?: (
             Open all →
           </button>
         )}
+        {isStuck && (
+          <button
+            onClick={handleResetStuck}
+            disabled={resetting}
+            title="Job appears stuck — click to reset and retry"
+            style={{
+              flexShrink: 0, padding: "6px 12px", borderRadius: 10,
+              border: "none", backgroundColor: resetting ? "var(--border)" : "rgba(234,88,12,0.85)",
+              color: "#fff", fontFamily: "var(--font-dm-sans)", fontSize: 12,
+              fontWeight: 600, cursor: resetting ? "default" : "pointer", whiteSpace: "nowrap",
+            }}
+          >
+            {resetting ? "Starting…" : "↺ Reset & Retry"}
+          </button>
+        )}
         <span style={{ color: "var(--text-muted, #aaa)", fontSize: 12, flexShrink: 0 }}>
           {expanded ? "▲" : "▼"}
         </span>
-        {!isRunning && (
-          <button
-            onClick={handleDelete}
-            disabled={deleting}
-            title="Delete trip record"
-            style={{
-              flexShrink: 0,
-              background: "none",
-              border: "0.5px solid var(--border, #e5e7eb)",
-              borderRadius: 8,
-              padding: "5px 10px",
-              fontFamily: "var(--font-dm-sans)",
-              fontSize: 12,
-              color: "rgba(220,38,38,0.65)",
-              cursor: deleting ? "default" : "pointer",
-              opacity: deleting ? 0.4 : 1,
-              display: "flex",
-              alignItems: "center",
-              gap: 4,
-            }}
-          >
-            🗑
-          </button>
-        )}
+        <button
+          onClick={handleDelete}
+          disabled={deleting}
+          title={isRunning ? "Force remove this running trip" : "Delete trip record"}
+          style={{
+            flexShrink: 0,
+            background: "none",
+            border: "0.5px solid var(--border, #e5e7eb)",
+            borderRadius: 8,
+            padding: "5px 10px",
+            fontFamily: "var(--font-dm-sans)",
+            fontSize: 12,
+            color: isRunning ? "rgba(234,88,12,0.8)" : "rgba(220,38,38,0.65)",
+            cursor: deleting ? "default" : "pointer",
+            opacity: deleting ? 0.4 : 1,
+            display: "flex",
+            alignItems: "center",
+            gap: 4,
+          }}
+        >
+          🗑
+        </button>
       </div>
 
       {expanded && (
@@ -1237,6 +1339,13 @@ function ProgressBar({ value, color }: { value: number; color: string }) {
 
 type InsightsTab = "overview" | "task" | "patterns" | "relationship";
 
+const INSIGHTS_TABS: Array<{ id: InsightsTab; label: string }> = [
+  { id: "overview",     label: "Overview"   },
+  { id: "task",         label: "Scenarios"  },
+  { id: "patterns",     label: "Patterns"   },
+  { id: "relationship", label: "Profile"    },
+];
+
 function InsightsPanel({ sessionId }: { sessionId: string }) {
   const [open, setOpen] = useState(false);
   const [activeTab, setActiveTab] = useState<InsightsTab>("overview");
@@ -1322,13 +1431,6 @@ function InsightsPanel({ sessionId }: { sessionId: string }) {
     );
   }
 
-  const TABS: Array<{ id: InsightsTab; label: string }> = [
-    { id: "overview",      label: "Overview"      },
-    { id: "task",          label: "Scenarios"     },
-    { id: "patterns",      label: "Patterns"      },
-    { id: "relationship",  label: "Profile"       },
-  ];
-
   return (
     <div style={{ borderRadius: 16, border: "0.5px solid var(--border, #e5e7eb)", backgroundColor: "var(--card, #fff)", overflow: "hidden" }}>
       {/* Header */}
@@ -1352,7 +1454,7 @@ function InsightsPanel({ sessionId }: { sessionId: string }) {
       {/* Tab bar */}
       {open && (
         <div style={{ borderTop: "0.5px solid var(--border, #e5e7eb)", display: "flex", gap: 0, overflowX: "auto" }}>
-          {TABS.map((tab) => (
+          {INSIGHTS_TABS.map((tab) => (
             <button key={tab.id} onClick={() => setActiveTab(tab.id)} style={{
               flex: 1, padding: "8px 4px", background: "none", border: "none",
               borderBottom: activeTab === tab.id ? "2px solid var(--gold, #D4A34B)" : "2px solid transparent",

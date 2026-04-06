@@ -136,14 +136,7 @@ export function buildTaskMemory(
     if (evts.length < 3) continue; // minimum data threshold
 
     const [scenario, stepType] = key.split("::");
-    const { label: scenarioLabel } = inferScenario(
-      scenario === "date_night" ? "date" :
-      scenario === "weekend_trip" ? "weekend" :
-      scenario === "business" ? "business" :
-      scenario === "family" ? "family" :
-      scenario === "friends" ? "friends" :
-      "city"
-    );
+    const scenarioLabel = SCENARIO_PATTERNS.find((p) => p.scenario === scenario)?.label ?? "General";
 
     const total = evts.length;
     const overrides = evts.filter((e) => e.outcome === "manual_override").length;
