@@ -1716,9 +1716,30 @@ Do NOT stop at the review summary and do NOT treat this as the final payment ste
       }
     };
 
+    const noAvailabilitySignals = [
+      "no availability", "no rooms available", "no rates available",
+      "fully booked", "sold out", "not available for", "no vacancies",
+      "couldn't find the room", "could not find the room",
+      "unavailable for your dates", "no properties available",
+      "0 properties", "0 results",
+    ];
+
     for (let attempt = 0; attempt < 4; attempt += 1) {
       trace(`Stage assessment ${attempt + 1}: ${assessment.stage} — ${assessment.reason}`);
       if (!["date_selection", "room_selection", "intermediate_gate"].includes(assessment.stage)) {
+        break;
+      }
+
+      if (assessment.stage === "room_selection" &&
+          containsAny(assessment.pageText, noAvailabilitySignals)) {
+        trace(`No-availability signal detected at room_selection — aborting recovery loop.`);
+        break;
+      }
+
+      // Also bail if the agent message already told us there are no rooms.
+      const agentSaysNoAvailability = /no (rooms?|availability|vacancies|rates?)|sold out|fully booked|not available/i.test(agentMessage);
+      if (assessment.stage === "room_selection" && agentSaysNoAvailability) {
+        trace(`Agent message indicates no availability — aborting recovery loop.`);
         break;
       }
 
@@ -1903,20 +1924,29 @@ Do NOT stop at the review summary and do NOT treat this as the final payment ste
     }
 
     if (stalledAtDateSelection || stalledAtRoomSelection) {
+      // Check if "no availability" is the actual reason rather than a navigation stall.
+      const noRooms = containsAny(assessment.pageText, noAvailabilitySignals) ||
+        /no (rooms?|availability|vacancies|rates?)|sold out|fully booked|not available/i.test(agentMessage);
       trace(
         stalledAtDateSelection
           ? "Final state check shows the run still stopped at the booking widget date-selection gate."
-          : "Final state check shows the run still stopped at room selection before checkout."
+          : noRooms
+            ? "Final state check: no availability for the requested dates."
+            : "Final state check shows the run still stopped at room selection before checkout."
       );
       return {
         status: "error",
         screenshotBase64,
         handoffUrl: currentUrl,
         sessionUrl,
-        summary: "The agent stopped before reaching the checkout form.",
+        summary: noRooms
+          ? "No rooms available for the requested dates at this property."
+          : "The agent stopped before reaching the checkout form.",
         error: stalledAtDateSelection
           ? "Stalled at date selection — booking widget did not advance after selecting dates."
-          : "Stalled at room selection — checkout form was not reached.",
+          : noRooms
+            ? "No availability — the hotel has no rooms for the requested dates."
+            : "Stalled at room selection — checkout form was not reached.",
         debugTrace,
       };
     }
