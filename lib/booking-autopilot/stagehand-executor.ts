@@ -132,16 +132,19 @@ const COMMON_DISALLOWED_ADVANCE_BUTTONS = [
   /decline all/i,
   /directory/i,
 ];
-const DATE_SELECTION_ADVANCE_BUTTONS = [/^next$/i, /^continue$/i, /^check availability$/i, /^show rooms$/i];
+// Prefix-match to tolerate trailing icons/whitespace on button labels.
+const DATE_SELECTION_ADVANCE_BUTTONS = [/^next\b/i, /^continue\b/i, /^check\s+availability/i, /^show\s+rooms/i];
 const ROOM_SELECTION_ADVANCE_BUTTONS = [
+  /^select\s+room/i,
+  /^proceed\s+to\s+payment/i,
   /^select$/i,
-  /^select room$/i,
-  /^proceed to payment$/i,
-  /^continue$/i,
+  /^continue\b/i,
   /^reserve$/i,
-  /^next$/i,
+  /^next\b/i,
 ];
-const INTERMEDIATE_GATE_ADVANCE_BUTTONS = [/^book now$/i, /^reserve now$/i, /^reserve$/i];
+// Use prefix-match (not strict ^…$) to handle buttons that have trailing icons,
+// arrows, or whitespace appended to the label, e.g. "Book Now →" or "Book Now ".
+const INTERMEDIATE_GATE_ADVANCE_BUTTONS = [/^book\s+now/i, /^reserve\s+now/i, /^reserve$/i];
 
 const CHECKOUT_FIELD_CATEGORIES: FieldCategory[] = [
   { key: "full_name", patterns: ["full name"] },
