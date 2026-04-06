@@ -1290,6 +1290,22 @@ export async function runBrowserTask(
   const useCloud =
     !!(process.env.BROWSERBASE_API_KEY && process.env.BROWSERBASE_PROJECT_ID);
 
+  // Vercel serverless has no Chromium — local mode will crash with a confusing
+  // error. Fail fast with an actionable message instead.
+  // To re-enable cloud browser: set BROWSERBASE_API_KEY + BROWSERBASE_PROJECT_ID
+  // in Vercel environment variables (Settings → Environment Variables).
+  // Future option: set WORKER_URL to a Railway/Render worker that runs Playwright.
+  const onVercel = !!(process.env.VERCEL || process.env.VERCEL_ENV);
+  if (onVercel && !useCloud) {
+    return {
+      success: false,
+      error: "Browser automation requires a cloud browser on Vercel. Set BROWSERBASE_API_KEY and BROWSERBASE_PROJECT_ID in your Vercel environment variables, or deploy the worker service to Railway.",
+      sessionUrl: undefined,
+      log: [],
+      paused: false,
+    };
+  }
+
   // Resolve model name — Stagehand v3 uses "provider/model" format
   const modelName = input.agentModel?.model ?? "openai/gpt-4o-mini";
 
