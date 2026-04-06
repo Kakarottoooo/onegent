@@ -1370,6 +1370,25 @@ export async function runBrowserTask(
     // Navigate to the starting URL
     await page.goto(input.startUrl, { waitUntil: "domcontentloaded", timeoutMs: 30_000 });
 
+    // Dev: inject a red cursor dot so you can watch the agent interact visually.
+    if (process.env.NODE_ENV !== "production" && !useCloud) {
+      await getRawPage(page).addInitScript(() => {
+        const dot = document.createElement("div");
+        dot.id = "__pw_cursor__";
+        Object.assign(dot.style, {
+          position: "fixed", top: "0", left: "0", width: "12px", height: "12px",
+          borderRadius: "50%", background: "red", opacity: "0.75",
+          pointerEvents: "none", zIndex: "999999", transition: "transform 0.05s",
+          transform: "translate(-50%,-50%)",
+        });
+        document.addEventListener("DOMContentLoaded", () => document.body?.appendChild(dot));
+        document.addEventListener("mousemove", (e) => {
+          dot.style.left = e.clientX + "px";
+          dot.style.top  = e.clientY + "px";
+        });
+      });
+    }
+
     // ── Early check: site unreachable (network error before agent runs) ─────
     {
       let earlyText = "";
@@ -1468,6 +1487,7 @@ export async function runBrowserTask(
 
     // Agent uses the same model string — key is already in process.env
     const agent = stagehand.agent({
+      agentMode: "hybrid",  // use hybrid (vision + DOM) for better perf; silences legacy warning
       model: modelName,
       systemPrompt: `You are a booking assistant completing a hotel reservation on behalf of a user. Be decisive — never ask questions, always try the most reasonable action.
 
