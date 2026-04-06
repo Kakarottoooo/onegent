@@ -985,7 +985,8 @@ export interface AgentFeedbackStats {
 export async function getAgentFeedbackStats(sessionId?: string): Promise<AgentFeedbackStats> {
   await ensureAgentFeedbackTable();
 
-  const scopeWhere = sessionId ? sql`WHERE session_id = ${sessionId}` : sql`WHERE 1=1`;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const scopeWhere = (sessionId ? sql`WHERE session_id = ${sessionId}` : sql`WHERE 1=1`) as any;
 
   const [totals, providers, venues, byType, decisions] = await Promise.all([
     // Outcome breakdown

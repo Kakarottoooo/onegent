@@ -41,6 +41,8 @@ export interface SkillResult {
   scheduledAt?: string;
   /** Whether this result used a fallback option (affects satisfaction score) */
   usedFallback?: boolean;
+  /** Whether the booking flow requires a payment step */
+  requiresPayment?: boolean;
   /** Arbitrary payload for downstream steps / replan */
   meta?: Record<string, unknown>;
 }

@@ -95,8 +95,8 @@ function OverviewTab({ stats, policy, profile, ti }: {
         <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 10 }}>
           {[
             { label: ti.feedbackEvents, value: stats.totalEvents },
-            { label: ti.accepted,       value: stats.accepted ?? 0 },
-            { label: ti.overridden,     value: stats.manual_override ?? 0 },
+            { label: ti.accepted,       value: stats.outcomeBreakdown.accepted ?? 0 },
+            { label: ti.overridden,     value: stats.outcomeBreakdown.manual_override ?? 0 },
           ].map(({ label, value }) => (
             <div key={label} style={{
               padding: "12px", borderRadius: 10, textAlign: "center",
@@ -141,7 +141,7 @@ function OverviewTab({ stats, policy, profile, ti }: {
               <Pill key={n.entity}
                 color={n.severity === "strong" ? "rgba(220,38,38,0.85)" : "rgba(234,88,12,0.8)"}
                 bg={n.severity === "strong" ? "rgba(220,38,38,0.07)" : "rgba(234,88,12,0.07)"}>
-                {n.entity} ({Math.round(n.overrideRate * 100)}% {ti.overridePct.replace("% ", "")})
+                {`${n.entity} (${Math.round(n.overrideRate * 100)}% ${ti.overridePct.replace("% ", "")})`}
               </Pill>
             ))}
           </div>
@@ -166,8 +166,8 @@ function OverviewTab({ stats, policy, profile, ti }: {
           <SectionLabel>{ti.tolerance}</SectionLabel>
           <div style={{ display: "flex", gap: 10 }}>
             {[
-              { label: ti.timeAdjust,  value: profile.timeAdjustTolerance,  color: "rgba(234,88,12,0.7)" },
-              { label: ti.venueSwitch, value: profile.venueSwitchTolerance, color: "#6366f1" },
+              { label: ti.timeAdjust,  value: profile.timeAdjustTolerance === "liberal" ? 0.8 : profile.timeAdjustTolerance === "strict" ? 0.2 : 0.5,  color: "rgba(234,88,12,0.7)" },
+              { label: ti.venueSwitch, value: profile.venueSwitchTolerance === "liberal" ? 0.8 : profile.venueSwitchTolerance === "strict" ? 0.2 : 0.5, color: "#6366f1" },
             ].map(({ label, value, color }) => (
               <div key={label} style={{ flex: 1 }}>
                 <p style={{ fontFamily: "var(--font-dm-sans)", fontSize: 11,
