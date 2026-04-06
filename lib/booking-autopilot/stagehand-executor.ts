@@ -1060,54 +1060,106 @@ async function looksLikeIntermediateBookNowGateState(
   return stillLooksLikeConsentGate && !hasDeepCheckoutSignals;
 }
 
-/** Dismiss blocking popups/modals that prevent the booking flow from continuing.
- *  Covers two classes:
- *  1. Coupon/promo-code error dialogs (Namastay widget with stale promo code)
- *  2. Any generic modal dialog with an Ok/Close/Dismiss button that is visually
- *     blocking the page (identified by role="dialog" or a backdrop overlay). */
-async function dismissCouponErrorPopups(rawPage: Page): Promise<boolean> {
-  let dismissed = false;
+/**
+ * Modal classification used by dismissBlockingModals().
+ * "error"   — booking error that needs Ok + possible retry (room not found, code invalid…)
+ * "ad"      — promotional/newsletter overlay that should be closed
+ * "blocker" — any other visible dialog blocking the flow
+ */
+type ModalKind = "error" | "ad" | "blocker";
+
+const MODAL_ERROR_PHRASES = [
+  "invalid", "coupon", "promo", "couldn't find", "could not find",
+  "not found", "not available", "unavailable", "no availability",
+  "no longer available", "sold out", "error", "failed", "sorry",
+  "something went wrong", "we're sorry",
+];
+const MODAL_AD_PHRASES = [
+  "subscribe", "newsletter", "sign up", "sign-up", "exclusive offer",
+  "special offer", "discount", "% off", "deal", "promotion",
+  "get the app", "download the app",
+];
+/** Button labels that close/dismiss a modal without advancing the booking. */
+const MODAL_CLOSE_LABELS = /^(ok|okay|close|dismiss|got it|no thanks|no,? thanks|skip|maybe later|×|✕|x)$/i;
+/** Button labels that confirm an error acknowledgement — effectively same as close. */
+const MODAL_CONFIRM_LABELS = /^(ok|okay|got it|continue|accept|confirm)$/i;
+
+function classifyModal(text: string): ModalKind | null {
+  const t = text.toLowerCase();
+  if (MODAL_AD_PHRASES.some((p) => t.includes(p))) return "ad";
+  if (MODAL_ERROR_PHRASES.some((p) => t.includes(p))) return "error";
+  return null;
+}
+
+/**
+ * Dismiss any blocking modals/popups that are interrupting the booking flow.
+ *
+ * Strategy:
+ *  - Scan all frames (main page + iframes, which Namastay uses for its widget)
+ *  - Find visible buttons with close/ok/dismiss labels
+ *  - Determine if the button sits inside a visible dialog/modal overlay
+ *  - Classify the modal content and always dismiss it (ads, errors, generic blockers)
+ *
+ * Returns a description of what was dismissed (empty string = nothing found).
+ */
+async function dismissBlockingModals(rawPage: Page): Promise<string> {
+  const dismissed: string[] = [];
   for (const scope of getInteractionScopes(rawPage)) {
     try {
-      const buttons = scope.locator('button');
-      const count = Math.min(await buttons.count().catch(() => 0), 30);
+      const buttons = scope.locator('button, [role="button"], a[href="#"]');
+      const count = Math.min(await buttons.count().catch(() => 0), 40);
       for (let i = 0; i < count; i++) {
         const btn = buttons.nth(i);
         if (!(await btn.isVisible({ timeout: 400 }).catch(() => false))) continue;
-        const text = normalizeText(
+
+        const btnText = normalizeText(
           await evaluateLocatorElement(btn, (el) =>
             (el as HTMLElement).innerText || (el as HTMLElement).textContent || ""
           ).catch(async () => await getLocatorText(btn))
         );
-        if (!/^ok$|^close$|^dismiss$|^got it$|^continue$|^accept$/i.test(text)) continue;
 
-        // Gather parent context to decide whether this button is inside a blocking dialog
-        const parentText = normalizeText(
-          await evaluateLocatorElement(btn, (el) => {
-            const root = el.closest("dialog, [role='dialog'], .modal, section, div") as HTMLElement | null;
-            return root?.textContent ?? el.parentElement?.textContent ?? "";
-          }).catch(() => "")
-        );
+        const isCloseLabel = MODAL_CLOSE_LABELS.test(btnText) || MODAL_CONFIRM_LABELS.test(btnText);
+        if (!isCloseLabel) continue;
 
-        // Case 1: coupon / promo-code error
-        const isCouponError = containsAny(parentText, [
-          "invalid", "coupon", "promo", "code", "couldn't find", "not found",
-        ]);
-        // Case 2: any visible role=dialog or element with modal/backdrop indicators
-        const isBlockingDialog = await evaluateLocatorElement(btn, (el) => {
-          const dialog = el.closest("[role='dialog'], dialog") as HTMLElement | null;
-          if (!dialog) return false;
-          const style = window.getComputedStyle(dialog);
-          return style.display !== "none" && style.visibility !== "hidden";
-        }).catch(() => false);
+        // Walk up the DOM to find the containing dialog/modal
+        const { inDialog, dialogText } = await evaluateLocatorElement(btn, (el) => {
+          // Check for semantic dialog
+          const dialog = el.closest("dialog, [role='dialog']") as HTMLElement | null;
+          if (dialog) {
+            const style = window.getComputedStyle(dialog);
+            if (style.display !== "none" && style.visibility !== "hidden") {
+              return { inDialog: true, dialogText: dialog.textContent ?? "" };
+            }
+          }
+          // Namastay and similar widgets use plain divs styled as modals.
+          // Heuristic: button's nearest scrollable/positioned ancestor with z-index > 10
+          let el2: HTMLElement | null = el.parentElement;
+          while (el2 && el2 !== document.body) {
+            const s = window.getComputedStyle(el2);
+            const z = parseInt(s.zIndex, 10);
+            if (!isNaN(z) && z > 10 && s.position !== "static") {
+              return { inDialog: true, dialogText: el2.textContent ?? "" };
+            }
+            el2 = el2.parentElement;
+          }
+          return { inDialog: false, dialogText: "" };
+        }).catch(() => ({ inDialog: false, dialogText: "" }));
 
-        if (!isCouponError && !isBlockingDialog) continue;
+        if (!inDialog) continue;
+
+        const kind: ModalKind = classifyModal(dialogText) ?? "blocker";
         await btn.click({ force: true }).catch(() => {});
-        dismissed = true;
+        dismissed.push(`${kind}: "${dialogText.trim().slice(0, 60)}"`);
       }
-    } catch { /* continue */ }
+    } catch { /* continue to next frame */ }
   }
-  return dismissed;
+  return dismissed.join("; ");
+}
+
+/** @deprecated use dismissBlockingModals */
+async function dismissCouponErrorPopups(rawPage: Page): Promise<boolean> {
+  const result = await dismissBlockingModals(rawPage);
+  return result.length > 0;
 }
 
 async function assessBookingStage(params: {
@@ -1317,11 +1369,11 @@ export async function runBrowserTask(
   const onVercel = !!(process.env.VERCEL || process.env.VERCEL_ENV);
   if (onVercel && !useCloud) {
     return {
-      success: false,
+      status: "error" as const,
       error: "Browser automation requires a cloud browser on Vercel. Set BROWSERBASE_API_KEY and BROWSERBASE_PROJECT_ID in your Vercel environment variables, or deploy the worker service to Railway.",
       sessionUrl: undefined,
-      log: [],
-      paused: false,
+      handoffUrl: input.startUrl,
+      summary: "Browser automation unavailable on Vercel without Browserbase credentials.",
     };
   }
 
@@ -1364,13 +1416,12 @@ export async function runBrowserTask(
     model: modelName,  // just the string — Stagehand reads key from env vars above
     verbose: 0,
     disablePino: true,
-    // Dev: set PLAYWRIGHT_HEADLESS=false to watch the browser window with a visible
-    // cursor. Set PLAYWRIGHT_SLOW_MO=500 to slow down each action by 500ms so you
-    // can follow what the agent is doing. Both are ignored in production/Browserbase.
+    // Dev: set PLAYWRIGHT_HEADLESS=false to watch the browser window.
+    // slowMo is not in Stagehand v3 localBrowserLaunchOptions — use PLAYWRIGHT_SLOW_MO
+    // via the Playwright env var PWDEBUG or by patching context after init() instead.
     ...(!useCloud && {
       localBrowserLaunchOptions: {
         headless: process.env.PLAYWRIGHT_HEADLESS !== "false",
-        slowMo: process.env.PLAYWRIGHT_SLOW_MO ? parseInt(process.env.PLAYWRIGHT_SLOW_MO) : 0,
       },
     }),
   });
@@ -1502,7 +1553,8 @@ export async function runBrowserTask(
 
     // Agent uses the same model string — key is already in process.env
     const agent = stagehand.agent({
-      agentMode: "hybrid",  // use hybrid (vision + DOM) for better perf; silences legacy warning
+      // agentMode: "hybrid" — not yet available in this Stagehand v3 build; will
+      // default to hybrid automatically in an upcoming release per the SDK warning.
       model: modelName,
       systemPrompt: `You are a booking assistant completing a hotel reservation on behalf of a user. Be decisive — never ask questions, always try the most reasonable action.
 
@@ -1578,8 +1630,8 @@ Do NOT stop at the review summary and do NOT treat this as the final payment ste
 
     const attemptStageRecovery = async (stage: BookingStage): Promise<boolean> => {
       // Always clear blocking modals before any recovery attempt.
-      const preCleared = await dismissCouponErrorPopups(raw).catch(() => false);
-      if (preCleared) trace(`Stage recovery pre-cleared a blocking modal (stage: ${stage}).`);
+      const cleared = await dismissBlockingModals(raw).catch(() => "");
+      if (cleared) trace(`Stage recovery dismissed modal(s) before ${stage}: ${cleared}`);
 
       switch (stage) {
         case "date_selection": {
@@ -2153,7 +2205,10 @@ Booking widget navigation rules:
 - The booking calendar and room selection are inside an IFRAME on the page.
 - After selecting dates, click ONLY the "Next" button that is INSIDE the booking widget iframe to advance to room selection. DO NOT click "Next Slide", "Previous Slide", photo carousel arrows, or any other button outside the booking iframe.
 - If you clicked a "Next Slide" button by mistake (it navigates a photo gallery), that is the wrong button — look for the Next/Continue button inside the booking iframe instead.
-- If a dialog or popup appears saying "This code is invalid", "coupon code", "promo code not found", or similar — click the "Ok" or "Close" button immediately to dismiss it. Do NOT enter any coupon code.
+- If any dialog or popup appears (error, warning, advertisement, newsletter, or any modal overlay), click its "Ok", "Close", "Dismiss", or "No thanks" button immediately to dismiss it and continue. Do NOT enter any coupon or promo code if asked.
+- If a dialog says "We couldn't find this room", "room not available", "sold out", or similar — click Ok to dismiss, then go back to the room list and select a DIFFERENT available room.
+- If a dialog says "no availability" for your dates — click Ok, then try adjusting the dates by ±1 day and search again.
+- Never leave a modal open — always dismiss it before trying to interact with the page behind it.
 
 CALENDAR MONTH NAVIGATION:
 - Before clicking any date, read the calendar header to see which month is shown.
