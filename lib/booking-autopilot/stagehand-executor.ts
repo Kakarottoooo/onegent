@@ -1270,7 +1270,10 @@ async function assessBookingStage(params: {
   if (blocked) {
     stage = "blocked";
     reason = "Blocking or anti-bot signals are visible.";
-  } else if (effectiveStalledAtIntermediateBookNow) {
+  } else if (effectiveStalledAtIntermediateBookNow && !visibleCheckoutFields) {
+    // Only classify as intermediate_gate when checkout fields are NOT yet visible.
+    // If the form fields are already present (First Name / Email / etc.), the agent
+    // already clicked "Book Now" and we are on the real guest form — don't regress.
     stage = "intermediate_gate";
     reason = stalledAtIntermediateBookNow
       ? "Review-and-pay gate is visible before real checkout fields."
@@ -1596,6 +1599,7 @@ The user will enter CVV and confirm payment themselves.`,
 
     const p = buildEffectiveProfile(input.profile, input.task);
     const hasProfile = !!(p.full_name || p.first_name || p.last_name || p.email || p.phone);
+    trace(`Profile check: hasProfile=${hasProfile}, fields=${[p.full_name?"full_name":null, p.first_name?"first_name":null, p.email?"email":null, p.phone?"phone":null].filter(Boolean).join(",") || "none"}`);
     const requestedDates = extractRequestedStayDates(input.task);
     let assessment = await assessBookingStage({
       rawPage: raw,
@@ -1741,6 +1745,8 @@ Do NOT stop at the review summary and do NOT treat this as the final payment ste
       hasProfile &&
       assessment.stage !== "intermediate_gate" &&
       visibleCheckoutFields;
+
+    trace(`Post-recovery state: stage=${assessment.stage}, visibleCheckoutFields=${visibleCheckoutFields}, hasProfile=${hasProfile}, onGuestForm=${onGuestForm}`);
 
     if (onGuestForm) {
       trace("Detected guest/payment form and started direct field-fill verification.");
