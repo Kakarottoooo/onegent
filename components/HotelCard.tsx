@@ -48,22 +48,19 @@ export default function HotelCard({ card, index, checkIn, checkOut, guests }: Ho
       const rawSearch = locationHint ? `${hotel.name} ${locationHint}` : hotel.name;
       const searchTerm = rawSearch.replace(/[/\\|]/g, " ").replace(/\s+/g, " ").trim();
 
-      const bookingComUrl = (() => {
-        const base = "https://www.booking.com/searchresults.html";
-        const params = new URLSearchParams({
-          ss: searchTerm,
-          checkin: checkIn ?? "",
-          checkout: checkOut ?? "",
-          group_adults: String(numAdults),
-          no_rooms: "1",
-          selected_currency: "USD",
-          lang: "en-us",
-        });
-        for (const [k, v] of [...params.entries()]) {
-          if (!v) params.delete(k);
-        }
-        return `${base}?${params.toString()}`;
-      })();
+      const bookingComParams = new URLSearchParams({
+        ss: searchTerm,
+        checkin: checkIn ?? "",
+        checkout: checkOut ?? "",
+        group_adults: String(numAdults),
+        no_rooms: "1",
+        selected_currency: "USD",
+        lang: "en-us",
+      });
+      for (const [k, v] of bookingComParams.entries()) {
+        if (!v) bookingComParams.delete(k);
+      }
+      const bookingComUrl = `https://www.booking.com/searchresults.html?${bookingComParams.toString()}`;
 
       const task = [
         `Book "${hotel.name}" for ${numAdults} adult(s).`,

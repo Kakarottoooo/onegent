@@ -1387,21 +1387,18 @@ export async function runBrowserTask(
     // ── Early check: booking.com search failed — redirect to fallback ────────
     {
       const landedUrl = page.url();
-      const isBookingComStart = input.startUrl.includes("booking.com/searchresults");
       const bookingComBotRedirect =
-        isBookingComStart && (
+        input.startUrl.includes("booking.com/searchresults") &&
+        !landedUrl.includes("errorc_searchstring_not_found") && (
           landedUrl.includes("booking.com/index.html") ||
-          // Bot detection sometimes redirects to root or homepage variants
-          /booking\.com\/?(\?|#|$)/.test(landedUrl)
-        ) && !landedUrl.includes("errorc_searchstring_not_found");
+          /booking\.com\/?(\?|#|$)/.test(landedUrl)  // root/homepage redirect = bot detection
+        );
       const bookingComFailed =
         landedUrl.includes("errorc_searchstring_not_found") ||
         bookingComBotRedirect;
 
       if (bookingComFailed) {
-        const isBotRedirect = bookingComBotRedirect;
-
-        if (isBotRedirect) {
+        if (bookingComBotRedirect) {
           // Bot redirect — let the user open the original search URL in their own browser
           // (works fine for real browsers, no CAPTCHA)
           trace(`booking.com bot-redirect detected (${landedUrl}). Returning handoff to original search URL.`);
