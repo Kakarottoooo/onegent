@@ -1060,16 +1060,17 @@ async function looksLikeIntermediateBookNowGateState(
   return stillLooksLikeConsentGate && !hasDeepCheckoutSignals;
 }
 
-/** Dismiss any "coupon/promo code invalid" popups inside booking widget iframes.
- *  These appear when the Namastay widget loads with a stale or invalid promo code
- *  in its session state. The popup blocks the booking flow; clicking "Ok" clears it. */
+/** Dismiss blocking popups/modals that prevent the booking flow from continuing.
+ *  Covers two classes:
+ *  1. Coupon/promo-code error dialogs (Namastay widget with stale promo code)
+ *  2. Any generic modal dialog with an Ok/Close/Dismiss button that is visually
+ *     blocking the page (identified by role="dialog" or a backdrop overlay). */
 async function dismissCouponErrorPopups(rawPage: Page): Promise<boolean> {
   let dismissed = false;
   for (const scope of getInteractionScopes(rawPage)) {
     try {
-      // Look for buttons labelled "Ok" near coupon error text
       const buttons = scope.locator('button');
-      const count = Math.min(await buttons.count().catch(() => 0), 20);
+      const count = Math.min(await buttons.count().catch(() => 0), 30);
       for (let i = 0; i < count; i++) {
         const btn = buttons.nth(i);
         if (!(await btn.isVisible({ timeout: 400 }).catch(() => false))) continue;
@@ -1078,15 +1079,29 @@ async function dismissCouponErrorPopups(rawPage: Page): Promise<boolean> {
             (el as HTMLElement).innerText || (el as HTMLElement).textContent || ""
           ).catch(async () => await getLocatorText(btn))
         );
-        if (!/^ok$|^close$|^dismiss$/i.test(text)) continue;
-        // Check if parent context contains coupon/promo error text
+        if (!/^ok$|^close$|^dismiss$|^got it$|^continue$|^accept$/i.test(text)) continue;
+
+        // Gather parent context to decide whether this button is inside a blocking dialog
         const parentText = normalizeText(
           await evaluateLocatorElement(btn, (el) => {
             const root = el.closest("dialog, [role='dialog'], .modal, section, div") as HTMLElement | null;
             return root?.textContent ?? el.parentElement?.textContent ?? "";
           }).catch(() => "")
         );
-        if (!containsAny(parentText, ["invalid", "coupon", "promo", "code", "couldn't find"])) continue;
+
+        // Case 1: coupon / promo-code error
+        const isCouponError = containsAny(parentText, [
+          "invalid", "coupon", "promo", "code", "couldn't find", "not found",
+        ]);
+        // Case 2: any visible role=dialog or element with modal/backdrop indicators
+        const isBlockingDialog = await evaluateLocatorElement(btn, (el) => {
+          const dialog = el.closest("[role='dialog'], dialog") as HTMLElement | null;
+          if (!dialog) return false;
+          const style = window.getComputedStyle(dialog);
+          return style.display !== "none" && style.visibility !== "hidden";
+        }).catch(() => false);
+
+        if (!isCouponError && !isBlockingDialog) continue;
         await btn.click({ force: true }).catch(() => {});
         dismissed = true;
       }
@@ -1562,6 +1577,10 @@ Do NOT stop at the review summary and do NOT treat this as the final payment ste
     };
 
     const attemptStageRecovery = async (stage: BookingStage): Promise<boolean> => {
+      // Always clear blocking modals before any recovery attempt.
+      const preCleared = await dismissCouponErrorPopups(raw).catch(() => false);
+      if (preCleared) trace(`Stage recovery pre-cleared a blocking modal (stage: ${stage}).`);
+
       switch (stage) {
         case "date_selection": {
           const clicked = await clickAllowedAdvanceButton(raw, DATE_SELECTION_ADVANCE_BUTTONS);
