@@ -1602,7 +1602,7 @@ The user will enter CVV and confirm payment themselves.`,
         status: "error" as const,
         error: `AI model API error: ${mainMsg.slice(0, 300)}`,
         handoffUrl: input.startUrl,
-        sessionUrl,
+        sessionUrl: useCloud ? stagehand.browserbaseSessionURL : undefined,
         summary: "Booking stopped: the AI model API returned a billing or quota error. Check your API key credits.",
         debugTrace,
       };
