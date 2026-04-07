@@ -13,6 +13,7 @@ import {
   STEP_SEMANTIC_DISPLAY,
 } from "@/lib/status";
 import GlobalNav from "@/components/GlobalNav";
+import BrowserLiveView from "@/components/BrowserLiveView";
 
 
 function getSessionId(): string {
@@ -802,7 +803,7 @@ function StepCard({ step, stepIndex, jobId, onRefresh }: {
 
       {/* Human intervention banner — awaiting_confirmation or needs_login */}
       {(step.status === "awaiting_confirmation" || (step.status === "error" && step.handoff_url && step.handoff_url !== step.fallbackUrl)) && (
-        <InterventionBanner step={step} />
+        <InterventionBanner step={step} jobId={jobId} />
       )}
 
       {/* Retry scheduling — shown for failed steps without an action item */}
@@ -820,8 +821,9 @@ function StepCard({ step, stepIndex, jobId, onRefresh }: {
 
 // ── Intervention banner + modal ────────────────────────────────────────────────
 
-function InterventionBanner({ step }: { step: BookingJobStep }) {
+function InterventionBanner({ step, jobId }: { step: BookingJobStep; jobId: string }) {
   const [open, setOpen] = useState(true); // auto-open when first rendered
+  const [showLive, setShowLive] = useState(false);
 
   const isPaymentWait = step.status === "awaiting_confirmation";
   const color = isPaymentWait ? "rgba(22,163,74,0.85)" : "rgba(220,38,38,0.8)";
@@ -847,16 +849,49 @@ function InterventionBanner({ step }: { step: BookingJobStep }) {
             </p>
           </div>
           <div style={{ display: "flex", gap: 8, flexShrink: 0 }}>
+            {isPaymentWait && (
+              <button onClick={() => setShowLive(v => !v)} style={{
+                padding: "7px 14px", borderRadius: 8, border: `1px solid ${color}`,
+                backgroundColor: "transparent", color,
+                fontFamily: "var(--font-dm-sans)", fontSize: 12, fontWeight: 600, cursor: "pointer",
+              }}>
+                {showLive ? "Hide browser" : "🖥️ Open in OneAgent"}
+              </button>
+            )}
             <button onClick={() => setOpen(true)} style={{
               padding: "7px 14px", borderRadius: 8, border: "none",
               backgroundColor: color, color: "#fff",
               fontFamily: "var(--font-dm-sans)", fontSize: 12, fontWeight: 600, cursor: "pointer",
             }}>
-              Open →
+              Details →
             </button>
           </div>
         </div>
       </div>
+
+      {/* Inline live browser view */}
+      {showLive && isPaymentWait && (
+        <div style={{
+          borderTop: `0.5px solid ${border}`,
+          padding: "12px 14px",
+          backgroundColor: "var(--bg, #fafaf9)",
+        }}>
+          <p style={{
+            fontFamily: "var(--font-dm-sans)", fontSize: 11, fontWeight: 700,
+            color: "var(--text-muted, #aaa)", textTransform: "uppercase",
+            letterSpacing: "0.06em", marginBottom: 8,
+          }}>
+            Live browser — click to interact
+          </p>
+          <BrowserLiveView jobId={jobId} />
+          <p style={{
+            fontFamily: "var(--font-dm-sans)", fontSize: 11,
+            color: "var(--text-secondary, #666)", marginTop: 8, lineHeight: 1.5,
+          }}>
+            Click anywhere in the browser above to interact. Enter CVV and click 完成预订 to finish.
+          </p>
+        </div>
+      )}
 
       {/* Modal */}
       {open && step.handoff_url && (
@@ -904,16 +939,35 @@ function InterventionBanner({ step }: { step: BookingJobStep }) {
             </div>
 
             {/* CTA */}
-            <a href={step.handoff_url} target="_blank" rel="noopener noreferrer"
-              onClick={() => setOpen(false)}
-              style={{
-                display: "block", width: "100%", padding: "13px 0", borderRadius: 12,
-                backgroundColor: color, color: "#fff", textAlign: "center",
-                fontFamily: "var(--font-dm-sans)", fontSize: 14, fontWeight: 700,
-                textDecoration: "none", boxSizing: "border-box",
+            {/* Session-bound URLs (e.g. secure.booking.com/book.html with basket_id)
+                are tied to the local Playwright browser's cookies and return HTTP 400
+                when opened in any other browser. Show instructions instead of a link. */}
+            {step.handoff_url && (step.handoff_url.includes("basket_id=") || step.handoff_url.includes("secure.booking.com/book")) ? (
+              <div style={{
+                padding: "12px 14px", borderRadius: 12, border: `1px solid ${color}`,
+                backgroundColor: isPaymentWait ? "rgba(22,163,74,0.06)" : "rgba(220,38,38,0.05)",
+                fontFamily: "var(--font-dm-sans)", fontSize: 13, color: "var(--text-primary, #111)",
+                lineHeight: 1.5, textAlign: "center",
               }}>
-              {isPaymentWait ? "Complete payment →" : "Sign in to continue →"}
-            </a>
+                <span style={{ fontSize: 20 }}>🖥️</span><br />
+                <strong>Use the local browser window</strong><br />
+                <span style={{ fontSize: 12, color: "var(--text-secondary, #666)" }}>
+                  The booking session is open in the Playwright browser on your screen.<br />
+                  Find that window, enter the CVV, and click 完成预订.
+                </span>
+              </div>
+            ) : (
+              <a href={step.handoff_url ?? "#"} target="_blank" rel="noopener noreferrer"
+                onClick={() => setOpen(false)}
+                style={{
+                  display: "block", width: "100%", padding: "13px 0", borderRadius: 12,
+                  backgroundColor: color, color: "#fff", textAlign: "center",
+                  fontFamily: "var(--font-dm-sans)", fontSize: 14, fontWeight: 700,
+                  textDecoration: "none", boxSizing: "border-box",
+                }}>
+                {isPaymentWait ? "Complete payment →" : "Sign in to continue →"}
+              </a>
+            )}
 
             <button onClick={() => setOpen(false)} style={{
               display: "block", width: "100%", marginTop: 10, padding: "9px 0",
@@ -2105,6 +2159,7 @@ export default function TripsPage() {
   const router = useRouter();
   const [jobs, setJobs] = useState<BookingJob[]>([]);
   const [loading, setLoading] = useState(true);
+  const [, setClockTick] = useState(0);
 
   const sessionId = typeof window !== "undefined" ? getSessionId() : "";
 
@@ -2126,6 +2181,13 @@ export default function TripsPage() {
     const timer = setInterval(loadJobs, 3000);
     return () => clearInterval(timer);
   }, [jobs, loadJobs]);
+
+  useEffect(() => {
+    const hasRunning = jobs.some((j) => j.status === "running" || j.status === "pending");
+    if (!hasRunning) return;
+    const timer = setInterval(() => setClockTick((tick) => tick + 1), 1000);
+    return () => clearInterval(timer);
+  }, [jobs]);
 
   const actionTotal = jobs.reduce((n, j) => n + j.steps.filter((s) => s.actionItem).length, 0);
 
@@ -2194,11 +2256,14 @@ export default function TripsPage() {
 function formatDate(iso: string): string {
   const d = new Date(iso);
   const now = new Date();
-  const diffMin = Math.floor((now.getTime() - d.getTime()) / 60000);
-  if (diffMin < 1) return "just now";
-  if (diffMin < 60) return `${diffMin}m ago`;
+  const diffSec = Math.max(0, Math.floor((now.getTime() - d.getTime()) / 1000));
+  if (diffSec < 60) return `${diffSec}s ago`;
+
+  const diffMin = Math.floor(diffSec / 60);
+  if (diffMin < 60) return `${diffMin}m ${diffSec % 60}s ago`;
+
   const diffH = Math.floor(diffMin / 60);
-  if (diffH < 24) return `${diffH}h ago`;
+  if (diffH < 24) return `${diffH}h ${diffMin % 60}m ago`;
   return d.toLocaleDateString("en-US", { month: "short", day: "numeric" });
 }
 

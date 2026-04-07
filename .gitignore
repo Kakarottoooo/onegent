@@ -45,6 +45,7 @@ next-env.d.ts
 .claude/settings.local.json
 # Booking autopilot saved cookies (sensitive — never commit)
 .booking-cookies/
+.booking-cookies.json
 
 # Dev artifacts
 .next-dev.log

@@ -19,12 +19,16 @@ export interface SearchHotelInput extends Record<string, unknown> {
   preferredArea?: string;
   hotelName?: string;
   notes?: string;
+  roomPreference?: string;      // e.g. "king bed", "double queen", "suite"
+  breakfastIncluded?: boolean;  // true = user wants breakfast included
   fallbackCandidates?: Array<{ name: string; area?: string; stars?: number }>;
   bookingProfile?: {
     first_name: string;
     last_name: string;
     email: string;
     phone: string;
+    room_preference?: string;
+    breakfast_preference?: boolean;
   };
 }
 
@@ -59,6 +63,8 @@ export const searchHotelSkill: Skill<SearchHotelInput> = {
       checkout: input.checkOut,
       adults: input.guests,
       profile,
+      roomPreference: input.roomPreference,
+      breakfastIncluded: input.breakfastIncluded,
     });
 
     const taskWithContext = input.preferredArea

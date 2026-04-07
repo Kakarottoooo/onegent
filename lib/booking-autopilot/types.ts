@@ -14,6 +14,10 @@ export interface BookingProfile {
   card_name?: string;    // name on card
   card_number?: string;  // full number, stored locally only
   card_expiry?: string;  // MM/YY
+  // Hotel preferences — learned from conversation history
+  room_preference?: string;  // e.g. "king bed", "double queen", "suite", "twin"
+  breakfast_preference?: boolean; // true = user prefers breakfast included
+  bed_type?: string; // explicit bed type if different from room_preference
 }
 
 export interface RestaurantAutopilotRequest {

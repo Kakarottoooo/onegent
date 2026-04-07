@@ -13,6 +13,9 @@ import { Stagehand } from "@browserbasehq/stagehand";
 import type { Frame, Locator, Page } from "playwright";
 import type { BrowserTaskInput, BrowserTaskResult } from "./types";
 import { writeAgentLog } from "../db";
+import { browserSessionStore } from "../browser-session-store";
+import fs from "fs";
+import path from "path";
 
 /** URL patterns that indicate we've reached a payment/checkout page. */
 const PAYMENT_URL_PATTERNS = [
@@ -24,6 +27,8 @@ const PAYMENT_URL_PATTERNS = [
   "/finalize",
   "/pay",
   "/purchase",
+  "secure.booking.com/book",   // Booking.com checkout page (book.html)
+  "secure.booking.com/s/",     // Booking.com secure booking flow
 ];
 
 /** Keywords in page content that suggest a payment gate. */
@@ -95,6 +100,10 @@ type EffectiveProfile = {
   card_number?: string;
   card_expiry?: string;
 };
+type AgentExecutionResult = {
+  message?: string;
+  output?: string;
+};
 type BookingStage =
   | "blocked"
   | "listing"
@@ -140,6 +149,8 @@ const ROOM_SELECTION_ADVANCE_BUTTONS = [
   /^select$/i,
   /^continue\b/i,
   /^reserve$/i,
+  /^i['']ll\s+reserve/i,
+  /^reserve\s+now/i,
   /^next\b/i,
 ];
 // Use prefix-match (not strict ^…$) to handle buttons that have trailing icons,
@@ -187,6 +198,18 @@ function getScopeUrl(scope: unknown): string {
   return "";
 }
 
+function isBookingComUrl(url: string | null | undefined): boolean {
+  if (!url) return false;
+  const lower = url.toLowerCase();
+  return lower.includes("booking.com") || lower.includes("secure.booking.com");
+}
+
+function isBookingComSearchResultsUrl(url: string | null | undefined): boolean {
+  if (!url) return false;
+  const lower = url.toLowerCase();
+  return lower.includes("booking.com/searchresults");
+}
+
 function isNoiseScopeUrl(url: string): boolean {
   const lower = url.toLowerCase();
   return NON_BOOKING_SCOPE_URL_PATTERNS.some((pattern) => pattern.test(lower));
@@ -223,6 +246,10 @@ function normalizeText(value: string): string {
   return value.toLowerCase().replace(/\s+/g, " ").trim();
 }
 
+function normalizeLooseText(value: string): string {
+  return normalizeText(value).replace(/[^a-z0-9]+/g, " ").replace(/\s+/g, " ").trim();
+}
+
 function normalizeDigits(value: string): string {
   return value.replace(/\D+/g, "");
 }
@@ -232,6 +259,33 @@ function extractRequestedStayDates(task: string): RequestedStayDates {
   const checkin = task.match(/check(?:ing)?-?\s*in(?:\s+date)?[:\s]+(\d{4}-\d{2}-\d{2})/i)?.[1];
   const checkout = task.match(/check(?:ing)?-?\s*out(?:\s+date)?[:\s]+(\d{4}-\d{2}-\d{2})/i)?.[1];
   return { checkin, checkout };
+}
+
+function extractTargetHotelName(task: string): string | undefined {
+  const patterns = [
+    /find\s+(.+?)\s+hotel\s+in\s+.+?\s+and\s+book/i,
+    /book a room at\s+(.+?)(?:\.|preferred|check-?in|check in|$)/i,
+    /hotel\s*:\s*(.+?)(?:\n|$)/i,
+  ];
+
+  for (const pattern of patterns) {
+    const match = task.match(pattern)?.[1]?.trim();
+    if (match) return match;
+  }
+
+  return undefined;
+}
+
+function extractTargetHotelNameFromUrl(url: string | undefined): string | undefined {
+  if (!url) return undefined;
+  try {
+    const parsed = new URL(url);
+    const ss = parsed.searchParams.get("ss")?.trim();
+    if (ss) return ss;
+  } catch {
+    // Ignore invalid URLs.
+  }
+  return undefined;
 }
 
 function extractTaskField(task: string, label: string): string | undefined {
@@ -298,6 +352,582 @@ function safeJsonStringify(value: unknown): string {
   } catch {
     return String(value);
   }
+}
+
+async function waitForPageSignals(
+  rawPage: Page,
+  options: {
+    fromUrl?: string;
+    untilUrlIncludes?: string[];
+    untilUrlExcludes?: string[];
+    untilTextIncludes?: string[];
+    untilTextExcludes?: string[];
+    timeoutMs?: number;
+  } = {}
+): Promise<boolean> {
+  const {
+    fromUrl,
+    untilUrlIncludes = [],
+    untilUrlExcludes = [],
+    untilTextIncludes = [],
+    untilTextExcludes = [],
+    timeoutMs = 6000,
+  } = options;
+
+  return waitForEvaluateCondition(
+    rawPage,
+    ({ fromUrl, untilUrlIncludes, untilUrlExcludes, untilTextIncludes, untilTextExcludes }) => {
+      const href = window.location.href.toLowerCase();
+      const text = (document.body?.innerText ?? "").toLowerCase();
+
+      const urlChanged = !!fromUrl && href !== fromUrl.toLowerCase();
+      const urlIncludesOk =
+        untilUrlIncludes.length === 0 || untilUrlIncludes.some((pattern) => href.includes(pattern));
+      const urlExcludesOk =
+        untilUrlExcludes.length === 0 || untilUrlExcludes.every((pattern) => !href.includes(pattern));
+      const textIncludesOk =
+        untilTextIncludes.length === 0 || untilTextIncludes.some((pattern) => text.includes(pattern));
+      const textExcludesOk =
+        untilTextExcludes.length === 0 || untilTextExcludes.every((pattern) => !text.includes(pattern));
+
+      return urlChanged || (urlIncludesOk && urlExcludesOk && textIncludesOk && textExcludesOk);
+    },
+    {
+      fromUrl,
+      untilUrlIncludes: untilUrlIncludes.map((value) => value.toLowerCase()),
+      untilUrlExcludes: untilUrlExcludes.map((value) => value.toLowerCase()),
+      untilTextIncludes: untilTextIncludes.map((value) => value.toLowerCase()),
+      untilTextExcludes: untilTextExcludes.map((value) => value.toLowerCase()),
+    },
+    timeoutMs
+  );
+}
+
+async function waitForVisibleActionText(
+  rawPage: Page,
+  texts: string[],
+  timeoutMs = 4000
+): Promise<boolean> {
+  const normalizedTexts = texts.map((value) => normalizeLooseText(value));
+  return waitForEvaluateCondition(
+    rawPage,
+    (patterns) => {
+      const normalize = (value: string) =>
+        value.toLowerCase().replace(/[^a-z0-9]+/g, " ").replace(/\s+/g, " ").trim();
+      const isVisible = (element: Element | null): element is HTMLElement => {
+        if (!(element instanceof HTMLElement)) return false;
+        const style = window.getComputedStyle(element);
+        const rect = element.getBoundingClientRect();
+        return (
+          style.display !== "none" &&
+          style.visibility !== "hidden" &&
+          rect.width > 0 &&
+          rect.height > 0
+        );
+      };
+
+      return Array.from(document.querySelectorAll("button, a, [role='button']")).some((element) => {
+        if (!isVisible(element)) return false;
+        const text = normalize(element.textContent ?? "");
+        return patterns.some((pattern) => text.includes(pattern));
+      });
+    },
+    normalizedTexts,
+    timeoutMs
+  );
+}
+
+async function waitForEvaluateCondition<TArg>(
+  rawPage: Page,
+  evaluator: (arg: TArg) => boolean,
+  arg: TArg,
+  timeoutMs = 6000,
+  intervalMs = 200
+): Promise<boolean> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const matched = await rawPage.evaluate(evaluator, arg).catch(() => false);
+    if (matched) return true;
+    await new Promise((resolve) => setTimeout(resolve, intervalMs));
+  }
+  return false;
+}
+
+async function safePressEscape(rawPage: Page): Promise<void> {
+  try {
+    const candidate = rawPage as Page & {
+      keyboard?: { press?: (key: string) => Promise<unknown> };
+    };
+    if (candidate.keyboard?.press) {
+      await candidate.keyboard.press("Escape");
+      return;
+    }
+  } catch {
+    // Fall through to DOM-dispatch fallback.
+  }
+
+  await rawPage.evaluate(() => {
+    const active = document.activeElement as HTMLElement | null;
+    active?.blur?.();
+    document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true }));
+    document.dispatchEvent(new KeyboardEvent("keyup", { key: "Escape", bubbles: true, cancelable: true }));
+  }).catch(() => {});
+}
+
+async function safeMouseClick(rawPage: Page, x: number, y: number): Promise<void> {
+  try {
+    const candidate = rawPage as Page & {
+      mouse?: { click?: (x: number, y: number, options?: { delay?: number }) => Promise<unknown> };
+    };
+    if (candidate.mouse?.click) {
+      await candidate.mouse.click(x, y, { delay: 80 });
+      return;
+    }
+  } catch {
+    // Fall through to DOM-dispatch fallback.
+  }
+
+  await rawPage.evaluate(
+    ({ x, y }) => {
+      const element = document.elementFromPoint(x, y) as HTMLElement | null;
+      if (!element) return;
+      const options = { bubbles: true, cancelable: true, clientX: x, clientY: y };
+      element.dispatchEvent(new MouseEvent("pointerdown", options));
+      element.dispatchEvent(new MouseEvent("mousedown", options));
+      element.dispatchEvent(new MouseEvent("mouseup", options));
+      element.dispatchEvent(new MouseEvent("click", options));
+      element.click?.();
+    },
+    { x, y }
+  ).catch(() => {});
+}
+
+async function revealBookingComRoomSelection(
+  rawPage: Page,
+  traceLog: (msg: string) => void = () => {}
+): Promise<void> {
+  const beforeUrl = rawPage.url();
+
+  await safePressEscape(rawPage);
+
+  const clickedTopNav = await rawPage.evaluate(() => {
+    const normalize = (value: string) =>
+      value.toLowerCase().replace(/\s+/g, " ").trim();
+    const isVisible = (element: Element | null): element is HTMLElement => {
+      if (!(element instanceof HTMLElement)) return false;
+      const style = window.getComputedStyle(element);
+      const rect = element.getBoundingClientRect();
+      return (
+        style.display !== "none" &&
+        style.visibility !== "hidden" &&
+        rect.width > 0 &&
+        rect.height > 0
+      );
+    };
+
+    const topCandidates = Array.from(
+      document.querySelectorAll("button, a, [role='button'], [role='tab']")
+    ).filter((element) => {
+      if (!isVisible(element)) return false;
+      const text = normalize(element.textContent ?? "");
+      const rect = (element as HTMLElement).getBoundingClientRect();
+      const nearTop = rect.top < window.innerHeight * 0.45;
+      return nearTop && (
+        text === "prices" ||
+        text === "reserve" ||
+        text === "see availability" ||
+        text === "view prices"
+      );
+    }) as HTMLElement[];
+
+    const preferred =
+      topCandidates.find((element) => normalize(element.textContent ?? "") === "prices") ??
+      topCandidates.find((element) => normalize(element.textContent ?? "") === "reserve") ??
+      topCandidates[0];
+
+    if (!preferred) return "";
+    preferred.click();
+    return normalize(preferred.textContent ?? "");
+  }).catch(() => "");
+
+  if (clickedTopNav) {
+    traceLog(`Booking.com room selection: clicked top "${clickedTopNav}" control to reveal pricing/availability.`);
+  }
+
+  await rawPage.evaluate(() => {
+    const selectors = [
+      "#hp_availability_tempcontainer",
+      "[data-testid='availability-cta-btn']",
+      ".hprt-table",
+      "[class*='roomType']",
+      "[class*='room-list']",
+      "[data-testid*='rooms']",
+    ];
+    for (const selector of selectors) {
+      const section = document.querySelector(selector) as HTMLElement | null;
+      if (section) {
+        section.scrollIntoView({ behavior: "instant", block: "start" });
+        return;
+      }
+    }
+
+    const allElements = Array.from(document.querySelectorAll("h1, h2, h3, h4, div, section, span, p"));
+    const roomHeading = allElements.find((element) => {
+      const text = (element.textContent ?? "").toLowerCase();
+      return (
+        text.includes("select a room type and the number of rooms you want to reserve") ||
+        text.includes("select rooms") ||
+        text.includes("room type")
+      );
+    }) as HTMLElement | undefined;
+    roomHeading?.scrollIntoView({ behavior: "instant", block: "start" });
+  }).catch(() => {});
+
+  await Promise.allSettled([
+    rawPage.waitForLoadState("domcontentloaded", { timeout: 5000 }),
+    waitForPageSignals(rawPage, {
+      fromUrl: beforeUrl,
+      untilTextIncludes: [
+        "select a room type and the number of rooms you want to reserve",
+        "select rooms",
+        "room type",
+        "today's price",
+        "your options",
+        "i'll reserve",
+        "i will reserve",
+      ],
+      timeoutMs: 7000,
+    }),
+  ]);
+}
+
+async function setBookingComRoomQuantity(rawPage: Page): Promise<{
+  ok: boolean;
+  summary: string;
+}> {
+  return rawPage.evaluate(() => {
+    const isVisible = (element: Element | null): element is HTMLElement => {
+      if (!(element instanceof HTMLElement)) return false;
+      const style = window.getComputedStyle(element);
+      const rect = element.getBoundingClientRect();
+      return (
+        style.display !== "none" &&
+        style.visibility !== "hidden" &&
+        rect.width > 0 &&
+        rect.height > 0
+      );
+    };
+
+    const normalize = (value: string) =>
+      value.toLowerCase().replace(/\s+/g, " ").trim();
+
+    const availabilityRoot =
+      document.querySelector("#hp_availability_tempcontainer") ||
+      document.querySelector(".hprt-table") ||
+      document.querySelector("[data-testid*='rooms']") ||
+      document.body;
+
+    const allSelects = Array.from(availabilityRoot.querySelectorAll("select"))
+      .filter((select) => isVisible(select)) as HTMLSelectElement[];
+
+    for (const select of allSelects) {
+      const values = Array.from(select.options).map((option) => option.value);
+      if (!values.includes("0") || !values.includes("1")) continue;
+      if (select.value && select.value !== "0") {
+        return { ok: true, summary: `room quantity already set to ${select.value}` };
+      }
+    }
+
+    const roomSelects = allSelects
+      .map((select, index) => {
+        const scope = select.closest("tr, [class*='room'], [class*='hprt'], [data-testid*='room'], div");
+        const text = normalize(scope?.textContent ?? "");
+        const priceMatch = text.match(/\$\s*([\d,]+)/);
+        const price = priceMatch ? Number.parseFloat(priceMatch[1].replace(/,/g, "")) : Number.POSITIVE_INFINITY;
+        return { select, index, price, text };
+      })
+      .filter(({ select }) => {
+        const values = Array.from(select.options).map((option) => option.value);
+        return values.includes("0") && values.includes("1") && (!select.value || select.value === "0");
+      })
+      .sort((a, b) => a.price - b.price);
+
+    for (const candidate of roomSelects) {
+      candidate.select.scrollIntoView({ block: "center", behavior: "instant" });
+      candidate.select.value = "1";
+      candidate.select.dispatchEvent(new Event("input", { bubbles: true }));
+      candidate.select.dispatchEvent(new Event("change", { bubbles: true }));
+      const applied = candidate.select.value === "1";
+      if (applied) {
+        return {
+          ok: true,
+          summary: `set room quantity dropdown ${candidate.index} to 1`,
+        };
+      }
+    }
+
+    const quantityButtons = Array.from(
+      availabilityRoot.querySelectorAll("button, [role='button'], a")
+    ).filter((element) => {
+      if (!isVisible(element)) return false;
+      const text = normalize(element.textContent ?? "");
+      return text === "1" || text.includes("select rooms") || text.includes("add room");
+    }) as HTMLElement[];
+
+    for (const button of quantityButtons) {
+      button.scrollIntoView({ block: "center", behavior: "instant" });
+      button.click();
+    }
+
+    return {
+      ok: false,
+      summary: `no room quantity dropdown found (visible selects: ${allSelects.length})`,
+    };
+  }).catch(() => ({ ok: false, summary: "DOM room quantity strategy failed" }));
+}
+
+async function clickBookingComListingTarget(
+  rawPage: Page,
+  targetHotelName: string,
+  traceLog: (msg: string) => void = () => {}
+): Promise<boolean> {
+  const normalizedTarget = normalizeLooseText(targetHotelName);
+  if (!normalizedTarget) return false;
+
+  const ignoredTokens = new Set([
+    "hotel",
+    "hotels",
+    "the",
+    "by",
+    "and",
+    "a",
+    "an",
+  ]);
+  const targetTokens = normalizedTarget
+    .split(" ")
+    .map((token) => token.trim())
+    .filter((token) => token.length >= 3 && !ignoredTokens.has(token));
+
+  await safePressEscape(rawPage);
+  await rawPage.evaluate(() => {
+    const active = document.activeElement as HTMLElement | null;
+    active?.blur?.();
+  }).catch(() => {});
+  await rawPage.waitForTimeout(100).catch(() => {});
+
+  const clickPlan = await rawPage.evaluate(
+    ({ normalizedTarget, targetTokens }) => {
+      const normalize = (value: string) =>
+        value
+          .toLowerCase()
+          .replace(/[^a-z0-9]+/g, " ")
+          .replace(/\s+/g, " ")
+          .trim();
+      const cleanTitle = (value: string) =>
+        normalize(
+          value
+            .replace(/opens in new window/gi, " ")
+            .replace(/\(\s*hotel\s*\)/gi, " ")
+            .replace(/\bfeatured\b/gi, " ")
+        );
+
+      const isVisible = (element: Element | null): element is HTMLElement => {
+        if (!(element instanceof HTMLElement)) return false;
+        const style = window.getComputedStyle(element);
+        const rect = element.getBoundingClientRect();
+        return (
+          style.visibility !== "hidden" &&
+          style.display !== "none" &&
+          rect.width > 0 &&
+          rect.height > 0
+        );
+      };
+
+      const scoreTitleText = (text: string) => {
+        const normalized = cleanTitle(text);
+        if (!normalized) return 0;
+        if (normalized === normalizedTarget) return 5000;
+        if (normalized.startsWith(`${normalizedTarget} `)) return 4200;
+        if (normalized.endsWith(` ${normalizedTarget}`)) return 400;
+
+        const normalizedWords = normalized.split(" ").filter(Boolean);
+        const matchedTokens = targetTokens.filter((token) => normalizedWords.includes(token)).length;
+        if (matchedTokens < targetTokens.length) return 0;
+
+        const extraTokens = normalizedWords.filter((token) => !targetTokens.includes(token));
+        const hasMeaningfulExtras = extraTokens.some((token) =>
+          ![
+            "hotel",
+            "hotels",
+            "new",
+            "window",
+            "open",
+            "opens",
+            "in",
+            "featured",
+          ].includes(token)
+        );
+
+        if (hasMeaningfulExtras) return 0;
+        return 1500 - extraTokens.length * 25;
+      };
+
+      const getNearestHref = (element: Element | null) => {
+        if (!element) return "";
+        const directAnchor =
+          element instanceof HTMLAnchorElement
+            ? element
+            : (element.closest("a[href]") as HTMLAnchorElement | null);
+        return directAnchor?.href ?? "";
+      };
+
+      const buttonCandidates = Array.from(
+        document.querySelectorAll("button, a, [role='button']")
+      )
+        .map((element) => {
+          if (!isVisible(element)) return null;
+          const actionText = normalize(element.textContent ?? "");
+          const isAvailabilityAction =
+            actionText.includes("see availability") ||
+            actionText.includes("view deal") ||
+            actionText.includes("select your room");
+          if (!isAvailabilityAction) return null;
+
+          let container: Element | null = element;
+          let bestScore = 0;
+          let bestTitle = "";
+          let bestHref = "";
+          for (let depth = 0; depth < 7 && container; depth += 1, container = container.parentElement) {
+            const titleNode =
+              container.querySelector("a[data-testid*='title-link'], a[href*='/hotel/'], h1, h2, h3") ??
+              container.querySelector("a, h1, h2, h3");
+            const titleText = (titleNode?.textContent ?? container.textContent ?? "").trim();
+            const score = scoreTitleText(titleText);
+            if (score > bestScore) {
+              bestScore = score;
+              bestTitle = titleText.trim().slice(0, 180);
+              bestHref = getNearestHref(titleNode ?? container);
+            }
+          }
+
+          if (bestScore < 1500) return null;
+          return {
+            kind: "availability" as const,
+            score: bestScore + 100,
+            text: (element.textContent ?? "").trim(),
+            title: bestTitle,
+            href: bestHref,
+          };
+        })
+        .filter((value): value is { kind: "availability"; score: number; text: string; title: string; href: string } => Boolean(value))
+        .sort((a, b) => b.score - a.score);
+
+      if (buttonCandidates.length > 0) {
+        const winner = buttonCandidates[0];
+        const elements = Array.from(
+          document.querySelectorAll("button, a, [role='button']")
+        ).filter((element) => {
+          if (!isVisible(element)) return false;
+          const actionText = normalize(element.textContent ?? "");
+          const isAvailabilityAction =
+            actionText.includes("see availability") ||
+            actionText.includes("view deal") ||
+            actionText.includes("select your room");
+          if (!isAvailabilityAction) return false;
+
+          let container: Element | null = element;
+          let bestScore = 0;
+          for (let depth = 0; depth < 7 && container; depth += 1, container = container.parentElement) {
+            const titleNode =
+              container.querySelector("a[data-testid*='title-link'], a[href*='/hotel/'], h1, h2, h3") ??
+              container.querySelector("a, h1, h2, h3");
+            const score = scoreTitleText(titleNode?.textContent ?? container.textContent ?? "");
+            if (score > bestScore) bestScore = score;
+          }
+          return bestScore === winner.score - 100;
+        });
+
+        const element = elements[0] as HTMLElement | undefined;
+        if (element) {
+          const rect = element.getBoundingClientRect();
+          return {
+            kind: "availability" as const,
+            text: winner.text,
+            title: winner.title,
+            href: winner.href,
+            x: rect.left + rect.width / 2,
+            y: rect.top + rect.height / 2,
+          };
+        }
+      }
+
+      const titleCandidates = Array.from(
+        document.querySelectorAll("a, button, [role='button'], h1, h2, h3")
+      )
+        .map((element) => {
+          if (!isVisible(element)) return null;
+          const text = (element.textContent ?? "").trim();
+          const score = scoreTitleText(text);
+          if (score <= 0) return null;
+          return {
+            element: element as HTMLElement,
+            score,
+            text,
+          };
+        })
+        .filter((value): value is { element: HTMLElement; score: number; text: string } => Boolean(value))
+        .sort((a, b) => b.score - a.score);
+
+      if (titleCandidates.length === 0) return null;
+
+      const winner = titleCandidates[0];
+      if (winner.score < 1500) return null;
+      const rect = winner.element.getBoundingClientRect();
+      return {
+        kind: "title" as const,
+        text: winner.text.slice(0, 180),
+        title: winner.text.slice(0, 180),
+        href: getNearestHref(winner.element),
+        x: rect.left + rect.width / 2,
+        y: rect.top + rect.height / 2,
+      };
+    },
+    { normalizedTarget, targetTokens }
+  ).catch(() => null);
+
+  if (!clickPlan) {
+    traceLog(`Booking.com listing: could not match a listing card for "${targetHotelName}".`);
+    return false;
+  }
+
+  const beforeUrl = rawPage.url();
+  if (clickPlan.href) {
+    await rawPage.goto(clickPlan.href, { waitUntil: "domcontentloaded", timeoutMs: 30_000 }).catch(async () => {
+      await safeMouseClick(rawPage, clickPlan.x, clickPlan.y);
+    });
+  } else {
+    await safeMouseClick(rawPage, clickPlan.x, clickPlan.y);
+  }
+  traceLog(
+    clickPlan.kind === "availability"
+      ? `Booking.com listing: opened matched hotel "${clickPlan.title || targetHotelName}" via "${clickPlan.text || "See availability"}".`
+      : `Booking.com listing: opened matched hotel title "${clickPlan.title || targetHotelName}".`
+  );
+  await Promise.allSettled([
+    rawPage.waitForLoadState("domcontentloaded", { timeout: 5000 }),
+    waitForPageSignals(rawPage, {
+      fromUrl: beforeUrl,
+      untilUrlExcludes: ["searchresults"],
+      untilTextIncludes: [
+        "select a room type and the number of rooms you want to reserve",
+        "room type",
+        "reserve",
+        "we price match",
+      ],
+      timeoutMs: 7000,
+    }),
+  ]);
+  return true;
 }
 
 function extractErrorDetails(err: unknown): {
@@ -404,12 +1034,21 @@ function hasRequestedStaySelected(
 }
 
 async function readCombinedText(rawPage: Page): Promise<string> {
+  const pageUrl = rawPage.url().toLowerCase();
+  const isBookingComPage =
+    pageUrl.includes("booking.com") ||
+    pageUrl.includes("secure.booking.com");
   const texts = await Promise.all(
     getInteractionScopes(rawPage).map(async (scope) => {
       try {
-        return await scope.evaluate(() =>
-          (document.body?.innerText ?? "").toLowerCase().slice(0, 12000)
-        ) as string;
+        return await scope.evaluate((bookingCom) => {
+          const text = (document.body?.innerText ?? "").toLowerCase();
+          if (!bookingCom) return text.slice(0, 12000);
+          if (text.length <= 32000) return text;
+          const head = text.slice(0, 18000);
+          const tail = text.slice(-14000);
+          return `${head}\n${tail}`;
+        }, isBookingComPage) as string;
       } catch {
         return "";
       }
@@ -437,7 +1076,7 @@ async function readCombinedText(rawPage: Page): Promise<string> {
     combined.includes("checkout");
 
   if (!bookingKeywordsPresent) {
-    try {
+    if (false) try {
       const snapshot = await (rawPage as unknown as {
         accessibility: { snapshot(): Promise<unknown> }
       }).accessibility.snapshot();
@@ -695,6 +1334,713 @@ async function getVisibleFieldCategoryKeys(rawPage: Page): Promise<Set<string>> 
   }
 
   return matches;
+}
+
+/**
+ * Booking.com Chinese guest-details form filler.
+ * Uses label text to locate each field, then force-clears and fills correct values.
+ * Always runs regardless of pre-filled account data (which is often wrong).
+ */
+async function fillBookingComGuestForm(rawPage: Page, p: EffectiveProfile, traceLog: (msg: string) => void = () => {}): Promise<void> {
+  // Safety guard: only run on Booking.com checkout pages, never on hotel detail/search pages.
+  // The checkout flow lives at secure.booking.com or booking.com/book.
+  const pageUrl = rawPage.url();
+  const isCheckoutPage = pageUrl.includes("secure.booking.com") || pageUrl.includes("booking.com/book");
+  if (!isCheckoutPage) {
+    traceLog(`fillBookingComGuestForm: SKIPPED — not on checkout page (${pageUrl.slice(0, 80)})`);
+    return;
+  }
+
+  // Helper: fill a single input reliably.
+  // Uses fill() which clears existing value and types new one, triggering React events.
+  async function fillInput(loc: Locator, value: string): Promise<void> {
+    await loc.fill(value);
+    await loc.blur().catch(() => {});
+  }
+
+  // Helper: try a list of CSS selectors, fill the first visible non-select input found.
+  async function fillBySelector(selectors: string[], value: string, label: string): Promise<boolean> {
+    for (const sel of selectors) {
+      try {
+        const loc = rawPage.locator(sel).first();
+        if (!await loc.isVisible({ timeout: 800 }).catch(() => false)) continue;
+        const tag = await loc.evaluate((el) => el.tagName.toLowerCase()).catch(() => "");
+        if (tag === "select") continue;
+        // Skip Booking.com's top search bar (name="ss") — never type guest data there
+        const nameAttr = await loc.getAttribute("name").catch(() => "");
+        if (nameAttr === "ss") continue;
+        await fillInput(loc, value);
+        traceLog(`Booking.com: filled ${label} via selector "${sel}" = "${value}"`);
+        return true;
+      } catch { /* try next */ }
+    }
+    return false;
+  }
+
+  // Helper: try getByLabel (Playwright aria lookup), then label's for= attribute.
+  async function fillByLabelText(labelTexts: string[], value: string, label: string): Promise<boolean> {
+    for (const text of labelTexts) {
+      // Strategy A: Playwright getByLabel
+      try {
+        const loc = rawPage.getByLabel(text, { exact: false }).first();
+        if (await loc.isVisible({ timeout: 800 }).catch(() => false)) {
+          const tag = await loc.evaluate((el) => el.tagName.toLowerCase()).catch(() => "");
+          if (tag === "select") continue;
+          // Skip Booking.com's top search bar
+          const nameAttr = await loc.getAttribute("name").catch(() => "");
+          if (nameAttr === "ss") continue;
+          await fillInput(loc, value);
+          traceLog(`Booking.com: filled ${label} via getByLabel("${text}") = "${value}"`);
+          return true;
+        }
+      } catch { /* try next */ }
+      // Strategy B: find <label> by text, look up input by for= attribute
+      try {
+        const labelEl = rawPage.locator("label").filter({ hasText: text }).first();
+        if (!await labelEl.isVisible({ timeout: 600 }).catch(() => false)) continue;
+        const forId = await labelEl.getAttribute("for").catch(() => null);
+        if (!forId) continue;
+        const inp = rawPage.locator(`#${CSS.escape(forId)}`);
+        if (!await inp.isVisible({ timeout: 600 }).catch(() => false)) continue;
+        await fillInput(inp, value);
+        traceLog(`Booking.com: filled ${label} via label[for="${forId}"] = "${value}"`);
+        return true;
+      } catch { /* try next */ }
+    }
+    return false;
+  }
+
+  async function fillPhoneFieldInPhoneSection(digitsOnly: string): Promise<boolean> {
+    const inspectMarkedPhoneInput = async () => {
+      return rawPage.evaluate((digits) => {
+        const input = document.querySelector("input[data-codex-phone-target='1']") as HTMLInputElement | null;
+        if (!input) {
+          return {
+            present: false,
+            normalizedValue: "",
+            verified: false,
+            ariaInvalid: false,
+            hasErrorText: false,
+            visibleErrorText: "",
+          };
+        }
+
+        const normalizeDigitsLocal = (value: string) => value.replace(/\D/g, "");
+        const normalizeText = (value: string) => value.toLowerCase().replace(/\s+/g, " ").trim();
+        const isVisible = (element: Element | null): element is HTMLElement => {
+          if (!(element instanceof HTMLElement)) return false;
+          const style = window.getComputedStyle(element);
+          return (
+            style.display !== "none" &&
+            style.visibility !== "hidden" &&
+            !element.hidden &&
+            (element.offsetWidth > 0 || element.offsetHeight > 0 || element.getClientRects().length > 0)
+          );
+        };
+
+        const describedByIds = (input.getAttribute("aria-describedby") ?? "")
+          .split(/\s+/)
+          .map((part) => part.trim())
+          .filter(Boolean);
+        const describedByText = describedByIds
+          .map((id) => document.getElementById(id))
+          .filter((element): element is HTMLElement => isVisible(element))
+          .map((element) => normalizeText(element.innerText || element.textContent || ""))
+          .join(" ");
+
+        const containers = [
+          input.closest("[data-testid]"),
+          input.closest("fieldset"),
+          input.closest("section"),
+          input.closest("form"),
+          input.parentElement,
+          input.parentElement?.parentElement ?? null,
+        ].filter((element, index, array): element is HTMLElement => !!element && array.indexOf(element) === index && isVisible(element));
+
+        const localText = containers
+          .map((element) => normalizeText(element.innerText || element.textContent || ""))
+          .join(" ");
+
+        const errorPattern =
+          /enter your phone number|please enter your phone number|invalid phone|valid phone|phone number is required|mobile number is required|please enter a valid|required field/;
+
+        const normalizedValue = normalizeDigitsLocal(input.value || "");
+        const verified = normalizedValue.endsWith(digits) || normalizedValue === digits;
+        const ariaInvalid = input.getAttribute("aria-invalid") === "true";
+        const combinedErrorText = `${describedByText} ${localText}`.trim();
+        const hasErrorText = errorPattern.test(combinedErrorText);
+
+        return {
+          present: true,
+          normalizedValue,
+          verified,
+          ariaInvalid,
+          hasErrorText,
+          visibleErrorText: combinedErrorText,
+        };
+      }, digitsOnly).catch(() => ({
+        present: false,
+        normalizedValue: "",
+        verified: false,
+        ariaInvalid: false,
+        hasErrorText: false,
+        visibleErrorText: "",
+      }));
+    };
+
+    const waitForMarkedPhoneValidationClear = async (timeoutMs = 1800) => {
+      const deadline = Date.now() + timeoutMs;
+      let lastState = await inspectMarkedPhoneInput();
+      while (Date.now() < deadline) {
+        if (lastState.present && lastState.verified && !lastState.ariaInvalid && !lastState.hasErrorText) {
+          return lastState;
+        }
+        await new Promise((resolve) => setTimeout(resolve, 120));
+        lastState = await inspectMarkedPhoneInput();
+      }
+      return lastState;
+    };
+
+    const marked = await rawPage.evaluate(() => {
+      const normalize = (value: string) => value.toLowerCase().replace(/\s+/g, " ").trim();
+      const matchesPhoneLabel = (value: string) => {
+        const text = normalize(value);
+        return (
+          text.includes("phone number") ||
+          text.includes("mobile number") ||
+          text.includes("telephone") ||
+          text.includes("电话号码") ||
+          text.includes("手機號碼") ||
+          text.includes("手机号码")
+        );
+      };
+      const isVisible = (element: Element | null): element is HTMLElement => {
+        if (!(element instanceof HTMLElement)) return false;
+        const style = window.getComputedStyle(element);
+        return (
+          style.display !== "none" &&
+          style.visibility !== "hidden" &&
+          !element.hidden &&
+          (element.offsetWidth > 0 || element.offsetHeight > 0 || element.getClientRects().length > 0)
+        );
+      };
+      document
+        .querySelectorAll("input[data-codex-phone-target='1']")
+        .forEach((element) => element.removeAttribute("data-codex-phone-target"));
+
+      const anchors = Array.from(
+        document.querySelectorAll("label, legend, span, p, div, h3, h4")
+      ).filter((element) => matchesPhoneLabel(element.textContent ?? ""));
+
+      for (const anchor of anchors) {
+        let container: Element | null = anchor;
+        for (let depth = 0; depth < 5 && container; depth += 1, container = container.parentElement) {
+          if (!isVisible(container)) continue;
+
+          const inputs = Array.from(container.querySelectorAll("input"))
+            .filter((input) => input instanceof HTMLInputElement && isVisible(input))
+            .filter((input) => !(input as HTMLInputElement).disabled && !(input as HTMLInputElement).readOnly)
+            .filter((input) => (input as HTMLInputElement).type !== "hidden")
+            .filter((input) => (input as HTMLInputElement).name !== "ss") as HTMLInputElement[];
+
+          const directPhoneCandidates = inputs.filter((input) => {
+            if (!(input instanceof HTMLInputElement) || !isVisible(input)) return false;
+            const meta = normalize([
+              input.type,
+              input.name,
+              input.id,
+              input.placeholder,
+              input.autocomplete,
+              input.getAttribute("aria-label") ?? "",
+            ].join(" "));
+
+            return (
+              input.type === "tel" ||
+              meta.includes("phone") ||
+              meta.includes("mobile") ||
+              meta.includes("telephone") ||
+              meta.includes("tel")
+            );
+          });
+
+          const selects = Array.from(container.querySelectorAll("select"))
+            .filter((select) => isVisible(select)) as HTMLSelectElement[];
+          const rightmostSelect = selects.sort((a, b) => {
+            const ar = a.getBoundingClientRect();
+            const br = b.getBoundingClientRect();
+            return br.left - ar.left;
+          })[0];
+
+          const target =
+            (rightmostSelect
+              ? directPhoneCandidates
+                  .filter((input) => input.getBoundingClientRect().left >= rightmostSelect.getBoundingClientRect().right - 8)
+                  .sort((a, b) => {
+                    const ar = a.getBoundingClientRect();
+                    const br = b.getBoundingClientRect();
+                    return br.left - ar.left;
+                  })[0]
+              : undefined) ||
+            directPhoneCandidates.sort((a, b) => {
+              const ar = a.getBoundingClientRect();
+              const br = b.getBoundingClientRect();
+              return br.left - ar.left;
+            })[0] ||
+            inputs.sort((a, b) => {
+              const ar = a.getBoundingClientRect();
+              const br = b.getBoundingClientRect();
+              return br.left - ar.left;
+            })[0];
+
+          if (target) {
+            target.setAttribute("data-codex-phone-target", "1");
+            return true;
+          }
+        }
+      }
+
+      return false;
+    }).catch(() => false);
+
+    if (!marked) {
+      traceLog("Booking.com: phone-section DOM strategy could not mark the right-side phone input.");
+      return false;
+    }
+
+    const phoneInput = rawPage.locator("input[data-codex-phone-target='1']").first();
+    if (!await phoneInput.isVisible({ timeout: 800 }).catch(() => false)) {
+      traceLog("Booking.com: marked phone input is not visible.");
+      return false;
+    }
+
+    try {
+      await phoneInput.fill(digitsOnly);
+      await phoneInput.blur().catch(() => {});
+    } catch {
+      // Fall through to DOM setter fallback below.
+    }
+
+    await new Promise((resolve) => setTimeout(resolve, 150));
+    let phoneState = await waitForMarkedPhoneValidationClear();
+    if (phoneState.present && phoneState.verified && !phoneState.ariaInvalid && !phoneState.hasErrorText) {
+      traceLog("Booking.com: filled Phone number via marked input fill().");
+      return true;
+    }
+
+    const filled = await rawPage.evaluate((digits) => {
+      const input = document.querySelector("input[data-codex-phone-target='1']") as HTMLInputElement | null;
+      if (!input) return "";
+      const nativeSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value")?.set;
+      input.focus();
+      if (nativeSetter) {
+        nativeSetter.call(input, "");
+      } else {
+        input.value = "";
+      }
+      input.dispatchEvent(new InputEvent("beforeinput", { bubbles: true, inputType: "deleteContentBackward", data: null }));
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+      if (nativeSetter) {
+        nativeSetter.call(input, digits);
+      } else {
+        input.value = digits;
+      }
+      input.dispatchEvent(new InputEvent("beforeinput", { bubbles: true, inputType: "insertText", data: digits }));
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+      input.dispatchEvent(new Event("change", { bubbles: true }));
+      input.blur();
+      return input.value;
+    }, digitsOnly).catch(() => "");
+
+    await new Promise((resolve) => setTimeout(resolve, 150));
+    phoneState = await waitForMarkedPhoneValidationClear();
+
+    if (phoneState.present && phoneState.verified && !phoneState.ariaInvalid && !phoneState.hasErrorText) {
+      traceLog("Booking.com: filled Phone number via marked-input DOM fallback.");
+      return true;
+    }
+
+    const typedSequentially = await rawPage.evaluate((digits) => {
+      const input = document.querySelector("input[data-codex-phone-target='1']") as HTMLInputElement | null;
+      if (!input) return "";
+      const nativeSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value")?.set;
+      const setValue = (value: string) => {
+        if (nativeSetter) {
+          nativeSetter.call(input, value);
+        } else {
+          input.value = value;
+        }
+      };
+
+      input.focus();
+      setValue("");
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+
+      let current = "";
+      for (const digit of digits) {
+        current += digit;
+        input.dispatchEvent(new InputEvent("beforeinput", { bubbles: true, inputType: "insertText", data: digit }));
+        setValue(current);
+        input.dispatchEvent(new Event("input", { bubbles: true }));
+      }
+
+      input.dispatchEvent(new Event("change", { bubbles: true }));
+      input.blur();
+      return input.value;
+    }, digitsOnly).catch(() => "");
+
+    await new Promise((resolve) => setTimeout(resolve, 150));
+    phoneState = await waitForMarkedPhoneValidationClear(2200);
+
+    if (phoneState.present && phoneState.verified && !phoneState.ariaInvalid && !phoneState.hasErrorText) {
+      traceLog("Booking.com: filled Phone number via marked-input sequential typing fallback.");
+      return true;
+    }
+
+    traceLog(
+      `Booking.com: marked phone input still looks invalid after fill attempts (raw="${filled}", sequential="${typedSequentially}", normalized="${phoneState.normalizedValue}", ariaInvalid=${phoneState.ariaInvalid}, error="${phoneState.visibleErrorText.slice(0, 180)}").`
+    );
+    return false;
+  }
+
+  // ── Determine given name / family name from profile ────────────────────────
+  // Profile may store names in Chinese convention (first_name="Guo", last_name="Ziwei").
+  // Use full_name ("Ziwei Guo") as the source of truth — last word = family name.
+  let givenName  = p.first_name ?? "";
+  let familyName = p.last_name  ?? "";
+  if (p.full_name && p.full_name.trim().includes(" ")) {
+    const parts = p.full_name.trim().split(/\s+/);
+    givenName  = parts.slice(0, parts.length - 1).join(" "); // "Ziwei"
+    familyName = parts[parts.length - 1];                    // "Guo"
+    traceLog(`Booking.com: name split "${p.full_name}" → given="${givenName}" family="${familyName}"`);
+  }
+
+  // ── First name ─────────────────────────────────────────────────────────────
+  if (givenName) {
+    const ok =
+      await fillBySelector(['input[autocomplete="given-name"]', 'input[name*="first" i]', 'input[id*="first" i]'], givenName, "First name") ||
+      await fillByLabelText(["First name", "Given name", "名", "名 (拼音/英语)"], givenName, "First name");
+    if (!ok) traceLog("Booking.com: could not find First name field");
+  }
+
+  await new Promise(r => setTimeout(r, 200));
+
+  // ── Last name ──────────────────────────────────────────────────────────────
+  if (familyName) {
+    const ok =
+      await fillBySelector(['input[autocomplete="family-name"]', 'input[name*="last" i]', 'input[id*="last" i]'], familyName, "Last name") ||
+      await fillByLabelText(["Last name", "Family name", "Surname", "姓", "姓 (拼音/英语)"], familyName, "Last name");
+    if (!ok) traceLog("Booking.com: could not find Last name field");
+  }
+
+  await new Promise(r => setTimeout(r, 200));
+
+  // ── Email ──────────────────────────────────────────────────────────────────
+  if (p.email) {
+    const ok =
+      await fillBySelector(['input[autocomplete="email"]', 'input[type="email"]', 'input[name*="email" i]'], p.email, "Email") ||
+      await fillByLabelText(["Email address", "Email", "E-mail", "电子邮箱地址"], p.email, "Email");
+    if (!ok) traceLog("Booking.com: could not find Email field");
+  }
+
+  await new Promise(r => setTimeout(r, 300));
+
+  // ── Country dropdown — set to United States ────────────────────────────────
+  // Find the country <select> specifically (not the phone code select).
+  try {
+    const countrySelectors = [
+      'select[autocomplete="country"]',
+      'select[name*="country" i]',
+      'select[id*="country" i]',
+    ];
+    let countrySet = false;
+    for (const sel of countrySelectors) {
+      try {
+        const el = rawPage.locator(sel).first();
+        if (!await el.isVisible({ timeout: 600 }).catch(() => false)) continue;
+        const set = await el.evaluate((s: HTMLSelectElement) => {
+          const opt = Array.from(s.options).find(o =>
+            o.text.toLowerCase().includes("united states") || o.value.toLowerCase() === "us"
+          );
+          if (!opt) return false;
+          s.value = opt.value;
+          s.dispatchEvent(new Event("change", { bubbles: true }));
+          return true;
+        });
+        if (set) { countrySet = true; traceLog(`Booking.com: set Country via "${sel}"`); break; }
+      } catch { /* next */ }
+    }
+    if (!countrySet) {
+      // Fallback: find by label text
+      for (const labelText of ["Country/Region", "Country", "国家/地区"]) {
+        try {
+          const sel = rawPage.getByLabel(labelText, { exact: false }).first();
+          const tag = await sel.evaluate((e) => e.tagName.toLowerCase()).catch(() => "");
+          if (tag !== "select") continue;
+          if (!await sel.isVisible({ timeout: 600 }).catch(() => false)) continue;
+          await sel.selectOption({ label: "United States" }).catch(() =>
+            sel.selectOption({ value: "us" })
+          ).catch(() => {});
+          traceLog(`Booking.com: set Country/Region via getByLabel("${labelText}")`);
+          countrySet = true;
+          break;
+        } catch { /* next */ }
+      }
+    }
+    if (!countrySet) traceLog("Booking.com: could not find Country dropdown");
+  } catch { /* non-fatal */ }
+
+  await new Promise(r => setTimeout(r, 300));
+
+  // ── Phone number ───────────────────────────────────────────────────────────
+  if (p.phone) {
+    const digitsOnly = p.phone.replace(/\D/g, "").replace(/^1/, ""); // strip leading +1
+
+    // Set country code to US first
+    try {
+      // Find the phone section's <select> — it's near the "Phone number" label
+      // but distinct from the Country/Region select (which we already set above).
+      // Use a broad selector, then narrow to the one inside the phone widget.
+      const phoneLabel = rawPage.locator("label").filter({ hasText: /Phone number|手机号码|电话号码/i }).first();
+      if (await phoneLabel.isVisible({ timeout: 800 }).catch(() => false)) {
+        // Walk up to the phone section container and find select inside it
+        const phoneSection = phoneLabel.locator("xpath=ancestor::div[position()<=3]").last();
+        const codeSelect = phoneSection.locator("select").first();
+        const shouldMutatePhonePrefix = false;
+        if (shouldMutatePhonePrefix && await codeSelect.isVisible({ timeout: 800 }).catch(() => false)) {
+          await codeSelect.selectOption({ value: "us" }).catch(() =>
+            codeSelect.selectOption({ label: "United States" })
+          ).catch(() => {});
+          traceLog("Booking.com: set phone country code to US +1");
+        }
+      }
+    } catch { /* non-fatal */ }
+
+    await new Promise(r => setTimeout(r, 300));
+
+    // Fill the tel input — input[type="tel"] is the most direct selector
+    const ok =
+      await fillPhoneFieldInPhoneSection(digitsOnly) ||
+      await fillBySelector(['input[type="tel"]', 'input[autocomplete="tel"]', 'input[name*="phone" i]', 'input[id*="phone" i]'], digitsOnly, "Phone") ||
+      await fillByLabelText(["Phone number", "Mobile number", "电话号码", "手机号码"], digitsOnly, "Phone");
+    if (!ok) traceLog("Booking.com: could not find Phone number input");
+    await new Promise(r => setTimeout(r, 300));
+  }
+
+  // ── Decline travel protection ("No thanks") ───────────────────────────────
+  await new Promise(r => setTimeout(r, 400));
+  try {
+    const noThanksBtn = rawPage.locator("button, label, span, div").filter({
+      hasText: /^No thanks$|^No, thanks$|^不需要$|^不，谢谢$/i,
+    }).first();
+    if (await noThanksBtn.isVisible({ timeout: 1500 }).catch(() => false)) {
+      await noThanksBtn.scrollIntoViewIfNeeded().catch(() => {});
+      await noThanksBtn.click({ force: true });
+      traceLog("Booking.com: declined travel protection ('No thanks').");
+      await new Promise(r => setTimeout(r, 400));
+    }
+  } catch { /* non-fatal */ }
+
+  // ── Click "Next: Final details" / "下一步" to advance to payment page ────────
+  // After filling all guest fields, the credit card form is on the NEXT page.
+  // Click the advance button so the agent doesn't continue typing on this page.
+  await new Promise(r => setTimeout(r, 200));
+  try {
+    const beforeUrl = rawPage.url();
+    await safePressEscape(rawPage);
+    await rawPage.evaluate(() => {
+      const active = document.activeElement as HTMLElement | null;
+      active?.blur?.();
+    }).catch(() => {});
+    await new Promise(r => setTimeout(r, 100));
+
+    // Booking.com Step 2 advance button is at the BOTTOM of the page.
+    // Try multiple strategies in order of specificity.
+    let nextClicked = false;
+    const nextButtonPattern = /next.*final\s*details|next.*detail|continue|下一步|继续|完成/i;
+
+    const nextCta = await rawPage.evaluate((patternSource) => {
+      const pattern = new RegExp(patternSource, "i");
+      const isVisible = (element: Element | null): element is HTMLElement => {
+        if (!(element instanceof HTMLElement)) return false;
+        const style = window.getComputedStyle(element);
+        const rect = element.getBoundingClientRect();
+        return style.display !== "none" && style.visibility !== "hidden" && rect.width > 0 && rect.height > 0;
+      };
+
+      const candidates = Array.from(
+        document.querySelectorAll("button, a, [role='button'], [data-testid*='next'], [data-testid*='submit']")
+      ).filter((element) => {
+        if (!isVisible(element)) return false;
+        const text = (element.textContent ?? "").trim();
+        if (!pattern.test(text)) return false;
+        const rect = (element as HTMLElement).getBoundingClientRect();
+        return rect.left >= window.innerWidth * 0.45 && rect.bottom >= window.innerHeight * 0.55;
+      }).sort((a, b) => {
+        const ar = (a as HTMLElement).getBoundingClientRect();
+        const br = (b as HTMLElement).getBoundingClientRect();
+        return (br.left + br.top) - (ar.left + ar.top);
+      }) as HTMLElement[];
+
+      const candidate = candidates[0];
+      if (!candidate) return null;
+      const rect = candidate.getBoundingClientRect();
+      candidate.scrollIntoView({ block: "center", behavior: "instant" });
+      candidate.click();
+      const form = candidate.closest("form") as HTMLFormElement | null;
+      form?.requestSubmit?.();
+      return {
+        x: rect.left + rect.width / 2,
+        y: rect.top + rect.height / 2,
+        text: (candidate.textContent ?? "").trim(),
+      };
+    }, nextButtonPattern.source).catch(() => null as { x: number; y: number; text: string } | null);
+
+    if (nextCta) {
+      traceLog(`Booking.com guest form: clicked "${nextCta.text}" (strategy 0 direct element click/requestSubmit) to advance to payment page.`);
+      nextClicked = true;
+    }
+
+    // Strategy 1: find by exact Booking.com button text patterns
+    if (!nextClicked) {
+    const nextBtnCandidates = [
+      rawPage.locator("button").filter({ hasText: /Next.*Final\s*details/i }).first(),
+      rawPage.locator("button").filter({ hasText: /Next.*detail/i }).first(),
+      rawPage.locator("button").filter({ hasText: /下一步/i }).first(),
+      rawPage.locator("button").filter({ hasText: /完成预订步骤/i }).first(),
+    ];
+    for (const btn of nextBtnCandidates) {
+      if (await btn.isVisible({ timeout: 1200 }).catch(() => false)) {
+        await btn.scrollIntoViewIfNeeded().catch(() => {});
+        await new Promise(r => setTimeout(r, 120));
+        await btn.click({ force: true });
+        traceLog("Booking.com guest form: clicked 'Next: Final details' (strategy 1) to advance to payment page.");
+        nextClicked = true;
+        break;
+      }
+    }
+    }
+
+    // Strategy 2: Booking.com's CTA is often a sticky lower-right button.
+    if (!nextClicked) {
+      const box = await rawPage.evaluate((patternSource) => {
+        const pattern = new RegExp(patternSource, "i");
+        const buttons = Array.from(document.querySelectorAll("button"));
+        const candidate = buttons
+          .filter((button) => {
+            if (!(button instanceof HTMLElement)) return false;
+            const text = (button.textContent ?? "").trim();
+            if (!pattern.test(text)) return false;
+            const rect = button.getBoundingClientRect();
+            return rect.width > 0 && rect.height > 0 && rect.left >= window.innerWidth * 0.55 && rect.bottom >= window.innerHeight * 0.6;
+          })
+          .sort((a, b) => {
+            const ar = a.getBoundingClientRect();
+            const br = b.getBoundingClientRect();
+            return (br.left + br.top) - (ar.left + ar.top);
+          })[0] as HTMLElement | undefined;
+
+        if (!candidate) return null;
+        const rect = candidate.getBoundingClientRect();
+        return { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 };
+      }, nextButtonPattern.source).catch(() => null as { x: number; y: number } | null);
+
+      if (box) {
+        await safeMouseClick(rawPage, box.x, box.y);
+        traceLog("Booking.com guest form: mouse-clicked lower-right 'Next: Final details' CTA (strategy 2).");
+        nextClicked = true;
+      }
+    }
+
+    // Strategy 3: scroll to bottom, then find any submit/next button in the form footer
+    if (!nextClicked) {
+      await rawPage.evaluate(() => window.scrollTo(0, document.body.scrollHeight)).catch(() => {});
+      await new Promise(r => setTimeout(r, 150));
+      // Look for a button near the bottom that is a primary/submit-type action
+      const jsClicked = await rawPage.evaluate(() => {
+        const btns = Array.from(document.querySelectorAll("button[type='submit'], button[data-testid*='next'], button[data-testid*='submit']"));
+        const btn = btns.find(b => {
+          const t = (b.textContent ?? "").toLowerCase();
+          return t.includes("next") || t.includes("final") || t.includes("detail") || t.includes("下一步");
+        }) as HTMLButtonElement | undefined;
+        if (btn) { btn.scrollIntoView({ block: "center" }); btn.click(); return true; }
+        return false;
+      }).catch(() => false);
+      if (jsClicked) {
+        traceLog("Booking.com guest form: JS-clicked 'Next: Final details' (strategy 3).");
+        nextClicked = true;
+      }
+    }
+
+    if (nextClicked) {
+      await Promise.allSettled([
+        rawPage.waitForLoadState("domcontentloaded", { timeout: 5000 }),
+        waitForPageSignals(rawPage, {
+          fromUrl: beforeUrl,
+          untilTextIncludes: [
+            "your payment details",
+            "complete booking",
+            "when do you want to pay",
+            "pay now",
+            "pay at the property",
+          ],
+          untilTextExcludes: [
+            "enter your details",
+            "your arrival time",
+            "cribs and extra beds",
+          ],
+          timeoutMs: 8000,
+        }),
+      ]);
+      const stillOnDetailsPage = await rawPage.evaluate(() => {
+        const text = (document.body?.innerText ?? "").toLowerCase();
+        return (
+          text.includes("enter your details") ||
+          text.includes("phone number") ||
+          text.includes("your arrival time") ||
+          text.includes("cribs and extra beds")
+        );
+      }).catch(() => false);
+      if (stillOnDetailsPage) {
+        traceLog("Booking.com guest form: next button was clicked, but the page still looks like the details step.");
+        const retriedSubmit = await rawPage.evaluate((patternSource) => {
+          const pattern = new RegExp(patternSource, "i");
+          const buttons = Array.from(document.querySelectorAll("button, a, [role='button']")) as HTMLElement[];
+          const target = buttons.find((button) => pattern.test((button.textContent ?? "").trim()));
+          if (!target) return false;
+          target.click();
+          const form = target.closest("form") as HTMLFormElement | null;
+          form?.requestSubmit?.();
+          return true;
+        }, nextButtonPattern.source).catch(() => false);
+        if (retriedSubmit) {
+          traceLog("Booking.com guest form: retried final-details submission via DOM click/requestSubmit after first click did not advance.");
+          await Promise.allSettled([
+            rawPage.waitForLoadState("domcontentloaded", { timeout: 5000 }),
+            waitForPageSignals(rawPage, {
+              fromUrl: beforeUrl,
+              untilTextIncludes: [
+                "your payment details",
+                "complete booking",
+                "when do you want to pay",
+                "pay now",
+                "pay at the property",
+              ],
+              untilTextExcludes: [
+                "enter your details",
+                "your arrival time",
+                "cribs and extra beds",
+              ],
+              timeoutMs: 8000,
+            }),
+          ]);
+        }
+      }
+    } else {
+      traceLog("Booking.com guest form: 'Next: Final details' button not found — recovery loop will handle navigation.");
+    }
+  } catch (error) {
+    traceLog(`Booking.com guest form: failed while trying to advance to final details: ${error}`);
+  }
 }
 
 async function fillFieldsInScopes(rawPage: Page, specs: FieldSpec[]): Promise<boolean> {
@@ -956,8 +2302,15 @@ function looksLikeIntermediateBookNowGate(pageText: string): boolean {
 
 function looksLikeDateSelectionGate(
   pageText: string,
-  requestedDates: RequestedStayDates
+  requestedDates: RequestedStayDates,
+  currentUrl = ""
 ): boolean {
+  // Booking.com's Step 2 (Your Details) and Step 3 (payment) pages are never
+  // date selection gates, even though they display booking dates in the sidebar.
+  if (currentUrl.includes("secure.booking.com") || currentUrl.includes("booking.com/book")) {
+    return false;
+  }
+
   const hasDatePickerSignals = containsAny(pageText, [
     "check in",
     "check out",
@@ -978,6 +2331,10 @@ function looksLikeDateSelectionGate(
     "guest details",
     "card number",
     "credit card",
+    // Booking.com Step 2 specific signals:
+    "next: final details",
+    "your price summary",
+    "your booking details",
   ]);
 
   return hasDatePickerSignals && hasAdvanceButton && hasSelectedDates && !hasDeeperCheckoutSignals;
@@ -992,6 +2349,22 @@ function looksLikeRoomSelectionGate(pageText: string): boolean {
     "usd338",
     "proceed to payment",
     "select room",
+    // Booking.com English room list signals (straight and curly apostrophe variants)
+    "i'll reserve",
+    "i\u2019ll reserve",
+    "i will reserve",
+    "select rooms",
+    "number of guests",
+    "today's price",
+    "your options",
+    "availability",
+    "per night",
+    // Booking.com Chinese room list signals
+    "空房情况",
+    "客房类型",
+    "选择客房",
+    "现在就预订",
+    "每晚",
   ]);
 
   const hasDeeperCheckoutSignals = containsAny(pageText, [
@@ -1000,9 +2373,709 @@ function looksLikeRoomSelectionGate(pageText: string): boolean {
     "card number",
     "credit card",
     "cvv",
+    // Chinese checkout signals
+    "输入个人信息",
+    "完成预订",
+    "信用卡",
+    "持卡人",
   ]);
 
   return hasRoomSignals && !hasDeeperCheckoutSignals;
+}
+
+function looksLikeBookingComGuestDetailsStep(pageText: string, currentUrl: string): boolean {
+  const isBookingComCheckoutUrl =
+    currentUrl.includes("secure.booking.com/book") ||
+    currentUrl.includes("booking.com/book");
+  if (!isBookingComCheckoutUrl) return false;
+
+  const hasGuestStepSignals = containsAny(pageText, [
+    "enter your details",
+    "your details",
+    "first name",
+    "last name",
+    "email address",
+    "country/region",
+    "phone number",
+    "next: final details",
+    "who are you booking for",
+    "your arrival time",
+    "add your estimated arrival time",
+    "cribs and extra beds",
+    "what are my booking conditions",
+  ]);
+
+  const hasFinalPaymentSignals = containsAny(pageText, [
+    "card number",
+    "credit or debit card",
+    "payment method",
+    "expiry date",
+    "security code",
+    "cvv",
+    "finish booking",
+    "complete booking",
+  ]);
+
+  return hasGuestStepSignals && !hasFinalPaymentSignals;
+}
+
+async function isBookingComGuestDetailsDomState(rawPage: Page, currentUrl: string): Promise<boolean> {
+  const isBookingComCheckoutUrl =
+    currentUrl.includes("secure.booking.com/book") ||
+    currentUrl.includes("booking.com/book");
+  if (!isBookingComCheckoutUrl) return false;
+
+  return rawPage.evaluate(() => {
+    const text = (document.body?.innerText ?? "").toLowerCase();
+    const hasBottomDetailsSignals =
+      text.includes("your arrival time") ||
+      text.includes("add your estimated arrival time") ||
+      text.includes("cribs and extra beds") ||
+      text.includes("what are my booking conditions");
+    const hasNextFinalDetailsCta = Array.from(
+      document.querySelectorAll("button, a, [role='button']")
+    ).some((element) => {
+      const html = element as HTMLElement;
+      const style = window.getComputedStyle(html);
+      const rect = html.getBoundingClientRect();
+      if (style.display === "none" || style.visibility === "hidden" || rect.width <= 0 || rect.height <= 0) {
+        return false;
+      }
+      const buttonText = (html.textContent ?? "").toLowerCase();
+      return buttonText.includes("next: final details") || buttonText.includes("next final details");
+    });
+
+    return hasBottomDetailsSignals || hasNextFinalDetailsCta;
+  }).catch(() => false);
+}
+
+async function isBookingComFinalPaymentDomState(rawPage: Page, currentUrl: string): Promise<boolean> {
+  const isBookingComCheckoutUrl =
+    currentUrl.includes("secure.booking.com/book") ||
+    currentUrl.includes("booking.com/book");
+  if (!isBookingComCheckoutUrl) return false;
+
+  return rawPage.evaluate(() => {
+    const normalize = (value: string) => value.toLowerCase().replace(/\s+/g, " ").trim();
+    const isVisible = (element: Element | null): element is HTMLElement => {
+      if (!(element instanceof HTMLElement)) return false;
+      const style = window.getComputedStyle(element);
+      const rect = element.getBoundingClientRect();
+      return (
+        style.display !== "none" &&
+        style.visibility !== "hidden" &&
+        !element.hidden &&
+        rect.width > 0 &&
+        rect.height > 0
+      );
+    };
+
+    const bodyText = normalize(document.body?.innerText ?? "");
+    const paymentTextSignals = [
+      "your payment details",
+      "when do you want to pay",
+      "pay online",
+      "pay now",
+      "pay at the property",
+      "complete booking",
+      "your payment details",
+      "do you have a promo code",
+      "payment will be handled by the property",
+      "how do you want to reserve",
+      "credit or debit card",
+      "payment details",
+    ];
+    const hasPaymentTextSignals = paymentTextSignals.some((signal) => bodyText.includes(signal));
+
+    const visiblePaymentControls = Array.from(
+      document.querySelectorAll("button, a, [role='button'], label, h2, h3, h4, p, span, div")
+    )
+      .filter((element) => isVisible(element))
+      .map((element) => normalize((element.textContent ?? "").slice(0, 200)));
+
+    const hasVisiblePaymentControls = visiblePaymentControls.some((text) =>
+      text.includes("your payment details") ||
+      text.includes("when do you want to pay") ||
+      text.includes("pay now") ||
+      text.includes("pay at the property") ||
+      text.includes("complete booking") ||
+      text.includes("credit or debit card") ||
+      text.includes("payment will be handled by the property")
+    );
+
+    const cardLikeInputs = Array.from(document.querySelectorAll("input, iframe"))
+      .filter((element) => isVisible(element))
+      .some((element) => {
+        const html = element as HTMLElement;
+        const meta = normalize([
+          html.getAttribute("name") ?? "",
+          html.getAttribute("id") ?? "",
+          html.getAttribute("placeholder") ?? "",
+          html.getAttribute("aria-label") ?? "",
+          html.getAttribute("title") ?? "",
+          html.getAttribute("autocomplete") ?? "",
+          html.getAttribute("data-testid") ?? "",
+        ].join(" "));
+        return (
+          meta.includes("card") ||
+          meta.includes("cc-") ||
+          meta.includes("expiry") ||
+          meta.includes("expir") ||
+          meta.includes("security code") ||
+          meta.includes("cvv") ||
+          meta.includes("payment")
+        );
+      });
+
+    return (hasPaymentTextSignals && hasVisiblePaymentControls) || cardLikeInputs;
+  }).catch(() => false);
+}
+
+async function markBookingComPaymentFields(
+  rawPage: Page
+): Promise<{ cardholder: boolean; cardNumber: boolean; cardExpiry: boolean }> {
+  return rawPage.evaluate(() => {
+    const normalize = (value: string) => value.toLowerCase().replace(/\s+/g, " ").trim();
+    const isVisible = (element: Element | null): element is HTMLElement => {
+      if (!(element instanceof HTMLElement)) return false;
+      const style = window.getComputedStyle(element);
+      const rect = element.getBoundingClientRect();
+      return style.display !== "none" && style.visibility !== "hidden" && !element.hidden && rect.width > 0 && rect.height > 0;
+    };
+    const markerAttr = "data-codex-booking-payment-field";
+    for (const marked of Array.from(document.querySelectorAll(`[${markerAttr}]`))) {
+      marked.removeAttribute(markerAttr);
+    }
+
+    const scoreMeta = (text: string, patterns: string[]) => {
+      let score = 0;
+      for (const pattern of patterns) {
+        if (text.includes(pattern)) score += pattern.length >= 10 ? 6 : 3;
+      }
+      return score;
+    };
+
+    const bestMatches = {
+      cardholder: { score: -1, element: null as HTMLElement | null },
+      cardNumber: { score: -1, element: null as HTMLElement | null },
+      cardExpiry: { score: -1, element: null as HTMLElement | null },
+    };
+
+    const controls = Array.from(document.querySelectorAll("input, textarea, select"));
+    for (const control of controls) {
+      if (!isVisible(control)) continue;
+      const html = control as HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement;
+      const labels =
+        "labels" in html && html.labels
+          ? Array.from(html.labels).map((label) => label.textContent ?? "")
+          : [];
+      const text = normalize([
+        labels.join(" "),
+        control.getAttribute("aria-label") ?? "",
+        control.getAttribute("placeholder") ?? "",
+        control.getAttribute("name") ?? "",
+        control.getAttribute("id") ?? "",
+        control.getAttribute("autocomplete") ?? "",
+        control.getAttribute("title") ?? "",
+        control.parentElement?.textContent ?? "",
+        control.closest("label, fieldset, section, form, div")?.textContent ?? "",
+      ].join(" "));
+
+      const cardholderScore = scoreMeta(text, [
+        "cardholder's name",
+        "cardholder name",
+        "name on card",
+        "cardholder",
+        "card holder",
+      ]);
+      if (cardholderScore > bestMatches.cardholder.score) {
+        bestMatches.cardholder = { score: cardholderScore, element: control as HTMLElement };
+      }
+
+      const cardNumberScore = scoreMeta(text, [
+        "card number",
+        "credit card number",
+        "cc-number",
+        "cc number",
+      ]);
+      if (cardNumberScore > bestMatches.cardNumber.score) {
+        bestMatches.cardNumber = { score: cardNumberScore, element: control as HTMLElement };
+      }
+
+      const expiryScore = scoreMeta(text, [
+        "expiration date",
+        "expiry date",
+        "expiration",
+        "expiry",
+        "mm/yy",
+        "mm / yy",
+      ]);
+      if (expiryScore > bestMatches.cardExpiry.score) {
+        bestMatches.cardExpiry = { score: expiryScore, element: control as HTMLElement };
+      }
+    }
+
+    const result = { cardholder: false, cardNumber: false, cardExpiry: false };
+    if (bestMatches.cardholder.score > 0 && bestMatches.cardholder.element) {
+      bestMatches.cardholder.element.setAttribute(markerAttr, "cardholder");
+      result.cardholder = true;
+    }
+    if (bestMatches.cardNumber.score > 0 && bestMatches.cardNumber.element) {
+      bestMatches.cardNumber.element.setAttribute(markerAttr, "card-number");
+      result.cardNumber = true;
+    }
+    if (bestMatches.cardExpiry.score > 0 && bestMatches.cardExpiry.element) {
+      bestMatches.cardExpiry.element.setAttribute(markerAttr, "card-expiry");
+      result.cardExpiry = true;
+    }
+
+    return result;
+  }).catch(() => ({ cardholder: false, cardNumber: false, cardExpiry: false }));
+}
+
+async function getBookingComPaymentFieldVisibility(
+  rawPage: Page,
+  currentUrl: string
+): Promise<{ cardholder: boolean; cardNumber: boolean; cardExpiry: boolean }> {
+  const isBookingComCheckoutUrl =
+    currentUrl.includes("secure.booking.com/book") ||
+    currentUrl.includes("booking.com/book");
+  if (!isBookingComCheckoutUrl) {
+    return { cardholder: false, cardNumber: false, cardExpiry: false };
+  }
+
+  return markBookingComPaymentFields(rawPage);
+}
+
+async function verifyBookingComPaymentFieldValues(
+  rawPage: Page,
+  currentUrl: string,
+  p: EffectiveProfile
+): Promise<{ cardholder: boolean; cardNumber: boolean; cardExpiry: boolean }> {
+  const isBookingComCheckoutUrl =
+    currentUrl.includes("secure.booking.com/book") ||
+    currentUrl.includes("booking.com/book");
+  if (!isBookingComCheckoutUrl) {
+    return { cardholder: false, cardNumber: false, cardExpiry: false };
+  }
+
+  await markBookingComPaymentFields(rawPage);
+
+  return rawPage.evaluate((expected) => {
+    const normalize = (value: string) => value.toLowerCase().replace(/\s+/g, " ").trim();
+    const normalizeDigitsLocal = (value: string) => value.replace(/\D/g, "");
+    const isVisible = (element: Element | null): element is HTMLElement => {
+      if (!(element instanceof HTMLElement)) return false;
+      const style = window.getComputedStyle(element);
+      const rect = element.getBoundingClientRect();
+      return style.display !== "none" && style.visibility !== "hidden" && !element.hidden && rect.width > 0 && rect.height > 0;
+    };
+
+    const result = { cardholder: false, cardNumber: false, cardExpiry: false };
+    const controls = Array.from(document.querySelectorAll("input, textarea, select"));
+    for (const control of controls) {
+      if (!isVisible(control)) continue;
+      const html = control as HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement;
+      const labels =
+        "labels" in html && html.labels
+          ? Array.from(html.labels).map((label) => label.textContent ?? "")
+          : [];
+      const meta = normalize([
+        labels.join(" "),
+        control.getAttribute("aria-label") ?? "",
+        control.getAttribute("placeholder") ?? "",
+        control.getAttribute("name") ?? "",
+        control.getAttribute("id") ?? "",
+        control.getAttribute("autocomplete") ?? "",
+        control.getAttribute("title") ?? "",
+        control.closest("label, fieldset, form, section, div")?.textContent ?? "",
+      ].join(" "));
+      const rawValue = "value" in html ? String(html.value ?? "") : "";
+      const normalizedValue = normalize(rawValue);
+      const digitValue = normalizeDigitsLocal(rawValue);
+
+      if (
+        expected.cardholder &&
+        (
+          meta.includes("cardholder's name") ||
+          meta.includes("cardholder name") ||
+          meta.includes("name on card") ||
+          meta.includes("cardholder")
+        ) &&
+        normalizedValue.includes(normalize(expected.cardholder))
+      ) {
+        result.cardholder = true;
+      }
+
+      if (
+        expected.cardNumber &&
+        (meta.includes("card number") || meta.includes("credit card number") || meta.includes("cc-number"))
+      ) {
+        const expectedDigits = normalizeDigitsLocal(expected.cardNumber);
+        if (
+          digitValue === expectedDigits ||
+          (expectedDigits.length >= 4 && digitValue.endsWith(expectedDigits.slice(-4)))
+        ) {
+          result.cardNumber = true;
+        }
+      }
+
+      if (
+        expected.cardExpiry &&
+        (
+          meta.includes("expiration date") ||
+          meta.includes("expiry date") ||
+          meta.includes("expiry") ||
+          meta.includes("expiration") ||
+          meta.includes("mm/yy") ||
+          meta.includes("mm / yy")
+        )
+      ) {
+        const compactValue = rawValue.replace(/\s+/g, "").replace(/-/g, "/");
+        const compactExpected = expected.cardExpiry.replace(/\s+/g, "").replace(/-/g, "/");
+        if (compactValue.includes(compactExpected)) {
+          result.cardExpiry = true;
+        }
+      }
+    }
+
+    return result;
+  }, {
+    cardholder: p.card_name || p.full_name || "",
+    cardNumber: p.card_number ?? "",
+    cardExpiry: p.card_expiry ?? "",
+  }).catch(() => ({ cardholder: false, cardNumber: false, cardExpiry: false }));
+}
+
+// Legacy helper kept temporarily for comparison while Booking.com payment filling is stabilized.
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+async function fillBookingComPaymentForm(
+  rawPage: Page,
+  p: EffectiveProfile,
+  traceLog: (msg: string) => void = () => {}
+): Promise<void> {
+  const pageUrl = rawPage.url();
+  const isCheckoutPage = pageUrl.includes("secure.booking.com") || pageUrl.includes("booking.com/book");
+  if (!isCheckoutPage) {
+    traceLog(`fillBookingComPaymentForm: SKIPPED — not on checkout page (${pageUrl.slice(0, 80)})`);
+    return;
+  }
+
+  const fillPaymentField = async (
+    patterns: string[],
+    value: string,
+    label: string,
+    kind: "text" | "digits" | "expiry"
+  ): Promise<boolean> => {
+    if (!value) return false;
+    const locator = await findVisibleField(rawPage, patterns);
+    if (!locator) {
+      traceLog(`Booking.com payment: could not find ${label} field`);
+      return false;
+    }
+
+    const normalizedDigits = normalizeDigits(value);
+    const normalizedExpiry = value.replace(/\s+/g, "").replace(/-/g, "/");
+
+    const verify = async () => {
+      const rawValue = await locator.inputValue().catch(() => "");
+      const normalizedTextValue = normalizeText(rawValue);
+      const normalizedDigitValue = normalizeDigits(rawValue);
+      if (kind === "digits") {
+        if (normalizedDigitValue === normalizedDigits) return true;
+        if (normalizedDigits.length >= 4 && normalizedDigitValue.endsWith(normalizedDigits.slice(-4))) return true;
+        return false;
+      }
+      if (kind === "expiry") {
+        const compact = rawValue.replace(/\s+/g, "").replace(/-/g, "/");
+        return compact.includes(normalizedExpiry);
+      }
+      return normalizedTextValue.includes(normalizeText(value));
+    };
+
+    const fillWithValue = async (fieldValue: string) => {
+      await locator.fill(fieldValue).catch(async () => {
+        await fillLocator(locator, fieldValue);
+      });
+    };
+
+    await fillWithValue(value);
+    await new Promise((resolve) => setTimeout(resolve, 150));
+    if (await verify()) {
+      traceLog(`Booking.com payment: filled ${label} via locator.fill().`);
+      return true;
+    }
+
+    await evaluateLocatorElement(locator, (element, fieldValue) => {
+      const input = element as HTMLInputElement | HTMLTextAreaElement;
+      const nativeSetter = Object.getOwnPropertyDescriptor(
+        element instanceof HTMLInputElement ? HTMLInputElement.prototype : HTMLTextAreaElement.prototype,
+        "value"
+      )?.set;
+      input.focus();
+      if (nativeSetter) {
+        nativeSetter.call(input, "");
+        nativeSetter.call(input, fieldValue);
+      } else {
+        input.value = fieldValue;
+      }
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+      input.dispatchEvent(new Event("change", { bubbles: true }));
+      input.blur();
+    }, value).catch(() => {});
+
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    if (await verify()) {
+      traceLog(`Booking.com payment: filled ${label} via DOM fallback.`);
+      return true;
+    }
+
+    traceLog(`Booking.com payment: failed to verify ${label} after fill.`);
+    return false;
+  };
+
+  const cardholderValue = p.card_name || p.full_name || "";
+  await fillPaymentField(
+    ["cardholder's name", "cardholder name", "name on card", "cardholder", "card holder"],
+    cardholderValue,
+    "Cardholder name",
+    "text"
+  );
+
+  if (p.card_number) {
+    await fillPaymentField(
+      ["card number", "credit card number", "cc-number"],
+      normalizeDigits(p.card_number),
+      "Card number",
+      "digits"
+    );
+  }
+
+  if (p.card_expiry) {
+    const normalizedExpiry = p.card_expiry.replace(/\s+/g, "").replace(/-/g, "/");
+    await fillPaymentField(
+      ["expiration date", "expiry date", "expiry", "expiration", "mm/yy", "mm / yy"],
+      normalizedExpiry,
+      "Expiration date",
+      "expiry"
+    );
+  }
+}
+
+async function fillBookingComPaymentFormV2(
+  rawPage: Page,
+  p: EffectiveProfile,
+  traceLog: (msg: string) => void = () => {}
+): Promise<void> {
+  const pageUrl = rawPage.url();
+  const isCheckoutPage = pageUrl.includes("secure.booking.com") || pageUrl.includes("booking.com/book");
+  if (!isCheckoutPage) {
+    traceLog(`fillBookingComPaymentFormV2: skipped - not on checkout page (${pageUrl.slice(0, 80)})`);
+    return;
+  }
+
+  await Promise.allSettled([
+    rawPage.waitForLoadState("domcontentloaded", { timeout: 5000 }),
+    waitForEvaluateCondition(
+      rawPage,
+      () => {
+        const text = (document.body?.innerText ?? "").toLowerCase();
+        return (
+          text.includes("your payment details") ||
+          text.includes("cardholder's name") ||
+          text.includes("card number") ||
+          text.includes("expiration date") ||
+          text.includes("mm/yy")
+        );
+      },
+      undefined,
+      8000
+    ),
+  ]);
+
+  const discovered = await markBookingComPaymentFields(rawPage);
+  traceLog(
+    `Booking.com payment: field discovery cardholder=${discovered.cardholder} cardNumber=${discovered.cardNumber} cardExpiry=${discovered.cardExpiry}.`
+  );
+
+  const fillPaymentField = async (
+    markerKey: "cardholder" | "card-number" | "card-expiry",
+    patterns: string[],
+    value: string,
+    label: string,
+    kind: "text" | "digits" | "expiry"
+  ): Promise<boolean> => {
+    if (!value) return false;
+
+    let locator = rawPage.locator(`[data-codex-booking-payment-field="${markerKey}"]`).first();
+    let locatorVisible = await locator.isVisible({ timeout: 800 }).catch(() => false);
+    if (!locatorVisible) {
+      const found = await findVisibleField(rawPage, patterns);
+      if (found) {
+        locator = found;
+        locatorVisible = true;
+      }
+    }
+    if (!locatorVisible) {
+      traceLog(`Booking.com payment: could not find ${label} field`);
+      return false;
+    }
+
+    const normalizedDigits = normalizeDigits(value);
+    const normalizedExpiry = value.replace(/\s+/g, "").replace(/-/g, "/");
+
+    const verify = async () => {
+      const rawValue = await locator.inputValue().catch(() => "");
+      const normalizedTextValue = normalizeText(rawValue);
+      const normalizedDigitValue = normalizeDigits(rawValue);
+      if (kind === "digits") {
+        if (normalizedDigitValue === normalizedDigits) return true;
+        if (normalizedDigits.length >= 4 && normalizedDigitValue.endsWith(normalizedDigits.slice(-4))) return true;
+        return false;
+      }
+      if (kind === "expiry") {
+        const compact = rawValue.replace(/\s+/g, "").replace(/-/g, "/");
+        return compact.includes(normalizedExpiry);
+      }
+      return normalizedTextValue.includes(normalizeText(value));
+    };
+
+    await locator.fill(value).catch(async () => {
+      await fillLocator(locator, value);
+    });
+    await new Promise((resolve) => setTimeout(resolve, 150));
+    if (await verify()) {
+      traceLog(`Booking.com payment: filled ${label} via locator.fill().`);
+      return true;
+    }
+
+    await evaluateLocatorElement(locator, (element, fieldValue) => {
+      const input = element as HTMLInputElement | HTMLTextAreaElement;
+      const nativeSetter = Object.getOwnPropertyDescriptor(
+        element instanceof HTMLInputElement ? HTMLInputElement.prototype : HTMLTextAreaElement.prototype,
+        "value"
+      )?.set;
+      input.focus();
+      if (nativeSetter) {
+        nativeSetter.call(input, "");
+        nativeSetter.call(input, fieldValue);
+      } else {
+        input.value = fieldValue;
+      }
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+      input.dispatchEvent(new Event("change", { bubbles: true }));
+      input.blur();
+    }, value).catch(() => {});
+
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    if (await verify()) {
+      traceLog(`Booking.com payment: filled ${label} via DOM fallback.`);
+      return true;
+    }
+
+    if (kind !== "text") {
+      await locator.click({ force: true }).catch(() => {});
+      await locator.pressSequentially(value, { delay: kind === "digits" ? 40 : 55 }).catch(() => {});
+      await locator.blur().catch(() => {});
+      await new Promise((resolve) => setTimeout(resolve, 250));
+      if (await verify()) {
+        traceLog(`Booking.com payment: filled ${label} via sequential typing fallback.`);
+        return true;
+      }
+    }
+
+    traceLog(`Booking.com payment: failed to verify ${label} after fill.`);
+    return false;
+  };
+
+  const cardholderValue = p.card_name || p.full_name || "";
+  await fillPaymentField(
+    "cardholder",
+    ["cardholder's name", "cardholder name", "name on card", "cardholder", "card holder"],
+    cardholderValue,
+    "Cardholder name",
+    "text"
+  );
+
+  if (p.card_number) {
+    await fillPaymentField(
+      "card-number",
+      ["card number", "credit card number", "cc-number", "cc number"],
+      normalizeDigits(p.card_number),
+      "Card number",
+      "digits"
+    );
+  }
+
+  if (p.card_expiry) {
+    const normalizedExpiry = p.card_expiry.replace(/\s+/g, "").replace(/-/g, "/");
+    await fillPaymentField(
+      "card-expiry",
+      ["expiration date", "expiry date", "expiry", "expiration", "mm/yy", "mm / yy"],
+      normalizedExpiry,
+      "Expiration date",
+      "expiry"
+    );
+  }
+}
+
+function looksLikeBookingComHotelDetailPage(pageText: string, currentUrl: string): boolean {
+  const isBookingComHotelUrl =
+    currentUrl.includes("booking.com/hotel/") &&
+    !currentUrl.includes("secure.booking.com") &&
+    !currentUrl.includes("booking.com/book");
+  if (!isBookingComHotelUrl) return false;
+
+  const hasRoomSelectionSignals = containsAny(pageText, [
+    "select a room type and the number of rooms you want to reserve",
+    "select rooms",
+    "room type",
+    "today's price",
+    "your options",
+    "i'll reserve",
+    "i will reserve",
+    "sleeps:",
+  ]);
+
+  const hasDetailTabs = containsAny(pageText, [
+    "overview",
+    "prices",
+    "amenities",
+    "house rules",
+    "important and legal info",
+    "guest reviews",
+  ]);
+
+  const hasHotelDetailSignals = containsAny(pageText, [
+    "we price match",
+    "show on map",
+    "travel proud",
+    "sustainability certification",
+    "hotel chain/brand",
+    "property highlights",
+    "save the property",
+    "change search",
+    "availability",
+    "reserve",
+  ]);
+
+  const hasRealCheckoutSignals = containsAny(pageText, [
+    "enter your details",
+    "your details",
+    "phone number",
+    "next: final details",
+    "your payment details",
+    "complete booking",
+    "pay now",
+    "card number",
+    "credit or debit card",
+  ]);
+
+  if (!hasRealCheckoutSignals && !hasRoomSelectionSignals) {
+    return true;
+  }
+
+  return (hasDetailTabs || hasHotelDetailSignals) && !hasRoomSelectionSignals && !hasRealCheckoutSignals;
 }
 
 async function hasVisibleCheckoutFields(rawPage: Page): Promise<boolean> {
@@ -1180,8 +3253,25 @@ async function assessBookingStage(params: {
   const pageText = await readCombinedText(rawPage);
   const visibleCheckoutFields = await hasVisibleCheckoutFields(rawPage);
   const stalledAtIntermediateBookNow = await looksLikeIntermediateBookNowGateState(rawPage, pageText);
-  const stalledAtDateSelection = looksLikeDateSelectionGate(pageText, requestedDates);
+  const stalledAtDateSelection = looksLikeDateSelectionGate(pageText, requestedDates, currentUrl);
   const stalledAtRoomSelection = looksLikeRoomSelectionGate(pageText);
+  const bookingComFinalPaymentState = await isBookingComFinalPaymentDomState(rawPage, currentUrl);
+  const bookingComGuestDetailsStep =
+    !bookingComFinalPaymentState &&
+    (
+      looksLikeBookingComGuestDetailsStep(pageText, currentUrl) ||
+      await isBookingComGuestDetailsDomState(rawPage, currentUrl)
+    );
+  const bookingComSearchResults = isBookingComSearchResultsUrl(currentUrl);
+  const bookingComHotelDetailPage = looksLikeBookingComHotelDetailPage(pageText, currentUrl);
+  const bookingComHotelDetailUrl =
+    currentUrl.includes("booking.com/hotel/") &&
+    !currentUrl.includes("secure.booking.com") &&
+    !currentUrl.includes("booking.com/book");
+  const bookingComNonCheckoutUrl =
+    isBookingComUrl(currentUrl) &&
+    !currentUrl.includes("secure.booking.com") &&
+    !currentUrl.includes("booking.com/book");
   const hitPaymentUrl = isPaymentUrl(currentUrl);
 
   const listingSignals =
@@ -1192,6 +3282,13 @@ async function assessBookingStage(params: {
     pageText.includes("select dates to see pricing") ||
     pageText.includes("select dates for prices") ||
     pageText.includes("check availability") ||
+    pageText.includes("see availability") ||
+    pageText.includes("search results") ||
+    pageText.includes("browse the results for") ||
+    pageText.includes("properties found") ||
+    pageText.includes("property found") ||
+    pageText.includes("smart filters") ||
+    pageText.includes("filter by") ||
     (pageText.includes("book now") && pageText.includes("select dates")) ||
     (pageText.includes("avg / night") && pageText.includes("check availability"));
 
@@ -1205,6 +3302,12 @@ async function assessBookingStage(params: {
     pageText.includes("guest information") ||
     pageText.includes("card number") ||
     pageText.includes("credit card") ||
+    // Chinese Booking.com checkout signals
+    pageText.includes("输入个人信息") ||
+    pageText.includes("完成预订") ||
+    pageText.includes("信用卡") ||
+    pageText.includes("持卡人") ||
+    pageText.includes("电子邮箱地址") ||
     hitPaymentUrl;
 
   const blocked =
@@ -1228,7 +3331,7 @@ async function assessBookingStage(params: {
     pageText.includes("dns_probe_finished_nxdomain") ||
     (pageText.includes("reference no") && pageText.includes("went wrong"));
 
-  const hitPaymentGate =
+  const paymentLikeSignals =
     hitPaymentUrl ||
     pageText.includes("cvv") ||
     pageText.includes("security code") ||
@@ -1239,6 +3342,11 @@ async function assessBookingStage(params: {
     pageText.includes("payment card") ||
     containsAny(pageText, PAYMENT_KEYWORDS) ||
     visibleCheckoutFields;
+  const hitPaymentGate =
+    !bookingComSearchResults &&
+    !bookingComHotelDetailPage &&
+    !bookingComNonCheckoutUrl &&
+    paymentLikeSignals;
 
   // ── Agent-message fallback for cross-origin JS widgets (e.g. Namastay) ──────
   // When the booking widget injects its content via JS into a cross-origin
@@ -1273,6 +3381,27 @@ async function assessBookingStage(params: {
   if (blocked) {
     stage = "blocked";
     reason = "Blocking or anti-bot signals are visible.";
+  } else if (bookingComSearchResults && listingSignals) {
+    stage = "listing";
+    reason = "Booking.com search results are visible and booking has not started yet.";
+  } else if (bookingComHotelDetailUrl && !bookingComGuestDetailsStep && !visibleCheckoutFields) {
+    stage = "room_selection";
+    reason = "Booking.com hotel detail URL is active and checkout has not started yet.";
+  } else if (bookingComHotelDetailPage) {
+    stage = "room_selection";
+    reason = "Booking.com hotel detail page is visible; pricing/room selection still needs to be opened.";
+  } else if (bookingComFinalPaymentState) {
+    stage = "payment_gate";
+    reason = "Booking.com final payment details are visible after the guest-details step.";
+  } else if (bookingComGuestDetailsStep) {
+    stage = "checkout_form";
+    reason = "Booking.com guest-details step is visible before the final details/payment page.";
+  } else if (hitPaymentUrl && !visibleCheckoutFields) {
+    // URL-based payment detection is reliable when there are no editable guest
+    // form fields visible. If form fields ARE visible, we're on Step 2 (Your Details)
+    // of Booking.com's flow — not yet at the final payment step.
+    stage = "payment_gate";
+    reason = "URL matches a payment/checkout pattern and no editable form fields found.";
   } else if (effectiveStalledAtIntermediateBookNow && !visibleCheckoutFields) {
     // Only classify as intermediate_gate when checkout fields are NOT yet visible.
     // If the form fields are already present (First Name / Email / etc.), the agent
@@ -1434,31 +3563,174 @@ export async function runBrowserTask(
 
   trace(`Executor starting — model: ${modelName}, browser: ${useCloud ? "Browserbase" : "local"}, proxies: ${process.env.BROWSERBASE_USE_PROXIES === "true"}`);
 
+  // In local mode, keep the browser open when we reach paused_payment so the
+  // user can see the pre-filled payment form and enter CVV themselves.
+  // Auto-close after 10 minutes.
+  let keepBrowserOpen = false;
+
   try {
     await stagehand.init();
     // v3 API: get active page from context (resolvePage is private)
     const page = stagehand.context.activePage() ?? await stagehand.context.newPage();
 
+    // ── Inject saved session cookies (e.g. Booking.com login) ────────────────
+    // Cookies are saved once via: node scripts/save-booking-cookies.mjs
+    // They persist your logged-in session so the agent starts already authenticated.
+    if (input.startUrl.includes("booking.com")) {
+      try {
+        const cookiesPath = path.join(process.cwd(), ".booking-cookies.json");
+        if (fs.existsSync(cookiesPath)) {
+          const cookies = JSON.parse(fs.readFileSync(cookiesPath, "utf-8"));
+          // Use stagehand.context.addCookies() directly — V3Context exposes this natively
+          // and avoids the getRawPage → .context() indirection that may not work in v3.
+          await stagehand.context.addCookies(cookies);
+          // Override language to English — saved cookies may have Chinese preference.
+          await stagehand.context.addCookies([
+            { name: "bk_lang",      value: "en-us", domain: ".booking.com", path: "/" },
+            { name: "lang",         value: "en-us", domain: ".booking.com", path: "/" },
+            { name: "selectedLang", value: "en-us", domain: ".booking.com", path: "/" },
+          ]);
+          trace(`Injected ${cookies.length} Booking.com session cookies from .booking-cookies.json`);
+        } else {
+          trace("No .booking-cookies.json found — run: node scripts/save-booking-cookies.mjs");
+        }
+      } catch (err) {
+        trace(`Cookie injection failed: ${err} — proceeding without saved session.`);
+      }
+    }
+
     // Navigate to the starting URL
     await page.goto(input.startUrl, { waitUntil: "domcontentloaded", timeoutMs: 30_000 });
 
     // Dev: inject a red cursor dot so you can watch the agent interact visually.
+    // Inject on the BrowserContext (not the page) so it persists across all tabs/navigations.
     if (process.env.NODE_ENV !== "production" && !useCloud) {
-      await getRawPage(page).addInitScript(() => {
-        const dot = document.createElement("div");
-        dot.id = "__pw_cursor__";
-        Object.assign(dot.style, {
-          position: "fixed", top: "0", left: "0", width: "12px", height: "12px",
-          borderRadius: "50%", background: "red", opacity: "0.75",
-          pointerEvents: "none", zIndex: "999999", transition: "transform 0.05s",
-          transform: "translate(-50%,-50%)",
-        });
-        document.addEventListener("DOMContentLoaded", () => document.body?.appendChild(dot));
-        document.addEventListener("mousemove", (e) => {
-          dot.style.left = e.clientX + "px";
-          dot.style.top  = e.clientY + "px";
-        });
+      // stagehand.context is a V3Context wrapper; the underlying Playwright BrowserContext
+      // may be exposed as .browserContext or .context — try both.
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const browserCtx = (stagehand.context as any).browserContext ?? (stagehand.context as any).context ?? null;
+      const addInitTarget = browserCtx ?? getRawPage(page);
+      await addInitTarget.addInitScript(() => {
+        function installCursor() {
+          if (document.getElementById("__pw_cursor__")) return;
+          const dot = document.createElement("div");
+          dot.id = "__pw_cursor__";
+          Object.assign(dot.style, {
+            position: "fixed", top: "0", left: "0", width: "12px", height: "12px",
+            borderRadius: "50%", background: "red", opacity: "0.75",
+            pointerEvents: "none", zIndex: "999999", transition: "transform 0.05s",
+            transform: "translate(-50%,-50%)",
+          });
+          (document.body || document.documentElement).appendChild(dot);
+          document.addEventListener("mousemove", (e) => {
+            dot.style.left = e.clientX + "px";
+            dot.style.top  = e.clientY + "px";
+          });
+        }
+        if (document.readyState === "loading") {
+          document.addEventListener("DOMContentLoaded", installCursor);
+        } else {
+          installCursor();
+        }
       });
+
+      // Also inject Booking.com search-bar disabler on every page load.
+      // This prevents the agent from typing form values into the top search bar.
+      await addInitTarget.addInitScript(() => {
+        function lockSearchBar(el: HTMLInputElement) {
+          const lockedEl = el as HTMLInputElement & { __sb_locked__?: boolean };
+          if (lockedEl.__sb_locked__) return;
+          lockedEl.__sb_locked__ = true;
+          el.value = "";
+          el.setAttribute("readonly", "true");
+          el.setAttribute("tabindex", "-1");
+          el.style.pointerEvents = "none";
+          el.style.opacity = "0.6";
+          el.dispatchEvent(new Event("input", { bubbles: true }));
+          el.dispatchEvent(new Event("change", { bubbles: true }));
+          // Prevent focus and typing via event capture
+          el.addEventListener("focus",     (e) => { e.stopPropagation(); (e.target as HTMLElement).blur(); }, true);
+            el.addEventListener("mousedown",  (e) => { e.preventDefault(); e.stopPropagation(); }, true);
+            el.addEventListener("keydown",    (e) => { e.preventDefault(); e.stopPropagation(); }, true);
+            el.addEventListener("beforeinput",(e) => { e.preventDefault(); e.stopPropagation(); }, true);
+          }
+          function disableBookingSearchBar() {
+            if (!location.hostname.includes("booking.com")) return;
+            // Only lock on hotel/search pages — NOT on guest-form / checkout pages
+            if (location.pathname.includes("/book") || location.pathname.includes("/checkout")) return;
+            const searchBarSelectors = [
+              "input[name='ss']", "input[placeholder*='目的地']",
+              "input[placeholder*='Destination']", "input[placeholder*='destination']",
+              "#ss", ".sb-searchbox__input",
+            ];
+            searchBarSelectors.forEach(sel => {
+              document.querySelectorAll<HTMLInputElement>(sel).forEach(lockSearchBar);
+            });
+          }
+          if (document.readyState === "loading") {
+            document.addEventListener("DOMContentLoaded", disableBookingSearchBar);
+          } else {
+            disableBookingSearchBar();
+          }
+          const obs = new MutationObserver(disableBookingSearchBar);
+          const observeTarget = document.body || document.documentElement;
+          if (observeTarget) obs.observe(observeTarget, { childList: true, subtree: true });
+        });
+    }
+
+    // ── Booking.com: close any open autocomplete dropdown ───────────────────────
+    if (isBookingComUrl(page.url())) {
+      try { await safePressEscape(getRawPage(page)); } catch { /* ignore */ }
+    }
+
+    // ── Booking.com: disable top search bar + scroll to room list ────────────
+    // The agent REPEATEDLY types form data (phone, card, names) into the top
+    // destination search bar. We neutralise it by:
+    //   1. Making the input readonly + blurring it (agent can't type into it)
+    //   2. Scrolling the page so the search bar is out of the visible viewport
+    //   3. Pressing Escape to close any open autocomplete
+    if (isBookingComUrl(page.url())) {
+      try {
+        await new Promise((r) => setTimeout(r, 1500)); // let page settle
+        await getRawPage(page).evaluate(() => {
+          // Disable / make readonly every input inside the top search bar widget
+          const searchBarSelectors = [
+            "input[name='ss']",
+            "input[placeholder*='目的地']",
+            "input[placeholder*='Destination']",
+            "input[placeholder*='destination']",
+            "[data-testid='searchbox-tabs-container'] input",
+            ".sb-searchbox input",
+            "#ss",
+          ];
+            for (const sel of searchBarSelectors) {
+              document.querySelectorAll<HTMLInputElement>(sel).forEach(el => {
+                el.value = "";
+                el.setAttribute("readonly", "true");
+                el.setAttribute("tabindex", "-1");
+                el.style.pointerEvents = "none";
+                el.blur();
+                el.dispatchEvent(new Event("input", { bubbles: true }));
+                el.dispatchEvent(new Event("change", { bubbles: true }));
+              });
+            }
+
+          // Also scroll to the room availability section
+          const roomSection =
+            document.querySelector("#hp_availability_tempcontainer") ||
+            document.querySelector("[data-testid='availability-cta-btn']") ||
+            document.querySelector(".hprt-table") ||
+            document.querySelector("[class*='roomType']") ||
+            document.querySelector("[class*='room-list']");
+          if (roomSection) {
+            roomSection.scrollIntoView({ behavior: "smooth", block: "start" });
+          } else {
+            window.scrollBy(0, 700);
+          }
+        });
+        await safePressEscape(getRawPage(page));
+        trace("Booking.com: disabled top search bar inputs and scrolled to room list.");
+      } catch { /* ignore — non-fatal */ }
     }
 
     // ── Early check: site unreachable (network error before agent runs) ─────
@@ -1575,6 +3847,8 @@ KEY RULES:
 - Domain redirect → stay on the redirected site, it is correct.
 - "Add Extras" / "Upgrade" upsell page → click "No thanks, skip it" immediately.
 - Room selection page → select cheapest room and click Continue/Reserve. Do NOT fill guest info here.
+- "Select a Rate" page (shows multiple rate options with prices) → always pick the lowest-priced rate UNLESS the task explicitly mentions breakfast, free cancellation, or a specific rate preference. Click "Select" on that rate to continue.
+- Booking.com room list with QUANTITY DROPDOWNS (each room shows a "0" dropdown): find the cheapest available room, change its dropdown from "0" to "1". After setting it to 1, a blue "现在就预订" (Book Now) button will appear in the RIGHT-SIDE SUMMARY PANEL — click that button immediately. Do NOT interact with the search bar at the top of the page. Do NOT navigate away.
 - Calendar month wrong → click ‹/› arrow to navigate; verify header before clicking a date.
 - IHG/single-date calendar (shows per-night price on each cell, has Stay duration +/− control) → click check-in date ONLY, then use + button to set nights, then CONTINUE.
 - If hotel detail page shows wrong dates → update the date picker first, then View Prices.
@@ -1582,21 +3856,61 @@ KEY RULES:
 - Terms/privacy checkboxes → always check before clicking booking buttons.
 - Fill guest fields one at a time; only fill on the actual checkout form page.
 - Browser/CORS/reCAPTCHA console errors → ignore, keep going.
+- If clicking a button opens a NEW TAB or new browser window → immediately switch focus to that new tab and continue the booking flow there. Do not stay on the original tab.
+- On a Booking.com hotel detail page: your FIRST action must be to SCROLL DOWN to find the room list ("空房情况" / "Available rooms"). Do NOT interact with anything at the top of the page. Do NOT click or type into the search bar (the bar showing destination / dates / guests at the very top) — that is for new hotel searches only. Do NOT type the guest's name, email, or any personal info anywhere on this page — that comes on the NEXT page after you click "现在就预订".
+- The room list on a Booking.com hotel page is BELOW the fold — you must scroll down to see it. Only after you can see the room rows should you interact with room selection.
+- The Booking.com room selection page has TWO distinct areas: (1) the room list with quantity dropdowns in the CENTER, and (2) the summary panel on the RIGHT with the blue "现在就预订" button. The correct sequence is: change dropdown to "1" → immediately click the blue "现在就预订" in the right panel → done. Nothing else happens on this page.
+- Booking.com checkout forms may appear in CHINESE. Treat these Chinese labels as their English equivalents: 姓=Last name, 名=First name, 电子邮箱地址=Email, 手机号码=Phone, 国家/地区=Country, 卡号=Card number, 到期日=Expiry date, 持卡人姓名=Cardholder name, 完成预订=Complete booking (STOP before this), 立即付款=Pay now (STOP before this).
+- After switching to a new tab, wait for it to fully load before taking any action.
 
 The user will enter CVV and confirm payment themselves.`,
     });
 
-    trace(`Agent starting main run (maxSteps=25, model=${modelName})`);
+    // For Booking.com hotel detail pages, skip the initial agent run entirely.
+    // Our programmatic recovery code handles room selection and form filling directly.
+    // Running the agent here wastes 300+ seconds and causes search-bar interference.
+    const landedUrlAfterSetup = page.url();
+    const openPageUrls = stagehand.context.pages().map((p) => getScopeUrl(getRawPage(p)));
+    const bookingComPageOpen =
+      isBookingComUrl(input.startUrl) ||
+      isBookingComUrl(landedUrlAfterSetup) ||
+      openPageUrls.some((url) => isBookingComUrl(url));
+    const initialMaxSteps = bookingComPageOpen ? 0 : 40;
+
+    trace(`Agent starting main run (maxSteps=${initialMaxSteps}, model=${modelName})${bookingComPageOpen ? " [Booking.com detected: agent.execute disabled, using programmatic flow only]" : ""}`);
     const t0 = Date.now();
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const result = await agent.execute({ instruction, maxSteps: 25 }) as any;
-    const raw = getRawPage(page);
+    const result = initialMaxSteps === 0
+      ? { message: "Skipped initial agent run — Booking.com programmatic flow active." }
+      : await agent.execute({ instruction, maxSteps: 40 }) as AgentExecutionResult;
+
+    // ── Switch to the most relevant open tab ──────────────────────────────
+    // Some hotel sites open a new tab when "Book Now" is clicked (e.g. Radio Hotel).
+    // After the agent run, find the most recently opened non-blank page that is NOT
+    // the original start URL, and use it for all subsequent DOM operations.
+    let activePage = page;
+    try {
+      const allPages = stagehand.context.pages();
+      // Prefer the newest page that has a real URL and isn't the original start URL.
+      const newerPages = allPages.filter((p) => {
+        const u = getScopeUrl(getRawPage(p));
+        return u && u !== "about:blank" && u !== input.startUrl;
+      });
+      if (newerPages.length > 0) {
+        // Last in the array = most recently opened tab.
+        activePage = newerPages[newerPages.length - 1];
+        trace(`Switched active page to newest tab: ${getScopeUrl(getRawPage(activePage)).slice(0, 80)}`);
+      }
+    } catch {
+      // ignore — keep using the original page
+    }
+    const raw = getRawPage(activePage);
     const mainMsg = (result.message ?? "").slice(0, 200);
     trace(`Agent finished main run in ${((Date.now() - t0) / 1000).toFixed(1)}s — message: "${mainMsg.slice(0, 120)}"`);
 
     // Detect fatal API errors (out of credits, invalid key, quota exceeded).
     // Continuing the recovery loop is pointless — every agent call will fail too.
-    const fatalApiError = /credit balance is too low|insufficient_quota|invalid.{0,20}api.{0,20}key|rate limit exceeded|billing/i.test(mainMsg);
+    const fatalApiError =
+      /credit balance is too low|insufficient_quota|invalid.{0,20}api.{0,20}key|rate limit exceeded|payment required|quota exceeded|credits? exhausted|billing error|billing issue|browser minutes limit/i.test(mainMsg);
     if (fatalApiError) {
       return {
         status: "error" as const,
@@ -1611,7 +3925,7 @@ The user will enter CVV and confirm payment themselves.`,
     // Check ALL open pages ― booking sites often open a new tab for the
     // checkout flow, so activePage() may still point to the original hotel
     // homepage while the real booking progress is in another tab.
-    const agentMessage = (result.message ?? "").toLowerCase();
+    let agentMessage = (result.message ?? "").toLowerCase();
     let currentUrl = await resolveCurrentUrl(raw, stagehand, input.startUrl);
     const sessionUrl = useCloud ? stagehand.browserbaseSessionURL : undefined;
 
@@ -1619,6 +3933,11 @@ The user will enter CVV and confirm payment themselves.`,
     const hasProfile = !!(p.full_name || p.first_name || p.last_name || p.email || p.phone);
     trace(`Profile check: hasProfile=${hasProfile}, fields=${[p.full_name?"full_name":null, p.first_name?"first_name":null, p.email?"email":null, p.phone?"phone":null].filter(Boolean).join(",") || "none"}`);
     const requestedDates = extractRequestedStayDates(input.task);
+    const targetHotelName =
+      extractTargetHotelName(input.task) ||
+      extractTargetHotelNameFromUrl(input.startUrl) ||
+      extractTargetHotelNameFromUrl(currentUrl);
+    trace(`Target hotel: ${targetHotelName ?? "unknown"}`);
     let assessment = await assessBookingStage({
       rawPage: raw,
       stagehand,
@@ -1657,29 +3976,250 @@ Do NOT stop at the review summary and do NOT treat this as the final payment ste
       // Always clear blocking modals before any recovery attempt.
       const cleared = await dismissBlockingModals(raw).catch(() => "");
       if (cleared) trace(`Stage recovery dismissed modal(s) before ${stage}: ${cleared}`);
+      const bookingComContext =
+        isBookingComUrl(raw.url()) ||
+        isBookingComUrl(currentUrl) ||
+        bookingComPageOpen;
 
       switch (stage) {
+        case "listing": {
+          if (bookingComContext) {
+            if (!targetHotelName) {
+              trace("Booking.com listing: target hotel name could not be parsed from the task.");
+              return false;
+            }
+            const clicked = await clickBookingComListingTarget(raw, targetHotelName, trace);
+            if (!clicked) {
+              trace(`Booking.com listing: no clickable result matched "${targetHotelName}".`);
+              return false;
+            }
+            return true;
+          }
+          return false;
+        }
         case "date_selection": {
           const clicked = await clickAllowedAdvanceButton(raw, DATE_SELECTION_ADVANCE_BUTTONS);
           if (clicked) {
             trace(`Stage recovery clicked "${clicked}" to advance the date-selection gate.`);
             return true;
           }
+          // Never run AI agent for date_selection on Booking.com — it types in the search bar.
+          if (bookingComContext) {
+            trace("Booking.com date_selection: skipping AI agent to prevent search-bar interference.");
+            return false;
+          }
           trace("No deterministic date-selection advance button was found, so a stage-specific agent recovery pass is running.");
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          await agent.execute({ instruction: buildStageRecoveryInstruction(stage), maxSteps: 8 } as any);
+          await agent.execute({ instruction: buildStageRecoveryInstruction(stage), maxSteps: 8 });
           return true;
         }
         case "room_selection": {
+          // ── Booking.com: use Playwright native selectOption() + JS click ──────
+          // NEVER fall back to AI agent on Booking.com — it always types in the
+          // search bar instead of selecting rooms.
+          if (bookingComContext) {
+            try {
+              const beforeUrl = raw.url();
+              await revealBookingComRoomSelection(raw, trace);
+              await raw.evaluate(() => document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true }))).catch(() => {});
+              await new Promise((r) => setTimeout(r, 120));
+
+              // Find all <select> elements that have 0/1/2... room quantity options.
+              // Use Playwright's selectOption() which properly triggers React's onChange.
+              const allSelects = raw.locator("select");
+              const count = await allSelects.count().catch(() => 0);
+              let selectedDropdown = false;
+
+              // First pass: check if any dropdown is already > 0 (previously set)
+              for (let i = 0; i < count; i++) {
+                const sel = allSelects.nth(i);
+                try {
+                  const val = await sel.inputValue().catch(() => "");
+                  const opts = await sel.evaluate((el: HTMLSelectElement) =>
+                    Array.from(el.options).map(o => o.value)
+                  ).catch(() => [] as string[]);
+                  if (opts.includes("0") && opts.includes("1") && val !== "0") {
+                    trace(`Booking.com: dropdown ${i} already set to ${val} — skipping select step.`);
+                    selectedDropdown = true;
+                    break;
+                  }
+                } catch { /* skip */ }
+              }
+
+              // Second pass: find cheapest dropdown at "0" and set it to "1"
+              if (!selectedDropdown) {
+                // Collect price+index pairs to pick cheapest
+                type DropInfo = { idx: number; price: number };
+                const candidates: DropInfo[] = [];
+                for (let i = 0; i < count; i++) {
+                  const sel = allSelects.nth(i);
+                  try {
+                    const opts = await sel.evaluate((el: HTMLSelectElement) =>
+                      Array.from(el.options).map(o => o.value)
+                    ).catch(() => [] as string[]);
+                    if (!opts.includes("0") || !opts.includes("1")) continue;
+                    const val = await sel.inputValue().catch(() => "0");
+                    if (val !== "0") continue;
+                    // Try to get price from nearest ancestor row
+                    const price = await sel.evaluate((el) => {
+                      const row = el.closest("tr, [class*='room'], div");
+                      const m = (row?.textContent ?? "").match(/\$\s*([\d,]+)/);
+                      return m ? parseFloat(m[1].replace(",", "")) : Infinity;
+                    }).catch(() => Infinity);
+                    candidates.push({ idx: i, price });
+                  } catch { /* skip */ }
+                }
+                candidates.sort((a, b) => a.price - b.price);
+
+                for (const { idx } of candidates) {
+                  try {
+                    const sel = allSelects.nth(idx);
+                    await sel.scrollIntoViewIfNeeded().catch(() => {});
+                    await sel.selectOption("1");
+                    trace(`Booking.com: set room dropdown index ${idx} to "1" via selectOption().`);
+                    selectedDropdown = true;
+                    await Promise.allSettled([
+                      waitForVisibleActionText(raw, ["I'll reserve", "I’ll reserve", "I will reserve", "reserve now"], 3500),
+                      raw.waitForLoadState("networkidle", { timeout: 2500 }).catch(() => {}),
+                    ]);
+                    break;
+                  } catch (e) {
+                    trace(`Booking.com: selectOption on dropdown ${idx} failed: ${e}`);
+                  }
+                }
+              }
+
+              if (!selectedDropdown) {
+                const domSet = await setBookingComRoomQuantity(raw);
+                if (domSet.ok) {
+                  selectedDropdown = true;
+                  trace(`Booking.com: ${domSet.summary} via DOM strategy.`);
+                  await Promise.allSettled([
+                    waitForVisibleActionText(raw, ["I'll reserve", "I鈥檒l reserve", "I will reserve", "reserve now"], 3500),
+                    raw.waitForLoadState("networkidle", { timeout: 2500 }).catch(() => {}),
+                  ]);
+                } else {
+                  trace(`Booking.com: ${domSet.summary}.`);
+                  trace("Booking.com: could not find or set any room quantity dropdown.");
+                }
+              }
+
+              // Click "I'll reserve" — use Playwright locator click (real mouse event),
+              // falling back to JS click. Use /reserve/i to avoid apostrophe issues.
+              await raw.evaluate(() => document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true }))).catch(() => {});
+              await new Promise((r) => setTimeout(r, 120));
+
+              const rawWithRole = raw as typeof raw & {
+                getByRole?: (role: string, options?: { name?: RegExp | string }) => ReturnType<typeof raw.locator>;
+              };
+              if (!rawWithRole.getByRole) {
+                rawWithRole.getByRole = () => raw.locator("__codex_missing_getByRole__");
+              }
+
+              for (let attempt = 0; attempt < 3; attempt++) {
+                // Strategy 1: Playwright locator click (triggers all mouse events)
+                let clicked = false;
+                try {
+                  const reserveCandidates = [
+                    raw.locator("button:has-text(\"I'll reserve\")").first(),
+                    raw.locator("button:has-text(\"I’ll reserve\")").first(),
+                    raw.locator("button:has-text(\"I will reserve\")").first(),
+                    raw.locator("button:has-text(\"现在就预订\")").first(),
+                    raw.locator("button:has-text(\"立即预订\")").first(),
+                    raw.getByRole("button", { name: /i['’]ll reserve|i will reserve/i }).first(),
+                    raw.getByRole("button", { name: /现在就预订|立即预订/i }).first(),
+                  ];
+                  for (const reserveLocator of reserveCandidates) {
+                    if (!await reserveLocator.isVisible({ timeout: 1200 }).catch(() => false)) continue;
+                    await reserveLocator.scrollIntoViewIfNeeded().catch(() => {});
+                    await new Promise((r) => setTimeout(r, 80));
+                    await reserveLocator.click({ force: true, timeout: 5000 });
+                    clicked = true;
+                    trace(`Booking.com: Playwright-clicked "reserve" button on attempt ${attempt + 1}.`);
+                    break;
+                  }
+                } catch (e) {
+                  trace(`Booking.com: Playwright click failed on attempt ${attempt + 1}: ${e}`);
+                }
+
+                // Strategy 2: JS click fallback
+                if (!clicked) {
+                  clicked = await raw.evaluate(() => {
+                    const btns = Array.from(document.querySelectorAll("button"));
+                    const normalize = (value: string) =>
+                      value.toLowerCase().replace(/\s+/g, " ").trim();
+                    const btn =
+                      btns.find((b) => {
+                        const text = normalize(b.textContent ?? "");
+                        const rect = (b as HTMLElement).getBoundingClientRect();
+                        const onRightSide = rect.left >= window.innerWidth * 0.55;
+                        const explicitBookingCta =
+                          text.includes("i'll reserve") ||
+                          text.includes("i’ll reserve") ||
+                          text.includes("i will reserve") ||
+                          text.includes("现在就预订") ||
+                          text.includes("立即预订");
+                        return explicitBookingCta && onRightSide;
+                      }) ??
+                      btns.find((b) => {
+                        const text = normalize(b.textContent ?? "");
+                        return (
+                          text.includes("i'll reserve") ||
+                          text.includes("i’ll reserve") ||
+                          text.includes("i will reserve") ||
+                          text.includes("现在就预订") ||
+                          text.includes("立即预订")
+                        );
+                      });
+                    if (!btn) return false;
+                    btn.scrollIntoView({ block: "center" });
+                    btn.click();
+                    return true;
+                  }).catch(() => false);
+                  if (clicked) trace(`Booking.com: JS-clicked "reserve" button on attempt ${attempt + 1}.`);
+                }
+
+                if (clicked) {
+                  await Promise.allSettled([
+                    raw.waitForLoadState("domcontentloaded", { timeout: 5000 }),
+                    waitForPageSignals(raw, {
+                      fromUrl: beforeUrl,
+                      untilUrlIncludes: ["secure.booking.com/book", "booking.com/book"],
+                      untilTextIncludes: [
+                        "enter your details",
+                        "your details",
+                        "phone number",
+                        "your arrival time",
+                      ],
+                      timeoutMs: 8000,
+                    }),
+                  ]);
+                  break;
+                }
+                trace(`Booking.com: reserve button not found on attempt ${attempt + 1}, waiting...`);
+                await new Promise((r) => setTimeout(r, 250));
+              }
+
+              return true; // Always return true — never let AI agent handle this on Booking.com
+            } catch (e) {
+              trace(`Booking.com room selection failed: ${e}`);
+              return true; // Still return true to prevent AI agent from taking over
+            }
+          }
+
+          // Non-Booking.com: try deterministic button click first, then AI agent
           const clicked = await clickAllowedAdvanceButton(raw, ROOM_SELECTION_ADVANCE_BUTTONS);
           if (clicked) {
             trace(`Stage recovery clicked "${clicked}" on the room-selection stage.`);
             return true;
           }
+          if (bookingComContext) {
+            trace("Booking.com room_selection: deterministic controls were not enough, and agent.execute fallback is disabled.");
+            return false;
+          }
           trace("No deterministic room-selection advance button was found, so a stage-specific agent recovery pass is running.");
           const tr0 = Date.now();
+          const rResult = await agent.execute({ instruction: buildStageRecoveryInstruction(stage), maxSteps: 10 } as AgentExecutionResult);
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          const rResult = await agent.execute({ instruction: buildStageRecoveryInstruction(stage), maxSteps: 10 } as any);
           trace(`Room-selection recovery finished in ${((Date.now() - tr0) / 1000).toFixed(1)}s — "${((rResult as any)?.message ?? "").slice(0, 80)}"`);
           return true;
         }
@@ -1706,6 +4246,10 @@ Do NOT stop at the review summary and do NOT treat this as the final payment ste
             trace(`Stage recovery force-clicked "${clicked}" on the intermediate booking gate (retry).`);
             return true;
           }
+          if (bookingComContext) {
+            trace("Booking.com intermediate_gate: deterministic controls were not enough, and agent.execute fallback is disabled.");
+            return false;
+          }
           trace("No deterministic intermediate booking button was found, so a stage-specific agent recovery pass is running.");
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
           await agent.execute({ instruction: buildStageRecoveryInstruction(stage), maxSteps: 8 } as any);
@@ -1726,7 +4270,7 @@ Do NOT stop at the review summary and do NOT treat this as the final payment ste
 
     for (let attempt = 0; attempt < 4; attempt += 1) {
       trace(`Stage assessment ${attempt + 1}: ${assessment.stage} — ${assessment.reason}`);
-      if (!["date_selection", "room_selection", "intermediate_gate"].includes(assessment.stage)) {
+      if (!["listing", "date_selection", "room_selection", "intermediate_gate"].includes(assessment.stage)) {
         break;
       }
 
@@ -1746,7 +4290,11 @@ Do NOT stop at the review summary and do NOT treat this as the final payment ste
       const acted = await attemptStageRecovery(assessment.stage);
       if (!acted) break;
 
-      await new Promise((resolve) => setTimeout(resolve, 2500));
+      const postActionWaitMs =
+        bookingComPageOpen || isBookingComUrl(currentUrl) || isBookingComUrl(raw.url())
+          ? 350
+          : 2500;
+      await new Promise((resolve) => setTimeout(resolve, postActionWaitMs));
       assessment = await assessBookingStage({
         rawPage: raw,
         stagehand,
@@ -1756,6 +4304,42 @@ Do NOT stop at the review summary and do NOT treat this as the final payment ste
       });
       pageText = assessment.pageText;
       currentUrl = assessment.currentUrl;
+    }
+
+    // ── Unknown stage: agent may have stopped mid-flow (maxSteps exhausted) ──
+    // If the stage is unknown after the main run (no recognisable page signals),
+    // run one more agent pass to continue from wherever it left off.
+    // EXCEPTION: Never run continuation agent on Booking.com — it always types in
+    // the search bar and navigates to the wrong hotel.
+    if (
+      assessment.stage === "unknown" &&
+      !isBookingComUrl(input.startUrl) &&
+      !isBookingComUrl(currentUrl) &&
+      !isBookingComUrl(raw.url())
+    ) {
+      trace("Stage is unknown after main run — running a continuation pass (maxSteps=20).");
+      const continuationInstruction =
+        `You are continuing a hotel booking that was interrupted mid-flow. ` +
+        `The target hotel URL is: ${input.startUrl}. ` +
+        `Look at the current state of the browser and continue the booking process from where it left off. ` +
+        `Your goal is to reach the payment/checkout page filled with the guest's information. ` +
+        `Do NOT submit or pay — stop just before the final payment button.`;
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const contResult = await agent.execute({ instruction: continuationInstruction, maxSteps: 20 }) as any;
+      const contMsg: string = contResult?.message ?? contResult?.output ?? "";
+      trace(`Continuation pass finished — message: "${contMsg.slice(0, 120)}"`);
+      // Update agentMessage so all downstream checks (hitPaymentGate, field verification) see the latest message.
+      if (contMsg) agentMessage = contMsg;
+      assessment = await assessBookingStage({
+        rawPage: raw,
+        stagehand,
+        startUrl: input.startUrl,
+        requestedDates,
+        agentMessage: contMsg || agentMessage,
+      });
+      pageText = assessment.pageText;
+      currentUrl = assessment.currentUrl;
+      trace(`Post-continuation stage: ${assessment.stage} — ${assessment.reason}`);
     }
 
     // ── Detect stuck at listing/search page ───────────────────────────────
@@ -1780,22 +4364,57 @@ Do NOT stop at the review summary and do NOT treat this as the final payment ste
     // (e.g. because reCAPTCHA console errors confused it), fill them directly
     // using page.act() — lower-level than the agent and not blocked by reCAPTCHA.
     const visibleCheckoutFields = assessment.visibleCheckoutFields;
+    // For Booking.com's checkout URL (Step 2 + Step 3), always treat as guest form
+    // regardless of visibleCheckoutFields — the step 2 form fields may not be detected
+    // by the generic hasVisibleCheckoutFields heuristic.
+    // NOTE: Use raw.url() and input.startUrl in addition to currentUrl because
+    // resolveCurrentUrl() can pick a non-booking.com iframe URL (analytics/tracking),
+    // which would make isBookingCom=false and trigger fillFieldsInScopes incorrectly.
+    const rawPageUrl = raw.url();
+    const isBookingComCheckout =
+      currentUrl.includes("secure.booking.com") || currentUrl.includes("booking.com/book") ||
+      rawPageUrl.includes("secure.booking.com") || rawPageUrl.includes("booking.com/book");
     const onGuestForm =
       hasProfile &&
       assessment.stage !== "intermediate_gate" &&
-      visibleCheckoutFields;
+      (visibleCheckoutFields || isBookingComCheckout);
 
-    trace(`Post-recovery state: stage=${assessment.stage}, visibleCheckoutFields=${visibleCheckoutFields}, hasProfile=${hasProfile}, onGuestForm=${onGuestForm}`);
+    trace(`Post-recovery state: stage=${assessment.stage}, visibleCheckoutFields=${visibleCheckoutFields}, hasProfile=${hasProfile}, onGuestForm=${onGuestForm}, isBookingComCheckout=${isBookingComCheckout}, rawPageUrl=${rawPageUrl.slice(0, 80)}, currentUrl=${currentUrl.slice(0, 80)}`);
 
     if (onGuestForm) {
       trace("Detected guest/payment form and started direct field-fill verification.");
+
+      // ── Booking.com: always run programmatic fill regardless of pre-filled state ──
+      // The account often pre-fills wrong values (wrong name order, wrong country/phone code).
+      // We must override these with the correct profile values every time.
+      // Use input.startUrl as the authoritative Booking.com check — currentUrl may be a
+      // non-booking.com URL resolved from an analytics/tracking iframe by resolveCurrentUrl().
+      const isBookingCom =
+        currentUrl.includes("booking.com") ||
+        rawPageUrl.includes("booking.com") ||
+        input.startUrl.includes("booking.com");
+      if (isBookingCom && assessment.stage === "checkout_form") {
+        trace("Booking.com guest form detected — running programmatic field fill (overrides account pre-fill).");
+        await fillBookingComGuestForm(raw, p, trace);
+        await new Promise(r => setTimeout(r, 600));
+      }
+
+      if (isBookingCom && assessment.stage === "payment_gate") {
+        trace("Booking.com payment page detected — running card-field fill fallback.");
+        await fillBookingComPaymentFormV2(raw, p, trace);
+        await new Promise((resolve) => setTimeout(resolve, 800));
+      }
+      if (isBookingCom && !["checkout_form", "payment_gate"].includes(assessment.stage)) {
+        trace(`Booking.com checkout is open at stage=${assessment.stage}; skipping guest-form override until stage is clearer.`);
+      }
+
       // Check whether the form is already filled (profile email visible in input values)
       let alreadyFilled = false;
       if (p.email) {
         alreadyFilled = await hasValueInScopes(raw, p.email);
       }
 
-      if (!alreadyFilled) {
+      if (!alreadyFilled && !isBookingCom) {
         trace("Guest/payment fields looked empty, so the direct Playwright fill fallback ran.");
         // Use RAW Playwright fill() ― bypasses Stagehand AI and reCAPTCHA DOM interference.
         // Try matching each field by placeholder text, then by accessible label name.
@@ -1830,9 +4449,99 @@ Do NOT stop at the review summary and do NOT treat this as the final payment ste
         });
         currentUrl = assessment.currentUrl;
         pageText = assessment.pageText;
-      } else {
+      } else if (!isBookingCom) {
         trace("Guest/payment fields already contained profile data, so direct fill fallback was skipped.");
       }
+
+      // Re-read state after any fills
+      if (isBookingCom) {
+        assessment = await assessBookingStage({
+          rawPage: raw,
+          stagehand,
+          startUrl: input.startUrl,
+          requestedDates,
+          agentMessage,
+        });
+        currentUrl = assessment.currentUrl;
+        pageText = assessment.pageText;
+      }
+    }
+
+    let bookingComFinalPaymentDomState = await isBookingComFinalPaymentDomState(raw, currentUrl);
+    let bookingComGuestDetailsDomState =
+      !bookingComFinalPaymentDomState &&
+      await isBookingComGuestDetailsDomState(raw, currentUrl);
+
+    if (!bookingComFinalPaymentDomState && (looksLikeBookingComGuestDetailsStep(pageText, currentUrl) || bookingComGuestDetailsDomState)) {
+      // Booking.com sometimes transitions to the final-details/payment page a beat after
+      // the CTA click/requestSubmit completes. Re-check once before declaring failure.
+      await Promise.allSettled([
+        raw.waitForLoadState("domcontentloaded", { timeout: 5000 }),
+        waitForPageSignals(raw, {
+          fromUrl: currentUrl,
+          untilUrlIncludes: ["secure.booking.com/book"],
+          untilTextIncludes: [
+            "your payment details",
+            "complete booking",
+            "when do you want to pay",
+            "pay now",
+            "pay at the property",
+            "card number",
+            "credit or debit card",
+          ],
+          untilTextExcludes: [
+            "your arrival time",
+            "cribs and extra beds",
+            "next: final details",
+          ],
+          timeoutMs: 7000,
+        }),
+      ]);
+
+      assessment = await assessBookingStage({
+        rawPage: raw,
+        stagehand,
+        startUrl: input.startUrl,
+        requestedDates,
+        agentMessage,
+      });
+      currentUrl = assessment.currentUrl;
+      pageText = assessment.pageText;
+      bookingComFinalPaymentDomState = await isBookingComFinalPaymentDomState(raw, currentUrl);
+      bookingComGuestDetailsDomState =
+        !bookingComFinalPaymentDomState &&
+        await isBookingComGuestDetailsDomState(raw, currentUrl);
+    }
+
+    if (!bookingComFinalPaymentDomState && (looksLikeBookingComGuestDetailsStep(pageText, currentUrl) || bookingComGuestDetailsDomState)) {
+      trace("Booking.com final state check: still on guest-details step, so payment/card filling is not allowed yet.");
+      const screenshotBase64 = `data:image/png;base64,${(await page.screenshot({ type: "png" })).toString("base64")}`;
+      return {
+        status: "error",
+        screenshotBase64,
+        handoffUrl: currentUrl,
+        sessionUrl,
+        summary: "Booking.com is still on the guest-details step. Personal details must be completed and 'Next: Final details' must succeed before any card fields are filled.",
+        error: "Still on Booking.com guest-details step before final-details/payment page.",
+        debugTrace,
+      };
+    }
+
+    if (bookingComFinalPaymentDomState && isBookingComUrl(currentUrl)) {
+      trace("Booking.com final payment page confirmed after guest-details step — running final card-field fill pass.");
+      await fillBookingComPaymentFormV2(raw, p, trace);
+      await new Promise((resolve) => setTimeout(resolve, 800));
+
+      assessment = await assessBookingStage({
+        rawPage: raw,
+        stagehand,
+        startUrl: input.startUrl,
+        requestedDates,
+        agentMessage,
+      });
+      currentUrl = assessment.currentUrl;
+      pageText = assessment.pageText;
+      bookingComFinalPaymentDomState = await isBookingComFinalPaymentDomState(raw, currentUrl);
     }
 
     const screenshotBase64 = `data:image/png;base64,${(await page.screenshot({ type: "png" })).toString("base64")}`;
@@ -1840,10 +4549,14 @@ Do NOT stop at the review summary and do NOT treat this as the final payment ste
     // ── Determine final outcome ───────────────────────────────────────────
     const msg = agentMessage;
     const hasEnteredFullName = p.full_name ? await hasValueInScopes(raw, p.full_name) : false;
+    const hasEnteredFirstName = p.first_name ? await hasValueInScopes(raw, p.first_name) : false;
+    const hasEnteredLastName = p.last_name ? await hasValueInScopes(raw, p.last_name) : false;
     const hasEnteredEmail = p.email ? await hasValueInScopes(raw, p.email) : false;
     const hasEnteredPhone = p.phone ? await hasValueInScopes(raw, p.phone) : false;
     const hasEnteredCardNumber = p.card_number ? await hasValueInScopes(raw, p.card_number) : false;
     const hasEnteredCardExpiry = p.card_expiry ? await hasValueInScopes(raw, p.card_expiry) : false;
+    const bookingComPaymentFieldVisibility = await getBookingComPaymentFieldVisibility(raw, currentUrl);
+    const bookingComPaymentFieldVerification = await verifyBookingComPaymentFieldValues(raw, currentUrl, p);
     const stalledAtIntermediateBookNow = assessment.stage === "intermediate_gate";
     const stalledAtDateSelection = assessment.stage === "date_selection";
     const stalledAtRoomSelection = assessment.stage === "room_selection";
@@ -1860,15 +4573,59 @@ Do NOT stop at the review summary and do NOT treat this as the final payment ste
       "first name", "last name", "full name", "your name",
       "email", "e-mail", "phone", "mobile", "contact",
     ]);
+    const pageHasFullNameField = containsAny(pageText, ["full name", "your name"]);
+    const pageHasFirstNameField = containsAny(pageText, ["first name", "given name"]);
+    const pageHasLastNameField = containsAny(pageText, ["last name", "family name", "surname"]);
+    const pageHasEmailField = containsAny(pageText, ["email", "e-mail"]);
+    const pageHasPhoneField = containsAny(pageText, ["phone number", "phone", "mobile", "telephone"]);
+
+    const identityChecks: boolean[] = [];
+    if (pageHasFullNameField) {
+      identityChecks.push(hasEnteredFullName || (hasEnteredFirstName && hasEnteredLastName));
+    } else {
+      if (pageHasFirstNameField) identityChecks.push(hasEnteredFirstName);
+      if (pageHasLastNameField) identityChecks.push(hasEnteredLastName);
+    }
+    if (pageHasEmailField) identityChecks.push(hasEnteredEmail);
+    if (pageHasPhoneField) identityChecks.push(hasEnteredPhone);
+
     const identityOk = pageHasIdentityFields
-      ? hasEnteredFullName || hasEnteredEmail || hasEnteredPhone
+      ? identityChecks.length > 0 && identityChecks.every(Boolean)
       : true; // card-only form — no identity fields to verify
 
     // For card fields in cross-origin iframes, hasValueInScopes always returns false.
     // When identity fields are absent (card-only form) we also trust the agent filled them.
-    const cardOk = !pageHasIdentityFields
-      ? true  // cross-origin card-only form — trust the agent
-      : (!p.card_number || hasEnteredCardNumber) && (!p.card_expiry || hasEnteredCardExpiry);
+    const bookingComVisiblePaymentInputs =
+      bookingComPaymentFieldVisibility.cardholder ||
+      bookingComPaymentFieldVisibility.cardNumber ||
+      bookingComPaymentFieldVisibility.cardExpiry;
+
+    const cardNumberOk =
+      !p.card_number ||
+      hasEnteredCardNumber ||
+      bookingComPaymentFieldVerification.cardNumber;
+    const cardExpiryOk =
+      !p.card_expiry ||
+      hasEnteredCardExpiry ||
+      bookingComPaymentFieldVerification.cardExpiry;
+    const bookingComPaymentSignalsVisible =
+      bookingComFinalPaymentDomState ||
+      containsAny(pageText, [
+        "your payment details",
+        "card number",
+        "expiration date",
+        "expiry date",
+        "credit or debit card",
+        "complete booking",
+      ]);
+
+    const cardOk = bookingComVisiblePaymentInputs
+      ? cardNumberOk && cardExpiryOk
+      : bookingComPaymentSignalsVisible
+        ? cardNumberOk && cardExpiryOk
+        : !pageHasIdentityFields
+        ? true  // cross-origin card-only form ― trust the agent only when the fields are not inspectable
+        : (!p.card_number || hasEnteredCardNumber) && (!p.card_expiry || hasEnteredCardExpiry);
 
     const hasMinimumFilledProfile = identityOk && cardOk;
 
@@ -1889,8 +4646,16 @@ Do NOT stop at the review summary and do NOT treat this as the final payment ste
     }
 
     // Agent stopped before CVV/pay button (has filled card number+expiry already)
+    // Also treat "agent says it successfully completed filling details" as a payment-gate signal:
+    // cross-origin widgets make DOM detection impossible, so the agent's own description is the
+    // only reliable signal in those cases.
+    const agentClaimsFilledDetails =
+      /successfully (completed|filled|entered|submitted).{0,60}(guest|booking|details|information|name|email)/i.test(msg) ||
+      /filled.{0,30}(guest|personal|contact|booking).{0,30}(details|information|form)/i.test(msg) ||
+      /(first name|last name|full name).{0,60}(filled|entered|submitted|provided)/i.test(msg);
     const hitPaymentGate =
       assessment.hitPaymentGate ||
+      agentClaimsFilledDetails ||
       msg.includes("cvv") ||
       msg.includes("security code") ||
       msg.includes("pay now") ||
@@ -1905,8 +4670,10 @@ Do NOT stop at the review summary and do NOT treat this as the final payment ste
     trace(
       `Final verification: stage=${assessment.stage}; reason=${assessment.reason}; ` +
       `visibleCheckoutFields=${assessment.visibleCheckoutFields}; hitPaymentGate=${hitPaymentGate}; ` +
-      `fullName=${hasEnteredFullName}; email=${hasEnteredEmail}; phone=${hasEnteredPhone}; ` +
+      `fullName=${hasEnteredFullName}; firstName=${hasEnteredFirstName}; lastName=${hasEnteredLastName}; ` +
+      `email=${hasEnteredEmail}; phone=${hasEnteredPhone}; ` +
       `cardNumber=${hasEnteredCardNumber}; cardExpiry=${hasEnteredCardExpiry}; ` +
+      `bookingComCardNumber=${bookingComPaymentFieldVerification.cardNumber}; bookingComCardExpiry=${bookingComPaymentFieldVerification.cardExpiry}; ` +
       `selectedDatesMatch=${selectedDatesMatchRequest}`
     );
 
@@ -1951,7 +4718,9 @@ Do NOT stop at the review summary and do NOT treat this as the final payment ste
       };
     }
 
-    if (!selectedDatesMatchRequest) {
+    // Skip date-mismatch check when we've already confirmed payment gate arrival —
+    // payment pages often don't re-display dates in the same format, causing false positives.
+    if (!selectedDatesMatchRequest && !hitPaymentGate) {
       trace("Final state check found that the selected stay dates did not match the requested check-in/check-out dates.");
       return {
         status: "error",
@@ -1964,7 +4733,18 @@ Do NOT stop at the review summary and do NOT treat this as the final payment ste
       };
     }
 
-    if (hitPaymentGate && !hasMinimumFilledProfile) {
+    // Only fail the profile check when we can actually SEE the fields in the DOM.
+    // If visibleCheckoutFields=false, the form is likely inside a cross-origin iframe
+    // (e.g. Hilton, Namastay) and hasValueInScopes always returns false — don't penalise.
+    if (
+      hitPaymentGate &&
+      !hasMinimumFilledProfile &&
+      (
+        assessment.visibleCheckoutFields ||
+        bookingComVisiblePaymentInputs ||
+        (bookingComPaymentSignalsVisible && (!!p.card_number || !!p.card_expiry))
+      )
+    ) {
       trace("Final state check found that the page looked like payment, but the expected profile/card values were not actually present in the form fields.");
       return {
         status: "error",
@@ -1994,6 +4774,20 @@ Do NOT stop at the review summary and do NOT treat this as the final payment ste
 
     if (hitPaymentGate) {
       trace("Final state check confirmed the run reached the payment gate before CVV/final submit.");
+      if (!useCloud) {
+        // Local mode: keep the browser open so the user can see the filled form
+        // and enter CVV directly in the browser window.
+        keepBrowserOpen = true;
+        trace("Local mode: browser will stay open for 15 minutes — live view available in OneAgent.");
+        console.log("\n✅ [stagehand] Payment page is open — use OneAgent live view or the browser window to complete payment.\n");
+        // Register page in the global session store so the live view API can stream it.
+        browserSessionStore.set(input.jobId, raw, 15 * 60 * 1000);
+        // Auto-close after 15 minutes.
+        setTimeout(() => {
+          browserSessionStore.delete(input.jobId);
+          stagehand.close().catch(() => {});
+        }, 15 * 60 * 1000);
+      }
       return {
         status: "paused_payment",
         screenshotBase64,
@@ -2182,7 +4976,9 @@ Do NOT stop at the review summary and do NOT treat this as the final payment ste
       debugTrace,
     };
   } finally {
-    await stagehand.close().catch(() => {});
+    if (!keepBrowserOpen) {
+      await stagehand.close().catch(() => {});
+    }
   }
 }
 
@@ -2222,7 +5018,8 @@ ${cardParts.length ? `\nPayment card (fill number and expiry, then STOP before C
 
 FIRST STEP — GET TO THE BOOKING FORM:
 - If you are on a booking.com or Expedia SEARCH RESULTS page: find the hotel card matching the hotel name in the task, click on it to open its detail page. Do NOT click any generic "Reserve" button on the search results page itself — first open the hotel's own detail page.
-- If you are on a booking.com or Expedia HOTEL DETAIL page: scroll down to find the room list, select the cheapest available room, and click "Reserve" or "I'll reserve".
+- If you are on a booking.com HOTEL DETAIL page: FIRST scroll down past the photos and description to find the room list ("空房情况"). Do NOT touch the search bar at the top. Do NOT type the guest name anywhere yet. Only interact with the room rows below.
+- If you see a "Select a Rate" page with multiple rate options: pick the lowest-priced rate UNLESS the task mentions breakfast, free cancellation, or a specific preference. Click its "Select" button to proceed.
 - If the hotel homepage shows a "BOOK NOW" or "Book Now" button in the header/navigation bar, click it FIRST to open the booking calendar widget. This is the entry point — you cannot select dates until you click this button.
 - If a cookie consent banner appears, click "Decline all" or "Reject all" to dismiss it before proceeding.
 
@@ -2249,10 +5046,29 @@ BOOKING.COM SPECIFIC FLOW:
    - If booking.com shows NO hotel cards, an error message, OR redirects to the booking.com homepage (booking.com/index.html) — this means the search FAILED. Immediately navigate to the fallback URL provided in the task. Do NOT wait or retry the search.
    - Signs of search failure: URL contains "errorc_searchstring_not_found", page shows "We couldn't find", page is booking.com homepage with no search results.
    - If results appear but the exact name isn't listed, click the closest match (same brand or city)
-2. Hotel detail page → verify/set dates → scroll to room list → choose cheapest room → click "Reserve" / "I'll reserve"
-3. Guest details form → fill name, email, phone, address
-4. Payment page → choose "Credit or debit card" → fill card number and expiry
-5. STOP before CVV and before "Complete booking" / "Pay now" button
+2. Hotel detail page → verify/set dates → scroll to room list → choose cheapest room:
+   - If the room list has a QUANTITY DROPDOWN (showing "0", "1", "2"…) next to each room type: set the dropdown for the cheapest room to "1". After setting it to 1, a blue "I'll reserve" (English) or "现在就预订" (Chinese) button appears in the RIGHT-SIDE SUMMARY PANEL — click THAT button as your VERY NEXT action. Do NOT fill any name, email, phone, or other information on this page — the guest info form is on the NEXT page. Do NOT touch the search bar at the top.
+   - If the room list has a direct "Reserve" / "I'll reserve" / "Select" / "Book" button per room: click it directly.
+   - Always pick the lowest-priced available room unless the task specifies a room type preference.
+3. Guest details form — Booking.com may show this form in CHINESE.
+   IMPORTANT: Even if you are logged into a Booking.com account and fields are pre-filled, you MUST verify each field matches the guest info provided in the task. Pre-filled values from the account may be wrong — always correct them.
+   Go through each field in this EXACT ORDER and fix any wrong values:
+   STEP A: 姓 (拼音/英语) = LAST NAME / FAMILY NAME / SURNAME. Check the current value. If it contains the first name or any wrong value, clear it and type ONLY the last name (e.g. if the guest is "Ziwei Guo", this field must contain "Guo"). Do NOT type digits or phone number here.
+   STEP B: 名 (拼音/英语) = FIRST NAME / GIVEN NAME. Check the current value. If it contains the last name or any wrong value, clear it and type ONLY the first name (e.g. "Ziwei"). Do NOT type digits or phone number here.
+   STEP C: 电子邮箱地址 = Email address. Verify it matches; correct if wrong.
+   STEP D: 国家/地区 = Country/region. This MUST match the guest's country. If the guest has a US address/phone, it must show "美国" (United States). If it shows "中国" or any other wrong country, click the dropdown and change it to "美国".
+   STEP E: 电话号码 / 手机号码 = Phone number — two parts side by side:
+     LEFT part: a country code dropdown. It MUST show "US +1" for US phone numbers. If it shows anything else (e.g. "BT +975", "中国 +86"), click the dropdown and select "United States +1" / "US +1".
+     RIGHT part: a separate empty number input box to the right of the country code → click ONLY this right-side input box, then type the 10-digit phone number (digits only, no +1, no dashes, no spaces).
+   STEP F: After ALL fields are verified/filled, look for and click the button to advance to the NEXT page. This button may say: "Next: Final details", "Next step", "Continue", "下一步", "继续", or "完成". It is usually at the BOTTOM of the page. Scroll down to find it if needed.
+   CRITICAL: The credit card / payment form is on a SEPARATE NEXT PAGE — it does NOT appear on the same page as the guest name/email/phone form. Do NOT attempt to fill card number, CVV, expiry, or address on the guest details page. Do NOT type anything else after the phone number. Immediately scroll down and click "Next: Final details" to go to the payment page.
+4. Payment page (reached AFTER clicking 下一步 on guest details page) — may also be in Chinese:
+   - 信用卡或借记卡 = Credit or debit card → select this option
+   - 卡号 = Card number
+   - 到期日 = Expiry date
+   - 持卡人姓名 = Cardholder name
+   - 完成预订 / 立即付款 = Complete booking / Pay now → STOP before clicking this
+5. STOP before CVV (安全码/CVV) and before "完成预订" / "立即付款" button
 
 EXPEDIA SPECIFIC FLOW:
 1. Search results → click correct hotel → "Select room"
@@ -2268,6 +5084,7 @@ Booking widget navigation rules:
 - If a dialog says "We couldn't find this room", "room not available", "sold out", or similar — click Ok to dismiss, then go back to the room list and select a DIFFERENT available room.
 - If a dialog says "no availability" for your dates — click Ok, then try adjusting the dates by ±1 day and search again.
 - Never leave a modal open — always dismiss it before trying to interact with the page behind it.
+- If clicking "Book Now" or any booking button opens a NEW TAB or popup window, switch to that new tab immediately and continue the booking process there. Do not stay on the original page.
 
 CALENDAR MONTH NAVIGATION:
 - Before clicking any date, read the calendar header to see which month is shown.
@@ -2337,10 +5154,24 @@ export function buildHotelTask(params: {
   checkout: string;
   adults: number;
   profile: import("./types").BookingProfile;
+  roomPreference?: string;  // e.g. "king bed", "double queen", "suite"
+  breakfastIncluded?: boolean;
 }): Pick<BrowserTaskInput, "task" | "profile"> {
+  // Build room selection guidance from preferences
+  const roomPref = params.roomPreference ?? params.profile.room_preference;
+  const wantsBreakfast = params.breakfastIncluded ?? params.profile.breakfast_preference;
+
+  const roomInstruction = roomPref
+    ? `Prefer a ${roomPref} room type if available. `
+    : `Select the cheapest available room (preferably a standard king or queen room). `;
+
+  const breakfastInstruction = wantsBreakfast
+    ? `Choose a rate that includes breakfast if available. `
+    : ``;
+
   return {
     profile: params.profile,
-    task: `Find ${params.hotelName} hotel in ${params.city} and book the cheapest available room for ${params.adults} adult(s), checking in ${params.checkin} and checking out ${params.checkout}. Fill in the guest information completely.`,
+    task: `Find ${params.hotelName} hotel in ${params.city} and book a room for ${params.adults} adult(s), checking in ${params.checkin} and checking out ${params.checkout}. ${roomInstruction}${breakfastInstruction}Fill in the guest information completely.`,
   };
 }
 

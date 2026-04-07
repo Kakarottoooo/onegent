@@ -6,7 +6,8 @@ export async function parseHotelIntent(
   userMessage: string,
   cityFullName: string,
   queryContext?: MultilingualQueryContext,
-  conversationHistory?: Array<{ role: "user" | "assistant"; content: string }>
+  conversationHistory?: Array<{ role: "user" | "assistant"; content: string }>,
+  profileContext?: string,
 ): Promise<HotelIntent> {
   const text = await minimaxChat({
     messages: [
@@ -14,7 +15,7 @@ export async function parseHotelIntent(
       {
         role: "user",
         content: `Extract hotel search requirements from this request. Return ONLY valid JSON.
-
+${profileContext ? `\nKnown user preferences (apply these as defaults if not overridden by the current request):\n${profileContext}\n` : ""}
 User request: "${userMessage}"
 Default city (use ONLY if user did not mention any location): ${cityFullName}
 Today's date: ${new Date().toISOString().split("T")[0]}

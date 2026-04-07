@@ -136,6 +136,16 @@ export function extractSignalsFromIntent(
       signals.push(makeSignal("hotels", "hotel_neighborhood", String(neighborhood),
         `Prefers ${neighborhood} area`, src, now));
     }
+    const roomType = requirements.room_type ?? requirements.bed_type;
+    if (roomType && typeof roomType === "string") {
+      signals.push(makeSignal("hotels", "room_type", String(roomType),
+        `Prefers ${roomType} room`, src, now));
+    }
+    const wantsBreakfast = requirements.amenities;
+    if (Array.isArray(wantsBreakfast) && wantsBreakfast.includes("breakfast")) {
+      signals.push(makeSignal("hotels", "breakfast_included", "true",
+        "Prefers breakfast included", src, now));
+    }
   }
 
   // ── Flights / Travel ────────────────────────────────────────────────────────
@@ -247,6 +257,13 @@ export function formatProfileForPrompt(profile: UserPreferenceProfile): string {
     const recent = profile.favorite_signals.slice(0, 3);
     parts.push(`Saved: ${recent.map((s) => `${s.cuisine} (${s.price})`).join(", ")}`);
   }
+
+  // Hotel-specific preferences — surfaced separately so the booking agent can act on them
+  const hotelPrefs = (profile.discovered ?? []).filter(d => d.category === "hotels" && (d.seen_count >= 1 || d.user_confirmed));
+  const roomTypePref = hotelPrefs.find(d => d.key === "room_type");
+  const breakfastPref = hotelPrefs.find(d => d.key === "breakfast_included");
+  if (roomTypePref) parts.push(`Hotel room preference: ${roomTypePref.value}`);
+  if (breakfastPref) parts.push("Prefers hotel breakfast included");
 
   return parts.length > 0
     ? `User preference profile: ${parts.join("; ")}.`

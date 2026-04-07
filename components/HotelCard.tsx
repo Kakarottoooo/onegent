@@ -19,8 +19,20 @@ export default function HotelCard({ card, index, checkIn, checkOut, guests }: Ho
   const [showPicker, setShowPicker] = useState(false);
   const [booking, setBooking] = useState(false);
 
+  // Validate that dates are present and in the future before booking.
+  const today = new Date().toISOString().split("T")[0];
+  const datesValid = checkIn && checkOut && checkIn > today;
+
   function handleBook() {
     if (booking) return;
+    if (!datesValid) {
+      alert(
+        checkIn && checkOut
+          ? `The selected dates (${checkIn} → ${checkOut}) are in the past or today. Please mention future dates in the chat (e.g. "April 15–17") and try again.`
+          : "Please tell me the check-in and check-out dates in the chat first, then click Book."
+      );
+      return;
+    }
     setShowPicker(true);
   }
 
@@ -59,12 +71,17 @@ export default function HotelCard({ card, index, checkIn, checkOut, guests }: Ho
       if (checkOut) bookingComParams.checkout = checkOut;
       const bookingComUrl = `https://www.booking.com/searchresults.html?${new URLSearchParams(bookingComParams)}`;
 
+      // Use Booking.com as the primary startUrl — dates are embedded in the URL so
+      // the agent never has to guess or update a date picker on the hotel's own page.
+      // The hotel's direct link becomes the fallback only if Booking.com fails.
+      const primaryUrl = bookingComUrl;
+      const directFallbackUrl = hotel.booking_link;
+
       const task = [
         `Book "${hotel.name}" for ${numAdults} adult(s).`,
-        checkIn ? `Check-in date: ${checkIn}.` : "",
-        checkOut ? `Check-out date: ${checkOut}.` : "",
-        "On the hotel's website, set the correct dates, select the cheapest available room, and click Reserve or Book.",
-        `If this site is blocked or broken, fall back to booking.com: ${bookingComUrl}`,
+        `Check-in: ${checkIn}. Check-out: ${checkOut}.`,
+        `You are starting on Booking.com — find the listing for "${hotel.name}", select the room, and fill all guest info.`,
+        `If Booking.com fails (no results, error, or blocked), navigate to the hotel's direct site instead: ${directFallbackUrl}`,
         "Fill in all guest information and card details.",
         "Stop before entering CVV or clicking the final payment confirmation button.",
       ].filter(Boolean).join(" ");
@@ -78,9 +95,9 @@ export default function HotelCard({ card, index, checkIn, checkOut, guests }: Ho
         label: hotel.name,
         apiEndpoint: "/api/booking-autopilot/universal",
         body: {
-          startUrl: hotel.booking_link,
+          startUrl: primaryUrl,
           task,
-          fallbackUrl: bookingComUrl,
+          fallbackUrl: directFallbackUrl,
           profileId: picked.profileId,
           profile: {
             first_name: picked.first_name,
