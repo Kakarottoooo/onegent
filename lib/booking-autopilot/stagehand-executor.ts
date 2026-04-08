@@ -66,6 +66,7 @@ import {
   setBookingComRoomQuantity as providerSetBookingComRoomQuantity,
 } from "./providers/booking-com";
 import { determineFinalOutcome, NO_AVAILABILITY_SIGNALS } from "./core/final-outcome";
+import { fillGuestFormWithAI } from "./ai-loop/fill-form";
 import {
   clickLocatorDom,
   evaluateLocatorElement,
@@ -1474,9 +1475,15 @@ The user will enter CVV and confirm payment themselves.`,
         rawPageUrl,
       }).bookingComContext;
       if (isBookingCom && assessment.stage === "checkout_form") {
-        trace("Booking.com guest form detected 鈥?running programmatic field fill (overrides account pre-fill).");
-      await providerFillBookingComGuestForm(raw, p, bookingComHelpers, trace);
-        await new Promise(r => setTimeout(r, 600));
+        if (process.env.AI_LOOP_FORM_FILL === "true") {
+          trace("Booking.com guest form — AI fill mode (AI_LOOP_FORM_FILL=true).");
+          await fillGuestFormWithAI(stagehand, p, trace);
+          await new Promise(r => setTimeout(r, 600));
+        } else {
+          trace("Booking.com guest form detected — running programmatic field fill (overrides account pre-fill).");
+          await providerFillBookingComGuestForm(raw, p, bookingComHelpers, trace);
+          await new Promise(r => setTimeout(r, 600));
+        }
       }
 
       if (isBookingCom && assessment.stage === "payment_gate") {
@@ -1495,26 +1502,31 @@ The user will enter CVV and confirm payment themselves.`,
       }
 
       if (!alreadyFilled && !isBookingCom) {
-        trace("Guest/payment fields looked empty, so the direct Playwright fill fallback ran.");
-        // Use RAW Playwright fill() 鈥?bypasses Stagehand AI and reCAPTCHA DOM interference.
-        // Try matching each field by placeholder text, then by accessible label name.
-        const specs: FieldSpec[] = [
-          { patterns: ["full name"], value: p.full_name ?? "" },
-          { patterns: ["first name", "given name", "firstname"], value: p.first_name ?? "" },
-          { patterns: ["last name", "family name", "surname", "lastname"], value: p.last_name ?? "" },
-          { patterns: ["phone", "mobile", "telephone"], value: p.phone ?? "" },
-          { patterns: ["email", "e-mail"], value: p.email ?? "" },
-          { patterns: ["street address", "address line 1", "address 1", "billing address"], value: p.address_line1 ?? "" },
-          { patterns: ["city"], value: p.city ?? "" },
-          { patterns: ["state", "province"], value: p.state ?? "" },
-          { patterns: ["zip", "postal code", "postcode"], value: p.zip ?? "" },
-          { patterns: ["country"], value: p.country ?? "" },
-          { patterns: ["name on card", "cardholder", "card holder"], value: p.card_name ?? "" },
-          { patterns: ["card number", "credit card number"], value: p.card_number ?? "" },
-          { patterns: ["expir", "expiry", "mm/yy", "mm / yy"], value: p.card_expiry ?? "" },
-        ].filter(s => s.value);
+        if (process.env.AI_LOOP_FORM_FILL === "true") {
+          trace("Guest/payment fields — AI fill mode (AI_LOOP_FORM_FILL=true).");
+          await fillGuestFormWithAI(stagehand, p, trace);
+        } else {
+          trace("Guest/payment fields looked empty, so the direct Playwright fill fallback ran.");
+          // Use RAW Playwright fill() — bypasses Stagehand AI and reCAPTCHA DOM interference.
+          // Try matching each field by placeholder text, then by accessible label name.
+          const specs: FieldSpec[] = [
+            { patterns: ["full name"], value: p.full_name ?? "" },
+            { patterns: ["first name", "given name", "firstname"], value: p.first_name ?? "" },
+            { patterns: ["last name", "family name", "surname", "lastname"], value: p.last_name ?? "" },
+            { patterns: ["phone", "mobile", "telephone"], value: p.phone ?? "" },
+            { patterns: ["email", "e-mail"], value: p.email ?? "" },
+            { patterns: ["street address", "address line 1", "address 1", "billing address"], value: p.address_line1 ?? "" },
+            { patterns: ["city"], value: p.city ?? "" },
+            { patterns: ["state", "province"], value: p.state ?? "" },
+            { patterns: ["zip", "postal code", "postcode"], value: p.zip ?? "" },
+            { patterns: ["country"], value: p.country ?? "" },
+            { patterns: ["name on card", "cardholder", "card holder"], value: p.card_name ?? "" },
+            { patterns: ["card number", "credit card number"], value: p.card_number ?? "" },
+            { patterns: ["expir", "expiry", "mm/yy", "mm / yy"], value: p.card_expiry ?? "" },
+          ].filter(s => s.value);
 
-        await fillFieldsInScopes(raw, specs);
+          await fillFieldsInScopes(raw, specs);
+        }
 
         // Small pause so the page can react to filled values (React state updates etc.)
         await new Promise(r => setTimeout(r, 800));
