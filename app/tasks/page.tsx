@@ -2275,6 +2275,7 @@ export default function TripsPage() {
   const [jobs, setJobs] = useState<BookingJob[]>([]);
   const [loading, setLoading] = useState(true);
   const [, setClockTick] = useState(0);
+  const [clearingAll, setClearingAll] = useState(false);
 
   const sessionId = typeof window !== "undefined" ? getSessionId() : "";
 
@@ -2287,6 +2288,19 @@ export default function TripsPage() {
     } catch { /* ignore */ }
     finally { setLoading(false); }
   }, []);
+
+  async function handleClearAll() {
+    const sid = getSessionId();
+    if (!sid || clearingAll) return;
+    if (!confirm(`Delete all ${jobs.length} tasks and their monitors?`)) return;
+    setClearingAll(true);
+    try {
+      await fetch(`/api/booking-jobs?session_id=${encodeURIComponent(sid)}`, { method: "DELETE" });
+      setJobs([]);
+    } finally {
+      setClearingAll(false);
+    }
+  }
 
   useEffect(() => { loadJobs(); }, [loadJobs]);
 
@@ -2342,9 +2356,25 @@ export default function TripsPage() {
             </span>
           )}
         </div>
-        <p style={{ fontFamily: "var(--font-dm-sans)", fontSize: 12, color: "var(--text-secondary, #666)", marginTop: 2 }}>
-          {loading ? "Loading…" : jobs.length === 0 ? "No tasks yet" : `${jobs.length} task${jobs.length === 1 ? "" : "s"}`}
-        </p>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginTop: 2 }}>
+          <p style={{ fontFamily: "var(--font-dm-sans)", fontSize: 12, color: "var(--text-secondary, #666)" }}>
+            {loading ? "Loading…" : jobs.length === 0 ? "No tasks yet" : `${jobs.length} task${jobs.length === 1 ? "" : "s"}`}
+          </p>
+          {!loading && jobs.length > 0 && (
+            <button
+              onClick={handleClearAll}
+              disabled={clearingAll}
+              style={{
+                background: "none", border: "none", cursor: "pointer",
+                fontFamily: "var(--font-dm-sans)", fontSize: 12,
+                color: clearingAll ? "var(--text-muted, #aaa)" : "rgba(220,38,38,0.7)",
+                padding: "2px 0",
+              }}
+            >
+              {clearingAll ? "Clearing…" : "Clear all"}
+            </button>
+          )}
+        </div>
       </div>
       <div style={{ padding: "16px", display: "flex", flexDirection: "column", gap: 12, maxWidth: 620, margin: "0 auto" }}>
         {!loading && jobs.length === 0 && (

@@ -146,6 +146,7 @@ interface JobGroup { tripLabel: string; jobId: string; monitors: BookingMonitor[
 export default function MonitoringPage() {
   const [groups, setGroups] = useState<JobGroup[]>([]);
   const [loading, setLoading] = useState(true);
+  const [clearingAll, setClearingAll] = useState(false);
   const { t } = useLanguage();
   const tm = t.monitoring;
 
@@ -194,6 +195,19 @@ export default function MonitoringPage() {
     return () => clearInterval(timer);
   }, [load]);
 
+  async function handleClearAll() {
+    const sid = getSessionId();
+    if (!sid || clearingAll) return;
+    if (!confirm(`Delete all ${total} monitors?`)) return;
+    setClearingAll(true);
+    try {
+      await fetch(`/api/monitors?session_id=${encodeURIComponent(sid)}`, { method: "DELETE" });
+      setGroups([]);
+    } finally {
+      setClearingAll(false);
+    }
+  }
+
   async function cancelMonitor(id: string) {
     await fetch(`/api/monitors/${id}`, {
       method: "PATCH",
@@ -240,11 +254,27 @@ export default function MonitoringPage() {
             {tm.title}
           </h1>
           {!loading && (
-            <p style={{ fontFamily: "var(--font-dm-sans)", fontSize: 13, color: "var(--text-secondary, #666)" }}>
-              {total === 0
-                ? tm.noMonitors
-                : `${active} ${tm.active} · ${alerts > 0 ? `${alerts} ${tm.alert}${alerts > 1 ? "s" : ""} · ` : ""}${total} ${tm.total}`}
-            </p>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+              <p style={{ fontFamily: "var(--font-dm-sans)", fontSize: 13, color: "var(--text-secondary, #666)" }}>
+                {total === 0
+                  ? tm.noMonitors
+                  : `${active} ${tm.active} · ${alerts > 0 ? `${alerts} ${tm.alert}${alerts > 1 ? "s" : ""} · ` : ""}${total} ${tm.total}`}
+              </p>
+              {total > 0 && (
+                <button
+                  onClick={handleClearAll}
+                  disabled={clearingAll}
+                  style={{
+                    background: "none", border: "none", cursor: "pointer",
+                    fontFamily: "var(--font-dm-sans)", fontSize: 12,
+                    color: clearingAll ? "var(--text-muted, #aaa)" : "rgba(220,38,38,0.7)",
+                    padding: "2px 0",
+                  }}
+                >
+                  {clearingAll ? "Clearing…" : "Clear all"}
+                </button>
+              )}
+            </div>
           )}
         </div>
 

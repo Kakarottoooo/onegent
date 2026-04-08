@@ -791,6 +791,11 @@ export async function deleteBookingJob(id: string): Promise<void> {
   await sql`DELETE FROM booking_jobs WHERE id = ${id}`;
 }
 
+export async function deleteAllBookingJobsBySession(sessionId: string): Promise<void> {
+  await ensureBookingJobsTable();
+  await sql`DELETE FROM booking_jobs WHERE session_id = ${sessionId}`;
+}
+
 // ─── Agent Logs ───────────────────────────────────────────────────────────────
 // Persistent log of agent actions, errors, and notable events.
 // Queryable via GET /api/agent-logs — can be read by Claude Code for debugging.
@@ -1218,6 +1223,16 @@ export async function updateMonitor(
 export async function deleteMonitor(id: string): Promise<void> {
   await ensureBookingMonitorsTable();
   await sql`DELETE FROM booking_monitors WHERE id = ${id}`;
+}
+
+export async function deleteMonitorsByJobId(jobId: string): Promise<void> {
+  await ensureBookingMonitorsTable();
+  await sql`DELETE FROM booking_monitors WHERE job_id = ${jobId}`;
+}
+
+export async function deleteAllMonitorsBySession(sessionId: string): Promise<void> {
+  await ensureBookingMonitorsTable();
+  await sql`DELETE FROM booking_monitors WHERE session_id = ${sessionId}`;
 }
 
 // ─── End Booking Monitors ──────────────────────────────────────────────────────

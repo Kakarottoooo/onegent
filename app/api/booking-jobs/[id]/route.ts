@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getBookingJob, deleteBookingJob } from "@/lib/db";
+import { getBookingJob, deleteBookingJob, deleteMonitorsByJobId } from "@/lib/db";
 
 type Params = { params: Promise<{ id: string }> };
 
@@ -22,6 +22,7 @@ export async function DELETE(req: NextRequest, { params }: Params) {
   if (job.status === "running" && !force) {
     return NextResponse.json({ error: "Cannot delete a running job" }, { status: 409 });
   }
+  await deleteMonitorsByJobId(id);
   await deleteBookingJob(id);
   return NextResponse.json({ deleted: true, forced: force });
 }
