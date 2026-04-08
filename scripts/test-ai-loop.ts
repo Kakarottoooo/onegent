@@ -48,8 +48,10 @@ async function runTest() {
   const stagehand = new Stagehand({
     env: "LOCAL",
     localBrowserLaunchOptions: { headless: false },
-    modelName: "claude-haiku-4-5-20251001",
-    modelClientOptions: { apiKey: process.env.ANTHROPIC_API_KEY },
+    model: {
+      modelName: "anthropic/claude-haiku-4-5-20251001",
+      apiKey: process.env.ANTHROPIC_API_KEY,
+    },
   });
 
   await stagehand.init();

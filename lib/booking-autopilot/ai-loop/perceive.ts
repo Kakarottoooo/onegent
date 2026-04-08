@@ -83,15 +83,17 @@ export interface PerceiveOptions {
 }
 
 export async function perceiveAndDecide(
-  page: Page,
+  page: unknown,
   opts: PerceiveOptions,
 ): Promise<PerceptionResult> {
+  // Accept Stagehand pages or raw Playwright pages — both expose screenshot/url/evaluate
+  const p = page as Page;
   const [screenshotBuf, interactiveElements] = await Promise.all([
-    page.screenshot({ type: "jpeg", quality: 60 }),
-    getInteractiveElements(page),
+    p.screenshot({ type: "jpeg", quality: 60 }),
+    getInteractiveElements(p),
   ]);
 
-  const currentUrl = page.url();
+  const currentUrl = p.url();
 
   const userPrompt = `Task: ${opts.task}
 URL: ${currentUrl}

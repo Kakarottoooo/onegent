@@ -19,7 +19,11 @@ import type { NextAction } from "./types";
 export type StagehandLike = {
   act: (instruction: string) => Promise<unknown>;
   context: {
-    activePage: () => { evaluate: Page["evaluate"]; waitForLoadState: Page["waitForLoadState"] } | undefined;
+    activePage: () => {
+      url: () => string;
+      evaluate: Page["evaluate"];
+      waitForLoadState: Page["waitForLoadState"];
+    } | undefined;
   };
 };
 

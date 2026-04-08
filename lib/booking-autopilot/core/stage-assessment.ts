@@ -1,7 +1,9 @@
 import type { Page } from "playwright";
 import type { Stagehand } from "@browserbasehq/stagehand";
-import type { BookingStageAssessment, RequestedStayDates } from "./stages";
+import type { BookingStage, BookingStageAssessment, RequestedStayDates } from "./stages";
 import { containsAny, looksLikeDateSelectionGate, looksLikeIntermediateBookNowGate, looksLikeRoomSelectionGate } from "./stage-signals";
+import { perceiveAndDecide } from "../ai-loop/perceive";
+import type { BookingStage as AIBookingStage } from "../ai-loop/types";
 
 export interface StageAssessmentDependencies {
   getVisibleFieldCategoryKeys: (rawPage: Page) => Promise<Set<string>>;
@@ -434,6 +436,32 @@ export async function assessBookingStage(params: {
     reason = "The page still looks like a listing/search flow without booking progress.";
   }
 
+  // ── Phase 2: AI-assisted stage detection (gated by AI_LOOP_STAGE_DETECT=true) ──
+  if (process.env.AI_LOOP_STAGE_DETECT === "true") {
+    try {
+      const aiPerception = await perceiveAndDecide(rawPage, {
+        task: "identify the current booking stage",
+        profileHint: { first_name: "", last_name: "", email: "", phone: "" },
+        recentSteps: [],
+      });
+      const aiMapped = mapAIStageToRPA(aiPerception.stage);
+      const conf = aiPerception.nextAction.confidence;
+
+      // Log comparison for observability (trace not available here, use console)
+      console.log(
+        `[stage-detect] AI=${aiPerception.stage}(conf=${conf.toFixed(2)}) → mapped=${aiMapped} | RPA=${stage}`
+      );
+
+      if (conf >= 0.75 && aiMapped !== "unknown") {
+        stage = aiMapped;
+        reason = `AI stage detection (conf=${conf.toFixed(2)}): ${aiPerception.pageDescription}`;
+      }
+    } catch (err) {
+      // AI detection is best-effort; never let it crash the existing flow
+      console.warn("[stage-detect] AI assess failed, using RPA result:", (err as Error).message?.slice(0, 80));
+    }
+  }
+
   return {
     stage,
     reason,
@@ -449,4 +477,22 @@ export async function assessBookingStage(params: {
     bookingProgressSignals,
     blocked,
   };
+}
+
+/**
+ * Maps AI loop stage names (generic) to the existing RPA BookingStage enum.
+ * AI stages are site-agnostic; RPA stages are Booking.com-centric.
+ */
+function mapAIStageToRPA(aiStage: AIBookingStage): BookingStage {
+  switch (aiStage) {
+    case "listing":      return "listing";
+    case "hotel_detail": return "room_selection";  // Detail page = where you pick rooms
+    case "room_selection": return "room_selection";
+    case "guest_form":   return "checkout_form";
+    case "payment_form": return "payment_gate";
+    case "paused_payment": return "payment_gate";
+    case "captcha":      return "blocked";
+    // confirmation / no_availability / unknown → keep as unknown (no RPA equivalent)
+    default:             return "unknown";
+  }
 }
