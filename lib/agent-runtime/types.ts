@@ -43,6 +43,12 @@ export interface SkillResult {
   usedFallback?: boolean;
   /** Whether the booking flow requires a payment step */
   requiresPayment?: boolean;
+  /**
+   * Browserbase live-view URL for the cloud browser session.
+   * Present only in Browserbase (cloud) mode — lets the user interact with the
+   * pre-filled payment page from any device, including mobile.
+   */
+  sessionUrl?: string;
   /** Arbitrary payload for downstream steps / replan */
   meta?: Record<string, unknown>;
 }

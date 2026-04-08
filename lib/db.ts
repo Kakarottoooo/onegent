@@ -637,6 +637,12 @@ export interface BookingJobStep {
   // ── Runtime fields (filled in as job runs) ──
   status: "pending" | "loading" | "done" | "error" | "no_availability" | "awaiting_confirmation";
   handoff_url?: string;
+  /**
+   * Browserbase live-view URL — present only in cloud (Browserbase) mode.
+   * Opens an interactive cloud browser where the user can enter CVC / confirm.
+   * Works on any device including mobile.
+   */
+  session_url?: string;
   selected_time?: string;
   error?: string;
   /** How many autopilot attempts were made (1 = succeeded first try) */

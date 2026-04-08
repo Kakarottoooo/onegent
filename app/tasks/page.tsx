@@ -828,13 +828,16 @@ function InterventionBanner({ step, jobId }: { step: BookingJobStep; jobId: stri
   const [showLive, setShowLive] = useState(false);
 
   const isPaymentWait = step.status === "awaiting_confirmation";
+  const hasCloudSession = !!step.session_url; // Browserbase mode
   const color = isPaymentWait ? "rgba(22,163,74,0.85)" : "rgba(220,38,38,0.8)";
   const bg = isPaymentWait ? "rgba(22,163,74,0.06)" : "rgba(220,38,38,0.05)";
   const border = isPaymentWait ? "rgba(22,163,74,0.25)" : "rgba(220,38,38,0.2)";
   const emoji = isPaymentWait ? "💳" : "🔑";
   const title = isPaymentWait ? "Agent paused — ready for payment" : "Agent needs your help";
   const subtitle = isPaymentWait
-    ? "The agent filled everything in. Open the link to enter payment and confirm."
+    ? hasCloudSession
+      ? "The agent filled everything in. Tap below to open the payment page and enter your CVC."
+      : "The agent filled everything in. Open the link to enter payment and confirm."
     : "The site requires your login. Open the link, sign in, then the agent can continue.";
 
   return (
@@ -851,7 +854,17 @@ function InterventionBanner({ step, jobId }: { step: BookingJobStep; jobId: stri
             </p>
           </div>
           <div style={{ display: "flex", gap: 8, flexShrink: 0 }}>
-            {isPaymentWait && (
+            {isPaymentWait && hasCloudSession && (
+              <a href={step.session_url} target="_blank" rel="noopener noreferrer" style={{
+                padding: "7px 14px", borderRadius: 8, border: `1px solid ${color}`,
+                backgroundColor: color, color: "#fff",
+                fontFamily: "var(--font-dm-sans)", fontSize: 12, fontWeight: 600, cursor: "pointer",
+                textDecoration: "none", display: "inline-block",
+              }}>
+                💳 Enter CVC →
+              </a>
+            )}
+            {isPaymentWait && !hasCloudSession && (
               <button onClick={() => setShowLive(v => !v)} style={{
                 padding: "7px 14px", borderRadius: 8, border: `1px solid ${color}`,
                 backgroundColor: "transparent", color,
@@ -979,11 +992,32 @@ function InterventionBanner({ step, jobId }: { step: BookingJobStep; jobId: stri
               </p>
             </div>
 
-            {/* CTA */}
-            {/* Session-bound URLs (e.g. secure.booking.com/book.html with basket_id)
-                are tied to the local Playwright browser's cookies and return HTTP 400
-                when opened in any other browser. Show instructions instead of a link. */}
-            {step.handoff_url && (step.handoff_url.includes("basket_id=") || step.handoff_url.includes("secure.booking.com/book")) ? (
+            {/* CTA — three cases:
+                1. Browserbase cloud session: show direct interactive link (works on mobile)
+                2. Session-bound local URL (basket_id / secure.booking.com): show instructions
+                3. Regular URL: show open link button */}
+            {hasCloudSession ? (
+              <>
+                <a href={step.session_url} target="_blank" rel="noopener noreferrer"
+                  onClick={() => setOpen(false)}
+                  style={{
+                    display: "block", width: "100%", padding: "13px 0", borderRadius: 12,
+                    backgroundColor: color, color: "#fff", textAlign: "center",
+                    fontFamily: "var(--font-dm-sans)", fontSize: 14, fontWeight: 700,
+                    textDecoration: "none", boxSizing: "border-box",
+                  }}>
+                  💳 Open payment page →
+                </a>
+                <p style={{
+                  fontFamily: "var(--font-dm-sans)", fontSize: 11,
+                  color: "var(--text-muted, #aaa)", textAlign: "center",
+                  marginTop: 8, lineHeight: 1.5,
+                }}>
+                  Opens in a cloud browser — card details are already filled in.<br />
+                  Just enter your CVC and confirm.
+                </p>
+              </>
+            ) : step.handoff_url && (step.handoff_url.includes("basket_id=") || step.handoff_url.includes("secure.booking.com/book")) ? (
               <div style={{
                 padding: "12px 14px", borderRadius: 12, border: `1px solid ${color}`,
                 backgroundColor: isPaymentWait ? "rgba(22,163,74,0.06)" : "rgba(220,38,38,0.05)",

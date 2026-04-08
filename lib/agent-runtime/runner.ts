@@ -173,6 +173,7 @@ function mergeOutcomeIntoSnapshot(
   if (outcome.status === "succeeded" || outcome.status === "adjusted" || outcome.status === "fallback") {
     base.status = "done";
     base.handoff_url = outcome.result.handoffUrl;
+    if (outcome.result.sessionUrl) base.session_url = outcome.result.sessionUrl;
     base.selected_time = outcome.result.scheduledAt;
     base.body = {
       ...base.body,
