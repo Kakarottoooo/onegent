@@ -19,37 +19,47 @@ export type FillResult = {
 };
 
 /**
- * Guest contact fields only (no payment data).
- * Maps EffectiveProfile fields → natural-language labels for stagehand.act().
+ * Core contact fields (no billing address, no payment).
+ * Used for sites like Booking.com where only name/email/phone/country appear.
  */
-function buildGuestFields(p: EffectiveProfile): Record<string, string> {
+function buildContactFields(p: EffectiveProfile): Record<string, string> {
   const fields: Record<string, string> = {};
-
-  if (p.first_name) fields["first name"] = p.first_name;
-  if (p.last_name)  fields["last name"]  = p.last_name;
+  if (p.first_name) fields["first name"]    = p.first_name;
+  if (p.last_name)  fields["last name"]     = p.last_name;
   if (p.email)      fields["email address"] = p.email;
   if (p.phone)      fields["phone number"]  = p.phone;
   if (p.country)    fields["country"]       = p.country;
+  return fields;
+}
 
-  // Billing address — optional, only include if present
-  if (p.address_line1) fields["street address"] = p.address_line1;
-  if (p.city)          fields["city"]            = p.city;
-  if (p.state)         fields["state or province"] = p.state;
+/**
+ * Full guest fields including billing address.
+ * Used for sites that show a billing address section in checkout.
+ */
+function buildGuestFields(p: EffectiveProfile): Record<string, string> {
+  const fields = buildContactFields(p);
+  if (p.address_line1) fields["street address"]     = p.address_line1;
+  if (p.city)          fields["city"]               = p.city;
+  if (p.state)         fields["state or province"]  = p.state;
   if (p.zip)           fields["zip or postal code"] = p.zip;
-
   return fields;
 }
 
 /**
  * Fill guest contact form fields using stagehand.act() (AI-driven).
- * Skips empty fields. Returns lists of filled and failed field names.
+ *
+ * @param includeAddress  Pass true only for sites that show a billing address
+ *   section (street/city/state/zip). Booking.com's checkout form does NOT have
+ *   these fields — enabling them causes Stagehand to mis-fill the "Special
+ *   requests" textarea instead. Defaults to false (contact fields only).
  */
 export async function fillGuestFormWithAI(
   stagehand: Actable,
   profile: EffectiveProfile,
   trace: (msg: string) => void,
+  { includeAddress = false }: { includeAddress?: boolean } = {},
 ): Promise<FillResult> {
-  const fields = buildGuestFields(profile);
+  const fields = includeAddress ? buildGuestFields(profile) : buildContactFields(profile);
   return fillFieldsWithAI(stagehand, fields, trace);
 }
 
