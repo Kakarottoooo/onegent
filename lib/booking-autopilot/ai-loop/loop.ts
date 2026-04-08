@@ -63,8 +63,16 @@ export async function runAIBookingLoop(
     try {
       perception = await perceiveAndDecide(page, { task, profileHint, recentSteps });
     } catch (err) {
-      trace(`[ai-loop] perceive error: ${err instanceof Error ? err.message : String(err)}`);
-      // Don't abort — try scrolling down and hope the page recovers
+      const errMsg = err instanceof Error ? err.message : String(err);
+      trace(`[ai-loop] perceive error: ${errMsg.slice(0, 160)}`);
+
+      // Non-recoverable billing/quota errors — stop immediately
+      const fatal = /credit balance|insufficient_quota|payment required|billing|quota exceeded/i.test(errMsg);
+      if (fatal) {
+        trace("[ai-loop] fatal billing/quota error — aborting loop");
+        return { outcome: "failed", finalUrl: url, steps, summary: `API billing error: ${errMsg.slice(0, 120)}` };
+      }
+
       steps.push({
         stepIndex: i,
         url,

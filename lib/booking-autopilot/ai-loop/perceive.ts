@@ -15,7 +15,13 @@ import Anthropic from "@anthropic-ai/sdk";
 import type { Page } from "playwright";
 import type { PerceptionResult } from "./types";
 
-const client = new Anthropic();
+// Lazily instantiated so ANTHROPIC_API_KEY is read at call time, not at import time.
+// This matters when .env.local is loaded after module imports (e.g. in test scripts).
+let _client: Anthropic | null = null;
+function getClient(): Anthropic {
+  if (!_client) _client = new Anthropic();
+  return _client;
+}
 
 const SYSTEM_PROMPT = `You are a browser automation agent deciding the single next action to complete an online booking.
 You receive a screenshot and a list of interactive elements, and return ONE structured JSON action.
@@ -115,7 +121,7 @@ Return this JSON (no markdown):
   }
 }`;
 
-  const response = await client.messages.create({
+  const response = await getClient().messages.create({
     model: "claude-haiku-4-5-20251001",
     max_tokens: 500,
     system: SYSTEM_PROMPT,

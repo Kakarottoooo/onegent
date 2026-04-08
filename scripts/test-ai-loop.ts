@@ -3,7 +3,7 @@
  * Runs against a real browser with a simple public form page.
  *
  * Usage (from project root):
- *   npx tsx scripts/test-ai-loop.mjs
+ *   npx tsx scripts/test-ai-loop.ts
  *
  * Requires: ANTHROPIC_API_KEY in .env.local
  */
@@ -11,8 +11,11 @@
 import fs from "fs";
 import path from "path";
 import { fileURLToPath } from "url";
+import { Stagehand } from "@browserbasehq/stagehand";
+import { runAIBookingLoop } from "../lib/booking-autopilot/ai-loop/loop";
+import type { BookingProfile } from "../lib/booking-autopilot/types";
 
-// ── Load .env.local manually (no dotenv dependency needed) ───────────────────
+// ── Load .env.local (no dotenv needed) ───────────────────────────────────────
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const envPath = path.join(__dirname, "../.env.local");
 if (fs.existsSync(envPath)) {
@@ -27,10 +30,7 @@ if (fs.existsSync(envPath)) {
   }
 }
 
-import { Stagehand } from "@browserbasehq/stagehand";
-import { runAIBookingLoop } from "../lib/booking-autopilot/ai-loop/loop.js";
-
-const TEST_PROFILE = {
+const TEST_PROFILE: BookingProfile = {
   first_name: "John",
   last_name: "Doe",
   email: "john.doe@example.com",
@@ -55,21 +55,25 @@ async function runTest() {
   await stagehand.init();
   const page = stagehand.context.activePage() ?? await stagehand.context.newPage();
 
-  // Simple public form that doesn't require login
+  // httpbin.org/forms/post — simple public HTML form, no login, no bot detection
   const TEST_URL = "https://httpbin.org/forms/post";
   console.log(`Navigating to: ${TEST_URL}`);
-  await page.goto(TEST_URL, { waitForLoadState: "domcontentloaded", timeoutMs: 15_000 });
+  await (page as any).goto(TEST_URL, { waitForLoadState: "domcontentloaded", timeoutMs: 15_000 });
 
-  const task = `Fill out the order form: customer name "${TEST_PROFILE.first_name} ${TEST_PROFILE.last_name}", email "${TEST_PROFILE.email}", then submit the form.`;
-  console.log(`\nTask: ${task}`);
-  console.log("Starting AI loop...\n");
+  const task = `Fill out the pizza order form on this page:
+- custname: "${TEST_PROFILE.first_name} ${TEST_PROFILE.last_name}"
+- custemail: "${TEST_PROFILE.email}"
+- size: medium
+- Select any topping
+Then click the Submit Order button.`;
 
-  const trace = (msg) => console.log(" ", msg);
+  console.log(`\nTask:\n${task}`);
+  console.log("\nStarting AI loop...\n");
 
-  // page.page is the raw Playwright Page inside Stagehand's wrapper
-  const rawPage = page.page ?? page;
+  const trace = (msg: string) => console.log(" ", msg);
+  const rawPage = (page as any).page ?? page;
 
-  const result = await runAIBookingLoop(rawPage, task, TEST_PROFILE, { trace, maxSteps: 12 });
+  const result = await runAIBookingLoop(rawPage, task, TEST_PROFILE, { trace, maxSteps: 15 });
 
   console.log("\n=== Result ===");
   console.log("Outcome  :", result.outcome);
@@ -79,7 +83,10 @@ async function runTest() {
   console.log("\nStep breakdown:");
   for (const s of result.steps) {
     const inst = s.action.instruction ? ` "${s.action.instruction.slice(0, 50)}"` : "";
-    console.log(`  ${s.stepIndex + 1}. [${s.stage}] ${s.action.type}${inst} — ${s.action.reasoning.slice(0, 60)} (${s.durationMs}ms)`);
+    console.log(
+      `  ${s.stepIndex + 1}. [${s.stage}] ${s.action.type}${inst}` +
+      ` — ${s.action.reasoning.slice(0, 60)} (${s.durationMs}ms)`
+    );
   }
 
   await stagehand.close();
