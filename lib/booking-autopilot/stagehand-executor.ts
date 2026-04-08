@@ -1509,8 +1509,31 @@ The user will enter CVV and confirm payment themselves.`,
         if (process.env.AI_LOOP_FORM_FILL === "true") {
           trace("Booking.com guest form — AI fill mode (AI_LOOP_FORM_FILL=true).");
           await fillGuestFormWithAI(stagehand, p, trace);
-          await new Promise(r => setTimeout(r, 800));
-          // After filling, click the advance button
+          await new Promise(r => setTimeout(r, 600));
+
+          // React controlled inputs: stagehand.act() uses locator.fill() which sets the DOM
+          // value but doesn't fire React's synthetic events. The submit button stays disabled
+          // until React re-validates. Fire nativeSetter + input/change events on every visible
+          // input so React picks up the values and enables the submit button.
+          const reactFlushed = await raw.evaluate(() => {
+            const nativeInputSetter   = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,   "value")?.set;
+            const nativeTextareaSetter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")?.set;
+            let count = 0;
+            document.querySelectorAll<HTMLInputElement | HTMLTextAreaElement>("input:not([type='hidden']), textarea").forEach(el => {
+              const val = el.value;
+              if (!val) return;
+              if (el instanceof HTMLInputElement && nativeInputSetter)     nativeInputSetter.call(el, val);
+              if (el instanceof HTMLTextAreaElement && nativeTextareaSetter) nativeTextareaSetter.call(el, val);
+              el.dispatchEvent(new Event("input",  { bubbles: true }));
+              el.dispatchEvent(new Event("change", { bubbles: true }));
+              count++;
+            });
+            return count;
+          }).catch(() => 0);
+          trace(`[fill-form] flushed React events on ${reactFlushed} input(s)`);
+          await new Promise(r => setTimeout(r, 400));
+
+          // Click the advance button — React should now have the form as valid
           try {
             await stagehand.act(
               'Click the "Next: Final details" or "Continue" or "Save and continue" button to proceed to the next step'

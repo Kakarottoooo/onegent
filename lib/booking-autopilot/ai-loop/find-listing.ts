@@ -39,10 +39,13 @@ export async function clickTargetListingAI(
   trace(`[find-listing] looking for "${targetHotelName}" in search results`);
 
   // Fast path: try direct act() first
+  // Important: do NOT click the search bar at the top — only click hotel listing cards.
   try {
     await stagehand.act(
-      `Find and click the hotel listing named "${targetHotelName}" in the search results. ` +
-      `Click on its name or "See availability" button to open the hotel detail page.`
+      `In the hotel search results list (NOT the search bar at the top), ` +
+      `find the hotel card named "${targetHotelName}" and click its "See availability" button ` +
+      `or the hotel name link to open the hotel detail page. ` +
+      `Ignore the destination search input field at the top of the page.`
     );
     trace(`[find-listing] direct act() succeeded for "${targetHotelName}"`);
     return "clicked";
@@ -109,7 +112,7 @@ export async function selectCheapestRoomAI(
 
   // Scroll to reveal the room list
   try {
-    await stagehand.act("scroll down to find the available rooms or room prices section");
+    await stagehand.act("scroll down past the hotel photos to find the room list or availability table");
     await sleep(800);
   } catch {
     await page.evaluate(() => window.scrollBy(0, window.innerHeight * 0.8)).catch(() => {});
@@ -118,7 +121,7 @@ export async function selectCheapestRoomAI(
 
   // AI perception to decide room selection action
   const perception = await perceiveAndDecide(page, {
-    task: "Select the cheapest available room. Set quantity to 1 if needed, then click Reserve or Book.",
+    task: "Select the cheapest available room. Set the room quantity dropdown to 1 if needed, then click the Reserve or 'I'll reserve' button.",
     profileHint: { first_name: "", last_name: "", email: "", phone: "" },
     recentSteps: [],
   }).catch(() => null);
@@ -128,7 +131,7 @@ export async function selectCheapestRoomAI(
     // Generic fallback
     try {
       await stagehand.act(
-        "Select 1 room in the cheapest available room option and click the Reserve or Book button"
+        "Set the room quantity to 1 in the cheapest available room row, then click the Reserve or 'I\\'ll reserve' button"
       );
       return "selected";
     } catch {
@@ -154,7 +157,7 @@ export async function selectCheapestRoomAI(
   // Last resort: generic instruction
   try {
     await stagehand.act(
-      "Click the Reserve or Book button for the cheapest available room"
+      "Click the Reserve or 'I\\'ll reserve' button for the cheapest available room"
     );
     return "selected";
   } catch {
