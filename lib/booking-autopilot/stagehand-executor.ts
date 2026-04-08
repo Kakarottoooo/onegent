@@ -893,7 +893,38 @@ The user will enter CVV and confirm payment themselves.`,
             }
             const result = await clickTargetListingAI(stagehand, targetHotelName, trace);
             if (result === "no_availability") return false;
-            return result === "clicked";
+            if (result === "clicked") {
+              // Booking.com opens hotel pages in a new tab.
+              // Wait briefly, then check if a new hotel-detail tab was opened.
+              // If so, navigate raw (current page) to the same URL so all subsequent
+              // operations stay on one page (raw is const — can't reassign).
+              await new Promise(r => setTimeout(r, 1200));
+              try {
+                const allPages = stagehand.context.pages();
+                const hotelPageEntry = allPages
+                  .map(p => ({ p, url: getScopeUrl(getRawPage(p)) }))
+                  .find(({ url }) =>
+                    /booking\.com\/hotel\//.test(url) ||
+                    /secure\.booking\.com\/book/.test(url)
+                  );
+                if (hotelPageEntry) {
+                  const hotelUrl = hotelPageEntry.url;
+                  if (raw.url() !== hotelUrl) {
+                    trace(`[ai-listing] new hotel tab detected — navigating main page to: ${hotelUrl.slice(0, 80)}`);
+                    await raw.goto(hotelUrl, { waitUntil: "domcontentloaded", timeout: 25_000 });
+                    await raw.waitForLoadState("networkidle", { timeout: 10_000 }).catch(() => {});
+                  } else {
+                    trace(`[ai-listing] already on hotel page: ${hotelUrl.slice(0, 80)}`);
+                  }
+                } else {
+                  trace(`[ai-listing] no new hotel tab detected — checking current URL: ${raw.url().slice(0, 80)}`);
+                }
+              } catch (err) {
+                trace(`[ai-listing] post-click tab check failed: ${(err as Error).message?.slice(0, 60)}`);
+              }
+              return true;
+            }
+            return false;
           }
           if (bookingComContext) {
             if (!targetHotelName) {
