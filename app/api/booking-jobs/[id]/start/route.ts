@@ -317,6 +317,7 @@ async function runStepWithRecovery(
 async function runUniversalStep(
   step: BookingJobStep,
   onProgress: (s: BookingJobStep) => Promise<void>,
+  bookingJobId: string,
   jobUserId?: string | null,
 ): Promise<BookingJobStep> {
   const log: DecisionLogEntry[] = [];
@@ -391,7 +392,9 @@ async function runUniversalStep(
       startUrl: resolvedBody.startUrl as string,
       task: resolvedBody.task as string,
       profile: (resolvedBody.profile ?? { first_name: "", last_name: "", email: "", phone: "" }) as BrowserTaskInput["profile"],
-      jobId: (resolvedBody.jobId as string | undefined) ?? step.label,
+      // Keep the live-browser session key aligned with the Tasks UI, which
+      // connects to /api/browser-live/<job.id>/... for inline interaction.
+      jobId: bookingJobId,
       stepIndex: (resolvedBody.stepIndex as number | undefined) ?? 0,
       agentModel: resolvedBody.agentModel as BrowserTaskInput["agentModel"] | undefined,
     };
@@ -570,7 +573,7 @@ export async function POST(_req: NextRequest, { params }: Params) {
 
     // ── Dispatch: universal → Stagehand, activity → agent-runtime, rest → recovery loop ──
     if (steps[i].type === "universal") {
-      steps[i] = await runUniversalStep(steps[i], onProgress, job.user_id);
+      steps[i] = await runUniversalStep(steps[i], onProgress, id, job.user_id);
     } else if ((steps[i].type as string) === "activity") {
       steps[i] = await runActivityStep(steps[i], skillCtx, onProgress);
     } else {
@@ -595,7 +598,11 @@ export async function POST(_req: NextRequest, { params }: Params) {
   }
 
   const doneCount = steps.filter((s) => s.status === "done").length;
-  const finalStatus = doneCount > 0 ? "done" : "failed";
+  const awaitingPaymentCount = steps.filter((s) => s.status === "awaiting_confirmation").length;
+  // Treat "awaiting_confirmation" as a success for job final status — agent did its job,
+  // user just needs to enter CVC.
+  const completedCount = doneCount + awaitingPaymentCount;
+  const finalStatus = completedCount > 0 ? "done" : "failed";
   await updateBookingJobStatus(id, finalStatus, new Date());
 
   // ── Auto-create monitors ──────────────────────────────────────────────
@@ -616,7 +623,16 @@ export async function POST(_req: NextRequest, { params }: Params) {
     const adjusted = steps.filter((s) => s.timeAdjusted || s.usedFallback).length;
 
     let title: string, body: string;
-    if (doneCount === steps.length) {
+    if (awaitingPaymentCount > 0 && doneCount + awaitingPaymentCount === steps.length) {
+      // All steps at payment gate — ready for CVC
+      title = "💳 Ready for payment — enter CVC";
+      body = awaitingPaymentCount === 1
+        ? "Card details pre-filled — tap to open and enter CVC to complete."
+        : `${awaitingPaymentCount} bookings pre-filled — tap to open each and enter CVC.`;
+    } else if (awaitingPaymentCount > 0) {
+      title = `💳 ${awaitingPaymentCount} booking${awaitingPaymentCount > 1 ? "s" : ""} ready for payment`;
+      body = `Enter CVC to complete. ${steps.length - awaitingPaymentCount - doneCount} step${steps.length - awaitingPaymentCount - doneCount !== 1 ? "s" : ""} still in progress.`;
+    } else if (doneCount === steps.length) {
       const note = adjusted > 0 ? ` (${adjusted} smart adjustment${adjusted > 1 ? "s" : ""})` : "";
       title = "✈ Your trip is ready to book!";
       body = `All ${steps.length} bookings pre-filled${note} — tap to open and pay.`;

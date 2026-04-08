@@ -1,4 +1,9 @@
 import type { Frame, Locator, Page } from "playwright";
+import {
+  evaluateLocatorElement,
+  normalizeDigits as normalizeFieldDigits,
+  normalizeLooseText,
+} from "../shared/field-utils";
 
 const BOOKING_COM_PAYMENT_IFRAME_SELECTORS = [
   'iframe[src*="paymentcomponent.booking.com"]',
@@ -74,6 +79,11 @@ export interface BookingComProfile {
   last_name?: string;
   email?: string;
   phone?: string;
+  address_line1?: string;
+  city?: string;
+  state?: string;
+  zip?: string;
+  country?: string;
   card_name?: string;
   card_number?: string;
   card_expiry?: string;
@@ -140,6 +150,55 @@ export interface BookingComVerificationResult {
   paymentFieldVisibility: { cardholder: boolean; cardNumber: boolean; cardExpiry: boolean };
   paymentFieldVerification: { cardholder: boolean; cardNumber: boolean; cardExpiry: boolean };
 }
+
+type BookingComGuestFieldKey =
+  | "full_name"
+  | "first_name"
+  | "last_name"
+  | "email"
+  | "address_line1"
+  | "city"
+  | "state"
+  | "zip"
+  | "country"
+  | "phone";
+
+type BookingComGuestFieldScan = {
+  locator: Locator;
+  key: BookingComGuestFieldKey | null;
+  label: string;
+  normalizedLabel: string;
+  required: boolean;
+  optional: boolean;
+  empty: boolean;
+  tagName: string;
+  inputType: string;
+  value: string;
+  options: string[];
+  ariaInvalid: boolean;
+};
+
+const BOOKING_COM_OPTIONAL_GUEST_FIELD_PATTERNS = [
+  "optional",
+  "special requests",
+  "arrival time",
+  "estimated arrival time",
+  "traveling for work",
+  "travelling for work",
+  "booking for someone else",
+  "main guest",
+  "paperless confirmation",
+  "travel protection",
+  "trip protection",
+  "insurance",
+  "crib",
+  "extra bed",
+  "add to your stay",
+  "airport taxi",
+  "renting a car",
+  "flight for my trip",
+  "promo code",
+];
 
 function isBookingComCheckoutUrl(currentUrl: string): boolean {
   return currentUrl.includes("secure.booking.com/book") || currentUrl.includes("booking.com/book");
@@ -1484,9 +1543,56 @@ export async function fillBookingComGuestForm(
     return;
   }
 
-  async function fillInput(loc: Locator, value: string): Promise<void> {
-    await loc.fill(value);
-    await loc.blur().catch(() => {});
+  async function fillInput(loc: Locator, value: string): Promise<boolean> {
+    const normalizedExpected = normalizeLooseText(value);
+    const digitExpected = normalizeFieldDigits(value);
+
+    try {
+      await loc.fill(value);
+      await loc.blur().catch(() => {});
+    } catch {
+      // Fall through to DOM setter fallback below.
+    }
+
+    const verifyFilledValue = async () => {
+      const currentValue = await loc.inputValue().catch(() => "");
+      const normalizedCurrent = normalizeLooseText(currentValue);
+      const digitCurrent = normalizeFieldDigits(currentValue);
+      if (normalizedExpected && normalizedCurrent === normalizedExpected) return true;
+      return digitExpected.length >= 4 && digitCurrent.endsWith(digitExpected);
+    };
+
+    if (await verifyFilledValue()) {
+      return true;
+    }
+
+    try {
+      await helpers.evaluateLocatorElement(
+        loc,
+        (element, nextValue) => {
+          const control = element as HTMLInputElement | HTMLTextAreaElement;
+          const prototype =
+            element instanceof HTMLTextAreaElement
+              ? window.HTMLTextAreaElement.prototype
+              : window.HTMLInputElement.prototype;
+          const nativeSetter = Object.getOwnPropertyDescriptor(prototype, "value")?.set;
+          control.focus();
+          if (nativeSetter) {
+            nativeSetter.call(control, nextValue);
+          } else {
+            control.value = nextValue;
+          }
+          control.dispatchEvent(new Event("input", { bubbles: true }));
+          control.dispatchEvent(new Event("change", { bubbles: true }));
+          control.blur();
+        },
+        value
+      );
+    } catch {
+      // Ignore DOM setter fallback failures.
+    }
+
+    return verifyFilledValue();
   }
 
   async function fillBySelector(selectors: string[], value: string, label: string): Promise<boolean> {
@@ -1498,7 +1604,7 @@ export async function fillBookingComGuestForm(
         if (tag === "select") continue;
         const nameAttr = await loc.getAttribute("name").catch(() => "");
         if (nameAttr === "ss") continue;
-        await fillInput(loc, value);
+        if (!await fillInput(loc, value)) continue;
         traceLog(`Booking.com: filled ${label} via selector "${sel}" = "${value}"`);
         return true;
       } catch {
@@ -1517,7 +1623,7 @@ export async function fillBookingComGuestForm(
           if (tag === "select") continue;
           const nameAttr = await loc.getAttribute("name").catch(() => "");
           if (nameAttr === "ss") continue;
-          await fillInput(loc, value);
+          if (!await fillInput(loc, value)) continue;
           traceLog(`Booking.com: filled ${label} via getByLabel("${text}") = "${value}"`);
           return true;
         }
@@ -1531,7 +1637,7 @@ export async function fillBookingComGuestForm(
         if (!forId) continue;
         const inp = rawPage.locator(`#${CSS.escape(forId)}`);
         if (!await inp.isVisible({ timeout: 600 }).catch(() => false)) continue;
-        await fillInput(inp, value);
+        if (!await fillInput(inp, value)) continue;
         traceLog(`Booking.com: filled ${label} via label[for="${forId}"] = "${value}"`);
         return true;
       } catch {
@@ -1539,6 +1645,250 @@ export async function fillBookingComGuestForm(
       }
     }
     return false;
+  }
+
+  async function scanGuestFields(): Promise<BookingComGuestFieldScan[]> {
+    const markers = await rawPage.evaluate((optionalPatterns) => {
+      const normalize = (value: string) =>
+        value.toLowerCase().replace(/[^a-z0-9]+/g, " ").replace(/\s+/g, " ").trim();
+      const isVisible = (element: Element | null): element is HTMLElement => {
+        if (!(element instanceof HTMLElement)) return false;
+        const style = window.getComputedStyle(element);
+        const rect = element.getBoundingClientRect();
+        return style.display !== "none" && style.visibility !== "hidden" && rect.width > 0 && rect.height > 0;
+      };
+
+      const classify = (label: string, tagName: string, inputType: string, options: string[]) => {
+        const normalizedLabel = normalize(label);
+        if (!normalizedLabel) return null;
+        if (optionalPatterns.some((pattern) => normalizedLabel.includes(pattern))) return null;
+
+        const has = (...patterns: string[]) => patterns.some((pattern) => normalizedLabel.includes(pattern));
+        const hasCountryOption =
+          tagName === "select" &&
+          options.some((option) => {
+            const normalizedOption = normalize(option);
+            return normalizedOption === "united states" || normalizedOption === "us" || normalizedOption === "usa";
+          });
+
+        if (has("email", "e mail")) return "email";
+        if (inputType === "tel" || has("phone", "mobile", "telephone", "tel")) return "phone";
+        if (has("first name", "given name", "firstname")) return "first_name";
+        if (has("last name", "family name", "surname", "lastname")) return "last_name";
+        if (has("full name", "guest name")) return "full_name";
+        if (has("country region", "country", "region country") || hasCountryOption) return "country";
+        if (has("zip", "postal code", "postcode")) return "zip";
+        if (has("state", "province", "state province", "province state")) return "state";
+        if (has("city", "town")) return "city";
+        if (has("street address", "address line 1", "address 1", "street", "billing address", "address") && !has("email address")) {
+          return "address_line1";
+        }
+        return null;
+      };
+
+      document
+        .querySelectorAll("[data-codex-booking-guest-field-index]")
+        .forEach((element) => {
+          element.removeAttribute("data-codex-booking-guest-field-index");
+          element.removeAttribute("data-codex-booking-guest-field-key");
+        });
+
+      const candidates = Array.from(document.querySelectorAll("input, textarea, select")).filter((element) => {
+        if (!isVisible(element)) return false;
+        if (!(element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement || element instanceof HTMLSelectElement)) {
+          return false;
+        }
+        const inputType = element instanceof HTMLInputElement ? (element.type || "text").toLowerCase() : element.tagName.toLowerCase();
+        return !["hidden", "checkbox", "radio", "button", "submit"].includes(inputType);
+      }) as Array<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>;
+
+      return candidates.map((element, index) => {
+        const tagName = element.tagName.toLowerCase();
+        const inputType = element instanceof HTMLInputElement ? (element.type || "text").toLowerCase() : tagName;
+        const labels =
+          "labels" in element && element.labels
+            ? Array.from(element.labels).map((item) => item.textContent ?? "")
+            : [];
+        const forLabel = element.id ? Array.from(document.querySelectorAll(`label[for="${CSS.escape(element.id)}"]`)).map((item) => item.textContent ?? "") : [];
+        const placeholder = "placeholder" in element ? element.placeholder ?? "" : "";
+        const options =
+          element instanceof HTMLSelectElement
+            ? Array.from(element.options).map((option) => option.textContent ?? option.value ?? "")
+            : [];
+        const nearbyText = [
+          element.closest("label")?.textContent ?? "",
+          element.parentElement?.textContent ?? "",
+          element.closest("div, section, fieldset")?.textContent ?? "",
+          element.getAttribute("aria-label") ?? "",
+          element.getAttribute("name") ?? "",
+          element.getAttribute("id") ?? "",
+          element.getAttribute("autocomplete") ?? "",
+          placeholder,
+        ]
+          .filter(Boolean)
+          .join(" ");
+        const label = [labels.join(" "), forLabel.join(" "), nearbyText].join(" ").trim();
+        const normalizedLabel = normalize(label);
+        const optional = /\(\s*optional\s*\)|\boptional\b/i.test(label) || optionalPatterns.some((pattern) => normalizedLabel.includes(pattern));
+        const required =
+          !optional &&
+          (
+            element.hasAttribute("required") ||
+            element.getAttribute("aria-required") === "true" ||
+            /\*/.test(label)
+          );
+        const value =
+          element instanceof HTMLSelectElement
+            ? element.selectedOptions?.[0]?.textContent ?? element.value ?? ""
+            : element.value ?? "";
+        const key = classify(label, tagName, inputType, options);
+
+        element.setAttribute("data-codex-booking-guest-field-index", String(index));
+        if (key) {
+          element.setAttribute("data-codex-booking-guest-field-key", key);
+        }
+
+        return {
+          index,
+          key,
+          label,
+          normalizedLabel,
+          required,
+          optional,
+          empty: !normalize(value),
+          tagName,
+          inputType,
+          value,
+          options,
+          ariaInvalid: element.getAttribute("aria-invalid") === "true",
+        };
+      });
+    }, BOOKING_COM_OPTIONAL_GUEST_FIELD_PATTERNS).catch(() => [] as Array<{
+      index: number;
+      key: BookingComGuestFieldKey | null;
+      label: string;
+      normalizedLabel: string;
+      required: boolean;
+      optional: boolean;
+      empty: boolean;
+      tagName: string;
+      inputType: string;
+      value: string;
+      options: string[];
+      ariaInvalid: boolean;
+    }>);
+
+    return markers.map((marker) => ({
+      locator: rawPage.locator(`[data-codex-booking-guest-field-index="${marker.index}"]`).first(),
+      key: marker.key as BookingComGuestFieldKey | null,
+      label: marker.label,
+      normalizedLabel: marker.normalizedLabel,
+      required: marker.required,
+      optional: marker.optional,
+      empty: marker.empty,
+      tagName: marker.tagName,
+      inputType: marker.inputType,
+      value: marker.value,
+      options: marker.options,
+      ariaInvalid: marker.ariaInvalid,
+    }));
+  }
+
+  async function fillSelectField(field: BookingComGuestFieldScan, value: string, label: string): Promise<boolean> {
+    const desired = value.trim();
+    const normalizedDesired = normalizeLooseText(desired);
+    if (!desired) return false;
+
+    try {
+      const optionValue = await evaluateLocatorElement(
+        field.locator,
+        (element, requested) => {
+          if (!(element instanceof HTMLSelectElement)) return "";
+          const normalize = (input: string) =>
+            input.toLowerCase().replace(/[^a-z0-9]+/g, " ").replace(/\s+/g, " ").trim();
+          const requestedNormalized = normalize(requested);
+          const aliases = new Set([requestedNormalized]);
+
+          if (requestedNormalized === "us" || requestedNormalized === "usa" || requestedNormalized === "united states") {
+            aliases.add("united states");
+            aliases.add("us");
+            aliases.add("usa");
+            aliases.add("united states of america");
+          }
+
+          const options = Array.from(element.options);
+          const exact =
+            options.find((option) => aliases.has(normalize(option.textContent ?? ""))) ??
+            options.find((option) => aliases.has(normalize(option.value ?? "")));
+          if (exact) return exact.value;
+
+          const loose =
+            options.find((option) => {
+              const optionText = normalize(option.textContent ?? "");
+              const optionValue = normalize(option.value ?? "");
+              return Array.from(aliases).some((alias) => optionText.includes(alias) || optionValue.includes(alias));
+            }) ?? null;
+
+          return loose?.value ?? "";
+        },
+        desired
+      );
+
+      if (!optionValue) return false;
+      await field.locator.selectOption(optionValue).catch(() => {});
+
+      const selectedText = await field.locator.inputValue().catch(() => "");
+      if (normalizeLooseText(selectedText) === normalizedDesired || normalizeLooseText(selectedText).includes(normalizedDesired)) {
+        traceLog(`Booking.com: filled ${label} via detected select field = "${desired}"`);
+        return true;
+      }
+
+      const selectedByDom = await evaluateLocatorElement(
+        field.locator,
+        (element, chosenValue) => {
+          if (!(element instanceof HTMLSelectElement)) return "";
+          element.value = chosenValue;
+          element.dispatchEvent(new Event("input", { bubbles: true }));
+          element.dispatchEvent(new Event("change", { bubbles: true }));
+          return element.selectedOptions?.[0]?.textContent ?? element.value ?? "";
+        },
+        optionValue
+      ).catch(() => "");
+
+      if (normalizeLooseText(selectedByDom) === normalizedDesired || normalizeLooseText(selectedByDom).includes(normalizedDesired)) {
+        traceLog(`Booking.com: filled ${label} via detected select field = "${desired}"`);
+        return true;
+      }
+    } catch {
+      // Ignore and report failure.
+    }
+
+    return false;
+  }
+
+  async function fillDetectedGuestField(field: BookingComGuestFieldScan, value: string, label: string): Promise<boolean> {
+    if (!value.trim()) return false;
+    if (field.tagName === "select") {
+      return fillSelectField(field, value, label);
+    }
+    const ok = await fillInput(field.locator, value);
+    if (ok) {
+      traceLog(`Booking.com: filled ${label} via detected guest field = "${value}"`);
+    }
+    return ok;
+  }
+
+  function summarizeGuestFields(fields: BookingComGuestFieldScan[]): string {
+    return fields
+      .slice(0, 12)
+      .map((field) => {
+        const key = field.key ?? "unclassified";
+        const req = field.required ? "required" : field.optional ? "optional" : "plain";
+        const state = field.empty ? "empty" : "filled";
+        const label = clipDiagnosticText(field.label || field.normalizedLabel || key, 70);
+        return `${key}/${field.tagName}/${req}/${state}: ${label}`;
+      })
+      .join(" || ");
   }
 
   async function fillPhoneFieldInPhoneSection(digitsOnly: string): Promise<boolean> {
@@ -1842,6 +2192,73 @@ export async function fillBookingComGuestForm(
     traceLog(`Booking.com: name split "${p.full_name}" → given="${givenName}" family="${familyName}"`);
   }
 
+  let scannedGuestFields = await scanGuestFields();
+  if (scannedGuestFields.length > 0) {
+    traceLog(`Booking.com guest form diagnostics: visible fields -> ${summarizeGuestFields(scannedGuestFields)}`);
+  } else {
+    traceLog("Booking.com guest form diagnostics: no visible editable fields detected.");
+  }
+  const requiredKeys = Array.from(
+    new Set(
+      scannedGuestFields
+        .filter((field) => field.required && field.key)
+        .map((field) => field.key as BookingComGuestFieldKey)
+    )
+  );
+  if (requiredKeys.length > 0) {
+    traceLog(`Booking.com guest form: detected required fields -> ${requiredKeys.join(", ")}`);
+  }
+
+  const preferredCountry = (p.country ?? "").trim() || "United States";
+  const profileValues = new Map<BookingComGuestFieldKey, string>([
+    ["full_name", p.full_name ?? ""],
+    ["first_name", givenName],
+    ["last_name", familyName],
+    ["email", p.email ?? ""],
+    ["address_line1", p.address_line1 ?? ""],
+    ["city", p.city ?? ""],
+    ["state", p.state ?? ""],
+    ["zip", p.zip ?? ""],
+    ["country", preferredCountry],
+  ]);
+  const profileCoverage = Array.from(profileValues.entries())
+    .filter(([, value]) => !!value.trim())
+    .map(([key]) => key)
+    .join(", ");
+  traceLog(`Booking.com guest form diagnostics: available profile fields -> ${profileCoverage || "none"}`);
+
+  const fillOrder: BookingComGuestFieldKey[] = [
+    "full_name",
+    "first_name",
+    "last_name",
+    "email",
+    "address_line1",
+    "city",
+    "state",
+    "zip",
+    "country",
+  ];
+
+  for (const key of fillOrder) {
+    const value = profileValues.get(key)?.trim() ?? "";
+    if (!value) continue;
+
+    const matchingFields = scannedGuestFields.filter((field) => field.key === key && !field.optional);
+    for (const field of matchingFields) {
+      if (!field.empty) continue;
+      await fillDetectedGuestField(field, value, key.replace(/_/g, " "));
+    }
+
+    if (matchingFields.length > 0) {
+      await rawPage.waitForTimeout(150).catch(() => {});
+    }
+  }
+
+  scannedGuestFields = await scanGuestFields();
+  if (scannedGuestFields.length > 0) {
+    traceLog(`Booking.com guest form diagnostics: fields after fill pass -> ${summarizeGuestFields(scannedGuestFields)}`);
+  }
+
   if (givenName) {
     const ok =
       await fillBySelector(['input[autocomplete="given-name"]', 'input[name*="first" i]', 'input[id*="first" i]'], givenName, "First name") ||
@@ -1953,6 +2370,8 @@ export async function fillBookingComGuestForm(
     await rawPage.waitForTimeout(300).catch(() => {});
   }
 
+  scannedGuestFields = await scanGuestFields();
+
   await rawPage.waitForTimeout(400).catch(() => {});
   try {
     const noThanksBtn = rawPage.locator("button, label, span, div").filter({
@@ -1966,6 +2385,34 @@ export async function fillBookingComGuestForm(
     }
   } catch {
     // Non-fatal.
+  }
+
+  scannedGuestFields = await scanGuestFields();
+  if (scannedGuestFields.length > 0) {
+    traceLog(`Booking.com guest form diagnostics: final pre-submit fields -> ${summarizeGuestFields(scannedGuestFields)}`);
+  }
+
+  const blockingGuestFields = scannedGuestFields.filter((field) => field.required && field.empty);
+  const invalidGuestFields = scannedGuestFields.filter((field) => field.ariaInvalid);
+  const blockingLabels = Array.from(
+    new Set(
+      blockingGuestFields.map((field) => field.key ?? clipDiagnosticText(field.label || field.normalizedLabel, 60))
+    )
+  );
+  const invalidLabels = Array.from(
+    new Set(
+      invalidGuestFields.map((field) => field.key ?? clipDiagnosticText(field.label || field.normalizedLabel, 60))
+    )
+  );
+
+  if (blockingLabels.length > 0) {
+    traceLog(`Booking.com guest form: required fields still empty before final-details submit -> ${blockingLabels.join(", ")}`);
+    return;
+  }
+
+  if (invalidLabels.length > 0) {
+    traceLog(`Booking.com guest form: some fields still look invalid before submit -> ${invalidLabels.join(", ")}`);
+    return;
   }
 
   await rawPage.waitForTimeout(200).catch(() => {});
@@ -2387,9 +2834,14 @@ export async function setBookingComRoomQuantity(rawPage: Page): Promise<{
       }
     }
 
+    // Diagnostic: describe the visible selects so we can understand what's on the page
+    const selectDiag = allSelects.slice(0, 6).map((s) => {
+      const values = Array.from(s.options).map((o) => o.value).slice(0, 5).join(",");
+      return `id=${s.id || "-"} name=${s.name || "-"} val=${s.value} opts=[${values}]`;
+    }).join(" | ");
     return {
       ok: false,
-      summary: `no room quantity dropdown found (visible selects: ${allSelects.length})`,
+      summary: `no room quantity dropdown found (visible selects: ${allSelects.length}) | ${selectDiag}`,
     };
   }).catch(() => ({ ok: false, summary: "DOM room quantity strategy failed" }));
 }
@@ -2416,27 +2868,26 @@ export async function clickBookingComListingTarget(
   }).catch(() => {});
   await rawPage.waitForTimeout(100).catch(() => {});
 
-  await helpers.waitForEvaluateCondition(
-    rawPage,
-    () => {
-      const hasVisibleHotelLink = Array.from(document.querySelectorAll("a[href*='/hotel/']")).some((element) => {
-        if (!(element instanceof HTMLElement)) return false;
-        const style = window.getComputedStyle(element);
-        const rect = element.getBoundingClientRect();
-        return style.visibility !== "hidden" && style.display !== "none" && rect.width > 0 && rect.height > 0;
-      });
-      const hasVisibleCard = Array.from(document.querySelectorAll("[data-testid='card'], .sr_property_block")).some((element) => {
-        if (!(element instanceof HTMLElement)) return false;
-        const style = window.getComputedStyle(element);
-        const rect = element.getBoundingClientRect();
-        return style.visibility !== "hidden" && style.display !== "none" && rect.width > 0 && rect.height > 0;
-      });
-      return hasVisibleHotelLink || hasVisibleCard;
-    },
-    undefined,
-    6_000,
-    250
-  ).catch(() => {});
+  // Wait for real hotel listing cards using Playwright's native waitForSelector (most reliable).
+  // This is more efficient than polling with waitForEvaluateCondition because Playwright uses
+  // a MutationObserver internally and resolves the moment the element appears.
+  // We try the most common card selector first, then fall back to country-specific hotel links.
+  const cardSelector = [
+    "[data-testid='property-card']",
+    "[data-testid='property-card-desktop']",
+    "[data-testid='search-card']",
+    ".sr_property_block",
+  ].join(", ");
+
+  const cardAppeared = await rawPage
+    .waitForSelector(cardSelector, { timeout: 20_000 })
+    .then(() => true)
+    .catch(() => false);
+
+  if (!cardAppeared) {
+    // Fallback: also accept country-specific hotel detail links (e.g. /hotel/us/name.html)
+    traceLog(`Booking.com listing: property-card selector did not appear within 20s — checking for hotel detail links…`);
+  }
 
   let clickPlan: {
     kind: "availability" | "title";
@@ -2447,7 +2898,7 @@ export async function clickBookingComListingTarget(
     y: number;
   } | null = null;
 
-  for (const scrollTarget of [0, 0.2, 0.45]) {
+  for (const scrollTarget of [0, 0.2, 0.45, 0.65, 0.85]) {
     if (scrollTarget > 0) {
       await rawPage.evaluate((position) => {
         const maxScroll = Math.max(
@@ -2460,7 +2911,7 @@ export async function clickBookingComListingTarget(
     }
 
     clickPlan = await rawPage.evaluate(
-      ({ normalizedTarget, targetTokens }) => {
+      ({ normalizedTarget, targetTokens, ignoredTokens }) => {
       const titleSelector = [
         "[data-testid='titleLink']",
         "a[data-testid='titleLink']",
@@ -2505,9 +2956,18 @@ export async function clickBookingComListingTarget(
           if (!normalized) return 0;
 
           const normalizedWords = normalized.split(" ").filter(Boolean);
+          const ignoredTokenSet = new Set(ignoredTokens);
+          const normalizedCoreWords = normalizedWords.filter((token) => !ignoredTokenSet.has(token));
+          const normalizedCore = normalizedCoreWords.join(" ");
+          const targetCore = targetTokens.join(" ");
           const targetWordCount = normalizedTarget.split(" ").filter(Boolean).length;
           const targetWordSet = new Set(targetTokens);
           const genericExtraTokens = new Set([
+            "the",
+            "by",
+            "and",
+            "a",
+            "an",
             "hotel",
             "hotels",
             "new",
@@ -2522,6 +2982,15 @@ export async function clickBookingComListingTarget(
             "properties",
             "us",
           ]);
+
+          if (normalizedCore && targetCore && normalizedCore === targetCore) return 4900;
+          if (normalizedCore && targetCore && normalizedCore.startsWith(`${targetCore} `)) {
+            return 3700;
+          }
+          if (normalizedCore && targetCore && normalizedCore.endsWith(` ${targetCore}`)) {
+            return 3700;
+          }
+
           const extraTokens = normalizedWords.filter((token) => !targetWordSet.has(token));
           const hasMeaningfulExtras = extraTokens.some((token) => !genericExtraTokens.has(token));
 
@@ -2714,7 +3183,7 @@ export async function clickBookingComListingTarget(
         y: rect.top + rect.height / 2,
       };
     },
-    { normalizedTarget, targetTokens }
+    { normalizedTarget, targetTokens, ignoredTokens: Array.from(ignoredTokens) }
     ).catch(() => null);
 
     if (clickPlan) break;
@@ -2772,31 +3241,74 @@ export async function clickBookingComListingTarget(
             const exact = normalized === normalizedTarget;
             const starts = normalized.startsWith(`${normalizedTarget} `);
             const ends = normalized.endsWith(` ${normalizedTarget}`);
+            const anchor = element.closest("a[href]") as HTMLAnchorElement | null;
+            const cta = Array.from(element.querySelectorAll("button, a, [role='button']"))
+              .map((item) => (item.textContent ?? "").trim())
+              .filter(Boolean)
+              .slice(0, 2)
+              .join(" | ");
             return {
               text: text.slice(0, 120),
               overlap,
               exact,
               starts,
               ends,
+              href: anchor?.href ?? "",
+              cta,
             };
           })
-          .filter((value): value is { text: string; overlap: number; exact: boolean; starts: boolean; ends: boolean } => Boolean(value))
+          .filter((value): value is { text: string; overlap: number; exact: boolean; starts: boolean; ends: boolean; href: string; cta: string } => Boolean(value))
           .sort((left, right) => {
             if (right.overlap !== left.overlap) return right.overlap - left.overlap;
             return left.text.length - right.text.length;
           })
           .slice(0, 5)
-          .map((candidate) => `${candidate.text} [overlap=${candidate.overlap}/${targetTokens.length}${candidate.exact ? ",exact" : ""}${candidate.starts ? ",starts" : ""}${candidate.ends ? ",ends" : ""}]`);
+          .map((candidate) => `${candidate.text} [overlap=${candidate.overlap}/${targetTokens.length}${candidate.exact ? ",exact" : ""}${candidate.starts ? ",starts" : ""}${candidate.ends ? ",ends" : ""}${candidate.cta ? `,cta=${candidate.cta.slice(0, 50)}` : ""}${candidate.href ? `,href=${candidate.href.slice(0, 80)}` : ""}]`);
 
         return scored;
       },
       { normalizedTarget, targetTokens }
     ).catch(() => [] as string[]);
 
-    traceLog(`Booking.com listing: could not match a listing card for "${targetHotelName}".`);
-    if (candidateSummary.length > 0) {
+    // Check whether the page has any real hotel listing cards at all.
+    // Exclude nav/footer links like /hotel/index.html — only count country-specific hotel pages.
+    const hasAnyHotelCards = await rawPage.evaluate(() => {
+      const isVisible = (el: Element) => {
+        if (!(el instanceof HTMLElement)) return false;
+        const r = el.getBoundingClientRect();
+        return r.width > 0 && r.height > 0;
+      };
+      // Specific property card elements (most reliable)
+      const hasCard = Array.from(document.querySelectorAll(
+        "[data-testid='card'], [data-testid='property-card'], [data-testid*='property-card'], .sr_property_block"
+      )).some(isVisible);
+      if (hasCard) return true;
+      // Hotel detail links: /hotel/{2-letter-country}/ (not /hotel/index.html or /hotel/us.html)
+      return Array.from(document.querySelectorAll("a[href*='/hotel/']")).some((el) => {
+        if (!isVisible(el)) return false;
+        return /\/hotel\/[a-z]{2}\//.test((el as HTMLAnchorElement).href ?? "");
+      });
+    }).catch(() => false);
+
+    if (!hasAnyHotelCards) {
+      // Check if the page looks like a CAPTCHA / bot-detection block.
+      const pageText = await rawPage.evaluate(() => (document.body?.innerText ?? "").toLowerCase()).catch(() => "");
+      const botSignals = [
+        "security check", "verify you are human", "are you a robot", "captcha",
+        "unusual traffic", "automated access", "access denied",
+        "robot or human", "just a moment", "checking your browser",
+      ];
+      const isBotBlock = botSignals.some((s) => pageText.includes(s));
+      if (isBotBlock) {
+        traceLog(`Booking.com listing: bot-detection/CAPTCHA page detected — no hotel cards visible. User must open the link manually.`);
+      } else {
+        traceLog(`Booking.com listing: no hotel cards on page for "${targetHotelName}" — hotel unavailable for selected dates (no search results).`);
+      }
+    } else if (candidateSummary.length > 0) {
+      traceLog(`Booking.com listing: could not match "${targetHotelName}" — page has hotels but none matched (hotel may be sold out or listed under a different name).`);
       traceLog(`Booking.com listing diagnostics: top title candidates -> ${candidateSummary.join(" || ")}`);
     } else {
+      traceLog(`Booking.com listing: could not match a listing card for "${targetHotelName}".`);
       traceLog("Booking.com listing diagnostics: no visible title candidates found with current selectors.");
     }
     return false;

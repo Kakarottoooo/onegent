@@ -7,12 +7,15 @@ interface Props {
   /** Natural browser viewport size (default 1280×800) */
   browserWidth?: number;
   browserHeight?: number;
+  /** Fill parent container instead of using aspect-ratio constraint */
+  fullscreen?: boolean;
 }
 
 export default function BrowserLiveView({
   jobId,
   browserWidth = 1280,
   browserHeight = 800,
+  fullscreen = false,
 }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
   const imgRef = useRef<HTMLImageElement>(null);
@@ -22,11 +25,15 @@ export default function BrowserLiveView({
   const closedRef = useRef(false);
   const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lastFrameAtRef = useRef(0);
+  const reconnectAttemptsRef = useRef(0);
+  const everConnectedRef = useRef(false);
 
   // ── SSE screenshot stream ───────────────────────────────────────────────────
   useEffect(() => {
     closedRef.current = false;
     lastFrameAtRef.current = 0;
+    reconnectAttemptsRef.current = 0;
+    everConnectedRef.current = false;
     let es: EventSource | null = null;
 
     const clearReconnectTimer = () => {
@@ -41,6 +48,8 @@ export default function BrowserLiveView({
 
       es.addEventListener("connected", () => {
         clearReconnectTimer();
+        reconnectAttemptsRef.current = 0;
+        everConnectedRef.current = true;
         setStatus("live");
       });
       es.addEventListener("closed", () => {
@@ -54,11 +63,21 @@ export default function BrowserLiveView({
           setStatus("live");
           frameCount.current++;
           lastFrameAtRef.current = Date.now();
+          reconnectAttemptsRef.current = 0;
+          everConnectedRef.current = true;
           clearReconnectTimer();
         }
       };
       es.onerror = () => {
         if (closedRef.current) return;
+        reconnectAttemptsRef.current += 1;
+        // If we never got a frame/connection and have tried several times,
+        // the session doesn't exist (404) — stop retrying and show "closed".
+        if (!everConnectedRef.current && reconnectAttemptsRef.current >= 4) {
+          setStatus("closed");
+          es?.close();
+          return;
+        }
         setStatus("connecting");
         if (!reconnectTimerRef.current) {
           reconnectTimerRef.current = setTimeout(() => {
@@ -182,9 +201,12 @@ export default function BrowserLiveView({
       </div>
     ) : status === "closed" ? (
       <div style={overlayStyle}>
-        <div style={{ fontSize: 24, marginBottom: 8 }}>✅</div>
+        <div style={{ fontSize: 24, marginBottom: 8 }}>🏁</div>
         <div style={{ fontFamily: "var(--font-dm-sans)", fontSize: 13, color: "#fff" }}>
           Session ended
+        </div>
+        <div style={{ fontFamily: "var(--font-dm-sans)", fontSize: 11, color: "rgba(255,255,255,0.5)", marginTop: 4 }}>
+          Agent has finished or session was not active
         </div>
       </div>
     ) : status === "error" ? (
@@ -197,7 +219,7 @@ export default function BrowserLiveView({
     ) : null;
 
   return (
-    <div style={{ position: "relative", width: "100%" }}>
+    <div style={{ position: "relative", width: "100%", ...(fullscreen ? { height: "100%" } : {}) }}>
       {/* Live badge */}
       {status === "live" && (
         <div style={{
@@ -239,11 +261,13 @@ export default function BrowserLiveView({
           position: "relative",
           cursor: status === "live" ? "crosshair" : "default",
           outline: "2px solid transparent",
-          borderRadius: 10,
+          borderRadius: fullscreen ? 0 : 10,
           overflow: "hidden",
           backgroundColor: "#1e1e1e",
-          aspectRatio: `${browserWidth} / ${browserHeight}`,
-          width: "100%",
+          ...(fullscreen
+            ? { width: "100%", height: "100%" }
+            : { aspectRatio: `${browserWidth} / ${browserHeight}`, width: "100%" }
+          ),
         }}
       >
         {/* eslint-disable-next-line @next/next/no-img-element */}

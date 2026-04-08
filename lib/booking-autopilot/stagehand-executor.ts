@@ -110,6 +110,70 @@ function getRawPage(stagehandPage: unknown): Page {
   return (((stagehandPage as { page?: Page }).page ?? stagehandPage) as Page);
 }
 
+/**
+ * Generate a direct Booking.com hotel detail URL from a hotel name.
+ * Booking.com hotel URLs follow: booking.com/hotel/{countryCode}/{slug}.html
+ * This lets us bypass the searchresults.html endpoint which blocks headless browsers.
+ */
+function buildBookingComDirectHotelUrl(hotelName: string, searchUrl: string): string | null {
+  if (!hotelName) return null;
+
+  // Generate Booking.com slug: lowercase, replace non-alphanumeric runs with hyphens
+  const slug = hotelName
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+
+  if (!slug) return null;
+
+  // Infer country code from city/country mentions in the search URL or hotel name
+  const combined = (searchUrl + " " + hotelName).toLowerCase();
+  let countryCode = "us"; // default
+  if (/new york|los angeles|chicago|houston|miami|las vegas|san francisco|boston|washington dc|seattle|denver|dallas|atlanta|philadelphia|phoenix|nashville|portland|austin/.test(combined)) countryCode = "us";
+  else if (/london|manchester|edinburgh|glasgow|liverpool|birmingham|bristol|leeds/.test(combined)) countryCode = "gb";
+  else if (/paris|lyon|marseille|nice|bordeaux|toulouse|strasbourg/.test(combined)) countryCode = "fr";
+  else if (/berlin|munich|hamburg|frankfurt|cologne|stuttgart|dusseldorf/.test(combined)) countryCode = "de";
+  else if (/rome|milan|venice|florence|naples|turin|bologna/.test(combined)) countryCode = "it";
+  else if (/madrid|barcelona|seville|valencia|malaga|ibiza/.test(combined)) countryCode = "es";
+  else if (/tokyo|osaka|kyoto|nagoya|sapporo|yokohama/.test(combined)) countryCode = "jp";
+  else if (/sydney|melbourne|brisbane|perth|gold coast|adelaide/.test(combined)) countryCode = "au";
+  else if (/toronto|vancouver|montreal|calgary|ottawa|edmonton/.test(combined)) countryCode = "ca";
+  else if (/amsterdam|rotterdam|the hague|utrecht/.test(combined)) countryCode = "nl";
+  else if (/dubai|abu dhabi|sharjah/.test(combined)) countryCode = "ae";
+  else if (/singapore/.test(combined)) countryCode = "sg";
+  else if (/bangkok|phuket|chiang mai/.test(combined)) countryCode = "th";
+  else if (/hong kong/.test(combined)) countryCode = "hk";
+  else if (/seoul|busan/.test(combined)) countryCode = "kr";
+
+  // Extract date/occupancy params from the original search URL.
+  // Hotel detail pages use ISO date format (checkin=YYYY-MM-DD), not the split
+  // checkin_year/month/monthday format used by searchresults.html.
+  const qIndex = searchUrl.indexOf("?");
+  const urlParams = new URLSearchParams(qIndex >= 0 ? searchUrl.slice(qIndex + 1) : "");
+  const params = new URLSearchParams();
+
+  const ciy = urlParams.get("checkin_year");
+  const cim = urlParams.get("checkin_month");
+  const cid = urlParams.get("checkin_monthday");
+  if (ciy && cim && cid) {
+    params.set("checkin", `${ciy}-${String(cim).padStart(2, "0")}-${String(cid).padStart(2, "0")}`);
+  }
+
+  const coy = urlParams.get("checkout_year");
+  const com = urlParams.get("checkout_month");
+  const cod = urlParams.get("checkout_monthday");
+  if (coy && com && cod) {
+    params.set("checkout", `${coy}-${String(com).padStart(2, "0")}-${String(cod).padStart(2, "0")}`);
+  }
+
+  const adults = urlParams.get("group_adults");
+  if (adults) params.set("group_adults", adults);
+  const rooms = urlParams.get("no_rooms");
+  if (rooms) params.set("no_rooms", rooms);
+
+  return `https://www.booking.com/hotel/${countryCode}/${slug}.html?${params.toString()}`;
+}
+
 function createStageAssessmentDeps(): StageAssessmentDependencies {
   return {
     getVisibleFieldCategoryKeys,
@@ -329,6 +393,14 @@ export async function runBrowserTask(
     await stagehand.init();
     // v3 API: get active page from context (resolvePage is private)
     const page = stagehand.context.activePage() ?? await stagehand.context.newPage();
+    // Register the page in the live-view store immediately so SSE stream can
+    // take screenshots during the entire booking process (not just after payment).
+    // Only in local mode — Browserbase sessions have their own live view URL.
+    if (!useCloud && input.jobId) {
+      browserSessionStore.set(input.jobId, getRawPage(page), 15 * 60 * 1000);
+      trace('Local mode: registered page in live-view store for real-time streaming.');
+    }
+
 
     // 鈹€鈹€ Inject saved session cookies (e.g. Booking.com login) 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
     // Cookies are saved once via: node scripts/save-booking-cookies.mjs
@@ -360,6 +432,57 @@ export async function runBrowserTask(
 
     // Navigate to the starting URL
     await page.goto(input.startUrl, { waitUntil: "domcontentloaded", timeoutMs: 30_000 });
+
+    // For Booking.com search results (React SPA), wait for networkidle so JS can finish
+    // fetching and rendering hotel listing cards before we check for them.
+    if (input.startUrl.includes("booking.com/searchresults")) {
+      trace("Booking.com searchresults: waiting for networkidle (React SPA hydration)…");
+      await getRawPage(page)
+        .waitForLoadState("networkidle", { timeout: 20_000 })
+        .catch(() => trace("Booking.com searchresults: networkidle timeout — continuing anyway."));
+    }
+
+    // Post-goto URL checks — Playwright considers chrome error pages a "successful" navigation.
+    {
+      const landedUrl = getRawPage(page).url();
+
+      // Hard browser error (network failure, DNS, crash)
+      if (landedUrl.startsWith("chrome-error://") || landedUrl === "about:blank") {
+        trace(`Page load failed after navigation — url="${landedUrl}". This is a network or browser error.`);
+        throw new Error(`Page failed to load: ${landedUrl}. Check network connectivity or proxy settings.`);
+      }
+
+      // Booking.com city/region redirect — hotel not found in search, try fallback URL
+      const isCityRedirect = /booking\.com\/(city|region|country|district)\//i.test(landedUrl);
+      if (isCityRedirect && input.startUrl.includes("booking.com")) {
+        const fallback = input.fallbackUrl ?? input.task.match(/fallback URL[^:]*:\s*(https?:\/\/\S+)/i)?.[1]?.replace(/\s.*$/, "");
+        if (fallback && fallback !== input.startUrl) {
+          trace(`Booking.com redirected to city page (${landedUrl}) — hotel not found via primary search URL. Trying fallback: ${fallback}`);
+          await page.goto(fallback, { waitUntil: "domcontentloaded", timeoutMs: 30_000 });
+          const fallbackLanded = getRawPage(page).url();
+          if (/booking\.com\/(city|region|country|district)\//i.test(fallbackLanded)) {
+            trace(`Fallback also redirected to city page (${fallbackLanded}) — hotel unavailable on Booking.com.`);
+            return {
+              status: "no_availability",
+              screenshotBase64: "",
+              handoffUrl: input.startUrl,
+              summary: "This property wasn't found in Booking.com search results for the requested dates.",
+              debugTrace,
+            };
+          }
+          trace(`Fallback navigation succeeded — landed on: ${fallbackLanded}`);
+        } else {
+          trace(`Booking.com redirected to city page (${landedUrl}) and no fallback URL available — hotel unavailable.`);
+          return {
+            status: "no_availability",
+            screenshotBase64: "",
+            handoffUrl: input.startUrl,
+            summary: "This property wasn't found in Booking.com search results for the requested dates.",
+            debugTrace,
+          };
+        }
+      }
+    }
 
     // Dev: inject a red cursor dot so you can watch the agent interact visually.
     // Inject on the BrowserContext (not the page) so it persists across all tabs/navigations.
@@ -579,6 +702,11 @@ export async function runBrowserTask(
           // fallbackUrl is also a booking.com search URL, so no bot-check needed here.
           trace(`booking.com search failed (${landedUrl}). Navigating to fallback: ${fallback}`);
           await page.goto(fallback, { waitUntil: "domcontentloaded", timeoutMs: 30_000 });
+          if (fallback.includes("booking.com/searchresults")) {
+            await getRawPage(page)
+              .waitForLoadState("networkidle", { timeout: 20_000 })
+              .catch(() => trace("Booking.com fallback searchresults: networkidle timeout."));
+          }
         } else {
           trace(`booking.com search failed but no fallback URL found. Letting agent handle it.`);
         }
@@ -703,11 +831,22 @@ The user will enter CVV and confirm payment themselves.`,
     const hasProfile = !!(p.full_name || p.first_name || p.last_name || p.email || p.phone);
     trace(`Profile check: hasProfile=${hasProfile}, fields=${[p.full_name?"full_name":null, p.first_name?"first_name":null, p.email?"email":null, p.phone?"phone":null].filter(Boolean).join(",") || "none"}`);
     const requestedDates = extractRequestedStayDates(input.task);
+    const targetHotelFromTask = extractTargetHotelName(input.task);
+    const targetHotelFromStartUrl = extractTargetHotelNameFromUrl(input.startUrl);
+    const targetHotelFromCurrentUrl = extractTargetHotelNameFromUrl(currentUrl);
     const targetHotelName =
-      extractTargetHotelName(input.task) ||
-      extractTargetHotelNameFromUrl(input.startUrl) ||
-      extractTargetHotelNameFromUrl(currentUrl);
-    trace(`Target hotel: ${targetHotelName ?? "unknown"}`);
+      targetHotelFromTask ||
+      targetHotelFromStartUrl ||
+      targetHotelFromCurrentUrl;
+    const targetHotelSource =
+      targetHotelFromTask ? "task" :
+      targetHotelFromStartUrl ? "startUrl" :
+      targetHotelFromCurrentUrl ? "currentUrl" :
+      "unknown";
+    trace(
+      `Target hotel: ${targetHotelName ?? "unknown"} ` +
+      `(source=${targetHotelSource}, startUrl=${input.startUrl.slice(0, 140)})`
+    );
     let assessment = await assessBookingStage({
       rawPage: raw,
       stagehand,
@@ -750,6 +889,33 @@ The user will enter CVV and confirm payment themselves.`,
             }, trace);
             if (!clicked) {
               trace(`Booking.com listing: no clickable result matched "${targetHotelName}".`);
+
+              // Fallback: navigate directly to the hotel detail page using a slug-derived URL.
+              // The searchresults.html endpoint is often blocked by Booking.com's headless detection,
+              // but individual hotel pages (booking.com/hotel/{cc}/{slug}.html) are not.
+              const directUrl = buildBookingComDirectHotelUrl(targetHotelName, input.startUrl);
+              if (directUrl) {
+                trace(`Booking.com listing: trying direct hotel URL: ${directUrl}`);
+                try {
+                  await raw.goto(directUrl, { waitUntil: "domcontentloaded", timeout: 25_000 });
+                  await raw.waitForLoadState("networkidle", { timeout: 12_000 }).catch(() => {});
+                  const landedUrl = raw.url();
+                  if (/booking\.com\/hotel\/[a-z]{2}\//.test(landedUrl)) {
+                    trace(`Booking.com listing: direct hotel URL worked — on hotel page: ${landedUrl}`);
+                    return true; // room_selection stage will handle this on the next iteration
+                  }
+                  trace(`Booking.com listing: direct hotel URL redirected to non-hotel page: ${landedUrl}`);
+                } catch (err) {
+                  trace(`Booking.com listing: direct hotel URL navigation failed: ${err}`);
+                }
+              }
+
+              // Capture a debug screenshot so we can see what the page actually looked like
+              // when the listing match failed (helps diagnose bot detection / empty results).
+              try {
+                const debugShot = await raw.screenshot({ type: "jpeg", quality: 40, timeout: 3000 });
+                trace(`[debug-screenshot] data:image/jpeg;base64,${debugShot.toString("base64")}`);
+              } catch { /* screenshot is best-effort */ }
               return false;
             }
             return true;
@@ -1235,13 +1401,39 @@ The user will enter CVV and confirm payment themselves.`,
     if (assessment.stage === "listing") {
       trace("Final state check concluded the run was still on a listing/date-selection page.");
       const screenshotBase64 = `data:image/png;base64,${(await page.screenshot({ type: "png" })).toString("base64")}`;
+
+      // Distinguish "hotel sold out / not in results" from generic listing stuck.
+      // The trace logs from clickBookingComListingTarget use these specific phrases:
+      //   - "hotel unavailable for selected dates (no search results)" → zero hotel cards on page
+      //   - "page has hotels but none matched" → other hotels present, ours isn't
+      // We also check the page text for explicit no-availability signals.
+      const lowerPageText = pageText.toLowerCase();
+      const noAvailabilityInText = NO_AVAILABILITY_SIGNALS.some((sig) => lowerPageText.includes(sig));
+      const hotelNotInResults = debugTrace?.some((line) =>
+        line.includes("hotel unavailable for selected dates") ||
+        line.includes("page has hotels but none matched")
+      ) ?? false;
+
+      if (noAvailabilityInText || hotelNotInResults) {
+        const hotelLabel = targetHotelName ?? "This property";
+        trace(`Listing failure classified as no_availability: noAvailabilityInText=${noAvailabilityInText}, hotelNotInResults=${hotelNotInResults}`);
+        return {
+          status: "no_availability",
+          screenshotBase64,
+          handoffUrl: currentUrl,
+          sessionUrl,
+          summary: `${hotelLabel} was not found in Booking.com search results — the property may be unavailable or sold out for the requested dates.`,
+          debugTrace,
+        };
+      }
+
       return {
         status: "error",
         screenshotBase64,
         handoffUrl: currentUrl,
         sessionUrl,
         summary: "The requested dates are unavailable or couldn't be selected on this property. Open the link to choose different dates or book manually.",
-        error: "Stuck at listing page 鈥?dates unavailable or not selectable",
+        error: "Stuck at listing page — dates unavailable or not selectable",
         debugTrace,
       };
     }
@@ -1600,6 +1792,7 @@ The user will enter CVV and confirm payment themselves.`,
     };
   } finally {
     if (!keepBrowserOpen) {
+      if (input.jobId) browserSessionStore.delete(input.jobId);
       await stagehand.close().catch(() => {});
     }
   }

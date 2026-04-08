@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { HotelRecommendationCard } from "@/lib/types";
+import { buildBookingComUrl } from "@/lib/agent/planners/booking-links";
 import ProfilePicker, { PickedProfile } from "./ProfilePicker";
 
 interface HotelCardProps {
@@ -22,6 +23,47 @@ export default function HotelCard({ card, index, checkIn, checkOut, guests }: Ho
   // Validate that dates are present and in the future before booking.
   const today = new Date().toISOString().split("T")[0];
   const datesValid = checkIn && checkOut && checkIn > today;
+
+  function buildBookingLocalityHint(): string {
+    const addressParts = (hotel.address ?? "")
+      .split(",")
+      .map((part) => part.trim())
+      .filter(Boolean);
+    const addressSuffix =
+      addressParts.length >= 2
+        ? addressParts.slice(-2).join(", ")
+        : addressParts[0] ?? "";
+
+    const candidates = [
+      card.location_summary?.trim(),
+      hotel.neighborhood?.trim()
+        ? `${hotel.neighborhood.trim()}, ${addressSuffix || "New York"}`
+        : "",
+      hotel.address?.trim(),
+    ].filter(Boolean) as string[];
+
+    for (const candidate of candidates) {
+      const cleaned = candidate
+        .replace(/\b\d+(?:\.\d+)?\s*(?:mi|miles?|km)\s+from\s+(?:center|centre|downtown)\b/gi, " ")
+        .replace(/\b\d+\s*min(?:ute)?s?\s+walk\b/gi, " ")
+        .replace(/\s+/g, " ")
+        .trim();
+      if (!cleaned) continue;
+
+      const parts = cleaned
+        .split(",")
+        .map((part) => part.trim())
+        .filter(Boolean);
+
+      if (parts.length >= 2) {
+        return parts.slice(-2).join(", ");
+      }
+
+      return cleaned;
+    }
+
+    return "New York";
+  }
 
   function handleBook() {
     if (booking) return;
@@ -51,25 +93,20 @@ export default function HotelCard({ card, index, checkIn, checkOut, guests }: Ho
       const numAdults = guests ?? 1;
 
       // Extract a short city hint from location_summary (e.g. "West Village, New York" → "New York")
-      const locationHint = card.location_summary
-        ? card.location_summary.split(",").slice(-1)[0].trim()
-        : "";
+      const locationHint = buildBookingLocalityHint();
 
-      // Search booking.com by "Hotel Name City" for best match.
+      // Search booking.com by hotel name, while passing city separately.
       // Strip slashes and extra punctuation that confuse booking.com's search.
-      const rawSearch = locationHint ? `${hotel.name} ${locationHint}` : hotel.name;
-      const searchTerm = rawSearch.replace(/[/\\|]/g, " ").replace(/\s+/g, " ").trim();
+      const searchTerm = hotel.name.replace(/[/\\|]/g, " ").replace(/\s+/g, " ").trim();
 
-      const bookingComParams: Record<string, string> = {
-        ss: searchTerm,
-        group_adults: String(numAdults),
-        no_rooms: "1",
-        selected_currency: "USD",
-        lang: "en-us",
-      };
-      if (checkIn) bookingComParams.checkin = checkIn;
-      if (checkOut) bookingComParams.checkout = checkOut;
-      const bookingComUrl = `https://www.booking.com/searchresults.html?${new URLSearchParams(bookingComParams)}`;
+      const bookingComUrl = buildBookingComUrl({
+        hotelName: searchTerm,
+        city: locationHint,
+        checkin: checkIn,
+        checkout: checkOut,
+        adults: numAdults,
+        rooms: 1,
+      });
 
       // Use Booking.com as the primary startUrl — dates are embedded in the URL so
       // the agent never has to guess or update a date picker on the hotel's own page.

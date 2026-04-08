@@ -59,6 +59,7 @@ function inferAgentDecision(step: BookingJobStep): string {
 // ── Visual helpers ─────────────────────────────────────────────────────────────
 
 function stepStatusColor(step: BookingJobStep): string {
+  if (step.status === "awaiting_confirmation") return "rgba(22,163,74,0.85)";
   const sem = computeStepSemanticStatus(step);
   return STEP_SEMANTIC_DISPLAY[sem].color;
 }
@@ -82,6 +83,7 @@ function stepStatusLabel(step: BookingJobStep): string {
   }
   if (step.retryScheduledFor) return `Retry scheduled for ${formatTime(step.retryScheduledFor)}`;
   if (step.actionItem) return "Needs your choice";
+  if (step.status === "awaiting_confirmation") return "Ready for payment — enter CVC";
   if (step.status === "loading") return "Agent working…";
   if (step.status === "no_availability") return "No availability found";
   if (step.status === "error") return "Failed";
@@ -869,27 +871,66 @@ function InterventionBanner({ step, jobId }: { step: BookingJobStep; jobId: stri
         </div>
       </div>
 
-      {/* Inline live browser view */}
+      {/* Full-screen live browser modal */}
       {showLive && isPaymentWait && (
         <div style={{
-          borderTop: `0.5px solid ${border}`,
-          padding: "12px 14px",
-          backgroundColor: "var(--bg, #fafaf9)",
+          position: "fixed", inset: 0, zIndex: 9999,
+          backgroundColor: "#0a0a0a",
+          display: "flex", flexDirection: "column",
         }}>
-          <p style={{
-            fontFamily: "var(--font-dm-sans)", fontSize: 11, fontWeight: 700,
-            color: "var(--text-muted, #aaa)", textTransform: "uppercase",
-            letterSpacing: "0.06em", marginBottom: 8,
+          {/* Header bar */}
+          <div style={{
+            display: "flex", alignItems: "center", justifyContent: "space-between",
+            padding: "12px 16px", flexShrink: 0,
+            backgroundColor: "#111",
+            borderBottom: "0.5px solid rgba(255,255,255,0.1)",
           }}>
-            Live browser — click to interact
-          </p>
-          <BrowserLiveView jobId={jobId} />
-          <p style={{
-            fontFamily: "var(--font-dm-sans)", fontSize: 11,
-            color: "var(--text-secondary, #666)", marginTop: 8, lineHeight: 1.5,
+            <div style={{ minWidth: 0 }}>
+              <p style={{
+                fontFamily: "var(--font-dm-sans)", fontSize: 14, fontWeight: 700,
+                color: "#fff", margin: 0,
+              }}>
+                💳 Live Browser — Enter CVC
+              </p>
+              <p style={{
+                fontFamily: "var(--font-dm-sans)", fontSize: 11,
+                color: "rgba(255,255,255,0.45)", margin: 0, marginTop: 1,
+                overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+              }}>
+                {step.label ?? "Complete payment"}
+              </p>
+            </div>
+            <button
+              onClick={() => setShowLive(false)}
+              style={{
+                flexShrink: 0, marginLeft: 12,
+                background: "rgba(255,255,255,0.1)", border: "none", borderRadius: 8,
+                color: "#fff", padding: "8px 16px", cursor: "pointer",
+                fontFamily: "var(--font-dm-sans)", fontSize: 13, fontWeight: 600,
+              }}
+            >
+              Done ✕
+            </button>
+          </div>
+
+          {/* Browser fills remaining space */}
+          <div style={{ flex: 1, overflow: "hidden", position: "relative" }}>
+            <BrowserLiveView jobId={jobId} fullscreen />
+          </div>
+
+          {/* Bottom hint */}
+          <div style={{
+            flexShrink: 0, padding: "10px 16px", textAlign: "center",
+            backgroundColor: "#111",
+            borderTop: "0.5px solid rgba(255,255,255,0.1)",
           }}>
-            Click anywhere in the browser above to interact. Enter CVV and click 完成预订 to finish.
-          </p>
+            <p style={{
+              fontFamily: "var(--font-dm-sans)", fontSize: 12,
+              color: "rgba(255,255,255,0.5)", margin: 0,
+            }}>
+              Click the CVC field → type your 3-digit code → click confirm
+            </p>
+          </div>
         </div>
       )}
 
@@ -950,7 +991,7 @@ function InterventionBanner({ step, jobId }: { step: BookingJobStep; jobId: stri
                 lineHeight: 1.5, textAlign: "center",
               }}>
                 <span style={{ fontSize: 20 }}>🖥️</span><br />
-                <strong>Use the local browser window</strong><br />
+                <strong>Use OneAgent live browser or the local browser window</strong><br />
                 <span style={{ fontSize: 12, color: "var(--text-secondary, #666)" }}>
                   The booking session is open in the Playwright browser on your screen.<br />
                   Find that window, enter the CVV, and click 完成预订.
@@ -989,6 +1030,24 @@ function JobCard({ job, onRefresh, sessionId }: { job: BookingJob; onRefresh?: (
   const [expanded, setExpanded] = useState(job.status !== "pending");
   const [deleting, setDeleting] = useState(false);
   const [resetting, setResetting] = useState(false);
+  const [showLiveModal, setShowLiveModal] = useState(false);
+  const [liveViewKey, setLiveViewKey] = useState(0);
+  const prevStatusRef = useRef(job.status);
+
+  // Auto-open live modal when job transitions to "running" or "done".
+  // Increment liveViewKey each time to force BrowserLiveView to remount and reconnect.
+  useEffect(() => {
+    const prev = prevStatusRef.current;
+    if (
+      (job.status === "running" && prev !== "running") ||
+      (job.status === "done" && prev === "running")
+    ) {
+      setShowLiveModal(true);
+      setLiveViewKey((k) => k + 1);
+    }
+    prevStatusRef.current = job.status;
+  }, [job.status]);
+
   const doneCount = job.steps.filter((s) => s.status === "done").length;
   const actionCount = job.steps.filter((s) => s.actionItem).length;
   const adjustedCount = job.steps.filter((s) => s.timeAdjusted || s.usedFallback).length;
@@ -1085,6 +1144,17 @@ function JobCard({ job, onRefresh, sessionId }: { job: BookingJob; onRefresh?: (
             </span>
           </div>
         </div>
+        {(job.status === "running" || (isComplete && Date.now() - new Date(job.updated_at).getTime() < 90_000)) && (
+          <button onClick={(e) => { e.stopPropagation(); setShowLiveModal(true); setLiveViewKey((k) => k + 1); }} style={{
+            flexShrink: 0, padding: "7px 12px", borderRadius: 10,
+            border: "1px solid var(--gold, #D4A34B)", backgroundColor: "transparent",
+            color: job.status === "running" ? "var(--gold, #D4A34B)" : "rgba(212,163,75,0.5)",
+            fontFamily: "var(--font-dm-sans)", fontSize: 12,
+            fontWeight: 600, cursor: "pointer", whiteSpace: "nowrap",
+          }}>
+            {job.status === "running" ? "🖥️ Watch live" : "🖥️ Replay"}
+          </button>
+        )}
         {job.status === "done" && doneCount > 0 && (
           <button onClick={(e) => { e.stopPropagation(); openAll(); }} style={{
             flexShrink: 0, padding: "7px 14px", borderRadius: 10,
@@ -1174,6 +1244,51 @@ function JobCard({ job, onRefresh, sessionId }: { job: BookingJob; onRefresh?: (
           {isComplete && <SatisfactionWidget jobId={job.id} />}
 
         </>
+      )}
+
+      {/* Full-screen live browser modal — triggered by "Watch live" button while running */}
+      {showLiveModal && (
+        <div style={{
+          position: "fixed", inset: 0, zIndex: 9999,
+          backgroundColor: "#0a0a0a",
+          display: "flex", flexDirection: "column",
+        }}>
+          <div style={{
+            display: "flex", alignItems: "center", justifyContent: "space-between",
+            padding: "12px 16px", flexShrink: 0,
+            backgroundColor: "#111",
+            borderBottom: "0.5px solid rgba(255,255,255,0.1)",
+          }}>
+            <div style={{ minWidth: 0 }}>
+              <p style={{ fontFamily: "var(--font-dm-sans)", fontSize: 14, fontWeight: 700, color: "#fff", margin: 0 }}>
+                🖥️ Agent working — live view
+              </p>
+              <p style={{ fontFamily: "var(--font-dm-sans)", fontSize: 11, color: "rgba(255,255,255,0.45)", margin: 0, marginTop: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                {job.trip_label}
+              </p>
+            </div>
+            <button onClick={() => setShowLiveModal(false)} style={{
+              flexShrink: 0, marginLeft: 12,
+              background: "rgba(255,255,255,0.1)", border: "none", borderRadius: 8,
+              color: "#fff", padding: "8px 16px", cursor: "pointer",
+              fontFamily: "var(--font-dm-sans)", fontSize: 13, fontWeight: 600,
+            }}>
+              Close ✕
+            </button>
+          </div>
+          <div style={{ flex: 1, overflow: "hidden", position: "relative" }}>
+            <BrowserLiveView key={liveViewKey} jobId={job.id} fullscreen />
+          </div>
+          <div style={{
+            flexShrink: 0, padding: "10px 16px", textAlign: "center",
+            backgroundColor: "#111",
+            borderTop: "0.5px solid rgba(255,255,255,0.1)",
+          }}>
+            <p style={{ fontFamily: "var(--font-dm-sans)", fontSize: 12, color: "rgba(255,255,255,0.5)", margin: 0 }}>
+              Read-only during agent run · You can interact after the agent pauses for payment
+            </p>
+          </div>
+        </div>
       )}
     </div>
   );

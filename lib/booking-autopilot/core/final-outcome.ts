@@ -15,6 +15,16 @@ export const NO_AVAILABILITY_SIGNALS = [
   "no properties available",
   "0 properties",
   "0 results",
+  // Booking.com search-level "no results" messages
+  "we couldn't find any properties",
+  "couldn't find properties",
+  "no properties match",
+  "sorry, there are no results",
+  "there are no results",
+  "no results for your search",
+  "no available properties",
+  "没有可用",
+  "找不到任何",
 ];
 
 export interface FinalOutcomeAssessment {
@@ -106,6 +116,7 @@ export function determineFinalOutcome(
   } = input;
 
   const stalledAtIntermediateBookNow = assessment.stage === "intermediate_gate";
+  const stalledAtListing = assessment.stage === "listing";
   const stalledAtDateSelection = assessment.stage === "date_selection";
   const stalledAtRoomSelection = assessment.stage === "room_selection";
   const bookingComPaymentFieldVerification = bookingComVerification.paymentFieldVerification;
@@ -116,6 +127,44 @@ export function determineFinalOutcome(
   const cardTypeRequired = bookingComVerification.cardTypeRequired;
   const cardTypeSelected = bookingComVerification.cardTypeSelected;
   const hitPaymentGate = inferHitPaymentGate(agentMessage, assessment);
+
+  // Detect hard browser errors (chrome error page, blank page).
+  const pageLoadFailed =
+    handoffUrl.startsWith("chrome-error://") ||
+    handoffUrl === "about:blank" ||
+    handoffUrl === "about:newtab" ||
+    handoffUrl === "";
+
+  if (pageLoadFailed) {
+    trace(`Final state check: page failed to load — url="${handoffUrl}". This is a network/browser error, not a booking failure.`);
+    return {
+      status: "error",
+      screenshotBase64,
+      handoffUrl: startUrl,
+      sessionUrl,
+      summary: "The browser failed to load the booking page. This is usually a temporary network issue — tap to retry.",
+      error: `Page load failed (url: ${handoffUrl || "empty"})`,
+      debugTrace,
+    };
+  }
+
+  // Detect Booking.com city/region/country redirect — happens when the hotel name can't be
+  // found in search, redirecting to a destination overview page instead of search results.
+  const bookingCityRedirect =
+    /booking\.com\/(city|region|country|district)\//i.test(handoffUrl) ||
+    /booking\.com\/searchresults\.html.*no_rooms/i.test(handoffUrl);
+
+  if (bookingCityRedirect) {
+    trace(`Final state check: Booking.com redirected to city/region page — hotel not findable via search (url="${handoffUrl}").`);
+    return {
+      status: "no_availability",
+      screenshotBase64,
+      handoffUrl: startUrl,
+      sessionUrl,
+      summary: "This property wasn't found in Booking.com search results — it may not be listed or available for the requested dates.",
+      debugTrace,
+    };
+  }
 
   if (assessment.blocked) {
     trace("Final state check detected bot protection / blocking signals.");
@@ -151,6 +200,28 @@ export function determineFinalOutcome(
       error: "Stalled before checkout form - intermediary 'Book Now' step was not completed.",
       debugTrace,
     };
+  }
+
+  if (stalledAtListing) {
+    const listingUnavailable =
+      containsAny(assessment.pageText, NO_AVAILABILITY_SIGNALS) ||
+      containsAny(assessment.pageText, [
+        "unavailable on our site for your dates",
+        "this property is unavailable on our site for your dates",
+      ]) ||
+      /unavailable on our site|not available|sold out|fully booked/i.test(agentMessage);
+
+    if (listingUnavailable) {
+      trace("Final state check found that the listing page matched the target hotel but showed it as unavailable for the requested stay.");
+      return {
+        status: "no_availability",
+        screenshotBase64,
+        handoffUrl,
+        sessionUrl,
+        summary: "This property is unavailable on Booking.com for the requested dates.",
+        debugTrace,
+      };
+    }
   }
 
   if (stalledAtDateSelection || stalledAtRoomSelection) {

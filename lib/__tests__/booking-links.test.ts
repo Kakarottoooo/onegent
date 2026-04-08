@@ -44,7 +44,7 @@ describe("buildGoogleHotelsUrl", () => {
 describe("buildBookingComUrl", () => {
   it("includes city as ss param", () => {
     const url = buildBookingComUrl({ city: "Paris" });
-    expect(url).toContain("booking.com/search.html");
+    expect(url).toContain("booking.com/searchresults.html");
     expect(url).toContain("ss=Paris");
   });
 
@@ -67,13 +67,12 @@ describe("buildBookingComUrl", () => {
     expect(url).toContain("group_adults=2");
   });
 
-  it("prefers hotel name as the ss query when provided", () => {
+  it("includes hotel name and city in the ss query when provided", () => {
     const url = buildBookingComUrl({
       hotelName: "YOTEL New York Times Square",
       city: "New York",
     });
-    expect(url).toContain("ss=YOTEL+New+York+Times+Square");
-    expect(url).not.toContain("ss=New+York");
+    expect(url).toContain("ss=YOTEL+New+York+Times+Square+New+York");
   });
 
   it("includes room count when provided", () => {

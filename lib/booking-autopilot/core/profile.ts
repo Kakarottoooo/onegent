@@ -18,6 +18,8 @@ export type EffectiveProfile = {
 
 export function extractTargetHotelName(task: string): string | undefined {
   const patterns = [
+    /book\s+["“](.+?)["”]\s+for/i,
+    /book\s+'(.+?)'\s+for/i,
     /find\s+(.+?)\s+hotel\s+in\s+.+?\s+and\s+book/i,
     /book a room at\s+(.+?)(?:\.|preferred|check-?in|check in|$)/i,
     /hotel\s*:\s*(.+?)(?:\n|$)/i,

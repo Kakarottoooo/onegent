@@ -59,7 +59,10 @@ export interface BookingComOpts {
  * dates, and number of adults.
  */
 export function buildBookingComUrl(opts: BookingComOpts): string {
-  const params: Record<string, string> = { ss: opts.hotelName ?? opts.city };
+  const searchString = opts.hotelName
+    ? `${opts.hotelName} ${opts.city}`.trim()
+    : opts.city;
+  const params: Record<string, string> = { ss: searchString };
   if (opts.checkin) {
     const d = parseDateParts(opts.checkin);
     if (d) {
@@ -78,7 +81,9 @@ export function buildBookingComUrl(opts: BookingComOpts): string {
   }
   if (opts.adults) params.group_adults = String(opts.adults);
   if (opts.rooms) params.no_rooms = String(opts.rooms);
-  return `https://www.booking.com/search.html?${new URLSearchParams(params).toString()}`;
+  // Use searchresults.html — the search.html endpoint can redirect to city/region pages
+  // when the hotel name isn't found, whereas searchresults.html always stays on the results list.
+  return `https://www.booking.com/searchresults.html?${new URLSearchParams(params).toString()}`;
 }
 
 export interface GoogleFlightsOpts {

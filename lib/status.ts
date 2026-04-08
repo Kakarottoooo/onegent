@@ -33,11 +33,13 @@ export type StepSemanticStatus =
 export type JobSemanticStatus =
   | "pending"
   | "running"
+  | "awaiting_payment"
   | "succeeded_first_try"
   | "succeeded_with_adjustment"
   | "partially_completed"
   | "blocked_needs_user_input"
   | "retrying"
+  | "no_availability"
   | "failed_recoverable"
   | "failed_terminal";
 
@@ -56,6 +58,8 @@ export function computeStepSemanticStatus(step: BookingJobStep): StepSemanticSta
         return "succeeded_first_try";
       }
       return "succeeded_with_adjustment";
+    case "awaiting_confirmation":
+      return "blocked_needs_input";
     case "error":
       if (step.actionItem) return "blocked_needs_input";
       return "failed_recoverable";
@@ -79,11 +83,17 @@ export function computeJobSemanticStatus(job: BookingJob): JobSemanticStatus {
   const errorCount = job.steps.filter((s) => s.status === "error").length;
   const total      = job.steps.length;
 
-  const hasRetrying = stepStatuses.some((s) => s === "retrying");
-  const hasBlocked  = stepStatuses.some((s) => s === "blocked_needs_input");
-  const allFirstTry = stepStatuses.every((s) => s === "succeeded_first_try");
+  const hasRetrying        = stepStatuses.some((s) => s === "retrying");
+  const hasBlocked         = stepStatuses.some((s) => s === "blocked_needs_input");
+  const allFirstTry        = stepStatuses.every((s) => s === "succeeded_first_try");
+  const hasAwaitingPayment = job.steps.some((s) => s.status === "awaiting_confirmation");
+  const allNoAvailability  = job.steps.every((s) => s.status === "no_availability");
 
   if (hasRetrying) return "retrying";
+
+  if (hasAwaitingPayment) return "awaiting_payment";
+
+  if (allNoAvailability) return "no_availability";
 
   if (doneCount === total) {
     return allFirstTry ? "succeeded_first_try" : "succeeded_with_adjustment";
@@ -110,11 +120,13 @@ export interface StatusDisplay {
 export const JOB_SEMANTIC_DISPLAY: Record<JobSemanticStatus, StatusDisplay> = {
   pending:                  { label: "Queued",                        color: "var(--text-muted, #aaa)",      animate: false },
   running:                  { label: "Agent working…",                color: "var(--gold, #D4A34B)",          animate: true  },
+  awaiting_payment:         { label: "Ready for payment — enter CVC", color: "rgba(22,163,74,0.85)",          animate: false },
   succeeded_first_try:      { label: "All done — first try",          color: "rgba(22,163,74,0.85)",          animate: false },
   succeeded_with_adjustment:{ label: "Done — with smart adjustments", color: "rgba(22,163,74,0.7)",           animate: false },
   partially_completed:      { label: "Partial — action needed",       color: "rgba(234,179,8,0.9)",           animate: false },
   blocked_needs_user_input: { label: "Needs your input",              color: "rgba(234,88,12,0.85)",          animate: false },
   retrying:                 { label: "Retry scheduled…",              color: "var(--gold, #D4A34B)",          animate: true  },
+  no_availability:          { label: "Not available for these dates",  color: "rgba(107,114,128,0.85)",        animate: false },
   failed_recoverable:       { label: "Failed — tap to retry",         color: "rgba(220,38,38,0.75)",          animate: false },
   failed_terminal:          { label: "Failed",                        color: "rgba(220,38,38,0.8)",           animate: false },
 };
