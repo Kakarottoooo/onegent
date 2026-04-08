@@ -8,6 +8,7 @@
 import type { Skill, SkillContext, StepOutcome, RecoveryStrategy } from "../types";
 import type { BrowserTaskResult } from "@/lib/booking-autopilot/types";
 import { buildHotelTask } from "@/lib/booking-autopilot/stagehand-executor";
+import { buildBookingComUrl } from "@/lib/agent/planners/booking-links";
 
 export interface SearchHotelInput extends Record<string, unknown> {
   destination: string;
@@ -39,8 +40,7 @@ export const searchHotelSkill: Skill<SearchHotelInput> = {
   stepType: "hotel",
 
   async execute(input, ctx: SkillContext): Promise<StepOutcome> {
-    const { baseUrl, autonomy, jobId } = ctx;
-    const htl = autonomy.hotel;
+    const { baseUrl, jobId } = ctx;
 
     ctx.log({
       type: "attempt",
@@ -53,8 +53,14 @@ export const searchHotelSkill: Skill<SearchHotelInput> = {
 
     const hotelName = input.hotelName ?? input.destination;
 
-    // Booking.com search URL as starting point
-    const startUrl = `https://www.booking.com/searchresults.html?ss=${encodeURIComponent(hotelName + " " + input.destination)}&checkin=${input.checkIn}&checkout=${input.checkOut}&group_adults=${input.guests}&no_rooms=${input.rooms ?? 1}`;
+    const startUrl = buildBookingComUrl({
+      hotelName,
+      city: input.destination,
+      checkin: input.checkIn,
+      checkout: input.checkOut,
+      adults: input.guests,
+      rooms: input.rooms ?? 1,
+    });
 
     const { task } = buildHotelTask({
       hotelName,

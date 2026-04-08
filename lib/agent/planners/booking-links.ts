@@ -46,10 +46,12 @@ export function buildGoogleHotelsUrl(opts: GoogleHotelsOpts): string {
 }
 
 export interface BookingComOpts {
+  hotelName?: string;
   city: string;
   checkin?: string; // YYYY-MM-DD
   checkout?: string; // YYYY-MM-DD
   adults?: number;
+  rooms?: number;
 }
 
 /**
@@ -57,7 +59,7 @@ export interface BookingComOpts {
  * dates, and number of adults.
  */
 export function buildBookingComUrl(opts: BookingComOpts): string {
-  const params: Record<string, string> = { ss: opts.city };
+  const params: Record<string, string> = { ss: opts.hotelName ?? opts.city };
   if (opts.checkin) {
     const d = parseDateParts(opts.checkin);
     if (d) {
@@ -75,6 +77,7 @@ export function buildBookingComUrl(opts: BookingComOpts): string {
     }
   }
   if (opts.adults) params.group_adults = String(opts.adults);
+  if (opts.rooms) params.no_rooms = String(opts.rooms);
   return `https://www.booking.com/search.html?${new URLSearchParams(params).toString()}`;
 }
 

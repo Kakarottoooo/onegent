@@ -67,6 +67,20 @@ describe("buildBookingComUrl", () => {
     expect(url).toContain("group_adults=2");
   });
 
+  it("prefers hotel name as the ss query when provided", () => {
+    const url = buildBookingComUrl({
+      hotelName: "YOTEL New York Times Square",
+      city: "New York",
+    });
+    expect(url).toContain("ss=YOTEL+New+York+Times+Square");
+    expect(url).not.toContain("ss=New+York");
+  });
+
+  it("includes room count when provided", () => {
+    const url = buildBookingComUrl({ city: "Paris", rooms: 2 });
+    expect(url).toContain("no_rooms=2");
+  });
+
   it("handles invalid date gracefully (no date params added)", () => {
     const url = buildBookingComUrl({ city: "Paris", checkin: "next Friday" });
     expect(url).not.toContain("checkin_year");
