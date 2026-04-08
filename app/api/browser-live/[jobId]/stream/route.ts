@@ -15,7 +15,7 @@ export async function GET(
     return new Response("Session not found or expired", { status: 404 });
   }
 
-  console.log(`[live-stream] starting stream jobId=${jobId} url=${page.url?.() ?? "unknown"}`);
+  console.log(`[live-stream] starting stream jobId=${jobId.slice(0, 8)}`);
 
   const encoder = new TextEncoder();
   let closed = false;
@@ -32,7 +32,6 @@ export async function GET(
 
       // Initial connection event
       send(`event: connected\ndata: ok\n\n`);
-      console.log(`[live-stream] sent connected event jobId=${jobId}`);
 
       let consecutiveFailures = 0;
       let framesSent = 0;
@@ -55,11 +54,8 @@ export async function GET(
           const buf = await livePage.screenshot({ type: "jpeg", quality: 55, timeout: 8000 });
           const b64 = buf.toString("base64");
           framesSent++;
-          if (consecutiveFailures > 0) {
-            console.log(`[live-stream] screenshot recovered after ${consecutiveFailures} failures, jobId=${jobId}`);
-          }
           if (framesSent === 1) {
-            console.log(`[live-stream] first frame sent (${buf.length} bytes) jobId=${jobId}`);
+            console.log(`[live-stream] first frame jobId=${jobId.slice(0, 8)} (${buf.length}b)`);
           }
           send(`data: ${b64}\n\n`);
           consecutiveFailures = 0;

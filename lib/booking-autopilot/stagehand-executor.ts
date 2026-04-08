@@ -807,6 +807,10 @@ The user will enter CVV and confirm payment themselves.`,
       if (rankedPages.length > 0 && rankedPages[0].candidatePage !== page) {
         activePage = rankedPages[0].candidatePage;
         trace(`Switched active page to best candidate: ${rankedPages[0].url.slice(0, 80)} (score=${rankedPages[0].score})`);
+        // Keep live-view store in sync so the stream shows the new tab
+        if (!useCloud && input.jobId) {
+          browserSessionStore.set(input.jobId, getRawPage(activePage), 15 * 60 * 1000);
+        }
       }
     } catch {
       // ignore 鈥?keep using the original page
@@ -1501,7 +1505,17 @@ The user will enter CVV and confirm payment themselves.`,
         if (process.env.AI_LOOP_FORM_FILL === "true") {
           trace("Booking.com guest form — AI fill mode (AI_LOOP_FORM_FILL=true).");
           await fillGuestFormWithAI(stagehand, p, trace);
-          await new Promise(r => setTimeout(r, 600));
+          await new Promise(r => setTimeout(r, 800));
+          // After filling, click the advance button (RPA does this inside providerFillBookingComGuestForm)
+          try {
+            await stagehand.act(
+              'Click the "Next: Final details" or "Continue" or "Save and continue" button to proceed to the next step'
+            );
+            trace("[fill-form] clicked advance button after guest form fill");
+            await new Promise(r => setTimeout(r, 1200));
+          } catch (err) {
+            trace(`[fill-form] advance button click failed: ${(err as Error).message?.slice(0, 80)}`);
+          }
         } else {
           trace("Booking.com guest form detected — running programmatic field fill (overrides account pre-fill).");
           await providerFillBookingComGuestForm(raw, p, bookingComHelpers, trace);
