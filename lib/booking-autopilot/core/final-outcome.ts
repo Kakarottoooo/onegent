@@ -59,6 +59,13 @@ export interface FinalOutcomeInput {
   resultCompleted: boolean;
   cardNumberProvided: boolean;
   cardExpiryProvided: boolean;
+  /**
+   * True when Booking.com's two-step checkout flow confirmed the guest-details
+   * step was submitted and we are now on the final payment page.
+   * When true, identity field checks are skipped — the name/email were filled
+   * on the previous page and are no longer in the payment page DOM.
+   */
+  bookingComPassedGuestDetails?: boolean;
 }
 
 function containsAny(text: string, patterns: string[]): boolean {
@@ -113,6 +120,7 @@ export function determineFinalOutcome(
     resultCompleted,
     cardNumberProvided,
     cardExpiryProvided,
+    bookingComPassedGuestDetails = false,
   } = input;
 
   const stalledAtIntermediateBookNow = assessment.stage === "intermediate_gate";
@@ -268,6 +276,10 @@ export function determineFinalOutcome(
     hitPaymentGate &&
     !hasMinimumFilledProfile &&
     !readyForManualPaymentCompletion &&
+    // Skip this check when Booking.com's two-step flow confirmed the guest-details
+    // page was submitted — identity fields are on the previous page and won't appear
+    // in the payment page DOM.
+    !bookingComPassedGuestDetails &&
     (
       assessment.visibleCheckoutFields ||
       bookingComVisiblePaymentInputs ||

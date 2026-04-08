@@ -1738,6 +1738,7 @@ The user will enter CVV and confirm payment themselves.`,
       resultCompleted: !!result.completed,
       cardNumberProvided: !!p.card_number,
       cardExpiryProvided: !!p.card_expiry,
+      bookingComPassedGuestDetails: bookingComFinalPaymentDomState,
     }, trace);
 
     if (finalOutcome.status === "paused_payment" && !useCloud) {
