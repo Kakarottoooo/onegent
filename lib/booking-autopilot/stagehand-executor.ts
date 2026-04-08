@@ -1506,15 +1506,22 @@ The user will enter CVV and confirm payment themselves.`,
           trace("Booking.com guest form — AI fill mode (AI_LOOP_FORM_FILL=true).");
           await fillGuestFormWithAI(stagehand, p, trace);
           await new Promise(r => setTimeout(r, 800));
-          // After filling, click the advance button (RPA does this inside providerFillBookingComGuestForm)
+          // After filling, click the advance button
           try {
             await stagehand.act(
               'Click the "Next: Final details" or "Continue" or "Save and continue" button to proceed to the next step'
             );
             trace("[fill-form] clicked advance button after guest form fill");
-            await new Promise(r => setTimeout(r, 1200));
+            await new Promise(r => setTimeout(r, 1500));
           } catch (err) {
             trace(`[fill-form] advance button click failed: ${(err as Error).message?.slice(0, 80)}`);
+          }
+          // Check if we actually advanced — if still on checkout_form, fall back to RPA
+          const postAISignals = await providerGetBookingComStageSignals(raw, raw.url(), await raw.evaluate(() => document.body.innerText).catch(() => ""), false);
+          if (postAISignals.guestDetailsStep && !postAISignals.finalPaymentState) {
+            trace("[fill-form] AI advance did not navigate — falling back to RPA providerFillBookingComGuestForm.");
+            await providerFillBookingComGuestForm(raw, p, bookingComHelpers, trace);
+            await new Promise(r => setTimeout(r, 600));
           }
         } else {
           trace("Booking.com guest form detected — running programmatic field fill (overrides account pre-fill).");
