@@ -306,6 +306,14 @@ async function resolveCurrentUrl(
 export async function runBrowserTask(
   input: BrowserTaskInput
 ): Promise<BrowserTaskResult> {
+  // AI_LOOP_FULL=true activates all AI sub-flags simultaneously.
+  // RPA code is never removed — each flag independently falls back to RPA on failure.
+  if (process.env.AI_LOOP_FULL === "true") {
+    process.env.AI_LOOP_STAGE_DETECT = "true";
+    process.env.AI_LOOP_FORM_FILL    = "true";
+    process.env.AI_LOOP_LISTING      = "true";
+  }
+
   const debugTrace: string[] = [];
   const trace = (message: string) => {
     debugTrace.push(message);

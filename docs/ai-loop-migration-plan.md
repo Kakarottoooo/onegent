@@ -470,28 +470,28 @@ export async function selectCheapestRoomAI(
 
 ---
 
-### Phase 5 — 整合，移除 RPA 代码
+### Phase 5 — 整合开关（RPA 代码永久保留作为 backup）
 
-**当所有 Phase 验收通过后**，`stagehand-executor.ts` 主流程简化为：
+**RPA 代码不删除**。`booking-com.ts`、`stage-assessment.ts` 关键词逻辑、所有 RPA 路径均作为 fallback 永久保留。
+
+`AI_LOOP_FULL=true` 同时开启所有 AI 路径（等价于把 Phase 2–4 的 flag 全部打开）：
 
 ```typescript
-// 开启 AI_LOOP_FULL=true 后的执行路径
+// stagehand-executor.ts 顶部：AI_LOOP_FULL=true 时覆盖所有子 flag
 if (process.env.AI_LOOP_FULL === "true") {
-  const loopResult = await runAIBookingLoop(raw, buildInstruction(input), p, trace);
-  // 把 loopResult 转成现有的 finalOutcome 格式
-  return mapLoopResultToFinalOutcome(loopResult);
+  process.env.AI_LOOP_STAGE_DETECT = "true";
+  process.env.AI_LOOP_FORM_FILL    = "true";
+  process.env.AI_LOOP_LISTING      = "true";
 }
-// 否则走现有 RPA 路径（保留直到全部验证）
 ```
 
-**最终删除**：
-- `lib/booking-autopilot/providers/booking-com.ts`（3400 行）
-- `lib/booking-autopilot/core/stage-assessment.ts` 的关键词数组部分
-- `stagehand-executor.ts` 中所有 `bookingComPageOpen` 分支和 Booking.com 特定逻辑
+**回滚策略（永久有效）**：
+- 任何 AI 路径出问题 → 对应 flag 改 `false` → 立即回退 RPA，零停机
+- `AI_LOOP_FULL=false` → 完整 RPA 模式，行为与迁移前完全一致
 
-**Phase 5 验收**：同一代码在以下网站跑通，`AI_LOOP_FULL=true`：
-- Booking.com
-- IHG / Marriott / Hilton
+**Phase 5 验收**：`AI_LOOP_FULL=true` 在以下网站完整跑通：
+- Booking.com（主力）
+- IHG / Marriott / Hilton（验证泛化能力）
 - OpenTable（餐厅）
 - Expedia（机票）
 
@@ -525,8 +525,8 @@ lib/booking-autopilot/
     error-utils.ts     ← 保留
     profile.ts         ← 保留（profile → fields 映射）
   providers/
-    booking-com.ts     ← Phase 5 后删除
-  stagehand-executor.ts  ← 最终只剩浏览器初始化 + 调用 runAIBookingLoop
+    booking-com.ts     ← 永久保留，AI 失败时作为 RPA fallback
+  stagehand-executor.ts  ← AI 路径 + RPA 路径并存，env flag 切换
 ```
 
 ---
