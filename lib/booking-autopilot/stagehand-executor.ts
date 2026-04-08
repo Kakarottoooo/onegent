@@ -407,8 +407,13 @@ export async function runBrowserTask(
     // take screenshots during the entire booking process (not just after payment).
     // Only in local mode — Browserbase sessions have their own live view URL.
     if (!useCloud && input.jobId) {
-      browserSessionStore.set(input.jobId, getRawPage(page), 15 * 60 * 1000);
-      trace('Local mode: registered page in live-view store for real-time streaming.');
+      // Use a dynamic getter so the live-view stream always screenshots the currently
+      // active page — even after tab switches or stagehand.act() navigations.
+      browserSessionStore.setGetter(input.jobId, () => {
+        const ap = stagehand.context.activePage();
+        return ap ? getRawPage(ap) : null;
+      }, 15 * 60 * 1000);
+      trace('Local mode: registered dynamic page getter in live-view store for real-time streaming.');
     }
 
 
@@ -807,10 +812,7 @@ The user will enter CVV and confirm payment themselves.`,
       if (rankedPages.length > 0 && rankedPages[0].candidatePage !== page) {
         activePage = rankedPages[0].candidatePage;
         trace(`Switched active page to best candidate: ${rankedPages[0].url.slice(0, 80)} (score=${rankedPages[0].score})`);
-        // Keep live-view store in sync so the stream shows the new tab
-        if (!useCloud && input.jobId) {
-          browserSessionStore.set(input.jobId, getRawPage(activePage), 15 * 60 * 1000);
-        }
+        // Live-view getter already returns stagehand.context.activePage() dynamically — no update needed.
       }
     } catch {
       // ignore 鈥?keep using the original page
@@ -895,9 +897,10 @@ The user will enter CVV and confirm payment themselves.`,
           }
           if (bookingComContext) {
             if (!targetHotelName) {
-              trace("Booking.com listing: target hotel name could not be parsed from the task.");
+              trace("[RPA] Booking.com listing: target hotel name could not be parsed from the task.");
               return false;
             }
+            trace(`[RPA] Booking.com listing: clicking target "${targetHotelName}" via RPA.`);
             const clicked = await providerClickBookingComListingTarget(raw, targetHotelName, {
               normalizeText,
               normalizeLooseText,
@@ -971,6 +974,7 @@ The user will enter CVV and confirm payment themselves.`,
           // search bar instead of selecting rooms.
           if (bookingComContext) {
             try {
+              trace("[RPA] Booking.com room_selection: using RPA selectOption + JS click.");
               const beforeUrl = raw.url();
               await providerRevealBookingComRoomSelection(raw, {
                 normalizeText,
@@ -1519,19 +1523,19 @@ The user will enter CVV and confirm payment themselves.`,
           // Check if we actually advanced — if still on checkout_form, fall back to RPA
           const postAISignals = await providerGetBookingComStageSignals(raw, raw.url(), await raw.evaluate(() => document.body.innerText).catch(() => ""), false);
           if (postAISignals.guestDetailsStep && !postAISignals.finalPaymentState) {
-            trace("[fill-form] AI advance did not navigate — falling back to RPA providerFillBookingComGuestForm.");
+            trace("[RPA] AI advance did not navigate — falling back to RPA providerFillBookingComGuestForm.");
             await providerFillBookingComGuestForm(raw, p, bookingComHelpers, trace);
             await new Promise(r => setTimeout(r, 600));
           }
         } else {
-          trace("Booking.com guest form detected — running programmatic field fill (overrides account pre-fill).");
+          trace("[RPA] Booking.com guest form — running programmatic field fill (overrides account pre-fill).");
           await providerFillBookingComGuestForm(raw, p, bookingComHelpers, trace);
           await new Promise(r => setTimeout(r, 600));
         }
       }
 
       if (isBookingCom && assessment.stage === "payment_gate") {
-        trace("Booking.com payment page detected 鈥?running card-field fill fallback.");
+        trace("[RPA] Booking.com payment page — running card-field fill.");
         await providerFillBookingComPaymentForm(raw, p, bookingComHelpers, trace);
         await new Promise((resolve) => setTimeout(resolve, 800));
       }
@@ -1550,7 +1554,7 @@ The user will enter CVV and confirm payment themselves.`,
           trace("Guest/payment fields — AI fill mode (AI_LOOP_FORM_FILL=true).");
           await fillGuestFormWithAI(stagehand, p, trace);
         } else {
-          trace("Guest/payment fields looked empty, so the direct Playwright fill fallback ran.");
+          trace("[RPA] Guest/payment fields — running direct Playwright fill fallback.");
           // Use RAW Playwright fill() — bypasses Stagehand AI and reCAPTCHA DOM interference.
           // Try matching each field by placeholder text, then by accessible label name.
           const specs: FieldSpec[] = [
@@ -1745,7 +1749,11 @@ The user will enter CVV and confirm payment themselves.`,
       keepBrowserOpen = true;
       trace("Local mode: browser will stay open for 15 minutes 鈥?live view available in OneAgent.");
       console.log("\n鉁?[stagehand] Payment page is open 鈥?use OneAgent live view or the browser window to complete payment.\n");
-      browserSessionStore.set(input.jobId, raw, 15 * 60 * 1000);
+      // Getter is already registered from init — just extend TTL for paused_payment hold.
+      browserSessionStore.setGetter(input.jobId, () => {
+        const ap = stagehand.context.activePage();
+        return ap ? getRawPage(ap) : null;
+      }, 15 * 60 * 1000);
       setTimeout(() => {
         browserSessionStore.delete(input.jobId);
         stagehand.close().catch(() => {});

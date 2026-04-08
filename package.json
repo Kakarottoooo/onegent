@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "next dev",
+    "dev": "next dev 2>&1 | grep -v 'GET /api/browser-live'",
     "build": "next build",
     "postbuild": "node scripts/inject-sw-version.mjs",
     "start": "next start",

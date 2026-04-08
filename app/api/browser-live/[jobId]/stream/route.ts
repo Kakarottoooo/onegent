@@ -72,7 +72,16 @@ export async function GET(
             console.log(`[live-stream] screenshot fail #${consecutiveFailures} jobId=${jobId}: ${message.slice(0, 200)}`);
           }
 
-          if (definitelyClosed || consecutiveFailures >= 10) {
+          if (definitelyClosed) {
+            console.log(`[live-stream] page closed — ending stream jobId=${jobId}`);
+            send(`event: closed\ndata: session ended\n\n`);
+            break;
+          }
+
+          // Don't give up on transient failures (stagehand.act() holds CDP lock).
+          // Keep retrying — the stream will recover as soon as the action completes.
+          if (consecutiveFailures >= 30) {
+            // 30 * 500ms = 15s total wait — something is really stuck
             console.log(`[live-stream] giving up after ${consecutiveFailures} failures jobId=${jobId}`);
             send(`event: closed\ndata: session ended\n\n`);
             break;
