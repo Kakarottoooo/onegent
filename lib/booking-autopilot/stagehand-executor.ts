@@ -1520,12 +1520,39 @@ The user will enter CVV and confirm payment themselves.`,
           } catch (err) {
             trace(`[fill-form] advance button click failed: ${(err as Error).message?.slice(0, 80)}`);
           }
-          // Check if we actually advanced — if still on checkout_form, fall back to RPA
+          // Check if we actually advanced — if still on guest-details, try a direct RPA button click
+          // (AI filled fields are already present — no need to re-fill, just advance)
           const postAISignals = await providerGetBookingComStageSignals(raw, raw.url(), await raw.evaluate(() => document.body.innerText).catch(() => ""), false);
           if (postAISignals.guestDetailsStep && !postAISignals.finalPaymentState) {
-            trace("[RPA] AI advance did not navigate — falling back to RPA providerFillBookingComGuestForm.");
-            await providerFillBookingComGuestForm(raw, p, bookingComHelpers, trace);
-            await new Promise(r => setTimeout(r, 600));
+            trace("[RPA] AI advance did not navigate — trying direct RPA click on 'Next: Final details'.");
+            // Blur active element first so submit isn't blocked by a focused field
+            await raw.evaluate(() => (document.activeElement as HTMLElement | null)?.blur?.()).catch(() => {});
+            const nextClicked = await raw.evaluate(() => {
+              const pattern = /next.*final\s*details|next.*detail|continue/i;
+              const isVisible = (el: Element | null): el is HTMLElement => {
+                if (!(el instanceof HTMLElement)) return false;
+                const s = window.getComputedStyle(el);
+                const r = el.getBoundingClientRect();
+                return s.display !== "none" && s.visibility !== "hidden" && r.width > 0 && r.height > 0;
+              };
+              const btn = Array.from(document.querySelectorAll("button, a, [role='button']"))
+                .find(el => isVisible(el) && pattern.test((el.textContent ?? "").trim())) as HTMLElement | undefined;
+              if (!btn) return false;
+              btn.scrollIntoView({ block: "center" });
+              btn.click();
+              (btn.closest("form") as HTMLFormElement | null)?.requestSubmit?.();
+              return true;
+            }).catch(() => false);
+
+            if (nextClicked) {
+              trace("[RPA] clicked 'Next: Final details' via direct DOM click.");
+              await new Promise(r => setTimeout(r, 1500));
+            } else {
+              // Last resort: run full RPA fill+advance (fields will be skipped as already filled)
+              trace("[RPA] direct click failed — running full RPA providerFillBookingComGuestForm as last resort.");
+              await providerFillBookingComGuestForm(raw, p, bookingComHelpers, trace);
+              await new Promise(r => setTimeout(r, 600));
+            }
           }
         } else {
           trace("[RPA] Booking.com guest form — running programmatic field fill (overrides account pre-fill).");
