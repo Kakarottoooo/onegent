@@ -67,6 +67,7 @@ import {
 } from "./providers/booking-com";
 import { determineFinalOutcome, NO_AVAILABILITY_SIGNALS } from "./core/final-outcome";
 import { fillGuestFormWithAI } from "./ai-loop/fill-form";
+import { clickTargetListingAI, selectCheapestRoomAI } from "./ai-loop/find-listing";
 import {
   clickLocatorDom,
   evaluateLocatorElement,
@@ -871,6 +872,15 @@ The user will enter CVV and confirm payment themselves.`,
 
       switch (stage) {
         case "listing": {
+          if (process.env.AI_LOOP_LISTING === "true") {
+            if (!targetHotelName) {
+              trace("[ai-listing] target hotel name could not be parsed from the task.");
+              return false;
+            }
+            const result = await clickTargetListingAI(stagehand, targetHotelName, trace);
+            if (result === "no_availability") return false;
+            return result === "clicked";
+          }
           if (bookingComContext) {
             if (!targetHotelName) {
               trace("Booking.com listing: target hotel name could not be parsed from the task.");
@@ -939,8 +949,13 @@ The user will enter CVV and confirm payment themselves.`,
           return true;
         }
         case "room_selection": {
-          // 鈹€鈹€ Booking.com: use Playwright native selectOption() + JS click 鈹€鈹€鈹€鈹€鈹€鈹€
-          // NEVER fall back to AI agent on Booking.com 鈥?it always types in the
+          if (process.env.AI_LOOP_LISTING === "true") {
+            const result = await selectCheapestRoomAI(stagehand, trace);
+            if (result === "no_availability") return false;
+            return true;
+          }
+          // ── Booking.com: use Playwright native selectOption() + JS click ──
+          // NEVER fall back to AI agent on Booking.com — it always types in the
           // search bar instead of selecting rooms.
           if (bookingComContext) {
             try {
