@@ -11,11 +11,10 @@
  * no keyword lists — the LLM handles all page understanding.
  */
 
-import type { Page } from "playwright";
 import type { BookingProfile } from "../types";
 import type { AILoopResult, LoopStepRecord } from "./types";
 import { perceiveAndDecide } from "./perceive";
-import { executeAction } from "./execute";
+import { executeAction, type StagehandLike } from "./execute";
 
 const DEFAULT_MAX_STEPS = 25;
 /** Delay between steps — gives the page time to react before next screenshot */
@@ -32,8 +31,13 @@ export interface AILoopOptions {
   trace?: (msg: string) => void;
 }
 
+/**
+ * Accepts a Stagehand V3 instance.
+ * - act/fill_form use stagehand.act() (AI-driven)
+ * - perceive uses stagehand.context.activePage() for screenshot + DOM
+ */
 export async function runAIBookingLoop(
-  page: Page,
+  stagehand: StagehandLike,
   task: string,
   profile: BookingProfile,
   opts: AILoopOptions = {},
@@ -55,10 +59,16 @@ export async function runAIBookingLoop(
 
   for (let i = 0; i < maxSteps; i++) {
     const stepStart = Date.now();
-    const url = page.url();
+    const page = stagehand.context.activePage();
+    const url = page?.url() ?? "(no active page)";
     trace(`[ai-loop] ── step ${i + 1}/${maxSteps} ── ${url.slice(0, 80)}`);
 
     // ── 1. Perceive ──────────────────────────────────────────────────────────
+    if (!page) {
+      trace("[ai-loop] no active page — waiting");
+      await sleep(STEP_DELAY_MS);
+      continue;
+    }
     let perception;
     try {
       perception = await perceiveAndDecide(page, { task, profileHint, recentSteps });
@@ -108,7 +118,7 @@ export async function runAIBookingLoop(
 
     // ── 3. Execute ───────────────────────────────────────────────────────────
     try {
-      await executeAction(page, nextAction, trace);
+      await executeAction(stagehand, nextAction, trace);
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       trace(`[ai-loop] execute error (step ${i + 1}): ${msg.slice(0, 120)} — continuing`);
@@ -130,7 +140,7 @@ export async function runAIBookingLoop(
   trace(`[ai-loop] reached max steps (${maxSteps}) without completing`);
   return {
     outcome: "failed",
-    finalUrl: page.url(),
+    finalUrl: stagehand.context.activePage()?.url() ?? "(no active page)",
     steps,
     summary: `Reached max steps (${maxSteps}) without completing the booking`,
   };

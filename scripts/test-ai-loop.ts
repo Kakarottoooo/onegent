@@ -53,12 +53,14 @@ async function runTest() {
   });
 
   await stagehand.init();
-  const page = stagehand.context.activePage() ?? await stagehand.context.newPage();
+
+  // Navigate using the active page
+  const navPage = stagehand.context.activePage() ?? await stagehand.context.newPage();
 
   // httpbin.org/forms/post — simple public HTML form, no login, no bot detection
   const TEST_URL = "https://httpbin.org/forms/post";
   console.log(`Navigating to: ${TEST_URL}`);
-  await (page as any).goto(TEST_URL, { waitForLoadState: "domcontentloaded", timeoutMs: 15_000 });
+  await (navPage as any).goto(TEST_URL, { waitForLoadState: "domcontentloaded", timeoutMs: 15_000 });
 
   const task = `Fill out the pizza order form on this page:
 - custname: "${TEST_PROFILE.first_name} ${TEST_PROFILE.last_name}"
@@ -71,9 +73,10 @@ Then click the Submit Order button.`;
   console.log("\nStarting AI loop...\n");
 
   const trace = (msg: string) => console.log(" ", msg);
-  const rawPage = (page as any).page ?? page;
 
-  const result = await runAIBookingLoop(rawPage, task, TEST_PROFILE, { trace, maxSteps: 15 });
+  // Pass the Stagehand V3 instance — stagehand.act() is the correct API,
+  // not page.act() (pages from activePage() are raw CDP pages without .act()).
+  const result = await runAIBookingLoop(stagehand as any, task, TEST_PROFILE, { trace, maxSteps: 15 });
 
   console.log("\n=== Result ===");
   console.log("Outcome  :", result.outcome);
