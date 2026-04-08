@@ -71,9 +71,11 @@ export default function BrowserLiveView({
       es.onerror = () => {
         if (closedRef.current) return;
         reconnectAttemptsRef.current += 1;
-        // If we never got a frame/connection and have tried several times,
-        // the session doesn't exist (404) — stop retrying and show "closed".
-        if (!everConnectedRef.current && reconnectAttemptsRef.current >= 4) {
+        // Stop retrying after too many consecutive failures:
+        // - Never connected: 4 attempts (session doesn't exist / 404)
+        // - Was connected before: 8 attempts (~10s) then give up (session ended)
+        const maxAttempts = everConnectedRef.current ? 8 : 4;
+        if (reconnectAttemptsRef.current >= maxAttempts) {
           setStatus("closed");
           es?.close();
           return;

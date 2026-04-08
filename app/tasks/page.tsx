@@ -2341,7 +2341,7 @@ export default function TripsPage() {
   useEffect(() => {
     const hasRunning = jobs.some((j) => j.status === "running" || j.status === "pending");
     if (!hasRunning) return;
-    const timer = setInterval(loadJobs, 3000);
+    const timer = setInterval(loadJobs, 5000);
     return () => clearInterval(timer);
   }, [jobs, loadJobs]);
 
