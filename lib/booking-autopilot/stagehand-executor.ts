@@ -825,37 +825,80 @@ The user will enter CVV and confirm payment themselves.`,
               trace("[ai-listing] target hotel name could not be parsed from the task.");
               return false;
             }
+            // Helper: does a URL look like a hotel detail page on any known OTA?
+            const isHotelDetailUrl = (url: string): boolean => {
+              return (
+                /booking\.com\/hotel\//.test(url) ||
+                /secure\.booking\.com\/book/.test(url) ||
+                /expedia\.com\/.*[./]h\d+[./]/.test(url) ||   // e.g. .h12345.Hotel-Information
+                /hotels\.com\/ho\d+/.test(url) ||              // e.g. /ho12345/
+                /\/hotel-information/.test(url) ||
+                /\/hotel-details/.test(url)
+              );
+            };
+
+            // Before clicking, dismiss any overlay modals (e.g. Expedia "fee-inclusive
+            // pricing" info dialog) that could intercept the listing click.
+            const preDismissed = await raw.evaluate(() => {
+              const isVisible = (el: Element) => {
+                const r = (el as HTMLElement).getBoundingClientRect();
+                return r.width > 0 && r.height > 0 && (el as HTMLElement).offsetParent !== null;
+              };
+              const closePatterns = /^(got it|ok|okay|close|dismiss|done|continue|accept|×|✕)$/i;
+              // Find visible buttons inside dialog/modal containers
+              const modals = Array.from(document.querySelectorAll<HTMLElement>(
+                '[role="dialog"], [aria-modal="true"], [class*="modal"], [class*="Modal"], [class*="overlay"], [class*="Overlay"]'
+              )).filter(el => isVisible(el));
+              let clicked = 0;
+              for (const modal of modals) {
+                const btns = Array.from(modal.querySelectorAll<HTMLElement>('button, [role="button"]'));
+                for (const btn of btns) {
+                  if (!isVisible(btn)) continue;
+                  if (closePatterns.test((btn.textContent ?? "").trim())) {
+                    btn.click();
+                    clicked++;
+                    break;
+                  }
+                }
+              }
+              return clicked;
+            }).catch(() => 0);
+            if (preDismissed > 0) {
+              trace(`[ai-listing] dismissed ${preDismissed} pre-click modal(s)`);
+              await new Promise(r => setTimeout(r, 600));
+            }
+
             const result = await clickTargetListingAI(stagehand, targetHotelName, trace);
             if (result === "no_availability") return false;
             if (result === "clicked") {
-              // Booking.com opens hotel pages in a new tab.
-              // Wait up to 2.5s for the tab to open, then navigate raw to it.
-              // If the hotel name link was clicked (correct), a tab opens quickly.
-              // If "See availability" was clicked (wrong), the page stays on search results.
+              // Wait briefly — Booking.com opens hotel pages in a new tab; Expedia navigates
+              // the current tab directly. Check both patterns.
               let hotelUrl: string | null = null;
               for (let tabWait = 0; tabWait < 3 && !hotelUrl; tabWait++) {
                 await new Promise(r => setTimeout(r, 800));
+                // Check if the current page navigated to a hotel detail URL (Expedia pattern)
+                const directUrl = raw.url();
+                if (isHotelDetailUrl(directUrl)) {
+                  trace(`[ai-listing] raw page navigated to hotel directly: ${directUrl.slice(0, 80)}`);
+                  return true;
+                }
+                // Check for a new tab (Booking.com pattern)
                 try {
                   const allPages = stagehand.context.pages();
                   const hotelPageEntry = allPages
                     .map(p => ({ p, url: getScopeUrl(getRawPage(p)) }))
-                    .find(({ url }) =>
-                      /booking\.com\/hotel\//.test(url) ||
-                      /secure\.booking\.com\/book/.test(url)
-                    );
+                    .find(({ url }) => isHotelDetailUrl(url));
                   if (hotelPageEntry) hotelUrl = hotelPageEntry.url;
                 } catch { /* ignore */ }
               }
               if (hotelUrl) {
                 if (raw.url() !== hotelUrl) {
-                  // Close the extra tab Booking.com opened — we'll navigate raw instead.
-                  // Without this, both the original tab and the new tab end up on the
-                  // hotel page, showing two browser windows to the user.
+                  // Close the extra tab then navigate raw to the hotel URL
                   try {
                     const allPages = stagehand.context.pages();
                     for (const p of allPages) {
                       const pr = getRawPage(p);
-                      if (pr !== raw && /booking\.com\/hotel\/|secure\.booking\.com\/book/.test(pr.url())) {
+                      if (pr !== raw && isHotelDetailUrl(pr.url())) {
                         await pr.close().catch(() => {});
                         break;
                       }
@@ -872,13 +915,7 @@ The user will enter CVV and confirm payment themselves.`,
                   trace(`[ai-listing] already on hotel page: ${hotelUrl.slice(0, 80)}`);
                 }
               } else {
-                // Check if raw itself navigated (some paths redirect without a new tab)
-                const rawUrl = raw.url();
-                if (/booking\.com\/hotel\//.test(rawUrl)) {
-                  trace(`[ai-listing] raw page navigated to hotel directly: ${rawUrl.slice(0, 80)}`);
-                } else {
-                  trace(`[ai-listing] no hotel tab detected after 2.4s — current URL: ${rawUrl.slice(0, 80)}`);
-                }
+                trace(`[ai-listing] no hotel tab or direct navigation detected after 2.4s — current URL: ${raw.url().slice(0, 80)}`);
               }
               return true;
             }

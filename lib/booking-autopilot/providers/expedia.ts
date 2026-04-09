@@ -89,7 +89,9 @@ async function fillExpediaGroupPaymentField(
   const frames = page.frames();
   for (const frame of frames) {
     if (frame === page.mainFrame()) continue;
-    const frameUrl = frame.url().toLowerCase();
+    // Stagehand v3 may expose url as a string property rather than a method
+    const rawUrl: unknown = frame.url;
+    const frameUrl = (typeof rawUrl === "function" ? (rawUrl as () => string)() : (rawUrl as string) ?? "").toLowerCase();
     if (!frameUrl.includes("expedia") && !frameUrl.includes("hotels") && !frameUrl.includes("payment") && !frameUrl.includes("checkout")) continue;
     const frameMatch = await findVisibleInScope(frame, selectorList);
     if (frameMatch) {
@@ -235,8 +237,10 @@ export async function fillExpediaGroupPaymentForm(
   }).catch(() => 0);
 
   const iframeCount = page.frames().filter(f => {
-    const url = f.url().toLowerCase();
-    return f !== page.mainFrame() && (url.includes("payment") || url.includes("checkout") || url.includes("expedia") || url.includes("hotels"));
+    if (f === page.mainFrame()) return false;
+    const rawUrl: unknown = f.url;
+    const url = (typeof rawUrl === "function" ? (rawUrl as () => string)() : (rawUrl as string) ?? "").toLowerCase();
+    return url.includes("payment") || url.includes("checkout") || url.includes("expedia") || url.includes("hotels");
   }).length;
 
   trace(`Expedia payment: detected ${inlineCardCount} inline card input(s), ${iframeCount} payment-related iframe(s)`);
