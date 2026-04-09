@@ -141,13 +141,15 @@ export async function selectRoomAI(
 
   // Step 1: When a preference is given, try stagehand.act() first.
   // Works well on sites where room names are clear text labels.
+  // Note: Expedia uses "Reserve" buttons per room (no <select> quantity dropdowns),
+  // so the instruction avoids requiring a dropdown interaction.
   if (roomPreference) {
     try {
       await stagehand.act(
         `In the room availability table, find the room type that best matches "${roomPreference}". ` +
-        `Set its quantity selector to 1 (select "1" from the dropdown next to that room). ` +
-        `If "${roomPreference}" is not available, select the cheapest available room instead. ` +
-        `Do NOT click "I'll reserve" yet — only set the quantity.`
+        `If there is a quantity dropdown next to that room, set it to 1. ` +
+        `If "${roomPreference}" is not available, locate the cheapest available room instead. ` +
+        `Do NOT click any Reserve or Book button yet — only identify or set the quantity.`
       );
       trace(`[find-listing] act() set quantity for room preference "${roomPreference}"`);
       await sleep(600);
@@ -220,26 +222,63 @@ export async function selectRoomAI(
     trace("[find-listing] quantity select not found or already set — proceeding to reserve click");
   }
 
-  // Step 3: Click "I'll reserve" via stagehand.act() — simple click only, no dropdowns.
+  // Step 3: Click "I'll reserve" / "Reserve" via stagehand.act().
+  // On Booking.com: button says "I'll reserve".
+  // On Expedia: button says "Reserve" — clicking opens a room-detail modal, then
+  //   a second "Reserve" click in the modal proceeds to checkout.
   try {
     await stagehand.act(
-      `Click the button labelled "I'll reserve" to proceed to checkout. ` +
-      `Do not interact with any dropdown — only click the reserve button.`
+      `Click the "I'll reserve" or "Reserve" button to proceed. ` +
+      `Do not interact with any dropdown — only click the reserve button. ` +
+      `If a modal or dialog appears after clicking, click the "Reserve" button inside the modal too.`
     );
-    trace("[find-listing] clicked I'll reserve via act()");
-    return "selected";
+    trace("[find-listing] clicked reserve via act()");
   } catch (actErr) {
     trace(`[find-listing] act() reserve failed: ${(actErr as Error).message?.slice(0, 80)}`);
+
+    // JS click fallback
+    const clicked = await page.evaluate(() => {
+      function isVisible(el: Element): boolean {
+        const r = el.getBoundingClientRect();
+        return r.width > 0 && r.height > 0 && (el as HTMLElement).offsetParent !== null;
+      }
+      const pattern = /i.?ll reserve|reserve|book now/i;
+      const btn = Array.from(document.querySelectorAll<HTMLElement>('button, a, [role="button"]'))
+        .find(el => isVisible(el) && pattern.test((el.textContent ?? "").trim()));
+      if (btn) {
+        btn.scrollIntoView({ block: "center" });
+        btn.click();
+        return true;
+      }
+      return false;
+    }).catch(() => false);
+
+    if (!clicked) {
+      trace("[find-listing] could not click reserve — no_availability");
+      return "no_availability";
+    }
+    trace("[find-listing] JS fallback click on reserve button worked");
   }
 
-  // Step 4: JS click fallback
-  const clicked = await page.evaluate(() => {
+  // Wait briefly for Expedia-style modal to appear after first Reserve click.
+  await sleep(1200);
+
+  // Check if a modal/dialog appeared (Expedia two-click Reserve flow).
+  // If so, click the Reserve button inside the modal to proceed to checkout.
+  const modalReserveClicked = await page.evaluate(() => {
     function isVisible(el: Element): boolean {
       const r = el.getBoundingClientRect();
       return r.width > 0 && r.height > 0 && (el as HTMLElement).offsetParent !== null;
     }
-    const pattern = /i.?ll reserve|reserve|book now/i;
-    const btn = Array.from(document.querySelectorAll<HTMLElement>('button, a, [role="button"]'))
+    // Look for a modal/dialog container
+    const modal = document.querySelector<HTMLElement>(
+      '[role="dialog"], [aria-modal="true"], [class*="modal"], [class*="Modal"], ' +
+      '[class*="dialog"], [class*="Dialog"], [class*="overlay"], [class*="Overlay"]'
+    );
+    if (!modal) return false;
+    // Find Reserve button inside the modal
+    const pattern = /^reserve$/i;
+    const btn = Array.from(modal.querySelectorAll<HTMLElement>('button, a, [role="button"]'))
       .find(el => isVisible(el) && pattern.test((el.textContent ?? "").trim()));
     if (btn) {
       btn.scrollIntoView({ block: "center" });
@@ -249,13 +288,13 @@ export async function selectRoomAI(
     return false;
   }).catch(() => false);
 
-  if (clicked) {
-    trace("[find-listing] JS fallback click on reserve button worked");
-    return "selected";
+  if (modalReserveClicked) {
+    trace("[find-listing] Expedia modal Reserve button clicked (two-click flow)");
+  } else {
+    trace("[find-listing] no modal detected after reserve click — single-click flow assumed");
   }
 
-  trace("[find-listing] could not click reserve — no_availability");
-  return "no_availability";
+  return "selected";
 }
 
 /**

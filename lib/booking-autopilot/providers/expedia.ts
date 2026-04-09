@@ -3,7 +3,13 @@ import { registerProvider } from "./registry";
 import type { BrowserProvider, ProviderStageSignals } from "./types";
 
 // Selectors for Expedia Group payment fields (used by both Expedia and Hotels.com)
+// Expedia inline payment form (not iframe) — placeholder-based selectors are most reliable.
+// Confirmed field placeholders from live Expedia checkout page:
+//   Card number:    "0000 0000 0000 0000"
+//   Expiry:         "MM/YY"
+//   Name on card:   "Name on card"
 export const EXPEDIA_GROUP_CARD_NAME_SELECTORS = [
+  'input[placeholder="Name on card"]',
   'input[id*="cardHolder"], input[id*="cardholder"], input[id*="card-holder"]',
   'input[name*="cardHolder"], input[name*="cardholder"]',
   'input[autocomplete="cc-name"]',
@@ -11,6 +17,7 @@ export const EXPEDIA_GROUP_CARD_NAME_SELECTORS = [
 ];
 
 export const EXPEDIA_GROUP_CARD_NUMBER_SELECTORS = [
+  'input[placeholder="0000 0000 0000 0000"]',
   'input[id*="cardNumber"], input[id*="card-number"]',
   'input[name*="cardNumber"], input[name*="card-number"]',
   'input[autocomplete="cc-number"]',
@@ -18,6 +25,7 @@ export const EXPEDIA_GROUP_CARD_NUMBER_SELECTORS = [
 ];
 
 export const EXPEDIA_GROUP_CARD_EXPIRY_SELECTORS = [
+  'input[placeholder="MM/YY"]',
   'input[id*="expiryDate"], input[id*="expiry"], input[id*="expiration"]',
   'input[name*="expiryDate"], input[name*="expiry"], input[name*="expiration"]',
   'input[autocomplete="cc-exp"]',
@@ -186,8 +194,12 @@ export const expediaProvider: BrowserProvider = {
       lowerUrl.includes("/hotel-search") ||
       lowerUrl.includes("/hotels");
 
+    // Expedia hotel detail URL formats:
+    //   /h/12345  (old format)
+    //   .h12345.  (new: "City-Hotels-Name.h12345.Hotel-Information")
     const hotelDetail =
       /\/h\/\d+/.test(lowerUrl) ||
+      /[./]h\d+[./]/.test(lowerUrl) ||
       (lowerUrl.includes("/hotel/") && !lowerUrl.includes("/checkout"));
 
     const isCheckout = lowerUrl.includes("/checkout");
