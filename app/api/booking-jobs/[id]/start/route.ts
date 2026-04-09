@@ -402,8 +402,57 @@ async function runUniversalStep(
 
     // Call runBrowserTask directly — avoids the self-HTTP fetch that fails when
     // NEXT_PUBLIC_APP_URL is not set (or the loopback is unavailable in serverless).
-    const data: BrowserTaskResult = await runBrowserTask(input);
-    liveLogClose(input.jobId);
+    // Retry up to 2 times on generic errors (timing failures, navigation issues, etc.)
+    // Non-retryable outcomes (captcha, no_availability, completed) break the loop immediately.
+    const MAX_BROWSER_RETRIES = 2; // 3 total attempts
+    let data: BrowserTaskResult | null = null;
+    let browserTaskErr: Error | null = null;
+
+    for (let attempt = 0; attempt <= MAX_BROWSER_RETRIES; attempt++) {
+      if (attempt > 0) {
+        const reason = data?.error ?? data?.summary ?? browserTaskErr?.message ?? "error";
+        log.push({
+          ts: now(), type: "retry",
+          message: `Browser retry ${attempt + 1}/${MAX_BROWSER_RETRIES + 1} — ${reason.slice(0, 120)}`,
+        });
+        await onProgress({ ...step, status: "loading", decisionLog: [...log] });
+        await sleep(3000);
+      }
+
+      try {
+        data = await runBrowserTask(input);
+        liveLogClose(input.jobId);
+        browserTaskErr = null;
+        // Non-retryable: stop immediately
+        if (
+          data.status === "completed" ||
+          data.status === "paused_payment" ||
+          data.status === "no_availability" ||
+          data.status === "captcha"
+        ) break;
+        // Retryable error: log attempt and continue loop
+        if (attempt < MAX_BROWSER_RETRIES) {
+          log.push({
+            ts: now(), type: "attempt",
+            message: `Attempt ${attempt + 1}: ${(data.error ?? data.summary ?? `status=${data.status}`).slice(0, 120)}`,
+            outcome: "retrying",
+          });
+        }
+      } catch (err) {
+        liveLogClose(input.jobId);
+        browserTaskErr = err instanceof Error ? err : new Error(String(err));
+        if (attempt < MAX_BROWSER_RETRIES) {
+          log.push({
+            ts: now(), type: "attempt",
+            message: `Attempt ${attempt + 1}: ${browserTaskErr.message.slice(0, 120)}`,
+            outcome: "retrying",
+          });
+        }
+      }
+    }
+
+    // If all attempts threw exceptions with no data, re-throw to outer catch
+    if (!data) throw browserTaskErr ?? new Error("Browser task failed after all retries");
 
     // ── Persist result immediately after runBrowserTask returns ──────────────
     // Vercel's 5-min maxDuration can kill the function at any moment. Writing
