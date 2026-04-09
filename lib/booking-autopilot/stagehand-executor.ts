@@ -837,19 +837,25 @@ The user will enter CVV and confirm payment themselves.`,
               );
             };
 
-            // Before clicking, dismiss any overlay modals (e.g. Expedia "fee-inclusive
-            // pricing" info dialog) that could intercept the listing click.
+            // Dismiss any blocking modals before clicking the hotel listing.
+            // Expedia shows a "We include taxes and fees — Got it" info dialog
+            // that intercepts clicks on the listing cards behind it.
+            // Strategy 1: modal container selector (works when role="dialog" or aria-modal is set)
+            // Strategy 2: direct "Got it" button search on page (works even without a container)
             const preDismissed = await raw.evaluate(() => {
               const isVisible = (el: Element) => {
                 const r = (el as HTMLElement).getBoundingClientRect();
                 return r.width > 0 && r.height > 0 && (el as HTMLElement).offsetParent !== null;
               };
-              const closePatterns = /^(got it|ok|okay|close|dismiss|done|continue|accept|×|✕)$/i;
-              // Find visible buttons inside dialog/modal containers
-              const modals = Array.from(document.querySelectorAll<HTMLElement>(
-                '[role="dialog"], [aria-modal="true"], [class*="modal"], [class*="Modal"], [class*="overlay"], [class*="Overlay"]'
-              )).filter(el => isVisible(el));
+              const closePatterns = /^(got it|ok|okay|close|dismiss|done|continue|accept|×|✕|no thanks)$/i;
               let clicked = 0;
+
+              // Strategy 1: buttons inside known dialog/modal/overlay containers
+              const modals = Array.from(document.querySelectorAll<HTMLElement>(
+                '[role="dialog"], [aria-modal="true"], [class*="modal"], [class*="Modal"], ' +
+                '[class*="overlay"], [class*="Overlay"], [class*="dialog"], [class*="Dialog"], ' +
+                '[class*="sheet"], [class*="Sheet"], [class*="popup"], [class*="Popup"]'
+              )).filter(el => isVisible(el));
               for (const modal of modals) {
                 const btns = Array.from(modal.querySelectorAll<HTMLElement>('button, [role="button"]'));
                 for (const btn of btns) {
@@ -861,11 +867,41 @@ The user will enter CVV and confirm payment themselves.`,
                   }
                 }
               }
+
+              // Strategy 2: if no modal container found, look for any visible "Got it" button
+              // that is rendered above the main content (fixed/absolute positioned, or high z-index).
+              if (clicked === 0) {
+                const allBtns = Array.from(document.querySelectorAll<HTMLElement>('button, [role="button"]'));
+                for (const btn of allBtns) {
+                  if (!isVisible(btn)) continue;
+                  if (!closePatterns.test((btn.textContent ?? "").trim())) continue;
+                  // Check if this button sits in a high-stacking-context ancestor
+                  let el: HTMLElement | null = btn;
+                  let isFloating = false;
+                  while (el && el !== document.body) {
+                    const s = window.getComputedStyle(el);
+                    const z = parseInt(s.zIndex, 10);
+                    if ((s.position === "fixed" || s.position === "absolute") && (!isNaN(z) && z > 5)) {
+                      isFloating = true;
+                      break;
+                    }
+                    el = el.parentElement;
+                  }
+                  if (isFloating) {
+                    btn.click();
+                    clicked++;
+                    break;
+                  }
+                }
+              }
+
               return clicked;
             }).catch(() => 0);
             if (preDismissed > 0) {
               trace(`[ai-listing] dismissed ${preDismissed} pre-click modal(s)`);
-              await new Promise(r => setTimeout(r, 600));
+              await new Promise(r => setTimeout(r, 800));
+            } else {
+              trace(`[ai-listing] no blocking modal detected before listing click`);
             }
 
             const result = await clickTargetListingAI(stagehand, targetHotelName, trace);

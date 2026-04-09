@@ -205,18 +205,24 @@ export async function dismissBlockingModals(
         if (!isCloseLabel) continue;
 
         const { inDialog, dialogText } = await deps.evaluateLocatorElement(btn, (el) => {
-          const dialog = el.closest("dialog, [role='dialog']") as HTMLElement | null;
+          // Check for explicit dialog/modal containers first
+          const dialog = el.closest("dialog, [role='dialog'], [aria-modal='true']") as HTMLElement | null;
           if (dialog) {
             const style = window.getComputedStyle(dialog);
             if (style.display !== "none" && style.visibility !== "hidden") {
               return { inDialog: true, dialogText: dialog.textContent ?? "" };
             }
           }
+          // Check for high-z-index containers (Expedia uses z-index ~6-10 for info modals)
+          // Also check aria-modal attribute on any ancestor
           let el2: HTMLElement | null = el.parentElement;
           while (el2 && el2 !== document.body) {
             const s = window.getComputedStyle(el2);
             const z = parseInt(s.zIndex, 10);
-            if (!isNaN(z) && z > 10 && s.position !== "static") {
+            if (!isNaN(z) && z > 5 && s.position !== "static") {
+              return { inDialog: true, dialogText: el2.textContent ?? "" };
+            }
+            if (el2.getAttribute("aria-modal") === "true") {
               return { inDialog: true, dialogText: el2.textContent ?? "" };
             }
             el2 = el2.parentElement;
