@@ -668,7 +668,8 @@ KEY RULES:
 - Booking.com checkout forms may appear in CHINESE. Treat these Chinese labels as their English equivalents: 濮?Last name, 鍚?First name, 鐢靛瓙閭鍦板潃=Email, 鎵嬫満鍙风爜=Phone, 鍥藉/鍦板尯=Country, 鍗″彿=Card number, 鍒版湡鏃?Expiry date, 鎸佸崱浜哄鍚?Cardholder name, 瀹屾垚棰勮=Complete booking (STOP before this), 绔嬪嵆浠樻=Pay now (STOP before this).
 - After switching to a new tab, wait for it to fully load before taking any action.
 - Expedia room selection: rooms show a "Reserve" button (NOT a quantity dropdown). Click "Reserve" on the cheapest available room. A modal/dialog will appear — click "Reserve" inside the modal too to proceed to checkout.
-- Expedia checkout is a SINGLE PAGE with both guest info and payment fields inline (not in an iframe). Fill First name, Last name, Email, Phone number fields first, then fill card fields: "Name on card", card number (placeholder "0000 0000 0000 0000"), expiration date (placeholder "MM/YY"). STOP before Security code (CVV).
+- Expedia checkout is a SINGLE PAGE with both guest info and payment fields inline (not in an iframe). Fill First name, Last name, Email fields, then Phone number (digits ONLY, no letters or state codes). Then fill card fields: "Name on card", card number (placeholder "0000 0000 0000 0000"), expiration date (placeholder "MM/YY"), billing ZIP code. STOP before Security code (CVV).
+- Expedia "Protect your stay" section: always select "No protection" / "I am willing to risk my stay" BEFORE filling card fields. This selection is required.
 
 The user will enter CVV and confirm payment themselves.`,
     });

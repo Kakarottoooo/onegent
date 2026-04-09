@@ -36,7 +36,18 @@ interface ExpediaGroupProfile {
   card_name?: string;
   card_number?: string;
   card_expiry?: string;
+  billing_zip?: string;
+  zip?: string; // fallback alias from BookingProfile
 }
+
+// Billing ZIP code selectors for Expedia checkout
+const EXPEDIA_BILLING_ZIP_SELECTORS = [
+  'input[id*="billingZip"], input[id*="billing-zip"], input[id*="BillingZip"]',
+  'input[name*="billingZip"], input[name*="billing-zip"]',
+  'input[autocomplete="postal-code"]',
+  'input[placeholder*="ZIP code"], input[placeholder*="Zip code"], input[placeholder*="Postal code"]',
+  'input[aria-label*="Billing ZIP"], input[aria-label*="ZIP code"]',
+];
 
 async function findVisibleInScope(scope: Page | Frame, selectors: string[]): Promise<{ scope: Page | Frame; selector: string } | null> {
   for (const selector of selectors) {
@@ -108,6 +119,7 @@ export async function fillExpediaGroupPaymentForm(
   // Detect inline vs iframe payment
   const inlineCardCount = await page.evaluate(() => {
     const selectors = [
+      'input[placeholder="0000 0000 0000 0000"]',
       'input[id*="cardNumber"], input[name*="cardNumber"], input[id*="card-number"]',
       'input[autocomplete="cc-number"]',
     ];
@@ -125,6 +137,38 @@ export async function fillExpediaGroupPaymentForm(
 
   trace(`Expedia payment: detected ${inlineCardCount} inline card input(s), ${iframeCount} payment-related iframe(s)`);
 
+  // Handle Expedia "Protect your stay" required section — select "No protection".
+  // This section is required before "Book now" becomes active.
+  const protectionSelected = await page.evaluate(() => {
+    // Look for the "No protection" radio/button option
+    const labels = Array.from(document.querySelectorAll<HTMLElement>('label, button, [role="radio"], [role="button"], input[type="radio"]'));
+    const noProtLabel = labels.find(el => {
+      const text = (el.textContent ?? "").trim().toLowerCase();
+      return text.includes("no protection") || text.includes("willing to risk") || text.includes("i'm willing");
+    });
+    if (noProtLabel) {
+      noProtLabel.scrollIntoView({ block: "center" });
+      noProtLabel.click();
+      return true;
+    }
+    // Also try clicking an <input type="radio"> with nearby "no protection" text
+    const radios = Array.from(document.querySelectorAll<HTMLInputElement>('input[type="radio"]'));
+    for (const radio of radios) {
+      const container = radio.closest('[class*="option"], [class*="Option"], [class*="plan"], li, div');
+      const text = (container?.textContent ?? "").toLowerCase();
+      if (text.includes("no protection") || text.includes("willing to risk")) {
+        radio.click();
+        return true;
+      }
+    }
+    return false;
+  }).catch(() => false);
+  if (protectionSelected) {
+    trace("Expedia payment: selected 'No protection' plan");
+  } else {
+    trace("Expedia payment: 'Protect your stay' section not found or already handled");
+  }
+
   // Fill cardholder name
   if (profile.card_name) {
     await fillExpediaGroupPaymentField(page, EXPEDIA_GROUP_CARD_NAME_SELECTORS, profile.card_name, "cardholder name", trace);
@@ -138,6 +182,14 @@ export async function fillExpediaGroupPaymentForm(
   // Fill expiry date — stop before CVV
   if (profile.card_expiry) {
     await fillExpediaGroupPaymentField(page, EXPEDIA_GROUP_CARD_EXPIRY_SELECTORS, profile.card_expiry, "expiry date", trace);
+  }
+
+  // Fill billing ZIP code
+  const billingZip = profile.billing_zip ?? profile.zip;
+  if (billingZip) {
+    await fillExpediaGroupPaymentField(page, EXPEDIA_BILLING_ZIP_SELECTORS, billingZip, "billing ZIP", trace);
+  } else {
+    trace("Expedia payment: no billing ZIP in profile — skipping");
   }
 
   // Verification pass

@@ -84,7 +84,12 @@ export async function fillFieldsWithAI(
     trace(`[fill-form] filling "${label}" = "${displayValue}"`);
 
     try {
-      await stagehand.act(`Fill the ${label} field with "${value}"`);
+      // Phone number: be explicit about digits-only to prevent autocomplete/AI from appending
+      // state codes or country suffixes (e.g., Expedia phone field showing "2235331053TN").
+      const instruction = label === "phone number"
+        ? `Find the Phone number input field and type only these digits: "${value}". Do not add any letters, country codes, or suffixes.`
+        : `Fill the ${label} field with "${value}"`;
+      await stagehand.act(instruction);
       filled.push(label);
       await sleep(350);
     } catch (err) {
