@@ -893,13 +893,18 @@ The user will enter CVV and confirm payment themselves.`,
     // Extract room type preference from the task text.
     // buildHotelTask() embeds it as "Prefer a <pref> room type if available."
     // We also accept inline formats like "Room type: King Suite" for manual tasks.
+    // Fallback: extract from hotel name suffix "Hotel Name - Room Type" (step label format).
     const roomPreference: string | undefined = (() => {
       const t = input.task;
       const m =
         t.match(/[Pp]refer(?:ence)?[:\s]+(?:a\s+)?([^.]+?)\s+room\s+type/i) ||
         t.match(/[Rr]oom\s+(?:type|preference)[:\s]+([^\n.]+)/i) ||
         t.match(/[Ss]elect\s+(?:a\s+)?([^.]+?)\s+room/i);
-      const raw = m?.[1]?.trim();
+      let raw = m?.[1]?.trim();
+      // Fallback: "Hotel Name - Deluxe Family Room" suffix in the hotel name label
+      if (!raw) {
+        raw = targetHotelName?.match(/\s+-\s+(.+)$/)?.[1]?.trim();
+      }
       // Reject non-preference captures: empty, too short, or containing generic words.
       // Pattern 3 (/Select\s+...room/) can capture "the cheapest available" or just "the" —
       // these must all be rejected so we don't pass a stop-word as a room preference.
