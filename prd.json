@@ -95,7 +95,7 @@
         "Typecheck passes"
       ],
       "priority": 5,
-      "passes": false,
+      "passes": true,
       "notes": "Reference fillBookingComPaymentForm() in booking-com.ts for the iframe locator pattern and verification approach. Key difference from Booking.com: Expedia may use inline DOM instead of cross-origin iframe — check first with page.evaluate() to count visible card inputs before assuming iframe."
     },
     {
