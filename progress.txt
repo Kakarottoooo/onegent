@@ -10,6 +10,26 @@
 - AI_LOOP_FULL=true enables all AI phases; individual flags: AI_LOOP_STAGE_DETECT, AI_LOOP_LISTING, AI_LOOP_FORM_FILL
 - liveLogPush(jobId, line) for real-time log streaming; trace() calls this automatically
 
+## 2026-04-09 - US-003
+- What was implemented: Refactored stagehand-executor.ts to use provider registry (getProvider) instead of resolveProviderContext/resolveProviderIdForUrl; replaced cookie injection with provider.setup(); replaced isBookingCom boolean with provider object; replaced providerGetBookingComStageSignals calls with provider?.getStageSignals(); replaced fill calls with provider?.fillGuestForm?/fillPaymentForm?
+- Files changed: lib/booking-autopilot/stagehand-executor.ts
+- **Learnings for future iterations:**
+  - provider is resolved 3 times: startProvider (at startUrl, before nav), bookingComContext (at currentUrl in attemptStageRecovery), activeProvider (at currentUrl for final signal/fill block)
+  - bookingComSignals renamed to providerSignals; .finalPaymentState → .paymentStep; same .guestDetailsStep
+  - provider?.getStageSignals() does NOT take 4th arg (visibleCheckoutFields) - only (page, url, text)
+  - fs/path imports removed from executor since cookie injection moved to provider.setup()
+  - providerGetBookingComStageSignals still imported for StageAssessmentDependencies (stage-assessment.ts uses it internally)
+  - setup() is called BEFORE navigation — addCookies and addInitScript work; page.evaluate fails silently
+---
+
+## 2026-04-09 - US-002
+- What was implemented: bookingComProvider object wrapping existing booking-com.ts functions, registered in global registry
+- Files changed: lib/booking-autopilot/providers/booking-com.ts (added imports + bookingComProvider export + registerProvider call)
+- **Learnings for future iterations:**
+  - Added `import fs from "fs"`, `import path from "path"`, `import { safePressEscape }`, `import { registerProvider }`, `import type { BrowserProvider, ProviderStageSignals }` at top
+  - getBookingComStageSignals() returns `{ isBookingCom, searchResults, hotelDetailPage, hotelDetailUrl, nonCheckoutUrl, guestDetailsStep, finalPaymentState }` — mapped to ProviderStageSignals: hotelDetail = hotelDetailPage || hotelDetailUrl, paymentStep = finalPaymentState
+  - setup() takes (page, context, trace) — context is the V3Context wrapper passed as stagehand.context; use `(context as any).addCookies()` for cookies, `(context as any).browserContext ?? (context as any).context` for BrowserContext
+  - All existing exports remain untouched per the additive-only requirement
 ---
 
 ## 2026-04-09 - US-001

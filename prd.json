@@ -35,7 +35,7 @@
         "Typecheck passes"
       ],
       "priority": 2,
-      "passes": false,
+      "passes": true,
       "notes": "Do NOT remove any existing exports or inline executor code yet — that happens in US-003. This story is additive only."
     },
     {
@@ -55,7 +55,7 @@
         "Typecheck passes"
       ],
       "priority": 3,
-      "passes": false,
+      "passes": true,
       "notes": "Most complex story — touches 47 locations in executor. Work methodically: replace one block at a time, typecheck after each. Keep the provider-specific helper functions (providerFillBookingComPaymentForm etc.) in booking-com.ts for now — the BrowserProvider wrapper calls them internally."
     },
     {
