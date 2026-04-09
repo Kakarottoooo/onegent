@@ -148,7 +148,7 @@
         "Fix any bugs found before marking this story passes: true"
       ],
       "priority": 8,
-      "passes": false,
+      "passes": true,
       "notes": "Use test script: npx tsx scripts/test-expedia.mjs hotels — runs a real Hotels.com booking flow. Passes when result.status === paused_payment. Fix bugs found, mark passes: true."
     }
   ]

@@ -33,7 +33,11 @@ export const hotelsComProvider: BrowserProvider = {
 
     const isCheckout = lowerUrl.includes("/checkout");
 
-    const guestDetailsStep = isCheckout && await page.evaluate(() => {
+    // Hotels.com redirects to expedia.com/checkout/session/ for the payment step
+    const isPaymentSessionUrl = lowerUrl.includes("/checkout/session");
+
+    // Guest details step: on checkout but NOT on the payment session page
+    const guestDetailsStep = isCheckout && !isPaymentSessionUrl && await page.evaluate(() => {
       const hasNameInput = !!document.querySelector(
         'input[id*="firstName"], input[id*="lastName"], ' +
         'input[name*="firstName"], input[name*="lastName"], ' +
@@ -43,14 +47,15 @@ export const hotelsComProvider: BrowserProvider = {
       return hasNameInput || hasEmailInput;
     }).catch(() => false);
 
-    const paymentStep = isCheckout && await page.evaluate(() => {
+    // Payment step: URL-based (most reliable) OR inline card input visible
+    const paymentStep = isPaymentSessionUrl || (isCheckout && await page.evaluate(() => {
       const cardInput = document.querySelector<HTMLInputElement>(
         'input[id*="cardNumber"], input[name*="cardNumber"], input[id*="card-number"], ' +
         'input[autocomplete="cc-number"], input[placeholder*="Card number"], ' +
         'input[placeholder*="card number"]'
       );
       return !!(cardInput && cardInput.offsetParent !== null);
-    }).catch(() => false);
+    }).catch(() => false));
 
     return {
       searchResults,

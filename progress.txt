@@ -1,3 +1,17 @@
+## 2026-04-09 - US-008
+- What was implemented: End-to-end Hotels.com test run; fixed stage detection bug in Expedia/Hotels.com providers
+- Bug found: On Expedia payment page (`/checkout/session/...`), card number is in cross-origin iframe → `paymentStep=false`. Cardholder name input was matching `guestDetailsStep=true`. This triggered the guard: `!bookingComFinalPaymentDomState && bookingComGuestDetailsDomState` → error.
+- Fix: Added URL-based payment step detection — `/checkout/session/` URL pattern is the Expedia Group payment step. `guestDetailsStep` now excludes `isPaymentSessionUrl`. `paymentStep = isPaymentSessionUrl || (DOM card input visible)`.
+- Files changed: lib/booking-autopilot/providers/expedia.ts, lib/booking-autopilot/providers/hotels-com.ts
+- Test result: `paused_payment` (meets PRD pass condition)
+- **Learnings for future iterations:**
+  - Hotels.com redirects to `expedia.com/checkout/session/<uuid>?tr` for the actual payment step — URL pattern is reliable
+  - Hotels.com shows `hotels.com/welcome-one-key` login wall when no session cookies are provided — booking without auth isn't possible
+  - One Key login wall causes `RPA=payment_gate` false positive detection (page has payment-like layout but no real card fields)
+  - For Hotels.com to fully work (card pre-fill), session cookies must be injected at setup() — same pattern as Booking.com cookie injection
+  - Expedia Group checkout always uses `/checkout/session/` for the payment step; prior steps use different path segments
+---
+
 ## 2026-04-09 - US-007
 - What was implemented: Found and fixed critical bug where bookingComPageOpen matched any registered provider (Expedia, Hotels.com), causing Expedia to skip the AI agent run (initialMaxSteps=0) and use Booking.com RPA recovery paths incorrectly
 - Root cause: After US-003 refactored to getProvider(), bookingComPageOpen used `getProvider(url) ?? ...` which is truthy for any provider, not just Booking.com
@@ -27,6 +41,8 @@
 ## Codebase Patterns
 
 - bookingComPageOpen/bookingComContext must only match id==='booking-com' — any broader check (getProvider truthy) causes Expedia/Hotels.com to incorrectly skip AI agent and run Booking.com RPA
+- Expedia Group payment step URL pattern: `/checkout/session/` — use this for reliable paymentStep detection (card fields are in cross-origin iframe, DOM check unreliable)
+- Hotels.com requires One Key session cookies to proceed past the login wall — same injection pattern as Booking.com cookies needed
 - Two-layer execution: AI (Stagehand/stagehand.act()) first, Playwright RPA fallback
 - All browser automation flows through lib/booking-autopilot/stagehand-executor.ts
 - Stage detection uses Claude Haiku perception (AI_LOOP_STAGE_DETECT) + rule-based signals
