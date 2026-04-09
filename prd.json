@@ -76,7 +76,7 @@
         "Typecheck passes"
       ],
       "priority": 4,
-      "passes": false,
+      "passes": true,
       "notes": "No payment form yet — that is US-005. Stage signal detection may need adjustment after real browser testing in US-007."
     },
     {
