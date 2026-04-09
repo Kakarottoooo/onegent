@@ -1453,16 +1453,30 @@ The user will enter CVV and confirm payment themselves.`,
       // Provider drift guard: if we've left the start provider's domain (e.g. Expedia → IHG hotel site),
       // navigate back to startUrl so the flow stays within the expected booking site.
       if (startProvider && !startProvider.matchesUrl(currentUrl) && !startProvider.matchesUrl(raw.url())) {
-        trace(`[provider-guard] drifted away from ${startProvider.id} to ${raw.url().slice(0, 80)} — navigating back to startUrl`);
-        try {
-          await raw.goto(input.startUrl, { waitUntil: "domcontentloaded", timeout: 25_000 });
-          await raw.waitForLoadState("networkidle", { timeout: 8_000 }).catch(() => {});
-        } catch (navErr) {
-          trace(`[provider-guard] navigation back failed: ${(navErr as Error).message?.slice(0, 60)}`);
+        // Check whether the current URL looks like a legitimate hotel booking redirect
+        // (e.g. Expedia → IHG/Marriott/Hilton brand site, which Expedia does for some hotels).
+        // Recognise: room-rate selection, reservation, checkout paths on ANY domain.
+        const redirectUrl = raw.url().toLowerCase();
+        const isLegitimateBookingRedirect =
+          /select.?room.?rate|roomrate|\/reservation|\/book|\/checkout|\/payment/i.test(redirectUrl) ||
+          assessment.stage === "room_selection" ||
+          assessment.stage === "checkout_form" ||
+          assessment.stage === "payment_gate";
+
+        if (isLegitimateBookingRedirect) {
+          trace(`[provider-guard] on external brand site but looks like a booking page — allowing redirect (${raw.url().slice(0, 80)})`);
+        } else {
+          trace(`[provider-guard] drifted away from ${startProvider.id} to ${raw.url().slice(0, 80)} — navigating back to startUrl`);
+          try {
+            await raw.goto(input.startUrl, { waitUntil: "domcontentloaded", timeout: 25_000 });
+            await raw.waitForLoadState("networkidle", { timeout: 8_000 }).catch(() => {});
+          } catch (navErr) {
+            trace(`[provider-guard] navigation back failed: ${(navErr as Error).message?.slice(0, 60)}`);
+          }
+          assessment = await assessBookingStage({ rawPage: raw, stagehand, startUrl: input.startUrl, requestedDates, agentMessage });
+          pageText = assessment.pageText;
+          currentUrl = assessment.currentUrl;
         }
-        assessment = await assessBookingStage({ rawPage: raw, stagehand, startUrl: input.startUrl, requestedDates, agentMessage });
-        pageText = assessment.pageText;
-        currentUrl = assessment.currentUrl;
       }
 
       if (assessment.stage === "room_selection" &&
