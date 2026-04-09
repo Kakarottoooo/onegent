@@ -1570,6 +1570,13 @@ The user will enter CVV and confirm payment themselves.`,
       const provider = getProvider(currentUrl) ?? getProvider(rawPageUrl) ?? (bookingComPageOpen ? getProvider(input.startUrl) : null);
       if (provider && assessment.stage === "checkout_form") {
         if (process.env.AI_LOOP_FORM_FILL === "true") {
+          // Providers can override AI form fill with a deterministic implementation.
+          // Expedia/Hotels.com use this to avoid browser autocomplete mis-filling fields.
+          if (provider.fillGuestForm) {
+            trace("[RPA] Provider has fillGuestForm override — using programmatic fill instead of AI.");
+            await provider.fillGuestForm(raw, p, bookingComHelpers, trace);
+            await new Promise(r => setTimeout(r, 600));
+          } else {
           trace("Booking.com guest form — AI fill mode (AI_LOOP_FORM_FILL=true).");
 
           // Detect if address fields are present before filling — some Booking.com properties
@@ -1737,10 +1744,12 @@ The user will enter CVV and confirm payment themselves.`,
               .catch(() => false);
             if (stillOnGuestDetails) {
               trace("[RPA] still on guest-details after DOM click — running full RPA fill as last resort.");
-              await provider?.fillGuestForm?.(raw, p, bookingComHelpers, trace);
+              // provider.fillGuestForm is not available in this branch (else = no override)
+              // so just re-run AI fill as last resort is not needed; advance was already attempted.
               await new Promise(r => setTimeout(r, 800));
             }
           }
+          } // end else (AI fill — no provider.fillGuestForm override)
         } else {
           trace("[RPA] Provider guest form — running programmatic field fill (overrides account pre-fill).");
           await provider?.fillGuestForm?.(raw, p, bookingComHelpers, trace);

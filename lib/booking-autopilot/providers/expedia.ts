@@ -111,6 +111,110 @@ async function fillExpediaGroupPaymentField(
   return false;
 }
 
+interface ExpediaGuestProfile {
+  first_name?: string;
+  last_name?: string;
+  email?: string;
+  phone?: string;
+}
+
+/**
+ * Fill Expedia / Hotels.com guest fields using Playwright native fill().
+ * Avoids stagehand.act() entirely so browser autocomplete cannot mis-fill fields.
+ * After each fill, presses Escape + Tab to dismiss any autocomplete dropdown.
+ */
+export async function fillExpediaGuestForm(
+  page: Page,
+  profile: ExpediaGuestProfile,
+  trace: (msg: string) => void,
+): Promise<void> {
+  const FIELD_SELECTORS: Array<{ key: keyof ExpediaGuestProfile; selectors: string[]; label: string }> = [
+    {
+      key: "first_name",
+      label: "first name",
+      selectors: [
+        'input[autocomplete="given-name"]',
+        'input[id*="firstName"], input[id*="first-name"], input[id*="firstname"]',
+        'input[name*="firstName"], input[name*="first-name"]',
+        'input[placeholder*="First name"]',
+      ],
+    },
+    {
+      key: "last_name",
+      label: "last name",
+      selectors: [
+        'input[autocomplete="family-name"]',
+        'input[id*="lastName"], input[id*="last-name"], input[id*="lastname"]',
+        'input[name*="lastName"], input[name*="last-name"]',
+        'input[placeholder*="Last name"]',
+      ],
+    },
+    {
+      key: "email",
+      label: "email",
+      selectors: [
+        'input[type="email"]',
+        'input[autocomplete="email"]',
+        'input[id*="email"], input[name*="email"]',
+        'input[placeholder*="Email"]',
+      ],
+    },
+    {
+      key: "phone",
+      label: "phone number",
+      selectors: [
+        'input[type="tel"]',
+        'input[autocomplete="tel"]',
+        'input[id*="phone"], input[name*="phone"]',
+        'input[placeholder*="Phone"]',
+      ],
+    },
+  ];
+
+  for (const field of FIELD_SELECTORS) {
+    const value = profile[field.key];
+    if (!value) continue;
+
+    let filled = false;
+    for (const sel of field.selectors) {
+      // Check if selector matches a visible input
+      const exists = await page.evaluate((s) => {
+        const el = document.querySelector<HTMLInputElement>(s);
+        return !!(el && el.offsetParent !== null && !el.disabled);
+      }, sel).catch(() => false);
+
+      if (!exists) continue;
+
+      try {
+        // Triple-click to select any existing content, then fill
+        await page.click(sel, { clickCount: 3 }).catch(() => {});
+        await page.fill(sel, value);
+        // Press Escape then Tab to dismiss any autocomplete dropdown
+        await page.keyboard.press("Escape").catch(() => {});
+        await page.keyboard.press("Tab").catch(() => {});
+
+        // Verify the value was actually set
+        const actual = await page.evaluate((s) => {
+          return (document.querySelector<HTMLInputElement>(s))?.value ?? "";
+        }, sel).catch(() => "");
+
+        if (actual === value) {
+          trace(`Expedia guest: filled ${field.label} = "${field.key === "email" ? value : "[ok]"}" via selector "${sel}"`);
+          filled = true;
+          break;
+        }
+        trace(`Expedia guest: fill ${field.label} mismatch — expected "${value.slice(0, 20)}" got "${actual.slice(0, 20)}"`);
+      } catch (err) {
+        trace(`Expedia guest: fill ${field.label} failed (${sel}): ${(err as Error).message?.slice(0, 60)}`);
+      }
+    }
+
+    if (!filled) {
+      trace(`Expedia guest: could not find visible field for ${field.label}`);
+    }
+  }
+}
+
 export async function fillExpediaGroupPaymentForm(
   page: Page,
   profile: ExpediaGroupProfile,
@@ -283,6 +387,10 @@ export const expediaProvider: BrowserProvider = {
       guestDetailsStep: guestDetailsStep as boolean,
       paymentStep: paymentStep as boolean,
     };
+  },
+
+  async fillGuestForm(page: Page, profile: unknown, _helpers: unknown, trace: (msg: string) => void): Promise<void> {
+    await fillExpediaGuestForm(page, profile as ExpediaGroupProfile & { first_name?: string; last_name?: string; email?: string; phone?: string }, trace);
   },
 
   async fillPaymentForm(page: Page, profile: unknown, _helpers: unknown, trace: (msg: string) => void): Promise<void> {
