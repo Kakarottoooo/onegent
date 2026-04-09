@@ -86,6 +86,28 @@ export function buildBookingComUrl(opts: BookingComOpts): string {
   return `https://www.booking.com/searchresults.html?${new URLSearchParams(params).toString()}`;
 }
 
+/** Build an Expedia hotel search URL. */
+export function buildExpediaUrl(opts: BookingComOpts): string {
+  const dest = opts.hotelName ? `${opts.hotelName} ${opts.city}`.trim() : opts.city;
+  const params: Record<string, string> = { destination: dest };
+  if (opts.checkin)  params.startDate = opts.checkin;
+  if (opts.checkout) params.endDate   = opts.checkout;
+  if (opts.adults)   params.adults    = String(opts.adults);
+  params.rooms = String(opts.rooms ?? 1);
+  return `https://www.expedia.com/Hotel-Search?${new URLSearchParams(params).toString()}`;
+}
+
+/** Build a Hotels.com hotel search URL. */
+export function buildHotelsComUrl(opts: BookingComOpts): string {
+  const dest = opts.hotelName ? `${opts.hotelName} ${opts.city}`.trim() : opts.city;
+  const params: Record<string, string> = { destination: dest };
+  if (opts.checkin)  params.startDate = opts.checkin;
+  if (opts.checkout) params.endDate   = opts.checkout;
+  if (opts.adults)   params.adults    = String(opts.adults);
+  params.rooms = String(opts.rooms ?? 1);
+  return `https://www.hotels.com/search?${new URLSearchParams(params).toString()}`;
+}
+
 export interface GoogleFlightsOpts {
   origin: string; // IATA airport code preferred (e.g. "BNA"), city name as fallback
   dest: string; // IATA airport code preferred (e.g. "LAX"), city name as fallback

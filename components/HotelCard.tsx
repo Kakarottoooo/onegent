@@ -3,7 +3,14 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { HotelRecommendationCard } from "@/lib/types";
-import { buildBookingComUrl } from "@/lib/agent/planners/booking-links";
+import { buildBookingComUrl, buildExpediaUrl, buildHotelsComUrl } from "@/lib/agent/planners/booking-links";
+
+type BookingSite = "booking-com" | "expedia" | "hotels-com";
+const SITE_OPTIONS: { id: BookingSite; label: string; color: string }[] = [
+  { id: "booking-com", label: "Booking.com", color: "#003580" },
+  { id: "expedia",     label: "Expedia",     color: "#00355F" },
+  { id: "hotels-com",  label: "Hotels.com",  color: "#D4001A" },
+];
 import ProfilePicker, { PickedProfile } from "./ProfilePicker";
 
 interface HotelCardProps {
@@ -19,6 +26,7 @@ export default function HotelCard({ card, index, checkIn, checkOut, guests }: Ho
   const router = useRouter();
   const [showPicker, setShowPicker] = useState(false);
   const [booking, setBooking] = useState(false);
+  const [bookingSite, setBookingSite] = useState<BookingSite>("booking-com");
 
   // Validate that dates are present and in the future before booking.
   const today = new Date().toISOString().split("T")[0];
@@ -99,26 +107,22 @@ export default function HotelCard({ card, index, checkIn, checkOut, guests }: Ho
       // Strip slashes and extra punctuation that confuse booking.com's search.
       const searchTerm = hotel.name.replace(/[/\\|]/g, " ").replace(/\s+/g, " ").trim();
 
-      const bookingComUrl = buildBookingComUrl({
-        hotelName: searchTerm,
-        city: locationHint,
-        checkin: checkIn,
-        checkout: checkOut,
-        adults: numAdults,
-        rooms: 1,
-      });
-
-      // Use Booking.com as the primary startUrl — dates are embedded in the URL so
-      // the agent never has to guess or update a date picker on the hotel's own page.
-      // The hotel's direct link becomes the fallback only if Booking.com fails.
-      const primaryUrl = bookingComUrl;
+      const urlOpts = { hotelName: searchTerm, city: locationHint, checkin: checkIn, checkout: checkOut, adults: numAdults, rooms: 1 };
+      const primaryUrl =
+        bookingSite === "expedia"    ? buildExpediaUrl(urlOpts) :
+        bookingSite === "hotels-com" ? buildHotelsComUrl(urlOpts) :
+                                       buildBookingComUrl(urlOpts);
+      const siteName =
+        bookingSite === "expedia"    ? "Expedia" :
+        bookingSite === "hotels-com" ? "Hotels.com" :
+                                       "Booking.com";
       const directFallbackUrl = hotel.booking_link;
 
       const task = [
         `Book "${hotel.name}" for ${numAdults} adult(s).`,
         `Check-in: ${checkIn}. Check-out: ${checkOut}.`,
-        `You are starting on Booking.com — find the listing for "${hotel.name}", select the room, and fill all guest info.`,
-        `If Booking.com fails (no results, error, or blocked), navigate to the hotel's direct site instead: ${directFallbackUrl}`,
+        `You are starting on ${siteName} — find the listing for "${hotel.name}", select the room, and fill all guest info.`,
+        `If ${siteName} fails (no results, error, or blocked), navigate to the hotel's direct site instead: ${directFallbackUrl}`,
         "Fill in all guest information and card details.",
         "Stop before entering CVV or clicking the final payment confirmation button.",
       ].filter(Boolean).join(" ");
@@ -149,7 +153,7 @@ export default function HotelCard({ card, index, checkIn, checkOut, guests }: Ho
           },
           agentModel,
         },
-        fallbackUrl: bookingComUrl,
+        fallbackUrl: primaryUrl,
         status: "pending",
       };
       const createRes = await fetch("/api/booking-jobs", {
@@ -425,6 +429,35 @@ export default function HotelCard({ card, index, checkIn, checkOut, guests }: Ho
             ))}
           </div>
         )}
+
+        {/* Site selector */}
+        <div style={{ display: "flex", gap: "6px", marginBottom: "10px" }}>
+          {SITE_OPTIONS.map((site) => {
+            const active = bookingSite === site.id;
+            return (
+              <button
+                key={site.id}
+                onClick={() => setBookingSite(site.id)}
+                style={{
+                  flex: 1,
+                  padding: "5px 0",
+                  borderRadius: "8px",
+                  border: active ? `1.5px solid ${site.color}` : "1px solid var(--border)",
+                  backgroundColor: active ? `${site.color}14` : "transparent",
+                  color: active ? site.color : "var(--text-secondary)",
+                  fontFamily: "var(--font-dm-sans)",
+                  fontSize: "11px",
+                  fontWeight: active ? 600 : 400,
+                  cursor: "pointer",
+                  transition: "all 0.15s",
+                  whiteSpace: "nowrap",
+                }}
+              >
+                {site.label}
+              </button>
+            );
+          })}
+        </div>
 
         {/* Footer */}
         <div
