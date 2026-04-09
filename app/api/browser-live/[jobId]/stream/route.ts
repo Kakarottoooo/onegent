@@ -51,7 +51,7 @@ export async function GET(
             break;
           }
 
-          const buf = await livePage.screenshot({ type: "jpeg", quality: 55, timeout: 8000 });
+          const buf = await livePage.screenshot({ type: "jpeg", quality: 50, timeout: 2500 });
           const b64 = buf.toString("base64");
           framesSent++;
           if (framesSent === 1) {
@@ -80,8 +80,8 @@ export async function GET(
 
           // Don't give up on transient failures (stagehand.act() holds CDP lock).
           // Keep retrying — the stream will recover as soon as the action completes.
-          if (consecutiveFailures >= 30) {
-            // 30 * 500ms = 15s total wait — something is really stuck
+          if (consecutiveFailures >= 40) {
+            // 40 * 200ms = 8s total wait — something is really stuck
             console.log(`[live-stream] giving up after ${consecutiveFailures} failures jobId=${jobId}`);
             send(`event: closed\ndata: session ended\n\n`);
             break;
@@ -89,11 +89,11 @@ export async function GET(
 
           // Keep-alive comment so SSE connection stays open
           send(`: screenshot-failure-${consecutiveFailures}\n\n`);
-          await new Promise((r) => setTimeout(r, 500));
+          await new Promise((r) => setTimeout(r, 200));
           continue;
         }
 
-        await new Promise((r) => setTimeout(r, 150));
+        await new Promise((r) => setTimeout(r, 80));
       }
 
       try { controller.close(); } catch { /* already closed */ }

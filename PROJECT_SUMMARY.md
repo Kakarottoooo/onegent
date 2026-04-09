@@ -245,6 +245,65 @@ Onegent · AI 决策代理 · 项目总结 · v0.2.24.0
         · 手动预订行动按钮（当 agent 失败时）
         · "What's next" 摘要（明确告诉用户下一步做什么）
 
+  5.7 · 两层执行架构：AI 主导 + Playwright 兜底（v0.2.25.0 重构）
+
+    Autopilot 执行层采用 双层降级（AI-first, RPA-fallback）设计：
+
+    ┌─────────────────────────────────────────────────────────────┐
+    │  Layer 1 — AI Layer（主）                                   │
+    │                                                             │
+    │  驱动：Stagehand (openai/gpt-4o-mini)                       │
+    │  感知：Claude Haiku 截图 + DOM → PerceptionResult            │
+    │  方式：stagehand.act("自然语言指令")                         │
+    │                                                             │
+    │  负责：                                                      │
+    │  • Stage 检测（listing / room_selection / checkout_form …） │
+    │  • 酒店名点击（search results → hotel detail page）         │
+    │  • 客房选择（识别房型偏好 + 点击 "I'll reserve"）           │
+    │  • Guest form 填写（name / email / phone / country）        │
+    │  • Form audit（扫描空字段 → 定向补填）                      │
+    │  • Advance 按钮（"Next: Final details" 首次尝试）           │
+    └────────────────────┬────────────────────────────────────────┘
+                         │ 失败 / 验证不通过时自动降级
+                         ▼
+    ┌─────────────────────────────────────────────────────────────┐
+    │  Layer 2 — RPA Layer（兜底）                                 │
+    │                                                             │
+    │  驱动：Playwright raw Page                                  │
+    │  方式：locator.fill() / selectOption() / page.evaluate()   │
+    │                                                             │
+    │  负责：                                                      │
+    │  • Room quantity <select>（JS native setter）               │
+    │  • Phone / Address 补填（native setter + 事件派发）         │
+    │  • React event flush（触发 synthetic input/change 事件）    │
+    │  • "Next: Final details" DOM click 兜底                    │
+    │  • 支付表单（跨域 iframe，AI 无法访问）                      │
+    │    - Cardholder name / Card number / Expiration date        │
+    └─────────────────────────────────────────────────────────────┘
+                         │
+                         ▼
+                  用户手动输入 CVC 确认支付
+
+    设计原则：
+      • AI 先行：每个步骤先调 stagehand.act()，成功即返回
+      • RPA 兜底：AI 失败或验证不通过，自动降级到 Playwright 确定性操作
+      • RPA 代码永远保留，作为最后防线，不因 AI 成功而删除
+      • 环境变量控制：AI_LOOP_FULL=true 全开 AI 层
+
+    AI_LOOP 控制粒度：
+      AI_LOOP_FULL=true        — 等于下面三个全部 true
+      AI_LOOP_STAGE_DETECT     — Stage 检测使用 Claude Haiku perception
+      AI_LOOP_LISTING          — Listing 点击 + Room selection
+      AI_LOOP_FORM_FILL        — Guest form 填写 + form audit
+
+    当前已验证（Hilton Garden Inn Times Square，端到端）：
+      listing → room_selection → checkout_form → payment_gate → paused_payment
+      全程 AI 主导，7 分钟内完成，CVC 待用户填写后支付
+
+    不能 AI 化的已知限制：
+      支付 iframe（paymentcomponent.booking.com）— 跨域安全策略，
+      浏览器禁止外部页面读写 iframe 内 DOM，只能由 Playwright iframe locator 操作
+
   5.6 · Agent 反馈闭环（Feedback Loop）
 
     系统学习用户对 agent 决策的接受度：
@@ -409,9 +468,14 @@ My Trips（Autopilot 任务中心）：
 AI：MiniMax（NLU + 评论信号解析 + 语义排序 + 双人约束合并）
 数据：Google Places API v1 · SerpAPI · Tavily · Ticketmaster Discovery API
       Google Geocoding · SerpAPI Google Shopping
-自动化：Playwright（headless Chromium）— 自动操作 Kayak / Booking.com / OpenTable
+自动化：Stagehand（AI 层）— stagehand.act() 自然语言指令，驱动 gpt-4o-mini
+       Claude Haiku（感知层）— 截图 + DOM → PerceptionResult（stage / nextAction）
+       Playwright（RPA 兜底层）— locator.fill() / selectOption() / page.evaluate()
+       两层降级架构：AI-first → Playwright fallback，每步独立控制
        stealth 模式（禁用 AutomationControlled / navigator.webdriver 覆写）
        Cookie 持久化（.booking-cookies/{service}.json）
+       Live Browser View — SSE 实时截图流 + canvas 双缓冲渲染（无闪烁）
+       实时日志 — 内存环形缓冲区（liveLogStore），1.2s 轮询推送到任务 UI
 存储：Neon PostgreSQL（12 张表）· localStorage（收藏夹 + 偏好缓存）
 认证：Clerk（内部分析仪表板 + 跨设备偏好同步 + Decision Room 身份锚定）
 推送：Web Push（VAPID）· PWA Service Worker
@@ -420,7 +484,7 @@ AI：MiniMax（NLU + 评论信号解析 + 语义排序 + 双人约束合并）
 API 层：30+ 个路由端点
 Cron：4 个定时任务（反馈提示 / 价格检查 / 场馆质量 / 笔记本价格）
 测试：Vitest（22+ 个测试文件 · 100% 通过）
-版本：v0.2.24.0
+版本：v0.2.25.0
 
 ================================================================
 八、数据库（12 张表）
@@ -444,6 +508,15 @@ Cron：4 个定时任务（反馈提示 / 价格检查 / 场馆质量 / 笔记�
 ================================================================
 九、版本历史摘要
 ================================================================
+
+v0.2.25.0（2026-04-08）— AI-first 两层执行架构 + Live View 优化
+  · 重构 Autopilot 执行层：AI 主导 + Playwright 兜底双层降级
+  · Stagehand AI 接管：listing 点击 / room 选择 / guest form 填写 / stage 检测
+  · 房型偏好：从 task 文本提取 room preference，AI 精确选择对应房型
+  · Form audit：扫描空字段 → 定向补填，AI fill 后零遗漏
+  · Phone JS fallback：native setter 补填手机号，绕过 stagehand schema bug
+  · Live Browser View：canvas 双缓冲渲染（消除闪烁），screenshot timeout 缩短至 2.5s
+  · 实时日志：liveLogStore 内存环形缓冲区，任务 UI 实时流式展示
 
 v0.2.24.0（2026-04-01）— Autopilot Booking + Agent 反馈闭环
   · Phase 5 全部落地：后台异步执行 / 任务内自主决策 / Cookie 登录持久化

@@ -606,6 +606,68 @@ function RetryScheduler({ step, stepIndex, jobId, onScheduled }: {
   );
 }
 
+// ── Live log panel (streams trace lines while agent is running) ───────────────
+function LiveLogPanel({ jobId }: { jobId: string }) {
+  const [lines, setLines] = useState<string[]>([]);
+  const [closed, setClosed] = useState(false);
+  const afterRef = useRef(0);
+  const boxRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (closed) return;
+    let cancelled = false;
+
+    async function poll() {
+      if (cancelled) return;
+      try {
+        const res = await fetch(`/api/booking-jobs/${jobId}/logs?after=${afterRef.current}`);
+        if (!res.ok) return;
+        const data: { lines: string[]; total: number; closed: boolean } = await res.json();
+        if (data.lines.length > 0) {
+          afterRef.current = data.total;
+          setLines(prev => {
+            const next = [...prev, ...data.lines];
+            return next.slice(-500); // keep last 500 lines
+          });
+          // Auto-scroll to bottom
+          requestAnimationFrame(() => {
+            if (boxRef.current) boxRef.current.scrollTop = boxRef.current.scrollHeight;
+          });
+        }
+        if (data.closed) { setClosed(true); return; }
+      } catch { /* ignore */ }
+      if (!cancelled) setTimeout(poll, 1200);
+    }
+
+    poll();
+    return () => { cancelled = true; };
+  }, [jobId, closed]);
+
+  if (lines.length === 0 && !closed) return (
+    <div style={{ padding: "6px 12px 6px 44px", fontFamily: "var(--font-dm-sans)", fontSize: 10, color: "var(--text-muted,#aaa)" }}>
+      Waiting for agent logs…
+    </div>
+  );
+
+  return (
+    <div style={{ borderTop: "0.5px solid var(--border,#e5e7eb)", padding: "8px 12px 8px 44px" }}>
+      <p style={{ fontFamily: "var(--font-dm-sans)", fontSize: 10, fontWeight: 700, color: "var(--text-muted,#aaa)", letterSpacing: "0.05em", textTransform: "uppercase", marginBottom: 4 }}>
+        Live agent log {closed ? "(finished)" : "● streaming"}
+      </p>
+      <div ref={boxRef} style={{
+        maxHeight: 180, overflowY: "auto", display: "flex", flexDirection: "column", gap: 1,
+        fontFamily: "monospace", fontSize: 10, lineHeight: 1.5,
+      }}>
+        {lines.map((line, i) => (
+          <span key={i} style={{ color: line.includes("FAIL") || line.includes("failed") || line.includes("ERROR") ? "rgba(220,38,38,0.8)" : line.includes("✓") || line.includes("filled") || line.includes("clicked") ? "rgba(22,163,74,0.85)" : "var(--text-secondary,#555)" }}>
+            {line}
+          </span>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 function StepCard({ step, stepIndex, jobId, onRefresh }: {
   step: BookingJobStep; stepIndex: number; jobId: string; onRefresh?: () => void;
 }) {
@@ -758,6 +820,9 @@ function StepCard({ step, stepIndex, jobId, onRefresh }: {
           </button>
         )}
       </div>
+
+      {/* Live log — shown while agent is running */}
+      {step.status === "loading" && <LiveLogPanel jobId={jobId} />}
 
       {/* Decision log */}
       {logOpen && step.decisionLog && (

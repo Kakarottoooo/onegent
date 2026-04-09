@@ -464,6 +464,17 @@ export async function isBookingComFinalPaymentDomState(rawPage: Page, currentUrl
         );
       });
 
+    // Guard: if "Next: Final details" button is still visible, we are NOT on the
+    // final payment page — some hotels show "payment will be handled by the property"
+    // text on the guest-details step, which would otherwise cause a false positive.
+    const hasNextFinalDetailsButton = Array.from(
+      document.querySelectorAll<HTMLElement>("button, a, [role='button']")
+    ).some((el) => {
+      if (!isVisible(el)) return false;
+      return /next[:\s]*final\s*details/i.test(el.textContent ?? "");
+    });
+    if (hasNextFinalDetailsButton) return false;
+
     return (hasPaymentTextSignals && hasVisiblePaymentControls) || cardLikeInputs;
   }).catch(() => false);
 }
@@ -1036,9 +1047,14 @@ export async function verifyBookingComPaymentFieldValues(
             meta.includes("mm / yy")
           )
         ) {
-          const compactValue = rawValue.replace(/\s+/g, "").replace(/-/g, "/");
+          const compactValue    = rawValue.replace(/\s+/g, "").replace(/-/g, "/");
           const compactExpected = scopeExpected.cardExpiry.replace(/\s+/g, "").replace(/-/g, "/");
-          if (compactValue.includes(compactExpected)) {
+          const expiryDigits    = compactExpected.replace(/\D/g, "");
+          const rawDigits       = rawValue.replace(/\D/g, "");
+          if (
+            compactValue.includes(compactExpected) ||
+            (expiryDigits.length >= 4 && rawDigits.includes(expiryDigits))
+          ) {
             result.cardExpiry = true;
           }
         }
@@ -1080,9 +1096,13 @@ export async function verifyBookingComPaymentFieldValues(
       return digits === expectedDigits || (expectedDigits.length >= 4 && digits.endsWith(expectedDigits.slice(-4)));
     }
     if (kind === "expiry") {
-      const compact = rawValue.replace(/\s+/g, "").replace(/-/g, "/");
+      const compact         = rawValue.replace(/\s+/g, "").replace(/-/g, "/");
       const expectedCompact = value.replace(/\s+/g, "").replace(/-/g, "/");
-      return compact.includes(expectedCompact);
+      if (compact.includes(expectedCompact)) return true;
+      // Fallback: some iframe fields return digits-only (e.g. "1228" vs "12/28")
+      const expiryDigits = expectedCompact.replace(/\D/g, "");
+      const rawDigits    = rawValue.replace(/\D/g, "");
+      return expiryDigits.length >= 4 && rawDigits.includes(expiryDigits);
     }
     return rawValue.toLowerCase().replace(/\s+/g, " ").trim().includes(value.toLowerCase().replace(/\s+/g, " ").trim());
   };
@@ -1333,7 +1353,12 @@ export async function fillBookingComPaymentForm(
       }
       if (kind === "expiry") {
         const compact = rawValue.replace(/\s+/g, "").replace(/-/g, "/");
-        return compact.includes(normalizedExpiry);
+        if (compact.includes(normalizedExpiry)) return true;
+        // Some payment iframes return digits-only (e.g. "1228" instead of "12/28").
+        // Compare without separators as a fallback.
+        const expiryDigits = normalizedExpiry.replace(/\D/g, "");
+        const rawDigits    = rawValue.replace(/\D/g, "");
+        return expiryDigits.length >= 4 && rawDigits.includes(expiryDigits);
       }
       return normalizedTextValue.includes(helpers.normalizeText(value));
     };

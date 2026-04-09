@@ -18,7 +18,7 @@ export default function BrowserLiveView({
   fullscreen = false,
 }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
-  const imgRef = useRef<HTMLImageElement>(null);
+  const canvasRef = useRef<HTMLCanvasElement>(null);
   const [status, setStatus] = useState<"connecting" | "live" | "closed" | "error">("connecting");
   const [fps, setFps] = useState(0);
   const frameCount = useRef(0);
@@ -27,6 +27,8 @@ export default function BrowserLiveView({
   const lastFrameAtRef = useRef(0);
   const reconnectAttemptsRef = useRef(0);
   const everConnectedRef = useRef(false);
+  // Pending frame being decoded — prevents pile-up of simultaneous decodes
+  const pendingDecodeRef = useRef(false);
 
   // ── SSE screenshot stream ───────────────────────────────────────────────────
   useEffect(() => {
@@ -34,6 +36,7 @@ export default function BrowserLiveView({
     lastFrameAtRef.current = 0;
     reconnectAttemptsRef.current = 0;
     everConnectedRef.current = false;
+    pendingDecodeRef.current = false;
     let es: EventSource | null = null;
 
     const clearReconnectTimer = () => {
@@ -41,6 +44,37 @@ export default function BrowserLiveView({
         clearTimeout(reconnectTimerRef.current);
         reconnectTimerRef.current = null;
       }
+    };
+
+    /**
+     * Draw a JPEG base64 frame onto the canvas using double-buffering.
+     * Creates an off-screen Image, waits for it to decode, then draws in one
+     * synchronous call — no visible flicker between old and new frame.
+     */
+    const drawFrame = (b64: string) => {
+      if (pendingDecodeRef.current) return; // skip if already decoding
+      pendingDecodeRef.current = true;
+
+      const img = new Image();
+      img.onload = () => {
+        pendingDecodeRef.current = false;
+        const canvas = canvasRef.current;
+        if (!canvas) return;
+        const ctx = canvas.getContext("2d");
+        if (!ctx) return;
+        // Draw atomically — no blank-canvas moment
+        ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+        frameCount.current++;
+        lastFrameAtRef.current = Date.now();
+        reconnectAttemptsRef.current = 0;
+        everConnectedRef.current = true;
+        clearReconnectTimer();
+        setStatus("live");
+      };
+      img.onerror = () => {
+        pendingDecodeRef.current = false;
+      };
+      img.src = `data:image/jpeg;base64,${b64}`;
     };
 
     const connect = () => {
@@ -58,15 +92,7 @@ export default function BrowserLiveView({
         es?.close();
       });
       es.onmessage = (e) => {
-        if (imgRef.current) {
-          imgRef.current.src = `data:image/jpeg;base64,${e.data}`;
-          setStatus("live");
-          frameCount.current++;
-          lastFrameAtRef.current = Date.now();
-          reconnectAttemptsRef.current = 0;
-          everConnectedRef.current = true;
-          clearReconnectTimer();
-        }
+        drawFrame(e.data);
       };
       es.onerror = () => {
         if (closedRef.current) return;
@@ -87,7 +113,7 @@ export default function BrowserLiveView({
             if (closedRef.current) return;
             es?.close();
             connect();
-          }, 1200);
+          }, 1000);
         }
       };
     };
@@ -100,19 +126,20 @@ export default function BrowserLiveView({
       frameCount.current = 0;
     }, 1000);
 
+    // Watchdog: reconnect if no frame received for 2.5s
     const watchdogInterval = setInterval(() => {
       if (closedRef.current) return;
       if (!lastFrameAtRef.current) return;
-      if (Date.now() - lastFrameAtRef.current > 4000 && !reconnectTimerRef.current) {
+      if (Date.now() - lastFrameAtRef.current > 2500 && !reconnectTimerRef.current) {
         setStatus("connecting");
         reconnectTimerRef.current = setTimeout(() => {
           reconnectTimerRef.current = null;
           if (closedRef.current) return;
           es?.close();
           connect();
-        }, 200);
+        }, 150);
       }
-    }, 1500);
+    }, 800);
 
     return () => {
       closedRef.current = true;
@@ -252,7 +279,7 @@ export default function BrowserLiveView({
         </div>
       )}
 
-      {/* Browser viewport */}
+      {/* Browser viewport — canvas for flicker-free double-buffered rendering */}
       <div
         ref={containerRef}
         tabIndex={0}
@@ -272,11 +299,11 @@ export default function BrowserLiveView({
           ),
         }}
       >
-        {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img
-          ref={imgRef}
-          alt="Live browser view"
-          style={{ width: "100%", height: "100%", display: "block", objectFit: "cover" }}
+        <canvas
+          ref={canvasRef}
+          width={browserWidth}
+          height={browserHeight}
+          style={{ width: "100%", height: "100%", display: "block" }}
         />
         {overlay}
       </div>

@@ -66,8 +66,9 @@ import {
   setBookingComRoomQuantity as providerSetBookingComRoomQuantity,
 } from "./providers/booking-com";
 import { determineFinalOutcome, NO_AVAILABILITY_SIGNALS } from "./core/final-outcome";
-import { fillGuestFormWithAI } from "./ai-loop/fill-form";
-import { clickTargetListingAI, selectCheapestRoomAI } from "./ai-loop/find-listing";
+import { fillGuestFormWithAI, auditAndRefillEmptyFields } from "./ai-loop/fill-form";
+import { clickTargetListingAI, selectRoomAI } from "./ai-loop/find-listing";
+import { liveLogPush, liveLogClose, liveLogReset } from "../live-log-store";
 import {
   clickLocatorDom,
   evaluateLocatorElement,
@@ -297,6 +298,13 @@ async function resolveCurrentUrl(
 }
 
 /**
+ * Per-job Stagehand registry — used to close a previous paused_payment browser
+ * when the same job is re-run (Reset & Retry). Without this, the old browser
+ * window stays open alongside the new one.
+ */
+const activeStagehands = new Map<string, { close: () => Promise<void> }>();
+
+/**
  * Run a booking task on any website using AI vision.
  *
  * The agent navigates the site, fills all known fields (name / email / phone /
@@ -314,9 +322,23 @@ export async function runBrowserTask(
     process.env.AI_LOOP_LISTING      = "true";
   }
 
+  // Close any previously paused browser for this job (e.g. Reset & Retry after paused_payment).
+  // Without this, the old browser stays open alongside the new one.
+  if (input.jobId) {
+    const prev = activeStagehands.get(input.jobId);
+    if (prev) {
+      activeStagehands.delete(input.jobId);
+      await prev.close().catch(() => {});
+    }
+  }
+
+  // Reset live log so previous runs don't bleed into this run's log panel.
+  if (input.jobId) liveLogReset(input.jobId);
+
   const debugTrace: string[] = [];
   const trace = (message: string) => {
     debugTrace.push(message);
+    if (input.jobId) liveLogPush(input.jobId, message);
     // Print to terminal in dev so you can follow execution without opening the DB.
     if (process.env.NODE_ENV !== "production") {
       console.log(`[stagehand] ${message}`);
@@ -401,6 +423,8 @@ export async function runBrowserTask(
 
   try {
     await stagehand.init();
+    // Register stagehand so a future Reset & Retry can close this browser instance.
+    if (input.jobId) activeStagehands.set(input.jobId, { close: () => stagehand.close() });
     // v3 API: get active page from context (resolvePage is private)
     const page = stagehand.context.activePage() ?? await stagehand.context.newPage();
     // Register the page in the live-view store immediately so SSE stream can
@@ -410,7 +434,9 @@ export async function runBrowserTask(
       // Use a dynamic getter so the live-view stream always screenshots the currently
       // active page — even after tab switches or stagehand.act() navigations.
       browserSessionStore.setGetter(input.jobId, () => {
-        const ap = stagehand.context.activePage();
+        const ctx = stagehand.context;
+        if (!ctx) return null;
+        const ap = ctx.activePage();
         return ap ? getRawPage(ap) : null;
       }, 15 * 60 * 1000);
       trace('Local mode: registered dynamic page getter in live-view store for real-time streaming.');
@@ -863,6 +889,30 @@ The user will enter CVV and confirm payment themselves.`,
       `Target hotel: ${targetHotelName ?? "unknown"} ` +
       `(source=${targetHotelSource}, startUrl=${input.startUrl.slice(0, 140)})`
     );
+
+    // Extract room type preference from the task text.
+    // buildHotelTask() embeds it as "Prefer a <pref> room type if available."
+    // We also accept inline formats like "Room type: King Suite" for manual tasks.
+    const roomPreference: string | undefined = (() => {
+      const t = input.task;
+      const m =
+        t.match(/[Pp]refer(?:ence)?[:\s]+(?:a\s+)?([^.]+?)\s+room\s+type/i) ||
+        t.match(/[Rr]oom\s+(?:type|preference)[:\s]+([^\n.]+)/i) ||
+        t.match(/[Ss]elect\s+(?:a\s+)?([^.]+?)\s+room/i);
+      const raw = m?.[1]?.trim();
+      // Reject non-preference captures: empty, too short, or containing generic words.
+      // Pattern 3 (/Select\s+...room/) can capture "the cheapest available" or just "the" —
+      // these must all be rejected so we don't pass a stop-word as a room preference.
+      if (!raw) return undefined;
+      if (raw.length < 4) return undefined;  // "the", "a", "an", etc.
+      if (/^the\b|cheapest|standard|available|lowest/i.test(raw)) return undefined;
+      return raw;
+    })();
+    if (roomPreference) {
+      trace(`Room preference extracted from task: "${roomPreference}"`);
+    } else {
+      trace("No specific room preference found in task — will select cheapest available.");
+    }
     let assessment = await assessBookingStage({
       rawPage: raw,
       stagehand,
@@ -895,32 +945,56 @@ The user will enter CVV and confirm payment themselves.`,
             if (result === "no_availability") return false;
             if (result === "clicked") {
               // Booking.com opens hotel pages in a new tab.
-              // Wait briefly, then check if a new hotel-detail tab was opened.
-              // If so, navigate raw (current page) to the same URL so all subsequent
-              // operations stay on one page (raw is const — can't reassign).
-              await new Promise(r => setTimeout(r, 1200));
-              try {
-                const allPages = stagehand.context.pages();
-                const hotelPageEntry = allPages
-                  .map(p => ({ p, url: getScopeUrl(getRawPage(p)) }))
-                  .find(({ url }) =>
-                    /booking\.com\/hotel\//.test(url) ||
-                    /secure\.booking\.com\/book/.test(url)
-                  );
-                if (hotelPageEntry) {
-                  const hotelUrl = hotelPageEntry.url;
-                  if (raw.url() !== hotelUrl) {
-                    trace(`[ai-listing] new hotel tab detected — navigating main page to: ${hotelUrl.slice(0, 80)}`);
+              // Wait up to 2.5s for the tab to open, then navigate raw to it.
+              // If the hotel name link was clicked (correct), a tab opens quickly.
+              // If "See availability" was clicked (wrong), the page stays on search results.
+              let hotelUrl: string | null = null;
+              for (let tabWait = 0; tabWait < 3 && !hotelUrl; tabWait++) {
+                await new Promise(r => setTimeout(r, 800));
+                try {
+                  const allPages = stagehand.context.pages();
+                  const hotelPageEntry = allPages
+                    .map(p => ({ p, url: getScopeUrl(getRawPage(p)) }))
+                    .find(({ url }) =>
+                      /booking\.com\/hotel\//.test(url) ||
+                      /secure\.booking\.com\/book/.test(url)
+                    );
+                  if (hotelPageEntry) hotelUrl = hotelPageEntry.url;
+                } catch { /* ignore */ }
+              }
+              if (hotelUrl) {
+                if (raw.url() !== hotelUrl) {
+                  // Close the extra tab Booking.com opened — we'll navigate raw instead.
+                  // Without this, both the original tab and the new tab end up on the
+                  // hotel page, showing two browser windows to the user.
+                  try {
+                    const allPages = stagehand.context.pages();
+                    for (const p of allPages) {
+                      const pr = getRawPage(p);
+                      if (pr !== raw && /booking\.com\/hotel\/|secure\.booking\.com\/book/.test(pr.url())) {
+                        await pr.close().catch(() => {});
+                        break;
+                      }
+                    }
+                  } catch { /* ignore */ }
+                  trace(`[ai-listing] new hotel tab detected — navigating main page to: ${hotelUrl.slice(0, 80)}`);
+                  try {
                     await raw.goto(hotelUrl, { waitUntil: "domcontentloaded", timeout: 25_000 });
                     await raw.waitForLoadState("networkidle", { timeout: 10_000 }).catch(() => {});
-                  } else {
-                    trace(`[ai-listing] already on hotel page: ${hotelUrl.slice(0, 80)}`);
+                  } catch (navErr) {
+                    trace(`[ai-listing] navigation failed: ${(navErr as Error).message?.slice(0, 60)}`);
                   }
                 } else {
-                  trace(`[ai-listing] no new hotel tab detected — checking current URL: ${raw.url().slice(0, 80)}`);
+                  trace(`[ai-listing] already on hotel page: ${hotelUrl.slice(0, 80)}`);
                 }
-              } catch (err) {
-                trace(`[ai-listing] post-click tab check failed: ${(err as Error).message?.slice(0, 60)}`);
+              } else {
+                // Check if raw itself navigated (some paths redirect without a new tab)
+                const rawUrl = raw.url();
+                if (/booking\.com\/hotel\//.test(rawUrl)) {
+                  trace(`[ai-listing] raw page navigated to hotel directly: ${rawUrl.slice(0, 80)}`);
+                } else {
+                  trace(`[ai-listing] no hotel tab detected after 2.4s — current URL: ${rawUrl.slice(0, 80)}`);
+                }
               }
               return true;
             }
@@ -995,14 +1069,56 @@ The user will enter CVV and confirm payment themselves.`,
           return true;
         }
         case "room_selection": {
+          // AI path: all sites when AI_LOOP_LISTING is enabled (including Booking.com).
+          // selectRoomAI uses stagehand.act() for preference matching + JS native setter
+          // for the quantity dropdown (avoids gpt-4o-mini selectOptionFromDropdown schema bug).
+          // The tab-detection block below handles Booking.com's checkout-in-new-tab pattern.
           if (process.env.AI_LOOP_LISTING === "true") {
-            const result = await selectCheapestRoomAI(stagehand, trace);
+            const result = await selectRoomAI(stagehand, trace, roomPreference);
             if (result === "no_availability") return false;
+            // Booking.com opens the checkout page in a new tab after "I'll reserve".
+            // Wait briefly, then check if a checkout tab was opened.
+            // If so, navigate raw to that URL (raw is const — can't reassign).
+            await new Promise(r => setTimeout(r, 1500));
+            try {
+              const allPages = stagehand.context.pages();
+              const checkoutEntry = allPages
+                .map(p => ({ p, url: getScopeUrl(getRawPage(p)) }))
+                .find(({ url }) => /secure\.booking\.com\/book/.test(url));
+              if (checkoutEntry) {
+                const checkoutUrl = checkoutEntry.url;
+                // Close the extra tab Booking.com opened, then navigate raw to checkout URL
+                try {
+                  const checkoutRaw = getRawPage(checkoutEntry.p);
+                  if (checkoutRaw && checkoutRaw !== raw) {
+                    await checkoutRaw.close().catch(() => {});
+                    trace(`[ai-room] closed extra checkout tab`);
+                  }
+                } catch { /* ignore */ }
+                if (raw.url() !== checkoutUrl) {
+                  trace(`[ai-room] checkout tab detected — navigating main page to: ${checkoutUrl.slice(0, 80)}`);
+                  await raw.goto(checkoutUrl, { waitUntil: "domcontentloaded", timeout: 25_000 });
+                  await raw.waitForLoadState("networkidle", { timeout: 10_000 }).catch(() => {});
+                } else {
+                  trace(`[ai-room] already on checkout page: ${checkoutUrl.slice(0, 80)}`);
+                }
+              } else {
+                // No new tab — Booking.com may have navigated the current page directly.
+                // Check if we're already on the checkout URL; if so, nothing to do.
+                const nowUrl = raw.url();
+                if (/secure\.booking\.com\/book/.test(nowUrl)) {
+                  trace(`[ai-room] already on checkout page (direct nav): ${nowUrl.slice(0, 80)}`);
+                } else {
+                  trace(`[ai-room] no checkout tab detected — current URL: ${nowUrl.slice(0, 80)}`);
+                }
+              }
+            } catch (err) {
+              trace(`[ai-room] post-click tab check failed: ${(err as Error).message?.slice(0, 60)}`);
+            }
             return true;
           }
-          // ── Booking.com: use Playwright native selectOption() + JS click ──
-          // NEVER fall back to AI agent on Booking.com — it always types in the
-          // search bar instead of selecting rooms.
+          // ── Booking.com RPA fallback: used when AI_LOOP_LISTING is disabled ──
+          // Uses Playwright native selectOption() + JS click.
           if (bookingComContext) {
             try {
               trace("[RPA] Booking.com room_selection: using RPA selectOption + JS click.");
@@ -1315,7 +1431,36 @@ The user will enter CVV and confirm payment themselves.`,
                 await new Promise((r) => setTimeout(r, 250));
               }
 
-              return true; // Always return true 鈥?never let AI agent handle this on Booking.com
+              // Booking.com opens the checkout page in a new tab after "I'll reserve".
+              // Scan all context pages and navigate raw to the checkout URL if found.
+              await new Promise(r => setTimeout(r, 1500));
+              try {
+                const allPages = stagehand.context.pages();
+                const checkoutEntry = allPages
+                  .map(p => ({ p, url: getScopeUrl(getRawPage(p)) }))
+                  .find(({ url }) => /secure\.booking\.com\/book/.test(url));
+                if (checkoutEntry) {
+                  const checkoutUrl = checkoutEntry.url;
+                  if (raw.url() !== checkoutUrl) {
+                    // Close the extra checkout tab before navigating raw to it.
+                    const checkoutRaw = getRawPage(checkoutEntry.p);
+                    if (checkoutRaw !== raw) {
+                      await checkoutRaw.close().catch(() => {});
+                    }
+                    trace(`[RPA-room] checkout tab detected — navigating main page to: ${checkoutUrl.slice(0, 80)}`);
+                    await raw.goto(checkoutUrl, { waitUntil: "domcontentloaded", timeout: 25_000 });
+                    await raw.waitForLoadState("networkidle", { timeout: 10_000 }).catch(() => {});
+                  } else {
+                    trace(`[RPA-room] already on checkout page`);
+                  }
+                } else {
+                  trace(`[RPA-room] no checkout tab found — current URL: ${raw.url().slice(0, 80)}`);
+                }
+              } catch (tabErr) {
+                trace(`[RPA-room] tab check failed: ${(tabErr as Error).message?.slice(0, 60)}`);
+              }
+
+              return true; // Always return true — never let AI agent handle this on Booking.com
             } catch (e) {
               trace(`Booking.com room selection failed: ${e}`);
               return true; // Still return true to prevent AI agent from taking over
@@ -1378,7 +1523,7 @@ The user will enter CVV and confirm payment themselves.`,
       }
     };
 
-    for (let attempt = 0; attempt < 4; attempt += 1) {
+    for (let attempt = 0; attempt < 8; attempt += 1) {
       trace(`Stage assessment ${attempt + 1}: ${assessment.stage} 鈥?${assessment.reason}`);
       if (!["listing", "date_selection", "room_selection", "intermediate_gate"].includes(assessment.stage)) {
         break;
@@ -1539,17 +1684,99 @@ The user will enter CVV and confirm payment themselves.`,
       if (isBookingCom && assessment.stage === "checkout_form") {
         if (process.env.AI_LOOP_FORM_FILL === "true") {
           trace("Booking.com guest form — AI fill mode (AI_LOOP_FORM_FILL=true).");
-          await fillGuestFormWithAI(stagehand, p, trace);
+
+          // Detect if address fields are present before filling — some Booking.com properties
+          // (e.g. NYC hotels with resort fees/deposit) require address/city at checkout.
+          // Only include address in AI fill when the form actually has those fields to avoid
+          // mis-filling the "Special requests" textarea (which happened before this check).
+          const formHasAddressFields = await raw.evaluate(() =>
+            !!document.querySelector(
+              'input[name="address1"], input[id*="address1"], ' +
+              'input[autocomplete="street-address"], input[autocomplete="address-line1"]'
+            )
+          ).catch(() => false);
+
+          await fillGuestFormWithAI(stagehand, p, trace, { includeAddress: formHasAddressFields });
           await new Promise(r => setTimeout(r, 600));
+
+          // Supplement: directly fill phone via JS native setter if AI missed it.
+          // Booking.com phone has a country-code <select> + digits-only input combo.
+          // stagehand.act() sometimes fills the wrong element. We identify the real
+          // phone number input by skipping elements that look like country-code selectors
+          // (maxLength ≤ 4 or current value starts with '+' and is ≤ 4 chars).
+          if (p.phone) {
+            const digitsOnly = p.phone.replace(/\D/g, "");
+            const phoneFilled = await raw.evaluate((digits) => {
+              const nativeSetter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set;
+              const candidates = Array.from(
+                document.querySelectorAll<HTMLInputElement>(
+                  'input[type="tel"], input[autocomplete="tel"], ' +
+                  'input[name*="phone" i], input[id*="phone" i]'
+                )
+              );
+              const tel = candidates.find(el => {
+                if (!el.offsetParent) return false; // not visible / detached
+                const val = el.value.trim();
+                const max = el.maxLength;
+                // Skip country-code inputs (short max-length or '+N' value)
+                if (max > 0 && max <= 5) return false;
+                if (val.startsWith("+") && val.length <= 5) return false;
+                return true;
+              });
+              if (!tel || tel.value) return false; // already filled — skip
+              nativeSetter?.call(tel, digits);
+              tel.dispatchEvent(new Event("input",  { bubbles: true }));
+              tel.dispatchEvent(new Event("change", { bubbles: true }));
+              return true;
+            }, digitsOnly).catch(() => false);
+            if (phoneFilled) trace(`[fill-form] phone filled via JS native setter (digits: ${digitsOnly})`);
+            else trace("[fill-form] phone JS fallback: input already filled or not found");
+          }
+
+          // Supplement: directly fill address/city/zip via JS native setter if present and empty.
+          // AI fill may not fill these reliably due to Stagehand schema issues on custom inputs.
+          if (formHasAddressFields && (p.address_line1 || p.city || p.zip)) {
+            const addrFilled = await raw.evaluate(({ addr, city, zip }) => {
+              const nativeSetter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set;
+              let count = 0;
+              const fillEmpty = (sel: string, val: string) => {
+                if (!val) return;
+                const el = document.querySelector<HTMLInputElement>(sel);
+                if (!el || el.value) return; // skip if already filled
+                nativeSetter?.call(el, val);
+                el.dispatchEvent(new Event("input", { bubbles: true }));
+                el.dispatchEvent(new Event("change", { bubbles: true }));
+                count++;
+              };
+              fillEmpty('input[name="address1"], input[id*="address1"]', addr);
+              fillEmpty('input[name="city"], input[id*="city"]', city);
+              fillEmpty('input[name="zip"], input[id*="zip"], input[id*="postalCode"]', zip);
+              return count;
+            }, {
+              addr: p.address_line1 ?? "",
+              city: p.city ?? "",
+              zip: p.zip ?? "",
+            }).catch(() => 0);
+            if (addrFilled > 0) trace(`[fill-form] filled ${addrFilled} address field(s) via JS native setter`);
+          }
+
+          // Form audit: scan DOM for any text fields still empty, targeted re-fill via AI.
+          // This catches fields the initial AI pass missed (wrong element, schema error,
+          // element appeared after a React re-render, etc.).
+          // Runs after all JS fallbacks so it only touches genuinely empty fields.
+          await auditAndRefillEmptyFields(stagehand, raw, p, trace);
+          await new Promise(r => setTimeout(r, 400));
 
           // React controlled inputs: stagehand.act() uses locator.fill() which sets the DOM
           // value but doesn't fire React's synthetic events. The submit button stays disabled
           // until React re-validates. Fire nativeSetter + input/change events on every visible
           // input so React picks up the values and enables the submit button.
           const reactFlushed = await raw.evaluate(() => {
-            const nativeInputSetter   = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,   "value")?.set;
+            const nativeInputSetter    = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,   "value")?.set;
             const nativeTextareaSetter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")?.set;
+            const nativeSelectSetter   = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype,   "value")?.set;
             let count = 0;
+            // Flush text inputs and textareas
             document.querySelectorAll<HTMLInputElement | HTMLTextAreaElement>("input:not([type='hidden']), textarea").forEach(el => {
               const val = el.value;
               if (!val) return;
@@ -1559,9 +1786,20 @@ The user will enter CVV and confirm payment themselves.`,
               el.dispatchEvent(new Event("change", { bubbles: true }));
               count++;
             });
+            // Also flush <select> dropdowns (e.g. country) — omitting these was
+            // causing React form validation to fail because the country select's
+            // React state never got updated after stagehand.act() set its value.
+            document.querySelectorAll<HTMLSelectElement>("select").forEach(el => {
+              const val = el.value;
+              if (!val || val === "0" || val === "") return;
+              if (nativeSelectSetter) nativeSelectSetter.call(el, val);
+              el.dispatchEvent(new Event("input",  { bubbles: true }));
+              el.dispatchEvent(new Event("change", { bubbles: true }));
+              count++;
+            });
             return count;
           }).catch(() => 0);
-          trace(`[fill-form] flushed React events on ${reactFlushed} input(s)`);
+          trace(`[fill-form] flushed React events on ${reactFlushed} field(s) (inputs + selects)`);
           await new Promise(r => setTimeout(r, 400));
 
           // Click the advance button — React should now have the form as valid
@@ -1600,12 +1838,20 @@ The user will enter CVV and confirm payment themselves.`,
 
             if (nextClicked) {
               trace("[RPA] clicked 'Next: Final details' via direct DOM click.");
-              await new Promise(r => setTimeout(r, 1500));
-            } else {
-              // Last resort: run full RPA fill+advance (fields will be skipped as already filled)
-              trace("[RPA] direct click failed — running full RPA providerFillBookingComGuestForm as last resort.");
+              await new Promise(r => setTimeout(r, 2000));
+            }
+
+            // Check again — if we're STILL on guest-details, run full RPA fill as last resort.
+            // The AI fill may have missed the country <select> (React state not updated).
+            // providerFillBookingComGuestForm uses Playwright selectOption() which properly
+            // updates React state and re-enables the submit button.
+            const stillOnGuestDetails = await providerGetBookingComStageSignals(raw, raw.url(), await raw.evaluate(() => document.body.innerText).catch(() => ""), false)
+              .then(s => s.guestDetailsStep && !s.finalPaymentState)
+              .catch(() => false);
+            if (stillOnGuestDetails) {
+              trace("[RPA] still on guest-details after DOM click — running full RPA fill as last resort.");
               await providerFillBookingComGuestForm(raw, p, bookingComHelpers, trace);
-              await new Promise(r => setTimeout(r, 600));
+              await new Promise(r => setTimeout(r, 800));
             }
           }
         } else {
@@ -1832,7 +2078,9 @@ The user will enter CVV and confirm payment themselves.`,
       console.log("\n鉁?[stagehand] Payment page is open 鈥?use OneAgent live view or the browser window to complete payment.\n");
       // Getter is already registered from init — just extend TTL for paused_payment hold.
       browserSessionStore.setGetter(input.jobId, () => {
-        const ap = stagehand.context.activePage();
+        const ctx = stagehand.context;
+        if (!ctx) return null;
+        const ap = ctx.activePage();
         return ap ? getRawPage(ap) : null;
       }, 15 * 60 * 1000);
       setTimeout(() => {
@@ -1938,9 +2186,14 @@ The user will enter CVV and confirm payment themselves.`,
     };
   } finally {
     if (!keepBrowserOpen) {
-      if (input.jobId) browserSessionStore.delete(input.jobId);
+      if (input.jobId) {
+        browserSessionStore.delete(input.jobId);
+        activeStagehands.delete(input.jobId);
+      }
       await stagehand.close().catch(() => {});
     }
+    // If keepBrowserOpen=true, the entry stays in activeStagehands so the next
+    // Reset & Retry will close this browser before opening a new one.
   }
 }
 

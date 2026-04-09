@@ -50,6 +50,7 @@ import { sendPushNotification } from "@/lib/push";
 import type { PushSubscription } from "web-push";
 import type { AutopilotResult, BrowserTaskResult, BrowserTaskInput } from "@/lib/booking-autopilot/types";
 import { runBrowserTask } from "@/lib/booking-autopilot/stagehand-executor";
+import { liveLogClose } from "@/lib/live-log-store";
 import { buildPreferenceProfile } from "@/lib/policy";
 
 // ── Agent-runtime: activity skill dispatch ─────────────────────────────────
@@ -402,6 +403,7 @@ async function runUniversalStep(
     // Call runBrowserTask directly — avoids the self-HTTP fetch that fails when
     // NEXT_PUBLIC_APP_URL is not set (or the loopback is unavailable in serverless).
     const data: BrowserTaskResult = await runBrowserTask(input);
+    liveLogClose(input.jobId);
 
     // ── Persist result immediately after runBrowserTask returns ──────────────
     // Vercel's 5-min maxDuration can kill the function at any moment. Writing
