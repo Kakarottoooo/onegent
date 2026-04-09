@@ -116,7 +116,7 @@
         "Typecheck passes"
       ],
       "priority": 6,
-      "passes": false,
+      "passes": true,
       "notes": "Hotels.com is Expedia Group — checkout DOM is nearly identical to Expedia. Start by copying expedia.ts and adjusting URL matchers. If payment selectors are identical, extract shared logic to a helper in a new file lib/booking-autopilot/providers/expedia-group-payment.ts."
     },
     {

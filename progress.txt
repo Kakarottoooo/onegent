@@ -1,3 +1,16 @@
+## 2026-04-09 - US-004 through US-006
+- US-004: Created lib/booking-autopilot/providers/expedia.ts with Expedia BrowserProvider; registered in registry via index.ts side-effect import
+- US-005: Added fillPaymentForm to expediaProvider using fillExpediaGroupPaymentForm() helper; detects inline vs iframe, fills name/number/expiry, stops before CVV, runs verification pass
+- US-006: Created lib/booking-autopilot/providers/hotels-com.ts reusing fillExpediaGroupPaymentForm from expedia.ts; matchesUrl excludes expedia.com URLs
+- Files changed: providers/expedia.ts, providers/hotels-com.ts, providers/index.ts
+- **Learnings for future iterations:**
+  - Shared Expedia Group payment logic exported as fillExpediaGroupPaymentForm() from expedia.ts (not a separate file)
+  - Hotels.com URL pattern for hotel detail: /ho\d+ (e.g. /ho1234567)
+  - Expedia URL pattern for hotel detail: /h/\d+ or /hotel/ (not /checkout)
+  - All new providers auto-register via side-effect imports in providers/index.ts
+  - US-007 and US-008 require live browser testing — cannot be automated without a running browser session
+---
+
 ## Codebase Patterns
 
 - Two-layer execution: AI (Stagehand/stagehand.act()) first, Playwright RPA fallback
