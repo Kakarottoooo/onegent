@@ -227,10 +227,20 @@ export async function dismissBlockingModals(
             }
             el2 = el2.parentElement;
           }
-          return { inDialog: false, dialogText: "" };
+          // Not in a standard dialog — return parent container text for content-based matching
+          const container = el.closest("section, aside, [class*='card'], [class*='panel'], div") as HTMLElement | null;
+          return { inDialog: false, dialogText: container?.textContent ?? "" };
         }).catch(() => ({ inDialog: false, dialogText: "" }));
 
-        if (!inDialog) continue;
+        // Allow known Expedia/OTA info modal patterns even without a standard dialog container.
+        // These are identified by button text + nearby content.
+        const isKnownInfoModal = !inDialog && (
+          dialogText.toLowerCase().includes("include taxes") ||
+          dialogText.toLowerCase().includes("not like the others") ||
+          dialogText.toLowerCase().includes("fee-inclusive") ||
+          dialogText.toLowerCase().includes("we include fees")
+        );
+        if (!inDialog && !isKnownInfoModal) continue;
 
         const kind: ModalKind = classifyModal(dialogText) ?? "blocker";
         await btn.click({ force: true }).catch(() => {});

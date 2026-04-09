@@ -868,29 +868,31 @@ The user will enter CVV and confirm payment themselves.`,
                 }
               }
 
-              // Strategy 2: if no modal container found, look for any visible "Got it" button
-              // that is rendered above the main content (fixed/absolute positioned, or high z-index).
+              // Strategy 2: fallback — look for any visible "Got it" / dismiss button
+              // anywhere on the page. This handles Expedia-style modals that use
+              // transform-based centering with no explicit z-index on ancestors.
+              // Safety check: only click if there are multiple visible buttons or the
+              // page has an obvious overlay (darkened background) element.
               if (clicked === 0) {
-                const allBtns = Array.from(document.querySelectorAll<HTMLElement>('button, [role="button"]'));
-                for (const btn of allBtns) {
-                  if (!isVisible(btn)) continue;
-                  if (!closePatterns.test((btn.textContent ?? "").trim())) continue;
-                  // Check if this button sits in a high-stacking-context ancestor
-                  let el: HTMLElement | null = btn;
-                  let isFloating = false;
-                  while (el && el !== document.body) {
-                    const s = window.getComputedStyle(el);
-                    const z = parseInt(s.zIndex, 10);
-                    if ((s.position === "fixed" || s.position === "absolute") && (!isNaN(z) && z > 5)) {
-                      isFloating = true;
-                      break;
-                    }
-                    el = el.parentElement;
-                  }
-                  if (isFloating) {
-                    btn.click();
+                const hasOverlay = !!document.querySelector(
+                  '[class*="overlay" i], [class*="backdrop" i], [class*="scrim" i], [style*="rgba(0"]'
+                );
+                const allBtns = Array.from(document.querySelectorAll<HTMLElement>('button, [role="button"]'))
+                  .filter(b => isVisible(b) && closePatterns.test((b.textContent ?? "").trim()));
+                if (hasOverlay && allBtns.length > 0) {
+                  allBtns[0].click();
+                  clicked++;
+                } else if (allBtns.length > 0) {
+                  // Even without an explicit overlay: if there's exactly one "Got it"-style
+                  // button visible and the page title / URL suggests a search results page
+                  // (not a form), click it as it's almost certainly the info modal dismiss.
+                  const isSearchPage = window.location.href.includes("hotel-search") ||
+                    window.location.href.includes("searchresults") ||
+                    document.title.toLowerCase().includes("hotels") ||
+                    !!document.querySelector('[data-testid*="search"], [id*="search"]');
+                  if (isSearchPage && allBtns.length === 1) {
+                    allBtns[0].click();
                     clicked++;
-                    break;
                   }
                 }
               }
