@@ -175,8 +175,8 @@ export const expediaProvider: BrowserProvider = {
     return url.toLowerCase().includes("expedia.com");
   },
 
-  async setup(): Promise<void> {
-    // No-op for Expedia
+  async setup(_page: Page, _context: unknown, trace: (msg: string) => void): Promise<void> {
+    trace("[expedia] setup: watching for external-site redirects (IHG, Marriott, Hilton, etc.)");
   },
 
   async getStageSignals(page: Page, url: string, _text: string): Promise<ProviderStageSignals> {

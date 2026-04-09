@@ -1410,6 +1410,21 @@ The user will enter CVV and confirm payment themselves.`,
         break;
       }
 
+      // Provider drift guard: if we've left the start provider's domain (e.g. Expedia → IHG hotel site),
+      // navigate back to startUrl so the flow stays within the expected booking site.
+      if (startProvider && !startProvider.matchesUrl(currentUrl) && !startProvider.matchesUrl(raw.url())) {
+        trace(`[provider-guard] drifted away from ${startProvider.id} to ${raw.url().slice(0, 80)} — navigating back to startUrl`);
+        try {
+          await raw.goto(input.startUrl, { waitUntil: "domcontentloaded", timeout: 25_000 });
+          await raw.waitForLoadState("networkidle", { timeout: 8_000 }).catch(() => {});
+        } catch (navErr) {
+          trace(`[provider-guard] navigation back failed: ${(navErr as Error).message?.slice(0, 60)}`);
+        }
+        assessment = await assessBookingStage({ rawPage: raw, stagehand, startUrl: input.startUrl, requestedDates, agentMessage });
+        pageText = assessment.pageText;
+        currentUrl = assessment.currentUrl;
+      }
+
       if (assessment.stage === "room_selection" &&
           containsAny(assessment.pageText, NO_AVAILABILITY_SIGNALS)) {
         trace(`No-availability signal detected at room_selection 鈥?aborting recovery loop.`);

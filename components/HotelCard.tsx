@@ -118,10 +118,14 @@ export default function HotelCard({ card, index, checkIn, checkOut, guests }: Ho
                                        "Booking.com";
       const directFallbackUrl = hotel.booking_link;
 
+      const stayOnSite = (bookingSite === "expedia" || bookingSite === "hotels-com")
+        ? `IMPORTANT: Stay within ${siteName} — do NOT click any "Book on hotel website", "Visit hotel site", or external links. Complete the entire booking inside ${siteName}'s own checkout flow.`
+        : "";
       const task = [
         `Book "${hotel.name}" for ${numAdults} adult(s).`,
         `Check-in: ${checkIn}. Check-out: ${checkOut}.`,
         `You are starting on ${siteName} — find the listing for "${hotel.name}", select the room, and fill all guest info.`,
+        stayOnSite,
         `If ${siteName} fails (no results, error, or blocked), navigate to the hotel's direct site instead: ${directFallbackUrl}`,
         "Fill in all guest information and card details.",
         "Stop before entering CVV or clicking the final payment confirmation button.",
