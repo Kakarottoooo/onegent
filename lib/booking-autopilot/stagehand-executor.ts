@@ -677,9 +677,9 @@ The user will enter CVV and confirm payment themselves.`,
     const landedUrlAfterSetup = page.url();
     const openPageUrls = stagehand.context.pages().map((p) => getScopeUrl(getRawPage(p)));
     const bookingComPageOpen = !!(
-      getProvider(input.startUrl) ??
-      getProvider(landedUrlAfterSetup) ??
-      openPageUrls.find((u) => u && getProvider(u))
+      getProvider(input.startUrl)?.id === 'booking-com' ||
+      getProvider(landedUrlAfterSetup)?.id === 'booking-com' ||
+      openPageUrls.find((u) => u && getProvider(u)?.id === 'booking-com')
     );
     const initialMaxSteps = bookingComPageOpen ? 0 : 40;
 
@@ -809,7 +809,11 @@ The user will enter CVV and confirm payment themselves.`,
       // Always clear blocking modals before any recovery attempt.
       const cleared = await dismissBlockingModals(raw).catch(() => "");
       if (cleared) trace(`Stage recovery dismissed modal(s) before ${stage}: ${cleared}`);
-      const bookingComContext = !!(getProvider(currentUrl) ?? getProvider(raw.url()) ?? (bookingComPageOpen ? getProvider(input.startUrl) : null));
+      const bookingComContext = !!(
+        getProvider(currentUrl)?.id === 'booking-com' ||
+        getProvider(raw.url())?.id === 'booking-com' ||
+        bookingComPageOpen
+      );
 
       switch (stage) {
         case "listing": {
