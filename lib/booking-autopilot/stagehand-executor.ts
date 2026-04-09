@@ -33,10 +33,7 @@ import {
 } from "./core/profile";
 import { buildInstruction } from "./core/instructions";
 import { extractErrorDetails } from "./core/error-utils";
-import {
-  resolveProviderContext,
-  resolveProviderIdForUrl,
-} from "./core/provider-router";
+import { getProvider } from "./providers/index";
 export {
   buildFlightTask,
   buildHotelTask,
@@ -59,8 +56,6 @@ import {
   type BookingComHelpers,
   clickBookingComListingTarget as providerClickBookingComListingTarget,
   evaluateBookingComVerification as providerEvaluateBookingComVerification,
-  fillBookingComGuestForm as providerFillBookingComGuestForm,
-  fillBookingComPaymentForm as providerFillBookingComPaymentForm,
   getBookingComStageSignals as providerGetBookingComStageSignals,
   revealBookingComRoomSelection as providerRevealBookingComRoomSelection,
   setBookingComRoomQuantity as providerSetBookingComRoomQuantity,
@@ -99,8 +94,6 @@ import {
   clickAgreementCheckboxes,
   fillFieldsInScopes,
 } from "./shared/form-actions";
-import fs from "fs";
-import path from "path";
 
 type FieldSpec = { patterns: string[]; value: string };
 type AgentExecutionResult = {
@@ -446,30 +439,9 @@ export async function runBrowserTask(
     // 鈹€鈹€ Inject saved session cookies (e.g. Booking.com login) 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
     // Cookies are saved once via: node scripts/save-booking-cookies.mjs
     // They persist your logged-in session so the agent starts already authenticated.
-    const startProviderId = resolveProviderIdForUrl(input.startUrl);
-
-    if (startProviderId === "booking-com") {
-      try {
-        const cookiesPath = path.join(process.cwd(), ".booking-cookies.json");
-        if (fs.existsSync(cookiesPath)) {
-          const cookies = JSON.parse(fs.readFileSync(cookiesPath, "utf-8"));
-          // Use stagehand.context.addCookies() directly 鈥?V3Context exposes this natively
-          // and avoids the getRawPage 鈫?.context() indirection that may not work in v3.
-          await stagehand.context.addCookies(cookies);
-          // Override language to English 鈥?saved cookies may have Chinese preference.
-          await stagehand.context.addCookies([
-            { name: "bk_lang",      value: "en-us", domain: ".booking.com", path: "/" },
-            { name: "lang",         value: "en-us", domain: ".booking.com", path: "/" },
-            { name: "selectedLang", value: "en-us", domain: ".booking.com", path: "/" },
-          ]);
-          trace(`Injected ${cookies.length} Booking.com session cookies from .booking-cookies.json`);
-        } else {
-          trace("No .booking-cookies.json found 鈥?run: node scripts/save-booking-cookies.mjs");
-        }
-      } catch (err) {
-        trace(`Cookie injection failed: ${err} 鈥?proceeding without saved session.`);
-      }
-    }
+    // Provider setup (cookies, initScripts, etc.) — delegate to provider registry
+    const startProvider = getProvider(input.startUrl);
+    await startProvider?.setup?.(getRawPage(page), stagehand.context, trace);
 
     // Navigate to the starting URL
     await page.goto(input.startUrl, { waitUntil: "domcontentloaded", timeoutMs: 30_000 });
@@ -556,107 +528,9 @@ export async function runBrowserTask(
           installCursor();
         }
       });
-
-      // Also inject Booking.com search-bar disabler on every page load.
-      // This prevents the agent from typing form values into the top search bar.
-      await addInitTarget.addInitScript(() => {
-        function lockSearchBar(el: HTMLInputElement) {
-          const lockedEl = el as HTMLInputElement & { __sb_locked__?: boolean };
-          if (lockedEl.__sb_locked__) return;
-          lockedEl.__sb_locked__ = true;
-          el.value = "";
-          el.setAttribute("readonly", "true");
-          el.setAttribute("tabindex", "-1");
-          el.style.pointerEvents = "none";
-          el.style.opacity = "0.6";
-          el.dispatchEvent(new Event("input", { bubbles: true }));
-          el.dispatchEvent(new Event("change", { bubbles: true }));
-          // Prevent focus and typing via event capture
-          el.addEventListener("focus",     (e) => { e.stopPropagation(); (e.target as HTMLElement).blur(); }, true);
-            el.addEventListener("mousedown",  (e) => { e.preventDefault(); e.stopPropagation(); }, true);
-            el.addEventListener("keydown",    (e) => { e.preventDefault(); e.stopPropagation(); }, true);
-            el.addEventListener("beforeinput",(e) => { e.preventDefault(); e.stopPropagation(); }, true);
-          }
-          function disableBookingSearchBar() {
-            if (!location.hostname.includes("booking.com")) return;
-            // Only lock on hotel/search pages 鈥?NOT on guest-form / checkout pages
-            if (location.pathname.includes("/book") || location.pathname.includes("/checkout")) return;
-            const searchBarSelectors = [
-              "input[name='ss']", "input[placeholder*='鐩殑鍦?]",
-              "input[placeholder*='Destination']", "input[placeholder*='destination']",
-              "#ss", ".sb-searchbox__input",
-            ];
-            searchBarSelectors.forEach(sel => {
-              document.querySelectorAll<HTMLInputElement>(sel).forEach(lockSearchBar);
-            });
-          }
-          if (document.readyState === "loading") {
-            document.addEventListener("DOMContentLoaded", disableBookingSearchBar);
-          } else {
-            disableBookingSearchBar();
-          }
-          const obs = new MutationObserver(disableBookingSearchBar);
-          const observeTarget = document.body || document.documentElement;
-          if (observeTarget) obs.observe(observeTarget, { childList: true, subtree: true });
-        });
     }
 
-    // 鈹€鈹€ Booking.com: close any open autocomplete dropdown 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
-    if (resolveProviderIdForUrl(page.url()) === "booking-com") {
-      try { await safePressEscape(getRawPage(page)); } catch { /* ignore */ }
-    }
-
-    // 鈹€鈹€ Booking.com: disable top search bar + scroll to room list 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
-    // The agent REPEATEDLY types form data (phone, card, names) into the top
-    // destination search bar. We neutralise it by:
-    //   1. Making the input readonly + blurring it (agent can't type into it)
-    //   2. Scrolling the page so the search bar is out of the visible viewport
-    //   3. Pressing Escape to close any open autocomplete
-    if (resolveProviderIdForUrl(page.url()) === "booking-com") {
-      try {
-        await new Promise((r) => setTimeout(r, 1500)); // let page settle
-        await getRawPage(page).evaluate(() => {
-          // Disable / make readonly every input inside the top search bar widget
-          const searchBarSelectors = [
-            "input[name='ss']",
-            "input[placeholder*='鐩殑鍦?]",
-            "input[placeholder*='Destination']",
-            "input[placeholder*='destination']",
-            "[data-testid='searchbox-tabs-container'] input",
-            ".sb-searchbox input",
-            "#ss",
-          ];
-            for (const sel of searchBarSelectors) {
-              document.querySelectorAll<HTMLInputElement>(sel).forEach(el => {
-                el.value = "";
-                el.setAttribute("readonly", "true");
-                el.setAttribute("tabindex", "-1");
-                el.style.pointerEvents = "none";
-                el.blur();
-                el.dispatchEvent(new Event("input", { bubbles: true }));
-                el.dispatchEvent(new Event("change", { bubbles: true }));
-              });
-            }
-
-          // Also scroll to the room availability section
-          const roomSection =
-            document.querySelector("#hp_availability_tempcontainer") ||
-            document.querySelector("[data-testid='availability-cta-btn']") ||
-            document.querySelector(".hprt-table") ||
-            document.querySelector("[class*='roomType']") ||
-            document.querySelector("[class*='room-list']");
-          if (roomSection) {
-            roomSection.scrollIntoView({ behavior: "smooth", block: "start" });
-          } else {
-            window.scrollBy(0, 700);
-          }
-        });
-        await safePressEscape(getRawPage(page));
-        trace("Booking.com: disabled top search bar inputs and scrolled to room list.");
-      } catch { /* ignore 鈥?non-fatal */ }
-    }
-
-    // 鈹€鈹€ Early check: site unreachable (network error before agent runs) 鈹€鈹€鈹€鈹€鈹€
+    // ─── Early check: site unreachable (network error before agent runs) ─────
     {
       let earlyText = "";
       try {
@@ -671,16 +545,19 @@ export async function runBrowserTask(
         earlyText.includes("err_name_not_resolved") ||
         earlyText.includes("dns_probe_finished_nxdomain");
       // Bot-detection / error pages on hotel brand sites and OTAs
+      const providerBotPatterns = startProvider?.getBotPatterns?.() ?? [
+        "something went wrong",
+        "access denied",
+        "checking your browser",
+        "show us your human side",
+        "bot or not",
+        "we can't tell if you're a human",
+        "please type the numbers you hear",
+      ];
       const botBlocked =
-        earlyText.includes("something went wrong") ||
-        earlyText.includes("access denied") ||
         earlyText.includes("reference no.") ||
         earlyText.includes("please enable cookies") ||
-        earlyText.includes("checking your browser") ||
-        earlyText.includes("show us your human side") ||   // Expedia CAPTCHA
-        earlyText.includes("bot or not") ||                // Expedia CAPTCHA title
-        earlyText.includes("we can't tell if you're a human") ||  // Expedia CAPTCHA
-        earlyText.includes("please type the numbers you hear");    // Expedia audio CAPTCHA
+        providerBotPatterns.some((p) => earlyText.includes(p));
       if (unreachable || botBlocked) {
         const reason = botBlocked ? "Bot detection / error page" : "Network unreachable";
         trace(`${reason} detected on landing page 鈥?stopping early.`);
@@ -799,11 +676,11 @@ The user will enter CVV and confirm payment themselves.`,
     // Running the agent here wastes 300+ seconds and causes search-bar interference.
     const landedUrlAfterSetup = page.url();
     const openPageUrls = stagehand.context.pages().map((p) => getScopeUrl(getRawPage(p)));
-    const bookingComPageOpen = resolveProviderContext({
-      startUrl: input.startUrl,
-      currentUrl: landedUrlAfterSetup,
-      openPageUrls,
-    }).bookingComContext;
+    const bookingComPageOpen = !!(
+      getProvider(input.startUrl) ??
+      getProvider(landedUrlAfterSetup) ??
+      openPageUrls.find((u) => u && getProvider(u))
+    );
     const initialMaxSteps = bookingComPageOpen ? 0 : 40;
 
     trace(`Agent starting main run (maxSteps=${initialMaxSteps}, model=${modelName})${bookingComPageOpen ? " [Booking.com detected: agent.execute disabled, using programmatic flow only]" : ""}`);
@@ -932,12 +809,7 @@ The user will enter CVV and confirm payment themselves.`,
       // Always clear blocking modals before any recovery attempt.
       const cleared = await dismissBlockingModals(raw).catch(() => "");
       if (cleared) trace(`Stage recovery dismissed modal(s) before ${stage}: ${cleared}`);
-      const bookingComContext = resolveProviderContext({
-        startUrl: input.startUrl,
-        currentUrl,
-        rawPageUrl: raw.url(),
-        openPageUrls: bookingComPageOpen ? [input.startUrl] : [],
-      }).bookingComContext;
+      const bookingComContext = !!(getProvider(currentUrl) ?? getProvider(raw.url()) ?? (bookingComPageOpen ? getProvider(input.startUrl) : null));
 
       switch (stage) {
         case "listing": {
@@ -1551,11 +1423,7 @@ The user will enter CVV and confirm payment themselves.`,
       if (!acted) break;
 
       const postActionWaitMs =
-        resolveProviderContext({
-          startUrl: bookingComPageOpen ? input.startUrl : undefined,
-          currentUrl,
-          rawPageUrl: raw.url(),
-        }).bookingComContext
+        !!(getProvider(currentUrl) ?? getProvider(raw.url()) ?? (bookingComPageOpen ? getProvider(input.startUrl) : null))
           ? 350
           : 2500;
       await new Promise((resolve) => setTimeout(resolve, postActionWaitMs));
@@ -1577,11 +1445,7 @@ The user will enter CVV and confirm payment themselves.`,
     // the search bar and navigates to the wrong hotel.
     if (
       assessment.stage === "unknown" &&
-      !resolveProviderContext({
-        startUrl: input.startUrl,
-        currentUrl,
-        rawPageUrl: raw.url(),
-      }).bookingComContext
+      !(getProvider(currentUrl) ?? getProvider(raw.url()) ?? (bookingComPageOpen ? getProvider(input.startUrl) : null))
     ) {
       trace("Stage is unknown after main run 鈥?running a continuation pass (maxSteps=20).");
       const continuationInstruction =
@@ -1681,12 +1545,8 @@ The user will enter CVV and confirm payment themselves.`,
       // We must override these with the correct profile values every time.
       // Use input.startUrl as the authoritative Booking.com check 鈥?currentUrl may be a
       // non-booking.com URL resolved from an analytics/tracking iframe by resolveCurrentUrl().
-      const isBookingCom = resolveProviderContext({
-        startUrl: input.startUrl,
-        currentUrl,
-        rawPageUrl,
-      }).bookingComContext;
-      if (isBookingCom && assessment.stage === "checkout_form") {
+      const provider = getProvider(currentUrl) ?? getProvider(rawPageUrl) ?? (bookingComPageOpen ? getProvider(input.startUrl) : null);
+      if (provider && assessment.stage === "checkout_form") {
         if (process.env.AI_LOOP_FORM_FILL === "true") {
           trace("Booking.com guest form — AI fill mode (AI_LOOP_FORM_FILL=true).");
 
@@ -1819,8 +1679,8 @@ The user will enter CVV and confirm payment themselves.`,
           }
           // Check if we actually advanced — if still on guest-details, try a direct RPA button click
           // (AI filled fields are already present — no need to re-fill, just advance)
-          const postAISignals = await providerGetBookingComStageSignals(raw, raw.url(), await raw.evaluate(() => document.body.innerText).catch(() => ""), false);
-          if (postAISignals.guestDetailsStep && !postAISignals.finalPaymentState) {
+          const postAISignals = await provider?.getStageSignals(raw, raw.url(), await raw.evaluate(() => document.body.innerText).catch(() => ""));
+          if (postAISignals?.guestDetailsStep && !postAISignals?.paymentStep) {
             trace("[RPA] AI advance did not navigate — trying direct RPA click on 'Next: Final details'.");
             // Blur active element first so submit isn't blocked by a focused field
             await raw.evaluate(() => (document.activeElement as HTMLElement | null)?.blur?.()).catch(() => {});
@@ -1850,29 +1710,29 @@ The user will enter CVV and confirm payment themselves.`,
             // The AI fill may have missed the country <select> (React state not updated).
             // providerFillBookingComGuestForm uses Playwright selectOption() which properly
             // updates React state and re-enables the submit button.
-            const stillOnGuestDetails = await providerGetBookingComStageSignals(raw, raw.url(), await raw.evaluate(() => document.body.innerText).catch(() => ""), false)
-              .then(s => s.guestDetailsStep && !s.finalPaymentState)
+            const stillOnGuestDetails = await provider?.getStageSignals(raw, raw.url(), await raw.evaluate(() => document.body.innerText).catch(() => ""))
+              .then(s => !!(s?.guestDetailsStep && !s?.paymentStep))
               .catch(() => false);
             if (stillOnGuestDetails) {
               trace("[RPA] still on guest-details after DOM click — running full RPA fill as last resort.");
-              await providerFillBookingComGuestForm(raw, p, bookingComHelpers, trace);
+              await provider?.fillGuestForm?.(raw, p, bookingComHelpers, trace);
               await new Promise(r => setTimeout(r, 800));
             }
           }
         } else {
-          trace("[RPA] Booking.com guest form — running programmatic field fill (overrides account pre-fill).");
-          await providerFillBookingComGuestForm(raw, p, bookingComHelpers, trace);
+          trace("[RPA] Provider guest form — running programmatic field fill (overrides account pre-fill).");
+          await provider?.fillGuestForm?.(raw, p, bookingComHelpers, trace);
           await new Promise(r => setTimeout(r, 600));
         }
       }
 
-      if (isBookingCom && assessment.stage === "payment_gate") {
-        trace("[RPA] Booking.com payment page — running card-field fill.");
-        await providerFillBookingComPaymentForm(raw, p, bookingComHelpers, trace);
+      if (provider && assessment.stage === "payment_gate") {
+        trace("[RPA] Provider payment page — running card-field fill.");
+        await provider?.fillPaymentForm?.(raw, p, bookingComHelpers, trace);
         await new Promise((resolve) => setTimeout(resolve, 800));
       }
-      if (isBookingCom && !["checkout_form", "payment_gate"].includes(assessment.stage)) {
-        trace(`Booking.com checkout is open at stage=${assessment.stage}; skipping guest-form override until stage is clearer.`);
+      if (provider && !["checkout_form", "payment_gate"].includes(assessment.stage)) {
+        trace(`Provider checkout is open at stage=${assessment.stage}; skipping guest-form override until stage is clearer.`);
       }
 
       // Check whether the form is already filled (profile email visible in input values)
@@ -1881,7 +1741,7 @@ The user will enter CVV and confirm payment themselves.`,
         alreadyFilled = await hasValueInScopes(raw, p.email);
       }
 
-      if (!alreadyFilled && !isBookingCom) {
+      if (!alreadyFilled && !provider) {
         if (process.env.AI_LOOP_FORM_FILL === "true") {
           trace("Guest/payment fields — AI fill mode (AI_LOOP_FORM_FILL=true).");
           await fillGuestFormWithAI(stagehand, p, trace);
@@ -1921,12 +1781,12 @@ The user will enter CVV and confirm payment themselves.`,
         });
         currentUrl = assessment.currentUrl;
         pageText = assessment.pageText;
-      } else if (!isBookingCom) {
+      } else if (!provider) {
         trace("Guest/payment fields already contained profile data, so direct fill fallback was skipped.");
       }
 
       // Re-read state after any fills
-      if (isBookingCom) {
+      if (provider) {
         assessment = await assessBookingStage({
           rawPage: raw,
           stagehand,
@@ -1939,9 +1799,10 @@ The user will enter CVV and confirm payment themselves.`,
       }
     }
 
-    let bookingComSignals = await providerGetBookingComStageSignals(raw, currentUrl, pageText, visibleCheckoutFields);
-    let bookingComFinalPaymentDomState = bookingComSignals.finalPaymentState;
-    let bookingComGuestDetailsDomState = bookingComSignals.guestDetailsStep;
+    const activeProvider = getProvider(currentUrl) ?? getProvider(raw.url()) ?? (bookingComPageOpen ? getProvider(input.startUrl) : null);
+    let providerSignals = activeProvider ? await activeProvider.getStageSignals(raw, currentUrl, pageText) : null;
+    let bookingComFinalPaymentDomState = providerSignals?.paymentStep ?? false;
+    let bookingComGuestDetailsDomState = providerSignals?.guestDetailsStep ?? false;
 
     if (!bookingComFinalPaymentDomState && bookingComGuestDetailsDomState) {
       // Booking.com sometimes transitions to the final-details/payment page a beat after
@@ -1978,9 +1839,9 @@ The user will enter CVV and confirm payment themselves.`,
       });
       currentUrl = assessment.currentUrl;
       pageText = assessment.pageText;
-      bookingComSignals = await providerGetBookingComStageSignals(raw, currentUrl, pageText, visibleCheckoutFields);
-      bookingComFinalPaymentDomState = bookingComSignals.finalPaymentState;
-      bookingComGuestDetailsDomState = bookingComSignals.guestDetailsStep;
+      providerSignals = activeProvider ? await activeProvider.getStageSignals(raw, currentUrl, pageText) : null;
+      bookingComFinalPaymentDomState = providerSignals?.paymentStep ?? false;
+      bookingComGuestDetailsDomState = providerSignals?.guestDetailsStep ?? false;
     }
 
     if (!bookingComFinalPaymentDomState && bookingComGuestDetailsDomState) {
@@ -1997,9 +1858,9 @@ The user will enter CVV and confirm payment themselves.`,
       };
     }
 
-    if (bookingComFinalPaymentDomState && resolveProviderContext({ currentUrl }).bookingComContext) {
-      trace("Booking.com final payment page confirmed after guest-details step 鈥?running final card-field fill pass.");
-      await providerFillBookingComPaymentForm(raw, p, bookingComHelpers, trace);
+    if (bookingComFinalPaymentDomState && activeProvider) {
+      trace("Provider final payment page confirmed after guest-details step — running final card-field fill pass.");
+      await activeProvider.fillPaymentForm?.(raw, p, bookingComHelpers, trace);
       await new Promise((resolve) => setTimeout(resolve, 800));
 
       assessment = await assessBookingStage({
@@ -2011,8 +1872,8 @@ The user will enter CVV and confirm payment themselves.`,
       });
       currentUrl = assessment.currentUrl;
       pageText = assessment.pageText;
-      bookingComSignals = await providerGetBookingComStageSignals(raw, currentUrl, pageText, visibleCheckoutFields);
-      bookingComFinalPaymentDomState = bookingComSignals.finalPaymentState;
+      providerSignals = activeProvider ? await activeProvider.getStageSignals(raw, currentUrl, pageText) : null;
+      bookingComFinalPaymentDomState = providerSignals?.paymentStep ?? false;
     }
 
     const screenshotBase64 = `data:image/png;base64,${(await page.screenshot({ type: "png" })).toString("base64")}`;
