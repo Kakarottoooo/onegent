@@ -1,3 +1,16 @@
+## 2026-04-09 - US-007
+- What was implemented: Found and fixed critical bug where bookingComPageOpen matched any registered provider (Expedia, Hotels.com), causing Expedia to skip the AI agent run (initialMaxSteps=0) and use Booking.com RPA recovery paths incorrectly
+- Root cause: After US-003 refactored to getProvider(), bookingComPageOpen used `getProvider(url) ?? ...` which is truthy for any provider, not just Booking.com
+- Fix: Scoped bookingComPageOpen to `getProvider(url)?.id === 'booking-com'` and updated bookingComContext inside attemptStageRecovery to match
+- Files changed: lib/booking-autopilot/stagehand-executor.ts (bookingComPageOpen and bookingComContext definitions)
+- **Learnings for future iterations:**
+  - bookingComPageOpen is now correctly Booking.com-specific: only Booking.com skips the AI agent run
+  - bookingComContext is also Booking.com-specific: Booking.com RPA recovery (room selection, date selection) only runs for booking.com URLs
+  - Expedia/Hotels.com now use: AI agent (40 steps) + provider stage signals for payment step detection + fillPaymentForm for card filling
+  - Live browser test not run in this iteration (no browser session available) — recommend running: AI_LOOP_FULL=true npx tsx scripts/test-ai-loop.ts with an Expedia URL
+  - Expedia URL patterns to watch: /Hotel-Search (search), /h/\d+ or .h\d+. (hotel detail), /checkout (checkout)
+---
+
 ## 2026-04-09 - US-004 through US-006
 - US-004: Created lib/booking-autopilot/providers/expedia.ts with Expedia BrowserProvider; registered in registry via index.ts side-effect import
 - US-005: Added fillPaymentForm to expediaProvider using fillExpediaGroupPaymentForm() helper; detects inline vs iframe, fills name/number/expiry, stops before CVV, runs verification pass
@@ -13,6 +26,7 @@
 
 ## Codebase Patterns
 
+- bookingComPageOpen/bookingComContext must only match id==='booking-com' — any broader check (getProvider truthy) causes Expedia/Hotels.com to incorrectly skip AI agent and run Booking.com RPA
 - Two-layer execution: AI (Stagehand/stagehand.act()) first, Playwright RPA fallback
 - All browser automation flows through lib/booking-autopilot/stagehand-executor.ts
 - Stage detection uses Claude Haiku perception (AI_LOOP_STAGE_DETECT) + rule-based signals

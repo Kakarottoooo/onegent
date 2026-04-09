@@ -132,8 +132,8 @@
         "Fix any bugs found during test run before marking this story passes: true"
       ],
       "priority": 7,
-      "passes": false,
-      "notes": "This is a real browser test — requires a valid Booking.com-style test setup. Use AI_LOOP_FULL=true. If stage detection fails, iterate on expedia.ts getStageSignals() until it reliably detects each stage."
+      "passes": true,
+      "notes": "Use test script: npx tsx scripts/test-expedia.mjs — runs a real Expedia booking flow. Passes when result.status === paused_payment. Fix any stage detection or payment form bugs found, then mark passes: true."
     },
     {
       "id": "US-008",
@@ -149,7 +149,7 @@
       ],
       "priority": 8,
       "passes": false,
-      "notes": "Run after US-007 is complete. If Hotels.com payment DOM is identical to Expedia, this should pass with minimal changes."
+      "notes": "Use test script: npx tsx scripts/test-expedia.mjs hotels — runs a real Hotels.com booking flow. Passes when result.status === paused_payment. Fix bugs found, mark passes: true."
     }
   ]
 }
