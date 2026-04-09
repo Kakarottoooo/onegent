@@ -1,0 +1,23 @@
+## Codebase Patterns
+
+- Two-layer execution: AI (Stagehand/stagehand.act()) first, Playwright RPA fallback
+- All browser automation flows through lib/booking-autopilot/stagehand-executor.ts
+- Stage detection uses Claude Haiku perception (AI_LOOP_STAGE_DETECT) + rule-based signals
+- Payment forms are always RPA-only (cross-origin iframe blocks AI access)
+- React inputs require nativeSetter + input/change events — locator.fill() alone doesn't trigger React state
+- Provider-specific code lives in lib/booking-autopilot/providers/
+- booking-com.ts has ~2900 lines — read only the sections you need, not the whole file
+- AI_LOOP_FULL=true enables all AI phases; individual flags: AI_LOOP_STAGE_DETECT, AI_LOOP_LISTING, AI_LOOP_FORM_FILL
+- liveLogPush(jobId, line) for real-time log streaming; trace() calls this automatically
+
+---
+
+## 2026-04-09 - US-001
+- What was implemented: BrowserProvider interface, ProviderStageSignals interface, provider registry with getProvider/requireProvider, re-export index
+- Files changed: lib/booking-autopilot/providers/types.ts (new), lib/booking-autopilot/providers/registry.ts (new), lib/booking-autopilot/providers/index.ts (new)
+- **Learnings for future iterations:**
+  - The existing resolveProviderContext/resolveProviderIdForUrl live in lib/booking-autopilot/core/provider-router.ts — leave untouched until US-003
+  - profile/helpers typed as 'unknown' in BrowserProvider to avoid circular imports until US-003
+  - context typed as 'unknown' in setup() to avoid importing BrowserContext from playwright-core
+  - Registry uses simple array + find() — registerProvider() must be called to add providers
+---

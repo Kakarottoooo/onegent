@@ -1,4 +1,9 @@
+import fs from "fs";
+import path from "path";
 import type { Frame, Locator, Page } from "playwright";
+import { safePressEscape } from "../shared/playwright-safe";
+import { registerProvider } from "./registry";
+import type { BrowserProvider, ProviderStageSignals } from "./types";
 import {
   evaluateLocatorElement,
   normalizeDigits as normalizeFieldDigits,
@@ -3385,3 +3390,154 @@ export async function clickBookingComListingTarget(
   }
   return true;
 }
+
+// ─── BrowserProvider wrapper ───────────────────────────────────────────────
+
+export const bookingComProvider: BrowserProvider = {
+  id: "booking-com",
+
+  matchesUrl(url: string): boolean {
+    return isBookingComUrl(url);
+  },
+
+  async setup(page: Page, context: unknown, trace: (msg: string) => void): Promise<void> {
+    // Cookie injection — inject saved Booking.com session cookies into the browser context
+    try {
+      const cookiesPath = path.join(process.cwd(), ".booking-cookies.json");
+      if (fs.existsSync(cookiesPath)) {
+        const cookies = JSON.parse(fs.readFileSync(cookiesPath, "utf-8")) as unknown[];
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        await (context as any).addCookies(cookies);
+        // Override language to English — saved cookies may have non-English preference.
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        await (context as any).addCookies([
+          { name: "bk_lang",      value: "en-us", domain: ".booking.com", path: "/" },
+          { name: "lang",         value: "en-us", domain: ".booking.com", path: "/" },
+          { name: "selectedLang", value: "en-us", domain: ".booking.com", path: "/" },
+        ]);
+        trace(`Injected ${cookies.length} Booking.com session cookies from .booking-cookies.json`);
+      } else {
+        trace("No .booking-cookies.json found — run: node scripts/save-booking-cookies.mjs");
+      }
+    } catch (err) {
+      trace(`Cookie injection failed: ${err} — proceeding without saved session.`);
+    }
+
+    // Search-bar-disable logic — inject initScript to prevent agent from typing into the search bar
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const browserCtx = (context as any).browserContext ?? (context as any).context ?? null;
+      const addInitTarget = browserCtx ?? page;
+      await addInitTarget.addInitScript(() => {
+        function lockSearchBar(el: HTMLInputElement) {
+          const lockedEl = el as HTMLInputElement & { __sb_locked__?: boolean };
+          if (lockedEl.__sb_locked__) return;
+          lockedEl.__sb_locked__ = true;
+          el.value = "";
+          el.setAttribute("readonly", "true");
+          el.setAttribute("tabindex", "-1");
+          el.style.pointerEvents = "none";
+          el.style.opacity = "0.6";
+          el.dispatchEvent(new Event("input", { bubbles: true }));
+          el.dispatchEvent(new Event("change", { bubbles: true }));
+          el.addEventListener("focus",     (e) => { e.stopPropagation(); (e.target as HTMLElement).blur(); }, true);
+          el.addEventListener("mousedown",  (e) => { e.preventDefault(); e.stopPropagation(); }, true);
+          el.addEventListener("keydown",    (e) => { e.preventDefault(); e.stopPropagation(); }, true);
+          el.addEventListener("beforeinput",(e) => { e.preventDefault(); e.stopPropagation(); }, true);
+        }
+        function disableBookingSearchBar() {
+          if (!location.hostname.includes("booking.com")) return;
+          if (location.pathname.includes("/book") || location.pathname.includes("/checkout")) return;
+          const searchBarSelectors = [
+            "input[name='ss']", "input[placeholder*='\u76ee\u7684\u5730']",
+            "input[placeholder*='Destination']", "input[placeholder*='destination']",
+            "#ss", ".sb-searchbox__input",
+          ];
+          searchBarSelectors.forEach(sel => {
+            document.querySelectorAll<HTMLInputElement>(sel).forEach(lockSearchBar);
+          });
+        }
+        if (document.readyState === "loading") {
+          document.addEventListener("DOMContentLoaded", disableBookingSearchBar);
+        } else {
+          disableBookingSearchBar();
+        }
+        const obs = new MutationObserver(disableBookingSearchBar);
+        const observeTarget = document.body || document.documentElement;
+        if (observeTarget) obs.observe(observeTarget, { childList: true, subtree: true });
+      });
+
+      // Also disable search bar immediately on current page and press Escape
+      try {
+        await new Promise((r) => setTimeout(r, 1500));
+        await page.evaluate(() => {
+          const searchBarSelectors = [
+            "input[name='ss']",
+            "input[placeholder*='Destination']",
+            "input[placeholder*='destination']",
+            "[data-testid='searchbox-tabs-container'] input",
+            ".sb-searchbox input",
+            "#ss",
+          ];
+          for (const sel of searchBarSelectors) {
+            document.querySelectorAll<HTMLInputElement>(sel).forEach(el => {
+              el.value = "";
+              el.setAttribute("readonly", "true");
+              el.setAttribute("tabindex", "-1");
+              el.style.pointerEvents = "none";
+              el.blur();
+              el.dispatchEvent(new Event("input", { bubbles: true }));
+              el.dispatchEvent(new Event("change", { bubbles: true }));
+            });
+          }
+          const roomSection =
+            document.querySelector("#hp_availability_tempcontainer") ||
+            document.querySelector("[data-testid='availability-cta-btn']") ||
+            document.querySelector(".hprt-table") ||
+            document.querySelector("[class*='roomType']") ||
+            document.querySelector("[class*='room-list']");
+          if (roomSection) {
+            roomSection.scrollIntoView({ behavior: "smooth", block: "start" });
+          } else {
+            window.scrollBy(0, 700);
+          }
+        });
+        await safePressEscape(page);
+        trace("Booking.com: disabled top search bar inputs and scrolled to room list.");
+      } catch { /* ignore — non-fatal */ }
+    } catch { /* ignore */ }
+  },
+
+  async getStageSignals(page: Page, url: string, text: string): Promise<ProviderStageSignals> {
+    const signals = await getBookingComStageSignals(page, url, text, false);
+    return {
+      searchResults: signals.searchResults,
+      hotelDetail: signals.hotelDetailPage || signals.hotelDetailUrl,
+      guestDetailsStep: signals.guestDetailsStep,
+      paymentStep: signals.finalPaymentState,
+    };
+  },
+
+  async fillGuestForm(page: Page, profile: unknown, helpers: unknown, trace: (msg: string) => void): Promise<void> {
+    await fillBookingComGuestForm(page, profile as BookingComProfile, helpers as BookingComHelpers, trace);
+  },
+
+  async fillPaymentForm(page: Page, profile: unknown, helpers: unknown, trace: (msg: string) => void): Promise<void> {
+    await fillBookingComPaymentForm(page, profile as BookingComProfile, helpers as BookingComHelpers, trace);
+  },
+
+  getBotPatterns(): string[] {
+    return [
+      "something went wrong",
+      "access denied",
+      "checking your browser",
+      "show us your human side",
+      "bot or not",
+      "we can't tell if you're a human",
+      "please type the numbers you hear",
+    ];
+  },
+};
+
+// Register with the global provider registry
+registerProvider(bookingComProvider);

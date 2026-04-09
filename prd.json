@@ -1,0 +1,155 @@
+{
+  "project": "OneAgent",
+  "branchName": "ralph/multi-provider-expansion",
+  "description": "Multi-Provider Architecture + Expedia & Hotels.com — define BrowserProvider interface, refactor executor to use provider registry, add Expedia and Hotels.com providers",
+  "userStories": [
+    {
+      "id": "US-001",
+      "title": "Define BrowserProvider interface and registry",
+      "description": "As a developer, I need a shared BrowserProvider interface and a URL-based registry so the executor can dispatch to any site adapter without knowing which site it is.",
+      "acceptanceCriteria": [
+        "Create lib/booking-autopilot/providers/types.ts with BrowserProvider interface containing: id (string), matchesUrl(url), setup?(page, context, trace), getStageSignals(page, url, text) returning ProviderStageSignals, fillGuestForm?(page, profile, helpers, trace), fillPaymentForm?(page, profile, helpers, trace), getBotPatterns?()",
+        "ProviderStageSignals interface defined in types.ts with fields: searchResults (bool), hotelDetail (bool), guestDetailsStep (bool), paymentStep (bool)",
+        "Create lib/booking-autopilot/providers/registry.ts exporting getProvider(url: string): BrowserProvider | null and requireProvider(url: string): BrowserProvider (throws if not found)",
+        "Create lib/booking-autopilot/providers/index.ts that re-exports getProvider and requireProvider from registry",
+        "Typecheck passes"
+      ],
+      "priority": 1,
+      "passes": true,
+      "notes": "Pure new files — no existing code touched. RpaHelpers type can be imported from stagehand-executor or temporarily typed as 'unknown' until US-003 cleans up imports."
+    },
+    {
+      "id": "US-002",
+      "title": "Wrap booking-com.ts in BrowserProvider interface",
+      "description": "As a developer, I need the existing Booking.com code wrapped in the BrowserProvider interface so it plugs into the registry with zero behavior change.",
+      "acceptanceCriteria": [
+        "Export a bookingComProvider object from lib/booking-autopilot/providers/booking-com.ts implementing BrowserProvider",
+        "matchesUrl: reuses existing isBookingComUrl()",
+        "setup: contains search-bar-disable logic + cookie-injection logic (extracted from stagehand-executor.ts — do NOT delete from executor yet, copy it)",
+        "getStageSignals: wraps existing getBookingComStageSignals(), maps result to ProviderStageSignals shape",
+        "fillGuestForm: wraps existing fillBookingComGuestForm()",
+        "fillPaymentForm: wraps existing fillBookingComPaymentForm()",
+        "getBotPatterns: returns the bot-detection strings array (currently hardcoded in executor: 'something went wrong', 'access denied', 'checking your browser', 'show us your human side', 'bot or not', 'we can't tell if you're a human', 'please type the numbers you hear')",
+        "bookingComProvider registered in registry.ts",
+        "All existing exports in booking-com.ts remain untouched (backwards compatibility)",
+        "Typecheck passes"
+      ],
+      "priority": 2,
+      "passes": false,
+      "notes": "Do NOT remove any existing exports or inline executor code yet — that happens in US-003. This story is additive only."
+    },
+    {
+      "id": "US-003",
+      "title": "Refactor executor.ts to use provider registry",
+      "description": "As a developer, I need the executor to dispatch all site-specific operations through the provider registry so there are zero hardcoded isBookingCom checks remaining.",
+      "acceptanceCriteria": [
+        "Import getProvider from lib/booking-autopilot/providers/index.ts at top of stagehand-executor.ts",
+        "Replace all resolveProviderContext() / resolveProviderIdForUrl() calls with const provider = getProvider(currentUrl ?? raw.url())",
+        "Bot-detection check uses provider?.getBotPatterns?.() ?? [] merged with unreachable-site strings",
+        "setup block replaced with await provider?.setup?.(raw, stagehand.context, trace)",
+        "Stage signals block uses await provider?.getStageSignals(raw, currentUrl, pageText) instead of providerGetBookingComStageSignals()",
+        "Guest form block calls await provider?.fillGuestForm?.(raw, p, bookingComHelpers, trace)",
+        "Payment form block calls await provider?.fillPaymentForm?.(raw, p, bookingComHelpers, trace)",
+        "Zero occurrences of the string 'isBookingCom' as a standalone boolean variable declaration in stagehand-executor.ts (grep check: grep -n 'const isBookingCom' stagehand-executor.ts returns empty)",
+        "Booking.com end-to-end flow still reaches paused_payment on a real test run (manual verification)",
+        "Typecheck passes"
+      ],
+      "priority": 3,
+      "passes": false,
+      "notes": "Most complex story — touches 47 locations in executor. Work methodically: replace one block at a time, typecheck after each. Keep the provider-specific helper functions (providerFillBookingComPaymentForm etc.) in booking-com.ts for now — the BrowserProvider wrapper calls them internally."
+    },
+    {
+      "id": "US-004",
+      "title": "Implement Expedia provider — stage signals and URL matching",
+      "description": "As a developer, I need an Expedia BrowserProvider so the executor can detect stages on Expedia hotel pages.",
+      "acceptanceCriteria": [
+        "Create lib/booking-autopilot/providers/expedia.ts implementing BrowserProvider",
+        "id: 'expedia'",
+        "matchesUrl: returns true when url includes 'expedia.com' (case-insensitive)",
+        "getStageSignals detects searchResults: url contains '/Hotel-Search' or '/hotels' (case-insensitive)",
+        "getStageSignals detects hotelDetail: url contains '/h/' followed by digits, or url contains '/hotel/' and NOT '/Checkout'",
+        "getStageSignals detects guestDetailsStep: url contains '/Checkout' AND page contains guest name / email input fields (use page.evaluate to check DOM)",
+        "getStageSignals detects paymentStep: url contains '/Checkout' AND payment card number input is visible (use page.evaluate)",
+        "getBotPatterns returns: ['show us your human side', 'bot or not', \"we can't tell if you're a human\", 'please type the numbers you hear']",
+        "setup is a no-op (return immediately)",
+        "expediaProvider registered in registry.ts",
+        "Typecheck passes"
+      ],
+      "priority": 4,
+      "passes": false,
+      "notes": "No payment form yet — that is US-005. Stage signal detection may need adjustment after real browser testing in US-007."
+    },
+    {
+      "id": "US-005",
+      "title": "Implement Expedia payment form RPA",
+      "description": "As a user, I want the system to pre-fill my card details on Expedia's checkout page so I only need to enter the CVV to complete the booking.",
+      "acceptanceCriteria": [
+        "Add fillPaymentForm to expediaProvider in expedia.ts",
+        "Inspect Expedia checkout DOM: determine if payment fields are in a cross-origin iframe or inline — log findings to trace()",
+        "If iframe: use page.frameLocator() to access fields (same pattern as fillBookingComPaymentForm in booking-com.ts)",
+        "Fill cardholder name field with profile.card_name",
+        "Fill card number field with profile.card_number",
+        "Fill expiry date field with profile.card_expiry",
+        "Stop before CVV/CVC field — do not fill it",
+        "After filling, run a verification pass: log which fields have values and which are empty",
+        "Typecheck passes"
+      ],
+      "priority": 5,
+      "passes": false,
+      "notes": "Reference fillBookingComPaymentForm() in booking-com.ts for the iframe locator pattern and verification approach. Key difference from Booking.com: Expedia may use inline DOM instead of cross-origin iframe — check first with page.evaluate() to count visible card inputs before assuming iframe."
+    },
+    {
+      "id": "US-006",
+      "title": "Implement Hotels.com provider",
+      "description": "As a user, I want to book hotels on Hotels.com using the same automation so I can use reward nights.",
+      "acceptanceCriteria": [
+        "Create lib/booking-autopilot/providers/hotels-com.ts implementing BrowserProvider",
+        "id: 'hotels-com'",
+        "matchesUrl: returns true when url includes 'hotels.com' (and NOT 'expedia.com')",
+        "getStageSignals detects searchResults: url contains '/search'",
+        "getStageSignals detects hotelDetail: url matches pattern /hotels\\.com\\/ho\\d+/ (e.g. /ho123456) and NOT checkout",
+        "getStageSignals detects guestDetailsStep: url contains '/checkout' AND guest info fields visible",
+        "getStageSignals detects paymentStep: url contains '/checkout' AND payment card input visible",
+        "fillPaymentForm: fills cardholder name, card number, expiry — stops before CVV (Hotels.com and Expedia share Expedia Group payment infrastructure — reuse expedia.ts fillPaymentForm logic with Hotels.com-specific selectors if different)",
+        "getBotPatterns returns same patterns as Expedia (same bot detection)",
+        "hotelsComProvider registered in registry.ts",
+        "Typecheck passes"
+      ],
+      "priority": 6,
+      "passes": false,
+      "notes": "Hotels.com is Expedia Group — checkout DOM is nearly identical to Expedia. Start by copying expedia.ts and adjusting URL matchers. If payment selectors are identical, extract shared logic to a helper in a new file lib/booking-autopilot/providers/expedia-group-payment.ts."
+    },
+    {
+      "id": "US-007",
+      "title": "End-to-end test — Expedia",
+      "description": "As a developer, I need to verify the full Expedia booking automation works before marking the feature complete.",
+      "acceptanceCriteria": [
+        "Run a full booking automation test on Expedia: search for a hotel in NYC, select a room, proceed through checkout",
+        "Live log shows stage transitions: listing → room_selection → checkout_form → payment_gate (no 'unknown' stages stuck for more than 1 iteration)",
+        "Final status is paused_payment — 'Ready for payment — enter CVC'",
+        "Live browser view shows payment page with cardholder name, card number, and expiry pre-filled",
+        "Document any Expedia-specific quirks found (stage detection mismatches, DOM differences) by appending to progress.txt",
+        "Fix any bugs found during test run before marking this story passes: true"
+      ],
+      "priority": 7,
+      "passes": false,
+      "notes": "This is a real browser test — requires a valid Booking.com-style test setup. Use AI_LOOP_FULL=true. If stage detection fails, iterate on expedia.ts getStageSignals() until it reliably detects each stage."
+    },
+    {
+      "id": "US-008",
+      "title": "End-to-end test — Hotels.com",
+      "description": "As a developer, I need to verify Hotels.com booking automation works end-to-end.",
+      "acceptanceCriteria": [
+        "Run a full booking automation test on Hotels.com: search for a hotel, select a room, proceed through checkout",
+        "Live log shows stage transitions: listing → room_selection → checkout_form → payment_gate",
+        "Final status is paused_payment — 'Ready for payment — enter CVC'",
+        "Live browser view shows payment page with card fields pre-filled",
+        "Document Hotels.com-specific quirks in progress.txt",
+        "Fix any bugs found before marking this story passes: true"
+      ],
+      "priority": 8,
+      "passes": false,
+      "notes": "Run after US-007 is complete. If Hotels.com payment DOM is identical to Expedia, this should pass with minimal changes."
+    }
+  ]
+}
