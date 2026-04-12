@@ -308,8 +308,13 @@ const activeStagehands = new Map<string, { close: () => Promise<void> }>();
  * Normalise well-known broken startUrl patterns before the executor touches them.
  * Hotels.com:
  *   /search?destination=... → /Hotel-Search?destination=... (fixes 404)
- *   City-level destination (regionId present, or destination contains a comma) + hotelName
- *   → replace destination with hotel name so Hotels.com shows the specific hotel
+ *   City-level URL (has regionId or destination contains comma) + hotelName
+ *   → add hotelName query param so Hotels.com pre-filters results to that hotel.
+ *   Keep city-level destination + regionId intact for proper date/guest context.
+ *
+ * Correct Hotels.com search URL structure (user-verified):
+ *   hotels.com/Hotel-Search?destination=New+York%2C...&regionId=2621&...&hotelName=Hilton+Garden+Inn+...
+ *   → Shows only the target hotel in results sidebar filter
  */
 function normaliseStartUrl(url: string, hotelName?: string): string {
   try {
@@ -319,15 +324,14 @@ function normaliseStartUrl(url: string, hotelName?: string): string {
       if (parsed.pathname.toLowerCase() === "/search") {
         parsed.pathname = "/Hotel-Search";
       }
-      // Replace city-level destination with hotel name when we have one.
-      // Hotels.com shows hotel-specific results when destination = exact hotel name.
-      if (hotelName) {
+      // Add hotelName parameter when we have a hotel name and the URL is city-level.
+      // Hotels.com uses hotelName to pre-filter sidebar results to the specific property.
+      // Keep destination + regionId unchanged — they provide date/guest search context.
+      if (hotelName && !parsed.searchParams.has("hotelName")) {
         const dest = parsed.searchParams.get("destination") ?? "";
         const isCityDest = dest.includes(",") || parsed.searchParams.has("regionId");
         if (isCityDest) {
-          parsed.searchParams.set("destination", hotelName);
-          parsed.searchParams.delete("regionId");
-          parsed.searchParams.delete("sort");
+          parsed.searchParams.set("hotelName", hotelName);
         }
       }
       return parsed.toString();
@@ -340,7 +344,7 @@ export async function runBrowserTask(
   input: BrowserTaskInput
 ): Promise<BrowserTaskResult> {
   // Normalise startUrl (e.g. hotels.com/search → hotels.com/Hotel-Search,
-  // and replace city-level destination with hotel name when available)
+  // and add hotelName param for city-level Hotels.com searches so results are pre-filtered)
   const hotelNameForUrl = extractTargetHotelName(input.task);
   input = { ...input, startUrl: normaliseStartUrl(input.startUrl, hotelNameForUrl ?? undefined) };
 
