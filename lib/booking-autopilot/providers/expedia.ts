@@ -956,47 +956,228 @@ export async function fillExpediaGroupPaymentForm(
   await new Promise(r => setTimeout(r, 600));
 
   // ── Card fields strategy ──────────────────────────────────────────────────────
-  // Expedia uses a payment widget (Checkout.com / similar) that renders card inputs
-  // inside cross-origin iframes positioned over placeholder divs like "pan-input-placeholder".
-  // The placeholder inputs in the main page are always visible=false — the real inputs
-  // are in the iframes. We must fill those iframes directly using Frame objects
-  // (which have full Playwright API, unlike the Stagehand-proxied Page).
+  // Expedia uses Checkout.com (CKO) for payment. CKO renders card inputs inside
+  // cross-origin iframes that are positioned OVER placeholder divs in the main DOM:
+  //   <input id="chn-input-placeholder" type="text" style="display:none">  ← hidden
+  //   <iframe ...>  ← real input here, inaccessible via frame.evaluate()
   //
-  // Strategy:
-  //   1. Try iframe-based fill (most reliable for Expedia's payment widget)
-  //   2. Fall back to inline selectors for sites that embed card fields directly
+  // From live debugging (2026-04-12):
+  //   • page.frames() returns 28 frames, all cross-origin (url-error, inputs=-1)
+  //   • The placeholder elements have visible=false (display:none / 0 bbox)
+  //   • frame.evaluate() fails for all Checkout.com frames → must use page.mouse
+  //
+  // Strategy (in order):
+  //   1. Playwright frameLocator() with Checkout.com iframe selectors (CKO IDs)
+  //   2. Visible iframe scan: find <iframe> elements with non-zero bounding box,
+  //      sort by vertical position, click center → keyboard.type()
+  //   3. Placeholder-parent climb: walk up DOM from placeholder until a parent
+  //      has a visible bounding box, click its center → keyboard.type()
+  //   4. fillCardFieldsInPaymentIframes: existing frame evaluate scan
+  //   5. findAndFillExpediaField: inline page.locator() for non-iframe forms
   // ─────────────────────────────────────────────────────────────────────────────
+
+  // ── Strategy 1: Playwright frameLocator() ─────────────────────────────────
+  // Checkout.com injects iframes with IDs like "cko-frames-cardnumber",
+  // "cko-frames-expirydate", "cko-frames-cardholdername".
+  let checkoutComFrameFilled = { name: false, number: false, expiry: false };
+  try {
+    const ckoFieldMap = [
+      {
+        key: "name" as const,
+        value: profile.card_name ?? "",
+        iframeSels: ['iframe[id*="cardholdername" i]', 'iframe[id*="holdername" i]', 'iframe[name*="cardholdername" i]'],
+        inputSels: ['input[autocomplete="cc-name"]', 'input[id*="name"]', 'input'],
+      },
+      {
+        key: "number" as const,
+        value: profile.card_number ?? "",
+        iframeSels: ['iframe[id*="cardnumber" i]', 'iframe[id*="card-number" i]', 'iframe[name*="cardnumber" i]', 'iframe[id*="pan" i]'],
+        inputSels: ['input[autocomplete="cc-number"]', 'input[placeholder*="0000"]', 'input[id*="pan"]', 'input'],
+      },
+      {
+        key: "expiry" as const,
+        value: profile.card_expiry ?? "",
+        iframeSels: ['iframe[id*="expirydate" i]', 'iframe[id*="expiry-date" i]', 'iframe[id*="expiry" i]', 'iframe[name*="expiry" i]'],
+        inputSels: ['input[autocomplete="cc-exp"]', 'input[placeholder*="MM"]', 'input'],
+      },
+    ];
+
+    for (const field of ckoFieldMap) {
+      if (!field.value) continue;
+      for (const iframeSel of field.iframeSels) {
+        try {
+          const fl = page.frameLocator(iframeSel);
+          for (const inputSel of field.inputSels) {
+            const loc = fl.locator(inputSel).first();
+            const count = await loc.count().catch(() => 0);
+            if (count === 0) continue;
+            await loc.click({ clickCount: 3 }).catch(() => {});
+            await loc.fill(field.value);
+            const actual = await loc.inputValue().catch(() => "");
+            if (actual.replace(/\s/g, "").length > 0) {
+              checkoutComFrameFilled[field.key] = true;
+              trace(`CKO frameLocator: ${field.key} filled via "${iframeSel}" + "${inputSel}"`);
+              break;
+            }
+          }
+          if (checkoutComFrameFilled[field.key]) break;
+        } catch { /* try next */ }
+      }
+    }
+  } catch (ckoErr) {
+    trace(`CKO frameLocator: outer error — ${(ckoErr as Error).message?.slice(0, 60)}`);
+  }
+  trace(`CKO frameLocator results: name=${checkoutComFrameFilled.name}, number=${checkoutComFrameFilled.number}, expiry=${checkoutComFrameFilled.expiry}`);
+
+  // ── Strategy 2: visible iframe scan + click→keyboard ─────────────────────
+  // Checkout.com iframes are visible on screen (non-zero bounding box).
+  // We find them, sort by Y position (top=name/number, bottom=expiry), and
+  // click the center of each iframe then use page.keyboard to type the value.
+  const needsVisibleIframeFill = !checkoutComFrameFilled.number || !checkoutComFrameFilled.expiry;
+  if (needsVisibleIframeFill) {
+    try {
+      // Get bounding boxes of all visible iframes on the page
+      const visibleIframeBoxes = await page.evaluate(() => {
+        return Array.from(document.querySelectorAll<HTMLIFrameElement>("iframe"))
+          .map((el, i) => {
+            const r = el.getBoundingClientRect();
+            return { i, x: r.x, y: r.y, w: r.width, h: r.height };
+          })
+          .filter(b => b.w > 0 && b.h > 0 && b.h < 120) // card fields are short (<120px tall)
+          .sort((a, b) => a.y - b.y); // sort top→bottom
+      }).catch(() => [] as Array<{ i: number; x: number; y: number; w: number; h: number }>);
+
+      trace(`CKO visible iframes: ${visibleIframeBoxes.length} short iframes found`);
+      for (const b of visibleIframeBoxes.slice(0, 6)) {
+        trace(`  iframe[${b.i}] x=${b.x.toFixed(0)} y=${b.y.toFixed(0)} w=${b.w.toFixed(0)} h=${b.h.toFixed(0)}`);
+      }
+
+      // Assign values to iframes by vertical position.
+      // Typical CKO layout (top to bottom): cardholder name, card number, expiry+CVV
+      const cardFields: Array<{ value: string; key: keyof typeof checkoutComFrameFilled }> = [];
+      if (!checkoutComFrameFilled.name && profile.card_name)
+        cardFields.push({ value: profile.card_name, key: "name" });
+      if (!checkoutComFrameFilled.number && profile.card_number)
+        cardFields.push({ value: profile.card_number, key: "number" });
+      if (!checkoutComFrameFilled.expiry && profile.card_expiry)
+        cardFields.push({ value: profile.card_expiry, key: "expiry" });
+
+      for (let i = 0; i < Math.min(cardFields.length, visibleIframeBoxes.length); i++) {
+        const box = visibleIframeBoxes[i];
+        const field = cardFields[i];
+        const cx = box.x + box.w / 2;
+        const cy = box.y + box.h / 2;
+        try {
+          await page.mouse.click(cx, cy);
+          await new Promise(r => setTimeout(r, 200));
+          // Select all existing text then type new value
+          await page.keyboard.press("Control+a");
+          await page.keyboard.type(field.value, { delay: 50 });
+          await new Promise(r => setTimeout(r, 200));
+          checkoutComFrameFilled[field.key] = true;
+          trace(`CKO visible iframe[${box.i}]: ${field.key} filled via mouse.click(${cx.toFixed(0)},${cy.toFixed(0)}) + keyboard`);
+        } catch (err) {
+          trace(`CKO visible iframe[${box.i}]: ${field.key} error — ${(err as Error).message?.slice(0, 50)}`);
+        }
+      }
+    } catch (visErr) {
+      trace(`CKO visible iframe scan error: ${(visErr as Error).message?.slice(0, 60)}`);
+    }
+  }
+
+  // ── Strategy 3: placeholder-parent click → keyboard ───────────────────────
+  // Walk up DOM from each hidden placeholder until we find a parent with visible
+  // bounding box. Click its center — the overlying CKO iframe should receive the
+  // focus and keyboard.type() then types into the iframe.
+  const needsParentClimbFill = !checkoutComFrameFilled.number || !checkoutComFrameFilled.expiry;
+  if (needsParentClimbFill) {
+    const parentCoords = await page.evaluate(() => {
+      const walk = (startId: string): { x: number; y: number } | null => {
+        let el: HTMLElement | null = document.getElementById(startId);
+        while (el && el !== document.body) {
+          const r = el.getBoundingClientRect();
+          if (r.width > 0 && r.height > 0 && r.height < 120) {
+            return { x: r.x + r.width / 2, y: r.y + r.height / 2 };
+          }
+          el = el.parentElement;
+        }
+        return null;
+      };
+      return {
+        name: walk("chn-input-placeholder"),
+        number: walk("pan-input-placeholder"),
+        expiry: walk("expiry-input-placeholder"),
+      };
+    }).catch(() => ({ name: null, number: null, expiry: null }));
+
+    trace(`CKO parent-climb coords: name=${JSON.stringify(parentCoords.name)}, number=${JSON.stringify(parentCoords.number)}, expiry=${JSON.stringify(parentCoords.expiry)}`);
+
+    const parentFillPairs: Array<[typeof parentCoords.name, string, keyof typeof checkoutComFrameFilled]> = [
+      [parentCoords.name, profile.card_name ?? "", "name"],
+      [parentCoords.number, profile.card_number ?? "", "number"],
+      [parentCoords.expiry, profile.card_expiry ?? "", "expiry"],
+    ];
+    for (const [coord, value, key] of parentFillPairs) {
+      if (checkoutComFrameFilled[key] || !coord || !value) continue;
+      try {
+        await page.mouse.click(coord.x, coord.y);
+        await new Promise(r => setTimeout(r, 200));
+        await page.keyboard.press("Control+a");
+        await page.keyboard.type(value, { delay: 50 });
+        await new Promise(r => setTimeout(r, 200));
+        checkoutComFrameFilled[key] = true;
+        trace(`CKO parent-climb: ${key} filled via mouse.click(${coord.x.toFixed(0)},${coord.y.toFixed(0)}) + keyboard`);
+      } catch (err) {
+        trace(`CKO parent-climb: ${key} error — ${(err as Error).message?.slice(0, 50)}`);
+      }
+    }
+  }
+
+  // Only run the heavy iframe scan + inline fallback if CKO strategies didn't fill everything
+  const skipIframeScanning = checkoutComFrameFilled.name && checkoutComFrameFilled.number && checkoutComFrameFilled.expiry;
 
   // Wait for payment widget iframes to load (Checkout.com iframes appear with the page).
   // If already loaded (>15 frames present), skip polling. Otherwise poll up to 2s.
   const iframesBefore = page.frames().length;
-  trace(`Expedia card: checking payment widget iframes (currently ${iframesBefore} frame(s))...`);
-  if (iframesBefore < 15) {
-    // Payment widget not yet loaded — poll briefly
-    for (let i = 0; i < 4; i++) {
-      await new Promise(r => setTimeout(r, 500));
-      const now = page.frames().length;
-      if (now > iframesBefore) {
-        trace(`Expedia card: new iframe(s) detected (${iframesBefore} → ${now}) — settling 800ms`);
-        await new Promise(r => setTimeout(r, 800));
-        break;
+  if (!skipIframeScanning) {
+    trace(`Expedia card: checking payment widget iframes (currently ${iframesBefore} frame(s))...`);
+    if (iframesBefore < 15) {
+      // Payment widget not yet loaded — poll briefly
+      for (let i = 0; i < 4; i++) {
+        await new Promise(r => setTimeout(r, 500));
+        const now = page.frames().length;
+        if (now > iframesBefore) {
+          trace(`Expedia card: new iframe(s) detected (${iframesBefore} → ${now}) — settling 800ms`);
+          await new Promise(r => setTimeout(r, 800));
+          break;
+        }
       }
+    } else {
+      trace("Expedia card: payment widget already loaded — proceeding immediately");
     }
-  } else {
-    trace("Expedia card: payment widget already loaded — proceeding immediately");
   }
 
   // Dismiss modal one final time right before card fill — it may have reappeared
   // after protection-plan selection or "Card" tab click.
   await dismissExpediaAlmostYoursModal(page, trace, 300);
 
-  const iframeFilledFields = await fillCardFieldsInPaymentIframes(
-    page,
-    profile.card_name ?? "",
-    profile.card_number ?? "",
-    profile.card_expiry ?? "",
-    trace
-  );
+  // Merge CKO results with iframe scan result (pass empty strings for already-filled fields)
+  let iframeFilledFields = checkoutComFrameFilled;
+  if (!skipIframeScanning) {
+    const iframeResult = await fillCardFieldsInPaymentIframes(
+      page,
+      checkoutComFrameFilled.name ? "" : (profile.card_name ?? ""),
+      checkoutComFrameFilled.number ? "" : (profile.card_number ?? ""),
+      checkoutComFrameFilled.expiry ? "" : (profile.card_expiry ?? ""),
+      trace
+    );
+    // Merge: a field is filled if either CKO or iframe scan succeeded
+    iframeFilledFields = {
+      name: checkoutComFrameFilled.name || iframeResult.name,
+      number: checkoutComFrameFilled.number || iframeResult.number,
+      expiry: checkoutComFrameFilled.expiry || iframeResult.expiry,
+    };
+  }
 
   // For each field NOT filled by the iframe strategy, attempt inline fill.
   // If the field is in an iframe, page.locator() returns count=0 → no-op (safe).
