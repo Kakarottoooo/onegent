@@ -59,11 +59,14 @@ export async function clickTargetListingAI(
     const directHref = await page.evaluate(
       ({ hotelName, domain }: { hotelName: string; domain: string }) => {
         const nameWords = hotelName.toLowerCase().split(/\s+/).filter((w: string) => w.length > 3);
-        // Find all <a> tags that link within the same OTA domain
+        // Find all <a> tags that link within the same OTA domain.
+        // Use "//<domain>" to match only the hostname portion, NOT query params like
+        // "directword.io/survey/domain=www.hotels.com/..." which contain the domain string
+        // but are actually third-party survey URLs.
         const candidates = Array.from(document.querySelectorAll<HTMLAnchorElement>("a[href]"))
           .filter(a => {
             const href = (a.href ?? "").toLowerCase();
-            return href.includes(domain) || href.startsWith("/");
+            return href.includes(`//${domain}`) || href.startsWith("/");
           });
         // Score each candidate by how many hotel name words appear in its text or href
         const scored = candidates.map(a => {

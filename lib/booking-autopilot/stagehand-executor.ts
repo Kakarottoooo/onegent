@@ -1180,9 +1180,10 @@ The user will enter CVV and confirm payment themselves.`,
                   // ── Stage B: "Search by property name" sidebar filter (fallback) ────────
                   if (!searchBarUsed) {
                     trace(`[ai-listing] Stage B fallback — typing in "Search by property name" filter`);
-                    // Use evaluate() to find the input and get its center coordinates.
-                    // Then raw.click(cx, cy) — Stagehand's NATIVE coordinate click (not selector-based).
-                    // raw.locator(sel).click() was unreliable for Hotels.com sidebar inputs.
+                    // Use evaluate() to find the input, scroll it into view, and click/focus it via DOM.
+                    // We NEVER use coordinates for this click: y-coordinates like 2710 are off-screen,
+                    // and CDP-coordinate clicks can land on survey overlays instead of the sidebar input.
+                    // DOM el.scrollIntoView() + el.focus() + el.click() is reliable regardless of scroll pos.
                     const inputInfo = await raw.evaluate(() => {
                       const selectors = [
                         'input[placeholder*="property name" i]',
@@ -1200,7 +1201,11 @@ The user will enter CVV and confirm payment themselves.`,
                         const r = el.getBoundingClientRect();
                         if (r.width === 0 || r.height === 0) continue;
                         if (el.disabled) continue;
-                        return { sel: s, cx: r.x + r.width / 2, cy: r.y + r.height / 2 };
+                        // Scroll into view immediately — element may be far below the fold (y > 2000)
+                        el.scrollIntoView({ behavior: 'instant', block: 'center' });
+                        el.focus();
+                        el.click();
+                        return { sel: s };
                       }
                       return null;
                     }).catch(() => null);
@@ -1208,19 +1213,18 @@ The user will enter CVV and confirm payment themselves.`,
                     if (!inputInfo) {
                       trace(`[ai-listing] Stage B: property name input not found in DOM`);
                     } else {
-                    const { sel, cx: inputCx, cy: inputCy } = inputInfo;
+                    const { sel } = inputInfo;
                     try {
-                        // Click at the input's center coordinates — Stagehand native API
-                        await (raw as unknown as { click: (x: number, y: number) => Promise<void> }).click(inputCx, inputCy);
-                        await new Promise(r => setTimeout(r, 300));
+                        // Brief pause for focus to settle after DOM el.focus() + el.click()
+                        await new Promise(r => setTimeout(r, 400));
                         // Clear any previous text then type the hotel name
                         await raw.keyPress("Control+a");
                         await new Promise(r => setTimeout(r, 150));
-                        // Type up to 25 chars to trigger the typeahead dropdown.
+                        // Type up to 25 chars (trimmed) to trigger the typeahead dropdown.
                         // More chars = more specific filter (we click "Search for '...'" not first suggestion).
-                        const typeaheadText = targetHotelName.slice(0, Math.min(25, targetHotelName.length));
+                        const typeaheadText = targetHotelName.slice(0, Math.min(25, targetHotelName.length)).trimEnd();
                         await raw.type(typeaheadText, { delay: 80 });
-                        trace(`[ai-listing] property name filter typed "${typeaheadText}" via "${sel}" (coords ${inputCx.toFixed(0)},${inputCy.toFixed(0)})`);
+                        trace(`[ai-listing] property name filter typed "${typeaheadText}" via "${sel}" (DOM focus/click)`);
 
                         // ── Strategy 1: Click "Search for '...'" dropdown item (safe, always on Hotels.com) ──
                         // The Hotels.com UITK dropdown has TWO types of suggestions:
@@ -1294,10 +1298,14 @@ The user will enter CVV and confirm payment themselves.`,
                               suggClicked = true;
                               trace(`[ai-listing] Strategy 1: results updated — sidebar filter applied`);
                             } else {
-                              trace(`[ai-listing] Strategy 1: "no exact match" after click — re-typing for fallback strategies`);
+                              trace(`[ai-listing] Strategy 1: "no exact match" after click — re-focusing input for fallback strategies`);
                               await raw.keyPress("Escape").catch(() => {});
-                              await (raw as unknown as { click: (x: number, y: number) => Promise<void> }).click(inputCx, inputCy);
-                              await new Promise(r => setTimeout(r, 200));
+                              // Re-focus via DOM (same approach as initial focus — avoids coordinate issues)
+                              await raw.evaluate((selArg: string) => {
+                                const el = document.querySelector<HTMLInputElement>(selArg);
+                                if (el) { el.scrollIntoView({ behavior: 'instant', block: 'center' }); el.focus(); el.click(); }
+                              }, sel).catch(() => {});
+                              await new Promise(r => setTimeout(r, 300));
                               await raw.keyPress("Control+a");
                               await raw.type(typeaheadText, { delay: 80 });
                               await new Promise(r => setTimeout(r, 1800));
