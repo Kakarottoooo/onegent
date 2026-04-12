@@ -20,11 +20,30 @@ export function buildInstruction(input: BrowserTaskInput): string {
       p.card_expiry && `Expiry date: ${p.card_expiry}`,
     ].filter(Boolean);
 
+    // Build a site-specific domain constraint so the AI does not wander to brand sites.
+    const isHotelsCom = input.startUrl.includes("hotels.com");
+    const isExpedia   = input.startUrl.includes("expedia.com") && !isHotelsCom;
+    const isBookingCom = input.startUrl.includes("booking.com");
+
+    const domainConstraint = isHotelsCom
+      ? `CRITICAL: You are booking through Hotels.com. You MUST stay on hotels.com throughout the entire booking flow. Hotels.com checkout may redirect to expedia.com/checkout — that redirect is OK. All other redirects away from hotels.com are NOT OK.\n` +
+        `DO NOT click "Visit hotel website", "View on map", Google Maps widgets, or ANY link that leaves hotels.com to a brand site (hilton.com, marriott.com, ihg.com, hyatt.com, etc.).\n` +
+        `Hotels.com flow:\n` +
+        `1. Search results page: use the LEFT SIDEBAR "Search by property name" input to type the hotel name and filter to only that hotel.\n` +
+        `2. Click the hotel NAME/TITLE card on the search results page to open the Hotels.com hotel detail page (URL will look like hotels.com/ho<digits>/).\n` +
+        `3. On the hotel detail page: choose a room and click "Reserve".\n` +
+        `4. Fill guest info and card details on the Hotels.com checkout pages.\n` +
+        `5. STOP before the final payment confirmation button.`
+      : isBookingCom
+      ? `You are on booking.com. Flow: search results -> click hotel card -> hotel detail page -> select room -> "Reserve" -> fill guest info -> fill card -> STOP before "Complete booking".`
+      : isExpedia
+      ? `You are on Expedia. Flow: search results -> click hotel -> select room -> "Reserve" -> fill guest info -> fill card -> STOP before final payment button.`
+      : `IMPORTANT: After navigating to the starting URL you may be redirected to a different domain - this is expected and correct (e.g. a hotel may have rebranded or moved). Stay on whatever website you actually land on and complete the booking there. Do NOT navigate to other hotel websites, search engines, or unrelated sites. If you land on the correct hotel's booking page, that IS the right site even if the domain differs from the starting URL.`;
+
     return `${input.task}
 
 You are starting at: ${input.startUrl}
-IMPORTANT: After navigating to the starting URL you may be redirected to a different domain - this is expected and correct (e.g. a hotel may have rebranded or moved). Stay on whatever website you actually land on and complete the booking there. Do NOT navigate to other hotel websites, search engines, or unrelated sites. If you land on the correct hotel's booking page, that IS the right site even if the domain differs from the starting URL.
-${input.startUrl.includes("booking.com") ? `\nYou are on booking.com. Flow: search results -> click hotel card -> hotel detail page -> select room -> "Reserve" -> fill guest info -> fill card -> STOP before "Complete booking".` : ""}${input.startUrl.includes("expedia.com") ? `\nYou are on Expedia. Flow: search results -> click hotel -> select room -> "Reserve" -> fill guest info -> fill card -> STOP before final payment button.` : ""}
+${domainConstraint}
 
 Guest details - fill these into ALL guest/contact information fields you encounter:
 - Full name: ${fullName}
