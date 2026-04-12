@@ -976,6 +976,63 @@ The user will enter CVV and confirm payment themselves.`,
             //          trigger React's event handlers (raw.type beats raw.fill here).
             if (startProvider?.id === "expedia" || startProvider?.id === "hotels-com") {
               try {
+                // ── Hotels.com: proactively dismiss the "We include taxes and fees" modal ──
+                // This promotional modal appears 1-3 seconds after the Hotels.com search results
+                // page loads. It blocks all clicks on the page until dismissed. We poll for it
+                // right at the START of the Hotels.com refinement flow (before sidebar typing)
+                // so it doesn't block Stage B. Without this early dismiss the sidebar filter
+                // interaction gets intercepted by the modal overlay.
+                if (startProvider?.id === "hotels-com") {
+                  const dismissHotelsModal = async (): Promise<boolean> => {
+                    return raw.evaluate(() => {
+                      const isVisible = (el: Element) => {
+                        const r = (el as HTMLElement).getBoundingClientRect();
+                        return r.width > 0 && r.height > 0;
+                      };
+                      const patterns = /^(got it|ok|okay|close|dismiss|done|continue|accept|×|✕|no thanks)$/i;
+                      // Strategy 1: buttons inside known dialog/modal containers
+                      const modals = Array.from(document.querySelectorAll<HTMLElement>(
+                        '[role="dialog"], [aria-modal="true"], [class*="modal" i], ' +
+                        '[class*="overlay" i], [class*="dialog" i], [class*="popup" i], ' +
+                        '[class*="sheet" i]'
+                      )).filter(isVisible);
+                      for (const modal of modals) {
+                        for (const btn of modal.querySelectorAll<HTMLElement>('button, [role="button"]')) {
+                          if (isVisible(btn) && patterns.test((btn.textContent ?? "").trim())) {
+                            btn.click();
+                            return true;
+                          }
+                        }
+                      }
+                      // Strategy 2: any visible "Got it" button anywhere on the page
+                      for (const btn of document.querySelectorAll<HTMLElement>('button, [role="button"]')) {
+                        if (isVisible(btn) && /^got it$/i.test((btn.textContent ?? "").trim())) {
+                          btn.click();
+                          return true;
+                        }
+                      }
+                      return false;
+                    }).catch(() => false);
+                  };
+
+                  // Poll up to 4 seconds (500ms intervals) for the modal to appear, then dismiss
+                  let modalDismissed = false;
+                  for (let attempt = 0; attempt < 8; attempt++) {
+                    await new Promise(r => setTimeout(r, 500));
+                    const dismissed = await dismissHotelsModal();
+                    if (dismissed) {
+                      modalDismissed = true;
+                      trace(`[ai-listing] Hotels.com "taxes & fees" modal dismissed (attempt ${attempt + 1})`);
+                      // Wait for the modal close animation to complete
+                      await new Promise(r => setTimeout(r, 600));
+                      break;
+                    }
+                  }
+                  if (!modalDismissed) {
+                    trace(`[ai-listing] Hotels.com: no promotional modal found — proceeding`);
+                  }
+                }
+
                 const expediaCurrentUrl = new URL(raw.url());
                 const dest = expediaCurrentUrl.searchParams.get("destination") ?? "";
                 const isCityLevel = dest.includes(",") || expediaCurrentUrl.searchParams.has("regionId") ||
