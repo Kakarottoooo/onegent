@@ -1133,42 +1133,75 @@ The user will enter CVV and confirm payment themselves.`,
                         // Wait for Hotels.com autocomplete/suggestion list to appear
                         await new Promise(r => setTimeout(r, 1500));
 
-                        // Try to click the first suggestion in the dropdown (Hotels.com shows
-                        // a list of matching properties — clicking one filters results immediately)
+                        // Try to click the dropdown suggestion below the sidebar input.
+                        // Hotels.com shows an autocomplete list BELOW the "Search by property name"
+                        // input when you type — clicking a suggestion navigates to that hotel.
+                        // Strategy: position-based detection (find elements directly below the input)
+                        // rather than CSS class names, which vary between Hotels.com deployments.
                         const suggClicked = await raw.evaluate((hotelN: string) => {
                           const words = hotelN.toLowerCase().split(/\s+/).filter((w: string) => w.length > 2);
-                          const suggSelectors = [
-                            '[role="option"]', '[role="listbox"] li',
-                            '[data-testid*="suggest"]', '[class*="suggestion" i]',
-                            'ul li[class*="item" i]',
-                          ];
-                          for (const ss of suggSelectors) {
-                            const items = Array.from(document.querySelectorAll<HTMLElement>(ss))
-                              .filter(el => {
-                                const r = el.getBoundingClientRect();
-                                return r.width > 0 && r.height > 0;
-                              });
-                            if (items.length === 0) continue;
-                            const scored = items.map(el => ({
-                              el,
-                              score: words.filter((w: string) => (el.textContent ?? "").toLowerCase().includes(w)).length,
-                            })).sort((a, b) => b.score - a.score);
-                            if (scored[0] && scored[0].score >= Math.ceil(words.length * 0.4)) {
-                              scored[0].el.scrollIntoView({ block: "nearest" });
-                              scored[0].el.click();
-                              return true;
-                            }
+
+                          // Locate the sidebar property-name input
+                          const input = document.querySelector<HTMLInputElement>(
+                            'input[placeholder*="property name" i], input[placeholder*="Marriott" i], ' +
+                            'input[aria-label*="property name" i], input[data-testid*="property"]'
+                          );
+                          if (!input) return false;
+                          const inputRect = input.getBoundingClientRect();
+
+                          // Find ALL visible elements positioned BELOW the input (within 400px).
+                          // This catches the autocomplete dropdown regardless of CSS class names.
+                          const candidates = Array.from(
+                            document.querySelectorAll<HTMLElement>(
+                              'li, [role="option"], [role="listbox"] *, div[class*="item"], ' +
+                              'div[class*="result"], div[class*="suggest"], div[class*="option"], ' +
+                              'div[class*="entry"], div[class*="row"], button[class*="item"]'
+                            )
+                          ).filter(el => {
+                            const r = el.getBoundingClientRect();
+                            if (r.width === 0 || r.height === 0) return false;
+                            // Must be BELOW the input and within 400px
+                            if (r.top < inputRect.bottom - 5) return false;
+                            if (r.top > inputRect.bottom + 400) return false;
+                            // Must contain at least one hotel name word
+                            const text = (el.textContent ?? "").toLowerCase();
+                            return words.some((w: string) => text.includes(w));
+                          });
+
+                          if (candidates.length === 0) return false;
+
+                          // Score by keyword overlap and pick the best match
+                          const scored = candidates.map(el => ({
+                            el,
+                            score: words.filter((w: string) => (el.textContent ?? "").toLowerCase().includes(w)).length,
+                            height: el.getBoundingClientRect().height,
+                          })).sort((a, b) => {
+                            // Primary: keyword score; secondary: prefer leaf nodes (smaller height)
+                            if (b.score !== a.score) return b.score - a.score;
+                            return a.height - b.height;
+                          });
+
+                          const best = scored[0];
+                          if (best && best.score >= Math.ceil(words.length * 0.3)) {
+                            best.el.scrollIntoView({ block: "nearest" });
+                            best.el.click();
+                            return true;
                           }
                           return false;
                         }, targetHotelName).catch(() => false);
 
                         if (suggClicked) {
                           trace(`[ai-listing] clicked sidebar suggestion for "${targetHotelName.slice(0, 50)}"`);
-                          await new Promise(r => setTimeout(r, 3000)); // wait for results to update
+                          await new Promise(r => setTimeout(r, 3000));
+                          // If clicking the suggestion navigated directly to a hotel detail page,
+                          // the Hotels.com fast-path will detect it and skip clickTargetListingAI.
+                          if (isHotelDetailUrl(raw.url())) {
+                            trace(`[ai-listing] sidebar suggestion navigated directly to hotel detail: ${raw.url().slice(0, 80)}`);
+                          }
                         } else {
-                          // No dropdown — press Enter to trigger filter
+                          // No dropdown visible — press Enter to trigger filter
                           await raw.keyboard.press("Enter");
-                          trace(`[ai-listing] pressed Enter on property name filter`);
+                          trace(`[ai-listing] pressed Enter on property name filter (no suggestion dropdown found)`);
                           await new Promise(r => setTimeout(r, 3500));
                         }
                         break;
