@@ -1229,24 +1229,47 @@ The user will enter CVV and confirm payment themselves.`,
             //   • Avoids stagehand.act() which can accidentally click "Visit hotel website" buttons
             // Runs after Stage B sidebar filter has narrowed results to ≤2 hotels.
             if (startProvider?.id === "hotels-com") {
+              // Scroll to top first so the first hotel card (highest-ranked after filter) is
+              // in the viewport and its DOM element is definitely rendered.
+              await raw.evaluate(() => window.scrollTo(0, 0)).catch(() => {});
+              await new Promise(r => setTimeout(r, 600));
+
               const hotelDetailHref = await raw.evaluate(
                 ({ nameWords }: { nameWords: string[] }) => {
-                  // Find all hotels.com hotel detail links on the page
-                  const detailLinks = Array.from(document.querySelectorAll<HTMLAnchorElement>("a[href]"))
+                  // Find all hotels.com hotel detail links on the page (deduplicated by href)
+                  const detailLinksRaw = Array.from(document.querySelectorAll<HTMLAnchorElement>("a[href]"))
                     .filter(a => {
                       const href = (a.href ?? "").toLowerCase();
                       return href.includes("hotels.com") &&
                         (/\/ho\d+\/|\/h\d+\//.test(href)) &&
                         !href.includes("checkout");
                     });
-                  if (detailLinks.length === 0) return null;
-                  // Score by keyword overlap with hotel name
-                  const scored = detailLinks.map(a => {
+                  if (detailLinksRaw.length === 0) return null;
+
+                  // Deduplicate: keep one <a> per unique href (the one closest to page top)
+                  const byHref = new Map<string, { a: HTMLAnchorElement; top: number }>();
+                  for (const a of detailLinksRaw) {
+                    const key = a.href;
+                    const top = a.getBoundingClientRect().top + window.scrollY;
+                    if (!byHref.has(key) || top < (byHref.get(key)!.top)) {
+                      byHref.set(key, { a, top });
+                    }
+                  }
+
+                  const scored = Array.from(byHref.values()).map(({ a, top }) => {
                     const text = (a.textContent ?? "").toLowerCase().replace(/\s+/g, " ").trim();
                     const href = (a.href ?? "").toLowerCase();
                     const score = nameWords.filter(w => text.includes(w) || href.includes(w)).length;
-                    return { href: a.href, score };
-                  }).sort((x, y) => y.score - x.score);
+                    return { href: a.href, score, top };
+                  });
+
+                  // Primary sort: keyword score (desc). Tie-break: page position (asc = higher up).
+                  // After sidebar filter, the correct hotel card is at the TOP of results.
+                  scored.sort((x, y) => {
+                    if (y.score !== x.score) return y.score - x.score;
+                    return x.top - y.top; // prefer elements higher on the page
+                  });
+
                   return scored[0]?.href ?? null;
                 },
                 { nameWords: (targetHotelName ?? "").toLowerCase().split(/\s+/).filter((w: string) => w.length > 3) }
