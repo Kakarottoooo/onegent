@@ -1128,80 +1128,106 @@ The user will enter CVV and confirm payment themselves.`,
                       if (!visible) continue;
                       try {
                         await raw.click(sel);
-                        await raw.type(sel, targetHotelName, { delay: 60 });
-                        trace(`[ai-listing] property name filter typed via "${sel}"`);
-                        // Wait for Hotels.com autocomplete/suggestion list to appear
-                        await new Promise(r => setTimeout(r, 1500));
+                        // Type only the first ~15 chars to trigger the typeahead dropdown.
+                        // Typing the full long name can over-filter and suppress suggestions.
+                        const typeaheadText = targetHotelName.slice(0, Math.min(15, targetHotelName.length));
+                        await raw.type(sel, typeaheadText, { delay: 80 });
+                        trace(`[ai-listing] property name filter typed "${typeaheadText}" via "${sel}"`);
 
-                        // Try to click the dropdown suggestion below the sidebar input.
-                        // Hotels.com shows an autocomplete list BELOW the "Search by property name"
-                        // input when you type — clicking a suggestion navigates to that hotel.
-                        // Strategy: position-based detection (find elements directly below the input)
-                        // rather than CSS class names, which vary between Hotels.com deployments.
-                        const suggClicked = await raw.evaluate((hotelN: string) => {
-                          const words = hotelN.toLowerCase().split(/\s+/).filter((w: string) => w.length > 2);
-
-                          // Locate the sidebar property-name input
-                          const input = document.querySelector<HTMLInputElement>(
-                            'input[placeholder*="property name" i], input[placeholder*="Marriott" i], ' +
-                            'input[aria-label*="property name" i], input[data-testid*="property"]'
+                        // ── Strategy 1: Playwright-native waitForSelector + locator ──────────
+                        // Wait for a listbox/option to appear after typing, then click it.
+                        // This is more reliable than evaluate() because Playwright waits for
+                        // the element to be visible, not just present in the DOM.
+                        let suggClicked = false;
+                        try {
+                          await raw.waitForSelector(
+                            '[role="listbox"], [role="option"], [data-stid*="typeahead"], ' +
+                            '[class*="typeahead"][class*="list"], ul[class*="suggest"], ul[class*="autocomplete"]',
+                            { timeout: 3000 }
                           );
-                          if (!input) return false;
-                          const inputRect = input.getBoundingClientRect();
-
-                          // Find ALL visible elements positioned BELOW the input (within 400px).
-                          // This catches the autocomplete dropdown regardless of CSS class names.
-                          const candidates = Array.from(
-                            document.querySelectorAll<HTMLElement>(
-                              'li, [role="option"], [role="listbox"] *, div[class*="item"], ' +
-                              'div[class*="result"], div[class*="suggest"], div[class*="option"], ' +
-                              'div[class*="entry"], div[class*="row"], button[class*="item"]'
-                            )
-                          ).filter(el => {
-                            const r = el.getBoundingClientRect();
-                            if (r.width === 0 || r.height === 0) return false;
-                            // Must be BELOW the input and within 400px
-                            if (r.top < inputRect.bottom - 5) return false;
-                            if (r.top > inputRect.bottom + 400) return false;
-                            // Must contain at least one hotel name word
-                            const text = (el.textContent ?? "").toLowerCase();
-                            return words.some((w: string) => text.includes(w));
-                          });
-
-                          if (candidates.length === 0) return false;
-
-                          // Score by keyword overlap and pick the best match
-                          const scored = candidates.map(el => ({
-                            el,
-                            score: words.filter((w: string) => (el.textContent ?? "").toLowerCase().includes(w)).length,
-                            height: el.getBoundingClientRect().height,
-                          })).sort((a, b) => {
-                            // Primary: keyword score; secondary: prefer leaf nodes (smaller height)
-                            if (b.score !== a.score) return b.score - a.score;
-                            return a.height - b.height;
-                          });
-
-                          const best = scored[0];
-                          if (best && best.score >= Math.ceil(words.length * 0.3)) {
-                            best.el.scrollIntoView({ block: "nearest" });
-                            best.el.click();
-                            return true;
+                          // Ordered list of locators to try — Hotels.com/Expedia Group uses UITK
+                          // which typically wraps suggestions in [role="option"] inside [role="listbox"]
+                          const suggLocatorSpecs = [
+                            '[role="listbox"] [role="option"]',
+                            '[role="option"]',
+                            '[data-stid*="typeahead-item"]',
+                            '[data-stid*="typeahead"] button',
+                            'ul[role="listbox"] > li',
+                            'ul[role="listbox"] > *',
+                            '[role="listbox"] > *',
+                          ];
+                          for (const spec of suggLocatorSpecs) {
+                            const count = await raw.locator(spec).count().catch(() => 0);
+                            if (count > 0) {
+                              await raw.locator(spec).first().click();
+                              suggClicked = true;
+                              trace(`[ai-listing] clicked sidebar suggestion via Playwright locator "${spec}" (${count} found)`);
+                              break;
+                            }
                           }
-                          return false;
-                        }, targetHotelName).catch(() => false);
+                        } catch {
+                          trace(`[ai-listing] Playwright waitForSelector timed out — falling back to position-based detection`);
+                        }
+
+                        // ── Strategy 2: position-based DOM evaluation fallback ────────────────
+                        // Find all visible elements positioned directly BELOW the input rect.
+                        if (!suggClicked) {
+                          await new Promise(r => setTimeout(r, 500));
+                          suggClicked = await raw.evaluate((hotelN: string) => {
+                            const words = hotelN.toLowerCase().split(/\s+/).filter((w: string) => w.length > 2);
+                            const input = document.querySelector<HTMLInputElement>(
+                              'input[placeholder*="property name" i], input[placeholder*="Marriott" i], ' +
+                              'input[aria-label*="property name" i], input[data-testid*="property"]'
+                            );
+                            if (!input) return false;
+                            const inputRect = input.getBoundingClientRect();
+                            // Broad element query — match anything below the input within 450px
+                            const candidates = Array.from(
+                              document.querySelectorAll<HTMLElement>(
+                                'li, [role="option"], [role="listbox"] *, button, ' +
+                                'div[class*="item"], div[class*="result"], div[class*="suggest"], ' +
+                                'div[class*="option"], div[class*="entry"], div[class*="row"], ' +
+                                '[data-stid]'
+                              )
+                            ).filter(el => {
+                              const r = el.getBoundingClientRect();
+                              if (r.width === 0 || r.height === 0) return false;
+                              if (r.top < inputRect.bottom - 5) return false;
+                              if (r.top > inputRect.bottom + 450) return false;
+                              const text = (el.textContent ?? "").toLowerCase();
+                              return words.some((w: string) => text.includes(w));
+                            });
+                            if (candidates.length === 0) return false;
+                            // Score by keyword overlap; prefer leaf nodes (smaller height)
+                            const scored = candidates.map(el => ({
+                              el,
+                              score: words.filter((w: string) => (el.textContent ?? "").toLowerCase().includes(w)).length,
+                              height: el.getBoundingClientRect().height,
+                            })).sort((a, b) => b.score !== a.score ? b.score - a.score : a.height - b.height);
+                            const best = scored[0];
+                            // Lower threshold to 1 word match (was 30% of words)
+                            if (best && best.score >= 1) {
+                              best.el.scrollIntoView({ block: "nearest" });
+                              best.el.click();
+                              return true;
+                            }
+                            return false;
+                          }, targetHotelName).catch(() => false);
+                          if (suggClicked) {
+                            trace(`[ai-listing] clicked sidebar suggestion via position-based DOM fallback`);
+                          }
+                        }
 
                         if (suggClicked) {
-                          trace(`[ai-listing] clicked sidebar suggestion for "${targetHotelName.slice(0, 50)}"`);
+                          trace(`[ai-listing] sidebar suggestion clicked for "${targetHotelName.slice(0, 50)}"`);
                           await new Promise(r => setTimeout(r, 3000));
-                          // If clicking the suggestion navigated directly to a hotel detail page,
-                          // the Hotels.com fast-path will detect it and skip clickTargetListingAI.
                           if (isHotelDetailUrl(raw.url())) {
                             trace(`[ai-listing] sidebar suggestion navigated directly to hotel detail: ${raw.url().slice(0, 80)}`);
                           }
                         } else {
-                          // No dropdown visible — press Enter to trigger filter
+                          // No suggestion found — press Enter to apply the text as a filter
                           await raw.keyboard.press("Enter");
-                          trace(`[ai-listing] pressed Enter on property name filter (no suggestion dropdown found)`);
+                          trace(`[ai-listing] pressed Enter on property name filter (no suggestion found)`);
                           await new Promise(r => setTimeout(r, 3500));
                         }
                         break;
