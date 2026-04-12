@@ -1191,42 +1191,78 @@ The user will enter CVV and confirm payment themselves.`,
                         await raw.type(sel, typeaheadText, { delay: 80 });
                         trace(`[ai-listing] property name filter typed "${typeaheadText}" via "${sel}"`);
 
-                        // ── Strategy 1: Playwright-native waitForSelector + locator ──────────
-                        // Wait for a listbox/option to appear after typing, then click it.
-                        // This is more reliable than evaluate() because Playwright waits for
-                        // the element to be visible, not just present in the DOM.
+                        // ── Strategy 1: ArrowDown + Enter keyboard navigation ─────────────────
+                        // Most reliable for UITK typeahead: focus moves to first suggestion
+                        // (hotel-specific suggestion, before "Search for '...'") then Enter selects.
+                        // This avoids fragile CSS/ARIA selector clicks.
                         let suggClicked = false;
+                        await new Promise(r => setTimeout(r, 1800)); // wait for typeahead to render
                         try {
-                          await raw.waitForSelector(
-                            '[role="listbox"], [role="option"], [data-stid*="typeahead"], ' +
-                            '[class*="typeahead"][class*="list"], ul[class*="suggest"], ul[class*="autocomplete"]',
-                            { timeout: 3000 }
-                          );
-                          // Ordered list of locators to try — Hotels.com/Expedia Group uses UITK
-                          // which typically wraps suggestions in [role="option"] inside [role="listbox"]
-                          const suggLocatorSpecs = [
-                            '[role="listbox"] [role="option"]',
-                            '[role="option"]',
-                            '[data-stid*="typeahead-item"]',
-                            '[data-stid*="typeahead"] button',
-                            'ul[role="listbox"] > li',
-                            'ul[role="listbox"] > *',
-                            '[role="listbox"] > *',
-                          ];
-                          for (const spec of suggLocatorSpecs) {
-                            const count = await raw.locator(spec).count().catch(() => 0);
-                            if (count > 0) {
-                              await raw.locator(spec).first().click();
+                          await raw.keyboard.press("ArrowDown"); // move to first suggestion
+                          await new Promise(r => setTimeout(r, 350));
+                          await raw.keyboard.press("Enter");    // select it
+                          await new Promise(r => setTimeout(r, 3000)); // wait for navigation/filter update
+                          // Check if we navigated to a hotel detail page
+                          if (isHotelDetailUrl(raw.url())) {
+                            suggClicked = true;
+                            trace(`[ai-listing] ArrowDown+Enter navigated to hotel detail: ${raw.url().slice(0, 80)}`);
+                          } else {
+                            // May have applied a filter (search results updated) — not yet on detail page.
+                            // Check if "No exact matches" appeared (means filter text was applied, not a hotel nav).
+                            const isNoMatch = await raw.evaluate(() =>
+                              /no exact match/i.test(document.body.textContent ?? "")
+                            ).catch(() => false);
+                            if (!isNoMatch) {
+                              // Search results updated — treat as success, let fast path pick the card
                               suggClicked = true;
-                              trace(`[ai-listing] clicked sidebar suggestion via Playwright locator "${spec}" (${count} found)`);
-                              break;
+                              trace(`[ai-listing] ArrowDown+Enter applied filter (no hotel detail nav, no "no exact match")`);
+                            } else {
+                              trace(`[ai-listing] ArrowDown+Enter produced "no exact match" — suggestion wasn't a hotel nav`);
+                              // Press Escape and retry with click-based approach
+                              await raw.keyboard.press("Escape").catch(() => {});
+                              await raw.click(sel);
+                              await raw.type(sel, typeaheadText, { delay: 80 });
+                              await new Promise(r => setTimeout(r, 1800));
                             }
                           }
-                        } catch {
-                          trace(`[ai-listing] Playwright waitForSelector timed out — falling back to position-based detection`);
+                        } catch (kbErr) {
+                          trace(`[ai-listing] ArrowDown+Enter failed: ${(kbErr as Error).message?.slice(0, 60)}`);
                         }
 
-                        // ── Strategy 2: position-based DOM evaluation fallback ────────────────
+                        // ── Strategy 2: Playwright-native waitForSelector + locator ──────────
+                        if (!suggClicked) {
+                          try {
+                            await raw.waitForSelector(
+                              '[role="listbox"], [role="option"], [data-stid*="typeahead"], ' +
+                              '[class*="typeahead"][class*="list"], ul[class*="suggest"], ul[class*="autocomplete"]',
+                              { timeout: 5000 }   // increased from 3000
+                            );
+                            // Ordered list of locators to try — Hotels.com/Expedia Group uses UITK
+                            // which typically wraps suggestions in [role="option"] inside [role="listbox"]
+                            const suggLocatorSpecs = [
+                              '[role="listbox"] [role="option"]',
+                              '[role="option"]',
+                              '[data-stid*="typeahead-item"]',
+                              '[data-stid*="typeahead"] button',
+                              'ul[role="listbox"] > li',
+                              'ul[role="listbox"] > *',
+                              '[role="listbox"] > *',
+                            ];
+                            for (const spec of suggLocatorSpecs) {
+                              const count = await raw.locator(spec).count().catch(() => 0);
+                              if (count > 0) {
+                                await raw.locator(spec).first().click();
+                                suggClicked = true;
+                                trace(`[ai-listing] clicked sidebar suggestion via Playwright locator "${spec}" (${count} found)`);
+                                break;
+                              }
+                            }
+                          } catch {
+                            trace(`[ai-listing] Playwright waitForSelector timed out — falling back to position-based detection`);
+                          }
+                        }
+
+                        // ── Strategy 3: position-based DOM evaluation fallback ────────────────
                         // Find all visible elements positioned directly BELOW the input rect.
                         if (!suggClicked) {
                           await new Promise(r => setTimeout(r, 500));
@@ -1276,15 +1312,16 @@ The user will enter CVV and confirm payment themselves.`,
                         }
 
                         if (suggClicked) {
-                          trace(`[ai-listing] sidebar suggestion clicked for "${targetHotelName.slice(0, 50)}"`);
-                          await new Promise(r => setTimeout(r, 3000));
+                          trace(`[ai-listing] sidebar suggestion activated for "${targetHotelName.slice(0, 50)}"`);
+                          await new Promise(r => setTimeout(r, 2500));
                           if (isHotelDetailUrl(raw.url())) {
                             trace(`[ai-listing] sidebar suggestion navigated directly to hotel detail: ${raw.url().slice(0, 80)}`);
                           }
                         } else {
-                          // No suggestion found — press Enter to apply the text as a filter
+                          // All strategies failed — press Enter as absolute last resort
+                          // (may produce "No exact matches" but at least narrows the field)
                           await raw.keyboard.press("Enter");
-                          trace(`[ai-listing] pressed Enter on property name filter (no suggestion found)`);
+                          trace(`[ai-listing] pressed Enter on property name filter (all suggestion strategies failed)`);
                           await new Promise(r => setTimeout(r, 3500));
                         }
                         break;
@@ -1317,15 +1354,39 @@ The user will enter CVV and confirm payment themselves.`,
               await raw.evaluate(() => window.scrollTo(0, 0)).catch(() => {});
               await new Promise(r => setTimeout(r, 600));
 
-              const hotelDetailHref = await raw.evaluate(
+              // Guard: if the page shows "No exact matches", skip hotels that are in the
+              // "Properties that don't match all your filters" section — those are wrong hotels
+              // that the sidebar filter didn't match. Without this guard, Artezen Hotel and
+              // other unrelated hotels from that section get selected instead of the target.
+              const noMatchPage = await raw.evaluate(() =>
+                /no exact match/i.test(document.body.textContent ?? "")
+              ).catch(() => false);
+
+              if (noMatchPage) {
+                trace(`[ai-listing] Hotels.com: "No exact matches" detected — skipping fast path to avoid selecting wrong hotel`);
+              }
+
+              const hotelDetailHref = noMatchPage ? null : await raw.evaluate(
                 ({ nameWords }: { nameWords: string[] }) => {
-                  // Find all hotels.com hotel detail links on the page (deduplicated by href)
+                  // Find all hotels.com hotel detail links on the page (deduplicated by href).
+                  // EXCLUDE links that are inside a "doesn't match your filters" section —
+                  // those are fallback hotels shown when the sidebar filter found no exact match.
+                  const doesntMatchHeading = Array.from(document.querySelectorAll<HTMLElement>("h2, h3, [role='heading'], p, div"))
+                    .find(el => /don.t match|doesn.t match|not match/i.test(el.textContent ?? ""));
+                  const doesntMatchTop = doesntMatchHeading
+                    ? doesntMatchHeading.getBoundingClientRect().top + window.scrollY
+                    : Infinity;
+
                   const detailLinksRaw = Array.from(document.querySelectorAll<HTMLAnchorElement>("a[href]"))
                     .filter(a => {
                       const href = (a.href ?? "").toLowerCase();
-                      return href.includes("hotels.com") &&
-                        (/\/ho\d+\/|\/h\d+\//.test(href)) &&
-                        !href.includes("checkout");
+                      if (!href.includes("hotels.com")) return false;
+                      if (!(/\/ho\d+\/|\/h\d+\//.test(href))) return false;
+                      if (href.includes("checkout")) return false;
+                      // Skip links below the "doesn't match" heading
+                      const linkTop = a.getBoundingClientRect().top + window.scrollY;
+                      if (linkTop > doesntMatchTop) return false;
+                      return true;
                     });
                   if (detailLinksRaw.length === 0) return null;
 
