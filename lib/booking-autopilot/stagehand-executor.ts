@@ -304,9 +304,30 @@ const activeStagehands = new Map<string, { close: () => Promise<void> }>();
  * dates / party size), and stops before entering payment information.
  * Returns a screenshot and the handoff URL so the user can complete payment.
  */
+/**
+ * Normalise well-known broken startUrl patterns before the executor touches them.
+ * Hotels.com: /search?destination=... gives a 404 — the correct path is /Hotel-Search?destination=...
+ */
+function normaliseStartUrl(url: string): string {
+  try {
+    const parsed = new URL(url);
+    if (parsed.hostname.includes("hotels.com")) {
+      // /search → /Hotel-Search (Hotels.com's actual search results path)
+      if (parsed.pathname.toLowerCase() === "/search") {
+        parsed.pathname = "/Hotel-Search";
+        return parsed.toString();
+      }
+    }
+  } catch { /* leave unchanged if unparseable */ }
+  return url;
+}
+
 export async function runBrowserTask(
   input: BrowserTaskInput
 ): Promise<BrowserTaskResult> {
+  // Normalise startUrl (e.g. hotels.com/search → hotels.com/Hotel-Search)
+  input = { ...input, startUrl: normaliseStartUrl(input.startUrl) };
+
   // AI_LOOP_FULL=true activates all AI sub-flags simultaneously.
   // RPA code is never removed — each flag independently falls back to RPA on failure.
   if (process.env.AI_LOOP_FULL === "true") {
