@@ -1152,6 +1152,68 @@ The user will enter CVV and confirm payment themselves.`,
               return true;
             }
 
+            // Hotels.com fast path: find the first hotels.com/ho<id>/ or hotels.com/h<id>/ link
+            // on the page and navigate to it directly via page.goto().
+            // This is the most reliable approach for Hotels.com because:
+            //   • Hotel detail URLs have a fixed /ho<digits>/ pattern
+            //   • Brand sites (hilton.com, marriott.com) never match this pattern
+            //   • Avoids stagehand.act() which can accidentally click "Visit hotel website" buttons
+            // Runs after Stage B sidebar filter has narrowed results to ≤2 hotels.
+            if (startProvider?.id === "hotels-com") {
+              const hotelDetailHref = await raw.evaluate(
+                ({ nameWords }: { nameWords: string[] }) => {
+                  // Find all hotels.com hotel detail links on the page
+                  const detailLinks = Array.from(document.querySelectorAll<HTMLAnchorElement>("a[href]"))
+                    .filter(a => {
+                      const href = (a.href ?? "").toLowerCase();
+                      return href.includes("hotels.com") &&
+                        (/\/ho\d+\/|\/h\d+\//.test(href)) &&
+                        !href.includes("checkout");
+                    });
+                  if (detailLinks.length === 0) return null;
+                  // Score by keyword overlap with hotel name
+                  const scored = detailLinks.map(a => {
+                    const text = (a.textContent ?? "").toLowerCase().replace(/\s+/g, " ").trim();
+                    const href = (a.href ?? "").toLowerCase();
+                    const score = nameWords.filter(w => text.includes(w) || href.includes(w)).length;
+                    return { href: a.href, score };
+                  }).sort((x, y) => y.score - x.score);
+                  return scored[0]?.href ?? null;
+                },
+                { nameWords: (targetHotelName ?? "").toLowerCase().split(/\s+/).filter((w: string) => w.length > 3) }
+              ).catch(() => null);
+
+              if (hotelDetailHref) {
+                trace(`[ai-listing] Hotels.com direct goto hotel detail: ${hotelDetailHref.slice(0, 80)}`);
+                // Append check-in/out dates so room availability loads correctly
+                let hotelUrl = hotelDetailHref;
+                const chkin  = requestedDates?.checkin;
+                const chkout = requestedDates?.checkout;
+                if (chkin && chkout) {
+                  try {
+                    const u = new URL(hotelDetailHref);
+                    if (!u.searchParams.has("chkin")) u.searchParams.set("chkin", chkin);
+                    if (!u.searchParams.has("chkout")) u.searchParams.set("chkout", chkout);
+                    hotelUrl = u.toString();
+                  } catch { /* leave unchanged */ }
+                }
+                try {
+                  await raw.goto(hotelUrl, { waitUntil: "domcontentloaded", timeout: 30000 });
+                  await new Promise(r => setTimeout(r, 1200));
+                  const landedUrl = raw.url();
+                  if (isHotelDetailUrl(landedUrl)) {
+                    trace(`[ai-listing] Hotels.com goto succeeded — on ${landedUrl.slice(0, 80)}`);
+                    return true;
+                  }
+                  trace(`[ai-listing] Hotels.com goto landed on unexpected URL (${landedUrl.slice(0, 60)}) — falling through to clickTargetListingAI`);
+                } catch (gotoErr) {
+                  trace(`[ai-listing] Hotels.com goto failed: ${(gotoErr as Error).message?.slice(0, 60)} — falling through to clickTargetListingAI`);
+                }
+              } else {
+                trace(`[ai-listing] Hotels.com: no /ho<id>/ link found on page — falling through to clickTargetListingAI`);
+              }
+            }
+
             // Pass startDomain so clickTargetListingAI can detect & revert wrong-domain clicks
             // (e.g. clicking an IHG logo badge on Expedia that navigates to ihg.com).
             const startDomainHint = startProvider?.id === "expedia" ? "expedia.com"
