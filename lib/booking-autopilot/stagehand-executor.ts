@@ -1191,34 +1191,52 @@ The user will enter CVV and confirm payment themselves.`,
                         await raw.type(sel, typeaheadText, { delay: 80 });
                         trace(`[ai-listing] property name filter typed "${typeaheadText}" via "${sel}"`);
 
-                        // ── Strategy 1: ArrowDown + Enter keyboard navigation ─────────────────
-                        // Most reliable for UITK typeahead: focus moves to first suggestion
-                        // (hotel-specific suggestion, before "Search for '...'") then Enter selects.
-                        // This avoids fragile CSS/ARIA selector clicks.
+                        // ── Strategy 1: DOM-inspect dropdown hrefs, then goto() or Enter ──────
+                        // NEVER use ArrowDown+Enter — the first dropdown suggestion is often a
+                        // brand-site link (e.g. 414hotel.com, hilton.com) that takes the browser
+                        // off Hotels.com. Instead we inspect the dropdown hrefs:
+                        //   • If a hotels.com/ho<id>/ link is found → goto() directly (stays on domain)
+                        //   • Otherwise → press Enter to apply text as a filter (stays on Hotels.com)
                         let suggClicked = false;
                         await new Promise(r => setTimeout(r, 1800)); // wait for typeahead to render
                         try {
-                          await raw.keyboard.press("ArrowDown"); // move to first suggestion
-                          await new Promise(r => setTimeout(r, 350));
-                          await raw.keyboard.press("Enter");    // select it
-                          await new Promise(r => setTimeout(r, 3000)); // wait for navigation/filter update
-                          // Check if we navigated to a hotel detail page
-                          if (isHotelDetailUrl(raw.url())) {
-                            suggClicked = true;
-                            trace(`[ai-listing] ArrowDown+Enter navigated to hotel detail: ${raw.url().slice(0, 80)}`);
+                          // Inspect all visible dropdown suggestion hrefs
+                          const dropdownHref = await raw.evaluate(() => {
+                            const anchors = Array.from(document.querySelectorAll<HTMLAnchorElement>(
+                              '[role="listbox"] a[href], [role="option"] a[href], ' +
+                              '[data-stid*="typeahead"] a[href], ul[role="listbox"] a[href]'
+                            ));
+                            for (const a of anchors) {
+                              const href = a.href || "";
+                              // Match hotels.com property detail URL pattern
+                              if (/hotels\.com\/(ho\d|h\d)/i.test(href)) return href;
+                            }
+                            return null;
+                          }).catch(() => null);
+
+                          if (dropdownHref) {
+                            // Navigate directly to the Hotels.com hotel detail page
+                            trace(`[ai-listing] Strategy 1: found hotels.com detail href in dropdown → goto()`);
+                            await raw.goto(dropdownHref, { waitUntil: "domcontentloaded", timeout: 20000 });
+                            await new Promise(r => setTimeout(r, 2000));
+                            if (isHotelDetailUrl(raw.url())) {
+                              suggClicked = true;
+                              trace(`[ai-listing] Strategy 1: goto() landed on hotel detail: ${raw.url().slice(0, 80)}`);
+                            }
                           } else {
-                            // May have applied a filter (search results updated) — not yet on detail page.
-                            // Check if "No exact matches" appeared (means filter text was applied, not a hotel nav).
+                            // No hotels.com link in dropdown → press Enter to apply text filter
+                            // (stays on Hotels.com, narrows results by property name)
+                            trace(`[ai-listing] Strategy 1: no hotels.com href in dropdown → pressing Enter as text filter`);
+                            await raw.keyboard.press("Enter");
+                            await new Promise(r => setTimeout(r, 3000));
                             const isNoMatch = await raw.evaluate(() =>
                               /no exact match/i.test(document.body.textContent ?? "")
                             ).catch(() => false);
                             if (!isNoMatch) {
-                              // Search results updated — treat as success, let fast path pick the card
                               suggClicked = true;
-                              trace(`[ai-listing] ArrowDown+Enter applied filter (no hotel detail nav, no "no exact match")`);
+                              trace(`[ai-listing] Strategy 1: Enter applied text filter (results updated)`);
                             } else {
-                              trace(`[ai-listing] ArrowDown+Enter produced "no exact match" — suggestion wasn't a hotel nav`);
-                              // Press Escape and retry with click-based approach
+                              trace(`[ai-listing] Strategy 1: Enter produced "no exact match" — re-typing for click-based strategies`);
                               await raw.keyboard.press("Escape").catch(() => {});
                               await raw.click(sel);
                               await raw.type(sel, typeaheadText, { delay: 80 });
@@ -1226,7 +1244,7 @@ The user will enter CVV and confirm payment themselves.`,
                             }
                           }
                         } catch (kbErr) {
-                          trace(`[ai-listing] ArrowDown+Enter failed: ${(kbErr as Error).message?.slice(0, 60)}`);
+                          trace(`[ai-listing] Strategy 1 failed: ${(kbErr as Error).message?.slice(0, 60)}`);
                         }
 
                         // ── Strategy 2: Playwright-native waitForSelector + locator ──────────
