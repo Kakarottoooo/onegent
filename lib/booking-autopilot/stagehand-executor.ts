@@ -1692,14 +1692,25 @@ The user will enter CVV and confirm payment themselves.`,
       // Provider drift guard: if we've left the start provider's domain (e.g. Expedia → IHG hotel site),
       // navigate back to startUrl so the flow stays within the expected booking site.
       if (startProvider && !startProvider.matchesUrl(currentUrl) && !startProvider.matchesUrl(raw.url())) {
-        // Check whether the current URL looks like a legitimate hotel booking redirect
-        // (e.g. Expedia → IHG/Marriott/Hilton brand site, which Expedia does for some hotels).
-        // Recognise: room-rate selection, reservation, checkout paths on ANY domain.
+        // Check whether the current URL looks like a legitimate hotel booking redirect.
+        // Rules differ by provider:
+        //   Hotels.com: only expedia.com/checkout is a legitimate redirect (payment step).
+        //               Any other brand site (Hilton, Marriott, etc.) must be rejected.
+        //   Expedia:    allows brand-site redirects for certain hotels (IHG, Marriott, etc.)
+        //               when the URL looks like a booking/checkout/payment page.
         const redirectUrl = raw.url().toLowerCase();
-        const isLegitimateBookingRedirect =
-          /select.?room.?rate|roomrate|\/reservation|\/book|\/checkout|\/payment/i.test(redirectUrl) ||
-          assessment.stage === "checkout_form" ||
-          assessment.stage === "payment_gate";
+        let isLegitimateBookingRedirect: boolean;
+        if (startProvider.id === "hotels-com") {
+          // Hotels.com only legitimately redirects to expedia.com/checkout for payment.
+          isLegitimateBookingRedirect =
+            redirectUrl.includes("expedia.com") && redirectUrl.includes("/checkout");
+        } else {
+          // Generic rule for Expedia and other OTAs: allow brand-site booking pages.
+          isLegitimateBookingRedirect =
+            /select.?room.?rate|roomrate|\/reservation|\/book|\/checkout|\/payment/i.test(redirectUrl) ||
+            assessment.stage === "checkout_form" ||
+            assessment.stage === "payment_gate";
+        }
 
         if (isLegitimateBookingRedirect) {
           trace(`[provider-guard] on external brand site but looks like a booking page — allowing redirect (${raw.url().slice(0, 80)})`);
