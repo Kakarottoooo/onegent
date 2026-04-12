@@ -28,7 +28,7 @@ export const hotelsComProvider: BrowserProvider = {
   async getStageSignals(page: Page, url: string, _text: string): Promise<ProviderStageSignals> {
     const lowerUrl = url.toLowerCase();
 
-    const searchResults = lowerUrl.includes("/search");
+    const searchResults = lowerUrl.includes("/search") || lowerUrl.includes("/hotel-search");
 
     // Hotels.com hotel detail pages: /ho<digits> or /h<digits> pattern (not checkout)
     const hotelDetail =
