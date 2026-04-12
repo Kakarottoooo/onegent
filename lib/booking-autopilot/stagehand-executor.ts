@@ -306,17 +306,31 @@ const activeStagehands = new Map<string, { close: () => Promise<void> }>();
  */
 /**
  * Normalise well-known broken startUrl patterns before the executor touches them.
- * Hotels.com: /search?destination=... gives a 404 — the correct path is /Hotel-Search?destination=...
+ * Hotels.com:
+ *   /search?destination=... → /Hotel-Search?destination=... (fixes 404)
+ *   City-level destination (regionId present, or destination contains a comma) + hotelName
+ *   → replace destination with hotel name so Hotels.com shows the specific hotel
  */
-function normaliseStartUrl(url: string): string {
+function normaliseStartUrl(url: string, hotelName?: string): string {
   try {
     const parsed = new URL(url);
     if (parsed.hostname.includes("hotels.com")) {
-      // /search → /Hotel-Search (Hotels.com's actual search results path)
+      // Fix broken /search path → /Hotel-Search
       if (parsed.pathname.toLowerCase() === "/search") {
         parsed.pathname = "/Hotel-Search";
-        return parsed.toString();
       }
+      // Replace city-level destination with hotel name when we have one.
+      // Hotels.com shows hotel-specific results when destination = exact hotel name.
+      if (hotelName) {
+        const dest = parsed.searchParams.get("destination") ?? "";
+        const isCityDest = dest.includes(",") || parsed.searchParams.has("regionId");
+        if (isCityDest) {
+          parsed.searchParams.set("destination", hotelName);
+          parsed.searchParams.delete("regionId");
+          parsed.searchParams.delete("sort");
+        }
+      }
+      return parsed.toString();
     }
   } catch { /* leave unchanged if unparseable */ }
   return url;
@@ -325,8 +339,10 @@ function normaliseStartUrl(url: string): string {
 export async function runBrowserTask(
   input: BrowserTaskInput
 ): Promise<BrowserTaskResult> {
-  // Normalise startUrl (e.g. hotels.com/search → hotels.com/Hotel-Search)
-  input = { ...input, startUrl: normaliseStartUrl(input.startUrl) };
+  // Normalise startUrl (e.g. hotels.com/search → hotels.com/Hotel-Search,
+  // and replace city-level destination with hotel name when available)
+  const hotelNameForUrl = extractTargetHotelName(input.task);
+  input = { ...input, startUrl: normaliseStartUrl(input.startUrl, hotelNameForUrl ?? undefined) };
 
   // AI_LOOP_FULL=true activates all AI sub-flags simultaneously.
   // RPA code is never removed — each flag independently falls back to RPA on failure.
