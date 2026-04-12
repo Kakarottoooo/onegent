@@ -534,8 +534,49 @@ async function dismissExpediaAlmostYoursModal(page: Page, trace: (msg: string) =
   if (closedX) {
     trace("Expedia: dismissed 'almost yours' modal via × close button");
     await new Promise(r => setTimeout(r, 600));
+    return;
+  }
+
+  // Strategy 3: press Escape — works for most modal implementations
+  try {
+    await page.keyboard.press("Escape");
+    trace("Expedia: pressed Escape to dismiss 'almost yours' modal");
+    await new Promise(r => setTimeout(r, 600));
+    return;
+  } catch { /* ignore */ }
+
+  // Strategy 4: click the first visible button INSIDE the modal container
+  // (catches SVG-icon-only × buttons with no text or aria-label)
+  const closedAny = await page.evaluate(() => {
+    const allEls = Array.from(document.querySelectorAll<HTMLElement>('*'));
+    const modalEl = allEls.find(el => {
+      const t = (el.textContent ?? "").toLowerCase();
+      return (t.includes("almost yours") || t.includes("continue booking")) &&
+        el.querySelectorAll("button, [role='button']").length > 0;
+    });
+    if (!modalEl) return false;
+    // Try non-primary buttons first (the close/dismiss button), then primary
+    const btns = Array.from(modalEl.querySelectorAll<HTMLElement>('button, [role="button"]'));
+    const closeBtn = btns.find(b => {
+      const r = b.getBoundingClientRect();
+      if (r.width === 0 || r.height === 0) return false;
+      const t = (b.textContent ?? "").trim().toLowerCase();
+      // Close buttons are usually small and have short/empty text
+      return t === "" || t === "×" || t === "✕" || t === "x" || t.length < 5;
+    });
+    const target = closeBtn ?? btns.find(b => {
+      const r = b.getBoundingClientRect();
+      return r.width > 0 && r.height > 0;
+    });
+    if (target) { target.click(); return true; }
+    return false;
+  }).catch(() => false);
+
+  if (closedAny) {
+    trace("Expedia: dismissed 'almost yours' modal via strategy 4 (any button in modal container)");
+    await new Promise(r => setTimeout(r, 600));
   } else {
-    trace("Expedia: 'almost yours' modal present but no clickable button found — continuing");
+    trace("Expedia: 'almost yours' modal present but could not dismiss — continuing anyway");
   }
 }
 
@@ -890,6 +931,10 @@ export async function fillExpediaGroupPaymentForm(
     trace("Expedia card: payment widget already loaded — proceeding immediately");
   }
 
+  // Dismiss modal one final time right before card fill — it may have reappeared
+  // after protection-plan selection or "Card" tab click.
+  await dismissExpediaAlmostYoursModal(page, trace, 300);
+
   const cardIframeFilled = await fillCardFieldsInPaymentIframes(
     page,
     profile.card_name ?? "",
@@ -900,7 +945,8 @@ export async function fillExpediaGroupPaymentForm(
 
   if (!cardIframeFilled) {
     // Fallback: try inline selectors in main page (for non-iframe payment forms)
-    trace("Expedia payment: iframe card fill found nothing — trying inline selectors");
+    // Hotels.com may not use Checkout.com iframes, using inline inputs instead.
+    trace("Expedia payment: iframe card fill found nothing — trying inline selectors (Hotels.com or similar)");
 
     if (profile.card_name) {
       await findAndFillExpediaField(page,
