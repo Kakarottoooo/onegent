@@ -1016,7 +1016,7 @@ export const expediaProvider: BrowserProvider = {
 
   matchesUrl(url: string): boolean {
     const lower = url.toLowerCase();
-    return lower.includes("expedia.com") || lower.includes("hotels.com");
+    return lower.includes("expedia.com") && !lower.includes("hotels.com");
   },
 
   async setup(_page: Page, _context: unknown, trace: (msg: string) => void): Promise<void> {
