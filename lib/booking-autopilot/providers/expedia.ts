@@ -964,7 +964,9 @@ export async function fillExpediaGroupPaymentForm(
   // From live debugging (2026-04-12):
   //   • page.frames() returns 28 frames, all cross-origin (url-error, inputs=-1)
   //   • The placeholder elements have visible=false (display:none / 0 bbox)
-  //   • frame.evaluate() fails for all Checkout.com frames → must use page.mouse
+  //   • frame.evaluate() fails for all Checkout.com frames
+  //   • page is a Stagehand CDP Page (NOT Playwright) — page.mouse is undefined!
+  //     Use page.click(x, y) directly (Stagehand Page API) for coordinate clicks.
   //
   // Strategy (in order):
   //   1. Playwright frameLocator() with Checkout.com iframe selectors (CKO IDs)
@@ -1068,14 +1070,17 @@ export async function fillExpediaGroupPaymentForm(
         const cx = box.x + box.w / 2;
         const cy = box.y + box.h / 2;
         try {
-          await page.mouse.click(cx, cy);
-          await new Promise(r => setTimeout(r, 200));
-          // Select all existing text then type new value
+          // Use page.click(x,y) — Stagehand page is a CDP wrapper, not Playwright.
+          // page.mouse is undefined on Stagehand pages; page.click(x,y) dispatches CDP mouse events directly.
+          await (page as unknown as { click: (x: number, y: number) => Promise<void> }).click(cx, cy);
+          await new Promise(r => setTimeout(r, 300));
+          // Select all + type — Stagehand page has page.keyboard (like Playwright)
           await page.keyboard.press("Control+a");
+          await new Promise(r => setTimeout(r, 100));
           await page.keyboard.type(field.value, { delay: 50 });
           await new Promise(r => setTimeout(r, 200));
           checkoutComFrameFilled[field.key] = true;
-          trace(`CKO visible iframe[${box.i}]: ${field.key} filled via mouse.click(${cx.toFixed(0)},${cy.toFixed(0)}) + keyboard`);
+          trace(`CKO visible iframe[${box.i}]: ${field.key} filled via page.click(${cx.toFixed(0)},${cy.toFixed(0)}) + keyboard`);
         } catch (err) {
           trace(`CKO visible iframe[${box.i}]: ${field.key} error — ${(err as Error).message?.slice(0, 50)}`);
         }
@@ -1120,13 +1125,14 @@ export async function fillExpediaGroupPaymentForm(
     for (const [coord, value, key] of parentFillPairs) {
       if (checkoutComFrameFilled[key] || !coord || !value) continue;
       try {
-        await page.mouse.click(coord.x, coord.y);
-        await new Promise(r => setTimeout(r, 200));
+        await (page as unknown as { click: (x: number, y: number) => Promise<void> }).click(coord.x, coord.y);
+        await new Promise(r => setTimeout(r, 300));
         await page.keyboard.press("Control+a");
+        await new Promise(r => setTimeout(r, 100));
         await page.keyboard.type(value, { delay: 50 });
         await new Promise(r => setTimeout(r, 200));
         checkoutComFrameFilled[key] = true;
-        trace(`CKO parent-climb: ${key} filled via mouse.click(${coord.x.toFixed(0)},${coord.y.toFixed(0)}) + keyboard`);
+        trace(`CKO parent-climb: ${key} filled via page.click(${coord.x.toFixed(0)},${coord.y.toFixed(0)}) + keyboard`);
       } catch (err) {
         trace(`CKO parent-climb: ${key} error — ${(err as Error).message?.slice(0, 50)}`);
       }

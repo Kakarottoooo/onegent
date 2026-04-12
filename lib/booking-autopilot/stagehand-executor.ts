@@ -731,10 +731,19 @@ The user will enter CVV and confirm payment themselves.`,
       getProvider(landedUrlAfterSetup)?.id === 'expedia' ||
       openPageUrls.find((u) => u && getProvider(u)?.id === 'expedia')
     );
-    const skipInitialAgent = bookingComPageOpen || expediaPageOpen;
+    // Hotels.com: same as Expedia — skip the initial AI agent run. The AI agent navigates to
+    // wrong hotels (e.g. Artezen Hotel instead of 414 Hotel) because it clicks the first result
+    // or follows brand site links. The programmatic recovery flow (Stage B sidebar filter →
+    // fast path → selectRoomAI → fillExpediaGroupPaymentForm) handles Hotels.com correctly.
+    const hotelsComPageOpen = !!(
+      getProvider(input.startUrl)?.id === 'hotels-com' ||
+      getProvider(landedUrlAfterSetup)?.id === 'hotels-com' ||
+      openPageUrls.find((u) => u && getProvider(u)?.id === 'hotels-com')
+    );
+    const skipInitialAgent = bookingComPageOpen || expediaPageOpen || hotelsComPageOpen;
     const initialMaxSteps = skipInitialAgent ? 0 : 40;
 
-    const skipProviderLabel = bookingComPageOpen ? 'Booking.com' : expediaPageOpen ? 'Expedia/Hotels.com' : '';
+    const skipProviderLabel = bookingComPageOpen ? 'Booking.com' : expediaPageOpen ? 'Expedia' : hotelsComPageOpen ? 'Hotels.com' : '';
     trace(`Agent starting main run (maxSteps=${initialMaxSteps}, model=${modelName})${skipInitialAgent ? ` [${skipProviderLabel} detected: agent.execute disabled, using programmatic flow only]` : ""}`);
     const t0 = Date.now();
     const result = initialMaxSteps === 0
