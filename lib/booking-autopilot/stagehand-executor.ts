@@ -851,6 +851,7 @@ The user will enter CVV and confirm payment themselves.`,
                 /secure\.booking\.com\/book/.test(url) ||
                 /expedia\.com\/.*[./]h\d+[./]/.test(url) ||   // e.g. .h12345.Hotel-Information
                 /hotels\.com\/ho\d+/.test(url) ||              // e.g. /ho12345/
+                /hotels\.com\/h\d+/.test(url) ||               // alternate /h12345/ format
                 /\/hotel-information/.test(url) ||
                 /\/hotel-details/.test(url)
               );
@@ -936,11 +937,14 @@ The user will enter CVV and confirm payment themselves.`,
             // Stage B (fallback): If the top search bar approach fails, use the left-sidebar
             //          "Search by property name" filter and type character-by-character to
             //          trigger React's event handlers (raw.type beats raw.fill here).
-            if (startProvider?.id === "expedia") {
+            if (startProvider?.id === "expedia" || startProvider?.id === "hotels-com") {
               try {
                 const expediaCurrentUrl = new URL(raw.url());
                 const dest = expediaCurrentUrl.searchParams.get("destination") ?? "";
-                const isCityLevel = dest.includes(",") || expediaCurrentUrl.searchParams.has("regionId");
+                const isCityLevel = dest.includes(",") || expediaCurrentUrl.searchParams.has("regionId") ||
+                  // Hotels.com city-level search: destination is a city name like "New York"
+                  // or no hotel ID appears in the URL yet
+                  (startProvider?.id === "hotels-com" && !/hotels\.com\/(ho|h)\d+/.test(raw.url().toLowerCase()));
 
                 if (isCityLevel && targetHotelName) {
                   trace(`[ai-listing] Expedia city-level search detected — searching hotel by name in top search bar`);
@@ -1102,6 +1106,7 @@ The user will enter CVV and confirm payment themselves.`,
             // Pass startDomain so clickTargetListingAI can detect & revert wrong-domain clicks
             // (e.g. clicking an IHG logo badge on Expedia that navigates to ihg.com).
             const startDomainHint = startProvider?.id === "expedia" ? "expedia.com"
+              : startProvider?.id === "hotels-com" ? "hotels.com"
               : input.startUrl.match(/^https?:\/\/([^/]+)/)?.[1] ?? undefined;
             const result = await clickTargetListingAI(stagehand, targetHotelName, trace, 5, startDomainHint, requestedDates);
             if (result === "no_availability") return false;
