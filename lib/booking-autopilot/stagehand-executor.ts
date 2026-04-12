@@ -968,9 +968,17 @@ The user will enter CVV and confirm payment themselves.`,
                   (startProvider?.id === "hotels-com" && !/hotels\.com\/(ho|h)\d+/.test(raw.url().toLowerCase()));
 
                 if (isCityLevel && targetHotelName) {
-                  trace(`[ai-listing] Expedia city-level search detected — searching hotel by name in top search bar`);
+                  // Hotels.com: skip Stage A (top destination search bar) and go straight to
+                  // the sidebar "Search by property name" filter. The destination search bar
+                  // on Hotels.com shows autocomplete suggestions that sometimes link to brand-site
+                  // GMB pages (e.g. hilton.com?SEO_id=GMB-...) instead of Hotels.com hotel pages,
+                  // causing the agent to navigate off-platform.
+                  const skipStageA = startProvider?.id === "hotels-com";
+                  trace(`[ai-listing] city-level search detected — ${skipStageA ? "Hotels.com: skipping Stage A, going to sidebar filter" : "searching hotel by name in top search bar"}`);
 
                   // ── Stage A: use the destination search box at the top ──────────────────
+                  // NOTE: Hotels.com skips Stage A (skipStageA=true) — its destination search bar
+                  // can navigate to brand-site GMB URLs instead of Hotels.com hotel pages.
                   // Selectors for the main destination/location search input on both the
                   // Expedia homepage and the Hotel-Search results page.
                   const destSelectors = [
@@ -986,7 +994,7 @@ The user will enter CVV and confirm payment themselves.`,
                   ];
 
                   let searchBarUsed = false;
-                  for (const sel of destSelectors) {
+                  for (const sel of skipStageA ? [] : destSelectors) {
                     const visible = await raw.evaluate((s: string) => {
                       const el = document.querySelector(s);
                       if (!el) return false;
