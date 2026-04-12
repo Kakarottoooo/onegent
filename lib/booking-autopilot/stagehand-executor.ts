@@ -1180,32 +1180,47 @@ The user will enter CVV and confirm payment themselves.`,
                   // ── Stage B: "Search by property name" sidebar filter (fallback) ────────
                   if (!searchBarUsed) {
                     trace(`[ai-listing] Stage B fallback — typing in "Search by property name" filter`);
-                    const propSelectors = [
-                      'input[placeholder*="property name" i]',
-                      'input[aria-label*="property name" i]',
-                      'input[placeholder*="Marriott" i]',
-                      'input[data-testid*="property"]',
-                    ];
-                    for (const sel of propSelectors) {
-                      const visible = await raw.evaluate((s: string) => {
+                    // Use evaluate() to find the input and get its center coordinates.
+                    // Then raw.click(cx, cy) — Stagehand's NATIVE coordinate click (not selector-based).
+                    // raw.locator(sel).click() was unreliable for Hotels.com sidebar inputs.
+                    const inputInfo = await raw.evaluate(() => {
+                      const selectors = [
+                        'input[placeholder*="property name" i]',
+                        'input[aria-label*="property name" i]',
+                        'input[placeholder*="Marriott" i]',
+                        'input[data-testid*="property"]',
+                        // Hotels.com sidebar uses a generic text input inside a labelled section
+                        'aside input[type="text"]:not([type="hidden"])',
+                        'nav input[type="text"]:not([type="hidden"])',
+                        '[data-stid*="property"] input',
+                      ];
+                      for (const s of selectors) {
                         const el = document.querySelector<HTMLInputElement>(s);
-                        return !!(el && el.offsetParent !== null && !el.disabled);
-                      }, sel).catch(() => false);
-                      if (!visible) continue;
-                      try {
-                        // raw is a Stagehand CDP Page (NOT Playwright).
-                        // raw.click(x,y) takes coordinates; raw.type(text) takes text only.
-                        // Use raw.locator(sel).click() for selector-based click, then raw.type(text).
-                        await raw.locator(sel).click();
-                        await new Promise(r => setTimeout(r, 200));
+                        if (!el) continue;
+                        const r = el.getBoundingClientRect();
+                        if (r.width === 0 || r.height === 0) continue;
+                        if (el.disabled) continue;
+                        return { sel: s, cx: r.x + r.width / 2, cy: r.y + r.height / 2 };
+                      }
+                      return null;
+                    }).catch(() => null);
+
+                    if (!inputInfo) {
+                      trace(`[ai-listing] Stage B: property name input not found in DOM`);
+                    } else {
+                    const { sel, cx: inputCx, cy: inputCy } = inputInfo;
+                    try {
+                        // Click at the input's center coordinates — Stagehand native API
+                        await (raw as unknown as { click: (x: number, y: number) => Promise<void> }).click(inputCx, inputCy);
+                        await new Promise(r => setTimeout(r, 300));
                         // Clear any previous text then type the hotel name
                         await raw.keyPress("Control+a");
-                        await new Promise(r => setTimeout(r, 100));
+                        await new Promise(r => setTimeout(r, 150));
                         // Type up to 25 chars to trigger the typeahead dropdown.
-                        // We now click "Search for '...'" (not first suggestion), so more chars = better filter.
+                        // More chars = more specific filter (we click "Search for '...'" not first suggestion).
                         const typeaheadText = targetHotelName.slice(0, Math.min(25, targetHotelName.length));
                         await raw.type(typeaheadText, { delay: 80 });
-                        trace(`[ai-listing] property name filter typed "${typeaheadText}" via "${sel}"`);
+                        trace(`[ai-listing] property name filter typed "${typeaheadText}" via "${sel}" (coords ${inputCx.toFixed(0)},${inputCy.toFixed(0)})`);
 
                         // ── Strategy 1: Click "Search for '...'" dropdown item (safe, always on Hotels.com) ──
                         // The Hotels.com UITK dropdown has TWO types of suggestions:
@@ -1261,7 +1276,7 @@ The user will enter CVV and confirm payment themselves.`,
                           if ((s1Result as { action: string; href?: string }).action === "href") {
                             const href = (s1Result as { action: string; href: string }).href;
                             trace(`[ai-listing] Strategy 1: found hotels.com detail href in dropdown → goto()`);
-                            await raw.goto(href, { waitUntil: "domcontentloaded", timeout: 20000 });
+                            await raw.goto(href, { waitUntil: "domcontentloaded", timeoutMs: 20000 });
                             await new Promise(r => setTimeout(r, 2000));
                             if (isHotelDetailUrl(raw.url())) {
                               suggClicked = true;
@@ -1281,7 +1296,7 @@ The user will enter CVV and confirm payment themselves.`,
                             } else {
                               trace(`[ai-listing] Strategy 1: "no exact match" after click — re-typing for fallback strategies`);
                               await raw.keyPress("Escape").catch(() => {});
-                              await raw.locator(sel).click();
+                              await (raw as unknown as { click: (x: number, y: number) => Promise<void> }).click(inputCx, inputCy);
                               await new Promise(r => setTimeout(r, 200));
                               await raw.keyPress("Control+a");
                               await raw.type(typeaheadText, { delay: 80 });
@@ -1374,14 +1389,14 @@ The user will enter CVV and confirm payment themselves.`,
                           }
                         } else {
                           // All strategies failed — press Enter as absolute last resort
-                          // (may produce "No exact matches" but at least narrows the field)
                           await raw.keyPress("Enter");
                           trace(`[ai-listing] pressed Enter on property name filter (all suggestion strategies failed)`);
                           await new Promise(r => setTimeout(r, 3500));
                         }
-                        break;
-                      } catch { /* try next */ }
-                    }
+                      } catch (stgBErr) {
+                        trace(`[ai-listing] Stage B inner error: ${(stgBErr as Error).message?.slice(0, 80)}`);
+                      }
+                    } // end else (inputInfo found)
                   }
                 }
               } catch (refineErr) {
