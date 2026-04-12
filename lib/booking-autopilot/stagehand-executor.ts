@@ -324,15 +324,11 @@ function normaliseStartUrl(url: string, hotelName?: string): string {
       if (parsed.pathname.toLowerCase() === "/search") {
         parsed.pathname = "/Hotel-Search";
       }
-      // Add hotelName parameter when we have a hotel name and the URL is city-level.
-      // Hotels.com uses hotelName to pre-filter sidebar results to the specific property.
-      // Keep destination + regionId unchanged — they provide date/guest search context.
+      // Always add hotelName when we have one — Hotels.com uses this to pre-filter
+      // the "Search by property name" sidebar, regardless of whether destination is
+      // city-level ("New York, NY") or already a hotel name ("414 Hotel New York...").
       if (hotelName && !parsed.searchParams.has("hotelName")) {
-        const dest = parsed.searchParams.get("destination") ?? "";
-        const isCityDest = dest.includes(",") || parsed.searchParams.has("regionId");
-        if (isCityDest) {
-          parsed.searchParams.set("hotelName", hotelName);
-        }
+        parsed.searchParams.set("hotelName", hotelName);
       }
       return parsed.toString();
     }
@@ -1134,7 +1130,47 @@ The user will enter CVV and confirm payment themselves.`,
                         await raw.click(sel);
                         await raw.type(sel, targetHotelName, { delay: 60 });
                         trace(`[ai-listing] property name filter typed via "${sel}"`);
-                        await new Promise(r => setTimeout(r, 2500));
+                        // Wait for Hotels.com autocomplete/suggestion list to appear
+                        await new Promise(r => setTimeout(r, 1500));
+
+                        // Try to click the first suggestion in the dropdown (Hotels.com shows
+                        // a list of matching properties — clicking one filters results immediately)
+                        const suggClicked = await raw.evaluate((hotelN: string) => {
+                          const words = hotelN.toLowerCase().split(/\s+/).filter((w: string) => w.length > 2);
+                          const suggSelectors = [
+                            '[role="option"]', '[role="listbox"] li',
+                            '[data-testid*="suggest"]', '[class*="suggestion" i]',
+                            'ul li[class*="item" i]',
+                          ];
+                          for (const ss of suggSelectors) {
+                            const items = Array.from(document.querySelectorAll<HTMLElement>(ss))
+                              .filter(el => {
+                                const r = el.getBoundingClientRect();
+                                return r.width > 0 && r.height > 0;
+                              });
+                            if (items.length === 0) continue;
+                            const scored = items.map(el => ({
+                              el,
+                              score: words.filter((w: string) => (el.textContent ?? "").toLowerCase().includes(w)).length,
+                            })).sort((a, b) => b.score - a.score);
+                            if (scored[0] && scored[0].score >= Math.ceil(words.length * 0.4)) {
+                              scored[0].el.scrollIntoView({ block: "nearest" });
+                              scored[0].el.click();
+                              return true;
+                            }
+                          }
+                          return false;
+                        }, targetHotelName).catch(() => false);
+
+                        if (suggClicked) {
+                          trace(`[ai-listing] clicked sidebar suggestion for "${targetHotelName.slice(0, 50)}"`);
+                          await new Promise(r => setTimeout(r, 3000)); // wait for results to update
+                        } else {
+                          // No dropdown — press Enter to trigger filter
+                          await raw.keyboard.press("Enter");
+                          trace(`[ai-listing] pressed Enter on property name filter`);
+                          await new Promise(r => setTimeout(r, 3500));
+                        }
                         break;
                       } catch { /* try next */ }
                     }
