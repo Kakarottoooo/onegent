@@ -1685,10 +1685,10 @@ The user will enter CVV and confirm payment themselves.`,
 
     for (let attempt = 0; attempt < 8; attempt += 1) {
       trace(`Stage assessment ${attempt + 1}: ${assessment.stage} —?${assessment.reason}`);
-      if (!["listing", "date_selection", "room_selection", "intermediate_gate"].includes(assessment.stage)) {
-        break;
-      }
 
+      // Provider drift guard runs BEFORE the stage break so it catches cases where the AI
+      // executed multiple steps and advanced all the way to checkout_form / payment_gate on
+      // the WRONG domain (e.g. Hotels.com AI navigated to hilton.com payment page in one pass).
       // Provider drift guard: if we've left the start provider's domain (e.g. Expedia → IHG hotel site),
       // navigate back to startUrl so the flow stays within the expected booking site.
       if (startProvider && !startProvider.matchesUrl(currentUrl) && !startProvider.matchesUrl(raw.url())) {
@@ -1726,6 +1726,13 @@ The user will enter CVV and confirm payment themselves.`,
           pageText = assessment.pageText;
           currentUrl = assessment.currentUrl;
         }
+      }
+
+      // After drift guard has had a chance to navigate back, check if the stage is still
+      // an early stage that needs recovery. If we're at checkout_form / payment_gate (on
+      // the correct domain after navigating back), exit the loop and let the main flow continue.
+      if (!["listing", "date_selection", "room_selection", "intermediate_gate"].includes(assessment.stage)) {
+        break;
       }
 
       // Definitive no-availability: page text signals unavailability AND no Reserve buttons visible.
