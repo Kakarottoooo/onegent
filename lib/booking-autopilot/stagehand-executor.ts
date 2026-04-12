@@ -1193,12 +1193,18 @@ The user will enter CVV and confirm payment themselves.`,
                       }, sel).catch(() => false);
                       if (!visible) continue;
                       try {
-                        await raw.click(sel);
+                        // raw is a Stagehand CDP Page (NOT Playwright).
+                        // raw.click(x,y) takes coordinates; raw.type(text) takes text only.
+                        // Use raw.locator(sel).click() for selector-based click, then raw.type(text).
+                        await raw.locator(sel).click();
+                        await new Promise(r => setTimeout(r, 200));
+                        // Clear any previous text then type the hotel name
+                        await raw.keyPress("Control+a");
+                        await new Promise(r => setTimeout(r, 100));
                         // Type up to 25 chars to trigger the typeahead dropdown.
                         // We now click "Search for '...'" (not first suggestion), so more chars = better filter.
-                        // 25 chars is enough to be specific while still showing the dropdown suggestions.
                         const typeaheadText = targetHotelName.slice(0, Math.min(25, targetHotelName.length));
-                        await raw.type(sel, typeaheadText, { delay: 80 });
+                        await raw.type(typeaheadText, { delay: 80 });
                         trace(`[ai-listing] property name filter typed "${typeaheadText}" via "${sel}"`);
 
                         // ── Strategy 1: Click "Search for '...'" dropdown item (safe, always on Hotels.com) ──
@@ -1274,9 +1280,11 @@ The user will enter CVV and confirm payment themselves.`,
                               trace(`[ai-listing] Strategy 1: results updated — sidebar filter applied`);
                             } else {
                               trace(`[ai-listing] Strategy 1: "no exact match" after click — re-typing for fallback strategies`);
-                              await raw.keyboard.press("Escape").catch(() => {});
-                              await raw.click(sel);
-                              await raw.type(sel, typeaheadText, { delay: 80 });
+                              await raw.keyPress("Escape").catch(() => {});
+                              await raw.locator(sel).click();
+                              await new Promise(r => setTimeout(r, 200));
+                              await raw.keyPress("Control+a");
+                              await raw.type(typeaheadText, { delay: 80 });
                               await new Promise(r => setTimeout(r, 1800));
                             }
                           } else {
@@ -1308,8 +1316,9 @@ The user will enter CVV and confirm payment themselves.`,
                               const count = await raw.locator(spec).count().catch(() => 0);
                               if (count > 0) {
                                 // Click the LAST option — "Search for '...'" (text filter, safe)
-                                // NOT first() which links to brand site
-                                await raw.locator(spec).last().click();
+                                // NOT first() which links to brand site.
+                                // Stagehand Locator has no .last() — use .nth(count-1) instead.
+                                await raw.locator(spec).nth(count - 1).click();
                                 suggClicked = true;
                                 trace(`[ai-listing] Strategy 2: clicked last of ${count} options via locator "${spec}"`);
                                 break;
@@ -1366,7 +1375,7 @@ The user will enter CVV and confirm payment themselves.`,
                         } else {
                           // All strategies failed — press Enter as absolute last resort
                           // (may produce "No exact matches" but at least narrows the field)
-                          await raw.keyboard.press("Enter");
+                          await raw.keyPress("Enter");
                           trace(`[ai-listing] pressed Enter on property name filter (all suggestion strategies failed)`);
                           await new Promise(r => setTimeout(r, 3500));
                         }
