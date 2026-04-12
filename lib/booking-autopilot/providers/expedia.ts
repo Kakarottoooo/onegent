@@ -593,7 +593,7 @@ async function dismissExpediaAlmostYoursModal(page: Page, trace: (msg: string) =
  *   - Expiry: placeholder "MM/YY" or similar
  *   - Cardholder name: placeholder/label contains "name"
  *
- * Returns true if at least one card field was successfully filled in an iframe.
+ * Returns which fields were successfully filled in iframes.
  */
 async function fillCardFieldsInPaymentIframes(
   page: Page,  // needed for page.keyboard fallback
@@ -601,7 +601,7 @@ async function fillCardFieldsInPaymentIframes(
   cardNumber: string,
   cardExpiry: string,
   trace: (msg: string) => void
-): Promise<boolean> {
+): Promise<{ name: boolean; number: boolean; expiry: boolean }> {
   // Safe URL getter — f.url is a method, not a property; calling without `this` binding loses context
   const getFrameUrl = (f: Frame): string => {
     try { return f.url(); } catch { return "(url-error)"; }
@@ -628,12 +628,16 @@ async function fillCardFieldsInPaymentIframes(
   // Scan ALL non-main frames — do NOT filter by URL.
   // Checkout.com and similar widgets use about:srcdoc or dynamically-written about:blank
   // frames that contain the real card inputs, hidden from the parent page.
-  let anyFilled = false;
+  const filled = { name: false, number: false, expiry: false };
 
   for (const frame of nonMainFrames) {
     const frameUrl = getFrameUrl(frame);
 
-    // Skip truly empty frames quickly
+    // Get all non-hidden inputs in this frame.
+    // NOTE: We intentionally DO NOT filter by visibility here — Checkout.com and
+    // similar PCI-widget iframes often have inputs with offsetParent === null (they
+    // use position:fixed or are inside a transform context), so the strict visibility
+    // check would skip them. We try ALL non-hidden inputs and let fill() fail gracefully.
     const inputs = await frame.evaluate(() =>
       Array.from(document.querySelectorAll("input")).map((el, i) => ({
         i,
@@ -642,19 +646,18 @@ async function fillCardFieldsInPaymentIframes(
         placeholder: el.placeholder || "",
         autocomplete: el.autocomplete || "",
         ariaLabel: el.getAttribute("aria-label") || "",
-        visible: el.offsetParent !== null || el.getBoundingClientRect().width > 0,
       }))
-    ).catch(() => [] as Array<{ i: number; type: string; id: string; placeholder: string; autocomplete: string; ariaLabel: string; visible: boolean }>);
+    ).catch(() => [] as Array<{ i: number; type: string; id: string; placeholder: string; autocomplete: string; ariaLabel: string }>);
 
-    const visibleInputs = inputs.filter(d => d.visible && d.type !== "hidden");
-    if (visibleInputs.length === 0) continue;
+    const candidateInputs = inputs.filter(d => d.type !== "hidden");
+    if (candidateInputs.length === 0) continue;
 
-    trace(`Expedia card: frame (${frameUrl.slice(0, 60)}) has ${visibleInputs.length} visible input(s)`);
-    for (const d of visibleInputs) {
+    trace(`Expedia card: frame (${frameUrl.slice(0, 60)}) has ${candidateInputs.length} input(s)`);
+    for (const d of candidateInputs) {
       trace(`  [${d.i}] type=${d.type} id="${d.id.slice(0, 30)}" ph="${d.placeholder.slice(0, 30)}" aria="${d.ariaLabel.slice(0, 30)}" ac=${d.autocomplete}`);
     }
 
-    for (const inp of visibleInputs) {
+    for (const inp of candidateInputs) {
       const ph = inp.placeholder.toLowerCase();
       const lbl = inp.ariaLabel.toLowerCase();
       const ac = inp.autocomplete.toLowerCase();
@@ -704,7 +707,7 @@ async function fillCardFieldsInPaymentIframes(
         const actual = await loc.inputValue().catch(() => "");
         const ok = actual.replace(/\s/g, "") === value.replace(/\s/g, "") || actual.length > 0;
         trace(`Expedia card: ${fieldType} fill — ${ok ? "OK" : "EMPTY"} (got "${actual.slice(0, 20)}")`);
-        if (ok) anyFilled = true;
+        if (ok) filled[fieldType] = true;
 
         // Fallback: keyboard type if fill didn't stick
         if (!ok) {
@@ -714,19 +717,71 @@ async function fillCardFieldsInPaymentIframes(
           const actual2 = await loc.inputValue().catch(() => "");
           if (actual2.length > 0) {
             trace(`Expedia card: ${fieldType} fill via keyboard — OK`);
-            anyFilled = true;
+            filled[fieldType] = true;
           }
         }
       } catch (err) {
         trace(`Expedia card: ${fieldType} fill error — ${(err as Error).message?.slice(0, 60)}`);
       }
     }
+
+    // ── Frame-locator fallback: try CSS selectors directly on frame ─────────
+    // This catches cases where evaluate() returned inputs but index-based .nth()
+    // mismatches due to DOM changes between evaluate and locator calls.
+    if (!filled.number && cardNumber) {
+      for (const sel of [
+        'input[placeholder*="0000"]', 'input[autocomplete="cc-number"]',
+        'input[id*="pan"]', 'input[id*="card-num"]', 'input[id*="cardnum"]',
+        'input[id="number"]', 'input[id*="credit-card"]',
+      ]) {
+        try {
+          const loc = frame.locator(sel).first();
+          const count = await loc.count().catch(() => 0);
+          if (count === 0) continue;
+          await loc.click({ clickCount: 3 }).catch(() => {});
+          if (typeof (loc as { pressSequentially?: (v: string, o?: { delay: number }) => Promise<void> }).pressSequentially === "function") {
+            await (loc as { pressSequentially: (v: string, o: { delay: number }) => Promise<void> }).pressSequentially(cardNumber, { delay: 50 });
+          } else {
+            await loc.fill(cardNumber);
+          }
+          const actual = await loc.inputValue().catch(() => "");
+          if (actual.replace(/\s/g, "").length > 0) {
+            trace(`Expedia card: number filled via frame.locator("${sel}") in ${frameUrl.slice(0, 40)}`);
+            filled.number = true;
+            break;
+          }
+        } catch { /* try next */ }
+      }
+    }
+    if (!filled.expiry && cardExpiry) {
+      for (const sel of [
+        'input[placeholder="MM/YY"]', 'input[placeholder*="MM"]',
+        'input[autocomplete="cc-exp"]', 'input[id*="expir"]', 'input[id="expiry"]',
+      ]) {
+        try {
+          const loc = frame.locator(sel).first();
+          const count = await loc.count().catch(() => 0);
+          if (count === 0) continue;
+          await loc.click({ clickCount: 3 }).catch(() => {});
+          await loc.fill(cardExpiry);
+          const actual = await loc.inputValue().catch(() => "");
+          if (actual.replace(/\s/g, "").length > 0) {
+            trace(`Expedia card: expiry filled via frame.locator("${sel}") in ${frameUrl.slice(0, 40)}`);
+            filled.expiry = true;
+            break;
+          }
+        } catch { /* try next */ }
+      }
+    }
   }
 
+  const anyFilled = filled.name || filled.number || filled.expiry;
   if (!anyFilled) {
     trace("Expedia card iframes: no card inputs found in any frame — widget may not be loaded");
+  } else {
+    trace(`Expedia card iframes: filled name=${filled.name}, number=${filled.number}, expiry=${filled.expiry}`);
   }
-  return anyFilled;
+  return filled;
 }
 
 export async function fillExpediaGroupPaymentForm(
@@ -935,7 +990,7 @@ export async function fillExpediaGroupPaymentForm(
   // after protection-plan selection or "Card" tab click.
   await dismissExpediaAlmostYoursModal(page, trace, 300);
 
-  const cardIframeFilled = await fillCardFieldsInPaymentIframes(
+  const iframeFilledFields = await fillCardFieldsInPaymentIframes(
     page,
     profile.card_name ?? "",
     profile.card_number ?? "",
@@ -943,26 +998,26 @@ export async function fillExpediaGroupPaymentForm(
     trace
   );
 
-  if (!cardIframeFilled) {
-    // Fallback: try inline selectors in main page (for non-iframe payment forms)
-    // Hotels.com may not use Checkout.com iframes, using inline inputs instead.
-    trace("Expedia payment: iframe card fill found nothing — trying inline selectors (Hotels.com or similar)");
-
-    if (profile.card_name) {
-      await findAndFillExpediaField(page,
-        ["Name on card", "Cardholder name", "Card holder name"],
-        EXPEDIA_GROUP_CARD_NAME_SELECTORS, profile.card_name, "cardholder name", trace);
-    }
-    if (profile.card_number) {
-      await findAndFillExpediaField(page,
-        ["Card number", "Credit card number"],
-        EXPEDIA_GROUP_CARD_NUMBER_SELECTORS, profile.card_number, "card number", trace, true);
-    }
-    if (profile.card_expiry) {
-      await findAndFillExpediaField(page,
-        ["Expiration date", "Expiry date", "Expiry"],
-        EXPEDIA_GROUP_CARD_EXPIRY_SELECTORS, profile.card_expiry, "expiry date", trace);
-    }
+  // For each field NOT filled by the iframe strategy, attempt inline fill.
+  // If the field is in an iframe, page.locator() returns count=0 → no-op (safe).
+  // If the field is inline (Hotels.com or non-Checkout.com forms), this fills it.
+  if (!iframeFilledFields.name && profile.card_name) {
+    trace("Expedia payment: card name not filled via iframe — trying inline selector");
+    await findAndFillExpediaField(page,
+      ["Name on card", "Cardholder name", "Card holder name"],
+      EXPEDIA_GROUP_CARD_NAME_SELECTORS, profile.card_name, "cardholder name", trace);
+  }
+  if (!iframeFilledFields.number && profile.card_number) {
+    trace("Expedia payment: card number not filled via iframe — trying inline selector");
+    await findAndFillExpediaField(page,
+      ["Card number", "Credit card number"],
+      EXPEDIA_GROUP_CARD_NUMBER_SELECTORS, profile.card_number, "card number", trace, true);
+  }
+  if (!iframeFilledFields.expiry && profile.card_expiry) {
+    trace("Expedia payment: card expiry not filled via iframe — trying inline selector");
+    await findAndFillExpediaField(page,
+      ["Expiration date", "Expiry date", "Expiry"],
+      EXPEDIA_GROUP_CARD_EXPIRY_SELECTORS, profile.card_expiry, "expiry date", trace);
   }
 
   // "This booking is almost yours!" modal appears AFTER card fields are filled.
