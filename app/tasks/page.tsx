@@ -668,8 +668,8 @@ function LiveLogPanel({ jobId }: { jobId: string }) {
   );
 }
 
-function StepCard({ step, stepIndex, jobId, onRefresh }: {
-  step: BookingJobStep; stepIndex: number; jobId: string; onRefresh?: () => void;
+function StepCard({ step, stepIndex, jobId, onRefresh, onOpenLive }: {
+  step: BookingJobStep; stepIndex: number; jobId: string; onRefresh?: () => void; onOpenLive?: () => void;
 }) {
   const [logOpen, setLogOpen] = useState(false);
   const feedbackSent = useRef(false);
@@ -870,7 +870,7 @@ function StepCard({ step, stepIndex, jobId, onRefresh }: {
 
       {/* Human intervention banner — awaiting_confirmation or needs_login */}
       {(step.status === "awaiting_confirmation" || (step.status === "error" && step.handoff_url && step.handoff_url !== step.fallbackUrl)) && (
-        <InterventionBanner step={step} jobId={jobId} />
+        <InterventionBanner step={step} jobId={jobId} onOpenLive={onOpenLive} />
       )}
 
       {/* Retry scheduling — shown for failed steps without an action item */}
@@ -888,9 +888,8 @@ function StepCard({ step, stepIndex, jobId, onRefresh }: {
 
 // ── Intervention banner + modal ────────────────────────────────────────────────
 
-function InterventionBanner({ step, jobId }: { step: BookingJobStep; jobId: string }) {
+function InterventionBanner({ step, jobId, onOpenLive }: { step: BookingJobStep; jobId: string; onOpenLive?: () => void }) {
   const [open, setOpen] = useState(true); // auto-open when first rendered
-  const [showLive, setShowLive] = useState(false);
 
   const isPaymentWait = step.status === "awaiting_confirmation";
   const hasCloudSession = !!step.session_url; // Browserbase mode
@@ -930,12 +929,12 @@ function InterventionBanner({ step, jobId }: { step: BookingJobStep; jobId: stri
               </a>
             )}
             {isPaymentWait && !hasCloudSession && (
-              <button onClick={() => setShowLive(v => !v)} style={{
+              <button onClick={() => onOpenLive?.()} style={{
                 padding: "7px 14px", borderRadius: 8, border: `1px solid ${color}`,
                 backgroundColor: "transparent", color,
                 fontFamily: "var(--font-dm-sans)", fontSize: 12, fontWeight: 600, cursor: "pointer",
               }}>
-                {showLive ? "Hide browser" : "🖥️ Open in OneAgent"}
+                🖥️ Watch live
               </button>
             )}
             <button onClick={() => setOpen(true)} style={{
@@ -948,69 +947,6 @@ function InterventionBanner({ step, jobId }: { step: BookingJobStep; jobId: stri
           </div>
         </div>
       </div>
-
-      {/* Full-screen live browser modal */}
-      {showLive && isPaymentWait && (
-        <div style={{
-          position: "fixed", inset: 0, zIndex: 9999,
-          backgroundColor: "#0a0a0a",
-          display: "flex", flexDirection: "column",
-        }}>
-          {/* Header bar */}
-          <div style={{
-            display: "flex", alignItems: "center", justifyContent: "space-between",
-            padding: "12px 16px", flexShrink: 0,
-            backgroundColor: "#111",
-            borderBottom: "0.5px solid rgba(255,255,255,0.1)",
-          }}>
-            <div style={{ minWidth: 0 }}>
-              <p style={{
-                fontFamily: "var(--font-dm-sans)", fontSize: 14, fontWeight: 700,
-                color: "#fff", margin: 0,
-              }}>
-                💳 Live Browser — Enter CVC
-              </p>
-              <p style={{
-                fontFamily: "var(--font-dm-sans)", fontSize: 11,
-                color: "rgba(255,255,255,0.45)", margin: 0, marginTop: 1,
-                overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
-              }}>
-                {step.label ?? "Complete payment"}
-              </p>
-            </div>
-            <button
-              onClick={() => setShowLive(false)}
-              style={{
-                flexShrink: 0, marginLeft: 12,
-                background: "rgba(255,255,255,0.1)", border: "none", borderRadius: 8,
-                color: "#fff", padding: "8px 16px", cursor: "pointer",
-                fontFamily: "var(--font-dm-sans)", fontSize: 13, fontWeight: 600,
-              }}
-            >
-              Done ✕
-            </button>
-          </div>
-
-          {/* Browser fills remaining space */}
-          <div style={{ flex: 1, overflow: "hidden", position: "relative" }}>
-            <BrowserLiveView jobId={jobId} fullscreen />
-          </div>
-
-          {/* Bottom hint */}
-          <div style={{
-            flexShrink: 0, padding: "10px 16px", textAlign: "center",
-            backgroundColor: "#111",
-            borderTop: "0.5px solid rgba(255,255,255,0.1)",
-          }}>
-            <p style={{
-              fontFamily: "var(--font-dm-sans)", fontSize: 12,
-              color: "rgba(255,255,255,0.5)", margin: 0,
-            }}>
-              Click the CVC field → type your 3-digit code → click confirm
-            </p>
-          </div>
-        </div>
-      )}
 
       {/* Modal */}
       {open && step.handoff_url && (
@@ -1125,27 +1061,23 @@ function InterventionBanner({ step, jobId }: { step: BookingJobStep; jobId: stri
 
 // ── Job card ───────────────────────────────────────────────────────────────────
 
-function JobCard({ job, onRefresh, sessionId }: { job: BookingJob; onRefresh?: () => void; sessionId: string }) {
+function JobCard({ job, onRefresh, sessionId, onOpenLive }: { job: BookingJob; onRefresh?: () => void; sessionId: string; onOpenLive?: (jobId: string) => void }) {
   const [expanded, setExpanded] = useState(job.status !== "pending");
   const [deleting, setDeleting] = useState(false);
   const [resetting, setResetting] = useState(false);
-  const [showLiveModal, setShowLiveModal] = useState(false);
-  const [liveViewKey, setLiveViewKey] = useState(0);
   const prevStatusRef = useRef(job.status);
 
-  // Auto-open live modal when job transitions to "running" or "done".
-  // Increment liveViewKey each time to force BrowserLiveView to remount and reconnect.
+  // Auto-open live panel when job transitions to "running" or "done".
   useEffect(() => {
     const prev = prevStatusRef.current;
     if (
       (job.status === "running" && prev !== "running") ||
       (job.status === "done" && prev === "running")
     ) {
-      setShowLiveModal(true);
-      setLiveViewKey((k) => k + 1);
+      onOpenLive?.(job.id);
     }
     prevStatusRef.current = job.status;
-  }, [job.status]);
+  }, [job.status, onOpenLive]);
 
   const doneCount = job.steps.filter((s) => s.status === "done").length;
   const actionCount = job.steps.filter((s) => s.actionItem).length;
@@ -1244,7 +1176,7 @@ function JobCard({ job, onRefresh, sessionId }: { job: BookingJob; onRefresh?: (
           </div>
         </div>
         {(job.status === "running" || (isComplete && Date.now() - new Date(job.updated_at).getTime() < 90_000)) && (
-          <button onClick={(e) => { e.stopPropagation(); setShowLiveModal(true); setLiveViewKey((k) => k + 1); }} style={{
+          <button onClick={(e) => { e.stopPropagation(); onOpenLive?.(job.id); }} style={{
             flexShrink: 0, padding: "7px 12px", borderRadius: 10,
             border: "1px solid var(--gold, #D4A34B)", backgroundColor: "transparent",
             color: job.status === "running" ? "var(--gold, #D4A34B)" : "rgba(212,163,75,0.5)",
@@ -1316,7 +1248,7 @@ function JobCard({ job, onRefresh, sessionId }: { job: BookingJob; onRefresh?: (
                   Needs your decision
                 </p>
                 {job.steps.filter((s) => s.actionItem).map((step, i) => (
-                  <StepCard key={`a-${i}`} step={step} stepIndex={job.steps.indexOf(step)} jobId={job.id} onRefresh={onRefresh} />
+                  <StepCard key={`a-${i}`} step={step} stepIndex={job.steps.indexOf(step)} jobId={job.id} onRefresh={onRefresh} onOpenLive={() => onOpenLive?.(job.id)} />
                 ))}
                 <div style={{ height: 2 }} />
               </>
@@ -1328,7 +1260,7 @@ function JobCard({ job, onRefresh, sessionId }: { job: BookingJob; onRefresh?: (
               </p>
             )}
             {job.steps.filter((s) => !s.actionItem).map((step, i) => (
-              <StepCard key={`s-${i}`} step={step} stepIndex={job.steps.indexOf(step)} jobId={job.id} onRefresh={onRefresh} />
+              <StepCard key={`s-${i}`} step={step} stepIndex={job.steps.indexOf(step)} jobId={job.id} onRefresh={onRefresh} onOpenLive={() => onOpenLive?.(job.id)} />
             ))}
           </div>
 
@@ -1345,50 +1277,6 @@ function JobCard({ job, onRefresh, sessionId }: { job: BookingJob; onRefresh?: (
         </>
       )}
 
-      {/* Full-screen live browser modal — triggered by "Watch live" button while running */}
-      {showLiveModal && (
-        <div style={{
-          position: "fixed", inset: 0, zIndex: 9999,
-          backgroundColor: "#0a0a0a",
-          display: "flex", flexDirection: "column",
-        }}>
-          <div style={{
-            display: "flex", alignItems: "center", justifyContent: "space-between",
-            padding: "12px 16px", flexShrink: 0,
-            backgroundColor: "#111",
-            borderBottom: "0.5px solid rgba(255,255,255,0.1)",
-          }}>
-            <div style={{ minWidth: 0 }}>
-              <p style={{ fontFamily: "var(--font-dm-sans)", fontSize: 14, fontWeight: 700, color: "#fff", margin: 0 }}>
-                🖥️ Agent working — live view
-              </p>
-              <p style={{ fontFamily: "var(--font-dm-sans)", fontSize: 11, color: "rgba(255,255,255,0.45)", margin: 0, marginTop: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                {job.trip_label}
-              </p>
-            </div>
-            <button onClick={() => setShowLiveModal(false)} style={{
-              flexShrink: 0, marginLeft: 12,
-              background: "rgba(255,255,255,0.1)", border: "none", borderRadius: 8,
-              color: "#fff", padding: "8px 16px", cursor: "pointer",
-              fontFamily: "var(--font-dm-sans)", fontSize: 13, fontWeight: 600,
-            }}>
-              Close ✕
-            </button>
-          </div>
-          <div style={{ flex: 1, overflow: "hidden", position: "relative" }}>
-            <BrowserLiveView key={liveViewKey} jobId={job.id} fullscreen />
-          </div>
-          <div style={{
-            flexShrink: 0, padding: "10px 16px", textAlign: "center",
-            backgroundColor: "#111",
-            borderTop: "0.5px solid rgba(255,255,255,0.1)",
-          }}>
-            <p style={{ fontFamily: "var(--font-dm-sans)", fontSize: 12, color: "rgba(255,255,255,0.5)", margin: 0 }}>
-              Read-only during agent run · You can interact after the agent pauses for payment
-            </p>
-          </div>
-        </div>
-      )}
     </div>
   );
 }
@@ -2376,6 +2264,55 @@ export default function TripsPage() {
   const [, setClockTick] = useState(0);
   const [clearingAll, setClearingAll] = useState(false);
 
+  // ── Live panel state ──────────────────────────────────────────────────────────
+  const [liveJobId, setLiveJobId] = useState<string | null>(null);
+  const [splitPct, setSplitPct] = useState(50);
+  const [liveViewKey, setLiveViewKey] = useState(0);
+  // Refs for zero-latency drag — bypass React re-render during mousemove
+  const splitPctRef = useRef(50);
+  const mainContentRef = useRef<HTMLDivElement>(null);
+  const livePanelRef = useRef<HTMLDivElement>(null);
+  const dragHandleRef = useRef<HTMLDivElement>(null);
+  // Track current liveJobId in a ref so openLive can read it without closure staleness
+  const liveJobIdRef = useRef<string | null>(null);
+
+  const openLive = useCallback((jobId: string) => {
+    if (liveJobIdRef.current !== jobId) {
+      setLiveViewKey((k) => k + 1);
+    }
+    liveJobIdRef.current = jobId;
+    setLiveJobId(jobId);
+  }, []);
+
+  function handleDragStart(e: React.MouseEvent) {
+    e.preventDefault();
+    document.body.style.cursor = "col-resize";
+    document.body.style.userSelect = "none";
+    // Kill transition during drag so updates are instant
+    if (mainContentRef.current) mainContentRef.current.style.transition = "none";
+
+    function onMove(ev: MouseEvent) {
+      const pct = Math.max(25, Math.min(75, (ev.clientX / window.innerWidth) * 100));
+      splitPctRef.current = pct;
+      const rightVw = `${100 - pct}vw`;
+      // Direct DOM mutation — no React setState, no re-render
+      if (mainContentRef.current)  mainContentRef.current.style.paddingRight = rightVw;
+      if (livePanelRef.current)    livePanelRef.current.style.width = rightVw;
+      if (dragHandleRef.current)   dragHandleRef.current.style.left = `${(ev.clientX - 3)}px`;
+    }
+    function onUp() {
+      document.body.style.cursor = "";
+      document.body.style.userSelect = "";
+      // Restore transition, then sync React state once
+      if (mainContentRef.current) mainContentRef.current.style.transition = "";
+      setSplitPct(splitPctRef.current);
+      window.removeEventListener("mousemove", onMove);
+      window.removeEventListener("mouseup", onUp);
+    }
+    window.addEventListener("mousemove", onMove);
+    window.addEventListener("mouseup", onUp);
+  }
+
   const sessionId = typeof window !== "undefined" ? getSessionId() : "";
 
   const loadJobs = useCallback(async () => {
@@ -2419,6 +2356,9 @@ export default function TripsPage() {
 
   const actionTotal = jobs.reduce((n, j) => n + j.steps.filter((s) => s.actionItem).length, 0);
 
+  const liveJob = jobs.find((j) => j.id === liveJobId);
+  const rightPct = liveJobId ? (100 - splitPct) : 0;
+
   return (
     <div style={{ minHeight: "100vh", backgroundColor: "var(--bg, #fafaf9)", padding: "0 0 80px" }}>
       <style>{`
@@ -2430,69 +2370,153 @@ export default function TripsPage() {
 
       <GlobalNav active="tasks" />
 
-      {/* Page title */}
-      <div style={{ padding: "20px 20px 4px", maxWidth: 620, margin: "0 auto" }}>
-        <button
-          onClick={() => router.back()}
-          style={{
-            display: "flex", alignItems: "center", gap: 4,
-            background: "none", border: "none", padding: "0 0 10px",
-            fontFamily: "var(--font-dm-sans)", fontSize: 13,
-            color: "var(--text-secondary, #666)", cursor: "pointer",
-          }}
-        >
-          ← Back to results
-        </button>
-        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-          <p style={{ fontFamily: "var(--font-dm-sans)", fontWeight: 700, fontSize: 17 }}>Tasks</p>
-          {actionTotal > 0 && (
-            <span style={{
-              fontFamily: "var(--font-dm-sans)", fontSize: 11, fontWeight: 700,
-              color: "#fff", backgroundColor: "rgba(220,38,38,0.85)",
-              borderRadius: 20, padding: "2px 7px",
-            }}>
-              {actionTotal} action{actionTotal > 1 ? "s" : ""} needed
-            </span>
-          )}
-        </div>
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginTop: 2 }}>
-          <p style={{ fontFamily: "var(--font-dm-sans)", fontSize: 12, color: "var(--text-secondary, #666)" }}>
-            {loading ? "Loading…" : jobs.length === 0 ? "No tasks yet" : `${jobs.length} task${jobs.length === 1 ? "" : "s"}`}
-          </p>
-          {!loading && jobs.length > 0 && (
-            <button
-              onClick={handleClearAll}
-              disabled={clearingAll}
-              style={{
-                background: "none", border: "none", cursor: "pointer",
-                fontFamily: "var(--font-dm-sans)", fontSize: 12,
-                color: clearingAll ? "var(--text-muted, #aaa)" : "rgba(220,38,38,0.7)",
-                padding: "2px 0",
-              }}
-            >
-              {clearingAll ? "Clearing…" : "Clear all"}
-            </button>
-          )}
-        </div>
-      </div>
-      <div style={{ padding: "16px", display: "flex", flexDirection: "column", gap: 12, maxWidth: 620, margin: "0 auto" }}>
-        {!loading && jobs.length === 0 && (
-          <div style={{ textAlign: "center", padding: "60px 20px", borderRadius: 16, border: "0.5px dashed var(--border, #e5e7eb)" }}>
-            <p style={{ fontSize: 32, marginBottom: 12 }}>📋</p>
-            <p style={{ fontFamily: "var(--font-dm-sans)", fontWeight: 600, fontSize: 14, marginBottom: 6 }}>No tasks yet</p>
-            <p style={{ fontFamily: "var(--font-dm-sans)", fontSize: 12, color: "var(--text-secondary, #666)" }}>
-              When you ask the agent to do something in the background, your tasks appear here.
-            </p>
+      {/* Main content — shrinks left when live panel is open */}
+      <div
+        ref={mainContentRef}
+        style={{
+          paddingRight: liveJobId ? `${rightPct}vw` : 0,
+          transition: "padding-right 0.25s ease",
+        }}
+      >
+        {/* Page title */}
+        <div style={{ padding: "20px 20px 4px", maxWidth: 620, margin: "0 auto" }}>
+          <button
+            onClick={() => router.back()}
+            style={{
+              display: "flex", alignItems: "center", gap: 4,
+              background: "none", border: "none", padding: "0 0 10px",
+              fontFamily: "var(--font-dm-sans)", fontSize: 13,
+              color: "var(--text-secondary, #666)", cursor: "pointer",
+            }}
+          >
+            ← Back to results
+          </button>
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <p style={{ fontFamily: "var(--font-dm-sans)", fontWeight: 700, fontSize: 17 }}>Tasks</p>
+            {actionTotal > 0 && (
+              <span style={{
+                fontFamily: "var(--font-dm-sans)", fontSize: 11, fontWeight: 700,
+                color: "#fff", backgroundColor: "rgba(220,38,38,0.85)",
+                borderRadius: 20, padding: "2px 7px",
+              }}>
+                {actionTotal} action{actionTotal > 1 ? "s" : ""} needed
+              </span>
+            )}
           </div>
-        )}
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginTop: 2 }}>
+            <p style={{ fontFamily: "var(--font-dm-sans)", fontSize: 12, color: "var(--text-secondary, #666)" }}>
+              {loading ? "Loading…" : jobs.length === 0 ? "No tasks yet" : `${jobs.length} task${jobs.length === 1 ? "" : "s"}`}
+            </p>
+            {!loading && jobs.length > 0 && (
+              <button
+                onClick={handleClearAll}
+                disabled={clearingAll}
+                style={{
+                  background: "none", border: "none", cursor: "pointer",
+                  fontFamily: "var(--font-dm-sans)", fontSize: 12,
+                  color: clearingAll ? "var(--text-muted, #aaa)" : "rgba(220,38,38,0.7)",
+                  padding: "2px 0",
+                }}
+              >
+                {clearingAll ? "Clearing…" : "Clear all"}
+              </button>
+            )}
+          </div>
+        </div>
+        <div style={{ padding: "16px", display: "flex", flexDirection: "column", gap: 12, maxWidth: 620, margin: "0 auto" }}>
+          {!loading && jobs.length === 0 && (
+            <div style={{ textAlign: "center", padding: "60px 20px", borderRadius: 16, border: "0.5px dashed var(--border, #e5e7eb)" }}>
+              <p style={{ fontSize: 32, marginBottom: 12 }}>📋</p>
+              <p style={{ fontFamily: "var(--font-dm-sans)", fontWeight: 600, fontSize: 14, marginBottom: 6 }}>No tasks yet</p>
+              <p style={{ fontFamily: "var(--font-dm-sans)", fontSize: 12, color: "var(--text-secondary, #666)" }}>
+                When you ask the agent to do something in the background, your tasks appear here.
+              </p>
+            </div>
+          )}
 
-        {jobs.map((job) => <JobCard key={job.id} job={job} onRefresh={loadJobs} sessionId={sessionId} />)}
+          {jobs.map((job) => <JobCard key={job.id} job={job} onRefresh={loadJobs} sessionId={sessionId} onOpenLive={openLive} />)}
 
-        {/* Agent Insights — always show at the bottom */}
-        {!loading && sessionId && (
-          <InsightsPanel sessionId={sessionId} />
-        )}
+          {/* Agent Insights — always show at the bottom */}
+          {!loading && sessionId && (
+            <InsightsPanel sessionId={sessionId} />
+          )}
+        </div>
       </div>
+
+      {/* ── Drag handle + Live panel ──────────────────────────────────────────── */}
+      {liveJobId && (
+        <>
+          {/* Drag handle */}
+          <div
+            ref={dragHandleRef}
+            onMouseDown={handleDragStart}
+            style={{
+              position: "fixed",
+              left: `calc(${splitPct}vw - 3px)`,
+              top: 0, bottom: 0,
+              width: 6,
+              zIndex: 10001,
+              cursor: "col-resize",
+              display: "flex", alignItems: "center", justifyContent: "center",
+            }}
+          >
+            <div style={{
+              width: 4, height: 48, borderRadius: 4,
+              backgroundColor: "rgba(255,255,255,0.25)",
+            }} />
+          </div>
+
+          {/* Live panel */}
+          <div
+            ref={livePanelRef}
+            style={{
+              position: "fixed",
+              right: 0, top: 0, bottom: 0,
+              width: `${rightPct}vw`,
+            zIndex: 9999,
+            background: "#111",
+            display: "flex", flexDirection: "column",
+            boxShadow: "-6px 0 32px rgba(0,0,0,0.45)",
+            borderLeft: "0.5px solid rgba(255,255,255,0.08)",
+          }}>
+            {/* Header */}
+            <div style={{
+              display: "flex", alignItems: "center", justifyContent: "space-between",
+              padding: "12px 16px", flexShrink: 0,
+              borderBottom: "0.5px solid rgba(255,255,255,0.1)",
+            }}>
+              <div style={{ minWidth: 0 }}>
+                <p style={{ fontFamily: "var(--font-dm-sans)", fontSize: 14, fontWeight: 700, color: "#fff", margin: 0 }}>
+                  🖥️ Agent browser
+                </p>
+                <p style={{ fontFamily: "var(--font-dm-sans)", fontSize: 11, color: "rgba(255,255,255,0.45)", margin: 0, marginTop: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                  {liveJob?.trip_label ?? ""}
+                </p>
+              </div>
+              <button onClick={() => { liveJobIdRef.current = null; setLiveJobId(null); }} style={{
+                flexShrink: 0, marginLeft: 12,
+                background: "rgba(255,255,255,0.1)", border: "none", borderRadius: 8,
+                color: "#fff", padding: "8px 16px", cursor: "pointer",
+                fontFamily: "var(--font-dm-sans)", fontSize: 13, fontWeight: 600,
+              }}>
+                Close ✕
+              </button>
+            </div>
+
+            {/* Browser view */}
+            <div style={{ flex: 1, overflow: "hidden", position: "relative" }}>
+              <BrowserLiveView key={liveViewKey} jobId={liveJobId} fullscreen />
+            </div>
+
+            {/* Footer */}
+            <div style={{ flexShrink: 0, padding: "8px 16px", textAlign: "center", borderTop: "0.5px solid rgba(255,255,255,0.1)" }}>
+              <p style={{ fontFamily: "var(--font-dm-sans)", fontSize: 11, color: "rgba(255,255,255,0.35)", margin: 0 }}>
+                Live view — read only · Drag handle to resize
+              </p>
+            </div>
+          </div>
+        </>
+      )}
     </div>
   );
 }

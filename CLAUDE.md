@@ -7,3 +7,7 @@ Available skills: /office-hours, /plan-ceo-review, /plan-eng-review, /plan-desig
 
 If gstack skills aren't working, run: cd .claude/skills/gstack && ./setup
 
+## Language
+
+Always respond in Chinese. Never respond in Korean.
+

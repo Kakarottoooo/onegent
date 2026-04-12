@@ -73,7 +73,7 @@ const MODAL_AD_PHRASES = [
   "get the app", "download the app",
 ];
 const MODAL_CLOSE_LABELS = /^(ok|okay|close|dismiss|got it|no thanks|no,? thanks|skip|maybe later|脳|鉁晐x)$/i;
-const MODAL_CONFIRM_LABELS = /^(ok|okay|got it|continue|accept|confirm)$/i;
+const MODAL_CONFIRM_LABELS = /^(ok|okay|got it|continue(\s+\w+)?|accept|confirm)$/i;
 
 function isPaymentUrl(url: string): boolean {
   const lower = url.toLowerCase();
@@ -227,7 +227,19 @@ export async function dismissBlockingModals(
             }
             el2 = el2.parentElement;
           }
-          // Not in a standard dialog — return parent container text for content-based matching
+          // Not in a standard dialog — walk up to find an ancestor containing modal text
+          // (needed for Expedia nudge modals that don't use dialog/aria-modal/high-z-index)
+          let walker: HTMLElement | null = el.parentElement;
+          while (walker && walker !== document.body) {
+            const t = (walker.textContent ?? "").toLowerCase();
+            if (t.includes("almost yours") || t.includes("booking is almost") ||
+                t.includes("include taxes") || t.includes("fee-inclusive") ||
+                t.includes("not like the others")) {
+              return { inDialog: false, dialogText: walker.textContent ?? "" };
+            }
+            walker = walker.parentElement;
+          }
+          // Fallback: return parent container text
           const container = el.closest("section, aside, [class*='card'], [class*='panel'], div") as HTMLElement | null;
           return { inDialog: false, dialogText: container?.textContent ?? "" };
         }).catch(() => ({ inDialog: false, dialogText: "" }));
@@ -240,7 +252,11 @@ export async function dismissBlockingModals(
           dialogText.toLowerCase().includes("fee-inclusive") ||
           dialogText.toLowerCase().includes("we include fees")
         );
-        if (!inDialog && !isKnownInfoModal) continue;
+        // Expedia "This booking is almost yours!" nudge modal — always safe to dismiss
+        const isExpediaAlmostYoursModal =
+          dialogText.toLowerCase().includes("booking is almost yours") ||
+          dialogText.toLowerCase().includes("almost yours");
+        if (!inDialog && !isKnownInfoModal && !isExpediaAlmostYoursModal) continue;
 
         const kind: ModalKind = classifyModal(dialogText) ?? "blocker";
         await btn.click({ force: true }).catch(() => {});
@@ -469,8 +485,17 @@ export async function assessBookingStage(params: {
       );
 
       if (conf >= 0.75 && aiMapped !== "unknown") {
-        stage = aiMapped;
-        reason = `AI stage detection (conf=${conf.toFixed(2)}): ${aiPerception.pageDescription}`;
+        // Safety guard: never let AI upgrade a hotel-detail / room-selection page to checkout_form.
+        // Hotel detail pages have text inputs (Q&A, search) that AI can misclassify as guest forms.
+        // Guest form fill should only run on actual checkout URLs.
+        const isIllegalUpgrade =
+          stage === "room_selection" && aiMapped === "checkout_form" && !hitPaymentUrl;
+        if (isIllegalUpgrade) {
+          console.log(`[stage-detect] blocked illegal upgrade: room_selection → checkout_form (not a checkout URL)`);
+        } else {
+          stage = aiMapped;
+          reason = `AI stage detection (conf=${conf.toFixed(2)}): ${aiPerception.pageDescription}`;
+        }
       }
     } catch (err) {
       // AI detection is best-effort; never let it crash the existing flow

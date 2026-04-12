@@ -121,11 +121,15 @@ export function looksLikeRoomSelectionGate(pageText: string): boolean {
     "your options",
     "availability",
     "per night",
-    "绌烘埧鎯呭喌",
-    "瀹㈡埧绫诲瀷",
-    "閫夋嫨瀹㈡埧",
+    "空房情况",
+    "客房类型",
+    "选择客房",
     "reserve now",
-    "姣忔櫄",
+    "每晚",
+    "view prices",
+    "check prices",
+    "view rates",
+    "check availability",
   ]);
 
   const hasDeeperCheckoutSignals = containsAny(pageText, [
@@ -134,8 +138,8 @@ export function looksLikeRoomSelectionGate(pageText: string): boolean {
     "card number",
     "credit card",
     "cvv",
-    "杈撳叆涓汉淇℃伅",
-    "瀹屾垚棰勮",
+    "输入个人信息",
+    "完成预订",
     "credit card",
     "cardholder",
   ]);

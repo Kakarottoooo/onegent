@@ -17,11 +17,13 @@ type EvalFn = {
   <T, A>(fn: (arg: A) => T, arg: A): Promise<T>;
 };
 
+type RequestedDates = { checkin?: string; checkout?: string };
+
 /** Minimal interface: only .act() + activePage() needed. */
 type Actable = {
   act: (instruction: string) => Promise<unknown>;
   context: {
-    activePage: () => { url: () => string; screenshot: (opts?: object) => Promise<Buffer>; evaluate: EvalFn } | undefined;
+    activePage: () => { url: () => string; screenshot: (opts?: object) => Promise<Buffer>; evaluate: EvalFn; goto: (url: string, opts?: object) => Promise<unknown> } | undefined;
     pages: () => unknown[];
   } | null;
 };
@@ -42,21 +44,119 @@ export async function clickTargetListingAI(
   targetHotelName: string,
   trace: (msg: string) => void,
   maxScrolls = 5,
+  startDomain?: string,         // e.g. "expedia.com" — used to detect wrong-domain clicks
+  requestedDates?: RequestedDates, // checkin/checkout to append to hotel URL (avoids no-availability false positive)
 ): Promise<ClickResult> {
   trace(`[find-listing] looking for "${targetHotelName}" in search results`);
 
-  // Fast path: try direct act() first.
-  // IMPORTANT: click the hotel NAME/TITLE link, not the "See availability" button.
-  // "See availability" only expands an inline accordion on the search page — it does NOT
-  // open the hotel detail page. The hotel name link opens the hotel page in a new tab.
+  const page = stagehand.context?.activePage();
+
+  // Fast path 0: DOM link extraction — find the hotel's href directly in the search results
+  // and navigate via goto(). This is the most reliable approach for OTA sites (Expedia/Hotels.com)
+  // because stagehand.act() can accidentally click brand logos or Google Maps links that
+  // redirect to a third-party brand site (e.g. IHG.com) instead of the OTA hotel detail page.
+  if (page && startDomain) {
+    const directHref = await page.evaluate(
+      ({ hotelName, domain }: { hotelName: string; domain: string }) => {
+        const nameWords = hotelName.toLowerCase().split(/\s+/).filter((w: string) => w.length > 3);
+        // Find all <a> tags that link within the same OTA domain
+        const candidates = Array.from(document.querySelectorAll<HTMLAnchorElement>("a[href]"))
+          .filter(a => {
+            const href = (a.href ?? "").toLowerCase();
+            return href.includes(domain) || href.startsWith("/");
+          });
+        // Score each candidate by how many hotel name words appear in its text or href
+        const scored = candidates.map(a => {
+          const text = (a.textContent ?? "").toLowerCase().replace(/\s+/g, " ").trim();
+          const href = (a.href ?? "").toLowerCase();
+          const score = nameWords.filter((w: string) => text.includes(w) || href.includes(w)).length;
+          return { href: a.href, text, score };
+        });
+        const best = scored.sort((x, y) => y.score - x.score)[0];
+        // Require at least half the name words to match
+        if (best && best.score >= Math.ceil(nameWords.length * 0.5)) {
+          return best.href;
+        }
+        return null;
+      },
+      { hotelName: targetHotelName, domain: startDomain }
+    ).catch(() => null);
+
+    if (directHref) {
+      trace(`[find-listing] DOM link found for "${targetHotelName}": ${directHref.slice(0, 80)}`);
+      try {
+        // Append check-in/out dates to the hotel URL so Expedia loads real availability.
+        // Without dates the page shows a placeholder that triggers a false-positive no-availability.
+        let hotelUrlWithDates = directHref;
+        const chkin  = requestedDates?.checkin;
+        const chkout = requestedDates?.checkout;
+        if (chkin && chkout && !directHref.includes("chkin=")) {
+          try {
+            const hotelUrl = new URL(directHref);
+            hotelUrl.searchParams.set("chkin", chkin);
+            hotelUrl.searchParams.set("chkout", chkout);
+            hotelUrlWithDates = hotelUrl.toString();
+            trace(`[find-listing] appended dates: chkin=${chkin} chkout=${chkout}`);
+          } catch {
+            // URL construction failed — use bare href
+          }
+        }
+        await (page as unknown as { goto: (url: string, opts?: object) => Promise<unknown> })
+          .goto(hotelUrlWithDates, { waitUntil: "domcontentloaded", timeout: 25000 });
+        await sleep(1000);
+        const landedUrl = page.url();
+        const onStartDomain = landedUrl.toLowerCase().includes(startDomain.toLowerCase());
+        if (onStartDomain) {
+          trace(`[find-listing] DOM goto succeeded — on ${landedUrl.slice(0, 80)}`);
+          return "clicked";
+        }
+        trace(`[find-listing] DOM goto went to wrong domain (${landedUrl.slice(0, 60)}) — trying act() fallback`);
+        await page.evaluate(() => window.history.back()).catch(() => {});
+        await sleep(800);
+      } catch (gotoErr) {
+        trace(`[find-listing] DOM goto failed: ${(gotoErr as Error).message?.slice(0, 60)}`);
+      }
+    }
+  }
+
+  // Fast path 1: stagehand.act() — AI-driven click.
+  // Used when DOM extraction fails or no startDomain given.
+  // IMPORTANT: specify to stay within the OTA domain and not click logos/badges.
+  const domainHint = startDomain
+    ? ` This should open the hotel page on ${startDomain} — do NOT click logos, badges, images, or external links that go to third-party brand websites.`
+    : "";
   try {
     await stagehand.act(
       `In the hotel search results list (NOT the search bar at the top), ` +
-      `find the listing for "${targetHotelName}" and click the hotel NAME or TITLE text ` +
-      `(the large clickable hotel name, NOT the "See availability" button) ` +
-      `to navigate to the hotel detail page.`
+      `find the listing whose name EXACTLY matches "${targetHotelName}". ` +
+      `Do NOT click hotels with similar but different names. ` +
+      `Click the hotel NAME or TITLE text (the large clickable hotel name, NOT the "See availability" button).` +
+      domainHint
     );
     trace(`[find-listing] direct act() succeeded for "${targetHotelName}"`);
+    await sleep(1500);
+    if (page) {
+      const currentUrl = page.url();
+      if (startDomain && !currentUrl.toLowerCase().includes(startDomain.toLowerCase())) {
+        trace(`[find-listing] act() went to wrong domain (${currentUrl.slice(0, 80)}) — going back`);
+        await page.evaluate(() => window.history.back()).catch(() => {});
+        await sleep(1200);
+        throw new Error(`wrong domain after act() click`);
+      }
+      const pageTitle = await page.evaluate(() => document.title).catch(() => "");
+      const h1Text = await page.evaluate(() => document.querySelector("h1")?.textContent?.trim() ?? "").catch(() => "");
+      const nameWords = targetHotelName.toLowerCase().split(/\s+/).filter(w => w.length > 3);
+      const combinedText = (pageTitle + " " + h1Text).toLowerCase();
+      const matchScore = nameWords.filter(w => combinedText.includes(w)).length;
+      const matchRatio = nameWords.length > 0 ? matchScore / nameWords.length : 1;
+      if (matchRatio < 0.5) {
+        trace(`[find-listing] act() wrong hotel page (ratio ${matchRatio.toFixed(2)}) — going back`);
+        await page.evaluate(() => window.history.back()).catch(() => {});
+        await sleep(1000);
+        throw new Error(`wrong hotel page`);
+      }
+      trace(`[find-listing] act() verified correct hotel page (ratio ${matchRatio.toFixed(2)})`);
+    }
     return "clicked";
   } catch (err) {
     trace(`[find-listing] direct act() failed: ${(err as Error).message?.slice(0, 80)}`);
@@ -68,7 +168,7 @@ export async function clickTargetListingAI(
     if (!page) break;
 
     const perception = await perceiveAndDecide(page as Parameters<typeof perceiveAndDecide>[0], {
-      task: `Find and click the hotel named "${targetHotelName}" in the search results`,
+      task: `Find and click the hotel whose name EXACTLY matches "${targetHotelName}" in the search results. Do not click hotels with similar but different names.`,
       profileHint: { first_name: "", last_name: "", email: "", phone: "" },
       recentSteps: scroll > 0 ? [`scroll_down (x${scroll})`] : [],
     }).catch(() => null);
@@ -137,6 +237,21 @@ export async function selectRoomAI(
   } catch {
     await page.evaluate(() => window.scrollBy(0, window.innerHeight * 0.8)).catch(() => {});
     await sleep(600);
+  }
+
+  // Early no_availability check: if page text is dominated by "sold out" across all rooms,
+  // bail before trying to click Reserve (avoids stagehand.act() picking wrong elements).
+  const soldOutCheck = await page.evaluate(() => {
+    const text = (document.body?.innerText ?? "").toLowerCase();
+    const soldOutCount = (text.match(/\bsold out\b/g) ?? []).length;
+    const reserveCount = (text.match(/\breserve\b|\bi'?ll reserve\b|\bbook now\b/gi) ?? []).length;
+    // If there are many "sold out" signals and no (or very few) reserve buttons visible, no availability
+    return soldOutCount >= 2 && reserveCount === 0;
+  }).catch(() => false);
+
+  if (soldOutCheck) {
+    trace("[find-listing] all rooms appear sold out (no Reserve buttons found) — no_availability");
+    return "no_availability";
   }
 
   // Step 1: When a preference is given, try stagehand.act() first.
@@ -222,17 +337,19 @@ export async function selectRoomAI(
     trace("[find-listing] quantity select not found or already set — proceeding to reserve click");
   }
 
-  // Step 3: Click "I'll reserve" / "Reserve" via stagehand.act().
+  // Step 3: Click "I'll reserve" / "Reserve" / "View prices" via stagehand.act().
   // On Booking.com: button says "I'll reserve".
   // On Expedia: button says "Reserve" — clicking opens a room-detail modal, then
   //   a second "Reserve" click in the modal proceeds to checkout.
+  // On IHG brand site hotel detail page: button says "View Prices" (takes you to room list).
   try {
     await stagehand.act(
-      `Click the "I'll reserve" or "Reserve" button to proceed. ` +
-      `Do not interact with any dropdown — only click the reserve button. ` +
+      `Click the primary booking action button to proceed. ` +
+      `This may say "I'll reserve", "Reserve", "View Prices", "Check Prices", "Book Now", or "Select Room". ` +
+      `Do not interact with any dropdown — only click the main booking button. ` +
       `If a modal or dialog appears after clicking, click the "Reserve" button inside the modal too.`
     );
-    trace("[find-listing] clicked reserve via act()");
+    trace("[find-listing] clicked reserve/book via act()");
   } catch (actErr) {
     trace(`[find-listing] act() reserve failed: ${(actErr as Error).message?.slice(0, 80)}`);
 
@@ -242,7 +359,7 @@ export async function selectRoomAI(
         const r = el.getBoundingClientRect();
         return r.width > 0 && r.height > 0 && (el as HTMLElement).offsetParent !== null;
       }
-      const pattern = /i.?ll reserve|reserve|book now/i;
+      const pattern = /i.?ll reserve|reserve|book now|view prices|check prices|select room/i;
       const btn = Array.from(document.querySelectorAll<HTMLElement>('button, a, [role="button"]'))
         .find(el => isVisible(el) && pattern.test((el.textContent ?? "").trim()));
       if (btn) {

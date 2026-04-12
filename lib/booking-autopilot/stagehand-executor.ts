@@ -342,7 +342,7 @@ export async function runBrowserTask(
   const useCloud =
     !!(process.env.BROWSERBASE_API_KEY && process.env.BROWSERBASE_PROJECT_ID);
 
-  // Vercel serverless has no Chromium 鈥?local mode will crash with a confusing
+  // Vercel serverless has no Chromium —?local mode will crash with a confusing
   // error. Fail fast with an actionable message instead.
   // To re-enable cloud browser: set BROWSERBASE_API_KEY + BROWSERBASE_PROJECT_ID
   // in Vercel environment variables (Settings 鈫?Environment Variables).
@@ -358,7 +358,7 @@ export async function runBrowserTask(
     };
   }
 
-  // Resolve model name 鈥?Stagehand v3 uses "provider/model" format
+  // Resolve model name —?Stagehand v3 uses "provider/model" format
   const modelName = input.agentModel?.model ?? "openai/gpt-4o-mini";
 
   // Resolve API key from user-supplied config or env fallback
@@ -389,16 +389,16 @@ export async function runBrowserTask(
       apiKey: process.env.BROWSERBASE_API_KEY,
       projectId: process.env.BROWSERBASE_PROJECT_ID,
       // Residential proxies bypass OTA bot-detection (booking.com, Expedia).
-      // Requires Browserbase plan that includes proxies 鈥?disable if on free plan.
+      // Requires Browserbase plan that includes proxies —?disable if on free plan.
       ...(process.env.BROWSERBASE_USE_PROXIES === "true" && {
         browserbaseSessionCreateParams: { proxies: true },
       }),
     }),
-    model: modelName,  // just the string 鈥?Stagehand reads key from env vars above
+    model: modelName,  // just the string —?Stagehand reads key from env vars above
     verbose: 0,
     disablePino: true,
     // Dev: set PLAYWRIGHT_HEADLESS=false to watch the browser window.
-    // slowMo is not in Stagehand v3 localBrowserLaunchOptions 鈥?use PLAYWRIGHT_SLOW_MO
+    // slowMo is not in Stagehand v3 localBrowserLaunchOptions —?use PLAYWRIGHT_SLOW_MO
     // via the Playwright env var PWDEBUG or by patching context after init() instead.
     ...(!useCloud && {
       localBrowserLaunchOptions: {
@@ -407,7 +407,7 @@ export async function runBrowserTask(
     }),
   });
 
-  trace(`Executor starting 鈥?model: ${modelName}, browser: ${useCloud ? "Browserbase" : "local"}, proxies: ${process.env.BROWSERBASE_USE_PROXIES === "true"}`);
+  trace(`Executor starting —?model: ${modelName}, browser: ${useCloud ? "Browserbase" : "local"}, proxies: ${process.env.BROWSERBASE_USE_PROXIES === "true"}`);
 
   // In local mode, keep the browser open when we reach paused_payment so the
   // user can see the pre-filled payment form and enter CVV themselves.
@@ -501,7 +501,7 @@ export async function runBrowserTask(
     // Inject on the BrowserContext (not the page) so it persists across all tabs/navigations.
     if (process.env.NODE_ENV !== "production" && !useCloud) {
       // stagehand.context is a V3Context wrapper; the underlying Playwright BrowserContext
-      // may be exposed as .browserContext or .context 鈥?try both.
+      // may be exposed as .browserContext or .context —?try both.
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const browserCtx = (stagehand.context as any).browserContext ?? (stagehand.context as any).context ?? null;
       const addInitTarget = browserCtx ?? getRawPage(page);
@@ -560,7 +560,7 @@ export async function runBrowserTask(
         providerBotPatterns.some((p) => earlyText.includes(p));
       if (unreachable || botBlocked) {
         const reason = botBlocked ? "Bot detection / error page" : "Network unreachable";
-        trace(`${reason} detected on landing page 鈥?stopping early.`);
+        trace(`${reason} detected on landing page —?stopping early.`);
         const screenshotBase64 = `data:image/png;base64,${(await page.screenshot({ type: "png" })).toString("base64")}`;
         const sessionUrl = useCloud ? stagehand.browserbaseSessionURL : undefined;
         await stagehand.close();
@@ -578,7 +578,7 @@ export async function runBrowserTask(
       }
     }
 
-    // 鈹€鈹€ Early check: booking.com search failed 鈥?redirect to fallback 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
+    // 鈹€鈹€ Early check: booking.com search failed —?redirect to fallback 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
     {
       const landedUrl = page.url();
       const bookingComBotRedirect =
@@ -593,7 +593,7 @@ export async function runBrowserTask(
 
       if (bookingComFailed) {
         if (bookingComBotRedirect) {
-          // Bot redirect 鈥?let the user open the original search URL in their own browser
+          // Bot redirect —?let the user open the original search URL in their own browser
           // (works fine for real browsers, no CAPTCHA)
           trace(`booking.com bot-redirect detected (${landedUrl}). Returning handoff to original search URL.`);
           const screenshotBase64 = `data:image/png;base64,${(await page.screenshot({ type: "png" })).toString("base64")}`;
@@ -616,7 +616,7 @@ export async function runBrowserTask(
           input.task.match(/fallback URL[^:]*:\s*(https?:\/\/\S+)/i)?.[1]?.replace(/\s.*$/, "");
 
         if (fallback) {
-          // booking.com search failed (errorc_searchstring_not_found) 鈥?retry with fallback URL.
+          // booking.com search failed (errorc_searchstring_not_found) —?retry with fallback URL.
           // fallbackUrl is also a booking.com search URL, so no bot-check needed here.
           trace(`booking.com search failed (${landedUrl}). Navigating to fallback: ${fallback}`);
           await page.goto(fallback, { waitUntil: "domcontentloaded", timeoutMs: 30_000 });
@@ -634,18 +634,18 @@ export async function runBrowserTask(
     // Build the agent instruction
     const instruction = buildInstruction(input);
 
-    // Agent uses the same model string 鈥?key is already in process.env
+    // Agent uses the same model string —?key is already in process.env
     const agent = stagehand.agent({
-      // agentMode: "hybrid" 鈥?not yet available in this Stagehand v3 build; will
+      // agentMode: "hybrid" —?not yet available in this Stagehand v3 build; will
       // default to hybrid automatically in an upcoming release per the SDK warning.
       model: modelName,
-      systemPrompt: `You are a booking assistant completing a hotel reservation on behalf of a user. Be decisive 鈥?never ask questions, always try the most reasonable action.
+      systemPrompt: `You are a booking assistant completing a hotel reservation on behalf of a user. Be decisive —?never ask questions, always try the most reasonable action.
 
 GOAL: Complete all steps up to (but NOT including) CVV entry or final payment confirmation.
 Required steps in order: dates 鈫?room selection 鈫?skip upsell pages 鈫?guest info form 鈫?card number + expiry 鈫?STOP.
 
 STOP IMMEDIATELY before: CVV field, "Pay Now", "Confirm Payment", "Complete Purchase", "Complete Booking", "Confirm Booking", "Submit Payment".
-DO NOT stop at: "Reserve", "Continue", "Proceed to payment", "Book Now" (intermediate) 鈥?click these to advance.
+DO NOT stop at: "Reserve", "Continue", "Proceed to payment", "Book Now" (intermediate) —?click these to advance.
 
 KEY RULES:
 - Cookie/consent banner 鈫?click "Decline all" / "Reject all" first, then proceed.
@@ -653,8 +653,8 @@ KEY RULES:
 - "Add Extras" / "Upgrade" upsell page 鈫?click "No thanks, skip it" immediately.
 - Room selection page 鈫?select cheapest room and click Continue/Reserve. Do NOT fill guest info here.
 - "Select a Rate" page (shows multiple rate options with prices) 鈫?always pick the lowest-priced rate UNLESS the task explicitly mentions breakfast, free cancellation, or a specific rate preference. Click "Select" on that rate to continue.
-- Booking.com room list with QUANTITY DROPDOWNS (each room shows a "0" dropdown): find the cheapest available room, change its dropdown from "0" to "1". After setting it to 1, a blue "鐜板湪灏遍璁? (Book Now) button will appear in the RIGHT-SIDE SUMMARY PANEL 鈥?click that button immediately. Do NOT interact with the search bar at the top of the page. Do NOT navigate away.
-- Calendar month wrong 鈫?click 鈥?鈥?arrow to navigate; verify header before clicking a date.
+- Booking.com room list with QUANTITY DROPDOWNS (each room shows a "0" dropdown): find the cheapest available room, change its dropdown from "0" to "1". After setting it to 1, a blue "鐜板湪灏遍璁? (Book Now) button will appear in the RIGHT-SIDE SUMMARY PANEL —?click that button immediately. Do NOT interact with the search bar at the top of the page. Do NOT navigate away.
+- Calendar month wrong 鈫?click —?—?arrow to navigate; verify header before clicking a date.
 - IHG/single-date calendar (shows per-night price on each cell, has Stay duration +/鈭?control) 鈫?click check-in date ONLY, then use + button to set nights, then CONTINUE.
 - If hotel detail page shows wrong dates 鈫?update the date picker first, then View Prices.
 - "Book Now" at a consent/review summary (no name/email/card fields visible yet) 鈫?check terms checkbox, then click it to open the actual form.
@@ -662,8 +662,8 @@ KEY RULES:
 - Fill guest fields one at a time; only fill on the actual checkout form page.
 - Browser/CORS/reCAPTCHA console errors 鈫?ignore, keep going.
 - If clicking a button opens a NEW TAB or new browser window 鈫?immediately switch focus to that new tab and continue the booking flow there. Do not stay on the original tab.
-- On a Booking.com hotel detail page: your FIRST action must be to SCROLL DOWN to find the room list ("绌烘埧鎯呭喌" / "Available rooms"). Do NOT interact with anything at the top of the page. Do NOT click or type into the search bar (the bar showing destination / dates / guests at the very top) 鈥?that is for new hotel searches only. Do NOT type the guest's name, email, or any personal info anywhere on this page 鈥?that comes on the NEXT page after you click "鐜板湪灏遍璁?.
-- The room list on a Booking.com hotel page is BELOW the fold 鈥?you must scroll down to see it. Only after you can see the room rows should you interact with room selection.
+- On a Booking.com hotel detail page: your FIRST action must be to SCROLL DOWN to find the room list ("绌烘埧鎯呭喌" / "Available rooms"). Do NOT interact with anything at the top of the page. Do NOT click or type into the search bar (the bar showing destination / dates / guests at the very top) —?that is for new hotel searches only. Do NOT type the guest's name, email, or any personal info anywhere on this page —?that comes on the NEXT page after you click "鐜板湪灏遍璁?.
+- The room list on a Booking.com hotel page is BELOW the fold —?you must scroll down to see it. Only after you can see the room rows should you interact with room selection.
 - The Booking.com room selection page has TWO distinct areas: (1) the room list with quantity dropdowns in the CENTER, and (2) the summary panel on the RIGHT with the blue "鐜板湪灏遍璁? button. The correct sequence is: change dropdown to "1" 鈫?immediately click the blue "鐜板湪灏遍璁? in the right panel 鈫?done. Nothing else happens on this page.
 - Booking.com checkout forms may appear in CHINESE. Treat these Chinese labels as their English equivalents: 濮?Last name, 鍚?First name, 鐢靛瓙閭鍦板潃=Email, 鎵嬫満鍙风爜=Phone, 鍥藉/鍦板尯=Country, 鍗″彿=Card number, 鍒版湡鏃?Expiry date, 鎸佸崱浜哄鍚?Cardholder name, 瀹屾垚棰勮=Complete booking (STOP before this), 绔嬪嵆浠樻=Pay now (STOP before this).
 - After switching to a new tab, wait for it to fully load before taking any action.
@@ -684,12 +684,24 @@ The user will enter CVV and confirm payment themselves.`,
       getProvider(landedUrlAfterSetup)?.id === 'booking-com' ||
       openPageUrls.find((u) => u && getProvider(u)?.id === 'booking-com')
     );
-    const initialMaxSteps = bookingComPageOpen ? 0 : 40;
+    // Expedia/Hotels.com: same as Booking.com — skip the initial AI agent run entirely.
+    // The 40-step agent run on Expedia goes off-rails: it clicks wrong hotels (e.g. The Fifth
+    // Avenue Hotel instead of the target), tries to edit the search bar, and follows IHG/Marriott
+    // logos to brand sites. The programmatic recovery flow (clickTargetListingAI → selectRoomAI
+    // → fillExpediaGuestForm → fillExpediaGroupPaymentForm) handles Expedia correctly stage-by-stage.
+    const expediaPageOpen = !!(
+      getProvider(input.startUrl)?.id === 'expedia' ||
+      getProvider(landedUrlAfterSetup)?.id === 'expedia' ||
+      openPageUrls.find((u) => u && getProvider(u)?.id === 'expedia')
+    );
+    const skipInitialAgent = bookingComPageOpen || expediaPageOpen;
+    const initialMaxSteps = skipInitialAgent ? 0 : 40;
 
-    trace(`Agent starting main run (maxSteps=${initialMaxSteps}, model=${modelName})${bookingComPageOpen ? " [Booking.com detected: agent.execute disabled, using programmatic flow only]" : ""}`);
+    const skipProviderLabel = bookingComPageOpen ? 'Booking.com' : expediaPageOpen ? 'Expedia/Hotels.com' : '';
+    trace(`Agent starting main run (maxSteps=${initialMaxSteps}, model=${modelName})${skipInitialAgent ? ` [${skipProviderLabel} detected: agent.execute disabled, using programmatic flow only]` : ""}`);
     const t0 = Date.now();
     const result = initialMaxSteps === 0
-      ? { message: "Skipped initial agent run 鈥?Booking.com programmatic flow active." }
+      ? { message: `Skipped initial agent run — ${skipProviderLabel} programmatic flow active.` }
       : await agent.execute({ instruction, maxSteps: 40 }) as AgentExecutionResult;
 
     // 鈹€鈹€ Switch to the most relevant open tab 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
@@ -721,14 +733,14 @@ The user will enter CVV and confirm payment themselves.`,
         // Live-view getter already returns stagehand.context.activePage() dynamically — no update needed.
       }
     } catch {
-      // ignore 鈥?keep using the original page
+      // ignore —?keep using the original page
     }
     const raw = getRawPage(activePage);
     const mainMsg = (result.message ?? "").slice(0, 200);
-    trace(`Agent finished main run in ${((Date.now() - t0) / 1000).toFixed(1)}s 鈥?message: "${mainMsg.slice(0, 120)}"`);
+    trace(`Agent finished main run in ${((Date.now() - t0) / 1000).toFixed(1)}s —?message: "${mainMsg.slice(0, 120)}"`);
 
     // Detect fatal API errors (out of credits, invalid key, quota exceeded).
-    // Continuing the recovery loop is pointless 鈥?every agent call will fail too.
+    // Continuing the recovery loop is pointless —?every agent call will fail too.
     const fatalApiError =
       /credit balance is too low|insufficient_quota|invalid.{0,20}api.{0,20}key|rate limit exceeded|payment required|quota exceeded|credits? exhausted|billing error|billing issue|browser minutes limit/i.test(mainMsg);
     if (fatalApiError) {
@@ -742,7 +754,7 @@ The user will enter CVV and confirm payment themselves.`,
       };
     }
 
-    // Check ALL open pages 鈥?booking sites often open a new tab for the
+    // Check ALL open pages —?booking sites often open a new tab for the
     // checkout flow, so activePage() may still point to the original hotel
     // homepage while the real booking progress is in another tab.
     let agentMessage = (result.message ?? "").toLowerCase();
@@ -752,7 +764,14 @@ The user will enter CVV and confirm payment themselves.`,
     const p = buildEffectiveProfile(input.profile, input.task);
     const hasProfile = !!(p.full_name || p.first_name || p.last_name || p.email || p.phone);
     trace(`Profile check: hasProfile=${hasProfile}, fields=${[p.full_name?"full_name":null, p.first_name?"first_name":null, p.email?"email":null, p.phone?"phone":null].filter(Boolean).join(",") || "none"}`);
-    const requestedDates = extractRequestedStayDates(input.task);
+    const requestedDatesFromTask = extractRequestedStayDates(input.task);
+    // Fallback: extract dates from startUrl query params (Expedia uses startDate/endDate,
+    // Hotels.com uses similar params). Reliable because the frontend always builds the URL.
+    const startUrlParams = (() => { try { return new URL(input.startUrl).searchParams; } catch { return new URLSearchParams(); } })();
+    const requestedDates = {
+      checkin:  requestedDatesFromTask.checkin  || startUrlParams.get("startDate") || startUrlParams.get("chkin")  || undefined,
+      checkout: requestedDatesFromTask.checkout || startUrlParams.get("endDate")   || startUrlParams.get("chkout") || undefined,
+    };
     const targetHotelFromTask = extractTargetHotelName(input.task);
     const targetHotelFromStartUrl = extractTargetHotelNameFromUrl(input.startUrl);
     const targetHotelFromCurrentUrl = extractTargetHotelNameFromUrl(currentUrl);
@@ -906,7 +925,185 @@ The user will enter CVV and confirm payment themselves.`,
               trace(`[ai-listing] no blocking modal detected before listing click`);
             }
 
-            const result = await clickTargetListingAI(stagehand, targetHotelName, trace);
+            // Expedia search refinement strategy:
+            // Expedia always redirects a hotel-name destination URL to a city-level search.
+            // Re-navigating is futile. Instead we use a two-stage approach:
+            //
+            // Stage A: Type hotel name into the TOP search bar, select from autocomplete,
+            //          then click Search — this navigates directly to the hotel detail page
+            //          (or a filtered hotel-specific results page).
+            //
+            // Stage B (fallback): If the top search bar approach fails, use the left-sidebar
+            //          "Search by property name" filter and type character-by-character to
+            //          trigger React's event handlers (raw.type beats raw.fill here).
+            if (startProvider?.id === "expedia") {
+              try {
+                const expediaCurrentUrl = new URL(raw.url());
+                const dest = expediaCurrentUrl.searchParams.get("destination") ?? "";
+                const isCityLevel = dest.includes(",") || expediaCurrentUrl.searchParams.has("regionId");
+
+                if (isCityLevel && targetHotelName) {
+                  trace(`[ai-listing] Expedia city-level search detected — searching hotel by name in top search bar`);
+
+                  // ── Stage A: use the destination search box at the top ──────────────────
+                  // Selectors for the main destination/location search input on both the
+                  // Expedia homepage and the Hotel-Search results page.
+                  const destSelectors = [
+                    '[data-testid="destination-field"]',
+                    'input[data-testid="destination-field"]',
+                    'button[data-testid="destination-field"]',
+                    'input[id*="destination" i][type="text"]',
+                    'input[placeholder*="Going to" i]',
+                    'input[placeholder*="Where to" i]',
+                    'input[aria-label*="Going to" i]',
+                    'input[aria-label*="Staying" i]',
+                    'input[aria-label*="destination" i]',
+                  ];
+
+                  let searchBarUsed = false;
+                  for (const sel of destSelectors) {
+                    const visible = await raw.evaluate((s: string) => {
+                      const el = document.querySelector(s);
+                      if (!el) return false;
+                      const r = (el as HTMLElement).getBoundingClientRect();
+                      return r.width > 0 && r.height > 0;
+                    }, sel).catch(() => false);
+                    if (!visible) continue;
+
+                    try {
+                      // Click to focus, select-all, then type hotel name character-by-character
+                      // raw.type() sends real key events that React's onChange can detect.
+                      await raw.click(sel, { clickCount: 3 });
+                      await new Promise(r => setTimeout(r, 300));
+                      await raw.keyboard.press("Control+A");
+                      await raw.keyboard.press("Backspace");
+                      await new Promise(r => setTimeout(r, 200));
+                      // Use Playwright's type (not fill) to fire key events React can intercept
+                      await raw.type(sel, targetHotelName, { delay: 60 });
+                      trace(`[ai-listing] typed hotel name in top search bar: "${targetHotelName.slice(0, 60)}"`);
+                      searchBarUsed = true;
+                      break;
+                    } catch (typeErr) {
+                      trace(`[ai-listing] search bar type failed (${sel}): ${(typeErr as Error).message?.slice(0, 60)}`);
+                    }
+                  }
+
+                  if (searchBarUsed) {
+                    // Wait for autocomplete suggestions to appear
+                    await new Promise(r => setTimeout(r, 2000));
+
+                    // Select the best matching suggestion from the dropdown
+                    const hotelWords = targetHotelName.toLowerCase().split(/\s+/)
+                      .filter((w: string) => w.length > 3);
+                    const picked = await raw.evaluate((words: string[]) => {
+                      const suggSelectors = [
+                        '[role="option"]',
+                        '[data-testid*="suggest"]',
+                        '[class*="typeahead" i] li',
+                        '[class*="suggestion" i]',
+                        '[class*="autocomplete" i] li',
+                        'ul[role="listbox"] li',
+                      ];
+                      for (const ss of suggSelectors) {
+                        const items = Array.from(document.querySelectorAll<HTMLElement>(ss))
+                          .filter(el => {
+                            const r = el.getBoundingClientRect();
+                            return r.width > 0 && r.height > 0;
+                          });
+                        if (items.length === 0) continue;
+                        // Score each suggestion by keyword overlap with hotel name
+                        const scored = items.map(el => ({
+                          el,
+                          score: words.filter(w => (el.textContent ?? "").toLowerCase().includes(w)).length,
+                          text: (el.textContent ?? "").slice(0, 80),
+                        })).sort((a, b) => b.score - a.score);
+                        const best = scored[0];
+                        if (best && best.score >= Math.ceil(words.length * 0.4)) {
+                          best.el.scrollIntoView({ block: "center" });
+                          best.el.click();
+                          return best.text;
+                        }
+                      }
+                      return null;
+                    }, hotelWords).catch(() => null);
+
+                    if (picked) {
+                      trace(`[ai-listing] selected autocomplete suggestion: "${picked.slice(0, 60)}"`);
+                      await new Promise(r => setTimeout(r, 1000));
+
+                      // Click the Search / Submit button
+                      const searched = await raw.evaluate(() => {
+                        const isVisible = (el: Element) => {
+                          const r = (el as HTMLElement).getBoundingClientRect();
+                          return r.width > 0 && r.height > 0;
+                        };
+                        const btn = Array.from(document.querySelectorAll<HTMLElement>(
+                          'button[data-testid="submit-button"], button[type="submit"], button[data-testid*="search"]'
+                        )).find(b => isVisible(b));
+                        if (btn) { btn.click(); return true; }
+                        // Fallback: any visible "Search" button
+                        const fallbackBtn = Array.from(document.querySelectorAll<HTMLElement>("button"))
+                          .find(b => isVisible(b) && /^search$/i.test((b.textContent ?? "").trim()));
+                        if (fallbackBtn) { fallbackBtn.click(); return true; }
+                        return false;
+                      }).catch(() => false);
+
+                      if (searched) {
+                        await new Promise(r => setTimeout(r, 4000));
+                        trace(`[ai-listing] search submitted — URL: ${raw.url().slice(0, 100)}`);
+                      } else {
+                        // Autocomplete selection may have already navigated directly to hotel
+                        await new Promise(r => setTimeout(r, 2000));
+                        trace(`[ai-listing] no Search button found — autocomplete may have navigated directly`);
+                      }
+                    } else {
+                      trace(`[ai-listing] no matching autocomplete suggestion found — falling back to property name filter`);
+                      searchBarUsed = false; // trigger fallback below
+                    }
+                  }
+
+                  // ── Stage B: "Search by property name" sidebar filter (fallback) ────────
+                  if (!searchBarUsed) {
+                    trace(`[ai-listing] Stage B fallback — typing in "Search by property name" filter`);
+                    const propSelectors = [
+                      'input[placeholder*="property name" i]',
+                      'input[aria-label*="property name" i]',
+                      'input[placeholder*="Marriott" i]',
+                      'input[data-testid*="property"]',
+                    ];
+                    for (const sel of propSelectors) {
+                      const visible = await raw.evaluate((s: string) => {
+                        const el = document.querySelector<HTMLInputElement>(s);
+                        return !!(el && el.offsetParent !== null && !el.disabled);
+                      }, sel).catch(() => false);
+                      if (!visible) continue;
+                      try {
+                        await raw.click(sel);
+                        await raw.type(sel, targetHotelName, { delay: 60 });
+                        trace(`[ai-listing] property name filter typed via "${sel}"`);
+                        await new Promise(r => setTimeout(r, 2500));
+                        break;
+                      } catch { /* try next */ }
+                    }
+                  }
+                }
+              } catch (refineErr) {
+                trace(`[ai-listing] Expedia search refinement failed: ${(refineErr as Error).message?.slice(0, 80)}`);
+              }
+            }
+
+            // If the Expedia search refinement above already navigated to a hotel detail page
+            // (e.g. autocomplete selection went directly to the hotel), skip clickTargetListingAI.
+            if (isHotelDetailUrl(raw.url())) {
+              trace(`[ai-listing] already on hotel detail page after refinement (${raw.url().slice(0, 80)}) — skipping clickTargetListingAI`);
+              return true;
+            }
+
+            // Pass startDomain so clickTargetListingAI can detect & revert wrong-domain clicks
+            // (e.g. clicking an IHG logo badge on Expedia that navigates to ihg.com).
+            const startDomainHint = startProvider?.id === "expedia" ? "expedia.com"
+              : input.startUrl.match(/^https?:\/\/([^/]+)/)?.[1] ?? undefined;
+            const result = await clickTargetListingAI(stagehand, targetHotelName, trace, 5, startDomainHint, requestedDates);
             if (result === "no_availability") return false;
             if (result === "clicked") {
               // Wait briefly — Booking.com opens hotel pages in a new tab; Expedia navigates
@@ -1018,7 +1215,7 @@ The user will enter CVV and confirm payment themselves.`,
             trace(`Stage recovery clicked "${clicked}" to advance the date-selection gate.`);
             return true;
           }
-          // Never run AI agent for date_selection on Booking.com 鈥?it types in the search bar.
+          // Never run AI agent for date_selection on Booking.com —?it types in the search bar.
           if (bookingComContext) {
             trace("Booking.com date_selection: skipping AI agent to prevent search-bar interference.");
             return false;
@@ -1028,11 +1225,10 @@ The user will enter CVV and confirm payment themselves.`,
           return true;
         }
         case "room_selection": {
-          // AI path: all sites when AI_LOOP_LISTING is enabled (including Booking.com).
-          // selectRoomAI uses stagehand.act() for preference matching + JS native setter
-          // for the quantity dropdown (avoids gpt-4o-mini selectOptionFromDropdown schema bug).
-          // The tab-detection block below handles Booking.com's checkout-in-new-tab pattern.
-          if (process.env.AI_LOOP_LISTING === "true") {
+          // AI path: all non-Booking.com sites always use selectRoomAI.
+          // Booking.com gets AI path when AI_LOOP_LISTING=true, otherwise uses RPA fallback.
+          // selectRoomAI handles Expedia's two-click Reserve flow (Reserve → modal → Reserve).
+          if (process.env.AI_LOOP_LISTING === "true" || !bookingComContext) {
             const result = await selectRoomAI(stagehand, trace, roomPreference);
             if (result === "no_availability") return false;
             // Booking.com opens the checkout page in a new tab after "I'll reserve".
@@ -1112,7 +1308,7 @@ The user will enter CVV and confirm payment themselves.`,
                     Array.from(el.options).map(o => o.value)
                   ).catch(() => [] as string[]);
                   if (opts.includes("0") && opts.includes("1") && val !== "0") {
-                    trace(`Booking.com: dropdown ${i} already set to ${val} 鈥?skipping select step.`);
+                    trace(`Booking.com: dropdown ${i} already set to ${val} —?skipping select step.`);
                     selectedDropdown = true;
                     break;
                   }
@@ -1157,7 +1353,7 @@ The user will enter CVV and confirm payment themselves.`,
                     trace(`Booking.com: set room dropdown index ${idx} to "1" via selectOption().`);
                     selectedDropdown = true;
                     await Promise.allSettled([
-                      waitForVisibleActionText(raw, ["I'll reserve", "I鈥檒l reserve", "I will reserve", "reserve now", "Reserve", "Show prices"], 3500),
+                      waitForVisibleActionText(raw, ["I'll reserve", "I—檒l reserve", "I will reserve", "reserve now", "Reserve", "Show prices"], 3500),
                       raw.waitForLoadState("networkidle", { timeout: 2500 }).catch(() => {}),
                     ]);
                     break;
@@ -1182,7 +1378,7 @@ The user will enter CVV and confirm payment themselves.`,
                 }
               }
 
-              // Click "I'll reserve" 鈥?use Playwright locator click (real mouse event),
+              // Click "I'll reserve" —?use Playwright locator click (real mouse event),
               // falling back to JS click. Use /reserve/i to avoid apostrophe issues.
               await raw.evaluate(() => document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true }))).catch(() => {});
               await new Promise((r) => setTimeout(r, 120));
@@ -1235,7 +1431,7 @@ The user will enter CVV and confirm payment themselves.`,
                     trace(`Booking.com: clicked "${expandedOffer}" on attempt ${attempt + 1} to expand room pricing.`);
                     await Promise.allSettled([
                       raw.waitForLoadState("domcontentloaded", { timeout: 3000 }),
-                      waitForVisibleActionText(raw, ["Reserve", "I'll reserve", "I鈥檒l reserve", "I will reserve", "reserve now", "Show prices"], 2500),
+                      waitForVisibleActionText(raw, ["Reserve", "I'll reserve", "I—檒l reserve", "I will reserve", "reserve now", "Show prices"], 2500),
                     ]);
                   }
                 }
@@ -1289,7 +1485,7 @@ The user will enter CVV and confirm payment themselves.`,
                     raw.locator("button:has-text(\"Show prices\")").first(),
                     raw.locator("a:has-text(\"Show prices\")").first(),
                     raw.locator("button:has-text(\"I'll reserve\")").first(),
-                    raw.locator("button:has-text(\"I鈥檒l reserve\")").first(),
+                    raw.locator("button:has-text(\"I—檒l reserve\")").first(),
                     raw.locator("button:has-text(\"I will reserve\")").first(),
                     raw.locator("button:has-text(\"reserve now\")").first(),
                     raw.locator("button:has-text(\"绔嬪嵆棰勮\")").first(),
@@ -1342,7 +1538,7 @@ The user will enter CVV and confirm payment themselves.`,
                           (
                           text === "reserve" ||
                           text.includes("i'll reserve") ||
-                          text.includes("i鈥檒l reserve") ||
+                          text.includes("i—檒l reserve") ||
                           text.includes("i will reserve") ||
                           text.includes("reserve now") ||
                           text.includes("绔嬪嵆棰勮")
@@ -1353,7 +1549,7 @@ The user will enter CVV and confirm payment themselves.`,
                         const text = normalize(b.textContent ?? "");
                         return (
                           text.includes("i'll reserve") ||
-                          text.includes("i鈥檒l reserve") ||
+                          text.includes("i—檒l reserve") ||
                           text.includes("i will reserve") ||
                           text.includes("reserve now") ||
                           text.includes("show prices") ||
@@ -1442,7 +1638,7 @@ The user will enter CVV and confirm payment themselves.`,
             instruction: coreBuildStageRecoveryInstruction(stage),
             maxSteps: 10,
           } as Parameters<typeof agent.execute>[0]) as AgentExecutionResult;
-          trace(`Room-selection recovery finished in ${((Date.now() - tr0) / 1000).toFixed(1)}s 鈥?"${(rResult.message ?? "").slice(0, 80)}"`);
+          trace(`Room-selection recovery finished in ${((Date.now() - tr0) / 1000).toFixed(1)}s —?"${(rResult.message ?? "").slice(0, 80)}"`);
           return true;
         }
         case "intermediate_gate": {
@@ -1452,7 +1648,7 @@ The user will enter CVV and confirm payment themselves.`,
               ? `Stage recovery checked ${checkedBoxes} consent/privacy checkbox(es) inside the booking widget.`
               : "Stage recovery did not find a new consent/privacy checkbox to check inside the booking widget."
           );
-          // Wait for React state to propagate after checkbox check 鈥?the "Book Now"
+          // Wait for React state to propagate after checkbox check —?the "Book Now"
           // button is often disabled until the privacy checkbox is ticked, so clicking
           // it immediately after check() returns will find it still disabled.
           await new Promise((resolve) => setTimeout(resolve, 700));
@@ -1483,7 +1679,7 @@ The user will enter CVV and confirm payment themselves.`,
     };
 
     for (let attempt = 0; attempt < 8; attempt += 1) {
-      trace(`Stage assessment ${attempt + 1}: ${assessment.stage} 鈥?${assessment.reason}`);
+      trace(`Stage assessment ${attempt + 1}: ${assessment.stage} —?${assessment.reason}`);
       if (!["listing", "date_selection", "room_selection", "intermediate_gate"].includes(assessment.stage)) {
         break;
       }
@@ -1497,7 +1693,6 @@ The user will enter CVV and confirm payment themselves.`,
         const redirectUrl = raw.url().toLowerCase();
         const isLegitimateBookingRedirect =
           /select.?room.?rate|roomrate|\/reservation|\/book|\/checkout|\/payment/i.test(redirectUrl) ||
-          assessment.stage === "room_selection" ||
           assessment.stage === "checkout_form" ||
           assessment.stage === "payment_gate";
 
@@ -1517,17 +1712,24 @@ The user will enter CVV and confirm payment themselves.`,
         }
       }
 
+      // Definitive no-availability: page text signals unavailability AND no Reserve buttons visible.
+      // We do NOT abort on text signals alone — Expedia hotel overview pages often contain
+      // "no availability" in widgets/sidebars even when rooms are bookable (false positive).
       if (assessment.stage === "room_selection" &&
           containsAny(assessment.pageText, NO_AVAILABILITY_SIGNALS)) {
-        trace(`No-availability signal detected at room_selection 鈥?aborting recovery loop.`);
-        break;
-      }
-
-      // Also bail if the agent message already told us there are no rooms.
-      const agentSaysNoAvailability = /no (rooms?|availability|vacancies|rates?)|sold out|fully booked|not available/i.test(agentMessage);
-      if (assessment.stage === "room_selection" && agentSaysNoAvailability) {
-        trace(`Agent message indicates no availability 鈥?aborting recovery loop.`);
-        break;
+        const hasReserveButton = await raw.evaluate(() => {
+          const pattern = /reserve|book now|i.?ll reserve|select room|view prices/i;
+          return Array.from(document.querySelectorAll<HTMLElement>('button, a, [role="button"]'))
+            .some(el => {
+              const r = el.getBoundingClientRect();
+              return r.width > 0 && r.height > 0 && pattern.test((el.textContent ?? "").trim());
+            });
+        }).catch(() => false);
+        if (!hasReserveButton) {
+          trace(`No-availability signal detected at room_selection with no Reserve buttons — aborting.`);
+          break;
+        }
+        trace(`No-availability text found but Reserve buttons exist — continuing to attempt room selection.`);
       }
 
       const acted = await attemptStageRecovery(assessment.stage);
@@ -1552,23 +1754,23 @@ The user will enter CVV and confirm payment themselves.`,
     // 鈹€鈹€ Unknown stage: agent may have stopped mid-flow (maxSteps exhausted) 鈹€鈹€
     // If the stage is unknown after the main run (no recognisable page signals),
     // run one more agent pass to continue from wherever it left off.
-    // EXCEPTION: Never run continuation agent on Booking.com 鈥?it always types in
+    // EXCEPTION: Never run continuation agent on Booking.com —?it always types in
     // the search bar and navigates to the wrong hotel.
     if (
       assessment.stage === "unknown" &&
       !(getProvider(currentUrl) ?? getProvider(raw.url()) ?? (bookingComPageOpen ? getProvider(input.startUrl) : null))
     ) {
-      trace("Stage is unknown after main run 鈥?running a continuation pass (maxSteps=20).");
+      trace("Stage is unknown after main run —?running a continuation pass (maxSteps=20).");
       const continuationInstruction =
         `You are continuing a hotel booking that was interrupted mid-flow. ` +
         `The target hotel URL is: ${input.startUrl}. ` +
         `Look at the current state of the browser and continue the booking process from where it left off. ` +
         `Your goal is to reach the payment/checkout page filled with the guest's information. ` +
-        `Do NOT submit or pay 鈥?stop just before the final payment button.`;
+        `Do NOT submit or pay —?stop just before the final payment button.`;
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const contResult = await agent.execute({ instruction: continuationInstruction, maxSteps: 20 }) as any;
       const contMsg: string = contResult?.message ?? contResult?.output ?? "";
-      trace(`Continuation pass finished 鈥?message: "${contMsg.slice(0, 120)}"`);
+      trace(`Continuation pass finished —?message: "${contMsg.slice(0, 120)}"`);
       // Update agentMessage so all downstream checks (hitPaymentGate, field verification) see the latest message.
       if (contMsg) agentMessage = contMsg;
       assessment = await assessBookingStage({
@@ -1580,7 +1782,7 @@ The user will enter CVV and confirm payment themselves.`,
       });
       pageText = assessment.pageText;
       currentUrl = assessment.currentUrl;
-      trace(`Post-continuation stage: ${assessment.stage} 鈥?${assessment.reason}`);
+      trace(`Post-continuation stage: ${assessment.stage} —?${assessment.reason}`);
     }
 
     // 鈹€鈹€ Detect stuck at listing/search page 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
@@ -1629,10 +1831,10 @@ The user will enter CVV and confirm payment themselves.`,
     // 鈹€鈹€ Direct form-fill fallback 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
     // If the agent landed on a guest info / checkout form but left fields empty
     // (e.g. because reCAPTCHA console errors confused it), fill them directly
-    // using page.act() 鈥?lower-level than the agent and not blocked by reCAPTCHA.
+    // using page.act() —?lower-level than the agent and not blocked by reCAPTCHA.
     const visibleCheckoutFields = assessment.visibleCheckoutFields;
     // For Booking.com's checkout URL (Step 2 + Step 3), always treat as guest form
-    // regardless of visibleCheckoutFields 鈥?the step 2 form fields may not be detected
+    // regardless of visibleCheckoutFields —?the step 2 form fields may not be detected
     // by the generic hasVisibleCheckoutFields heuristic.
     // NOTE: Use raw.url() and input.startUrl in addition to currentUrl because
     // resolveCurrentUrl() can pick a non-booking.com iframe URL (analytics/tracking),
@@ -1654,10 +1856,14 @@ The user will enter CVV and confirm payment themselves.`,
       // 鈹€鈹€ Booking.com: always run programmatic fill regardless of pre-filled state 鈹€鈹€
       // The account often pre-fills wrong values (wrong name order, wrong country/phone code).
       // We must override these with the correct profile values every time.
-      // Use input.startUrl as the authoritative Booking.com check 鈥?currentUrl may be a
+      // Use input.startUrl as the authoritative Booking.com check —?currentUrl may be a
       // non-booking.com URL resolved from an analytics/tracking iframe by resolveCurrentUrl().
       const provider = getProvider(currentUrl) ?? getProvider(rawPageUrl) ?? (bookingComPageOpen ? getProvider(input.startUrl) : null);
       if (provider && assessment.stage === "checkout_form") {
+        // Dismiss any modals that appeared after navigation (e.g. Expedia "This booking is almost yours!")
+        const preFormDismissed = await dismissBlockingModals(raw).catch(() => "");
+        if (preFormDismissed) trace(`[RPA] Dismissed checkout modal(s) before form fill: ${preFormDismissed}`);
+
         if (process.env.AI_LOOP_FORM_FILL === "true") {
           // Providers can override AI form fill with a deterministic implementation.
           // Expedia/Hotels.com use this to avoid browser autocomplete mis-filling fields.
@@ -1862,6 +2068,10 @@ The user will enter CVV and confirm payment themselves.`,
       }
 
       if (!alreadyFilled && !provider) {
+        // Dismiss any late-appearing modals (e.g. site nudge overlays) before filling
+        const preGenericFormDismissed = await dismissBlockingModals(raw).catch(() => "");
+        if (preGenericFormDismissed) trace(`[RPA] Dismissed modal(s) before generic form fill: ${preGenericFormDismissed}`);
+
         if (process.env.AI_LOOP_FORM_FILL === "true") {
           trace("Guest/payment fields — AI fill mode (AI_LOOP_FORM_FILL=true).");
           await fillGuestFormWithAI(stagehand, p, trace);
@@ -1980,8 +2190,73 @@ The user will enter CVV and confirm payment themselves.`,
 
     if (bookingComFinalPaymentDomState && activeProvider) {
       trace("Provider final payment page confirmed after guest-details step — running final card-field fill pass.");
+
+      // Before filling, wait briefly for the checkout page to render (Expedia lazy-loads card fields)
+      await raw.waitForLoadState("domcontentloaded", { timeout: 5000 }).catch(() => {});
+      await new Promise(r => setTimeout(r, 1500));
+      const prePaymentDismissed = await raw.evaluate(() => {
+        // Direct DOM click — bypass all abstraction layers
+        const buttons = Array.from(document.querySelectorAll<HTMLElement>('button, [role="button"], a'));
+        const dismissed: string[] = [];
+        for (const btn of buttons) {
+          const text = (btn.textContent ?? "").trim().toLowerCase();
+          const r = btn.getBoundingClientRect();
+          if (r.width === 0 || r.height === 0) continue;
+          // "Continue booking" or X close button near "almost yours" text
+          const isContinue = text === "continue booking" || text === "continue";
+          if (!isContinue) continue;
+          // Verify modal context — walk up and check for "almost yours" ancestor
+          let ancestor: HTMLElement | null = btn.parentElement;
+          while (ancestor && ancestor !== document.body) {
+            if ((ancestor.textContent ?? "").toLowerCase().includes("almost yours")) {
+              btn.click();
+              dismissed.push(text);
+              break;
+            }
+            ancestor = ancestor.parentElement;
+          }
+        }
+        return dismissed.join(", ");
+      }).catch(() => "");
+      if (prePaymentDismissed) {
+        trace(`[RPA] Pre-payment modal dismissed: ${prePaymentDismissed} — waiting for modal to close`);
+        await new Promise(r => setTimeout(r, 800));
+      }
+
       await activeProvider.fillPaymentForm?.(raw, p, bookingComHelpers, trace);
-      await new Promise((resolve) => setTimeout(resolve, 800));
+
+      // Wait for any post-fill modals (Expedia nudge modal may appear after Playwright interaction ends)
+      await new Promise(r => setTimeout(r, 1500));
+      const postPaymentDismissed = await raw.evaluate(() => {
+        const buttons = Array.from(document.querySelectorAll<HTMLElement>('button, [role="button"], a'));
+        const dismissed: string[] = [];
+        for (const btn of buttons) {
+          const text = (btn.textContent ?? "").trim().toLowerCase();
+          const r = btn.getBoundingClientRect();
+          if (r.width === 0 || r.height === 0) continue;
+          const isContinue = text === "continue booking" || text === "continue";
+          const isClose = btn.getAttribute("aria-label")?.toLowerCase().includes("close") ||
+            text === "×" || text === "✕" || text === "x";
+          if (!isContinue && !isClose) continue;
+          let ancestor: HTMLElement | null = btn.parentElement;
+          while (ancestor && ancestor !== document.body) {
+            if ((ancestor.textContent ?? "").toLowerCase().includes("almost yours")) {
+              btn.click();
+              dismissed.push(text);
+              break;
+            }
+            ancestor = ancestor.parentElement;
+          }
+        }
+        return dismissed.join(", ");
+      }).catch(() => "");
+      if (postPaymentDismissed) {
+        trace(`[RPA] Post-payment modal dismissed: ${postPaymentDismissed} — retrying card fill`);
+        await new Promise(r => setTimeout(r, 800));
+        // Retry fill after modal is dismissed
+        await activeProvider.fillPaymentForm?.(raw, p, bookingComHelpers, trace);
+        await new Promise(r => setTimeout(r, 800));
+      }
 
       assessment = await assessBookingStage({
         rawPage: raw,
@@ -2060,8 +2335,8 @@ The user will enter CVV and confirm payment themselves.`,
 
     if (finalOutcome.status === "paused_payment" && !useCloud) {
       keepBrowserOpen = true;
-      trace("Local mode: browser will stay open for 15 minutes 鈥?live view available in OneAgent.");
-      console.log("\n鉁?[stagehand] Payment page is open 鈥?use OneAgent live view or the browser window to complete payment.\n");
+      trace("Local mode: browser will stay open for 15 minutes —?live view available in OneAgent.");
+      console.log("\n鉁?[stagehand] Payment page is open —?use OneAgent live view or the browser window to complete payment.\n");
       // Getter is already registered from init — just extend TTL for paused_payment hold.
       browserSessionStore.setGetter(input.jobId, () => {
         const ctx = stagehand.context;
@@ -2134,12 +2409,12 @@ The user will enter CVV and confirm payment themselves.`,
           status: "error",
           handoffUrl: input.startUrl,
           summary: "Browserbase free plan browser minutes exhausted.",
-          error: "Browserbase free plan limit reached 鈥?upgrade at browserbase.com/plans, or remove BROWSERBASE_API_KEY to run locally.",
+          error: "Browserbase free plan limit reached —?upgrade at browserbase.com/plans, or remove BROWSERBASE_API_KEY to run locally.",
           debugTrace,
         };
       }
 
-      // Generic 402 鈥?try to name the provider
+      // Generic 402 —?try to name the provider
       const isBrowserbase = rawError.toLowerCase().includes("browserbase") ||
         rawError.toLowerCase().includes("session") ||
         rawError.toLowerCase().includes("concurren");
@@ -2151,7 +2426,7 @@ The user will enter CVV and confirm payment themselves.`,
         ? "Browserbase"
         : isModelApi
         ? `Model API (${modelName})`
-        : `unknown provider 鈥?model: ${modelName}`;
+        : `unknown provider —?model: ${modelName}`;
 
       return {
         status: "error",
