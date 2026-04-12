@@ -1661,6 +1661,36 @@ The user will enter CVV and confirm payment themselves.`,
           if (process.env.AI_LOOP_LISTING === "true" || !bookingComContext) {
             const result = await selectRoomAI(stagehand, trace, roomPreference);
             if (result === "no_availability") return false;
+
+            // ── Hotels.com "Your payment options" modal ──────────────────────────────
+            // After clicking Reserve, Hotels.com shows a modal with two options:
+            //   • "Pay now" (Pay total now online)
+            //   • "Pay at property" (Pay when you stay)
+            // Neither is pre-selected. We must click "Pay now" to proceed to checkout.
+            // This modal does NOT appear on Expedia or Booking.com.
+            await new Promise(r => setTimeout(r, 1200)); // wait for modal to render
+            const payNowClicked = await raw.evaluate(() => {
+              const buttons = Array.from(document.querySelectorAll<HTMLElement>('button, [role="button"], a'));
+              // First, check if this modal is present by looking for "pay at property" or "pay now" buttons
+              const bodyText = (document.body.textContent ?? "").toLowerCase();
+              const hasPaymentOptionsModal = bodyText.includes("pay at the property") || bodyText.includes("pay at property") || bodyText.includes("pay when you stay");
+              if (!hasPaymentOptionsModal) return false;
+              // Click "Pay now" button — avoid "Pay at property"
+              const payNowBtn = buttons.find(btn => {
+                const text = (btn.textContent ?? "").trim().toLowerCase();
+                const r = btn.getBoundingClientRect();
+                if (r.width === 0 || r.height === 0) return false;
+                return text === "pay now" || text === "pay the total now";
+              });
+              if (payNowBtn) { payNowBtn.click(); return true; }
+              return false;
+            }).catch(() => false);
+            if (payNowClicked) {
+              trace(`[ai-room] Hotels.com payment options modal: clicked "Pay now"`);
+              await new Promise(r => setTimeout(r, 1000));
+            }
+            // ── End payment options modal ────────────────────────────────────────────
+
             // Booking.com opens the checkout page in a new tab after "I'll reserve".
             // Wait briefly, then check if a checkout tab was opened.
             // If so, navigate raw to that URL (raw is const — can't reassign).
