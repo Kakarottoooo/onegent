@@ -1803,6 +1803,28 @@ The user will enter CVV and confirm payment themselves.`,
       currentUrl = assessment.currentUrl;
     }
 
+    // Post-loop drift guard: the for-loop may have exited (attempt limit or !acted) while the
+    // browser is on the wrong domain (e.g. Hotels.com AI went to hilton.com on the last attempt).
+    // Navigate back to startUrl so downstream checkout / payment logic runs on the correct site.
+    if (startProvider && !startProvider.matchesUrl(raw.url())) {
+      const redirectUrl = raw.url().toLowerCase();
+      const isLegitimatePostLoopRedirect = startProvider.id === "hotels-com"
+        ? (redirectUrl.includes("expedia.com") && redirectUrl.includes("/checkout"))
+        : /\/checkout|\/payment|\/book/i.test(redirectUrl) ||
+          assessment.stage === "checkout_form" ||
+          assessment.stage === "payment_gate";
+      if (!isLegitimatePostLoopRedirect) {
+        trace(`[provider-guard] post-loop: on wrong domain (${raw.url().slice(0, 80)}) — navigating back`);
+        try {
+          await raw.goto(input.startUrl, { waitUntil: "domcontentloaded", timeout: 25_000 });
+          await raw.waitForLoadState("networkidle", { timeout: 8_000 }).catch(() => {});
+        } catch { /* ignore nav errors */ }
+        assessment = await assessBookingStage({ rawPage: raw, stagehand, startUrl: input.startUrl, requestedDates, agentMessage });
+        pageText = assessment.pageText;
+        currentUrl = assessment.currentUrl;
+      }
+    }
+
     // 鈹€鈹€ Unknown stage: agent may have stopped mid-flow (maxSteps exhausted) 鈹€鈹€
     // If the stage is unknown after the main run (no recognisable page signals),
     // run one more agent pass to continue from wherever it left off.

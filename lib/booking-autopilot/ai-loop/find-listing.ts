@@ -123,14 +123,15 @@ export async function clickTargetListingAI(
   // Used when DOM extraction fails or no startDomain given.
   // IMPORTANT: specify to stay within the OTA domain and not click logos/badges.
   const domainHint = startDomain
-    ? ` This should open the hotel page on ${startDomain} — do NOT click logos, badges, images, or external links that go to third-party brand websites.`
+    ? ` IMPORTANT: stay on ${startDomain} — do NOT click any link that goes to a different website, brand site, Google Maps, or any third-party page. Do NOT navigate to Google or any search engine.`
     : "";
   try {
     await stagehand.act(
-      `In the hotel search results list (NOT the search bar at the top), ` +
-      `find the listing whose name EXACTLY matches "${targetHotelName}". ` +
+      `In the hotel search results list on the CURRENT PAGE ONLY, ` +
+      `find the listing card for "${targetHotelName}". ` +
       `Do NOT click hotels with similar but different names. ` +
-      `Click the hotel NAME or TITLE text (the large clickable hotel name, NOT the "See availability" button).` +
+      `Click only the hotel NAME or TITLE text link that stays on the same website. ` +
+      `Do NOT click "Visit hotel website", "View on map", Google Maps widgets, or any external link.` +
       domainHint
     );
     trace(`[find-listing] direct act() succeeded for "${targetHotelName}"`);
