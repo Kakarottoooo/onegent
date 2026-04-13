@@ -1194,17 +1194,51 @@ export async function fillExpediaGroupPaymentForm(
       ["Name on card", "Cardholder name", "Card holder name"],
       EXPEDIA_GROUP_CARD_NAME_SELECTORS, profile.card_name, "cardholder name", trace);
   }
+
+  // ── Inline card number + expiry: use page.evaluate() with strict placeholder selectors ──
+  // Why: findAndFillExpediaField() can fill the WRONG field — e.g. the expiry field gets
+  // the card number value ("8888888888888888" → masked as "88/88") because CSS selectors
+  // are too broad. Using placeholder="0000 0000 0000 0000" and placeholder="MM/YY" is
+  // unambiguous: each placeholder is unique to exactly one field in the form.
+  // This runs BEFORE the locator fallback; the locator fallback runs only if this fails.
+  const nativeFillInline = async (sel: string, val: string, fieldLabel: string): Promise<boolean> => {
+    const ok = await page.evaluate(({ selector, value }: { selector: string; value: string }) => {
+      const el = document.querySelector<HTMLInputElement>(selector);
+      if (!el || el.disabled || el.offsetParent === null) return false;
+      const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set;
+      el.focus();
+      if (setter) { setter.call(el, ""); setter.call(el, value); }
+      else { el.value = ""; el.value = value; }
+      el.dispatchEvent(new Event("input", { bubbles: true }));
+      el.dispatchEvent(new Event("change", { bubbles: true }));
+      el.blur();
+      return true;
+    }, { selector: sel, value: val }).catch(() => false);
+    if (ok) trace(`Expedia payment: filled ${fieldLabel} via page.evaluate placeholder selector`);
+    return ok;
+  };
+
   if (!iframeFilledFields.number && profile.card_number) {
     trace("Expedia payment: card number not filled via iframe — trying inline selector");
-    await findAndFillExpediaField(page,
-      ["Card number", "Credit card number"],
-      EXPEDIA_GROUP_CARD_NUMBER_SELECTORS, profile.card_number, "card number", trace, true);
+    // First: precise placeholder-based evaluate fill (Hotels.com inline form)
+    const numOk = await nativeFillInline('input[placeholder="0000 0000 0000 0000"]', profile.card_number, "card number");
+    if (!numOk) {
+      // Fallback: locator-based fill (Expedia or other forms)
+      await findAndFillExpediaField(page,
+        ["Card number", "Credit card number"],
+        EXPEDIA_GROUP_CARD_NUMBER_SELECTORS, profile.card_number, "card number", trace, true);
+    }
   }
   if (!iframeFilledFields.expiry && profile.card_expiry) {
     trace("Expedia payment: card expiry not filled via iframe — trying inline selector");
-    await findAndFillExpediaField(page,
-      ["Expiration date", "Expiry date", "Expiry"],
-      EXPEDIA_GROUP_CARD_EXPIRY_SELECTORS, profile.card_expiry, "expiry date", trace);
+    // First: precise placeholder-based evaluate fill (Hotels.com inline form)
+    const expOk = await nativeFillInline('input[placeholder="MM/YY"]', profile.card_expiry, "expiry date");
+    if (!expOk) {
+      // Fallback: locator-based fill
+      await findAndFillExpediaField(page,
+        ["Expiration date", "Expiry date", "Expiry"],
+        EXPEDIA_GROUP_CARD_EXPIRY_SELECTORS, profile.card_expiry, "expiry date", trace);
+    }
   }
 
   // "This booking is almost yours!" modal appears AFTER card fields are filled.
