@@ -1447,10 +1447,15 @@ The user will enter CVV and confirm payment themselves.`,
                         }
                       }
 
-                      const links = Array.from(document.querySelectorAll<HTMLElement>('a, button, [role="button"]'));
-                      for (const link of links) {
+                      // "Try removing filters" can be any element type — search broadly.
+                      const clearFilterEls = Array.from(document.querySelectorAll<HTMLElement>('a, button, [role="button"], span, p, div'))
+                        .filter(el => {
+                          const r = el.getBoundingClientRect();
+                          if (r.width === 0 || r.height === 0 || r.height > 80) return false;
+                          return /try removing filters|remove filters|clear filters|clear all/i.test(normalize(el.textContent ?? ""));
+                        });
+                      for (const link of clearFilterEls) {
                         const text = normalize(link.textContent ?? "");
-                        if (!/try removing filters|remove filters|clear filters|clear all/i.test(text)) continue;
                         if (isInViewport(link)) {
                           const r = link.getBoundingClientRect();
                           fallbackTargets.unshift({
@@ -1503,17 +1508,21 @@ The user will enter CVV and confirm payment themselves.`,
                       fallbackTargets: [] as Array<{ x: number; y: number; label: string }>,
                     }));
 
-                    // ── Diagnostic: scan ALL elements with filter text, show tag/size/coords ──
+                    // ── Diagnostic: find SMALL elements with filter text (not giant containers) ──
                     const filterDiag = await raw.evaluate(() => {
                       const filterTerms = /fully refundable|free cancellation|refundable only/i;
                       const norm = (s: string) => s.replace(/\s+/g, " ").trim();
-                      return Array.from(document.querySelectorAll<HTMLElement>('*'))
-                        .filter(el => {
+                      // querySelectorAll('*') returns outer containers first — skip them.
+                      // Only look at small/leaf elements that are likely clickable UI controls.
+                      return Array.from(document.querySelectorAll<HTMLElement>(
+                        'button, label, [role="button"], [role="checkbox"], input, span, a, li, div, p'
+                      )).filter(el => {
                           const r = el.getBoundingClientRect();
                           if (r.width === 0 || r.height === 0) return false;
+                          if (r.width > 600 || r.height > 150) return false; // skip containers
                           return filterTerms.test(norm(el.textContent ?? ""));
                         })
-                        .slice(0, 12)
+                        .slice(0, 10)
                         .map(el => {
                           const r = el.getBoundingClientRect();
                           const ariaChecked = el.getAttribute('aria-checked');
@@ -1555,13 +1564,44 @@ The user will enter CVV and confirm payment themselves.`,
 
                     if (remainingFilters.length > 0) {
                       trace(`[ai-listing] Hotels.com: refundable filter still visible after UI clear: ${remainingFilters.join(" | ")}`);
-                      // ── URL-reload approach: navigate to current URL with refundableOnly=false ──
-                      // Hotels.com may have ignored the parameter on the initial URL (due to redirect).
-                      // Now we know the FINAL URL and can append refundableOnly=false directly.
+
+                      // ── Strategy 1: clear filter-related localStorage keys and reload ──────
+                      // Hotels.com stores filter preferences in localStorage. If we can clear
+                      // the relevant keys, the next page load will use URL params instead.
+                      try {
+                        const clearedKeys = await raw.evaluate(() => {
+                          const filterKeywords = ['filter', 'refund', 'cancell', 'amenity', 'amenities', 'search', 'HCOM'];
+                          const cleared: string[] = [];
+                          for (let i = localStorage.length - 1; i >= 0; i--) {
+                            const key = localStorage.key(i) ?? '';
+                            if (filterKeywords.some(kw => key.toLowerCase().includes(kw.toLowerCase()))) {
+                              localStorage.removeItem(key);
+                              cleared.push(key);
+                            }
+                          }
+                          // Also try sessionStorage
+                          for (let i = sessionStorage.length - 1; i >= 0; i--) {
+                            const key = sessionStorage.key(i) ?? '';
+                            if (filterKeywords.some(kw => key.toLowerCase().includes(kw.toLowerCase()))) {
+                              sessionStorage.removeItem(key);
+                              cleared.push(`session:${key}`);
+                            }
+                          }
+                          return cleared;
+                        }).catch(() => [] as string[]);
+                        if (clearedKeys.length > 0) {
+                          trace(`[ai-listing] Hotels.com: cleared filter localStorage keys: ${clearedKeys.join(', ')}`);
+                        } else {
+                          trace(`[ai-listing] Hotels.com: no filter-related localStorage keys found`);
+                        }
+                      } catch (lsErr) {
+                        trace(`[ai-listing] Hotels.com: localStorage clear error: ${(lsErr as Error).message?.slice(0, 60)}`);
+                      }
+
+                      // ── Strategy 2: reload current URL with refundableOnly=false ──────────
                       try {
                         const currentUrl = new URL(raw.url());
                         currentUrl.searchParams.set("refundableOnly", "false");
-                        // Also remove any explicit refundable filter params Hotels.com may have added
                         currentUrl.searchParams.delete("ro");
                         const cleanUrl = currentUrl.toString();
                         trace(`[ai-listing] Hotels.com: reloading with refundableOnly=false → ${cleanUrl.slice(0, 120)}`);
@@ -2264,17 +2304,22 @@ The user will enter CVV and confirm payment themselves.`,
                 // DOM .click() does NOT trigger Hotels.com's React navigation handler — use
                 // CDP coordinate click instead, which fires real pointer/mouse events.
                 const removeFiltersCoords = await raw.evaluate(() => {
-                  const links = Array.from(document.querySelectorAll<HTMLElement>('a, button, [role="button"]'));
-                  const removeLink = links.find(el =>
-                    /try removing filters|remove filters|clear filters|clear all/i.test(el.textContent ?? "")
-                  );
+                  // "Try removing filters" can be any element — span, p, a, button, etc.
+                  const norm = (s: string) => s.replace(/\s+/g, " ").trim();
+                  const removeLink = Array.from(document.querySelectorAll<HTMLElement>(
+                    'a, button, [role="button"], span, p, div, li'
+                  )).find(el => {
+                    const r = el.getBoundingClientRect();
+                    if (r.width === 0 || r.height === 0 || r.height > 80) return false;
+                    return /try removing filters|remove filters|clear filters|clear all/i.test(norm(el.textContent ?? ""));
+                  });
                   if (!removeLink) return null;
                   removeLink.scrollIntoView({ behavior: 'instant', block: 'center' });
                   const r = removeLink.getBoundingClientRect();
                   return {
                     x: Math.round(r.left + r.width / 2),
                     y: Math.round(r.top + r.height / 2),
-                    text: (removeLink.textContent ?? '').replace(/\s+/g, ' ').trim().slice(0, 60),
+                    text: norm(removeLink.textContent ?? "").slice(0, 60),
                   };
                 }).catch(() => null);
 
