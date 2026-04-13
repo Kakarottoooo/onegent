@@ -1202,6 +1202,51 @@ The user will enter CVV and confirm payment themselves.`,
                     }
                   }
 
+                  // ── Pre-Stage B: remove active filters that hide the target hotel ────────
+                  // Hotels.com may have "Fully refundable properties" or similar filters active
+                  // (often from the &ro parameter in the start URL). These prevent the property
+                  // name filter from finding the hotel. Clear them before searching by name.
+                  if (!searchBarUsed && startProvider?.id === "hotels-com") {
+                    const clearedFilters: string[] = [];
+                    await raw.evaluate(() => {
+                      // Hotels.com renders active filters as chips/pills/badges in the results header.
+                      // We target the close/remove button associated with "Fully Refundable" etc.
+                      const filterTerms = /fully refundable|free cancellation|refundable only/i;
+                      // Strategy A: UITK pill/chip with an × button
+                      const chips = Array.from(document.querySelectorAll<HTMLElement>(
+                        '[data-testid*="filterChip"], [data-testid*="applied-filter"], ' +
+                        '.uitk-pill, [class*="filter-pill"], [class*="FilterChip"], ' +
+                        '[data-stid*="filter-chip"]'
+                      ));
+                      for (const chip of chips) {
+                        if (!filterTerms.test(chip.textContent ?? "")) continue;
+                        const closeBtn = chip.querySelector<HTMLElement>('button, [role="button"]');
+                        if (closeBtn) { closeBtn.click(); return; }
+                        chip.click();
+                      }
+                      // Strategy B: checkbox/toggle in the sidebar
+                      const checkboxes = Array.from(document.querySelectorAll<HTMLElement>(
+                        '[role="checkbox"], input[type="checkbox"]'
+                      ));
+                      for (const cb of checkboxes) {
+                        const label = cb.closest('label') ?? cb.parentElement;
+                        if (!filterTerms.test(label?.textContent ?? "")) continue;
+                        const isChecked = cb.getAttribute('aria-checked') === 'true' ||
+                          (cb as HTMLInputElement).checked;
+                        if (isChecked) { cb.click(); return; }
+                      }
+                    }).catch(() => {});
+                    // Check if anything was removed (any filter text changed)
+                    const stillHasFilter = await raw.evaluate(() =>
+                      /fully refundable/i.test(document.body.textContent ?? "")
+                    ).catch(() => true);
+                    if (!stillHasFilter || clearedFilters.length === 0) {
+                      // Wait for results to update regardless — Hotels.com may take a moment
+                    }
+                    trace(`[ai-listing] Hotels.com: pre-Stage-B filter clear attempted — waiting for results`);
+                    await new Promise(r => setTimeout(r, 2000));
+                  }
+
                   // ── Stage B: "Search by property name" sidebar filter (fallback) ────────
                   if (!searchBarUsed) {
                     trace(`[ai-listing] Stage B fallback — typing in "Search by property name" filter`);
@@ -1561,10 +1606,32 @@ The user will enter CVV and confirm payment themselves.`,
               ).catch(() => false);
 
               if (noMatchPage) {
-                trace(`[ai-listing] Hotels.com: "No exact matches" detected — skipping fast path to avoid selecting wrong hotel`);
+                trace(`[ai-listing] Hotels.com: "No exact matches" — trying "Try removing filters" to clear active filters`);
+                // Hotels.com shows a "Try removing filters" link when all results are hidden.
+                // Click it to clear filters that may be hiding the target hotel.
+                const triedRemoveFilters = await raw.evaluate(() => {
+                  const links = Array.from(document.querySelectorAll<HTMLElement>('a, button'));
+                  const removeLink = links.find(el =>
+                    /try removing filters|remove filters|clear filters|clear all/i.test(el.textContent ?? "")
+                  );
+                  if (removeLink) { (removeLink as HTMLElement).click(); return true; }
+                  return false;
+                }).catch(() => false);
+                if (triedRemoveFilters) {
+                  await new Promise(r => setTimeout(r, 3000));
+                  trace(`[ai-listing] Hotels.com: clicked "Try removing filters" — checking for hotel now`);
+                }
               }
 
-              const hotelDetailHref = noMatchPage ? null : await raw.evaluate(
+              // Re-check noMatchPage after filter removal attempt
+              const noMatchPageFinal = noMatchPage && await raw.evaluate(() =>
+                /no exact match/i.test(document.body.textContent ?? "")
+              ).catch(() => false);
+              if (noMatchPageFinal) {
+                trace(`[ai-listing] Hotels.com: still "No exact matches" after filter removal — skipping fast path`);
+              }
+
+              const hotelDetailHref = noMatchPageFinal ? null : await raw.evaluate(
                 ({ nameWords }: { nameWords: string[] }) => {
                   // Find all hotels.com hotel detail links on the page (deduplicated by href).
                   // EXCLUDE links that are inside a "doesn't match your filters" section —
