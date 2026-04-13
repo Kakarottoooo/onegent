@@ -1234,9 +1234,9 @@ The user will enter CVV and confirm payment themselves.`,
                           const el = document.querySelector<HTMLInputElement>(s);
                           if (el) { const r = el.getBoundingClientRect(); if (r.width >= 60) return el; }
                         }
-                        // Fallback: any sidebar text input wider than 60px
+                        // Fallback: any sidebar text input (exclude destination bar: too wide or has comma-value)
                         return Array.from(document.querySelectorAll<HTMLInputElement>('input[type="text"]'))
-                          .find(el => { const r = el.getBoundingClientRect(); return r.width >= 60 && r.left <= 420 && r.top >= 100; }) ?? null;
+                          .find(el => { const r = el.getBoundingClientRect(); return r.width >= 60 && r.width <= 400 && r.left <= 420 && !(el.value ?? '').includes(','); }) ?? null;
                       })();
                       const inputRect = input?.getBoundingClientRect();
                       const inputSummary = input
@@ -1507,8 +1507,12 @@ The user will enter CVV and confirm payment themselves.`,
                       for (const el of allTextInputs) {
                         const r = el.getBoundingClientRect();
                         if (r.width < 80 || r.height < 20) continue; // must be a real text field
+                        // Skip the main destination search bar:
+                        //   - It is wider than sidebar inputs (Hotels.com destination bar is ~470px)
+                        //   - Its value already contains a destination string (commas = "City, State, Country")
+                        if (r.width > 400) continue; // destination bar is wider than sidebar filter
+                        if ((el.value ?? '').includes(',')) continue; // destination values have commas
                         if (r.left > 420) continue; // only sidebar (left ~30% of typical 1400px screen)
-                        if (r.top < 100) continue; // skip main destination search bar at top
                         const result = tryInput(el, 'sidebar-text-input-fallback');
                         if (result) return result;
                       }
@@ -1587,7 +1591,7 @@ The user will enter CVV and confirm payment themselves.`,
                             const findPropertyNameInput = (): HTMLInputElement | null => {
                               const sels = ['input[placeholder*="property name" i]','input[placeholder*="Marriott" i]','input[aria-label*="property name" i]','input[data-testid*="property"]','[data-stid*="property-name"] input[type="text"]','aside input[type="text"]','section input[type="text"]'];
                               for (const s of sels) { const el = document.querySelector<HTMLInputElement>(s); if (el) { const r=el.getBoundingClientRect(); if(r.width>=60) return el; } }
-                              return Array.from(document.querySelectorAll<HTMLInputElement>('input[type="text"]')).find(el=>{const r=el.getBoundingClientRect();return r.width>=60&&r.left<=420&&r.top>=100;})??null;
+                              return Array.from(document.querySelectorAll<HTMLInputElement>('input[type="text"]')).find(el=>{const r=el.getBoundingClientRect();return r.width>=60&&r.width<=400&&r.left<=420&&!(el.value??'').includes(',');})??null;
                             };
                             const input = findPropertyNameInput();
                             if (!input) return [];
@@ -1666,7 +1670,7 @@ The user will enter CVV and confirm payment themselves.`,
                                 if (selArg && selArg !== 'sidebar-text-input-fallback') { const el=document.querySelector<HTMLInputElement>(selArg); if(el){const r=el.getBoundingClientRect();if(r.width>=60)return el;} }
                                 const sels=['input[placeholder*="property name" i]','input[placeholder*="Marriott" i]','input[aria-label*="property name" i]','input[data-testid*="property"]','[data-stid*="property-name"] input[type="text"]','aside input[type="text"]','section input[type="text"]'];
                                 for(const s of sels){const el=document.querySelector<HTMLInputElement>(s);if(el){const r=el.getBoundingClientRect();if(r.width>=60)return el;}}
-                                return Array.from(document.querySelectorAll<HTMLInputElement>('input[type="text"]')).find(el=>{const r=el.getBoundingClientRect();return r.width>=60&&r.left<=420&&r.top>=100;})??null;
+                                return Array.from(document.querySelectorAll<HTMLInputElement>('input[type="text"]')).find(el=>{const r=el.getBoundingClientRect();return r.width>=60&&r.width<=400&&r.left<=420&&!(el.value??'').includes(',');})??null;
                               };
                               const input = findPropertyNameInput();
                               if (!input) return false;
@@ -1737,7 +1741,7 @@ The user will enter CVV and confirm payment themselves.`,
                             const findPropertyNameInput2 = (): HTMLInputElement | null => {
                               const sels=['input[placeholder*="property name" i]','input[placeholder*="Marriott" i]','input[aria-label*="property name" i]','input[data-testid*="property"]','[data-stid*="property-name"] input[type="text"]','aside input[type="text"]','section input[type="text"]'];
                               for(const s of sels){const el=document.querySelector<HTMLInputElement>(s);if(el){const r=el.getBoundingClientRect();if(r.width>=60)return el;}}
-                              return Array.from(document.querySelectorAll<HTMLInputElement>('input[type="text"]')).find(el=>{const r=el.getBoundingClientRect();return r.width>=60&&r.left<=420&&r.top>=100;})??null;
+                              return Array.from(document.querySelectorAll<HTMLInputElement>('input[type="text"]')).find(el=>{const r=el.getBoundingClientRect();return r.width>=60&&r.width<=400&&r.left<=420&&!(el.value??'').includes(',');})??null;
                             };
                             const input = findPropertyNameInput2();
                             const inputRect = input?.getBoundingClientRect();
