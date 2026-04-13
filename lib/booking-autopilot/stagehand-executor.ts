@@ -1320,18 +1320,31 @@ The user will enter CVV and confirm payment themselves.`,
                         for (const chip of chips) {
                           const text = normalize(chip.textContent ?? "");
                           if (!filterTerms.test(text)) continue;
-                          if (isInViewport(chip)) {
-                            const r = chip.getBoundingClientRect();
-                            fallbackTargets.push({
-                              x: Math.round(r.right - Math.max(14, Math.min(24, r.width * 0.12))),
-                              y: Math.round(r.top + r.height / 2),
-                              label: `chip-close:${text.slice(0, 40)}`,
-                            });
-                          }
+                          // Exclude elements that are giant containers (their textContent includes the
+                          // filter text but they span the whole sidebar — clicking them does nothing useful).
+                          const r0 = chip.getBoundingClientRect();
+                          if (r0.width > 600 || r0.height > 120) continue;
+                          // Try DOM click (may not trigger Hotels.com React handler, but attempt anyway)
                           const closeBtn = chip.querySelector<HTMLElement>(
                             'button, [role="button"], [aria-label*="remove" i], [aria-label*="close" i]'
                           );
-                          if (clickIfVisible(closeBtn, `chip-close:${text.slice(0, 40)}`)) continue;
+                          if (clickIfVisible(closeBtn, `chip-close:${text.slice(0, 40)}`)) {
+                            // DOM click attempted — also capture CDP coordinates for fallback
+                            (closeBtn as HTMLElement).scrollIntoView({ behavior: 'instant', block: 'center' });
+                            const rc = (closeBtn as HTMLElement).getBoundingClientRect();
+                            if (rc.width > 0 && rc.height > 0) fallbackTargets.push({ x: Math.round(rc.left + rc.width / 2), y: Math.round(rc.top + rc.height / 2), label: `chip-close-cdp:${text.slice(0, 40)}` });
+                            continue;
+                          }
+                          // No close button — scroll chip into view and capture CDP coordinates
+                          chip.scrollIntoView({ behavior: 'instant', block: 'center' });
+                          const r = chip.getBoundingClientRect();
+                          if (r.width > 0 && r.height > 0) {
+                            fallbackTargets.push({
+                              x: Math.round(r.right - Math.max(14, Math.min(24, r.width * 0.12))),
+                              y: Math.round(r.top + r.height / 2),
+                              label: `chip-cdp:${text.slice(0, 40)}`,
+                            });
+                          }
                           clickIfVisible(chip, `chip:${text.slice(0, 40)}`);
                         }
                       }
@@ -1468,19 +1481,6 @@ The user will enter CVV and confirm payment themselves.`,
                     // and CDP-coordinate clicks can land on survey overlays instead of the sidebar input.
                     // DOM el.scrollIntoView() + el.focus() + el.click() is reliable regardless of scroll pos.
                     const inputInfo = await raw.evaluate(() => {
-                      const selectors = [
-                        'input[placeholder*="property name" i]',
-                        'input[aria-label*="property name" i]',
-                        'input[placeholder*="Marriott" i]',
-                        'input[data-testid*="property"]',
-                        // Hotels.com sidebar: use [type="text"] to avoid matching checkboxes
-                        '[data-stid*="property-name"] input[type="text"]',
-                        '[data-stid*="hotel-name"] input[type="text"]',
-                        '[data-stid*="filter-name"] input[type="text"]',
-                        'aside input[type="text"]:not([type="hidden"])',
-                        'nav input[type="text"]:not([type="hidden"])',
-                        'section input[type="text"]:not([type="hidden"])',
-                      ];
                       const tryInput = (el: HTMLInputElement | null, label: string): { sel: string; cx: number; cy: number } | null => {
                         if (!el) return null;
                         const r = el.getBoundingClientRect();
@@ -1495,24 +1495,59 @@ The user will enter CVV and confirm payment themselves.`,
                         const after = el.getBoundingClientRect();
                         return { sel: label, cx: Math.round(after.left + after.width / 2), cy: Math.round(after.top + after.height / 2) };
                       };
+
+                      // ── Strategy A: label-based search ─────────────────────────────────────
+                      // Find the "Search by property name" section by its heading text.
+                      // This is the most reliable approach on Hotels.com where the text input
+                      // lacks descriptive attributes (placeholder, aria-label, data-testid).
+                      const sectionTitles = Array.from(document.querySelectorAll<HTMLElement>(
+                        'h1,h2,h3,h4,h5,h6,label,legend,[class*="title"],[class*="heading"],[class*="label"],[class*="Title"],[class*="Heading"]'
+                      ));
+                      for (const title of sectionTitles) {
+                        const text = (title.textContent ?? '').replace(/\s+/g, ' ').trim();
+                        if (!/search by property name|property name filter/i.test(text)) continue;
+                        // Walk up to find the section container, then look for its text input
+                        let container: Element | null = title.parentElement;
+                        while (container && container !== document.body) {
+                          const input = container.querySelector<HTMLInputElement>('input[type="text"]');
+                          if (input && !input.disabled) {
+                            const r2 = input.getBoundingClientRect();
+                            if (r2.width >= 60) return tryInput(input, 'label-search-by-property-name');
+                          }
+                          container = container.parentElement;
+                        }
+                      }
+
+                      // ── Strategy B: specific attribute selectors ────────────────────────────
+                      const selectors = [
+                        'input[placeholder*="property name" i]',
+                        'input[aria-label*="property name" i]',
+                        'input[placeholder*="Marriott" i]',
+                        'input[data-testid*="property"]',
+                        '[data-stid*="property-name"] input[type="text"]',
+                        '[data-stid*="hotel-name"] input[type="text"]',
+                        '[data-stid*="filter-name"] input[type="text"]',
+                      ];
                       for (const s of selectors) {
                         const result = tryInput(document.querySelector<HTMLInputElement>(s), s);
                         if (result) return result;
                       }
-                      // Broader fallback: find any visible text input in the left sidebar area.
-                      // Hotels.com may use non-standard data attributes for the property name filter.
+
+                      // ── Strategy C: broader sidebar fallback ────────────────────────────────
+                      // Skip: destination bar (width > 400, value has commas), price inputs (value starts with $),
+                      // numeric-only inputs (price range min/max), and checkbox-sized elements.
                       const allTextInputs = Array.from(document.querySelectorAll<HTMLInputElement>(
                         'input[type="text"]:not([disabled]):not([readonly])'
                       ));
                       for (const el of allTextInputs) {
                         const r = el.getBoundingClientRect();
-                        if (r.width < 80 || r.height < 20) continue; // must be a real text field
-                        // Skip the main destination search bar:
-                        //   - It is wider than sidebar inputs (Hotels.com destination bar is ~470px)
-                        //   - Its value already contains a destination string (commas = "City, State, Country")
-                        if (r.width > 400) continue; // destination bar is wider than sidebar filter
-                        if ((el.value ?? '').includes(',')) continue; // destination values have commas
-                        if (r.left > 420) continue; // only sidebar (left ~30% of typical 1400px screen)
+                        if (r.width < 80 || r.height < 20) continue;
+                        if (r.width > 400) continue; // destination bar
+                        if (r.left > 420) continue;  // must be in sidebar
+                        const val = el.value ?? '';
+                        if (val.includes(',')) continue; // destination-style values
+                        if (/^\$/.test(val)) continue;   // price inputs ($210, $1,650)
+                        if (/^\d+$/.test(val)) continue; // pure-numeric price range inputs
                         const result = tryInput(el, 'sidebar-text-input-fallback');
                         if (result) return result;
                       }
@@ -2102,19 +2137,31 @@ The user will enter CVV and confirm payment themselves.`,
 
               if (noMatchPage) {
                 trace(`[ai-listing] Hotels.com: "No exact matches" — trying "Try removing filters" to clear active filters`);
-                // Hotels.com shows a "Try removing filters" link when all results are hidden.
-                // Click it to clear filters that may be hiding the target hotel.
-                const triedRemoveFilters = await raw.evaluate(() => {
-                  const links = Array.from(document.querySelectorAll<HTMLElement>('a, button'));
+                // Hotels.com shows a "Try removing filters" link when no property name matches.
+                // DOM .click() does NOT trigger Hotels.com's React navigation handler — use
+                // CDP coordinate click instead, which fires real pointer/mouse events.
+                const removeFiltersCoords = await raw.evaluate(() => {
+                  const links = Array.from(document.querySelectorAll<HTMLElement>('a, button, [role="button"]'));
                   const removeLink = links.find(el =>
                     /try removing filters|remove filters|clear filters|clear all/i.test(el.textContent ?? "")
                   );
-                  if (removeLink) { (removeLink as HTMLElement).click(); return true; }
-                  return false;
-                }).catch(() => false);
-                if (triedRemoveFilters) {
+                  if (!removeLink) return null;
+                  removeLink.scrollIntoView({ behavior: 'instant', block: 'center' });
+                  const r = removeLink.getBoundingClientRect();
+                  return {
+                    x: Math.round(r.left + r.width / 2),
+                    y: Math.round(r.top + r.height / 2),
+                    text: (removeLink.textContent ?? '').replace(/\s+/g, ' ').trim().slice(0, 60),
+                  };
+                }).catch(() => null);
+
+                if (removeFiltersCoords) {
+                  trace(`[ai-listing] Hotels.com: CDP-clicking "Try removing filters" "${removeFiltersCoords.text}" at (${removeFiltersCoords.x},${removeFiltersCoords.y})`);
+                  await sh(raw).click(removeFiltersCoords.x, removeFiltersCoords.y);
                   await new Promise(r => setTimeout(r, 3000));
-                  trace(`[ai-listing] Hotels.com: clicked "Try removing filters" — checking for hotel now`);
+                  trace(`[ai-listing] Hotels.com: waited 3s after "Try removing filters" CDP click`);
+                } else {
+                  trace(`[ai-listing] Hotels.com: "Try removing filters" link not found in DOM`);
                 }
               }
 
