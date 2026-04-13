@@ -1218,12 +1218,12 @@ The user will enter CVV and confirm payment themselves.`,
                         // Brief pause for focus to settle after DOM el.focus() + el.click()
                         await new Promise(r => setTimeout(r, 400));
                         // Clear any previous text then type the hotel name
-                        await raw.keyPress("Control+a");
+                        await raw.keyboard.press("Control+a");
                         await new Promise(r => setTimeout(r, 150));
                         // Type up to 25 chars (trimmed) to trigger the typeahead dropdown.
                         // More chars = more specific filter (we click "Search for '...'" not first suggestion).
                         const typeaheadText = targetHotelName.slice(0, Math.min(25, targetHotelName.length)).trimEnd();
-                        await raw.type(typeaheadText, { delay: 80 });
+                        await raw.keyboard.type(typeaheadText, { delay: 80 });
                         trace(`[ai-listing] property name filter typed "${typeaheadText}" via "${sel}" (DOM focus/click)`);
 
                         // ── Strategy 1: click hotel property CARD in dropdown ────────────────
@@ -1329,15 +1329,15 @@ The user will enter CVV and confirm payment themselves.`,
                                 trace(`[ai-listing] Strategy 1: results updated — sidebar filter applied`);
                               } else {
                                 trace(`[ai-listing] Strategy 1: "no exact match" after click — re-focusing input for fallback strategies`);
-                                await raw.keyPress("Escape").catch(() => {});
+                                await raw.keyboard.press("Escape").catch(() => {});
                                 // Re-focus via DOM (same approach as initial focus — avoids coordinate issues)
                                 await raw.evaluate((selArg: string) => {
                                   const el = document.querySelector<HTMLInputElement>(selArg);
                                   if (el) { el.scrollIntoView({ behavior: 'instant', block: 'center' }); el.focus(); el.click(); }
                                 }, sel).catch(() => {});
                                 await new Promise(r => setTimeout(r, 300));
-                                await raw.keyPress("Control+a");
-                                await raw.type(typeaheadText, { delay: 80 });
+                                await raw.keyboard.press("Control+a");
+                                await raw.keyboard.type(typeaheadText, { delay: 80 });
                                 await new Promise(r => setTimeout(r, 1800));
                               }
                             }
@@ -1474,7 +1474,7 @@ The user will enter CVV and confirm payment themselves.`,
                           }
                         } else {
                           // All strategies failed — press Enter as absolute last resort
-                          await raw.keyPress("Enter");
+                          await raw.keyboard.press("Enter");
                           trace(`[ai-listing] pressed Enter on property name filter (all suggestion strategies failed)`);
                           await new Promise(r => setTimeout(r, 3500));
                         }
