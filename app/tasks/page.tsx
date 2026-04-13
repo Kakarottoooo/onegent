@@ -611,18 +611,32 @@ function LiveLogPanel({ jobId }: { jobId: string }) {
   const [lines, setLines] = useState<string[]>([]);
   const [closed, setClosed] = useState(false);
   const afterRef = useRef(0);
+  const epochRef = useRef(0);
   const boxRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    if (closed) return;
     let cancelled = false;
+    let closedAt = 0; // timestamp when we first saw closed=true
 
     async function poll() {
       if (cancelled) return;
       try {
         const res = await fetch(`/api/booking-jobs/${jobId}/logs?after=${afterRef.current}`);
-        if (!res.ok) return;
-        const data: { lines: string[]; total: number; closed: boolean } = await res.json();
+        if (!res.ok) { if (!cancelled) setTimeout(poll, 1200); return; }
+        const data: { lines: string[]; total: number; closed: boolean; epoch: number } = await res.json();
+
+        // New run started (retry) — reset counters and resume streaming
+        if (data.epoch > epochRef.current && epochRef.current > 0) {
+          afterRef.current = 0;
+          epochRef.current = data.epoch;
+          closedAt = 0;
+          setClosed(false);
+          setLines([]);
+          if (!cancelled) setTimeout(poll, 400);
+          return;
+        }
+        epochRef.current = data.epoch;
+
         if (data.lines.length > 0) {
           afterRef.current = data.total;
           setLines(prev => {
@@ -634,14 +648,21 @@ function LiveLogPanel({ jobId }: { jobId: string }) {
             if (boxRef.current) boxRef.current.scrollTop = boxRef.current.scrollHeight;
           });
         }
-        if (data.closed) { setClosed(true); return; }
-      } catch { /* ignore */ }
+
+        if (data.closed) {
+          if (!closedAt) closedAt = Date.now();
+          // Keep polling for 15 s after close in case a retry resets the epoch
+          if (Date.now() - closedAt > 15_000) { setClosed(true); return; }
+        } else {
+          closedAt = 0; // reset if a new run resumed
+        }
+      } catch { /* ignore network errors */ }
       if (!cancelled) setTimeout(poll, 1200);
     }
 
     poll();
     return () => { cancelled = true; };
-  }, [jobId, closed]);
+  }, [jobId]);
 
   if (lines.length === 0 && !closed) return (
     <div style={{ padding: "6px 12px 6px 44px", fontFamily: "var(--font-dm-sans)", fontSize: 10, color: "var(--text-muted,#aaa)" }}>

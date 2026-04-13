@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { liveLogGet, liveLogCount, liveLogIsClosed } from "@/lib/live-log-store";
+import { liveLogGet, liveLogIsClosed, liveLogEpoch } from "@/lib/live-log-store";
 
 export async function GET(
   req: Request,
@@ -12,6 +12,7 @@ export async function GET(
   const lines = liveLogGet(id, after);
   const total = after + lines.length;
   const closed = liveLogIsClosed(id);
+  const epoch = liveLogEpoch(id);
 
-  return NextResponse.json({ lines, total, closed });
+  return NextResponse.json({ lines, total, closed, epoch });
 }

@@ -12,19 +12,29 @@ const CLEANUP_DELAY_MS = 5 * 60_000;
 interface LogEntry {
   lines: string[];
   closedAt?: number;
+  epoch: number; // increments on each liveLogReset — lets client detect a new run
 }
 
-const store = new Map<string, LogEntry>();
+// Use globalThis so the Map survives Next.js HMR module re-evaluations in dev.
+// In production each serverless invocation gets its own process, but the DB
+// fallback (logs/route.ts reading decisionLog from DB) handles that case.
+declare global {
+  // eslint-disable-next-line no-var
+  var __liveLogStore: Map<string, LogEntry> | undefined;
+}
+if (!globalThis.__liveLogStore) globalThis.__liveLogStore = new Map<string, LogEntry>();
+const store = globalThis.__liveLogStore;
 
 /** Reset the log for a job — call at the start of each new run to clear stale entries. */
 export function liveLogReset(jobId: string): void {
-  store.set(jobId, { lines: [] });
+  const prev = store.get(jobId);
+  store.set(jobId, { lines: [], epoch: (prev?.epoch ?? 0) + 1 });
 }
 
 export function liveLogPush(jobId: string, line: string): void {
   let entry = store.get(jobId);
   if (!entry) {
-    entry = { lines: [] };
+    entry = { lines: [], epoch: 1 };
     store.set(jobId, entry);
   }
   if (entry.lines.length < MAX_LINES) {
@@ -53,4 +63,9 @@ export function liveLogClose(jobId: string): void {
 
 export function liveLogIsClosed(jobId: string): boolean {
   return !!(store.get(jobId)?.closedAt);
+}
+
+/** Current epoch for a job — increments every time liveLogReset is called. */
+export function liveLogEpoch(jobId: string): number {
+  return store.get(jobId)?.epoch ?? 0;
 }
