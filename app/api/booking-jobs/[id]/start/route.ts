@@ -420,7 +420,15 @@ async function runUniversalStep(
       }
 
       try {
-        data = await runBrowserTask(input);
+        // Hard timeout: if runBrowserTask hangs (stagehand.act() CDP lock, networkidle wait, etc.)
+        // kill the attempt after 7 minutes so the retry loop can proceed or fail cleanly.
+        const BROWSER_TASK_TIMEOUT_MS = 7 * 60 * 1000;
+        data = await Promise.race([
+          runBrowserTask(input),
+          new Promise<never>((_, reject) =>
+            setTimeout(() => reject(new Error("Browser task timed out after 7 minutes")), BROWSER_TASK_TIMEOUT_MS)
+          ),
+        ]);
         liveLogClose(input.jobId);
         browserTaskErr = null;
         // Non-retryable: stop immediately
