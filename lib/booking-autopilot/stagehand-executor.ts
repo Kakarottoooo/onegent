@@ -353,6 +353,10 @@ function normaliseStartUrl(url: string, hotelName?: string): string {
       // `ro` frequently restores a refundable-only filter state on Hotels.com,
       // which breaks the property-name sidebar flow and leads to "No exact matches".
       parsed.searchParams.delete("ro");
+      // Explicitly override saved "Fully refundable only" account preference.
+      // Hotels.com reads `refundableOnly=false` from the URL and uses it to suppress
+      // the saved-preference filter, preventing "No exact matches" on non-refundable hotels.
+      parsed.searchParams.set("refundableOnly", "false");
       // Always add hotelName when we have one — Hotels.com uses this to pre-filter
       // the "Search by property name" sidebar, regardless of whether destination is
       // city-level ("New York, NY") or already a hotel name ("414 Hotel New York...").
@@ -1079,10 +1083,18 @@ The user will enter CVV and confirm payment themselves.`,
                   // or no hotel ID appears in the URL yet
                   (startProvider?.id === "hotels-com" && !/hotels\.com\/(ho|h)\d+/.test(raw.url().toLowerCase()));
 
+                // Hotels.com: skip Stage A (destination bar) entirely.
+                // The "Where to?" bar navigates to a city-level search and cannot reliably
+                // select a specific hotel property. Use Stage B (sidebar "Search by property name") directly.
+                const skipStageA = startProvider?.id === "hotels-com";
+
                 if (isCityLevel && targetHotelName) {
-                  // Hotels.com now uses Stage A (destination search bar) — the autocomplete dropdown
-                  // shows the specific hotel property as the first suggestion, which we CDP-click
-                  // to navigate directly to the hotel. Stage B (sidebar filter) is a fallback.
+                  // searchBarUsed tracks whether Stage A succeeded; false means Stage B will run.
+                  let searchBarUsed = false;
+
+                  if (skipStageA) {
+                    trace(`[ai-listing] Hotels.com: skipping Stage A — will use sidebar "Search by property name" (Stage B)`);
+                  } else {
                   trace(`[ai-listing] city-level search detected — trying Stage A (destination bar) first`);
 
                   // ── Stage A: use the destination search box at the top ──────────────────
@@ -1101,7 +1113,6 @@ The user will enter CVV and confirm payment themselves.`,
                     'input[aria-label*="destination" i]',
                   ];
 
-                  let searchBarUsed = false;
                   for (const sel of destSelectors) {
                     const visible = await raw.evaluate((s: string) => {
                       const el = document.querySelector(s);
@@ -1263,6 +1274,7 @@ The user will enter CVV and confirm payment themselves.`,
                       searchBarUsed = false; // trigger fallback below
                     }
                   }
+                  } // end of !skipStageA Stage A block
 
                   const getHotelsListingSnapshot = async (): Promise<string> => {
                     const snapshot = await raw.evaluate(() => {
