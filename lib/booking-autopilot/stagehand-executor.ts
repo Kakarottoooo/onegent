@@ -350,6 +350,9 @@ function normaliseStartUrl(url: string, hotelName?: string): string {
       if (parsed.pathname.toLowerCase() === "/search") {
         parsed.pathname = "/Hotel-Search";
       }
+      // `ro` frequently restores a refundable-only filter state on Hotels.com,
+      // which breaks the property-name sidebar flow and leads to "No exact matches".
+      parsed.searchParams.delete("ro");
       // Always add hotelName when we have one — Hotels.com uses this to pre-filter
       // the "Search by property name" sidebar, regardless of whether destination is
       // city-level ("New York, NY") or already a hotel name ("414 Hotel New York...").
@@ -400,6 +403,7 @@ export async function runBrowserTask(
       console.log(`[stagehand] ${message}`);
     }
   };
+  trace(`normaliseStartUrl: hotelNameForUrl="${hotelNameForUrl ?? "(none)"}" → startUrl=${input.startUrl.slice(0, 160)}`);
   const bookingComHelpers = createBookingComHelpers();
 
   const useCloud =
@@ -1202,49 +1206,258 @@ The user will enter CVV and confirm payment themselves.`,
                     }
                   }
 
+                  const getHotelsListingSnapshot = async (): Promise<string> => {
+                    const snapshot = await raw.evaluate(() => {
+                      const normalize = (value: string) => value.replace(/\s+/g, " ").trim();
+                      const isVisible = (el: Element | null): el is HTMLElement => {
+                        if (!(el instanceof HTMLElement)) return false;
+                        const r = el.getBoundingClientRect();
+                        return r.width > 0 && r.height > 0;
+                      };
+                      const activeFilters = Array.from(document.querySelectorAll<HTMLElement>('button, [role="button"], label, .uitk-pill'))
+                        .filter((el) => isVisible(el) && /fully refundable|free cancellation|refundable only|clear all/i.test(normalize(el.textContent ?? "")))
+                        .map((el) => normalize(el.textContent ?? "").slice(0, 60))
+                        .slice(0, 6);
+                      // Use [type="text"] to avoid matching checkboxes (e.g. FREE_CANCELLATION checkbox
+                      // inside a [data-stid*="property"] section — that's a 16x16 filter checkbox, not the search input)
+                      const input = (() => {
+                        const selectors = [
+                          'input[placeholder*="property name" i]',
+                          'input[aria-label*="property name" i]',
+                          'input[placeholder*="Marriott" i]',
+                          'input[data-testid*="property"]',
+                          '[data-stid*="property-name"] input[type="text"]',
+                          '[data-stid*="filter-name"] input[type="text"]',
+                          'aside input[type="text"]', 'section input[type="text"]',
+                        ];
+                        for (const s of selectors) {
+                          const el = document.querySelector<HTMLInputElement>(s);
+                          if (el) { const r = el.getBoundingClientRect(); if (r.width >= 60) return el; }
+                        }
+                        // Fallback: any sidebar text input wider than 60px
+                        return Array.from(document.querySelectorAll<HTMLInputElement>('input[type="text"]'))
+                          .find(el => { const r = el.getBoundingClientRect(); return r.width >= 60 && r.left <= 420 && r.top >= 100; }) ?? null;
+                      })();
+                      const inputRect = input?.getBoundingClientRect();
+                      const inputSummary = input
+                        ? `value="${normalize(input.value ?? "").slice(0, 40)}" rect=(${Math.round(inputRect?.left ?? 0)},${Math.round(inputRect?.top ?? 0)}) ${Math.round(inputRect?.width ?? 0)}x${Math.round(inputRect?.height ?? 0)}`
+                        : "missing";
+                      const visibleCards = Array.from(document.querySelectorAll<HTMLAnchorElement>('a[href]'))
+                        .filter((a) => {
+                          if (!isVisible(a)) return false;
+                          const href = a.href ?? "";
+                          return /hotels\.com\/(ho|h)\d+/i.test(href) || /Hotel-Search/i.test(href);
+                        })
+                        .map((a) => `${normalize(a.textContent ?? "").slice(0, 60)} -> ${(a.href ?? "").slice(0, 90)}`)
+                        .slice(0, 4);
+                      return {
+                        href: location.href.slice(0, 140),
+                        noExact: /no exact matches/i.test(document.body.textContent ?? ""),
+                        activeFilters,
+                        inputSummary,
+                        visibleCards,
+                      };
+                    }).catch(() => null as null | {
+                      href: string;
+                      noExact: boolean;
+                      activeFilters: string[];
+                      inputSummary: string;
+                      visibleCards: string[];
+                    });
+
+                    if (!snapshot) return "snapshot-unavailable";
+                    return [
+                      `href=${snapshot.href}`,
+                      `noExact=${snapshot.noExact}`,
+                      `filters=${snapshot.activeFilters.length > 0 ? snapshot.activeFilters.join(" | ") : "none"}`,
+                      `propertyInput=${snapshot.inputSummary}`,
+                      `cards=${snapshot.visibleCards.length > 0 ? snapshot.visibleCards.join(" | ") : "none"}`,
+                    ].join(" ; ");
+                  };
+
                   // ── Pre-Stage B: remove active filters that hide the target hotel ────────
                   // Hotels.com may have "Fully refundable properties" or similar filters active
                   // (often from the &ro parameter in the start URL). These prevent the property
                   // name filter from finding the hotel. Clear them before searching by name.
                   if (!searchBarUsed && startProvider?.id === "hotels-com") {
-                    const clearedFilters: string[] = [];
-                    await raw.evaluate(() => {
-                      // Hotels.com renders active filters as chips/pills/badges in the results header.
-                      // We target the close/remove button associated with "Fully Refundable" etc.
+                    trace(`[ai-listing] Hotels.com snapshot before filter clear -> ${await getHotelsListingSnapshot()}`);
+                    const filterClear = await raw.evaluate(() => {
                       const filterTerms = /fully refundable|free cancellation|refundable only/i;
-                      // Strategy A: UITK pill/chip with an × button
-                      const chips = Array.from(document.querySelectorAll<HTMLElement>(
-                        '[data-testid*="filterChip"], [data-testid*="applied-filter"], ' +
-                        '.uitk-pill, [class*="filter-pill"], [class*="FilterChip"], ' +
-                        '[data-stid*="filter-chip"]'
-                      ));
-                      for (const chip of chips) {
-                        if (!filterTerms.test(chip.textContent ?? "")) continue;
-                        const closeBtn = chip.querySelector<HTMLElement>('button, [role="button"]');
-                        if (closeBtn) { closeBtn.click(); return; }
-                        chip.click();
+                      const normalize = (value: string) => value.replace(/\s+/g, " ").trim();
+                      const isVisible = (el: Element | null): el is HTMLElement => {
+                        if (!(el instanceof HTMLElement)) return false;
+                        const r = el.getBoundingClientRect();
+                        return r.width > 0 && r.height > 0;
+                      };
+                      const isInViewport = (el: Element | null): el is HTMLElement => {
+                        if (!(el instanceof HTMLElement)) return false;
+                        const r = el.getBoundingClientRect();
+                        return r.width > 0 && r.height > 0 && r.bottom >= 0 && r.top <= window.innerHeight;
+                      };
+                      const clicked: string[] = [];
+                      const fallbackTargets: Array<{ x: number; y: number; label: string }> = [];
+
+                      const clickIfVisible = (el: Element | null, label: string) => {
+                        if (!isVisible(el)) return false;
+                        el.click();
+                        clicked.push(label);
+                        return true;
+                      };
+
+                      const chipSelectors = [
+                        '[data-testid*="filterChip"]',
+                        '[data-testid*="applied-filter"]',
+                        '.uitk-pill',
+                        '[class*="filter-pill"]',
+                        '[class*="FilterChip"]',
+                        '[data-stid*="filter-chip"]',
+                        'button',
+                        '[role="button"]',
+                      ];
+
+                      for (const selector of chipSelectors) {
+                        const chips = Array.from(document.querySelectorAll<HTMLElement>(selector));
+                        for (const chip of chips) {
+                          const text = normalize(chip.textContent ?? "");
+                          if (!filterTerms.test(text)) continue;
+                          if (isInViewport(chip)) {
+                            const r = chip.getBoundingClientRect();
+                            fallbackTargets.push({
+                              x: Math.round(r.right - Math.max(14, Math.min(24, r.width * 0.12))),
+                              y: Math.round(r.top + r.height / 2),
+                              label: `chip-close:${text.slice(0, 40)}`,
+                            });
+                          }
+                          const closeBtn = chip.querySelector<HTMLElement>(
+                            'button, [role="button"], [aria-label*="remove" i], [aria-label*="close" i]'
+                          );
+                          if (clickIfVisible(closeBtn, `chip-close:${text.slice(0, 40)}`)) continue;
+                          clickIfVisible(chip, `chip:${text.slice(0, 40)}`);
+                        }
                       }
-                      // Strategy B: checkbox/toggle in the sidebar
+
                       const checkboxes = Array.from(document.querySelectorAll<HTMLElement>(
                         '[role="checkbox"], input[type="checkbox"]'
                       ));
                       for (const cb of checkboxes) {
                         const label = cb.closest('label') ?? cb.parentElement;
-                        if (!filterTerms.test(label?.textContent ?? "")) continue;
+                        const labelText = normalize(label?.textContent ?? "");
+                        if (!filterTerms.test(labelText)) continue;
                         const isChecked = cb.getAttribute('aria-checked') === 'true' ||
                           (cb as HTMLInputElement).checked;
-                        if (isChecked) { cb.click(); return; }
+                        if (isChecked) {
+                          // Try DOM click first (may not trigger React handler, but attempt anyway)
+                          clickIfVisible(label ?? cb, `checkbox:${labelText.slice(0, 40)}`);
+                          // Always scroll into view and capture coordinates for CDP coordinate click.
+                          // Hotels.com checkboxes are often far below the fold (y > 2000) and DOM
+                          // .click() doesn't reliably trigger their React state handlers.
+                          const target = label ?? cb;
+                          (target as HTMLElement).scrollIntoView({ behavior: 'instant', block: 'center' });
+                          const r = (target as HTMLElement).getBoundingClientRect();
+                          if (r.width > 0 && r.height > 0) {
+                            fallbackTargets.push({
+                              x: Math.round(r.left + r.width / 2),
+                              y: Math.round(r.top + r.height / 2),
+                              label: `checkbox-cdp:${labelText.slice(0, 40)}`,
+                            });
+                          }
+                        }
                       }
-                    }).catch(() => {});
-                    // Check if anything was removed (any filter text changed)
-                    const stillHasFilter = await raw.evaluate(() =>
-                      /fully refundable/i.test(document.body.textContent ?? "")
-                    ).catch(() => true);
-                    if (!stillHasFilter || clearedFilters.length === 0) {
-                      // Wait for results to update regardless — Hotels.com may take a moment
+
+                      const links = Array.from(document.querySelectorAll<HTMLElement>('a, button, [role="button"]'));
+                      for (const link of links) {
+                        const text = normalize(link.textContent ?? "");
+                        if (!/try removing filters|remove filters|clear filters|clear all/i.test(text)) continue;
+                        if (isInViewport(link)) {
+                          const r = link.getBoundingClientRect();
+                          fallbackTargets.unshift({
+                            x: Math.round(r.left + r.width / 2),
+                            y: Math.round(r.top + r.height / 2),
+                            label: `clear-link:${text.slice(0, 40)}`,
+                          });
+                        }
+                        clickIfVisible(link, `clear-link:${text.slice(0, 40)}`);
+                      }
+
+                      const genericFilterTargets = Array.from(document.querySelectorAll<HTMLElement>('button, [role="button"], label, div, span'))
+                        .filter((el) => {
+                          if (!isInViewport(el)) return false;
+                          const text = normalize(el.textContent ?? "");
+                          if (!filterTerms.test(text)) return false;
+                          const r = el.getBoundingClientRect();
+                          const inLikelyFilterZone = r.left < 420 || r.top < 260;
+                          if (!inLikelyFilterZone) return false;
+                          return r.width >= 60 && r.width <= 360 && r.height >= 20 && r.height <= 64;
+                        })
+                        .slice(0, 8);
+                      for (const el of genericFilterTargets) {
+                        const text = normalize(el.textContent ?? "");
+                        const r = el.getBoundingClientRect();
+                        fallbackTargets.push({
+                          x: Math.round(r.right - Math.max(12, Math.min(22, r.width * 0.12))),
+                          y: Math.round(r.top + r.height / 2),
+                          label: `generic-filter:${text.slice(0, 40)}`,
+                        });
+                      }
+
+                      const remaining = Array.from(document.querySelectorAll<HTMLElement>('button, [role="button"], label, .uitk-pill'))
+                        .filter((el) => isVisible(el) && filterTerms.test(normalize(el.textContent ?? "")))
+                        .map((el) => normalize(el.textContent ?? "").slice(0, 60))
+                        .slice(0, 5);
+
+                      const dedupedFallbackTargets = fallbackTargets.filter((target, index, all) =>
+                        all.findIndex((item) =>
+                          item.label === target.label &&
+                          Math.abs(item.x - target.x) <= 2 &&
+                          Math.abs(item.y - target.y) <= 2
+                        ) === index
+                      ).slice(0, 6);
+
+                      return { clicked, remaining, fallbackTargets: dedupedFallbackTargets };
+                    }).catch(() => ({
+                      clicked: [] as string[],
+                      remaining: [] as string[],
+                      fallbackTargets: [] as Array<{ x: number; y: number; label: string }>,
+                    }));
+
+                    if (filterClear.clicked.length > 0) {
+                      trace(`[ai-listing] Hotels.com: cleared active filters -> ${filterClear.clicked.join(" || ")}`);
+                    } else {
+                      trace(`[ai-listing] Hotels.com: no active refundable filter chip/checkbox was clickable before Stage B`);
+                      if (filterClear.fallbackTargets.length > 0) {
+                        trace(`[ai-listing] Hotels.com: filter fallback targets -> ${filterClear.fallbackTargets.map((t) => `${t.label}@(${t.x},${t.y})`).join(" || ")}`);
+                      }
+                      for (const fallbackTarget of filterClear.fallbackTargets.slice(0, 3)) {
+                        await sh(raw).click(fallbackTarget.x, fallbackTarget.y);
+                        trace(
+                          `[ai-listing] Hotels.com: coordinate-clicked filter fallback ` +
+                          `"${fallbackTarget.label}" at ` +
+                          `(${fallbackTarget.x},${fallbackTarget.y})`
+                        );
+                        await new Promise(r => setTimeout(r, 500));
+                      }
                     }
+
                     trace(`[ai-listing] Hotels.com: pre-Stage-B filter clear attempted — waiting for results`);
-                    await new Promise(r => setTimeout(r, 2000));
+                    await new Promise(r => setTimeout(r, 2500));
+
+                    const remainingFilterDiagnostics = await raw.evaluate(() => {
+                      const normalize = (value: string) => value.replace(/\s+/g, " ").trim();
+                      const isVisible = (el: Element | null): el is HTMLElement => {
+                        if (!(el instanceof HTMLElement)) return false;
+                        const r = el.getBoundingClientRect();
+                        return r.width > 0 && r.height > 0;
+                      };
+                      return Array.from(document.querySelectorAll<HTMLElement>('button, [role="button"], label, .uitk-pill'))
+                        .filter((el) => isVisible(el) && /fully refundable|free cancellation|refundable only/i.test(normalize(el.textContent ?? "")))
+                        .map((el) => normalize(el.textContent ?? "").slice(0, 60))
+                        .slice(0, 5);
+                    }).catch(() => [] as string[]);
+
+                    if (remainingFilterDiagnostics.length > 0) {
+                      trace(`[ai-listing] Hotels.com: refundable filters still visible after clear -> ${remainingFilterDiagnostics.join(" || ")}`);
+                    }
+                    trace(`[ai-listing] Hotels.com snapshot after filter clear -> ${await getHotelsListingSnapshot()}`);
                   }
 
                   // ── Stage B: "Search by property name" sidebar filter (fallback) ────────
@@ -1260,22 +1473,44 @@ The user will enter CVV and confirm payment themselves.`,
                         'input[aria-label*="property name" i]',
                         'input[placeholder*="Marriott" i]',
                         'input[data-testid*="property"]',
-                        // Hotels.com sidebar uses a generic text input inside a labelled section
+                        // Hotels.com sidebar: use [type="text"] to avoid matching checkboxes
+                        '[data-stid*="property-name"] input[type="text"]',
+                        '[data-stid*="hotel-name"] input[type="text"]',
+                        '[data-stid*="filter-name"] input[type="text"]',
                         'aside input[type="text"]:not([type="hidden"])',
                         'nav input[type="text"]:not([type="hidden"])',
-                        '[data-stid*="property"] input',
+                        'section input[type="text"]:not([type="hidden"])',
                       ];
-                      for (const s of selectors) {
-                        const el = document.querySelector<HTMLInputElement>(s);
-                        if (!el) continue;
+                      const tryInput = (el: HTMLInputElement | null, label: string): { sel: string; cx: number; cy: number } | null => {
+                        if (!el) return null;
                         const r = el.getBoundingClientRect();
-                        if (r.width === 0 || r.height === 0) continue;
-                        if (el.disabled) continue;
+                        if (r.width === 0 || r.height === 0) return null;
+                        if (el.disabled) return null;
+                        // Skip checkbox-sized elements (checkboxes are typically 16-20px wide)
+                        if (r.width < 60) return null;
                         // Scroll into view immediately — element may be far below the fold (y > 2000)
                         el.scrollIntoView({ behavior: 'instant', block: 'center' });
                         el.focus();
                         el.click();
-                        return { sel: s };
+                        const after = el.getBoundingClientRect();
+                        return { sel: label, cx: Math.round(after.left + after.width / 2), cy: Math.round(after.top + after.height / 2) };
+                      };
+                      for (const s of selectors) {
+                        const result = tryInput(document.querySelector<HTMLInputElement>(s), s);
+                        if (result) return result;
+                      }
+                      // Broader fallback: find any visible text input in the left sidebar area.
+                      // Hotels.com may use non-standard data attributes for the property name filter.
+                      const allTextInputs = Array.from(document.querySelectorAll<HTMLInputElement>(
+                        'input[type="text"]:not([disabled]):not([readonly])'
+                      ));
+                      for (const el of allTextInputs) {
+                        const r = el.getBoundingClientRect();
+                        if (r.width < 80 || r.height < 20) continue; // must be a real text field
+                        if (r.left > 420) continue; // only sidebar (left ~30% of typical 1400px screen)
+                        if (r.top < 100) continue; // skip main destination search bar at top
+                        const result = tryInput(el, 'sidebar-text-input-fallback');
+                        if (result) return result;
                       }
                       return null;
                     }).catch(() => null);
@@ -1283,10 +1518,16 @@ The user will enter CVV and confirm payment themselves.`,
                     if (!inputInfo) {
                       trace(`[ai-listing] Stage B: property name input not found in DOM`);
                     } else {
-                    const { sel } = inputInfo;
+                    const { sel, cx, cy } = inputInfo;
                     try {
-                        // Brief pause for focus to settle after DOM el.focus() + el.click()
+                        // Brief pause for scroll/focus to settle after DOM el.focus() + el.click()
                         await new Promise(r => setTimeout(r, 400));
+                        // CDP coordinate click to ensure the CORRECT element gets focus in the browser.
+                        // DOM el.focus() inside evaluate() sets focus, but CDP type() uses whatever has
+                        // browser-level focus. The coordinate click lands on the exact input element.
+                        trace(`[ai-listing] CDP clicking property name input at (${cx},${cy}) sel="${sel}"`);
+                        await sh(raw).click(cx, cy);
+                        await new Promise(r => setTimeout(r, 300));
                         // Select-all + type via Stagehand CDP APIs (no .keyboard/.mouse controller).
                         await sh(raw).keyPress("Control+a");
                         await new Promise(r => setTimeout(r, 150));
@@ -1294,6 +1535,171 @@ The user will enter CVV and confirm payment themselves.`,
                         const typeaheadText = targetHotelName.slice(0, Math.min(25, targetHotelName.length)).trimEnd();
                         await sh(raw).type(typeaheadText, { delay: 80 });
                         trace(`[ai-listing] property name filter typed "${typeaheadText}" via "${sel}" (DOM focus/click)`);
+                        trace(`[ai-listing] Hotels.com snapshot after property typing -> ${await getHotelsListingSnapshot()}`);
+
+                        const verifyHotelsSidebarResult = async (): Promise<{
+                          status: "detail" | "listing" | "no_exact" | "unknown";
+                          text?: string;
+                          href?: string;
+                        }> => {
+                          if (isHotelDetailUrl(raw.url())) {
+                            return { status: "detail", href: raw.url() };
+                          }
+
+                          return raw.evaluate(({ hotelN }: { hotelN: string }) => {
+                            const normalize = (value: string) =>
+                              value.toLowerCase().replace(/[^a-z0-9]+/g, " ").replace(/\s+/g, " ").trim();
+                            const isVisible = (el: Element | null): el is HTMLElement => {
+                              if (!(el instanceof HTMLElement)) return false;
+                              const r = el.getBoundingClientRect();
+                              return r.width > 0 && r.height > 0;
+                            };
+                            const textContent = normalize(document.body.textContent ?? "");
+                            if (textContent.includes("no exact matches")) {
+                              return { status: "no_exact" as const };
+                            }
+
+                            const nameWords = normalize(hotelN)
+                              .split(" ")
+                              .filter((w: string) => w.length > 2 || /^\d+$/.test(w));
+
+                            const anchors = Array.from(document.querySelectorAll<HTMLAnchorElement>('a[href*="/ho"], a[href*="/h"]'))
+                              .filter((el) => isVisible(el))
+                              .map((el) => {
+                                const text = normalize(el.textContent ?? "");
+                                const href = el.href ?? "";
+                                const score = nameWords.filter((w: string) => text.includes(w) || href.toLowerCase().includes(w)).length;
+                                return { text, href, score };
+                              })
+                              .sort((a, b) => b.score - a.score);
+
+                            const best = anchors[0];
+                            if (best && best.score >= Math.ceil(nameWords.length * 0.5)) {
+                              return { status: "listing" as const, text: best.text.slice(0, 120), href: best.href };
+                            }
+
+                            return { status: "unknown" as const };
+                          }, { hotelN: targetHotelName ?? "" }).catch(() => ({ status: "unknown" as const }));
+                        };
+
+                        const getHotelsDropdownDiagnostics = async (): Promise<string[]> => {
+                          return raw.evaluate(({ hotelN }: { hotelN: string }) => {
+                            const findPropertyNameInput = (): HTMLInputElement | null => {
+                              const sels = ['input[placeholder*="property name" i]','input[placeholder*="Marriott" i]','input[aria-label*="property name" i]','input[data-testid*="property"]','[data-stid*="property-name"] input[type="text"]','aside input[type="text"]','section input[type="text"]'];
+                              for (const s of sels) { const el = document.querySelector<HTMLInputElement>(s); if (el) { const r=el.getBoundingClientRect(); if(r.width>=60) return el; } }
+                              return Array.from(document.querySelectorAll<HTMLInputElement>('input[type="text"]')).find(el=>{const r=el.getBoundingClientRect();return r.width>=60&&r.left<=420&&r.top>=100;})??null;
+                            };
+                            const input = findPropertyNameInput();
+                            if (!input) return [];
+
+                            const normalize = (value: string) =>
+                              value.replace(/\s+/g, " ").trim().slice(0, 80);
+                            const hotelWords = hotelN.toLowerCase().split(/\s+/)
+                              .filter((w: string) => w.length > 2 || /^\d+$/.test(w));
+                            const inputRect = input.getBoundingClientRect();
+                            const selectorCandidates = Array.from(document.querySelectorAll<HTMLElement>(
+                              '[role="option"], [role="listbox"] li, [data-stid*="typeahead-item"], ' +
+                              '[data-stid*="typeahead"] li, [data-stid*="typeahead"] a, ' +
+                              'ul[role="listbox"] > li, ul[role="listbox"] > *, [role="listbox"] > *'
+                            )).filter((el) => {
+                              const r = el.getBoundingClientRect();
+                              if (r.width === 0 || r.height === 0) return false;
+                              if (r.bottom < 0 || r.top > window.innerHeight) return false;
+                              const verticallyNear =
+                                (r.top >= inputRect.top - 260 && r.top <= inputRect.bottom + 360) ||
+                                (r.bottom >= inputRect.top - 260 && r.bottom <= inputRect.bottom + 360);
+                              const horizontallyNear = r.right >= inputRect.left - 40 && r.left <= inputRect.right + 520;
+                              return verticallyNear && horizontallyNear;
+                            });
+                            if (selectorCandidates.length > 0) {
+                              return selectorCandidates.slice(0, 5).map((el) => {
+                                const r = el.getBoundingClientRect();
+                                return `${normalize(el.textContent ?? "")} @ (${Math.round(r.left)},${Math.round(r.top)}) ${Math.round(r.width)}x${Math.round(r.height)}`;
+                              });
+                            }
+
+                            const sampled = new Map<HTMLElement, true>();
+                            const pointStacks: string[] = [];
+                            const sampleXs = [
+                              inputRect.left + Math.min(32, inputRect.width / 4),
+                              inputRect.left + Math.min(96, Math.max(48, inputRect.width / 2)),
+                            ];
+                            const sampleYs = [32, 64, 96, 128, 160].map((offset) => inputRect.bottom + offset);
+                            for (const x of sampleXs) {
+                              for (const y of sampleYs) {
+                                const stackTexts: string[] = [];
+                                for (const el of document.elementsFromPoint(x, y)) {
+                                  if (!(el instanceof HTMLElement)) continue;
+                                  if (el === input || el.contains(input) || input.contains(el)) continue;
+                                  const text = normalize(el.textContent ?? "");
+                                  if (!text) continue;
+                                  if (stackTexts.length < 3) stackTexts.push(text.slice(0, 50));
+                                  if (/^search\s+for\b/i.test(text)) continue;
+                                  const matches = hotelWords.filter((w: string) => text.toLowerCase().includes(w)).length;
+                                  if (matches < Math.ceil(hotelWords.length * 0.4)) continue;
+                                  sampled.set(el, true);
+                                }
+                                if (stackTexts.length > 0 && pointStacks.length < 6) {
+                                  pointStacks.push(`point(${Math.round(x)},${Math.round(y)}): ${stackTexts.join(" > ")}`);
+                                }
+                              }
+                            }
+
+                            const sampledEntries = Array.from(sampled.keys()).slice(0, 5).map((el) => {
+                              const r = el.getBoundingClientRect();
+                              return `${normalize(el.textContent ?? "")} @ (${Math.round(r.left)},${Math.round(r.top)}) ${Math.round(r.width)}x${Math.round(r.height)}`;
+                            });
+                            if (sampledEntries.length > 0) return sampledEntries;
+                            if (pointStacks.length > 0) return pointStacks;
+                            return [
+                              `inputRect=(${Math.round(inputRect.left)},${Math.round(inputRect.top)}) ${Math.round(inputRect.width)}x${Math.round(inputRect.height)}`,
+                              `inputValue=${normalize(input.value ?? "").slice(0, 50)}`,
+                            ];
+                          }, { hotelN: targetHotelName ?? "" }).catch(() => [] as string[]);
+                        };
+
+                        const waitForHotelsDropdownCandidates = async (): Promise<boolean> => {
+                          const startedAt = Date.now();
+                          while (Date.now() - startedAt < 4000) {
+                            const found = await raw.evaluate(({ hotelN, selArg }: { hotelN: string; selArg: string }) => {
+                              const findPropertyNameInput = (): HTMLInputElement | null => {
+                                if (selArg && selArg !== 'sidebar-text-input-fallback') { const el=document.querySelector<HTMLInputElement>(selArg); if(el){const r=el.getBoundingClientRect();if(r.width>=60)return el;} }
+                                const sels=['input[placeholder*="property name" i]','input[placeholder*="Marriott" i]','input[aria-label*="property name" i]','input[data-testid*="property"]','[data-stid*="property-name"] input[type="text"]','aside input[type="text"]','section input[type="text"]'];
+                                for(const s of sels){const el=document.querySelector<HTMLInputElement>(s);if(el){const r=el.getBoundingClientRect();if(r.width>=60)return el;}}
+                                return Array.from(document.querySelectorAll<HTMLInputElement>('input[type="text"]')).find(el=>{const r=el.getBoundingClientRect();return r.width>=60&&r.left<=420&&r.top>=100;})??null;
+                              };
+                              const input = findPropertyNameInput();
+                              if (!input) return false;
+
+                              const normalize = (value: string) =>
+                                value.toLowerCase().replace(/[^a-z0-9]+/g, " ").replace(/\s+/g, " ").trim();
+                              const hotelWords = normalize(hotelN)
+                                .split(" ")
+                                .filter((w: string) => w.length > 2 || /^\d+$/.test(w));
+                              const inputRect = input.getBoundingClientRect();
+
+                              const nearby = Array.from(document.querySelectorAll<HTMLElement>("body *")).some((el) => {
+                                const r = el.getBoundingClientRect();
+                                if (r.width === 0 || r.height === 0) return false;
+                                if (r.bottom < inputRect.top - 260 || r.top > inputRect.bottom + 360) return false;
+                                if (r.right < inputRect.left - 40 || r.left > inputRect.right + 520) return false;
+                                const text = normalize(el.textContent ?? "");
+                                if (!text || /^search\s+for\b/.test(text) || /^clear$/.test(text)) return false;
+                                const matches = hotelWords.filter((w: string) => text.includes(w)).length;
+                                return matches >= Math.ceil(hotelWords.length * 0.4);
+                              });
+
+                              input.focus();
+                              const end = input.value.length;
+                              input.setSelectionRange?.(end, end);
+                              return nearby;
+                            }, { hotelN: targetHotelName ?? "", selArg: sel }).catch(() => false);
+
+                            if (found) return true;
+                            await new Promise((r) => setTimeout(r, 250));
+                          }
+                          return false;
+                        };
 
                         // ── Strategy 1: click hotel property CARD in dropdown ────────────────
                         // Hotels.com "Search by property name" typeahead shows:
@@ -1301,8 +1707,18 @@ The user will enter CVV and confirm payment themselves.`,
                         //   Item 1: "Search for '...'" button       → text filter only
                         // The hotel card is NOT always a <button> — Hotels.com UITK uses <li> or <a>.
                         // We exclude elements that contain an <input> child (the input wrapper).
+                        const dropdownReady = await waitForHotelsDropdownCandidates();
+                        if (!dropdownReady) {
+                          const preDiag = await getHotelsDropdownDiagnostics();
+                          if (preDiag.length > 0) {
+                            trace(`[ai-listing] pre-Strategy diagnostics: nearby dropdown candidates -> ${preDiag.join(" || ")}`);
+                          } else {
+                            trace(`[ai-listing] pre-Strategy diagnostics: no nearby dropdown candidates detected after wait`);
+                          }
+                        }
+
                         let suggClicked = false;
-                        await new Promise(r => setTimeout(r, 1800)); // wait for typeahead to render
+                        await new Promise(r => setTimeout(r, 600)); // allow last layout/animation tick to settle
                         try {
                           // Strategy 1: find the hotel card in the dropdown via DOM, return its
                           // coordinates or href — do NOT use evaluate().click() (synthetic DOM click
@@ -1316,23 +1732,65 @@ The user will enter CVV and confirm payment themselves.`,
                               if (/^clear$/i.test((el.textContent ?? "").trim())) return true;
                               return false;
                             };
+                            const isSearchForRow = (el: HTMLElement) =>
+                              /^search\s+for\b/i.test((el.textContent ?? "").trim());
+                            const findPropertyNameInput2 = (): HTMLInputElement | null => {
+                              const sels=['input[placeholder*="property name" i]','input[placeholder*="Marriott" i]','input[aria-label*="property name" i]','input[data-testid*="property"]','[data-stid*="property-name"] input[type="text"]','aside input[type="text"]','section input[type="text"]'];
+                              for(const s of sels){const el=document.querySelector<HTMLInputElement>(s);if(el){const r=el.getBoundingClientRect();if(r.width>=60)return el;}}
+                              return Array.from(document.querySelectorAll<HTMLInputElement>('input[type="text"]')).find(el=>{const r=el.getBoundingClientRect();return r.width>=60&&r.left<=420&&r.top>=100;})??null;
+                            };
+                            const input = findPropertyNameInput2();
+                            const inputRect = input?.getBoundingClientRect();
                             const visibleOpts = Array.from(document.querySelectorAll<HTMLElement>(
                               '[role="option"], [role="listbox"] li, [data-stid*="typeahead-item"], ' +
                               '[data-stid*="typeahead"] li, [data-stid*="typeahead"] a, ' +
                               'ul[role="listbox"] > li, [data-stid*="typeahead"] button'
                             )).filter(el => {
                               const r = el.getBoundingClientRect();
-                              return r.width > 0 && r.height > 0 && !isInputWrapper(el);
+                              if (r.width === 0 || r.height === 0) return false;
+                              if (r.bottom < 0 || r.top > window.innerHeight) return false;
+                              if (isInputWrapper(el) || isSearchForRow(el)) return false;
+                              if (!inputRect) return true;
+                              const verticallyNear =
+                                (r.top >= inputRect.top - 260 && r.top <= inputRect.bottom + 360) ||
+                                (r.bottom >= inputRect.top - 260 && r.bottom <= inputRect.bottom + 360);
+                              const horizontallyNear = r.right >= inputRect.left - 40 && r.left <= inputRect.right + 520;
+                              return verticallyNear && horizontallyNear;
                             });
-
-                            if (visibleOpts.length === 0) return { action: "none" as const };
 
                             const nameWords = hotelN.toLowerCase().split(/\s+/)
                               .filter((w: string) => w.length > 2 || /^\d+$/.test(w));
 
+                            const sampleElementsFromPoint = () => {
+                              if (!inputRect) return [] as HTMLElement[];
+                              const picked = new Map<HTMLElement, true>();
+                              const sampleXs = [
+                                inputRect.left + Math.min(32, inputRect.width / 4),
+                                inputRect.left + Math.min(96, Math.max(48, inputRect.width / 2)),
+                              ];
+                              const sampleYs = [32, 64, 96, 128, 160].map((offset) => inputRect.bottom + offset);
+                              for (const x of sampleXs) {
+                                for (const y of sampleYs) {
+                                  for (const el of document.elementsFromPoint(x, y)) {
+                                    if (!(el instanceof HTMLElement)) continue;
+                                    if (isInputWrapper(el) || isSearchForRow(el)) continue;
+                                    if (el === input || el.contains(input as Node) || (input && input.contains(el))) continue;
+                                    const text = (el.textContent ?? "").toLowerCase();
+                                    const matches = nameWords.filter((w: string) => text.includes(w)).length;
+                                    if (matches < Math.ceil(nameWords.length * 0.4)) continue;
+                                    picked.set(el, true);
+                                  }
+                                }
+                              }
+                              return Array.from(picked.keys());
+                            };
+
+                            const candidatePool = visibleOpts.length > 0 ? visibleOpts : sampleElementsFromPoint();
+                            if (candidatePool.length === 0) return { action: "none" as const };
+
                             // Priority 1: find the hotel card element by name match,
                             // then look for an <a href> to a hotel page (use goto instead of click).
-                            const hotelCard = visibleOpts.find(el => {
+                            const hotelCard = candidatePool.find(el => {
                               const text = (el.textContent ?? "").toLowerCase();
                               const matches = nameWords.filter((w: string) => text.includes(w)).length;
                               return matches >= Math.ceil(nameWords.length * 0.5);
@@ -1377,7 +1835,7 @@ The user will enter CVV and confirm payment themselves.`,
                             }
 
                             // Priority 3: return coordinates of first option (real mouse click)
-                            const first = visibleOpts[0];
+                            const first = candidatePool[0];
                             (first as HTMLElement).scrollIntoView({ behavior: 'instant', block: 'nearest' });
                             const r = first.getBoundingClientRect();
                             return {
@@ -1408,31 +1866,35 @@ The user will enter CVV and confirm payment themselves.`,
                             // (triggers real browser mouse events, unlike DOM .click())
                             await sh(raw).click(res.x, res.y);
                             await new Promise(r => setTimeout(r, 3000));
-                            if (isHotelDetailUrl(raw.url())) {
+                            const stageBResult = await verifyHotelsSidebarResult();
+                            if (stageBResult.status === "detail") {
                               suggClicked = true;
                               trace(`[ai-listing] Strategy 1: hotel card → hotel detail: ${raw.url().slice(0, 80)}`);
+                            } else if (stageBResult.status === "listing") {
+                              suggClicked = true;
+                              trace(`[ai-listing] Strategy 1: sidebar filter applied — target result visible (${(stageBResult.text ?? "").slice(0, 70)})`);
                             } else {
-                              const isNoMatch = await raw.evaluate(() =>
-                                /no exact match/i.test(document.body.textContent ?? "")
-                              ).catch(() => false);
-                              if (!isNoMatch) {
-                                suggClicked = true;
-                                trace(`[ai-listing] Strategy 1: sidebar filter applied — listing updated`);
-                              } else {
+                              if (stageBResult.status === "no_exact") {
                                 trace(`[ai-listing] Strategy 1: "no exact match" after coordinate click — retrying dropdown`);
-                                // Re-focus input and retype so Strategy 2 can try
-                                await raw.evaluate((selArg: string) => {
-                                  const el = document.querySelector<HTMLInputElement>(selArg);
-                                  if (el) { el.scrollIntoView({ behavior: 'instant', block: 'center' }); el.focus(); el.click(); }
-                                }, sel).catch(() => {});
-                                await new Promise(r => setTimeout(r, 300));
-                                await sh(raw).keyPress("Control+a");
-                                await sh(raw).type(typeaheadText, { delay: 80 });
-                                await new Promise(r => setTimeout(r, 1800));
+                              } else {
+                                trace(`[ai-listing] Strategy 1: click did not expose target result — retrying dropdown`);
                               }
+                              // Re-focus input and retype so Strategy 2 can try
+                              await raw.evaluate((selArg: string) => {
+                                const el = document.querySelector<HTMLInputElement>(selArg);
+                                if (el) { el.scrollIntoView({ behavior: 'instant', block: 'center' }); el.focus(); el.click(); }
+                              }, sel).catch(() => {});
+                              await new Promise(r => setTimeout(r, 300));
+                              await sh(raw).keyPress("Control+a");
+                              await sh(raw).type(typeaheadText, { delay: 80 });
+                              await new Promise(r => setTimeout(r, 1800));
                             }
                           } else {
                             trace(`[ai-listing] Strategy 1: no dropdown suggestions found`);
+                            const diag = await getHotelsDropdownDiagnostics();
+                            if (diag.length > 0) {
+                              trace(`[ai-listing] Strategy 1 diagnostics: nearby dropdown candidates -> ${diag.join(" || ")}`);
+                            }
                           }
                         } catch (kbErr) {
                           trace(`[ai-listing] Strategy 1 failed: ${(kbErr as Error).message?.slice(0, 60)}`);
@@ -1467,11 +1929,12 @@ The user will enter CVV and confirm payment themselves.`,
 
                               // Among found items, find best text match for hotel name.
                               // Fall back to index 0 if no match.
-                              let targetIdx = 0;
+                              let targetIdx = -1;
                               for (let i = 0; i < Math.min(count, 6); i++) {
                                 const text = (await raw.locator(spec).nth(i).textContent().catch(() => "")) ?? "";
                                 // Skip clear button
                                 if (/^clear$/i.test(text.trim())) continue;
+                                if (/^search\s+for\b/i.test(text.trim())) continue;
                                 const ltext = text.toLowerCase();
                                 const matches = nameWords.filter((w: string) => ltext.includes(w)).length;
                                 if (matches >= Math.ceil(nameWords.length * 0.5)) {
@@ -1479,6 +1942,7 @@ The user will enter CVV and confirm payment themselves.`,
                                   break;
                                 }
                               }
+                              if (targetIdx < 0) continue;
 
                               // Coordinate click: move mouse to center of element then click
                               const loc = raw.locator(spec).nth(targetIdx);
@@ -1493,16 +1957,28 @@ The user will enter CVV and confirm payment themselves.`,
                                 await loc.click().catch(() => {});
                                 trace(`[ai-listing] Strategy 2: synthetic-clicked item ${targetIdx}/${count} via "${spec}" — "${itemText.trim().slice(0, 50)}"`);
                               }
-                              suggClicked = true;
                               // Check if we navigated to hotel detail page
                               await new Promise(r => setTimeout(r, 2500));
-                              if (isHotelDetailUrl(raw.url())) {
+                              const stageBResult = await verifyHotelsSidebarResult();
+                              if (stageBResult.status === "detail") {
+                                suggClicked = true;
                                 trace(`[ai-listing] Strategy 2: hotel card → hotel detail: ${raw.url().slice(0, 80)}`);
+                              } else if (stageBResult.status === "listing") {
+                                suggClicked = true;
+                                trace(`[ai-listing] Strategy 2: target result visible after dropdown click (${(stageBResult.text ?? "").slice(0, 70)})`);
+                              } else if (stageBResult.status === "no_exact") {
+                                trace(`[ai-listing] Strategy 2: click led to "No exact matches" — continuing fallback`);
+                              } else {
+                                trace(`[ai-listing] Strategy 2: click did not expose target result`);
                               }
                               break;
                             }
                             if (!suggClicked) {
                               trace(`[ai-listing] Strategy 2: no dropdown items found via any locator`);
+                              const diag = await getHotelsDropdownDiagnostics();
+                              if (diag.length > 0) {
+                                trace(`[ai-listing] Strategy 2 diagnostics: nearby dropdown candidates -> ${diag.join(" || ")}`);
+                              }
                             }
                           } catch (s2Err) {
                             trace(`[ai-listing] Strategy 2 failed: ${(s2Err as Error).message?.slice(0, 60)}`);
@@ -1537,20 +2013,31 @@ The user will enter CVV and confirm payment themselves.`,
                               .filter((w: string) => w.length > 2 || /^\d+$/.test(w));
                             const hotelCard = allBelow.find(el => {
                               const text = (el.textContent ?? "").toLowerCase();
+                              if (/^search\s+for\b/i.test((el.textContent ?? "").trim())) return false;
                               const matches = nameWords.filter((w: string) => text.includes(w)).length;
                               return matches >= Math.ceil(nameWords.length * 0.5);
                             });
-                            // Fall back to "Search for '...'" if no card found, then first item
-                            const searchForEl = allBelow.find(el =>
-                              /^search\s+for\b/i.test((el.textContent ?? "").trim())
-                            );
-                            const target = hotelCard ?? searchForEl ?? allBelow[0];
+                            const target = hotelCard ?? null;
+                            if (!target) return false;
                             (target as HTMLElement).scrollIntoView({ block: "nearest" });
                             (target as HTMLElement).click();
                             return true;
                           }, { hotelN: targetHotelName ?? "" }).catch(() => false);
                           if (suggClicked) {
                             trace(`[ai-listing] Strategy 3: clicked dropdown item via position-based DOM`);
+                            await new Promise(r => setTimeout(r, 2500));
+                            const stageBResult = await verifyHotelsSidebarResult();
+                            if (stageBResult.status === "detail") {
+                              trace(`[ai-listing] Strategy 3: hotel card → hotel detail: ${raw.url().slice(0, 80)}`);
+                            } else if (stageBResult.status === "listing") {
+                              trace(`[ai-listing] Strategy 3: target result visible after DOM click (${(stageBResult.text ?? "").slice(0, 70)})`);
+                            } else if (stageBResult.status === "no_exact") {
+                              suggClicked = false;
+                              trace(`[ai-listing] Strategy 3: click led to "No exact matches" — treating as failure`);
+                            } else {
+                              suggClicked = false;
+                              trace(`[ai-listing] Strategy 3: click did not expose target result`);
+                            }
                           }
                         }
 
@@ -1561,10 +2048,14 @@ The user will enter CVV and confirm payment themselves.`,
                             trace(`[ai-listing] sidebar suggestion navigated directly to hotel detail: ${raw.url().slice(0, 80)}`);
                           }
                         } else {
-                          // All strategies failed — press Enter as absolute last resort
-                          await sh(raw).keyPress("Enter");
-                          trace(`[ai-listing] pressed Enter on property name filter (all suggestion strategies failed)`);
-                          await new Promise(r => setTimeout(r, 3500));
+                          if (startProvider?.id === "hotels-com") {
+                            trace(`[ai-listing] skipped Enter on Hotels.com property filter (would trigger text-only filtering)`);
+                          } else {
+                            // All strategies failed — press Enter as absolute last resort
+                            await sh(raw).keyPress("Enter");
+                            trace(`[ai-listing] pressed Enter on property name filter (all suggestion strategies failed)`);
+                            await new Promise(r => setTimeout(r, 3500));
+                          }
                         }
                       } catch (stgBErr) {
                         trace(`[ai-listing] Stage B inner error: ${(stgBErr as Error).message?.slice(0, 80)}`);
