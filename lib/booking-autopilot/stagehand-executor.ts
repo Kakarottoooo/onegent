@@ -1186,20 +1186,29 @@ The user will enter CVV and confirm payment themselves.`,
                         if (best && best.score >= threshold) return toResult(best.el);
                       }
 
-                      // ── Broad fallback: any visible li/button in the top 300px of the page ──
-                      // Hotels.com may use class names we haven't seen yet. If the dropdown is
-                      // open (visible items near the search bar), grab the first non-"Search for" li.
+                      // ── Broad fallback: individual dropdown items near the search bar ──
+                      // Hotels.com may use class names we haven't seen yet. We scan for elements
+                      // that are (a) visually in the autocomplete area, (b) item-sized (not containers).
+                      // KEY CONSTRAINTS:
+                      //   height: 20-100px  → exclude the full search-bar container (200px+)
+                      //   top: 80-300px     → below the search input (y~55-75), above main content
+                      //   width: 80-700px   → wide enough to be a suggestion row
+                      // Do NOT include [data-stid] — it matches the whole search container.
                       const topItems = Array.from(document.querySelectorAll<HTMLElement>(
-                        'li, [role="option"], [data-stid], button[class*="item" i]'
+                        'li, [role="option"], button, div[tabindex]'
                       )).filter(el => {
                           if (!isVisible(el) || !isNotSearchFor(el)) return false;
                           const r = el.getBoundingClientRect();
-                          // Must be in the top portion of the viewport (near the search bar)
-                          return r.top >= 50 && r.top <= 350 && r.width > 100;
+                          return r.top >= 80 && r.top <= 300 &&
+                                 r.width >= 80 && r.width <= 700 &&
+                                 r.height >= 20 && r.height <= 100;
                         });
-                      // Return diagnostics about what we found (embedded in text field)
-                      const diagText = topItems.slice(0, 3)
-                        .map(el => `[${el.tagName}] ${(el.textContent ?? "").replace(/\s+/g, " ").trim().slice(0, 40)}`)
+                      // Build diagnostics
+                      const diagText = topItems.slice(0, 5)
+                        .map(el => {
+                          const r = el.getBoundingClientRect();
+                          return `[${el.tagName}h${Math.round(r.height)}] ${(el.textContent ?? "").replace(/\s+/g, " ").trim().slice(0, 40)}`;
+                        })
                         .join(" || ");
                       if (topItems.length > 0) {
                         const scored = topItems
@@ -1211,7 +1220,7 @@ The user will enter CVV and confirm payment themselves.`,
                         // Still nothing — just take the first visible item (hotel property)
                         return toResult(topItems[0]);
                       }
-                      // No items found at all — return diagnostic null with info
+                      // No items found at all — return diagnostic info
                       return { x: -1, y: -1, text: `DIAG:no-items-found diag=${diagText || "empty"}` };
                     }, hotelWords).catch(() => null);
 
