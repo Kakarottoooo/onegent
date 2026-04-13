@@ -1503,6 +1503,29 @@ The user will enter CVV and confirm payment themselves.`,
                       fallbackTargets: [] as Array<{ x: number; y: number; label: string }>,
                     }));
 
+                    // ── Diagnostic: scan ALL elements with filter text, show tag/size/coords ──
+                    const filterDiag = await raw.evaluate(() => {
+                      const filterTerms = /fully refundable|free cancellation|refundable only/i;
+                      const norm = (s: string) => s.replace(/\s+/g, " ").trim();
+                      return Array.from(document.querySelectorAll<HTMLElement>('*'))
+                        .filter(el => {
+                          const r = el.getBoundingClientRect();
+                          if (r.width === 0 || r.height === 0) return false;
+                          return filterTerms.test(norm(el.textContent ?? ""));
+                        })
+                        .slice(0, 12)
+                        .map(el => {
+                          const r = el.getBoundingClientRect();
+                          const ariaChecked = el.getAttribute('aria-checked');
+                          const checked = (el as HTMLInputElement).checked;
+                          return `${el.tagName}[${el.getAttribute('data-testid') ?? el.getAttribute('data-stid') ?? el.className.split(' ').slice(0,2).join(' ')}] ` +
+                            `${Math.round(r.width)}x${Math.round(r.height)}@(${Math.round(r.left)},${Math.round(r.top)}) ` +
+                            `ariaChecked=${ariaChecked} checked=${checked} ` +
+                            `"${norm(el.textContent ?? "").slice(0, 50)}"`;
+                        });
+                    }).catch(() => [] as string[]);
+                    trace(`[filter-diag] ALL elements with refundable text: ${filterDiag.length === 0 ? "NONE FOUND" : filterDiag.join(" || ")}`);
+
                     if (filterClear.clicked.length > 0) {
                       trace(`[ai-listing] Hotels.com: cleared active filters -> ${filterClear.clicked.join(" || ")}`);
                     } else {
@@ -1512,11 +1535,7 @@ The user will enter CVV and confirm payment themselves.`,
                       }
                       for (const fallbackTarget of filterClear.fallbackTargets.slice(0, 3)) {
                         await sh(raw).click(fallbackTarget.x, fallbackTarget.y);
-                        trace(
-                          `[ai-listing] Hotels.com: coordinate-clicked filter fallback ` +
-                          `"${fallbackTarget.label}" at ` +
-                          `(${fallbackTarget.x},${fallbackTarget.y})`
-                        );
+                        trace(`[ai-listing] Hotels.com: CDP-clicked filter fallback "${fallbackTarget.label}" at (${fallbackTarget.x},${fallbackTarget.y})`);
                         await new Promise(r => setTimeout(r, 500));
                       }
                     }
@@ -1524,21 +1543,35 @@ The user will enter CVV and confirm payment themselves.`,
                     trace(`[ai-listing] Hotels.com: pre-Stage-B filter clear attempted — waiting for results`);
                     await new Promise(r => setTimeout(r, 2500));
 
-                    const remainingFilterDiagnostics = await raw.evaluate(() => {
-                      const normalize = (value: string) => value.replace(/\s+/g, " ").trim();
-                      const isVisible = (el: Element | null): el is HTMLElement => {
-                        if (!(el instanceof HTMLElement)) return false;
-                        const r = el.getBoundingClientRect();
-                        return r.width > 0 && r.height > 0;
-                      };
+                    // Check if filter is still active after UI clear attempts
+                    const remainingFilters = await raw.evaluate(() => {
+                      const norm = (s: string) => s.replace(/\s+/g, " ").trim();
+                      const isV = (el: Element) => { const r = (el as HTMLElement).getBoundingClientRect(); return r.width > 0 && r.height > 0; };
                       return Array.from(document.querySelectorAll<HTMLElement>('button, [role="button"], label, .uitk-pill'))
-                        .filter((el) => isVisible(el) && /fully refundable|free cancellation|refundable only/i.test(normalize(el.textContent ?? "")))
-                        .map((el) => normalize(el.textContent ?? "").slice(0, 60))
+                        .filter(el => isV(el) && /fully refundable|free cancellation|refundable only/i.test(norm(el.textContent ?? "")))
+                        .map(el => norm(el.textContent ?? "").slice(0, 60))
                         .slice(0, 5);
                     }).catch(() => [] as string[]);
 
-                    if (remainingFilterDiagnostics.length > 0) {
-                      trace(`[ai-listing] Hotels.com: refundable filters still visible after clear -> ${remainingFilterDiagnostics.join(" || ")}`);
+                    if (remainingFilters.length > 0) {
+                      trace(`[ai-listing] Hotels.com: refundable filter still visible after UI clear: ${remainingFilters.join(" | ")}`);
+                      // ── URL-reload approach: navigate to current URL with refundableOnly=false ──
+                      // Hotels.com may have ignored the parameter on the initial URL (due to redirect).
+                      // Now we know the FINAL URL and can append refundableOnly=false directly.
+                      try {
+                        const currentUrl = new URL(raw.url());
+                        currentUrl.searchParams.set("refundableOnly", "false");
+                        // Also remove any explicit refundable filter params Hotels.com may have added
+                        currentUrl.searchParams.delete("ro");
+                        const cleanUrl = currentUrl.toString();
+                        trace(`[ai-listing] Hotels.com: reloading with refundableOnly=false → ${cleanUrl.slice(0, 120)}`);
+                        await raw.goto(cleanUrl, { waitUntil: "domcontentloaded", timeout: 15000 });
+                        await new Promise(r => setTimeout(r, 3000));
+                        trace(`[ai-listing] Hotels.com: after refundableOnly reload — URL: ${raw.url().slice(0, 100)}`);
+                        trace(`[ai-listing] Hotels.com snapshot after reload -> ${await getHotelsListingSnapshot()}`);
+                      } catch (reloadErr) {
+                        trace(`[ai-listing] Hotels.com: reload with refundableOnly=false failed: ${(reloadErr as Error).message?.slice(0, 80)}`);
+                      }
                     }
                     trace(`[ai-listing] Hotels.com snapshot after filter clear -> ${await getHotelsListingSnapshot()}`);
                   }
@@ -1551,14 +1584,13 @@ The user will enter CVV and confirm payment themselves.`,
                     // and CDP-coordinate clicks can land on survey overlays instead of the sidebar input.
                     // DOM el.scrollIntoView() + el.focus() + el.click() is reliable regardless of scroll pos.
                     const inputInfo = await raw.evaluate(() => {
-                      const tryInput = (el: HTMLInputElement | null, label: string): { sel: string; cx: number; cy: number } | null => {
+                      const norm = (s: string) => s.replace(/\s+/g, " ").trim();
+                      const tryInput = (el: HTMLInputElement | null, label: string): { sel: string; cx: number; cy: number; diag?: string } | null => {
                         if (!el) return null;
                         const r = el.getBoundingClientRect();
                         if (r.width === 0 || r.height === 0) return null;
                         if (el.disabled) return null;
-                        // Skip checkbox-sized elements (checkboxes are typically 16-20px wide)
                         if (r.width < 60) return null;
-                        // Scroll into view immediately — element may be far below the fold (y > 2000)
                         el.scrollIntoView({ behavior: 'instant', block: 'center' });
                         el.focus();
                         el.click();
@@ -1566,28 +1598,34 @@ The user will enter CVV and confirm payment themselves.`,
                         return { sel: label, cx: Math.round(after.left + after.width / 2), cy: Math.round(after.top + after.height / 2) };
                       };
 
+                      // ── Diagnostic: enumerate ALL text inputs on page ───────────────────────
+                      const allInputs = Array.from(document.querySelectorAll<HTMLInputElement>('input[type="text"], input:not([type])'))
+                        .map(el => {
+                          const r = el.getBoundingClientRect();
+                          return `[${el.getAttribute('placeholder')?.slice(0,20) ?? ''} | ${el.getAttribute('data-testid') ?? ''} | ${el.getAttribute('data-stid') ?? ''}] ` +
+                            `${Math.round(r.width)}x${Math.round(r.height)}@(${Math.round(r.left)},${Math.round(r.top)}) val="${(el.value ?? '').slice(0,20)}"`;
+                        })
+                        .slice(0, 8);
+
                       // ── Strategy A: label-based search ─────────────────────────────────────
-                      // Find the "Search by property name" section by its heading text.
-                      // This is the most reliable approach on Hotels.com where the text input
-                      // lacks descriptive attributes (placeholder, aria-label, data-testid).
+                      let stratAResult: string | null = null;
                       const sectionTitles = Array.from(document.querySelectorAll<HTMLElement>(
                         'h1,h2,h3,h4,h5,h6,label,legend,[class*="title"],[class*="heading"],[class*="label"],[class*="Title"],[class*="Heading"]'
                       ));
                       for (const title of sectionTitles) {
                         const text = (title.textContent ?? '').replace(/\s+/g, ' ').trim();
                         if (!/search by property name|property name filter/i.test(text)) continue;
-                        // Walk up to find the section container, then look for its text input.
-                        // Limit depth to 4 levels: going deeper risks hitting a common ancestor
-                        // that contains BOTH the destination bar and the sidebar — querySelector
-                        // on that ancestor returns the destination bar (first in DOM order).
+                        stratAResult = `found heading "${text.slice(0,40)}"`;
                         let container: Element | null = title.parentElement;
                         let depth = 0;
                         while (container && container !== document.body && depth < 4) {
                           const input = container.querySelector<HTMLInputElement>('input[type="text"]');
                           if (input && !input.disabled) {
                             const r2 = input.getBoundingClientRect();
-                            // Exclude destination bar (too wide) and checkbox-sized elements
-                            if (r2.width >= 60 && r2.width <= 400) return tryInput(input, 'label-search-by-property-name');
+                            if (r2.width >= 60 && r2.width <= 400) {
+                              const result = tryInput(input, 'label-search-by-property-name');
+                              if (result) return { ...result, diag: `stratA:depth${depth} ${allInputs.join(' | ')}` };
+                            }
                           }
                           container = container.parentElement;
                           depth++;
@@ -1598,42 +1636,51 @@ The user will enter CVV and confirm payment themselves.`,
                       const selectors = [
                         'input[placeholder*="property name" i]',
                         'input[aria-label*="property name" i]',
+                        'input[placeholder*="e.g. Marriott" i]',
                         'input[placeholder*="Marriott" i]',
                         'input[data-testid*="property"]',
                         '[data-stid*="property-name"] input[type="text"]',
                         '[data-stid*="hotel-name"] input[type="text"]',
                         '[data-stid*="filter-name"] input[type="text"]',
+                        '[data-stid*="filterName"] input[type="text"]',
                       ];
                       for (const s of selectors) {
-                        const result = tryInput(document.querySelector<HTMLInputElement>(s), s);
-                        if (result) return result;
+                        const el = document.querySelector<HTMLInputElement>(s);
+                        if (el) {
+                          const result = tryInput(el, s);
+                          if (result) return { ...result, diag: `stratB:${s} ${allInputs.join(' | ')}` };
+                        }
                       }
 
                       // ── Strategy C: broader sidebar fallback ────────────────────────────────
-                      // Skip: destination bar (width > 400, value has commas), price inputs (value starts with $),
-                      // numeric-only inputs (price range min/max), and checkbox-sized elements.
                       const allTextInputs = Array.from(document.querySelectorAll<HTMLInputElement>(
                         'input[type="text"]:not([disabled]):not([readonly])'
                       ));
                       for (const el of allTextInputs) {
                         const r = el.getBoundingClientRect();
                         if (r.width < 80 || r.height < 20) continue;
-                        if (r.width > 400) continue; // destination bar
-                        if (r.left > 420) continue;  // must be in sidebar
+                        if (r.width > 400) continue;
+                        if (r.left > 420) continue;
                         const val = el.value ?? '';
-                        if (val.includes(',')) continue; // destination-style values
-                        if (/^\$/.test(val)) continue;   // price inputs ($210, $1,650)
-                        if (/^\d+$/.test(val)) continue; // pure-numeric price range inputs
+                        if (val.includes(',')) continue;
+                        if (/^\$/.test(val)) continue;
+                        if (/^\d+$/.test(val)) continue;
                         const result = tryInput(el, 'sidebar-text-input-fallback');
-                        if (result) return result;
+                        if (result) return { ...result, diag: `stratC ${allInputs.join(' | ')}` };
                       }
-                      return null;
+
+                      // ── Not found: return null with diagnostic info ─────────────────────────
+                      return { sel: 'NOT_FOUND', cx: -1, cy: -1,
+                        diag: `stratA:${stratAResult ?? 'no-heading'} stratB:no-match stratC:no-match ` +
+                              `allInputs=[${allInputs.join(' | ')}]` };
                     }).catch(() => null);
 
-                    if (!inputInfo) {
+                    if (!inputInfo || inputInfo.cx === -1) {
+                      trace(`[stageB-diag] input search failed: ${inputInfo?.diag ?? "evaluate-threw"}`);
                       trace(`[ai-listing] Stage B: property name input not found in DOM`);
                     } else {
-                    const { sel, cx, cy } = inputInfo;
+                    const { sel, cx, cy, diag } = inputInfo;
+                    if (diag) trace(`[stageB-diag] input found via ${diag.slice(0, 120)}`);
                     try {
                         // Brief pause for scroll/focus to settle after DOM el.focus() + el.click()
                         await new Promise(r => setTimeout(r, 400));
