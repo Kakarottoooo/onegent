@@ -107,6 +107,32 @@ function getRawPage(stagehandPage: unknown): Page {
 }
 
 /**
+ * Stagehand's Page wrapper exposes CDP-level APIs that differ from Playwright's Page:
+ *   sh(raw).keyPress("Ctrl+a")      — press key combo (no .keyboard controller)
+ *   sh(raw).type(text, {delay})     — type to focused element (no selector)
+ *   sh(raw).click(x, y)            — coordinate click via CDP (no .mouse controller)
+ *   sh(raw).locatorClick(sel)       — selector click via raw.locator(sel).click()
+ *
+ * Use this helper anywhere Playwright-style .keyboard/.mouse/.press() would fail.
+ */
+function sh(page: Page) {
+  const p = page as unknown as {
+    keyPress(key: string, options?: { delay?: number }): Promise<void>;
+    type(text: string, options?: { delay?: number }): Promise<void>;
+    click(x: number, y: number, options?: { button?: string; clickCount?: number }): Promise<string>;
+  };
+  return {
+    keyPress: (key: string) => p.keyPress(key),
+    type: (text: string, opts?: { delay?: number }) => p.type(text, opts),
+    /** Coordinate-based click via CDP (y must be ≥ 0, i.e., element must be in viewport). */
+    click: (x: number, y: number) => p.click(x, y),
+    /** Selector-based click via Playwright locator (for elements that need selector-click). */
+    locatorClick: (sel: string, opts?: { clickCount?: number }) =>
+      page.locator(sel).click(opts),
+  };
+}
+
+/**
  * Generate a direct Booking.com hotel detail URL from a hotel name.
  * Booking.com hotel URLs follow: booking.com/hotel/{countryCode}/{slug}.html
  * This lets us bypass the searchresults.html endpoint which blocks headless browsers.
@@ -1086,15 +1112,14 @@ The user will enter CVV and confirm payment themselves.`,
                     if (!visible) continue;
 
                     try {
-                      // Click to focus, select-all, then type hotel name character-by-character
-                      // raw.type() sends real key events that React's onChange can detect.
-                      await raw.click(sel, { clickCount: 3 });
+                      // Click to focus, select-all, then type hotel name character-by-character.
+                      // Use Stagehand's sh() helper: keyPress/type use CDP input events.
+                      await sh(raw).locatorClick(sel, { clickCount: 3 });
                       await new Promise(r => setTimeout(r, 300));
-                      await raw.keyboard.press("Control+A");
-                      await raw.keyboard.press("Backspace");
+                      await sh(raw).keyPress("Control+a");
+                      await sh(raw).keyPress("Backspace");
                       await new Promise(r => setTimeout(r, 200));
-                      // Use Playwright's type (not fill) to fire key events React can intercept
-                      await raw.type(sel, targetHotelName, { delay: 60 });
+                      await sh(raw).type(targetHotelName, { delay: 60 });
                       trace(`[ai-listing] typed hotel name in top search bar: "${targetHotelName.slice(0, 60)}"`);
                       searchBarUsed = true;
                       break;
@@ -1217,15 +1242,12 @@ The user will enter CVV and confirm payment themselves.`,
                     try {
                         // Brief pause for focus to settle after DOM el.focus() + el.click()
                         await new Promise(r => setTimeout(r, 400));
-                        // Triple-click selects all existing text, then type overwrites it.
-                        // We use page.type(selector, text) — not keyboard.type — because
-                        // raw may be a Stagehand wrapper that doesn't expose .keyboard directly.
-                        await raw.click(sel, { clickCount: 3 }).catch(() => {});
+                        // Select-all + type via Stagehand CDP APIs (no .keyboard/.mouse controller).
+                        await sh(raw).keyPress("Control+a");
                         await new Promise(r => setTimeout(r, 150));
                         // Type up to 25 chars (trimmed) to trigger the typeahead dropdown.
-                        // More chars = more specific filter (we click "Search for '...'" not first suggestion).
                         const typeaheadText = targetHotelName.slice(0, Math.min(25, targetHotelName.length)).trimEnd();
-                        await raw.type(sel, typeaheadText, { delay: 80 });
+                        await sh(raw).type(typeaheadText, { delay: 80 });
                         trace(`[ai-listing] property name filter typed "${typeaheadText}" via "${sel}" (DOM focus/click)`);
 
                         // ── Strategy 1: click hotel property CARD in dropdown ────────────────
@@ -1286,7 +1308,10 @@ The user will enter CVV and confirm payment themselves.`,
                               if (hrefEl?.href && /hotels\.com\/(ho|h)\d+/i.test(hrefEl.href)) {
                                 return { action: "href" as const, href: hrefEl.href };
                               }
-                              // No href — return coordinates for real mouse click
+                              // No href — scroll into view (instant) then return viewport coordinates.
+                              // The dropdown may render above the sidebar input, giving y < 0.
+                              // scrollIntoView({block:'nearest'}) fixes that without closing the dropdown.
+                              (hotelCard as HTMLElement).scrollIntoView({ behavior: 'instant', block: 'nearest' });
                               const r = hotelCard.getBoundingClientRect();
                               return {
                                 action: "coords" as const,
@@ -1308,6 +1333,7 @@ The user will enter CVV and confirm payment themselves.`,
 
                             // Priority 3: return coordinates of first option (real mouse click)
                             const first = visibleOpts[0];
+                            (first as HTMLElement).scrollIntoView({ behavior: 'instant', block: 'nearest' });
                             const r = first.getBoundingClientRect();
                             return {
                               action: "coords" as const,
@@ -1333,11 +1359,9 @@ The user will enter CVV and confirm payment themselves.`,
                             }
                           } else if (res.action === "coords") {
                             trace(`[ai-listing] Strategy 1: coordinate-clicking dropdown item "${res.text}" at (${res.x},${res.y})`);
-                            // Real mouse click — triggers React event handlers (unlike DOM .click())
-                            const mouse = (raw as unknown as { mouse: { move(x: number, y: number): Promise<void>; click(x: number, y: number): Promise<void> } }).mouse;
-                            await mouse.move(res.x, res.y);
-                            await new Promise(r => setTimeout(r, 120));
-                            await mouse.click(res.x, res.y);
+                            // sh(raw).click(x, y) uses Stagehand's CDP coordinate click
+                            // (triggers real browser mouse events, unlike DOM .click())
+                            await sh(raw).click(res.x, res.y);
                             await new Promise(r => setTimeout(r, 3000));
                             if (isHotelDetailUrl(raw.url())) {
                               suggClicked = true;
@@ -1357,8 +1381,8 @@ The user will enter CVV and confirm payment themselves.`,
                                   if (el) { el.scrollIntoView({ behavior: 'instant', block: 'center' }); el.focus(); el.click(); }
                                 }, sel).catch(() => {});
                                 await new Promise(r => setTimeout(r, 300));
-                                await raw.click(sel, { clickCount: 3 }).catch(() => {});
-                                await raw.type(sel, typeaheadText, { delay: 80 });
+                                await sh(raw).keyPress("Control+a");
+                                await sh(raw).type(typeaheadText, { delay: 80 });
                                 await new Promise(r => setTimeout(r, 1800));
                               }
                             }
@@ -1418,9 +1442,7 @@ The user will enter CVV and confirm payment themselves.`,
                               if (bbox) {
                                 const cx = Math.round(bbox.x + bbox.width / 2);
                                 const cy = Math.round(bbox.y + bbox.height / 2);
-                                await (raw as unknown as { mouse: { move: (x: number, y: number) => Promise<void>; click: (x: number, y: number) => Promise<void> } }).mouse.move(cx, cy);
-                                await new Promise(r => setTimeout(r, 150));
-                                await (raw as unknown as { mouse: { move: (x: number, y: number) => Promise<void>; click: (x: number, y: number) => Promise<void> } }).mouse.click(cx, cy);
+                                await sh(raw).click(cx, cy);
                                 trace(`[ai-listing] Strategy 2: coordinate-clicked item ${targetIdx}/${count} via "${spec}" — "${itemText.trim().slice(0, 50)}"`);
                               } else {
                                 await loc.click().catch(() => {});
@@ -1495,7 +1517,7 @@ The user will enter CVV and confirm payment themselves.`,
                           }
                         } else {
                           // All strategies failed — press Enter as absolute last resort
-                          await raw.press(sel, "Enter");
+                          await sh(raw).keyPress("Enter");
                           trace(`[ai-listing] pressed Enter on property name filter (all suggestion strategies failed)`);
                           await new Promise(r => setTimeout(r, 3500));
                         }
