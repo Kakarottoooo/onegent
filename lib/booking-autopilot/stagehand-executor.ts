@@ -1080,33 +1080,29 @@ The user will enter CVV and confirm payment themselves.`,
                   (startProvider?.id === "hotels-com" && !/hotels\.com\/(ho|h)\d+/.test(raw.url().toLowerCase()));
 
                 if (isCityLevel && targetHotelName) {
-                  // Hotels.com: skip Stage A (top destination search bar) and go straight to
-                  // the sidebar "Search by property name" filter. The destination search bar
-                  // on Hotels.com shows autocomplete suggestions that sometimes link to brand-site
-                  // GMB pages (e.g. hilton.com?SEO_id=GMB-...) instead of Hotels.com hotel pages,
-                  // causing the agent to navigate off-platform.
-                  const skipStageA = startProvider?.id === "hotels-com";
-                  trace(`[ai-listing] city-level search detected — ${skipStageA ? "Hotels.com: skipping Stage A, going to sidebar filter" : "searching hotel by name in top search bar"}`);
+                  // Hotels.com now uses Stage A (destination search bar) — the autocomplete dropdown
+                  // shows the specific hotel property as the first suggestion, which we CDP-click
+                  // to navigate directly to the hotel. Stage B (sidebar filter) is a fallback.
+                  trace(`[ai-listing] city-level search detected — trying Stage A (destination bar) first`);
 
                   // ── Stage A: use the destination search box at the top ──────────────────
-                  // NOTE: Hotels.com skips Stage A (skipStageA=true) — its destination search bar
-                  // can navigate to brand-site GMB URLs instead of Hotels.com hotel pages.
-                  // Selectors for the main destination/location search input on both the
-                  // Expedia homepage and the Hotel-Search results page.
+                  // Selectors for the main destination/location search input.
+                  // Hotels.com uses "Where to?" placeholder; Expedia uses "Going to".
                   const destSelectors = [
                     '[data-testid="destination-field"]',
                     'input[data-testid="destination-field"]',
                     'button[data-testid="destination-field"]',
-                    'input[id*="destination" i][type="text"]',
-                    'input[placeholder*="Going to" i]',
+                    '[data-stid*="destination"] input[type="text"]',
                     'input[placeholder*="Where to" i]',
+                    'input[placeholder*="Going to" i]',
+                    'input[id*="destination" i][type="text"]',
                     'input[aria-label*="Going to" i]',
                     'input[aria-label*="Staying" i]',
                     'input[aria-label*="destination" i]',
                   ];
 
                   let searchBarUsed = false;
-                  for (const sel of skipStageA ? [] : destSelectors) {
+                  for (const sel of destSelectors) {
                     const visible = await raw.evaluate((s: string) => {
                       const el = document.querySelector(s);
                       if (!el) return false;
@@ -1136,13 +1132,16 @@ The user will enter CVV and confirm payment themselves.`,
                     // Wait for autocomplete suggestions to appear
                     await new Promise(r => setTimeout(r, 2000));
 
-                    // Select the best matching suggestion from the dropdown
+                    // Select the best matching suggestion from the dropdown.
+                    // IMPORTANT: Use CDP coordinate click (not DOM .click()) to trigger Hotels.com
+                    // navigation. Filter out "Search for '...'" items (text-only search).
                     const hotelWords = targetHotelName.toLowerCase().split(/\s+/)
                       .filter((w: string) => w.length > 3 || /^\d+$/.test(w));
-                    const picked = await raw.evaluate((words: string[]) => {
+                    const pickedCoords = await raw.evaluate((words: string[]) => {
                       const suggSelectors = [
                         '[role="option"]',
                         '[data-testid*="suggest"]',
+                        '[data-stid*="typeahead"] li',
                         '[class*="typeahead" i] li',
                         '[class*="suggestion" i]',
                         '[class*="autocomplete" i] li',
@@ -1155,24 +1154,35 @@ The user will enter CVV and confirm payment themselves.`,
                             return r.width > 0 && r.height > 0;
                           });
                         if (items.length === 0) continue;
+                        // Exclude "Search for '...'" items — these trigger text-only search,
+                        // not hotel navigation. We want the hotel property suggestion.
+                        const hotelItems = items.filter(el =>
+                          !/^search\s+for\b/i.test((el.textContent ?? "").replace(/\s+/g, " ").trim())
+                        );
                         // Score each suggestion by keyword overlap with hotel name
-                        const scored = items.map(el => ({
+                        const scored = hotelItems.map(el => ({
                           el,
                           score: words.filter(w => (el.textContent ?? "").toLowerCase().includes(w)).length,
-                          text: (el.textContent ?? "").slice(0, 80),
+                          text: (el.textContent ?? "").replace(/\s+/g, " ").trim().slice(0, 80),
                         })).sort((a, b) => b.score - a.score);
                         const best = scored[0];
                         if (best && best.score >= Math.ceil(words.length * 0.4)) {
-                          best.el.scrollIntoView({ block: "center" });
-                          best.el.click();
-                          return best.text;
+                          best.el.scrollIntoView({ behavior: 'instant', block: "center" });
+                          const r = best.el.getBoundingClientRect();
+                          return {
+                            x: Math.round(r.left + r.width / 2),
+                            y: Math.round(r.top + r.height / 2),
+                            text: best.text,
+                          };
                         }
                       }
                       return null;
                     }, hotelWords).catch(() => null);
 
-                    if (picked) {
-                      trace(`[ai-listing] selected autocomplete suggestion: "${picked.slice(0, 60)}"`);
+                    if (pickedCoords) {
+                      trace(`[ai-listing] CDP-clicking autocomplete suggestion: "${pickedCoords.text.slice(0, 60)}" at (${pickedCoords.x},${pickedCoords.y})`);
+                      await sh(raw).click(pickedCoords.x, pickedCoords.y);
+                      const picked = pickedCoords.text;
                       await new Promise(r => setTimeout(r, 1000));
 
                       // Click the Search / Submit button
@@ -1506,15 +1516,21 @@ The user will enter CVV and confirm payment themselves.`,
                       for (const title of sectionTitles) {
                         const text = (title.textContent ?? '').replace(/\s+/g, ' ').trim();
                         if (!/search by property name|property name filter/i.test(text)) continue;
-                        // Walk up to find the section container, then look for its text input
+                        // Walk up to find the section container, then look for its text input.
+                        // Limit depth to 4 levels: going deeper risks hitting a common ancestor
+                        // that contains BOTH the destination bar and the sidebar — querySelector
+                        // on that ancestor returns the destination bar (first in DOM order).
                         let container: Element | null = title.parentElement;
-                        while (container && container !== document.body) {
+                        let depth = 0;
+                        while (container && container !== document.body && depth < 4) {
                           const input = container.querySelector<HTMLInputElement>('input[type="text"]');
                           if (input && !input.disabled) {
                             const r2 = input.getBoundingClientRect();
-                            if (r2.width >= 60) return tryInput(input, 'label-search-by-property-name');
+                            // Exclude destination bar (too wide) and checkbox-sized elements
+                            if (r2.width >= 60 && r2.width <= 400) return tryInput(input, 'label-search-by-property-name');
                           }
                           container = container.parentElement;
+                          depth++;
                         }
                       }
 
