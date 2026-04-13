@@ -1031,58 +1031,109 @@ export async function fillExpediaGroupPaymentForm(
   }
   trace(`CKO frameLocator results: name=${checkoutComFrameFilled.name}, number=${checkoutComFrameFilled.number}, expiry=${checkoutComFrameFilled.expiry}`);
 
-  // ── Strategy 2: visible iframe scan + click→keyboard ─────────────────────
-  // Checkout.com iframes are visible on screen (non-zero bounding box).
-  // We find them, sort by Y position (top=name/number, bottom=expiry), and
-  // click the center of each iframe then use page.keyboard to type the value.
+  // ── Strategy 2: CKO iframe ID-based click→keyboard ──────────────────────
+  // Checkout.com injects iframes with IDs that encode their purpose:
+  //   "cko-frames-cardnumber", "cko-frames-expirydate", "cko-frames-cardholdername"
+  // We match each unfilled field to its iframe by ID pattern (NOT positional order).
+  //
+  // IMPORTANT: positional order is WRONG when "Name on card" is an inline field
+  // (no CKO iframe). If there are only 2 iframes (card number + expiry) but we
+  // assign by position assuming 3 (name, number, expiry), we fill:
+  //   cardFields[0]=name → iframe[0]=card_number_iframe  ← wrong field
+  //   cardFields[1]=number → iframe[1]=expiry_iframe     ← card number in expiry = "88/88"
   const needsVisibleIframeFill = !checkoutComFrameFilled.number || !checkoutComFrameFilled.expiry;
   if (needsVisibleIframeFill) {
     try {
-      // Get bounding boxes of all visible iframes on the page
-      const visibleIframeBoxes = await page.evaluate(() => {
+      // Collect all visible CKO iframes with their IDs and bounding boxes
+      const ckoIframes = await page.evaluate(() => {
         return Array.from(document.querySelectorAll<HTMLIFrameElement>("iframe"))
-          .map((el, i) => {
+          .map(el => {
             const r = el.getBoundingClientRect();
-            return { i, x: r.x, y: r.y, w: r.width, h: r.height };
+            return {
+              id: (el.id ?? "").toLowerCase(),
+              frameName: (el.name ?? "").toLowerCase(),
+              src: (el.src ?? "").toLowerCase(),
+              x: r.x, y: r.y, w: r.width, h: r.height,
+            };
           })
-          .filter(b => b.w > 0 && b.h > 0 && b.h < 120) // card fields are short (<120px tall)
-          .sort((a, b) => a.y - b.y); // sort top→bottom
-      }).catch(() => [] as Array<{ i: number; x: number; y: number; w: number; h: number }>);
+          .filter(b => b.w > 0 && b.h > 0 && b.h < 120); // card fields are short (<120px tall)
+      }).catch(() => [] as Array<{ id: string; frameName: string; src: string; x: number; y: number; w: number; h: number }>);
 
-      trace(`CKO visible iframes: ${visibleIframeBoxes.length} short iframes found`);
-      for (const b of visibleIframeBoxes.slice(0, 6)) {
-        trace(`  iframe[${b.i}] x=${b.x.toFixed(0)} y=${b.y.toFixed(0)} w=${b.w.toFixed(0)} h=${b.h.toFixed(0)}`);
+      trace(`CKO visible iframes: ${ckoIframes.length} short iframes found`);
+      for (const b of ckoIframes.slice(0, 6)) {
+        trace(`  iframe id="${b.id}" x=${b.x.toFixed(0)} y=${b.y.toFixed(0)} w=${b.w.toFixed(0)} h=${b.h.toFixed(0)}`);
       }
 
-      // Assign values to iframes by vertical position.
-      // Typical CKO layout (top to bottom): cardholder name, card number, expiry+CVV
-      const cardFields: Array<{ value: string; key: keyof typeof checkoutComFrameFilled }> = [];
-      if (!checkoutComFrameFilled.name && profile.card_name)
-        cardFields.push({ value: profile.card_name, key: "name" });
-      if (!checkoutComFrameFilled.number && profile.card_number)
-        cardFields.push({ value: profile.card_number, key: "number" });
-      if (!checkoutComFrameFilled.expiry && profile.card_expiry)
-        cardFields.push({ value: profile.card_expiry, key: "expiry" });
+      // Classify each iframe by its ID/name/src into: "number" | "expiry" | "name" | null
+      const classifyIframe = (id: string, frameName: string, src: string): keyof typeof checkoutComFrameFilled | null => {
+        const s = `${id} ${frameName} ${src}`;
+        if (/cardnumber|card-number|pan(?!ic|el)/.test(s)) return "number";
+        if (/expirydate|expiry-date|expiry(?!less)|expiration/.test(s)) return "expiry";
+        if (/cardholdername|holdername|cardname|card-name/.test(s)) return "name";
+        return null;
+      };
 
-      for (let i = 0; i < Math.min(cardFields.length, visibleIframeBoxes.length); i++) {
-        const box = visibleIframeBoxes[i];
-        const field = cardFields[i];
-        const cx = box.x + box.w / 2;
-        const cy = box.y + box.h / 2;
+      // ID-based fill: match each CKO iframe to the correct field
+      let matchedAny = false;
+      for (const iframe of ckoIframes) {
+        const fieldType = classifyIframe(iframe.id, iframe.frameName, iframe.src);
+        if (!fieldType) continue;
+        if (checkoutComFrameFilled[fieldType]) continue;
+        const value = fieldType === "number" ? (profile.card_number ?? "")
+                    : fieldType === "expiry" ? (profile.card_expiry ?? "")
+                    : (profile.card_name ?? "");
+        if (!value) continue;
+
+        const cx = iframe.x + iframe.w / 2;
+        const cy = iframe.y + iframe.h / 2;
         try {
-          // Use page.click(x,y) — Stagehand page is a CDP wrapper, not Playwright.
-          // page.mouse is undefined on Stagehand pages; page.click(x,y) dispatches CDP mouse events directly.
           await (page as unknown as { click: (x: number, y: number) => Promise<void> }).click(cx, cy);
           await new Promise(r => setTimeout(r, 300));
-          // Select all + type — Stagehand page has page.keyboard (like Playwright)
           await page.keyboard.press("Control+a");
           await new Promise(r => setTimeout(r, 100));
-          await page.keyboard.type(field.value, { delay: 50 });
+          await page.keyboard.type(value, { delay: 50 });
           await new Promise(r => setTimeout(r, 200));
-          checkoutComFrameFilled[field.key] = true;
-          trace(`CKO visible iframe[${box.i}]: ${field.key} filled via page.click(${cx.toFixed(0)},${cy.toFixed(0)}) + keyboard`);
+          checkoutComFrameFilled[fieldType] = true;
+          matchedAny = true;
+          trace(`CKO id-based iframe "${iframe.id}": ${fieldType} filled via page.click(${cx.toFixed(0)},${cy.toFixed(0)}) + keyboard`);
         } catch (err) {
-          trace(`CKO visible iframe[${box.i}]: ${field.key} error — ${(err as Error).message?.slice(0, 50)}`);
+          trace(`CKO id-based iframe "${iframe.id}": ${fieldType} error — ${(err as Error).message?.slice(0, 50)}`);
+        }
+      }
+
+      // Fallback: if no iframes matched by ID (iframe IDs are non-standard), use positional
+      // order but ONLY for the CKO iframes we found, and ONLY for fields not yet filled.
+      // Crucially: only include in cardFields fields that we believe ARE in iframes.
+      // Use the iframe count as a hint: if there are exactly 2 short iframes, assume
+      // they are card number + expiry (name is inline). Never include name in positional
+      // fill if we only have 2 iframes and name is still unfilled.
+      if (!matchedAny && ckoIframes.length > 0) {
+        trace(`CKO positional fallback: ${ckoIframes.length} unmatched iframe(s)`);
+        const sortedIframes = [...ckoIframes].sort((a, b) => a.y - b.y);
+        // Build fill list: only number and expiry (skip name — it's likely inline)
+        const positionalFields: Array<{ value: string; key: keyof typeof checkoutComFrameFilled }> = [];
+        if (!checkoutComFrameFilled.number && profile.card_number)
+          positionalFields.push({ value: profile.card_number, key: "number" });
+        if (!checkoutComFrameFilled.expiry && profile.card_expiry)
+          positionalFields.push({ value: profile.card_expiry, key: "expiry" });
+
+        for (let i = 0; i < Math.min(positionalFields.length, sortedIframes.length); i++) {
+          const box = sortedIframes[i];
+          const field = positionalFields[i];
+          const cx = box.x + box.w / 2;
+          const cy = box.y + box.h / 2;
+          try {
+            await (page as unknown as { click: (x: number, y: number) => Promise<void> }).click(cx, cy);
+            await new Promise(r => setTimeout(r, 300));
+            await page.keyboard.press("Control+a");
+            await new Promise(r => setTimeout(r, 100));
+            await page.keyboard.type(field.value, { delay: 50 });
+            await new Promise(r => setTimeout(r, 200));
+            checkoutComFrameFilled[field.key] = true;
+            trace(`CKO positional iframe[${i}]: ${field.key} filled via page.click(${cx.toFixed(0)},${cy.toFixed(0)}) + keyboard`);
+          } catch (err) {
+            trace(`CKO positional iframe[${i}]: ${field.key} error — ${(err as Error).message?.slice(0, 50)}`);
+          }
         }
       }
     } catch (visErr) {
