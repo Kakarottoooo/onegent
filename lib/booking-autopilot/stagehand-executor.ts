@@ -1136,50 +1136,89 @@ The user will enter CVV and confirm payment themselves.`,
                     // IMPORTANT: Use CDP coordinate click (not DOM .click()) to trigger Hotels.com
                     // navigation. Filter out "Search for '...'" items (text-only search).
                     const hotelWords = targetHotelName.toLowerCase().split(/\s+/)
-                      .filter((w: string) => w.length > 3 || /^\d+$/.test(w));
+                      .filter((w: string) => w.length > 2 || /^\d+$/.test(w));
                     const pickedCoords = await raw.evaluate((words: string[]) => {
+                      const isVisible = (el: HTMLElement) => {
+                        const r = el.getBoundingClientRect();
+                        return r.width > 0 && r.height > 0;
+                      };
+                      const isNotSearchFor = (el: HTMLElement) =>
+                        !/^search\s+for\b/i.test((el.textContent ?? "").replace(/\s+/g, " ").trim());
+                      const scoreEl = (el: HTMLElement) =>
+                        words.filter(w => (el.textContent ?? "").toLowerCase().includes(w)).length;
+                      const toResult = (el: HTMLElement) => {
+                        el.scrollIntoView({ behavior: 'instant', block: "center" });
+                        const r = el.getBoundingClientRect();
+                        return {
+                          x: Math.round(r.left + r.width / 2),
+                          y: Math.round(r.top + r.height / 2),
+                          text: (el.textContent ?? "").replace(/\s+/g, " ").trim().slice(0, 80),
+                        };
+                      };
+
+                      // Structured selectors — ordered from most to least specific
                       const suggSelectors = [
                         '[role="option"]',
                         '[data-testid*="suggest"]',
+                        '[data-stid*="typeahead-item"]',
+                        '[data-stid*="TypeAhead-item"]',
                         '[data-stid*="typeahead"] li',
+                        '[data-stid*="TypeAhead"] li',
+                        '[class*="TypeAheadResults"] li',
+                        '[class*="typeaheadResults"] li',
                         '[class*="typeahead" i] li',
+                        '[class*="AutoSuggest" i] li',
                         '[class*="suggestion" i]',
                         '[class*="autocomplete" i] li',
                         'ul[role="listbox"] li',
+                        '[role="listbox"] li',
+                        '[role="listbox"] [role="option"]',
                       ];
+                      const threshold = Math.max(1, Math.ceil(words.length * 0.4));
                       for (const ss of suggSelectors) {
                         const items = Array.from(document.querySelectorAll<HTMLElement>(ss))
-                          .filter(el => {
-                            const r = el.getBoundingClientRect();
-                            return r.width > 0 && r.height > 0;
-                          });
+                          .filter(el => isVisible(el) && isNotSearchFor(el));
                         if (items.length === 0) continue;
-                        // Exclude "Search for '...'" items — these trigger text-only search,
-                        // not hotel navigation. We want the hotel property suggestion.
-                        const hotelItems = items.filter(el =>
-                          !/^search\s+for\b/i.test((el.textContent ?? "").replace(/\s+/g, " ").trim())
-                        );
-                        // Score each suggestion by keyword overlap with hotel name
-                        const scored = hotelItems.map(el => ({
-                          el,
-                          score: words.filter(w => (el.textContent ?? "").toLowerCase().includes(w)).length,
-                          text: (el.textContent ?? "").replace(/\s+/g, " ").trim().slice(0, 80),
-                        })).sort((a, b) => b.score - a.score);
+                        const scored = items
+                          .map(el => ({ el, score: scoreEl(el), text: (el.textContent ?? "").slice(0, 60) }))
+                          .sort((a, b) => b.score - a.score);
                         const best = scored[0];
-                        if (best && best.score >= Math.ceil(words.length * 0.4)) {
-                          best.el.scrollIntoView({ behavior: 'instant', block: "center" });
-                          const r = best.el.getBoundingClientRect();
-                          return {
-                            x: Math.round(r.left + r.width / 2),
-                            y: Math.round(r.top + r.height / 2),
-                            text: best.text,
-                          };
-                        }
+                        if (best && best.score >= threshold) return toResult(best.el);
                       }
-                      return null;
+
+                      // ── Broad fallback: any visible li/button in the top 300px of the page ──
+                      // Hotels.com may use class names we haven't seen yet. If the dropdown is
+                      // open (visible items near the search bar), grab the first non-"Search for" li.
+                      const topItems = Array.from(document.querySelectorAll<HTMLElement>(
+                        'li, [role="option"], [data-stid], button[class*="item" i]'
+                      )).filter(el => {
+                          if (!isVisible(el) || !isNotSearchFor(el)) return false;
+                          const r = el.getBoundingClientRect();
+                          // Must be in the top portion of the viewport (near the search bar)
+                          return r.top >= 50 && r.top <= 350 && r.width > 100;
+                        });
+                      // Return diagnostics about what we found (embedded in text field)
+                      const diagText = topItems.slice(0, 3)
+                        .map(el => `[${el.tagName}] ${(el.textContent ?? "").replace(/\s+/g, " ").trim().slice(0, 40)}`)
+                        .join(" || ");
+                      if (topItems.length > 0) {
+                        const scored = topItems
+                          .map(el => ({ el, score: scoreEl(el) }))
+                          .sort((a, b) => b.score - a.score);
+                        // Accept any item with score >= 1 (at least one word matches)
+                        const best = scored[0];
+                        if (best && best.score >= 1) return toResult(best.el);
+                        // Still nothing — just take the first visible item (hotel property)
+                        return toResult(topItems[0]);
+                      }
+                      // No items found at all — return diagnostic null with info
+                      return { x: -1, y: -1, text: `DIAG:no-items-found diag=${diagText || "empty"}` };
                     }, hotelWords).catch(() => null);
 
-                    if (pickedCoords) {
+                    if (pickedCoords?.x === -1) {
+                      trace(`[ai-listing] autocomplete broad-fallback: ${pickedCoords.text}`);
+                    }
+                    if (pickedCoords && pickedCoords.x > 0) {
                       trace(`[ai-listing] CDP-clicking autocomplete suggestion: "${pickedCoords.text.slice(0, 60)}" at (${pickedCoords.x},${pickedCoords.y})`);
                       await sh(raw).click(pickedCoords.x, pickedCoords.y);
                       const picked = pickedCoords.text;
@@ -1211,7 +1250,7 @@ The user will enter CVV and confirm payment themselves.`,
                         trace(`[ai-listing] no Search button found — autocomplete may have navigated directly`);
                       }
                     } else {
-                      trace(`[ai-listing] no matching autocomplete suggestion found — falling back to property name filter`);
+                      trace(`[ai-listing] no matching autocomplete suggestion found (x=${pickedCoords?.x ?? "null"}) — falling back to property name filter`);
                       searchBarUsed = false; // trigger fallback below
                     }
                   }
