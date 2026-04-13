@@ -92,7 +92,26 @@ export async function clickTargetListingAI(
       { hotelName: targetHotelName, domain: startDomain }
     ).catch(() => null);
 
-    if (directHref) {
+    // Reject search/listing page links — only hotel detail pages are valid targets.
+    // Hotels.com search URLs contain "Hotel-Search", "regionId=", "destination=" in the path/query.
+    // Expedia search URLs contain "/Hotel-Search" or similar patterns.
+    // These look like valid matches (e.g. "Times Square" in the URL matches name words)
+    // but navigating to them leads to another search results page, not a hotel detail page.
+    const isSearchUrl = directHref && (() => {
+      try {
+        const u = new URL(directHref);
+        const pathAndQuery = (u.pathname + u.search).toLowerCase();
+        return pathAndQuery.includes("hotel-search") ||
+               pathAndQuery.includes("regionid=") ||
+               pathAndQuery.includes("destination=") ||
+               pathAndQuery.includes("/search?") ||
+               pathAndQuery.includes("/hotels?");
+      } catch { return false; }
+    })();
+    if (isSearchUrl) {
+      trace(`[find-listing] DOM link looks like a search URL — skipping: ${directHref!.slice(0, 80)}`);
+    }
+    if (directHref && !isSearchUrl) {
       trace(`[find-listing] DOM link found for "${targetHotelName}": ${directHref.slice(0, 80)}`);
       try {
         // Append check-in/out dates to the hotel URL so Expedia loads real availability.

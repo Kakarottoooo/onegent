@@ -710,9 +710,10 @@ async function fillCardFieldsInPaymentIframes(
         if (ok) filled[fieldType] = true;
 
         // Fallback: keyboard type if fill didn't stick
+        // page.keyboard is undefined on Stagehand v3 — use Stagehand's type() API
         if (!ok) {
           await loc.click({ clickCount: 3 }).catch(() => {});
-          await page.keyboard.type(value, { delay: 50 });
+          await (page as unknown as { type: (t: string) => Promise<void> }).type(value);
           await new Promise(r => setTimeout(r, 200));
           const actual2 = await loc.inputValue().catch(() => "");
           if (actual2.length > 0) {
@@ -1089,9 +1090,10 @@ export async function fillExpediaGroupPaymentForm(
         try {
           await (page as unknown as { click: (x: number, y: number) => Promise<void> }).click(cx, cy);
           await new Promise(r => setTimeout(r, 300));
-          await page.keyboard.press("Control+a");
+          // page.keyboard is undefined on Stagehand v3 — use Stagehand's own keyPress/type API
+          await (page as unknown as { keyPress: (k: string) => Promise<void> }).keyPress("Control+a");
           await new Promise(r => setTimeout(r, 100));
-          await page.keyboard.type(value, { delay: 50 });
+          await (page as unknown as { type: (t: string) => Promise<void> }).type(value);
           await new Promise(r => setTimeout(r, 200));
           checkoutComFrameFilled[fieldType] = true;
           matchedAny = true;
