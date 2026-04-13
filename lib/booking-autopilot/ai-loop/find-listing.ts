@@ -58,15 +58,22 @@ export async function clickTargetListingAI(
   if (page && startDomain) {
     const directHref = await page.evaluate(
       ({ hotelName, domain }: { hotelName: string; domain: string }) => {
-        const nameWords = hotelName.toLowerCase().split(/\s+/).filter((w: string) => w.length > 3);
+        // Include purely-numeric words (e.g. "414" in "414 Hotel") regardless of length —
+        // hotel numbers are the most distinctive part of a name and must not be dropped.
+        const nameWords = hotelName.toLowerCase().split(/\s+/).filter((w: string) => w.length > 3 || /^\d+$/.test(w));
         // Find all <a> tags that link within the same OTA domain.
-        // Use "//<domain>" to match only the hostname portion, NOT query params like
-        // "directword.io/survey/domain=www.hotels.com/..." which contain the domain string
-        // but are actually third-party survey URLs.
+        // Check the URL *hostname* so that survey redirect URLs like
+        // "directword.io/survey/domain=www.hotels.com/..." are excluded even though
+        // they contain the domain string in their path/query parameters.
         const candidates = Array.from(document.querySelectorAll<HTMLAnchorElement>("a[href]"))
           .filter(a => {
-            const href = (a.href ?? "").toLowerCase();
-            return href.includes(`//${domain}`) || href.startsWith("/");
+            if (a.href.startsWith("/")) return true; // relative URL — always within current domain
+            try {
+              const url = new URL(a.href);
+              return url.hostname === domain || url.hostname.endsWith(`.${domain}`);
+            } catch {
+              return false;
+            }
           });
         // Score each candidate by how many hotel name words appear in its text or href
         const scored = candidates.map(a => {
@@ -149,7 +156,7 @@ export async function clickTargetListingAI(
       }
       const pageTitle = await page.evaluate(() => document.title).catch(() => "");
       const h1Text = await page.evaluate(() => document.querySelector("h1")?.textContent?.trim() ?? "").catch(() => "");
-      const nameWords = targetHotelName.toLowerCase().split(/\s+/).filter(w => w.length > 3);
+      const nameWords = targetHotelName.toLowerCase().split(/\s+/).filter(w => w.length > 3 || /^\d+$/.test(w));
       const combinedText = (pageTitle + " " + h1Text).toLowerCase();
       const matchScore = nameWords.filter(w => combinedText.includes(w)).length;
       const matchRatio = nameWords.length > 0 ? matchScore / nameWords.length : 1;

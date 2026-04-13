@@ -1109,7 +1109,7 @@ The user will enter CVV and confirm payment themselves.`,
 
                     // Select the best matching suggestion from the dropdown
                     const hotelWords = targetHotelName.toLowerCase().split(/\s+/)
-                      .filter((w: string) => w.length > 3);
+                      .filter((w: string) => w.length > 3 || /^\d+$/.test(w));
                     const picked = await raw.evaluate((words: string[]) => {
                       const suggSelectors = [
                         '[role="option"]',
@@ -1494,7 +1494,7 @@ The user will enter CVV and confirm payment themselves.`,
 
                   return scored[0]?.href ?? null;
                 },
-                { nameWords: (targetHotelName ?? "").toLowerCase().split(/\s+/).filter((w: string) => w.length > 3) }
+                { nameWords: (targetHotelName ?? "").toLowerCase().split(/\s+/).filter((w: string) => w.length > 3 || /^\d+$/.test(w)) }
               ).catch(() => null);
 
               if (hotelDetailHref) {
