@@ -1226,19 +1226,20 @@ The user will enter CVV and confirm payment themselves.`,
                         await raw.type(typeaheadText, { delay: 80 });
                         trace(`[ai-listing] property name filter typed "${typeaheadText}" via "${sel}" (DOM focus/click)`);
 
-                        // ── Strategy 1: Click "Search for '...'" dropdown item (safe, always on Hotels.com) ──
-                        // The Hotels.com UITK dropdown has TWO types of suggestions:
-                        //   1. Hotel-specific link (may lead to brand site like 414hotel.com) — AVOID
-                        //   2. "Search for '...'" (text filter, stays on Hotels.com)         — TARGET
-                        // Exception: if the dropdown directly links to hotels.com/ho<id>/, goto() it.
-                        // NEVER use ArrowDown+Enter (selects item #1 → brand site navigation).
-                        // NEVER press Enter on the input (submits main search form → wrong results).
+                        // ── Strategy 1: click hotel property CARD in dropdown ────────────────
+                        // Hotels.com "Search by property name" dropdown shows:
+                        //   Option 0: hotel property card  → clicks → hotel detail page (IDEAL)
+                        //   Option 1: "Search for '...'"   → applies text filter (MAY show "No exact matches")
+                        // We pass the hotel name so we can identify the matching card.
+                        // NOTE: This sidebar dropdown is NOT the top search bar — property card
+                        // suggestions here link to hotels.com hotel pages, not brand sites.
                         let suggClicked = false;
                         await new Promise(r => setTimeout(r, 1800)); // wait for typeahead to render
                         try {
-                          const s1Result = await raw.evaluate(() => {
-                            // Helper: get all visible options in the dropdown
+                          const s1Result = await raw.evaluate(({ hotelN }: { hotelN: string }) => {
+                            // Collect all visible buttons/items in the typeahead dropdown
                             const visibleOpts = Array.from(document.querySelectorAll<HTMLElement>(
+                              '[data-stid*="typeahead"] button, ' +
                               '[role="option"], [role="listbox"] li, [data-stid*="typeahead-item"], ' +
                               '[data-stid*="typeahead"] > *, ul[role="listbox"] > li'
                             )).filter(el => {
@@ -1246,7 +1247,33 @@ The user will enter CVV and confirm payment themselves.`,
                               return r.width > 0 && r.height > 0;
                             });
 
-                            // Priority 1: "Search for '...'" item — text filter, always safe
+                            if (visibleOpts.length === 0) return { action: "none" };
+
+                            // Priority 1: hotel property card — button whose text contains
+                            // enough words from the target hotel name (the card to click).
+                            const nameWords = hotelN.toLowerCase().split(/\s+/)
+                              .filter((w: string) => w.length > 2 || /^\d+$/.test(w));
+                            const hotelCard = visibleOpts.find(el => {
+                              const text = (el.textContent ?? "").toLowerCase();
+                              const matches = nameWords.filter((w: string) => text.includes(w)).length;
+                              return matches >= Math.ceil(nameWords.length * 0.5);
+                            });
+                            if (hotelCard) {
+                              (hotelCard as HTMLElement).click();
+                              return { action: "clicked-hotel-card", text: (hotelCard.textContent ?? "").trim().slice(0, 60) };
+                            }
+
+                            // Priority 2: direct hotels.com hotel link via <a href>
+                            const anchors = Array.from(document.querySelectorAll<HTMLAnchorElement>(
+                              '[role="listbox"] a[href], [role="option"] a[href], [data-stid*="typeahead"] a[href]'
+                            ));
+                            for (const a of anchors) {
+                              if (/hotels\.com\/(ho\d|h\d)/i.test(a.href)) {
+                                return { action: "href", href: a.href };
+                              }
+                            }
+
+                            // Priority 3: "Search for '...'" text filter (stays on Hotels.com)
                             const searchForItem = visibleOpts.find(el =>
                               /^search\s+for\b/i.test((el.textContent ?? "").trim())
                             );
@@ -1255,32 +1282,16 @@ The user will enter CVV and confirm payment themselves.`,
                               return { action: "clicked-search-for" };
                             }
 
-                            // Priority 2: direct hotels.com hotel link (rare but ideal)
-                            const anchors = Array.from(document.querySelectorAll<HTMLAnchorElement>(
-                              '[role="listbox"] a[href], [role="option"] a[href], ' +
-                              '[data-stid*="typeahead"] a[href]'
-                            ));
-                            for (const a of anchors) {
-                              if (/hotels\.com\/(ho\d|h\d)/i.test(a.href)) {
-                                return { action: "href", href: a.href };
-                              }
-                            }
-
-                            // Priority 3: click the LAST visible option (usually "Search for '...'")
-                            // Avoids first option which is often a brand-site link
-                            if (visibleOpts.length >= 2) {
-                              const last = visibleOpts[visibleOpts.length - 1];
-                              (last as HTMLElement).click();
-                              return { action: "clicked-last-option", text: (last.textContent ?? "").trim().slice(0, 60) };
-                            }
-
-                            return { action: "none" };
-                          }).catch(() => ({ action: "none" as const }));
+                            // Priority 4: click FIRST visible option (hotel card, not last/"Search for")
+                            const first = visibleOpts[0];
+                            (first as HTMLElement).click();
+                            return { action: "clicked-first-option", text: (first.textContent ?? "").trim().slice(0, 60) };
+                          }, { hotelN: targetHotelName ?? "" }).catch(() => ({ action: "none" as const }));
 
                           if ((s1Result as { action: string; href?: string }).action === "href") {
                             const href = (s1Result as { action: string; href: string }).href;
                             trace(`[ai-listing] Strategy 1: found hotels.com detail href in dropdown → goto()`);
-                            await raw.goto(href, { waitUntil: "domcontentloaded", timeoutMs: 20000 });
+                            await raw.goto(href, { waitUntil: "domcontentloaded", timeout: 20000 });
                             await new Promise(r => setTimeout(r, 2000));
                             if (isHotelDetailUrl(raw.url())) {
                               suggClicked = true;
@@ -1290,25 +1301,32 @@ The user will enter CVV and confirm payment themselves.`,
                             const actionLabel = (s1Result as { action: string; text?: string }).action;
                             const itemText = (s1Result as { action: string; text?: string }).text ?? "";
                             trace(`[ai-listing] Strategy 1: ${actionLabel}${itemText ? ` ("${itemText}")` : ""}`);
+                            // Wait for navigation (hotel card → hotel detail page) or filter update
                             await new Promise(r => setTimeout(r, 3000));
-                            const isNoMatch = await raw.evaluate(() =>
-                              /no exact match/i.test(document.body.textContent ?? "")
-                            ).catch(() => false);
-                            if (!isNoMatch) {
+                            // If hotel card click navigated to hotel detail, we're done
+                            if (isHotelDetailUrl(raw.url())) {
                               suggClicked = true;
-                              trace(`[ai-listing] Strategy 1: results updated — sidebar filter applied`);
+                              trace(`[ai-listing] Strategy 1: hotel card → hotel detail: ${raw.url().slice(0, 80)}`);
                             } else {
-                              trace(`[ai-listing] Strategy 1: "no exact match" after click — re-focusing input for fallback strategies`);
-                              await raw.keyPress("Escape").catch(() => {});
-                              // Re-focus via DOM (same approach as initial focus — avoids coordinate issues)
-                              await raw.evaluate((selArg: string) => {
-                                const el = document.querySelector<HTMLInputElement>(selArg);
-                                if (el) { el.scrollIntoView({ behavior: 'instant', block: 'center' }); el.focus(); el.click(); }
-                              }, sel).catch(() => {});
-                              await new Promise(r => setTimeout(r, 300));
-                              await raw.keyPress("Control+a");
-                              await raw.type(typeaheadText, { delay: 80 });
-                              await new Promise(r => setTimeout(r, 1800));
+                              const isNoMatch = await raw.evaluate(() =>
+                                /no exact match/i.test(document.body.textContent ?? "")
+                              ).catch(() => false);
+                              if (!isNoMatch) {
+                                suggClicked = true;
+                                trace(`[ai-listing] Strategy 1: results updated — sidebar filter applied`);
+                              } else {
+                                trace(`[ai-listing] Strategy 1: "no exact match" after click — re-focusing input for fallback strategies`);
+                                await raw.keyPress("Escape").catch(() => {});
+                                // Re-focus via DOM (same approach as initial focus — avoids coordinate issues)
+                                await raw.evaluate((selArg: string) => {
+                                  const el = document.querySelector<HTMLInputElement>(selArg);
+                                  if (el) { el.scrollIntoView({ behavior: 'instant', block: 'center' }); el.focus(); el.click(); }
+                                }, sel).catch(() => {});
+                                await new Promise(r => setTimeout(r, 300));
+                                await raw.keyPress("Control+a");
+                                await raw.type(typeaheadText, { delay: 80 });
+                                await new Promise(r => setTimeout(r, 1800));
+                              }
                             }
                           } else {
                             trace(`[ai-listing] Strategy 1: no dropdown suggestions found`);
@@ -1318,7 +1336,7 @@ The user will enter CVV and confirm payment themselves.`,
                         }
 
                         // ── Strategy 2: Playwright-native waitForSelector + locator ──────────
-                        // Click the LAST option (not first) — "Search for '...'" is always last.
+                        // Try FIRST option (hotel property card) then LAST ("Search for '...'" filter).
                         if (!suggClicked) {
                           try {
                             await raw.waitForSelector(
@@ -1338,12 +1356,17 @@ The user will enter CVV and confirm payment themselves.`,
                             for (const spec of suggLocatorSpecs) {
                               const count = await raw.locator(spec).count().catch(() => 0);
                               if (count > 0) {
-                                // Click the LAST option — "Search for '...'" (text filter, safe)
-                                // NOT first() which links to brand site.
-                                // Stagehand Locator has no .last() — use .nth(count-1) instead.
-                                await raw.locator(spec).nth(count - 1).click();
+                                // Click the FIRST option (hotel property card).
+                                // In Hotels.com sidebar typeahead: first = hotel card → hotel detail page.
+                                // If it results in "No exact matches", Strategy 3 retries with last option.
+                                await raw.locator(spec).nth(0).click();
                                 suggClicked = true;
-                                trace(`[ai-listing] Strategy 2: clicked last of ${count} options via locator "${spec}"`);
+                                trace(`[ai-listing] Strategy 2: clicked first of ${count} options via locator "${spec}"`);
+                                // Check if we navigated to hotel detail page
+                                await new Promise(r => setTimeout(r, 2500));
+                                if (isHotelDetailUrl(raw.url())) {
+                                  trace(`[ai-listing] Strategy 2: hotel card → hotel detail: ${raw.url().slice(0, 80)}`);
+                                }
                                 break;
                               }
                             }
@@ -1352,10 +1375,10 @@ The user will enter CVV and confirm payment themselves.`,
                           }
                         }
 
-                        // ── Strategy 3: position-based fallback — prefer "Search for" text ─────
+                        // ── Strategy 3: position-based fallback — prefer hotel name card ─────
                         if (!suggClicked) {
                           await new Promise(r => setTimeout(r, 500));
-                          suggClicked = await raw.evaluate((hotelN: string) => {
+                          suggClicked = await raw.evaluate(({ hotelN }: { hotelN: string }) => {
                             const input = document.querySelector<HTMLInputElement>(
                               'input[placeholder*="property name" i], input[placeholder*="Marriott" i], ' +
                               'input[aria-label*="property name" i], input[data-testid*="property"]'
@@ -1375,15 +1398,23 @@ The user will enter CVV and confirm payment themselves.`,
                             });
                             if (allBelow.length === 0) return false;
 
-                            // Strongly prefer element containing "Search for" text
+                            // Prefer element whose text matches the hotel name (property card)
+                            const nameWords = hotelN.toLowerCase().split(/\s+/)
+                              .filter((w: string) => w.length > 2 || /^\d+$/.test(w));
+                            const hotelCard = allBelow.find(el => {
+                              const text = (el.textContent ?? "").toLowerCase();
+                              const matches = nameWords.filter((w: string) => text.includes(w)).length;
+                              return matches >= Math.ceil(nameWords.length * 0.5);
+                            });
+                            // Fall back to "Search for '...'" if no card found, then first item
                             const searchForEl = allBelow.find(el =>
                               /^search\s+for\b/i.test((el.textContent ?? "").trim())
                             );
-                            const target = searchForEl ?? allBelow[allBelow.length - 1]; // last item
+                            const target = hotelCard ?? searchForEl ?? allBelow[0];
                             (target as HTMLElement).scrollIntoView({ block: "nearest" });
                             (target as HTMLElement).click();
                             return true;
-                          }, targetHotelName).catch(() => false);
+                          }, { hotelN: targetHotelName ?? "" }).catch(() => false);
                           if (suggClicked) {
                             trace(`[ai-listing] Strategy 3: clicked dropdown item via position-based DOM`);
                           }
