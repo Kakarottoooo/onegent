@@ -900,6 +900,11 @@ The user will enter CVV and confirm payment themselves.`,
       if (!raw) return undefined;
       if (raw.length < 4) return undefined;  // "the", "a", "an", etc.
       if (/^the\b|cheapest|standard|available|lowest/i.test(raw)) return undefined;
+      // Restaurant tasks don't have room types — skip for OpenTable bookings
+      if (startProvider?.id === "opentable-com") return undefined;
+      // Reject location-like suffixes that look like restaurant branch names
+      // e.g. "Nashville - Lower Broadway" from "Hattie B's Hot Chicken - Nashville - Lower Broadway"
+      if (/^[A-Z][a-z]+ -\s+[A-Z]/.test(raw)) return undefined;
       return raw;
     })();
     if (roomPreference) {
@@ -3072,6 +3077,27 @@ The user will enter CVV and confirm payment themselves.`,
             // the search page. We click the closest slot to the requested time via
             // pure DOM — no stagehand.act() needed (avoids OpenAI quota errors).
             if (startProvider?.id === "opentable-com") {
+              // ── Early exit: restaurant not found on OpenTable ──────────────
+              // OpenTable shows "We didn't find a match" when the restaurant doesn't exist.
+              // Return no_availability so the user gets a clear message instead of a
+              // confusing "stage=unknown" error.
+              const noResultsFound = await raw.evaluate(() => {
+                const text = (document.body?.innerText ?? "").toLowerCase();
+                return (
+                  text.includes("we didn't find a match") ||
+                  text.includes("no results found") ||
+                  text.includes("couldn't find") ||
+                  text.includes("no restaurants found") ||
+                  (text.includes("didn't find") && text.includes("match"))
+                );
+              }).catch(() => false);
+
+              if (noResultsFound) {
+                const restaurantLabel = targetHotelName ?? "This restaurant";
+                trace(`[opentable] no results found for "${restaurantLabel}" — returning no_availability`);
+                return false; // signals no_availability; the outer loop captures available slots
+              }
+
               // Extract requested time from task string (HH:MM 24h or "H:MM PM" 12h)
               const timeMatch = input.task.match(/\b(\d{1,2}):(\d{2})\s*(AM|PM)?\b/i);
               let requestedMinutes = 19 * 60; // default 7 PM
