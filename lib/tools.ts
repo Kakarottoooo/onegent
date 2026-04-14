@@ -60,6 +60,7 @@ export async function googlePlacesSearch(params: {
     "https://places.googleapis.com/v1/places:searchText",
     {
       method: "POST",
+      signal: AbortSignal.timeout(15_000),
       headers: {
         "Content-Type": "application/json",
         "X-Goog-Api-Key": process.env.GOOGLE_PLACES_API_KEY!,
