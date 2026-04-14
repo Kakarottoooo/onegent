@@ -1153,8 +1153,12 @@ The user will enter CVV and confirm payment themselves.`,
                         const r = el.getBoundingClientRect();
                         return r.width > 0 && r.height > 0;
                       };
+                      // Filter out "Search for '...'" generic search suggestions.
+                      // Use a non-anchored pattern — autocomplete items often prepend a hidden
+                      // icon span whose accessible text is "search", turning the full textContent
+                      // into "searchsearchSearch for ..." which defeats a ^-anchored regex.
                       const isNotSearchFor = (el: HTMLElement) =>
-                        !/^search\s+for\b/i.test((el.textContent ?? "").replace(/\s+/g, " ").trim());
+                        !/search\s+for\b/i.test((el.textContent ?? "").replace(/\s+/g, " ").trim());
                       const scoreEl = (el: HTMLElement) =>
                         words.filter(w => (el.textContent ?? "").toLowerCase().includes(w)).length;
                       const toResult = (el: HTMLElement) => {
