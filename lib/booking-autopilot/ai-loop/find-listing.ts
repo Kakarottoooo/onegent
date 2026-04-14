@@ -94,7 +94,9 @@ export async function clickTargetListingAI(
         const isDetailUrl = (href: string): boolean => {
           try {
             const p = new URL(href).pathname.toLowerCase();
-            return /\/ho\d+\/|\/h\d+\//.test(p) || p.includes("/hotel/");
+            return /\/ho\d+\/|\/h\d+\//.test(p) ||  // Hotels.com /hoNNN/ and old Expedia /h/NNN/
+                   /[./]h\d+[./]/.test(p) ||          // Expedia .hNNN. dot format (e.g. .h3552516416.)
+                   p.includes("/hotel/");              // Booking.com /hotel/us/...
           } catch { return false; }
         };
         const scored = candidates.map(a => {
@@ -251,10 +253,57 @@ export async function clickTargetListingAI(
     trace(`[find-listing] direct act() failed: ${(err as Error).message?.slice(0, 80)}`);
   }
 
-  // Fallback: scroll + AI perception loop
+  // Fallback: scroll + DOM extraction retry + AI perception loop
+  // Re-run DOM extraction after each scroll in case the hotel card wasn't in the
+  // initial viewport. This path works without stagehand.act() (no AI quota needed).
   for (let scroll = 0; scroll < maxScrolls; scroll++) {
     const page = stagehand.context?.activePage();
     if (!page) break;
+
+    // DOM extraction retry after scroll — no AI needed
+    if (startDomain) {
+      const scrollCandidates = await page.evaluate(
+        ({ hotelName, domain }: { hotelName: string; domain: string }) => {
+          const normalize = (v: string) => v.toLowerCase().replace(/[^a-z0-9]+/g, " ").replace(/\s+/g, " ").trim();
+          const nameWords = normalize(hotelName).split(/\s+/).filter((w: string) => w.length > 3 || /^\d+$/.test(w));
+          const stopWords = new Set(["hotel","hotels","inn","suite","suites","resort","spa","the","by","and","at","of","new","york","times","square","manhattan","midtown","downtown","broadway","city","united","states","america"]);
+          const numericWords = nameWords.filter((w: string) => /^\d+$/.test(w));
+          const distinctiveWords = nameWords.filter((w: string) => !/^\d+$/.test(w) && !stopWords.has(w) && w.length >= 4);
+          const requiredWords = numericWords.length > 0 ? numericWords : distinctiveWords.slice(0, 2);
+          const isDetail = (href: string) => { try { const p = new URL(href).pathname.toLowerCase(); return /\/ho\d+\/|\/h\d+\//.test(p) || /[./]h\d+[./]/.test(p) || p.includes("/hotel/"); } catch { return false; } };
+          return Array.from(document.querySelectorAll<HTMLAnchorElement>("a[href]"))
+            .filter(a => { try { const u = new URL(a.href); return u.hostname === domain || u.hostname.endsWith(`.${domain}`); } catch { return false; } })
+            .map(a => {
+              const combined = `${normalize(a.textContent ?? "")} ${normalize(a.href ?? "")}`;
+              const matchedRequired = requiredWords.every((w: string) => combined.includes(w));
+              const matchedAll = nameWords.filter((w: string) => combined.includes(w)).length;
+              const matchedDistinctive = distinctiveWords.filter((w: string) => combined.includes(w)).length;
+              const score = matchedAll * 10 + matchedDistinctive * 25 + (matchedRequired ? 60 : 0) + (isDetail(a.href) ? 40 : 0);
+              return { href: a.href, score, matchedRequired, matchedAll, matchedDistinctive };
+            })
+            .filter(c => c.matchedRequired && c.matchedAll >= Math.max(1, Math.ceil(nameWords.length * 0.35)) && (distinctiveWords.length === 0 || c.matchedDistinctive >= 1))
+            .sort((a, b) => b.score - a.score)
+            .slice(0, 5)
+            .map(c => c.href);
+        },
+        { hotelName: targetHotelName, domain: startDomain }
+      ).catch(() => [] as string[]);
+
+      const validHref = scrollCandidates.find(href => !isSearchUrl(href));
+      if (validHref) {
+        trace(`[find-listing] DOM extraction found hotel after scroll ${scroll + 1}: ${validHref.slice(0, 80)}`);
+        try {
+          await (page as unknown as { goto: (url: string, opts?: object) => Promise<unknown> })
+            .goto(validHref, { waitUntil: "domcontentloaded", timeout: 25000 });
+          await sleep(1000);
+          const landedUrl = page.url();
+          if (landedUrl.toLowerCase().includes(startDomain.toLowerCase())) {
+            trace(`[find-listing] DOM goto (scroll ${scroll + 1}) succeeded — on ${landedUrl.slice(0, 80)}`);
+            return "clicked";
+          }
+        } catch { /* fall through to AI */ }
+      }
+    }
 
     const perception = await perceiveAndDecide(page as Parameters<typeof perceiveAndDecide>[0], {
       task: `Find and click the hotel whose name EXACTLY matches "${targetHotelName}" in the search results. Do not click hotels with similar but different names.`,
@@ -262,7 +311,13 @@ export async function clickTargetListingAI(
       recentSteps: scroll > 0 ? [`scroll_down (x${scroll})`] : [],
     }).catch(() => null);
 
-    if (!perception) break;
+    if (!perception) {
+      // AI unavailable — just scroll and retry DOM extraction next iteration
+      trace(`[find-listing] AI unavailable on scroll ${scroll + 1} — scrolling and retrying DOM extraction`);
+      await page.evaluate(() => window.scrollBy(0, window.innerHeight * 0.8)).catch(() => {});
+      await sleep(600);
+      continue;
+    }
 
     if (perception.stage === "no_availability") {
       trace(`[find-listing] AI says no_availability`);
