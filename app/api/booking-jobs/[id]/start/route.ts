@@ -330,6 +330,36 @@ async function runUniversalStep(
   // universal endpoint. Fetching here and injecting inline solves that.
   let resolvedBody: Record<string, unknown> = { ...(step.body as Record<string, unknown>) };
 
+  // ── Restaurant steps: build OpenTable startUrl + task if not already set ──
+  // step.body for restaurant steps contains: restaurantName, date (YYYY-MM-DD),
+  // time (HH:MM 24h), covers (number), and optionally city.
+  if (step.type === "restaurant" && !resolvedBody.startUrl) {
+    const rName = resolvedBody.restaurantName as string | undefined;
+    const rDate = resolvedBody.date as string | undefined;
+    const rTime = resolvedBody.time as string | undefined;
+    const rCovers = (resolvedBody.covers as number | undefined) ?? 2;
+    const rCity = (resolvedBody.city as string | undefined) ?? "";
+
+    if (rName && rDate && rTime) {
+      // Build OpenTable search URL: dateTime must be ISO format YYYY-MM-DDTHH:MM:00
+      const otUrl = `https://www.opentable.com/s?term=${encodeURIComponent(rName)}&covers=${rCovers}&dateTime=${rDate}T${rTime}:00`;
+      resolvedBody = { ...resolvedBody, startUrl: otUrl };
+
+      if (!resolvedBody.task) {
+        const { buildRestaurantTask } = await import("@/lib/booking-autopilot/core/task-builders");
+        const { task } = buildRestaurantTask({
+          restaurantName: rName,
+          city: rCity,
+          date: rDate,
+          time: rTime,
+          covers: rCovers,
+          profile: (resolvedBody.profile ?? { first_name: "", last_name: "", email: "", phone: "" }) as Parameters<typeof buildRestaurantTask>[0]["profile"],
+        });
+        resolvedBody = { ...resolvedBody, task };
+      }
+    }
+  }
+
   // Accept profileId as number OR string (JSONB round-trips preserve numbers, but be defensive)
   const rawProfileId = resolvedBody.profileId;
   const profileId: number | null =
