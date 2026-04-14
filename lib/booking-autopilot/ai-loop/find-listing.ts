@@ -88,7 +88,15 @@ export async function clickTargetListingAI(
               return false;
             }
           });
-        // Score each candidate by how many hotel name words appear in its text or href
+        // Score each candidate by how many hotel name words appear in its text or href.
+        // Bonus: prefer hotel detail page URLs over search/results URLs so that when
+        // a search-results link and a hotel-detail link score equally, the detail link wins.
+        const isDetailUrl = (href: string): boolean => {
+          try {
+            const p = new URL(href).pathname.toLowerCase();
+            return /\/ho\d+\/|\/h\d+\//.test(p) || p.includes("/hotel/");
+          } catch { return false; }
+        };
         const scored = candidates.map(a => {
           const text = normalize(a.textContent ?? "");
           const href = normalize(a.href ?? "");
@@ -96,58 +104,68 @@ export async function clickTargetListingAI(
           const matchedRequired = requiredWords.every((w: string) => combined.includes(w));
           const matchedDistinctive = distinctiveWords.filter((w: string) => combined.includes(w)).length;
           const matchedAll = nameWords.filter((w: string) => combined.includes(w)).length;
+          const detailBonus = isDetailUrl(a.href) ? 40 : 0;
           const score =
             matchedAll * 10 +
             matchedDistinctive * 25 +
-            (matchedRequired ? 60 : 0);
+            (matchedRequired ? 60 : 0) +
+            detailBonus;
           return { href: a.href, text, score, matchedRequired, matchedDistinctive, matchedAll };
         });
-        const best = scored.sort((x, y) => y.score - x.score)[0];
-        if (
-          best &&
-          best.matchedRequired &&
-          best.matchedAll >= Math.max(1, Math.ceil(nameWords.length * 0.35)) &&
-          (distinctiveWords.length === 0 || best.matchedDistinctive >= 1)
-        ) {
-          return best.href;
-        }
-        return null;
+        // Return top 5 qualifying candidates so the caller can pick the best non-search URL
+        const minMatchAll = Math.max(1, Math.ceil(nameWords.length * 0.35));
+        return scored
+          .filter(c =>
+            c.matchedRequired &&
+            c.matchedAll >= minMatchAll &&
+            (distinctiveWords.length === 0 || c.matchedDistinctive >= 1)
+          )
+          .sort((x, y) => y.score - x.score)
+          .slice(0, 5)
+          .map(c => c.href);
       },
       { hotelName: targetHotelName, domain: startDomain }
-    ).catch(() => null);
+    ).catch(() => null as null) as string[] | null;
 
-    // Reject search/listing page links — only hotel detail pages are valid targets.
-    // Hotels.com search URLs contain "Hotel-Search", "regionId=", "destination=" in the path/query.
-    // Expedia search URLs contain "/Hotel-Search" or similar patterns.
-    // These look like valid matches (e.g. "Times Square" in the URL matches name words)
-    // but navigating to them leads to another search results page, not a hotel detail page.
-    const isSearchUrl = directHref && (() => {
+    // Pick the best candidate that is NOT a search/listing page.
+    // Hotels.com: search URLs have "Hotel-Search", "regionId=", "destination=".
+    // Expedia: "/Hotel-Search" or similar.
+    // Booking.com: "searchresults.html" in pathname.
+    // Hotel detail URLs for Booking.com contain "/hotel/"; for Hotels.com/Expedia "/ho12345/" or "/h12345/".
+    const isSearchUrl = (href: string): boolean => {
       try {
-        const u = new URL(directHref);
+        const u = new URL(href);
         const pathname = u.pathname.toLowerCase();
-        if (/\/ho\d+\/|\/h\d+\//.test(pathname)) return false;
+        // Explicit hotel detail page patterns — NOT search URLs
+        if (/\/ho\d+\/|\/h\d+\//.test(pathname)) return false;  // Hotels.com / Expedia hotel IDs
+        if (pathname.includes("/hotel/")) return false;           // Booking.com hotel detail pages
         const pathAndQuery = (u.pathname + u.search).toLowerCase();
         return pathAndQuery.includes("hotel-search") ||
                pathAndQuery.includes("regionid=") ||
                pathAndQuery.includes("destination=") ||
                pathAndQuery.includes("/search?") ||
-               pathAndQuery.includes("/hotels?");
+               pathAndQuery.includes("/hotels?") ||
+               pathname.includes("searchresults");               // Booking.com search results
       } catch { return false; }
-    })();
-    if (isSearchUrl) {
-      trace(`[find-listing] DOM link looks like a search URL — skipping: ${directHref!.slice(0, 80)}`);
+    };
+
+    const candidates = Array.isArray(directHref) ? directHref : (directHref ? [directHref] : []);
+    const directHrefClean = candidates.find(href => !isSearchUrl(href)) ?? null;
+
+    if (candidates.length > 0 && !directHrefClean) {
+      trace(`[find-listing] all DOM candidates look like search URLs — skipping: ${candidates[0]?.slice(0, 80)}`);
     }
-    if (directHref && !isSearchUrl) {
-      trace(`[find-listing] DOM link found for "${targetHotelName}": ${directHref.slice(0, 80)}`);
+    if (directHrefClean) {
+      trace(`[find-listing] DOM link found for "${targetHotelName}": ${directHrefClean.slice(0, 80)}`);
       try {
         // Append check-in/out dates to the hotel URL so Expedia loads real availability.
         // Without dates the page shows a placeholder that triggers a false-positive no-availability.
-        let hotelUrlWithDates = directHref;
+        let hotelUrlWithDates = directHrefClean;
         const chkin  = requestedDates?.checkin;
         const chkout = requestedDates?.checkout;
-        if (chkin && chkout && !directHref.includes("chkin=")) {
+        if (chkin && chkout && !directHrefClean.includes("chkin=")) {
           try {
-            const hotelUrl = new URL(directHref);
+            const hotelUrl = new URL(directHrefClean);
             hotelUrl.searchParams.set("chkin", chkin);
             hotelUrl.searchParams.set("chkout", chkout);
             hotelUrlWithDates = hotelUrl.toString();
