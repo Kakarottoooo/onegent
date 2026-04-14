@@ -590,29 +590,49 @@ async function runUniversalStep(
                 const bodyWithSlots = { ...body, availableSlots: resyData.availableSlots, platformsTried: [...platformsTried, "resy"] };
                 return { ...step, body: bodyWithSlots, status: "no_availability", error: resyData.summary, decisionLog: log };
               }
-              log.push({ ts: now(), type: "attempt", message: `Not found on Resy — trying Yelp`, outcome: "Retrying" });
-            } catch { /* fall through to Yelp */ }
+              log.push({ ts: now(), type: "attempt", message: `Not found on Resy — looking up official website via Google Places`, outcome: "Retrying" });
+            } catch { /* fall through to Google Places lookup */ }
 
-            // Try Yelp as final fallback
-            if (!platformsTried.includes("yelp")) {
-              const yelpUrl = `https://www.yelp.com/search?find_desc=${encodeURIComponent(rName)}&find_loc=${encodeURIComponent(rCity || "Nashville, TN")}`;
-              const yelpInput: import("@/lib/booking-autopilot/types").BrowserTaskInput = {
-                startUrl: yelpUrl, task,
-                profile: resolvedBody.profile as import("@/lib/booking-autopilot/types").BrowserTaskInput["profile"],
-                jobId: bookingJobId,
-                stepIndex: (resolvedBody.stepIndex as number | undefined) ?? 0,
-              };
-              try {
-                const yelpData = await runBrowserTask(yelpInput);
-                if (isGenuineBooking(yelpData, yelpUrl)) {
-                  log.push({ ts: now(), type: "succeeded", message: `Booked via Yelp: ${yelpData.summary}`, outcome: "Done ✓" });
-                  return { ...step, status: yelpData.status === "paused_payment" ? "awaiting_confirmation" : "done", handoff_url: yelpData.handoffUrl, decisionLog: log };
-                }
-              } catch { /* give up */ }
-              log.push({ ts: now(), type: "failed", message: `Not found on OpenTable, Resy, or Yelp`, outcome: "No availability" });
+            // Final fallback: use Google Places to find the restaurant's official website
+            let officialWebsite: string | undefined;
+            let googlePlacesError = false;
+            try {
+              const { googlePlacesSearch } = await import("@/lib/booking-autopilot/../tools");
+              const results = await googlePlacesSearch({
+                query: rName,
+                location: rCity || "Nashville, TN",
+                maxResults: 3,
+              });
+              // Find the best match by name
+              const normalize = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, "");
+              const targetNorm = normalize(rName);
+              const match = results.find(r => {
+                const nameNorm = normalize(r.name);
+                return nameNorm.includes(targetNorm.slice(0, 8)) || targetNorm.includes(nameNorm.slice(0, 8));
+              }) ?? results[0];
+              officialWebsite = match?.url;
+            } catch {
+              googlePlacesError = true;
             }
-            const allTriedBody = { ...body, platformsTried: [...platformsTried, "opentable", "resy", "yelp"] };
-            return { ...step, body: allTriedBody, status: "no_availability", error: `"${rName}" was not found on OpenTable, Resy, or Yelp. The restaurant may not accept online reservations.`, decisionLog: log };
+
+            if (officialWebsite) {
+              log.push({ ts: now(), type: "attempt", message: `Found official website via Google Places: ${officialWebsite.slice(0, 60)}`, outcome: "Handoff" });
+            } else {
+              log.push({ ts: now(), type: "failed", message: googlePlacesError ? `Google Places lookup failed` : `No website found for "${rName}"`, outcome: "No availability" });
+            }
+
+            const allTriedBody = { ...body, platformsTried: [...platformsTried, "opentable", "resy"], officialWebsite };
+            const notFoundSummary = officialWebsite
+              ? `"${rName}" is not on OpenTable or Resy. Visit their official website to book directly: ${officialWebsite}`
+              : `"${rName}" was not found on OpenTable or Resy. The restaurant may only accept walk-in reservations or phone bookings.`;
+            return {
+              ...step,
+              body: allTriedBody,
+              status: "no_availability",
+              error: notFoundSummary,
+              handoff_url: officialWebsite ?? step.fallbackUrl,
+              decisionLog: log,
+            };
           }
         }
       }

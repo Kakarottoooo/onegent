@@ -87,7 +87,9 @@ function stepStatusLabel(step: BookingJobStep): string {
   if (step.status === "awaiting_confirmation") return "Ready for payment — enter CVC";
   if (step.status === "loading") return "Agent working…";
   if (step.status === "no_availability") {
-    if ((step.error ?? "").toLowerCase().includes("not found on opentable")) return "Not found on OpenTable";
+    const err = (step.error ?? "").toLowerCase();
+    if (err.includes("not on opentable or resy") || err.includes("is not on opentable or resy")) return "Not on OpenTable or Resy";
+    if (err.includes("not found on opentable")) return "Not found on OpenTable";
     return "No availability found";
   }
   if (step.status === "error") return "Failed";
@@ -976,40 +978,55 @@ function StepCard({ step, stepIndex, jobId, onRefresh, onOpenLive }: {
         <InterventionBanner step={step} jobId={jobId} onOpenLive={onOpenLive} />
       )}
 
-      {/* Restaurant not found on OpenTable — clear explanation + search link */}
+      {/* Restaurant not on any platform — show official website or fallback */}
       {step.type === "restaurant" &&
         step.status === "no_availability" &&
-        (step.error ?? "").toLowerCase().includes("not found on opentable") && (
-        <div style={{
-          borderTop: "0.5px solid rgba(220,38,38,0.2)", padding: "12px 14px",
-          background: "rgba(220,38,38,0.04)", display: "flex", flexDirection: "column", gap: 8,
-        }}>
-          <div style={{ display: "flex", alignItems: "flex-start", gap: 8 }}>
-            <span style={{ fontSize: 16 }}>🔍</span>
-            <div>
-              <p style={{ fontFamily: "var(--font-dm-sans)", fontSize: 13, fontWeight: 700, color: "rgba(220,38,38,0.85)", margin: 0 }}>
-                Restaurant not found on OpenTable
-              </p>
-              <p style={{ fontFamily: "var(--font-dm-sans)", fontSize: 12, color: "var(--text-secondary, #666)", margin: "4px 0 0" }}>
-                <strong>{step.label}</strong> may not be on OpenTable, or the name may be slightly different.
-              </p>
+        ((step.error ?? "").toLowerCase().includes("not found on opentable") ||
+         (step.error ?? "").toLowerCase().includes("not on opentable or resy") ||
+         (step.error ?? "").toLowerCase().includes("is not on opentable or resy")) && (() => {
+          const hasOfficialSite = step.handoff_url && !step.handoff_url.includes("opentable.com") && !step.handoff_url.includes("resy.com") && step.handoff_url.startsWith("http");
+          const hasOfficialWebsite = hasOfficialSite;
+          return (
+            <div style={{
+              borderTop: "0.5px solid rgba(220,38,38,0.2)", padding: "12px 14px",
+              background: "rgba(220,38,38,0.04)", display: "flex", flexDirection: "column", gap: 8,
+            }}>
+              <div style={{ display: "flex", alignItems: "flex-start", gap: 8 }}>
+                <span style={{ fontSize: 16 }}>{hasOfficialWebsite ? "🌐" : "🔍"}</span>
+                <div>
+                  <p style={{ fontFamily: "var(--font-dm-sans)", fontSize: 13, fontWeight: 700, color: "rgba(220,38,38,0.85)", margin: 0 }}>
+                    {hasOfficialWebsite ? "Not on OpenTable or Resy" : "Not found on OpenTable or Resy"}
+                  </p>
+                  <p style={{ fontFamily: "var(--font-dm-sans)", fontSize: 12, color: "var(--text-secondary, #666)", margin: "4px 0 0" }}>
+                    {hasOfficialWebsite
+                      ? `Found their official website — tap to book directly.`
+                      : `${step.label} may be walk-in only or use a different booking system.`}
+                  </p>
+                </div>
+              </div>
+              {hasOfficialWebsite ? (
+                <a href={step.handoff_url} target="_blank" rel="noopener noreferrer" style={{
+                  display: "block", width: "100%", padding: "9px 0", borderRadius: 10,
+                  background: "rgba(220,38,38,0.75)", color: "#fff", textAlign: "center",
+                  fontFamily: "var(--font-dm-sans)", fontSize: 13, fontWeight: 700,
+                  textDecoration: "none",
+                }}>
+                  Book on official website →
+                </a>
+              ) : (
+                <a href={`https://www.google.com/search?q=${encodeURIComponent(step.label + " reservation")}`} target="_blank" rel="noopener noreferrer" style={{
+                  display: "block", width: "100%", padding: "9px 0", borderRadius: 10,
+                  background: "rgba(220,38,38,0.75)", color: "#fff", textAlign: "center",
+                  fontFamily: "var(--font-dm-sans)", fontSize: 13, fontWeight: 700,
+                  textDecoration: "none",
+                }}>
+                  Search for reservation options →
+                </a>
+              )}
             </div>
-          </div>
-          <a
-            href={step.handoff_url || `https://www.opentable.com/s?term=${encodeURIComponent(step.label)}`}
-            target="_blank"
-            rel="noopener noreferrer"
-            style={{
-              display: "block", width: "100%", padding: "9px 0", borderRadius: 10,
-              background: "rgba(220,38,38,0.75)", color: "#fff", textAlign: "center",
-              fontFamily: "var(--font-dm-sans)", fontSize: 13, fontWeight: 700,
-              textDecoration: "none",
-            }}
-          >
-            Search OpenTable manually →
-          </a>
-        </div>
-      )}
+          );
+        })()
+      }
 
       {/* Restaurant time-slot picker — shown when there are alternative slots */}
       {step.type === "restaurant" &&
