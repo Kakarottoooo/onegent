@@ -550,6 +550,22 @@ async function runUniversalStep(
 
         if (rName && rDate && rTime) {
           const { cityToResySlug } = await import("@/lib/booking-autopilot/providers/resy-com");
+          const { buildRestaurantTask } = await import("@/lib/booking-autopilot/core/task-builders");
+          const { task } = buildRestaurantTask({ restaurantName: rName, city: rCity, date: rDate, time: rTime, covers: rCovers, profile: resolvedBody.profile as Parameters<typeof buildRestaurantTask>[0]["profile"] });
+
+          // A result is a genuine booking success only when:
+          // 1. Status is completed/paused_payment
+          // 2. The handoff URL actually moved beyond the original search page
+          // 3. The summary doesn't say "Skipped initial agent run" (= executor fallthrough with no action)
+          // This prevents the final-outcome.ts fallback from returning paused_payment as fake "success".
+          const isGenuineBooking = (d: import("@/lib/booking-autopilot/types").BrowserTaskResult, searchUrl: string) => {
+            if (d.status === "no_availability" || d.status === "error" || d.status === "captcha" || d.status === "needs_login") return false;
+            const s = d.summary.toLowerCase();
+            if (s.includes("skipped initial agent run")) return false;
+            if (s.includes("not found") || s.includes("no availability") || s.includes("didn't find")) return false;
+            if (d.handoffUrl === searchUrl) return false; // never left search page
+            return true;
+          };
 
           // Try Resy if not already tried
           if (!platformsTried.includes("resy")) {
@@ -558,8 +574,6 @@ async function runUniversalStep(
             log.push({ ts: now(), type: "attempt", message: `Not found on OpenTable — trying Resy`, outcome: "Retrying" });
             await onProgress({ ...step, status: "loading", decisionLog: [...log] });
 
-            const { buildRestaurantTask } = await import("@/lib/booking-autopilot/core/task-builders");
-            const { task } = buildRestaurantTask({ restaurantName: rName, city: rCity, date: rDate, time: rTime, covers: rCovers, profile: resolvedBody.profile as Parameters<typeof buildRestaurantTask>[0]["profile"] });
             const resyInput: import("@/lib/booking-autopilot/types").BrowserTaskInput = {
               startUrl: resyUrl, task,
               profile: resolvedBody.profile as import("@/lib/booking-autopilot/types").BrowserTaskInput["profile"],
@@ -568,12 +582,11 @@ async function runUniversalStep(
             };
             try {
               const resyData = await runBrowserTask(resyInput);
-              if (resyData.status !== "no_availability" && resyData.status !== "error") {
+              if (isGenuineBooking(resyData, resyUrl)) {
                 log.push({ ts: now(), type: "succeeded", message: `Booked via Resy: ${resyData.summary}`, outcome: "Done ✓" });
                 return { ...step, status: resyData.status === "paused_payment" ? "awaiting_confirmation" : "done", handoff_url: resyData.handoffUrl, decisionLog: log };
               }
-              // Resy also failed — try Yelp
-              if (!isNotFoundError(resyData.summary) && resyData.availableSlots?.length) {
+              if (resyData.availableSlots?.length) {
                 const bodyWithSlots = { ...body, availableSlots: resyData.availableSlots, platformsTried: [...platformsTried, "resy"] };
                 return { ...step, body: bodyWithSlots, status: "no_availability", error: resyData.summary, decisionLog: log };
               }
@@ -591,7 +604,7 @@ async function runUniversalStep(
               };
               try {
                 const yelpData = await runBrowserTask(yelpInput);
-                if (yelpData.status !== "no_availability" && yelpData.status !== "error") {
+                if (isGenuineBooking(yelpData, yelpUrl)) {
                   log.push({ ts: now(), type: "succeeded", message: `Booked via Yelp: ${yelpData.summary}`, outcome: "Done ✓" });
                   return { ...step, status: yelpData.status === "paused_payment" ? "awaiting_confirmation" : "done", handoff_url: yelpData.handoffUrl, decisionLog: log };
                 }
