@@ -3052,10 +3052,164 @@ The user will enter CVV and confirm payment themselves.`,
               }
             }
 
+            // ── OpenTable: programmatic time-slot selection ──────────────────────
+            // OpenTable search results show available time-slot buttons directly on
+            // the search page. We click the closest slot to the requested time via
+            // pure DOM — no stagehand.act() needed (avoids OpenAI quota errors).
+            if (startProvider?.id === "opentable-com") {
+              // Extract requested time from task string (HH:MM 24h or "H:MM PM" 12h)
+              const timeMatch = input.task.match(/\b(\d{1,2}):(\d{2})\s*(AM|PM)?\b/i);
+              let requestedMinutes = 19 * 60; // default 7 PM
+              if (timeMatch) {
+                let h = parseInt(timeMatch[1], 10);
+                const m = parseInt(timeMatch[2], 10);
+                const meridiem = (timeMatch[3] ?? "").toUpperCase();
+                if (meridiem === "PM" && h < 12) h += 12;
+                if (meridiem === "AM" && h === 12) h = 0;
+                requestedMinutes = h * 60 + m;
+              }
+
+              // Parse "7:00 PM" / "7:30 pm" / "19:00" to minutes since midnight
+              const parseTimeText = (text: string): number | null => {
+                const m12 = text.match(/(\d{1,2}):(\d{2})\s*(AM|PM)/i);
+                if (m12) {
+                  let h = parseInt(m12[1], 10);
+                  const min = parseInt(m12[2], 10);
+                  if (m12[3].toUpperCase() === "PM" && h < 12) h += 12;
+                  if (m12[3].toUpperCase() === "AM" && h === 12) h = 0;
+                  return h * 60 + min;
+                }
+                const m24 = text.match(/(\d{1,2}):(\d{2})$/);
+                if (m24) return parseInt(m24[1], 10) * 60 + parseInt(m24[2], 10);
+                return null;
+              };
+
+              const slotClicked = await raw.evaluate(
+                ({ reqMins, maxDiffMins }: { reqMins: number; maxDiffMins: number }) => {
+                  const isVisible = (el: Element) => {
+                    const r = (el as HTMLElement).getBoundingClientRect();
+                    return r.width > 0 && r.height > 0;
+                  };
+                  const parseT = (text: string): number | null => {
+                    const m12 = text.match(/(\d{1,2}):(\d{2})\s*(AM|PM)/i);
+                    if (m12) {
+                      let h = parseInt(m12[1], 10);
+                      const min = parseInt(m12[2], 10);
+                      if (m12[3].toUpperCase() === "PM" && h < 12) h += 12;
+                      if (m12[3].toUpperCase() === "AM" && h === 12) h = 0;
+                      return h * 60 + min;
+                    }
+                    return null;
+                  };
+
+                  // OpenTable time slot buttons: text like "7:00 PM", "7:15 PM"
+                  const candidates = Array.from(
+                    document.querySelectorAll<HTMLElement>('button, a[role="button"], [data-test*="time"], [data-testid*="time"]')
+                  ).filter((el) => {
+                    if (!isVisible(el)) return false;
+                    const t = parseT((el.textContent ?? "").trim());
+                    return t !== null && Math.abs(t - reqMins) <= maxDiffMins;
+                  });
+
+                  if (candidates.length === 0) return null;
+
+                  // Pick the closest slot
+                  const best = candidates.sort((a, b) => {
+                    const ta = parseT((a.textContent ?? "").trim()) ?? Infinity;
+                    const tb = parseT((b.textContent ?? "").trim()) ?? Infinity;
+                    return Math.abs(ta - reqMins) - Math.abs(tb - reqMins);
+                  })[0];
+
+                  const chosenText = (best.textContent ?? "").trim().slice(0, 20);
+                  best.scrollIntoView({ block: "center" });
+                  best.click();
+                  return chosenText;
+                },
+                { reqMins: requestedMinutes, maxDiffMins: 90 }
+              ).catch(() => null);
+
+              if (slotClicked) {
+                trace(`[opentable] clicked time slot "${slotClicked}" (requested: ${Math.floor(requestedMinutes / 60)}:${String(requestedMinutes % 60).padStart(2, "0")})`);
+                await new Promise(r => setTimeout(r, 1500));
+                // Check if we navigated to the reservation form
+                const nowUrl = raw.url();
+                if (nowUrl.toLowerCase().includes("opentable.com") && !nowUrl.toLowerCase().includes("/s?")) {
+                  trace(`[opentable] navigated to reservation page: ${nowUrl.slice(0, 80)}`);
+                  return true; // listing done — proceeed to guest form stage
+                }
+              } else {
+                trace("[opentable] no time slots found in ±90 min — trying restaurant card click");
+                // Fall back: click the restaurant card to navigate to detail page
+                const cardClicked = await raw.evaluate((restaurantName: string) => {
+                  const normalize = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, "");
+                  const target = normalize(restaurantName);
+                  const links = Array.from(document.querySelectorAll<HTMLElement>("a[href]"));
+                  const match = links.find((el) => {
+                    const t = normalize(el.textContent ?? "");
+                    return t.includes(target.slice(0, 8)) || target.includes(t.slice(0, 8));
+                  });
+                  if (match) { match.click(); return true; }
+                  return false;
+                }, targetHotelName ?? "").catch(() => false);
+
+                if (cardClicked) {
+                  trace("[opentable] clicked restaurant card — waiting for detail page");
+                  await new Promise(r => setTimeout(r, 2000));
+                  // Retry time slot click on the detail page
+                  const detailSlot = await raw.evaluate(
+                    ({ reqMins, maxDiffMins }: { reqMins: number; maxDiffMins: number }) => {
+                      const parseT = (text: string): number | null => {
+                        const m12 = text.match(/(\d{1,2}):(\d{2})\s*(AM|PM)/i);
+                        if (m12) {
+                          let h = parseInt(m12[1], 10);
+                          const min = parseInt(m12[2], 10);
+                          if (m12[3].toUpperCase() === "PM" && h < 12) h += 12;
+                          if (m12[3].toUpperCase() === "AM" && h === 12) h = 0;
+                          return h * 60 + min;
+                        }
+                        return null;
+                      };
+                      const isVisible = (el: Element) => {
+                        const r = (el as HTMLElement).getBoundingClientRect();
+                        return r.width > 0 && r.height > 0;
+                      };
+                      const slots = Array.from(
+                        document.querySelectorAll<HTMLElement>('button, a[role="button"]')
+                      ).filter((el) => {
+                        if (!isVisible(el)) return false;
+                        const t = parseT((el.textContent ?? "").trim());
+                        return t !== null && Math.abs(t - reqMins) <= maxDiffMins;
+                      });
+                      if (!slots.length) return null;
+                      const best = slots.sort((a, b) => {
+                        const ta = parseT((a.textContent ?? "").trim()) ?? Infinity;
+                        const tb = parseT((b.textContent ?? "").trim()) ?? Infinity;
+                        return Math.abs(ta - reqMins) - Math.abs(tb - reqMins);
+                      })[0];
+                      const text = (best.textContent ?? "").trim().slice(0, 20);
+                      best.click();
+                      return text;
+                    },
+                    { reqMins: requestedMinutes, maxDiffMins: 90 }
+                  ).catch(() => null);
+
+                  if (detailSlot) {
+                    trace(`[opentable] clicked time slot on detail page: "${detailSlot}"`);
+                    await new Promise(r => setTimeout(r, 1500));
+                    return true;
+                  }
+                }
+
+                trace("[opentable] no time slots found — no_availability");
+                return false; // signals no_availability to outer loop
+              }
+            }
+
             // Pass startDomain so clickTargetListingAI can detect & revert wrong-domain clicks
             // (e.g. clicking an IHG logo badge on Expedia that navigates to ihg.com).
             const startDomainHint = startProvider?.id === "expedia" ? "expedia.com"
               : startProvider?.id === "hotels-com" ? "hotels.com"
+              : startProvider?.id === "opentable-com" ? "opentable.com"
               : input.startUrl.match(/^https?:\/\/([^/]+)/)?.[1] ?? undefined;
             const result = await clickTargetListingAI(stagehand, targetHotelName, trace, 5, startDomainHint, requestedDates);
             if (result === "no_availability") return false;
