@@ -678,8 +678,11 @@ export async function POST(_req: NextRequest, { params }: Params) {
       await updateBookingJobSteps(id, steps);
     };
 
-    // ── Dispatch: universal → Stagehand, activity → agent-runtime, rest → recovery loop ──
-    if (steps[i].type === "universal") {
+    // ── Dispatch: universal/restaurant → Stagehand, activity → agent-runtime, rest → recovery loop ──
+    // "restaurant" steps use runUniversalStep (same as "universal") because they need
+    // runBrowserTask called directly — runStepWithRecovery uses callEndpoint (HTTP) which
+    // requires a valid apiEndpoint URL, but restaurant steps don't have one.
+    if (steps[i].type === "universal" || steps[i].type === "restaurant") {
       steps[i] = await runUniversalStep(steps[i], onProgress, id, job.user_id);
     } else if ((steps[i].type as string) === "activity") {
       steps[i] = await runActivityStep(steps[i], skillCtx, onProgress);
