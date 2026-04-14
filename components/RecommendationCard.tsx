@@ -77,11 +77,24 @@ export default function RecommendationCard({
 }: Props) {
   const router = useRouter();
   const [booking, setBooking] = useState(false);
+  const [showDateForm, setShowDateForm] = useState(false);
   const [showPicker, setShowPicker] = useState(false);
+
+  // Reservation details
+  const today = new Date().toISOString().split("T")[0];
+  const [resDate, setResDate] = useState("");
+  const [resTime, setResTime] = useState("19:00");
+  const [resCovers, setResCovers] = useState(2);
 
   function handleReserve() {
     if (booking) return;
     fireTelemetry("reserve_click");
+    setShowDateForm(true);
+  }
+
+  function handleDateFormNext() {
+    if (!resDate) return;
+    setShowDateForm(false);
     setShowPicker(true);
   }
 
@@ -91,36 +104,37 @@ export default function RecommendationCard({
     localStorage.setItem("active_profile_id", String(picked.profileId));
     try {
       const sessionId = localStorage.getItem("session_id") ?? crypto.randomUUID();
+      if (!localStorage.getItem("session_id")) localStorage.setItem("session_id", sessionId);
       const savedModel = JSON.parse(localStorage.getItem("agent_model_config") ?? "{}");
       const agentModel = savedModel.model && savedModel.apiKey ? savedModel : undefined;
-      const startUrl =
-        card.opentable_url ??
-        `https://www.opentable.com/s?term=${encodeURIComponent(card.restaurant.name)}`;
+
+      const otUrl = `https://www.opentable.com/s?term=${encodeURIComponent(card.restaurant.name)}&covers=${resCovers}&dateTime=${resDate}T${resTime}:00`;
+      const fallbackUrl = card.opentable_url ?? otUrl;
+
       const step = {
-        type: "universal",
+        type: "restaurant" as const,
         emoji: "🍽️",
         label: card.restaurant.name,
-        apiEndpoint: "/api/booking-autopilot/universal",
+        apiEndpoint: "/api/booking-jobs/start",
         body: {
-          startUrl,
-          task: `Make a reservation at ${card.restaurant.name}. Fill in the contact information and stop at the payment or confirmation page without completing payment.`,
+          restaurantName: card.restaurant.name,
+          city: card.restaurant.address?.split(",").slice(-2).join(",").trim() ?? "",
+          date: resDate,
+          time: resTime,
+          covers: resCovers,
           profileId: picked.profileId,
           profile: {
             first_name: picked.first_name,
             last_name: picked.last_name,
             email: picked.email,
             phone: picked.phone,
-            address_line1: picked.address_line1,
-            city: picked.city,
-            state: picked.state,
-            zip: picked.zip,
-            country: picked.country,
           },
           agentModel,
         },
-        fallbackUrl: startUrl,
-        status: "pending",
+        fallbackUrl,
+        status: "pending" as const,
       };
+
       const createRes = await fetch("/api/booking-jobs", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -209,8 +223,59 @@ export default function RecommendationCard({
     setFeedbackState("done");
   }
 
+  // Time options 11:00–22:00 in 30-min steps
+  const timeOptions = Array.from({ length: 23 }, (_, i) => {
+    const h = 11 + Math.floor(i / 2);
+    const m = i % 2 === 0 ? "00" : "30";
+    if (h > 22) return null;
+    const value = `${String(h).padStart(2, "0")}:${m}`;
+    const h12 = h > 12 ? h - 12 : h;
+    const ampm = h >= 12 ? "PM" : "AM";
+    return { value, label: `${h12}:${m} ${ampm}` };
+  }).filter(Boolean) as { value: string; label: string }[];
+
   return (
     <>
+    {/* Date / time / covers form — shown before ProfilePicker */}
+    {showDateForm && (
+      <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", zIndex: 9999, display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }}>
+        <div style={{ background: "var(--card, #fff)", borderRadius: 16, padding: 24, width: "100%", maxWidth: 360, display: "flex", flexDirection: "column", gap: 14 }}>
+          <p style={{ fontFamily: "var(--font-dm-sans)", fontWeight: 700, fontSize: 15, margin: 0 }}>
+            🍽️ {card.restaurant.name}
+          </p>
+          <div>
+            <p style={{ fontFamily: "var(--font-dm-sans)", fontSize: 11, fontWeight: 700, color: "var(--text-muted, #999)", textTransform: "uppercase", marginBottom: 4 }}>Date</p>
+            <input type="date" value={resDate} min={today} onChange={e => setResDate(e.target.value)}
+              style={{ width: "100%", padding: "8px 10px", borderRadius: 8, border: "0.5px solid var(--border, #e5e7eb)", fontFamily: "var(--font-dm-sans)", fontSize: 13, boxSizing: "border-box" }} />
+          </div>
+          <div style={{ display: "flex", gap: 8 }}>
+            <div style={{ flex: 1 }}>
+              <p style={{ fontFamily: "var(--font-dm-sans)", fontSize: 11, fontWeight: 700, color: "var(--text-muted, #999)", textTransform: "uppercase", marginBottom: 4 }}>Time</p>
+              <select value={resTime} onChange={e => setResTime(e.target.value)}
+                style={{ width: "100%", padding: "8px 10px", borderRadius: 8, border: "0.5px solid var(--border, #e5e7eb)", fontFamily: "var(--font-dm-sans)", fontSize: 13, boxSizing: "border-box" }}>
+                {timeOptions.map(opt => <option key={opt.value} value={opt.value}>{opt.label}</option>)}
+              </select>
+            </div>
+            <div style={{ flex: 1 }}>
+              <p style={{ fontFamily: "var(--font-dm-sans)", fontSize: 11, fontWeight: 700, color: "var(--text-muted, #999)", textTransform: "uppercase", marginBottom: 4 }}>People</p>
+              <select value={resCovers} onChange={e => setResCovers(Number(e.target.value))}
+                style={{ width: "100%", padding: "8px 10px", borderRadius: 8, border: "0.5px solid var(--border, #e5e7eb)", fontFamily: "var(--font-dm-sans)", fontSize: 13, boxSizing: "border-box" }}>
+                {[1,2,3,4,5,6,7,8,9,10].map(n => <option key={n} value={n}>{n} {n===1?"person":"people"}</option>)}
+              </select>
+            </div>
+          </div>
+          <div style={{ display: "flex", gap: 8 }}>
+            <button onClick={() => setShowDateForm(false)} style={{ flex: 1, padding: "9px", borderRadius: 8, border: "0.5px solid var(--border, #e5e7eb)", background: "transparent", fontFamily: "var(--font-dm-sans)", fontSize: 13, cursor: "pointer" }}>
+              Cancel
+            </button>
+            <button onClick={handleDateFormNext} disabled={!resDate}
+              style={{ flex: 2, padding: "9px", borderRadius: 8, border: "none", background: resDate ? "var(--gold, #D4A34B)" : "#e5e7eb", color: resDate ? "#fff" : "#999", fontFamily: "var(--font-dm-sans)", fontSize: 13, fontWeight: 700, cursor: resDate ? "pointer" : "not-allowed" }}>
+              Next: choose profile →
+            </button>
+          </div>
+        </div>
+      </div>
+    )}
     {showPicker && (
       <ProfilePicker
         onSelect={proceedWithProfile}

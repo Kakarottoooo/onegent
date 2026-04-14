@@ -774,10 +774,17 @@ The user will enter CVV and confirm payment themselves.`,
       getProvider(landedUrlAfterSetup)?.id === 'hotels-com' ||
       openPageUrls.find((u) => u && getProvider(u)?.id === 'hotels-com')
     );
-    const skipInitialAgent = bookingComPageOpen || expediaPageOpen || hotelsComPageOpen;
+    // OpenTable: skip the AI agent run entirely — time-slot selection and guest
+    // form fill are handled programmatically in the listing/guestDetailsStep stages.
+    const openTablePageOpen = !!(
+      getProvider(input.startUrl)?.id === 'opentable-com' ||
+      getProvider(landedUrlAfterSetup)?.id === 'opentable-com' ||
+      openPageUrls.find((u) => u && getProvider(u)?.id === 'opentable-com')
+    );
+    const skipInitialAgent = bookingComPageOpen || expediaPageOpen || hotelsComPageOpen || openTablePageOpen;
     const initialMaxSteps = skipInitialAgent ? 0 : 40;
 
-    const skipProviderLabel = bookingComPageOpen ? 'Booking.com' : expediaPageOpen ? 'Expedia' : hotelsComPageOpen ? 'Hotels.com' : '';
+    const skipProviderLabel = bookingComPageOpen ? 'Booking.com' : expediaPageOpen ? 'Expedia' : hotelsComPageOpen ? 'Hotels.com' : openTablePageOpen ? 'OpenTable' : '';
     trace(`Agent starting main run (maxSteps=${initialMaxSteps}, model=${modelName})${skipInitialAgent ? ` [${skipProviderLabel} detected: agent.execute disabled, using programmatic flow only]` : ""}`);
     const t0 = Date.now();
     const result = initialMaxSteps === 0
