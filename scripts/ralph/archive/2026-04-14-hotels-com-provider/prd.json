@@ -1,0 +1,90 @@
+{
+  "project": "restaurant-agent",
+  "branchName": "ralph/hotels-com-provider",
+  "description": "Hotels.com provider completion — wire up the existing skeleton to correctly handle URL matching, stage detection, guest form fill, and end-to-end checkout",
+  "userStories": [
+    {
+      "id": "US-001",
+      "title": "Fix Expedia provider URL conflict with Hotels.com",
+      "description": "As a developer, I need expedia.ts to stop matching hotels.com URLs so the hotels-com provider can handle them exclusively.",
+      "acceptanceCriteria": [
+        "In expedia.ts, matchesUrl() only returns true for expedia.com URLs, NOT hotels.com",
+        "expediaProvider.matchesUrl('https://www.hotels.com/search') returns false",
+        "expediaProvider.matchesUrl('https://www.expedia.com/Hotel-Search') returns true",
+        "hotelsComProvider.matchesUrl('https://www.hotels.com/search') returns true",
+        "hotelsComProvider.matchesUrl('https://www.expedia.com/Hotel-Search') returns false",
+        "Registry returns hotelsComProvider for hotels.com URLs",
+        "Registry returns expediaProvider for expedia.com URLs",
+        "Typecheck passes"
+      ],
+      "priority": 1,
+      "passes": false,
+      "notes": "expedia.ts line ~1019: matchesUrl returns true for both expedia.com AND hotels.com — this causes registry ambiguity. hotels-com.ts already exists and delegates to fillExpediaGroupPaymentForm. Just remove hotels.com from expedia's matchesUrl."
+    },
+    {
+      "id": "US-002",
+      "title": "Add fillGuestForm to hotels-com provider",
+      "description": "As a developer, I need hotels-com.ts to fill the guest form on Hotels.com checkout pages, reusing Expedia's implementation since the checkout infrastructure is shared.",
+      "acceptanceCriteria": [
+        "hotels-com.ts exports hotelsComProvider with fillGuestForm method",
+        "fillGuestForm delegates to fillExpediaGuestForm from expedia.ts",
+        "fillExpediaGuestForm is exported from expedia.ts (add export if missing)",
+        "HotelsComProfile interface includes first_name, last_name, email, phone fields",
+        "Typecheck passes"
+      ],
+      "priority": 2,
+      "passes": false,
+      "notes": "fillExpediaGuestForm already exists in expedia.ts. Check if it is exported. hotels-com.ts has fillPaymentForm but no fillGuestForm. Hotels.com and Expedia share the same checkout/session URL (expedia.com/checkout/session/) so the same fill logic applies."
+    },
+    {
+      "id": "US-003",
+      "title": "Fix hotels-com stage signals for expedia.com checkout redirect",
+      "description": "As a developer, I need hotels-com getStageSignals to correctly detect payment_gate when Hotels.com redirects to expedia.com/checkout/session/ for payment.",
+      "acceptanceCriteria": [
+        "paymentStep returns true when URL contains expedia.com/checkout/session (Hotels.com redirects here)",
+        "paymentStep returns true when URL contains hotels.com/checkout/session",
+        "guestDetailsStep returns true when URL contains /checkout and guest form inputs are visible",
+        "guestDetailsStep returns false for /checkout/session URLs (combined page is handled as paymentStep)",
+        "searchResults returns true for hotels.com/search URLs",
+        "hotelDetail returns true for hotels.com/ho<digits> pattern URLs",
+        "hotelDetail returns true for hotels.com/h<digits> pattern URLs (alternate format)",
+        "Typecheck passes"
+      ],
+      "priority": 3,
+      "passes": false,
+      "notes": "Current getStageSignals checks lowerUrl.includes('/checkout/session') for isPaymentSessionUrl — this works for expedia.com but Hotels.com may redirect to expedia.com domain. Also the guestDetailsStep DOM query uses id*='firstName' etc. which doesn't match Expedia's actual IDs (smart-form-control-input-component-trave). Use placeholder-based detection instead: input[placeholder*='John'] or input[type='email']."
+    },
+    {
+      "id": "US-004",
+      "title": "Add hotels.com to stagehand-executor provider drift guard",
+      "description": "As a developer, I need the executor's provider drift guard to allow Hotels.com → expedia.com checkout redirects, the same way Expedia brand-site redirects are allowed.",
+      "acceptanceCriteria": [
+        "In stagehand-executor.ts, the provider drift guard (checks for unexpected URL domain changes) allows hotels.com URLs to redirect to expedia.com/checkout/session",
+        "A Hotels.com booking task does not trigger a false-positive 'provider drift' warning when it reaches the Expedia checkout URL",
+        "The expedia provider drift allowlist includes hotels.com as a source domain",
+        "Typecheck passes"
+      ],
+      "priority": 4,
+      "passes": false,
+      "notes": "stagehand-executor.ts has logic to detect when the browser navigates away from the expected provider domain (e.g. Expedia→IHG brand site). Hotels.com→expedia.com/checkout is a legitimate cross-domain redirect that must be allowed. Search for 'drift' or 'provider.*url' or 'matchesUrl' in the executor to find the guard."
+    },
+    {
+      "id": "US-005",
+      "title": "End-to-end Hotels.com booking verification",
+      "description": "As a developer, I need to confirm the full Hotels.com automation flow works: listing → room selection → checkout → payment gate with all fields pre-filled.",
+      "acceptanceCriteria": [
+        "Run a booking task targeting a real Hotels.com hotel (e.g. search New York)",
+        "Flow completes all stages: listing → room_selection → checkout_form → payment_gate",
+        "Guest fields filled: first name, last name, email, phone",
+        "Card fields filled: name on card, card number, expiry date",
+        "Billing ZIP filled",
+        "Status shows 'Ready for payment — enter CVC'",
+        "No 'provider drift' or unexpected stage errors in agent log",
+        "Typecheck passes"
+      ],
+      "priority": 5,
+      "passes": false,
+      "notes": "Hotels.com uses the same Checkout.com payment widget as Expedia (iframes 19-22 with id=name/payment_credit_card/expiry/payment_cvv_code). The billing ZIP field is id=payment_zip_code. All of these are handled by fillExpediaGroupPaymentForm already. The main risk is stage detection and the expedia.com checkout redirect."
+    }
+  ]
+}

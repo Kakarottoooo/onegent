@@ -1,0 +1,119 @@
+{
+  "project": "restaurant-agent",
+  "branchName": "ralph/opentable-booking",
+  "description": "OpenTable restaurant booking — programmatic provider + frontend UI for US restaurant reservations",
+  "userStories": [
+    {
+      "id": "US-001",
+      "title": "OpenTable provider — URL matching and stage signals",
+      "description": "As a developer, I need an OpenTable provider registered in the provider registry so the executor knows it's on OpenTable and can detect which stage it's in.",
+      "acceptanceCriteria": [
+        "Create lib/booking-autopilot/providers/opentable-com.ts implementing BrowserProvider",
+        "id is 'opentable-com'",
+        "matchesUrl returns true for any opentable.com URL and false for all other URLs",
+        "getStageSignals: searchResults=true when URL contains '/s?' and 'term='",
+        "getStageSignals: hotelDetail=true when URL contains '/r/' or '/restaurant/profile/'",
+        "getStageSignals: guestDetailsStep=true when page has a visible first-name input (reservation form visible)",
+        "getStageSignals: paymentStep always false (OpenTable standard reservations need no payment)",
+        "getBotPatterns returns []",
+        "openTableProvider registered in lib/booking-autopilot/providers/registry.ts",
+        "openTableProvider imported/exported in lib/booking-autopilot/providers/index.ts",
+        "Typecheck passes"
+      ],
+      "priority": 1,
+      "passes": false,
+      "notes": "Follow the same pattern as expedia.ts and hotels-com.ts. registry.ts already has getProvider() and registerProvider(). index.ts re-exports from registry. The BrowserProvider interface is in lib/booking-autopilot/providers/types.ts. Use page.evaluate() for the guestDetailsStep DOM check — same approach as expedia.ts getStageSignals."
+    },
+    {
+      "id": "US-002",
+      "title": "OpenTable programmatic listing — find and click time slot",
+      "description": "As a user, I want the executor to find my restaurant on OpenTable and click the closest available time slot automatically, without needing AI.",
+      "acceptanceCriteria": [
+        "In stagehand-executor.ts, add OpenTable listing handler triggered when startProvider?.id === 'opentable-com' and stage is listing",
+        "Handler reads requested time from task string (e.g. '19:00' or '7:00 PM' format)",
+        "Finds all visible time-slot buttons on search results page via page.evaluate()",
+        "Time slot buttons on OpenTable have text like '7:00 PM', '7:15 PM' — match by text content",
+        "Selects button whose time is closest to requestedTime within ±90 minutes",
+        "Clicks via page.evaluate() DOM click (not stagehand.act())",
+        "If no time slots on search page, clicks restaurant card to navigate to detail page then retries",
+        "Logs: [opentable] clicked time slot '7:15 PM' (requested: 19:00)",
+        "Returns no_availability signal if no slot found within ±90 min after retry",
+        "Typecheck passes"
+      ],
+      "priority": 2,
+      "passes": false,
+      "notes": "Look at how Hotels.com Stage B (sidebar filter) is implemented in stagehand-executor.ts around line 1086-1277 for the pattern of a provider-specific listing handler. OpenTable time slot buttons are rendered in the search results — each restaurant card shows available times as clickable buttons. Parse '7:00 PM' format to minutes-since-midnight for comparison with requested HH:MM time."
+    },
+    {
+      "id": "US-003",
+      "title": "OpenTable guest form fill",
+      "description": "As a user, I want the executor to fill in my name, email, and phone on the OpenTable reservation form so I don't have to type anything.",
+      "acceptanceCriteria": [
+        "Add fillGuestForm to openTableProvider in opentable-com.ts",
+        "Uses page.evaluate() with native HTMLInputElement setter (same React-compatible pattern as fillExpediaGuestForm in expedia.ts)",
+        "Fills first name — input with placeholder containing 'First' or aria-label 'First name'",
+        "Fills last name — input with placeholder containing 'Last' or aria-label 'Last name'",
+        "Fills email — input with type='email'",
+        "Fills phone — input with type='tel', digits only (strip non-digits from profile.phone)",
+        "Skips optional Occasion dropdown",
+        "After filling, clicks the submit/confirm button (text: 'Complete reservation' or 'Confirm') via page.evaluate() DOM click",
+        "Does NOT click any Sign In links",
+        "Logs: [opentable] guest form filled: firstName=true lastName=true email=true phone=true",
+        "Typecheck passes"
+      ],
+      "priority": 3,
+      "passes": false,
+      "notes": "Copy the nativeFill pattern from fillExpediaGuestForm in lib/booking-autopilot/providers/expedia.ts (lines ~358-422). Use Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set to trigger React state. Phone: use profile.phone stripped of non-digits. The submit button on OpenTable reservation form typically says 'Complete reservation' or has type=submit."
+    },
+    {
+      "id": "US-004",
+      "title": "Wire restaurant booking to OpenTable startUrl in booking-jobs start route",
+      "description": "As a developer, I need the booking-jobs start route to build the correct OpenTable search URL from restaurant booking params so the executor lands on the right page.",
+      "acceptanceCriteria": [
+        "In app/api/booking-jobs/[id]/start/route.ts, when step.type === 'restaurant' and no startUrl in step.body, build: https://www.opentable.com/s?term={restaurantName}&covers={partySize}&dateTime={date}T{time}:00",
+        "restaurantName, partySize, date, time read from step.body",
+        "If startUrl already exists in step.body, use it as-is (backwards compat)",
+        "Also call buildRestaurantTask to generate task string if task not in body",
+        "buildRestaurantTask imported from lib/booking-autopilot/core/task-builders",
+        "resolvedBody.startUrl and resolvedBody.task set correctly before the runBrowserTask call at line ~394",
+        "Typecheck passes"
+      ],
+      "priority": 4,
+      "passes": false,
+      "notes": "In app/api/booking-jobs/[id]/start/route.ts, find the section around line 331 where resolvedBody is built. Add a block: if (step.type === 'restaurant' && !resolvedBody.startUrl) { build the OpenTable URL and task }. The buildRestaurantTask function signature is in lib/booking-autopilot/core/task-builders.ts and expects restaurantName, city, date, time, covers, profile."
+    },
+    {
+      "id": "US-005",
+      "title": "Frontend — RestaurantStepCard component",
+      "description": "As a user, I want to add a restaurant reservation to my trip just like I add a hotel, with a simple form: restaurant name, date, time, party size.",
+      "acceptanceCriteria": [
+        "Create component components/booking/RestaurantStepCard.tsx (or nearest equivalent directory where HotelStepCard lives)",
+        "Form fields: restaurant name (text, required), date (date input, required), time (select with 30-min increments 11:00 AM–10:00 PM, required), party size (select 1–10, default 2)",
+        "Submit creates a BookingJobStep with type: 'restaurant', emoji: '🍽️', label: restaurantName",
+        "step.body contains: restaurantName, date (YYYY-MM-DD), time (HH:MM 24h), covers, city (optional)",
+        "Component uses same styling patterns as existing booking step cards in the codebase",
+        "Typecheck passes",
+        "Verify in browser using dev-browser skill"
+      ],
+      "priority": 5,
+      "passes": false,
+      "notes": "Find where HotelStepCard or similar booking UI components live — search for 'StepCard' or 'BookingStep' in components/. Match the styling and prop patterns of existing cards. The BookingJobStep type is in lib/db.ts. Time select: generate options from '11:00' to '22:00' in 30-min steps, display as 12h format (11:00 AM, 11:30 AM...) but store as 24h (11:00, 11:30...)."
+    },
+    {
+      "id": "US-006",
+      "title": "End-to-end OpenTable booking test",
+      "description": "As a developer, I need to verify the full OpenTable flow works before shipping.",
+      "acceptanceCriteria": [
+        "Run a booking job targeting a real OpenTable restaurant in New York (e.g. Nobu Fifty Seven, 2026-05-26, 19:00, 2 people)",
+        "Agent log shows [opentable] clicked time slot and [opentable] guest form filled",
+        "No stagehand.act() quota errors block the flow",
+        "Job reaches done (confirmed) or awaiting_confirmation with a handoff URL",
+        "Stage transitions in log: listing → guestDetailsStep → confirmed/handoff",
+        "Typecheck passes"
+      ],
+      "priority": 6,
+      "passes": false,
+      "notes": "Use the same test approach as hotel testing — create a booking job via the UI or API with type: restaurant. Check the live log for [opentable] prefixed messages. If the restaurant requires a login, the job should surface a handoff URL instead of failing."
+    }
+  ]
+}
