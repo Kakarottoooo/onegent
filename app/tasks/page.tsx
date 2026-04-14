@@ -13,6 +13,7 @@ import {
   STEP_SEMANTIC_DISPLAY,
 } from "@/lib/status";
 import GlobalNav from "@/components/GlobalNav";
+import RestaurantStepCard from "@/components/booking/RestaurantStepCard";
 import BrowserLiveView from "@/components/BrowserLiveView";
 
 
@@ -2284,6 +2285,7 @@ export default function TripsPage() {
   const [loading, setLoading] = useState(true);
   const [, setClockTick] = useState(0);
   const [clearingAll, setClearingAll] = useState(false);
+  const [showRestaurantForm, setShowRestaurantForm] = useState(false);
 
   // ── Live panel state ──────────────────────────────────────────────────────────
   const [liveJobId, setLiveJobId] = useState<string | null>(null);
@@ -2428,24 +2430,48 @@ export default function TripsPage() {
             <p style={{ fontFamily: "var(--font-dm-sans)", fontSize: 12, color: "var(--text-secondary, #666)" }}>
               {loading ? "Loading…" : jobs.length === 0 ? "No tasks yet" : `${jobs.length} task${jobs.length === 1 ? "" : "s"}`}
             </p>
-            {!loading && jobs.length > 0 && (
+            <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
               <button
-                onClick={handleClearAll}
-                disabled={clearingAll}
+                onClick={() => setShowRestaurantForm((v) => !v)}
                 style={{
+                  display: "flex", alignItems: "center", gap: 4,
                   background: "none", border: "none", cursor: "pointer",
-                  fontFamily: "var(--font-dm-sans)", fontSize: 12,
-                  color: clearingAll ? "var(--text-muted, #aaa)" : "rgba(220,38,38,0.7)",
+                  fontFamily: "var(--font-dm-sans)", fontSize: 12, fontWeight: 600,
+                  color: showRestaurantForm ? "var(--gold, #D4A34B)" : "var(--text-secondary, #666)",
                   padding: "2px 0",
                 }}
               >
-                {clearingAll ? "Clearing…" : "Clear all"}
+                {showRestaurantForm ? "✕ Cancel" : "🍽️ + Restaurant"}
               </button>
-            )}
+              {!loading && jobs.length > 0 && (
+                <button
+                  onClick={handleClearAll}
+                  disabled={clearingAll}
+                  style={{
+                    background: "none", border: "none", cursor: "pointer",
+                    fontFamily: "var(--font-dm-sans)", fontSize: 12,
+                    color: clearingAll ? "var(--text-muted, #aaa)" : "rgba(220,38,38,0.7)",
+                    padding: "2px 0",
+                  }}
+                >
+                  {clearingAll ? "Clearing…" : "Clear all"}
+                </button>
+              )}
+            </div>
           </div>
         </div>
         <div style={{ padding: "16px", display: "flex", flexDirection: "column", gap: 12, maxWidth: 620, margin: "0 auto" }}>
-          {!loading && jobs.length === 0 && (
+          {/* Restaurant booking form — shown when user clicks "+ Restaurant" */}
+          {showRestaurantForm && (
+            <RestaurantStepCard
+              onCreated={() => {
+                setShowRestaurantForm(false);
+                loadJobs();
+              }}
+            />
+          )}
+
+          {!loading && jobs.length === 0 && !showRestaurantForm && (
             <div style={{ textAlign: "center", padding: "60px 20px", borderRadius: 16, border: "0.5px dashed var(--border, #e5e7eb)" }}>
               <p style={{ fontSize: 32, marginBottom: 12 }}>📋</p>
               <p style={{ fontFamily: "var(--font-dm-sans)", fontWeight: 600, fontSize: 14, marginBottom: 6 }}>No tasks yet</p>
