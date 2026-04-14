@@ -86,7 +86,10 @@ function stepStatusLabel(step: BookingJobStep): string {
   if (step.actionItem) return "Needs your choice";
   if (step.status === "awaiting_confirmation") return "Ready for payment — enter CVC";
   if (step.status === "loading") return "Agent working…";
-  if (step.status === "no_availability") return "No availability found";
+  if (step.status === "no_availability") {
+    if ((step.error ?? "").toLowerCase().includes("not found on opentable")) return "Not found on OpenTable";
+    return "No availability found";
+  }
   if (step.status === "error") return "Failed";
   return "Waiting";
 }
@@ -973,9 +976,45 @@ function StepCard({ step, stepIndex, jobId, onRefresh, onOpenLive }: {
         <InterventionBanner step={step} jobId={jobId} onOpenLive={onOpenLive} />
       )}
 
+      {/* Restaurant not found on OpenTable — clear explanation + search link */}
+      {step.type === "restaurant" &&
+        step.status === "no_availability" &&
+        (step.error ?? "").toLowerCase().includes("not found on opentable") && (
+        <div style={{
+          borderTop: "0.5px solid rgba(220,38,38,0.2)", padding: "12px 14px",
+          background: "rgba(220,38,38,0.04)", display: "flex", flexDirection: "column", gap: 8,
+        }}>
+          <div style={{ display: "flex", alignItems: "flex-start", gap: 8 }}>
+            <span style={{ fontSize: 16 }}>🔍</span>
+            <div>
+              <p style={{ fontFamily: "var(--font-dm-sans)", fontSize: 13, fontWeight: 700, color: "rgba(220,38,38,0.85)", margin: 0 }}>
+                Restaurant not found on OpenTable
+              </p>
+              <p style={{ fontFamily: "var(--font-dm-sans)", fontSize: 12, color: "var(--text-secondary, #666)", margin: "4px 0 0" }}>
+                <strong>{step.label}</strong> may not be on OpenTable, or the name may be slightly different.
+              </p>
+            </div>
+          </div>
+          <a
+            href={step.handoff_url || `https://www.opentable.com/s?term=${encodeURIComponent(step.label)}`}
+            target="_blank"
+            rel="noopener noreferrer"
+            style={{
+              display: "block", width: "100%", padding: "9px 0", borderRadius: 10,
+              background: "rgba(220,38,38,0.75)", color: "#fff", textAlign: "center",
+              fontFamily: "var(--font-dm-sans)", fontSize: 13, fontWeight: 700,
+              textDecoration: "none",
+            }}
+          >
+            Search OpenTable manually →
+          </a>
+        </div>
+      )}
+
       {/* Restaurant time-slot picker — shown when there are alternative slots */}
       {step.type === "restaurant" &&
         (step.status === "error" || step.status === "no_availability") &&
+        !(step.error ?? "").toLowerCase().includes("not found on opentable") &&
         Array.isArray((step.body as Record<string, unknown>).availableSlots) &&
         ((step.body as Record<string, unknown>).availableSlots as string[]).length > 0 && (
         <RestaurantTimePicker step={step} stepIndex={stepIndex} jobId={jobId} onBooked={onRefresh ?? (() => {})} />
@@ -983,6 +1022,7 @@ function StepCard({ step, stepIndex, jobId, onRefresh, onOpenLive }: {
 
       {/* Retry scheduling — shown for failed steps without an action item */}
       {(step.status === "error" || step.status === "no_availability") &&
+        !(step.error ?? "").toLowerCase().includes("not found on opentable") &&
         !(step.type === "restaurant" && Array.isArray((step.body as Record<string, unknown>).availableSlots) && ((step.body as Record<string, unknown>).availableSlots as string[]).length > 0) && (
         <RetryScheduler
           step={step}
