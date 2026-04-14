@@ -51,6 +51,28 @@ export async function clickTargetListingAI(
 
   const page = stagehand.context?.activePage();
 
+  // Classify a URL as a search/listing page (true) vs a hotel detail page (false).
+  // Hoisted to function scope so both the initial DOM extraction and the scroll-loop
+  // DOM retry can reference it.
+  // KEY LESSON: Expedia puts regionId= and destination= in hotel detail URL query params
+  // (e.g. /New-York-Hotels-414-hotel.h3552516416.Hotel-Information?regionId=178307&chkin=...)
+  // so we must NOT use query-param checks alone — base the decision on the PATH.
+  const isSearchUrl = (href: string): boolean => {
+    try {
+      const u = new URL(href);
+      const pathname = u.pathname.toLowerCase();
+      // Explicit hotel detail patterns → never a search URL
+      if (/\/ho\d+\/|\/h\d+\//.test(pathname)) return false; // Hotels.com /hoNNN/ or old Expedia /h/NNN
+      if (/[./]h\d+[./]/.test(pathname)) return false;       // Expedia .hNNN. dot format
+      if (pathname.includes("/hotel/")) return false;         // Booking.com /hotel/us/...
+      // Search/listing page patterns based on PATH
+      if (pathname.includes("hotel-search")) return true;     // Expedia & Hotels.com search results
+      if (pathname.includes("searchresults")) return true;    // Booking.com search results
+      if (pathname.includes("/search")) return true;          // generic search pages
+      return false;
+    } catch { return false; }
+  };
+
   // Fast path 0: DOM link extraction — find the hotel's href directly in the search results
   // and navigate via goto(). This is the most reliable approach for OTA sites (Expedia/Hotels.com)
   // because stagehand.act() can accidentally click brand logos or Google Maps links that
@@ -129,28 +151,7 @@ export async function clickTargetListingAI(
       { hotelName: targetHotelName, domain: startDomain }
     ).catch(() => null as null) as string[] | null;
 
-    // Pick the best candidate that is NOT a search/listing page.
-    // Hotels.com: search URLs have "Hotel-Search", "regionId=", "destination=".
-    // Expedia: "/Hotel-Search" or similar.
-    // Booking.com: "searchresults.html" in pathname.
-    // Hotel detail URLs for Booking.com contain "/hotel/"; for Hotels.com/Expedia "/ho12345/" or "/h12345/".
-    const isSearchUrl = (href: string): boolean => {
-      try {
-        const u = new URL(href);
-        const pathname = u.pathname.toLowerCase();
-        // Explicit hotel detail page patterns — NOT search URLs
-        if (/\/ho\d+\/|\/h\d+\//.test(pathname)) return false;  // Hotels.com / Expedia hotel IDs
-        if (pathname.includes("/hotel/")) return false;           // Booking.com hotel detail pages
-        const pathAndQuery = (u.pathname + u.search).toLowerCase();
-        return pathAndQuery.includes("hotel-search") ||
-               pathAndQuery.includes("regionid=") ||
-               pathAndQuery.includes("destination=") ||
-               pathAndQuery.includes("/search?") ||
-               pathAndQuery.includes("/hotels?") ||
-               pathname.includes("searchresults");               // Booking.com search results
-      } catch { return false; }
-    };
-
+    // isSearchUrl is defined at function scope above — accessible here.
     const candidates = Array.isArray(directHref) ? directHref : (directHref ? [directHref] : []);
     const directHrefClean = candidates.find(href => !isSearchUrl(href)) ?? null;
 
