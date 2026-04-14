@@ -4016,6 +4016,37 @@ The user will enter CVV and confirm payment themselves.`,
     for (let attempt = 0; attempt < 8; attempt += 1) {
       trace(`Stage assessment ${attempt + 1}: ${assessment.stage} —?${assessment.reason}`);
 
+      // ── OpenTable: no-results early exit ─────────────────────────────────────
+      // Runs regardless of stage (even "unknown") so we catch the "We didn't find a match"
+      // page before it cascades into confusing errors.
+      if (startProvider?.id === "opentable-com") {
+        const otNoResults = await raw.evaluate(() => {
+          const text = (document.body?.innerText ?? "").toLowerCase();
+          return (
+            text.includes("we didn't find a match") ||
+            text.includes("no results found") ||
+            text.includes("couldn't find") ||
+            text.includes("no restaurants found") ||
+            (text.includes("didn't find") && text.includes("match"))
+          );
+        }).catch(() => false);
+        if (otNoResults) {
+          const label = targetHotelName ?? "This restaurant";
+          trace(`[opentable] "${label}" not found on OpenTable — returning no_availability`);
+          const noResultsScreenshot = await raw.screenshot({ type: "png" })
+            .then(b => `data:image/png;base64,${b.toString("base64")}`)
+            .catch(() => undefined);
+          return {
+            status: "no_availability" as const,
+            screenshotBase64: noResultsScreenshot,
+            handoffUrl: `https://www.opentable.com/s?term=${encodeURIComponent(label)}`,
+            sessionUrl,
+            summary: `"${label}" was not found on OpenTable. The restaurant may not be listed or the name may be slightly different. Try searching OpenTable directly.`,
+            debugTrace,
+          };
+        }
+      }
+
       // Provider drift guard runs BEFORE the stage break so it catches cases where the AI
       // executed multiple steps and advanced all the way to checkout_form / payment_gate on
       // the WRONG domain (e.g. Hotels.com AI navigated to hilton.com payment page in one pass).
