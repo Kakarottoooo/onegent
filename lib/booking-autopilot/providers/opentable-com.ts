@@ -34,8 +34,9 @@ export const openTableProvider: BrowserProvider = {
 
     // Guest details step:
     // 1. URL is the booking details page (opentable.com/booking/details?...)
-    // 2. OR reservation form is visible (first-name OR phone-number input present)
-    const isBookingDetailsUrl = lowerUrl.includes("/booking/details");
+    // 2. URL is the seating options page (opentable.com/booking/seating-options?...)
+    // 3. OR reservation form is visible (first-name OR phone-number input present)
+    const isBookingDetailsUrl = lowerUrl.includes("/booking/details") || lowerUrl.includes("/booking/seating-options");
     const hasReservationForm = await page.evaluate(() => {
       const inputs = Array.from(document.querySelectorAll<HTMLInputElement>("input"));
       const visible = inputs.filter(

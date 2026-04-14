@@ -3187,12 +3187,57 @@ The user will enter CVV and confirm payment themselves.`,
                 // Check 1: URL navigated away from search results
                 const nowUrl = raw.url();
                 if (nowUrl.toLowerCase().includes("opentable.com") && !nowUrl.toLowerCase().includes("/s?")) {
-                  // Verify we're at the CORRECT restaurant (not a "you may also like" card)
+                  // ── Seating options page: auto-select Standard ────────────────
+                  // OpenTable may show /booking/seating-options before the guest form.
+                  // Automatically click "Standard" (or first "Select" button) to proceed.
+                  if (nowUrl.toLowerCase().includes("/booking/seating-options")) {
+                    trace(`[opentable] seating options page detected — auto-selecting Standard`);
+                    const seatingSelected = await raw.evaluate(() => {
+                      const isVisible = (el: Element) => {
+                        const r = (el as HTMLElement).getBoundingClientRect();
+                        return r.width > 0 && r.height > 0;
+                      };
+                      // Prefer "Standard" seating; fall back to first visible Select button
+                      const allSelectBtns = Array.from(document.querySelectorAll<HTMLButtonElement>("button"))
+                        .filter(b => isVisible(b) && /^select$/i.test((b.textContent ?? "").trim()));
+                      const stdSection = document.querySelector<HTMLElement>("[class*='standard' i], [data-testid*='standard' i]");
+                      const stdBtn = stdSection
+                        ? Array.from(stdSection.querySelectorAll<HTMLButtonElement>("button"))
+                            .find(b => /^select$/i.test((b.textContent ?? "").trim()))
+                        : null;
+                      const btn = stdBtn ?? allSelectBtns[0] ?? null;
+                      if (btn) { btn.click(); return (btn.closest("section, [class*='section']")?.querySelector("h3, p, span")?.textContent ?? "Standard").trim().slice(0, 30); }
+                      return null;
+                    }).catch(() => null);
+                    if (seatingSelected) {
+                      trace(`[opentable] selected seating: "${seatingSelected}" — waiting for booking form`);
+                      await new Promise(r => setTimeout(r, 2000));
+                      return true;
+                    }
+                  }
+
+                  // ── Verify correct restaurant ─────────────────────────────────
+                  // Avoid booking the wrong restaurant (e.g. from "you may also like" cards).
+                  // OpenTable booking pages show restaurant name in specific elements near the
+                  // booking header — NOT in generic page headings like "You're almost done!".
                   if (targetHotelName) {
                     const pageRestaurant = await raw.evaluate(() => {
-                      // OpenTable booking form shows restaurant name in h1 or prominent heading
-                      const h = document.querySelector('h1, h2, [class*="restaurant-name" i], [data-testid*="restaurant" i]');
-                      return (h?.textContent ?? "").trim().slice(0, 80);
+                      // OpenTable booking pages show the restaurant name near the top,
+                      // separate from the page's action heading (h1: "You're almost done!").
+                      // Strategy: find a heading that is NOT a generic UI phrase.
+                      const genericUI = /you're almost done|complete your reservation|available seating|select seating|reservation details|almost done|booking|diner details/i;
+                      // Check all headings and prominent text nodes for a restaurant-like name
+                      const candidates = Array.from(document.querySelectorAll<HTMLElement>(
+                        'h1, h2, h3, [class*="restaurant" i], [class*="venue" i], [data-testid*="restaurant" i]'
+                      ));
+                      for (const el of candidates) {
+                        const text = (el.textContent ?? "").trim();
+                        if (text.length >= 3 && text.length <= 80 && !genericUI.test(text)) {
+                          return text;
+                        }
+                      }
+                      // Fallback: read page title (tab title often has restaurant name)
+                      return document.title.replace(/\s*[-|].*$/, "").trim().slice(0, 80);
                     }).catch(() => "");
                     const normalize = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, " ").replace(/\s+/g, " ").trim();
                     const targetWords = normalize(targetHotelName).split(" ").filter(w => w.length > 3);
@@ -3206,7 +3251,7 @@ The user will enter CVV and confirm payment themselves.`,
                       return false; // retry the listing stage
                     }
                     if (pageRestaurant) {
-                      trace(`[opentable] correct restaurant confirmed: "${pageRestaurant}"`);
+                      trace(`[opentable] correct restaurant confirmed: "${pageRestaurant}" (matchRatio=${matchRatio.toFixed(2)})`);
                     }
                   }
                   trace(`[opentable] navigated to reservation page: ${nowUrl.slice(0, 80)}`);
