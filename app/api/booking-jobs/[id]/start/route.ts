@@ -64,6 +64,7 @@ export const maxDuration = 300;
 type Params = { params: Promise<{ id: string }> };
 
 const BASE_URL = process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000";
+const inFlightJobStarts = new Set<string>();
 
 function now() { return new Date().toISOString(); }
 function sleep(ms: number) { return new Promise<void>((r) => setTimeout(r, ms)); }
@@ -402,9 +403,9 @@ async function runUniversalStep(
 
     // Call runBrowserTask directly — avoids the self-HTTP fetch that fails when
     // NEXT_PUBLIC_APP_URL is not set (or the loopback is unavailable in serverless).
-    // Retry up to 2 times on generic errors (timing failures, navigation issues, etc.)
-    // Non-retryable outcomes (captcha, no_availability, completed) break the loop immediately.
-    const MAX_BROWSER_RETRIES = 2; // 3 total attempts
+    // For debugging, keep browser execution to a single attempt so the log shows one clean trace.
+    // Non-retryable outcomes (captcha, no_availability, completed) still break immediately.
+    const MAX_BROWSER_RETRIES = 0; // 1 total attempt
     let data: BrowserTaskResult | null = null;
     let browserTaskErr: Error | null = null;
 
@@ -459,8 +460,8 @@ async function runUniversalStep(
       }
     }
 
-    // If all attempts threw exceptions with no data, re-throw to outer catch
-    if (!data) throw browserTaskErr ?? new Error("Browser task failed after all retries");
+    // If the single attempt threw before producing a BrowserTaskResult, re-throw to outer catch.
+    if (!data) throw browserTaskErr ?? new Error("Browser task failed before returning a result");
 
     // ── Persist result immediately after runBrowserTask returns ──────────────
     // Vercel's 5-min maxDuration can kill the function at any moment. Writing
@@ -569,6 +570,23 @@ async function runActivityStep(
 
 export async function POST(_req: NextRequest, { params }: Params) {
   const { id } = await params;
+
+  if (inFlightJobStarts.has(id)) {
+    const existingJob = await getBookingJob(id);
+    return NextResponse.json(
+      {
+        jobId: id,
+        status: existingJob?.status ?? "running",
+        steps: existingJob?.steps ?? [],
+        duplicateStartIgnored: true,
+      },
+      { status: 202 }
+    );
+  }
+
+  inFlightJobStarts.add(id);
+
+  try {
 
   const job = await getBookingJob(id);
   if (!job) return NextResponse.json({ error: "Job not found" }, { status: 404 });
@@ -715,6 +733,9 @@ export async function POST(_req: NextRequest, { params }: Params) {
   } catch { /* push failure never blocks */ }
 
   return NextResponse.json({ jobId: id, status: finalStatus, steps });
+  } finally {
+    inFlightJobStarts.delete(id);
+  }
 }
 
 // ── Utility ────────────────────────────────────────────────────────────────

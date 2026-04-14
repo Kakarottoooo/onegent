@@ -60,7 +60,20 @@ export async function clickTargetListingAI(
       ({ hotelName, domain }: { hotelName: string; domain: string }) => {
         // Include purely-numeric words (e.g. "414" in "414 Hotel") regardless of length —
         // hotel numbers are the most distinctive part of a name and must not be dropped.
-        const nameWords = hotelName.toLowerCase().split(/\s+/).filter((w: string) => w.length > 3 || /^\d+$/.test(w));
+        const normalize = (value: string) =>
+          value.toLowerCase().replace(/[^a-z0-9]+/g, " ").replace(/\s+/g, " ").trim();
+        const nameWords = normalize(hotelName).split(/\s+/).filter((w: string) => w.length > 3 || /^\d+$/.test(w));
+        const stopWords = new Set([
+          "hotel", "hotels", "inn", "suite", "suites", "resort", "spa",
+          "the", "by", "and", "at", "of",
+          "new", "york", "times", "square", "manhattan", "midtown", "downtown",
+          "broadway", "city", "united", "states", "america",
+        ]);
+        const numericWords = nameWords.filter((w: string) => /^\d+$/.test(w));
+        const distinctiveWords = nameWords.filter((w: string) => !/^\d+$/.test(w) && !stopWords.has(w) && w.length >= 4);
+        const requiredWords = numericWords.length > 0
+          ? numericWords
+          : distinctiveWords.slice(0, Math.min(2, distinctiveWords.length));
         // Find all <a> tags that link within the same OTA domain.
         // Check the URL *hostname* so that survey redirect URLs like
         // "directword.io/survey/domain=www.hotels.com/..." are excluded even though
@@ -77,14 +90,25 @@ export async function clickTargetListingAI(
           });
         // Score each candidate by how many hotel name words appear in its text or href
         const scored = candidates.map(a => {
-          const text = (a.textContent ?? "").toLowerCase().replace(/\s+/g, " ").trim();
-          const href = (a.href ?? "").toLowerCase();
-          const score = nameWords.filter((w: string) => text.includes(w) || href.includes(w)).length;
-          return { href: a.href, text, score };
+          const text = normalize(a.textContent ?? "");
+          const href = normalize(a.href ?? "");
+          const combined = `${text} ${href}`;
+          const matchedRequired = requiredWords.every((w: string) => combined.includes(w));
+          const matchedDistinctive = distinctiveWords.filter((w: string) => combined.includes(w)).length;
+          const matchedAll = nameWords.filter((w: string) => combined.includes(w)).length;
+          const score =
+            matchedAll * 10 +
+            matchedDistinctive * 25 +
+            (matchedRequired ? 60 : 0);
+          return { href: a.href, text, score, matchedRequired, matchedDistinctive, matchedAll };
         });
         const best = scored.sort((x, y) => y.score - x.score)[0];
-        // Require at least half the name words to match
-        if (best && best.score >= Math.ceil(nameWords.length * 0.5)) {
+        if (
+          best &&
+          best.matchedRequired &&
+          best.matchedAll >= Math.max(1, Math.ceil(nameWords.length * 0.35)) &&
+          (distinctiveWords.length === 0 || best.matchedDistinctive >= 1)
+        ) {
           return best.href;
         }
         return null;
@@ -100,6 +124,8 @@ export async function clickTargetListingAI(
     const isSearchUrl = directHref && (() => {
       try {
         const u = new URL(directHref);
+        const pathname = u.pathname.toLowerCase();
+        if (/\/ho\d+\/|\/h\d+\//.test(pathname)) return false;
         const pathAndQuery = (u.pathname + u.search).toLowerCase();
         return pathAndQuery.includes("hotel-search") ||
                pathAndQuery.includes("regionid=") ||
@@ -175,12 +201,27 @@ export async function clickTargetListingAI(
       }
       const pageTitle = await page.evaluate(() => document.title).catch(() => "");
       const h1Text = await page.evaluate(() => document.querySelector("h1")?.textContent?.trim() ?? "").catch(() => "");
-      const nameWords = targetHotelName.toLowerCase().split(/\s+/).filter(w => w.length > 3 || /^\d+$/.test(w));
-      const combinedText = (pageTitle + " " + h1Text).toLowerCase();
+      const normalize = (value: string) =>
+        value.toLowerCase().replace(/[^a-z0-9]+/g, " ").replace(/\s+/g, " ").trim();
+      const nameWords = normalize(targetHotelName).split(/\s+/).filter(w => w.length > 3 || /^\d+$/.test(w));
+      const stopWords = new Set([
+        "hotel", "hotels", "inn", "suite", "suites", "resort", "spa",
+        "the", "by", "and", "at", "of",
+        "new", "york", "times", "square", "manhattan", "midtown", "downtown",
+        "broadway", "city", "united", "states", "america",
+      ]);
+      const numericWords = nameWords.filter(w => /^\d+$/.test(w));
+      const distinctiveWords = nameWords.filter(w => !/^\d+$/.test(w) && !stopWords.has(w) && w.length >= 4);
+      const requiredWords = numericWords.length > 0
+        ? numericWords
+        : distinctiveWords.slice(0, Math.min(2, distinctiveWords.length));
+      const combinedText = normalize(pageTitle + " " + h1Text);
+      const requiredOk = requiredWords.every(w => combinedText.includes(w));
+      const matchedDistinctive = distinctiveWords.filter(w => combinedText.includes(w)).length;
       const matchScore = nameWords.filter(w => combinedText.includes(w)).length;
       const matchRatio = nameWords.length > 0 ? matchScore / nameWords.length : 1;
-      if (matchRatio < 0.5) {
-        trace(`[find-listing] act() wrong hotel page (ratio ${matchRatio.toFixed(2)}) — going back`);
+      if (!requiredOk || (distinctiveWords.length > 0 && matchedDistinctive < 1) || matchRatio < 0.35) {
+        trace(`[find-listing] act() wrong hotel page (requiredOk=${requiredOk} ratio ${matchRatio.toFixed(2)}) — going back`);
         await page.evaluate(() => window.history.back()).catch(() => {});
         await sleep(1000);
         throw new Error(`wrong hotel page`);

@@ -697,6 +697,11 @@ async function fillCardFieldsInPaymentIframes(
 
       if (!fieldType || !value) continue;
 
+      // Skip hidden CKO placeholder inputs (id ends with "-placeholder" or "-input-placeholder").
+      // These are display:none backing elements for CKO iframes — filling them does nothing,
+      // and the page.type() fallback would type into whatever random element has focus.
+      if (inp.id.includes("-placeholder")) continue;
+
       try {
         const loc = frame.locator("input").nth(inp.i);
         // NOTE: scrollIntoViewIfNeeded is NOT available on Stagehand-proxied locators.
@@ -1066,15 +1071,19 @@ export async function fillExpediaGroupPaymentForm(
       }
 
       // Classify each iframe by its ID/name/src into: "number" | "expiry" | "name" | null
+      // Hotels.com/Expedia CKO iframe IDs: iframe-pan, iframe-expdate, iframe-chn, iframe-cvv
       const classifyIframe = (id: string, frameName: string, src: string): keyof typeof checkoutComFrameFilled | null => {
         const s = `${id} ${frameName} ${src}`;
         if (/cardnumber|card-number|pan(?!ic|el)/.test(s)) return "number";
-        if (/expirydate|expiry-date|expiry(?!less)|expiration/.test(s)) return "expiry";
-        if (/cardholdername|holdername|cardname|card-name/.test(s)) return "name";
+        if (/expirydate|expiry-date|expiry(?!less)|expiration|expdate/.test(s)) return "expiry";
+        if (/cardholdername|holdername|cardname|card-name|\bchn\b/.test(s)) return "name";
         return null;
       };
 
       // ID-based fill: match each CKO iframe to the correct field
+      // IMPORTANT: Re-fetch each iframe's live rect just before clicking — CKO validation errors
+      // (e.g. "Sorry, that card isn't accepted") shift the page layout after card-number is typed,
+      // making the pre-captured y-coordinates stale for subsequent fields (especially expiry).
       let matchedAny = false;
       for (const iframe of ckoIframes) {
         const fieldType = classifyIframe(iframe.id, iframe.frameName, iframe.src);
@@ -1085,8 +1094,22 @@ export async function fillExpediaGroupPaymentForm(
                     : (profile.card_name ?? "");
         if (!value) continue;
 
-        const cx = iframe.x + iframe.w / 2;
-        const cy = iframe.y + iframe.h / 2;
+        // Re-read the live bounding rect of this specific iframe before clicking,
+        // in case earlier fills triggered validation messages that shifted the layout.
+        const liveRect = await page.evaluate((iframeId: string) => {
+          const el = document.getElementById(iframeId) as HTMLIFrameElement | null;
+          if (!el) return null;
+          const r = el.getBoundingClientRect();
+          return { x: r.left, y: r.top, w: r.width, h: r.height };
+        }, iframe.id).catch(() => null as null);
+
+        const rect = liveRect ?? iframe;  // fall back to pre-captured if re-fetch fails
+        if (liveRect && (Math.abs(liveRect.y - iframe.y) > 5 || Math.abs(liveRect.x - iframe.x) > 5)) {
+          trace(`CKO id-based iframe "${iframe.id}": rect shifted — old y=${iframe.y.toFixed(0)}, live y=${liveRect.y.toFixed(0)}`);
+        }
+
+        const cx = rect.x + rect.w / 2;
+        const cy = rect.y + rect.h / 2;
         try {
           await (page as unknown as { click: (x: number, y: number) => Promise<void> }).click(cx, cy);
           await new Promise(r => setTimeout(r, 300));
@@ -1127,9 +1150,10 @@ export async function fillExpediaGroupPaymentForm(
           try {
             await (page as unknown as { click: (x: number, y: number) => Promise<void> }).click(cx, cy);
             await new Promise(r => setTimeout(r, 300));
-            await page.keyboard.press("Control+a");
+            // page.keyboard is undefined on Stagehand v3 — use Stagehand's own keyPress/type API
+            await (page as unknown as { keyPress: (k: string) => Promise<void> }).keyPress("Control+a");
             await new Promise(r => setTimeout(r, 100));
-            await page.keyboard.type(field.value, { delay: 50 });
+            await (page as unknown as { type: (t: string, o?: { delay?: number }) => Promise<void> }).type(field.value, { delay: 50 });
             await new Promise(r => setTimeout(r, 200));
             checkoutComFrameFilled[field.key] = true;
             trace(`CKO positional iframe[${i}]: ${field.key} filled via page.click(${cx.toFixed(0)},${cy.toFixed(0)}) + keyboard`);
@@ -1180,9 +1204,10 @@ export async function fillExpediaGroupPaymentForm(
       try {
         await (page as unknown as { click: (x: number, y: number) => Promise<void> }).click(coord.x, coord.y);
         await new Promise(r => setTimeout(r, 300));
-        await page.keyboard.press("Control+a");
+        // page.keyboard is undefined on Stagehand v3 — use Stagehand's own keyPress/type API
+        await (page as unknown as { keyPress: (k: string) => Promise<void> }).keyPress("Control+a");
         await new Promise(r => setTimeout(r, 100));
-        await page.keyboard.type(value, { delay: 50 });
+        await (page as unknown as { type: (t: string, o?: { delay?: number }) => Promise<void> }).type(value, { delay: 50 });
         await new Promise(r => setTimeout(r, 200));
         checkoutComFrameFilled[key] = true;
         trace(`CKO parent-climb: ${key} filled via page.click(${coord.x.toFixed(0)},${coord.y.toFixed(0)}) + keyboard`);

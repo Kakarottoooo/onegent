@@ -1288,25 +1288,38 @@ The user will enter CVV and confirm payment themselves.`,
                         .filter((el) => isVisible(el) && /fully refundable|free cancellation|refundable only|clear all/i.test(normalize(el.textContent ?? "")))
                         .map((el) => normalize(el.textContent ?? "").slice(0, 60))
                         .slice(0, 6);
-                      // Use [type="text"] to avoid matching checkboxes (e.g. FREE_CANCELLATION checkbox
-                      // inside a [data-stid*="property"] section — that's a 16x16 filter checkbox, not the search input)
                       const input = (() => {
-                        const selectors = [
-                          'input[placeholder*="property name" i]',
-                          'input[aria-label*="property name" i]',
-                          'input[placeholder*="Marriott" i]',
-                          'input[data-testid*="property"]',
-                          '[data-stid*="property-name"] input[type="text"]',
-                          '[data-stid*="filter-name"] input[type="text"]',
-                          'aside input[type="text"]', 'section input[type="text"]',
-                        ];
-                        for (const s of selectors) {
-                          const el = document.querySelector<HTMLInputElement>(s);
-                          if (el) { const r = el.getBoundingClientRect(); if (r.width >= 60) return el; }
-                        }
-                        // Fallback: any sidebar text input (exclude destination bar: too wide or has comma-value)
-                        return Array.from(document.querySelectorAll<HTMLInputElement>('input[type="text"]'))
-                          .find(el => { const r = el.getBoundingClientRect(); return r.width >= 60 && r.width <= 400 && r.left <= 420 && !(el.value ?? '').includes(','); }) ?? null;
+                        const candidateInputs = Array.from(document.querySelectorAll<HTMLElement>('input, textarea'))
+                          .filter((el): el is HTMLInputElement | HTMLTextAreaElement => el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement)
+                          .map((el) => {
+                            const r = el.getBoundingClientRect();
+                            const value = normalize((el as HTMLInputElement).value ?? "");
+                            const meta = normalize([
+                              el.getAttribute("placeholder") ?? "",
+                              el.getAttribute("aria-label") ?? "",
+                              el.getAttribute("data-testid") ?? "",
+                              el.getAttribute("data-stid") ?? "",
+                              el.className ?? "",
+                              el.closest("label, section, aside, div")?.textContent ?? "",
+                            ].join(" "));
+                            const looksPropertyish =
+                              /property name|marriott|hotel name|search by property name|e\.g\./i.test(meta) ||
+                              /property/.test((el.getAttribute("data-testid") ?? "") + " " + (el.getAttribute("data-stid") ?? ""));
+                            const isCurrency = /^\$\s*\d/.test(value) || /\bprice\b|\bnightly\b|\btotal\b/i.test(meta);
+                            const isSidebarSized = r.left <= 420 && r.width >= 90 && r.width <= 360 && r.height >= 28 && r.height <= 64;
+                            const visible = r.width > 0 && r.height > 0;
+                            const score =
+                              (looksPropertyish ? 120 : 0) +
+                              (visible ? 30 : 0) +
+                              (isSidebarSized ? 25 : 0) +
+                              (value && !isCurrency ? 10 : 0) -
+                              (isCurrency ? 200 : 0) -
+                              (value.includes(",") ? 40 : 0);
+                            return { el, score, visible, isCurrency, isSidebarSized };
+                          })
+                          .filter(({ score, isCurrency }) => score > 0 && !isCurrency)
+                          .sort((a, b) => b.score - a.score);
+                        return candidateInputs[0]?.el ?? null;
                       })();
                       const inputRect = input?.getBoundingClientRect();
                       const inputSummary = input
@@ -1383,6 +1396,10 @@ The user will enter CVV and confirm payment themselves.`,
                         '[data-stid*="filter-chip"]',
                         'button',
                         '[role="button"]',
+                        // Hotels.com renders "Fully refundable property" as a label
+                        // (uitk-checkbox-label) at ~y=2700, no close button inside.
+                        // We scroll it into view and CDP-click to toggle the checkbox.
+                        'label',
                       ];
 
                       for (const selector of chipSelectors) {
@@ -1623,97 +1640,168 @@ The user will enter CVV and confirm payment themselves.`,
                     // We NEVER use coordinates for this click: y-coordinates like 2710 are off-screen,
                     // and CDP-coordinate clicks can land on survey overlays instead of the sidebar input.
                     // DOM el.scrollIntoView() + el.focus() + el.click() is reliable regardless of scroll pos.
-                    const inputInfo = await raw.evaluate(() => {
+                    const inputInfo = await raw.evaluate(({ hotelN }: { hotelN: string }) => {
                       const norm = (s: string) => s.replace(/\s+/g, " ").trim();
-                      const tryInput = (el: HTMLInputElement | null, label: string): { sel: string; cx: number; cy: number; diag?: string } | null => {
-                        if (!el) return null;
-                        const r = el.getBoundingClientRect();
-                        if (r.width === 0 || r.height === 0) return null;
-                        if (el.disabled) return null;
-                        if (r.width < 60) return null;
-                        el.scrollIntoView({ behavior: 'instant', block: 'center' });
-                        el.focus();
-                        el.click();
-                        const after = el.getBoundingClientRect();
-                        return { sel: label, cx: Math.round(after.left + after.width / 2), cy: Math.round(after.top + after.height / 2) };
-                      };
-
-                      // ── Diagnostic: enumerate ALL text inputs on page ───────────────────────
-                      const allInputs = Array.from(document.querySelectorAll<HTMLInputElement>('input[type="text"], input:not([type])'))
-                        .map(el => {
+                      const hotelWords = norm(hotelN).toLowerCase().split(/\s+/).filter((w) => w.length > 2 || /^\d+$/.test(w));
+                      const allInputs = Array.from(document.querySelectorAll<HTMLInputElement>('input, textarea'))
+                        .map((el) => {
                           const r = el.getBoundingClientRect();
-                          return `[${el.getAttribute('placeholder')?.slice(0,20) ?? ''} | ${el.getAttribute('data-testid') ?? ''} | ${el.getAttribute('data-stid') ?? ''}] ` +
+                          return `[${el.getAttribute('placeholder')?.slice(0,20) ?? ''} | ${el.getAttribute('aria-label')?.slice(0,20) ?? ''} | ${el.getAttribute('data-testid') ?? el.getAttribute('data-stid') ?? ''}] ` +
                             `${Math.round(r.width)}x${Math.round(r.height)}@(${Math.round(r.left)},${Math.round(r.top)}) val="${(el.value ?? '').slice(0,20)}"`;
                         })
-                        .slice(0, 8);
+                        .slice(0, 12);
 
-                      // ── Strategy A: label-based search ─────────────────────────────────────
-                      let stratAResult: string | null = null;
-                      const sectionTitles = Array.from(document.querySelectorAll<HTMLElement>(
+                      const scoreInput = (el: HTMLInputElement | HTMLTextAreaElement, scopeText = "") => {
+                        const r = el.getBoundingClientRect();
+                        const value = norm((el as HTMLInputElement).value ?? "");
+                        const meta = norm([
+                          el.getAttribute("placeholder") ?? "",
+                          el.getAttribute("aria-label") ?? "",
+                          el.getAttribute("data-testid") ?? "",
+                          el.getAttribute("data-stid") ?? "",
+                          el.className ?? "",
+                          scopeText,
+                          el.closest("label, section, aside, div")?.textContent ?? "",
+                        ].join(" "));
+                        const visible = r.width > 0 && r.height > 0;
+                        const isCurrency = /^\$\s*\d/.test(value) || /^\$\s*\d/.test(meta) || /\bnightly\b|\btotal\b|\bprice\b/.test(meta);
+                        const propertyish = /search by property name|property name|marriott|hotel name|e\.g\./.test(meta);
+                        const score =
+                          (propertyish ? 160 : 0) +
+                          (hotelWords.some((w) => value.toLowerCase().includes(w)) ? 45 : 0) +
+                          (visible ? 30 : 0) +
+                          (r.left <= 420 ? 20 : -30) +
+                          (r.width >= 90 && r.width <= 360 ? 20 : 0) +
+                          (r.height >= 24 && r.height <= 64 ? 15 : 0) -
+                          (value.includes(",") ? 80 : 0) -
+                          (/^\d+$/.test(value) ? 90 : 0) -
+                          (isCurrency ? 220 : 0);
+                        return { el, r, value, meta, visible, propertyish, isCurrency, score };
+                      };
+
+                      const activateCandidate = (
+                        candidate: ReturnType<typeof scoreInput>,
+                        label: string,
+                        clickTarget?: HTMLElement | null
+                      ): { sel: string; cx: number; cy: number; diag?: string } | null => {
+                        if (!candidate || candidate.score <= 0 || candidate.isCurrency) return null;
+                        const target = (() => {
+                          if (clickTarget) return clickTarget;
+                          const direct = candidate.el instanceof HTMLElement ? candidate.el : null;
+                          if (direct && candidate.visible) return direct;
+                          const nearby = candidate.el.closest<HTMLElement>(
+                            '[role="combobox"], [data-stid*="typeahead"], [data-testid*="typeahead"], [class*="typeahead"], [class*="Typeahead"], label, section, aside, div'
+                          );
+                          return nearby ?? direct;
+                        })();
+                        if (!(target instanceof HTMLElement)) return null;
+                        target.scrollIntoView({ behavior: 'instant', block: 'center' });
+                        candidate.el.focus();
+                        target.click();
+                        const after = target.getBoundingClientRect();
+                        if (after.width === 0 || after.height === 0) return null;
+                        return {
+                          sel: label,
+                          cx: Math.round(after.left + after.width / 2),
+                          cy: Math.round(after.top + after.height / 2),
+                          diag: `${label} score=${candidate.score} visible=${candidate.visible} value="${candidate.value.slice(0, 20)}" meta="${candidate.meta.slice(0, 80)}"`,
+                        };
+                      };
+
+                      const headingCandidates = Array.from(document.querySelectorAll<HTMLElement>(
                         'h1,h2,h3,h4,h5,h6,label,legend,[class*="title"],[class*="heading"],[class*="label"],[class*="Title"],[class*="Heading"]'
-                      ));
-                      for (const title of sectionTitles) {
-                        const text = (title.textContent ?? '').replace(/\s+/g, ' ').trim();
-                        if (!/search by property name|property name filter/i.test(text)) continue;
-                        stratAResult = `found heading "${text.slice(0,40)}"`;
+                      )).filter((title) => /search by property name|property name filter/i.test(norm(title.textContent ?? "")));
+
+                      const rankedCandidates: Array<{
+                        candidate: ReturnType<typeof scoreInput>;
+                        label: string;
+                        clickTarget?: HTMLElement | null;
+                      }> = [];
+
+                      for (const title of headingCandidates) {
                         let container: Element | null = title.parentElement;
                         let depth = 0;
                         while (container && container !== document.body && depth < 4) {
-                          const input = container.querySelector<HTMLInputElement>('input[type="text"]');
-                          if (input && !input.disabled) {
-                            const r2 = input.getBoundingClientRect();
-                            if (r2.width >= 60 && r2.width <= 400) {
-                              const result = tryInput(input, 'label-search-by-property-name');
-                              if (result) return { ...result, diag: `stratA:depth${depth} ${allInputs.join(' | ')}` };
-                            }
+                          const scopeText = norm(container.textContent ?? "");
+                          const inputs = Array.from(container.querySelectorAll<HTMLInputElement | HTMLTextAreaElement>('input, textarea'));
+                          for (const input of inputs) {
+                            const candidate = scoreInput(input, scopeText);
+                            rankedCandidates.push({
+                              candidate: { ...candidate, score: candidate.score + 40 - depth * 8 },
+                              label: `stratA:depth${depth}`,
+                              clickTarget: container instanceof HTMLElement ? container : null,
+                            });
+                          }
+                          const widgets = Array.from(container.querySelectorAll<HTMLElement>(
+                            '[role="combobox"], [class*="typeahead"], [class*="Typeahead"], [data-stid*="typeahead"], [data-testid*="typeahead"]'
+                          ));
+                          for (const widget of widgets) {
+                            const hiddenInput = widget.querySelector<HTMLInputElement | HTMLTextAreaElement>('input, textarea');
+                            if (!hiddenInput) continue;
+                            const candidate = scoreInput(hiddenInput, scopeText + " " + norm(widget.textContent ?? ""));
+                            rankedCandidates.push({
+                              candidate: { ...candidate, score: candidate.score + 55 - depth * 8 },
+                              label: `stratA-widget:depth${depth}`,
+                              clickTarget: widget,
+                            });
                           }
                           container = container.parentElement;
                           depth++;
                         }
                       }
 
-                      // ── Strategy B: specific attribute selectors ────────────────────────────
                       const selectors = [
                         'input[placeholder*="property name" i]',
                         'input[aria-label*="property name" i]',
                         'input[placeholder*="e.g. Marriott" i]',
                         'input[placeholder*="Marriott" i]',
                         'input[data-testid*="property"]',
-                        '[data-stid*="property-name"] input[type="text"]',
-                        '[data-stid*="hotel-name"] input[type="text"]',
-                        '[data-stid*="filter-name"] input[type="text"]',
-                        '[data-stid*="filterName"] input[type="text"]',
+                        '[data-stid*="property-name"] input',
+                        '[data-stid*="hotel-name"] input',
+                        '[data-stid*="filter-name"] input',
+                        '[data-stid*="filterName"] input',
+                        '[role="combobox"] input',
                       ];
                       for (const s of selectors) {
-                        const el = document.querySelector<HTMLInputElement>(s);
-                        if (el) {
-                          const result = tryInput(el, s);
-                          if (result) return { ...result, diag: `stratB:${s} ${allInputs.join(' | ')}` };
+                        const found = Array.from(document.querySelectorAll<HTMLInputElement | HTMLTextAreaElement>(s));
+                        for (const el of found) {
+                          rankedCandidates.push({ candidate: scoreInput(el), label: `stratB:${s}` });
                         }
                       }
 
-                      // ── Strategy C: broader sidebar fallback ────────────────────────────────
-                      const allTextInputs = Array.from(document.querySelectorAll<HTMLInputElement>(
-                        'input[type="text"]:not([disabled]):not([readonly])'
-                      ));
+                      const allTextInputs = Array.from(document.querySelectorAll<HTMLInputElement | HTMLTextAreaElement>('input, textarea'));
                       for (const el of allTextInputs) {
-                        const r = el.getBoundingClientRect();
-                        if (r.width < 80 || r.height < 20) continue;
-                        if (r.width > 400) continue;
-                        if (r.left > 420) continue;
-                        const val = el.value ?? '';
-                        if (val.includes(',')) continue;
-                        if (/^\$/.test(val)) continue;
-                        if (/^\d+$/.test(val)) continue;
-                        const result = tryInput(el, 'sidebar-text-input-fallback');
-                        if (result) return { ...result, diag: `stratC ${allInputs.join(' | ')}` };
+                        const candidate = scoreInput(el);
+                        if (candidate.r.left > 420) continue;
+                        rankedCandidates.push({ candidate, label: 'stratC' });
                       }
 
-                      // ── Not found: return null with diagnostic info ─────────────────────────
-                      return { sel: 'NOT_FOUND', cx: -1, cy: -1,
-                        diag: `stratA:${stratAResult ?? 'no-heading'} stratB:no-match stratC:no-match ` +
-                              `allInputs=[${allInputs.join(' | ')}]` };
-                    }).catch(() => null);
+                      const rankedSummary = rankedCandidates
+                        .filter(({ candidate }) => candidate.score > -100)
+                        .sort((a, b) => b.candidate.score - a.candidate.score)
+                        .slice(0, 8)
+                        .map(({ candidate, label }) =>
+                          `${label} score=${candidate.score} ${Math.round(candidate.r.width)}x${Math.round(candidate.r.height)}@(${Math.round(candidate.r.left)},${Math.round(candidate.r.top)}) value="${candidate.value.slice(0, 16)}" meta="${candidate.meta.slice(0, 40)}"`
+                        );
+
+                      const best = rankedCandidates
+                        .filter(({ candidate }) => candidate.score > 0 && !candidate.isCurrency)
+                        .sort((a, b) => b.candidate.score - a.candidate.score)[0];
+
+                      if (best) {
+                        const activated = activateCandidate(best.candidate, best.label, best.clickTarget);
+                        if (activated) {
+                          return { ...activated, diag: `${activated.diag ?? ""} ranked=[${rankedSummary.join(" | ")}]` };
+                        }
+                      }
+
+                      return {
+                        sel: 'NOT_FOUND',
+                        cx: -1,
+                        cy: -1,
+                        diag: `no-usable-property-widget ranked=[${rankedSummary.join(' | ')}] allInputs=[${allInputs.join(' | ')}]`,
+                      };
+                    }, { hotelN: targetHotelName ?? "" }).catch(() => null);
 
                     if (!inputInfo || inputInfo.cx === -1) {
                       trace(`[stageB-diag] input search failed: ${inputInfo?.diag ?? "evaluate-threw"}`);
@@ -1739,10 +1827,58 @@ The user will enter CVV and confirm payment themselves.`,
                         trace(`[ai-listing] property name filter typed "${typeaheadText}" via "${sel}" (DOM focus/click)`);
                         trace(`[ai-listing] Hotels.com snapshot after property typing -> ${await getHotelsListingSnapshot()}`);
 
+                        const verifyHotelsCurrentDetailMatchesTarget = async (): Promise<boolean> => {
+                          if (!isHotelDetailUrl(raw.url())) return false;
+                          return raw.evaluate(({ hotelN }: { hotelN: string }) => {
+                            const normalize = (value: string) =>
+                              value.toLowerCase().replace(/[^a-z0-9]+/g, " ").replace(/\s+/g, " ").trim();
+                            const nameWords = normalize(hotelN)
+                              .split(" ")
+                              .filter((w: string) => w.length > 2 || /^\d+$/.test(w));
+                            const stopWords = new Set([
+                              "hotel", "hotels", "inn", "suite", "suites", "resort", "spa",
+                              "the", "by", "and", "at", "of",
+                              "new", "york", "times", "square", "manhattan", "midtown", "downtown",
+                              "broadway", "city", "united", "states", "america",
+                            ]);
+                            const numericWords = nameWords.filter((w: string) => /^\d+$/.test(w));
+                            const distinctiveWords = nameWords.filter((w: string) => !/^\d+$/.test(w) && !stopWords.has(w) && w.length >= 4);
+                            const targetCoreWords = Array.from(new Set([
+                              ...numericWords,
+                              ...distinctiveWords,
+                            ]));
+                            const requiredWords = numericWords.length > 0
+                              ? numericWords
+                              : distinctiveWords.slice(0, Math.min(2, distinctiveWords.length));
+                            const allowedUiWords = new Set([
+                              "reserve", "reserved", "book", "booking", "room", "rooms", "select", "overview",
+                              "accessibility", "policies", "about", "good", "great", "excellent", "review", "reviews",
+                            ]);
+                            const combined = normalize(`${document.title ?? ""} ${document.querySelector("h1")?.textContent ?? ""}`);
+                            const combinedWords = combined.split(" ").filter((w: string) => w.length > 0);
+                            const combinedCoreWords = combinedWords.filter((w: string) =>
+                              /^\d+$/.test(w) || (!stopWords.has(w) && !allowedUiWords.has(w) && w.length >= 4)
+                            );
+                            const extraCoreWords = combinedCoreWords.filter((w: string) => !targetCoreWords.includes(w));
+                            const requiredOk = requiredWords.every((w: string) => combined.includes(w));
+                            const matchedDistinctive = distinctiveWords.filter((w: string) => combined.includes(w)).length;
+                            const matchedAll = nameWords.filter((w: string) => combined.includes(w)).length;
+                            if (numericWords.length > 0) {
+                              return requiredOk && extraCoreWords.length === 0;
+                            }
+                            return requiredOk &&
+                              extraCoreWords.length === 0 &&
+                              matchedAll >= Math.max(1, Math.ceil(nameWords.length * 0.25)) &&
+                              (distinctiveWords.length === 0 || matchedDistinctive >= 1);
+                          }, { hotelN: targetHotelName ?? "" }).catch(() => false);
+                        };
+
                         const verifyHotelsSidebarResult = async (): Promise<{
                           status: "detail" | "listing" | "no_exact" | "unknown";
                           text?: string;
                           href?: string;
+                          x?: number;
+                          y?: number;
                         }> => {
                           if (isHotelDetailUrl(raw.url())) {
                             return { status: "detail", href: raw.url() };
@@ -1756,40 +1892,336 @@ The user will enter CVV and confirm payment themselves.`,
                               const r = el.getBoundingClientRect();
                               return r.width > 0 && r.height > 0;
                             };
-                            const textContent = normalize(document.body.textContent ?? "");
-                            if (textContent.includes("no exact matches")) {
-                              return { status: "no_exact" as const };
-                            }
-
                             const nameWords = normalize(hotelN)
                               .split(" ")
                               .filter((w: string) => w.length > 2 || /^\d+$/.test(w));
+                            const stopWords = new Set([
+                              "hotel", "hotels", "inn", "suite", "suites", "resort", "spa",
+                              "the", "by", "and", "at", "of",
+                              "new", "york", "times", "square", "manhattan", "midtown", "downtown",
+                              "broadway", "city", "united", "states", "america",
+                            ]);
+                            const targetCoreWords = Array.from(new Set(
+                              nameWords.filter((w: string) => /^\d+$/.test(w) || (!stopWords.has(w) && w.length >= 4))
+                            ));
+                            const requiredWords = targetCoreWords.length > 0
+                              ? targetCoreWords.slice(0, Math.min(2, targetCoreWords.length))
+                              : nameWords.slice(0, Math.min(2, nameWords.length));
+                            const getCardTitle = (container: HTMLElement, anchor?: HTMLAnchorElement | null) => {
+                              const titleCandidate = container.querySelector<HTMLElement>(
+                                'h1,h2,h3,h4,[role="heading"], [data-stid*="title"], [class*="title"], [class*="Title"], a[aria-label^="Opens "]'
+                              );
+                              const fromAria = normalize(titleCandidate?.getAttribute("aria-label") ?? anchor?.getAttribute("aria-label") ?? "")
+                                .replace(/^opens\s+/, "")
+                                .replace(/\s+in new tab$/, "");
+                              const fromHeading = normalize(titleCandidate?.textContent ?? "");
+                              const fromAnchorText = normalize(anchor?.textContent ?? "").split(" reserve now")[0]?.trim() ?? "";
+                              const fromContainerText = normalize(container.textContent ?? "").split(" reserve now")[0]?.trim() ?? "";
+                              return fromAria || fromHeading || fromAnchorText || fromContainerText;
+                            };
+                            const getClickableTarget = (container: HTMLElement) => {
+                              const clickTarget =
+                                container.querySelector<HTMLElement>(
+                                  'a[href*="/ho"], a[href*="/h"], button, [role="button"], [data-stid*="open-hotel-information"], [data-stid*="select-room"]'
+                                ) ?? container;
+                              const rect = clickTarget.getBoundingClientRect();
+                              if (rect.width <= 0 || rect.height <= 0) return null;
+                              return {
+                                x: Math.round(rect.left + Math.min(rect.width * 0.45, Math.max(80, rect.width / 2))),
+                                y: Math.round(rect.top + Math.min(rect.height * 0.5, Math.max(20, rect.height / 2))),
+                              };
+                            };
+                            const scoreCard = (title: string, top: number, href: string, clickPos: { x: number; y: number } | null) => {
+                              const titleWords = title.split(" ").filter((w: string) => w.length > 0);
+                              const titleCoreWords = titleWords.filter((w: string) => /^\d+$/.test(w) || (!stopWords.has(w) && w.length >= 4));
+                              const extraCoreWords = titleCoreWords.filter((w: string) => !targetCoreWords.includes(w));
+                              const matchedRequired = requiredWords.every((w: string) => titleCoreWords.includes(w) || titleWords.includes(w));
+                              const matchedCore = targetCoreWords.filter((w: string) => titleCoreWords.includes(w)).length;
+                              const matchedAll = nameWords.filter((w: string) => titleWords.includes(w)).length;
+                              const score =
+                                matchedAll * 12 +
+                                matchedCore * 35 +
+                                (matchedRequired ? 80 : 0) -
+                                extraCoreWords.length * 90 +
+                                (href ? 12 : 0) +
+                                (clickPos ? 8 : 0);
+                              return { score, matchedRequired, matchedCore, matchedAll, extraCoreWords };
+                            };
 
-                            const anchors = Array.from(document.querySelectorAll<HTMLAnchorElement>('a[href*="/ho"], a[href*="/h"]'))
-                              .filter((el) => isVisible(el))
-                              .map((el) => {
-                                const text = normalize(el.textContent ?? "");
-                                const href = el.href ?? "";
-                                const score = nameWords.filter((w: string) => text.includes(w) || href.toLowerCase().includes(w)).length;
-                                return { text, href, score };
-                              })
-                              .sort((a, b) => b.score - a.score);
+                            const seen = new Map<string, {
+                              text: string;
+                              href: string;
+                              score: number;
+                              matchedRequired: boolean;
+                              matchedCore: number;
+                              matchedAll: number;
+                              extraCoreWords: string[];
+                              top: number;
+                              x?: number;
+                              y?: number;
+                            }>();
+                            const cardSelectors = [
+                              'article',
+                              '[data-stid*="property"]',
+                              '[data-stid*="listing"]',
+                              '[class*="card"]',
+                              '[class*="Card"]',
+                              'section',
+                              'li',
+                            ].join(",");
+                            Array.from(document.querySelectorAll<HTMLElement>(cardSelectors))
+                              .filter((container) => isVisible(container))
+                              .forEach((container) => {
+                                const rect = container.getBoundingClientRect();
+                                if (rect.width < 260 || rect.height < 60) return;
+                                if (rect.right < 260 || rect.top > window.innerHeight + 120 || rect.bottom < -20) return;
+                                const hrefAnchor =
+                                  container.querySelector<HTMLAnchorElement>('a[href*="/ho"], a[href*="/h"]') ??
+                                  (container.tagName === "A" ? container as HTMLAnchorElement : null);
+                                const href = hrefAnchor?.href ?? "";
+                                const title = getCardTitle(container, hrefAnchor);
+                                if (!title) return;
+                                const top = rect.top + window.scrollY;
+                                const clickPos = getClickableTarget(container);
+                                const { score, matchedRequired, matchedCore, matchedAll, extraCoreWords } =
+                                  scoreCard(title, top, href, clickPos);
+                                const candidate = {
+                                  text: title,
+                                  href,
+                                  score,
+                                  matchedRequired,
+                                  matchedCore,
+                                  matchedAll,
+                                  extraCoreWords,
+                                  top,
+                                  x: clickPos?.x,
+                                  y: clickPos?.y,
+                                };
+                                const key = href || `${title}:${Math.round(top)}`;
+                                const prev = seen.get(key);
+                                if (!prev || candidate.score > prev.score || (candidate.score === prev.score && candidate.top < prev.top)) {
+                                  seen.set(key, candidate);
+                                }
+                              });
+                            const anchors = Array.from(seen.values())
+                              .sort((a, b) => {
+                                if (b.score !== a.score) return b.score - a.score;
+                                return a.top - b.top;
+                              });
 
                             const best = anchors[0];
-                            if (best && best.score >= Math.ceil(nameWords.length * 0.5)) {
-                              return { status: "listing" as const, text: best.text.slice(0, 120), href: best.href };
+                            if (
+                              best &&
+                              best.matchedRequired &&
+                              best.extraCoreWords.length === 0 &&
+                              (
+                                best.matchedCore >= Math.max(1, Math.min(2, targetCoreWords.length || 1)) ||
+                                best.matchedAll >= Math.max(1, Math.min(2, nameWords.length))
+                              )
+                            ) {
+                              return {
+                                status: "listing" as const,
+                                text: best.text.slice(0, 120),
+                                href: best.href || undefined,
+                                x: best.x,
+                                y: best.y,
+                              };
+                            }
+
+                            const textContent = normalize(document.body.textContent ?? "");
+                            if (textContent.includes("no exact matches")) {
+                              return { status: "no_exact" as const };
                             }
 
                             return { status: "unknown" as const };
                           }, { hotelN: targetHotelName ?? "" }).catch(() => ({ status: "unknown" as const }));
                         };
 
+                        const waitForHotelsSidebarResultSettlement = async (): Promise<{
+                          status: "detail" | "listing" | "no_exact" | "unknown";
+                          text?: string;
+                          href?: string;
+                        }> => {
+                          let sawNoExact = false;
+                          let last: { status: "detail" | "listing" | "no_exact" | "unknown"; text?: string; href?: string } = { status: "unknown" };
+                          for (let attempt = 0; attempt < 9; attempt++) {
+                            const current = await verifyHotelsSidebarResult();
+                            last = current;
+                            if (current.status === "detail" || current.status === "listing") {
+                              return current;
+                            }
+                            if (current.status === "no_exact") {
+                              sawNoExact = true;
+                            }
+                            await new Promise(r => setTimeout(r, sawNoExact ? 700 : 450));
+                          }
+                          return last;
+                        };
+
+                        const adoptHotelsDetailTabIfOpened = async (strategyLabel: string): Promise<boolean> => {
+                          try {
+                            const allPages = stagehand.context.pages();
+                            const hotelPageEntry = allPages
+                              .map((candidatePage) => {
+                                const pr = getRawPage(candidatePage);
+                                return { pr, url: pr.url() };
+                              })
+                              .find(({ pr, url }) => pr !== raw && isHotelDetailUrl(url));
+                            if (!hotelPageEntry) return false;
+                            trace(`[ai-listing] ${strategyLabel}: detected hotel detail tab -> ${hotelPageEntry.url.slice(0, 80)}`);
+                            const matches = await hotelPageEntry.pr.evaluate(({ hotelN }: { hotelN: string }) => {
+                              const normalize = (value: string) =>
+                                value.toLowerCase().replace(/[^a-z0-9]+/g, " ").replace(/\s+/g, " ").trim();
+                              const nameWords = normalize(hotelN)
+                                .split(" ")
+                                .filter((w: string) => w.length > 2 || /^\d+$/.test(w));
+                              const stopWords = new Set([
+                                "hotel", "hotels", "inn", "suite", "suites", "resort", "spa",
+                                "the", "by", "and", "at", "of",
+                                "new", "york", "times", "square", "manhattan", "midtown", "downtown",
+                                "broadway", "city", "united", "states", "america",
+                              ]);
+                              const numericWords = nameWords.filter((w: string) => /^\d+$/.test(w));
+                              const distinctiveWords = nameWords.filter((w: string) => !/^\d+$/.test(w) && !stopWords.has(w) && w.length >= 4);
+                              const targetCoreWords = Array.from(new Set([
+                                ...numericWords,
+                                ...distinctiveWords,
+                              ]));
+                              const requiredWords = numericWords.length > 0
+                                ? numericWords
+                                : distinctiveWords.slice(0, Math.min(2, distinctiveWords.length));
+                              const allowedUiWords = new Set([
+                                "reserve", "reserved", "book", "booking", "room", "rooms", "select", "overview",
+                                "accessibility", "policies", "about", "good", "great", "excellent", "review", "reviews",
+                              ]);
+                              const combined = normalize(`${document.title ?? ""} ${document.querySelector("h1")?.textContent ?? ""}`);
+                              const combinedWords = combined.split(" ").filter((w: string) => w.length > 0);
+                              const combinedCoreWords = combinedWords.filter((w: string) =>
+                                /^\d+$/.test(w) || (!stopWords.has(w) && !allowedUiWords.has(w) && w.length >= 4)
+                              );
+                              const extraCoreWords = combinedCoreWords.filter((w: string) => !targetCoreWords.includes(w));
+                              const requiredOk = requiredWords.every((w: string) => combined.includes(w));
+                              const matchedDistinctive = distinctiveWords.filter((w: string) => combined.includes(w)).length;
+                              const matchedAll = nameWords.filter((w: string) => combined.includes(w)).length;
+                              if (numericWords.length > 0) {
+                                return requiredOk && extraCoreWords.length === 0;
+                              }
+                              return requiredOk &&
+                                extraCoreWords.length === 0 &&
+                                matchedAll >= Math.max(1, Math.ceil(nameWords.length * 0.25)) &&
+                                (distinctiveWords.length === 0 || matchedDistinctive >= 1);
+                            }, { hotelN: targetHotelName ?? "" }).catch(() => false);
+                            if (!matches) {
+                              trace(`[ai-listing] ${strategyLabel}: detected hotel detail tab did not match target (${hotelPageEntry.url.slice(0, 80)})`);
+                              await hotelPageEntry.pr.close().catch(() => {});
+                              return false;
+                            }
+                            try {
+                              await raw.goto(hotelPageEntry.url, { waitUntil: "domcontentloaded", timeout: 25000 });
+                              await raw.waitForLoadState("networkidle", { timeout: 10000 }).catch(() => {});
+                            } catch (navErr) {
+                              trace(`[ai-listing] ${strategyLabel}: failed to adopt hotel detail tab via goto: ${(navErr as Error).message?.slice(0, 70)}`);
+                              return false;
+                            }
+                            await hotelPageEntry.pr.close().catch(() => {});
+                            trace(`[ai-listing] ${strategyLabel}: adopted hotel detail tab into main page -> ${raw.url().slice(0, 80)}`);
+                            return true;
+                          } catch (adoptErr) {
+                            trace(`[ai-listing] ${strategyLabel}: hotel detail tab adoption failed: ${(adoptErr as Error).message?.slice(0, 70)}`);
+                            return false;
+                          }
+                        };
+
+                        const advanceHotelsSidebarListingResult = async (
+                          stageBResult: { status: "detail" | "listing" | "no_exact" | "unknown"; text?: string; href?: string; x?: number; y?: number },
+                          strategyLabel: string
+                        ): Promise<"detail" | "listing" | "failed"> => {
+                          if (stageBResult.status === "detail") {
+                            const matches = await verifyHotelsCurrentDetailMatchesTarget();
+                            if (matches) {
+                              trace(`[ai-listing] ${strategyLabel}: hotel card → verified target hotel detail: ${raw.url().slice(0, 80)}`);
+                              return "detail";
+                            }
+                            trace(`[ai-listing] ${strategyLabel}: reached hotel detail but title does not match target — rejecting ${raw.url().slice(0, 80)}`);
+                            await raw.evaluate(() => window.history.back()).catch(() => {});
+                            await new Promise(r => setTimeout(r, 1200));
+                            return "failed";
+                          }
+                          if (stageBResult.status !== "listing") {
+                            return "failed";
+                          }
+
+                          trace(`[ai-listing] ${strategyLabel}: sidebar filter applied — target result visible (${(stageBResult.text ?? "").slice(0, 70)})`);
+                          if (stageBResult.href && /hotels\.com\/(ho|h)\d+/i.test(stageBResult.href)) {
+                            try {
+                              trace(`[ai-listing] ${strategyLabel}: opening visible target result href → ${stageBResult.href.slice(0, 100)}`);
+                              await raw.goto(stageBResult.href, { waitUntil: "domcontentloaded", timeout: 20000 });
+                              await new Promise(r => setTimeout(r, 2200));
+                              if (isHotelDetailUrl(raw.url())) {
+                                const matches = await verifyHotelsCurrentDetailMatchesTarget();
+                                if (matches) {
+                                  trace(`[ai-listing] ${strategyLabel}: target result href reached verified hotel detail: ${raw.url().slice(0, 80)}`);
+                                  return "detail";
+                                }
+                                trace(`[ai-listing] ${strategyLabel}: target result href opened wrong hotel detail — going back (${raw.url().slice(0, 80)})`);
+                                await raw.evaluate(() => window.history.back()).catch(() => {});
+                                await new Promise(r => setTimeout(r, 1200));
+                                return "failed";
+                              }
+                              trace(`[ai-listing] ${strategyLabel}: target result href did not reach hotel detail (${raw.url().slice(0, 80)})`);
+                            } catch (hrefErr) {
+                              trace(`[ai-listing] ${strategyLabel}: opening target result href failed: ${(hrefErr as Error).message?.slice(0, 70)}`);
+                            }
+                          }
+
+                          if (typeof stageBResult.x === "number" && typeof stageBResult.y === "number") {
+                            try {
+                              trace(`[ai-listing] ${strategyLabel}: clicking visible target result card at (${stageBResult.x},${stageBResult.y})`);
+                              await sh(raw).click(stageBResult.x, stageBResult.y);
+                              await new Promise(r => setTimeout(r, 2200));
+                              if (await adoptHotelsDetailTabIfOpened(strategyLabel)) {
+                                return "detail";
+                              }
+                              if (isHotelDetailUrl(raw.url())) {
+                                const matches = await verifyHotelsCurrentDetailMatchesTarget();
+                                if (matches) {
+                                  trace(`[ai-listing] ${strategyLabel}: visible target card click reached verified hotel detail: ${raw.url().slice(0, 80)}`);
+                                  return "detail";
+                                }
+                                trace(`[ai-listing] ${strategyLabel}: visible target card click opened wrong hotel detail — going back (${raw.url().slice(0, 80)})`);
+                                await raw.evaluate(() => window.history.back()).catch(() => {});
+                                await new Promise(r => setTimeout(r, 1200));
+                                return "failed";
+                              }
+                            } catch (clickErr) {
+                              trace(`[ai-listing] ${strategyLabel}: clicking visible target result card failed: ${(clickErr as Error).message?.slice(0, 70)}`);
+                            }
+                          }
+
+                          return "listing";
+                        };
+
                         const getHotelsDropdownDiagnostics = async (): Promise<string[]> => {
                           return raw.evaluate(({ hotelN }: { hotelN: string }) => {
                             const findPropertyNameInput = (): HTMLInputElement | null => {
-                              const sels = ['input[placeholder*="property name" i]','input[placeholder*="Marriott" i]','input[aria-label*="property name" i]','input[data-testid*="property"]','[data-stid*="property-name"] input[type="text"]','aside input[type="text"]','section input[type="text"]'];
-                              for (const s of sels) { const el = document.querySelector<HTMLInputElement>(s); if (el) { const r=el.getBoundingClientRect(); if(r.width>=60) return el; } }
-                              return Array.from(document.querySelectorAll<HTMLInputElement>('input[type="text"]')).find(el=>{const r=el.getBoundingClientRect();return r.width>=60&&r.width<=400&&r.left<=420&&!(el.value??'').includes(',');})??null;
+                              const score = (el: HTMLInputElement) => {
+                                const r = el.getBoundingClientRect();
+                                const value = (el.value ?? "").trim();
+                                const meta = `${el.getAttribute('placeholder') ?? ''} ${el.getAttribute('aria-label') ?? ''} ${el.getAttribute('data-testid') ?? ''} ${el.getAttribute('data-stid') ?? ''} ${el.closest('label, section, aside, div')?.textContent ?? ''}`.replace(/\s+/g, ' ').trim().toLowerCase();
+                                const isCurrency = /^\$\s*\d/.test(value) || /\bnightly\b|\btotal\b|\bprice\b/.test(meta);
+                                return (meta.match(/property name|marriott|search by property name|hotel name|e\.g\./) ? 120 : 0)
+                                  + (r.width >= 90 && r.width <= 360 ? 20 : 0)
+                                  + (r.left <= 420 ? 20 : -40)
+                                  + (r.height >= 24 && r.height <= 64 ? 10 : 0)
+                                  - (value.includes(',') ? 50 : 0)
+                                  - (/^\d+$/.test(value) ? 80 : 0)
+                                  - (isCurrency ? 200 : 0);
+                              };
+                              return Array.from(document.querySelectorAll<HTMLInputElement>('input, textarea'))
+                                .filter((el): el is HTMLInputElement => el instanceof HTMLInputElement)
+                                .map((el) => ({ el, score: score(el) }))
+                                .filter(({ score }) => score > 0)
+                                .sort((a, b) => b.score - a.score)[0]?.el ?? null;
                             };
                             const input = findPropertyNameInput();
                             if (!input) return [];
@@ -1926,6 +2358,8 @@ The user will enter CVV and confirm payment themselves.`,
                           // coordinates or href — do NOT use evaluate().click() (synthetic DOM click
                           // doesn't trigger Hotels.com UITK React navigation handlers).
                           const s1Result = await raw.evaluate(({ hotelN }: { hotelN: string }) => {
+                            const normalize = (value: string) =>
+                              value.toLowerCase().replace(/[^a-z0-9]+/g, " ").replace(/\s+/g, " ").trim();
                             const isInputWrapper = (el: HTMLElement) => {
                               if (el.tagName === "INPUT") return true;
                               if (el.querySelector("input")) return true;
@@ -1937,9 +2371,31 @@ The user will enter CVV and confirm payment themselves.`,
                             const isSearchForRow = (el: HTMLElement) =>
                               /^search\s+for\b/i.test((el.textContent ?? "").trim());
                             const findPropertyNameInput2 = (): HTMLInputElement | null => {
-                              const sels=['input[placeholder*="property name" i]','input[placeholder*="Marriott" i]','input[aria-label*="property name" i]','input[data-testid*="property"]','[data-stid*="property-name"] input[type="text"]','aside input[type="text"]','section input[type="text"]'];
-                              for(const s of sels){const el=document.querySelector<HTMLInputElement>(s);if(el){const r=el.getBoundingClientRect();if(r.width>=60)return el;}}
-                              return Array.from(document.querySelectorAll<HTMLInputElement>('input[type="text"]')).find(el=>{const r=el.getBoundingClientRect();return r.width>=60&&r.width<=400&&r.left<=420&&!(el.value??'').includes(',');})??null;
+                              const score = (el: HTMLInputElement) => {
+                                const r = el.getBoundingClientRect();
+                                const value = (el.value ?? "").trim();
+                                const meta = normalize([
+                                  el.getAttribute("placeholder") ?? "",
+                                  el.getAttribute("aria-label") ?? "",
+                                  el.getAttribute("data-testid") ?? "",
+                                  el.getAttribute("data-stid") ?? "",
+                                  el.className ?? "",
+                                  el.closest("label, section, aside, div")?.textContent ?? "",
+                                ].join(" "));
+                                const isCurrency = /^\$\s*\d/.test(value) || /\bnightly\b|\btotal\b|\bprice\b/.test(meta);
+                                return (/(search by property name|property name|marriott|hotel name|e\.g\.)/.test(meta) ? 120 : 0)
+                                  + (r.left <= 420 ? 20 : -40)
+                                  + (r.width >= 90 && r.width <= 380 ? 20 : 0)
+                                  + (r.height >= 24 && r.height <= 76 ? 10 : 0)
+                                  - (value.includes(",") ? 50 : 0)
+                                  - (/^\d+$/.test(value) ? 80 : 0)
+                                  - (isCurrency ? 220 : 0);
+                              };
+                              return Array.from(document.querySelectorAll<HTMLInputElement>('input, textarea'))
+                                .filter((el): el is HTMLInputElement => el instanceof HTMLInputElement)
+                                .map((el) => ({ el, score: score(el) }))
+                                .filter(({ score }) => score > 0)
+                                .sort((a, b) => b.score - a.score)[0]?.el ?? null;
                             };
                             const input = findPropertyNameInput2();
                             const inputRect = input?.getBoundingClientRect();
@@ -1953,6 +2409,7 @@ The user will enter CVV and confirm payment themselves.`,
                               if (r.bottom < 0 || r.top > window.innerHeight) return false;
                               if (isInputWrapper(el) || isSearchForRow(el)) return false;
                               if (!inputRect) return true;
+                              if (r.top <= inputRect.bottom + 6) return false;
                               const verticallyNear =
                                 (r.top >= inputRect.top - 260 && r.top <= inputRect.bottom + 360) ||
                                 (r.bottom >= inputRect.top - 260 && r.bottom <= inputRect.bottom + 360);
@@ -1977,6 +2434,8 @@ The user will enter CVV and confirm payment themselves.`,
                                     if (!(el instanceof HTMLElement)) continue;
                                     if (isInputWrapper(el) || isSearchForRow(el)) continue;
                                     if (el === input || el.contains(input as Node) || (input && input.contains(el))) continue;
+                                    const r = el.getBoundingClientRect();
+                                    if (inputRect && r.top <= inputRect.bottom + 6) continue;
                                     const text = (el.textContent ?? "").toLowerCase();
                                     const matches = nameWords.filter((w: string) => text.includes(w)).length;
                                     if (matches < Math.ceil(nameWords.length * 0.4)) continue;
@@ -1992,17 +2451,45 @@ The user will enter CVV and confirm payment themselves.`,
 
                             // Priority 1: find the hotel card element by name match,
                             // then look for an <a href> to a hotel page (use goto instead of click).
-                            const hotelCard = candidatePool.find(el => {
-                              const text = (el.textContent ?? "").toLowerCase();
-                              const matches = nameWords.filter((w: string) => text.includes(w)).length;
-                              return matches >= Math.ceil(nameWords.length * 0.5);
-                            });
+                            const hotelCard = candidatePool
+                              .map((el) => {
+                                const text = normalize(el.textContent ?? "");
+                                const r = el.getBoundingClientRect();
+                                const matches = nameWords.filter((w: string) => text.includes(w)).length;
+                                const searchPenalty = /search\s+for\b/.test(text) ? 100 : 0;
+                                const score =
+                                  matches * 20 +
+                                  (inputRect && r.top > inputRect.bottom + 6 ? 20 : 0) +
+                                  (r.width >= 220 ? 10 : 0) +
+                                  (text.includes("united states") ? 6 : 0) -
+                                  searchPenalty;
+                                return { el, score };
+                              })
+                              .filter(({ score }) => score >= Math.ceil(nameWords.length * 0.5) * 20)
+                              .sort((a, b) => b.score - a.score)[0]?.el;
                             if (hotelCard) {
+                              const promotedCard = (() => {
+                                let node: HTMLElement | null = hotelCard;
+                                while (node && node !== document.body) {
+                                  const r = node.getBoundingClientRect();
+                                  if (
+                                    r.width >= 240 &&
+                                    r.height >= 40 &&
+                                    (!inputRect || r.top > inputRect.bottom + 6) &&
+                                    !isInputWrapper(node) &&
+                                    !isSearchForRow(node)
+                                  ) {
+                                    return node;
+                                  }
+                                  node = node.parentElement;
+                                }
+                                return hotelCard;
+                              })();
                               // Check if the card itself or any child/ancestor is an <a> with hotel URL
-                              const selfA = hotelCard.tagName === "A" ? hotelCard as HTMLAnchorElement : null;
-                              const childA = hotelCard.querySelector<HTMLAnchorElement>("a[href]");
+                              const selfA = promotedCard.tagName === "A" ? promotedCard as HTMLAnchorElement : null;
+                              const childA = promotedCard.querySelector<HTMLAnchorElement>("a[href]");
                               let parentA: HTMLAnchorElement | null = null;
-                              let p = hotelCard.parentElement;
+                              let p = promotedCard.parentElement;
                               while (p && p !== document.body) {
                                 if (p.tagName === "A" && (p as HTMLAnchorElement).href) {
                                   parentA = p as HTMLAnchorElement; break;
@@ -2016,13 +2503,13 @@ The user will enter CVV and confirm payment themselves.`,
                               // No href — scroll into view (instant) then return viewport coordinates.
                               // The dropdown may render above the sidebar input, giving y < 0.
                               // scrollIntoView({block:'nearest'}) fixes that without closing the dropdown.
-                              (hotelCard as HTMLElement).scrollIntoView({ behavior: 'instant', block: 'nearest' });
-                              const r = hotelCard.getBoundingClientRect();
+                              (promotedCard as HTMLElement).scrollIntoView({ behavior: 'instant', block: 'nearest' });
+                              const r = promotedCard.getBoundingClientRect();
                               return {
                                 action: "coords" as const,
                                 x: Math.round(r.left + r.width / 2),
                                 y: Math.round(r.top + r.height / 2),
-                                text: (hotelCard.textContent ?? "").trim().slice(0, 60),
+                                text: (promotedCard.textContent ?? "").trim().slice(0, 60),
                               };
                             }
 
@@ -2067,14 +2554,11 @@ The user will enter CVV and confirm payment themselves.`,
                             // sh(raw).click(x, y) uses Stagehand's CDP coordinate click
                             // (triggers real browser mouse events, unlike DOM .click())
                             await sh(raw).click(res.x, res.y);
-                            await new Promise(r => setTimeout(r, 3000));
-                            const stageBResult = await verifyHotelsSidebarResult();
-                            if (stageBResult.status === "detail") {
+                            await new Promise(r => setTimeout(r, 1200));
+                            const stageBResult = await waitForHotelsSidebarResultSettlement();
+                            const advanced = await advanceHotelsSidebarListingResult(stageBResult, "Strategy 1");
+                            if (advanced === "detail" || advanced === "listing") {
                               suggClicked = true;
-                              trace(`[ai-listing] Strategy 1: hotel card → hotel detail: ${raw.url().slice(0, 80)}`);
-                            } else if (stageBResult.status === "listing") {
-                              suggClicked = true;
-                              trace(`[ai-listing] Strategy 1: sidebar filter applied — target result visible (${(stageBResult.text ?? "").slice(0, 70)})`);
                             } else {
                               if (stageBResult.status === "no_exact") {
                                 trace(`[ai-listing] Strategy 1: "no exact match" after coordinate click — retrying dropdown`);
@@ -2160,14 +2644,11 @@ The user will enter CVV and confirm payment themselves.`,
                                 trace(`[ai-listing] Strategy 2: synthetic-clicked item ${targetIdx}/${count} via "${spec}" — "${itemText.trim().slice(0, 50)}"`);
                               }
                               // Check if we navigated to hotel detail page
-                              await new Promise(r => setTimeout(r, 2500));
-                              const stageBResult = await verifyHotelsSidebarResult();
-                              if (stageBResult.status === "detail") {
+                              await new Promise(r => setTimeout(r, 1200));
+                              const stageBResult = await waitForHotelsSidebarResultSettlement();
+                              const advanced = await advanceHotelsSidebarListingResult(stageBResult, "Strategy 2");
+                              if (advanced === "detail" || advanced === "listing") {
                                 suggClicked = true;
-                                trace(`[ai-listing] Strategy 2: hotel card → hotel detail: ${raw.url().slice(0, 80)}`);
-                              } else if (stageBResult.status === "listing") {
-                                suggClicked = true;
-                                trace(`[ai-listing] Strategy 2: target result visible after dropdown click (${(stageBResult.text ?? "").slice(0, 70)})`);
                               } else if (stageBResult.status === "no_exact") {
                                 trace(`[ai-listing] Strategy 2: click led to "No exact matches" — continuing fallback`);
                               } else {
@@ -2191,10 +2672,33 @@ The user will enter CVV and confirm payment themselves.`,
                         if (!suggClicked) {
                           await new Promise(r => setTimeout(r, 500));
                           suggClicked = await raw.evaluate(({ hotelN }: { hotelN: string }) => {
-                            const input = document.querySelector<HTMLInputElement>(
-                              'input[placeholder*="property name" i], input[placeholder*="Marriott" i], ' +
-                              'input[aria-label*="property name" i], input[data-testid*="property"]'
-                            );
+                            const normalize = (value: string) =>
+                              value.toLowerCase().replace(/[^a-z0-9]+/g, " ").replace(/\s+/g, " ").trim();
+                            const input = Array.from(document.querySelectorAll<HTMLInputElement>('input, textarea'))
+                              .filter((el): el is HTMLInputElement => el instanceof HTMLInputElement)
+                              .map((el) => {
+                                const r = el.getBoundingClientRect();
+                                const value = (el.value ?? "").trim();
+                                const meta = normalize([
+                                  el.getAttribute("placeholder") ?? "",
+                                  el.getAttribute("aria-label") ?? "",
+                                  el.getAttribute("data-testid") ?? "",
+                                  el.getAttribute("data-stid") ?? "",
+                                  el.className ?? "",
+                                  el.closest("label, section, aside, div")?.textContent ?? "",
+                                ].join(" "));
+                                const isCurrency = /^\$\s*\d/.test(value) || /\bnightly\b|\btotal\b|\bprice\b/.test(meta);
+                                const score =
+                                  (/(search by property name|property name|marriott|hotel name|e\.g\.)/.test(meta) ? 120 : 0) +
+                                  (r.left <= 420 ? 20 : -40) +
+                                  (r.width >= 90 && r.width <= 380 ? 20 : 0) +
+                                  (r.height >= 24 && r.height <= 76 ? 10 : 0) -
+                                  (value.includes(",") ? 50 : 0) -
+                                  (isCurrency ? 220 : 0);
+                                return { el, score };
+                              })
+                              .filter(({ score }) => score > 0)
+                              .sort((a, b) => b.score - a.score)[0]?.el ?? null;
                             if (!input) return false;
                             const inputRect = input.getBoundingClientRect();
                             const allBelow = Array.from(
@@ -2204,39 +2708,57 @@ The user will enter CVV and confirm payment themselves.`,
                             ).filter(el => {
                               const r = el.getBoundingClientRect();
                               if (r.width === 0 || r.height === 0) return false;
-                              if (r.top < inputRect.bottom - 5) return false;
+                              if (r.top <= inputRect.bottom + 6) return false;
                               if (r.top > inputRect.bottom + 450) return false;
+                              if (r.left > inputRect.right + 520 || r.right < inputRect.left - 40) return false;
                               return true;
                             });
                             if (allBelow.length === 0) return false;
 
                             // Prefer element whose text matches the hotel name (property card)
-                            const nameWords = hotelN.toLowerCase().split(/\s+/)
+                            const nameWords = normalize(hotelN).split(/\s+/)
                               .filter((w: string) => w.length > 2 || /^\d+$/.test(w));
-                            const hotelCard = allBelow.find(el => {
-                              const text = (el.textContent ?? "").toLowerCase();
-                              if (/^search\s+for\b/i.test((el.textContent ?? "").trim())) return false;
-                              const matches = nameWords.filter((w: string) => text.includes(w)).length;
-                              return matches >= Math.ceil(nameWords.length * 0.5);
-                            });
+                            const hotelCard = allBelow
+                              .map((el) => {
+                                const text = normalize(el.textContent ?? "");
+                                const r = el.getBoundingClientRect();
+                                if (/^search\s+for\b/i.test((el.textContent ?? "").trim())) return { el, score: -999 };
+                                const matches = nameWords.filter((w: string) => text.includes(w)).length;
+                                const score =
+                                  matches * 20 +
+                                  (r.width >= 220 ? 10 : 0) +
+                                  (r.height >= 40 ? 8 : 0) +
+                                  (text.includes("united states") ? 6 : 0);
+                                return { el, score };
+                              })
+                              .filter(({ score }) => score >= Math.ceil(nameWords.length * 0.5) * 20)
+                              .sort((a, b) => b.score - a.score)[0]?.el;
                             const target = hotelCard ?? null;
                             if (!target) return false;
-                            (target as HTMLElement).scrollIntoView({ block: "nearest" });
-                            (target as HTMLElement).click();
+                            const promotedTarget = (() => {
+                              let node: HTMLElement | null = target;
+                              while (node && node !== document.body) {
+                                const r = node.getBoundingClientRect();
+                                if (r.width >= 240 && r.height >= 40 && r.top > inputRect.bottom + 6) {
+                                  return node;
+                                }
+                                node = node.parentElement;
+                              }
+                              return target;
+                            })();
+                            (promotedTarget as HTMLElement).scrollIntoView({ block: "nearest" });
+                            (promotedTarget as HTMLElement).click();
                             return true;
                           }, { hotelN: targetHotelName ?? "" }).catch(() => false);
                           if (suggClicked) {
                             trace(`[ai-listing] Strategy 3: clicked dropdown item via position-based DOM`);
-                            await new Promise(r => setTimeout(r, 2500));
-                            const stageBResult = await verifyHotelsSidebarResult();
-                            if (stageBResult.status === "detail") {
-                              trace(`[ai-listing] Strategy 3: hotel card → hotel detail: ${raw.url().slice(0, 80)}`);
-                            } else if (stageBResult.status === "listing") {
-                              trace(`[ai-listing] Strategy 3: target result visible after DOM click (${(stageBResult.text ?? "").slice(0, 70)})`);
-                            } else if (stageBResult.status === "no_exact") {
+                            await new Promise(r => setTimeout(r, 1200));
+                            const stageBResult = await waitForHotelsSidebarResultSettlement();
+                            const advanced = await advanceHotelsSidebarListingResult(stageBResult, "Strategy 3");
+                            if (advanced === "failed" && stageBResult.status === "no_exact") {
                               suggClicked = false;
                               trace(`[ai-listing] Strategy 3: click led to "No exact matches" — treating as failure`);
-                            } else {
+                            } else if (advanced === "failed") {
                               suggClicked = false;
                               trace(`[ai-listing] Strategy 3: click did not expose target result`);
                             }
@@ -2245,9 +2767,15 @@ The user will enter CVV and confirm payment themselves.`,
 
                         if (suggClicked) {
                           trace(`[ai-listing] sidebar suggestion activated for "${targetHotelName.slice(0, 50)}"`);
-                          await new Promise(r => setTimeout(r, 2500));
+                          await new Promise(r => setTimeout(r, 1200));
                           if (isHotelDetailUrl(raw.url())) {
                             trace(`[ai-listing] sidebar suggestion navigated directly to hotel detail: ${raw.url().slice(0, 80)}`);
+                          } else {
+                            const stageBResult = await waitForHotelsSidebarResultSettlement();
+                            const advanced = await advanceHotelsSidebarListingResult(stageBResult, "Strategy 3 follow-up");
+                            if (advanced === "detail") {
+                              trace(`[ai-listing] sidebar suggestion navigated directly to hotel detail: ${raw.url().slice(0, 80)}`);
+                            }
                           }
                         } else {
                           if (startProvider?.id === "hotels-com") {
@@ -2343,6 +2871,23 @@ The user will enter CVV and confirm payment themselves.`,
 
               const hotelDetailHref = noMatchPageFinal ? null : await raw.evaluate(
                 ({ nameWords }: { nameWords: string[] }) => {
+                  const stopWords = new Set([
+                    "hotel", "hotels", "inn", "suite", "suites", "resort", "spa",
+                    "the", "by", "and", "at", "of",
+                    "new", "york", "times", "square", "manhattan", "midtown", "downtown",
+                    "broadway", "city", "united", "states", "america",
+                  ]);
+                  const numericWords = nameWords.filter((w: string) => /^\d+$/.test(w));
+                  const distinctiveWords = nameWords.filter((w: string) => !/^\d+$/.test(w) && !stopWords.has(w) && w.length >= 4);
+                  const targetCoreWords = Array.from(new Set([
+                    ...numericWords,
+                    ...distinctiveWords,
+                  ]));
+                  const requiredWords = numericWords.length > 0
+                    ? numericWords
+                    : distinctiveWords.slice(0, Math.min(2, distinctiveWords.length));
+                  const normalize = (value: string) =>
+                    value.toLowerCase().replace(/[^a-z0-9]+/g, " ").replace(/\s+/g, " ").trim();
                   // Find all hotels.com hotel detail links on the page (deduplicated by href).
                   // EXCLUDE links that are inside a "doesn't match your filters" section —
                   // those are fallback hotels shown when the sidebar filter found no exact match.
@@ -2376,10 +2921,30 @@ The user will enter CVV and confirm payment themselves.`,
                   }
 
                   const scored = Array.from(byHref.values()).map(({ a, top }) => {
-                    const text = (a.textContent ?? "").toLowerCase().replace(/\s+/g, " ").trim();
-                    const href = (a.href ?? "").toLowerCase();
-                    const score = nameWords.filter(w => text.includes(w) || href.includes(w)).length;
-                    return { href: a.href, score, top };
+                    const container = a.closest<HTMLElement>('article, li, [data-stid*="property"], [data-stid*="listing"], [class*="card"], [class*="Card"]') ?? a;
+                    const titleCandidate = container.querySelector<HTMLElement>(
+                      'h1,h2,h3,h4,[role="heading"], [data-stid*="title"], [class*="title"], [class*="Title"], a[aria-label^="Opens "]'
+                    );
+                    const title = normalize(
+                      (titleCandidate?.getAttribute("aria-label") ?? a.getAttribute("aria-label") ?? "")
+                        .replace(/^opens\s+/i, "")
+                        .replace(/\s+in new tab$/i, "") ||
+                      titleCandidate?.textContent ||
+                      a.textContent ||
+                      ""
+                    ).split(" reserve now")[0]?.trim() ?? "";
+                    const titleWords = title.split(" ").filter((w: string) => w.length > 0);
+                    const titleCoreWords = titleWords.filter((w: string) => /^\d+$/.test(w) || (!stopWords.has(w) && w.length >= 4));
+                    const extraCoreWords = titleCoreWords.filter((w: string) => !targetCoreWords.includes(w));
+                    const matchedRequired = requiredWords.every((w: string) => titleWords.includes(w) || titleCoreWords.includes(w));
+                    const matchedDistinctive = distinctiveWords.filter((w: string) => titleWords.includes(w) || titleCoreWords.includes(w)).length;
+                    const matchedAll = nameWords.filter(w => titleWords.includes(w)).length;
+                    const score =
+                      matchedAll * 10 +
+                      matchedDistinctive * 25 +
+                      (matchedRequired ? 60 : 0) -
+                      extraCoreWords.length * 90;
+                    return { href: a.href, score, top, matchedRequired, matchedDistinctive, matchedAll, extraCoreWords };
                   });
 
                   // Primary sort: keyword score (desc). Tie-break: page position (asc = higher up).
@@ -2389,7 +2954,17 @@ The user will enter CVV and confirm payment themselves.`,
                     return x.top - y.top; // prefer elements higher on the page
                   });
 
-                  return scored[0]?.href ?? null;
+                  const best = scored[0];
+                  if (
+                    best &&
+                    best.matchedRequired &&
+                    best.extraCoreWords.length === 0 &&
+                    best.matchedAll >= Math.max(1, Math.ceil(nameWords.length * 0.35)) &&
+                    (distinctiveWords.length === 0 || best.matchedDistinctive >= 1)
+                  ) {
+                    return best.href;
+                  }
+                  return null;
                 },
                 { nameWords: (targetHotelName ?? "").toLowerCase().split(/\s+/).filter((w: string) => w.length > 3 || /^\d+$/.test(w)) }
               ).catch(() => null);
@@ -2413,10 +2988,58 @@ The user will enter CVV and confirm payment themselves.`,
                   await new Promise(r => setTimeout(r, 1200));
                   const landedUrl = raw.url();
                   if (isHotelDetailUrl(landedUrl)) {
-                    trace(`[ai-listing] Hotels.com goto succeeded — on ${landedUrl.slice(0, 80)}`);
-                    return true;
+                    const matches = await raw.evaluate(({ hotelN }: { hotelN: string }) => {
+                      const normalize = (value: string) =>
+                        value.toLowerCase().replace(/[^a-z0-9]+/g, " ").replace(/\s+/g, " ").trim();
+                      const nameWords = normalize(hotelN)
+                        .split(" ")
+                        .filter((w: string) => w.length > 2 || /^\d+$/.test(w));
+                      const stopWords = new Set([
+                        "hotel", "hotels", "inn", "suite", "suites", "resort", "spa",
+                        "the", "by", "and", "at", "of",
+                        "new", "york", "times", "square", "manhattan", "midtown", "downtown",
+                        "broadway", "city", "united", "states", "america",
+                      ]);
+                      const numericWords = nameWords.filter((w: string) => /^\d+$/.test(w));
+                      const distinctiveWords = nameWords.filter((w: string) => !/^\d+$/.test(w) && !stopWords.has(w) && w.length >= 4);
+                      const targetCoreWords = Array.from(new Set([
+                        ...numericWords,
+                        ...distinctiveWords,
+                      ]));
+                      const requiredWords = numericWords.length > 0
+                        ? numericWords
+                        : distinctiveWords.slice(0, Math.min(2, distinctiveWords.length));
+                      const allowedUiWords = new Set([
+                        "reserve", "reserved", "book", "booking", "room", "rooms", "select", "overview",
+                        "accessibility", "policies", "about", "good", "great", "excellent", "review", "reviews",
+                      ]);
+                      const combined = normalize(`${document.title ?? ""} ${document.querySelector("h1")?.textContent ?? ""}`);
+                      const combinedWords = combined.split(" ").filter((w: string) => w.length > 0);
+                      const combinedCoreWords = combinedWords.filter((w: string) =>
+                        /^\d+$/.test(w) || (!stopWords.has(w) && !allowedUiWords.has(w) && w.length >= 4)
+                      );
+                      const extraCoreWords = combinedCoreWords.filter((w: string) => !targetCoreWords.includes(w));
+                      const requiredOk = requiredWords.every((w: string) => combined.includes(w));
+                      const matchedDistinctive = distinctiveWords.filter((w: string) => combined.includes(w)).length;
+                      const matchedAll = nameWords.filter((w: string) => combined.includes(w)).length;
+                      if (numericWords.length > 0) {
+                        return requiredOk && extraCoreWords.length === 0;
+                      }
+                      return requiredOk &&
+                        extraCoreWords.length === 0 &&
+                        matchedAll >= Math.max(1, Math.ceil(nameWords.length * 0.25)) &&
+                        (distinctiveWords.length === 0 || matchedDistinctive >= 1);
+                    }, { hotelN: targetHotelName ?? "" }).catch(() => false);
+                    if (matches) {
+                      trace(`[ai-listing] Hotels.com goto succeeded — verified target detail on ${landedUrl.slice(0, 80)}`);
+                      return true;
+                    }
+                    trace(`[ai-listing] Hotels.com goto reached wrong hotel detail — going back (${landedUrl.slice(0, 80)})`);
+                    await raw.evaluate(() => window.history.back()).catch(() => {});
+                    await new Promise(r => setTimeout(r, 1200));
+                  } else {
+                    trace(`[ai-listing] Hotels.com goto landed on unexpected URL (${landedUrl.slice(0, 60)}) — falling through to clickTargetListingAI`);
                   }
-                  trace(`[ai-listing] Hotels.com goto landed on unexpected URL (${landedUrl.slice(0, 60)}) — falling through to clickTargetListingAI`);
                 } catch (gotoErr) {
                   trace(`[ai-listing] Hotels.com goto failed: ${(gotoErr as Error).message?.slice(0, 60)} — falling through to clickTargetListingAI`);
                 }
