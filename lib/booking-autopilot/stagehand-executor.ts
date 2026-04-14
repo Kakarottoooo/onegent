@@ -3135,13 +3135,12 @@ The user will enter CVV and confirm payment themselves.`,
                 return null;
               };
 
-              // Find the best time slot button and return its coordinates + text.
-              // We do NOT call btn.click() inside evaluate — React synthetic events
-              // require a real CDP mouse click, not a DOM .click() call.
-              // Use broad selector: OpenTable renders slots as <a href>, <button>,
-              // or other clickable elements depending on page state/version.
+              // Find the best time slot button WITHIN the target restaurant's card.
+              // IMPORTANT: OpenTable search results show multiple restaurants. We must
+              // restrict the search to the card that contains the target restaurant name
+              // to avoid clicking slots from other restaurant cards (e.g. Firebirds).
               const slotCoords = await raw.evaluate(
-                ({ reqMins, maxDiffMins }: { reqMins: number; maxDiffMins: number }) => {
+                ({ reqMins, maxDiffMins, restaurantName }: { reqMins: number; maxDiffMins: number; restaurantName: string }) => {
                   const isVisible = (el: Element) => {
                     const r = (el as HTMLElement).getBoundingClientRect();
                     return r.width > 0 && r.height > 0;
@@ -3157,30 +3156,58 @@ The user will enter CVV and confirm payment themselves.`,
                     }
                     return null;
                   };
-                  // Exact time text pattern: "7:00 PM", "7:15 PM", etc.
-                  const isTimeText = (text: string) => /^\d{1,2}:\d{2}\s*(AM|PM)$/i.test(text.trim());
+                  // Exact time text pattern: "7:00 PM", "7:15 PM", etc. (with optional asterisk)
+                  const isTimeText = (text: string) => /^\d{1,2}:\d{2}\s*(AM|PM)\*?$/i.test(text.trim());
 
-                  // Broad scan: any visible interactive element OR any leaf element
-                  // whose own text is exactly a time string (catches <a href>, <span>, <div> etc.)
-                  const allEls = Array.from(document.querySelectorAll<HTMLElement>(
+                  // Find the restaurant card containing our target name.
+                  // OpenTable cards are typically <li>, <article>, or a div with the restaurant name.
+                  const normalize = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, '');
+                  const targetNorm = normalize(restaurantName);
+                  const targetWords = targetNorm.split('').length > 4 ? [targetNorm.slice(0, 6)] : [targetNorm];
+
+                  // Find a container element whose text contains the restaurant name
+                  // but is reasonably sized (a card, not the whole page).
+                  const allContainers = Array.from(document.querySelectorAll<HTMLElement>(
+                    'li, article, [class*="result" i], [class*="card" i], [class*="restaurant" i], [data-test*="result" i]'
+                  )).filter(el => {
+                    if (!isVisible(el)) return false;
+                    const r = el.getBoundingClientRect();
+                    if (r.width < 100 || r.height < 50) return false; // too small to be a card
+                    const text = normalize(el.textContent ?? '');
+                    return targetWords.every(w => text.includes(w));
+                  });
+
+                  // Sort by smallest area to find the most specific card (not entire page body)
+                  const targetCard = allContainers.sort((a, b) => {
+                    const ra = a.getBoundingClientRect();
+                    const rb = b.getBoundingClientRect();
+                    return (ra.width * ra.height) - (rb.width * rb.height);
+                  })[0];
+
+                  // Scan for time slots: prefer within target card, fall back to all page slots
+                  const searchRoot: Element = targetCard ?? document.body;
+                  const diagScope = targetCard ? 'card' : 'page (no matching card found)';
+
+                  // Broad scan within scope
+                  const allEls = Array.from(searchRoot.querySelectorAll<HTMLElement>(
                     'a[href], button, [role="button"], [role="link"], [tabindex]'
                   ));
-                  // Also scan ALL elements for leaf nodes with exact time text
-                  const leafTimeEls = Array.from(document.querySelectorAll<HTMLElement>('*'))
+                  const leafTimeEls = Array.from(searchRoot.querySelectorAll<HTMLElement>('*'))
                     .filter(el => isTimeText((el.textContent ?? '').trim()) && el.children.length === 0 && isVisible(el));
 
                   const combined = [...new Set([...allEls, ...leafTimeEls])];
 
-                  // Diagnostics: log first few time-like elements
-                  const diag = combined
+                  // Diagnostics
+                  const diag = `scope=${diagScope} | ` + combined
                     .filter(el => isVisible(el) && parseT((el.textContent ?? '').trim()) !== null)
-                    .slice(0, 6)
+                    .slice(0, 5)
                     .map(el => `${el.tagName}[${el.getAttribute('role') ?? ''}] "${(el.textContent ?? '').trim().slice(0, 15)}"`)
                     .join(' | ');
 
                   const candidates = combined.filter((el) => {
                     if (!isVisible(el)) return false;
-                    const t = parseT((el.textContent ?? "").trim());
+                    // Strip asterisk (*) from slot text before parsing (OpenTable marks some slots with *)
+                    const t = parseT((el.textContent ?? "").trim().replace(/\*$/, ""));
                     return t !== null && Math.abs(t - reqMins) <= maxDiffMins;
                   });
 
@@ -3188,8 +3215,8 @@ The user will enter CVV and confirm payment themselves.`,
 
                   // Pick the closest slot
                   const best = candidates.sort((a, b) => {
-                    const ta = parseT((a.textContent ?? "").trim()) ?? Infinity;
-                    const tb = parseT((b.textContent ?? "").trim()) ?? Infinity;
+                    const ta = parseT((a.textContent ?? "").trim().replace(/\*$/, "")) ?? Infinity;
+                    const tb = parseT((b.textContent ?? "").trim().replace(/\*$/, "")) ?? Infinity;
                     return Math.abs(ta - reqMins) - Math.abs(tb - reqMins);
                   })[0];
 
@@ -3202,7 +3229,7 @@ The user will enter CVV and confirm payment themselves.`,
                     diag,
                   };
                 },
-                { reqMins: requestedMinutes, maxDiffMins: 90 }
+                { reqMins: requestedMinutes, maxDiffMins: 90, restaurantName: targetHotelName ?? "" }
               ).catch(() => null);
 
               if (slotCoords?.diag) {
