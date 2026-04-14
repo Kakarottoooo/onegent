@@ -3142,13 +3142,38 @@ The user will enter CVV and confirm payment themselves.`,
 
               if (slotClicked) {
                 trace(`[opentable] clicked time slot "${slotClicked}" (requested: ${Math.floor(requestedMinutes / 60)}:${String(requestedMinutes % 60).padStart(2, "0")})`);
-                await new Promise(r => setTimeout(r, 1500));
-                // Check if we navigated to the reservation form
+                await new Promise(r => setTimeout(r, 2500));
+
+                // Check 1: URL navigated away from search results
                 const nowUrl = raw.url();
                 if (nowUrl.toLowerCase().includes("opentable.com") && !nowUrl.toLowerCase().includes("/s?")) {
                   trace(`[opentable] navigated to reservation page: ${nowUrl.slice(0, 80)}`);
-                  return true; // listing done — proceeed to guest form stage
+                  return true;
                 }
+
+                // Check 2: OpenTable opened a reservation form as an inline modal
+                // (URL stays at /s? but a name/email form appears on the page)
+                const hasReservationForm = await raw.evaluate(() => {
+                  const inputs = Array.from(document.querySelectorAll<HTMLInputElement>("input"));
+                  const visible = inputs.filter(el => el.offsetParent !== null && !el.disabled);
+                  return visible.some(el => {
+                    const ph = (el.placeholder || "").toLowerCase();
+                    const lbl = (el.getAttribute("aria-label") || "").toLowerCase();
+                    return ph.includes("first") || ph.includes("last") || el.type === "email" ||
+                           lbl.includes("first name") || lbl.includes("last name");
+                  });
+                }).catch(() => false);
+
+                if (hasReservationForm) {
+                  trace("[opentable] reservation form modal detected after slot click — proceeding to guest details");
+                  return true;
+                }
+
+                // Check 3: Even if we can't detect the state change, return true to prevent
+                // clickTargetListingAI from navigating back to the search page and causing a loop.
+                // The stage assessment on the next pass will detect the actual state.
+                trace("[opentable] slot clicked but no URL/form change detected — yielding to stage reassessment");
+                return true;
               } else {
                 trace("[opentable] no time slots found in ±90 min — trying restaurant card click");
                 // Fall back: click the restaurant card to navigate to detail page
