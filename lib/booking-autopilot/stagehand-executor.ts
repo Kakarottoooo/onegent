@@ -3099,7 +3099,10 @@ The user will enter CVV and confirm payment themselves.`,
                 return null;
               };
 
-              const slotClicked = await raw.evaluate(
+              // Find the best time slot button and return its coordinates + text.
+              // We do NOT call btn.click() inside evaluate — React synthetic events
+              // require a real CDP mouse click, not a DOM .click() call.
+              const slotCoords = await raw.evaluate(
                 ({ reqMins, maxDiffMins }: { reqMins: number; maxDiffMins: number }) => {
                   const isVisible = (el: Element) => {
                     const r = (el as HTMLElement).getBoundingClientRect();
@@ -3135,13 +3138,23 @@ The user will enter CVV and confirm payment themselves.`,
                     return Math.abs(ta - reqMins) - Math.abs(tb - reqMins);
                   })[0];
 
-                  const chosenText = (best.textContent ?? "").trim().slice(0, 20);
                   best.scrollIntoView({ block: "center" });
-                  best.click();
-                  return chosenText;
+                  const r = best.getBoundingClientRect();
+                  return {
+                    x: Math.round(r.left + r.width / 2),
+                    y: Math.round(r.top + r.height / 2),
+                    text: (best.textContent ?? "").trim().slice(0, 20),
+                  };
                 },
                 { reqMins: requestedMinutes, maxDiffMins: 90 }
               ).catch(() => null);
+
+              // Use CDP coordinate click (real mouse event that React can detect)
+              const slotClicked = slotCoords
+                ? await sh(raw).click(slotCoords.x, slotCoords.y)
+                    .then(() => slotCoords.text)
+                    .catch(() => null)
+                : null;
 
               if (slotClicked) {
                 trace(`[opentable] clicked time slot "${slotClicked}" (requested: ${Math.floor(requestedMinutes / 60)}:${String(requestedMinutes % 60).padStart(2, "0")})`);
@@ -3195,8 +3208,8 @@ The user will enter CVV and confirm payment themselves.`,
                 if (cardClicked) {
                   trace("[opentable] clicked restaurant card — waiting for detail page");
                   await new Promise(r => setTimeout(r, 2000));
-                  // Retry time slot click on the detail page
-                  const detailSlot = await raw.evaluate(
+                  // Retry time slot click on the detail page — use CDP coords, not DOM .click()
+                  const detailSlotCoords = await raw.evaluate(
                     ({ reqMins, maxDiffMins }: { reqMins: number; maxDiffMins: number }) => {
                       const parseT = (text: string): number | null => {
                         const m12 = text.match(/(\d{1,2}):(\d{2})\s*(AM|PM)/i);
@@ -3226,13 +3239,18 @@ The user will enter CVV and confirm payment themselves.`,
                         const tb = parseT((b.textContent ?? "").trim()) ?? Infinity;
                         return Math.abs(ta - reqMins) - Math.abs(tb - reqMins);
                       })[0];
-                      const text = (best.textContent ?? "").trim().slice(0, 20);
-                      best.click();
-                      return text;
+                      best.scrollIntoView({ block: "center" });
+                      const r = best.getBoundingClientRect();
+                      return { x: Math.round(r.left + r.width / 2), y: Math.round(r.top + r.height / 2), text: (best.textContent ?? "").trim().slice(0, 20) };
                     },
                     { reqMins: requestedMinutes, maxDiffMins: 90 }
                   ).catch(() => null);
 
+                  const detailSlot = detailSlotCoords
+                    ? await sh(raw).click(detailSlotCoords.x, detailSlotCoords.y)
+                        .then(() => detailSlotCoords.text)
+                        .catch(() => null)
+                    : null;
                   if (detailSlot) {
                     trace(`[opentable] clicked time slot on detail page: "${detailSlot}"`);
                     await new Promise(r => setTimeout(r, 1500));
