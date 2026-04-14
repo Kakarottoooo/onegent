@@ -4737,6 +4737,33 @@ The user will enter CVV and confirm payment themselves.`,
       bookingComGuestDetailsDomState = providerSignals?.guestDetailsStep ?? false;
     }
 
+    // For restaurant platforms (OpenTable, Resy): guestDetailsStep=true means we're on
+    // the reservation form. There is no separate payment step — just fill guest info and submit.
+    const isRestaurantProvider = activeProvider?.id === "opentable-com" || activeProvider?.id === "resy-com";
+    if (!bookingComFinalPaymentDomState && bookingComGuestDetailsDomState && isRestaurantProvider) {
+      trace(`[${activeProvider?.id}] reservation form detected — filling guest info`);
+      if (activeProvider?.fillGuestForm) {
+        await activeProvider.fillGuestForm(raw, p, bookingComHelpers, trace);
+      }
+      await new Promise(r => setTimeout(r, 1500));
+      const screenshotBase64 = `data:image/png;base64,${(await page.screenshot({ type: "png" })).toString("base64")}`;
+      const afterUrl = raw.url();
+      // Check if form was submitted successfully (URL changed to confirmation)
+      const isConfirmed = afterUrl.toLowerCase().includes("/confirmation") ||
+        afterUrl.toLowerCase().includes("/confirmed") ||
+        afterUrl.toLowerCase().includes("booking/complete");
+      return {
+        status: isConfirmed ? "completed" : "paused_payment",
+        screenshotBase64,
+        handoffUrl: afterUrl,
+        sessionUrl,
+        summary: isConfirmed
+          ? `Reservation confirmed at ${targetHotelName ?? "the restaurant"}!`
+          : `Reservation form filled for ${targetHotelName ?? "the restaurant"}. Open the link to confirm.`,
+        debugTrace,
+      };
+    }
+
     if (!bookingComFinalPaymentDomState && bookingComGuestDetailsDomState) {
       trace("Booking.com final state check: still on guest-details step, so payment/card filling is not allowed yet.");
       const screenshotBase64 = `data:image/png;base64,${(await page.screenshot({ type: "png" })).toString("base64")}`;
