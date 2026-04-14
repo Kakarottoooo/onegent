@@ -3102,6 +3102,8 @@ The user will enter CVV and confirm payment themselves.`,
               // Find the best time slot button and return its coordinates + text.
               // We do NOT call btn.click() inside evaluate — React synthetic events
               // require a real CDP mouse click, not a DOM .click() call.
+              // Use broad selector: OpenTable renders slots as <a href>, <button>,
+              // or other clickable elements depending on page state/version.
               const slotCoords = await raw.evaluate(
                 ({ reqMins, maxDiffMins }: { reqMins: number; maxDiffMins: number }) => {
                   const isVisible = (el: Element) => {
@@ -3119,17 +3121,34 @@ The user will enter CVV and confirm payment themselves.`,
                     }
                     return null;
                   };
+                  // Exact time text pattern: "7:00 PM", "7:15 PM", etc.
+                  const isTimeText = (text: string) => /^\d{1,2}:\d{2}\s*(AM|PM)$/i.test(text.trim());
 
-                  // OpenTable time slot buttons: text like "7:00 PM", "7:15 PM"
-                  const candidates = Array.from(
-                    document.querySelectorAll<HTMLElement>('button, a[role="button"], [data-test*="time"], [data-testid*="time"]')
-                  ).filter((el) => {
+                  // Broad scan: any visible interactive element OR any leaf element
+                  // whose own text is exactly a time string (catches <a href>, <span>, <div> etc.)
+                  const allEls = Array.from(document.querySelectorAll<HTMLElement>(
+                    'a[href], button, [role="button"], [role="link"], [tabindex]'
+                  ));
+                  // Also scan ALL elements for leaf nodes with exact time text
+                  const leafTimeEls = Array.from(document.querySelectorAll<HTMLElement>('*'))
+                    .filter(el => isTimeText((el.textContent ?? '').trim()) && el.children.length === 0 && isVisible(el));
+
+                  const combined = [...new Set([...allEls, ...leafTimeEls])];
+
+                  // Diagnostics: log first few time-like elements
+                  const diag = combined
+                    .filter(el => isVisible(el) && parseT((el.textContent ?? '').trim()) !== null)
+                    .slice(0, 6)
+                    .map(el => `${el.tagName}[${el.getAttribute('role') ?? ''}] "${(el.textContent ?? '').trim().slice(0, 15)}"`)
+                    .join(' | ');
+
+                  const candidates = combined.filter((el) => {
                     if (!isVisible(el)) return false;
                     const t = parseT((el.textContent ?? "").trim());
                     return t !== null && Math.abs(t - reqMins) <= maxDiffMins;
                   });
 
-                  if (candidates.length === 0) return null;
+                  if (candidates.length === 0) return { x: -1, y: -1, text: '', diag };
 
                   // Pick the closest slot
                   const best = candidates.sort((a, b) => {
@@ -3144,13 +3163,18 @@ The user will enter CVV and confirm payment themselves.`,
                     x: Math.round(r.left + r.width / 2),
                     y: Math.round(r.top + r.height / 2),
                     text: (best.textContent ?? "").trim().slice(0, 20),
+                    diag,
                   };
                 },
                 { reqMins: requestedMinutes, maxDiffMins: 90 }
               ).catch(() => null);
 
+              if (slotCoords?.diag) {
+                trace(`[opentable] time slot diag: ${slotCoords.diag || "(none found)"}`);
+              }
+
               // Use CDP coordinate click (real mouse event that React can detect)
-              const slotClicked = slotCoords
+              const slotClicked = slotCoords && slotCoords.x > 0
                 ? await sh(raw).click(slotCoords.x, slotCoords.y)
                     .then(() => slotCoords.text)
                     .catch(() => null)
