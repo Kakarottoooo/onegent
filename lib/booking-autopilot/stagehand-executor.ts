@@ -3187,12 +3187,34 @@ The user will enter CVV and confirm payment themselves.`,
                 // Check 1: URL navigated away from search results
                 const nowUrl = raw.url();
                 if (nowUrl.toLowerCase().includes("opentable.com") && !nowUrl.toLowerCase().includes("/s?")) {
+                  // Verify we're at the CORRECT restaurant (not a "you may also like" card)
+                  if (targetHotelName) {
+                    const pageRestaurant = await raw.evaluate(() => {
+                      // OpenTable booking form shows restaurant name in h1 or prominent heading
+                      const h = document.querySelector('h1, h2, [class*="restaurant-name" i], [data-testid*="restaurant" i]');
+                      return (h?.textContent ?? "").trim().slice(0, 80);
+                    }).catch(() => "");
+                    const normalize = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, " ").replace(/\s+/g, " ").trim();
+                    const targetWords = normalize(targetHotelName).split(" ").filter(w => w.length > 3);
+                    const pageWords = normalize(pageRestaurant);
+                    const matched = targetWords.filter(w => pageWords.includes(w)).length;
+                    const matchRatio = targetWords.length > 0 ? matched / targetWords.length : 1;
+                    if (pageRestaurant && matchRatio < 0.4) {
+                      trace(`[opentable] wrong restaurant on booking page: "${pageRestaurant}" (target: "${targetHotelName}") — going back`);
+                      await raw.evaluate(() => window.history.back()).catch(() => {});
+                      await new Promise(r => setTimeout(r, 1000));
+                      return false; // retry the listing stage
+                    }
+                    if (pageRestaurant) {
+                      trace(`[opentable] correct restaurant confirmed: "${pageRestaurant}"`);
+                    }
+                  }
                   trace(`[opentable] navigated to reservation page: ${nowUrl.slice(0, 80)}`);
                   return true;
                 }
 
                 // Check 2: OpenTable opened a reservation form as an inline modal
-                // (URL stays at /s? but a name/email form appears on the page)
+                // (URL stays at /s? but a name/email/phone form appears on the page)
                 const hasReservationForm = await raw.evaluate(() => {
                   const inputs = Array.from(document.querySelectorAll<HTMLInputElement>("input"));
                   const visible = inputs.filter(el => el.offsetParent !== null && !el.disabled);
@@ -3200,6 +3222,7 @@ The user will enter CVV and confirm payment themselves.`,
                     const ph = (el.placeholder || "").toLowerCase();
                     const lbl = (el.getAttribute("aria-label") || "").toLowerCase();
                     return ph.includes("first") || ph.includes("last") || el.type === "email" ||
+                           ph.includes("phone") || lbl.includes("phone") ||
                            lbl.includes("first name") || lbl.includes("last name");
                   });
                 }).catch(() => false);
