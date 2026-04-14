@@ -18,11 +18,16 @@ export type EffectiveProfile = {
 
 export function extractTargetHotelName(task: string): string | undefined {
   const patterns = [
-    /book\s+["“](.+?)["”]\s+for/i,
+    /book\s+[“”](.+?)[“”]\s+for/i,
     /book\s+'(.+?)'\s+for/i,
     /find\s+(.+?)\s+hotel\s+in\s+.+?\s+and\s+book/i,
     /book a room at\s+(.+?)(?:\.|preferred|check-?in|check in|$)/i,
     /hotel\s*:\s*(.+?)(?:\n|$)/i,
+    // Restaurant patterns: “Find Urban Grub restaurant in Nashville and book a table”
+    /find\s+(.+?)\s+restaurant\s+in\s+.+?\s+and\s+book/i,
+    /reservation\s+at\s+(.+?)(?:\.|,|$)/i,
+    /book\s+a\s+table\s+at\s+(.+?)(?:\.|,|for)/i,
+    /make\s+a\s+reservation\s+at\s+(.+?)(?:\.|,|$)/i,
   ];
 
   for (const pattern of patterns) {
@@ -37,8 +42,10 @@ export function extractTargetHotelNameFromUrl(url: string | undefined): string |
   if (!url) return undefined;
   try {
     const parsed = new URL(url);
-    const ss = parsed.searchParams.get("ss")?.trim();
+    const ss = parsed.searchParams.get('ss')?.trim();
     if (ss) return ss;
+    const term = parsed.searchParams.get('term')?.trim();
+    if (term) return term;
   } catch {
     // Ignore invalid URLs.
   }

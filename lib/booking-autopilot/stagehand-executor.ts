@@ -927,7 +927,12 @@ The user will enter CVV and confirm payment themselves.`,
       switch (stage) {
         case "listing": {
           if (process.env.AI_LOOP_LISTING === "true") {
-            if (!targetHotelName) {
+            // OpenTable: run time-slot handler regardless of targetHotelName —
+            // the search URL already has the restaurant pre-filtered via ?term=.
+            // This block is a copy of the handler below (before targetHotelName guard).
+            if (startProvider?.id === "opentable-com") {
+              // Fall through to the OpenTable handler below (after the guard).
+            } else if (!targetHotelName) {
               trace("[ai-listing] target hotel name could not be parsed from the task.");
               return false;
             }
@@ -3218,7 +3223,7 @@ The user will enter CVV and confirm payment themselves.`,
               : startProvider?.id === "hotels-com" ? "hotels.com"
               : startProvider?.id === "opentable-com" ? "opentable.com"
               : input.startUrl.match(/^https?:\/\/([^/]+)/)?.[1] ?? undefined;
-            const result = await clickTargetListingAI(stagehand, targetHotelName, trace, 5, startDomainHint, requestedDates);
+            const result = await clickTargetListingAI(stagehand, targetHotelName ?? "", trace, 5, startDomainHint, requestedDates);
             if (result === "no_availability") return false;
             if (result === "clicked") {
               // Wait briefly — Booking.com opens hotel pages in a new tab; Expedia navigates
