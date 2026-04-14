@@ -106,4 +106,9 @@ export interface BrowserTaskResult {
   error?: string;
   /** Structured trace of automatic fallback decisions taken by the executor. */
   debugTrace?: string[];
+  /**
+   * For restaurant no_availability: list of time slots found on the page
+   * (e.g. ["7:15 PM", "7:30 PM", "8:00 PM"]) so the UI can offer alternatives.
+   */
+  availableSlots?: string[];
 }

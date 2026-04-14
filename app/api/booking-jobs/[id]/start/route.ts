@@ -534,12 +534,21 @@ async function runUniversalStep(
 
     if (data.status === "no_availability") {
       log.push({ ts: now(), type: "skipped", message: "No availability found", outcome: "No availability" });
-      return { ...step, status: "no_availability", error: data.summary, decisionLog: log };
+      // For restaurant steps: persist available time slots so the UI can offer alternatives
+      const bodyWithSlots = data.availableSlots?.length
+        ? { ...(step.body as Record<string, unknown>), availableSlots: data.availableSlots }
+        : step.body;
+      return { ...step, body: bodyWithSlots, status: "no_availability", error: data.summary, decisionLog: log };
     }
 
+    // error path — also capture available slots for restaurants
+    const bodyWithSlots = data.availableSlots?.length
+      ? { ...(step.body as Record<string, unknown>), availableSlots: data.availableSlots }
+      : step.body;
     log.push({ ts: now(), type: "failed", message: data.error ?? data.summary, outcome: "Failed" });
     return {
       ...step,
+      body: bodyWithSlots,
       status: "error",
       error: data.error ?? data.summary,
       handoff_url: step.fallbackUrl,

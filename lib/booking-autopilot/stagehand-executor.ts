@@ -377,6 +377,9 @@ export async function runBrowserTask(
   const hotelNameForUrl = extractTargetHotelName(input.task);
   input = { ...input, startUrl: normaliseStartUrl(input.startUrl, hotelNameForUrl ?? undefined) };
 
+  // For OpenTable no_availability: captured time slots the user can choose from instead.
+  let capturedAvailableSlots: string[] = [];
+
   // AI_LOOP_FULL=true activates all AI sub-flags simultaneously.
   // RPA code is never removed — each flag independently falls back to RPA on failure.
   if (process.env.AI_LOOP_FULL === "true") {
@@ -3237,7 +3240,28 @@ The user will enter CVV and confirm payment themselves.`,
                   }
                 }
 
-                trace("[opentable] no time slots found — no_availability");
+                // Capture ALL visible time slots so the UI can offer alternatives
+                capturedAvailableSlots = await raw.evaluate(() => {
+                  const parseT = (text: string): number | null => {
+                    const m = text.match(/(\d{1,2}):(\d{2})\s*(AM|PM)/i);
+                    if (!m) return null;
+                    let h = parseInt(m[1], 10);
+                    if (m[3].toUpperCase() === "PM" && h < 12) h += 12;
+                    if (m[3].toUpperCase() === "AM" && h === 12) h = 0;
+                    return h * 60 + parseInt(m[2], 10);
+                  };
+                  const isVisible = (el: Element) => {
+                    const r = (el as HTMLElement).getBoundingClientRect();
+                    return r.width > 0 && r.height > 0;
+                  };
+                  const seen = new Set<string>();
+                  return Array.from(document.querySelectorAll<HTMLElement>('button, a[role="button"]'))
+                    .filter(el => isVisible(el) && parseT((el.textContent ?? "").trim()) !== null)
+                    .map(el => (el.textContent ?? "").trim().replace(/\s+/g, " "))
+                    .filter(t => { if (seen.has(t)) return false; seen.add(t); return true; })
+                    .slice(0, 12);
+                }).catch(() => []);
+                trace(`[opentable] no time slots found in ±90 min — captured ${capturedAvailableSlots.length} available slot(s): ${capturedAvailableSlots.slice(0, 5).join(", ")}`);
                 return false; // signals no_availability to outer loop
               }
             }
@@ -4029,6 +4053,7 @@ The user will enter CVV and confirm payment themselves.`,
           sessionUrl,
           summary: `${hotelLabel} was not found in Booking.com search results — the property may be unavailable or sold out for the requested dates.`,
           debugTrace,
+          ...(capturedAvailableSlots.length > 0 ? { availableSlots: capturedAvailableSlots } : {}),
         };
       }
 
@@ -4040,6 +4065,7 @@ The user will enter CVV and confirm payment themselves.`,
         summary: "The requested dates are unavailable or couldn't be selected on this property. Open the link to choose different dates or book manually.",
         error: "Stuck at listing page — dates unavailable or not selectable",
         debugTrace,
+        ...(capturedAvailableSlots.length > 0 ? { availableSlots: capturedAvailableSlots } : {}),
       };
     }
 

@@ -511,6 +511,84 @@ function NeedsHelpCard({ step, onManualLink, jobId, stepIndex, onRefresh }: {
   );
 }
 
+// ── RestaurantTimePicker ───────────────────────────────────────────────────────
+// Shown when a restaurant booking has no_availability/error but the executor
+// captured available time slots from the page. The user picks one and we retry.
+
+function RestaurantTimePicker({
+  step, stepIndex, jobId, onBooked,
+}: {
+  step: BookingJobStep; stepIndex: number; jobId: string; onBooked: () => void;
+}) {
+  const slots = ((step.body as Record<string, unknown>).availableSlots as string[]) ?? [];
+  const [booking, setBooking] = useState<string | null>(null);
+
+  async function bookSlot(slot: string) {
+    if (booking) return;
+    setBooking(slot);
+    try {
+      // Convert "7:30 PM" → "19:30"
+      const to24 = (s: string): string => {
+        const m = s.match(/(\d{1,2}):(\d{2})\s*(AM|PM)/i);
+        if (!m) return s;
+        let h = parseInt(m[1], 10);
+        const min = m[2];
+        if (m[3].toUpperCase() === "PM" && h < 12) h += 12;
+        if (m[3].toUpperCase() === "AM" && h === 12) h = 0;
+        return `${String(h).padStart(2, "0")}:${min}`;
+      };
+      const newTime = to24(slot);
+      const sessionId = localStorage.getItem("session_id") ?? crypto.randomUUID();
+      const newBody = { ...(step.body as Record<string, unknown>), time: newTime, availableSlots: undefined };
+      const newStep = { ...step, status: "pending", body: newBody, error: undefined, decisionLog: undefined };
+      const createRes = await fetch("/api/booking-jobs", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ session_id: sessionId, trip_label: step.label, steps: [newStep] }),
+      });
+      if (createRes.ok) {
+        const { jobId: newJobId } = await createRes.json();
+        fetch(`/api/booking-jobs/${newJobId}/start`, { method: "POST" }).catch(() => {});
+        onBooked();
+      }
+    } finally {
+      setBooking(null);
+    }
+  }
+
+  return (
+    <div style={{
+      background: "rgba(212,163,75,0.06)", border: "0.5px solid rgba(212,163,75,0.3)",
+      borderRadius: 10, padding: "12px 14px", display: "flex", flexDirection: "column", gap: 8,
+    }}>
+      <p style={{ fontFamily: "var(--font-dm-sans)", fontSize: 12, fontWeight: 700, color: "var(--gold, #D4A34B)", margin: 0 }}>
+        🕐 7:00 PM wasn&apos;t available — pick another time:
+      </p>
+      <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+        {slots.map(slot => (
+          <button
+            key={slot}
+            onClick={() => bookSlot(slot)}
+            disabled={!!booking}
+            style={{
+              padding: "5px 12px", borderRadius: 20, border: "0.5px solid rgba(212,163,75,0.5)",
+              background: booking === slot ? "var(--gold, #D4A34B)" : "transparent",
+              color: booking === slot ? "#fff" : "var(--gold, #D4A34B)",
+              fontFamily: "var(--font-dm-sans)", fontSize: 12, fontWeight: 600,
+              cursor: booking ? "not-allowed" : "pointer", opacity: booking && booking !== slot ? 0.5 : 1,
+            }}
+          >
+            {booking === slot ? "Booking…" : slot}
+          </button>
+        ))}
+      </div>
+      <p style={{ fontFamily: "var(--font-dm-sans)", fontSize: 11, color: "var(--text-muted, #aaa)", margin: 0 }}>
+        Tap a time → agent will book it automatically
+      </p>
+    </div>
+  );
+}
+
 // ── RetryScheduler ─────────────────────────────────────────────────────────────
 
 function RetryScheduler({ step, stepIndex, jobId, onScheduled }: {
@@ -895,8 +973,17 @@ function StepCard({ step, stepIndex, jobId, onRefresh, onOpenLive }: {
         <InterventionBanner step={step} jobId={jobId} onOpenLive={onOpenLive} />
       )}
 
+      {/* Restaurant time-slot picker — shown when there are alternative slots */}
+      {step.type === "restaurant" &&
+        (step.status === "error" || step.status === "no_availability") &&
+        Array.isArray((step.body as Record<string, unknown>).availableSlots) &&
+        ((step.body as Record<string, unknown>).availableSlots as string[]).length > 0 && (
+        <RestaurantTimePicker step={step} stepIndex={stepIndex} jobId={jobId} onBooked={onRefresh ?? (() => {})} />
+      )}
+
       {/* Retry scheduling — shown for failed steps without an action item */}
-      {(step.status === "error" || step.status === "no_availability") && (
+      {(step.status === "error" || step.status === "no_availability") &&
+        !(step.type === "restaurant" && Array.isArray((step.body as Record<string, unknown>).availableSlots) && ((step.body as Record<string, unknown>).availableSlots as string[]).length > 0) && (
         <RetryScheduler
           step={step}
           stepIndex={stepIndex}
