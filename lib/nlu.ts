@@ -128,7 +128,7 @@ function buildFallbackContext(
   else if (/\blaptop\b|\bmacbook\b|\bthinkpad\b/.test(lower)) categoryHint = "laptop";
   else if (/\bphone\b|\bsmartphone\b|\biphone\b|\bandroid\b/.test(lower)) categoryHint = "smartphone";
   else if (/\bheadphone\b|\bearbuds\b|\bairpods\b/.test(lower)) categoryHint = "headphone";
-  else if (/\brestaurant\b|\bdinner\b|\blunch\b|\bdate\b|\breservation\b/.test(lower)) categoryHint = "restaurant";
+  else if (/\brestaurant\b|\bdinner\b|\blunch\b|\bdate\b|\breservation\b|\beat\b|\bfood\b|\bcuisine\b|\btable\b|\bdine\b|\bdining\b/.test(lower)) categoryHint = "restaurant";
 
   let scenarioHint: ScenarioType | null = null;
   // Multi-component trip: flight + hotel together → weekend_trip regardless of keyword order
@@ -201,6 +201,27 @@ function buildFallbackContext(
     refinementConstraints.push("faster service than previous — prefer quick-service venues");
   }
 
+  // Extract cuisine hint from English messages (MiniMax fast-path skips NLU so we do it here)
+  const cuisinePatterns: [RegExp, string][] = [
+    [/\bhot chicken\b/i, "hot chicken"],
+    [/\bsushi\b|\bjapanese\b/i, "Japanese"],
+    [/\bitalian\b|\bpizza\b|\bpasta\b|\brisotto\b/i, "Italian"],
+    [/\btacos?\b|\bmexican\b|\bburritos?\b|\bguacamole\b/i, "Mexican"],
+    [/\bchinese\b|\bdim sum\b|\bdumplings?\b/i, "Chinese"],
+    [/\bthai\b|\bpad thai\b/i, "Thai"],
+    [/\bindian\b|\bcurry\b|\bnaan\b|\bbiryani\b/i, "Indian"],
+    [/\bbbq\b|\bbarbe?cue\b|\bsmoked\b|\bbrisket\b|\bribs?\b/i, "BBQ"],
+    [/\bburger\b|\bburgers\b/i, "burgers"],
+    [/\bsteak\b|\bsteakhouse\b/i, "steakhouse"],
+    [/\bfrench\b|\bbistro\b|\bcroissant\b/i, "French"],
+    [/\bmediterranean\b|\bgreek\b|\bhummus\b/i, "Mediterranean"],
+    [/\bvegan\b|\bvegetarian\b|\bplant.?based\b/i, "vegan"],
+    [/\bseafood\b|\blobster\b|\bshrimp\b|\boyster\b/i, "seafood"],
+    [/\bramen\b|\bnoodles?\b|\bpho\b|\budon\b/i, "ramen"],
+    [/\bkorean\b|\bbibimbap\b|\bkbbq\b/i, "Korean"],
+  ];
+  const cuisine_hint = cuisinePatterns.find(([rx]) => rx.test(lower))?.[1] ?? undefined;
+
   return {
     input_language: inputLanguage,
     output_language: outputLanguage,
@@ -212,6 +233,7 @@ function buildFallbackContext(
     // an explicit city from the message and override this. If we pre-fill the
     // fallback city (e.g. Nashville), it wins over the AI-extracted location.
     location_hint: resolveLocationAlias(message) ?? undefined,
+    ...(cuisine_hint ? { cuisine_hint } : {}),
     ...(refinementConstraints.length > 0 ? { constraints_hint: refinementConstraints } : {}),
   };
 }
