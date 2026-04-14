@@ -616,21 +616,56 @@ async function runUniversalStep(
             }
 
             if (officialWebsite) {
-              log.push({ ts: now(), type: "attempt", message: `Found official website via Google Places: ${officialWebsite.slice(0, 60)}`, outcome: "Handoff" });
+              log.push({ ts: now(), type: "attempt", message: `Found official website via Google Places: ${officialWebsite.slice(0, 60)} — navigating to find reservation link`, outcome: "Retrying" });
+              await onProgress({ ...step, status: "loading", decisionLog: [...log] });
+
+              // Navigate to the official website and look for a reservation/booking page
+              let reservationUrl = officialWebsite;
+              try {
+                const websiteInput: import("@/lib/booking-autopilot/types").BrowserTaskInput = {
+                  startUrl: officialWebsite,
+                  task: `On the restaurant website for "${rName}", find and click a "Reservations", "Book a Table", "Book Now", or "Reserve" link or button. Navigate to the reservation page. Do not fill any forms — just navigate to where reservations can be made.`,
+                  profile: resolvedBody.profile as import("@/lib/booking-autopilot/types").BrowserTaskInput["profile"],
+                  jobId: bookingJobId,
+                  stepIndex: (resolvedBody.stepIndex as number | undefined) ?? 0,
+                };
+                const websiteData = await runBrowserTask(websiteInput);
+
+                // If the agent navigated somewhere meaningful, use that URL
+                if (
+                  websiteData.handoffUrl &&
+                  websiteData.handoffUrl !== officialWebsite &&
+                  websiteData.handoffUrl.startsWith("http")
+                ) {
+                  reservationUrl = websiteData.handoffUrl;
+                  log.push({ ts: now(), type: "attempt", message: `Found reservation page on official website: ${reservationUrl.slice(0, 60)}`, outcome: "Handoff" });
+                } else {
+                  log.push({ ts: now(), type: "attempt", message: `No dedicated reservation page found — using homepage: ${officialWebsite.slice(0, 60)}`, outcome: "Handoff" });
+                }
+              } catch {
+                log.push({ ts: now(), type: "attempt", message: `Could not browse official website — using homepage`, outcome: "Handoff" });
+              }
+
+              const allTriedBody = { ...body, platformsTried: [...platformsTried, "opentable", "resy"], officialWebsite, reservationUrl };
+              return {
+                ...step,
+                body: allTriedBody,
+                status: "no_availability",
+                error: `"${rName}" is not on OpenTable or Resy. ${reservationUrl !== officialWebsite ? "Found their reservation page — tap to book directly." : "Visit their official website to book directly."}`,
+                handoff_url: reservationUrl,
+                decisionLog: log,
+              };
             } else {
               log.push({ ts: now(), type: "failed", message: googlePlacesError ? `Google Places lookup failed` : `No website found for "${rName}"`, outcome: "No availability" });
             }
 
-            const allTriedBody = { ...body, platformsTried: [...platformsTried, "opentable", "resy"], officialWebsite };
-            const notFoundSummary = officialWebsite
-              ? `"${rName}" is not on OpenTable or Resy. Visit their official website to book directly: ${officialWebsite}`
-              : `"${rName}" was not found on OpenTable or Resy. The restaurant may only accept walk-in reservations or phone bookings.`;
+            const allTriedBody = { ...body, platformsTried: [...platformsTried, "opentable", "resy"] };
             return {
               ...step,
               body: allTriedBody,
               status: "no_availability",
-              error: notFoundSummary,
-              handoff_url: officialWebsite ?? step.fallbackUrl,
+              error: `"${rName}" was not found on OpenTable or Resy. The restaurant may only accept walk-in reservations or phone bookings.`,
+              handoff_url: step.fallbackUrl,
               decisionLog: log,
             };
           }
