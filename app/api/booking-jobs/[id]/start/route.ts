@@ -533,6 +533,77 @@ async function runUniversalStep(
     }
 
     if (data.status === "no_availability") {
+      // ── Multi-platform fallback for restaurants ───────────────────────────
+      // If restaurant wasn't found on the current platform, automatically try the next one.
+      const isNotFoundError = (summary: string) =>
+        summary.toLowerCase().includes("not found on opentable") ||
+        summary.toLowerCase().includes("not found on resy");
+
+      if (step.type === "restaurant" && isNotFoundError(data.summary)) {
+        const body = step.body as Record<string, unknown>;
+        const rName = body.restaurantName as string | undefined;
+        const rDate = body.date as string | undefined;
+        const rTime = body.time as string | undefined;
+        const rCovers = (body.covers as number | undefined) ?? 2;
+        const rCity = (body.city as string | undefined) ?? "";
+        const platformsTried = (body.platformsTried as string[] | undefined) ?? [];
+
+        if (rName && rDate && rTime) {
+          const { cityToResySlug } = await import("@/lib/booking-autopilot/providers/resy-com");
+
+          // Try Resy if not already tried
+          if (!platformsTried.includes("resy")) {
+            const resySlug = cityToResySlug(rCity || "nashville");
+            const resyUrl = `https://resy.com/cities/${resySlug}?date=${rDate}&seats=${rCovers}&query=${encodeURIComponent(rName)}`;
+            log.push({ ts: now(), type: "attempt", message: `Not found on OpenTable — trying Resy`, outcome: "Retrying" });
+            await onProgress({ ...step, status: "loading", decisionLog: [...log] });
+
+            const { buildRestaurantTask } = await import("@/lib/booking-autopilot/core/task-builders");
+            const { task } = buildRestaurantTask({ restaurantName: rName, city: rCity, date: rDate, time: rTime, covers: rCovers, profile: resolvedBody.profile as Parameters<typeof buildRestaurantTask>[0]["profile"] });
+            const resyInput: import("@/lib/booking-autopilot/types").BrowserTaskInput = {
+              startUrl: resyUrl, task,
+              profile: resolvedBody.profile as import("@/lib/booking-autopilot/types").BrowserTaskInput["profile"],
+              jobId: bookingJobId,
+              stepIndex: (resolvedBody.stepIndex as number | undefined) ?? 0,
+            };
+            try {
+              const resyData = await runBrowserTask(resyInput);
+              if (resyData.status !== "no_availability" && resyData.status !== "error") {
+                log.push({ ts: now(), type: "succeeded", message: `Booked via Resy: ${resyData.summary}`, outcome: "Done ✓" });
+                return { ...step, status: resyData.status === "paused_payment" ? "awaiting_confirmation" : "done", handoff_url: resyData.handoffUrl, decisionLog: log };
+              }
+              // Resy also failed — try Yelp
+              if (!isNotFoundError(resyData.summary) && resyData.availableSlots?.length) {
+                const bodyWithSlots = { ...body, availableSlots: resyData.availableSlots, platformsTried: [...platformsTried, "resy"] };
+                return { ...step, body: bodyWithSlots, status: "no_availability", error: resyData.summary, decisionLog: log };
+              }
+              log.push({ ts: now(), type: "attempt", message: `Not found on Resy — trying Yelp`, outcome: "Retrying" });
+            } catch { /* fall through to Yelp */ }
+
+            // Try Yelp as final fallback
+            if (!platformsTried.includes("yelp")) {
+              const yelpUrl = `https://www.yelp.com/search?find_desc=${encodeURIComponent(rName)}&find_loc=${encodeURIComponent(rCity || "Nashville, TN")}`;
+              const yelpInput: import("@/lib/booking-autopilot/types").BrowserTaskInput = {
+                startUrl: yelpUrl, task,
+                profile: resolvedBody.profile as import("@/lib/booking-autopilot/types").BrowserTaskInput["profile"],
+                jobId: bookingJobId,
+                stepIndex: (resolvedBody.stepIndex as number | undefined) ?? 0,
+              };
+              try {
+                const yelpData = await runBrowserTask(yelpInput);
+                if (yelpData.status !== "no_availability" && yelpData.status !== "error") {
+                  log.push({ ts: now(), type: "succeeded", message: `Booked via Yelp: ${yelpData.summary}`, outcome: "Done ✓" });
+                  return { ...step, status: yelpData.status === "paused_payment" ? "awaiting_confirmation" : "done", handoff_url: yelpData.handoffUrl, decisionLog: log };
+                }
+              } catch { /* give up */ }
+              log.push({ ts: now(), type: "failed", message: `Not found on OpenTable, Resy, or Yelp`, outcome: "No availability" });
+            }
+            const allTriedBody = { ...body, platformsTried: [...platformsTried, "opentable", "resy", "yelp"] };
+            return { ...step, body: allTriedBody, status: "no_availability", error: `"${rName}" was not found on OpenTable, Resy, or Yelp. The restaurant may not accept online reservations.`, decisionLog: log };
+          }
+        }
+      }
+
       log.push({ ts: now(), type: "skipped", message: "No availability found", outcome: "No availability" });
       // For restaurant steps: persist available time slots so the UI can offer alternatives
       const bodyWithSlots = data.availableSlots?.length

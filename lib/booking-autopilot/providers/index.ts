@@ -3,5 +3,7 @@ import "./booking-com";
 import "./expedia";
 import "./hotels-com";
 import "./opentable-com";
+import "./resy-com";
+import "./yelp-com";
 
 export { getProvider, requireProvider } from "./registry";

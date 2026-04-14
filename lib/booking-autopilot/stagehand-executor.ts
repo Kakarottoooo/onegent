@@ -784,10 +784,20 @@ The user will enter CVV and confirm payment themselves.`,
       getProvider(landedUrlAfterSetup)?.id === 'opentable-com' ||
       openPageUrls.find((u) => u && getProvider(u)?.id === 'opentable-com')
     );
-    const skipInitialAgent = bookingComPageOpen || expediaPageOpen || hotelsComPageOpen || openTablePageOpen;
+    const resyPageOpen = !!(
+      getProvider(input.startUrl)?.id === 'resy-com' ||
+      getProvider(landedUrlAfterSetup)?.id === 'resy-com' ||
+      openPageUrls.find((u) => u && getProvider(u)?.id === 'resy-com')
+    );
+    const yelpPageOpen = !!(
+      getProvider(input.startUrl)?.id === 'yelp-com' ||
+      getProvider(landedUrlAfterSetup)?.id === 'yelp-com' ||
+      openPageUrls.find((u) => u && getProvider(u)?.id === 'yelp-com')
+    );
+    const skipInitialAgent = bookingComPageOpen || expediaPageOpen || hotelsComPageOpen || openTablePageOpen || resyPageOpen || yelpPageOpen;
     const initialMaxSteps = skipInitialAgent ? 0 : 40;
 
-    const skipProviderLabel = bookingComPageOpen ? 'Booking.com' : expediaPageOpen ? 'Expedia' : hotelsComPageOpen ? 'Hotels.com' : openTablePageOpen ? 'OpenTable' : '';
+    const skipProviderLabel = bookingComPageOpen ? 'Booking.com' : expediaPageOpen ? 'Expedia' : hotelsComPageOpen ? 'Hotels.com' : openTablePageOpen ? 'OpenTable' : resyPageOpen ? 'Resy' : yelpPageOpen ? 'Yelp' : '';
     trace(`Agent starting main run (maxSteps=${initialMaxSteps}, model=${modelName})${skipInitialAgent ? ` [${skipProviderLabel} detected: agent.execute disabled, using programmatic flow only]` : ""}`);
     const t0 = Date.now();
     const result = initialMaxSteps === 0
@@ -900,8 +910,8 @@ The user will enter CVV and confirm payment themselves.`,
       if (!raw) return undefined;
       if (raw.length < 4) return undefined;  // "the", "a", "an", etc.
       if (/^the\b|cheapest|standard|available|lowest/i.test(raw)) return undefined;
-      // Restaurant tasks don't have room types — skip for OpenTable bookings
-      if (startProvider?.id === "opentable-com") return undefined;
+      // Restaurant tasks don't have room types — skip for all restaurant platforms
+      if (startProvider?.id === "opentable-com" || startProvider?.id === "resy-com" || startProvider?.id === "yelp-com") return undefined;
       // Reject location-like suffixes that look like restaurant branch names
       // e.g. "Nashville - Lower Broadway" from "Hattie B's Hot Chicken - Nashville - Lower Broadway"
       if (/^[A-Z][a-z]+ -\s+[A-Z]/.test(raw)) return undefined;
@@ -3402,11 +3412,113 @@ The user will enter CVV and confirm payment themselves.`,
               }
             }
 
+            // ── Resy: programmatic time-slot selection (mirrors OpenTable) ────────
+            if (startProvider?.id === "resy-com") {
+              // No-results check
+              const resyNoResults = await raw.evaluate(() => {
+                const text = (document.body?.innerText ?? "").toLowerCase();
+                return text.includes("no results") || text.includes("no restaurants") ||
+                       text.includes("nothing here") || (text.includes("didn't find") && text.includes("match"));
+              }).catch(() => false);
+              if (resyNoResults) {
+                const label = targetHotelName ?? "This restaurant";
+                trace(`[resy] "${label}" not found on Resy — returning no_availability`);
+                return false; // outer loop will return no_availability via capturedAvailableSlots path
+              }
+
+              // Time slot selection — identical logic to OpenTable
+              const timeMatch2 = input.task.match(/\b(\d{1,2}):(\d{2})\s*(AM|PM)?\b/i);
+              let reqMins2 = 19 * 60;
+              if (timeMatch2) {
+                let h = parseInt(timeMatch2[1], 10);
+                const m = parseInt(timeMatch2[2], 10);
+                const mer = (timeMatch2[3] ?? "").toUpperCase();
+                if (mer === "PM" && h < 12) h += 12;
+                if (mer === "AM" && h === 12) h = 0;
+                reqMins2 = h * 60 + m;
+              }
+
+              const resySlotCoords = await raw.evaluate(({ reqMins, maxDiff }: { reqMins: number; maxDiff: number }) => {
+                const isVisible = (el: Element) => { const r = (el as HTMLElement).getBoundingClientRect(); return r.width > 0 && r.height > 0; };
+                const parseT = (text: string) => { const m = text.match(/(\d{1,2}):(\d{2})\s*(AM|PM)/i); if (!m) return null; let h = parseInt(m[1], 10); const min = parseInt(m[2], 10); if (m[3].toUpperCase() === "PM" && h < 12) h += 12; if (m[3].toUpperCase() === "AM" && h === 12) h = 0; return h * 60 + min; };
+                const isTimeText = (t: string) => /^\d{1,2}:\d{2}\s*(AM|PM)$/i.test(t.trim());
+                const allEls = [...Array.from(document.querySelectorAll<HTMLElement>('a[href], button, [role="button"], [role="link"]')),
+                                ...Array.from(document.querySelectorAll<HTMLElement>('*')).filter(el => isTimeText((el.textContent ?? '').trim()) && el.children.length === 0 && isVisible(el))];
+                const candidates = [...new Set(allEls)].filter(el => { if (!isVisible(el)) return false; const t = parseT((el.textContent ?? '').trim()); return t !== null && Math.abs(t - reqMins) <= maxDiff; });
+                if (!candidates.length) return { x: -1, y: -1, text: '', diag: 'none' };
+                const best = candidates.sort((a, b) => Math.abs((parseT((a.textContent ?? '').trim()) ?? Infinity) - reqMins) - Math.abs((parseT((b.textContent ?? '').trim()) ?? Infinity) - reqMins))[0];
+                best.scrollIntoView({ block: "center" });
+                const r = best.getBoundingClientRect();
+                return { x: Math.round(r.left + r.width / 2), y: Math.round(r.top + r.height / 2), text: (best.textContent ?? '').trim().slice(0, 20), diag: best.tagName };
+              }, { reqMins: reqMins2, maxDiff: 90 }).catch(() => null);
+
+              if (resySlotCoords?.diag) trace(`[resy] time slot diag: ${resySlotCoords.diag} "${resySlotCoords.text}"`);
+
+              const resySlotClicked = resySlotCoords && resySlotCoords.x > 0
+                ? await sh(raw).click(resySlotCoords.x, resySlotCoords.y).then(() => resySlotCoords.text).catch(() => null)
+                : null;
+
+              if (resySlotClicked) {
+                trace(`[resy] clicked time slot "${resySlotClicked}" (requested: ${Math.floor(reqMins2 / 60)}:${String(reqMins2 % 60).padStart(2, "0")})`);
+                await new Promise(r => setTimeout(r, 2500));
+                const resyNowUrl = raw.url();
+                if (!resyNowUrl.toLowerCase().includes("resy.com/cities") || resyNowUrl.toLowerCase().includes("/book")) {
+                  trace(`[resy] navigated to booking page: ${resyNowUrl.slice(0, 80)}`);
+                  return true;
+                }
+                const resyHasForm = await raw.evaluate(() => {
+                  const inputs = Array.from(document.querySelectorAll<HTMLInputElement>("input")).filter(el => el.offsetParent !== null && !el.disabled);
+                  return inputs.some(el => { const ph = (el.placeholder || "").toLowerCase(); return ph.includes("first") || ph.includes("last") || el.type === "email" || ph.includes("phone"); });
+                }).catch(() => false);
+                if (resyHasForm) { trace("[resy] reservation form detected"); return true; }
+                trace("[resy] slot clicked — yielding to stage reassessment");
+                return true;
+              } else {
+                capturedAvailableSlots = await raw.evaluate(() => {
+                  const parseT = (t: string) => { const m = t.match(/(\d{1,2}):(\d{2})\s*(AM|PM)/i); if (!m) return null; let h = parseInt(m[1], 10); if (m[3].toUpperCase() === "PM" && h < 12) h += 12; if (m[3].toUpperCase() === "AM" && h === 12) h = 0; return h * 60 + parseInt(m[2], 10); };
+                  const isV = (el: Element) => { const r = (el as HTMLElement).getBoundingClientRect(); return r.width > 0 && r.height > 0; };
+                  const seen = new Set<string>();
+                  return Array.from(document.querySelectorAll<HTMLElement>('button, a[role="button"]')).filter(el => isV(el) && parseT((el.textContent ?? "").trim()) !== null).map(el => (el.textContent ?? "").trim()).filter(t => { if (seen.has(t)) return false; seen.add(t); return true; }).slice(0, 12);
+                }).catch(() => []);
+                trace(`[resy] no time slots found — captured ${capturedAvailableSlots.length} slot(s)`);
+                return false;
+              }
+            }
+
+            // ── Yelp: find restaurant and click reservation link ───────────────
+            if (startProvider?.id === "yelp-com") {
+              // Find and click the "Make a Reservation" button on the Yelp biz page
+              const yelpResCoords = await raw.evaluate(() => {
+                const isVisible = (el: Element) => { const r = (el as HTMLElement).getBoundingClientRect(); return r.width > 0 && r.height > 0; };
+                const pattern = /make a reservation|reserve a table|book a table|reserve now|find a table/i;
+                const btn = Array.from(document.querySelectorAll<HTMLElement>("a, button")).find(el => isVisible(el) && pattern.test((el.textContent ?? "").trim()));
+                if (!btn) return null;
+                btn.scrollIntoView({ block: "center" });
+                const r = btn.getBoundingClientRect();
+                return { x: Math.round(r.left + r.width / 2), y: Math.round(r.top + r.height / 2), text: (btn.textContent ?? "").trim().slice(0, 40) };
+              }).catch(() => null);
+
+              if (yelpResCoords) {
+                trace(`[yelp] clicking reservation link: "${yelpResCoords.text}"`);
+                await sh(raw).click(yelpResCoords.x, yelpResCoords.y).catch(() => {});
+                await new Promise(r => setTimeout(r, 2500));
+                const yelpNowUrl = raw.url();
+                trace(`[yelp] after reservation click: ${yelpNowUrl.slice(0, 80)}`);
+                // The click may redirect to OpenTable/Resy — those providers handle from here
+                return true;
+              }
+
+              // If no reservation button found on Yelp, search for the restaurant first
+              trace("[yelp] no reservation button found — still on search/listing");
+            }
+
             // Pass startDomain so clickTargetListingAI can detect & revert wrong-domain clicks
             // (e.g. clicking an IHG logo badge on Expedia that navigates to ihg.com).
             const startDomainHint = startProvider?.id === "expedia" ? "expedia.com"
               : startProvider?.id === "hotels-com" ? "hotels.com"
               : startProvider?.id === "opentable-com" ? "opentable.com"
+              : startProvider?.id === "resy-com" ? "resy.com"
+              : startProvider?.id === "yelp-com" ? "yelp.com"
               : input.startUrl.match(/^https?:\/\/([^/]+)/)?.[1] ?? undefined;
             const result = await clickTargetListingAI(stagehand, targetHotelName ?? "", trace, 5, startDomainHint, requestedDates);
             if (result === "no_availability") return false;
@@ -4016,9 +4128,25 @@ The user will enter CVV and confirm payment themselves.`,
     for (let attempt = 0; attempt < 8; attempt += 1) {
       trace(`Stage assessment ${attempt + 1}: ${assessment.stage} —?${assessment.reason}`);
 
+      // ── Restaurant platforms: no-results early exit ──────────────────────────
+      // Runs regardless of stage (even "unknown") so we catch "didn't find" pages.
+      const isRestaurantPlatform = startProvider?.id === "opentable-com" || startProvider?.id === "resy-com" || startProvider?.id === "yelp-com";
+      if (startProvider?.id === "resy-com") {
+        const resyNoResultsOuter = await raw.evaluate(() => {
+          const text = (document.body?.innerText ?? "").toLowerCase();
+          return text.includes("no results") || text.includes("no restaurants") || text.includes("nothing here") ||
+                 (text.includes("didn't find") && text.includes("match"));
+        }).catch(() => false);
+        if (resyNoResultsOuter) {
+          const label = targetHotelName ?? "This restaurant";
+          trace(`[resy] "${label}" not found on Resy — no_availability`);
+          const ss = await raw.screenshot({ type: "png" }).then(b => `data:image/png;base64,${b.toString("base64")}`).catch(() => undefined);
+          return { status: "no_availability" as const, screenshotBase64: ss, handoffUrl: `https://resy.com/`, sessionUrl,
+            summary: `"${label}" was not found on Resy. The restaurant may not accept reservations through Resy.`, debugTrace };
+        }
+      }
       // ── OpenTable: no-results early exit ─────────────────────────────────────
-      // Runs regardless of stage (even "unknown") so we catch the "We didn't find a match"
-      // page before it cascades into confusing errors.
+      void isRestaurantPlatform; // suppress unused warning
       if (startProvider?.id === "opentable-com") {
         const otNoResults = await raw.evaluate(() => {
           const text = (document.body?.innerText ?? "").toLowerCase();
