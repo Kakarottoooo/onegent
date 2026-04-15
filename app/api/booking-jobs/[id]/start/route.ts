@@ -360,6 +360,58 @@ async function runUniversalStep(
     }
   }
 
+  // ── Hotel steps: build Booking.com startUrl + task if not already set ──
+  // step.body for hotel steps contains: hotel_name, city, checkin, checkout, adults.
+  if (step.type === "hotel" && !resolvedBody.startUrl) {
+    const hName = resolvedBody.hotel_name as string | undefined;
+    const hCity = (resolvedBody.city as string | undefined) ?? "";
+    const hCheckin = resolvedBody.checkin as string | undefined;
+    const hCheckout = resolvedBody.checkout as string | undefined;
+    const hAdults = (resolvedBody.adults as number | undefined) ?? 2;
+
+    if (hName) {
+      const searchQuery = encodeURIComponent(`${hName} ${hCity}`.trim());
+      resolvedBody = {
+        ...resolvedBody,
+        startUrl: `https://www.booking.com/search.html?ss=${searchQuery}`,
+      };
+
+      if (!resolvedBody.task) {
+        const checkinStr = hCheckin ? ` Check in ${hCheckin}.` : "";
+        const checkoutStr = hCheckout ? ` Check out ${hCheckout}.` : "";
+        resolvedBody = {
+          ...resolvedBody,
+          task: `Find ${hName}${hCity ? ` in ${hCity}` : ""} on Booking.com.${checkinStr}${checkoutStr} Select the cheapest available room for ${hAdults} adult${hAdults !== 1 ? "s" : ""}. Fill in all guest details and payment information. Stop before entering CVV or clicking the final payment confirmation button.`,
+        };
+      }
+    }
+  }
+
+  // ── Flight steps: build Kayak startUrl + task if not already set ──
+  // step.body for flight steps contains: origin, dest, date, returnDate, passengers.
+  if (step.type === "flight" && !resolvedBody.startUrl) {
+    const fOrigin = resolvedBody.origin as string | undefined;
+    const fDest = resolvedBody.dest as string | undefined;
+    const fDate = resolvedBody.date as string | undefined;
+    const fReturn = resolvedBody.returnDate as string | undefined;
+    const fPax = (resolvedBody.passengers as number | undefined) ?? 1;
+
+    if (fOrigin && fDest && fDate) {
+      const kayakUrl = fReturn
+        ? `https://www.kayak.com/flights/${fOrigin}-${fDest}/${fDate}/${fReturn}/${fPax}adults/economy`
+        : `https://www.kayak.com/flights/${fOrigin}-${fDest}/${fDate}/${fPax}adults/economy`;
+      resolvedBody = { ...resolvedBody, startUrl: kayakUrl };
+
+      if (!resolvedBody.task) {
+        const returnStr = fReturn ? ` Return flight on ${fReturn}.` : "";
+        resolvedBody = {
+          ...resolvedBody,
+          task: `Find the cheapest economy flight from ${fOrigin} to ${fDest} on ${fDate} for ${fPax} passenger${fPax !== 1 ? "s" : ""}.${returnStr} Select the best option and proceed to checkout. Stop before entering payment information.`,
+        };
+      }
+    }
+  }
+
   // Accept profileId as number OR string (JSONB round-trips preserve numbers, but be defensive)
   const rawProfileId = resolvedBody.profileId;
   const profileId: number | null =
@@ -830,7 +882,8 @@ export async function POST(_req: NextRequest, { params }: Params) {
     // "restaurant" steps use runUniversalStep (same as "universal") because they need
     // runBrowserTask called directly — runStepWithRecovery uses callEndpoint (HTTP) which
     // requires a valid apiEndpoint URL, but restaurant steps don't have one.
-    if (steps[i].type === "universal" || steps[i].type === "restaurant") {
+    if (steps[i].type === "universal" || steps[i].type === "restaurant" ||
+        steps[i].type === "hotel" || steps[i].type === "flight") {
       steps[i] = await runUniversalStep(steps[i], onProgress, id, job.user_id);
     } else if ((steps[i].type as string) === "activity") {
       steps[i] = await runActivityStep(steps[i], skillCtx, onProgress);

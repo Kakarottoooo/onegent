@@ -1,7 +1,6 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import type { AutopilotResult } from "../lib/booking-autopilot/types";
 import { ConnectAccountsModal } from "./ConnectAccountsModal";
 
 import { loadAutonomySettings } from "@/lib/autonomy";
@@ -28,13 +27,6 @@ export interface BookableStep {
   timeFallbacks?: string[];
 }
 
-type StepStatus = "pending" | "loading" | "done" | "error" | "no_availability";
-
-interface StepState {
-  status: StepStatus;
-  result?: AutopilotResult;
-}
-
 interface Props {
   open: boolean;
   steps: BookableStep[];
@@ -43,10 +35,7 @@ interface Props {
 }
 
 export function AutopilotRunnerModal({ open, steps, tripLabel, onClose }: Props) {
-  const [stepStates, setStepStates] = useState<StepState[]>([]);
-  const [allDone, setAllDone] = useState(false);
   const [connectOpen, setConnectOpen] = useState(false);
-
   const [bgJobId, setBgJobId] = useState<string | null>(null);
   const [bgSent, setBgSent] = useState(false);
 
@@ -77,79 +66,16 @@ export function AutopilotRunnerModal({ open, steps, tripLabel, onClose }: Props)
     }).catch(() => {});
   }
 
-  // Reset and start when opened
+  // Send to background immediately when opened
   useEffect(() => {
     if (!open || steps.length === 0) return;
     setBgSent(false);
     setBgJobId(null);
-    const initial = steps.map<StepState>((_, i) =>
-      i === 0 ? { status: "loading" } : { status: "pending" }
-    );
-    setStepStates(initial);
-    setAllDone(false);
-
-    let cancelled = false;
-    async function runAll() {
-      const states: StepState[] = steps.map<StepState>((_, i) =>
-        i === 0 ? { status: "loading" } : { status: "pending" }
-      );
-
-      for (let i = 0; i < steps.length; i++) {
-        if (cancelled) break;
-        // Mark current as loading
-        states[i] = { status: "loading" };
-        if (!cancelled) setStepStates([...states]);
-
-        const step = steps[i];
-        try {
-          const res = await fetch(step.apiEndpoint, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify(step.body),
-          });
-          const data: AutopilotResult = await res.json();
-          states[i] = {
-            status: data.status === "ready" ? "done" : data.status === "no_availability" ? "no_availability" : "error",
-            result: data,
-          };
-        } catch {
-          states[i] = {
-            status: "error",
-            result: { status: "error", handoff_url: step.fallbackUrl, error: "Network error" },
-          };
-        }
-
-        if (!cancelled) setStepStates([...states]);
-
-        // Mark next as loading
-        if (i + 1 < steps.length) {
-          states[i + 1] = { status: "loading" };
-          if (!cancelled) setStepStates([...states]);
-        }
-      }
-
-      if (!cancelled) setAllDone(true);
-    }
-
-    runAll();
-    return () => { cancelled = true; };
+    sendToBackground();
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
 
   if (!open) return null;
-
-  const completedSteps = stepStates.filter((s) => s.status === "done" || s.status === "no_availability");
-  const doneWithUrls = stepStates
-    .map((s, i) => ({ step: steps[i], state: s }))
-    .filter((x) => x.state.result?.handoff_url);
-
-  function openAllTabs() {
-    for (const { state } of doneWithUrls) {
-      if (state.result?.handoff_url) {
-        window.open(state.result.handoff_url, "_blank");
-      }
-    }
-  }
 
   return (
     <div
@@ -190,7 +116,7 @@ export function AutopilotRunnerModal({ open, steps, tripLabel, onClose }: Props)
           }}
         >
           <span style={{ fontFamily: "var(--font-dm-sans)", fontWeight: 700, fontSize: 15 }}>
-            {allDone ? "Your trip is ready to book" : "Booking your trip…"}
+            Booking your trip…
           </span>
           <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
             <a
@@ -247,7 +173,7 @@ export function AutopilotRunnerModal({ open, steps, tripLabel, onClose }: Props)
           {/* ── Before action: trust panel ─────────────────────────────────
                Shows what the agent is allowed to change, before it acts.
                Only shown while steps haven't started yet.               */}
-          {!allDone && !bgSent && stepStates.every((s) => s.status === "pending" || s.status === "loading") && (() => {
+          {!bgSent && (() => {
             const a = loadAutonomySettings();
             const signals: string[] = [];
             if (a.restaurant.timeWindowMinutes > 0)
@@ -340,253 +266,6 @@ export function AutopilotRunnerModal({ open, steps, tripLabel, onClose }: Props)
             </div>
           )}
 
-          {/* Normal sync mode */}
-          {!bgSent && (
-          <>
-          {/* "Book in background" option — shown while steps are still running */}
-          {!allDone && stepStates.some((s) => s.status === "loading" || s.status === "pending") && (
-            <div
-              style={{
-                marginBottom: 16,
-                padding: "10px 14px",
-                borderRadius: 10,
-                border: "0.5px dashed var(--border, #e5e7eb)",
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "space-between",
-                gap: 10,
-              }}
-            >
-              <p style={{ fontFamily: "var(--font-dm-sans)", fontSize: 12, color: "var(--text-secondary, #666)" }}>
-                Don&apos;t want to wait?
-              </p>
-              <button
-                onClick={sendToBackground}
-                style={{
-                  flexShrink: 0,
-                  padding: "5px 12px",
-                  borderRadius: 8,
-                  border: "0.5px solid var(--gold, #D4A34B)",
-                  background: "transparent",
-                  color: "var(--gold, #D4A34B)",
-                  fontFamily: "var(--font-dm-sans)",
-                  fontSize: 11,
-                  fontWeight: 600,
-                  cursor: "pointer",
-                  whiteSpace: "nowrap",
-                }}
-              >
-                Book in background →
-              </button>
-            </div>
-          )}
-          {/* Step list */}
-          <div style={{ display: "flex", flexDirection: "column", gap: 12, marginBottom: allDone ? 20 : 0 }}>
-            {steps.map((step, i) => {
-              const state = stepStates[i];
-              const status = state?.status ?? "pending";
-
-              return (
-                <div
-                  key={i}
-                  style={{
-                    borderRadius: 12,
-                    border: `0.5px solid ${
-                      status === "done" ? "rgba(212,163,75,0.35)" :
-                      status === "no_availability" ? "rgba(251,191,36,0.4)" :
-                      status === "error" ? "rgba(239,68,68,0.3)" :
-                      "var(--border, #e5e7eb)"
-                    }`,
-                    backgroundColor: status === "done"
-                      ? "rgba(212,163,75,0.06)"
-                      : "var(--card-2, #f9f9f9)",
-                    padding: "12px 14px",
-                    display: "flex",
-                    gap: 12,
-                    alignItems: "flex-start",
-                  }}
-                >
-                  {/* Step icon */}
-                  <div style={{ flexShrink: 0, width: 28, textAlign: "center", marginTop: 1 }}>
-                    {status === "loading" ? (
-                      <SpinnerIcon />
-                    ) : status === "done" ? (
-                      <span style={{ color: "var(--gold, #D4A34B)", fontSize: 16 }}>✓</span>
-                    ) : status === "no_availability" ? (
-                      <span style={{ fontSize: 16 }}>⚠️</span>
-                    ) : status === "error" ? (
-                      <span style={{ fontSize: 16 }}>✗</span>
-                    ) : (
-                      <span style={{ color: "var(--text-muted, #aaa)", fontSize: 14 }}>{step.emoji}</span>
-                    )}
-                  </div>
-
-                  {/* Content */}
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <p
-                      style={{
-                        fontFamily: "var(--font-dm-sans)",
-                        fontSize: 13,
-                        fontWeight: 600,
-                        color: status === "pending" ? "var(--text-muted, #aaa)" : "var(--text-primary, #111)",
-                        marginBottom: 2,
-                      }}
-                    >
-                      {step.emoji} {step.label}
-                    </p>
-                    <p
-                      style={{
-                        fontFamily: "var(--font-dm-sans)",
-                        fontSize: 12,
-                        color: "var(--text-secondary, #666)",
-                      }}
-                    >
-                      {status === "loading" && (
-                        step.type === "flight"
-                          ? "Finding cheapest non-stop flight on Kayak…"
-                          : step.type === "hotel"
-                          ? "Navigating to hotel page on Booking.com…"
-                          : "Finding your table on OpenTable…"
-                      )}
-                      {status === "done" && (() => {
-                        const r = state.result;
-                        // During action: surface what the agent adjusted
-                        if (r?.selected_time && r.selected_time !== step.body?.time) {
-                          return <span style={{ color: "var(--gold, #D4A34B)" }}>↻ Agent adjusted time to {r.selected_time}</span>;
-                        }
-                        if (r?.selected_time) {
-                          return `Ready · ${step.type === "flight" ? "Departs " : ""}${r.selected_time}`;
-                        }
-                        return "Pre-filled and ready to confirm";
-                      })()}
-                      {status === "no_availability" && (
-                        state.result?.error ?? "No availability — search page ready"
-                      )}
-                      {status === "error" && (
-                        state.result?.error ?? "Couldn't complete — fallback link ready"
-                      )}
-                      {status === "pending" && "Waiting…"}
-                    </p>
-
-                    {/* Screenshot thumbnail */}
-                    {(status === "done" || status === "no_availability") && state.result?.screenshot_base64 && (
-                      <div
-                        style={{
-                          marginTop: 8,
-                          borderRadius: 8,
-                          overflow: "hidden",
-                          border: "0.5px solid var(--border, #e5e7eb)",
-                          maxHeight: 140,
-                        }}
-                      >
-                        {/* eslint-disable-next-line @next/next/no-img-element */}
-                        <img
-                          src={state.result.screenshot_base64}
-                          alt={`${step.label} booking page`}
-                          style={{ width: "100%", display: "block" }}
-                        />
-                      </div>
-                    )}
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-
-          {/* ── After action: what the agent learned ──────────────────────
-               Shown once all steps are complete. Surfaces what was adjusted
-               so the user understands what the agent will remember.      */}
-          {allDone && (() => {
-            const adjusted = stepStates.filter((s) =>
-              s.result?.selected_time && steps[stepStates.indexOf(s)]?.body?.time !== s.result.selected_time
-            );
-            const succeeded = stepStates.filter((s) => s.status === "done").length;
-            const failed    = stepStates.filter((s) => s.status === "no_availability" || s.status === "error").length;
-            if (succeeded === 0) return null;
-            return (
-              <div style={{
-                marginBottom: 16, padding: "12px 14px", borderRadius: 10,
-                background: "rgba(212,163,75,0.06)", border: "0.5px solid rgba(212,163,75,0.25)",
-              }}>
-                <p style={{ fontFamily: "var(--font-dm-sans)", fontSize: 11, fontWeight: 700,
-                  color: "var(--gold, #D4A34B)", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 6 }}>
-                  What the agent did
-                </p>
-                <p style={{ fontFamily: "var(--font-dm-sans)", fontSize: 12, color: "var(--text-secondary, #666)", marginBottom: 3 }}>
-                  ✓ {succeeded} step{succeeded !== 1 ? "s" : ""} pre-filled{adjusted.length > 0 ? ` · ${adjusted.length} time adjustment${adjusted.length !== 1 ? "s" : ""} made` : ""}
-                </p>
-                {failed > 0 && (
-                  <p style={{ fontFamily: "var(--font-dm-sans)", fontSize: 12, color: "var(--text-secondary, #666)" }}>
-                    ⚠ {failed} step{failed !== 1 ? "s" : ""} need manual booking
-                  </p>
-                )}
-                <p style={{ fontFamily: "var(--font-dm-sans)", fontSize: 11, color: "var(--text-muted, #aaa)", marginTop: 6 }}>
-                  Your feedback on these bookings trains the agent for next time.
-                </p>
-              </div>
-            );
-          })()}
-
-          {/* Final CTA */}
-          {allDone && doneWithUrls.length > 0 && (
-            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-              <button
-                onClick={openAllTabs}
-                style={{
-                  width: "100%",
-                  padding: "13px 20px",
-                  borderRadius: 12,
-                  border: "none",
-                  backgroundColor: "var(--gold, #D4A34B)",
-                  color: "#fff",
-                  fontFamily: "var(--font-dm-sans)",
-                  fontSize: 14,
-                  fontWeight: 600,
-                  cursor: "pointer",
-                }}
-              >
-                Open all booking tabs →
-              </button>
-
-              {/* Individual links */}
-              <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-                {doneWithUrls.map(({ step, state }, i) => (
-                  <button
-                    key={i}
-                    onClick={() => window.open(state.result!.handoff_url, "_blank")}
-                    style={{
-                      width: "100%",
-                      padding: "9px 14px",
-                      borderRadius: 10,
-                      border: "0.5px solid var(--border, #e5e7eb)",
-                      backgroundColor: "transparent",
-                      color: "var(--text-secondary, #666)",
-                      fontFamily: "var(--font-dm-sans)",
-                      fontSize: 12,
-                      cursor: "pointer",
-                      textAlign: "left",
-                      display: "flex",
-                      alignItems: "center",
-                      gap: 6,
-                    }}
-                  >
-                    <span>{step.emoji}</span>
-                    <span>Open {step.label} →</span>
-                  </button>
-                ))}
-              </div>
-            </div>
-          )}
-
-          {allDone && completedSteps.length === 0 && (
-            <div style={{ textAlign: "center", padding: "8px 0" }}>
-              <p style={{ fontFamily: "var(--font-dm-sans)", fontSize: 13, color: "var(--text-secondary, #666)" }}>
-                Autopilot couldn&apos;t complete any steps. Try booking manually.
-              </p>
-            </div>
-          )}
-          </>
-          )}
         </div>
       </div>
     </div>

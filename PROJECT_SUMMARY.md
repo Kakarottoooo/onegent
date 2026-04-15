@@ -1,5 +1,5 @@
 ================================================================
-Onegent · AI 决策代理 · 项目总结 · v0.2.24.0
+Onegent · AI 决策代理 · 项目总结 · v0.2.26.0
 ================================================================
 
 【项目定义】
@@ -41,6 +41,9 @@ Onegent · AI 决策代理 · 项目总结 · v0.2.24.0
   实现：lib/tools.ts — 全部并行调用，非致命性，任意工具失败不影响主流程。
   新增（v0.2.24.0）：Playwright 无头浏览器工具层 — 自动操作 Kayak / Booking.com /
   OpenTable，完成从搜索到预填结账页的全链路，不依赖任何官方 API。
+  新增（v0.2.26.0）：多 Provider 架构 — BrowserProvider 接口 + 注册表，支持
+  Booking.com / Expedia / Hotels.com / OpenTable / Resy / Yelp 六个平台，
+  餐厅预订多平台瀑布式回退链（OpenTable → Resy → Yelp → 官网直链）。
 
 第 4 层 · 候选生成层
   广泛拉取 → 规则初筛 → 语义过滤 → Top 10 漏斗式召回。
@@ -245,6 +248,57 @@ Onegent · AI 决策代理 · 项目总结 · v0.2.24.0
         · 手动预订行动按钮（当 agent 失败时）
         · "What's next" 摘要（明确告诉用户下一步做什么）
 
+  5.8 · 多 Provider 架构（v0.2.26.0）
+
+    在 v0.2.25.0 双层执行架构基础上，新增跨站点 Provider 抽象层：
+
+    BrowserProvider 接口（lib/booking-autopilot/providers/types.ts）：
+      · matchesUrl(url)         — 判断当前 URL 归属哪个平台
+      · getStageSignals(page)   — 快速规则检测当前阶段
+      · fillGuestForm()         — 填写客人信息表单
+      · fillPaymentForm()       — 填写支付字段（止步 CVC）
+      · setup()                 — 页面初始化（cookie 注入 / 搜索框禁用等）
+      · getBotPatterns()        — Bot 检测字符串列表
+
+    已注册 Provider（lib/booking-autopilot/providers/registry.ts）：
+      · booking-com   — Booking.com 酒店（原有，已接口化）
+      · expedia       — Expedia 酒店 + checkout
+      · hotels-com    — Hotels.com 酒店 + checkout（Expedia Group 同架构）
+      · opentable-com — OpenTable 餐厅时段选择（程序化，无 AI 配额消耗）
+      · resy-com      — Resy 餐厅预订
+      · yelp-com      — Yelp 餐厅链接 + 官网直链回退
+
+    Provider 注册后，executor 零改动即可支持新平台：
+      getProvider(url) → 返回对应 Provider，null 则降级为纯 AI 模式
+
+  5.9 · 餐厅预订自动化（v0.2.26.0）
+
+    餐厅预订瀑布式回退链（多平台兜底）：
+
+      1. OpenTable（程序化主路径）
+           · 构建 startUrl（city + cuisine + date/time/party）
+           · 程序化点击时段按钮（CDP 坐标点击，绕过 React 合成事件问题）
+           · 表单填写：name / email / phone（Playwright 原生 setter 兜底）
+           · 无结果时：展示 "Search on OpenTable →" 直链，不触发重试
+           · 无位时：提取可用时段列表 → 返回给用户选择，而非静默失败
+
+      2. Resy（OpenTable 不可用时）
+           · resy-com Provider：URL 匹配 + stage 检测 + guest form fill
+
+      3. Yelp（Resy 失败时）
+           · yelp-com Provider：定向导航到餐厅 Yelp 页面提取预订入口
+
+      4. Google Places 官网直链（最终回退）
+           · 调用 Google Places API 获取餐厅 official website
+           · 导航到官网寻找预订入口（Resy widget / OpenTable widget / 直订表单）
+
+    isGenuineBooking 校验：每个平台完成后校验，防止误判"成功"（如停在搜索页）
+
+    餐厅步骤 UI（RestaurantStepCard）：
+      · Tasks 页面 "＋ Restaurant" 按钮展开步骤卡
+      · 展示当前状态 / 平台 / 可用时段 / 手动预订备选链接
+      · no_availability 时显示 agent 发现的可用时段供用户直接点击
+
   5.7 · 两层执行架构：AI 主导 + Playwright 兜底（v0.2.25.0 重构）
 
     Autopilot 执行层采用 双层降级（AI-first, RPA-fallback）设计：
@@ -352,11 +406,16 @@ Onegent · AI 决策代理 · 项目总结 · v0.2.24.0
   ✅ My Trips 统一任务视图 — 决策日志 / 分级展示 / What's next（Phase 5）
   ✅ Agent 反馈闭环 — 接受/覆盖/满意度 + Agent Insights 面板（Phase 5）
   ✅ 27 个美国城市覆盖
+  ✅ 多 Provider 架构（BrowserProvider 接口 + 注册表，6 个平台 Provider）
+  ✅ 酒店预订扩展：Expedia + Hotels.com 自动化（listing → room → form → paused_payment）
+  ✅ 餐厅预订自动化：OpenTable + Resy + Yelp + 官网直链瀑布式回退
+  ✅ 餐厅 no_availability：提取可用时段展示给用户选择，不再静默失败
+  ✅ RecommendationCard 新增日期/时间选择器（直接在推荐卡选定后触发预订）
 
 还差什么（仅剩 3 个边界）：
-  ① 实时订位可用性 — 当前提供 OpenTable 深链接 + rid 查询端点，
-     但未内嵌可用时段 widget（需要 OpenTable 合作 rid 或可靠抓取方案）
-     目标：直接显示"20:00 还有 2 人位"，消灭最后一步跳出摩擦
+  ① 实时订位可用性 — agent 现已能抓取并展示 OpenTable 可用时段列表（no_availability
+     时）；但尚未做到在推荐阶段预取时段并直接展示"20:00 还有 2 人位"的原生嵌入
+     目标：主推荐卡实时展示可用时段，零跳出完成选座
 
   ② 分数调整激活 — 基础设施已就绪，等待真实数据积累
      条件：≥30 天 + ≥100 条 plan_outcomes，最早 2026-04-22 评估
@@ -472,6 +531,10 @@ AI：MiniMax（NLU + 评论信号解析 + 语义排序 + 双人约束合并）
        Claude Haiku（感知层）— 截图 + DOM → PerceptionResult（stage / nextAction）
        Playwright（RPA 兜底层）— locator.fill() / selectOption() / page.evaluate()
        两层降级架构：AI-first → Playwright fallback，每步独立控制
+       BrowserProvider 接口 + 注册表 — 6 个 Provider（Booking.com / Expedia /
+         Hotels.com / OpenTable / Resy / Yelp），executor 零改动可扩展新平台
+       CDP 坐标点击 — 解决 React 合成事件问题（OpenTable 时段点击）
+       isGenuineBooking 校验 — 防止平台回退链误判成功
        stealth 模式（禁用 AutomationControlled / navigator.webdriver 覆写）
        Cookie 持久化（.booking-cookies/{service}.json）
        Live Browser View — SSE 实时截图流 + canvas 双缓冲渲染（无闪烁）
@@ -484,7 +547,7 @@ AI：MiniMax（NLU + 评论信号解析 + 语义排序 + 双人约束合并）
 API 层：30+ 个路由端点
 Cron：4 个定时任务（反馈提示 / 价格检查 / 场馆质量 / 笔记本价格）
 测试：Vitest（22+ 个测试文件 · 100% 通过）
-版本：v0.2.25.0
+版本：v0.2.26.0
 
 ================================================================
 八、数据库（12 张表）
@@ -508,6 +571,18 @@ Cron：4 个定时任务（反馈提示 / 价格检查 / 场馆质量 / 笔记�
 ================================================================
 九、版本历史摘要
 ================================================================
+
+v0.2.26.0（2026-04-14）— 多 Provider 架构 + 餐厅预订自动化
+  · BrowserProvider 接口 + 注册表：booking-com / expedia / hotels-com / opentable / resy / yelp
+  · Expedia + Hotels.com 全链路自动化（listing → room → form → paused_payment）
+  · OpenTable 餐厅预订：程序化时段选择（CDP 坐标点击）+ 表单填写
+  · 餐厅多平台瀑布式回退：OpenTable → Resy → Yelp → Google Places 官网直链
+  · no_availability 时提取可用时段展示给用户，消灭静默失败
+  · isGenuineBooking 校验：防止回退链误判成功
+  · RestaurantStepCard 组件：Tasks 页面餐厅步骤展示
+  · RecommendationCard 新增日期/时间选择器
+  · Google Places 官网直链回退（替换旧版 Yelp 回退）
+  · 城市覆盖扩展至 47 个美国城市（+Nashville 等 20 城）
 
 v0.2.25.0（2026-04-08）— AI-first 两层执行架构 + Live View 优化
   · 重构 Autopilot 执行层：AI 主导 + Playwright 兜底双层降级
@@ -545,5 +620,133 @@ v0.2.14.0 — 真实评论结构化信号（noise / wait / dishes / red_flags）
 v0.2.13.0 — 场景引擎（Date Night / Weekend Trip / Big Purchase）
 v0.2.12.0 — Session 偏好提取（3.3a/b/c）
 v0.2.11.0 — 品类推荐引擎（餐厅 / 酒店 / 航班 / 信用卡 / 数码）
+
+================================================================
+十、支持场景一览
+================================================================
+
+## 🍽️ 餐厅
+
+| 场景 | 用户输入示例 | 输出 |
+|------|-------------|------|
+| 约会晚餐 | "周五晚上曼哈顿约会，$80/人，安静，不要连锁" | 主方案 + 2 备选 + 风险提示 |
+| 商务宴请 | "接待客户的高端中餐，包间，预算 $150/人" | 3 套方案 + 商务适配原因 |
+| 朋友聚餐 | "6 个人周六晚上吃日料，能喝酒聊天" | 方案 + 等位预期 + 是否需预约 |
+| 快速午餐 | "公司附近 15 分钟内能吃完的" | 快速选项 + 距离 + 出餐速度（S-1） |
+| 特殊饮食 | "素食友好的意大利餐厅" | 筛选后方案 + 菜单推荐 |
+| 过敏限制 | "有朋友对坚果过敏" | 过滤红旗 + 菜单安全说明 |
+
+## 🏨 酒店
+
+| 场景 | 用户输入示例 | 输出 |
+|------|-------------|------|
+| 商务出差 | "下周芝加哥出差，靠近会议中心，$200/晚" | 商务酒店方案 + WiFi/会议室评价 |
+| 周末度假 | "下个月去 LA 过周末，想轻松不折腾" | 3 套打包方案（酒店 + 餐厅 + 酒吧）|
+| 蜜月/纪念日 | "结婚周年去迈阿密，海景房，浪漫" | 奢华方案 + 套房/SPA 提权（S-2）|
+| 家庭出游 | "带两个孩子去奥兰多，靠近迪士尼" | 亲子酒店 + 泳池/儿童俱乐部（S-3）|
+
+## ✈️ 航班
+
+| 场景 | 用户输入示例 | 输出 |
+|------|-------------|------|
+| 经济出行 | "下周五纽约飞芝加哥，最便宜的" | 最低价方案 + 中转风险 + 行李政策 |
+| 红眼回避 | "不要太早或太晚的航班" | 过滤后方案 + 到达时间 + 酒店衔接（G-1）|
+| 时间限制 | "下午 5 点前必须到" | 最早不超过 7am / 最晚不超过 9pm 筛选 |
+
+## 💳 信用卡
+
+| 场景 | 用户输入示例 | 输出 |
+|------|-------------|------|
+| 旅行常客 | "每月机票 $2000，酒店 $1500" | 边际价值最高的卡 + 积分策略 |
+| 组合优化 | "我有 CSP 和 Amex Gold，还需要什么？" | 组合缺口分析 + 下一张卡建议（G-2）|
+| 开卡奖励 | "最近有什么好的开卡奖励？" | 当前最佳 SUB + 消费门槛可行性（S-4）|
+
+## 💻 数码
+
+| 场景 | 用户输入示例 | 输出 |
+|------|-------------|------|
+| 开发者 | "写代码用，不想太重，预算 $1800" | 默认推荐 + 为什么不是另外两台 |
+| 手机换新 | "从 iPhone 13 升级，预算 $1000" | 是否值得升级 + 最佳时机 + 旧机估价 |
+| 耳机 | "通勤降噪，偶尔跑步" | 场景匹配方案 + 舒适度评价 |
+
+## 🎵 活动票务
+
+| 场景 | 用户输入示例 | 输出 |
+|------|-------------|------|
+| 演唱会 | "周五晚 NYC，Taylor Swift 附近场次" | Ticketmaster 真实票源 + 购票链接 |
+| 爵士演出 | "想看爵士演出，Manhattan，这个月" | 最多 3 场（Top pick / 最具氛围 / 隐藏好场）|
+
+## 🎁 礼物 / 🏋️ 健身
+
+| 场景 | 用户输入示例 | 输出 |
+|------|-------------|------|
+| 生日礼物 | "给我妈买生日礼物，她喜欢园艺，$150" | 安全选 / 最走心 / 最有创意 + 购买链接 |
+| 瑜伽课 | "Brooklyn 周六早上瑜伽课，$25 以下" | 3 工作室 + ClassPass + Mindbody 备选 |
+
+## 🔄 持续协作 / 👫 双人决策
+
+| 场景 | 用户动作 | Onegent 响应 |
+|------|---------|-------------|
+| 单约束精炼 | "再便宜点" | 只更新价格约束，保留其他条件（S-5）|
+| 模块替换 | "换个酒店，航班不变" | 只重跑酒店模块（G-3）|
+| Decision Room | A 说"安静"，B 说"意大利" | 合并约束 → 候选卡 → 双方投票 |
+| 冲突协调 | A 素食 + B 必须有牛排 | 检测冲突 → 说明原因 → 最近方案 |
+
+================================================================
+十一、用户旅程示例
+================================================================
+
+### 场景 A：一个人约会规划（传统模式）
+
+```
+用户: "下周五约会，曼哈顿，$80/人，安静"
+  → Onegent 解析意图：date_night + restaurant + bar
+  → 并行搜索候选（Google Places + Tavily）
+  → 评分排序（评论信号 + 用户偏好）
+  → 组装方案：主方案 + 2 备选 + 餐后去处 + 风险
+
+用户: "换个便宜点的"
+  → Refinement：只更新价格约束，保留安静/Manhattan/日期
+
+用户: [点 Share]
+  → 生成分享链接 → 朋友打开 → "This works for me" → partner_approved
+
+用户: [点 Book everything →]
+  → Autopilot 启动 OpenTable
+  → 7pm 无位 → 自动尝试 7:30pm → 成功 ✓
+  → 推送: "Le Bernardin pre-filled at 7:30pm — open and pay"
+  → /trips → 展开决策日志 → 点 Open → 付款
+```
+
+### 场景 B：两人一起决策（Decision Room）
+
+```
+A: "安排一个周五约会，我不喜欢太吵的"
+  → 创建 Decision Room → 生成分享链接 → 发给 B
+
+B: [打开链接] 输入: "想吃意大利，不要等位"
+  → 合并约束：安静 + 意大利 + 不等位
+  → 无冲突 → 生成 3 张候选卡
+
+A 和 B 分别独立投票
+  → 双方都选了"Buccini" → "You both agreed on Buccini ✓"
+  → 事后反馈: A "Loved it" / B "Fine"
+```
+
+### 场景 C：周末旅行完整执行
+
+```
+用户: "下个月去 Chicago 过周末，预算 $900"
+  → 并行：航班 pipeline + 酒店 pipeline
+  → 配对组包：3 套方案 + 时间衔接检查 + 总价
+
+用户: "选套餐 A，帮我订"
+  → Autopilot:
+      ✈ Kayak → AA2341，返回 checkout 链接 ✓
+      🏨 Booking.com → Hotel X 预订页 ✓
+      🍽 OpenTable → 7pm 无位 → 7:30pm 自动调整 ✓
+  → 推送: "✈ 🏨 🍽 Your Chicago trip is ready — 3/3 pre-filled"
+  → /trips → 决策日志 → 3 个 Open 按钮 → 逐一付款
+```
 
 ================================================================

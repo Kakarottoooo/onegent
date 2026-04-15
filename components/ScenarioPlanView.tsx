@@ -305,7 +305,7 @@ export default function ScenarioPlanView({
           type: "flight",
           emoji: "✈",
           label: `${orig} → ${dest}`,
-          apiEndpoint: "/api/booking-autopilot/flight",
+          apiEndpoint: "/api/booking-autopilot/universal",
           body: {
             origin: route.origin,
             dest: route.dest,
@@ -339,7 +339,7 @@ export default function ScenarioPlanView({
           type: "hotel",
           emoji: "🏨",
           label: name,
-          apiEndpoint: "/api/booking-autopilot/hotel",
+          apiEndpoint: "/api/booking-autopilot/universal",
           body: {
             hotel_name: name,
             city: ctx.city ?? "",
@@ -373,7 +373,7 @@ export default function ScenarioPlanView({
           type: "restaurant",
           emoji: "🍽",
           label: name,
-          apiEndpoint: "/api/booking-autopilot/restaurant",
+          apiEndpoint: "/api/booking-autopilot/universal",
           body: {
             restaurant_name: name,
             city: ctx.city ?? "",
