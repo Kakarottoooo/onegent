@@ -173,6 +173,8 @@ export interface Message {
   scenario?: ScenarioType;
   category?: CategoryType;
   output_language?: OutputLanguage;
+  /** When set, renders an inline booking job card instead of plain text */
+  bookingJobId?: string;
 }
 
 export type ResultMode =

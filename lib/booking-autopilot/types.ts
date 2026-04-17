@@ -18,6 +18,15 @@ export interface BookingProfile {
   room_preference?: string;  // e.g. "king bed", "double queen", "suite", "twin"
   breakfast_preference?: boolean; // true = user prefers breakfast included
   bed_type?: string; // explicit bed type if different from room_preference
+  // Travel documents — required for flight booking
+  date_of_birth?: string;         // YYYY-MM-DD
+  nationality?: string;           // e.g. "Chinese", "American"
+  passport_number?: string;       // encrypted at rest
+  passport_expiry?: string;       // YYYY-MM-DD
+  passport_country?: string;      // issuing country, e.g. "CN", "US"
+  known_traveler_number?: string; // TSA PreCheck / Global Entry number
+  driver_license_number?: string; // encrypted at rest
+  driver_license_state?: string;  // issuing state/province
 }
 
 export interface RestaurantAutopilotRequest {
@@ -82,6 +91,12 @@ export interface BrowserTaskInput {
    * The executor will navigate here automatically instead of relying on the agent to detect errors.
    */
   fallbackUrl?: string;
+  /** For Expedia flight booking: target airline name to match on search results */
+  targetAirline?: string;
+  /** For Expedia flight booking: target price ($) to match */
+  targetPrice?: number;
+  /** For Expedia flight booking: target departure time to match */
+  targetDepartureTime?: string;
 }
 
 export type BrowserTaskStatus =

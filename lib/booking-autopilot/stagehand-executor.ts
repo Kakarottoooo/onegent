@@ -61,7 +61,7 @@ import {
   setBookingComRoomQuantity as providerSetBookingComRoomQuantity,
 } from "./providers/booking-com";
 import { determineFinalOutcome, NO_AVAILABILITY_SIGNALS } from "./core/final-outcome";
-import { fillGuestFormWithAI, auditAndRefillEmptyFields } from "./ai-loop/fill-form";
+import { fillGuestFormWithAI, fillFlightGuestFormWithAI, auditAndRefillEmptyFields } from "./ai-loop/fill-form";
 import { clickTargetListingAI, selectRoomAI } from "./ai-loop/find-listing";
 import { liveLogPush, liveLogClose, liveLogReset } from "../live-log-store";
 import {
@@ -94,6 +94,7 @@ import {
   clickAgreementCheckboxes,
   fillFieldsInScopes,
 } from "./shared/form-actions";
+import { bookExpediaFlightProgrammatic } from "./providers/expedia";
 
 type FieldSpec = { patterns: string[]; value: string };
 type AgentExecutionResult = {
@@ -744,6 +745,7 @@ KEY RULES:
 - Expedia room selection: rooms show a "Reserve" button (NOT a quantity dropdown). Click "Reserve" on the cheapest available room. A modal/dialog will appear — click "Reserve" inside the modal too to proceed to checkout.
 - Expedia checkout is a SINGLE PAGE with both guest info and payment fields inline (not in an iframe). Fill First name, Last name, Email fields, then Phone number (digits ONLY, no letters or state codes). Then fill card fields: "Name on card", card number (placeholder "0000 0000 0000 0000"), expiration date (placeholder "MM/YY"), billing ZIP code. STOP before Security code (CVV).
 - Expedia "Protect your stay" section: always select "No protection" / "I am willing to risk my stay" BEFORE filling card fields. This selection is required.
+- Expedia FLIGHT booking: On the flight search results page, find the target flight and click "Select". On seat selection pages, click "Skip seat selection" or "No thanks". On the checkout/traveler info page, fill First name, Last name, Date of birth, and passport details. STOP before entering CVV or clicking the final "Complete booking" / "Purchase" button.
 
 The user will enter CVV and confirm payment themselves.`,
     });
@@ -763,10 +765,14 @@ The user will enter CVV and confirm payment themselves.`,
     // Avenue Hotel instead of the target), tries to edit the search bar, and follows IHG/Marriott
     // logos to brand sites. The programmatic recovery flow (clickTargetListingAI → selectRoomAI
     // → fillExpediaGuestForm → fillExpediaGroupPaymentForm) handles Expedia correctly stage-by-stage.
+    // Expedia flight URLs are handled by programmatic RPA (bookExpediaFlightProgrammatic),
+    // not the AI agent. Skip the agent entirely for flight booking.
+    const isExpediaFlightUrl = (url: string) =>
+      /expedia\.com\/Flights/i.test(url) || /expedia\.com\/flights/i.test(url);
     const expediaPageOpen = !!(
-      getProvider(input.startUrl)?.id === 'expedia' ||
-      getProvider(landedUrlAfterSetup)?.id === 'expedia' ||
-      openPageUrls.find((u) => u && getProvider(u)?.id === 'expedia')
+      (!isExpediaFlightUrl(input.startUrl) && getProvider(input.startUrl)?.id === 'expedia') ||
+      (!isExpediaFlightUrl(landedUrlAfterSetup) && getProvider(landedUrlAfterSetup)?.id === 'expedia') ||
+      openPageUrls.find((u) => u && !isExpediaFlightUrl(u) && getProvider(u)?.id === 'expedia')
     );
     // Hotels.com: same as Expedia — skip the initial AI agent run. The AI agent navigates to
     // wrong hotels (e.g. Artezen Hotel instead of 414 Hotel) because it clicks the first result
@@ -794,10 +800,11 @@ The user will enter CVV and confirm payment themselves.`,
       getProvider(landedUrlAfterSetup)?.id === 'yelp-com' ||
       openPageUrls.find((u) => u && getProvider(u)?.id === 'yelp-com')
     );
-    const skipInitialAgent = bookingComPageOpen || expediaPageOpen || hotelsComPageOpen || openTablePageOpen || resyPageOpen || yelpPageOpen;
+    const expediaFlightPageOpen = isExpediaFlightUrl(input.startUrl);
+    const skipInitialAgent = bookingComPageOpen || expediaPageOpen || hotelsComPageOpen || openTablePageOpen || resyPageOpen || yelpPageOpen || expediaFlightPageOpen;
     const initialMaxSteps = skipInitialAgent ? 0 : 40;
 
-    const skipProviderLabel = bookingComPageOpen ? 'Booking.com' : expediaPageOpen ? 'Expedia' : hotelsComPageOpen ? 'Hotels.com' : openTablePageOpen ? 'OpenTable' : resyPageOpen ? 'Resy' : yelpPageOpen ? 'Yelp' : '';
+    const skipProviderLabel = bookingComPageOpen ? 'Booking.com' : expediaPageOpen ? 'Expedia' : hotelsComPageOpen ? 'Hotels.com' : openTablePageOpen ? 'OpenTable' : resyPageOpen ? 'Resy' : yelpPageOpen ? 'Yelp' : expediaFlightPageOpen ? 'Expedia Flight' : '';
     trace(`Agent starting main run (maxSteps=${initialMaxSteps}, model=${modelName})${skipInitialAgent ? ` [${skipProviderLabel} detected: agent.execute disabled, using programmatic flow only]` : ""}`);
     const t0 = Date.now();
     const result = initialMaxSteps === 0
@@ -842,7 +849,7 @@ The user will enter CVV and confirm payment themselves.`,
     // Detect fatal API errors (out of credits, invalid key, quota exceeded).
     // Continuing the recovery loop is pointless —?every agent call will fail too.
     const fatalApiError =
-      /credit balance is too low|insufficient_quota|invalid.{0,20}api.{0,20}key|rate limit exceeded|payment required|quota exceeded|credits? exhausted|billing error|billing issue|browser minutes limit/i.test(mainMsg);
+      /credit balance is too low|insufficient_quota|invalid.{0,20}api.{0,20}key|rate limit exceeded|payment required|quota exceeded|exceeded your current quota|credits? exhausted|billing error|billing issue|browser minutes limit/i.test(mainMsg);
     if (fatalApiError) {
       return {
         status: "error" as const,
@@ -860,6 +867,99 @@ The user will enter CVV and confirm payment themselves.`,
     let agentMessage = (result.message ?? "").toLowerCase();
     let currentUrl = await resolveCurrentUrl(raw, stagehand, input.startUrl);
     const sessionUrl = useCloud ? stagehand.browserbaseSessionURL : undefined;
+
+    // ── Expedia flight programmatic RPA ──────────────────────────────────────────
+    // Bypasses the AI agent entirely. Programmatically: find flight → select fare →
+    // dismiss bundle popup → skip to checkout → fill passenger info → stop before CVV.
+    if (isExpediaFlightUrl(input.startUrl)) {
+      const screenshotBuf = await raw.screenshot({ type: "jpeg", quality: 55 }).catch(() => null);
+      const screenshotBase64 = screenshotBuf?.toString("base64") ?? "";
+
+      try {
+        const flightProfile = {
+          first_name: input.profile.first_name,
+          last_name: input.profile.last_name,
+          email: input.profile.email,
+          phone: input.profile.phone,
+          date_of_birth: input.profile.date_of_birth,
+          passport_number: input.profile.passport_number,
+          passport_expiry: input.profile.passport_expiry,
+          passport_country: input.profile.passport_country,
+          known_traveler_number: input.profile.known_traveler_number,
+        };
+
+        const targetAirline = input.targetAirline;
+        const targetPrice = input.targetPrice;
+        const targetDepartureTime = input.targetDepartureTime;
+
+        trace(`[flight-rpa] Starting programmatic flight booking: airline="${targetAirline}" price=$${targetPrice} time="${targetDepartureTime}"`);
+
+        const getAllPages = (): Page[] =>
+          stagehand.context.pages().map((p: unknown) => getRawPage(p));
+
+        const rpaResult = await bookExpediaFlightProgrammatic(
+          raw, flightProfile, targetAirline, targetPrice, targetDepartureTime, trace, getAllPages, stagehand
+        );
+
+        const finalScreenshot = await raw.screenshot({ type: "jpeg", quality: 55 }).catch(() => null);
+        const finalScreenshotBase64 = finalScreenshot?.toString("base64") ?? screenshotBase64;
+
+        if (rpaResult.reached_checkout) {
+          // Use activePage (may be a new tab Expedia opened for review/checkout)
+          const checkoutPage = rpaResult.activePage ?? raw;
+
+          // ── AI form fill: passenger info + travel documents ──────────────
+          trace("[flight-rpa] Checkout reached — running AI form fill");
+          const effectiveFlightProfile = buildEffectiveProfile(input.profile, input.task);
+          try {
+            const fillResult = await fillFlightGuestFormWithAI(stagehand, effectiveFlightProfile, trace);
+            trace(`[flight-rpa] AI fill: filled=${fillResult.filled.join(",")} failed=${fillResult.failed.join(",")}`);
+          } catch (fillErr) {
+            trace(`[flight-rpa] AI fill error: ${(fillErr as Error).message?.slice(0, 80)}`);
+          }
+          // ── AI audit: re-fill any fields AI missed ────────────────────
+          try {
+            const auditResult = await auditAndRefillEmptyFields(stagehand, checkoutPage, effectiveFlightProfile, trace);
+            trace(`[flight-rpa] Audit refill: ${auditResult.refilled.join(",") || "none"}`);
+          } catch (auditErr) {
+            trace(`[flight-rpa] Audit error: ${(auditErr as Error).message?.slice(0, 80)}`);
+          }
+
+          const postFillScreenshot = await checkoutPage.screenshot({ type: "jpeg", quality: 55 }).catch(() => null);
+          const checkoutUrl = (() => { try { return (checkoutPage as unknown as { url: () => string }).url(); } catch { return rpaResult.currentUrl || input.startUrl; } })();
+          return {
+            status: "paused_payment" as const,
+            screenshotBase64: postFillScreenshot?.toString("base64") ?? finalScreenshotBase64,
+            handoffUrl: checkoutUrl || rpaResult.currentUrl || input.startUrl,
+            sessionUrl,
+            summary: "Flight passenger info pre-filled by AI — open to review and complete payment.",
+            debugTrace,
+          };
+        }
+
+        return {
+          status: "error" as const,
+          screenshotBase64: finalScreenshotBase64,
+          handoffUrl: input.startUrl,
+          sessionUrl,
+          summary: rpaResult.error ?? "Couldn't navigate to flight checkout. Open the link to book manually.",
+          error: rpaResult.error ?? "Flight booking RPA did not reach checkout.",
+          debugTrace,
+        };
+      } catch (rpaErr) {
+        trace(`[flight-rpa] Unexpected error: ${(rpaErr as Error).message?.slice(0, 120)}`);
+        return {
+          status: "error" as const,
+          screenshotBase64,
+          handoffUrl: input.startUrl,
+          sessionUrl,
+          summary: "Flight booking encountered an error. Open the link to book manually.",
+          error: (rpaErr as Error).message?.slice(0, 200) ?? "Flight RPA error",
+          debugTrace,
+        };
+      }
+    }
+    // ── End Expedia flight RPA ─────────────────────────────────────────────────
 
     const p = buildEffectiveProfile(input.profile, input.task);
     const hasProfile = !!(p.full_name || p.first_name || p.last_name || p.email || p.phone);
@@ -4432,7 +4532,8 @@ The user will enter CVV and confirm payment themselves.`,
           // Expedia/Hotels.com use this to avoid browser autocomplete mis-filling fields.
           if (provider.fillGuestForm) {
             trace("[RPA] Provider has fillGuestForm override — using programmatic fill instead of AI.");
-            await provider.fillGuestForm(raw, p, bookingComHelpers, trace);
+            const enrichedHelpers = { ...bookingComHelpers, stagehand, rawPage: raw };
+            await provider.fillGuestForm(raw, p, enrichedHelpers, trace);
             await new Promise(r => setTimeout(r, 600));
           } else {
           trace("Booking.com guest form — AI fill mode (AI_LOOP_FORM_FILL=true).");

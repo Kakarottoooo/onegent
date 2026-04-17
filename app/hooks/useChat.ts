@@ -72,6 +72,7 @@ export function useChat({
   const [suggestedRefinements, setSuggestedRefinements] = useState<string[]>([]);
   const [allHotelCards, setAllHotelCards] = useState<HotelRecommendationCard[]>([]);
   const [hotelDates, setHotelDates] = useState<{ check_in?: string; check_out?: string; guests?: number } | null>(null);
+  const [flightBookingContext, setFlightBookingContext] = useState<{ date?: string; return_date?: string; passengers?: number; cabin_class?: string; is_round_trip?: boolean } | null>(null);
   const [allFlightCards, setAllFlightCards] = useState<FlightRecommendationCard[]>([]);
   const [allCreditCardCards, setAllCreditCardCards] = useState<CreditCardRecommendationCard[]>([]);
   const [allLaptopCards, setAllLaptopCards] = useState<LaptopRecommendationCard[]>([]);
@@ -194,9 +195,8 @@ export function useChat({
       setActiveCuisine(null);
       setViewMode("list");
       setSuggestedRefinements([]);
-      setAllHotelCards([]);
-      setHotelDates(null);
-      setAllFlightCards([]);
+      // Don't clear flight/hotel cards here — they persist until replaced by new results
+      // of the same category. Only clear same-category results when new ones arrive in SSE.
       setAllCreditCardCards([]);
       setAllLaptopCards([]);
       setAllSmartphoneCards([]);
@@ -402,8 +402,32 @@ export function useChat({
                   setDecisionPlan(plan);
                   setAllCards(event.recommendations ?? []);
                   setVisibleCards(event.recommendations ?? []);
-                  setAllHotelCards(event.hotelRecommendations ?? []);
-                  setAllFlightCards(event.flightRecommendations ?? []);
+                  if ((event.hotelRecommendations ?? []).length > 0) {
+                    setAllHotelCards(event.hotelRecommendations!);
+                    // Set hotel dates from the plan's autopilot_context for "Book with Agent" to work
+                    const hCtx = plan.autopilot_context;
+                    if (hCtx?.start_date) {
+                      setHotelDates({
+                        check_in: hCtx.start_date,
+                        check_out: hCtx.end_date,
+                        guests: hCtx.travelers ?? 1,
+                      });
+                    }
+                  }
+                  if ((event.flightRecommendations ?? []).length > 0) {
+                    setAllFlightCards(event.flightRecommendations!);
+                    // Set flight booking context from the plan's autopilot_context if available
+                    const ctx = plan.autopilot_context;
+                    if (ctx?.start_date) {
+                      setFlightBookingContext({
+                        date: ctx.start_date,
+                        return_date: ctx.end_date,
+                        passengers: ctx.travelers ?? 1,
+                        cabin_class: "economy",
+                        is_round_trip: !!(ctx.end_date),
+                      });
+                    }
+                  }
                   setAllCreditCardCards(event.creditCardRecommendations ?? []);
 
                   const assistantMessage: Message = {
@@ -498,6 +522,8 @@ export function useChat({
                 } else if (category === "flight") {
                   const flightRecs: FlightRecommendationCard[] = event.flightRecommendations ?? [];
                   const missingFields: string[] = event.missing_flight_fields ?? [];
+                  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                  const fIntent = (event.requirements ?? {}) as any;
 
                   if (missingFields.length > 0) {
                     setMessages((prev) => [
@@ -520,6 +546,16 @@ export function useChat({
                       },
                     ]);
                   } else {
+                    // Only set context when we have real results with a valid date
+                    if (fIntent.date) {
+                      setFlightBookingContext({
+                        date: fIntent.date,
+                        return_date: fIntent.return_date,
+                        passengers: fIntent.passengers ?? 1,
+                        cabin_class: fIntent.cabin_class ?? "economy",
+                        is_round_trip: fIntent.is_round_trip ?? false,
+                      });
+                    }
                     const assistantMessage: Message = {
                       role: "assistant",
                       content: buildFlightFoundCopy(
@@ -770,6 +806,7 @@ export function useChat({
         allHotelCards,
         hotelDates,
         allFlightCards,
+        flightBookingContext,
         allCreditCardCards,
         allLaptopCards,
         allSmartphoneCards,
@@ -804,6 +841,7 @@ export function useChat({
         if (p.allHotelCards?.length) setAllHotelCards(p.allHotelCards);
         if (p.hotelDates) setHotelDates(p.hotelDates);
         if (p.allFlightCards?.length) setAllFlightCards(p.allFlightCards);
+        if (p.flightBookingContext) setFlightBookingContext(p.flightBookingContext);
         if (p.allCreditCardCards?.length) setAllCreditCardCards(p.allCreditCardCards);
         if (p.allLaptopCards?.length) setAllLaptopCards(p.allLaptopCards);
         if (p.allSmartphoneCards?.length) setAllSmartphoneCards(p.allSmartphoneCards);
@@ -897,6 +935,55 @@ export function useChat({
     });
   }
 
+  function clearChat() {
+    // Clear all sessionStorage cache entries for this prefix
+    if (typeof window !== "undefined") {
+      Object.keys(sessionStorage)
+        .filter((k) => k.startsWith("chat_results:"))
+        .forEach((k) => sessionStorage.removeItem(k));
+      // Remove the ?q= URL param and reload
+      const url = new URL(window.location.href);
+      url.searchParams.delete("q");
+      window.history.replaceState({}, "", url.toString());
+    }
+    // Reset all chat state
+    setMessages([]);
+    setVisibleCards([]);
+    setAllCards([]);
+    setAllHotelCards([]);
+    setHotelDates(null);
+    setAllFlightCards([]);
+    setFlightBookingContext(null);
+    setAllCreditCardCards([]);
+    setAllLaptopCards([]);
+    setAllSmartphoneCards([]);
+    setAllHeadphoneCards([]);
+    setResultCategory("restaurant");
+    setResultMode("category_cards");
+    setDecisionPlan(null);
+    setInput("");
+    setActivePrice(null);
+    setActiveCuisine(null);
+    setSuggestedRefinements([]);
+    setSessionPreferences(DEFAULT_SESSION_PREFS);
+    latestRequestIdRef.current = null;
+  }
+
+  function addBookingJobMessage(jobId: string) {
+    setMessages((prev) => [
+      ...prev,
+      { role: "assistant", content: "", bookingJobId: jobId },
+    ]);
+  }
+
+  function injectAssistantMessage(content: string) {
+    setMessages((prev) => [...prev, { role: "assistant", content }]);
+  }
+
+  function injectUserMessage(content: string) {
+    setMessages((prev) => [...prev, { role: "user", content }]);
+  }
+
   return {
     messages,
     input,
@@ -908,6 +995,7 @@ export function useChat({
     allHotelCards,
     hotelDates,
     allFlightCards,
+    flightBookingContext,
     allCreditCardCards,
     allLaptopCards,
     laptopDbGapWarning,
@@ -928,6 +1016,10 @@ export function useChat({
     priceOptions,
     cuisineOptions,
     sendMessage,
+    clearChat,
+    addBookingJobMessage,
+    injectAssistantMessage,
+    injectUserMessage,
     shareResults,
     sessionPreferences,
     isStreaming,

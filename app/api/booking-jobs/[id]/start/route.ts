@@ -387,26 +387,56 @@ async function runUniversalStep(
     }
   }
 
-  // ── Flight steps: build Kayak startUrl + task if not already set ──
-  // step.body for flight steps contains: origin, dest, date, returnDate, passengers.
+  // ── Flight steps: build Expedia startUrl + task if not already set ──
+  // step.body for flight steps contains: origin, dest, date, returnDate, passengers, cabinClass.
   if (step.type === "flight" && !resolvedBody.startUrl) {
     const fOrigin = resolvedBody.origin as string | undefined;
     const fDest = resolvedBody.dest as string | undefined;
     const fDate = resolvedBody.date as string | undefined;
     const fReturn = resolvedBody.returnDate as string | undefined;
     const fPax = (resolvedBody.passengers as number | undefined) ?? 1;
+    const fCabin = (resolvedBody.cabinClass as string | undefined) ?? "economy";
+    const fPreferNonstop = (resolvedBody.preferNonstop as boolean | undefined) ?? false;
 
     if (fOrigin && fDest && fDate) {
-      const kayakUrl = fReturn
-        ? `https://www.kayak.com/flights/${fOrigin}-${fDest}/${fDate}/${fReturn}/${fPax}adults/economy`
-        : `https://www.kayak.com/flights/${fOrigin}-${fDest}/${fDate}/${fPax}adults/economy`;
-      resolvedBody = { ...resolvedBody, startUrl: kayakUrl };
+      // Use Expedia for flight booking — shares same guest/payment form logic as hotel booking
+      const tripType = fReturn ? "roundtrip" : "oneway";
+      const cabinMap: Record<string, string> = { economy: "coach", business: "business", first: "first", premium_economy: "premiumcoach" };
+      const expediaCabin = cabinMap[fCabin] ?? "coach";
+      const expediaUrl = `https://www.expedia.com/Flights-Search?trip=${tripType}&leg1=from:${fOrigin},to:${fDest},departure:${fDate}TANYT${fReturn ? `&leg2=from:${fDest},to:${fOrigin},departure:${fReturn}TANYT` : ""}&passengers=adults:${fPax}&options=cabinclass:${expediaCabin}&mode=search`;
+      resolvedBody = { ...resolvedBody, startUrl: expediaUrl };
 
       if (!resolvedBody.task) {
-        const returnStr = fReturn ? ` Return flight on ${fReturn}.` : "";
+        const returnStr = fReturn ? ` Return on ${fReturn}.` : "";
+        const targetAirline = resolvedBody.targetAirline as string | undefined;
+        const targetPrice = resolvedBody.targetPrice as number | undefined;
+        const targetDepartureTime = resolvedBody.targetDepartureTime as string | undefined;
+        const targetFlightNumber = resolvedBody.targetFlightNumber as string | undefined;
+        // Build a specific flight identifier so the agent targets the right flight card
+        const flightId = [
+          targetAirline,
+          targetDepartureTime ? `departing ${targetDepartureTime}` : "",
+          targetPrice ? `priced at $${targetPrice}` : "",
+          targetFlightNumber ? `flight number ${targetFlightNumber}` : "",
+        ].filter(Boolean).join(", ");
+        const flightDesc = flightId
+          ? `the ${flightId}`
+          : `a ${fCabin} class flight from ${fOrigin} to ${fDest}`;
+
         resolvedBody = {
           ...resolvedBody,
-          task: `Find the cheapest economy flight from ${fOrigin} to ${fDest} on ${fDate} for ${fPax} passenger${fPax !== 1 ? "s" : ""}.${returnStr} Select the best option and proceed to checkout. Stop before entering payment information.`,
+          _flightTaskBase: [
+            `This is a FLIGHT BOOKING task on Expedia. You are on the Expedia flight search results page.`,
+            `EXACT STEPS — follow in order:`,
+            `1. FIND FLIGHT: Locate ${flightDesc} departing ${fDate}${returnStr}. Scroll through the list to find a flight card that matches the airline name and price.`,
+            `2. CLICK FLIGHT: Click that flight card to open the fare selection panel/popup.`,
+            `3. SELECT FARE: In the fare popup that appears, choose the cheapest/first option (e.g. "Blue Basic", "Basic Economy", or the lowest-priced fare shown). Click the "Select" button on that fare.`,
+            `4. DISMISS BUNDLE POPUP: If a "Bundle & Save" or car rental popup appears, click "No thanks" to dismiss it.`,
+            `5. REVIEW PAGE: You will land on a "Review your trip" page. Click "Skip to Checkout" (NOT "Next: Seats"). If only "Next: Seats" is visible, click it — but then on the Seats page click "Next: Checkout" to proceed without selecting a seat.`,
+            `6. FILL PASSENGER INFO: On the checkout/traveler info page, fill in all required fields (first name, last name, email, phone, date of birth, passport number if required).`,
+            `7. STOP before entering the CVV or clicking the final "Complete booking" / "Purchase" button.`,
+            `Do NOT navigate to hotels, do NOT use hotel booking steps.`,
+          ].join(" "),
         };
       }
     }
@@ -429,7 +459,7 @@ async function runUniversalStep(
 
       if (dbProfile) {
         // Prefer inline profile for contact info (always up-to-date from picker),
-        // but add card data from DB (card number never stored inline).
+        // but add card data + travel docs from DB (sensitive fields never stored inline).
         const inline = (resolvedBody.profile ?? {}) as Record<string, string | undefined>;
         resolvedBody = {
           ...resolvedBody,
@@ -446,8 +476,47 @@ async function runUniversalStep(
             card_name: dbProfile.card_name,
             card_number: dbProfile.card_number,
             card_expiry: dbProfile.card_expiry,
+            // Travel documents — from DB only (encrypted, never in inline body)
+            date_of_birth: dbProfile.date_of_birth,
+            nationality: dbProfile.nationality,
+            passport_number: dbProfile.passport_number,
+            passport_expiry: dbProfile.passport_expiry,
+            passport_country: dbProfile.passport_country,
+            known_traveler_number: dbProfile.known_traveler_number,
+            driver_license_number: dbProfile.driver_license_number,
+            driver_license_state: dbProfile.driver_license_state,
           },
         };
+
+        // ── Flight travel doc check ─────────────────────────────────────────
+        // If this is a flight step and passport is missing, fail early with a clear message.
+        if (step.type === "flight" && !dbProfile.passport_number) {
+          const missingDocs: string[] = [];
+          if (!dbProfile.passport_number) missingDocs.push("passport number");
+          if (!dbProfile.date_of_birth) missingDocs.push("date of birth");
+          const missingMsg = `Missing travel documents: ${missingDocs.join(", ")} required for flight booking. Please add these in Settings → My Profile → Travel Documents, then try booking again.`;
+          return {
+            ...step,
+            status: "error",
+            error: missingMsg,
+            decisionLog: [...log, { type: "error" as const, message: `[travel-doc-check] Missing: ${missingDocs.join(", ")}` }],
+          } as unknown as BookingJobStep;
+        }
+
+        // ── Finalize flight task with travel doc info (now that DB profile is merged) ──
+        if (step.type === "flight" && resolvedBody._flightTaskBase) {
+          const mergedProfile = resolvedBody.profile as Record<string, string | undefined> | undefined;
+          const docStr = mergedProfile?.passport_number
+            ? ` Passenger passport: ${mergedProfile.passport_number}, expires ${mergedProfile.passport_expiry ?? "unknown"}${mergedProfile.passport_country ? `, issued by ${mergedProfile.passport_country}` : ""}.`
+            : "";
+          const dobStr = mergedProfile?.date_of_birth ? ` Date of birth: ${mergedProfile.date_of_birth}.` : "";
+          const ktnStr = mergedProfile?.known_traveler_number ? ` Known Traveler Number (TSA PreCheck): ${mergedProfile.known_traveler_number}.` : "";
+          resolvedBody = {
+            ...resolvedBody,
+            task: `${resolvedBody._flightTaskBase as string}${docStr}${dobStr}${ktnStr} Stop before entering payment card information.`,
+          };
+          delete resolvedBody._flightTaskBase;
+        }
       } else {
         // Log for debugging — profile not found by id or default
         await writeAgentLog({
@@ -476,11 +545,13 @@ async function runUniversalStep(
       startUrl: resolvedBody.startUrl as string,
       task: resolvedBody.task as string,
       profile: (resolvedBody.profile ?? { first_name: "", last_name: "", email: "", phone: "" }) as BrowserTaskInput["profile"],
-      // Keep the live-browser session key aligned with the Tasks UI, which
-      // connects to /api/browser-live/<job.id>/... for inline interaction.
       jobId: bookingJobId,
       stepIndex: (resolvedBody.stepIndex as number | undefined) ?? 0,
       agentModel: resolvedBody.agentModel as BrowserTaskInput["agentModel"] | undefined,
+      // Flight targeting hints — passed through to programmatic RPA
+      targetAirline: resolvedBody.targetAirline as string | undefined,
+      targetPrice: resolvedBody.targetPrice as number | undefined,
+      targetDepartureTime: resolvedBody.targetDepartureTime as string | undefined,
     };
 
     // Call runBrowserTask directly — avoids the self-HTTP fetch that fails when

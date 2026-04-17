@@ -1,6 +1,9 @@
+import fs from "fs";
+import path from "path";
 import type { Frame, Page } from "playwright";
 import { registerProvider } from "./registry";
 import type { BrowserProvider, ProviderStageSignals } from "./types";
+import { safeMouseClick } from "../shared/playwright-safe";
 
 // Selectors for Expedia Group payment fields (used by both Expedia and Hotels.com)
 // Expedia inline payment form (not iframe) — placeholder-based selectors are most reliable.
@@ -1411,6 +1414,1137 @@ export async function fillExpediaGroupPaymentForm(
   trace(`Expedia payment verification: name=${nameOk}, cardNumber=${numberOk}, expiry=${expiryOk}`);
 }
 
+// ── Programmatic Expedia flight booking ────────────────────────────────────────
+// Fully replaces the AI agent for Expedia flight booking.
+// Flow: find flight → select fare popup → dismiss bundle popup → skip to checkout → fill info
+
+export interface FlightBookingProfile extends ExpediaGuestProfile {
+  date_of_birth?: string;
+  passport_number?: string;
+  passport_expiry?: string;
+  passport_country?: string;
+  known_traveler_number?: string;
+  nationality?: string;
+}
+
+export async function bookExpediaFlightProgrammatic(
+  page: Page,
+  profile: FlightBookingProfile,
+  targetAirline: string | undefined,
+  targetPrice: number | undefined,
+  targetDepartureTime: string | undefined,
+  trace: (msg: string) => void,
+  /** Optional: returns all open pages so we can switch to a newly opened tab */
+  getAllPages?: () => Page[],
+  /** Optional: Stagehand instance for Attempt C fallback on fare-commit */
+  stagehand?: { act: (s: string) => Promise<unknown> },
+): Promise<{ reached_checkout: boolean; currentUrl: string; activePage?: Page; error?: string }> {
+  let activePage = page; // may be updated if Expedia opens review in new tab
+
+  const getUrl = () => {
+    try { return (activePage as unknown as { url: () => string }).url(); } catch { return ""; }
+  };
+
+  // ── Debug: screenshot helper (writes to .debug-screenshots/<run-id>/) ───
+  const debugRunId = `flight-rpa-${Date.now()}`;
+  const debugDir = path.join(process.cwd(), ".debug-screenshots", debugRunId);
+  try { fs.mkdirSync(debugDir, { recursive: true }); } catch { /* ignore */ }
+  const safeScreenshot = async (label: string): Promise<void> => {
+    try {
+      const p = path.join(debugDir, `${label}.jpg`);
+      await (activePage as unknown as { screenshot: (o: { path: string; type: string; quality: number }) => Promise<Buffer> })
+        .screenshot({ path: p, type: "jpeg", quality: 55 });
+      trace(`[flight-rpa] 📸 ${label} → ${p}`);
+    } catch (err) {
+      trace(`[flight-rpa] screenshot(${label}) failed: ${(err as Error).message?.slice(0, 80)}`);
+    }
+  };
+
+  // ── Step 1: Wait for flight results ───────────────────────────────────────
+  const enforceOneWayTripUi = async (): Promise<void> => {
+    const url = getUrl().toLowerCase();
+    if (!url.includes("trip=oneway")) return;
+
+    const tripState = await page.evaluate(() => {
+      const tabs = Array.from(document.querySelectorAll<HTMLElement>('button, a, [role="tab"], [role="button"]'))
+        .filter(el => {
+          const text = (el.textContent ?? "").trim().toLowerCase();
+          const r = el.getBoundingClientRect();
+          return r.width > 0 && r.height > 0 &&
+            (text === "roundtrip" || text === "one-way" || text === "multi-city");
+        })
+        .map(el => ({
+          text: (el.textContent ?? "").trim(),
+          ariaSelected: el.getAttribute("aria-selected"),
+          ariaPressed: el.getAttribute("aria-pressed"),
+          ariaCurrent: el.getAttribute("aria-current"),
+          className: (el.getAttribute("class") ?? "").toLowerCase(),
+        }));
+
+      const active = tabs.find(tab =>
+        tab.ariaSelected === "true" ||
+        tab.ariaPressed === "true" ||
+        tab.ariaCurrent === "page" ||
+        /\bselected\b|\bactive\b|\buitk-tab-selected\b/.test(tab.className)
+      );
+
+      return {
+        tabs: tabs.map(tab => tab.text),
+        activeText: active?.text ?? "",
+      };
+    }).catch(() => ({ tabs: [] as string[], activeText: "" }));
+
+    trace(`[flight-rpa] Trip UI before enforce: tabs="${tripState.tabs.join(" | ")}" active="${tripState.activeText || "(unknown)"}"`);
+    if (tripState.activeText.toLowerCase() === "one-way") return;
+
+    const clicked = await page.evaluate(() => {
+      const target = Array.from(document.querySelectorAll<HTMLElement>('button, a, [role="tab"], [role="button"]'))
+        .find(el => {
+          const text = (el.textContent ?? "").trim().toLowerCase();
+          const r = el.getBoundingClientRect();
+          return text === "one-way" && r.width > 0 && r.height > 0;
+        });
+      if (!target) return false;
+      target.scrollIntoView({ block: "center", behavior: "instant" as ScrollBehavior });
+      target.click();
+      return true;
+    }).catch(() => false);
+
+    trace(`[flight-rpa] Trip UI enforce one-way: clicked=${clicked}`);
+    if (clicked) await new Promise(r => setTimeout(r, 1200));
+  };
+
+  const dismissForcedChoiceDatePicker = async (): Promise<boolean> => {
+    const dismissed = await page.evaluate(() => {
+      const dialogs = Array.from(document.querySelectorAll<HTMLElement>('[role="dialog"], [aria-modal="true"], dialog'))
+        .filter(el => {
+          const r = el.getBoundingClientRect();
+          return r.width > 200 && r.height > 200;
+        });
+
+      const dialog = dialogs.find(el => {
+        const text = (el.textContent ?? "").toLowerCase();
+        return text.includes("pick-up date") ||
+          text.includes("drop-off date") ||
+          (text.includes("done") && (text.includes("may 2026") || text.includes("june 2026")));
+      });
+      if (!dialog) return false;
+
+      const closeBtn = dialog.querySelector<HTMLElement>(
+        '#forced-choice-modal-dismiss-btn, button[aria-label*="close" i], button[title*="close" i], button[data-testid*="close" i]'
+      );
+      if (closeBtn) {
+        closeBtn.click();
+        return true;
+      }
+
+      const doneBtn = Array.from(dialog.querySelectorAll<HTMLElement>('button, a'))
+        .find(el => (el.textContent ?? "").trim().toLowerCase() === "done");
+      if (doneBtn) {
+        doneBtn.click();
+        return true;
+      }
+
+      return false;
+    }).catch(() => false);
+
+    if (dismissed) {
+      trace("[flight-rpa] Closed forced-choice date picker");
+      await new Promise(r => setTimeout(r, 1000));
+    }
+    return dismissed;
+  };
+
+  await enforceOneWayTripUi();
+  trace("[flight-rpa] Waiting for flight results to load...");
+  for (let i = 0; i < 20; i++) {
+    await new Promise(r => setTimeout(r, 1000));
+    const hasResults = await page.evaluate(() => {
+      const btns = Array.from(document.querySelectorAll<HTMLElement>('button'));
+      return btns.some(b => {
+        const label = (b.getAttribute("aria-label") ?? "").toLowerCase();
+        return label.includes("select") && label.includes("flight");
+      });
+    }).catch(() => false);
+    if (hasResults) break;
+  }
+  await new Promise(r => setTimeout(r, 800));
+
+  // ── Step 2: Find, scroll to, and click the target flight card ─────────────
+  trace(`[flight-rpa] Searching for flight: airline="${targetAirline}" price=$${targetPrice} time="${targetDepartureTime}"`);
+  await safeScreenshot("01-search-results");
+
+  const found = await page.evaluate(({ airline, price, time }: { airline?: string; price?: number; time?: string }) => {
+    const normalizeTime = (t: string) => t.toLowerCase().replace(/\s*(am|pm)\s*/gi, "").replace(/:/g, "").trim();
+    const timeNorm = time ? normalizeTime(time) : null;
+
+    const allButtons = Array.from(document.querySelectorAll<HTMLElement>('button, [role="button"]'));
+    const scoredButtons = allButtons
+      .map(btn => {
+        const label = ((btn.getAttribute("aria-label") ?? "") + " " + (btn.textContent ?? "")).toLowerCase();
+        if (!label.includes("select")) return null;
+        const airlineWord = airline?.toLowerCase().split(" ")[0] ?? "";
+        const hasAirline = !airlineWord || label.includes(airlineWord);
+        const hasPrice = !price || label.includes(`$${price}`);
+        if (!hasAirline || !hasPrice) return null;
+        const timeScore = timeNorm
+          ? (normalizeTime(label).includes(timeNorm) ? 2 : 1)
+          : 1;
+        const r = btn.getBoundingClientRect();
+        if (r.width === 0 || r.height === 0) return null;
+        return { btn, label: label.slice(0, 100), timeScore };
+      })
+      .filter(Boolean) as Array<{ btn: HTMLElement; label: string; timeScore: number }>;
+
+    scoredButtons.sort((a, b) => b.timeScore - a.timeScore);
+    const best = scoredButtons[0];
+    if (!best) return { found: false, label: "", candidates: 0, x: 0, y: 0, inViewportBefore: false };
+
+    const rectBefore = best.btn.getBoundingClientRect();
+    const inViewportBefore = rectBefore.top >= 0 && rectBefore.bottom <= window.innerHeight;
+    best.btn.scrollIntoView({ block: "center", behavior: "instant" as ScrollBehavior });
+    // Return viewport-relative center (after scroll). Need to re-read rect after scroll.
+    const rectAfter = best.btn.getBoundingClientRect();
+    return {
+      found: true,
+      label: best.label,
+      candidates: scoredButtons.length,
+      x: rectAfter.x + rectAfter.width / 2,
+      y: rectAfter.y + rectAfter.height / 2,
+      inViewportBefore,
+    };
+  }, { airline: targetAirline, price: targetPrice, time: targetDepartureTime });
+
+  if (!found.found) {
+    trace(`[flight-rpa] No matching flight button found (tried airline="${targetAirline}" price=$${targetPrice})`);
+    return { reached_checkout: false, currentUrl: getUrl(), error: "Could not find the target flight on the search results page. The flight may no longer be available." };
+  }
+  trace(`[flight-rpa] Flight match: "${found.label}" candidates=${found.candidates} inViewportBefore=${found.inViewportBefore} → scrolled, clicking@(${Math.round(found.x)},${Math.round(found.y)})`);
+
+  // Let the browser settle after scrollIntoView
+  await new Promise(r => setTimeout(r, 700));
+  await safeScreenshot("02-after-scroll-to-flight");
+
+  // Real mouse click (triggers React handlers reliably for off-screen scrolled elements)
+  await safeMouseClick(page, found.x, found.y);
+  await new Promise(r => setTimeout(r, 500));
+  await safeScreenshot("03-after-flight-click");
+
+  // ── Step 3: Wait for fare modal ("Select fare to <city>") then pick cheapest ─
+  // The fare modal has a heading containing "Select fare to" and shows multiple fare tiers.
+  trace("[flight-rpa] Waiting for fare selection modal...");
+  let fareModalFound = false;
+  for (let i = 0; i < 20; i++) {   // up to 10s
+    await new Promise(r => setTimeout(r, 500));
+    const found = await page.evaluate(() => {
+      const t = (document.body.textContent ?? "").toLowerCase();
+      return t.includes("select fare to") || t.includes("select your fare");
+    }).catch(() => false);
+    if (found) { fareModalFound = true; break; }
+  }
+
+  if (fareModalFound) {
+    trace("[flight-rpa] Fare modal appeared — locating cheapest (leftmost) fare button");
+    await safeScreenshot("04-fare-modal-open");
+
+    const fareInfo = await page.evaluate(() => {
+      // Step A — find the real dialog via ARIA attributes
+      const dialogs = Array.from(document.querySelectorAll<HTMLElement>(
+        '[role="dialog"], [aria-modal="true"], dialog'
+      )).filter(el => {
+        const r = el.getBoundingClientRect();
+        return r.width > 100 && r.height > 100;
+      });
+
+      let modal: HTMLElement | null = null;
+      for (const cand of dialogs) {
+        const t = (cand.textContent ?? "").toLowerCase();
+        if (t.includes("select fare to") || t.includes("select your fare")) {
+          modal = cand;
+          break;
+        }
+      }
+
+      // Step B — fallback: smallest ancestor containing the heading text
+      if (!modal) {
+        const allEls = Array.from(document.querySelectorAll<HTMLElement>('*'));
+        const candidates = allEls.filter(el => {
+          const t = (el.textContent ?? "").toLowerCase();
+          const r = el.getBoundingClientRect();
+          return r.width > 200 && r.height > 200 &&
+                 r.width < window.innerWidth * 0.95 &&
+                 (t.includes("select fare to") || t.includes("select your fare")) &&
+                 el.querySelectorAll("button").length >= 2;
+        });
+        candidates.sort((a, b) => {
+          const ra = a.getBoundingClientRect();
+          const rb = b.getBoundingClientRect();
+          return (ra.width * ra.height) - (rb.width * rb.height);
+        });
+        modal = candidates[0] ?? null;
+      }
+
+      if (!modal) {
+        return { found: false, reason: "modal not found", count: 0, modalSize: "", allButtonTexts: [] as string[], source: "none", x: 0, y: 0, btnTag: "", btnHtml: "" };
+      }
+
+      const modalRect = modal.getBoundingClientRect();
+      const source = dialogs.includes(modal) ? "aria-dialog" : "text-fallback";
+
+      const allBtnsInModal = Array.from(modal.querySelectorAll<HTMLElement>('button'))
+        .filter(b => { const r = b.getBoundingClientRect(); return r.width > 0 && r.height > 0; });
+      const allButtonTexts = allBtnsInModal.map(b => (b.textContent ?? "").trim().slice(0, 30));
+
+      const selectBtns = allBtnsInModal
+        .filter(b => (b.textContent ?? "").trim().toLowerCase() === "select")
+        .sort((a, b) => a.getBoundingClientRect().x - b.getBoundingClientRect().x);
+
+      if (selectBtns.length === 0) {
+        return { found: false, reason: "no 'select' buttons inside modal", count: 0, modalSize: `${Math.round(modalRect.width)}x${Math.round(modalRect.height)}`, allButtonTexts, source, x: 0, y: 0, btnTag: "", btnHtml: "" };
+      }
+
+      const target = selectBtns[0];
+      target.scrollIntoView({ block: "center", behavior: "instant" as ScrollBehavior });
+      const r = target.getBoundingClientRect();
+      return {
+        found: true,
+        reason: "ok",
+        count: selectBtns.length,
+        modalSize: `${Math.round(modalRect.width)}x${Math.round(modalRect.height)}`,
+        allButtonTexts,
+        source,
+        x: r.x + r.width / 2,
+        y: r.y + r.height / 2,
+        btnTag: target.tagName.toLowerCase() + (target.getAttribute("type") ? `[type=${target.getAttribute("type")}]` : ""),
+        btnHtml: target.outerHTML.slice(0, 200),
+      };
+    }).catch((err: Error) => ({ found: false, reason: `evaluate error: ${err.message?.slice(0, 80)}`, count: 0, modalSize: "", allButtonTexts: [] as string[], source: "error", x: 0, y: 0, btnTag: "", btnHtml: "" }));
+
+    trace(`[flight-rpa] Fare modal source=${fareInfo.source} size=${fareInfo.modalSize} selectCount=${fareInfo.count} reason=${fareInfo.reason}`);
+    trace(`[flight-rpa] Fare modal buttons: ${fareInfo.allButtonTexts.slice(0, 12).join(" | ")}`);
+
+    if (fareInfo.found) {
+      trace(`[flight-rpa] Fare target: tag=${fareInfo.btnTag} initial coords=(${Math.round(fareInfo.x)},${Math.round(fareInfo.y)})`);
+      trace(`[flight-rpa] Fare target html: ${fareInfo.btnHtml.slice(0, 150)}`);
+
+      // Wait for any scroll-into-view animation to settle, then re-measure and verify
+      await new Promise(r => setTimeout(r, 800));
+
+      // Re-read position + sanity-check what's actually at that point
+      const preClick = await page.evaluate(() => {
+        const dialogs = Array.from(document.querySelectorAll<HTMLElement>('[role="dialog"], [aria-modal="true"], dialog'))
+          .filter(el => { const r = el.getBoundingClientRect(); return r.width > 100 && r.height > 100; });
+        let modal: HTMLElement | null = null;
+        for (const cand of dialogs) {
+          const t = (cand.textContent ?? "").toLowerCase();
+          if (t.includes("select fare to") || t.includes("select your fare")) { modal = cand; break; }
+        }
+        if (!modal) return { x: 0, y: 0, reason: "no modal", elAtPoint: "", elText: "", modalRect: "" };
+
+        const modalRect = modal.getBoundingClientRect();
+        const selectBtns = Array.from(modal.querySelectorAll<HTMLElement>('button'))
+          .filter(b => (b.textContent ?? "").trim().toLowerCase() === "select")
+          .filter(b => { const r = b.getBoundingClientRect(); return r.width > 0 && r.height > 0; });
+
+        // Find cheapest-fare Select button: walk up from each Select to find the $price, pick min
+        const withPrices = selectBtns.map(btn => {
+          let container: HTMLElement | null = btn.parentElement;
+          let price = Infinity;
+          for (let i = 0; i < 8 && container; i++) {
+            const match = (container.textContent ?? "").match(/\$(\d{2,4})\b/);
+            if (match) { price = parseInt(match[1], 10); break; }
+            container = container.parentElement;
+          }
+          return { btn, price };
+        });
+        withPrices.sort((a, b) => a.price - b.price);
+        const target = withPrices[0]?.btn ?? selectBtns[0];
+        if (!target) return { x: 0, y: 0, reason: "no select btn", elAtPoint: "", elText: "", modalRect: "" };
+
+        target.scrollIntoView({ block: "center", behavior: "instant" as ScrollBehavior });
+        const r = target.getBoundingClientRect();
+        const cx = r.x + r.width / 2;
+        const cy = r.y + r.height / 2;
+        const elAtPoint = document.elementFromPoint(cx, cy) as HTMLElement | null;
+        const elTag = elAtPoint ? elAtPoint.tagName.toLowerCase() : "null";
+        const elText = elAtPoint ? (elAtPoint.textContent ?? "").trim().slice(0, 40) : "";
+        // Walk up to find nearest button ancestor for sanity check
+        let ancestorBtn: HTMLElement | null = elAtPoint;
+        let ancestorText = "";
+        while (ancestorBtn && ancestorBtn !== document.body) {
+          if (ancestorBtn.tagName === "BUTTON" || ancestorBtn.getAttribute("role") === "button") {
+            ancestorText = (ancestorBtn.textContent ?? "").trim().slice(0, 40);
+            break;
+          }
+          ancestorBtn = ancestorBtn.parentElement;
+        }
+        return {
+          x: cx,
+          y: cy,
+          reason: "ok",
+          elAtPoint: elTag,
+          elText,
+          ancestorBtnText: ancestorText,
+          pricesFound: withPrices.map(w => w.price).slice(0, 8),
+          chosenPrice: withPrices[0]?.price ?? -1,
+          modalRect: `${Math.round(modalRect.x)},${Math.round(modalRect.y)} ${Math.round(modalRect.width)}x${Math.round(modalRect.height)}`,
+        };
+      }).catch((err: Error) => ({ x: 0, y: 0, reason: `err: ${err.message?.slice(0, 80)}`, elAtPoint: "", elText: "", ancestorBtnText: "", pricesFound: [] as number[], chosenPrice: -1, modalRect: "" }));
+
+      trace(`[flight-rpa] Pre-click verify: modalRect=${preClick.modalRect} coords=(${Math.round(preClick.x)},${Math.round(preClick.y)}) pricesFound=[${preClick.pricesFound?.join(",")}] chosen=$${preClick.chosenPrice}`);
+      trace(`[flight-rpa] Pre-click elementFromPoint: <${preClick.elAtPoint}> text="${preClick.elText}" ancestorBtn="${preClick.ancestorBtnText}"`);
+
+      const chosenPrice = preClick.chosenPrice ?? 0;
+      const initialUrl = getUrl();
+      const selector = `button[data-stid="select-button"][aria-label*="for $${chosenPrice}"]`;
+
+      const resolvePlayablePage = (): (Page & {
+        mouse?: {
+          move?: (x: number, y: number, opts?: { steps?: number }) => Promise<void>;
+          down?: () => Promise<void>;
+          up?: () => Promise<void>;
+        };
+        keyboard?: { press?: (key: string, opts?: { delay?: number }) => Promise<void> };
+        page?: unknown;
+        _page?: unknown;
+        rawPage?: unknown;
+      }) | null => {
+        const seen = new Set<unknown>();
+        let current: unknown = page;
+        for (let depth = 0; depth < 5 && current && typeof current === "object" && !seen.has(current); depth++) {
+          seen.add(current);
+          const candidate = current as Page & {
+            mouse?: {
+              move?: (x: number, y: number, opts?: { steps?: number }) => Promise<void>;
+              down?: () => Promise<void>;
+              up?: () => Promise<void>;
+            };
+            keyboard?: { press?: (key: string, opts?: { delay?: number }) => Promise<void> };
+            locator?: Page["locator"];
+            page?: unknown;
+            _page?: unknown;
+            rawPage?: unknown;
+          };
+          if (typeof candidate.locator === "function" || candidate.mouse || candidate.keyboard) return candidate;
+          current = candidate.page ?? candidate._page ?? candidate.rawPage;
+        }
+        return null;
+      };
+
+      const clickFareBySelector = async (): Promise<"locator-click" | "dom-click"> => {
+        const playablePage = resolvePlayablePage();
+        if (playablePage && typeof playablePage.locator === "function") {
+          await playablePage.locator(selector).first().click({ delay: 120, timeout: 5000 });
+          return "locator-click";
+        }
+
+        const clicked = await page.evaluate((sel: string) => {
+          const candidates = Array.from(document.querySelectorAll<HTMLButtonElement>(sel))
+            .filter(btn => {
+              const r = btn.getBoundingClientRect();
+              return r.width > 0 && r.height > 0 && !btn.disabled;
+            });
+          const target = candidates[0];
+          if (!target) return false;
+          target.scrollIntoView({ block: "center", behavior: "instant" as ScrollBehavior });
+          target.click();
+          return true;
+        }, selector).catch(() => false);
+
+        if (!clicked) throw new Error(`selector fallback could not find ${selector}`);
+        return "dom-click";
+      };
+
+      const pressEnterOnFareButton = async (): Promise<"keyboard-press" | "stagehand-keypress" | "dom-enter"> => {
+        const focused = await page.evaluate((sel: string) => {
+          const candidates = Array.from(document.querySelectorAll<HTMLButtonElement>(sel))
+            .filter(btn => {
+              const r = btn.getBoundingClientRect();
+              return r.width > 0 && r.height > 0 && !btn.disabled;
+            });
+          const target = candidates[0];
+          if (!target) return false;
+          target.scrollIntoView({ block: "center", behavior: "instant" as ScrollBehavior });
+          target.focus();
+          return document.activeElement === target;
+        }, selector).catch(() => false);
+
+        if (!focused) throw new Error("could not focus fare button");
+
+        const playablePage = resolvePlayablePage();
+        if (playablePage?.keyboard?.press) {
+          await playablePage.keyboard.press("Enter", { delay: 80 });
+          return "keyboard-press";
+        }
+
+        const stagehandKeyPress = (page as unknown as {
+          keyPress?: (key: string, opts?: { delay?: number }) => Promise<void>;
+        }).keyPress;
+        if (typeof stagehandKeyPress === "function") {
+          await stagehandKeyPress("Enter", { delay: 80 });
+          return "stagehand-keypress";
+        }
+
+        const fired = await page.evaluate((sel: string) => {
+          const target = document.querySelector<HTMLElement>(sel);
+          if (!target) return false;
+          const opts = { key: "Enter", code: "Enter", bubbles: true, cancelable: true };
+          target.dispatchEvent(new KeyboardEvent("keydown", opts));
+          target.dispatchEvent(new KeyboardEvent("keypress", opts));
+          target.dispatchEvent(new KeyboardEvent("keyup", opts));
+          target.click?.();
+          return true;
+        }, selector).catch(() => false);
+
+        if (!fired) throw new Error("could not synthesize Enter on fare button");
+        return "dom-enter";
+      };
+
+      const runTrajectoryClick = async (x: number, y: number): Promise<"playwright-mouse" | "stagehand-click" | "safe-mouse-click"> => {
+        const playablePage = resolvePlayablePage();
+        if (playablePage?.mouse?.move && playablePage?.mouse?.down && playablePage?.mouse?.up) {
+          await playablePage.mouse.move(100, 500);
+          await new Promise(r => setTimeout(r, 150));
+          await playablePage.mouse.move(x - 60, y - 30, { steps: 18 });
+          await new Promise(r => setTimeout(r, 120));
+          await playablePage.mouse.move(x, y, { steps: 10 });
+          await new Promise(r => setTimeout(r, 200));
+          await playablePage.mouse.down();
+          await new Promise(r => setTimeout(r, 90));
+          await playablePage.mouse.up();
+          return "playwright-mouse";
+        }
+
+        await page.evaluate(({ targetX, targetY }: { targetX: number; targetY: number }) => {
+          const start = { x: 100, y: 500 };
+          const mid = { x: targetX - 60, y: targetY - 30 };
+          const end = { x: targetX, y: targetY };
+          const points = [start, mid, end];
+          const interpolate = (from: { x: number; y: number }, to: { x: number; y: number }, steps: number) => {
+            const out: Array<{ x: number; y: number }> = [];
+            for (let i = 1; i <= steps; i++) {
+              out.push({
+                x: from.x + ((to.x - from.x) * i) / steps,
+                y: from.y + ((to.y - from.y) * i) / steps,
+              });
+            }
+            return out;
+          };
+          const trail = [
+            ...interpolate(points[0], points[1], 18),
+            ...interpolate(points[1], points[2], 10),
+          ];
+          for (const point of trail) {
+            const el = document.elementFromPoint(point.x, point.y) as HTMLElement | null;
+            if (!el) continue;
+            const mouseOpts = { bubbles: true, cancelable: true, clientX: point.x, clientY: point.y };
+            el.dispatchEvent(new PointerEvent("pointermove", { ...mouseOpts, pointerType: "mouse" }));
+            el.dispatchEvent(new MouseEvent("mousemove", mouseOpts));
+            el.dispatchEvent(new MouseEvent("mouseover", mouseOpts));
+          }
+        }, { targetX: x, targetY: y }).catch(() => {});
+
+        const stagehandCoordClick = (page as unknown as {
+          click?: (x: number, y: number, opts?: { button?: string; clickCount?: number }) => Promise<unknown>;
+          mouse?: unknown;
+        }).click;
+        const hasNativeMouse = !!(page as unknown as { mouse?: unknown }).mouse;
+        if (typeof stagehandCoordClick === "function" && !hasNativeMouse) {
+          await stagehandCoordClick(x, y, { button: "left", clickCount: 1 });
+          return "stagehand-click";
+        }
+
+        await safeMouseClick(page, x, y);
+        return "safe-mouse-click";
+      };
+
+      const capabilityPage = resolvePlayablePage();
+      trace(
+        `[flight-rpa] Fare click env: locator=${typeof capabilityPage?.locator === "function"} ` +
+        `keyboard=${!!capabilityPage?.keyboard?.press} mouse=${!!capabilityPage?.mouse} ` +
+        `stagehandClick=${typeof (page as unknown as { click?: unknown }).click === "function"}`
+      );
+
+      // Helper: commit detection — URL leaves Flights-Search OR a Review/Continue CTA appears
+      const checkCommitted = async (): Promise<{ committed: boolean; url: string; reason: string }> => {
+        const url = getUrl();
+        const urlChanged =
+          !!initialUrl &&
+          url.toLowerCase() !== initialUrl.toLowerCase() &&
+          !url.toLowerCase().includes("flights-search");
+        const ctaVisible = await page.evaluate(() => {
+          const btns = Array.from(document.querySelectorAll<HTMLElement>('button, a, [role="button"]'))
+            .filter(b => { const r = b.getBoundingClientRect(); return r.width > 0 && r.height > 0; });
+          const keywords = [
+            "review your trip", "review trip", "continue to review",
+            "continue to checkout", "next: review", "next: seats",
+            "proceed to review", "confirm selection",
+          ];
+          return btns.some(b => {
+            const t = (b.textContent ?? "").trim().toLowerCase();
+            return keywords.some(kw => t === kw || t.includes(kw));
+          });
+        }).catch(() => false);
+        const bundlePopupVisible = await page.evaluate(() => {
+          const dialogs = Array.from(document.querySelectorAll<HTMLElement>('[role="dialog"], [aria-modal="true"], dialog'))
+            .filter(el => {
+              const r = el.getBoundingClientRect();
+              return r.width > 100 && r.height > 100;
+            });
+          return dialogs.some(el => {
+            const text = (el.textContent ?? "").toLowerCase();
+            return text.includes("car rental dates") ||
+              text.includes("explore packages") ||
+              (text.includes("bundle & save") && text.includes("includes your selected flight"));
+          });
+        }).catch(() => false);
+        if (urlChanged) return { committed: true, url, reason: "url-changed" };
+        if (ctaVisible) return { committed: true, url, reason: "cta-visible" };
+        if (bundlePopupVisible) return { committed: true, url, reason: "bundle-popup" };
+        return { committed: false, url, reason: "no-change" };
+      };
+
+      // Helper: ensure fare modal is open (re-click flight card if closed)
+      const ensureFareModalOpen = async (): Promise<boolean> => {
+        const isOpen = async () => page.evaluate(() => {
+          const dialogs = Array.from(document.querySelectorAll<HTMLElement>('[role="dialog"], [aria-modal="true"], dialog'));
+          return dialogs.some(d => {
+            const t = (d.textContent ?? "").toLowerCase();
+            const r = d.getBoundingClientRect();
+            return r.width > 100 && r.height > 100 && (t.includes("select fare to") || t.includes("select your fare"));
+          });
+        }).catch(() => false);
+        if (await isOpen()) return true;
+
+        trace("[flight-rpa] Fare modal closed — re-clicking flight card to reopen");
+        const reopen = await page.evaluate(({ airline }: { airline: string }) => {
+          const airlineLower = airline.toLowerCase();
+          const btns = Array.from(document.querySelectorAll<HTMLElement>('button, [role="button"]'));
+          const target = btns.find(b => {
+            const label = ((b.getAttribute("aria-label") ?? "") + " " + (b.textContent ?? "")).toLowerCase();
+            return label.includes("select") && label.includes("flight") && (airlineLower === "" || label.includes(airlineLower));
+          });
+          if (!target) return { found: false, x: 0, y: 0 };
+          target.scrollIntoView({ block: "center", behavior: "instant" as ScrollBehavior });
+          const r = target.getBoundingClientRect();
+          return { found: true, x: r.x + r.width / 2, y: r.y + r.height / 2 };
+        }, { airline: (targetAirline ?? "").toLowerCase() })
+          .catch(() => ({ found: false, x: 0, y: 0 }));
+        if (!reopen.found) return false;
+        await new Promise(r => setTimeout(r, 400));
+        await safeMouseClick(page, reopen.x, reopen.y);
+        await new Promise(r => setTimeout(r, 2500));
+        return await isOpen();
+      };
+
+      // Helper: re-measure cheapest-fare button coords in currently-open modal (for D)
+      const recomputeFareCoords = async (): Promise<{ x: number; y: number; price: number }> => {
+        return page.evaluate(() => {
+          const dialogs = Array.from(document.querySelectorAll<HTMLElement>('[role="dialog"], [aria-modal="true"], dialog'))
+            .filter(el => { const r = el.getBoundingClientRect(); return r.width > 100 && r.height > 100; });
+          let modal: HTMLElement | null = null;
+          for (const cand of dialogs) {
+            const t = (cand.textContent ?? "").toLowerCase();
+            if (t.includes("select fare to") || t.includes("select your fare")) { modal = cand; break; }
+          }
+          if (!modal) return { x: 0, y: 0, price: 0 };
+          const selectBtns = Array.from(modal.querySelectorAll<HTMLElement>('button'))
+            .filter(b => (b.textContent ?? "").trim().toLowerCase() === "select")
+            .filter(b => { const r = b.getBoundingClientRect(); return r.width > 0 && r.height > 0; });
+          const withPrices = selectBtns.map(btn => {
+            let container: HTMLElement | null = btn.parentElement;
+            let price = Infinity;
+            for (let i = 0; i < 8 && container; i++) {
+              const match = (container.textContent ?? "").match(/\$(\d{2,4})\b/);
+              if (match) { price = parseInt(match[1], 10); break; }
+              container = container.parentElement;
+            }
+            return { btn, price };
+          }).sort((a, b) => a.price - b.price);
+          const target = withPrices[0]?.btn;
+          if (!target) return { x: 0, y: 0, price: 0 };
+          target.scrollIntoView({ block: "center", behavior: "instant" as ScrollBehavior });
+          const r = target.getBoundingClientRect();
+          return { x: r.x + r.width / 2, y: r.y + r.height / 2, price: withPrices[0]?.price ?? 0 };
+        }).catch(() => ({ x: 0, y: 0, price: 0 }));
+      };
+
+      let commitResult: { committed: boolean; url: string; reason: string } =
+        { committed: false, url: initialUrl, reason: "not-attempted" };
+
+      // ── Attempt A: locator click on the fare button ───────────────────────
+      trace(`[flight-rpa] Attempt A: locator.click(${selector})`);
+      try {
+        const method = await clickFareBySelector();
+        await new Promise(r => setTimeout(r, 2800));
+        await safeScreenshot("05A-after-pw-click");
+        commitResult = await checkCommitted();
+        trace(`[flight-rpa] After A: method=${method} committed=${commitResult.committed} reason=${commitResult.reason} url=${commitResult.url.slice(0, 90)}`);
+      } catch (err) {
+        trace(`[flight-rpa] Attempt A failed: ${(err as Error).message?.slice(0, 100)}`);
+      }
+
+      // ── Attempt B: focus + Enter path ──────────────────────────────────────
+      if (!commitResult.committed) {
+        trace(`[flight-rpa] Attempt B: focus + Enter on ${selector}`);
+        try {
+          const method = await pressEnterOnFareButton();
+          await new Promise(r => setTimeout(r, 2200));
+          await safeScreenshot("05B-after-enter");
+          commitResult = await checkCommitted();
+          trace(`[flight-rpa] After B: method=${method} committed=${commitResult.committed} reason=${commitResult.reason} url=${commitResult.url.slice(0, 90)}`);
+        } catch (err) {
+          trace(`[flight-rpa] Attempt B failed: ${(err as Error).message?.slice(0, 100)}`);
+        }
+      }
+
+      // ── Attempt C: Stagehand AI act ───────────────────────────────────────
+      if (!commitResult.committed && stagehand) {
+        const modalOpenForC = await ensureFareModalOpen();
+        trace(`[flight-rpa] Attempt C prep: modalOpen=${modalOpenForC}`);
+        if (modalOpenForC) {
+          try {
+            await stagehand.act(
+              `Click the Select button for the cheapest fare tier priced at $${chosenPrice} inside the fare selection drawer on the right side of the page`
+            );
+            await new Promise(r => setTimeout(r, 3000));
+            await safeScreenshot("05C-after-stagehand-act");
+            commitResult = await checkCommitted();
+            trace(`[flight-rpa] After C: committed=${commitResult.committed} reason=${commitResult.reason} url=${commitResult.url.slice(0, 90)}`);
+          } catch (err) {
+            trace(`[flight-rpa] Attempt C failed: ${(err as Error).message?.slice(0, 100)}`);
+          }
+        }
+      } else if (!commitResult.committed && !stagehand) {
+        trace("[flight-rpa] Attempt C skipped: stagehand not provided");
+      }
+
+      // ── Attempt D: Human-like mouse trajectory ──────────────────────────────
+      if (!commitResult.committed) {
+        const modalOpenForD = await ensureFareModalOpen();
+        trace(`[flight-rpa] Attempt D prep: modalOpen=${modalOpenForD}`);
+        if (modalOpenForD) {
+          const coords = await recomputeFareCoords();
+          trace(`[flight-rpa] Attempt D: mouse-trajectory click at (${Math.round(coords.x)},${Math.round(coords.y)}) price=$${coords.price}`);
+          try {
+            const method = await runTrajectoryClick(coords.x, coords.y);
+            await new Promise(r => setTimeout(r, 2800));
+            await safeScreenshot("05D-after-trajectory");
+            commitResult = await checkCommitted();
+            trace(`[flight-rpa] After D: method=${method} committed=${commitResult.committed} reason=${commitResult.reason} url=${commitResult.url.slice(0, 90)}`);
+          } catch (err) {
+            trace(`[flight-rpa] Attempt D failed: ${(err as Error).message?.slice(0, 100)}`);
+          }
+        }
+      }
+
+      // Final state snapshot (kept for downstream compat + visibility in logs)
+      const fareModalStillOpen = await page.evaluate(() => {
+        const t = (document.body.textContent ?? "").toLowerCase();
+        return t.includes("select fare to") || t.includes("select your fare");
+      }).catch(() => false);
+      trace(`[flight-rpa] Fare cascade done: committed=${commitResult.committed} reason=${commitResult.reason} modalStillOpen=${fareModalStillOpen}`);
+      trace(`[flight-rpa] URL after fare cascade: ${getUrl().slice(0, 100)}`);
+
+      // ── Follow-up: look for "Review your trip" / "Continue" action ─────
+      // On one-way flights (e.g. Delta), Expedia closes the modal and highlights
+      // the card, but doesn't navigate — user must click a Review/Continue CTA.
+      const postFareAction = await page.evaluate(() => {
+        const allBtns = Array.from(document.querySelectorAll<HTMLElement>('button, a, [role="button"]'))
+          .filter(b => { const r = b.getBoundingClientRect(); return r.width > 0 && r.height > 0; });
+
+        const keywords = [
+          "review your trip", "review trip", "continue to review", "continue to checkout",
+          "continue to book", "next: review", "next: seats", "proceed to review",
+          "go to review", "confirm selection", "continue",
+        ];
+        for (const kw of keywords) {
+          const btn = allBtns.find(b => {
+            const t = (b.textContent ?? "").trim().toLowerCase();
+            return t === kw || t.startsWith(kw + " ") || t.includes(kw);
+          });
+          if (btn) {
+            btn.scrollIntoView({ block: "center", behavior: "instant" as ScrollBehavior });
+            const r = btn.getBoundingClientRect();
+            return {
+              found: true,
+              matchedKw: kw,
+              text: (btn.textContent ?? "").trim().slice(0, 40),
+              x: r.x + r.width / 2,
+              y: r.y + r.height / 2,
+              allText: [] as string[],
+            };
+          }
+        }
+        const allText = allBtns
+          .map(b => {
+            const r = b.getBoundingClientRect();
+            return `"${(b.textContent ?? "").trim().slice(0, 30)}"@(${Math.round(r.x)},${Math.round(r.y)})`;
+          })
+          .filter(t => !t.startsWith('""'))
+          .slice(0, 40);
+        return { found: false, matchedKw: "", text: "", x: 0, y: 0, allText };
+      }).catch(() => ({ found: false, matchedKw: "", text: "", x: 0, y: 0, allText: [] as string[] }));
+
+      if (postFareAction.found) {
+        trace(`[flight-rpa] Post-fare action found: kw="${postFareAction.matchedKw}" text="${postFareAction.text}" coords=(${Math.round(postFareAction.x)},${Math.round(postFareAction.y)})`);
+        await new Promise(r => setTimeout(r, 400));
+        await safeMouseClick(page, postFareAction.x, postFareAction.y);
+        await new Promise(r => setTimeout(r, 2000));
+        await safeScreenshot("05b-after-post-fare-click");
+        trace(`[flight-rpa] URL after post-fare click: ${getUrl().slice(0, 100)}`);
+      } else {
+        trace(`[flight-rpa] No post-fare CTA found — all visible buttons (40 max):`);
+        for (const t of postFareAction.allText) trace(`[flight-rpa]   btn: ${t}`);
+      }
+    }
+  } else {
+    trace("[flight-rpa] Fare modal not detected — continuing");
+  }
+
+  // ── Step 4: Dismiss Bundle & Save popup ────────────────────────────────────
+  // The real bundle popup contains "Car rental dates" or "Explore packages" button.
+  // Wait up to 6s for it to appear after fare selection.
+  let bundlePopupDetected = false;
+  for (let i = 0; i < 12; i++) {
+    await new Promise(r => setTimeout(r, 500));
+    const detected = await page.evaluate(() => {
+      const t = (document.body.textContent ?? "").toLowerCase();
+      // Real bundle popup has car rental form or "Explore packages" CTA
+      return t.includes("car rental dates") || t.includes("explore packages") ||
+        (t.includes("bundle & save") && t.includes("includes your selected flight"));
+    }).catch(() => false);
+    if (detected) { bundlePopupDetected = true; break; }
+  }
+
+  let bundleDismissed = false;
+  let bundleDiag: { reason: string; source: string; modalSize: string; noThanksText: string; btnHtml: string; x: number; y: number } = { reason: "", source: "", modalSize: "", noThanksText: "", btnHtml: "", x: 0, y: 0 };
+  if (bundlePopupDetected) {
+    await safeScreenshot("06-bundle-popup-open");
+    const result = await page.evaluate(() => {
+      const dialogs = Array.from(document.querySelectorAll<HTMLElement>(
+        '[role="dialog"], [aria-modal="true"], dialog'
+      )).filter(el => {
+        const r = el.getBoundingClientRect();
+        return r.width > 100 && r.height > 100;
+      });
+
+      let modal: HTMLElement | null = null;
+      for (const cand of dialogs) {
+        const t = (cand.textContent ?? "").toLowerCase();
+        if (t.includes("car rental") || t.includes("explore packages") || t.includes("bundle")) {
+          modal = cand;
+          break;
+        }
+      }
+
+      if (!modal) {
+        const allEls = Array.from(document.querySelectorAll<HTMLElement>('*'));
+        const candidates = allEls.filter(el => {
+          const t = (el.textContent ?? "").toLowerCase();
+          const r = el.getBoundingClientRect();
+          return r.width > 200 && r.height > 200 &&
+                 r.width < window.innerWidth * 0.95 &&
+                 (t.includes("car rental dates") || t.includes("explore packages") ||
+                  (t.includes("bundle & save") && t.includes("includes your selected flight"))) &&
+                 el.querySelectorAll("button, a").length >= 1;
+        });
+        candidates.sort((a, b) => {
+          const ra = a.getBoundingClientRect();
+          const rb = b.getBoundingClientRect();
+          return (ra.width * ra.height) - (rb.width * rb.height);
+        });
+        modal = candidates[0] ?? null;
+      }
+
+      if (!modal) {
+        return { found: false, reason: "modal not found", source: "none", modalSize: "", noThanksText: "", btnHtml: "", x: 0, y: 0 };
+      }
+
+      const modalRect = modal.getBoundingClientRect();
+      const source = dialogs.includes(modal) ? "aria-dialog" : "text-fallback";
+      const size = `${Math.round(modalRect.width)}x${Math.round(modalRect.height)}`;
+
+      const candidates = Array.from(modal.querySelectorAll<HTMLElement>('button, a, [role="button"]'));
+      const describe = (el: HTMLElement) =>
+        (((el.textContent ?? "").trim() + " " + (el.getAttribute("aria-label") ?? "") + " " + (el.getAttribute("title") ?? "")).trim().toLowerCase());
+      const noThanks = candidates.find(el => {
+        const t = describe(el);
+        const r = el.getBoundingClientRect();
+        return (t === "no thanks" || t === "no, thanks" || t.startsWith("no thanks") || t.startsWith("no, thanks")) &&
+               r.width > 0 && r.height > 0;
+      });
+
+      const dismissBtn = noThanks ?? candidates.find(el => {
+        const t = describe(el);
+        const r = el.getBoundingClientRect();
+        return r.width > 0 && r.height > 0 && (
+          t.includes("dismiss") ||
+          t.includes("close") ||
+          (el.id ?? "").toLowerCase().includes("dismiss")
+        );
+      });
+
+      if (!dismissBtn) {
+        return { found: false, reason: "no dismiss button in modal", source, modalSize: size, noThanksText: "", btnHtml: "", x: 0, y: 0 };
+      }
+
+      dismissBtn.scrollIntoView({ block: "center", behavior: "instant" as ScrollBehavior });
+      const clicked = (() => {
+        try {
+          dismissBtn.click();
+          return true;
+        } catch {
+          return false;
+        }
+      })();
+      const r = dismissBtn.getBoundingClientRect();
+      const txt = ((dismissBtn.textContent ?? "").trim() || dismissBtn.getAttribute("aria-label") || dismissBtn.getAttribute("title") || "").slice(0, 40);
+      return {
+        found: true,
+        reason: clicked ? "dom-clicked" : "coords-fallback",
+        source,
+        modalSize: size,
+        noThanksText: txt,
+        btnHtml: dismissBtn.outerHTML.slice(0, 200),
+        x: r.x + r.width / 2,
+        y: r.y + r.height / 2,
+      };
+    }).catch((err: Error) => ({ found: false, reason: `evaluate error: ${err.message?.slice(0, 80)}`, source: "error", modalSize: "", noThanksText: "", btnHtml: "", x: 0, y: 0 }));
+    bundleDiag = { reason: result.reason, source: result.source, modalSize: result.modalSize, noThanksText: result.noThanksText, btnHtml: result.btnHtml, x: result.x, y: result.y };
+    if (result.found) {
+      trace(`[flight-rpa] Bundle dismiss located: ${bundleDiag.source} size=${bundleDiag.modalSize} text="${bundleDiag.noThanksText}" reason=${bundleDiag.reason} coords=(${Math.round(bundleDiag.x)},${Math.round(bundleDiag.y)})`);
+      trace(`[flight-rpa] Bundle btn html: ${bundleDiag.btnHtml.slice(0, 150)}`);
+      if (bundleDiag.reason !== "dom-clicked") {
+        await new Promise(r => setTimeout(r, 400));
+        await safeMouseClick(page, bundleDiag.x, bundleDiag.y);
+        await new Promise(r => setTimeout(r, 1500));
+      } else {
+        await new Promise(r => setTimeout(r, 1500));
+      }
+      await safeScreenshot("07-after-bundle-click");
+
+      // Verify dialog actually closed
+      const bundleStillOpen = await page.evaluate(() => {
+        const stillThere = Array.from(document.querySelectorAll<HTMLElement>('[role="dialog"], [aria-modal="true"], dialog'))
+          .filter(el => {
+            const r = el.getBoundingClientRect();
+            const t = (el.textContent ?? "").toLowerCase();
+            return r.width > 100 && r.height > 100 &&
+                   (t.includes("car rental") || t.includes("explore packages") || t.includes("bundle & save"));
+          });
+        return stillThere.length > 0;
+      }).catch(() => false);
+      trace(`[flight-rpa] Bundle dialog still open after click: ${bundleStillOpen}`);
+      bundleDismissed = !bundleStillOpen;
+      if (bundleStillOpen) {
+        const closedPicker = await dismissForcedChoiceDatePicker();
+        if (closedPicker) {
+          const retried = await page.evaluate(() => {
+            const dialogs = Array.from(document.querySelectorAll<HTMLElement>('[role="dialog"], [aria-modal="true"], dialog'))
+              .filter(el => {
+                const r = el.getBoundingClientRect();
+                return r.width > 100 && r.height > 100;
+              });
+            const modal = dialogs.find(el => {
+              const text = (el.textContent ?? "").toLowerCase();
+              return text.includes("car rental dates") ||
+                text.includes("explore packages") ||
+                (text.includes("bundle & save") && text.includes("includes your selected flight"));
+            });
+            if (!modal) return false;
+            const target = Array.from(modal.querySelectorAll<HTMLElement>('button, a, [role="button"]'))
+              .find(el => {
+                const text = (((el.textContent ?? "").trim() + " " + (el.getAttribute("aria-label") ?? "") + " " + (el.getAttribute("title") ?? "")).trim()).toLowerCase();
+                const r = el.getBoundingClientRect();
+                return r.width > 0 && r.height > 0 &&
+                  (text.startsWith("no thanks") || text.includes("dismiss") || text.includes("close"));
+              });
+            if (!target) return false;
+            target.click();
+            return true;
+          }).catch(() => false);
+          trace(`[flight-rpa] Bundle dismiss retry after closing date picker: clicked=${retried}`);
+          await new Promise(r => setTimeout(r, 1200));
+          const bundleStillOpenAfterRetry = await page.evaluate(() => {
+            const stillThere = Array.from(document.querySelectorAll<HTMLElement>('[role="dialog"], [aria-modal="true"], dialog'))
+              .filter(el => {
+                const r = el.getBoundingClientRect();
+                const t = (el.textContent ?? "").toLowerCase();
+                return r.width > 100 && r.height > 100 &&
+                  (t.includes("car rental") || t.includes("explore packages") || t.includes("bundle & save"));
+              });
+            return stillThere.length > 0;
+          }).catch(() => false);
+          trace(`[flight-rpa] Bundle dialog still open after retry: ${bundleStillOpenAfterRetry}`);
+          bundleDismissed = !bundleStillOpenAfterRetry;
+        }
+      }
+    }
+  } else {
+    trace("[flight-rpa] Bundle popup not detected (no car rental form) — skipping");
+  }
+  if (bundlePopupDetected && !bundleDismissed) {
+    trace(`[flight-rpa] Bundle popup NOT fully dismissed — reason="${bundleDiag.reason}" source=${bundleDiag.source}`);
+  }
+  if (bundleDismissed) {
+    trace(`[flight-rpa] Bundle popup dismissed via ${bundleDiag.source} size=${bundleDiag.modalSize} btn="${bundleDiag.noThanksText}"`);
+    await new Promise(r => setTimeout(r, 2000));
+
+    // Expedia sometimes opens the Review page in a new tab after fare selection.
+    // Check if any new page appeared and switch to it.
+    if (getAllPages) {
+      const allPages = getAllPages();
+      trace(`[flight-rpa] Open pages after bundle dismiss: ${allPages.length}`);
+      const newerPage = allPages.find(p => {
+        if (p === page) return false;
+        const url = (() => { try { return (p as unknown as { url: () => string }).url().toLowerCase(); } catch { return ""; } })();
+        return url.includes("expedia.com") && !url.includes("flights-search");
+      });
+      if (newerPage) {
+        trace(`[flight-rpa] Switching to new tab: ${((() => { try { return (newerPage as unknown as { url: () => string }).url(); } catch { return "?"; } })()).slice(0, 80)}`);
+        activePage = newerPage;
+      }
+    }
+    trace(`[flight-rpa] URL after bundle dismiss: ${getUrl().slice(0, 100)}`);
+  }
+
+  // ── Step 5: Click "Skip to Checkout" on Review page ───────────────────────
+  // Wait for URL to change away from search, or for review page text to appear
+  trace("[flight-rpa] Waiting for Review Your Trip page...");
+  let reviewFound = false;
+  for (let i = 0; i < 40; i++) {   // up to 20s
+    await new Promise(r => setTimeout(r, 500));
+
+    // Also check if a new tab opened mid-wait
+    if (getAllPages && i % 4 === 0) {
+      const allPages = getAllPages();
+      const newerPage = allPages.find(p => {
+        if (p === page) return false;
+        const url = (() => { try { return (p as unknown as { url: () => string }).url().toLowerCase(); } catch { return ""; } })();
+        return url.includes("expedia.com") && !url.includes("flights-search");
+      });
+      if (newerPage && newerPage !== activePage) {
+        trace(`[flight-rpa] New tab detected during review wait — switching`);
+        activePage = newerPage;
+      }
+    }
+
+    const check = await activePage.evaluate(() => {
+      const t = (document.body.textContent ?? "").toLowerCase();
+      const url = document.location.href.toLowerCase();
+      // Strict: require actionable button text OR URL change away from flights-search
+      const hasActionBtn = t.includes("skip to checkout") || t.includes("next: seats") || t.includes("next: checkout");
+      const urlChanged = !url.includes("flights-search");
+      return {
+        onReview: hasActionBtn || (urlChanged && t.includes("review your trip")),
+        url: url.slice(0, 80),
+      };
+    }).catch(() => ({ onReview: false, url: "" }));
+    if (check.onReview) {
+      trace(`[flight-rpa] Review page detected at: ${check.url}`);
+      reviewFound = true;
+      break;
+    }
+    if (i === 10) trace(`[flight-rpa] Still waiting for review... current URL: ${check.url}`);
+  }
+  if (!reviewFound) trace("[flight-rpa] Review page not detected after 20s");
+  await new Promise(r => setTimeout(r, 600));
+
+  const skipResult = await activePage.evaluate(() => {
+    const allButtons = Array.from(document.querySelectorAll<HTMLElement>('button, a'));
+    const visibleBtns = allButtons
+      .filter(b => { const r = b.getBoundingClientRect(); return r.width > 0 && r.height > 0; })
+      .map(b => {
+        const r = b.getBoundingClientRect();
+        return `"${(b.textContent ?? "").trim().slice(0, 30)}"@(${Math.round(r.x)},${Math.round(r.y)})`;
+      })
+      .filter(t => !t.startsWith('""'))
+      .slice(0, 40);
+
+    const tryFind = (keywords: string[]): { kw: string; x: number; y: number } | null => {
+      for (const kw of keywords) {
+        const btn = allButtons.find(b => {
+          const t = (b.textContent ?? "").trim().toLowerCase();
+          const r = b.getBoundingClientRect();
+          return t.includes(kw) && r.width > 0 && r.height > 0;
+        });
+        if (btn) {
+          btn.scrollIntoView({ block: "center", behavior: "instant" as ScrollBehavior });
+          const r = btn.getBoundingClientRect();
+          return { kw, x: r.x + r.width / 2, y: r.y + r.height / 2 };
+        }
+      }
+      return null;
+    };
+
+    const target = tryFind(["skip to checkout", "skip to check", "next: checkout"]) ??
+                   tryFind(["next: seats"]);
+    return { target, visibleBtns };
+  }).catch(() => ({ target: null as { kw: string; x: number; y: number } | null, visibleBtns: [] as string[] }));
+
+  if (skipResult.target) {
+    trace(`[flight-rpa] Review page action: ${skipResult.target.kw} @(${Math.round(skipResult.target.x)},${Math.round(skipResult.target.y)})`);
+    await new Promise(r => setTimeout(r, 400));
+    await safeMouseClick(activePage, skipResult.target.x, skipResult.target.y);
+    await new Promise(r => setTimeout(r, 2500));
+  } else {
+    trace(`[flight-rpa] Review page action: no button found`);
+  }
+  trace(`[flight-rpa] Visible buttons (40 max):`);
+  for (const t of skipResult.visibleBtns) trace(`[flight-rpa]   btn: ${t}`);
+
+  // ── Step 6: Handle seat selection page ────────────────────────────────────
+  for (let i = 0; i < 10; i++) {
+    await new Promise(r => setTimeout(r, 500));
+    const onSeats = await activePage.evaluate(() => {
+      const t = (document.body.textContent ?? "").toLowerCase();
+      return t.includes("choose your seats") || document.location.href.toLowerCase().includes("/seats");
+    }).catch(() => false);
+    if (onSeats) break;
+  }
+
+  const onSeatPage = await activePage.evaluate(() => {
+    const t = (document.body.textContent ?? "").toLowerCase();
+    return t.includes("choose your seats") || document.location.href.toLowerCase().includes("/seats");
+  }).catch(() => false);
+
+  if (onSeatPage) {
+    trace("[flight-rpa] Seat selection page — clicking Next: Checkout");
+    await activePage.evaluate(() => {
+      const btns = Array.from(document.querySelectorAll<HTMLElement>('button, a'));
+      const next = btns.find(b => {
+        const t = (b.textContent ?? "").trim().toLowerCase();
+        const r = b.getBoundingClientRect();
+        return (t.includes("next: checkout") || t.includes("checkout") || t.includes("skip")) && r.width > 0;
+      });
+      if (next) next.click();
+    }).catch(() => {});
+    await new Promise(r => setTimeout(r, 2500));
+  }
+
+  // ── Step 7: Check if we reached checkout ─────────────────────────────────
+  const currentUrl = getUrl();
+  const onCheckout =
+    currentUrl.includes("/checkout") || currentUrl.includes("/Checkout") ||
+    await activePage.evaluate(() => {
+      const bodyText = (document.body.textContent ?? "").toLowerCase();
+      return bodyText.includes("traveler information") || bodyText.includes("passenger information") ||
+        bodyText.includes("who's flying") || bodyText.includes("traveler 1") ||
+        bodyText.includes("review and book") || bodyText.includes("enter payment");
+    }).catch(() => false);
+
+  if (!onCheckout) {
+    trace(`[flight-rpa] Did not reach checkout — currentUrl=${currentUrl.slice(0, 80)}`);
+    await safeScreenshot("99-final-not-checkout");
+    return { reached_checkout: false, currentUrl, error: "Could not navigate to checkout. Please book manually." };
+  }
+
+  trace("[flight-rpa] Reached checkout — handing off to AI form fill in executor");
+  await safeScreenshot("99-final-checkout");
+  return { reached_checkout: true, currentUrl: getUrl(), activePage };
+}
+
 export const expediaProvider: BrowserProvider = {
   id: "expedia",
 
@@ -1419,7 +2553,24 @@ export const expediaProvider: BrowserProvider = {
     return lower.includes("expedia.com") && !lower.includes("hotels.com");
   },
 
-  async setup(_page: Page, _context: unknown, trace: (msg: string) => void): Promise<void> {
+  async setup(_page: Page, context: unknown, trace: (msg: string) => void): Promise<void> {
+    // Inject saved Expedia session cookies so the agent starts already logged in.
+    // Cookies are saved via the "Connect Accounts" flow in the Permissions page.
+    try {
+      const cookiePath = path.join(process.cwd(), ".booking-cookies", "expedia.json");
+      if (fs.existsSync(cookiePath)) {
+        const { cookies } = JSON.parse(fs.readFileSync(cookiePath, "utf-8")) as { cookies: unknown[] };
+        if (cookies?.length) {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          await (context as any).addCookies(cookies);
+          trace(`[expedia] setup: injected ${cookies.length} saved session cookies (logged-in state)`);
+        }
+      } else {
+        trace("[expedia] setup: no saved cookies found — proceeding as guest");
+      }
+    } catch (err) {
+      trace(`[expedia] setup: cookie injection failed (${err}) — proceeding as guest`);
+    }
     trace("[expedia] setup: watching for external-site redirects (IHG, Marriott, Hilton, etc.)");
   },
 

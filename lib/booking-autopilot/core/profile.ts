@@ -14,6 +14,15 @@ export type EffectiveProfile = {
   card_name?: string;
   card_number?: string;
   card_expiry?: string;
+  // Travel documents
+  date_of_birth?: string;
+  nationality?: string;
+  passport_number?: string;
+  passport_expiry?: string;
+  passport_country?: string;
+  known_traveler_number?: string;
+  driver_license_number?: string;
+  driver_license_state?: string;
 };
 
 export function extractTargetHotelName(task: string): string | undefined {
@@ -91,6 +100,15 @@ export function buildEffectiveProfile(
     card_name: profile.card_name || taskCardholderName || taskFullName,
     card_number: profile.card_number || extractTaskField(task, "Card number"),
     card_expiry: profile.card_expiry || extractTaskField(task, "Expiry date"),
+    // Travel documents
+    date_of_birth: profile.date_of_birth,
+    nationality: profile.nationality,
+    passport_number: profile.passport_number,
+    passport_expiry: profile.passport_expiry,
+    passport_country: profile.passport_country,
+    known_traveler_number: profile.known_traveler_number,
+    driver_license_number: profile.driver_license_number,
+    driver_license_state: profile.driver_license_state,
   };
 
   if (!merged.full_name) {
