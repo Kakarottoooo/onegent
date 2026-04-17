@@ -1575,8 +1575,20 @@ export async function bookExpediaFlightProgrammatic(
   await safeScreenshot("01-search-results");
 
   const found = await page.evaluate(({ airline, price, time }: { airline?: string; price?: number; time?: string }) => {
-    const normalizeTime = (t: string) => t.toLowerCase().replace(/\s*(am|pm)\s*/gi, "").replace(/:/g, "").trim();
-    const timeNorm = time ? normalizeTime(time) : null;
+    const parseTimeToMinutes = (t: string | null | undefined): number | null => {
+      if (!t) return null;
+      const raw = t.trim().toLowerCase();
+      const match = raw.match(/(\d{1,2}):(\d{2})\s*(am|pm)?/i);
+      if (!match) return null;
+      let hour = parseInt(match[1], 10);
+      const minute = parseInt(match[2], 10);
+      const suffix = match[3]?.toLowerCase() ?? null;
+      if (suffix === "pm" && hour < 12) hour += 12;
+      if (suffix === "am" && hour === 12) hour = 0;
+      if (!suffix && hour === 24) hour = 0;
+      return hour * 60 + minute;
+    };
+    const timeMinutes = parseTimeToMinutes(time);
 
     const allButtons = Array.from(document.querySelectorAll<HTMLElement>('button, [role="button"]'));
     const scoredButtons = allButtons
@@ -1587,16 +1599,28 @@ export async function bookExpediaFlightProgrammatic(
         const hasAirline = !airlineWord || label.includes(airlineWord);
         const hasPrice = !price || label.includes(`$${price}`);
         if (!hasAirline || !hasPrice) return null;
-        const timeScore = timeNorm
-          ? (normalizeTime(label).includes(timeNorm) ? 2 : 1)
+        const departureMatch =
+          label.match(/departing at (\d{1,2}:\d{2}\s*(?:am|pm)?)/i) ??
+          label.match(/\b(\d{1,2}:\d{2}\s*(?:am|pm))\b/i);
+        const departureMinutes = parseTimeToMinutes(departureMatch?.[1] ?? null);
+        const timeScore = timeMinutes !== null
+          ? (departureMinutes === timeMinutes ? 3 : 1)
           : 1;
         const r = btn.getBoundingClientRect();
         if (r.width === 0 || r.height === 0) return null;
-        return { btn, label: label.slice(0, 100), timeScore };
+        return { btn, label: label.slice(0, 100), timeScore, departureMinutes: departureMinutes ?? -1 };
       })
-      .filter(Boolean) as Array<{ btn: HTMLElement; label: string; timeScore: number }>;
+      .filter(Boolean) as Array<{ btn: HTMLElement; label: string; timeScore: number; departureMinutes: number }>;
 
-    scoredButtons.sort((a, b) => b.timeScore - a.timeScore);
+    scoredButtons.sort((a, b) => {
+      if (b.timeScore !== a.timeScore) return b.timeScore - a.timeScore;
+      if (timeMinutes !== null) {
+        const aDelta = a.departureMinutes >= 0 ? Math.abs(a.departureMinutes - timeMinutes) : Number.POSITIVE_INFINITY;
+        const bDelta = b.departureMinutes >= 0 ? Math.abs(b.departureMinutes - timeMinutes) : Number.POSITIVE_INFINITY;
+        if (aDelta !== bDelta) return aDelta - bDelta;
+      }
+      return 0;
+    });
     const best = scoredButtons[0];
     if (!best) return { found: false, label: "", candidates: 0, x: 0, y: 0, inViewportBefore: false };
 
@@ -2218,7 +2242,7 @@ export async function bookExpediaFlightProgrammatic(
   }
 
   let bundleDismissed = false;
-  let bundleDiag: { reason: string; source: string; modalSize: string; noThanksText: string; btnHtml: string; x: number; y: number } = { reason: "", source: "", modalSize: "", noThanksText: "", btnHtml: "", x: 0, y: 0 };
+  let bundleDiag: { reason: string; source: string; modalSize: string; noThanksText: string; btnHtml: string; href: string; x: number; y: number } = { reason: "", source: "", modalSize: "", noThanksText: "", btnHtml: "", href: "", x: 0, y: 0 };
   if (bundlePopupDetected) {
     await safeScreenshot("06-bundle-popup-open");
     const result = await page.evaluate(() => {
@@ -2258,7 +2282,7 @@ export async function bookExpediaFlightProgrammatic(
       }
 
       if (!modal) {
-        return { found: false, reason: "modal not found", source: "none", modalSize: "", noThanksText: "", btnHtml: "", x: 0, y: 0 };
+        return { found: false, reason: "modal not found", source: "none", modalSize: "", noThanksText: "", btnHtml: "", href: "", x: 0, y: 0 };
       }
 
       const modalRect = modal.getBoundingClientRect();
@@ -2266,17 +2290,18 @@ export async function bookExpediaFlightProgrammatic(
       const size = `${Math.round(modalRect.width)}x${Math.round(modalRect.height)}`;
 
       const candidates = Array.from(modal.querySelectorAll<HTMLElement>('button, a, [role="button"]'));
-      const describe = (el: HTMLElement) =>
+      const visibleText = (el: HTMLElement) => (el.innerText ?? "").trim().toLowerCase();
+      const accessibleText = (el: HTMLElement) =>
         (((el.textContent ?? "").trim() + " " + (el.getAttribute("aria-label") ?? "") + " " + (el.getAttribute("title") ?? "")).trim().toLowerCase());
       const noThanks = candidates.find(el => {
-        const t = describe(el);
+        const t = visibleText(el);
         const r = el.getBoundingClientRect();
         return (t === "no thanks" || t === "no, thanks" || t.startsWith("no thanks") || t.startsWith("no, thanks")) &&
-               r.width > 0 && r.height > 0;
+               r.width >= 80 && r.height >= 20;
       });
 
       const dismissBtn = noThanks ?? candidates.find(el => {
-        const t = describe(el);
+        const t = accessibleText(el);
         const r = el.getBoundingClientRect();
         return r.width > 0 && r.height > 0 && (
           t.includes("dismiss") ||
@@ -2286,7 +2311,7 @@ export async function bookExpediaFlightProgrammatic(
       });
 
       if (!dismissBtn) {
-        return { found: false, reason: "no dismiss button in modal", source, modalSize: size, noThanksText: "", btnHtml: "", x: 0, y: 0 };
+        return { found: false, reason: "no dismiss button in modal", source, modalSize: size, noThanksText: "", btnHtml: "", href: "", x: 0, y: 0 };
       }
 
       dismissBtn.scrollIntoView({ block: "center", behavior: "instant" as ScrollBehavior });
@@ -2302,20 +2327,21 @@ export async function bookExpediaFlightProgrammatic(
       const txt = ((dismissBtn.textContent ?? "").trim() || dismissBtn.getAttribute("aria-label") || dismissBtn.getAttribute("title") || "").slice(0, 40);
       return {
         found: true,
-        reason: clicked ? "dom-clicked" : "coords-fallback",
+        reason: `${noThanks ? "no-thanks" : "dismiss"}:${clicked ? "dom-clicked" : "coords-fallback"}`,
         source,
         modalSize: size,
         noThanksText: txt,
         btnHtml: dismissBtn.outerHTML.slice(0, 200),
+        href: dismissBtn instanceof HTMLAnchorElement ? dismissBtn.href : (dismissBtn.getAttribute("href") ?? ""),
         x: r.x + r.width / 2,
         y: r.y + r.height / 2,
       };
-    }).catch((err: Error) => ({ found: false, reason: `evaluate error: ${err.message?.slice(0, 80)}`, source: "error", modalSize: "", noThanksText: "", btnHtml: "", x: 0, y: 0 }));
-    bundleDiag = { reason: result.reason, source: result.source, modalSize: result.modalSize, noThanksText: result.noThanksText, btnHtml: result.btnHtml, x: result.x, y: result.y };
+    }).catch((err: Error) => ({ found: false, reason: `evaluate error: ${err.message?.slice(0, 80)}`, source: "error", modalSize: "", noThanksText: "", btnHtml: "", href: "", x: 0, y: 0 }));
+    bundleDiag = { reason: result.reason, source: result.source, modalSize: result.modalSize, noThanksText: result.noThanksText, btnHtml: result.btnHtml, href: result.href, x: result.x, y: result.y };
     if (result.found) {
       trace(`[flight-rpa] Bundle dismiss located: ${bundleDiag.source} size=${bundleDiag.modalSize} text="${bundleDiag.noThanksText}" reason=${bundleDiag.reason} coords=(${Math.round(bundleDiag.x)},${Math.round(bundleDiag.y)})`);
       trace(`[flight-rpa] Bundle btn html: ${bundleDiag.btnHtml.slice(0, 150)}`);
-      if (bundleDiag.reason !== "dom-clicked") {
+      if (!bundleDiag.reason.endsWith("dom-clicked")) {
         await new Promise(r => setTimeout(r, 400));
         await safeMouseClick(page, bundleDiag.x, bundleDiag.y);
         await new Promise(r => setTimeout(r, 1500));
@@ -2355,10 +2381,11 @@ export async function bookExpediaFlightProgrammatic(
             if (!modal) return false;
             const target = Array.from(modal.querySelectorAll<HTMLElement>('button, a, [role="button"]'))
               .find(el => {
+                const visible = (el.innerText ?? "").trim().toLowerCase();
                 const text = (((el.textContent ?? "").trim() + " " + (el.getAttribute("aria-label") ?? "") + " " + (el.getAttribute("title") ?? "")).trim()).toLowerCase();
                 const r = el.getBoundingClientRect();
                 return r.width > 0 && r.height > 0 &&
-                  (text.startsWith("no thanks") || text.includes("dismiss") || text.includes("close"));
+                  ((visible.startsWith("no thanks") && r.width >= 80 && r.height >= 20) || text.includes("dismiss") || text.includes("close"));
               });
             if (!target) return false;
             target.click();
@@ -2380,6 +2407,119 @@ export async function bookExpediaFlightProgrammatic(
           bundleDismissed = !bundleStillOpenAfterRetry;
         }
       }
+
+      if (bundleDismissed) {
+        const fareModalStillOpenAfterBundle = await page.evaluate(() => {
+          const dialogs = Array.from(document.querySelectorAll<HTMLElement>('[role="dialog"], [aria-modal="true"], dialog'))
+            .filter(el => {
+              const r = el.getBoundingClientRect();
+              return r.width > 100 && r.height > 100;
+            });
+          return dialogs.some(el => {
+            const text = (el.textContent ?? "").toLowerCase();
+            return text.includes("select fare to") || text.includes("select your fare");
+          });
+        }).catch(() => false);
+        trace(`[flight-rpa] Fare modal still open after bundle dismiss: ${fareModalStillOpenAfterBundle}`);
+
+        if (fareModalStillOpenAfterBundle) {
+          const retriedFare = await page.evaluate(() => {
+            const dialogs = Array.from(document.querySelectorAll<HTMLElement>('[role="dialog"], [aria-modal="true"], dialog'))
+              .filter(el => {
+                const r = el.getBoundingClientRect();
+                return r.width > 100 && r.height > 100;
+              });
+            const modal = dialogs.find(el => {
+              const text = (el.textContent ?? "").toLowerCase();
+              return text.includes("select fare to") || text.includes("select your fare");
+            });
+            if (!modal) return false;
+
+            const selectBtns = Array.from(modal.querySelectorAll<HTMLButtonElement>('button'))
+              .filter(btn => {
+                const r = btn.getBoundingClientRect();
+                return (btn.textContent ?? "").trim().toLowerCase() === "select" && r.width > 0 && r.height > 0 && !btn.disabled;
+              });
+            const withPrices = selectBtns.map(btn => {
+              let container: HTMLElement | null = btn.parentElement;
+              let price = Number.POSITIVE_INFINITY;
+              for (let i = 0; i < 8 && container; i++) {
+                const match = (container.textContent ?? "").match(/\$(\d{2,4})\b/);
+                if (match) {
+                  price = parseInt(match[1], 10);
+                  break;
+                }
+                container = container.parentElement;
+              }
+              return { btn, price };
+            }).sort((a, b) => a.price - b.price);
+
+            const target = withPrices[0]?.btn;
+            if (!target) return false;
+            target.scrollIntoView({ block: "center", behavior: "instant" as ScrollBehavior });
+            target.click();
+            return true;
+          }).catch(() => false);
+          trace(`[flight-rpa] Retried fare select after bundle dismiss: clicked=${retriedFare}`);
+          if (retriedFare) {
+            await new Promise(r => setTimeout(r, 2000));
+            await safeScreenshot("07b-after-refare-click");
+
+            const bundleReopened = await page.evaluate(() => {
+              const dialogs = Array.from(document.querySelectorAll<HTMLElement>('[role="dialog"], [aria-modal="true"], dialog'))
+                .filter(el => {
+                  const r = el.getBoundingClientRect();
+                  return r.width > 100 && r.height > 100;
+                });
+              return dialogs.some(el => {
+                const text = (el.textContent ?? "").toLowerCase();
+                return text.includes("car rental dates") ||
+                  text.includes("explore packages") ||
+                  (text.includes("bundle & save") && text.includes("includes your selected flight"));
+              });
+            }).catch(() => false);
+            trace(`[flight-rpa] Bundle reopened after re-fare click: ${bundleReopened}`);
+
+            if (bundleReopened) {
+              const reDismissed = await page.evaluate(() => {
+                const dialogs = Array.from(document.querySelectorAll<HTMLElement>('[role="dialog"], [aria-modal="true"], dialog'))
+                  .filter(el => {
+                    const r = el.getBoundingClientRect();
+                    return r.width > 100 && r.height > 100;
+                  });
+                const modal = dialogs.find(el => {
+                  const text = (el.textContent ?? "").toLowerCase();
+                  return text.includes("car rental dates") ||
+                    text.includes("explore packages") ||
+                    (text.includes("bundle & save") && text.includes("includes your selected flight"));
+                });
+                if (!modal) return false;
+
+                const controls = Array.from(modal.querySelectorAll<HTMLElement>('button, a, [role="button"]'));
+                const noThanks = controls.find(el => {
+                  const text = (el.innerText ?? "").trim().toLowerCase();
+                  const r = el.getBoundingClientRect();
+                  return r.width > 40 && r.height > 20 &&
+                    (text === "no thanks" || text === "no, thanks" || text.startsWith("no thanks") || text.startsWith("no, thanks"));
+                });
+                const fallback = controls.find(el => {
+                  const text = (((el.textContent ?? "").trim() + " " + (el.getAttribute("aria-label") ?? "") + " " + (el.getAttribute("title") ?? "")).trim()).toLowerCase();
+                  const r = el.getBoundingClientRect();
+                  return r.width > 0 && r.height > 0 &&
+                    (text.includes("dismiss") || text.includes("close") || (el.id ?? "").toLowerCase().includes("dismiss"));
+                });
+                const target = noThanks ?? fallback;
+                if (!target) return false;
+                target.click();
+                return true;
+              }).catch(() => false);
+              trace(`[flight-rpa] Re-dismissed bundle after re-fare click: clicked=${reDismissed}`);
+              await new Promise(r => setTimeout(r, 1500));
+              await safeScreenshot("07c-after-redismiss");
+            }
+          }
+        }
+      }
     }
   } else {
     trace("[flight-rpa] Bundle popup not detected (no car rental form) — skipping");
@@ -2390,6 +2530,24 @@ export async function bookExpediaFlightProgrammatic(
   if (bundleDismissed) {
     trace(`[flight-rpa] Bundle popup dismissed via ${bundleDiag.source} size=${bundleDiag.modalSize} btn="${bundleDiag.noThanksText}"`);
     await new Promise(r => setTimeout(r, 2000));
+
+    const currentUrlAfterBundle = getUrl();
+    const bundleHref = bundleDiag.href?.trim();
+    if (bundleHref && currentUrlAfterBundle.toLowerCase().includes("flights-search")) {
+      try {
+        const absoluteHref = new URL(bundleHref, currentUrlAfterBundle).toString();
+        if (/flight-information|journeyContinuationId/i.test(absoluteHref)) {
+          trace(`[flight-rpa] Bundle href detected — navigating directly to ${absoluteHref.slice(0, 140)}`);
+          await activePage.goto(absoluteHref, { waitUntil: "domcontentloaded", timeout: 30_000 }).catch(async () => {
+            await activePage.evaluate((href: string) => { window.location.href = href; }, absoluteHref);
+          });
+          await new Promise(r => setTimeout(r, 2500));
+          await safeScreenshot("07d-after-bundle-href-nav");
+        }
+      } catch (err) {
+        trace(`[flight-rpa] Bundle href navigation failed: ${(err as Error).message?.slice(0, 100)}`);
+      }
+    }
 
     // Expedia sometimes opens the Review page in a new tab after fare selection.
     // Check if any new page appeared and switch to it.
