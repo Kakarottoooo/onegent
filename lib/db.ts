@@ -1384,6 +1384,15 @@ export async function ensureBookingProfilesTable() {
         )
       `;
       await sql`CREATE INDEX IF NOT EXISTS booking_profiles_user_idx ON booking_profiles (user_id)`;
+      // Travel document columns — added via migration (ALTER TABLE IF NOT EXISTS column)
+      await sql`ALTER TABLE booking_profiles ADD COLUMN IF NOT EXISTS date_of_birth TEXT`.catch(() => {});
+      await sql`ALTER TABLE booking_profiles ADD COLUMN IF NOT EXISTS nationality TEXT`.catch(() => {});
+      await sql`ALTER TABLE booking_profiles ADD COLUMN IF NOT EXISTS passport_number_enc TEXT`.catch(() => {});
+      await sql`ALTER TABLE booking_profiles ADD COLUMN IF NOT EXISTS passport_expiry TEXT`.catch(() => {});
+      await sql`ALTER TABLE booking_profiles ADD COLUMN IF NOT EXISTS passport_country TEXT`.catch(() => {});
+      await sql`ALTER TABLE booking_profiles ADD COLUMN IF NOT EXISTS known_traveler_number TEXT`.catch(() => {});
+      await sql`ALTER TABLE booking_profiles ADD COLUMN IF NOT EXISTS driver_license_number_enc TEXT`.catch(() => {});
+      await sql`ALTER TABLE booking_profiles ADD COLUMN IF NOT EXISTS driver_license_state TEXT`.catch(() => {});
     })().catch((err) => {
       bookingProfilesTableReady = null;
       console.error("ensureBookingProfilesTable error:", err);
@@ -1412,6 +1421,17 @@ export interface BookingProfileRow {
   card_expiry?: string;
   /** Full decrypted card number — only included when explicitly requested */
   card_number?: string;
+  // Travel documents
+  date_of_birth?: string;
+  nationality?: string;
+  /** Full decrypted passport number — only included when explicitly requested */
+  passport_number?: string;
+  passport_expiry?: string;
+  passport_country?: string;
+  known_traveler_number?: string;
+  /** Full decrypted driver's license number — only included when explicitly requested */
+  driver_license_number?: string;
+  driver_license_state?: string;
 }
 
 type ProfileInput = Omit<BookingProfileRow, "id" | "user_id" | "card_number_masked">;
@@ -1425,6 +1445,10 @@ function maskCard(num: string): string {
 function rowToProfile(row: Record<string, unknown>, includeCard = false): BookingProfileRow {
   const cardEnc = row.card_number_enc as string | null;
   const decrypted = cardEnc ? decrypt(cardEnc) : "";
+  const passportEnc = row.passport_number_enc as string | null;
+  const passportDecrypted = passportEnc ? decrypt(passportEnc) : "";
+  const dlEnc = row.driver_license_number_enc as string | null;
+  const dlDecrypted = dlEnc ? decrypt(dlEnc) : "";
   return {
     id: row.id as number,
     user_id: row.user_id as string,
@@ -1443,6 +1467,15 @@ function rowToProfile(row: Record<string, unknown>, includeCard = false): Bookin
     card_number_masked: decrypted ? maskCard(decrypted) : undefined,
     card_expiry: (row.card_expiry as string) ?? undefined,
     ...(includeCard && { card_number: decrypted || undefined }),
+    // Travel documents (only included when explicitly requested, same as card)
+    date_of_birth: (row.date_of_birth as string) ?? undefined,
+    nationality: (row.nationality as string) ?? undefined,
+    passport_expiry: (row.passport_expiry as string) ?? undefined,
+    passport_country: (row.passport_country as string) ?? undefined,
+    known_traveler_number: (row.known_traveler_number as string) ?? undefined,
+    driver_license_state: (row.driver_license_state as string) ?? undefined,
+    ...(includeCard && { passport_number: passportDecrypted || undefined }),
+    ...(includeCard && { driver_license_number: dlDecrypted || undefined }),
   };
 }
 
@@ -1488,6 +1521,8 @@ export async function createBookingProfile(
 ): Promise<BookingProfileRow> {
   await ensureBookingProfilesTable();
   const cardEnc = data.card_number ? encrypt(data.card_number) : null;
+  const passportEnc = data.passport_number ? encrypt(data.passport_number) : null;
+  const dlEnc = data.driver_license_number ? encrypt(data.driver_license_number) : null;
   // If this is the first profile, make it default
   const countRes = await sql`SELECT COUNT(*) as cnt FROM booking_profiles WHERE user_id = ${userId}`;
   const isFirst = parseInt((countRes.rows[0].cnt as string) ?? "0") === 0;
@@ -1498,6 +1533,10 @@ export async function createBookingProfile(
       first_name, last_name, email, phone,
       address_line1, city, state, zip, country,
       card_name, card_number_enc, card_expiry,
+      date_of_birth, nationality,
+      passport_number_enc, passport_expiry, passport_country,
+      known_traveler_number,
+      driver_license_number_enc, driver_license_state,
       updated_at
     ) VALUES (
       ${userId},
@@ -1515,6 +1554,14 @@ export async function createBookingProfile(
       ${data.card_name ?? null},
       ${cardEnc},
       ${data.card_expiry ?? null},
+      ${data.date_of_birth ?? null},
+      ${data.nationality ?? null},
+      ${passportEnc},
+      ${data.passport_expiry ?? null},
+      ${data.passport_country ?? null},
+      ${data.known_traveler_number ?? null},
+      ${dlEnc},
+      ${data.driver_license_state ?? null},
       NOW()
     ) RETURNING *
   `;
@@ -1535,6 +1582,12 @@ export async function updateBookingProfile(
   const cardEnc = data.card_number !== undefined
     ? (data.card_number ? encrypt(data.card_number) : null)
     : (existing.rows[0].card_number_enc as string | null);
+  const passportEnc = data.passport_number !== undefined
+    ? (data.passport_number ? encrypt(data.passport_number) : null)
+    : (existing.rows[0].passport_number_enc as string | null);
+  const dlEnc = data.driver_license_number !== undefined
+    ? (data.driver_license_number ? encrypt(data.driver_license_number) : null)
+    : (existing.rows[0].driver_license_number_enc as string | null);
 
   if (data.is_default) {
     await sql`UPDATE booking_profiles SET is_default = FALSE WHERE user_id = ${userId}`;
@@ -1556,6 +1609,14 @@ export async function updateBookingProfile(
       card_name     = ${data.card_name !== undefined ? (data.card_name ?? null) : (existing.rows[0].card_name as string | null)},
       card_number_enc = ${cardEnc},
       card_expiry   = ${data.card_expiry !== undefined ? (data.card_expiry ?? null) : (existing.rows[0].card_expiry as string | null)},
+      date_of_birth = ${data.date_of_birth !== undefined ? (data.date_of_birth ?? null) : (existing.rows[0].date_of_birth as string | null)},
+      nationality   = ${data.nationality !== undefined ? (data.nationality ?? null) : (existing.rows[0].nationality as string | null)},
+      passport_number_enc = ${passportEnc},
+      passport_expiry = ${data.passport_expiry !== undefined ? (data.passport_expiry ?? null) : (existing.rows[0].passport_expiry as string | null)},
+      passport_country = ${data.passport_country !== undefined ? (data.passport_country ?? null) : (existing.rows[0].passport_country as string | null)},
+      known_traveler_number = ${data.known_traveler_number !== undefined ? (data.known_traveler_number ?? null) : (existing.rows[0].known_traveler_number as string | null)},
+      driver_license_number_enc = ${dlEnc},
+      driver_license_state = ${data.driver_license_state !== undefined ? (data.driver_license_state ?? null) : (existing.rows[0].driver_license_state as string | null)},
       updated_at    = NOW()
     WHERE id = ${id} AND user_id = ${userId}
     RETURNING *

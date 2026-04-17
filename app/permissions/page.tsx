@@ -235,6 +235,15 @@ interface ProfileRecord {
   card_number_masked?: string;
   card_number?: string;
   card_expiry?: string;
+  // Travel documents
+  date_of_birth?: string;
+  nationality?: string;
+  passport_number?: string;
+  passport_expiry?: string;
+  passport_country?: string;
+  known_traveler_number?: string;
+  driver_license_number?: string;
+  driver_license_state?: string;
 }
 
 type ProfileInput = Partial<Omit<ProfileRecord, "id" | "card_number_masked">>;
@@ -246,11 +255,13 @@ const EMPTY_INPUT: ProfileInput = {
 
 // ── Booking Profile tab (multi-profile, DB-backed) ─────────────────────────
 
-function ProfileForm({ data, onChange, showCard, onToggleCard }: {
+function ProfileForm({ data, onChange, showCard, onToggleCard, showDocs, onToggleDocs }: {
   data: ProfileInput;
   onChange: (patch: ProfileInput) => void;
   showCard: boolean;
   onToggleCard: () => void;
+  showDocs: boolean;
+  onToggleDocs: () => void;
 }) {
   const set = (k: keyof ProfileInput, v: string) => onChange({ ...data, [k]: v });
   const inp: React.CSSProperties = {
@@ -353,6 +364,68 @@ function ProfileForm({ data, onChange, showCard, onToggleCard }: {
           </div>
         </div>
       </div>
+
+      {/* Travel Documents */}
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12, marginTop: 4 }}>
+        <p style={{ fontFamily: "var(--font-dm-sans)", fontSize: 11, fontWeight: 700, color: "var(--text-muted, #aaa)", textTransform: "uppercase", letterSpacing: "0.08em" }}>
+          ✈️ Travel Documents
+        </p>
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <span style={{ fontSize: 10, fontFamily: "var(--font-dm-sans)", padding: "2px 8px", borderRadius: 20, backgroundColor: "rgba(201,168,76,0.1)", color: "var(--gold, #C9A84C)", fontWeight: 600 }}>
+            Passport encrypted 🔒
+          </span>
+          <button onClick={onToggleDocs} style={{
+            fontFamily: "var(--font-dm-sans)", fontSize: 11, color: "var(--text-muted, #aaa)",
+            background: "none", border: "0.5px solid var(--border, #e5e7eb)", borderRadius: 6,
+            padding: "2px 8px", cursor: "pointer",
+          }}>{showDocs ? "Hide" : "Show"}</button>
+        </div>
+      </div>
+      <div style={{ display: "flex", flexDirection: "column", gap: 12, marginBottom: 8 }}>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+          <div><FieldLabel>Date of birth</FieldLabel>
+            <input style={inp} value={data.date_of_birth ?? ""} placeholder="YYYY-MM-DD"
+              onChange={(e) => set("date_of_birth", e.target.value)} /></div>
+          <div><FieldLabel>Nationality</FieldLabel>
+            <input style={inp} value={data.nationality ?? ""} placeholder="e.g. Chinese"
+              onChange={(e) => set("nationality", e.target.value)} /></div>
+        </div>
+        <div>
+          <FieldLabel>Passport number</FieldLabel>
+          <div style={{ position: "relative" }}>
+            <input style={{ ...inp, paddingRight: 44 }}
+              type={showDocs ? "text" : "password"}
+              value={data.passport_number ?? ""} placeholder="e.g. E12345678"
+              onChange={(e) => set("passport_number", e.target.value)} />
+            <button onClick={onToggleDocs} style={{
+              position: "absolute", right: 10, top: "50%", transform: "translateY(-50%)",
+              background: "none", border: "none", cursor: "pointer",
+              fontFamily: "var(--font-dm-sans)", fontSize: 11, color: "var(--text-muted, #aaa)",
+            }}>{showDocs ? "Hide" : "Show"}</button>
+          </div>
+        </div>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+          <div><FieldLabel>Passport expiry</FieldLabel>
+            <input style={inp} value={data.passport_expiry ?? ""} placeholder="YYYY-MM-DD"
+              onChange={(e) => set("passport_expiry", e.target.value)} /></div>
+          <div><FieldLabel>Issuing country</FieldLabel>
+            <input style={inp} value={data.passport_country ?? ""} placeholder="e.g. CN, US"
+              onChange={(e) => set("passport_country", e.target.value)} /></div>
+        </div>
+        <div><FieldLabel>Known Traveler Number (TSA PreCheck / Global Entry)</FieldLabel>
+          <input style={inp} value={data.known_traveler_number ?? ""} placeholder="Optional — speeds up security"
+            onChange={(e) => set("known_traveler_number", e.target.value)} /></div>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 100px", gap: 12 }}>
+          <div><FieldLabel>Driver&apos;s license number</FieldLabel>
+            <input style={{ ...inp }}
+              type={showDocs ? "text" : "password"}
+              value={data.driver_license_number ?? ""} placeholder="Optional"
+              onChange={(e) => set("driver_license_number", e.target.value)} /></div>
+          <div><FieldLabel>State / Province</FieldLabel>
+            <input style={inp} value={data.driver_license_state ?? ""} placeholder="CA"
+              onChange={(e) => set("driver_license_state", e.target.value)} /></div>
+        </div>
+      </div>
     </div>
   );
 }
@@ -364,6 +437,7 @@ function BookingProfileTab() {
   const [addingNew, setAddingNew] = useState(false);
   const [editData, setEditData] = useState<ProfileInput>(EMPTY_INPUT);
   const [showCard, setShowCard] = useState(false);
+  const [showDocs, setShowDocs] = useState(false);
   const [saving, setSaving] = useState(false);
   const [deleting, setDeleting] = useState(false);
 
@@ -400,9 +474,18 @@ function BookingProfileTab() {
         card_name: full.card_name ?? "",
         card_number: full.card_number ?? "",
         card_expiry: full.card_expiry ?? "",
+        date_of_birth: full.date_of_birth ?? "",
+        nationality: full.nationality ?? "",
+        passport_number: full.passport_number ?? "",
+        passport_expiry: full.passport_expiry ?? "",
+        passport_country: full.passport_country ?? "",
+        known_traveler_number: full.known_traveler_number ?? "",
+        driver_license_number: full.driver_license_number ?? "",
+        driver_license_state: full.driver_license_state ?? "",
       });
     }
     setShowCard(false);
+    setShowDocs(false);
     setExpandedId(p.id);
   }
 
@@ -544,7 +627,7 @@ function BookingProfileTab() {
               borderTop: "none", borderRadius: "0 0 12px 12px",
               backgroundColor: "var(--background, #fafaf9)",
             }}>
-              <ProfileForm data={editData} onChange={setEditData} showCard={showCard} onToggleCard={() => setShowCard(v => !v)} />
+              <ProfileForm data={editData} onChange={setEditData} showCard={showCard} onToggleCard={() => setShowCard(v => !v)} showDocs={showDocs} onToggleDocs={() => setShowDocs(v => !v)} />
               <div style={{ display: "flex", gap: 10, marginTop: 20 }}>
                 <button onClick={saveExisting} disabled={saving} style={btnStyle(true)}>
                   {saving ? "Saving…" : "Save"}
@@ -577,7 +660,7 @@ function BookingProfileTab() {
           <p style={{ fontFamily: "var(--font-dm-sans)", fontSize: 13, fontWeight: 700, color: "var(--text-primary, #111)", marginBottom: 16 }}>
             New Profile
           </p>
-          <ProfileForm data={editData} onChange={setEditData} showCard={showCard} onToggleCard={() => setShowCard(v => !v)} />
+          <ProfileForm data={editData} onChange={setEditData} showCard={showCard} onToggleCard={() => setShowCard(v => !v)} showDocs={showDocs} onToggleDocs={() => setShowDocs(v => !v)} />
           <div style={{ display: "flex", gap: 10, marginTop: 20 }}>
             <button onClick={saveNew} disabled={saving} style={btnStyle(true)}>
               {saving ? "Saving…" : "Create"}

@@ -1,5 +1,5 @@
 ================================================================
-Onegent · AI 决策代理 · 项目总结 · v0.2.26.0
+Onegent · AI 决策代理 · 项目总结 · v0.2.28.0
 ================================================================
 
 【项目定义】
@@ -411,6 +411,10 @@ Onegent · AI 决策代理 · 项目总结 · v0.2.26.0
   ✅ 餐厅预订自动化：OpenTable + Resy + Yelp + 官网直链瀑布式回退
   ✅ 餐厅 no_availability：提取可用时段展示给用户选择，不再静默失败
   ✅ RecommendationCard 新增日期/时间选择器（直接在推荐卡选定后触发预订）
+  ✅ 机票 Autopilot：Expedia 全链路自动化（选票 → 填乘客信息 → 止步付款）
+  ✅ 旅行证件系统：护照号/DOB/国籍/KTN/驾照（AES-256 加密，存于 BookingProfile）
+  ✅ InlineJobCard：任务卡内联显示在主聊天页结果列表下方，不跳转 /tasks
+  ✅ 对话式证件收集：缺少证件时 agent 在聊天框发问，用户回复后自动解析保存并重试任务
 
 还差什么（仅剩 3 个边界）：
   ① 实时订位可用性 — agent 现已能抓取并展示 OpenTable 可用时段列表（no_availability
@@ -547,7 +551,7 @@ AI：MiniMax（NLU + 评论信号解析 + 语义排序 + 双人约束合并）
 API 层：30+ 个路由端点
 Cron：4 个定时任务（反馈提示 / 价格检查 / 场馆质量 / 笔记本价格）
 测试：Vitest（22+ 个测试文件 · 100% 通过）
-版本：v0.2.26.0
+版本：v0.2.27.0
 
 ================================================================
 八、数据库（12 张表）
@@ -583,6 +587,43 @@ v0.2.26.0（2026-04-14）— 多 Provider 架构 + 餐厅预订自动化
   · RecommendationCard 新增日期/时间选择器
   · Google Places 官网直链回退（替换旧版 Yelp 回退）
   · 城市覆盖扩展至 47 个美国城市（+Nashville 等 20 城）
+
+v0.2.28.0（2026-04-16）— 全平台 Booking Automation 架构对齐 + 机票 RPA 升级
+  · 机票预订：从 AI Agent 升级为程序化 RPA（findFlight → selectFare → dismissBundle → skipToCheckout）
+  · AI 填表升级：fillFlightGuestFormWithAI（姓名/邮箱/电话/DOB/护照/KTN）+ auditAndRefillEmptyFields
+  · 架构规范写入 CLAUDE.md：程序化导航 + AI 感知三层模式，所有新平台必须遵守
+  · OpenTable / Resy：fillGuestForm 升级为 programmatic 主填 + AI 补漏 + auditAndRefill 验证
+  · InlineJobCard：删除后即从 inlineItems 移除（onDeleted 回调），不再显示 "Starting booking task..."
+  · 消息布局：酒店/机票卡片现在内联在对应 assistant 消息之后，不再堆在底部
+  · ProfilePicker 淘汰：点击预订直接自动取 default profile，零弹窗
+  · 修复 raw.textContent is not a function（改用 try/catch + evaluate 兜底）
+  · 修复 fatalApiError 正则未覆盖 "exceeded your current quota"
+  · 修复 page.waitForFunction / waitForSelector 在 Stagehand proxy 不可用（改为 evaluate 轮询）
+  · 修复 targetDepartureTime 格式（从 raw 时间戳改为 formatTime 后的 "2:54pm"）
+  · gstack 升级：0.11.8.0 → 0.18.1.0 + bun 安装
+
+v0.2.27.0（2026-04-16）— 机票 Autopilot + 旅行证件 + 内联任务卡 + 对话式证件收集
+  · 机票预订升级：Kayak 纯搜索 → Expedia 全链路 Autopilot（选票 → 填信息 → 止步付款）
+  · Expedia 机票 URL：支持单程/往返，cabin class 映射（economy/business/first/premium_economy）
+  · 旅行证件系统（BookingProfile 新增 8 字段）：
+      date_of_birth / nationality / passport_number（AES-256 加密）/
+      passport_expiry / passport_country / known_traveler_number /
+      driver_license_number（加密）/ driver_license_state
+  · DB 安全迁移：ALTER TABLE ADD COLUMN IF NOT EXISTS，不影响已有数据
+  · /permissions Profile 表单新增 "Travel Documents" 折叠区（含 Show/Hide 敏感字段）
+  · booking job 启动时检查护照，缺失直接阻断并触发对话流
+  · InlineJobCard（components/booking/InlineJobCard.tsx）：
+      - 点击 Book with Autopilot 不再跳转 /tasks
+      - 任务卡出现在主聊天页结果列表正下方（inlineItems 状态，独立于消息流）
+      - 每 3 秒轮询 /api/booking-jobs/[id]，状态实时更新
+      - 折叠/展开 / 步骤卡 / Watch live / Replay / Open all / 删除 / Retry stuck
+      - 新搜索时自动清空（监听 allFlightCards / allHotelCards 变化）
+  · 对话式证件收集（全程走主聊天框）：
+      - 任务出错 → onNeedsTravelDocs 回调 → agent 在聊天里问 DOB 和护照号
+      - pendingTravelDoc 状态激活，输入框 placeholder 变成格式提示
+      - sendCurrentInput 拦截：有 pendingTravelDoc → parseTravelDocs() 解析 → 保存 → 重启 job
+      - 解析失败 → agent 再问一次，pendingTravelDoc 保持激活直到成功
+      - 全程不触发新搜索，原有航班列表和任务卡保持不变
 
 v0.2.25.0（2026-04-08）— AI-first 两层执行架构 + Live View 优化
   · 重构 Autopilot 执行层：AI 主导 + Playwright 兜底双层降级

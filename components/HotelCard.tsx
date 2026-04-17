@@ -1,7 +1,6 @@
 "use client";
 
 import { useState } from "react";
-import { useRouter } from "next/navigation";
 import { HotelRecommendationCard } from "@/lib/types";
 import { buildBookingComUrl, buildExpediaUrl, buildHotelsComUrl } from "@/lib/agent/planners/booking-links";
 
@@ -11,21 +10,20 @@ const SITE_OPTIONS: { id: BookingSite; label: string; color: string }[] = [
   { id: "expedia",     label: "Expedia",     color: "#00355F" },
   { id: "hotels-com",  label: "Hotels.com",  color: "#D4001A" },
 ];
-import ProfilePicker, { PickedProfile } from "./ProfilePicker";
-
 interface HotelCardProps {
   card: HotelRecommendationCard;
   index: number;
   checkIn?: string;
   checkOut?: string;
   guests?: number;
+  /** Called after a booking job is created — inject inline task card */
+  onJobCreated?: (jobId: string) => void;
 }
 
-export default function HotelCard({ card, index, checkIn, checkOut, guests }: HotelCardProps) {
+export default function HotelCard({ card, index, checkIn, checkOut, guests, onJobCreated }: HotelCardProps) {
   const { hotel } = card;
-  const router = useRouter();
-  const [showPicker, setShowPicker] = useState(false);
   const [booking, setBooking] = useState(false);
+  const [noProfile, setNoProfile] = useState(false);
   const [bookingSite, setBookingSite] = useState<BookingSite>("booking-com");
 
   // Validate that dates are present and in the future before booking.
@@ -73,7 +71,7 @@ export default function HotelCard({ card, index, checkIn, checkOut, guests }: Ho
     return "New York";
   }
 
-  function handleBook() {
+  async function handleBook() {
     if (booking) return;
     if (!datesValid) {
       alert(
@@ -83,13 +81,20 @@ export default function HotelCard({ card, index, checkIn, checkOut, guests }: Ho
       );
       return;
     }
-    setShowPicker(true);
+    setNoProfile(false);
+    setBooking(true);
+    try {
+      const profileRes = await fetch("/api/user/booking-profiles?default=true");
+      const { profile } = await profileRes.json();
+      if (!profile) { setNoProfile(true); return; }
+      await proceedWithProfile(profile);
+    } finally {
+      setBooking(false);
+    }
   }
 
-  async function proceedWithProfile(picked: PickedProfile) {
-    setShowPicker(false);
-    setBooking(true);
-    localStorage.setItem("active_profile_id", String(picked.profileId));
+  async function proceedWithProfile(profile: { id: number; first_name: string; last_name: string; email: string; phone: string; address_line1?: string; city?: string; state?: string; zip?: string; country?: string }) {
+    localStorage.setItem("active_profile_id", String(profile.id));
     try {
       const sessionId = localStorage.getItem("session_id") ?? crypto.randomUUID();
       const savedModel = JSON.parse(localStorage.getItem("agent_model_config") ?? "{}");
@@ -143,17 +148,17 @@ export default function HotelCard({ card, index, checkIn, checkOut, guests }: Ho
           startUrl: primaryUrl,
           task,
           fallbackUrl: directFallbackUrl,
-          profileId: picked.profileId,
+          profileId: profile.id,
           profile: {
-            first_name: picked.first_name,
-            last_name: picked.last_name,
-            email: picked.email,
-            phone: picked.phone,
-            address_line1: picked.address_line1,
-            city: picked.city,
-            state: picked.state,
-            zip: picked.zip,
-            country: picked.country,
+            first_name: profile.first_name,
+            last_name: profile.last_name,
+            email: profile.email,
+            phone: profile.phone,
+            address_line1: profile.address_line1,
+            city: profile.city,
+            state: profile.state,
+            zip: profile.zip,
+            country: profile.country,
           },
           agentModel,
         },
@@ -168,10 +173,10 @@ export default function HotelCard({ card, index, checkIn, checkOut, guests }: Ho
       if (createRes.ok) {
         const { jobId } = await createRes.json();
         fetch(`/api/booking-jobs/${jobId}/start`, { method: "POST" }).catch(() => {});
-        router.push("/tasks");
+        onJobCreated?.(jobId);
       }
-    } finally {
-      setBooking(false);
+    } catch {
+      // ignore
     }
   }
 
@@ -179,12 +184,6 @@ export default function HotelCard({ card, index, checkIn, checkOut, guests }: Ho
 
   return (
     <>
-    {showPicker && (
-      <ProfilePicker
-        onSelect={proceedWithProfile}
-        onCancel={() => setShowPicker(false)}
-      />
-    )}
     <div
       style={{
         backgroundColor: "var(--card)",
@@ -513,6 +512,12 @@ export default function HotelCard({ card, index, checkIn, checkOut, guests }: Ho
         </div>
       </div>
     </div>
+    {noProfile && (
+      <div style={{ padding: "10px 16px", fontSize: 12, fontFamily: "var(--font-dm-sans)", color: "#b45309", background: "#fffbeb", borderRadius: 8, border: "1px solid #fde68a", marginTop: 4 }}>
+        No booking profile found.{" "}
+        <a href="/permissions?tab=profile" style={{ color: "var(--gold)", fontWeight: 600 }}>Set up your profile →</a>
+      </div>
+    )}
     </>
   );
 }

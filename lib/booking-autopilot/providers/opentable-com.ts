@@ -1,6 +1,9 @@
 import type { Page } from "playwright";
 import { registerProvider } from "./registry";
 import type { BrowserProvider, ProviderStageSignals } from "./types";
+import { fillGuestFormWithAI, auditAndRefillEmptyFields } from "../ai-loop/fill-form";
+import { buildEffectiveProfile } from "../core/profile";
+import type { BookingProfile } from "../types";
 
 interface OpenTableProfile {
   first_name?: string;
@@ -67,11 +70,15 @@ export const openTableProvider: BrowserProvider = {
   async fillGuestForm(
     page: Page,
     profile: unknown,
-    _helpers: unknown,
+    helpers: unknown,
     trace: (msg: string) => void
   ): Promise<void> {
     const p = profile as OpenTableProfile;
     const phoneDigits = (p.phone ?? "").replace(/\D/g, "");
+    // Extract stagehand + rawPage from helpers (injected by executor)
+    const h = helpers as { stagehand?: { act: (s: string) => Promise<unknown> }; rawPage?: Page } | null;
+    const stagehand = h?.stagehand;
+    const rawPage = h?.rawPage ?? page;
 
     // ── Step 1: detect which form type is showing ─────────────────────────────
     // OpenTable unauthenticated flow shows a phone-only form first.
@@ -189,7 +196,26 @@ export const openTableProvider: BrowserProvider = {
 
     trace(`[opentable] guest form filled: firstName=${results.firstName} lastName=${results.lastName} email=${results.email} phone=${results.phone}`);
 
-    // ── Step 4: click the submit / "Complete reservation" button ─────────────
+    // ── Step 4: AI fill for any fields the programmatic pass missed ────────────
+    if (stagehand) {
+      const missed = [results.firstName, results.lastName, results.email, results.phone].filter(v => v === "not_found" || v === false);
+      if (missed.length > 0) {
+        trace(`[opentable] ${missed.length} field(s) not found by programmatic fill — running AI fill`);
+        const effectiveProfile = buildEffectiveProfile(p as BookingProfile, "");
+        try {
+          const aiResult = await fillGuestFormWithAI(stagehand, effectiveProfile, trace);
+          trace(`[opentable] AI fill: filled=${aiResult.filled.join(",")} failed=${aiResult.failed.join(",")}`);
+        } catch (e) { trace(`[opentable] AI fill error: ${(e as Error).message?.slice(0, 80)}`); }
+      }
+      // ── Step 5: audit — catch any still-empty fields ───────────────────────
+      try {
+        const effectiveProfile = buildEffectiveProfile(p as BookingProfile, "");
+        const audit = await auditAndRefillEmptyFields(stagehand, rawPage, effectiveProfile, trace);
+        if (audit.refilled.length) trace(`[opentable] audit refilled: ${audit.refilled.join(",")}`);
+      } catch (e) { trace(`[opentable] audit error: ${(e as Error).message?.slice(0, 80)}`); }
+    }
+
+    // ── Step 6: click the submit / "Complete reservation" button ─────────────
     // Wait briefly so the form can validate before we submit
     await new Promise(r => setTimeout(r, 800));
     const submitted = await page.evaluate(() => {

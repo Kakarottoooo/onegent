@@ -4,7 +4,6 @@ import Image from "next/image";
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { RecommendationCard as CardType, FeedbackRecord } from "@/lib/types";
-import ProfilePicker, { PickedProfile } from "./ProfilePicker";
 
 interface Props {
   card: CardType;
@@ -78,7 +77,7 @@ export default function RecommendationCard({
   const router = useRouter();
   const [booking, setBooking] = useState(false);
   const [showDateForm, setShowDateForm] = useState(false);
-  const [showPicker, setShowPicker] = useState(false);
+  const [noProfile, setNoProfile] = useState(false);
 
   // Reservation details
   const today = new Date().toISOString().split("T")[0];
@@ -92,16 +91,23 @@ export default function RecommendationCard({
     setShowDateForm(true);
   }
 
-  function handleDateFormNext() {
+  async function handleDateFormNext() {
     if (!resDate) return;
     setShowDateForm(false);
-    setShowPicker(true);
+    setNoProfile(false);
+    setBooking(true);
+    try {
+      const profileRes = await fetch("/api/user/booking-profiles?default=true");
+      const { profile } = await profileRes.json();
+      if (!profile) { setNoProfile(true); return; }
+      await proceedWithProfile(profile);
+    } finally {
+      setBooking(false);
+    }
   }
 
-  async function proceedWithProfile(picked: PickedProfile) {
-    setShowPicker(false);
-    setBooking(true);
-    localStorage.setItem("active_profile_id", String(picked.profileId));
+  async function proceedWithProfile(profile: { id: number; first_name: string; last_name: string; email: string; phone: string }) {
+    localStorage.setItem("active_profile_id", String(profile.id));
     try {
       const sessionId = localStorage.getItem("session_id") ?? crypto.randomUUID();
       if (!localStorage.getItem("session_id")) localStorage.setItem("session_id", sessionId);
@@ -122,12 +128,12 @@ export default function RecommendationCard({
           date: resDate,
           time: resTime,
           covers: resCovers,
-          profileId: picked.profileId,
+          profileId: profile.id,
           profile: {
-            first_name: picked.first_name,
-            last_name: picked.last_name,
-            email: picked.email,
-            phone: picked.phone,
+            first_name: profile.first_name,
+            last_name: profile.last_name,
+            email: profile.email,
+            phone: profile.phone,
           },
           agentModel,
         },
@@ -145,8 +151,8 @@ export default function RecommendationCard({
         fetch(`/api/booking-jobs/${jobId}/start`, { method: "POST" }).catch(() => {});
         router.push("/tasks");
       }
-    } finally {
-      setBooking(false);
+    } catch {
+      // ignore
     }
   }
 
@@ -268,19 +274,19 @@ export default function RecommendationCard({
             <button onClick={() => setShowDateForm(false)} style={{ flex: 1, padding: "9px", borderRadius: 8, border: "0.5px solid var(--border, #e5e7eb)", background: "transparent", fontFamily: "var(--font-dm-sans)", fontSize: 13, cursor: "pointer" }}>
               Cancel
             </button>
-            <button onClick={handleDateFormNext} disabled={!resDate}
+            <button onClick={handleDateFormNext} disabled={!resDate || booking}
               style={{ flex: 2, padding: "9px", borderRadius: 8, border: "none", background: resDate ? "var(--gold, #D4A34B)" : "#e5e7eb", color: resDate ? "#fff" : "#999", fontFamily: "var(--font-dm-sans)", fontSize: 13, fontWeight: 700, cursor: resDate ? "pointer" : "not-allowed" }}>
-              Next: choose profile →
+              {booking ? "Starting…" : "Book →"}
             </button>
           </div>
         </div>
       </div>
     )}
-    {showPicker && (
-      <ProfilePicker
-        onSelect={proceedWithProfile}
-        onCancel={() => setShowPicker(false)}
-      />
+    {noProfile && (
+      <div style={{ padding: "10px 16px", fontSize: 12, fontFamily: "var(--font-dm-sans)", color: "#b45309", background: "#fffbeb", borderRadius: 8, border: "1px solid #fde68a", margin: "0 0 8px" }}>
+        No booking profile found.{" "}
+        <a href="/permissions?tab=profile" style={{ color: "var(--gold)", fontWeight: 600 }}>Set up your profile →</a>
+      </div>
     )}
     <div
       className="animate-fadeIn overflow-hidden"

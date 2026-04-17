@@ -34,6 +34,31 @@ function buildContactFields(p: EffectiveProfile): Record<string, string> {
 }
 
 /**
+ * Flight passenger fields — contact info + travel documents.
+ * Used for Expedia (and other OTA) flight checkout forms.
+ */
+function buildFlightGuestFields(p: EffectiveProfile): Record<string, string> {
+  const fields = buildContactFields(p);
+  if (p.date_of_birth)          fields["date of birth"]           = p.date_of_birth;
+  if (p.passport_number)        fields["passport number"]         = p.passport_number;
+  if (p.passport_expiry)        fields["passport expiration date"] = p.passport_expiry;
+  if (p.known_traveler_number)  fields["known traveler number"]   = p.known_traveler_number;
+  if (p.nationality)            fields["nationality"]             = p.nationality;
+  return fields;
+}
+
+/**
+ * Fill flight passenger form fields (name + email + phone + travel documents).
+ */
+export async function fillFlightGuestFormWithAI(
+  stagehand: Actable,
+  profile: EffectiveProfile,
+  trace: (msg: string) => void,
+): Promise<FillResult> {
+  return fillFieldsWithAI(stagehand, buildFlightGuestFields(profile), trace);
+}
+
+/**
  * Full guest fields including billing address.
  * Used for sites that show a billing address section in checkout.
  */
@@ -198,6 +223,12 @@ const PROFILE_PATTERNS: Array<{
   { patterns: [/\bstate\b|\bprovince\b|\bregion\b/],           field: "state" },
   { patterns: [/zip|postal.?code|postcode/],                   field: "zip" },
   { patterns: [/country/],                                     field: "country" },
+  // Travel documents
+  { patterns: [/date.?of.?birth|birth.?date|dob|birthday/],   field: "date_of_birth" },
+  { patterns: [/passport.?num|passport.?no|document.?num/],   field: "passport_number" },
+  { patterns: [/passport.?expir|passport.?valid/],            field: "passport_expiry" },
+  { patterns: [/known.?traveler|ktn|tsa.?pre|precheck/],      field: "known_traveler_number" },
+  { patterns: [/nationality|citizenship/],                    field: "nationality" },
 ];
 
 /**

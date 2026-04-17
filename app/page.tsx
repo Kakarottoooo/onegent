@@ -5,6 +5,7 @@ import dynamic from "next/dynamic";
 import RecommendationCard from "@/components/RecommendationCard";
 import HotelCard from "@/components/HotelCard";
 import FlightCard from "@/components/FlightCard";
+import InlineJobCard, { type TravelDocRequest } from "@/components/booking/InlineJobCard";
 import CreditCardCard from "@/components/CreditCardCard";
 import LaptopCard from "@/components/LaptopCard";
 import SmartphoneCard from "@/components/SmartphoneCard";
@@ -143,6 +144,12 @@ export default function Home() {
   const [decisionRoomOpen, setDecisionRoomOpen] = useState(false);
   const [decisionRoomQuery, setDecisionRoomQuery] = useState("");
   const [recentJobs, setRecentJobs] = useState<{ id: string; trip_label: string; status: string; created_at: string }[]>([]);
+  // Inline booking task cards rendered below results
+  const [inlineItems, setInlineItems] = useState<{ type: "job"; jobId: string }[]>([]);
+  // When set, the next chat message is intercepted as a travel-doc reply
+  const [pendingTravelDoc, setPendingTravelDoc] = useState<TravelDocRequest | null>(null);
+  // Timestamp of last successful travel doc save — blocks re-trigger for 10s
+  const travelDocSavedAtRef = useRef<number>(0);
 
   // Load recent jobs for home page strip
   useEffect(() => {
@@ -225,6 +232,13 @@ export default function Home() {
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [chat.messages, chat.visibleCards]);
+
+  // 新 task 卡片加入时延迟滚动，等卡片 DOM 渲染完再到底
+  useEffect(() => {
+    if (inlineItems.length === 0) return;
+    const t = setTimeout(() => bottomRef.current?.scrollIntoView({ behavior: "smooth" }), 150);
+    return () => clearTimeout(t);
+  }, [inlineItems.length]);
 
   useEffect(() => {
     setPlanFeedbackMessage(null);
@@ -341,9 +355,78 @@ export default function Home() {
     chat.setInput(value);
   }
 
+  function parseTravelDocs(text: string): { dob?: string; passport?: string } {
+    const dobMatch = text.match(/(\d{4}[\/\-]\d{1,2}[\/\-]\d{1,2})/);
+    const passportMatch = text.match(/\b([A-Za-z]{1,2}\d{6,9})\b/);
+    return {
+      dob: dobMatch ? dobMatch[1].replace(/\//g, "-") : undefined,
+      passport: passportMatch ? passportMatch[1].toUpperCase() : undefined,
+    };
+  }
+
+  async function handleTravelDocReply(text: string, req: TravelDocRequest) {
+    // Show user's message in chat
+    chat.injectUserMessage(text);
+    chat.setInput("");
+    chatInputRef.current = "";
+
+    const { dob, passport } = parseTravelDocs(text);
+
+    if (!dob || !passport) {
+      chat.injectAssistantMessage(
+        "I couldn't find a valid date of birth (YYYY-MM-DD) and passport number in your message. Could you try again? For example: \"2001-09-05, passport EJ2676174\""
+      );
+      return; // keep pendingTravelDoc active so they can retry
+    }
+
+    // Save to profile
+    try {
+      const saveRes = await fetch(`/api/user/booking-profiles/${req.profileId}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ date_of_birth: dob, passport_number: passport }),
+      });
+      if (!saveRes.ok) {
+        chat.injectAssistantMessage("Sorry, I couldn't save your travel documents. Please try again.");
+        return;
+      }
+    } catch {
+      chat.injectAssistantMessage("Network error saving your documents. Please try again.");
+      return;
+    }
+
+    // Clear pending context and record save time (10s cooldown blocks accidental re-sends)
+    setPendingTravelDoc(null);
+    travelDocSavedAtRef.current = Date.now();
+
+    // Restart the booking job
+    await fetch(`/api/booking-jobs/${req.jobId}/start`, { method: "POST" }).catch(() => {});
+
+    chat.injectAssistantMessage(
+      `Got it — travel documents saved. Retrying your flight booking now…`
+    );
+  }
+
   function sendCurrentInput() {
     const text = chatInputRef.current.trim();
     if (!text || chat.loading || isListening) return;
+
+    // If we're waiting for travel doc info, intercept the message
+    if (pendingTravelDoc) {
+      handleTravelDocReply(text, pendingTravelDoc);
+      return;
+    }
+
+    // Within 10s of a successful save, silently drop messages that look like
+    // travel doc info (accidental double-sends after the first succeeded)
+    const secsSinceSave = (Date.now() - travelDocSavedAtRef.current) / 1000;
+    if (secsSinceSave < 10 && parseTravelDocs(text).passport) {
+      chat.injectAssistantMessage("Your travel documents are already saved — no need to resend.");
+      chat.setInput("");
+      chatInputRef.current = "";
+      return;
+    }
+
     learnFromSearch(text);
     chat.sendMessage(text);
     chatInputRef.current = "";
@@ -1593,17 +1676,49 @@ export default function Home() {
                         )}
                       </div>
                     ) : (
-                      <p
-                        style={{
-                          color: "var(--text-secondary)",
-                          fontSize: "13px",
-                          fontFamily: "var(--font-dm-sans)",
-                          paddingTop: "4px",
-                          paddingBottom: "4px",
-                        }}
-                      >
-                        {msg.content}
-                      </p>
+                      <div className="flex flex-col gap-3">
+                        <p
+                          style={{
+                            color: "var(--text-secondary)",
+                            fontSize: "13px",
+                            fontFamily: "var(--font-dm-sans)",
+                            paddingTop: "4px",
+                            paddingBottom: "4px",
+                          }}
+                        >
+                          {msg.content}
+                        </p>
+                        {/* Inline hotel cards for this message */}
+                        {msg.hotelCards && msg.hotelCards.length > 0 && (
+                          <div className="flex flex-col gap-3">
+                            {msg.hotelCards.map((card, ci) => (
+                              <HotelCard
+                                key={card.hotel.id}
+                                card={card}
+                                index={ci}
+                                checkIn={chat.hotelDates?.check_in}
+                                checkOut={chat.hotelDates?.check_out}
+                                guests={chat.hotelDates?.guests}
+                                onJobCreated={(jobId) => setInlineItems((prev) => [...prev, { type: "job", jobId }])}
+                              />
+                            ))}
+                          </div>
+                        )}
+                        {/* Inline flight cards for this message */}
+                        {msg.flightCards && msg.flightCards.length > 0 && (
+                          <div className="flex flex-col gap-3">
+                            {msg.flightCards.map((card, ci) => (
+                              <FlightCard
+                                key={card.flight.id}
+                                card={card}
+                                index={ci}
+                                bookingContext={chat.flightBookingContext}
+                                onJobCreated={(jobId) => setInlineItems((prev) => [...prev, { type: "job", jobId }])}
+                              />
+                            ))}
+                          </div>
+                        )}
+                      </div>
                     )}
                   </div>
                 ))}
@@ -1669,7 +1784,7 @@ export default function Home() {
                 )}
 
                 {/* Hotel date picker trigger */}
-                {chat.resultCategory === "hotel" && (
+                {chat.allHotelCards.length > 0 && (
                   <button
                     onClick={() => setDatePickerOpen(true)}
                     style={{
@@ -1808,21 +1923,24 @@ export default function Home() {
                   </button>
                 )}
 
-                {/* Hotel Results */}
-                {chat.resultCategory === "hotel" && chat.allHotelCards.length > 0 && (
+                {/* Inline booking task cards — below results, newest at bottom */}
+                {inlineItems.length > 0 && (
                   <div className="flex flex-col gap-3">
-                    {chat.allHotelCards.map((card, i) => (
-                      <HotelCard key={card.hotel.id} card={card} index={i} checkIn={chat.hotelDates?.check_in} checkOut={chat.hotelDates?.check_out} guests={chat.hotelDates?.guests} />
-                    ))}
-                  </div>
-                )}
-
-                {/* Flight Results */}
-                {chat.resultCategory === "flight" && chat.allFlightCards.length > 0 && (
-                  <div className="flex flex-col gap-3">
-                    {chat.allFlightCards.map((card, i) => (
-                      <FlightCard key={card.flight.id} card={card} index={i} />
-                    ))}
+                    {inlineItems.map((item) =>
+                      item.type === "job" ? (
+                        <InlineJobCard
+                          key={item.jobId}
+                          jobId={item.jobId}
+                          onDeleted={(id) => setInlineItems((prev) => prev.filter((i) => i.jobId !== id))}
+                          onNeedsTravelDocs={(req) => {
+                            setPendingTravelDoc(req);
+                            chat.injectAssistantMessage(
+                              "To book this flight, I need your travel documents. Could you please share your **date of birth** (YYYY-MM-DD) and **passport number**? For example: \"2001-09-05, passport EJ2676174\""
+                            );
+                          }}
+                        />
+                      ) : null
+                    )}
                   </div>
                 )}
 
@@ -2072,6 +2190,22 @@ export default function Home() {
         style={{ backgroundColor: "var(--card)", borderColor: "var(--border)" }}
       >
         <div className="max-w-2xl mx-auto flex gap-2 items-center">
+          {/* New chat button — only show when there's conversation history */}
+          {hasMessages && (
+            <button
+              onClick={() => { chat.clearChat(); setInlineItems([]); setPendingTravelDoc(null); }}
+              title="Start a new conversation"
+              style={{
+                flexShrink: 0, width: 36, height: 36, borderRadius: 10,
+                border: "0.5px solid var(--border)", backgroundColor: "var(--card)",
+                color: "var(--text-secondary)", cursor: "pointer",
+                display: "flex", alignItems: "center", justifyContent: "center",
+                fontSize: 16, lineHeight: 1,
+              }}
+            >
+              ✕
+            </button>
+          )}
           <input
             type="text"
             value={isListening ? "" : chat.input}
@@ -2096,6 +2230,8 @@ export default function Home() {
             placeholder={
               isListening
                 ? "Listening..."
+                : pendingTravelDoc
+                ? "e.g. 2001-09-05, passport EJ2676174"
                 : hasMessages
                 ? "Refine: 'more quiet', 'cheaper options'..."
                 : "Describe what you're looking for..."

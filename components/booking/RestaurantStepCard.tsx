@@ -2,7 +2,6 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import ProfilePicker, { PickedProfile } from "@/components/ProfilePicker";
 
 interface RestaurantStepCardProps {
   /** Optional default city pre-filled from trip context */
@@ -40,22 +39,27 @@ export default function RestaurantStepCard({
   const [date, setDate] = useState("");
   const [time, setTime] = useState("19:00");
   const [covers, setCovers] = useState(2);
-  const [showPicker, setShowPicker] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
 
   const canSubmit =
     restaurantName.trim().length > 0 && date >= today && !loading;
 
-  function handleBook() {
+  async function handleBook() {
     if (!canSubmit) return;
     setError("");
-    setShowPicker(true);
+    setLoading(true);
+    try {
+      const profileRes = await fetch("/api/user/booking-profiles?default=true");
+      const { profile } = await profileRes.json();
+      if (!profile) { setError("No booking profile found. Please set up your profile first."); return; }
+      await proceedWithProfile(profile);
+    } finally {
+      setLoading(false);
+    }
   }
 
-  async function proceedWithProfile(picked: PickedProfile) {
-    setShowPicker(false);
-    setLoading(true);
+  async function proceedWithProfile(profile: { id: number; first_name: string; last_name: string; email: string; phone: string }) {
     setError("");
 
     try {
@@ -81,12 +85,12 @@ export default function RestaurantStepCard({
           date,
           time,
           covers,
-          profileId: picked.profileId,
+          profileId: profile.id,
           profile: {
-            first_name: picked.first_name,
-            last_name: picked.last_name,
-            email: picked.email,
-            phone: picked.phone,
+            first_name: profile.first_name,
+            last_name: profile.last_name,
+            email: profile.email,
+            phone: profile.phone,
           },
           agentModel,
         },
@@ -120,8 +124,6 @@ export default function RestaurantStepCard({
       setError(
         err instanceof Error ? err.message : "Something went wrong. Try again."
       );
-    } finally {
-      setLoading(false);
     }
   }
 
@@ -278,12 +280,6 @@ export default function RestaurantStepCard({
         </button>
       </div>
 
-      {showPicker && (
-        <ProfilePicker
-          onSelect={proceedWithProfile}
-          onCancel={() => setShowPicker(false)}
-        />
-      )}
     </>
   );
 }

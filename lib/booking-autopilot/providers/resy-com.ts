@@ -1,6 +1,9 @@
 import type { Page } from "playwright";
 import { registerProvider } from "./registry";
 import type { BrowserProvider, ProviderStageSignals } from "./types";
+import { fillGuestFormWithAI, auditAndRefillEmptyFields } from "../ai-loop/fill-form";
+import { buildEffectiveProfile } from "../core/profile";
+import type { BookingProfile } from "../types";
 
 interface ResyProfile {
   first_name?: string;
@@ -106,11 +109,14 @@ export const resyProvider: BrowserProvider = {
   async fillGuestForm(
     page: Page,
     profile: unknown,
-    _helpers: unknown,
+    helpers: unknown,
     trace: (msg: string) => void
   ): Promise<void> {
     const p = profile as ResyProfile;
     const phoneDigits = (p.phone ?? "").replace(/\D/g, "");
+    const h = helpers as { stagehand?: { act: (s: string) => Promise<unknown> }; rawPage?: Page } | null;
+    const stagehand = h?.stagehand;
+    const rawPage = h?.rawPage ?? page;
 
     const results = await page.evaluate(
       ({ first, last, email, phone }: { first: string; last: string; email: string; phone: string }) => {
@@ -162,6 +168,24 @@ export const resyProvider: BrowserProvider = {
     });
 
     trace(`[resy] guest form filled: firstName=${results.firstName} lastName=${results.lastName} email=${results.email} phone=${results.phone}`);
+
+    // ── AI fill for missed fields + audit ──────────────────────────────────────
+    if (stagehand) {
+      const missed = [results.firstName, results.lastName, results.email, results.phone].filter(v => v === "not_found" || v === false);
+      if (missed.length > 0) {
+        trace(`[resy] ${missed.length} field(s) missed — running AI fill`);
+        const effectiveProfile = buildEffectiveProfile(p as BookingProfile, "");
+        try {
+          const aiResult = await fillGuestFormWithAI(stagehand, effectiveProfile, trace);
+          trace(`[resy] AI fill: filled=${aiResult.filled.join(",")} failed=${aiResult.failed.join(",")}`);
+        } catch (e) { trace(`[resy] AI fill error: ${(e as Error).message?.slice(0, 80)}`); }
+      }
+      try {
+        const effectiveProfile = buildEffectiveProfile(p as BookingProfile, "");
+        const audit = await auditAndRefillEmptyFields(stagehand, rawPage, effectiveProfile, trace);
+        if (audit.refilled.length) trace(`[resy] audit refilled: ${audit.refilled.join(",")}`);
+      } catch (e) { trace(`[resy] audit error: ${(e as Error).message?.slice(0, 80)}`); }
+    }
 
     // Submit the reservation form
     await new Promise(r => setTimeout(r, 800));
