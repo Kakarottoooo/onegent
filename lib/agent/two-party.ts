@@ -3,7 +3,7 @@
  *
  * Takes natural-language constraints from two people, merges them into a
  * single compound restaurant query, runs the existing agent pipeline,
- * and returns up to 3 options that satisfy both.
+ * and returns up to 5 options that satisfy both.
  *
  * Conflict detection: if constraints are mutually exclusive (e.g. "vegan only"
  * + "must have steak"), returns conflict=true with a reason + closest options
@@ -103,14 +103,14 @@ export async function runAgentForTwoParty(
     city.fullName
   );
 
-  // Run the existing agent with the merged query, capped at 3 results
+  // Run the existing agent with the merged query, capped at 5 results
   const result = await runAgent(
     mergedQuery,
     [], // no conversation history for merged query
     cityId
   );
 
-  const options = result.recommendations.slice(0, 3) as RecommendationCard[];
+  const options = result.recommendations.slice(0, 5) as RecommendationCard[];
 
   return { options, conflict, conflictReason };
 }

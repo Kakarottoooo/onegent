@@ -62,7 +62,6 @@ export default function NewRoomPage() {
   const [city, setCity] = useState<string>(DEFAULT_CITY);
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
-  const [partySize, setPartySize] = useState(2);
   const [payerIsSelf, setPayerIsSelf] = useState(true);
 
   // Multi-contact + group picker
@@ -141,7 +140,6 @@ export default function NewRoomPage() {
           context: {
             city_id: city,
             date_window: dateFrom || dateTo ? { from: dateFrom || null, to: dateTo || null } : null,
-            party_size: partySize,
           },
           payer_id: payerIsSelf ? userId : null,
           approval_rule: effectiveRule,
@@ -393,36 +391,20 @@ export default function NewRoomPage() {
                 Majority ({'>'}50%)
               </button>
             </div>
-            <p className="text-[11px] text-[var(--text-muted)] mb-5">
+            <p className="text-[11px] text-[var(--text-muted)] mb-1">
               {effectiveRule === "unanimous"
-                ? "Everyone must approve the proposal."
+                ? "Everyone must approve the same option."
                 : "More than half of members must approve."}
               {ruleOverride === null && " Default for groups is majority."}
             </p>
+            {effectiveRule === "unanimous" && (
+              <p className="text-[11px] text-amber-600 mb-5">
+                ⚠ A single member can veto every option — use with care.
+              </p>
+            )}
+            {effectiveRule === "majority" && <div className="mb-5" />}
           </>
         )}
-
-        {/* Party size */}
-        <label className={LABEL}>Party size</label>
-        <div className="flex items-center gap-3 mb-5">
-          <button
-            type="button"
-            onClick={() => setPartySize(Math.max(1, partySize - 1))}
-            className="w-10 h-10 rounded-xl border border-[var(--border)] bg-[var(--card)] text-[var(--text-primary)] hover:border-[var(--gold)] transition-colors"
-          >
-            −
-          </button>
-          <span className="text-sm font-medium text-[var(--text-primary)] w-8 text-center">
-            {partySize}
-          </span>
-          <button
-            type="button"
-            onClick={() => setPartySize(Math.min(12, partySize + 1))}
-            className="w-10 h-10 rounded-xl border border-[var(--border)] bg-[var(--card)] text-[var(--text-primary)] hover:border-[var(--gold)] transition-colors"
-          >
-            +
-          </button>
-        </div>
 
         {/* Payer */}
         <label className={LABEL}>Who&apos;s paying?</label>

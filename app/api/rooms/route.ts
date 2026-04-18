@@ -51,11 +51,17 @@ export async function POST(req: NextRequest) {
   return NextResponse.json({ room });
 }
 
-/** GET /api/rooms — list Rooms this user is a member of. */
-export async function GET() {
+/**
+ * GET /api/rooms — list Rooms this user is a member of.
+ *
+ * Query: ?archived=1 returns done/abandoned rooms (History tab). Default is
+ * active rooms only.
+ */
+export async function GET(req: NextRequest) {
   const { userId } = await auth();
   if (!userId) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
-  const rooms = await listMyDecisionRooms(userId);
+  const archived = req.nextUrl.searchParams.get("archived") === "1";
+  const rooms = await listMyDecisionRooms(userId, { archived });
   return NextResponse.json({ rooms });
 }

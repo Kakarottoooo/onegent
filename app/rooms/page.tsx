@@ -24,24 +24,31 @@ const TYPE_EMOJI: Record<DecisionRoom["type"], string> = {
   activity: "🎟️",
 };
 
+type Tab = "active" | "history";
+
 export default function RoomsListPage() {
   const { isSignedIn } = useAuth();
+  const [tab, setTab] = useState<Tab>("active");
   const [rooms, setRooms] = useState<DecisionRoom[] | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!isSignedIn) return;
+    let cancelled = false;
+    setRooms(null);
+    setError(null);
     (async () => {
       try {
-        const res = await fetch("/api/rooms");
+        const res = await fetch(tab === "history" ? "/api/rooms?archived=1" : "/api/rooms");
         if (!res.ok) throw new Error();
         const data = await res.json() as { rooms: DecisionRoom[] };
-        setRooms(data.rooms);
+        if (!cancelled) setRooms(data.rooms);
       } catch {
-        setError("Couldn't load your rooms.");
+        if (!cancelled) setError("Couldn't load your rooms.");
       }
     })();
-  }, [isSignedIn]);
+    return () => { cancelled = true; };
+  }, [isSignedIn, tab]);
 
   if (!isSignedIn) {
     return (
@@ -83,6 +90,25 @@ export default function RoomsListPage() {
           </div>
         </div>
 
+        {/* Active / History tabs */}
+        <div className="flex gap-1 mb-4 p-1 rounded-xl bg-[var(--card-2)] border border-[var(--border)]">
+          {(["active", "history"] as const).map((t) => (
+            <button
+              key={t}
+              type="button"
+              onClick={() => setTab(t)}
+              className={
+                "flex-1 text-xs font-medium py-1.5 rounded-lg transition-colors " +
+                (tab === t
+                  ? "bg-[var(--card)] text-[var(--text-primary)] shadow-sm"
+                  : "text-[var(--text-muted)] hover:text-[var(--text-secondary)]")
+              }
+            >
+              {t === "active" ? "Active" : "History"}
+            </button>
+          ))}
+        </div>
+
         {error && (
           <div className="bg-red-500/10 border border-red-500/30 rounded-xl p-3 text-xs text-red-600 mb-4">
             {error}
@@ -93,7 +119,7 @@ export default function RoomsListPage() {
           <p className="text-sm text-[var(--text-muted)] text-center py-12">Loading…</p>
         )}
 
-        {rooms && rooms.length === 0 && (
+        {rooms && rooms.length === 0 && tab === "active" && (
           <div className={`${CARD} p-6 text-center`}>
             <div className="text-3xl mb-2">🗣️</div>
             <p className="text-sm font-medium text-[var(--text-primary)] mb-1">No rooms yet</p>
@@ -103,6 +129,13 @@ export default function RoomsListPage() {
             <Link href="/rooms/new" className={`inline-block py-2 px-4 ${CTA}`}>
               Start a room →
             </Link>
+          </div>
+        )}
+        {rooms && rooms.length === 0 && tab === "history" && (
+          <div className={`${CARD} p-6 text-center`}>
+            <p className="text-sm text-[var(--text-secondary)]">
+              Nothing in your history yet.
+            </p>
           </div>
         )}
 

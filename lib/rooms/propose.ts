@@ -2,7 +2,7 @@
  * Decision Room proposal generator.
  *
  * Flattens each member's structured constraints into a natural-language clause,
- * routes to the right engine, and returns up to 3 options as a multi-choice
+ * routes to the right engine, and returns up to 5 options as a multi-choice
  * proposal. Members vote for their preferred option; acceptance follows the
  * room's `approval_rule` (unanimous = everyone picks the same option; majority
  * = one option's supporters exceed N/2).
@@ -52,7 +52,7 @@ export function constraintRowToText(row: DecisionRoomConstraintRow): string {
 
 /**
  * Restaurant proposal. Requires at least 2 submitted constraints.
- * Returns up to 3 option cards for the group to pick from.
+ * Returns up to 5 option cards for the group to pick from.
  */
 export async function generateRestaurantProposal(
   room: DecisionRoom,
@@ -109,14 +109,14 @@ export async function generateRestaurantProposal(
     );
   }
 
-  const options: ProposalOption[] = cards.slice(0, 3).map((card) => ({
+  const options: ProposalOption[] = cards.slice(0, 5).map((card) => ({
     id: randomUUID(),
     card,
   }));
 
   const rationale = conflict
     ? `Best compromises despite a conflict (${conflictReason ?? "incompatible preferences"}).`
-    : `Three options that match everyone's constraints — ${rationaleTail}`.slice(0, 400);
+    : `${options.length} options that match everyone's constraints — ${rationaleTail}`.slice(0, 400);
 
   const conflicts: ProposalGenerationResult["conflicts"] = conflict
     ? [

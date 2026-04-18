@@ -11,11 +11,12 @@ import type {
   DecisionRoomConstraintRow,
   DecisionRoomMessage,
   DecisionRoomProposal,
+  DecisionRoomStatus,
   DecisionRoomVote,
   UserProfile,
 } from "@/lib/db";
 import type { RecommendationCard } from "@/lib/types";
-import { extractOptions, tallyVotes } from "@/lib/rooms/proposal-shape";
+import { extractOptions, resolveAcceptedOption, tallyVotes } from "@/lib/rooms/proposal-shape";
 import { CARD, CARD_MUTED, CTA, CTA_GHOST, PAGE } from "@/app/_ui/tokens";
 import GlobalNav from "@/components/GlobalNav";
 
@@ -109,37 +110,106 @@ function RoomView({
   const myConstraint = constraints.find((c) => c.user_id === userId);
   const activeProposal = proposals.find((p) => p.status === "active") ?? null;
   const acceptedProposal = proposals.find((p) => p.status === "accepted") ?? null;
+  // Most-recent rejected proposal — surfaced (read-only) above the regenerate
+  // button while the room is back in `collecting` after a split vote, so
+  // members can see what was proposed / who voted for what before they
+  // decide to tweak constraints and re-propose.
+  const lastRejectedProposal =
+    [...proposals]
+      .filter((p) => p.status === "rejected")
+      .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())[0] ?? null;
   const payerId = room.payer_id ?? room.creator_id;
   const isPayer = userId === payerId;
   const isCreator = userId === room.creator_id;
 
   const submittedCount = constraints.filter((c) => c.submitted).length;
 
-  // Contact set for the "save as contact" button. Version tick triggers reload.
+  // Contact set + pending-request state for the "add as contact" button.
+  // Version tick triggers reload.
   const [contactIds, setContactIds] = useState<Set<string>>(new Set());
+  type PendingState = "pending_outgoing" | "pending_incoming";
+  const [pendingByUser, setPendingByUser] = useState<Record<string, { state: PendingState; requestId: string }>>({});
   const [contactsVersion, setContactsVersion] = useState(0);
   useEffect(() => {
     let cancelled = false;
     (async () => {
       try {
-        const res = await fetch("/api/contacts");
-        if (!res.ok || cancelled) return;
-        const data = (await res.json()) as { contacts: Array<{ contact_user_id: string }> };
-        if (!cancelled) setContactIds(new Set(data.contacts.map((c) => c.contact_user_id)));
+        const [cRes, oRes, iRes] = await Promise.all([
+          fetch("/api/contacts"),
+          fetch("/api/contacts/requests/outgoing"),
+          fetch("/api/contacts/requests/incoming"),
+        ]);
+        if (cancelled) return;
+        if (cRes.ok) {
+          const data = (await cRes.json()) as { contacts: Array<{ contact_user_id: string }> };
+          setContactIds(new Set(data.contacts.map((c) => c.contact_user_id)));
+        }
+        const nextPending: Record<string, { state: PendingState; requestId: string }> = {};
+        if (oRes.ok) {
+          const data = (await oRes.json()) as {
+            requests: Array<{ id: string; to_user_id: string; status: string }>;
+          };
+          for (const r of data.requests) {
+            if (r.status === "pending") {
+              nextPending[r.to_user_id] = { state: "pending_outgoing", requestId: r.id };
+            }
+          }
+        }
+        if (iRes.ok) {
+          const data = (await iRes.json()) as {
+            requests: Array<{ id: string; from_user_id: string; status: string }>;
+          };
+          for (const r of data.requests) {
+            if (r.status === "pending") {
+              nextPending[r.from_user_id] = { state: "pending_incoming", requestId: r.id };
+            }
+          }
+        }
+        if (!cancelled) setPendingByUser(nextPending);
       } catch { /* noop */ }
     })();
     return () => { cancelled = true; };
   }, [contactsVersion]);
   const reloadContacts = useCallback(() => setContactsVersion((v) => v + 1), []);
 
+  // If the user removes a contact on /contacts and navigates back, the cached
+  // set here goes stale and the "+" button stays hidden. Re-fetch whenever
+  // this tab regains visibility or focus.
+  useEffect(() => {
+    function onVisible() {
+      if (document.visibilityState === "visible") reloadContacts();
+    }
+    document.addEventListener("visibilitychange", onVisible);
+    window.addEventListener("focus", reloadContacts);
+    return () => {
+      document.removeEventListener("visibilitychange", onVisible);
+      window.removeEventListener("focus", reloadContacts);
+    };
+  }, [reloadContacts]);
+
   return (
     <div className={`${PAGE} pb-24`}>
       <GlobalNav active="rooms" />
       <div className="max-w-md mx-auto px-5 py-6">
         <HeaderBar
+          roomId={room.id}
           title={room.title}
           status={room.status}
           shortCode={room.short_code}
+          approvalRule={room.approval_rule ?? "unanimous"}
+          memberCount={members.length}
+          isCreator={isCreator}
+          refresh={refresh}
+        />
+
+        <RoomActionsMenu
+          roomId={room.id}
+          creatorId={room.creator_id}
+          myUserId={userId}
+          status={room.status}
+          members={members}
+          memberProfiles={member_profiles}
+          refresh={refresh}
         />
 
         <MembersStrip
@@ -151,6 +221,7 @@ function RoomView({
           activeProposal={activeProposal}
           myUserId={userId}
           contactIds={contactIds}
+          pendingByUser={pendingByUser}
           onContactAdded={reloadContacts}
         />
 
@@ -172,9 +243,33 @@ function RoomView({
           />
         )}
 
-        {/* Propose button — shown while collecting once >=2 submitted */}
-        {room.status === "collecting" && submittedCount >= 2 && (
-          <ProposeButton roomId={room.id} refresh={refresh} />
+        {/* Last rejected round — shown while the room is back in collecting
+            so members can see what was proposed / who voted for what before
+            deciding to regenerate. Must sit ABOVE ProposeButton so the
+            "Generate proposal" CTA appears below the rejected option cards. */}
+        {!activeProposal && !acceptedProposal && lastRejectedProposal && room.status === "collecting" && (
+          <ProposalCard
+            proposal={lastRejectedProposal}
+            roomId={room.id}
+            userId={userId}
+            memberCount={members.length}
+            approvalRule={room.approval_rule ?? "unanimous"}
+            memberProfiles={member_profiles}
+            isCreator={isCreator}
+            refresh={refresh}
+            mode="rejected"
+          />
+        )}
+
+        {/* Propose panel — always shown while collecting; gates itself on counts + role */}
+        {room.status === "collecting" && (
+          <ProposeButton
+            roomId={room.id}
+            refresh={refresh}
+            submittedCount={submittedCount}
+            memberCount={members.length}
+            isCreator={isCreator}
+          />
         )}
 
         {room.status === "proposing" && (
@@ -184,16 +279,20 @@ function RoomView({
           </div>
         )}
 
-        {/* Active proposal + voting */}
-        {activeProposal && (
+        {/* Proposal card — stays visible through voting AND after acceptance
+            so the group can see which restaurant won (read-only), instead of
+            the options disappearing the moment a winner is picked. */}
+        {(activeProposal ?? acceptedProposal) && (
           <ProposalCard
-            proposal={activeProposal}
+            proposal={(activeProposal ?? acceptedProposal)!}
             roomId={room.id}
             userId={userId}
             memberCount={members.length}
             approvalRule={room.approval_rule ?? "unanimous"}
             memberProfiles={member_profiles}
+            isCreator={isCreator}
             refresh={refresh}
+            mode={acceptedProposal && !activeProposal ? "accepted" : "active"}
           />
         )}
 
@@ -248,9 +347,20 @@ function RoomView({
 // ── Header bar ────────────────────────────────────────────────────────────────
 
 function HeaderBar({
-  title, status, shortCode,
-}: { title: string; status: string; shortCode: string }) {
+  roomId, title, status, shortCode, approvalRule, memberCount, isCreator, refresh,
+}: {
+  roomId: string;
+  title: string;
+  status: string;
+  shortCode: string;
+  approvalRule: ApprovalRule;
+  memberCount: number;
+  isCreator: boolean;
+  refresh: () => void;
+}) {
   const [copied, setCopied] = useState(false);
+  const [changingRule, setChangingRule] = useState(false);
+  const [ruleErr, setRuleErr] = useState<string | null>(null);
   const router = useRouter();
   const inviteUrl = typeof window !== "undefined" ? `${window.location.origin}/rooms/join/${shortCode}` : "";
 
@@ -260,6 +370,34 @@ function HeaderBar({
       setCopied(true);
       setTimeout(() => setCopied(false), 1500);
     } catch { /* noop */ }
+  }
+
+  // Creator-only: flip the rule while still collecting (no proposal yet).
+  // <3 members is forced unanimous server-side so the button stays hidden.
+  const canChangeRule = isCreator && status === "collecting" && memberCount >= 3;
+  async function flipRule() {
+    const next: ApprovalRule = approvalRule === "unanimous" ? "majority" : "unanimous";
+    const warn = next === "unanimous"
+      ? "Switch to Unanimous? A single member can veto every option."
+      : "Switch to Majority? More than half of members must approve.";
+    if (!confirm(warn)) return;
+    setChangingRule(true);
+    setRuleErr(null);
+    try {
+      const res = await fetch(`/api/rooms/${roomId}/approval-rule`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ approval_rule: next }),
+      });
+      if (!res.ok) {
+        const { error: msg } = await res.json().catch(() => ({ error: "Change failed" }));
+        setRuleErr(msg ?? "Couldn't change the rule.");
+        return;
+      }
+      refresh();
+    } finally {
+      setChangingRule(false);
+    }
   }
 
   // Semi-transparent colored pills survive both light and dark modes.
@@ -281,11 +419,39 @@ function HeaderBar({
       >
         ← All rooms
       </button>
-      <div className="flex items-start justify-between gap-3 mb-3">
+      <div className="flex items-start justify-between gap-3 mb-2">
         <h1 className="text-lg font-semibold text-[var(--text-primary)] leading-tight flex-1">{title}</h1>
         <span className={`text-[10px] font-medium px-2 py-0.5 rounded-full whitespace-nowrap mt-1 ${s.tone}`}>
           {s.text}
         </span>
+      </div>
+      <div className="flex items-center gap-2 mb-3 flex-wrap">
+        <span
+          className={
+            "text-[10px] font-medium px-2 py-0.5 rounded-full border whitespace-nowrap " +
+            (approvalRule === "unanimous"
+              ? "bg-amber-500/10 text-amber-600 border-amber-500/30"
+              : "bg-blue-500/10 text-blue-600 border-blue-500/30")
+          }
+          title={
+            approvalRule === "unanimous"
+              ? "Everyone must approve the same option"
+              : "More than half of members must approve"
+          }
+        >
+          {approvalRule === "unanimous" ? "🫱 Unanimous" : "🗳 Majority"}
+        </span>
+        {canChangeRule && (
+          <button
+            type="button"
+            onClick={flipRule}
+            disabled={changingRule}
+            className="text-[10px] text-[var(--text-muted)] hover:text-[var(--text-primary)] underline decoration-[var(--border)] hover:decoration-[var(--gold)] disabled:opacity-40"
+          >
+            {changingRule ? "…" : `Change to ${approvalRule === "unanimous" ? "Majority" : "Unanimous"}`}
+          </button>
+        )}
+        {ruleErr && <span className="text-[10px] text-red-600">{ruleErr}</span>}
       </div>
       <div className="flex items-center gap-2 mb-4">
         <div className={`flex-1 ${CARD} px-3 py-2 flex items-center justify-between rounded-xl`}>
@@ -304,6 +470,186 @@ function HeaderBar({
   );
 }
 
+// ── Room actions menu (leave / cancel / transfer / delete) ──────────────────
+
+function RoomActionsMenu({
+  roomId, creatorId, myUserId, status, members, memberProfiles, refresh,
+}: {
+  roomId: string;
+  creatorId: string;
+  myUserId: string;
+  status: DecisionRoomStatus;
+  members: { user_id: string }[];
+  memberProfiles: Record<string, UserProfile>;
+  refresh: () => void;
+}) {
+  const router = useRouter();
+  const [open, setOpen] = useState(false);
+  const [busy, setBusy] = useState<string | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+  const [transferPickerOpen, setTransferPickerOpen] = useState(false);
+
+  const isCreator = creatorId === myUserId;
+  const isExecuting = status === "executing";
+  const isArchived = status === "done" || status === "abandoned";
+  const canCancel = isCreator && !isExecuting && !isArchived;
+  const canTransfer = isCreator && !isExecuting && members.filter((m) => m.user_id !== myUserId).length > 0;
+  const canDelete = isCreator && isArchived;
+  const canLeave = !isCreator && !isExecuting;
+
+  const otherMembers = members.filter((m) => m.user_id !== myUserId);
+
+  if (!isCreator && !canLeave) return null; // nothing actionable
+
+  async function run(
+    url: string,
+    opts: RequestInit = {},
+    onOk?: (res: Response) => void | Promise<void>
+  ) {
+    setBusy(url);
+    setErr(null);
+    try {
+      const res = await fetch(url, opts);
+      if (!res.ok) {
+        const { error: msg } = await res.json().catch(() => ({ error: "Action failed" }));
+        setErr(msg ?? "Action failed");
+        return;
+      }
+      if (onOk) await onOk(res);
+      else refresh();
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function cancelRoom() {
+    if (!confirm("Cancel this room? It will move to History and voting stops.")) return;
+    await run(`/api/rooms/${roomId}/abandon`, { method: "POST" }, () => {
+      setOpen(false);
+      refresh();
+    });
+  }
+
+  async function leaveRoom() {
+    if (!confirm("Leave this room? You won't see new proposals or votes.")) return;
+    await run(`/api/rooms/${roomId}/leave`, { method: "POST" }, () => {
+      router.push("/rooms");
+    });
+  }
+
+  async function deleteRoom() {
+    if (!confirm("Permanently delete this room and all its history? This can't be undone.")) return;
+    await run(`/api/rooms/${roomId}`, { method: "DELETE" }, () => {
+      router.push("/rooms");
+    });
+  }
+
+  async function transferTo(toUserId: string) {
+    const peerName = memberDisplayName(toUserId, memberProfiles);
+    if (!confirm(`Hand ownership to ${peerName}? They'll become creator and (if you were paying) payer.`)) return;
+    await run(
+      `/api/rooms/${roomId}/transfer-creator`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ to_user_id: toUserId }),
+      },
+      () => {
+        setTransferPickerOpen(false);
+        setOpen(false);
+        refresh();
+      }
+    );
+  }
+
+  return (
+    <div className="relative mb-3 flex justify-end">
+      <button
+        type="button"
+        onClick={() => { setOpen((v) => !v); setTransferPickerOpen(false); }}
+        className="text-xs text-[var(--text-muted)] hover:text-[var(--text-primary)] px-2 py-1 rounded-lg border border-[var(--border)]"
+        aria-label="Room actions"
+      >
+        ⋯ Actions
+      </button>
+
+      {open && (
+        <div className="absolute right-0 top-full mt-1 w-60 z-20 rounded-xl border border-[var(--border)] bg-[var(--card)] shadow-lg overflow-hidden">
+          {canCancel && (
+            <button
+              type="button"
+              onClick={cancelRoom}
+              disabled={busy !== null}
+              className="w-full text-left px-3 py-2 text-sm text-[var(--text-primary)] hover:bg-[var(--card-2)] disabled:opacity-40"
+            >
+              Cancel room
+              <p className="text-[10px] text-[var(--text-muted)]">Move to History, stop voting.</p>
+            </button>
+          )}
+          {canTransfer && (
+            <button
+              type="button"
+              onClick={() => setTransferPickerOpen((v) => !v)}
+              disabled={busy !== null}
+              className="w-full text-left px-3 py-2 text-sm text-[var(--text-primary)] hover:bg-[var(--card-2)] border-t border-[var(--border)] disabled:opacity-40"
+            >
+              Transfer ownership {transferPickerOpen ? "▾" : "▸"}
+              <p className="text-[10px] text-[var(--text-muted)]">Hand creator role to another member.</p>
+            </button>
+          )}
+          {transferPickerOpen && canTransfer && (
+            <div className="border-t border-[var(--border)] bg-[var(--card-2)]">
+              {otherMembers.map((m) => (
+                <button
+                  key={m.user_id}
+                  type="button"
+                  onClick={() => transferTo(m.user_id)}
+                  disabled={busy !== null}
+                  className="w-full text-left px-4 py-1.5 text-xs text-[var(--text-primary)] hover:bg-[var(--card)] disabled:opacity-40"
+                >
+                  → {memberDisplayName(m.user_id, memberProfiles)}
+                </button>
+              ))}
+            </div>
+          )}
+          {canDelete && (
+            <button
+              type="button"
+              onClick={deleteRoom}
+              disabled={busy !== null}
+              className="w-full text-left px-3 py-2 text-sm text-red-600 hover:bg-red-500/10 border-t border-[var(--border)] disabled:opacity-40"
+            >
+              Delete permanently
+              <p className="text-[10px] text-[var(--text-muted)]">Wipes all messages, votes, constraints. Irreversible.</p>
+            </button>
+          )}
+          {canLeave && (
+            <button
+              type="button"
+              onClick={leaveRoom}
+              disabled={busy !== null}
+              className="w-full text-left px-3 py-2 text-sm text-[var(--text-primary)] hover:bg-[var(--card-2)] disabled:opacity-40"
+            >
+              Leave room
+              <p className="text-[10px] text-[var(--text-muted)]">You&apos;ll stop getting updates. History stays.</p>
+            </button>
+          )}
+          {isExecuting && (
+            <div className="px-3 py-2 text-[10px] text-[var(--text-muted)] border-t border-[var(--border)]">
+              Booking is in progress — clear it from the proposal to unlock these actions.
+            </div>
+          )}
+          {err && (
+            <div className="px-3 py-2 text-[11px] text-red-600 border-t border-[var(--border)]">
+              {err}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ── Members strip ─────────────────────────────────────────────────────────────
 
 function memberDisplayName(userId: string, profiles: Record<string, UserProfile>): string {
@@ -312,7 +658,7 @@ function memberDisplayName(userId: string, profiles: Record<string, UserProfile>
 
 function MembersStrip({
   members, memberProfiles, constraints, creatorId, payerId, activeProposal,
-  myUserId, contactIds, onContactAdded,
+  myUserId, contactIds, pendingByUser, onContactAdded,
 }: {
   members: { user_id: string }[];
   memberProfiles: Record<string, UserProfile>;
@@ -324,18 +670,37 @@ function MembersStrip({
     | null;
   myUserId: string;
   contactIds: Set<string>;
+  pendingByUser: Record<string, { state: "pending_outgoing" | "pending_incoming"; requestId: string }>;
   onContactAdded: () => void;
 }) {
   const [saving, setSaving] = useState<string | null>(null);
+  const [errMsg, setErrMsg] = useState<string | null>(null);
 
-  async function saveContact(targetId: string) {
+  async function sendRequest(targetId: string) {
     setSaving(targetId);
+    setErrMsg(null);
     try {
-      const res = await fetch("/api/contacts/by-user", {
+      const res = await fetch("/api/contacts/requests", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ user_id: targetId }),
       });
+      if (!res.ok) {
+        const { error } = await res.json().catch(() => ({ error: "Request failed" }));
+        setErrMsg(error ?? "Request failed");
+        setTimeout(() => setErrMsg(null), 3000);
+        return;
+      }
+      onContactAdded();
+    } finally {
+      setSaving(null);
+    }
+  }
+
+  async function cancelPending(requestId: string, targetId: string) {
+    setSaving(targetId);
+    try {
+      const res = await fetch(`/api/contacts/requests/${requestId}/cancel`, { method: "POST" });
       if (res.ok) onContactAdded();
     } finally {
       setSaving(null);
@@ -367,6 +732,7 @@ function MembersStrip({
           let statusEmoji = "…";
           let statusTone = "text-[var(--text-muted)]";
           let statusTitle = "Hasn't submitted yet";
+          let pendingConstraint = false;
           if (showVoteState) {
             if (vote?.vote === "approve") {
               statusEmoji = "✓";
@@ -389,10 +755,22 @@ function MembersStrip({
             statusEmoji = "✓";
             statusTone = "text-emerald-600";
             statusTitle = "Submitted constraints";
+          } else {
+            // Collecting phase, not yet submitted — highlight the pill.
+            statusEmoji = "●";
+            statusTone = "text-amber-500";
+            statusTitle = "Hasn't submitted yet";
+            pendingConstraint = true;
           }
 
           return (
-            <div key={m.user_id} className="flex items-center gap-1.5 bg-[var(--card-2)] border border-[var(--border)] rounded-full pl-1 pr-2.5 py-1">
+            <div
+              key={m.user_id}
+              className={
+                "flex items-center gap-1.5 bg-[var(--card-2)] rounded-full pl-1 pr-2.5 py-1 border " +
+                (pendingConstraint ? "border-amber-500/60" : "border-[var(--border)]")
+              }
+            >
               {profile?.avatar_url ? (
                 // eslint-disable-next-line @next/next/no-img-element
                 <img src={profile.avatar_url} alt="" className="w-5 h-5 rounded-full" />
@@ -407,21 +785,52 @@ function MembersStrip({
               <span className={`text-[9px] ${statusTone}`} title={statusTitle}>
                 {statusEmoji}
               </span>
-              {m.user_id !== myUserId && !contactIds.has(m.user_id) && (
-                <button
-                  type="button"
-                  onClick={() => saveContact(m.user_id)}
-                  disabled={saving === m.user_id}
-                  title="Save as contact"
-                  className="text-[10px] text-[var(--text-muted)] hover:text-[var(--gold)] disabled:opacity-40"
-                >
-                  {saving === m.user_id ? "…" : "+"}
-                </button>
-              )}
+              {m.user_id !== myUserId && !contactIds.has(m.user_id) && (() => {
+                const pending = pendingByUser[m.user_id];
+                if (!pending) {
+                  return (
+                    <button
+                      type="button"
+                      onClick={() => sendRequest(m.user_id)}
+                      disabled={saving === m.user_id}
+                      title="Send contact request"
+                      className="ml-0.5 w-5 h-5 rounded-full border border-[var(--gold)]/60 bg-[var(--gold)]/15 text-[var(--gold)] text-sm font-bold leading-none flex items-center justify-center hover:bg-[var(--gold)] hover:text-white hover:border-[var(--gold)] disabled:opacity-40 transition-colors"
+                    >
+                      {saving === m.user_id ? "…" : "+"}
+                    </button>
+                  );
+                }
+                if (pending.state === "pending_outgoing") {
+                  return (
+                    <button
+                      type="button"
+                      onClick={() => cancelPending(pending.requestId, m.user_id)}
+                      disabled={saving === m.user_id}
+                      title="Pending — click to cancel"
+                      className="ml-0.5 px-1.5 h-5 rounded-full border border-[var(--border)] bg-[var(--card)] text-[9px] text-[var(--text-muted)] hover:text-red-600 disabled:opacity-40"
+                    >
+                      {saving === m.user_id ? "…" : "pending ✕"}
+                    </button>
+                  );
+                }
+                // pending_incoming — they already sent me one; point to /contacts.
+                return (
+                  <Link
+                    href="/contacts"
+                    title="Respond in your inbox"
+                    className="ml-0.5 px-1.5 h-5 rounded-full border border-[var(--gold)]/60 bg-[var(--gold)]/15 text-[9px] text-[var(--gold)] flex items-center hover:bg-[var(--gold)] hover:text-white"
+                  >
+                    respond →
+                  </Link>
+                );
+              })()}
             </div>
           );
         })}
       </div>
+      {errMsg && (
+        <p className="text-[11px] text-red-600 mt-2">{errMsg}</p>
+      )}
     </div>
   );
 }
@@ -619,15 +1028,39 @@ function ConstraintForm({
 
 // ── Propose button ────────────────────────────────────────────────────────────
 
-function ProposeButton({ roomId, refresh }: { roomId: string; refresh: () => void }) {
+function ProposeButton({
+  roomId,
+  refresh,
+  submittedCount,
+  memberCount,
+  isCreator,
+}: {
+  roomId: string;
+  refresh: () => void;
+  submittedCount: number;
+  memberCount: number;
+  isCreator: boolean;
+}) {
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
-  async function propose() {
+  const missing = Math.max(0, memberCount - submittedCount);
+  const allSubmitted = missing === 0 && submittedCount > 0;
+  // Creator escape hatch: at least 2 submitted but not everyone.
+  const canForce = isCreator && !allSubmitted && submittedCount >= 2;
+
+  async function propose(force: boolean) {
+    if (force) {
+      const ok = confirm(
+        `${missing} member${missing === 1 ? "" : "s"} haven${"\u2019"}t submitted preferences yet. Their input will be ignored. Continue?`
+      );
+      if (!ok) return;
+    }
     setLoading(true);
     setErr(null);
     try {
-      const res = await fetch(`/api/rooms/${roomId}/propose`, { method: "POST" });
+      const url = force ? `/api/rooms/${roomId}/propose?force=1` : `/api/rooms/${roomId}/propose`;
+      const res = await fetch(url, { method: "POST" });
       if (!res.ok) {
         const { error: msg } = await res.json().catch(() => ({ error: "Propose failed" }));
         setErr(msg ?? "Couldn't generate a proposal.");
@@ -641,13 +1074,28 @@ function ProposeButton({ roomId, refresh }: { roomId: string; refresh: () => voi
 
   return (
     <div className="mb-4">
+      <p className="text-xs text-[var(--text-muted)] mb-2 text-center">
+        {submittedCount}/{memberCount} submitted
+        {missing > 0 && <span> · {missing} still waiting</span>}
+      </p>
       <button
-        onClick={propose}
-        disabled={loading}
-        className={`w-full py-3 ${CTA}`}
+        onClick={() => propose(false)}
+        disabled={loading || !allSubmitted}
+        className={`w-full py-3 ${CTA} disabled:opacity-50`}
+        title={allSubmitted ? undefined : "Waiting for everyone to submit"}
       >
-        {loading ? "Finding a place…" : "🧭 Generate proposal →"}
+        {loading ? "Finding a place…" : allSubmitted ? "🧭 Generate proposal →" : "Waiting for all members"}
       </button>
+      {canForce && (
+        <button
+          type="button"
+          onClick={() => propose(true)}
+          disabled={loading}
+          className="mt-2 w-full text-xs text-[var(--text-muted)] hover:text-[var(--text-primary)] underline decoration-[var(--border)] hover:decoration-[var(--gold)] disabled:opacity-40"
+        >
+          Propose without waiting →
+        </button>
+      )}
       {err && <p className="text-xs text-red-600 mt-2">{err}</p>}
     </div>
   );
@@ -656,7 +1104,7 @@ function ProposeButton({ roomId, refresh }: { roomId: string; refresh: () => voi
 // ── Proposal card + voting ────────────────────────────────────────────────────
 
 function ProposalCard({
-  proposal, roomId, userId, memberCount, approvalRule, memberProfiles, refresh,
+  proposal, roomId, userId, memberCount, approvalRule, memberProfiles, isCreator, refresh, mode = "active",
 }: {
   proposal: DecisionRoomProposal & { votes: DecisionRoomVote[] };
   roomId: string;
@@ -664,15 +1112,56 @@ function ProposalCard({
   memberCount: number;
   approvalRule: ApprovalRule;
   memberProfiles: Record<string, UserProfile>;
+  isCreator: boolean;
   refresh: () => void;
+  /**
+   * - "active" (default): voting in progress, buttons enabled
+   * - "accepted": winner highlighted emerald, option picks still mutable
+   * - "rejected": read-only historical snapshot of a prior round that failed
+   *   to converge — shows tallies so members can see who picked what before
+   *   they regenerate.
+   */
+  mode?: "active" | "accepted" | "rejected";
 }) {
+  const historical = mode === "rejected";
+  const canPickOption = mode === "active" || mode === "accepted";
   const options = useMemo(() => extractOptions(proposal), [proposal]);
   const tallies = useMemo(() => tallyVotes(options, proposal.votes), [options, proposal.votes]);
   const myVote = proposal.votes.find((v) => v.user_id === userId);
-  const totalVoted = proposal.votes.length;
+  // Unique voters — approve / decline / request_changes all count as "voted".
+  const voterCount = new Set(proposal.votes.map((v) => v.user_id)).size;
+  const missingVoters = Math.max(0, memberCount - voterCount);
+  // Only accepted proposals have a winner to highlight.
+  const winnerId = useMemo(
+    () => (mode === "accepted" ? resolveAcceptedOption(approvalRule, memberCount, tallies) : null),
+    [mode, approvalRule, memberCount, tallies],
+  );
 
   const [voting, setVoting] = useState<string | null>(null); // in-flight option_id or "decline"
   const [err, setErr] = useState<string | null>(null);
+  const [finalizing, setFinalizing] = useState(false);
+
+  async function finalizeNow() {
+    const ok = confirm(
+      `${missingVoters} member${missingVoters === 1 ? "" : "s"} haven${"\u2019"}t voted yet. Finalize with current votes?`
+    );
+    if (!ok) return;
+    setFinalizing(true);
+    setErr(null);
+    try {
+      const res = await fetch(`/api/rooms/${roomId}/proposals/${proposal.id}/finalize`, {
+        method: "POST",
+      });
+      if (!res.ok) {
+        const { error: msg } = await res.json().catch(() => ({ error: "Finalize failed" }));
+        setErr(msg ?? "Couldn't finalize voting.");
+        return;
+      }
+      refresh();
+    } finally {
+      setFinalizing(false);
+    }
+  }
 
   async function vote(kind: "approve" | "decline" | "request_changes", optionId: string | null) {
     setVoting(kind === "approve" ? (optionId ?? "approve") : kind);
@@ -702,13 +1191,19 @@ function ProposalCard({
   const totalApproved = tallies.reduce((acc, t) => acc + t.approved_by.length, 0);
 
   return (
-    <div className={`${CARD} p-4 mb-4`}>
+    <div
+      className={`${CARD} p-4 mb-4 ${mode === "rejected" ? "opacity-80" : ""}`}
+    >
       <div className="flex items-baseline justify-between mb-2">
         <p className="text-xs text-[var(--text-muted)]">
-          Agent proposes {options.length > 1 ? `${options.length} options` : "an option"}
+          {mode === "rejected"
+            ? `Last round — rejected · ${options.length > 1 ? `${options.length} options` : "1 option"}`
+            : mode === "accepted"
+              ? `Accepted — ${options.length > 1 ? `${options.length} options` : "1 option"}`
+              : `Agent proposes ${options.length > 1 ? `${options.length} options` : "an option"}`}
         </p>
         <p className="text-[11px] text-[var(--text-muted)]">
-          {totalApproved}/{memberCount} approved · {approvalRule === "unanimous" ? "unanimous" : "majority"}
+          {voterCount}/{memberCount} voted · {totalApproved} approved · {approvalRule === "unanimous" ? "unanimous" : "majority"}
         </p>
       </div>
 
@@ -765,15 +1260,22 @@ function ProposalCard({
           const card = o.card;
           const tally = tallies.find((t) => t.option_id === o.id);
           const approvedBy = tally?.approved_by ?? [];
+          const approvedCount = approvedBy.length;
+          const approvedPct = memberCount > 0 ? Math.round((approvedCount / memberCount) * 100) : 0;
+          const shownAvatars = approvedBy.slice(0, 3);
+          const overflowAvatars = approvedCount - shownAvatars.length;
           const isMyPick = myVote?.vote === "approve" && myVote.option_id === o.id;
+          const isWinner = mode === "accepted" && winnerId === o.id;
           const loading = voting === o.id;
           return (
             <div
               key={o.id}
               className={`rounded-xl border p-3 transition-colors ${
-                isMyPick
-                  ? "border-[var(--gold)] bg-[var(--gold)]/10"
-                  : "border-[var(--border)] bg-[var(--card)]"
+                isWinner
+                  ? "border-emerald-500/60 bg-emerald-500/10"
+                  : isMyPick
+                    ? "border-[var(--gold)] bg-[var(--gold)]/10"
+                    : "border-[var(--border)] bg-[var(--card)]"
               }`}
             >
               <div className="flex items-start justify-between gap-2 mb-1">
@@ -786,53 +1288,82 @@ function ProposalCard({
                     {card.restaurant?.address?.split(",")[0]}
                   </p>
                 </div>
-                <div className="flex items-center gap-0.5 flex-shrink-0">
-                  {approvedBy.map((uid) => {
-                    const p = memberProfiles[uid];
-                    const name = p?.display_name ?? `@${p?.profile_code ?? uid.slice(-6)}`;
-                    return p?.avatar_url ? (
-                      // eslint-disable-next-line @next/next/no-img-element
-                      <img
-                        key={uid}
-                        src={p.avatar_url}
-                        alt={name}
-                        title={`${name} picked this`}
-                        className="w-5 h-5 rounded-full ring-2 ring-[var(--card)] -ml-1 first:ml-0"
-                      />
-                    ) : (
+                <div className="flex items-center gap-2 flex-shrink-0">
+                  {isWinner && (
+                    <span
+                      className="text-[10px] font-semibold px-1.5 py-0.5 rounded-full bg-emerald-500 text-white whitespace-nowrap"
+                      title="Group picked this option"
+                    >
+                      ✓ Picked
+                    </span>
+                  )}
+                  {approvedCount > 0 && (
+                    <span
+                      className="text-[10px] font-medium px-1.5 py-0.5 rounded-full bg-emerald-500/15 text-emerald-600 border border-emerald-500/30 whitespace-nowrap"
+                      title={`${approvedCount} of ${memberCount} picked this`}
+                    >
+                      {approvedCount} · {approvedPct}%
+                    </span>
+                  )}
+                  <div className="flex items-center gap-0.5">
+                    {shownAvatars.map((uid) => {
+                      const p = memberProfiles[uid];
+                      const name = p?.display_name ?? `@${p?.profile_code ?? uid.slice(-6)}`;
+                      return p?.avatar_url ? (
+                        // eslint-disable-next-line @next/next/no-img-element
+                        <img
+                          key={uid}
+                          src={p.avatar_url}
+                          alt={name}
+                          title={`${name} picked this`}
+                          className="w-5 h-5 rounded-full ring-2 ring-[var(--card)] -ml-1 first:ml-0"
+                        />
+                      ) : (
+                        <div
+                          key={uid}
+                          title={`${name} picked this`}
+                          className="w-5 h-5 rounded-full bg-[var(--border)] flex items-center justify-center text-[9px] text-[var(--text-secondary)] ring-2 ring-[var(--card)] -ml-1 first:ml-0"
+                        >
+                          {name.slice(0, 1).toUpperCase()}
+                        </div>
+                      );
+                    })}
+                    {overflowAvatars > 0 && (
                       <div
-                        key={uid}
-                        title={`${name} picked this`}
-                        className="w-5 h-5 rounded-full bg-[var(--border)] flex items-center justify-center text-[9px] text-[var(--text-secondary)] ring-2 ring-[var(--card)] -ml-1 first:ml-0"
+                        title={`${overflowAvatars} more picked this`}
+                        className="w-5 h-5 rounded-full bg-[var(--border)] flex items-center justify-center text-[9px] text-[var(--text-secondary)] ring-2 ring-[var(--card)] -ml-1"
                       >
-                        {name.slice(0, 1).toUpperCase()}
+                        +{overflowAvatars}
                       </div>
-                    );
-                  })}
+                    )}
+                  </div>
                 </div>
               </div>
               {card.why_recommended && (
-                <p className="text-[11px] text-[var(--text-secondary)] leading-relaxed mb-2">
+                <p className={`text-[11px] text-[var(--text-secondary)] leading-relaxed ${historical ? "" : "mb-2"}`}>
                   {card.why_recommended}
                 </p>
               )}
-              <button
-                onClick={() => vote("approve", o.id)}
-                disabled={voting !== null}
-                className={`w-full py-2 rounded-xl border text-xs font-medium disabled:opacity-40 transition-colors ${
-                  isMyPick
-                    ? "border-[var(--gold)] bg-[var(--gold)] text-white"
-                    : "border-[var(--border)] text-[var(--text-secondary)] bg-[var(--card)] hover:border-[var(--gold)]"
-                }`}
-              >
-                {loading ? "…" : isMyPick ? "Picked ✓ — click to change below" : "Pick this one"}
-              </button>
+              {canPickOption && (
+                <button
+                  onClick={() => vote("approve", o.id)}
+                  disabled={voting !== null}
+                  className={`w-full py-2 rounded-xl border text-xs font-medium disabled:opacity-40 transition-colors ${
+                    isMyPick
+                      ? "border-[var(--gold)] bg-[var(--gold)] text-white"
+                      : "border-[var(--border)] text-[var(--text-secondary)] bg-[var(--card)] hover:border-[var(--gold)]"
+                  }`}
+                >
+                  {loading ? "…" : isMyPick ? "Picked ✓ — click to change below" : "Pick this one"}
+                </button>
+              )}
             </div>
           );
         })}
       </div>
 
       {/* Aggregate decline / request-changes (apply to the whole slate) */}
+      {mode === "active" && (
       <div className="flex gap-2">
         <button
           onClick={() => vote("decline", null)}
@@ -857,11 +1388,23 @@ function ProposalCard({
           {voting === "request_changes" ? "…" : myVote?.vote === "request_changes" ? "Change requested" : "Request changes"}
         </button>
       </div>
+      )}
 
-      {totalVoted < memberCount && (
+      {mode === "active" && missingVoters > 0 && (
         <p className="text-[11px] text-[var(--text-muted)] mt-2">
-          Waiting on {memberCount - totalVoted} more vote{memberCount - totalVoted === 1 ? "" : "s"}.
+          Waiting on {missingVoters} more vote{missingVoters === 1 ? "" : "s"}.
         </p>
+      )}
+
+      {mode === "active" && isCreator && missingVoters > 0 && voterCount >= 1 && (
+        <button
+          type="button"
+          onClick={finalizeNow}
+          disabled={finalizing}
+          className="mt-2 w-full text-xs text-[var(--text-muted)] hover:text-[var(--text-primary)] underline decoration-[var(--border)] hover:decoration-[var(--gold)] disabled:opacity-40"
+        >
+          {finalizing ? "Finalizing…" : "Finalize now →"}
+        </button>
       )}
 
       {err && <p className="text-xs text-red-600 mt-2">{err}</p>}
@@ -905,11 +1448,33 @@ function AcceptedBlock({
     ({} as RecommendationCard);
   const [date, setDate] = useState("");
   const [time, setTime] = useState("19:00");
-  const [covers, setCovers] = useState(2);
+  // Default covers = current joined count. Payer can still override for
+  // cases like bringing a child (no seat) or a non-member joining on site.
+  const [covers, setCovers] = useState(Math.max(1, memberCount));
   const [starting, setStarting] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [needsProfile, setNeedsProfile] = useState(false);
+  const [undoing, setUndoing] = useState(false);
   const router = useRouter();
+
+  async function undoApproval() {
+    if (undoing) return;
+    setUndoing(true);
+    setErr(null);
+    try {
+      const res = await fetch(`/api/rooms/${roomId}/proposals/${proposal.id}/vote`, {
+        method: "DELETE",
+      });
+      if (!res.ok) {
+        const { error: msg } = await res.json().catch(() => ({ error: "Undo failed" }));
+        setErr(msg ?? "Couldn't undo approval.");
+        return;
+      }
+      refresh();
+    } finally {
+      setUndoing(false);
+    }
+  }
 
   // Live-fetch the referenced booking job (if any) so the UI can distinguish
   // "running" from "failed" from "deleted" instead of blindly showing
@@ -1132,7 +1697,7 @@ function AcceptedBlock({
   return (
     <div className="bg-emerald-500/10 border border-emerald-500/30 rounded-2xl p-4 mb-4">
       <p className="text-sm font-medium text-emerald-600 mb-1">
-        ✅ Everyone approved — {card.restaurant?.name ?? "restaurant"}
+        ✅ Ready to book — {card.restaurant?.name ?? "restaurant"}
       </p>
       {!isPayer && (
         <p className="text-xs text-emerald-600/80">
@@ -1195,6 +1760,18 @@ function AcceptedBlock({
               </Link>
             </div>
           )}
+        </div>
+      )}
+
+      {status !== "executing" && status !== "done" && (
+        <div className="mt-3 pt-3 border-t border-emerald-500/20">
+          <button
+            onClick={undoApproval}
+            disabled={undoing}
+            className="text-[11px] text-emerald-600/70 hover:text-emerald-600 underline underline-offset-2 disabled:opacity-40"
+          >
+            {undoing ? "Reopening voting…" : "↶ Change my pick — reopen voting"}
+          </button>
         </div>
       )}
     </div>

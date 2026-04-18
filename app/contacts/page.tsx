@@ -39,6 +39,27 @@ interface Group {
   updated_at: string;
 }
 
+interface ContactRequest {
+  id: string;
+  from_user_id: string;
+  to_user_id: string;
+  status: "pending" | "accepted" | "declined" | "cancelled";
+  created_at: string;
+  note: string | null;
+  peer_profile_code: string | null;
+  peer_display_name: string | null;
+  peer_avatar_url: string | null;
+}
+
+interface BlockedUser {
+  blocker_id: string;
+  blocked_id: string;
+  created_at: string;
+  profile_code: string | null;
+  display_name: string | null;
+  avatar_url: string | null;
+}
+
 export default function ContactsPage() {
   const { isSignedIn } = useAuth();
   const [myProfile, setMyProfile] = useState<MyProfile | null>(null);
@@ -49,8 +70,9 @@ export default function ContactsPage() {
   const [codeInput, setCodeInput] = useState("");
   const [preview, setPreview] = useState<MyProfile | null>(null);
   const [previewError, setPreviewError] = useState<string | null>(null);
-  const [nicknameInput, setNicknameInput] = useState("");
+  const [nicknameInput, setNicknameInput] = useState(""); // carried across accept in future
   const [adding, setAdding] = useState(false);
+  const [addedToast, setAddedToast] = useState<string | null>(null);
 
   // Edit state
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -65,11 +87,21 @@ export default function ContactsPage() {
   const [groupMembers, setGroupMembers] = useState<Record<string, Contact[]>>({});
   const [groupPickerIds, setGroupPickerIds] = useState<Set<string>>(new Set());
 
+  // Requests + blocks
+  const [incoming, setIncoming] = useState<ContactRequest[] | null>(null);
+  const [outgoing, setOutgoing] = useState<ContactRequest[] | null>(null);
+  const [blocks, setBlocks] = useState<BlockedUser[] | null>(null);
+  const [blocksOpen, setBlocksOpen] = useState(false);
+  const [busyReq, setBusyReq] = useState<string | null>(null);
+
   const loadAll = useCallback(async () => {
-    const [profRes, contactsRes, groupsRes] = await Promise.all([
+    const [profRes, contactsRes, groupsRes, incRes, outRes, blkRes] = await Promise.all([
       fetch("/api/users/me"),
       fetch("/api/contacts"),
       fetch("/api/groups"),
+      fetch("/api/contacts/requests/incoming"),
+      fetch("/api/contacts/requests/outgoing"),
+      fetch("/api/contacts/blocks"),
     ]);
     if (profRes.ok) {
       const data = await profRes.json() as { profile: MyProfile };
@@ -82,6 +114,18 @@ export default function ContactsPage() {
     if (groupsRes.ok) {
       const data = await groupsRes.json() as { groups: Group[] };
       setGroups(data.groups);
+    }
+    if (incRes.ok) {
+      const data = await incRes.json() as { requests: ContactRequest[] };
+      setIncoming(data.requests);
+    }
+    if (outRes.ok) {
+      const data = await outRes.json() as { requests: ContactRequest[] };
+      setOutgoing(data.requests);
+    }
+    if (blkRes.ok) {
+      const data = await blkRes.json() as { blocks: BlockedUser[] };
+      setBlocks(data.blocks);
     }
   }, []);
 
@@ -163,8 +207,6 @@ export default function ContactsPage() {
   async function lookupCode() {
     setPreview(null);
     setPreviewError(null);
-    // Accept either @username or 6-char profile code. Preserve case so the
-    // server can do case-insensitive username matching.
     const handle = codeInput.trim().replace(/^@/, "");
     if (!handle) return;
     try {
@@ -185,13 +227,18 @@ export default function ContactsPage() {
       const res = await fetch("/api/contacts", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ code: preview.profile_code, nickname: nicknameInput.trim() || undefined }),
+        body: JSON.stringify({
+          code: preview.profile_code,
+          note: nicknameInput.trim() || undefined,
+        }),
       });
       if (!res.ok) {
-        const { error } = await res.json().catch(() => ({ error: "Add failed" }));
-        setPreviewError(error ?? "Add failed");
+        const { error } = await res.json().catch(() => ({ error: "Send failed" }));
+        setPreviewError(error ?? "Send failed");
         return;
       }
+      setAddedToast(`Request sent to ${preview.display_name ?? `@${preview.username ?? preview.profile_code}`}.`);
+      setTimeout(() => setAddedToast(null), 3000);
       setCodeInput("");
       setNicknameInput("");
       setPreview(null);
@@ -200,6 +247,52 @@ export default function ContactsPage() {
     } finally {
       setAdding(false);
     }
+  }
+
+  async function respondToRequest(requestId: string, action: "accept" | "decline") {
+    setBusyReq(requestId);
+    try {
+      const res = await fetch(`/api/contacts/requests/${requestId}/${action}`, {
+        method: "POST",
+      });
+      if (res.ok) await loadAll();
+    } finally {
+      setBusyReq(null);
+    }
+  }
+
+  async function cancelOutgoingRequest(requestId: string) {
+    setBusyReq(requestId);
+    try {
+      const res = await fetch(`/api/contacts/requests/${requestId}/cancel`, {
+        method: "POST",
+      });
+      if (res.ok) await loadAll();
+    } finally {
+      setBusyReq(null);
+    }
+  }
+
+  async function blockFromRequest(request: ContactRequest) {
+    if (!confirm(`Block this user? They won't be able to send you more requests.`)) return;
+    setBusyReq(request.id);
+    try {
+      const res = await fetch("/api/contacts/blocks", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ user_id: request.from_user_id }),
+      });
+      if (res.ok) await loadAll();
+    } finally {
+      setBusyReq(null);
+    }
+  }
+
+  async function unblock(userId: string) {
+    const res = await fetch(`/api/contacts/blocks/${encodeURIComponent(userId)}`, {
+      method: "DELETE",
+    });
+    if (res.ok) await loadAll();
   }
 
   async function saveNickname(contactUserId: string) {
@@ -268,6 +361,71 @@ export default function ContactsPage() {
           </p>
         </div>
 
+        {/* Incoming requests */}
+        {incoming && incoming.length > 0 && (
+          <div className={`${CARD} p-4 mb-5`}>
+            <p className="text-sm font-semibold text-[var(--text-primary)] mb-3">
+              Incoming requests ({incoming.length})
+            </p>
+            <div className="flex flex-col gap-2">
+              {incoming.map((r) => {
+                const label = r.peer_display_name ?? `@${r.peer_profile_code ?? "user"}`;
+                return (
+                  <div
+                    key={r.id}
+                    className="flex items-center gap-3 p-2 rounded-xl bg-[var(--card-2)] border border-[var(--border)]"
+                  >
+                    {r.peer_avatar_url ? (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img src={r.peer_avatar_url} alt="" className="w-9 h-9 rounded-full flex-shrink-0" />
+                    ) : (
+                      <div className="w-9 h-9 rounded-full bg-[var(--card)] border border-[var(--border)] flex items-center justify-center text-xs text-[var(--text-secondary)] flex-shrink-0">
+                        {label.slice(0, 1).toUpperCase()}
+                      </div>
+                    )}
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-medium text-[var(--text-primary)] truncate">{label}</p>
+                      <p className="text-[11px] text-[var(--text-muted)] font-mono">
+                        @{r.peer_profile_code ?? "?"}
+                      </p>
+                      {r.note && (
+                        <p className="text-[11px] text-[var(--text-secondary)] mt-0.5 italic line-clamp-2">
+                          “{r.note}”
+                        </p>
+                      )}
+                    </div>
+                    <div className="flex flex-col gap-1 items-end">
+                      <div className="flex gap-1.5">
+                        <button
+                          onClick={() => respondToRequest(r.id, "accept")}
+                          disabled={busyReq === r.id}
+                          className="px-2.5 py-1 rounded-lg bg-[var(--gold)] text-white text-[11px] font-medium disabled:opacity-40 hover:opacity-90"
+                        >
+                          Accept
+                        </button>
+                        <button
+                          onClick={() => respondToRequest(r.id, "decline")}
+                          disabled={busyReq === r.id}
+                          className="px-2.5 py-1 rounded-lg border border-[var(--border)] text-[var(--text-secondary)] text-[11px] hover:text-[var(--text-primary)] disabled:opacity-40"
+                        >
+                          Decline
+                        </button>
+                      </div>
+                      <button
+                        onClick={() => blockFromRequest(r)}
+                        disabled={busyReq === r.id}
+                        className="text-[10px] text-[var(--text-muted)] hover:text-red-600 disabled:opacity-40"
+                      >
+                        Block
+                      </button>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
         {/* Add-by-code form */}
         <div className={`${CARD} p-4 mb-5`}>
           <p className="text-sm font-semibold text-[var(--text-primary)] mb-3">Add someone</p>
@@ -289,6 +447,9 @@ export default function ContactsPage() {
           </div>
           {previewError && (
             <p className="text-xs text-red-700 mb-2">{previewError}</p>
+          )}
+          {addedToast && (
+            <p className="text-xs text-[var(--gold)] mb-2">{addedToast}</p>
           )}
           {preview && (
             <div className="mt-3 border-t border-[var(--border)] pt-3">
@@ -313,8 +474,8 @@ export default function ContactsPage() {
               <input
                 value={nicknameInput}
                 onChange={(e) => setNicknameInput(e.target.value)}
-                placeholder="Nickname (optional)"
-                maxLength={60}
+                placeholder="Optional note (e.g. “met at Linda's dinner”)"
+                maxLength={200}
                 className={`w-full ${INPUT} mb-2`}
               />
               <button
@@ -322,11 +483,49 @@ export default function ContactsPage() {
                 disabled={adding}
                 className={`w-full py-2.5 ${CTA}`}
               >
-                {adding ? "Adding…" : `Add ${preview.display_name ?? "contact"} →`}
+                {adding ? "Sending…" : `Send request to ${preview.display_name ?? "contact"} →`}
               </button>
+              <p className="text-[10px] text-[var(--text-muted)] mt-2 text-center">
+                They&apos;ll have to accept before you appear in each other&apos;s contacts.
+              </p>
             </div>
           )}
         </div>
+
+        {/* Outgoing pending requests — compact list */}
+        {outgoing && outgoing.length > 0 && (
+          <div className={`${CARD} p-4 mb-5`}>
+            <p className="text-sm font-semibold text-[var(--text-primary)] mb-3">
+              Pending invites sent ({outgoing.length})
+            </p>
+            <div className="flex flex-col gap-2">
+              {outgoing.map((r) => {
+                const label = r.peer_display_name ?? `@${r.peer_profile_code ?? "user"}`;
+                return (
+                  <div
+                    key={r.id}
+                    className="flex items-center gap-3 text-sm"
+                  >
+                    <div className="w-7 h-7 rounded-full bg-[var(--card-2)] border border-[var(--border)] flex items-center justify-center text-[10px] text-[var(--text-secondary)] flex-shrink-0">
+                      {label.slice(0, 1).toUpperCase()}
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm text-[var(--text-primary)] truncate">{label}</p>
+                      <p className="text-[10px] text-[var(--text-muted)]">Awaiting their response…</p>
+                    </div>
+                    <button
+                      onClick={() => cancelOutgoingRequest(r.id)}
+                      disabled={busyReq === r.id}
+                      className="text-[11px] text-[var(--text-muted)] hover:text-red-600 disabled:opacity-40"
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
 
         {/* Groups — collapsible section (Phase 2) */}
         <div className={`${CARD} mb-5 overflow-hidden`}>
@@ -581,6 +780,53 @@ export default function ContactsPage() {
                 </div>
               );
             })}
+          </div>
+        )}
+
+        {/* Blocked users — collapsible, at the very bottom */}
+        {blocks && blocks.length > 0 && (
+          <div className={`${CARD} mt-5 overflow-hidden`}>
+            <button
+              type="button"
+              onClick={() => setBlocksOpen((v) => !v)}
+              className="w-full flex items-center justify-between p-4 text-left"
+            >
+              <div>
+                <p className="text-sm font-semibold text-[var(--text-primary)]">
+                  Blocked ({blocks.length})
+                </p>
+                <p className="text-[11px] text-[var(--text-secondary)]">
+                  Blocked users can&apos;t send you requests or see you in new rooms.
+                </p>
+              </div>
+              <span className="text-[var(--text-muted)] text-xs">{blocksOpen ? "▲" : "▼"}</span>
+            </button>
+            {blocksOpen && (
+              <div className="border-t border-[var(--border)] p-4 flex flex-col gap-2">
+                {blocks.map((b) => {
+                  const label = b.display_name ?? `@${b.profile_code ?? "user"}`;
+                  return (
+                    <div key={b.blocked_id} className="flex items-center gap-3 text-sm">
+                      <div className="w-8 h-8 rounded-full bg-[var(--card-2)] border border-[var(--border)] flex items-center justify-center text-[11px] text-[var(--text-secondary)] flex-shrink-0">
+                        {label.slice(0, 1).toUpperCase()}
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm text-[var(--text-primary)] truncate">{label}</p>
+                        <p className="text-[10px] text-[var(--text-muted)] font-mono">
+                          @{b.profile_code ?? "?"}
+                        </p>
+                      </div>
+                      <button
+                        onClick={() => unblock(b.blocked_id)}
+                        className="text-[11px] text-[var(--text-secondary)] hover:text-[var(--text-primary)]"
+                      >
+                        Unblock
+                      </button>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
           </div>
         )}
       </div>

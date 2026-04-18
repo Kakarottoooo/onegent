@@ -4,6 +4,7 @@ import { randomUUID } from "crypto";
 import {
   getDecisionRoomById,
   isRoomMember,
+  listRoomMembers,
   listRoomConstraints,
   createRoomProposal,
   updateDecisionRoomStatus,
@@ -16,8 +17,14 @@ type Params = { params: Promise<{ id: string }> };
 // MiniMax + SerpAPI can take up to 55s — give the route room to breathe.
 export const maxDuration = 60;
 
-/** POST /api/rooms/[id]/propose — triggers agent to produce a proposal. */
-export async function POST(_req: Request, { params }: Params) {
+/**
+ * POST /api/rooms/[id]/propose — triggers agent to produce a proposal.
+ *
+ * Default: requires every joined member to have submitted constraints.
+ * `?force=1`: creator-only escape hatch — proceeds as long as ≥2 submitted,
+ * and logs a system message so the skipped members see what happened.
+ */
+export async function POST(req: Request, { params }: Params) {
   const { userId } = await auth();
   if (!userId) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
@@ -35,16 +42,45 @@ export async function POST(_req: Request, { params }: Params) {
     );
   }
 
-  const constraints = await listRoomConstraints(roomId);
+  const force = new URL(req.url).searchParams.get("force") === "1";
+  const [constraints, members] = await Promise.all([
+    listRoomConstraints(roomId),
+    listRoomMembers(roomId),
+  ]);
+  const joinedCount = members.length;
   const submittedCount = constraints.filter((c) => c.submitted).length;
-  if (submittedCount < 2) {
+  const missingCount = Math.max(0, joinedCount - submittedCount);
+
+  if (force) {
+    if (room.creator_id !== userId) {
+      return NextResponse.json(
+        { error: "Only the creator can force a proposal before everyone submits." },
+        { status: 403 }
+      );
+    }
+    if (submittedCount < 2) {
+      return NextResponse.json(
+        { error: `Need at least 2 submitted constraints (have ${submittedCount})` },
+        { status: 409 }
+      );
+    }
+  } else if (submittedCount < joinedCount) {
     return NextResponse.json(
-      { error: `Need at least 2 submitted constraints to propose (have ${submittedCount})` },
+      { error: `Waiting for all members to submit (${submittedCount}/${joinedCount}).` },
       { status: 409 }
     );
   }
 
   await updateDecisionRoomStatus(roomId, "proposing");
+
+  if (force && missingCount > 0) {
+    await appendRoomMessage({
+      roomId,
+      senderId: null,
+      content: `The creator generated a proposal before everyone submitted (${missingCount} member${missingCount === 1 ? "" : "s"} skipped).`,
+      metaJson: { kind: "proposal_forced", missing_count: missingCount, user_id: userId },
+    }).catch(() => { /* advisory */ });
+  }
 
   let generated;
   try {

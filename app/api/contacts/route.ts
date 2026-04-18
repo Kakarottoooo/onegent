@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@clerk/nextjs/server";
 import {
-  addContact,
+  canSendContactRequest,
+  createContactRequest,
   getUserProfileByCode,
   getUserProfileByUsername,
   listContactsWithProfiles,
@@ -18,8 +19,12 @@ export async function GET() {
 
 /**
  * POST /api/contacts
- * Body: { code: string, nickname?: string }
- * Resolves profile code → user_id and adds to my contacts.
+ * Body: { code: string, note?: string }
+ *
+ * Send a *pending contact request* to the user behind `code`. The legacy
+ * direct-add behavior was removed — adding someone now always requires their
+ * consent so the target can decline and trigger the 7-day cooldown if they
+ * don't want further requests.
  */
 export async function POST(req: NextRequest) {
   const { userId } = await auth();
@@ -29,9 +34,8 @@ export async function POST(req: NextRequest) {
   if (!body || typeof body !== "object") {
     return NextResponse.json({ error: "Invalid body" }, { status: 400 });
   }
-  // Accept either a 6-char profile_code or an @username (case-insensitive).
   const raw = typeof body.code === "string" ? body.code.trim().replace(/^@/, "") : "";
-  const nickname = typeof body.nickname === "string" ? body.nickname.trim().slice(0, 60) || null : null;
+  const note = typeof body.note === "string" ? body.note.trim().slice(0, 200) || null : null;
   if (!raw) return NextResponse.json({ error: "code required" }, { status: 400 });
 
   let profile = await getUserProfileByCode(raw);
@@ -41,15 +45,22 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "That's your own code" }, { status: 400 });
   }
 
-  const row = await addContact(userId, profile.user_id, nickname);
+  const check = await canSendContactRequest(userId, profile.user_id);
+  if (!check.ok) {
+    return NextResponse.json({ error: check.reason, code: check.code }, { status: 409 });
+  }
+
+  const row = await createContactRequest(userId, profile.user_id, note);
   return NextResponse.json({
-    contact: {
-      contact_user_id: profile.user_id,
-      nickname: row.nickname,
-      profile_code: profile.profile_code,
-      display_name: profile.display_name,
-      avatar_url: profile.avatar_url,
-      added_at: row.created_at,
+    request: {
+      id: row.id,
+      from_user_id: row.from_user_id,
+      to_user_id: row.to_user_id,
+      status: row.status,
+      created_at: row.created_at,
+      peer_profile_code: profile.profile_code,
+      peer_display_name: profile.display_name,
+      peer_avatar_url: profile.avatar_url,
     },
   });
 }

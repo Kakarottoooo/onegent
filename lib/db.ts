@@ -23,6 +23,9 @@ let decisionRoomMessagesTableReady: Promise<void> | null = null;
 // ── Contacts / user profiles (Phase 1.5, layer 2) ──────────────────────────
 let userProfilesTableReady: Promise<void> | null = null;
 let userContactsTableReady: Promise<void> | null = null;
+let contactRequestsTableReady: Promise<void> | null = null;
+let contactBlocksTableReady: Promise<void> | null = null;
+let userContactsBackfillRan: Promise<void> | null = null;
 
 // ── Groups (Phase 2, layer 3 — named reusable sets of contacts) ────────────
 let userGroupsTableReady: Promise<void> | null = null;
@@ -1992,14 +1995,37 @@ export async function getDecisionRoomByShortCode(shortCode: string): Promise<Dec
   return result.rows[0] ?? null;
 }
 
-/** List rooms where this user is creator OR member. Most recent activity first. */
-export async function listMyDecisionRooms(userId: string): Promise<DecisionRoom[]> {
+/**
+ * List rooms where this user is a joined member. With `archived: false` (the
+ * default) returns only "live" rooms (status in collecting / proposing /
+ * approving / executing). With `archived: true` returns done / abandoned —
+ * the History tab on /rooms.
+ */
+export async function listMyDecisionRooms(
+  userId: string,
+  opts: { archived?: boolean } = {}
+): Promise<DecisionRoom[]> {
   await ensureDecisionRoomTables();
+  if (opts.archived) {
+    const result = await sql<DecisionRoom>`
+      SELECT r.*
+      FROM decision_rooms r
+      JOIN decision_room_members m ON m.room_id = r.id
+      WHERE m.user_id = ${userId}
+        AND m.status = 'joined'
+        AND r.status IN ('done', 'abandoned')
+      ORDER BY r.updated_at DESC
+      LIMIT 100
+    `;
+    return result.rows;
+  }
   const result = await sql<DecisionRoom>`
     SELECT r.*
     FROM decision_rooms r
     JOIN decision_room_members m ON m.room_id = r.id
-    WHERE m.user_id = ${userId} AND m.status = 'joined'
+    WHERE m.user_id = ${userId}
+      AND m.status = 'joined'
+      AND r.status NOT IN ('done', 'abandoned')
     ORDER BY r.updated_at DESC
     LIMIT 100
   `;
@@ -2013,6 +2039,18 @@ export async function updateDecisionRoomStatus(
   await ensureDecisionRoomTables();
   await sql`
     UPDATE decision_rooms SET status = ${status}, updated_at = NOW() WHERE id = ${roomId}
+  `;
+}
+
+export async function updateDecisionRoomApprovalRule(
+  roomId: string,
+  rule: ApprovalRule
+): Promise<void> {
+  await ensureDecisionRoomTables();
+  await sql`
+    UPDATE decision_rooms
+    SET approval_rule = ${rule}, updated_at = NOW()
+    WHERE id = ${roomId}
   `;
 }
 
@@ -2041,6 +2079,79 @@ export async function clearDecisionRoomBookingJob(roomId: string): Promise<void>
     SET booking_job_id = NULL, status = 'approving', updated_at = NOW()
     WHERE id = ${roomId}
   `;
+}
+
+/**
+ * Soft-delete a member: flips their row to status='left'. All existing
+ * queries already filter to status='joined', so the ex-member silently drops
+ * out of tallies, member strip, chat roster, etc. — no cascading edits.
+ *
+ * We keep their constraints / votes / messages for history so remaining
+ * members can still see the discussion that happened while they were there.
+ */
+export async function leaveDecisionRoom(
+  roomId: string,
+  userId: string
+): Promise<boolean> {
+  await ensureDecisionRoomTables();
+  const result = await sql`
+    UPDATE decision_room_members
+    SET status = 'left'
+    WHERE room_id = ${roomId} AND user_id = ${userId} AND status = 'joined'
+  `;
+  if ((result.rowCount ?? 0) > 0) {
+    await sql`UPDATE decision_rooms SET updated_at = NOW() WHERE id = ${roomId}`;
+    return true;
+  }
+  return false;
+}
+
+/**
+ * Hand the creator role to another joined member. If the current creator was
+ * also the payer, the payer moves with them. Does NOT remove the old creator
+ * from the room — callers (e.g. a creator "transfer-and-leave" flow) must
+ * call leaveDecisionRoom afterwards if that's the intent.
+ */
+export async function transferRoomCreator(
+  roomId: string,
+  newCreatorId: string
+): Promise<void> {
+  await ensureDecisionRoomTables();
+  // Pull current creator/payer so we know whether payer needs to follow.
+  const room = await sql<{ creator_id: string; payer_id: string | null }>`
+    SELECT creator_id, payer_id FROM decision_rooms WHERE id = ${roomId} LIMIT 1
+  `;
+  if (room.rows.length === 0) throw new Error("Room not found");
+  const { creator_id: oldCreator, payer_id: oldPayer } = room.rows[0];
+  const nextPayer = oldPayer === oldCreator || oldPayer === null ? newCreatorId : oldPayer;
+  await sql`
+    UPDATE decision_rooms
+    SET creator_id = ${newCreatorId},
+        payer_id = ${nextPayer},
+        updated_at = NOW()
+    WHERE id = ${roomId}
+  `;
+}
+
+/**
+ * Permanently remove a room and all dependent rows. Irreversible — callers
+ * must confirm with the user AND restrict this to rooms that are already
+ * done/abandoned (we enforce that at the API layer, not here, so internal
+ * tooling can override).
+ *
+ * Order matters: delete children before parent to respect any FK behavior
+ * even though current schema doesn't declare CASCADE.
+ */
+export async function deleteDecisionRoom(roomId: string): Promise<void> {
+  await ensureDecisionRoomTables();
+  await sql`DELETE FROM decision_room_votes WHERE proposal_id IN (
+    SELECT id FROM decision_room_proposals WHERE room_id = ${roomId}
+  )`;
+  await sql`DELETE FROM decision_room_proposals WHERE room_id = ${roomId}`;
+  await sql`DELETE FROM decision_room_constraints WHERE room_id = ${roomId}`;
+  await sql`DELETE FROM decision_room_messages WHERE room_id = ${roomId}`;
+  await sql`DELETE FROM decision_room_members WHERE room_id = ${roomId}`;
+  await sql`DELETE FROM decision_rooms WHERE id = ${roomId}`;
 }
 
 // ── CRUD: Members ──────────────────────────────────────────────────────────
@@ -2148,11 +2259,19 @@ export async function createRoomProposal(params: {
   return result.rows[0];
 }
 
+/**
+ * Returns every proposal for a room (newest first) — including `rejected`
+ * ones. The client renders the most recent rejected proposal above the
+ * Regenerate button so members can see what was proposed and who voted
+ * for what in the previous round.
+ *
+ * Historical misnomer kept for compatibility with call sites.
+ */
 export async function listActiveProposals(roomId: string): Promise<DecisionRoomProposal[]> {
   await ensureDecisionRoomTables();
   const result = await sql<DecisionRoomProposal>`
     SELECT * FROM decision_room_proposals
-    WHERE room_id = ${roomId} AND status IN ('active', 'accepted')
+    WHERE room_id = ${roomId} AND status IN ('active', 'accepted', 'rejected')
     ORDER BY created_at DESC
   `;
   return result.rows;
@@ -2202,6 +2321,14 @@ export async function listProposalVotes(proposalId: string): Promise<DecisionRoo
     SELECT * FROM decision_room_votes WHERE proposal_id = ${proposalId}
   `;
   return result.rows;
+}
+
+export async function deleteProposalVote(proposalId: string, userId: string): Promise<void> {
+  await ensureDecisionRoomTables();
+  await sql`
+    DELETE FROM decision_room_votes
+    WHERE proposal_id = ${proposalId} AND user_id = ${userId}
+  `;
 }
 
 // ── CRUD: Messages ─────────────────────────────────────────────────────────
@@ -2518,6 +2645,7 @@ export async function isContact(ownerId: string, contactUserId: string): Promise
 /** List my contacts joined with their profile data — ready for rendering. */
 export async function listContactsWithProfiles(ownerId: string): Promise<ContactWithProfile[]> {
   await Promise.all([ensureUserContactsTable(), ensureUserProfilesTable()]);
+  await backfillBidirectionalContactsOnce();
   const result = await sql<{
     contact_user_id: string;
     nickname: string | null;
@@ -2541,6 +2669,396 @@ export async function listContactsWithProfiles(ownerId: string): Promise<Contact
     avatar_url: r.avatar_url,
     added_at: r.created_at,
   }));
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Contact requests + blocks (friend-request model)
+//
+// We treat user_contacts as *bidirectional*: accepting a request inserts a
+// row on both sides. Legacy rows that pre-date this change are backfilled on
+// first touch so listContactsWithProfiles stays symmetric.
+//
+// Rules:
+//   - Cannot send a request if a contact already exists in either direction.
+//   - Cannot send if either party has blocked the other.
+//   - If the target declined me within the last 7 days, I'm on cooldown.
+//   - An existing pending request in either direction blocks new ones.
+// ═══════════════════════════════════════════════════════════════════════════
+
+export type ContactRequestStatus = "pending" | "accepted" | "declined" | "cancelled";
+
+export interface ContactRequestRow {
+  id: string;
+  from_user_id: string;
+  to_user_id: string;
+  status: ContactRequestStatus;
+  created_at: string;
+  resolved_at: string | null;
+  note: string | null;
+}
+
+export interface ContactRequestWithProfile extends ContactRequestRow {
+  /** Profile of the *other* party relative to the caller. */
+  peer_profile_code: string | null;
+  peer_display_name: string | null;
+  peer_avatar_url: string | null;
+}
+
+export interface ContactBlockRow {
+  blocker_id: string;
+  blocked_id: string;
+  created_at: string;
+}
+
+export interface BlockedUserWithProfile extends ContactBlockRow {
+  profile_code: string | null;
+  display_name: string | null;
+  avatar_url: string | null;
+}
+
+const CONTACT_REQUEST_DECLINE_COOLDOWN_DAYS = 7;
+
+export async function ensureContactRequestsTable(): Promise<void> {
+  if (!contactRequestsTableReady) {
+    contactRequestsTableReady = (async () => {
+      await sql`
+        CREATE TABLE IF NOT EXISTS contact_requests (
+          id            TEXT PRIMARY KEY,
+          from_user_id  TEXT NOT NULL,
+          to_user_id    TEXT NOT NULL,
+          status        TEXT NOT NULL DEFAULT 'pending',
+          note          TEXT,
+          created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          resolved_at   TIMESTAMPTZ,
+          CHECK (from_user_id <> to_user_id),
+          CHECK (status IN ('pending','accepted','declined','cancelled'))
+        )
+      `;
+      await sql`CREATE INDEX IF NOT EXISTS contact_requests_to_status_idx ON contact_requests (to_user_id, status)`;
+      await sql`CREATE INDEX IF NOT EXISTS contact_requests_from_status_idx ON contact_requests (from_user_id, status)`;
+      // Only one pending request can exist between any ordered pair at a time.
+      await sql`
+        CREATE UNIQUE INDEX IF NOT EXISTS contact_requests_pending_uniq
+        ON contact_requests (from_user_id, to_user_id)
+        WHERE status = 'pending'
+      `;
+    })().catch((err) => {
+      contactRequestsTableReady = null;
+      throw err;
+    });
+  }
+  await contactRequestsTableReady;
+}
+
+export async function ensureContactBlocksTable(): Promise<void> {
+  if (!contactBlocksTableReady) {
+    contactBlocksTableReady = (async () => {
+      await sql`
+        CREATE TABLE IF NOT EXISTS contact_blocks (
+          blocker_id  TEXT NOT NULL,
+          blocked_id  TEXT NOT NULL,
+          created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          PRIMARY KEY (blocker_id, blocked_id),
+          CHECK (blocker_id <> blocked_id)
+        )
+      `;
+      await sql`CREATE INDEX IF NOT EXISTS contact_blocks_blocked_idx ON contact_blocks (blocked_id)`;
+    })().catch((err) => {
+      contactBlocksTableReady = null;
+      throw err;
+    });
+  }
+  await contactBlocksTableReady;
+}
+
+/**
+ * One-time backfill: user_contacts used to be stored unidirectionally. For any
+ * (a, b) row without a matching (b, a), insert the reverse so listing works
+ * symmetrically. Safe to run repeatedly — uses ON CONFLICT DO NOTHING.
+ */
+async function backfillBidirectionalContactsOnce(): Promise<void> {
+  if (!userContactsBackfillRan) {
+    userContactsBackfillRan = (async () => {
+      await sql`
+        INSERT INTO user_contacts (owner_id, contact_user_id, nickname)
+        SELECT a.contact_user_id, a.owner_id, NULL
+        FROM user_contacts a
+        LEFT JOIN user_contacts b
+          ON b.owner_id = a.contact_user_id
+         AND b.contact_user_id = a.owner_id
+        WHERE b.owner_id IS NULL
+        ON CONFLICT (owner_id, contact_user_id) DO NOTHING
+      `;
+    })().catch((err) => {
+      userContactsBackfillRan = null;
+      throw err;
+    });
+  }
+  await userContactsBackfillRan;
+}
+
+export async function addBidirectionalContact(
+  aUserId: string,
+  bUserId: string
+): Promise<void> {
+  if (aUserId === bUserId) throw new Error("Cannot add yourself as a contact");
+  await ensureUserContactsTable();
+  await sql`
+    INSERT INTO user_contacts (owner_id, contact_user_id, nickname)
+    VALUES (${aUserId}, ${bUserId}, NULL), (${bUserId}, ${aUserId}, NULL)
+    ON CONFLICT (owner_id, contact_user_id) DO NOTHING
+  `;
+}
+
+/**
+ * Verify whether `fromUserId` is allowed to send a new contact request to
+ * `toUserId` right now. Returns `{ ok: true }` or `{ ok: false, reason }`.
+ * Callers should surface the reason verbatim to the user.
+ */
+export async function canSendContactRequest(
+  fromUserId: string,
+  toUserId: string
+): Promise<{ ok: true } | { ok: false; reason: string; code: string }> {
+  if (fromUserId === toUserId) {
+    return { ok: false, code: "self", reason: "You can't add yourself." };
+  }
+  await Promise.all([
+    ensureUserContactsTable(),
+    ensureContactRequestsTable(),
+    ensureContactBlocksTable(),
+  ]);
+  await backfillBidirectionalContactsOnce();
+
+  const blocks = await sql<{ blocker_id: string }>`
+    SELECT blocker_id FROM contact_blocks
+    WHERE (blocker_id = ${fromUserId} AND blocked_id = ${toUserId})
+       OR (blocker_id = ${toUserId} AND blocked_id = ${fromUserId})
+    LIMIT 1
+  `;
+  if (blocks.rows.length > 0) {
+    const iBlocked = blocks.rows[0].blocker_id === fromUserId;
+    return {
+      ok: false,
+      code: iBlocked ? "you_blocked_them" : "they_blocked_you",
+      reason: iBlocked
+        ? "You blocked this user. Unblock them first."
+        : "You can't send a request to this user.",
+    };
+  }
+
+  const already = await sql`
+    SELECT 1 FROM user_contacts
+    WHERE (owner_id = ${fromUserId} AND contact_user_id = ${toUserId})
+       OR (owner_id = ${toUserId} AND contact_user_id = ${fromUserId})
+    LIMIT 1
+  `;
+  if (already.rows.length > 0) {
+    return { ok: false, code: "already_contact", reason: "Already in your contacts." };
+  }
+
+  const pending = await sql<{ from_user_id: string }>`
+    SELECT from_user_id FROM contact_requests
+    WHERE status = 'pending'
+      AND ((from_user_id = ${fromUserId} AND to_user_id = ${toUserId})
+        OR (from_user_id = ${toUserId} AND to_user_id = ${fromUserId}))
+    LIMIT 1
+  `;
+  if (pending.rows.length > 0) {
+    const mine = pending.rows[0].from_user_id === fromUserId;
+    return {
+      ok: false,
+      code: mine ? "already_pending_outgoing" : "already_pending_incoming",
+      reason: mine
+        ? "You already have a pending request to this user."
+        : "This user already sent you a request — accept it from your inbox.",
+    };
+  }
+
+  const cutoff = new Date(
+    Date.now() - CONTACT_REQUEST_DECLINE_COOLDOWN_DAYS * 24 * 60 * 60 * 1000
+  ).toISOString();
+  const cooldown = await sql<{ resolved_at: string }>`
+    SELECT resolved_at FROM contact_requests
+    WHERE from_user_id = ${fromUserId}
+      AND to_user_id = ${toUserId}
+      AND status = 'declined'
+      AND resolved_at > ${cutoff}
+    ORDER BY resolved_at DESC
+    LIMIT 1
+  `;
+  if (cooldown.rows.length > 0) {
+    return {
+      ok: false,
+      code: "cooldown",
+      reason: `This user recently declined your request. Try again after ${CONTACT_REQUEST_DECLINE_COOLDOWN_DAYS} days.`,
+    };
+  }
+
+  return { ok: true };
+}
+
+export async function createContactRequest(
+  fromUserId: string,
+  toUserId: string,
+  note: string | null
+): Promise<ContactRequestRow> {
+  await ensureContactRequestsTable();
+  const id = `cr_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 10)}`;
+  const result = await sql<ContactRequestRow>`
+    INSERT INTO contact_requests (id, from_user_id, to_user_id, note, status)
+    VALUES (${id}, ${fromUserId}, ${toUserId}, ${note}, 'pending')
+    RETURNING *
+  `;
+  return result.rows[0];
+}
+
+export async function getContactRequestById(
+  id: string
+): Promise<ContactRequestRow | null> {
+  await ensureContactRequestsTable();
+  const result = await sql<ContactRequestRow>`
+    SELECT * FROM contact_requests WHERE id = ${id} LIMIT 1
+  `;
+  return result.rows[0] ?? null;
+}
+
+export async function updateContactRequestStatus(
+  id: string,
+  status: Exclude<ContactRequestStatus, "pending">
+): Promise<ContactRequestRow | null> {
+  await ensureContactRequestsTable();
+  const result = await sql<ContactRequestRow>`
+    UPDATE contact_requests
+    SET status = ${status}, resolved_at = NOW()
+    WHERE id = ${id} AND status = 'pending'
+    RETURNING *
+  `;
+  return result.rows[0] ?? null;
+}
+
+export async function listIncomingContactRequests(
+  userId: string
+): Promise<ContactRequestWithProfile[]> {
+  await Promise.all([ensureContactRequestsTable(), ensureUserProfilesTable()]);
+  const result = await sql<ContactRequestWithProfile>`
+    SELECT r.id, r.from_user_id, r.to_user_id, r.status, r.created_at, r.resolved_at, r.note,
+           p.profile_code AS peer_profile_code,
+           p.display_name AS peer_display_name,
+           p.avatar_url   AS peer_avatar_url
+    FROM contact_requests r
+    LEFT JOIN user_profiles p ON p.user_id = r.from_user_id
+    WHERE r.to_user_id = ${userId} AND r.status = 'pending'
+    ORDER BY r.created_at DESC
+  `;
+  return result.rows;
+}
+
+export async function listOutgoingContactRequests(
+  userId: string
+): Promise<ContactRequestWithProfile[]> {
+  await Promise.all([ensureContactRequestsTable(), ensureUserProfilesTable()]);
+  const result = await sql<ContactRequestWithProfile>`
+    SELECT r.id, r.from_user_id, r.to_user_id, r.status, r.created_at, r.resolved_at, r.note,
+           p.profile_code AS peer_profile_code,
+           p.display_name AS peer_display_name,
+           p.avatar_url   AS peer_avatar_url
+    FROM contact_requests r
+    LEFT JOIN user_profiles p ON p.user_id = r.to_user_id
+    WHERE r.from_user_id = ${userId} AND r.status = 'pending'
+    ORDER BY r.created_at DESC
+  `;
+  return result.rows;
+}
+
+/** Map of peerUserId → "pending_outgoing" | "pending_incoming". Used by room UI. */
+export async function getPendingRequestPeers(
+  userId: string
+): Promise<Record<string, "pending_outgoing" | "pending_incoming">> {
+  await ensureContactRequestsTable();
+  const result = await sql<{ from_user_id: string; to_user_id: string }>`
+    SELECT from_user_id, to_user_id FROM contact_requests
+    WHERE status = 'pending' AND (from_user_id = ${userId} OR to_user_id = ${userId})
+  `;
+  const out: Record<string, "pending_outgoing" | "pending_incoming"> = {};
+  for (const r of result.rows) {
+    if (r.from_user_id === userId) out[r.to_user_id] = "pending_outgoing";
+    else out[r.from_user_id] = "pending_incoming";
+  }
+  return out;
+}
+
+export async function hasBlock(
+  blockerUserId: string,
+  blockedUserId: string
+): Promise<boolean> {
+  await ensureContactBlocksTable();
+  const result = await sql`
+    SELECT 1 FROM contact_blocks
+    WHERE blocker_id = ${blockerUserId} AND blocked_id = ${blockedUserId}
+    LIMIT 1
+  `;
+  return result.rows.length > 0;
+}
+
+/**
+ * Block a user. Also: clears any pending contact requests in either direction
+ * and removes the pair from user_contacts (both sides). The block persists
+ * until explicitly removed.
+ */
+export async function createBlock(
+  blockerUserId: string,
+  blockedUserId: string
+): Promise<void> {
+  if (blockerUserId === blockedUserId) throw new Error("Cannot block yourself");
+  await Promise.all([
+    ensureContactBlocksTable(),
+    ensureContactRequestsTable(),
+    ensureUserContactsTable(),
+  ]);
+  await sql`
+    INSERT INTO contact_blocks (blocker_id, blocked_id)
+    VALUES (${blockerUserId}, ${blockedUserId})
+    ON CONFLICT DO NOTHING
+  `;
+  // Auto-cancel any pending request between the two, in either direction.
+  await sql`
+    UPDATE contact_requests
+    SET status = 'cancelled', resolved_at = NOW()
+    WHERE status = 'pending'
+      AND ((from_user_id = ${blockerUserId} AND to_user_id = ${blockedUserId})
+        OR (from_user_id = ${blockedUserId} AND to_user_id = ${blockerUserId}))
+  `;
+  // Drop the contact relationship on both sides.
+  await sql`
+    DELETE FROM user_contacts
+    WHERE (owner_id = ${blockerUserId} AND contact_user_id = ${blockedUserId})
+       OR (owner_id = ${blockedUserId} AND contact_user_id = ${blockerUserId})
+  `;
+}
+
+export async function removeBlock(
+  blockerUserId: string,
+  blockedUserId: string
+): Promise<boolean> {
+  await ensureContactBlocksTable();
+  const result = await sql`
+    DELETE FROM contact_blocks
+    WHERE blocker_id = ${blockerUserId} AND blocked_id = ${blockedUserId}
+  `;
+  return (result.rowCount ?? 0) > 0;
+}
+
+export async function listMyBlocks(userId: string): Promise<BlockedUserWithProfile[]> {
+  await Promise.all([ensureContactBlocksTable(), ensureUserProfilesTable()]);
+  const result = await sql<BlockedUserWithProfile>`
+    SELECT b.blocker_id, b.blocked_id, b.created_at,
+           p.profile_code, p.display_name, p.avatar_url
+    FROM contact_blocks b
+    LEFT JOIN user_profiles p ON p.user_id = b.blocked_id
+    WHERE b.blocker_id = ${userId}
+    ORDER BY b.created_at DESC
+  `;
+  return result.rows;
 }
 
 // ═══════════════════════════════════════════════════════════════════════════

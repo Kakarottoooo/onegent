@@ -8,6 +8,7 @@ import {
   listRoomConstraints,
   listProposalVotes,
   castRoomVote,
+  deleteProposalVote,
   updateProposalStatus,
   updateDecisionRoomStatus,
   appendRoomMessage,
@@ -49,8 +50,14 @@ export async function POST(req: NextRequest, { params }: Params) {
   if (!(await isRoomMember(roomId, userId))) {
     return NextResponse.json({ error: "Not a member" }, { status: 403 });
   }
-  if (proposal.status !== "active") {
+  if (proposal.status !== "active" && proposal.status !== "accepted") {
     return NextResponse.json({ error: `Proposal already ${proposal.status}` }, { status: 409 });
+  }
+  if (proposal.status === "accepted" && room.booking_job_id) {
+    return NextResponse.json(
+      { error: "Booking already started — payer must clear it first." },
+      { status: 409 }
+    );
   }
 
   const body = await req.json().catch(() => null);
@@ -76,6 +83,17 @@ export async function POST(req: NextRequest, { params }: Params) {
     }
   }
 
+  const previousVotes = await listProposalVotes(proposalId);
+  const members = await listRoomMembers(roomId);
+  const joined = members.filter((m) => m.status === "joined");
+  const rawRule = room.approval_rule ?? "unanimous";
+  const rule = joined.length < 3 ? "unanimous" : rawRule;
+  const previousTallies = tallyVotes(options, previousVotes);
+  const previousWinner =
+    proposal.status === "accepted"
+      ? resolveAcceptedOption(rule, joined.length, previousTallies)
+      : null;
+
   await castRoomVote({
     proposalId,
     userId,
@@ -84,28 +102,66 @@ export async function POST(req: NextRequest, { params }: Params) {
     comment,
   });
 
-  const [members, allVotes] = await Promise.all([
-    listRoomMembers(roomId),
-    listProposalVotes(proposalId),
-  ]);
-  const joined = members.filter((m) => m.status === "joined");
-  // N<3 collapses "majority" to unilateral; coerce to unanimous regardless of
-  // what the room was configured with. The /rooms/new UI enforces this too,
-  // but old rooms or direct API calls could bypass the guard.
-  const rawRule = room.approval_rule ?? "unanimous";
-  const rule = joined.length < 3 ? "unanimous" : rawRule;
+  const allVotes = await listProposalVotes(proposalId);
   const tallies = tallyVotes(options, allVotes);
-  const winner = resolveAcceptedOption(rule, joined.length, tallies);
+  const voterCount = new Set(allVotes.map((v) => v.user_id)).size;
+  const everyoneVoted = voterCount >= joined.length;
+  const winner =
+    proposal.status === "accepted"
+      ? resolveAcceptedOption(rule, joined.length, tallies)
+      : everyoneVoted
+        ? resolveAcceptedOption(rule, joined.length, tallies)
+        : null;
 
-  // Count "negative" votes (decline + request_changes). If these exceed half
-  // the joined members, the proposal can no longer pass even if everyone else
-  // approves the same option — mark it rejected and reopen collecting.
-  const negativeCount = allVotes.filter(
-    (v) => v.vote === "decline" || v.vote === "request_changes"
-  ).length;
-  const autoRejected = !winner && negativeCount * 2 > joined.length;
+  // Once everyone has voted, the proposal either has a winner or it's done.
+  // Splits (unanimous with different approvals, or majority with no option >50%)
+  // used to leave the room stuck in Voting forever — now we close it out and
+  // kick back to collecting so the group can tweak constraints and retry.
+  const autoRejected = proposal.status === "active" && everyoneVoted && !winner;
 
-  if (winner) {
+  const optionLabel = (optionId: string | null) =>
+    options.find((o) => o.id === optionId)?.card?.restaurant?.name ?? "another option";
+
+  let reopened = false;
+  let shifted = false;
+
+  if (proposal.status === "accepted") {
+    if (winner) {
+      if (winner !== previousWinner && previousWinner) {
+        shifted = true;
+        await appendRoomMessage({
+          roomId,
+          senderId: null,
+          content: `The group's pick shifted from ${optionLabel(previousWinner)} to ${optionLabel(winner)}.`,
+          metaJson: {
+            kind: "proposal_winner_shifted",
+            proposal_id: proposalId,
+            from_option_id: previousWinner,
+            to_option_id: winner,
+            rule,
+          },
+        });
+        const constraints = await listRoomConstraints(roomId);
+        recordRoomAcceptance({
+          proposal,
+          acceptedOptionId: winner,
+          memberIds: joined.map((m) => m.user_id),
+          constraints,
+          roomTitle: room.title,
+        }).catch((err) => console.error("recordRoomAcceptance failed:", err));
+      }
+    } else {
+      reopened = true;
+      await updateProposalStatus(proposalId, "active");
+      await updateDecisionRoomStatus(roomId, "approving");
+      await appendRoomMessage({
+        roomId,
+        senderId: null,
+        content: "A vote change removed the majority — back to voting.",
+        metaJson: { kind: "proposal_reopened", proposal_id: proposalId, user_id: userId },
+      });
+    }
+  } else if (winner) {
     // Persist the chosen option onto the proposal so downstream execution
     // (e.g. booking) knows which card won.
     await updateProposalStatus(proposalId, "accepted");
@@ -158,9 +214,95 @@ export async function POST(req: NextRequest, { params }: Params) {
     accepted: Boolean(winner),
     accepted_option_id: winner,
     rejected: autoRejected,
+    reopened,
+    shifted,
     rule,
     total_members: joined.length,
+    voted_count: voterCount,
+    everyone_voted: everyoneVoted,
     tallies: counts,
     unanimous: Boolean(winner) && rule === "unanimous",
+    proposal_status: reopened ? "active" : winner ? "accepted" : proposal.status,
+  });
+}
+
+/**
+ * DELETE /api/rooms/[id]/proposals/[pid]/vote
+ *
+ * Withdraw the caller's own vote. Allowed while the proposal is active OR
+ * accepted (so a member can change their mind after the slate was accepted),
+ * but refused once booking has started (room.booking_job_id is non-null) —
+ * at that point the payer must clear the booking first.
+ *
+ * If withdrawing breaks the acceptance rule, reopen the proposal (status
+ * active) and the room (status approving) so remaining members can revote.
+ */
+export async function DELETE(_req: NextRequest, { params }: Params) {
+  const { userId } = await auth();
+  if (!userId) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+
+  const { id: roomId, pid: proposalId } = await params;
+
+  const [room, proposal] = await Promise.all([
+    getDecisionRoomById(roomId),
+    getRoomProposal(proposalId),
+  ]);
+  if (!room) return NextResponse.json({ error: "Room not found" }, { status: 404 });
+  if (!proposal || proposal.room_id !== roomId) {
+    return NextResponse.json({ error: "Proposal not found" }, { status: 404 });
+  }
+  if (!(await isRoomMember(roomId, userId))) {
+    return NextResponse.json({ error: "Not a member" }, { status: 403 });
+  }
+  if (room.booking_job_id) {
+    return NextResponse.json(
+      { error: "Booking already started — payer must clear it first." },
+      { status: 409 }
+    );
+  }
+  if (proposal.status !== "active" && proposal.status !== "accepted") {
+    return NextResponse.json(
+      { error: `Proposal already ${proposal.status}` },
+      { status: 409 }
+    );
+  }
+
+  await deleteProposalVote(proposalId, userId);
+
+  const [members, allVotes] = await Promise.all([
+    listRoomMembers(roomId),
+    listProposalVotes(proposalId),
+  ]);
+  const joined = members.filter((m) => m.status === "joined");
+  const rawRule = room.approval_rule ?? "unanimous";
+  const rule = joined.length < 3 ? "unanimous" : rawRule;
+  const options = extractOptions(proposal);
+  const tallies = tallyVotes(options, allVotes);
+  const stillWinner = resolveAcceptedOption(rule, joined.length, tallies);
+
+  let reopened = false;
+  if (proposal.status === "accepted" && !stillWinner) {
+    await updateProposalStatus(proposalId, "active");
+    await updateDecisionRoomStatus(roomId, "approving");
+    await appendRoomMessage({
+      roomId,
+      senderId: null,
+      content: "A vote change removed the majority — back to voting.",
+      metaJson: { kind: "vote_withdrawn", proposal_id: proposalId, user_id: userId },
+    });
+    reopened = true;
+  }
+
+  const counts = tallies.map((t) => ({
+    option_id: t.option_id,
+    approved_count: t.approved_by.length,
+    approved_by: t.approved_by,
+  }));
+
+  return NextResponse.json({
+    withdrew: true,
+    reopened,
+    proposal_status: reopened ? "active" : proposal.status,
+    tallies: counts,
   });
 }

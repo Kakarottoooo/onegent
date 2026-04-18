@@ -109,7 +109,7 @@ Or if conflict:
 
 /**
  * Merge any number of per-person constraint strings into a single compound
- * query, run the agent, and return up to 3 group-friendly options.
+ * query, run the agent, and return up to 5 group-friendly options.
  *
  * Caller should only invoke this for N >= 3. For N=2 use `runAgentForTwoParty`.
  */
@@ -126,7 +126,7 @@ export async function runAgentForNParty(
     await buildGroupMergedQuery(inputs, city.fullName);
 
   const result = await runAgent(mergedQuery, [], cityId);
-  const options = result.recommendations.slice(0, 3) as RecommendationCard[];
+  const options = result.recommendations.slice(0, 5) as RecommendationCard[];
 
   return { options, conflict, conflictReason, conflictAffectedUsers };
 }
