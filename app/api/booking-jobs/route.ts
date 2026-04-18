@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createBookingJob, getBookingJobsBySession, deleteAllBookingJobsBySession, deleteAllMonitorsBySession } from "@/lib/db";
-import type { BookingJobStep } from "@/lib/db";
+import { createBookingJob, getBookingJobsBySession, getBookingJobsByUser, deleteAllBookingJobsBySession, deleteAllMonitorsBySession } from "@/lib/db";
+import type { BookingJob, BookingJobStep } from "@/lib/db";
 import type { AgentAutonomySettings } from "@/lib/autonomy";
 import { auth } from "@clerk/nextjs/server";
 import { randomUUID } from "crypto";
@@ -37,13 +37,31 @@ export async function POST(req: NextRequest) {
   return NextResponse.json({ jobId: job.id, status: job.status });
 }
 
-/** GET /api/booking-jobs — list all jobs for the session */
+/**
+ * GET /api/booking-jobs — list jobs for the session, plus any jobs owned by
+ * the authenticated user whose session_id is different (e.g. Decision Room
+ * bookings that were created with one-off random UUIDs in earlier versions).
+ * Merged + deduped by job id, sorted newest first.
+ */
 export async function GET(req: NextRequest) {
   const sessionId = req.nextUrl.searchParams.get("session_id");
   if (!sessionId) {
     return NextResponse.json({ error: "session_id required" }, { status: 400 });
   }
-  const jobs = await getBookingJobsBySession(sessionId);
+  const { userId } = await auth();
+
+  const [sessionJobs, userJobs] = await Promise.all([
+    getBookingJobsBySession(sessionId),
+    userId ? getBookingJobsByUser(userId) : Promise.resolve([] as BookingJob[]),
+  ]);
+
+  const byId = new Map<string, BookingJob>();
+  for (const j of sessionJobs) byId.set(j.id, j);
+  for (const j of userJobs) if (!byId.has(j.id)) byId.set(j.id, j);
+  const jobs = [...byId.values()].sort(
+    (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+  );
+
   return NextResponse.json({ jobs });
 }
 

@@ -8,7 +8,7 @@ import { useState, useEffect } from "react";
 import { useLanguage, LANGUAGES } from "@/app/hooks/useLanguage";
 import { useAuth } from "@/app/hooks/useAuth";
 
-type Page = "home" | "tasks" | "monitoring" | "insights" | "metrics" | "other";
+type Page = "home" | "tasks" | "monitoring" | "insights" | "metrics" | "rooms" | "other";
 
 interface Props {
   active?: Page;
@@ -52,6 +52,7 @@ export default function GlobalNav({ active }: Props) {
 
   const links: { href: string; label: string; id: Page; badge?: number }[] = [
     { href: "/tasks",      label: t.nav.myTrips,   id: "tasks",      badge: actionCount || undefined },
+    { href: "/rooms",      label: "Rooms",          id: "rooms" },
     { href: "/monitoring", label: t.nav.monitoring, id: "monitoring", badge: monitorCount || undefined },
     { href: "/insights",   label: t.nav.insights,   id: "insights" },
     { href: "/permissions",label: t.nav.preferences,id: "other" },

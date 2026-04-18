@@ -2,6 +2,7 @@
 
 import { useRef, useEffect, useState } from "react";
 import dynamic from "next/dynamic";
+import Link from "next/link";
 import RecommendationCard from "@/components/RecommendationCard";
 import HotelCard from "@/components/HotelCard";
 import FlightCard from "@/components/FlightCard";
@@ -1550,6 +1551,43 @@ export default function Home() {
                       &quot;{ex}&quot;
                     </button>
                   ))}
+                </div>
+
+                {/* Decision Rooms entry — multi-party booking (Phase 1) */}
+                <div style={{ width: "100%", maxWidth: 440, marginTop: 28 }}>
+                  <Link
+                    href="/rooms"
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      gap: 12,
+                      padding: "14px 16px",
+                      borderRadius: 14,
+                      backgroundColor: "var(--card)",
+                      border: "1px solid var(--border)",
+                      textDecoration: "none",
+                      transition: "border-color 120ms",
+                    }}
+                    onMouseEnter={(e) => {
+                      (e.currentTarget as HTMLElement).style.borderColor = "var(--gold)";
+                    }}
+                    onMouseLeave={(e) => {
+                      (e.currentTarget as HTMLElement).style.borderColor = "var(--border)";
+                    }}
+                  >
+                    <span style={{ fontSize: 22, lineHeight: 1 }}>🗣️</span>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <p style={{ margin: 0, fontFamily: "var(--font-dm-sans)", fontSize: 14, fontWeight: 600, color: "var(--text-primary)" }}>
+                        Decision Rooms
+                      </p>
+                      <p style={{ margin: "2px 0 0", fontFamily: "var(--font-dm-sans)", fontSize: 12, color: "var(--text-secondary)" }}>
+                        Decide together — dinner, hotel, trips
+                      </p>
+                    </div>
+                    <span style={{ fontFamily: "var(--font-dm-sans)", fontSize: 12, color: "var(--gold)", flexShrink: 0 }}>
+                      Open →
+                    </span>
+                  </Link>
                 </div>
 
                 {/* Recent tasks strip */}

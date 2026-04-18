@@ -12,6 +12,22 @@ let priceWatchesTableReady: Promise<void> | null = null;
 let userPreferencesTableReady: Promise<void> | null = null;
 let userNotificationsTableReady: Promise<void> | null = null;
 
+// ── Decision Rooms v2 (multi-party Phase 1) ────────────────────────────────
+let decisionRoomsTableReady: Promise<void> | null = null;
+let decisionRoomMembersTableReady: Promise<void> | null = null;
+let decisionRoomConstraintsTableReady: Promise<void> | null = null;
+let decisionRoomProposalsTableReady: Promise<void> | null = null;
+let decisionRoomVotesTableReady: Promise<void> | null = null;
+let decisionRoomMessagesTableReady: Promise<void> | null = null;
+
+// ── Contacts / user profiles (Phase 1.5, layer 2) ──────────────────────────
+let userProfilesTableReady: Promise<void> | null = null;
+let userContactsTableReady: Promise<void> | null = null;
+
+// ── Groups (Phase 2, layer 3 — named reusable sets of contacts) ────────────
+let userGroupsTableReady: Promise<void> | null = null;
+let userGroupMembersTableReady: Promise<void> | null = null;
+
 /**
  * Initialize the database tables if they don't exist.
  * Call once on first deploy or via a setup script.
@@ -607,6 +623,7 @@ export interface StepActionItem {
 export interface DecisionLogEntry {
   ts: string; // ISO timestamp
   type:
+    | "info"           // diagnostic / informational
     | "attempt"        // tried primary or fallback
     | "retry"          // retrying after transient error
     | "time_adjusted"  // restaurant: trying a different time slot
@@ -712,6 +729,21 @@ export async function getBookingJobsBySession(sessionId: string, limit = 20): Pr
   const result = await sql<BookingJob>`
     SELECT * FROM booking_jobs
     WHERE session_id = ${sessionId}
+    ORDER BY created_at DESC
+    LIMIT ${limit}
+  `;
+  return result.rows;
+}
+
+/**
+ * Jobs owned by a user regardless of session_id — recovers Decision Room
+ * bookings whose session_id was a one-off random UUID.
+ */
+export async function getBookingJobsByUser(userId: string, limit = 20): Promise<BookingJob[]> {
+  await ensureBookingJobsTable();
+  const result = await sql<BookingJob>`
+    SELECT * FROM booking_jobs
+    WHERE user_id = ${userId}
     ORDER BY created_at DESC
     LIMIT ${limit}
   `;
@@ -1630,4 +1662,1105 @@ export async function deleteBookingProfile(id: number, userId: string): Promise<
     DELETE FROM booking_profiles WHERE id = ${id} AND user_id = ${userId} RETURNING id
   `;
   return result.rows.length > 0;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Decision Rooms v2 — multi-party decision system (Phase 1: 2-person dining)
+// Coexists with legacy decision_sessions; will eventually supersede it.
+// ═══════════════════════════════════════════════════════════════════════════
+
+export async function ensureDecisionRoomsTable(): Promise<void> {
+  if (!decisionRoomsTableReady) {
+    decisionRoomsTableReady = (async () => {
+      await sql`
+        CREATE TABLE IF NOT EXISTS decision_rooms (
+          id             TEXT PRIMARY KEY,
+          short_code     TEXT UNIQUE NOT NULL,
+          type           TEXT NOT NULL,
+          title          TEXT NOT NULL,
+          status         TEXT NOT NULL DEFAULT 'collecting',
+          creator_id     TEXT NOT NULL,
+          payer_id       TEXT,
+          context_json   JSONB NOT NULL DEFAULT '{}'::jsonb,
+          booking_job_id TEXT,
+          deadline       TIMESTAMPTZ,
+          approval_rule  TEXT NOT NULL DEFAULT 'unanimous',
+          created_at     TIMESTAMPTZ DEFAULT NOW(),
+          updated_at     TIMESTAMPTZ DEFAULT NOW()
+        )
+      `;
+      // Phase 2 migration for existing rooms table.
+      await sql`ALTER TABLE decision_rooms ADD COLUMN IF NOT EXISTS approval_rule TEXT NOT NULL DEFAULT 'unanimous'`;
+      await sql`CREATE INDEX IF NOT EXISTS decision_rooms_creator_idx ON decision_rooms (creator_id)`;
+      await sql`CREATE INDEX IF NOT EXISTS decision_rooms_short_code_idx ON decision_rooms (short_code)`;
+      await sql`CREATE INDEX IF NOT EXISTS decision_rooms_status_idx ON decision_rooms (status)`;
+    })().catch((err) => {
+      decisionRoomsTableReady = null;
+      throw err;
+    });
+  }
+  await decisionRoomsTableReady;
+}
+
+export async function ensureDecisionRoomMembersTable(): Promise<void> {
+  if (!decisionRoomMembersTableReady) {
+    decisionRoomMembersTableReady = (async () => {
+      await sql`
+        CREATE TABLE IF NOT EXISTS decision_room_members (
+          room_id     TEXT NOT NULL,
+          user_id     TEXT NOT NULL,
+          role        TEXT NOT NULL DEFAULT 'member',
+          status      TEXT NOT NULL DEFAULT 'joined',
+          joined_at   TIMESTAMPTZ DEFAULT NOW(),
+          PRIMARY KEY (room_id, user_id)
+        )
+      `;
+      await sql`CREATE INDEX IF NOT EXISTS decision_room_members_user_idx ON decision_room_members (user_id)`;
+      await sql`CREATE INDEX IF NOT EXISTS decision_room_members_room_idx ON decision_room_members (room_id)`;
+    })().catch((err) => {
+      decisionRoomMembersTableReady = null;
+      throw err;
+    });
+  }
+  await decisionRoomMembersTableReady;
+}
+
+export async function ensureDecisionRoomConstraintsTable(): Promise<void> {
+  if (!decisionRoomConstraintsTableReady) {
+    decisionRoomConstraintsTableReady = (async () => {
+      await sql`
+        CREATE TABLE IF NOT EXISTS decision_room_constraints (
+          room_id      TEXT NOT NULL,
+          user_id      TEXT NOT NULL,
+          data_json    JSONB NOT NULL DEFAULT '{}'::jsonb,
+          submitted    BOOLEAN NOT NULL DEFAULT FALSE,
+          updated_at   TIMESTAMPTZ DEFAULT NOW(),
+          PRIMARY KEY (room_id, user_id)
+        )
+      `;
+      await sql`CREATE INDEX IF NOT EXISTS decision_room_constraints_room_idx ON decision_room_constraints (room_id)`;
+    })().catch((err) => {
+      decisionRoomConstraintsTableReady = null;
+      throw err;
+    });
+  }
+  await decisionRoomConstraintsTableReady;
+}
+
+export async function ensureDecisionRoomProposalsTable(): Promise<void> {
+  if (!decisionRoomProposalsTableReady) {
+    decisionRoomProposalsTableReady = (async () => {
+      await sql`
+        CREATE TABLE IF NOT EXISTS decision_room_proposals (
+          id             TEXT PRIMARY KEY,
+          room_id        TEXT NOT NULL,
+          content_json   JSONB NOT NULL,
+          rationale      TEXT,
+          conflicts_json JSONB,
+          status         TEXT NOT NULL DEFAULT 'active',
+          created_at     TIMESTAMPTZ DEFAULT NOW()
+        )
+      `;
+      await sql`CREATE INDEX IF NOT EXISTS decision_room_proposals_room_idx ON decision_room_proposals (room_id, status)`;
+    })().catch((err) => {
+      decisionRoomProposalsTableReady = null;
+      throw err;
+    });
+  }
+  await decisionRoomProposalsTableReady;
+}
+
+export async function ensureDecisionRoomVotesTable(): Promise<void> {
+  if (!decisionRoomVotesTableReady) {
+    decisionRoomVotesTableReady = (async () => {
+      await sql`
+        CREATE TABLE IF NOT EXISTS decision_room_votes (
+          proposal_id   TEXT NOT NULL,
+          user_id       TEXT NOT NULL,
+          vote          TEXT NOT NULL,
+          option_id     TEXT,
+          comment       TEXT,
+          voted_at      TIMESTAMPTZ DEFAULT NOW(),
+          PRIMARY KEY (proposal_id, user_id)
+        )
+      `;
+      // Phase 3 migration: add option_id for multi-option proposals.
+      await sql`ALTER TABLE decision_room_votes ADD COLUMN IF NOT EXISTS option_id TEXT`;
+      await sql`CREATE INDEX IF NOT EXISTS decision_room_votes_proposal_idx ON decision_room_votes (proposal_id)`;
+    })().catch((err) => {
+      decisionRoomVotesTableReady = null;
+      throw err;
+    });
+  }
+  await decisionRoomVotesTableReady;
+}
+
+export async function ensureDecisionRoomMessagesTable(): Promise<void> {
+  if (!decisionRoomMessagesTableReady) {
+    decisionRoomMessagesTableReady = (async () => {
+      await sql`
+        CREATE TABLE IF NOT EXISTS decision_room_messages (
+          id          BIGSERIAL PRIMARY KEY,
+          room_id     TEXT NOT NULL,
+          sender_id   TEXT,
+          content     TEXT NOT NULL,
+          meta_json   JSONB,
+          created_at  TIMESTAMPTZ DEFAULT NOW()
+        )
+      `;
+      await sql`CREATE INDEX IF NOT EXISTS decision_room_messages_room_idx ON decision_room_messages (room_id, created_at DESC)`;
+    })().catch((err) => {
+      decisionRoomMessagesTableReady = null;
+      throw err;
+    });
+  }
+  await decisionRoomMessagesTableReady;
+}
+
+/** Ensure all Decision Room v2 tables — called on first API hit. */
+export async function ensureDecisionRoomTables(): Promise<void> {
+  await Promise.all([
+    ensureDecisionRoomsTable(),
+    ensureDecisionRoomMembersTable(),
+    ensureDecisionRoomConstraintsTable(),
+    ensureDecisionRoomProposalsTable(),
+    ensureDecisionRoomVotesTable(),
+    ensureDecisionRoomMessagesTable(),
+  ]);
+}
+
+// ── Types ──────────────────────────────────────────────────────────────────
+
+export type DecisionRoomType = "restaurant" | "hotel" | "flight" | "activity";
+export type DecisionRoomStatus =
+  | "collecting"   // members still filling constraints
+  | "proposing"    // agent generating proposal
+  | "approving"    // proposals out, waiting on votes
+  | "executing"    // booking job kicked off
+  | "done"         // booking completed
+  | "abandoned";   // creator cancelled / timed out
+export type ProposalStatus = "active" | "superseded" | "accepted" | "rejected";
+export type VoteKind = "approve" | "decline" | "request_changes";
+
+export type ApprovalRule = "unanimous" | "majority";
+
+export interface DecisionRoom {
+  id: string;
+  short_code: string;
+  type: DecisionRoomType;
+  title: string;
+  status: DecisionRoomStatus;
+  creator_id: string;
+  payer_id: string | null;
+  context_json: Record<string, unknown>;
+  booking_job_id: string | null;
+  deadline: string | null;
+  approval_rule: ApprovalRule;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface DecisionRoomMember {
+  room_id: string;
+  user_id: string;
+  role: "creator" | "member";
+  status: "joined" | "left";
+  joined_at: string;
+}
+
+export interface DecisionRoomConstraintRow {
+  room_id: string;
+  user_id: string;
+  data_json: Record<string, unknown>;
+  submitted: boolean;
+  updated_at: string;
+}
+
+export interface DecisionRoomProposal {
+  id: string;
+  room_id: string;
+  content_json: Record<string, unknown>;
+  rationale: string | null;
+  conflicts_json: unknown[] | null;
+  status: ProposalStatus;
+  created_at: string;
+}
+
+export interface DecisionRoomVote {
+  proposal_id: string;
+  user_id: string;
+  vote: VoteKind;
+  /** Which option within the proposal the user is voting on. null = legacy / no option chosen. */
+  option_id: string | null;
+  comment: string | null;
+  voted_at: string;
+}
+
+export interface DecisionRoomMessage {
+  id: string;
+  room_id: string;
+  sender_id: string | null;
+  content: string;
+  meta_json: Record<string, unknown> | null;
+  created_at: string;
+}
+
+/** Composite snapshot returned by GET /api/rooms/[id]/state — feeds client polling. */
+export interface DecisionRoomSnapshot {
+  room: DecisionRoom;
+  members: DecisionRoomMember[];
+  /** Keyed by user_id — only members with a profile row are included. */
+  member_profiles: Record<string, UserProfile>;
+  constraints: DecisionRoomConstraintRow[];
+  proposals: Array<DecisionRoomProposal & { votes: DecisionRoomVote[] }>;
+  message_count: number;
+  version: number; // bumped each time the room is updated; clients diff on this
+}
+
+// ── Short-code generator (6 chars, unambiguous alphabet) ───────────────────
+
+const SHORT_CODE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"; // 32 chars, no 0/O/1/I/L
+const SHORT_CODE_LEN = 6;
+
+function randomShortCode(): string {
+  let out = "";
+  for (let i = 0; i < SHORT_CODE_LEN; i++) {
+    out += SHORT_CODE_ALPHABET[Math.floor(Math.random() * SHORT_CODE_ALPHABET.length)];
+  }
+  return out;
+}
+
+// ── CRUD: Rooms ────────────────────────────────────────────────────────────
+
+export async function createDecisionRoom(params: {
+  id: string;
+  type: DecisionRoomType;
+  title: string;
+  creatorId: string;
+  payerId?: string | null;
+  contextJson?: Record<string, unknown>;
+  deadline?: string | null;
+  approvalRule?: ApprovalRule;
+}): Promise<DecisionRoom> {
+  await ensureDecisionRoomTables();
+
+  const payerId = params.payerId ?? params.creatorId;
+  const contextJson = JSON.stringify(params.contextJson ?? {});
+  const approvalRule: ApprovalRule = params.approvalRule ?? "unanimous";
+
+  // Retry short-code collisions (unique constraint); fallback 5 tries.
+  for (let attempt = 0; attempt < 5; attempt++) {
+    const shortCode = randomShortCode();
+    try {
+      const result = await sql<DecisionRoom>`
+        INSERT INTO decision_rooms
+          (id, short_code, type, title, status, creator_id, payer_id, context_json, deadline, approval_rule)
+        VALUES
+          (${params.id}, ${shortCode}, ${params.type}, ${params.title}, 'collecting',
+           ${params.creatorId}, ${payerId}, ${contextJson}::jsonb, ${params.deadline ?? null}, ${approvalRule})
+        RETURNING *
+      `;
+      // Creator auto-joins
+      await sql`
+        INSERT INTO decision_room_members (room_id, user_id, role, status)
+        VALUES (${params.id}, ${params.creatorId}, 'creator', 'joined')
+        ON CONFLICT (room_id, user_id) DO NOTHING
+      `;
+      return result.rows[0];
+    } catch (err) {
+      const msg = (err as Error)?.message ?? "";
+      if (!msg.includes("decision_rooms_short_code_key") && !msg.includes("unique")) throw err;
+      // else retry
+    }
+  }
+  throw new Error("Failed to allocate a unique short_code after retries");
+}
+
+export async function getDecisionRoomById(id: string): Promise<DecisionRoom | null> {
+  await ensureDecisionRoomTables();
+  const result = await sql<DecisionRoom>`
+    SELECT * FROM decision_rooms WHERE id = ${id} LIMIT 1
+  `;
+  return result.rows[0] ?? null;
+}
+
+export async function getDecisionRoomByShortCode(shortCode: string): Promise<DecisionRoom | null> {
+  await ensureDecisionRoomTables();
+  const result = await sql<DecisionRoom>`
+    SELECT * FROM decision_rooms WHERE short_code = ${shortCode.toUpperCase()} LIMIT 1
+  `;
+  return result.rows[0] ?? null;
+}
+
+/** List rooms where this user is creator OR member. Most recent activity first. */
+export async function listMyDecisionRooms(userId: string): Promise<DecisionRoom[]> {
+  await ensureDecisionRoomTables();
+  const result = await sql<DecisionRoom>`
+    SELECT r.*
+    FROM decision_rooms r
+    JOIN decision_room_members m ON m.room_id = r.id
+    WHERE m.user_id = ${userId} AND m.status = 'joined'
+    ORDER BY r.updated_at DESC
+    LIMIT 100
+  `;
+  return result.rows;
+}
+
+export async function updateDecisionRoomStatus(
+  roomId: string,
+  status: DecisionRoomStatus
+): Promise<void> {
+  await ensureDecisionRoomTables();
+  await sql`
+    UPDATE decision_rooms SET status = ${status}, updated_at = NOW() WHERE id = ${roomId}
+  `;
+}
+
+export async function setDecisionRoomBookingJob(
+  roomId: string,
+  bookingJobId: string
+): Promise<void> {
+  await ensureDecisionRoomTables();
+  await sql`
+    UPDATE decision_rooms
+    SET booking_job_id = ${bookingJobId}, status = 'executing', updated_at = NOW()
+    WHERE id = ${roomId}
+  `;
+}
+
+/**
+ * Clears the room's booking_job_id (e.g. after a failed job is retried or
+ * deleted) and rolls status back from 'executing' to 'approving' so the
+ * AcceptedBlock shows the date-picker form again instead of "Booking in
+ * progress".
+ */
+export async function clearDecisionRoomBookingJob(roomId: string): Promise<void> {
+  await ensureDecisionRoomTables();
+  await sql`
+    UPDATE decision_rooms
+    SET booking_job_id = NULL, status = 'approving', updated_at = NOW()
+    WHERE id = ${roomId}
+  `;
+}
+
+// ── CRUD: Members ──────────────────────────────────────────────────────────
+
+export async function joinDecisionRoom(roomId: string, userId: string): Promise<DecisionRoomMember> {
+  await ensureDecisionRoomTables();
+  const result = await sql<DecisionRoomMember>`
+    INSERT INTO decision_room_members (room_id, user_id, role, status)
+    VALUES (${roomId}, ${userId}, 'member', 'joined')
+    ON CONFLICT (room_id, user_id) DO UPDATE SET status = 'joined', joined_at = NOW()
+    RETURNING *
+  `;
+  await sql`UPDATE decision_rooms SET updated_at = NOW() WHERE id = ${roomId}`;
+  return result.rows[0];
+}
+
+export async function listRoomMembers(roomId: string): Promise<DecisionRoomMember[]> {
+  await ensureDecisionRoomTables();
+  const result = await sql<DecisionRoomMember>`
+    SELECT * FROM decision_room_members
+    WHERE room_id = ${roomId} AND status = 'joined'
+    ORDER BY joined_at ASC
+  `;
+  return result.rows;
+}
+
+export async function isRoomMember(roomId: string, userId: string): Promise<boolean> {
+  await ensureDecisionRoomTables();
+  const result = await sql`
+    SELECT 1 FROM decision_room_members
+    WHERE room_id = ${roomId} AND user_id = ${userId} AND status = 'joined'
+    LIMIT 1
+  `;
+  return result.rows.length > 0;
+}
+
+/** True if the two users are both joined members of at least one common room. */
+export async function usersShareRoom(userA: string, userB: string): Promise<boolean> {
+  if (userA === userB) return false;
+  await ensureDecisionRoomTables();
+  const result = await sql`
+    SELECT 1 FROM decision_room_members a
+    JOIN decision_room_members b
+      ON a.room_id = b.room_id
+    WHERE a.user_id = ${userA} AND b.user_id = ${userB}
+      AND a.status = 'joined' AND b.status = 'joined'
+    LIMIT 1
+  `;
+  return result.rows.length > 0;
+}
+
+// ── CRUD: Constraints ──────────────────────────────────────────────────────
+
+export async function upsertRoomConstraint(
+  roomId: string,
+  userId: string,
+  dataJson: Record<string, unknown>,
+  submitted: boolean
+): Promise<DecisionRoomConstraintRow> {
+  await ensureDecisionRoomTables();
+  const json = JSON.stringify(dataJson);
+  const result = await sql<DecisionRoomConstraintRow>`
+    INSERT INTO decision_room_constraints (room_id, user_id, data_json, submitted, updated_at)
+    VALUES (${roomId}, ${userId}, ${json}::jsonb, ${submitted}, NOW())
+    ON CONFLICT (room_id, user_id)
+    DO UPDATE SET
+      data_json  = ${json}::jsonb,
+      submitted  = ${submitted},
+      updated_at = NOW()
+    RETURNING *
+  `;
+  await sql`UPDATE decision_rooms SET updated_at = NOW() WHERE id = ${roomId}`;
+  return result.rows[0];
+}
+
+export async function listRoomConstraints(roomId: string): Promise<DecisionRoomConstraintRow[]> {
+  await ensureDecisionRoomTables();
+  const result = await sql<DecisionRoomConstraintRow>`
+    SELECT * FROM decision_room_constraints WHERE room_id = ${roomId}
+  `;
+  return result.rows;
+}
+
+// ── CRUD: Proposals ────────────────────────────────────────────────────────
+
+export async function createRoomProposal(params: {
+  id: string;
+  roomId: string;
+  contentJson: Record<string, unknown>;
+  rationale?: string | null;
+  conflictsJson?: unknown[] | null;
+}): Promise<DecisionRoomProposal> {
+  await ensureDecisionRoomTables();
+  const result = await sql<DecisionRoomProposal>`
+    INSERT INTO decision_room_proposals
+      (id, room_id, content_json, rationale, conflicts_json, status)
+    VALUES
+      (${params.id}, ${params.roomId}, ${JSON.stringify(params.contentJson)}::jsonb,
+       ${params.rationale ?? null},
+       ${params.conflictsJson ? JSON.stringify(params.conflictsJson) : null}::jsonb,
+       'active')
+    RETURNING *
+  `;
+  await sql`UPDATE decision_rooms SET status = 'approving', updated_at = NOW() WHERE id = ${params.roomId}`;
+  return result.rows[0];
+}
+
+export async function listActiveProposals(roomId: string): Promise<DecisionRoomProposal[]> {
+  await ensureDecisionRoomTables();
+  const result = await sql<DecisionRoomProposal>`
+    SELECT * FROM decision_room_proposals
+    WHERE room_id = ${roomId} AND status IN ('active', 'accepted')
+    ORDER BY created_at DESC
+  `;
+  return result.rows;
+}
+
+export async function getRoomProposal(proposalId: string): Promise<DecisionRoomProposal | null> {
+  await ensureDecisionRoomTables();
+  const result = await sql<DecisionRoomProposal>`
+    SELECT * FROM decision_room_proposals WHERE id = ${proposalId} LIMIT 1
+  `;
+  return result.rows[0] ?? null;
+}
+
+export async function updateProposalStatus(
+  proposalId: string,
+  status: ProposalStatus
+): Promise<void> {
+  await ensureDecisionRoomTables();
+  await sql`
+    UPDATE decision_room_proposals SET status = ${status} WHERE id = ${proposalId}
+  `;
+}
+
+// ── CRUD: Votes ────────────────────────────────────────────────────────────
+
+export async function castRoomVote(params: {
+  proposalId: string;
+  userId: string;
+  vote: VoteKind;
+  optionId?: string | null;
+  comment?: string | null;
+}): Promise<DecisionRoomVote> {
+  await ensureDecisionRoomTables();
+  const result = await sql<DecisionRoomVote>`
+    INSERT INTO decision_room_votes (proposal_id, user_id, vote, option_id, comment, voted_at)
+    VALUES (${params.proposalId}, ${params.userId}, ${params.vote}, ${params.optionId ?? null}, ${params.comment ?? null}, NOW())
+    ON CONFLICT (proposal_id, user_id)
+    DO UPDATE SET vote = ${params.vote}, option_id = ${params.optionId ?? null}, comment = ${params.comment ?? null}, voted_at = NOW()
+    RETURNING *
+  `;
+  return result.rows[0];
+}
+
+export async function listProposalVotes(proposalId: string): Promise<DecisionRoomVote[]> {
+  await ensureDecisionRoomTables();
+  const result = await sql<DecisionRoomVote>`
+    SELECT * FROM decision_room_votes WHERE proposal_id = ${proposalId}
+  `;
+  return result.rows;
+}
+
+// ── CRUD: Messages ─────────────────────────────────────────────────────────
+
+export async function appendRoomMessage(params: {
+  roomId: string;
+  senderId: string | null;
+  content: string;
+  metaJson?: Record<string, unknown> | null;
+}): Promise<DecisionRoomMessage> {
+  await ensureDecisionRoomTables();
+  const result = await sql<DecisionRoomMessage>`
+    INSERT INTO decision_room_messages (room_id, sender_id, content, meta_json)
+    VALUES (${params.roomId}, ${params.senderId}, ${params.content},
+            ${params.metaJson ? JSON.stringify(params.metaJson) : null}::jsonb)
+    RETURNING *
+  `;
+  await sql`UPDATE decision_rooms SET updated_at = NOW() WHERE id = ${params.roomId}`;
+  return result.rows[0];
+}
+
+export async function listRoomMessages(
+  roomId: string,
+  limit = 100
+): Promise<DecisionRoomMessage[]> {
+  await ensureDecisionRoomTables();
+  const result = await sql<DecisionRoomMessage>`
+    SELECT * FROM decision_room_messages
+    WHERE room_id = ${roomId}
+    ORDER BY created_at ASC
+    LIMIT ${limit}
+  `;
+  return result.rows;
+}
+
+// ── Composite snapshot (polling endpoint) ──────────────────────────────────
+
+export async function getRoomSnapshot(roomId: string): Promise<DecisionRoomSnapshot | null> {
+  await ensureDecisionRoomTables();
+  const room = await getDecisionRoomById(roomId);
+  if (!room) return null;
+
+  const [members, constraints, proposals] = await Promise.all([
+    listRoomMembers(roomId),
+    listRoomConstraints(roomId),
+    listActiveProposals(roomId),
+  ]);
+
+  const proposalsWithVotes = await Promise.all(
+    proposals.map(async (p) => ({ ...p, votes: await listProposalVotes(p.id) }))
+  );
+
+  const msgCountResult = await sql<{ c: string }>`
+    SELECT COUNT(*)::text AS c FROM decision_room_messages WHERE room_id = ${roomId}
+  `;
+  const messageCount = parseInt(msgCountResult.rows[0]?.c ?? "0", 10);
+
+  // Resolve member userIds → profiles so the UI can render display names.
+  const memberProfiles = await getUserProfilesByIds(members.map((m) => m.user_id));
+
+  // Version = max(updated_at across room + all child tables) — coarse but good enough for 3s polling.
+  // We use room.updated_at (bumped on every child write via helpers above) as the version signal.
+  const version = new Date(room.updated_at).getTime();
+
+  return {
+    room,
+    members,
+    member_profiles: memberProfiles,
+    constraints,
+    proposals: proposalsWithVotes,
+    message_count: messageCount,
+    version,
+  };
+}
+
+// ── Phase 1.5: Recent collaborators ────────────────────────────────────────
+
+/** People this user has shared a Room with, most-recent join first. */
+export async function getRecentCollaborators(userId: string, limit = 20): Promise<string[]> {
+  await ensureDecisionRoomTables();
+  const result = await sql<{ user_id: string }>`
+    SELECT DISTINCT ON (m2.user_id) m2.user_id
+    FROM decision_room_members m1
+    JOIN decision_room_members m2 ON m2.room_id = m1.room_id AND m2.user_id <> m1.user_id
+    WHERE m1.user_id = ${userId} AND m1.status = 'joined' AND m2.status = 'joined'
+    ORDER BY m2.user_id, m2.joined_at DESC
+    LIMIT ${limit}
+  `;
+  return result.rows.map((r) => r.user_id);
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Contacts / user profiles (Phase 1.5 — Layer 2: address book w/ profile codes)
+// ═══════════════════════════════════════════════════════════════════════════
+
+export async function ensureUserProfilesTable(): Promise<void> {
+  if (!userProfilesTableReady) {
+    userProfilesTableReady = (async () => {
+      await sql`
+        CREATE TABLE IF NOT EXISTS user_profiles (
+          user_id       TEXT PRIMARY KEY,
+          profile_code  TEXT NOT NULL UNIQUE,
+          display_name  TEXT,
+          avatar_url    TEXT,
+          created_at    TIMESTAMPTZ DEFAULT NOW(),
+          updated_at    TIMESTAMPTZ DEFAULT NOW()
+        )
+      `;
+      await sql`CREATE INDEX IF NOT EXISTS user_profiles_code_idx ON user_profiles (profile_code)`;
+      // Backfill: add username for @handle lookup (e.g. @ziweib). Clerk owns
+      // uniqueness globally, but we enforce a case-insensitive local unique
+      // so two synced accounts can't collide.
+      await sql`ALTER TABLE user_profiles ADD COLUMN IF NOT EXISTS username TEXT`;
+      await sql`
+        CREATE UNIQUE INDEX IF NOT EXISTS user_profiles_username_lower_idx
+        ON user_profiles (LOWER(username))
+        WHERE username IS NOT NULL
+      `;
+    })().catch((err) => {
+      userProfilesTableReady = null;
+      throw err;
+    });
+  }
+  await userProfilesTableReady;
+}
+
+export async function ensureUserContactsTable(): Promise<void> {
+  if (!userContactsTableReady) {
+    userContactsTableReady = (async () => {
+      await sql`
+        CREATE TABLE IF NOT EXISTS user_contacts (
+          owner_id         TEXT NOT NULL,
+          contact_user_id  TEXT NOT NULL,
+          nickname         TEXT,
+          created_at       TIMESTAMPTZ DEFAULT NOW(),
+          PRIMARY KEY (owner_id, contact_user_id)
+        )
+      `;
+      await sql`CREATE INDEX IF NOT EXISTS user_contacts_owner_idx ON user_contacts (owner_id)`;
+    })().catch((err) => {
+      userContactsTableReady = null;
+      throw err;
+    });
+  }
+  await userContactsTableReady;
+}
+
+export interface UserProfile {
+  user_id: string;
+  profile_code: string;
+  display_name: string | null;
+  avatar_url: string | null;
+  /** Clerk-sourced handle (e.g. "ziweib"). Nullable for legacy rows. */
+  username: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ContactRow {
+  owner_id: string;
+  contact_user_id: string;
+  nickname: string | null;
+  created_at: string;
+}
+
+/** Contact joined with the peer's profile — what the UI actually renders. */
+export interface ContactWithProfile {
+  contact_user_id: string;
+  nickname: string | null;
+  profile_code: string;
+  display_name: string | null;
+  avatar_url: string | null;
+  added_at: string;
+}
+
+/**
+ * Upsert a user_profiles row. On first insert, generate a unique profile_code.
+ * Safe to call on every sign-in (idempotent).
+ */
+export async function ensureUserProfile(
+  userId: string,
+  displayName: string | null,
+  avatarUrl: string | null,
+  username: string | null = null
+): Promise<UserProfile> {
+  await ensureUserProfilesTable();
+
+  // Fast path: row already exists — just refresh display_name/avatar_url/username.
+  const existing = await sql<UserProfile>`SELECT * FROM user_profiles WHERE user_id = ${userId} LIMIT 1`;
+  if (existing.rows.length > 0) {
+    const row = existing.rows[0];
+    const changed =
+      row.display_name !== displayName ||
+      row.avatar_url !== avatarUrl ||
+      row.username !== username;
+    if (changed) {
+      const updated = await sql<UserProfile>`
+        UPDATE user_profiles
+        SET display_name = ${displayName},
+            avatar_url = ${avatarUrl},
+            username = ${username},
+            updated_at = NOW()
+        WHERE user_id = ${userId}
+        RETURNING *
+      `;
+      return updated.rows[0];
+    }
+    return row;
+  }
+
+  // Slow path: create row with a fresh unique profile_code. Retry on collision.
+  for (let attempt = 0; attempt < 5; attempt++) {
+    const code = randomShortCode();
+    try {
+      const inserted = await sql<UserProfile>`
+        INSERT INTO user_profiles (user_id, profile_code, display_name, avatar_url, username)
+        VALUES (${userId}, ${code}, ${displayName}, ${avatarUrl}, ${username})
+        RETURNING *
+      `;
+      return inserted.rows[0];
+    } catch (err) {
+      // Unique-violation on profile_code → retry with a new one.
+      const msg = err instanceof Error ? err.message : String(err);
+      if (!msg.includes("user_profiles_profile_code_key") && !msg.includes("unique")) throw err;
+    }
+  }
+  throw new Error("Failed to generate a unique profile_code after 5 attempts");
+}
+
+export async function getUserProfileByCode(code: string): Promise<UserProfile | null> {
+  await ensureUserProfilesTable();
+  const result = await sql<UserProfile>`
+    SELECT * FROM user_profiles WHERE profile_code = ${code.toUpperCase()} LIMIT 1
+  `;
+  return result.rows[0] ?? null;
+}
+
+/** Case-insensitive lookup by Clerk username (e.g. "@ziweib"). */
+export async function getUserProfileByUsername(username: string): Promise<UserProfile | null> {
+  await ensureUserProfilesTable();
+  const result = await sql<UserProfile>`
+    SELECT * FROM user_profiles WHERE LOWER(username) = LOWER(${username}) LIMIT 1
+  `;
+  return result.rows[0] ?? null;
+}
+
+export async function getUserProfile(userId: string): Promise<UserProfile | null> {
+  await ensureUserProfilesTable();
+  const result = await sql<UserProfile>`SELECT * FROM user_profiles WHERE user_id = ${userId} LIMIT 1`;
+  return result.rows[0] ?? null;
+}
+
+/** Batch resolve userIds → profiles. Missing ids simply omitted from the map. */
+export async function getUserProfilesByIds(userIds: string[]): Promise<Record<string, UserProfile>> {
+  if (userIds.length === 0) return {};
+  await ensureUserProfilesTable();
+  const placeholders = userIds.map((_, i) => `$${i + 1}`).join(",");
+  const result = await db.query<UserProfile>(
+    `SELECT * FROM user_profiles WHERE user_id IN (${placeholders})`,
+    userIds
+  );
+  const out: Record<string, UserProfile> = {};
+  for (const row of result.rows) out[row.user_id] = row;
+  return out;
+}
+
+export async function addContact(
+  ownerId: string,
+  contactUserId: string,
+  nickname: string | null
+): Promise<ContactRow> {
+  if (ownerId === contactUserId) throw new Error("Cannot add yourself as a contact");
+  await ensureUserContactsTable();
+  const result = await sql<ContactRow>`
+    INSERT INTO user_contacts (owner_id, contact_user_id, nickname)
+    VALUES (${ownerId}, ${contactUserId}, ${nickname})
+    ON CONFLICT (owner_id, contact_user_id)
+    DO UPDATE SET nickname = COALESCE(EXCLUDED.nickname, user_contacts.nickname)
+    RETURNING *
+  `;
+  return result.rows[0];
+}
+
+export async function updateContactNickname(
+  ownerId: string,
+  contactUserId: string,
+  nickname: string | null
+): Promise<ContactRow | null> {
+  await ensureUserContactsTable();
+  const result = await sql<ContactRow>`
+    UPDATE user_contacts SET nickname = ${nickname}
+    WHERE owner_id = ${ownerId} AND contact_user_id = ${contactUserId}
+    RETURNING *
+  `;
+  return result.rows[0] ?? null;
+}
+
+export async function removeContact(ownerId: string, contactUserId: string): Promise<boolean> {
+  await ensureUserContactsTable();
+  const result = await sql`
+    DELETE FROM user_contacts WHERE owner_id = ${ownerId} AND contact_user_id = ${contactUserId}
+  `;
+  return (result.rowCount ?? 0) > 0;
+}
+
+export async function isContact(ownerId: string, contactUserId: string): Promise<boolean> {
+  await ensureUserContactsTable();
+  const result = await sql`
+    SELECT 1 FROM user_contacts WHERE owner_id = ${ownerId} AND contact_user_id = ${contactUserId} LIMIT 1
+  `;
+  return result.rows.length > 0;
+}
+
+/** List my contacts joined with their profile data — ready for rendering. */
+export async function listContactsWithProfiles(ownerId: string): Promise<ContactWithProfile[]> {
+  await Promise.all([ensureUserContactsTable(), ensureUserProfilesTable()]);
+  const result = await sql<{
+    contact_user_id: string;
+    nickname: string | null;
+    created_at: string;
+    profile_code: string | null;
+    display_name: string | null;
+    avatar_url: string | null;
+  }>`
+    SELECT c.contact_user_id, c.nickname, c.created_at,
+           p.profile_code, p.display_name, p.avatar_url
+    FROM user_contacts c
+    LEFT JOIN user_profiles p ON p.user_id = c.contact_user_id
+    WHERE c.owner_id = ${ownerId}
+    ORDER BY c.created_at DESC
+  `;
+  return result.rows.map((r) => ({
+    contact_user_id: r.contact_user_id,
+    nickname: r.nickname,
+    profile_code: r.profile_code ?? "",
+    display_name: r.display_name,
+    avatar_url: r.avatar_url,
+    added_at: r.created_at,
+  }));
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Groups (Phase 2 — named reusable sets of contacts for 3-5 person decisions)
+// ═══════════════════════════════════════════════════════════════════════════
+
+export async function ensureUserGroupsTable(): Promise<void> {
+  if (!userGroupsTableReady) {
+    userGroupsTableReady = (async () => {
+      await sql`
+        CREATE TABLE IF NOT EXISTS user_groups (
+          id          TEXT PRIMARY KEY,
+          owner_id    TEXT NOT NULL,
+          name        TEXT NOT NULL,
+          created_at  TIMESTAMPTZ DEFAULT NOW(),
+          updated_at  TIMESTAMPTZ DEFAULT NOW()
+        )
+      `;
+      await sql`CREATE INDEX IF NOT EXISTS user_groups_owner_idx ON user_groups (owner_id)`;
+    })().catch((err) => {
+      userGroupsTableReady = null;
+      throw err;
+    });
+  }
+  await userGroupsTableReady;
+}
+
+export async function ensureUserGroupMembersTable(): Promise<void> {
+  if (!userGroupMembersTableReady) {
+    userGroupMembersTableReady = (async () => {
+      await sql`
+        CREATE TABLE IF NOT EXISTS user_group_members (
+          group_id         TEXT NOT NULL,
+          contact_user_id  TEXT NOT NULL,
+          added_at         TIMESTAMPTZ DEFAULT NOW(),
+          PRIMARY KEY (group_id, contact_user_id)
+        )
+      `;
+      await sql`CREATE INDEX IF NOT EXISTS user_group_members_group_idx ON user_group_members (group_id)`;
+    })().catch((err) => {
+      userGroupMembersTableReady = null;
+      throw err;
+    });
+  }
+  await userGroupMembersTableReady;
+}
+
+export interface UserGroup {
+  id: string;
+  owner_id: string;
+  name: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface UserGroupWithCount extends UserGroup {
+  member_count: number;
+}
+
+export async function createGroup(ownerId: string, name: string): Promise<UserGroup> {
+  await ensureUserGroupsTable();
+  const id = `grp_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
+  const result = await sql<UserGroup>`
+    INSERT INTO user_groups (id, owner_id, name)
+    VALUES (${id}, ${ownerId}, ${name})
+    RETURNING *
+  `;
+  return result.rows[0];
+}
+
+export async function listMyGroups(ownerId: string): Promise<UserGroupWithCount[]> {
+  await Promise.all([ensureUserGroupsTable(), ensureUserGroupMembersTable()]);
+  const result = await sql<UserGroupWithCount>`
+    SELECT g.*, COALESCE(COUNT(m.contact_user_id), 0)::int AS member_count
+    FROM user_groups g
+    LEFT JOIN user_group_members m ON m.group_id = g.id
+    WHERE g.owner_id = ${ownerId}
+    GROUP BY g.id
+    ORDER BY g.updated_at DESC
+  `;
+  return result.rows;
+}
+
+export async function getGroup(ownerId: string, groupId: string): Promise<UserGroup | null> {
+  await ensureUserGroupsTable();
+  const result = await sql<UserGroup>`
+    SELECT * FROM user_groups WHERE id = ${groupId} AND owner_id = ${ownerId} LIMIT 1
+  `;
+  return result.rows[0] ?? null;
+}
+
+export async function renameGroup(
+  ownerId: string,
+  groupId: string,
+  name: string
+): Promise<UserGroup | null> {
+  await ensureUserGroupsTable();
+  const result = await sql<UserGroup>`
+    UPDATE user_groups SET name = ${name}, updated_at = NOW()
+    WHERE id = ${groupId} AND owner_id = ${ownerId}
+    RETURNING *
+  `;
+  return result.rows[0] ?? null;
+}
+
+export async function deleteGroup(ownerId: string, groupId: string): Promise<boolean> {
+  await Promise.all([ensureUserGroupsTable(), ensureUserGroupMembersTable()]);
+  // Remove members first to keep FK-free schema consistent.
+  await sql`DELETE FROM user_group_members WHERE group_id = ${groupId}`;
+  const result = await sql`
+    DELETE FROM user_groups WHERE id = ${groupId} AND owner_id = ${ownerId}
+  `;
+  return (result.rowCount ?? 0) > 0;
+}
+
+/**
+ * Add one or more contacts to a group. Skips ids that aren't the owner's
+ * contacts (prevents sneaking strangers into a group).
+ */
+export async function addGroupMembers(
+  ownerId: string,
+  groupId: string,
+  contactUserIds: string[]
+): Promise<number> {
+  if (contactUserIds.length === 0) return 0;
+  await Promise.all([
+    ensureUserGroupsTable(),
+    ensureUserGroupMembersTable(),
+    ensureUserContactsTable(),
+  ]);
+
+  // Verify ownership of the group.
+  const group = await getGroup(ownerId, groupId);
+  if (!group) throw new Error("Group not found");
+
+  // Intersect the requested ids with the owner's actual contacts.
+  const placeholders = contactUserIds.map((_, i) => `$${i + 2}`).join(",");
+  const valid = await db.query<{ contact_user_id: string }>(
+    `SELECT contact_user_id FROM user_contacts
+      WHERE owner_id = $1 AND contact_user_id IN (${placeholders})`,
+    [ownerId, ...contactUserIds]
+  );
+  const validIds = valid.rows.map((r) => r.contact_user_id);
+  if (validIds.length === 0) return 0;
+
+  let inserted = 0;
+  for (const cid of validIds) {
+    const res = await sql`
+      INSERT INTO user_group_members (group_id, contact_user_id)
+      VALUES (${groupId}, ${cid})
+      ON CONFLICT (group_id, contact_user_id) DO NOTHING
+    `;
+    inserted += res.rowCount ?? 0;
+  }
+  if (inserted > 0) {
+    await sql`UPDATE user_groups SET updated_at = NOW() WHERE id = ${groupId}`;
+  }
+  return inserted;
+}
+
+export async function removeGroupMember(
+  ownerId: string,
+  groupId: string,
+  contactUserId: string
+): Promise<boolean> {
+  await Promise.all([ensureUserGroupsTable(), ensureUserGroupMembersTable()]);
+  const group = await getGroup(ownerId, groupId);
+  if (!group) return false;
+  const result = await sql`
+    DELETE FROM user_group_members
+    WHERE group_id = ${groupId} AND contact_user_id = ${contactUserId}
+  `;
+  if ((result.rowCount ?? 0) > 0) {
+    await sql`UPDATE user_groups SET updated_at = NOW() WHERE id = ${groupId}`;
+    return true;
+  }
+  return false;
+}
+
+/** List a group's members joined with their profile + nickname — ready to render. */
+export async function listGroupMembersWithProfiles(
+  ownerId: string,
+  groupId: string
+): Promise<ContactWithProfile[]> {
+  await Promise.all([
+    ensureUserGroupsTable(),
+    ensureUserGroupMembersTable(),
+    ensureUserContactsTable(),
+    ensureUserProfilesTable(),
+  ]);
+  const group = await getGroup(ownerId, groupId);
+  if (!group) return [];
+  const result = await sql<{
+    contact_user_id: string;
+    nickname: string | null;
+    added_at: string;
+    profile_code: string | null;
+    display_name: string | null;
+    avatar_url: string | null;
+  }>`
+    SELECT gm.contact_user_id,
+           c.nickname,
+           gm.added_at,
+           p.profile_code,
+           p.display_name,
+           p.avatar_url
+    FROM user_group_members gm
+    LEFT JOIN user_contacts c
+      ON c.owner_id = ${ownerId} AND c.contact_user_id = gm.contact_user_id
+    LEFT JOIN user_profiles p
+      ON p.user_id = gm.contact_user_id
+    WHERE gm.group_id = ${groupId}
+    ORDER BY gm.added_at ASC
+  `;
+  return result.rows.map((r) => ({
+    contact_user_id: r.contact_user_id,
+    nickname: r.nickname,
+    profile_code: r.profile_code ?? "",
+    display_name: r.display_name,
+    avatar_url: r.avatar_url,
+    added_at: r.added_at,
+  }));
 }

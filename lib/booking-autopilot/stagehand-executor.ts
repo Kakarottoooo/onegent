@@ -489,6 +489,12 @@ export async function runBrowserTask(
   // Auto-close after 10 minutes.
   let keepBrowserOpen = false;
 
+  // Safety net: if the flow reached guest-form filling (restaurant or
+  // hotel/flight guest details) but then threw or finalized as "error",
+  // we still want to keep the browser open so the user can visually confirm
+  // what was filled and submit the form themselves.
+  let reachedGuestForm = false;
+
   try {
     await stagehand.init();
     // Register stagehand so a future Reset & Retry can close this browser instance.
@@ -4839,28 +4845,80 @@ The user will enter CVV and confirm payment themselves.`,
     }
 
     // For restaurant platforms (OpenTable, Resy): guestDetailsStep=true means we're on
-    // the reservation form. There is no separate payment step — just fill guest info and submit.
+    // the reservation form. Restaurants keep guest + card on the SAME page (unlike
+    // Expedia/Booking.com which split them), so we handle everything in this branch:
+    //   1. fillGuestForm (diner details)
+    //   2. re-check paymentStep → if cc section present, run fillPaymentForm (stops at CVV)
+    // We intentionally ignore !bookingComFinalPaymentDomState here — otherwise a
+    // restaurant that requires a credit card would fall through to the 4889 branch,
+    // which assumes guest details were filled on an earlier page and skips diner fill.
     const isRestaurantProvider = activeProvider?.id === "opentable-com" || activeProvider?.id === "resy-com";
-    if (!bookingComFinalPaymentDomState && bookingComGuestDetailsDomState && isRestaurantProvider) {
+    if (bookingComGuestDetailsDomState && isRestaurantProvider) {
       trace(`[${activeProvider?.id}] reservation form detected — filling guest info`);
+      reachedGuestForm = true;
       if (activeProvider?.fillGuestForm) {
         await activeProvider.fillGuestForm(raw, p, bookingComHelpers, trace);
       }
-      await new Promise(r => setTimeout(r, 1500));
+      await new Promise(r => setTimeout(r, 800));
+
+      // Re-check signals after guest fill: OpenTable's "Credit card required"
+      // section may now be fully rendered/scrolled into view. If so, run the
+      // payment pass so the user only has to type their CVV.
+      let needsCardEntry = false;
+      let paymentIncompleteFields: string[] = [];
+      if (activeProvider) {
+        const postGuestSignals = await activeProvider.getStageSignals(raw, raw.url(), "").catch(() => null);
+        if (postGuestSignals?.paymentStep && activeProvider.fillPaymentForm) {
+          const pAny = p as Record<string, unknown>;
+          const cn = typeof pAny.card_number === "string" ? pAny.card_number : "";
+          const ce = typeof pAny.card_expiry === "string" ? pAny.card_expiry : "";
+          const cname = typeof pAny.card_name === "string" ? pAny.card_name : "";
+          const zip = typeof pAny.zip === "string" ? pAny.zip : "";
+          trace(`[${activeProvider.id}] pre-payment profile: cardNameLen=${cname.length} cardNumLen=${cn.length} cardExpiry="${ce}" zip="${zip}" profileKeys=${Object.keys(pAny).join(",")}`);
+          trace(`[${activeProvider.id}] credit card required — running fillPaymentForm (stops at CVV)`);
+          const paymentFillResult = await activeProvider.fillPaymentForm(raw, p, bookingComHelpers, trace);
+          if (paymentFillResult && typeof paymentFillResult === "object") {
+            const missing: string[] = [];
+            if (paymentFillResult.name === false) missing.push("card name");
+            if (paymentFillResult.number === false) missing.push("card number");
+            if (paymentFillResult.expiry === false) missing.push("expiry");
+            if (paymentFillResult.zip === false) missing.push("billing zip");
+            if (paymentFillResult.agreed === false) missing.push("terms checkbox");
+            paymentIncompleteFields = missing;
+            if (missing.length > 0) {
+              trace(`[${activeProvider.id}] payment fill incomplete — missing=${missing.join(", ")}`);
+            }
+          }
+          await new Promise(r => setTimeout(r, 800));
+          needsCardEntry = true;
+        }
+      }
+
+      await new Promise(r => setTimeout(r, 700));
       const screenshotBase64 = `data:image/png;base64,${(await page.screenshot({ type: "png" })).toString("base64")}`;
       const afterUrl = raw.url();
       // Check if form was submitted successfully (URL changed to confirmation)
       const isConfirmed = afterUrl.toLowerCase().includes("/confirmation") ||
         afterUrl.toLowerCase().includes("/confirmed") ||
         afterUrl.toLowerCase().includes("booking/complete");
+
+      let summary: string;
+      if (isConfirmed) {
+        summary = `Reservation confirmed at ${targetHotelName ?? "the restaurant"}!`;
+      } else if (needsCardEntry && paymentIncompleteFields.length > 0) {
+        summary = `Reservation form filled for ${targetHotelName ?? "the restaurant"}, but some payment fields still need manual entry (${paymentIncompleteFields.join(", ")} + CVC).`;
+      } else if (needsCardEntry) {
+        summary = `Reservation form + card details filled for ${targetHotelName ?? "the restaurant"}. Enter CVC and click "Complete reservation" to finish.`;
+      } else {
+        summary = `Reservation form filled for ${targetHotelName ?? "the restaurant"}. Open the link to confirm.`;
+      }
+
       return {
         status: isConfirmed ? "completed" : "paused_payment",
         screenshotBase64,
         handoffUrl: afterUrl,
         sessionUrl,
-        summary: isConfirmed
-          ? `Reservation confirmed at ${targetHotelName ?? "the restaurant"}!`
-          : `Reservation form filled for ${targetHotelName ?? "the restaurant"}. Open the link to confirm.`,
+        summary,
         debugTrace,
       };
     }
@@ -4881,6 +4939,7 @@ The user will enter CVV and confirm payment themselves.`,
 
     if (bookingComFinalPaymentDomState && activeProvider) {
       trace("Provider final payment page confirmed after guest-details step — running final card-field fill pass.");
+      reachedGuestForm = true;
 
       // Before filling, wait briefly for the checkout page to render (Expedia lazy-loads card fields)
       await raw.waitForLoadState("domcontentloaded", { timeout: 5000 }).catch(() => {});
@@ -5129,6 +5188,19 @@ The user will enter CVV and confirm payment themselves.`,
     }
 
     trace(`Executor threw an unexpected error: ${error}`);
+    // If the guest/payment form was already filled before the throw, don't
+    // mark the whole step as hard-error — the user can visually review the
+    // browser (kept open by the safety net) and submit manually.
+    if (reachedGuestForm) {
+      trace("reachedGuestForm=true at throw — returning paused_payment so UI treats this as awaiting manual confirmation.");
+      return {
+        status: "paused_payment",
+        handoffUrl: input.startUrl,
+        summary: "Form pre-filled. Please review the browser and submit the booking manually.",
+        error,
+        debugTrace,
+      };
+    }
     return {
       status: "error",
       handoffUrl: input.startUrl,
@@ -5137,6 +5209,25 @@ The user will enter CVV and confirm payment themselves.`,
       debugTrace,
     };
   } finally {
+    // Safety net: if we already filled guest/payment form fields but the
+    // outcome was error (or unexpected throw), keep the browser open so the
+    // user can visually review what's on the page and submit manually.
+    // Mirrors the paused_payment TTL (15 min).
+    if (!keepBrowserOpen && reachedGuestForm && !useCloud && input.jobId) {
+      keepBrowserOpen = true;
+      trace("Safety net: guest form was reached — keeping browser open 15 min for manual review/submit.");
+      browserSessionStore.setGetter(input.jobId, () => {
+        const ctx = stagehand.context;
+        if (!ctx) return null;
+        const ap = ctx.activePage();
+        return ap ? getRawPage(ap) : null;
+      }, 15 * 60 * 1000);
+      setTimeout(() => {
+        browserSessionStore.delete(input.jobId!);
+        stagehand.close().catch(() => {});
+      }, 15 * 60 * 1000);
+    }
+
     if (!keepBrowserOpen) {
       if (input.jobId) {
         browserSessionStore.delete(input.jobId);

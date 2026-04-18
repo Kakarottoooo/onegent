@@ -1,5 +1,5 @@
 ================================================================
-Onegent · AI 决策代理 · 项目总结 · v0.2.28.0
+Onegent · AI 决策代理 · 项目总结 · v0.2.29.0
 ================================================================
 
 【项目定义】
@@ -68,8 +68,8 @@ Onegent · AI 决策代理 · 项目总结 · v0.2.28.0
   实现：DecisionPlan.tradeoff_summary + risks[] + ActionRail 行动按钮。
   升级：高置信方案直接显示"✓ 已为你选定"，备选方案默认折叠，
   引导批准而非比较。
-  升级 2：Decision Room（Phase 4）— 两人共同做决策，各自提交约束，
-  AI 合并后投票，全程实时同步，支持冲突检测。
+  升级 2：Decision Rooms v2（Phase 4）— 支持多人共同做决策，成员分别提交约束，
+  AI 合并后生成多选提案，按 unanimous / majority 规则投票，可直接衔接 Booking。
   升级 3（v0.2.24.0）：Autopilot Booking — 选好方案后，agent 自动执行预订，
   用户只需最后付款。任务视图实时展示 agent 的每一步决策过程。
 
@@ -164,25 +164,25 @@ Onegent · AI 决策代理 · 项目总结 · v0.2.28.0
   ✅ getScoreAdjustments() 已实现（等待激活：≥30 天 + ≥100 条 plan_outcomes）
   🔶 实时订位可用性（当前：OpenTable 深链接 + rid 查询端点，未内嵌可用时段 widget）
 
-【第四阶段 · 完成】双人协作决策 — Decision Room
+【第四阶段 · 完成】多人协作决策 — Decision Rooms v2
 
-  核心转变：从"一个人做决策" → "两个人一起做决策"
+  核心转变：从"一个人做决策" → "多人实时协作做决策"
 
-  Decision Room ✅（Phase 4）
+  Decision Rooms v2 ✅（Phase 4）
     流程：
-      1. A 创建 Decision Room，获得分享链接
-      2. 发给 B（iMessage / WhatsApp / 复制链接）
-      3. B 加入后自动跳转投票页（4s 轮询）
-      4. AI 合并双方约束（MiniMax）→ 冲突检测
-      5. 展示最多 3 张候选卡，双方独立投票
-      6. 双方同时点 ✓ 的第一张卡 = 最终决定
-      7. 事后反馈（Loved it / Fine / Never again）
+      1. 创建 Room（restaurant / hotel / flight / activity），生成 short code / join link
+      2. 邀请联系人或群组成员加入，成员页实时显示 joined / submitted 状态
+      3. 每位成员提交结构化约束（预算 / 菜系偏好 / 忌口 / vibe / time / notes）
+      4. AI 合并约束并生成最多 3 个候选 option，附 rationale + conflicts
+      5. 成员按 unanimous / majority 规则独立投票；N<3 自动退化为 unanimous
+      6. 某个 option 达成通过后，payer 一键执行预订，直接启动 booking_job
+      7. Room 内消息流记录 accepted / rejected / booking_started 等系统事件
     实现要点：
-      · 服务端角色推断：Clerk userId > HttpOnly Cookie > 默认 partner
-      · 投票写入后重新拉取，避免脏读竞态（re-fetch after write）
-      · 55s 双重超时保护（Promise.race + maxDuration = 60）
-      · 会话 24h 过期，设计用于"当晚就决定"场景
-      · 单次 DB 批量 UPDATE 替代原始 N+1 串行写入
+      · `/api/rooms/[id]/state?since=<version>` + `useRoomState()`：3s 轮询 + 304 no-change，低成本实时同步
+      · 提案引擎：2 人走 `runAgentForTwoParty`，3+ 人走 `runAgentForNParty`
+      · 票型：approve / decline / request_changes；accepted proposal 持久化 winning option
+      · 社交层：`user_profiles / user_contacts / user_groups / collaborators/recent`
+      · 执行层：accepted restaurant proposal 可直接落地为 booking job，并绑定回 room
 
 【第五阶段 · 完成】Autopilot Booking — 从"推荐"到"代办"
 
@@ -543,7 +543,7 @@ AI：MiniMax（NLU + 评论信号解析 + 语义排序 + 双人约束合并）
        Cookie 持久化（.booking-cookies/{service}.json）
        Live Browser View — SSE 实时截图流 + canvas 双缓冲渲染（无闪烁）
        实时日志 — 内存环形缓冲区（liveLogStore），1.2s 轮询推送到任务 UI
-存储：Neon PostgreSQL（12 张表）· localStorage（收藏夹 + 偏好缓存）
+存储：Neon PostgreSQL（29 张表）· localStorage（收藏夹 + 偏好缓存）
 认证：Clerk（内部分析仪表板 + 跨设备偏好同步 + Decision Room 身份锚定）
 推送：Web Push（VAPID）· PWA Service Worker
 基础设施：Vercel（maxDuration=300 for autopilot，maxDuration=60 for Decision Room）
@@ -551,10 +551,10 @@ AI：MiniMax（NLU + 评论信号解析 + 语义排序 + 双人约束合并）
 API 层：30+ 个路由端点
 Cron：4 个定时任务（反馈提示 / 价格检查 / 场馆质量 / 笔记本价格）
 测试：Vitest（22+ 个测试文件 · 100% 通过）
-版本：v0.2.27.0
+版本：v0.2.29.0
 
 ================================================================
-八、数据库（12 张表）
+八、数据库（29 张表）
 ================================================================
 
 | 表名 | 用途 |
@@ -569,12 +569,45 @@ Cron：4 个定时任务（反馈提示 / 价格检查 / 场馆质量 / 笔记�
 | price_watches | 已注册的价格监控 |
 | user_preferences | Session + 用户维度偏好 KV 存储 |
 | user_notifications | Web Push 订阅 |
+| decision_sessions | 旧版双人 Decision Room 会话（legacy） |
+| venue_baselines | 场馆评分基线，用于健康度预警 |
 | booking_jobs | Autopilot 任务队列（状态/步骤/决策日志） |
+| agent_logs | Booking / Executor 实时日志 |
 | agent_feedback | Agent 反馈事件（接受/覆盖/满意度） |
+| booking_monitors | 价格/库存等监控任务 |
+| relationship_profiles | 双人关系画像 / 偏好记忆 |
+| booking_profiles | 预订资料与支付/证件信息 |
+| decision_rooms | Decision Rooms v2 主表（room 元数据 / approval_rule / booking_job_id） |
+| decision_room_members | Room 成员、角色与 joined 状态 |
+| decision_room_constraints | 每位成员提交的结构化约束 |
+| decision_room_proposals | AI 生成的多选提案与 conflicts |
+| decision_room_votes | proposal 投票（approve / decline / request_changes + option_id） |
+| decision_room_messages | Room 消息流 / 系统事件 |
+| user_profiles | 用户公开资料 / profile code |
+| user_contacts | 联系人图谱 |
+| user_groups | 用户自定义分组 |
+| user_group_members | 群组成员关系 |
 
 ================================================================
 九、版本历史摘要
 ================================================================
+
+v0.2.29.0（2026-04-18）— Decision Rooms v2 + 社交协作层
+  · Decision Room 升级为 `/rooms` 独立产品面：列表页 / 新建页 / 房间页 / join by short code
+  · 新增房间 API：create / join / members / constraints / propose / vote / state / execute / clear-booking
+  · 提案引擎升级：2 人沿用 two-party，3+ 人切到 `runAgentForNParty`，支持 conflict 检测与多 option proposal
+  · 投票规则升级：支持 unanimous / majority；N<3 自动退化为 unanimous，accepted proposal 持久化 winning option
+  · 执行闭环：payer 可从 accepted restaurant proposal 直接启动 booking_job，Room 内写入 booking_started 系统消息
+  · 实时同步：`useRoomState()` 基于 version + 304 no-change 轮询，降低房间状态刷新成本
+  · 社交层：新增 `user_profiles / user_contacts / user_groups / user_group_members`，支持联系人、群组、recent collaborators
+  · OpenTable 支付收尾：修复卡号字段失败时的日志与判定，Ready for payment 不再误报“card details filled”
+
+v0.2.28.1（2026-04-17）— Expedia 机票 RPA bugfix 收尾
+  · 修复 American / Delta 选票链路：24 小时制时间可正确匹配 Expedia 页面中的 12 小时制文案（如 14:54 → 2:54pm）
+  · 修复 fare select 级联点击：兼容 Stagehand page 与 Playwright locator 差异，避免 selector click / mouse API 误用
+  · 修复 bundle 弹窗关闭：优先命中真实可见文本 "No thanks"，不再误点左上角关闭按钮或日期选择器
+  · 修复二次 bundle 回弹：关窗后若 fare modal 仍在，自动补点票价；若 bundle 再次弹出则继续自动 dismiss
+  · 新增 href 兜底：若 "No thanks" 携带 Flight-Information 跳转链接且前端未 commit，直接导航进入后续 checkout 流程
 
 v0.2.26.0（2026-04-14）— 多 Provider 架构 + 餐厅预订自动化
   · BrowserProvider 接口 + 注册表：booking-com / expedia / hotels-com / opentable / resy / yelp

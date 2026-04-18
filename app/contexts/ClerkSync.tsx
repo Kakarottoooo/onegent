@@ -46,6 +46,22 @@ export function ClerkSync() {
     if (mergedUserIdRef.current === user.id) return; // already merged this session
     mergedUserIdRef.current = user.id;
 
+    // Ensure user_profiles row exists so other users can resolve this person
+    // by profile_code or @username. Idempotent; also refreshes display_name /
+    // avatar_url / username on every sign-in.
+    const displayName = user.fullName ?? user.primaryEmailAddress?.emailAddress ?? null;
+    const avatarUrl = user.imageUrl ?? null;
+    const username = user.username ?? null;
+    fetch("/api/users/me", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        display_name: displayName,
+        avatar_url: avatarUrl,
+        username,
+      }),
+    }).catch(() => {}); // fire-and-forget
+
     const sessionId = getStoredSessionId();
     if (!sessionId) return;
 
@@ -54,7 +70,7 @@ export function ClerkSync() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ session_id: sessionId }),
     }).catch(() => {}); // fire-and-forget — not user-visible
-  }, [isSignedIn, user?.id]);
+  }, [isSignedIn, user]);
 
   return null;
 }

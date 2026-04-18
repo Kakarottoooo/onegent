@@ -458,6 +458,11 @@ async function runUniversalStep(
         : await getDefaultBookingProfile(jobUserId, true);
 
       if (dbProfile) {
+        log.push({
+          ts: now(),
+          type: "info" as const,
+          message: `[profile-load] dbProfile.id=${dbProfile.id} cardNumLen=${dbProfile.card_number?.length ?? 0} cardExpiry=${!!dbProfile.card_expiry} zip=${!!dbProfile.zip} cardName=${!!dbProfile.card_name}`,
+        });
         // Prefer inline profile for contact info (always up-to-date from picker),
         // but add card data + travel docs from DB (sensitive fields never stored inline).
         const inline = (resolvedBody.profile ?? {}) as Record<string, string | undefined>;

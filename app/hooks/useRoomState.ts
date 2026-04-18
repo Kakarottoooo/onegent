@@ -1,0 +1,52 @@
+"use client";
+
+import { useCallback, useEffect, useRef, useState } from "react";
+import type { DecisionRoomSnapshot } from "@/lib/db";
+
+/**
+ * Polls /api/rooms/[id]/state every 3s. Uses `?since=<version>` so unchanged
+ * rooms return 304 — cheap on both client and server. Returns the latest
+ * snapshot plus a manual `refresh()` for post-action optimistic refetches.
+ */
+export function useRoomState(roomId: string | null) {
+  const [snapshot, setSnapshot] = useState<DecisionRoomSnapshot | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
+  const versionRef = useRef<number | null>(null);
+
+  const fetchSnapshot = useCallback(async (force = false) => {
+    if (!roomId) return;
+    try {
+      const url = force || versionRef.current === null
+        ? `/api/rooms/${roomId}/state`
+        : `/api/rooms/${roomId}/state?since=${versionRef.current}`;
+      const res = await fetch(url);
+      if (res.status === 304) return; // no change
+      if (res.status === 404) { setError("Room not found."); return; }
+      if (res.status === 403) { setError("You're not a member of this room."); return; }
+      if (!res.ok) { setError("Couldn't load room."); return; }
+      const data = await res.json() as DecisionRoomSnapshot;
+      versionRef.current = data.version;
+      setSnapshot(data);
+      setError(null);
+    } catch {
+      setError("Network error.");
+    } finally {
+      setLoading(false);
+    }
+  }, [roomId]);
+
+  useEffect(() => {
+    if (!roomId) return;
+    fetchSnapshot(true);
+    const interval = setInterval(() => fetchSnapshot(false), 3000);
+    return () => clearInterval(interval);
+  }, [roomId, fetchSnapshot]);
+
+  return {
+    snapshot,
+    loading,
+    error,
+    refresh: () => fetchSnapshot(true),
+  };
+}
