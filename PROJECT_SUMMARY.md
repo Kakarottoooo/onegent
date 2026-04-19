@@ -11,6 +11,42 @@ Onegent · AI 决策代理 · 项目总结 · v0.2.29.0
 
 产品地址：https://onegent.one/
 
+================================================================
+Recent Updates - 2026-04-18
+================================================================
+
+1. Hotels Decision Room support
+   - Decision Rooms now support hotel proposals end-to-end, not just restaurant flows.
+   - The room pipeline, proposal generation, execution routing, and payer booking handoff all support hotel rooms.
+   - This includes the "hotel" room type in creation, proposal, voting, and execution paths.
+
+2. Mutable voting after acceptance
+   - Accepted proposals are no longer final-locked before booking starts.
+   - Members can change their pick after a proposal is accepted.
+   - If the majority/unanimous winner still stands, the room stays accepted.
+   - If vote changes remove the winner, the room automatically returns to voting.
+   - If booking has already started (`booking_job_id` exists), vote changes are blocked until booking is cleared.
+
+3. Expedia flight booking hardening
+   - Expedia flight RPA now enforces one-way flow more reliably for single-date flight requests.
+   - Fare selection and bundle-dismiss handling were hardened for Expedia's modal-heavy flow.
+   - Programmatic booking logs now make it easier to distinguish click failure, bundle popup interruption, and session-level blocking.
+
+4. OpenTable payment form bug fix
+   - OpenTable reservation filling now handles the masked credit-card-number field more reliably.
+   - The system no longer reports a full payment fill when card number input actually failed.
+   - Success/failure messaging for payment fill now matches the real field state shown to the user.
+
+5. Desktop workspace UI refresh
+   - The app now uses a cleaner desktop layout direction: top nav for global navigation, local page rails only for workspace-specific controls.
+   - Rooms and Tasks were widened and refactored into desktop workspaces instead of narrow mobile-centered columns.
+   - The local left rail was redesigned to feel lighter and less like a second heavy panel: narrower width, reduced card framing, stronger right-side page header, and a more unified canvas.
+   - The top navigation bar was also normalized back to the app background color for a more consistent visual system.
+
+6. Project / workspace naming
+   - The active project directory is now `onegent`.
+   - Older references to `restaurant-agent` or the Ralph workspace should be treated as legacy context, not the primary project root.
+
 【核心能力速览】
 三条主线，贯穿第四 / 第五阶段的完成态能力：
   · 个人决策：6 层 Agent 管道（NLU → Plan → Tool → Retrieve → Rank → Explain），
