@@ -1378,7 +1378,7 @@ export default function Home() {
       {/* ─── List Mode ──────────────────────────────────────── */}
       {!isMapMode && (
         <div className="flex-1 overflow-y-auto" style={{ minHeight: 0 }}>
-          <div className="max-w-2xl mx-auto w-full px-4 py-6">
+          <div className="max-w-2xl md:max-w-3xl lg:max-w-4xl mx-auto w-full px-4 md:px-6 lg:px-8 py-6">
 
             {!hasMessages ? (
               /* Welcome / Hero State */
@@ -2227,7 +2227,7 @@ export default function Home() {
         className="flex-shrink-0 border-t px-4 py-3 z-10"
         style={{ backgroundColor: "var(--card)", borderColor: "var(--border)" }}
       >
-        <div className="max-w-2xl mx-auto flex gap-2 items-center">
+        <div className="max-w-2xl md:max-w-3xl lg:max-w-4xl mx-auto flex gap-2 items-center">
           {/* New chat button — only show when there's conversation history */}
           {hasMessages && (
             <button

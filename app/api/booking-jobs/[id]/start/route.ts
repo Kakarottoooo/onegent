@@ -370,10 +370,21 @@ async function runUniversalStep(
     const hAdults = (resolvedBody.adults as number | undefined) ?? 2;
 
     if (hName) {
-      const searchQuery = encodeURIComponent(`${hName} ${hCity}`.trim());
+      // Use the canonical URL builder so checkin/checkout/group_adults are
+      // embedded as Booking.com-native params (checkin_year/month/monthday).
+      // A bare ?ss= search URL defaults to "tonight/tomorrow" and the executor's
+      // selectedDatesMatch check then fails with "Selected dates mismatched the requested stay."
+      const { buildBookingComUrl } = await import("@/lib/agent/planners/booking-links");
       resolvedBody = {
         ...resolvedBody,
-        startUrl: `https://www.booking.com/search.html?ss=${searchQuery}`,
+        startUrl: buildBookingComUrl({
+          hotelName: hName,
+          city: hCity,
+          checkin: hCheckin,
+          checkout: hCheckout,
+          adults: hAdults,
+          rooms: 1,
+        }),
       };
 
       if (!resolvedBody.task) {

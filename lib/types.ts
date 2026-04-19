@@ -43,6 +43,7 @@ export interface Restaurant {
   phone?: string;
   url?: string;
   image_url?: string;
+  images?: string[];
   description?: string;
   is_closed: boolean;
   distance?: number;
@@ -669,6 +670,7 @@ export interface Hotel {
   distance_to_center?: string;
   amenities: string[];
   thumbnail?: string;
+  images?: string[];
   booking_link: string;
   description?: string;
   lat?: number;

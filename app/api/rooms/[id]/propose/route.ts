@@ -10,7 +10,9 @@ import {
   updateDecisionRoomStatus,
   appendRoomMessage,
 } from "@/lib/db";
-import { generateRestaurantProposal } from "@/lib/rooms/propose";
+import { generateRoomProposal } from "@/lib/rooms/propose";
+
+const SUPPORTED_ROOM_TYPES = new Set(["restaurant", "hotel"]);
 
 type Params = { params: Promise<{ id: string }> };
 
@@ -35,9 +37,9 @@ export async function POST(req: Request, { params }: Params) {
     return NextResponse.json({ error: "Not a member" }, { status: 403 });
   }
 
-  if (room.type !== "restaurant") {
+  if (!SUPPORTED_ROOM_TYPES.has(room.type)) {
     return NextResponse.json(
-      { error: `Proposal generation for ${room.type} not supported in Phase 1` },
+      { error: `Proposal generation for ${room.type} not yet supported` },
       { status: 400 }
     );
   }
@@ -84,7 +86,7 @@ export async function POST(req: Request, { params }: Params) {
 
   let generated;
   try {
-    generated = await generateRestaurantProposal(room, constraints);
+    generated = await generateRoomProposal(room, constraints);
   } catch (err) {
     // Revert status so the UI reopens the constraint editor.
     await updateDecisionRoomStatus(roomId, "collecting");
@@ -105,16 +107,21 @@ export async function POST(req: Request, { params }: Params) {
   });
 
   const namesSummary = generated.options
-    .map((o) => o.card.restaurant?.name)
+    .map((o) => {
+      const c = o.card as { restaurant?: { name?: string }; hotel?: { name?: string } };
+      return c.restaurant?.name ?? c.hotel?.name;
+    })
     .filter((n): n is string => Boolean(n))
     .join(" · ");
+  const noun = room.type === "hotel" ? "hotels" : "restaurants";
+  const nounSingular = room.type === "hotel" ? "hotel" : "restaurant";
   // Log an agent system message so the chat reflects the event.
   await appendRoomMessage({
     roomId,
     senderId: null, // agent
     content: generated.options.length > 1
-      ? `Proposed ${generated.options.length} options: ${namesSummary || "restaurants"}`
-      : `Proposed: ${namesSummary || "restaurant"}`,
+      ? `Proposed ${generated.options.length} options: ${namesSummary || noun}`
+      : `Proposed: ${namesSummary || nounSingular}`,
     metaJson: { kind: "proposal_created", proposal_id: proposal.id },
   });
 

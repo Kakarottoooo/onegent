@@ -18,7 +18,9 @@ import {
   resolveAcceptedOption,
   tallyVotes,
 } from "@/lib/rooms/proposal-shape";
-import type { RecommendationCard } from "@/lib/types";
+import type { RecommendationCard, HotelRecommendationCard } from "@/lib/types";
+
+const SUPPORTED_ROOM_TYPES = new Set(["restaurant", "hotel"]);
 
 type Params = { params: Promise<{ id: string }> };
 
@@ -43,9 +45,8 @@ export async function POST(req: NextRequest, { params }: Params) {
     return NextResponse.json({ error: "Only the payer may execute this booking" }, { status: 403 });
   }
 
-  // Phase 1: restaurant only
-  if (room.type !== "restaurant") {
-    return NextResponse.json({ error: `Execution for ${room.type} not supported in Phase 1` }, { status: 400 });
+  if (!SUPPORTED_ROOM_TYPES.has(room.type)) {
+    return NextResponse.json({ error: `Execution for ${room.type} not yet supported` }, { status: 400 });
   }
 
   // Must have at least one accepted proposal
@@ -56,14 +57,20 @@ export async function POST(req: NextRequest, { params }: Params) {
   }
 
   const body = await req.json().catch(() => null);
+  const sessionId = typeof body?.session_id === "string" && body.session_id.length > 0 ? body.session_id : null;
+  if (!sessionId) {
+    return NextResponse.json({ error: "session_id required" }, { status: 400 });
+  }
+
+  // Restaurant needs per-booking date/time/covers from the request; hotel reads
+  // them from the Room's group context (all members share the same stay).
   const date = typeof body?.date === "string" ? body.date : null;
   const time = typeof body?.time === "string" ? body.time : null;
   const coversRaw = body?.covers;
   const covers = typeof coversRaw === "number" && coversRaw > 0 ? Math.floor(coversRaw) : null;
-  const sessionId = typeof body?.session_id === "string" && body.session_id.length > 0 ? body.session_id : null;
-  if (!date || !time || !covers || !sessionId) {
+  if (room.type === "restaurant" && (!date || !time || !covers)) {
     return NextResponse.json(
-      { error: "date, time, covers, session_id required" },
+      { error: "date, time, covers required for restaurant booking" },
       { status: 400 }
     );
   }
@@ -88,42 +95,115 @@ export async function POST(req: NextRequest, { params }: Params) {
   const tallies = tallyVotes(options, votes);
   const rule = room.approval_rule ?? "unanimous";
   const winnerId = resolveAcceptedOption(rule, joined.length, tallies) ?? options[0]?.id;
-  const winningCard = options.find((o) => o.id === winnerId)?.card as
+  const winningCard = options.find((o) => o.id === winnerId)?.card;
+  const card = (winningCard ?? options[0]?.card) as
     | RecommendationCard
+    | HotelRecommendationCard
     | undefined;
-  const card = winningCard ?? (options[0]?.card as RecommendationCard | undefined);
   if (!card) {
     return NextResponse.json({ error: "Accepted proposal has no option card" }, { status: 500 });
   }
-  const restaurantName = card?.restaurant?.name ?? room.title;
-  const city = card?.restaurant?.address?.split(",").slice(-2).join(",").trim() ?? "";
-  const fallbackUrl =
-    card?.opentable_url ??
-    `https://www.opentable.com/s?term=${encodeURIComponent(restaurantName)}&covers=${covers}&dateTime=${date}T${time}:00`;
 
-  const step: BookingJobStep = {
-    type: "restaurant",
-    emoji: "🍽️",
-    label: restaurantName,
-    apiEndpoint: "/api/booking-jobs/start",
-    body: {
-      restaurantName,
-      city,
-      date,
-      time,
-      covers,
-      profileId: profile.id,
-      profile: {
-        first_name: profile.first_name,
-        last_name: profile.last_name,
-        email: profile.email,
-        phone: profile.phone,
-      },
-      roomId,
-    },
-    fallbackUrl,
-    status: "pending",
+  const profilePayload = {
+    first_name: profile.first_name,
+    last_name: profile.last_name,
+    email: profile.email,
+    phone: profile.phone,
   };
+
+  let step: BookingJobStep;
+  let messageContent: string;
+
+  if (room.type === "restaurant") {
+    const rCard = card as RecommendationCard;
+    const restaurantName = rCard?.restaurant?.name ?? room.title;
+    const city = rCard?.restaurant?.address?.split(",").slice(-2).join(",").trim() ?? "";
+    const fallbackUrl =
+      rCard?.opentable_url ??
+      `https://www.opentable.com/s?term=${encodeURIComponent(restaurantName)}&covers=${covers}&dateTime=${date}T${time}:00`;
+
+    step = {
+      type: "restaurant",
+      emoji: "🍽️",
+      label: restaurantName,
+      apiEndpoint: "/api/booking-jobs/start",
+      body: {
+        restaurantName,
+        city,
+        date,
+        time,
+        covers,
+        profileId: profile.id,
+        profile: profilePayload,
+        roomId,
+      },
+      fallbackUrl,
+      status: "pending",
+    };
+    messageContent = `Booking started: ${restaurantName} on ${date} at ${time} for ${covers}.`;
+  } else {
+    // hotel — group-level defaults come from room.context_json, but the payer
+    // may override check-in / check-out / guests at execute time (e.g. to fix
+    // a date typo). Body values win when provided.
+    const hCard = card as HotelRecommendationCard;
+    const hotelName = hCard?.hotel?.name ?? room.title;
+    const ctx = (room.context_json ?? {}) as {
+      city?: string;
+      destination?: string;
+      check_in?: string;
+      check_out?: string;
+      guests?: number;
+      date_window?: { from?: string | null; to?: string | null } | null;
+    };
+    const city =
+      ctx.destination ??
+      ctx.city ??
+      hCard?.hotel?.neighborhood ??
+      hCard?.hotel?.address?.split(",").slice(-2).join(",").trim() ??
+      "";
+    const bodyCheckin = typeof body?.check_in === "string" && body.check_in ? body.check_in : null;
+    const bodyCheckout = typeof body?.check_out === "string" && body.check_out ? body.check_out : null;
+    const bodyGuestsRaw = body?.guests;
+    const bodyGuests = typeof bodyGuestsRaw === "number" && bodyGuestsRaw > 0 ? Math.floor(bodyGuestsRaw) : null;
+    const checkin = bodyCheckin ?? ctx.check_in ?? ctx.date_window?.from ?? null;
+    const checkout = bodyCheckout ?? ctx.check_out ?? ctx.date_window?.to ?? null;
+    const adults = bodyGuests ?? ctx.guests ?? joined.length ?? 2;
+    if (!checkin || !checkout) {
+      return NextResponse.json(
+        { error: "Hotel room is missing check_in / check_out — provide them or set them in the room context" },
+        { status: 412 }
+      );
+    }
+    if (checkin >= checkout) {
+      return NextResponse.json(
+        { error: "Check-out must be after check-in" },
+        { status: 400 }
+      );
+    }
+    const fallbackUrl =
+      hCard?.hotel?.booking_link ??
+      `https://www.booking.com/searchresults.html?ss=${encodeURIComponent(`${hotelName} ${city}`.trim())}&checkin=${checkin}&checkout=${checkout}&group_adults=${adults}`;
+
+    step = {
+      type: "hotel",
+      emoji: "🏨",
+      label: hotelName,
+      apiEndpoint: "/api/booking-jobs/start",
+      body: {
+        hotel_name: hotelName,
+        city,
+        checkin,
+        checkout,
+        adults,
+        profileId: profile.id,
+        profile: profilePayload,
+        roomId,
+      },
+      fallbackUrl,
+      status: "pending",
+    };
+    messageContent = `Booking started: ${hotelName} from ${checkin} to ${checkout} for ${adults} guest${adults === 1 ? "" : "s"}.`;
+  }
 
   const jobId = randomUUID();
   await createBookingJob({
@@ -137,7 +217,7 @@ export async function POST(req: NextRequest, { params }: Params) {
   await appendRoomMessage({
     roomId,
     senderId: null,
-    content: `Booking started: ${restaurantName} on ${date} at ${time} for ${covers}.`,
+    content: messageContent,
     metaJson: { kind: "booking_started", booking_job_id: jobId },
   });
 

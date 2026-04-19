@@ -71,7 +71,7 @@ export default function RoomsListPage() {
   return (
     <div className={PAGE}>
       <GlobalNav active="rooms" />
-      <div className="max-w-md mx-auto px-5 py-8">
+      <div className="max-w-md md:max-w-3xl lg:max-w-5xl mx-auto px-5 md:px-8 py-8">
         <div className="flex items-baseline justify-between mb-6">
           <h1 className="text-xl font-semibold text-[var(--text-primary)]">Decision Rooms</h1>
           <div className="flex items-center gap-3">
@@ -140,7 +140,7 @@ export default function RoomsListPage() {
         )}
 
         {rooms && rooms.length > 0 && (
-          <div className="flex flex-col gap-2">
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
             {rooms.map((r) => {
               const status = STATUS_LABEL[r.status];
               return (

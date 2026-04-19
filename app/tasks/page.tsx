@@ -2546,7 +2546,7 @@ export default function TripsPage() {
         }}
       >
         {/* Page title */}
-        <div style={{ padding: "20px 20px 4px", maxWidth: 620, margin: "0 auto" }}>
+        <div style={{ padding: "20px 20px 4px", maxWidth: "min(100%, 1024px)", margin: "0 auto" }}>
           <button
             onClick={() => router.back()}
             style={{
@@ -2604,7 +2604,7 @@ export default function TripsPage() {
             </div>
           </div>
         </div>
-        <div style={{ padding: "16px", display: "flex", flexDirection: "column", gap: 12, maxWidth: 620, margin: "0 auto" }}>
+        <div style={{ padding: "16px", display: "flex", flexDirection: "column", gap: 12, maxWidth: "min(100%, 1024px)", margin: "0 auto" }}>
           {/* Restaurant booking form — shown when user clicks "+ Restaurant" */}
           {showRestaurantForm && (
             <RestaurantStepCard

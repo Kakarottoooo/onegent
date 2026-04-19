@@ -60,6 +60,8 @@ export async function runHotelPipeline(
     : "";
 
   let text = "";
+  const intentSnippet = JSON.stringify(intent).slice(0, 300);
+  console.log(`[runHotelPipeline] calling minimaxChat nights=${nights} intent=${intentSnippet}`);
   try {
     text = await minimaxChat({
       system: systemPrompt,
@@ -106,21 +108,38 @@ Return ONLY the JSON array.`,
       timeout_ms: 30000,
     });
   } catch (err) {
-    console.warn("[runHotelPipeline] minimaxChat threw — using SerpAPI data directly:", err instanceof Error ? err.message : err);
-    // Fallback: build basic cards from SerpAPI data without AI scoring
-    const fallbackCards: HotelRecommendationCard[] = filtered.slice(0, 5).map((hotel, i) => ({
-      hotel,
-      rank: i + 1,
-      score: hotel.rating * 10,
-      why_recommended: `${hotel.star_rating}-star hotel with ${hotel.review_count} reviews`,
-      best_for: "Travelers seeking quality accommodation",
-      watch_out: "",
-      not_great_if: "",
-      price_summary: `$${hotel.price_per_night}/night · ${nights} nights $${Math.round(hotel.price_per_night * nights)} total`,
-      location_summary: hotel.address,
-      scoring: undefined,
-      suggested_refinements: [],
-    }));
+    // Loud + full stack so we can actually debug when MiniMax fails in prod.
+    console.error(
+      "[runHotelPipeline] minimaxChat threw — using SerpAPI data directly. err:",
+      err instanceof Error ? `${err.name}: ${err.message}\n${err.stack}` : err,
+    );
+    // Fallback: build basic cards from SerpAPI data without AI scoring.
+    // Guard every numeric field — SerpAPI can omit star_rating / price_per_night.
+    const fallbackCards: HotelRecommendationCard[] = filtered.slice(0, 5).map((hotel, i) => {
+      const stars = typeof hotel.star_rating === "number" && hotel.star_rating > 0 ? hotel.star_rating : null;
+      const reviewCount = hotel.review_count ?? 0;
+      const ppn = typeof hotel.price_per_night === "number" && hotel.price_per_night > 0 ? hotel.price_per_night : null;
+      const whyParts: string[] = [];
+      if (stars) whyParts.push(`${stars}-star hotel`);
+      else whyParts.push("Hotel pick");
+      if (reviewCount > 0) whyParts.push(`with ${reviewCount.toLocaleString()} reviews`);
+      const priceSummary = ppn
+        ? `$${ppn}/night · ${nights} night${nights === 1 ? "" : "s"} · $${Math.round(ppn * nights)} total`
+        : "Price on booking site";
+      return {
+        hotel,
+        rank: i + 1,
+        score: (hotel.rating ?? 0) * 10,
+        why_recommended: whyParts.join(" "),
+        best_for: "Travelers seeking quality accommodation",
+        watch_out: "",
+        not_great_if: "",
+        price_summary: priceSummary,
+        location_summary: hotel.address ?? "",
+        scoring: undefined,
+        suggested_refinements: [],
+      };
+    });
     console.log(`[runHotelPipeline] fallback cards=${fallbackCards.length}`);
     return { hotelRecommendations: fallbackCards, suggested_refinements: [] };
   }

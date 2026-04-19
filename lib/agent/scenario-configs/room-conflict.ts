@@ -1,0 +1,138 @@
+/**
+ * Per-scenario configuration for Decision Room constraint-merge engines.
+ *
+ * `two-party.ts` and `n-party.ts` read this table to generate the MiniMax
+ * prompt that merges N users' constraints into ONE compound query and flags
+ * conflicts. Adding a new Room type = adding a new entry here + wiring a
+ * `runAgentFor<Type>` search pipeline.
+ *
+ * Rule of thumb when authoring a new entry:
+ *   - `goal*` is the sentence the prompt opens with ("a hotel they'll all stay at").
+ *   - `mergeRules` are bulleted directives the LLM follows while merging.
+ *   - `conflictExamples` are canonical "real conflict" shapes — the LLM uses
+ *     these to calibrate when to set `conflict=true`.
+ */
+
+export type RoomScenarioId = "restaurant" | "hotel";
+
+export interface RoomConflictConfig {
+  /** Singular noun used throughout the prompt, e.g. "restaurant". */
+  noun: string;
+  /** Plural form, e.g. "restaurants". */
+  nounPlural: string;
+  /** Opener for 2-party prompt: "find <goalTwoParty>". */
+  goalTwoParty: string;
+  /** Opener for N-party prompt: "find <goalNParty>". */
+  goalNParty: string;
+  /** Bulleted merge directives (rendered verbatim into the prompt). */
+  mergeRules: string[];
+  /** Canonical conflict shapes used to calibrate the LLM's conflict threshold. */
+  conflictExamples: string[];
+}
+
+export const ROOM_CONFLICT_CONFIGS: Record<RoomScenarioId, RoomConflictConfig> = {
+  restaurant: {
+    noun: "restaurant",
+    nounPlural: "restaurants",
+    goalTwoParty: "a restaurant they'll both agree on",
+    goalNParty: "a restaurant they'll all agree on",
+    mergeRules: [
+      'Hard constraint UNION: if either person has a hard exclusion ("no raw fish", "not too loud", "vegan"), it applies to both',
+      "Budget: use the LOWER of the two budgets as the ceiling",
+      "Cuisine preferences: include both if they don't conflict; if they conflict, note it",
+      "Noise/atmosphere: use the stricter preference",
+    ],
+    conflictExamples: [
+      '"vegan only" + "must have steak"',
+      '"halal only" + "must have pork"',
+    ],
+  },
+  hotel: {
+    noun: "hotel",
+    nounPlural: "hotels",
+    goalTwoParty: "a hotel they'll both stay at",
+    goalNParty: "a hotel they'll all stay at",
+    mergeRules: [
+      "Date window: check-in/check-out is fixed by the room context and applies to everyone — do NOT let per-person constraints override dates",
+      "Location/neighborhood: if neighborhoods clash (e.g. 'downtown' vs 'airport area'), pick a central compromise. Only declare conflict if they name geographically incompatible areas (e.g. different cities)",
+      "Budget per night: use the LOWEST ceiling as the group cap",
+      "Star rating: use the HIGHEST minimum as the group floor",
+      "Amenities: UNION of required amenities (pool, breakfast, gym, parking, pet-friendly)",
+      "Vibe: use the stricter preference (e.g. 'quiet' overrides 'lively')",
+    ],
+    conflictExamples: [
+      '"must be under $80/night" + "must be 5-star luxury"',
+      '"pet-friendly required" + "no pets allowed anywhere on property"',
+      '"downtown only" + "airport hotel only"',
+    ],
+  },
+};
+
+/** Two-party prompt template — renders with a scenario config. */
+export function renderTwoPartyPrompt(
+  cfg: RoomConflictConfig,
+  initiatorConstraints: string,
+  partnerConstraints: string,
+  cityFullName: string,
+): string {
+  const rulesBlock = cfg.mergeRules.map((r) => `- ${r}`).join("\n");
+  const conflictExamples = cfg.conflictExamples.map((e) => e).join(", ");
+  return `Two people need to find ${cfg.goalTwoParty}. Merge their individual constraints into ONE compound search query, and detect if they conflict.
+
+Person A: "${initiatorConstraints}"
+Person B: "${partnerConstraints}"
+City: ${cityFullName}
+
+Rules for merging:
+${rulesBlock}
+- CONFLICT: declare conflict ONLY if constraints are truly incompatible (e.g. ${conflictExamples})
+
+Return ONLY valid JSON:
+{
+  "merged_query": "<single natural-language query combining both constraints for ${cityFullName}>",
+  "conflict": false,
+  "conflict_reason": null
+}
+
+Or if conflict:
+{
+  "merged_query": "<best compromise or A's query as fallback>",
+  "conflict": true,
+  "conflict_reason": "<one sentence explaining what conflicts>"
+}`;
+}
+
+/** N-party prompt template — renders with a scenario config and enumerated inputs. */
+export function renderNPartyPrompt(
+  cfg: RoomConflictConfig,
+  enumeratedInputs: string,
+  inputCount: number,
+  cityFullName: string,
+): string {
+  const rulesBlock = cfg.mergeRules.map((r) => `- ${r}`).join("\n");
+  const conflictExamples = cfg.conflictExamples.map((e) => e).join(", ");
+  return `${inputCount} people need to find ${cfg.goalNParty}. Merge everyone's constraints into ONE compound search query, and detect if any pair conflicts.
+
+${enumeratedInputs}
+City: ${cityFullName}
+
+Rules for merging:
+${rulesBlock}
+- CONFLICT: declare conflict ONLY if two or more constraints are truly incompatible (e.g. ${conflictExamples}). If you declare conflict, list the affected person ids.
+
+Return ONLY valid JSON:
+{
+  "merged_query": "<single natural-language query for ${cityFullName}>",
+  "conflict": false,
+  "conflict_reason": null,
+  "affected_user_ids": []
+}
+
+Or if conflict:
+{
+  "merged_query": "<best compromise given the conflict>",
+  "conflict": true,
+  "conflict_reason": "<one sentence>",
+  "affected_user_ids": ["<id>", "<id>"]
+}`;
+}

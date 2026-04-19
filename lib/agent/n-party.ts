@@ -1,18 +1,25 @@
 /**
- * N-party constraint merge engine for Decision Room (Phase 2, N >= 3).
+ * N-party constraint merge engine for Decision Room (N >= 3).
  *
- * Extends the two-party approach to any number of participants via structured
- * concatenation: MiniMax receives an enumerated list of per-person constraint
- * strings and produces a single compound query + conflict detection.
+ * Two modes, mirroring two-party.ts:
+ *   - `mergeNPartyQuery(scenarioId, ...)`  — merge-only, for non-restaurant
+ *     scenarios that run their own search pipeline.
+ *   - `runAgentForNParty(...)`              — restaurant-only wrapper that
+ *     merges AND runs the restaurant agent.
  *
- * For N=2 callers should keep using `runAgentForTwoParty` — the prompt there is
- * tuned for pair dynamics ("both agree on"). This engine is tuned for groups.
+ * For N=2 callers should keep using two-party.ts — its prompt is tuned for
+ * pair dynamics ("both agree on"). This engine is tuned for groups.
  */
 
 import { minimaxChat } from "../minimax";
 import { CITIES, DEFAULT_CITY } from "../cities";
 import { runAgent } from "../agent";
 import type { RecommendationCard } from "../types";
+import {
+  ROOM_CONFLICT_CONFIGS,
+  renderNPartyPrompt,
+  type RoomScenarioId,
+} from "./scenario-configs/room-conflict";
 
 export interface NPartyMergeResult {
   options: RecommendationCard[];
@@ -28,59 +35,40 @@ export interface NPartyInput {
   text: string;
 }
 
-async function buildGroupMergedQuery(
-  inputs: NPartyInput[],
-  cityFullName: string
-): Promise<{
+export interface NPartyMergedQuery {
   mergedQuery: string;
   conflict: boolean;
   conflictReason?: string;
   conflictAffectedUsers?: string[];
-}> {
+}
+
+/**
+ * Merge N users' constraints into ONE compound query. Scenario-agnostic —
+ * reads the prompt template from `ROOM_CONFLICT_CONFIGS[scenarioId]`.
+ */
+export async function mergeNPartyQuery(
+  scenarioId: RoomScenarioId,
+  inputs: NPartyInput[],
+  cityId: string,
+): Promise<NPartyMergedQuery> {
+  const city = CITIES[cityId] ?? CITIES[DEFAULT_CITY];
+  const cfg = ROOM_CONFLICT_CONFIGS[scenarioId];
+
   const enumerated = inputs
     .map((p, i) => `Person ${String.fromCharCode(65 + i)} (id=${p.userId}): "${p.text}"`)
     .join("\n");
 
+  const prompt = renderNPartyPrompt(cfg, enumerated, inputs.length, city.fullName);
+
   const text = await minimaxChat({
-    messages: [
-      {
-        role: "user",
-        content: `${inputs.length} people need to find a restaurant they'll all agree on. Merge everyone's constraints into ONE compound search query, and detect if any pair conflicts.
-
-${enumerated}
-City: ${cityFullName}
-
-Rules for merging:
-- Hard constraint UNION: if ANYONE has a hard exclusion ("no raw fish", "not too loud", "vegan"), it applies to the whole group
-- Budget: use the LOWEST budget as the ceiling (group must fit the tightest wallet)
-- Cuisine preferences: include likes that don't conflict; skip likes that someone else actively dislikes
-- Noise/atmosphere: use the strictest preference
-- CONFLICT: declare conflict ONLY if two or more constraints are truly incompatible (e.g. "vegan only" vs "must have steak"). If you declare conflict, list the affected person ids.
-
-Return ONLY valid JSON:
-{
-  "merged_query": "<single natural-language query for ${cityFullName}>",
-  "conflict": false,
-  "conflict_reason": null,
-  "affected_user_ids": []
-}
-
-Or if conflict:
-{
-  "merged_query": "<best compromise given the conflict>",
-  "conflict": true,
-  "conflict_reason": "<one sentence>",
-  "affected_user_ids": ["<id>", "<id>"]
-}`,
-      },
-    ],
+    messages: [{ role: "user", content: prompt }],
     max_tokens: 400,
   });
 
   const match = text.match(/\{[\s\S]*\}/);
   if (!match) {
     return {
-      mergedQuery: inputs.map((p) => p.text).join("; also: ") + ` in ${cityFullName}`,
+      mergedQuery: inputs.map((p) => p.text).join("; also: ") + ` in ${city.fullName}`,
       conflict: false,
     };
   }
@@ -101,17 +89,18 @@ Or if conflict:
     };
   } catch {
     return {
-      mergedQuery: inputs.map((p) => p.text).join("; also: ") + ` in ${cityFullName}`,
+      mergedQuery: inputs.map((p) => p.text).join("; also: ") + ` in ${city.fullName}`,
       conflict: false,
     };
   }
 }
 
 /**
- * Merge any number of per-person constraint strings into a single compound
- * query, run the agent, and return up to 5 group-friendly options.
+ * Restaurant-only wrapper: merge N-party constraints, run the restaurant
+ * agent, return up to 5 group-friendly cards.
  *
- * Caller should only invoke this for N >= 3. For N=2 use `runAgentForTwoParty`.
+ * Hotel / flight / etc. callers should use `mergeNPartyQuery` + their own
+ * search pipeline instead.
  */
 export async function runAgentForNParty(
   inputs: NPartyInput[],
@@ -120,10 +109,9 @@ export async function runAgentForNParty(
   if (inputs.length === 0) {
     return { options: [], conflict: false };
   }
-  const city = CITIES[cityId] ?? CITIES[DEFAULT_CITY];
 
   const { mergedQuery, conflict, conflictReason, conflictAffectedUsers } =
-    await buildGroupMergedQuery(inputs, city.fullName);
+    await mergeNPartyQuery("restaurant", inputs, cityId);
 
   const result = await runAgent(mergedQuery, [], cityId);
   const options = result.recommendations.slice(0, 5) as RecommendationCard[];

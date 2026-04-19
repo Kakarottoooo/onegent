@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { HotelRecommendationCard } from "@/lib/types";
 import { buildBookingComUrl, buildExpediaUrl, buildHotelsComUrl } from "@/lib/agent/planners/booking-links";
+import PhotoCarousel from "@/components/PhotoCarousel";
 
 type BookingSite = "booking-com" | "expedia" | "hotels-com";
 const SITE_OPTIONS: { id: BookingSite; label: string; color: string }[] = [
@@ -195,39 +196,34 @@ export default function HotelCard({ card, index, checkIn, checkOut, guests, onJo
         transition: "opacity 0.3s ease, transform 0.3s ease",
       }}
     >
-      {/* Image */}
-      {hotel.thumbnail ? (
-        // eslint-disable-next-line @next/next/no-img-element
-        <img
-          src={hotel.thumbnail}
-          alt={hotel.name}
-          style={{
-            width: "100%",
-            height: "180px",
-            objectFit: "cover",
-            display: "block",
-          }}
-        />
-      ) : (
-        <div
-          style={{
-            width: "100%",
-            height: "180px",
-            backgroundColor: "var(--bg)",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-          }}
-        >
-          <svg width="48" height="48" viewBox="0 0 48 48" fill="none">
-            <rect x="8" y="16" width="32" height="24" rx="2" stroke="var(--border)" strokeWidth="1.5" />
-            <rect x="14" y="22" width="6" height="6" rx="1" stroke="var(--border)" strokeWidth="1.5" />
-            <rect x="28" y="22" width="6" height="6" rx="1" stroke="var(--border)" strokeWidth="1.5" />
-            <rect x="20" y="30" width="8" height="10" rx="1" stroke="var(--border)" strokeWidth="1.5" />
-            <path d="M4 16 L24 6 L44 16" stroke="var(--border)" strokeWidth="1.5" />
-          </svg>
-        </div>
-      )}
+      {/* Image carousel */}
+      <PhotoCarousel
+        images={
+          hotel.images && hotel.images.length > 0
+            ? hotel.images
+            : hotel.thumbnail
+              ? [hotel.thumbnail]
+              : []
+        }
+        alt={hotel.name}
+        heightClass="h-[180px]"
+        cornerAction={
+          hotel.booking_link ? (
+            <a
+              href={hotel.booking_link}
+              target="_blank"
+              rel="noopener noreferrer"
+              onClick={(e) => e.stopPropagation()}
+              title="View hotel details on Booking.com / Google Hotels"
+              className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-black/65 hover:bg-black/85 text-white text-[11px] font-medium ring-1 ring-white/20 shadow-lg transition-colors"
+            >
+              <span aria-hidden>↗</span>
+              <span>View details</span>
+            </a>
+          ) : undefined
+        }
+      />
+
 
       <div style={{ padding: "16px" }}>
         {/* Header row */}

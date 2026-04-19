@@ -11,6 +11,21 @@ Onegent · AI 决策代理 · 项目总结 · v0.2.29.0
 
 产品地址：https://onegent.one/
 
+【核心能力速览】
+三条主线，贯穿第四 / 第五阶段的完成态能力：
+  · 个人决策：6 层 Agent 管道（NLU → Plan → Tool → Retrieve → Rank → Explain），
+    8 场景规划器 × 8 品类 pipeline，支持模块级精炼（G-3）与单约束精炼（S-5）
+  · 群体决策：Decision Room v2 — 多人结构化约束、AI 合并 + 冲突检测、
+    unanimous / majority 投票、payer 一键 booking 闭环
+  · Autopilot 执行：Stagehand（AI 层）+ Claude Haiku（感知层）+ Playwright（RPA 兜底），
+    六个 Provider（Booking.com / Expedia / Hotels.com / OpenTable / Resy / Yelp）+ Expedia 机票 RPA
+
+【本文档阅读导航】
+  · 新工程师上手 → 直接翻 十二（启动）→ 十三（目录）→ 十四（改动入口）→ 十七（坑）
+  · 产品 / 投资人视角 → 一 ~ 六（架构与阶段演进）、十（支持场景）、十一（用户旅程）
+  · 架构师 / 重构前必读 → 十五（数据流）、十六（关键设计决策 ADR）
+  · 改 Booking 自动化 → 本文 十四 + 根目录 `CLAUDE.md` 的 "Booking Automation Architecture" 章节
+
 ================================================================
 一、核心架构 · 6 层 Agent 设计（已全部实现）
 ================================================================
@@ -822,5 +837,403 @@ A 和 B 分别独立投票
   → 推送: "✈ 🏨 🍽 Your Chicago trip is ready — 3/3 pre-filled"
   → /trips → 决策日志 → 3 个 Open 按钮 → 逐一付款
 ```
+
+================================================================
+十二、本地启动（Getting Started · 给新工程师）
+================================================================
+
+【前置要求】
+  · Node.js ≥ 20（Next.js 16 要求）
+  · npm ≥ 10 — lock 文件为 package-lock.json，不要换 pnpm / yarn
+  · Windows：git 自动做 LF → CRLF 转换，不要关 autocrlf（否则 Vercel deploy 异常）
+  · Playwright 浏览器：首次需 `npx playwright install chromium`
+
+【启动步骤】
+  1. `git clone` → `npm install`
+  2. 复制 `.env.local.example` → `.env.local`，填入下方 API keys
+  3. 数据库：生产/staging 走 Neon PostgreSQL，连接串写入 `POSTGRES_URL`；
+     本地首启动会自动执行 `lib/schema.sql` 中的 CREATE TABLE IF NOT EXISTS
+  4. `npm run dev` → http://localhost:3000
+  5. `npm test` → Vitest 全量（22+ spec，100% 通过）
+  6. `npm run build` → 生产构建；postbuild 会跑 `scripts/inject-sw-version.mjs`
+     注入 service worker 版本号（每次 build 必须跑一次，sw.js 缓存才能 bust）
+
+【必填环境变量】
+  · POSTGRES_URL                        Neon PostgreSQL 连接串
+  · NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY   Clerk 公钥
+  · CLERK_SECRET_KEY                    Clerk 私钥（社交层 / Room 身份锚定核心）
+  · MINIMAX_API_KEY                     MiniMax（NLU / 排序 / two-party / n-party 约束合并）
+  · ANTHROPIC_API_KEY                   Claude Haiku（Booking 感知层 perceive.ts）
+  · OPENAI_API_KEY                      Stagehand 驱动模型（gpt-4o-mini）
+  · GOOGLE_PLACES_API_KEY               餐厅 / 酒店核心数据源
+  · SERPAPI_KEY                         价格元数据 / 航班 / 数码比价 / 购物
+  · TAVILY_API_KEY                      编辑语境抓取（评论信号）
+  · TICKETMASTER_API_KEY + _SECRET      活动票务
+  · BOOKING_ENCRYPTION_KEY              `booking_profiles` 表的证件信息 AES 加密密钥
+  · CRON_SECRET                         4 个 cron 端点的 Bearer 校验
+  · NEXT_PUBLIC_VAPID_PUBLIC_KEY /
+    VAPID_PRIVATE_KEY / VAPID_EMAIL     Web Push 推送（PWA 通知必需）
+
+【可选环境变量】
+  · PLAYWRIGHT_HEADLESS=true|false      Autopilot 无头开关（本地调试常设 false）
+  · PLAYWRIGHT_SLOW_MO=<ms>             本地调试放慢 RPA 速度
+  · AI_LOOP_FULL=true                   启用完整 40-step AI loop（默认走程序化优化）
+  · GEMINI_API_KEY /
+    GOOGLE_GENERATIVE_AI_API_KEY        实验性，非必填
+
+【Decision Room 测试账号】
+  · Clerk dev instance: `natural-tuna-90`
+  · 账号：`ziweiA` / `ziweiB` / `ziweiC`（多人 Room 流程 T1–T18 专用）
+  · 完整测试计划：`DECISION_ROOM_TEST_PLAN.md`
+
+【Booking cookies 初始化】
+  · Autopilot 首跑需真人登录各平台一次
+  · 辅助脚本：`scripts/save-booking-cookies.mjs` / `scripts/save-expedia-cookies.mjs`
+  · 或调用 gstack skill：`/setup-browser-cookies`
+  · 持久化路径：`.booking-cookies/{service}.json`（已 gitignore）
+  · Cookie 过期会触发 login wall，执行器会降级为手动链接 + Action Item
+
+================================================================
+十三、目录结构地图（Where does the code live?）
+================================================================
+
+```
+app/                                   Next.js App Router（前端 + API）
+├── api/                               30+ 端点，按域划分
+│   ├── agent-chat, plan, chat         核心 Agent 对话与规划
+│   ├── booking-autopilot              Autopilot 任务触发与状态
+│   ├── booking-jobs                   任务历史与详情
+│   ├── browser-live                   SSE 浏览器直播（6fps 截图流 + canvas 双缓冲）
+│   ├── rooms/[id]/{propose,vote,      Decision Room v2 全套端点（含
+│   │   finalize,state,leave,abandon,  approval-rule 切换 / creator 转移 /
+│   │   approval-rule,transfer-creator}proposal 执行 booking）
+│   ├── contacts/{requests,blocks}     社交层：联系人请求 / 拉黑 / 分组
+│   ├── cron                           4 个定时任务（反馈 / 价格 / 场馆质量 / 笔记本）
+│   └── ...                            feedback / telemetry / metrics / share / subscriptions
+├── rooms/                             Decision Room 页面（列表 / 新建 / 详情）
+├── decide/                            单人主决策入口
+├── trips, tasks, plan                 执行视图（Autopilot 任务 / 行程）
+├── insights, metrics, monitoring      内部分析仪表板
+└── _ui, hooks, contexts               共享前端基础设施
+
+components/                            可复用 React 组件
+├── RecommendationCard + *Card.tsx     六大品类卡片（Restaurant / Hotel / Flight /
+│                                      Laptop / Smartphone / Headphone / CreditCard）
+├── BrowserLiveView.tsx                Autopilot 实时截图直播
+├── AutopilotRunnerModal.tsx           任务发起 UI
+├── DecisionRoomModal.tsx              Room 快速入口
+├── ScenarioPlanView.tsx + ActionRail  决策方案主视图 + 行动按钮
+└── booking/                           Autopilot 任务子组件
+
+lib/                                   核心业务逻辑（非 UI）
+├── agent.ts                           Agent 主入口 runAgent()
+├── agent/
+│   ├── planners/                      场景规划器（date-night / weekend-trip / city-trip /
+│   │                                  big-purchase / concert-event / fitness / gift）
+│   ├── pipelines/                     品类 pipeline（restaurant / hotel / flight /
+│   │                                  laptop / smartphone / headphone / credit-card）
+│   ├── planner-engine/                modular planner 引擎（EngineConfig 驱动）
+│   ├── parse/                         每场景 NLU 解析器
+│   ├── composer/scoring.ts            综合打分（产品灵魂，5 维度 + 惩罚）
+│   ├── two-party.ts                   N=2 Decision Room 引擎
+│   ├── n-party.ts                     N≥3 Decision Room 引擎
+│   └── scenario-configs/              场景配置（当前仅 city-trip）
+├── booking-autopilot/
+│   ├── stagehand-executor.ts          主执行器（skipInitialAgent 路由、三层架构入口）
+│   ├── providers/                     Provider 插件（6 平台 + registry.ts 注册表）
+│   │   ├── booking-com.ts, expedia.ts, hotels-com.ts
+│   │   ├── opentable-com.ts, resy-com.ts, yelp-com.ts
+│   │   └── registry.ts                URL → Provider 路由
+│   ├── ai-loop/
+│   │   ├── fill-form.ts               Layer 2/3：AI 填表 + auditAndRefillEmptyFields
+│   │   ├── find-listing.ts            clickTargetListingAI / selectRoomAI
+│   │   ├── perceive.ts                Claude Haiku 感知（截图 + DOM → PerceptionResult）
+│   │   ├── execute.ts                 Stagehand act() 执行下一步
+│   │   └── loop.ts                    主循环（AI-first → Playwright fallback）
+│   ├── core/                          profile / stage-assessment / recovery /
+│   │                                  provider-router / instructions / final-outcome
+│   └── cookie-store.ts                cookies 加解密与加载
+├── rooms/
+│   ├── propose.ts                     提案生成入口（路由 two-party / n-party）
+│   ├── learn.ts                       Room 结束后学习反馈
+│   └── proposal-shape.ts              proposal JSON schema
+├── db.ts                              数据层（29 张表的 query / insert / update）
+├── schema.sql                         建表 DDL
+├── minimax.ts                         MiniMax API 客户端
+├── tools.ts                           外部工具（Places / SerpAPI / Tavily / Ticketmaster）
+├── nlu.ts                             NLU 入口（英文快路径 + MiniMax 慢路径）
+├── schemas.ts                         Zod 结构化数据 schema
+├── types.ts                           共享 TypeScript 类型
+├── memory.ts, replan.ts, policy.ts    偏好记忆 / 模块级精炼 / 策略层
+├── live-log-store.ts                  Autopilot 实时日志环形缓冲区
+└── browser-session-store.ts           浏览器 session 池
+
+scripts/                               命令行辅助
+├── generate-icons.mjs                 PWA 图标生成
+├── inject-sw-version.mjs              postbuild 注入 service worker 版本
+├── save-booking-cookies.mjs           Booking.com 登录态保存
+├── save-expedia-cookies.mjs           Expedia 登录态保存
+└── ralph/                             Ralph autopilot workspace（非主流程）
+
+data/                                  静态数据（数码品类白名单等）
+docs/                                  设计文档归档
+public/                                静态资源（icons / sw.js / manifest）
+```
+
+================================================================
+十四、关键任务入口（Cookbook · 我要改 X 改哪）
+================================================================
+
+新增一个 Booking 平台 Provider
+  1. `lib/booking-autopilot/providers/<name>.ts`  实现 `BrowserProvider` 接口
+     （setup / getStageSignals / fillGuestForm / fillPaymentForm）
+  2. `lib/booking-autopilot/providers/registry.ts`  `registerProvider(xxxProvider)`
+  3. `lib/booking-autopilot/stagehand-executor.ts`  加 `xxxPageOpen` 检测 +
+     加入 `skipInitialAgent` 列表 + 加入 `skipProviderLabel` 映射
+  4. `lib/booking-autopilot/ai-loop/fill-form.ts`  如有新字段类型，加 `PROFILE_PATTERNS` 规则
+  5. 完整 Checklist：根目录 `CLAUDE.md` 的 "Booking Automation Architecture" 章节
+  ⚠ 永远不要对已知平台跑 40-step blind agent — 违反 ADR-1
+
+新增一个 Agent 场景（如"生日派对规划"）
+  1. `lib/agent/parse/<scenario>.ts`     NLU 解析器
+  2. `lib/agent/planners/<scenario>.ts`  场景规划器（组装 pipeline 输出）
+  3. `lib/agent/pipelines/<category>.ts` 如需新品类 pipeline，新增；否则复用
+  4. `lib/agent/scenario-configs/<s>.ts` 如走 EngineConfig 模式，新增配置
+  5. `lib/agent/composer/scoring.ts`     如需新打分维度，扩展打分函数
+  6. `lib/types.ts` + `lib/schemas.ts`   新的结构化类型与 Zod schema
+
+改 Decision Room 逻辑
+  · 投票规则      → `lib/db.ts` 的 `decideProposalOutcome` / `finalizeProposal`
+  · 约束提交      → `lib/db.ts` 的 `upsertRoomConstraint` +
+                    `app/api/rooms/[id]/constraints/route.ts`
+  · 提案生成      → `lib/rooms/propose.ts` → `lib/agent/{two-party,n-party}.ts`
+  · approval_rule → `app/api/rooms/[id]/approval-rule/route.ts`
+  · 成员管理      → `app/api/rooms/[id]/{leave,abandon,transfer-creator}/route.ts`
+  · Room UI       → `app/rooms/[id]/page.tsx`（739 行，已按 tab 分块：
+                    Overview / Members / Constraints / Proposals / Messages）
+
+改 Autopilot 执行策略
+  · 时间 fallback     → `lib/booking-autopilot/core/recovery.ts`
+  · Stage 感知        → `lib/booking-autopilot/core/{stage-assessment,stage-signals}.ts`
+  · 表单补填兜底      → `lib/booking-autopilot/ai-loop/fill-form.ts` 的 `auditAndRefillEmptyFields`
+  · RPA 降级          → `lib/booking-autopilot/ai-loop/execute.ts` → Playwright locator
+  · 实时日志          → `lib/live-log-store.ts`（环形缓冲，1.2s 轮询推送）
+  · Provider 选择     → `lib/booking-autopilot/core/provider-router.ts`
+
+改打分权重
+  · `lib/agent/composer/scoring.ts`
+  · `getScoreAdjustments()` 激活条件：≥30 天上线 + ≥100 条 `plan_outcomes`（预计 2026-04-22）
+
+改数据库 schema
+  · `lib/schema.sql` 加 DDL（生产需手动 apply 到 Neon）
+  · `lib/db.ts` 加 query 函数与类型导出
+  · 若影响 Room → 同步更新 `DecisionRoom` / `DecisionRoomConstraintRow` / `DecisionRoomProposal` 等类型
+  · ⚠ 字段改名会影响已存 JSON；加字段优先
+
+================================================================
+十五、核心数据流
+================================================================
+
+【数据流 A · Decision Room v2：创建 → 投票 → 预订】
+
+  Creator                   Members                    AI 层                       Booking
+  ──────                    ───────                    ────                        ───────
+  POST /api/rooms  ─────►  decision_rooms
+       │
+       └── short_code ──►  分享链接 ──►  POST /api/rooms/join  ──►  decision_room_members
+                                                                       │
+                                        POST /api/rooms/[id]/constraints （每位成员）
+                                                                       │
+                                                                decision_room_constraints
+                                                                       │
+                           POST /api/rooms/[id]/propose  ──►  lib/rooms/propose.ts
+                                                                       │
+                                              N=2 → runAgentForTwoParty  (lib/agent/two-party.ts)
+                                              N≥3 → runAgentForNParty    (lib/agent/n-party.ts)
+                                                                       │
+                                                   MiniMax 合并约束 + 冲突检测
+                                                                       │
+                                       runAgent() → 候选生成 → 打分 → 最多 3 option
+                                                                       │
+                                                             decision_room_proposals
+                                                                       │
+                           POST /api/rooms/[id]/proposals/[pid]/vote （每位成员独立）
+                                                                       │
+                                            approval_rule = unanimous → 全员同 option
+                                            approval_rule = majority  → 支持票 > N/2
+                                                                       │
+                           POST /api/rooms/[id]/proposals/[pid]/finalize （payer 触发）
+                                                                       │
+                                        booking_jobs 新记录 → Autopilot 启动
+                                                                       │
+                                decision_room_messages 写入 booking_started 事件
+
+  前端实时同步：`useRoomState()` 每 3s 拉 `/api/rooms/[id]/state?since=<version>`，
+                304 表示无变化（ADR-4：轮询 + 304，非 WebSocket）
+
+【数据流 B · Autopilot Booking：任务生命周期】
+
+  用户点 "Book everything →"
+         │
+         ▼
+  POST /api/booking-autopilot              booking_jobs 记录 status=queued
+         │
+         ▼
+  stagehand-executor.ts                    路由：URL → getProvider() → skipInitialAgent?
+         │
+         ├── 已知平台（skip）──► Layer 1（程序化导航）
+         │                         │
+         │                         ▼
+         │             provider.getStageSignals() → 当前 stage
+         │                         │
+         │                         ▼
+         │             按 stage 执行：点按钮 / dismiss 弹窗 / 等页面
+         │                         │
+         │                         ▼
+         │             Layer 2：fillGuestFormWithAI() / fillFlightGuestFormWithAI()
+         │                         │
+         │                         ▼
+         │             Layer 3：auditAndRefillEmptyFields() ← 每次填表后必调
+         │                         │
+         │                         ▼
+         │             provider.fillPaymentForm() → 止步 CVV（ADR-3）
+         │
+         └── 未知平台 ──► AI loop（最长 40 step）
+                            │
+                            ▼
+                 perceive.ts (Claude Haiku) → PerceptionResult
+                            │
+                            ▼
+                 execute.ts (Stagehand act()) → 下一步
+                            │
+                            └── 任意失败 → Playwright locator fallback（ADR-7）
+
+  横切关注点：
+    · `agent_logs` / `live-log-store.ts` 环形缓冲写入实时日志
+    · `/api/browser-live/[jobId]` SSE 推 6fps 截图
+    · 自主决策：time fallback / backup hotel / 重试（最多 3 次）
+    · 终态：`booking_jobs.status = succeeded | partial | failed`
+    · Web Push 推送用户设备
+
+================================================================
+十六、关键设计决策（ADR 精华 · 改代码前必读）
+================================================================
+
+ADR-1 · Booking 自动化采用三层执行架构，而非纯 AI Agent
+  背景：纯 AI agent（40 step blind loop）对已知平台又慢、又贵、又不稳
+  决策：已知 UI 步骤走 Playwright 程序化（Layer 1），字段语义走 AI（Layer 2），
+        填完必 AI 兜底 audit（Layer 3）
+  影响：所有已知平台必须加入 `skipInitialAgent`，永远不跑 blind agent
+  详见：根目录 `CLAUDE.md` "Booking Automation Architecture"
+
+ADR-2 · Decision Room 的 N=2 与 N≥3 使用不同引擎
+  背景：二人场景 prompt（"both agree on"）与群体场景（"union of hard constraints"）
+        措辞差异大，强塞一起精度下降
+  决策：`lib/agent/two-party.ts` 专注 pair 动态；`lib/agent/n-party.ts` 专注
+        群体 union / lowest-budget / 冲突范围
+  影响：`lib/rooms/propose.ts` 按 `submitted.length` 路由
+  不采纳：并入单一 `runAgent(inputs[])`（试过，冲突检测召回率 -15%）
+
+ADR-3 · Payment 字段永远程序化，AI 不参与
+  背景：跨域 iframe 的支付字段 AI 无法访问；"止步 CVV" 是监管红线
+  决策：`provider.fillPaymentForm()` 必须用 Playwright 原生 setter，填到 CVV 之前停
+  影响：新增 provider 禁止用 AI 填支付字段；所有 provider 必须显式实现此方法
+
+ADR-4 · Decision Room 实时同步用 3s 轮询 + 304，而非 WebSocket
+  背景：Vercel serverless 不适合长连接；Neon 也无长连接 push 通道
+  决策：`GET /api/rooms/[id]/state?since=<version>`，无变化返回 304
+  影响：前端 `useRoomState()` 封装轮询；成本低、代码简单
+  可接受代价：最大延迟 3s（UX 测试可接受）
+
+ADR-5 · 打分权重调整延迟激活
+  背景：用 `plan_outcomes` 微调权重在数据不足时会被噪声带偏
+  决策：`getScoreAdjustments()` 仅在 ≥30 天 + ≥100 条 outcomes 后生效
+  激活评估日期：2026-04-22（预计）
+  影响：当前权重为静态值；见 `lib/agent/composer/scoring.ts` 顶部注释
+
+ADR-6 · NLU 英文快路径绕过 MiniMax
+  背景：英文查询占 90%+，MiniMax 每次 ~300ms；快路径零 API 调用
+  决策：`lib/nlu.ts` 英文走 regex + 规则引擎，非英文走 MiniMax
+  影响：改 NLU 需同步维护两条路径；非英文场景延迟较高
+
+ADR-7 · Stagehand（AI 浏览器）+ Playwright（RPA）双层降级
+  背景：Stagehand.act() 自然语言强但偶发选错元素；纯 Playwright 脚本又脆
+  决策：AI-first → 失败自动 fallback 到 Playwright locator；每步独立控制
+  影响：provider 可强制走 RPA（例如 OpenTable 时段点击需 CDP 坐标，见 Gotchas）
+
+================================================================
+十七、踩过的坑（Gotchas · 省你几天）
+================================================================
+
+【前端 / 构建】
+  · Windows 下 git 自动 LF→CRLF 警告是正常的，不要关 autocrlf（会破坏 Vercel deploy）
+  · `next.config.ts` 保留了 Leaflet 的 webpack 外部化，删掉会导致地图模块崩
+  · `sw.js` 改动后必须跑一次完整 `npm run build`，让 postbuild 注入新版本号，
+    否则客户端不会 bust 缓存
+
+【Autopilot】
+  · OpenTable 时段点击：React 合成事件 + dispatchEvent 失效
+      → 必须走 CDP `Input.dispatchMouseEvent` 坐标点击
+  · Booking.com 平台偶尔静默切换新 UI variant
+      → `getStageSignals()` 要同时检测新、旧两套 selector
+  · 平台回退链（OpenTable → Resy → Yelp）可能"假成功"（落到 landing page）
+      → 必须 `isGenuineBooking` 校验（URL pattern + 成功文本）
+  · Cookies 过期无提示 → 触发 login wall
+      → 必须捕获 login wall signal，降级为手动链接 + Action Item
+  · Stagehand rate limit：并发 > 3 容易触发 gpt-4o-mini quota
+      → Autopilot 任务串行化；`/api/browser-live` 单独通道
+
+【Decision Room】
+  · approval_rule 切换会撤销所有已投票（防规则混淆）→ UI 必须弹二次确认
+  · creator 离开必须先 `transfer-creator`，否则 room 进入 abandoned；payer 字段同理
+  · N≥3 的 conflict 检测严格：要构造"真冲突"（vegan vs must-have-steak）才会触发，
+    普通偏好差异不会 — 写测试时注意
+
+【MiniMax】
+  · Temperature > 0.3 引入 JSON 解析失败率上升
+  · 返回里可能带 markdown code fence，解析前必须 strip
+  · 非英文 prompt 延迟大（~800ms），尽量走英文快路径
+
+【数据库】
+  · `decision_sessions` 是 legacy 双人表，新功能一律走 `decision_rooms*`
+  · `booking_profiles` 的 passport / KTN 字段走 `BOOKING_ENCRYPTION_KEY` 加密
+      → 换 key 前必须先把现有数据解密、再用新 key 重新加密
+
+【Windows 本地开发】
+  · Playwright chromium 路径含空格需引号包裹
+  · `.env.local` 用 CRLF 结尾某些 parser 会出问题，建议 LF
+  · 在 bash shell 下路径必须正斜杠；PowerShell 可用反斜杠
+
+================================================================
+十八、开发工作流（gstack / ship skills 约定）
+================================================================
+
+【日常开发节奏】
+  1. 新功能先看 `prd.json` 是否已有 ralph spec
+  2. 大改动走 `/ship:auto`（design → dev → e2e → review → qa → refactor → handoff）
+  3. 小修直接 `/ship` 或 `/ship:dev`
+  4. UI / 前端改动必须用 `/browse` skill 人工验证（持久化 headless Chromium，快）
+  5. 提 PR 前跑 `/review`（对比 base 分支 diff，有结构化报告）
+  6. commit 用中文 `feat:` / `fix:` / `chore:` 前缀（保持历史一致）
+
+【测试策略】
+  · 单测：Vitest，`npm test`；覆盖率 `npm run test:coverage`
+  · Decision Room 手测：`DECISION_ROOM_TEST_PLAN.md` 的 T1–T18，账号 ziweiA/B/C
+  · Autopilot 手测：本地设 `PLAYWRIGHT_HEADLESS=false` 起任务，观察浏览器直播
+  · QA：`/qa` 对整站交互扫描；`/design-review` 专查视觉一致性
+
+【可用 gstack Skills（重要子集）】
+  · Ship：/ship, /ship:auto, /ship:dev, /ship:e2e, /ship:review, /ship:qa,
+          /ship:refactor, /ship:handoff, /ship:arch-design, /ship:visual-design
+  · QA / Review：/browse, /qa, /qa-only, /review, /design-review
+  · 调试 / 复盘：/investigate, /retro, /document-release, /codex, /office-hours
+  · 计划：/plan-eng-review, /plan-ceo-review, /plan-design-review, /ask-me, /autoplan
+  · 全量文档与实现细节：根目录 `CLAUDE.md` + `~/.claude/skills/`
+
+【部署】
+  · Vercel 自动 deploy master 分支
+  · Cron 端点在 `vercel.json` 声明，走 `CRON_SECRET` Bearer 校验
+  · maxDuration：Autopilot = 300s，Decision Room = 60s，其余 = 10s
+  · Service worker 每次 build 自动 bust 缓存（`scripts/inject-sw-version.mjs`）
 
 ================================================================

@@ -28,7 +28,7 @@ interface GroupDetail {
 
 const ALLOWED_TYPES = [
   { id: "restaurant", label: "Restaurant", emoji: "🍽️", phase: 1 },
-  { id: "hotel",      label: "Hotel",      emoji: "🏨", phase: 2 },
+  { id: "hotel",      label: "Hotel",      emoji: "🏨", phase: 1 },
   { id: "flight",     label: "Flight",     emoji: "✈️", phase: 2 },
   { id: "activity",   label: "Activity",   emoji: "🎟️", phase: 2 },
 ] as const;
@@ -62,6 +62,7 @@ export default function NewRoomPage() {
   const [city, setCity] = useState<string>(DEFAULT_CITY);
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
+  const [guests, setGuests] = useState<number>(2); // hotel-only — defaults to 2, UI caps at 8
   const [payerIsSelf, setPayerIsSelf] = useState(true);
 
   // Multi-contact + group picker
@@ -127,20 +128,45 @@ export default function NewRoomPage() {
 
   async function submit() {
     if (!title.trim()) { setError("Give it a title so people know what they're joining."); return; }
-    if (type !== "restaurant") { setError("Only Restaurant rooms are supported right now."); return; }
+    if (type !== "restaurant" && type !== "hotel") {
+      setError("That room type isn't supported yet.");
+      return;
+    }
+    if (type === "hotel") {
+      if (!dateFrom || !dateTo) {
+        setError("Hotel rooms need check-in and check-out dates.");
+        return;
+      }
+      if (dateTo <= dateFrom) {
+        setError("Check-out has to be after check-in.");
+        return;
+      }
+      if (!guests || guests < 1) {
+        setError("Need at least one guest.");
+        return;
+      }
+    }
     setSubmitting(true);
     setError(null);
     try {
+      // Shared fields for both scenarios. Hotel adds check_in/check_out/guests so
+      // the merge-then-search pipeline and execute route can read them directly.
+      const context: Record<string, unknown> = {
+        city_id: city,
+        date_window: dateFrom || dateTo ? { from: dateFrom || null, to: dateTo || null } : null,
+      };
+      if (type === "hotel") {
+        context.check_in = dateFrom;
+        context.check_out = dateTo;
+        context.guests = guests;
+      }
       const res = await fetch("/api/rooms", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           type,
           title: title.trim(),
-          context: {
-            city_id: city,
-            date_window: dateFrom || dateTo ? { from: dateFrom || null, to: dateTo || null } : null,
-          },
+          context,
           payer_id: payerIsSelf ? userId : null,
           approval_rule: effectiveRule,
         }),
@@ -196,7 +222,7 @@ export default function NewRoomPage() {
   return (
     <div className={PAGE}>
       <GlobalNav active="rooms" />
-      <div className="max-w-md mx-auto px-5 py-8">
+      <div className="max-w-md md:max-w-xl lg:max-w-2xl mx-auto px-5 md:px-6 py-8">
         <button
           onClick={() => router.back()}
           className="text-xs text-[var(--text-muted)] hover:text-[var(--text-primary)] mb-4"
@@ -257,24 +283,44 @@ export default function NewRoomPage() {
           ))}
         </select>
 
-        {/* Date window (optional) */}
+        {/* Date window — required for hotel (check-in/out), optional for restaurant. */}
         <label className={LABEL}>
-          When? <span className="text-[var(--text-muted)]">(optional)</span>
+          {type === "hotel" ? "Check-in / Check-out" : "When?"}{" "}
+          {type !== "hotel" && (
+            <span className="text-[var(--text-muted)]">(optional)</span>
+          )}
         </label>
         <div className="flex gap-2 mb-5">
           <input
             type="date"
             value={dateFrom}
             onChange={(e) => setDateFrom(e.target.value)}
+            aria-label={type === "hotel" ? "Check-in" : "From"}
             className={`flex-1 ${INPUT_LG}`}
           />
           <input
             type="date"
             value={dateTo}
             onChange={(e) => setDateTo(e.target.value)}
+            aria-label={type === "hotel" ? "Check-out" : "To"}
             className={`flex-1 ${INPUT_LG}`}
           />
         </div>
+
+        {/* Hotel-only: guest count drives the search and the booking job. */}
+        {type === "hotel" && (
+          <>
+            <label className={LABEL}>Guests</label>
+            <input
+              type="number"
+              min={1}
+              max={8}
+              value={guests}
+              onChange={(e) => setGuests(Math.max(1, Math.min(8, parseInt(e.target.value, 10) || 1)))}
+              className={`${INPUT_LG} mb-5`}
+            />
+          </>
+        )}
 
         {/* Groups — one-tap expand */}
         {groups.length > 0 && (

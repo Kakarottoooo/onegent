@@ -329,7 +329,7 @@ export default function ContactsPage() {
   return (
     <div className={PAGE}>
       <GlobalNav active="other" />
-      <div className="max-w-md mx-auto px-5 py-8">
+      <div className="max-w-md md:max-w-2xl lg:max-w-3xl mx-auto px-5 md:px-6 py-8">
         <Link
           href="/rooms"
           className="text-xs text-[var(--text-muted)] hover:text-[var(--text-primary)] mb-4 inline-block"

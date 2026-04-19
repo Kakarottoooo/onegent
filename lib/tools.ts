@@ -112,6 +112,15 @@ export async function googlePlacesSearch(params: {
       image_url: p.photos?.[0]
         ? `https://places.googleapis.com/v1/${p.photos[0].name}/media?maxWidthPx=400&key=${process.env.GOOGLE_PLACES_API_KEY}`
         : undefined,
+      images: Array.isArray(p.photos)
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        ? (p.photos as any[])
+            .slice(0, 8)
+            .map(
+              (ph) =>
+                `https://places.googleapis.com/v1/${ph.name}/media?maxWidthPx=1600&key=${process.env.GOOGLE_PLACES_API_KEY}`,
+            )
+        : undefined,
       is_closed: false,
       description: p.editorialSummary?.text,
       lat: p.location?.latitude,
@@ -477,10 +486,23 @@ export async function searchHotels(params: {
         ? (p.amenities as string[]).slice(0, 8)
         : [];
 
+      // SerpAPI's `hotel_class` is usually a string like "5-star hotel", not a
+      // plain number — Number("5-star hotel") === NaN. Pull the first integer
+      // out, and fall back to 0 (== "unknown") rather than the previous 3,
+      // which lied about unrated properties.
+      const starRating = (() => {
+        const raw = p.hotel_class;
+        if (typeof raw === "number" && Number.isFinite(raw)) return raw;
+        if (typeof raw === "string") {
+          const m = raw.match(/\d+/);
+          if (m) return parseInt(m[0], 10);
+        }
+        return 0;
+      })();
       return {
         id: String(p.property_token ?? `hotel-${i}`),
         name: String(p.name ?? "Unknown Hotel"),
-        star_rating: Number(p.hotel_class ?? 3),
+        star_rating: starRating,
         price_per_night: pricePerNight,
         total_price: Math.round(pricePerNight * nights),
         rating: Number(p.overall_rating ?? 0),
@@ -489,10 +511,30 @@ export async function searchHotels(params: {
         neighborhood: String(p.neighborhood ?? ""),
         distance_to_center: String(p.distance ?? ""),
         amenities,
-        thumbnail: String(
-          (p.images as Array<Record<string, string>> | undefined)?.[0]
-            ?.thumbnail ?? ""
-        ),
+        ...(() => {
+          // SerpAPI returns photos in a handful of shapes depending on the
+          // property. Try every field we've seen in the wild so hotels without
+          // the richer `images` array still show at least one picture.
+          const urls: string[] = [];
+          const pushUrl = (v: unknown) => {
+            if (typeof v === "string" && v.startsWith("http") && !urls.includes(v)) {
+              urls.push(v);
+            }
+          };
+          const imgs = p.images as Array<Record<string, unknown>> | undefined;
+          for (const entry of imgs ?? []) {
+            if (urls.length >= 8) break;
+            pushUrl(entry?.original_image);
+            pushUrl(entry?.thumbnail);
+            pushUrl(entry?.image);
+            pushUrl(entry?.link);
+          }
+          // Fallback: some hotels only have a top-level thumbnail/image.
+          pushUrl((p as Record<string, unknown>).thumbnail);
+          pushUrl((p as Record<string, unknown>).image);
+          pushUrl((p as Record<string, unknown>).hero_image);
+          return { thumbnail: urls[0] ?? "", images: urls };
+        })(),
         booking_link: String(p.link ?? `https://www.google.com/travel/hotels`),
         description: String(p.description ?? ""),
         lat: (p.gps_coordinates as Record<string, number> | undefined)?.latitude,

@@ -19,6 +19,7 @@ import type { RecommendationCard } from "@/lib/types";
 import { extractOptions, resolveAcceptedOption, tallyVotes } from "@/lib/rooms/proposal-shape";
 import { CARD, CARD_MUTED, CTA, CTA_GHOST, PAGE } from "@/app/_ui/tokens";
 import GlobalNav from "@/components/GlobalNav";
+import PhotoCarousel from "@/components/PhotoCarousel";
 
 type MyConstraint = {
   budget_max?: number;
@@ -30,8 +31,21 @@ type MyConstraint = {
   notes?: string;
 };
 
+type MyHotelConstraint = {
+  budget_max_per_night?: number;
+  neighborhood?: string;
+  star_rating_min?: number;
+  vibe?: "quiet" | "lively" | "romantic" | "family-friendly" | "business";
+  amenities?: string[];
+  notes?: string;
+};
+
 const VIBES = ["casual", "romantic", "lively", "quiet", "upscale"] as const;
 const DIETARY_OPTIONS = ["vegetarian", "vegan", "gluten-free", "halal", "kosher", "no raw fish"];
+
+const HOTEL_VIBES = ["quiet", "lively", "romantic", "family-friendly", "business"] as const;
+const HOTEL_AMENITIES = ["pool", "gym", "breakfast", "parking", "pet-friendly", "wifi", "spa", "airport-shuttle"];
+const STAR_OPTIONS = [3, 4, 5] as const;
 
 // Local input/label tokens (room-specific variants of the shared ones).
 const INPUT =
@@ -190,7 +204,7 @@ function RoomView({
   return (
     <div className={`${PAGE} pb-24`}>
       <GlobalNav active="rooms" />
-      <div className="max-w-md mx-auto px-5 py-6">
+      <div className="max-w-md md:max-w-3xl lg:max-w-4xl mx-auto px-5 md:px-6 py-6">
         <HeaderBar
           roomId={room.id}
           title={room.title}
@@ -230,6 +244,7 @@ function RoomView({
         {(room.status === "collecting" || room.status === "proposing") && (
           <ConstraintForm
             roomId={room.id}
+            roomType={room.type}
             initial={myConstraint}
             refresh={refresh}
           />
@@ -237,6 +252,7 @@ function RoomView({
         {room.status === "approving" && (
           <ConstraintForm
             roomId={room.id}
+            roomType={room.type}
             initial={myConstraint}
             refresh={refresh}
             collapsedByDefault
@@ -251,6 +267,7 @@ function RoomView({
           <ProposalCard
             proposal={lastRejectedProposal}
             roomId={room.id}
+            roomType={room.type}
             userId={userId}
             memberCount={members.length}
             approvalRule={room.approval_rule ?? "unanimous"}
@@ -286,6 +303,7 @@ function RoomView({
           <ProposalCard
             proposal={(activeProposal ?? acceptedProposal)!}
             roomId={room.id}
+            roomType={room.type}
             userId={userId}
             memberCount={members.length}
             approvalRule={room.approval_rule ?? "unanimous"}
@@ -301,6 +319,8 @@ function RoomView({
           <AcceptedBlock
             proposal={acceptedProposal}
             roomId={room.id}
+            roomType={room.type}
+            context={room.context_json ?? {}}
             isPayer={isPayer}
             status={room.status}
             bookingJobId={room.booking_job_id}
@@ -835,9 +855,26 @@ function MembersStrip({
   );
 }
 
-// ── Constraint form ───────────────────────────────────────────────────────────
+// ── Constraint form dispatcher ────────────────────────────────────────────────
+// Picks per-scenario editor by room.type. Restaurant/hotel each have their own
+// shape (see lib/rooms/constraint-types.ts). The propose-route flattener
+// dispatches on the same room.type, so these two sides must stay in sync.
+function ConstraintForm(props: {
+  roomId: string;
+  roomType: string;
+  initial: DecisionRoomConstraintRow | undefined;
+  refresh: () => void;
+  collapsedByDefault?: boolean;
+}) {
+  if (props.roomType === "hotel") {
+    return <HotelConstraintForm {...props} />;
+  }
+  return <RestaurantConstraintForm {...props} />;
+}
 
-function ConstraintForm({
+// ── Restaurant constraint form ────────────────────────────────────────────────
+
+function RestaurantConstraintForm({
   roomId, initial, refresh, collapsedByDefault = false,
 }: {
   roomId: string;
@@ -1026,6 +1063,198 @@ function ConstraintForm({
   );
 }
 
+// ── Hotel constraint form ─────────────────────────────────────────────────────
+// Dates and guest count are Room-level (set at creation), NOT per-member — they
+// live in room.context_json. Only soft preferences go here.
+function HotelConstraintForm({
+  roomId, initial, refresh, collapsedByDefault = false,
+}: {
+  roomId: string;
+  initial: DecisionRoomConstraintRow | undefined;
+  refresh: () => void;
+  collapsedByDefault?: boolean;
+}) {
+  const [open, setOpen] = useState(!collapsedByDefault);
+  const initialData = (initial?.data_json ?? {}) as MyHotelConstraint;
+  const [budget, setBudget] = useState<string>(
+    initialData.budget_max_per_night ? String(initialData.budget_max_per_night) : ""
+  );
+  const [neighborhood, setNeighborhood] = useState<string>(initialData.neighborhood ?? "");
+  const [starMin, setStarMin] = useState<number | undefined>(initialData.star_rating_min);
+  const [vibe, setVibe] = useState<MyHotelConstraint["vibe"]>(initialData.vibe);
+  const [amenities, setAmenities] = useState<string[]>(initialData.amenities ?? []);
+  const [notes, setNotes] = useState<string>(initialData.notes ?? "");
+
+  const [saving, setSaving] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  const submitted = Boolean(initial?.submitted);
+
+  function buildData(): MyHotelConstraint {
+    return {
+      budget_max_per_night: budget ? Number(budget) : undefined,
+      neighborhood: neighborhood.trim() || undefined,
+      star_rating_min: starMin,
+      vibe,
+      amenities: amenities.length ? amenities : undefined,
+      notes: notes || undefined,
+    };
+  }
+
+  async function save(markSubmitted: boolean) {
+    setSaving(true);
+    setErr(null);
+    try {
+      const res = await fetch(`/api/rooms/${roomId}/constraints`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ data: buildData(), submitted: markSubmitted }),
+      });
+      if (!res.ok) {
+        const { error: msg } = await res.json().catch(() => ({ error: "Save failed" }));
+        setErr(msg ?? "Save failed");
+        return;
+      }
+      refresh();
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  function toggleAmenity(opt: string) {
+    setAmenities((prev) => prev.includes(opt) ? prev.filter((p) => p !== opt) : [...prev, opt]);
+  }
+
+  return (
+    <div className={`${CARD} p-4 mb-4`}>
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        className="w-full flex items-center justify-between mb-3 text-left"
+      >
+        <p className="text-sm font-semibold text-[var(--text-primary)]">Your hotel preferences</p>
+        <div className="flex items-center gap-2">
+          {submitted && (
+            <span className="text-[10px] font-medium px-2 py-0.5 rounded-full bg-emerald-500/15 text-emerald-600 border border-emerald-500/30">
+              Submitted
+            </span>
+          )}
+          <span className="text-[var(--text-muted)] text-xs">{open ? "▲" : "▼ edit"}</span>
+        </div>
+      </button>
+
+      {!open ? null : (<>
+      <label className={LABEL}>Budget ceiling (per night)</label>
+      <div className="flex items-center gap-2 mb-3">
+        <span className="text-sm text-[var(--text-muted)]">$</span>
+        <input
+          type="number"
+          inputMode="numeric"
+          value={budget}
+          onChange={(e) => setBudget(e.target.value)}
+          placeholder="e.g. 250"
+          className={`flex-1 ${INPUT}`}
+        />
+      </div>
+
+      <label className={LABEL}>Neighborhood</label>
+      <input
+        value={neighborhood}
+        onChange={(e) => setNeighborhood(e.target.value)}
+        placeholder="e.g. downtown, near airport, Shinjuku"
+        className={`w-full mb-3 ${INPUT}`}
+      />
+
+      <label className="text-xs text-[var(--text-secondary)] block mb-2">Minimum stars</label>
+      <div className="flex flex-wrap gap-1.5 mb-3">
+        {STAR_OPTIONS.map((s) => {
+          const active = starMin === s;
+          return (
+            <button
+              key={s}
+              type="button"
+              onClick={() => setStarMin(active ? undefined : s)}
+              className={`text-xs px-2.5 py-1 rounded-full border transition-colors ${
+                active ? PILL_ACTIVE : PILL_IDLE
+              }`}
+            >
+              {s}★ or better
+            </button>
+          );
+        })}
+      </div>
+
+      <label className="text-xs text-[var(--text-secondary)] block mb-2">Vibe</label>
+      <div className="flex flex-wrap gap-1.5 mb-3">
+        {HOTEL_VIBES.map((v) => {
+          const active = vibe === v;
+          return (
+            <button
+              key={v}
+              type="button"
+              onClick={() => setVibe(active ? undefined : v)}
+              className={`text-xs px-2.5 py-1 rounded-full border capitalize transition-colors ${
+                active ? PILL_ACTIVE : PILL_IDLE
+              }`}
+            >
+              {v}
+            </button>
+          );
+        })}
+      </div>
+
+      <label className="text-xs text-[var(--text-secondary)] block mb-2">Amenities</label>
+      <div className="flex flex-wrap gap-1.5 mb-3">
+        {HOTEL_AMENITIES.map((opt) => {
+          const active = amenities.includes(opt);
+          return (
+            <button
+              key={opt}
+              type="button"
+              onClick={() => toggleAmenity(opt)}
+              className={`text-xs px-2.5 py-1 rounded-full border transition-colors ${
+                active ? PILL_ACTIVE : PILL_IDLE
+              }`}
+            >
+              {opt}
+            </button>
+          );
+        })}
+      </div>
+
+      <label className={LABEL}>Notes</label>
+      <textarea
+        value={notes}
+        onChange={(e) => setNotes(e.target.value)}
+        rows={2}
+        placeholder="Anything else? wheelchair accessible, honeymoon suite, late check-in…"
+        className={`w-full resize-none mb-3 ${INPUT}`}
+      />
+
+      {err && (
+        <p className="text-xs text-red-600 mb-2">{err}</p>
+      )}
+
+      <div className="flex gap-2">
+        <button
+          onClick={() => save(false)}
+          disabled={saving}
+          className="flex-1 py-2.5 rounded-xl border border-[var(--border)] bg-transparent text-sm font-medium text-[var(--text-primary)] hover:border-[var(--gold)] disabled:opacity-40 transition-colors"
+        >
+          {saving ? "Saving…" : "Save draft"}
+        </button>
+        <button
+          onClick={() => save(true)}
+          disabled={saving}
+          className={`flex-1 py-2.5 ${CTA}`}
+        >
+          {submitted ? "Update" : "Submit"}
+        </button>
+      </div>
+      </>)}
+    </div>
+  );
+}
+
 // ── Propose button ────────────────────────────────────────────────────────────
 
 function ProposeButton({
@@ -1104,10 +1333,11 @@ function ProposeButton({
 // ── Proposal card + voting ────────────────────────────────────────────────────
 
 function ProposalCard({
-  proposal, roomId, userId, memberCount, approvalRule, memberProfiles, isCreator, refresh, mode = "active",
+  proposal, roomId, roomType, userId, memberCount, approvalRule, memberProfiles, isCreator, refresh, mode = "active",
 }: {
   proposal: DecisionRoomProposal & { votes: DecisionRoomVote[] };
   roomId: string;
+  roomType: string;
   userId: string;
   memberCount: number;
   approvalRule: ApprovalRule;
@@ -1270,7 +1500,7 @@ function ProposalCard({
           return (
             <div
               key={o.id}
-              className={`rounded-xl border p-3 transition-colors ${
+              className={`rounded-xl border overflow-hidden transition-colors ${
                 isWinner
                   ? "border-emerald-500/60 bg-emerald-500/10"
                   : isMyPick
@@ -1278,16 +1508,94 @@ function ProposalCard({
                     : "border-[var(--border)] bg-[var(--card)]"
               }`}
             >
+              {roomType === "hotel" && (() => {
+                const h = (card as { hotel?: { name?: string; thumbnail?: string; images?: string[]; booking_link?: string } }).hotel;
+                const imgs = (h?.images && h.images.length > 0)
+                  ? h.images
+                  : (h?.thumbnail ? [h.thumbnail] : []);
+                const link = h?.booking_link;
+                return (
+                  <div className="border-b border-[var(--border)]">
+                    <PhotoCarousel
+                      images={imgs}
+                      alt={h?.name ?? "Hotel"}
+                      heightClass="h-40"
+                      emptyEmoji="🏨"
+                      cornerAction={
+                        link ? (
+                          <a
+                            href={link}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            onClick={(e) => e.stopPropagation()}
+                            title="View hotel details"
+                            className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-black/65 hover:bg-black/85 text-white text-[11px] font-medium ring-1 ring-white/20 shadow-lg transition-colors"
+                          >
+                            <span aria-hidden>↗</span>
+                            <span>View details</span>
+                          </a>
+                        ) : undefined
+                      }
+                    />
+                  </div>
+                );
+              })()}
+              {roomType === "restaurant" && (() => {
+                const r = (card as { restaurant?: { name?: string; image_url?: string; images?: string[] } }).restaurant;
+                const imgs = (r?.images && r.images.length > 0)
+                  ? r.images
+                  : (r?.image_url ? [r.image_url] : []);
+                return (
+                  <div className="border-b border-[var(--border)]">
+                    <PhotoCarousel images={imgs} alt={r?.name ?? "Restaurant"} heightClass="h-40" emptyEmoji="🍽️" />
+                  </div>
+                );
+              })()}
+              <div className="p-3">
               <div className="flex items-start justify-between gap-2 mb-1">
-                <div className="flex-1 min-w-0">
-                  <p className="text-sm font-semibold text-[var(--text-primary)] truncate">
-                    {card.restaurant?.name ?? "—"}
-                  </p>
-                  <p className="text-[11px] text-[var(--text-muted)] truncate">
-                    {card.restaurant?.cuisine} · {card.restaurant?.price} ·{" "}
-                    {card.restaurant?.address?.split(",")[0]}
-                  </p>
-                </div>
+                {roomType === "hotel" ? (
+                  (() => {
+                    const h = (card as { hotel?: { name?: string; star_rating?: number; neighborhood?: string; address?: string; price_per_night?: number; rating?: number; review_count?: number } }).hotel;
+                    const starCount = typeof h?.star_rating === "number" ? Math.min(5, Math.max(0, Math.round(h.star_rating))) : 0;
+                    const area = h?.neighborhood || h?.address?.split(",")[0];
+                    const price = typeof h?.price_per_night === "number" && h.price_per_night > 0 ? `$${h.price_per_night}/night` : null;
+                    return (
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm font-semibold text-[var(--text-primary)] truncate">
+                          {h?.name ?? "—"}
+                        </p>
+                        <div className="flex items-center gap-2 flex-wrap mt-0.5">
+                          {starCount > 0 && (
+                            <span className="text-[11px] text-[var(--gold)]">
+                              {"★".repeat(starCount)}{"☆".repeat(5 - starCount)}
+                            </span>
+                          )}
+                          {typeof h?.rating === "number" && h.rating > 0 && (
+                            <span className="text-[11px] text-[var(--gold)]">
+                              ⭐ {h.rating.toFixed(1)}
+                              {h.review_count ? (
+                                <span className="text-[var(--text-muted)]"> ({h.review_count.toLocaleString()})</span>
+                              ) : null}
+                            </span>
+                          )}
+                        </div>
+                        <p className="text-[11px] text-[var(--text-muted)] truncate mt-0.5">
+                          {[area, price].filter(Boolean).join(" · ") || "—"}
+                        </p>
+                      </div>
+                    );
+                  })()
+                ) : (
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-semibold text-[var(--text-primary)] truncate">
+                      {card.restaurant?.name ?? "—"}
+                    </p>
+                    <p className="text-[11px] text-[var(--text-muted)] truncate">
+                      {card.restaurant?.cuisine} · {card.restaurant?.price} ·{" "}
+                      {card.restaurant?.address?.split(",")[0]}
+                    </p>
+                  </div>
+                )}
                 <div className="flex items-center gap-2 flex-shrink-0">
                   {isWinner && (
                     <span
@@ -1357,6 +1665,7 @@ function ProposalCard({
                   {loading ? "…" : isMyPick ? "Picked ✓ — click to change below" : "Pick this one"}
                 </button>
               )}
+              </div>
             </div>
           );
         })}
@@ -1415,10 +1724,12 @@ function ProposalCard({
 // ── Accepted proposal + execute panel ─────────────────────────────────────────
 
 function AcceptedBlock({
-  proposal, roomId, isPayer, status, bookingJobId, approvalRule, memberCount, refresh,
+  proposal, roomId, roomType, context, isPayer, status, bookingJobId, approvalRule, memberCount, refresh,
 }: {
   proposal: DecisionRoomProposal & { votes: DecisionRoomVote[] };
   roomId: string;
+  roomType: string;
+  context: Record<string, unknown>;
   isPayer: boolean;
   status: string;
   bookingJobId: string | null;
@@ -1426,6 +1737,7 @@ function AcceptedBlock({
   memberCount: number;
   refresh: () => void;
 }) {
+  const isHotel = roomType === "hotel";
   // Pick the winning option from the tallies; fall back to the first option
   // (legacy single-card proposals are treated as a single option by extractOptions).
   const options = extractOptions(proposal);
@@ -1446,6 +1758,34 @@ function AcceptedBlock({
     (options.find((o) => o.id === winnerId)?.card as RecommendationCard | undefined) ??
     (options[0]?.card as RecommendationCard | undefined) ??
     ({} as RecommendationCard);
+  // Hotel vs. restaurant display label — used in status banners and CTA copy.
+  const hotelCard = card as unknown as { hotel?: { name?: string } };
+  const targetName = isHotel
+    ? hotelCard.hotel?.name ?? "hotel"
+    : card.restaurant?.name ?? "restaurant";
+  const targetNameCapitalized = isHotel
+    ? hotelCard.hotel?.name ?? "Hotel"
+    : card.restaurant?.name ?? "Restaurant";
+  // Hotel stays are group-level defaults from room.context_json. The payer
+  // can still tweak them here before kicking off the booking — saves a trip
+  // back to the room editor for a one-day typo.
+  const hotelInitial = useMemo(() => {
+    if (!isHotel) return { checkIn: "", checkOut: "", guests: Math.max(1, memberCount) };
+    const ctx = context as {
+      check_in?: string;
+      check_out?: string;
+      guests?: number;
+      date_window?: { from?: string | null; to?: string | null } | null;
+    };
+    return {
+      checkIn: ctx.check_in ?? ctx.date_window?.from ?? "",
+      checkOut: ctx.check_out ?? ctx.date_window?.to ?? "",
+      guests: ctx.guests ?? Math.max(1, memberCount),
+    };
+  }, [isHotel, context, memberCount]);
+  const [checkIn, setCheckIn] = useState(hotelInitial.checkIn);
+  const [checkOut, setCheckOut] = useState(hotelInitial.checkOut);
+  const [guests, setGuests] = useState(hotelInitial.guests);
   const [date, setDate] = useState("");
   const [time, setTime] = useState("19:00");
   // Default covers = current joined count. Payer can still override for
@@ -1622,7 +1962,7 @@ function AcceptedBlock({
             ✅ Booking confirmed
           </p>
           <p className="text-xs text-emerald-600/90 mb-3">
-            {card.restaurant?.name ?? "Restaurant"} — the reservation is locked in.
+            {targetNameCapitalized} — the reservation is locked in.
           </p>
           {isPayer && (
             <button
@@ -1644,8 +1984,8 @@ function AcceptedBlock({
         </p>
         <p className="text-xs text-indigo-500 mb-3">
           {isPayer
-            ? `${card.restaurant?.name ?? "Restaurant"} — the agent is filling out the reservation now. Open Tasks to see live steps and logs.`
-            : `${card.restaurant?.name ?? "Restaurant"} — the payer is booking. You'll be notified when it's done.`}
+            ? `${targetNameCapitalized} — the agent is filling out the reservation now. Open Tasks to see live steps and logs.`
+            : `${targetNameCapitalized} — the payer is booking. You'll be notified when it's done.`}
         </p>
         {isPayer && (
           <button
@@ -1660,7 +2000,13 @@ function AcceptedBlock({
   }
 
   async function start() {
-    if (!date || !time || !covers) { setErr("Pick a date, time, and party size."); return; }
+    if (isHotel) {
+      if (!checkIn || !checkOut) { setErr("Pick check-in and check-out dates."); return; }
+      if (checkIn >= checkOut) { setErr("Check-out must be after check-in."); return; }
+      if (!guests || guests < 1) { setErr("Guests must be at least 1."); return; }
+    } else {
+      if (!date || !time || !covers) { setErr("Pick a date, time, and party size."); return; }
+    }
     setStarting(true);
     setErr(null);
     setNeedsProfile(false);
@@ -1672,10 +2018,20 @@ function AcceptedBlock({
         sessionId = crypto.randomUUID();
         window.localStorage.setItem("session_id", sessionId);
       }
+      const payload: Record<string, unknown> = { session_id: sessionId };
+      if (isHotel) {
+        payload.check_in = checkIn;
+        payload.check_out = checkOut;
+        payload.guests = guests;
+      } else {
+        payload.date = date;
+        payload.time = time;
+        payload.covers = covers;
+      }
       const res = await fetch(`/api/rooms/${roomId}/execute`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ date, time, covers, session_id: sessionId }),
+        body: JSON.stringify(payload),
       });
       if (!res.ok) {
         const { error: msg } = await res.json().catch(() => ({ error: "Start failed" }));
@@ -1697,15 +2053,83 @@ function AcceptedBlock({
   return (
     <div className="bg-emerald-500/10 border border-emerald-500/30 rounded-2xl p-4 mb-4">
       <p className="text-sm font-medium text-emerald-600 mb-1">
-        ✅ Ready to book — {card.restaurant?.name ?? "restaurant"}
+        ✅ Ready to book — {targetName}
       </p>
       {!isPayer && (
         <p className="text-xs text-emerald-600/80">
-          Waiting on the payer to confirm date/time and trigger the booking.
+          {isHotel
+            ? "Waiting on the payer to trigger the booking."
+            : "Waiting on the payer to confirm date/time and trigger the booking."}
         </p>
       )}
 
-      {isPayer && status !== "executing" && (
+      {isPayer && status !== "executing" && isHotel && (
+        <div className="mt-3">
+          <div className="rounded-lg border border-emerald-500/30 bg-emerald-500/5 p-3 mb-2">
+            <div className="grid grid-cols-3 gap-2">
+              <label className="flex flex-col gap-1">
+                <span className="text-[10px] uppercase tracking-wide text-emerald-600/80">Check-in</span>
+                <input
+                  type="date"
+                  value={checkIn}
+                  onChange={(e) => setCheckIn(e.target.value)}
+                  className={INPUT}
+                />
+              </label>
+              <label className="flex flex-col gap-1">
+                <span className="text-[10px] uppercase tracking-wide text-emerald-600/80">Check-out</span>
+                <input
+                  type="date"
+                  value={checkOut}
+                  onChange={(e) => setCheckOut(e.target.value)}
+                  className={INPUT}
+                />
+              </label>
+              <label className="flex flex-col gap-1">
+                <span className="text-[10px] uppercase tracking-wide text-emerald-600/80">Guests</span>
+                <input
+                  type="number"
+                  min={1}
+                  max={12}
+                  value={guests}
+                  onChange={(e) => setGuests(Math.max(1, Math.min(12, parseInt(e.target.value, 10) || 1)))}
+                  className={INPUT}
+                />
+              </label>
+            </div>
+            <p className="text-[10px] text-emerald-600/70 mt-2">
+              Defaults come from the room context — tweak here if anything&apos;s off.
+            </p>
+          </div>
+          <button
+            onClick={start}
+            disabled={starting}
+            className={`w-full py-2.5 ${CTA}`}
+          >
+            {starting ? "Starting…" : "🤖 Start booking →"}
+          </button>
+          {err && <p className="text-xs text-red-600 mt-2">{err}</p>}
+          {needsProfile && (
+            <div className="mt-3 bg-[var(--gold)]/10 border border-[var(--gold)]/30 rounded-xl p-3">
+              <p className="text-xs font-medium text-[var(--gold)] mb-1">
+                Booking profile missing
+              </p>
+              <p className="text-[11px] text-[var(--text-secondary)] mb-2">
+                You need a default booking profile (name / email / phone) before
+                the agent can fill the reservation form. Takes 30 seconds.
+              </p>
+              <Link
+                href="/permissions"
+                className="inline-block py-2 px-3 rounded-lg bg-[var(--gold)] text-white text-xs font-medium hover:opacity-90 transition-opacity"
+              >
+                Open Settings → My Profile
+              </Link>
+            </div>
+          )}
+        </div>
+      )}
+
+      {isPayer && status !== "executing" && !isHotel && (
         <div className="mt-3">
           <div className="grid grid-cols-2 gap-2 mb-2">
             <input

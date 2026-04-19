@@ -1,9 +1,9 @@
 "use client";
 
-import Image from "next/image";
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { RecommendationCard as CardType, FeedbackRecord } from "@/lib/types";
+import PhotoCarousel from "@/components/PhotoCarousel";
 
 interface Props {
   card: CardType;
@@ -296,52 +296,19 @@ export default function RecommendationCard({
         border: "0.5px solid var(--border)",
       }}
     >
-      {/* Image */}
-      {r.image_url ? (
-        <div style={{ position: "relative", height: "180px", width: "100%" }}>
-          <Image
-            src={r.image_url}
-            alt={r.name}
-            fill
-            sizes="(max-width: 672px) 100vw, 672px"
-            style={{ objectFit: "cover" }}
-            priority={index === 0}
-          />
-        </div>
-      ) : (
-        <div
-          className="w-full flex items-center justify-center"
-          style={{ height: "180px", backgroundColor: "var(--card-2)" }}
-        >
-          <svg
-            width="48"
-            height="48"
-            viewBox="0 0 48 48"
-            fill="none"
-            opacity={0.25}
-          >
-            <path
-              d="M8 40V16l16-8 16 8v24H8z"
-              stroke="var(--text-secondary)"
-              strokeWidth="1.5"
-              strokeLinejoin="round"
-            />
-            <path
-              d="M18 40v-12h12v12"
-              stroke="var(--text-secondary)"
-              strokeWidth="1.5"
-              strokeLinejoin="round"
-            />
-            <circle
-              cx="24"
-              cy="22"
-              r="3"
-              stroke="var(--text-secondary)"
-              strokeWidth="1.5"
-            />
-          </svg>
-        </div>
-      )}
+      {/* Photo carousel */}
+      <PhotoCarousel
+        images={
+          r.images && r.images.length > 0
+            ? r.images
+            : r.image_url
+              ? [r.image_url]
+              : []
+        }
+        alt={r.name}
+        heightClass="h-[180px]"
+        emptyEmoji="🍽️"
+      />
 
       <div style={{ padding: "16px" }}>
         {/* Card Header */}
