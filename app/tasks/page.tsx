@@ -1113,7 +1113,6 @@ function InterventionBanner({ step, jobId, onOpenLive }: { step: BookingJobStep;
           </div>
         </div>
       </div>
-
       {/* Modal */}
       {open && step.handoff_url && (
         <div style={{
@@ -2440,8 +2439,10 @@ export default function TripsPage() {
   const mainContentRef = useRef<HTMLDivElement>(null);
   const livePanelRef = useRef<HTMLDivElement>(null);
   const dragHandleRef = useRef<HTMLDivElement>(null);
+  const jobRefs = useRef<Record<string, HTMLDivElement | null>>({});
   // Track current liveJobId in a ref so openLive can read it without closure staleness
   const liveJobIdRef = useRef<string | null>(null);
+  const [selectedJobId, setSelectedJobId] = useState<string | null>(null);
 
   const openLive = useCallback((jobId: string) => {
     if (liveJobIdRef.current !== jobId) {
@@ -2521,10 +2522,20 @@ export default function TripsPage() {
     return () => clearInterval(timer);
   }, [jobs]);
 
+  useEffect(() => {
+    if (selectedJobId && jobs.some((j) => j.id === selectedJobId)) return;
+    setSelectedJobId(jobs[0]?.id ?? null);
+  }, [jobs, selectedJobId]);
+
   const actionTotal = jobs.reduce((n, j) => n + j.steps.filter((s) => s.actionItem).length, 0);
 
   const liveJob = jobs.find((j) => j.id === liveJobId);
   const rightPct = liveJobId ? (100 - splitPct) : 0;
+
+  function focusJob(jobId: string) {
+    setSelectedJobId(jobId);
+    jobRefs.current[jobId]?.scrollIntoView({ behavior: "smooth", block: "start" });
+  }
 
   return (
     <div style={{ minHeight: "100vh", backgroundColor: "var(--bg, #fafaf9)", padding: "0 0 80px" }}>
@@ -2546,7 +2557,110 @@ export default function TripsPage() {
         }}
       >
         {/* Page title */}
-        <div style={{ padding: "20px 20px 4px", maxWidth: "min(100%, 1024px)", margin: "0 auto" }}>
+        <div className="mx-auto w-full max-w-[1440px] px-4 md:px-6 py-5">
+          <div className="lg:grid lg:grid-cols-[280px_minmax(0,1fr)] lg:gap-8">
+            <aside className="hidden lg:block">
+              <div className="sticky top-20 space-y-4">
+                <div className="rounded-[20px] border border-[var(--border,#e5e7eb)] bg-[var(--card,#fff)] p-5">
+                  <p className="text-[11px] uppercase tracking-[0.14em] text-[var(--text-muted,#999)] mb-2">Tasks</p>
+                  <p className="text-2xl font-semibold text-[var(--text-primary,#111)]">Background work</p>
+                  <p className="mt-2 text-sm text-[var(--text-secondary,#666)]">
+                    The top bar switches products. This rail only controls your task workspace.
+                  </p>
+                  <div className="mt-4 grid grid-cols-2 gap-2">
+                    <div className="rounded-xl border border-[var(--border,#e5e7eb)] bg-[var(--card-2,#f6f6f4)] px-3 py-2">
+                      <p className="text-[10px] uppercase tracking-wide text-[var(--text-muted,#999)]">Tasks</p>
+                      <p className="text-lg font-semibold text-[var(--text-primary,#111)]">{jobs.length}</p>
+                    </div>
+                    <div className="rounded-xl border border-[var(--border,#e5e7eb)] bg-[var(--card-2,#f6f6f4)] px-3 py-2">
+                      <p className="text-[10px] uppercase tracking-wide text-[var(--text-muted,#999)]">Actions</p>
+                      <p className="text-lg font-semibold text-[var(--text-primary,#111)]">{actionTotal}</p>
+                    </div>
+                  </div>
+                  <div className="mt-4 flex flex-col gap-2">
+                    <button
+                      onClick={() => setShowRestaurantForm((v) => !v)}
+                      style={{
+                        width: "100%",
+                        padding: "11px 14px",
+                        borderRadius: 14,
+                        border: "none",
+                        background: "var(--gold, #D4A34B)",
+                        color: "#fff",
+                        fontFamily: "var(--font-dm-sans)",
+                        fontSize: 13,
+                        fontWeight: 600,
+                        cursor: "pointer",
+                      }}
+                    >
+                      {showRestaurantForm ? "Cancel new task" : "+ Restaurant"}
+                    </button>
+                    {!loading && jobs.length > 0 && (
+                      <button
+                        onClick={handleClearAll}
+                        disabled={clearingAll}
+                        style={{
+                          width: "100%",
+                          padding: "10px 14px",
+                          borderRadius: 14,
+                          border: "0.5px solid var(--border, #e5e7eb)",
+                          background: "transparent",
+                          color: clearingAll ? "var(--text-muted, #aaa)" : "rgba(220,38,38,0.7)",
+                          fontFamily: "var(--font-dm-sans)",
+                          fontSize: 13,
+                          cursor: "pointer",
+                        }}
+                      >
+                        {clearingAll ? "Clearing..." : "Clear all"}
+                      </button>
+                    )}
+                  </div>
+                </div>
+
+                {!loading && jobs.length > 0 && (
+                  <div className="rounded-[20px] border border-[var(--border,#e5e7eb)] bg-[var(--card,#fff)] p-3">
+                    <p className="text-[11px] uppercase tracking-[0.14em] text-[var(--text-muted,#999)] mb-2 px-1">Jump to task</p>
+                    <div className="flex flex-col gap-1 max-h-[52vh] overflow-y-auto pr-1">
+                      {jobs.map((job) => {
+                        const isSelected = selectedJobId === job.id;
+                        const blockedCount = job.steps.filter((s) => s.actionItem).length;
+                        return (
+                          <button
+                            key={job.id}
+                            onClick={() => focusJob(job.id)}
+                            className="text-left"
+                            style={{
+                              padding: "10px 12px",
+                              borderRadius: 14,
+                              border: isSelected ? "1px solid rgba(212,163,75,0.45)" : "1px solid transparent",
+                              background: isSelected ? "rgba(212,163,75,0.08)" : "transparent",
+                              cursor: "pointer",
+                            }}
+                          >
+                            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
+                              <span style={{ fontFamily: "var(--font-dm-sans)", fontSize: 13, fontWeight: 600, color: "var(--text-primary,#111)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                                {job.trip_label}
+                              </span>
+                              {blockedCount > 0 && (
+                                <span style={{ fontSize: 10, fontWeight: 700, color: "#fff", background: "rgba(220,38,38,0.85)", borderRadius: 999, padding: "1px 6px" }}>
+                                  {blockedCount}
+                                </span>
+                              )}
+                            </div>
+                            <div style={{ marginTop: 2, fontFamily: "var(--font-dm-sans)", fontSize: 11, color: "var(--text-secondary,#666)" }}>
+                              {JOB_SEMANTIC_DISPLAY[computeJobSemanticStatus(job)].label}
+                            </div>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+              </div>
+            </aside>
+
+            <main className="min-w-0">
+        <div style={{ padding: "0 0 4px", maxWidth: "100%", margin: 0 }}>
           <button
             onClick={() => router.back()}
             style={{
@@ -2574,7 +2688,7 @@ export default function TripsPage() {
             <p style={{ fontFamily: "var(--font-dm-sans)", fontSize: 12, color: "var(--text-secondary, #666)" }}>
               {loading ? "Loading…" : jobs.length === 0 ? "No tasks yet" : `${jobs.length} task${jobs.length === 1 ? "" : "s"}`}
             </p>
-            <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+            <div className="lg:hidden" style={{ display: "flex", alignItems: "center", gap: 10 }}>
               <button
                 onClick={() => setShowRestaurantForm((v) => !v)}
                 style={{
@@ -2604,7 +2718,7 @@ export default function TripsPage() {
             </div>
           </div>
         </div>
-        <div style={{ padding: "16px", display: "flex", flexDirection: "column", gap: 12, maxWidth: "min(100%, 1024px)", margin: "0 auto" }}>
+        <div style={{ padding: "16px 0 0", display: "flex", flexDirection: "column", gap: 12, maxWidth: "100%", margin: 0 }}>
           {/* Restaurant booking form — shown when user clicks "+ Restaurant" */}
           {showRestaurantForm && (
             <RestaurantStepCard
@@ -2625,12 +2739,30 @@ export default function TripsPage() {
             </div>
           )}
 
-          {jobs.map((job) => <JobCard key={job.id} job={job} onRefresh={loadJobs} sessionId={sessionId} onOpenLive={openLive} />)}
+          {jobs.map((job) => (
+            <div
+              key={job.id}
+              ref={(node) => {
+                jobRefs.current[job.id] = node;
+              }}
+              onClickCapture={() => setSelectedJobId(job.id)}
+              style={{
+                borderRadius: 18,
+                boxShadow: selectedJobId === job.id ? "0 0 0 2px rgba(212,163,75,0.22)" : "none",
+                transition: "box-shadow 0.18s ease",
+              }}
+            >
+              <JobCard job={job} onRefresh={loadJobs} sessionId={sessionId} onOpenLive={openLive} />
+            </div>
+          ))}
 
           {/* Agent Insights — always show at the bottom */}
           {!loading && sessionId && (
             <InsightsPanel sessionId={sessionId} />
           )}
+        </div>
+            </main>
+          </div>
         </div>
       </div>
 

@@ -137,6 +137,15 @@ function RoomView({
   const isCreator = userId === room.creator_id;
 
   const submittedCount = constraints.filter((c) => c.submitted).length;
+  const roomStatusMeta: Record<string, { text: string; tone: string }> = {
+    collecting: { text: "Collecting", tone: "bg-[var(--card-2)] text-[var(--text-secondary)] border border-[var(--border)]" },
+    proposing: { text: "Proposing", tone: "bg-blue-500/15 text-blue-600 border border-blue-500/30" },
+    approving: { text: "Voting", tone: "bg-[var(--gold)]/15 text-[var(--gold)] border border-[var(--gold)]/40" },
+    executing: { text: "Booking", tone: "bg-indigo-500/15 text-indigo-600 border border-indigo-500/30" },
+    done: { text: "Done", tone: "bg-emerald-500/15 text-emerald-600 border border-emerald-500/30" },
+    abandoned: { text: "Abandoned", tone: "bg-[var(--card-2)] text-[var(--text-muted)] border border-[var(--border)]" },
+  };
+  const roomStatus = roomStatusMeta[room.status] ?? roomStatusMeta.collecting;
 
   // Contact set + pending-request state for the "add as contact" button.
   // Version tick triggers reload.
@@ -204,7 +213,65 @@ function RoomView({
   return (
     <div className={`${PAGE} pb-24`}>
       <GlobalNav active="rooms" />
-      <div className="max-w-md md:max-w-3xl lg:max-w-4xl mx-auto px-5 md:px-6 py-6">
+      <div className="mx-auto max-w-[1440px] px-5 md:px-6 lg:px-8 py-6">
+        <div className="lg:grid lg:grid-cols-[280px_minmax(0,1fr)] xl:grid-cols-[300px_minmax(0,1fr)] lg:gap-8">
+          <aside className="hidden lg:block">
+            <div className="sticky top-20 space-y-4">
+              <div className={`${CARD} p-5`}>
+                <p className="text-[11px] uppercase tracking-[0.14em] text-[var(--text-muted)] mb-2">Room</p>
+                <p className="text-xl font-semibold text-[var(--text-primary)] leading-tight">{room.title}</p>
+                <div className="mt-3 flex items-center gap-2 flex-wrap">
+                  <span className={`text-[10px] font-medium px-2 py-0.5 rounded-full whitespace-nowrap ${roomStatus.tone}`}>
+                    {roomStatus.text}
+                  </span>
+                  <span
+                    className={
+                      "text-[10px] font-medium px-2 py-0.5 rounded-full border whitespace-nowrap " +
+                      ((room.approval_rule ?? "unanimous") === "unanimous"
+                        ? "bg-amber-500/10 text-amber-600 border-amber-500/30"
+                        : "bg-blue-500/10 text-blue-600 border-blue-500/30")
+                    }
+                  >
+                    {(room.approval_rule ?? "unanimous") === "unanimous" ? "Unanimous" : "Majority"}
+                  </span>
+                </div>
+                <div className="mt-4 grid grid-cols-2 gap-2">
+                  <div className="rounded-xl border border-[var(--border)] bg-[var(--card-2)] px-3 py-2">
+                    <p className="text-[10px] uppercase tracking-wide text-[var(--text-muted)]">Members</p>
+                    <p className="text-lg font-semibold text-[var(--text-primary)]">{members.length}</p>
+                  </div>
+                  <div className="rounded-xl border border-[var(--border)] bg-[var(--card-2)] px-3 py-2">
+                    <p className="text-[10px] uppercase tracking-wide text-[var(--text-muted)]">Submitted</p>
+                    <p className="text-lg font-semibold text-[var(--text-primary)]">{submittedCount}</p>
+                  </div>
+                </div>
+                <div className="mt-3 rounded-xl border border-[var(--border)] bg-[var(--card-2)] px-3 py-2">
+                  <p className="text-[10px] uppercase tracking-wide text-[var(--text-muted)]">Invite code</p>
+                  <p className="text-sm font-mono font-semibold text-[var(--text-primary)]">{room.short_code}</p>
+                </div>
+                <p className="mt-3 text-xs text-[var(--text-secondary)]">
+                  {isPayer ? "You are the payer for this room." : "Another member is the payer for this room."}
+                </p>
+              </div>
+
+              <div className={`${CARD} p-3`}>
+                <p className="text-[11px] uppercase tracking-[0.14em] text-[var(--text-muted)] mb-2 px-1">Sections</p>
+                <div className="flex flex-col gap-1">
+                  <a href="#room-overview" className="px-3 py-2 rounded-xl text-sm text-[var(--text-secondary)] hover:bg-[var(--card-2)] hover:text-[var(--text-primary)] transition-colors">Overview</a>
+                  <a href="#room-members" className="px-3 py-2 rounded-xl text-sm text-[var(--text-secondary)] hover:bg-[var(--card-2)] hover:text-[var(--text-primary)] transition-colors">People</a>
+                  <a href="#room-preferences" className="px-3 py-2 rounded-xl text-sm text-[var(--text-secondary)] hover:bg-[var(--card-2)] hover:text-[var(--text-primary)] transition-colors">Preferences</a>
+                  <a href="#room-proposal" className="px-3 py-2 rounded-xl text-sm text-[var(--text-secondary)] hover:bg-[var(--card-2)] hover:text-[var(--text-primary)] transition-colors">Proposal</a>
+                  {(acceptedProposal || room.status === "executing" || room.status === "done") && (
+                    <a href="#room-booking" className="px-3 py-2 rounded-xl text-sm text-[var(--text-secondary)] hover:bg-[var(--card-2)] hover:text-[var(--text-primary)] transition-colors">Booking</a>
+                  )}
+                  <a href="#room-chat" className="px-3 py-2 rounded-xl text-sm text-[var(--text-secondary)] hover:bg-[var(--card-2)] hover:text-[var(--text-primary)] transition-colors">Chat</a>
+                </div>
+              </div>
+            </div>
+          </aside>
+
+          <main className="min-w-0">
+        <div id="room-overview" className="scroll-mt-24">
         <HeaderBar
           roomId={room.id}
           title={room.title}
@@ -215,6 +282,7 @@ function RoomView({
           isCreator={isCreator}
           refresh={refresh}
         />
+        </div>
 
         <RoomActionsMenu
           roomId={room.id}
@@ -226,6 +294,7 @@ function RoomView({
           refresh={refresh}
         />
 
+        <div id="room-members" className="scroll-mt-24">
         <MembersStrip
           members={members}
           memberProfiles={member_profiles}
@@ -238,9 +307,11 @@ function RoomView({
           pendingByUser={pendingByUser}
           onContactAdded={reloadContacts}
         />
+        </div>
 
         {/* Constraint form — expanded while collecting; collapsed hint once
             voting opens so the proposal gets visual priority. */}
+        <div id="room-preferences" className="scroll-mt-24">
         {(room.status === "collecting" || room.status === "proposing") && (
           <ConstraintForm
             roomId={room.id}
@@ -258,11 +329,13 @@ function RoomView({
             collapsedByDefault
           />
         )}
+        </div>
 
         {/* Last rejected round — shown while the room is back in collecting
             so members can see what was proposed / who voted for what before
             deciding to regenerate. Must sit ABOVE ProposeButton so the
             "Generate proposal" CTA appears below the rejected option cards. */}
+        <div id="room-proposal" className="scroll-mt-24">
         {!activeProposal && !acceptedProposal && lastRejectedProposal && room.status === "collecting" && (
           <ProposalCard
             proposal={lastRejectedProposal}
@@ -313,8 +386,10 @@ function RoomView({
             mode={acceptedProposal && !activeProposal ? "accepted" : "active"}
           />
         )}
+        </div>
 
         {/* Accepted proposal + execute (payer only) */}
+        <div id="room-booking" className="scroll-mt-24">
         {acceptedProposal && room.status !== "done" && (
           <AcceptedBlock
             proposal={acceptedProposal}
@@ -344,14 +419,17 @@ function RoomView({
             <p className="text-sm text-[var(--text-secondary)]">This room was abandoned.</p>
           </div>
         )}
+        </div>
 
         {/* Chat */}
+        <div id="room-chat" className="scroll-mt-24">
         <ChatPanel
           roomId={room.id}
           userId={userId}
           members={members}
           memberProfiles={member_profiles}
         />
+        </div>
 
         {/* Creator footnote */}
         {isCreator && room.status === "collecting" && (
@@ -359,6 +437,8 @@ function RoomView({
             You&apos;re the creator. {isPayer ? "You'll pay for this one." : "Partner will pay."}
           </p>
         )}
+          </main>
+        </div>
       </div>
     </div>
   );
