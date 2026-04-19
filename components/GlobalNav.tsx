@@ -67,9 +67,7 @@ export default function GlobalNav({ active }: Props) {
         position: "sticky",
         top: 0,
         zIndex: 100,
-        backgroundColor: "rgba(250,248,244,0.86)",
-        backdropFilter: "blur(18px)",
-        WebkitBackdropFilter: "blur(18px)",
+        backgroundColor: "var(--bg, #fafaf9)",
         borderBottom: "0.5px solid var(--border, #e5e7eb)",
         padding: "0 16px",
       }}

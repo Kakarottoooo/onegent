@@ -2558,26 +2558,15 @@ export default function TripsPage() {
       >
         {/* Page title */}
         <div className="mx-auto w-full max-w-[1440px] px-4 md:px-6 py-5">
-          <div className="lg:grid lg:grid-cols-[280px_minmax(0,1fr)] lg:gap-8">
+          <div className="lg:grid lg:grid-cols-[232px_minmax(0,1fr)] lg:gap-10">
             <aside className="hidden lg:block">
-              <div className="sticky top-20 space-y-4">
-                <div className="rounded-[20px] border border-[var(--border,#e5e7eb)] bg-[var(--card,#fff)] p-5">
-                  <p className="text-[11px] uppercase tracking-[0.14em] text-[var(--text-muted,#999)] mb-2">Tasks</p>
-                  <p className="text-2xl font-semibold text-[var(--text-primary,#111)]">Background work</p>
-                  <p className="mt-2 text-sm text-[var(--text-secondary,#666)]">
-                    The top bar switches products. This rail only controls your task workspace.
-                  </p>
-                  <div className="mt-4 grid grid-cols-2 gap-2">
-                    <div className="rounded-xl border border-[var(--border,#e5e7eb)] bg-[var(--card-2,#f6f6f4)] px-3 py-2">
-                      <p className="text-[10px] uppercase tracking-wide text-[var(--text-muted,#999)]">Tasks</p>
-                      <p className="text-lg font-semibold text-[var(--text-primary,#111)]">{jobs.length}</p>
-                    </div>
-                    <div className="rounded-xl border border-[var(--border,#e5e7eb)] bg-[var(--card-2,#f6f6f4)] px-3 py-2">
-                      <p className="text-[10px] uppercase tracking-wide text-[var(--text-muted,#999)]">Actions</p>
-                      <p className="text-lg font-semibold text-[var(--text-primary,#111)]">{actionTotal}</p>
-                    </div>
-                  </div>
-                  <div className="mt-4 flex flex-col gap-2">
+              <div className="sticky top-20 border-r border-[var(--border,#e5e7eb)] pr-6">
+                <p className="text-[11px] uppercase tracking-[0.14em] text-[var(--text-muted,#999)] mb-2">Tasks</p>
+                <p className="text-xl font-semibold text-[var(--text-primary,#111)]">Queue</p>
+                <p className="mt-2 text-sm text-[var(--text-secondary,#666)] leading-6">
+                  Background jobs and manual follow-ups live here.
+                </p>
+                <div className="mt-5 flex flex-col gap-2">
                     <button
                       onClick={() => setShowRestaurantForm((v) => !v)}
                       style={{
@@ -2614,12 +2603,19 @@ export default function TripsPage() {
                         {clearingAll ? "Clearing..." : "Clear all"}
                       </button>
                     )}
-                  </div>
                 </div>
 
                 {!loading && jobs.length > 0 && (
-                  <div className="rounded-[20px] border border-[var(--border,#e5e7eb)] bg-[var(--card,#fff)] p-3">
-                    <p className="text-[11px] uppercase tracking-[0.14em] text-[var(--text-muted,#999)] mb-2 px-1">Jump to task</p>
+                  <div style={{ marginTop: 24, paddingTop: 20, borderTop: "0.5px solid var(--border, #e5e7eb)" }}>
+                    <p style={{
+                      fontFamily: "var(--font-dm-sans)",
+                      fontSize: 11,
+                      fontWeight: 600,
+                      letterSpacing: "0.14em",
+                      textTransform: "uppercase",
+                      color: "var(--text-muted,#999)",
+                      marginBottom: 12,
+                    }}>Jump to task</p>
                     <div className="flex flex-col gap-1 max-h-[52vh] overflow-y-auto pr-1">
                       {jobs.map((job) => {
                         const isSelected = selectedJobId === job.id;
@@ -2672,22 +2668,64 @@ export default function TripsPage() {
           >
             ← Back to results
           </button>
-          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-            <p style={{ fontFamily: "var(--font-dm-sans)", fontWeight: 700, fontSize: 17 }}>Tasks</p>
-            {actionTotal > 0 && (
-              <span style={{
-                fontFamily: "var(--font-dm-sans)", fontSize: 11, fontWeight: 700,
-                color: "#fff", backgroundColor: "rgba(220,38,38,0.85)",
-                borderRadius: 20, padding: "2px 7px",
+          <div className="lg:flex lg:items-end lg:justify-between" style={{ gap: 16 }}>
+            <div>
+              <p style={{
+                fontFamily: "var(--font-dm-sans)",
+                fontSize: 11,
+                fontWeight: 600,
+                letterSpacing: "0.14em",
+                textTransform: "uppercase",
+                color: "var(--text-muted, #999)",
               }}>
-                {actionTotal} action{actionTotal > 1 ? "s" : ""} needed
-              </span>
-            )}
+                Workspace
+              </p>
+              <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 4 }}>
+                <p style={{ fontFamily: "var(--font-dm-sans)", fontWeight: 700, fontSize: 28, lineHeight: 1.1 }}>Tasks</p>
+                {actionTotal > 0 && (
+                  <span style={{
+                    fontFamily: "var(--font-dm-sans)", fontSize: 11, fontWeight: 700,
+                    color: "#fff", backgroundColor: "rgba(220,38,38,0.85)",
+                    borderRadius: 20, padding: "2px 7px",
+                  }}>
+                    {actionTotal} action{actionTotal > 1 ? "s" : ""} needed
+                  </span>
+                )}
+              </div>
+              <p style={{ fontFamily: "var(--font-dm-sans)", fontSize: 12, color: "var(--text-secondary, #666)", marginTop: 4 }}>
+                {loading ? "Loading..." : jobs.length === 0 ? "No tasks yet" : `${jobs.length} task${jobs.length === 1 ? "" : "s"} in queue.`}
+              </p>
+            </div>
+
+            <div className="hidden lg:flex" style={{ alignItems: "center", gap: 10 }}>
+              <div style={{
+                padding: "10px 14px",
+                borderRadius: 14,
+                border: "0.5px solid var(--border, #e5e7eb)",
+                background: "var(--card-2, #f6f6f4)",
+                fontFamily: "var(--font-dm-sans)",
+                fontSize: 12,
+                color: "var(--text-secondary, #666)",
+              }}>
+                <span style={{ color: "var(--text-muted, #999)", marginRight: 6 }}>Tasks</span>
+                <span style={{ color: "var(--text-primary, #111)", fontWeight: 700 }}>{jobs.length}</span>
+              </div>
+              <div style={{
+                padding: "10px 14px",
+                borderRadius: 14,
+                border: "0.5px solid var(--border, #e5e7eb)",
+                background: "var(--card-2, #f6f6f4)",
+                fontFamily: "var(--font-dm-sans)",
+                fontSize: 12,
+                color: "var(--text-secondary, #666)",
+              }}>
+                <span style={{ color: "var(--text-muted, #999)", marginRight: 6 }}>Actions</span>
+                <span style={{ color: "var(--text-primary, #111)", fontWeight: 700 }}>{actionTotal}</span>
+              </div>
+            </div>
           </div>
-          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginTop: 2 }}>
-            <p style={{ fontFamily: "var(--font-dm-sans)", fontSize: 12, color: "var(--text-secondary, #666)" }}>
-              {loading ? "Loading…" : jobs.length === 0 ? "No tasks yet" : `${jobs.length} task${jobs.length === 1 ? "" : "s"}`}
-            </p>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginTop: 6 }}>
+            <div />
             <div className="lg:hidden" style={{ display: "flex", alignItems: "center", gap: 10 }}>
               <button
                 onClick={() => setShowRestaurantForm((v) => !v)}

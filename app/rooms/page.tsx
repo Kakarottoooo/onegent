@@ -53,6 +53,21 @@ function TabSwitch({
   );
 }
 
+function RailStat({
+  label,
+  value,
+}: {
+  label: string;
+  value: string | number;
+}) {
+  return (
+    <div className="rounded-xl border border-[var(--border)] bg-[var(--card-2)] px-3 py-2">
+      <p className="text-[10px] uppercase tracking-wide text-[var(--text-muted)]">{label}</p>
+      <p className="text-sm font-semibold text-[var(--text-primary)] mt-1">{value}</p>
+    </div>
+  );
+}
+
 export default function RoomsListPage() {
   const { isSignedIn } = useAuth();
   const [tab, setTab] = useState<Tab>("active");
@@ -89,7 +104,7 @@ export default function RoomsListPage() {
               Sign in to see your Decision Rooms.
             </p>
             <Link href="/" className="text-sm font-medium text-[var(--gold)] underline">
-              Go to sign in →
+              Go to sign in
             </Link>
           </div>
         </div>
@@ -101,39 +116,32 @@ export default function RoomsListPage() {
     <div className={PAGE}>
       <GlobalNav active="rooms" />
       <div className="mx-auto max-w-[1440px] px-5 md:px-8 py-8">
-        <div className="lg:grid lg:grid-cols-[280px_minmax(0,1fr)] lg:gap-8">
+        <div className="lg:grid lg:grid-cols-[232px_minmax(0,1fr)] lg:gap-10">
           <aside className="hidden lg:block">
-            <div className="sticky top-20 space-y-4">
-              <div className={`${CARD} p-5`}>
-                <p className="text-[11px] uppercase tracking-[0.14em] text-[var(--text-muted)] mb-2">Rooms</p>
-                <h1 className="text-2xl font-semibold text-[var(--text-primary)] leading-tight">Decision Rooms</h1>
-                <p className="text-sm text-[var(--text-secondary)] mt-2">
-                  Shared decisions live here. The top bar switches modules; this rail only controls the rooms workspace.
-                </p>
-                <div className="mt-4 flex flex-col gap-2">
-                  <Link href="/rooms/new" className={`w-full text-center py-2.5 ${CTA}`}>
-                    + New room
-                  </Link>
-                  <Link
-                    href="/contacts"
-                    className="w-full text-center py-2.5 rounded-xl border border-[var(--border)] text-sm text-[var(--text-secondary)] hover:border-[var(--gold)] hover:text-[var(--text-primary)] transition-colors"
-                  >
-                    Contacts
-                  </Link>
-                </div>
+            <div className="sticky top-20 border-r border-[var(--border)] pr-6">
+              <p className="text-[11px] uppercase tracking-[0.14em] text-[var(--text-muted)] mb-2">Rooms</p>
+              <h1 className="text-xl font-semibold text-[var(--text-primary)] leading-tight">Decision Rooms</h1>
+              <p className="text-sm text-[var(--text-secondary)] mt-2 leading-6">
+                Shared decisions for dining, hotels, flights, and activities.
+              </p>
+
+              <div className="mt-5 flex flex-col gap-2">
+                <Link href="/rooms/new" className={`w-full text-center py-2.5 ${CTA}`}>
+                  + New room
+                </Link>
+                <Link
+                  href="/contacts"
+                  className="w-full text-center py-2.5 rounded-xl border border-[var(--border)] text-sm text-[var(--text-secondary)] hover:border-[var(--gold)] hover:text-[var(--text-primary)] transition-colors"
+                >
+                  Contacts
+                </Link>
               </div>
 
-              <div className={`${CARD} p-3`}>
-                <TabSwitch tab={tab} setTab={setTab} />
-                <div className="mt-3 grid grid-cols-2 gap-2">
-                  <div className="rounded-xl border border-[var(--border)] bg-[var(--card-2)] px-3 py-2">
-                    <p className="text-[10px] uppercase tracking-wide text-[var(--text-muted)]">Visible</p>
-                    <p className="text-lg font-semibold text-[var(--text-primary)]">{rooms?.length ?? "—"}</p>
-                  </div>
-                  <div className="rounded-xl border border-[var(--border)] bg-[var(--card-2)] px-3 py-2">
-                    <p className="text-[10px] uppercase tracking-wide text-[var(--text-muted)]">Mode</p>
-                    <p className="text-sm font-semibold text-[var(--text-primary)]">{tab === "active" ? "Working" : "Archive"}</p>
-                  </div>
+              <div className="mt-6 pt-5 border-t border-[var(--border)]">
+                <p className="text-[11px] uppercase tracking-[0.14em] text-[var(--text-muted)] mb-3">Overview</p>
+                <div className="grid grid-cols-2 gap-2">
+                  <RailStat label="Visible" value={rooms?.length ?? "—"} />
+                  <RailStat label="Mode" value={tab === "active" ? "Working" : "Archive"} />
                 </div>
               </div>
             </div>
@@ -162,20 +170,29 @@ export default function RoomsListPage() {
               <TabSwitch tab={tab} setTab={setTab} />
             </div>
 
-            <div className="mb-5">
-              <p className="text-[11px] uppercase tracking-[0.14em] text-[var(--text-muted)]">Workspace</p>
-              <p className="mt-1 text-2xl lg:text-3xl font-semibold text-[var(--text-primary)]">
-                {tab === "active" ? "Current rooms" : "Archived rooms"}
-              </p>
-              <p className="text-sm text-[var(--text-secondary)] mt-1">
-                {rooms === null
-                  ? "Refreshing your rooms."
-                  : rooms.length
-                    ? `${rooms.length} room${rooms.length === 1 ? "" : "s"} in view.`
-                    : tab === "active"
-                      ? "No active rooms yet."
-                      : "No archived rooms yet."}
-              </p>
+            <div className="mb-6 flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
+              <div>
+                <p className="text-[11px] uppercase tracking-[0.14em] text-[var(--text-muted)]">Workspace</p>
+                <p className="mt-1 text-2xl lg:text-3xl font-semibold text-[var(--text-primary)]">Rooms</p>
+                <p className="text-sm text-[var(--text-secondary)] mt-1">
+                  {rooms === null
+                    ? "Refreshing your rooms."
+                    : rooms.length
+                      ? `${rooms.length} ${tab === "active" ? "active" : "archived"} room${rooms.length === 1 ? "" : "s"} in view.`
+                      : tab === "active"
+                        ? "No active rooms yet."
+                        : "No archived rooms yet."}
+                </p>
+              </div>
+
+              <div className="hidden lg:flex items-center gap-3">
+                <div className="min-w-[220px]">
+                  <TabSwitch tab={tab} setTab={setTab} />
+                </div>
+                <Link href="/rooms/new" className={`inline-flex items-center justify-center px-4 py-2.5 ${CTA}`}>
+                  + New room
+                </Link>
+              </div>
             </div>
 
             {error && (
@@ -185,18 +202,18 @@ export default function RoomsListPage() {
             )}
 
             {rooms === null && !error && (
-              <p className="text-sm text-[var(--text-muted)] text-center py-12">Loading…</p>
+              <p className="text-sm text-[var(--text-muted)] text-center py-12">Loading...</p>
             )}
 
             {rooms && rooms.length === 0 && tab === "active" && (
               <div className={`${CARD} p-8 text-center`}>
-                <div className="text-3xl mb-2">🗧️</div>
+                <div className="text-3xl mb-2">Rooms</div>
                 <p className="text-sm font-medium text-[var(--text-primary)] mb-1">No rooms yet</p>
                 <p className="text-xs text-[var(--text-secondary)] mb-4">
                   Start one to decide something together with a friend or partner.
                 </p>
                 <Link href="/rooms/new" className={`inline-block py-2 px-4 ${CTA}`}>
-                  Start a room →
+                  Start a room
                 </Link>
               </div>
             )}
@@ -221,7 +238,7 @@ export default function RoomsListPage() {
                         <div className="flex-1 min-w-0">
                           <p className="text-sm font-semibold text-[var(--text-primary)] truncate">{r.title}</p>
                           <p className="text-xs text-[var(--text-muted)] mt-0.5">
-                            {TYPE_LABEL[r.type]} • <span className="font-mono">{r.short_code}</span>
+                            {TYPE_LABEL[r.type]} · <span className="font-mono">{r.short_code}</span>
                           </p>
                         </div>
                         <span className={`text-[10px] font-medium px-2 py-0.5 rounded-full whitespace-nowrap ${status.tone}`}>
