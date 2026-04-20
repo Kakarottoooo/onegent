@@ -120,7 +120,7 @@ export function AutopilotRunnerModal({ open, steps, tripLabel, onClose }: Props)
           </span>
           <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
             <a
-              href="/permissions"
+              href="/account?tab=controls"
               title="Agent permissions"
               style={{
                 background: "none",

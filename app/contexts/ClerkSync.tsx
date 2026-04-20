@@ -35,6 +35,7 @@ export function ClerkSync() {
       userId: user?.id ?? null,
       userDisplayName: user?.fullName ?? user?.primaryEmailAddress?.emailAddress ?? null,
       userAvatar: user?.imageUrl ?? null,
+      userEmail: user?.primaryEmailAddress?.emailAddress ?? null,
       signIn,
       signOut,
     });

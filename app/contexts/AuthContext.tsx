@@ -7,6 +7,7 @@ export interface AuthState {
   userId: string | null;
   userDisplayName: string | null;
   userAvatar: string | null;
+  userEmail?: string | null;
   signIn: () => void;
   signOut: () => Promise<void>;
 }
@@ -16,6 +17,7 @@ const DEFAULT_STATE: AuthState = {
   userId: null,
   userDisplayName: null,
   userAvatar: null,
+  userEmail: null,
   signIn: () => {},
   signOut: async () => {},
 };

@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 /**
  * /permissions — Unified Settings hub
@@ -11,7 +11,7 @@
  */
 
 import { useState, useEffect, useCallback } from "react";
-import { useSearchParams } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import GlobalNav from "@/components/GlobalNav";
 import { useLanguage } from "@/app/hooks/useLanguage";
 import { usePreferences } from "@/app/hooks/usePreferences";
@@ -442,7 +442,7 @@ function ProfileForm({ data, onChange, showCard, onToggleCard, showDocs, onToggl
   );
 }
 
-function BookingProfileTab() {
+export function BookingProfileTab() {
   const [profiles, setProfiles] = useState<ProfileRecord[]>([]);
   const [loading, setLoading] = useState(true);
   const [expandedId, setExpandedId] = useState<number | null>(null);
@@ -753,7 +753,7 @@ function saveAgentModelConfig(cfg: AgentModelConfig) {
   localStorage.setItem("agent_model_config", JSON.stringify(cfg));
 }
 
-function AgentModelTab() {
+export function AgentModelTab() {
   const [activeModel, setActiveModel] = useState("");
   // per-provider keys typed by the user (from localStorage)
   const [localKeys, setLocalKeys] = useState<Record<string, string>>({});
@@ -1314,7 +1314,7 @@ function RelationshipProfileSection({
   );
 }
 
-function LearnedProfileTab({
+export function LearnedProfileTab({
   sessionId,
   relationship,
   onSaveRelationship,
@@ -1475,31 +1475,52 @@ function PermissionsTab({ settings, update, tp }: {
 
 // ── Main page ──────────────────────────────────────────────────────────────
 
-type TabId = "profile" | "model" | "taste" | "permissions";
-
 export default function PermissionsPage() {
+  const router = useRouter();
   const searchParams = useSearchParams();
-  const [activeTab, setActiveTab] = useState<TabId>("profile");
-  const [settings, setSettings] = useState<AgentAutonomySettings>(DEFAULT_AUTONOMY);
-  const [mounted, setMounted] = useState(false);
-  const [saved, setSaved] = useState(false);
-  const [relationship, setRelationship] = useState<RelationshipProfile | null>(null);
-  const [sessionId, setSessionId] = useState("");
-  const { t } = useLanguage();
-  const tp = t.permissions;
 
-  const resolveTabId = useCallback((raw: string | null): TabId | null => {
-    if (!raw) return null;
-    if (raw === "profile" || raw === "details") return "profile";
-    if (raw === "model" || raw === "models") return "model";
-    if (raw === "taste" || raw === "learned") return "taste";
-    if (raw === "permissions" || raw === "controls") return "permissions";
-    return null;
+  const resolveTarget = useCallback((raw: string | null): string => {
+    if (!raw) return "profiles";
+    if (raw === "profile" || raw === "details" || raw === "profiles") return "profiles";
+    if (raw === "model" || raw === "models") return "models";
+    if (raw === "taste" || raw === "learned") return "learned";
+    if (raw === "permissions" || raw === "controls") return "controls";
+    if (raw === "billing") return "billing";
+    if (raw === "identity") return "identity";
+    return "identity";
   }, []);
 
   useEffect(() => {
-    setSettings(loadAutonomySettings());
-    setMounted(true);
+    const target = resolveTarget(searchParams.get("tab"));
+    if (target === "learned") {
+      router.replace("/insights?tab=overview");
+      return;
+    }
+    router.replace(`/account?tab=${encodeURIComponent(target)}`);
+  }, [resolveTarget, router, searchParams]);
+
+  return (
+    <div style={{ minHeight: "100vh", backgroundColor: "var(--bg, #fafaf9)" }}>
+      <GlobalNav active="other" />
+      <main style={{ maxWidth: 580, margin: "0 auto", padding: "28px 20px 80px" }}>
+        <div style={{ marginBottom: 4 }}>
+          <h1 style={{ fontFamily: "var(--font-playfair, serif)", fontSize: 26, fontWeight: 700, color: "var(--text-primary, #111)", marginBottom: 6 }}>
+            Redirecting to Account
+          </h1>
+          <p style={{ fontFamily: "var(--font-dm-sans)", fontSize: 13, color: "var(--text-secondary, #666)" }}>
+            Settings now live under the unified Account workspace.
+          </p>
+        </div>
+      </main>
+    </div>
+  );
+}
+
+export function LearnedSettingsTab() {
+  const [relationship, setRelationship] = useState<RelationshipProfile | null>(null);
+  const [sessionId, setSessionId] = useState("");
+
+  useEffect(() => {
     const sid = getSessionId();
     setSessionId(sid);
     if (!sid) return;
@@ -1509,10 +1530,26 @@ export default function PermissionsPage() {
       .catch(() => {});
   }, []);
 
+  return (
+    <LearnedProfileTab
+      sessionId={sessionId}
+      relationship={relationship}
+      onSaveRelationship={setRelationship}
+    />
+  );
+}
+
+export function ControlsSettingsTab() {
+  const [settings, setSettings] = useState<AgentAutonomySettings>(DEFAULT_AUTONOMY);
+  const [mounted, setMounted] = useState(false);
+  const [saved, setSaved] = useState(false);
+  const { t } = useLanguage();
+  const tp = t.permissions;
+
   useEffect(() => {
-    const nextTab = resolveTabId(searchParams.get("tab"));
-    if (nextTab && nextTab !== activeTab) setActiveTab(nextTab);
-  }, [activeTab, resolveTabId, searchParams]);
+    setSettings(loadAutonomySettings());
+    setMounted(true);
+  }, []);
 
   const update = useCallback((patch: unknown) => {
     setSettings((prev) => {
@@ -1524,72 +1561,29 @@ export default function PermissionsPage() {
     setTimeout(() => setSaved(false), 1800);
   }, []);
 
-  const TABS: { id: TabId; label: string }[] = [
-    { id: "profile",     label: "Details" },
-    { id: "taste",       label: "Learned" },
-    { id: "model",       label: "Models" },
-    { id: "permissions", label: "Controls" },
-  ];
-
   return (
-    <div style={{ minHeight: "100vh", backgroundColor: "var(--bg, #fafaf9)" }}>
-      <GlobalNav active="other" />
-
-      <main style={{ maxWidth: 580, margin: "0 auto", padding: "28px 20px 80px" }}>
-
-        {/* Header */}
-        <div style={{ marginBottom: 4 }}>
-          <h1 style={{ fontFamily: "var(--font-playfair, serif)", fontSize: 26, fontWeight: 700, color: "var(--text-primary, #111)", marginBottom: 6 }}>
-            Profile
-          </h1>
-          <p style={{ fontFamily: "var(--font-dm-sans)", fontSize: 13, color: "var(--text-secondary, #666)" }}>
-            Booking details, learned preferences, and agent controls in one place.
-          </p>
-        </div>
-
-        {/* Tabs */}
-        <div style={{ display: "flex", borderBottom: "0.5px solid var(--border, #e5e7eb)", marginBottom: 24, marginTop: 20, gap: 0 }}>
-          {TABS.map((tab) => (
-            <button key={tab.id} onClick={() => setActiveTab(tab.id)} style={{
-              flex: 1, padding: "10px 4px", background: "none", border: "none",
-              borderBottom: activeTab === tab.id ? "2px solid var(--gold, #C9A84C)" : "2px solid transparent",
-              fontFamily: "var(--font-dm-sans)", fontSize: 13,
-              fontWeight: activeTab === tab.id ? 700 : 400,
-              color: activeTab === tab.id ? "var(--gold, #C9A84C)" : "var(--text-muted, #aaa)",
-              cursor: "pointer", transition: "color 0.15s",
-            }}>
-              {tab.label}
-            </button>
-          ))}
-        </div>
-
-        {/* Tab content */}
-        {activeTab === "profile" && <BookingProfileTab />}
-        {activeTab === "model" && <AgentModelTab />}
-        {activeTab === "taste" && (
-          <LearnedProfileTab
-            sessionId={sessionId}
-            relationship={relationship}
-            onSaveRelationship={setRelationship}
-          />
-        )}
-        {activeTab === "permissions" && (
-          mounted
-            ? <PermissionsTab settings={settings} update={update} tp={tp} />
-            : <p style={{ fontFamily: "var(--font-dm-sans)", fontSize: 13, color: "var(--text-muted, #aaa)" }}>Loading…</p>
-        )}
-
-        {/* Auto-save notice (permissions tab only) */}
-        {activeTab === "permissions" && saved && (
-          <p style={{
-            fontFamily: "var(--font-dm-sans)", fontSize: 12,
+    <>
+      {mounted ? (
+        <PermissionsTab settings={settings} update={update} tp={tp} />
+      ) : (
+        <p style={{ fontFamily: "var(--font-dm-sans)", fontSize: 13, color: "var(--text-muted, #aaa)" }}>
+          Loading…
+        </p>
+      )}
+      {saved && (
+        <p
+          style={{
+            fontFamily: "var(--font-dm-sans)",
+            fontSize: 12,
             color: "var(--gold, #C9A84C)",
-            textAlign: "center", marginTop: 36, transition: "color 0.3s",
-          }}>
-            ✓ {tp.autoSaved}
-          </p>
-        )}
-      </main>
-    </div>
+            textAlign: "center",
+            marginTop: 36,
+            transition: "color 0.3s",
+          }}
+        >
+          ✓ {tp.autoSaved}
+        </p>
+      )}
+    </>
   );
 }

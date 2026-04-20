@@ -2706,7 +2706,7 @@ function AcceptedBlock({
                 the agent can fill the reservation form. Takes 30 seconds.
               </p>
               <Link
-                href="/permissions"
+                href="/account?tab=profiles"
                 className="inline-block py-2 px-3 rounded-lg bg-[var(--gold)] text-white text-xs font-medium hover:opacity-90 transition-opacity"
               >
                 Open Settings → My Profile
@@ -2794,7 +2794,7 @@ function AcceptedBlock({
                 the agent can fill the reservation form. Takes 30 seconds.
               </p>
               <Link
-                href="/permissions"
+                href="/account?tab=profiles"
                 className="inline-block py-2 px-3 rounded-lg bg-[var(--gold)] text-white text-xs font-medium hover:opacity-90 transition-opacity"
               >
                 Open Settings → My Profile
@@ -2852,7 +2852,7 @@ function AcceptedBlock({
                 the agent can fill the reservation form. Takes 30 seconds.
               </p>
               <Link
-                href="/permissions"
+                href="/account?tab=profiles"
                 className="inline-block py-2 px-3 rounded-lg bg-[var(--gold)] text-white text-xs font-medium hover:opacity-90 transition-opacity"
               >
                 Open Settings → My Profile

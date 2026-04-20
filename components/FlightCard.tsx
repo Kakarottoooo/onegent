@@ -356,7 +356,7 @@ export default function FlightCard({ card, index, bookingContext, onJobCreated, 
       {noProfile && (
         <div style={{ padding: "10px 16px", fontSize: 12, fontFamily: "var(--font-sans)", color: "#b45309", background: "#fffbeb", borderRadius: 8, border: "1px solid #fde68a", marginTop: 4 }}>
           No booking profile found.{" "}
-          <a href="/permissions?tab=profile" style={{ color: "var(--gold)", fontWeight: 600 }}>Set up your profile →</a>
+          <a href="/account?tab=profiles" style={{ color: "var(--gold)", fontWeight: 600 }}>Set up your profile →</a>
         </div>
       )}
     </>

@@ -131,7 +131,7 @@ export default function ProfilePicker({ onSelect, onCancel }: ProfilePickerProps
             <>
               <p style={s.title}>Set up a profile first</p>
               <p style={s.subtitle}>Add your name, email, and phone so the agent can fill booking forms.</p>
-              <button style={s.setupBtn} onClick={() => router.push("/permissions?tab=profile")}>
+              <button style={s.setupBtn} onClick={() => router.push("/account?tab=profiles")}>
                 Go to My Profiles →
               </button>
               <button style={s.cancelBtn} onClick={onCancel}>Cancel</button>

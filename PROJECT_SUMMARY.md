@@ -47,6 +47,40 @@ Recent Updates - 2026-04-18
    - The active project directory is now `onegent`.
    - Older references to `restaurant-agent` or the Ralph workspace should be treated as legacy context, not the primary project root.
 
+================================================================
+Recent Updates - 2026-04-20
+================================================================
+
+1. Memory workspace promoted to top-level navigation
+   - `Insights` and the old learned-preferences surface are now being consolidated into a first-class `Memory` workspace.
+   - The top navigation now emphasizes the core product surfaces: `Tasks`, `Rooms`, and `Memory`.
+   - `Memory` is treated as operational agent memory, not a buried settings tab.
+
+2. New Memory IA: defaults + inference + evidence
+   - The new Memory page separates what the agent actively uses from how it inferred those beliefs.
+   - The workspace now includes five views: `Overview`, `Patterns`, `Scenarios`, `Evidence`, and `Activity`.
+   - `Overview` shows the currently applied defaults and hard constraints.
+   - `Patterns` surfaces provider ranking, satisfaction predictors, and stated-vs-actual behavior gaps.
+   - `Scenarios` shows context-specific memory such as date-night vs. family vs. general behavior.
+   - `Evidence` explains why the system believes something, including override-trigger traces and flagged/trusted entities.
+   - `Activity` shows recent learned signals, favorite traces, and search-memory breadcrumbs.
+
+3. Account became a true account center
+   - The global `Account` destination was removed from the primary top navigation and is now primarily entered from the avatar menu.
+   - `Account` now focuses on stable account-management surfaces instead of trying to hold both identity and agent-memory concepts.
+   - The main account tabs now focus on `Identity`, `Profiles`, `Controls`, `Models`, and `Billing`.
+   - Requests for the old `learned` tab are redirected into the new `Memory` workspace instead of staying inside `Account`.
+
+4. Identity model upgraded beyond a simple display name
+   - The account identity surface now supports avatar upload, editable display name, searchable handle, immutable user ID, and backup contact code.
+   - The account UI explains how the user will appear inside Contacts, Rooms, and collaborative booking flows.
+   - This makes the user object feel like a persistent account entity rather than a temporary auth label.
+
+5. Legacy settings / learned routes normalized
+   - The legacy `/permissions` hub now acts as a compatibility redirect into the new account / memory split.
+   - Older entry points that previously assumed `learned` lived inside settings are now forwarded to the correct surface.
+   - This keeps older links and flows working while the product model shifts from settings tabs to dedicated workspaces.
+
 【核心能力速览】
 三条主线，贯穿第四 / 第五阶段的完成态能力：
   · 个人决策：6 层 Agent 管道（NLU → Plan → Tool → Retrieve → Rank → Explain），
