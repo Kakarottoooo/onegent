@@ -56,14 +56,13 @@ Recent Updates - 2026-04-20
    - The top navigation now emphasizes the core product surfaces: `Tasks`, `Rooms`, and `Memory`.
    - `Memory` is treated as operational agent memory, not a buried settings tab.
 
-2. New Memory IA: defaults + inference + evidence
-   - The new Memory page separates what the agent actively uses from how it inferred those beliefs.
-   - The workspace now includes five views: `Overview`, `Patterns`, `Scenarios`, `Evidence`, and `Activity`.
-   - `Overview` shows the currently applied defaults and hard constraints.
-   - `Patterns` surfaces provider ranking, satisfaction predictors, and stated-vs-actual behavior gaps.
+2. New Memory IA: dashboard + patterns + scenarios + evidence
+   - The new Memory page separates what the agent has done, what the agent has learned, and how it inferred those beliefs.
+   - The workspace now includes four views: `Dashboard`, `Patterns`, `Scenarios`, and `Evidence`.
+   - `Dashboard` is the default landing view — an agent-achievement analytics surface (see update #6).
+   - `Patterns` absorbs the old `Overview` content plus provider ranking, satisfaction predictors, and stated-vs-actual behavior gaps.
    - `Scenarios` shows context-specific memory such as date-night vs. family vs. general behavior.
-   - `Evidence` explains why the system believes something, including override-trigger traces and flagged/trusted entities.
-   - `Activity` shows recent learned signals, favorite traces, and search-memory breadcrumbs.
+   - `Evidence` absorbs the old `Activity` entry points and explains why the system believes something, including override-trigger traces and flagged/trusted entities.
 
 3. Account became a true account center
    - The global `Account` destination was removed from the primary top navigation and is now primarily entered from the avatar menu.
@@ -80,6 +79,21 @@ Recent Updates - 2026-04-20
    - The legacy `/permissions` hub now acts as a compatibility redirect into the new account / memory split.
    - Older entry points that previously assumed `learned` lived inside settings are now forwarded to the correct surface.
    - This keeps older links and flows working while the product model shifts from settings tabs to dedicated workspaces.
+
+6. Memory Dashboard — agent-achievement analytics
+   - Memory's new default landing view is a dashboard showing "what your agent has been doing for you" across a chosen time range.
+   - Range switch (This week / This month / All time) drives every card, chart, and activity entry on the page.
+   - Six KPI cards: Agent Compared (options across plans and proposals, with an inline "hours saved" hint), Tasks Delivered (booking jobs + completed rooms treated as delivered), Decision Rooms, Searches (individual agent plans), New Preferences Learned, Votes Cast.
+   - Two visualizations: an Area chart for cross-source activity over time, and a donut chart breaking down scenarios (restaurant / hotel / flight / trip / etc).
+   - A unified recent-activity feed at the bottom merges booking tasks, rooms, searches, votes, and newly-learned preferences into a single timeline.
+   - Hours-saved estimate uses a deliberately conservative formula: `options_compared × 45s`, surfaced as "Roughly Xh of manual browsing saved" inside the Agent Compared card.
+   - Aggregation lives in a single `/api/user/analytics?range=…` endpoint that fans out ~20 parallel SQL queries against `booking_jobs`, `decision_rooms`, `decision_plans`, `decision_room_proposals`, `decision_room_votes`, and `user_preferences`.
+   - Archived / completed tasks are treated as successfully delivered for analytics purposes, so the dashboard reflects full lifetime agent work, not only live state.
+
+7. Suspense hardening for search-params pages
+   - `/account`, `/insights`, `/permissions`, and `/tasks` all read `useSearchParams()` directly on render. Under Next 16's stricter prerender rules this broke static page generation.
+   - Each page was split into a `*Inner` component plus a top-level default export that wraps the inner component in `<Suspense fallback={null}>`.
+   - Production build now prerenders all 56 pages cleanly without CSR-bailout errors.
 
 【核心能力速览】
 三条主线，贯穿第四 / 第五阶段的完成态能力：

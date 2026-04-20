@@ -1,6 +1,6 @@
 ﻿"use client";
 
-import { useState, useEffect, useCallback, useRef } from "react";
+import { Suspense, useState, useEffect, useCallback, useRef } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import type { BookingJob, BookingJobStep, DecisionLogEntry, AgentFeedbackStats } from "@/lib/db";
 import type { PolicyBias, UserPreferenceProfile } from "@/lib/policy";
@@ -2670,7 +2670,7 @@ function InsightsPanel({ sessionId }: { sessionId: string }) {
 
 // ── Page ───────────────────────────────────────────────────────────────────────
 
-export default function TripsPage() {
+function TripsPageInner() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const [jobs, setJobs] = useState<BookingJob[]>([]);
@@ -3247,6 +3247,14 @@ export default function TripsPage() {
         </>
       )}
     </div>
+  );
+}
+
+export default function TripsPage() {
+  return (
+    <Suspense fallback={null}>
+      <TripsPageInner />
+    </Suspense>
   );
 }
 

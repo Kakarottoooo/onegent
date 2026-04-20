@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { Suspense, useEffect, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import GlobalNav from "@/components/GlobalNav";
 import { LearnedSettingsTab } from "@/app/permissions/page";
@@ -11,8 +11,9 @@ import type {
   PolicyBias,
   UserPreferenceProfile as BehaviorProfile,
 } from "@/lib/policy";
+import DashboardTab from "./DashboardTab";
 
-type MemoryTab = "overview" | "patterns" | "scenarios" | "evidence" | "activity";
+type MemoryTab = "dashboard" | "patterns" | "scenarios" | "evidence";
 
 type MemoryResponse = {
   taskMemory: ScenarioMemory[];
@@ -40,27 +41,15 @@ function getSessionId() {
 }
 
 function resolveTab(raw: string | null): MemoryTab {
-  if (raw === "patterns") return "patterns";
+  if (raw === "patterns" || raw === "overview") return "patterns";
   if (raw === "scenarios") return "scenarios";
-  if (raw === "evidence") return "evidence";
-  if (raw === "activity") return "activity";
-  return "overview";
+  if (raw === "evidence" || raw === "activity") return "evidence";
+  return "dashboard";
 }
 
 function formatPercent(value: number | null | undefined): string {
   if (value == null || Number.isNaN(value)) return "n/a";
   return `${Math.round(value * 100)}%`;
-}
-
-function formatDate(value: string | null | undefined): string {
-  if (!value) return "n/a";
-  const parsed = new Date(value);
-  if (Number.isNaN(parsed.getTime())) return "n/a";
-  return parsed.toLocaleDateString(undefined, {
-    month: "short",
-    day: "numeric",
-    year: "numeric",
-  });
 }
 
 function humanizeTolerance(value: string | null | undefined): string {
@@ -138,50 +127,6 @@ function sectionTitleStyle(): React.CSSProperties {
     color: "rgba(244,231,200,0.42)",
     marginBottom: 10,
   };
-}
-
-function SummaryStat({
-  label,
-  value,
-  detail,
-}: {
-  label: string;
-  value: string;
-  detail: string;
-}) {
-  return (
-    <div
-      style={{
-        borderRadius: 16,
-        border: "0.5px solid rgba(201,168,76,0.16)",
-        background: "rgba(255,255,255,0.03)",
-        padding: 16,
-      }}
-    >
-      <div style={sectionTitleStyle()}>{label}</div>
-      <div
-        style={{
-          fontFamily: "var(--font-dm-sans)",
-          fontSize: 24,
-          fontWeight: 700,
-          color: "#F8F2E7",
-          marginBottom: 6,
-        }}
-      >
-        {value}
-      </div>
-      <div
-        style={{
-          fontFamily: "var(--font-dm-sans)",
-          fontSize: 12,
-          lineHeight: 1.6,
-          color: "rgba(244,231,200,0.62)",
-        }}
-      >
-        {detail}
-      </div>
-    </div>
-  );
 }
 
 function EmptyState({ title, detail }: { title: string; detail: string }) {
@@ -306,12 +251,12 @@ function TabButton({
   );
 }
 
-export default function InsightsPage() {
+function InsightsPageInner() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const { profile: learnedProfile } = usePreferences();
 
-  const [activeTab, setActiveTab] = useState<MemoryTab>("overview");
+  const [activeTab, setActiveTab] = useState<MemoryTab>("dashboard");
   const [loading, setLoading] = useState(true);
   const [memory, setMemory] = useState<MemoryResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -368,8 +313,6 @@ export default function InsightsPage() {
   const topProviders = memory?.bias.providerRanking.slice(0, 4) ?? [];
   const scenarioMemory = memory?.taskMemory ?? [];
   const evidenceTriggers = memory?.patternMemory.overrideTriggers ?? [];
-  const favoriteSignals = learnedProfile.favorite_signals ?? [];
-  const recentKeywords = learnedProfile.recent_search_keywords ?? [];
 
   return (
     <div style={{ minHeight: "100vh", backgroundColor: "var(--bg, #fafaf9)" }}>
@@ -399,43 +342,9 @@ export default function InsightsPage() {
               maxWidth: 760,
             }}
           >
-            This is the agent's working memory: the defaults it actively applies, the behavioral
+            This is the agent&apos;s working memory: the defaults it actively applies, the behavioral
             patterns it inferred, and the evidence explaining why it thinks that way.
           </p>
-        </div>
-
-        <div
-          style={{
-            display: "grid",
-            gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
-            gap: 12,
-            marginBottom: 18,
-          }}
-        >
-          <SummaryStat
-            label="Adopted defaults"
-            value={String(adoptedSignals.length + learnedProfile.dietary_restrictions.length)}
-            detail="Signals the agent can immediately apply before making a fresh decision."
-          />
-          <SummaryStat
-            label="Evidence events"
-            value={String(memory?.totalEvents ?? 0)}
-            detail="Historical feedback and booking outcomes used to calibrate agent behavior."
-          />
-          <SummaryStat
-            label="Confidence"
-            value={memory?.profile.confidenceLevel ?? "loading"}
-            detail="How reliable the current behavioral model is based on interaction volume."
-          />
-          <SummaryStat
-            label="Relationship"
-            value={memory?.relationship?.type ?? "none"}
-            detail={
-              memory?.relationship
-                ? `${memory.relationship.name} defaults last updated ${formatDate(memory.relationship.updated_at)}.`
-                : "No shared relationship profile has been saved yet."
-            }
-          />
         </div>
 
         <div
@@ -453,11 +362,11 @@ export default function InsightsPage() {
             }}
           >
             <TabButton
-              active={activeTab === "overview"}
-              label="Overview"
+              active={activeTab === "dashboard"}
+              label="Dashboard"
               onClick={() => {
-                setActiveTab("overview");
-                router.replace("/insights?tab=overview");
+                setActiveTab("dashboard");
+                router.replace("/insights?tab=dashboard");
               }}
             />
             <TabButton
@@ -484,30 +393,24 @@ export default function InsightsPage() {
                 router.replace("/insights?tab=evidence");
               }}
             />
-            <TabButton
-              active={activeTab === "activity"}
-              label="Activity"
-              onClick={() => {
-                setActiveTab("activity");
-                router.replace("/insights?tab=activity");
-              }}
-            />
           </div>
         </div>
 
-        {loading && (
+        {activeTab === "dashboard" && <DashboardTab />}
+
+        {loading && activeTab !== "dashboard" && (
           <EmptyState
             title="Loading memory"
             detail="Pulling together learned defaults, behavioral patterns, and evidence traces."
           />
         )}
 
-        {!loading && error && (
+        {!loading && error && activeTab !== "dashboard" && (
           <EmptyState title="Memory unavailable" detail={error} />
         )}
 
-        {!loading && !error && activeTab === "overview" && (
-          <div style={{ display: "grid", gap: 18 }}>
+        {!loading && !error && activeTab === "patterns" && (
+          <div style={{ display: "grid", gap: 18, marginBottom: 18 }}>
             <div style={{ ...memoryPanelStyle(), padding: 22 }}>
               <div style={sectionTitleStyle()}>Currently applied defaults</div>
               <div
@@ -1035,100 +938,15 @@ export default function InsightsPage() {
           </div>
         )}
 
-        {!loading && !error && activeTab === "activity" && (
-          <div style={{ display: "grid", gap: 18 }}>
-            <div style={{ ...memoryPanelStyle(), padding: 22 }}>
-              <div style={sectionTitleStyle()}>Recent learned signals</div>
-              {adoptedSignals.length > 0 ? (
-                <div style={{ display: "grid", gap: 10 }}>
-                  {[...adoptedSignals]
-                    .sort(
-                      (a, b) =>
-                        new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime(),
-                    )
-                    .slice(0, 8)
-                    .map((signal) => (
-                      <div
-                        key={signal.id}
-                        style={{
-                          borderRadius: 14,
-                          border: "0.5px solid rgba(201,168,76,0.14)",
-                          background: "rgba(255,255,255,0.03)",
-                          padding: "12px 14px",
-                        }}
-                      >
-                        <div style={{ fontFamily: "var(--font-dm-sans)", fontSize: 13, fontWeight: 700, color: "#F8F2E7", marginBottom: 6 }}>
-                          {signal.label}
-                        </div>
-                        <div style={{ fontFamily: "var(--font-dm-sans)", fontSize: 12, lineHeight: 1.7, color: "rgba(244,231,200,0.58)" }}>
-                          {signal.source} · updated {formatDate(signal.updated_at)}
-                        </div>
-                      </div>
-                    ))}
-                </div>
-              ) : (
-                <EmptyState
-                  title="No learned signals yet"
-                  detail="Once the agent starts inferring repeated preferences from tasks and conversation, they will show up here."
-                />
-              )}
-            </div>
-
-            <div
-              style={{
-                display: "grid",
-                gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))",
-                gap: 12,
-              }}
-            >
-              <div style={{ ...memoryPanelStyle(), padding: 20 }}>
-                <div style={sectionTitleStyle()}>Saved favorites</div>
-                {favoriteSignals.length > 0 ? (
-                  <div style={{ display: "grid", gap: 8 }}>
-                    {favoriteSignals.slice(0, 6).map((item, index) => (
-                      <div key={`${item.cuisine}-${item.price}-${index}`} style={{ fontFamily: "var(--font-dm-sans)", fontSize: 12, lineHeight: 1.8, color: "#F8F2E7" }}>
-                        {item.cuisine} / {item.price}
-                        {item.purpose ? ` / ${item.purpose}` : ""}
-                      </div>
-                    ))}
-                  </div>
-                ) : (
-                  <div style={{ fontFamily: "var(--font-dm-sans)", fontSize: 12, color: "rgba(244,231,200,0.58)" }}>
-                    No favorite signals stored yet.
-                  </div>
-                )}
-              </div>
-
-              <div style={{ ...memoryPanelStyle(), padding: 20 }}>
-                <div style={sectionTitleStyle()}>Search trail</div>
-                {recentKeywords.length > 0 ? (
-                  <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
-                    {recentKeywords.slice(0, 12).map((word, index) => (
-                      <div
-                        key={`${word}-${index}`}
-                        style={{
-                          borderRadius: 999,
-                          padding: "6px 10px",
-                          background: "rgba(255,255,255,0.04)",
-                          color: "#F8F2E7",
-                          fontFamily: "var(--font-dm-sans)",
-                          fontSize: 12,
-                        }}
-                      >
-                        {word}
-                      </div>
-                    ))}
-                  </div>
-                ) : (
-                  <div style={{ fontFamily: "var(--font-dm-sans)", fontSize: 12, color: "rgba(244,231,200,0.58)" }}>
-                    No recent search keywords captured yet.
-                  </div>
-                )}
-              </div>
-            </div>
-          </div>
-        )}
       </main>
     </div>
+  );
+}
+
+export default function InsightsPage() {
+  return (
+    <Suspense fallback={null}>
+      <InsightsPageInner />
+    </Suspense>
   );
 }

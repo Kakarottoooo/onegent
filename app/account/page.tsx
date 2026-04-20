@@ -1,6 +1,6 @@
 "use client";
 
-import { ChangeEvent, useEffect, useMemo, useRef, useState } from "react";
+import { ChangeEvent, Suspense, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import GlobalNav from "@/components/GlobalNav";
 import { useAuth } from "@/app/hooks/useAuth";
@@ -90,7 +90,7 @@ async function compressAvatar(file: File): Promise<string> {
   return canvas.toDataURL("image/jpeg", 0.84);
 }
 
-export default function AccountPage() {
+function AccountPageInner() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const auth = useAuth();
@@ -948,5 +948,13 @@ export default function AccountPage() {
         )}
       </main>
     </div>
+  );
+}
+
+export default function AccountPage() {
+  return (
+    <Suspense fallback={null}>
+      <AccountPageInner />
+    </Suspense>
   );
 }

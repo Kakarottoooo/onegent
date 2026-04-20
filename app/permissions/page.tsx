@@ -10,7 +10,7 @@
  * All settings auto-save to localStorage on every change.
  */
 
-import { useState, useEffect, useCallback } from "react";
+import { Suspense, useState, useEffect, useCallback } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import GlobalNav from "@/components/GlobalNav";
 import { useLanguage } from "@/app/hooks/useLanguage";
@@ -1475,7 +1475,7 @@ function PermissionsTab({ settings, update, tp }: {
 
 // ── Main page ──────────────────────────────────────────────────────────────
 
-export default function PermissionsPage() {
+function PermissionsPageInner() {
   const router = useRouter();
   const searchParams = useSearchParams();
 
@@ -1513,6 +1513,14 @@ export default function PermissionsPage() {
         </div>
       </main>
     </div>
+  );
+}
+
+export default function PermissionsPage() {
+  return (
+    <Suspense fallback={null}>
+      <PermissionsPageInner />
+    </Suspense>
   );
 }
 
