@@ -97,6 +97,8 @@ export interface BrowserTaskInput {
   targetPrice?: number;
   /** For Expedia flight booking: target departure time to match */
   targetDepartureTime?: string;
+  /** For Expedia flight booking: target flight number to match when available */
+  targetFlightNumber?: string;
 }
 
 export type BrowserTaskStatus =

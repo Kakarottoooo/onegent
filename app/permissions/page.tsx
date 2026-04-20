@@ -11,9 +11,11 @@
  */
 
 import { useState, useEffect, useCallback } from "react";
+import { useSearchParams } from "next/navigation";
 import GlobalNav from "@/components/GlobalNav";
 import { useLanguage } from "@/app/hooks/useLanguage";
 import { usePreferences } from "@/app/hooks/usePreferences";
+import type { RelationshipProfile, RelationshipType } from "@/lib/memory";
 import {
   loadAutonomySettings,
   saveAutonomySettings,
@@ -23,6 +25,16 @@ import {
 } from "@/lib/autonomy";
 
 const DIETARY_OPTIONS = ["Vegetarian", "Vegan", "Gluten-free", "Shellfish-free", "Halal", "Kosher"];
+
+function getSessionId() {
+  if (typeof window === "undefined") return "";
+  let id = localStorage.getItem("session_id");
+  if (!id) {
+    id = crypto.randomUUID();
+    localStorage.setItem("session_id", id);
+  }
+  return id;
+}
 
 // ── Deep merge helper ──────────────────────────────────────────────────────
 
@@ -623,9 +635,10 @@ function BookingProfileTab() {
           {/* Expanded edit form */}
           {expandedId === p.id && (
             <div style={{
-              padding: "16px 14px", border: "0.5px solid var(--gold, #C9A84C)",
+              padding: "16px 14px", border: "0.5px solid rgba(255,255,255,0.08)",
               borderTop: "none", borderRadius: "0 0 12px 12px",
-              backgroundColor: "var(--background, #fafaf9)",
+              backgroundColor: "#262320",
+              boxShadow: "inset 0 1px 0 rgba(255,255,255,0.02)",
             }}>
               <ProfileForm data={editData} onChange={setEditData} showCard={showCard} onToggleCard={() => setShowCard(v => !v)} showDocs={showDocs} onToggleDocs={() => setShowDocs(v => !v)} />
               <div style={{ display: "flex", gap: 10, marginTop: 20 }}>
@@ -654,8 +667,10 @@ function BookingProfileTab() {
       {addingNew && (
         <div style={{
           padding: "16px 14px", borderRadius: 12,
-          border: "0.5px solid var(--gold, #C9A84C)",
-          backgroundColor: "var(--background, #fafaf9)", marginTop: 4,
+          border: "0.5px solid rgba(255,255,255,0.08)",
+          backgroundColor: "#262320",
+          boxShadow: "inset 0 1px 0 rgba(255,255,255,0.02)",
+          marginTop: 4,
         }}>
           <p style={{ fontFamily: "var(--font-dm-sans)", fontSize: 13, fontWeight: 700, color: "var(--text-primary, #111)", marginBottom: 16 }}>
             New Profile
@@ -1120,6 +1135,224 @@ function TasteProfileTab() {
   );
 }
 
+function RelationshipProfileSection({
+  sessionId,
+  relationship,
+  onSave,
+}: {
+  sessionId: string;
+  relationship: RelationshipProfile | null;
+  onSave: (profile: RelationshipProfile) => void;
+}) {
+  const [form, setForm] = useState({
+    name: relationship?.name ?? "",
+    type: (relationship?.type ?? "solo") as RelationshipType,
+    constraints: relationship?.constraints.join(", ") ?? "",
+    avoid_types: relationship?.avoid_types.join(", ") ?? "",
+    notes: relationship?.notes ?? "",
+  });
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    setForm({
+      name: relationship?.name ?? "",
+      type: (relationship?.type ?? "solo") as RelationshipType,
+      constraints: relationship?.constraints.join(", ") ?? "",
+      avoid_types: relationship?.avoid_types.join(", ") ?? "",
+      notes: relationship?.notes ?? "",
+    });
+  }, [relationship]);
+
+  const TYPES: RelationshipType[] = ["solo", "couple", "friends", "family"];
+  const TYPE_LABELS: Record<RelationshipType, string> = {
+    solo: "Solo",
+    couple: "Couple",
+    friends: "Friends",
+    family: "Family",
+  };
+
+  const inputStyle: React.CSSProperties = {
+    width: "100%",
+    padding: "10px 12px",
+    borderRadius: 10,
+    boxSizing: "border-box",
+    border: "0.5px solid var(--border, #e5e7eb)",
+    background: "var(--card, #fff)",
+    fontFamily: "var(--font-dm-sans)",
+    fontSize: 13,
+    color: "var(--text-primary, #111)",
+    outline: "none",
+  };
+
+  async function save() {
+    if (!sessionId || !form.name.trim()) return;
+    setSaving(true);
+    const id = relationship?.id ?? crypto.randomUUID();
+    const payload: RelationshipProfile = {
+      id,
+      name: form.name.trim(),
+      type: form.type,
+      session_ids: [sessionId],
+      constraints: form.constraints.split(",").map((s) => s.trim()).filter(Boolean),
+      avoid_types: form.avoid_types.split(",").map((s) => s.trim()).filter(Boolean),
+      notes: form.notes.trim(),
+      created_at: relationship?.created_at ?? new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    };
+    const url = relationship ? `/api/relationships/${id}` : "/api/relationships";
+    const method = relationship ? "PATCH" : "POST";
+    await fetch(url, {
+      method,
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    }).catch(() => {});
+    onSave(payload);
+    setSaving(false);
+  }
+
+  return (
+    <div style={{ marginTop: 28 }}>
+      <SectionLabel>Relationship defaults</SectionLabel>
+      <div
+        style={{
+          borderRadius: 14,
+          border: "0.5px solid var(--border, #e5e7eb)",
+          background: "var(--card, #fff)",
+          padding: 16,
+        }}
+      >
+        <p
+          style={{
+            fontFamily: "var(--font-dm-sans)",
+            fontSize: 13,
+            color: "var(--text-secondary, #666)",
+            lineHeight: 1.6,
+            marginBottom: 16,
+          }}
+        >
+          Persistent context the agent should keep in mind across rooms: who this profile is for, what the group usually needs,
+          and what it should avoid by default.
+        </p>
+
+        <FieldLabel>Profile name</FieldLabel>
+        <input
+          value={form.name}
+          onChange={(e) => setForm((prev) => ({ ...prev, name: e.target.value }))}
+          placeholder="Friday night date"
+          style={inputStyle}
+        />
+
+        <SubLabel>Group type</SubLabel>
+        <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+          {TYPES.map((tp) => (
+            <button
+              key={tp}
+              onClick={() => setForm((prev) => ({ ...prev, type: tp }))}
+              style={{
+                padding: "7px 12px",
+                borderRadius: 999,
+                cursor: "pointer",
+                fontFamily: "var(--font-dm-sans)",
+                fontSize: 12,
+                fontWeight: form.type === tp ? 700 : 500,
+                border: form.type === tp ? "1px solid var(--gold, #C9A84C)" : "0.5px solid var(--border, #e5e7eb)",
+                background: form.type === tp ? "rgba(201,168,76,0.12)" : "var(--card, #fff)",
+                color: form.type === tp ? "var(--gold, #C9A84C)" : "var(--text-secondary, #666)",
+              }}
+            >
+              {TYPE_LABELS[tp]}
+            </button>
+          ))}
+        </div>
+
+        <FieldLabel>Always needs</FieldLabel>
+        <input
+          value={form.constraints}
+          onChange={(e) => setForm((prev) => ({ ...prev, constraints: e.target.value }))}
+          placeholder="window seat, quiet hotel, walkable area"
+          style={inputStyle}
+        />
+
+        <FieldLabel>Always avoids</FieldLabel>
+        <input
+          value={form.avoid_types}
+          onChange={(e) => setForm((prev) => ({ ...prev, avoid_types: e.target.value }))}
+          placeholder="early flights, shellfish, party hotels"
+          style={inputStyle}
+        />
+
+        <FieldLabel>Notes</FieldLabel>
+        <textarea
+          value={form.notes}
+          onChange={(e) => setForm((prev) => ({ ...prev, notes: e.target.value }))}
+          placeholder="Anything the agent should preserve when making tradeoffs."
+          rows={3}
+          style={{ ...inputStyle, resize: "vertical" }}
+        />
+
+        <button
+          onClick={save}
+          disabled={saving || !form.name.trim() || !sessionId}
+          style={{
+            marginTop: 14,
+            padding: "11px 14px",
+            borderRadius: 10,
+            border: "none",
+            cursor: saving ? "wait" : "pointer",
+            backgroundColor: "var(--gold, #C9A84C)",
+            color: "#fff",
+            fontFamily: "var(--font-dm-sans)",
+            fontSize: 13,
+            fontWeight: 700,
+            opacity: !form.name.trim() || !sessionId ? 0.55 : 1,
+          }}
+        >
+          {saving ? "Saving..." : relationship ? "Update learned defaults" : "Save learned defaults"}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function LearnedProfileTab({
+  sessionId,
+  relationship,
+  onSaveRelationship,
+}: {
+  sessionId: string;
+  relationship: RelationshipProfile | null;
+  onSaveRelationship: (profile: RelationshipProfile) => void;
+}) {
+  return (
+    <div style={{ display: "flex", flexDirection: "column" }}>
+      <div
+        style={{
+          borderRadius: 14,
+          border: "0.5px solid var(--border, #e5e7eb)",
+          background: "rgba(201,168,76,0.06)",
+          padding: "14px 16px",
+          marginBottom: 22,
+        }}
+      >
+        <p
+          style={{
+            fontFamily: "var(--font-dm-sans)",
+            fontSize: 13,
+            color: "var(--text-primary, #111)",
+            lineHeight: 1.6,
+          }}
+        >
+          This section combines what the agent has inferred from your usage with the longer-lived defaults it should remember for future
+          decisions.
+        </p>
+      </div>
+
+      <TasteProfileTab />
+      <RelationshipProfileSection sessionId={sessionId} relationship={relationship} onSave={onSaveRelationship} />
+    </div>
+  );
+}
+
 const CAT_META: Record<string, { emoji: string; label: string }> = {
   dining:   { emoji: "🍽", label: "Dining" },
   travel:   { emoji: "✈️", label: "Travel" },
@@ -1245,17 +1478,41 @@ function PermissionsTab({ settings, update, tp }: {
 type TabId = "profile" | "model" | "taste" | "permissions";
 
 export default function PermissionsPage() {
+  const searchParams = useSearchParams();
   const [activeTab, setActiveTab] = useState<TabId>("profile");
   const [settings, setSettings] = useState<AgentAutonomySettings>(DEFAULT_AUTONOMY);
   const [mounted, setMounted] = useState(false);
   const [saved, setSaved] = useState(false);
+  const [relationship, setRelationship] = useState<RelationshipProfile | null>(null);
+  const [sessionId, setSessionId] = useState("");
   const { t } = useLanguage();
   const tp = t.permissions;
+
+  const resolveTabId = useCallback((raw: string | null): TabId | null => {
+    if (!raw) return null;
+    if (raw === "profile" || raw === "details") return "profile";
+    if (raw === "model" || raw === "models") return "model";
+    if (raw === "taste" || raw === "learned") return "taste";
+    if (raw === "permissions" || raw === "controls") return "permissions";
+    return null;
+  }, []);
 
   useEffect(() => {
     setSettings(loadAutonomySettings());
     setMounted(true);
+    const sid = getSessionId();
+    setSessionId(sid);
+    if (!sid) return;
+    fetch(`/api/memory?session_id=${encodeURIComponent(sid)}`)
+      .then((r) => r.json())
+      .then((data) => setRelationship(data.relationship ?? null))
+      .catch(() => {});
   }, []);
+
+  useEffect(() => {
+    const nextTab = resolveTabId(searchParams.get("tab"));
+    if (nextTab && nextTab !== activeTab) setActiveTab(nextTab);
+  }, [activeTab, resolveTabId, searchParams]);
 
   const update = useCallback((patch: unknown) => {
     setSettings((prev) => {
@@ -1268,10 +1525,10 @@ export default function PermissionsPage() {
   }, []);
 
   const TABS: { id: TabId; label: string }[] = [
-    { id: "profile",     label: "My Profile" },
-    { id: "model",       label: "AI Model" },
-    { id: "taste",       label: "Taste Profile" },
-    { id: "permissions", label: tp.title },
+    { id: "profile",     label: "Details" },
+    { id: "taste",       label: "Learned" },
+    { id: "model",       label: "Models" },
+    { id: "permissions", label: "Controls" },
   ];
 
   return (
@@ -1283,10 +1540,10 @@ export default function PermissionsPage() {
         {/* Header */}
         <div style={{ marginBottom: 4 }}>
           <h1 style={{ fontFamily: "var(--font-playfair, serif)", fontSize: 26, fontWeight: 700, color: "var(--text-primary, #111)", marginBottom: 6 }}>
-            Preferences
+            Profile
           </h1>
           <p style={{ fontFamily: "var(--font-dm-sans)", fontSize: 13, color: "var(--text-secondary, #666)" }}>
-            Your taste profile and agent behaviour settings.
+            Booking details, learned preferences, and agent controls in one place.
           </p>
         </div>
 
@@ -1309,7 +1566,13 @@ export default function PermissionsPage() {
         {/* Tab content */}
         {activeTab === "profile" && <BookingProfileTab />}
         {activeTab === "model" && <AgentModelTab />}
-        {activeTab === "taste" && <TasteProfileTab />}
+        {activeTab === "taste" && (
+          <LearnedProfileTab
+            sessionId={sessionId}
+            relationship={relationship}
+            onSaveRelationship={setRelationship}
+          />
+        )}
         {activeTab === "permissions" && (
           mounted
             ? <PermissionsTab settings={settings} update={update} tp={tp} />

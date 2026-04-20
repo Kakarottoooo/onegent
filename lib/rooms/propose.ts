@@ -27,16 +27,25 @@ import {
   mergeNPartyQuery,
 } from "@/lib/agent/n-party";
 import { runAgentForHotel } from "@/lib/rooms/hotel-search";
-import type { RecommendationCard, HotelRecommendationCard } from "@/lib/types";
+import { runAgentForFlight } from "@/lib/rooms/flight-search";
+import type {
+  RecommendationCard,
+  HotelRecommendationCard,
+  FlightRecommendationCard,
+} from "@/lib/types";
 import type { DecisionRoom, DecisionRoomConstraintRow } from "@/lib/db";
 import type { RoomScenarioId } from "@/lib/agent/scenario-configs/room-conflict";
 import type {
   RestaurantConstraintData,
   HotelConstraintData,
+  FlightConstraintData,
 } from "@/lib/rooms/constraint-types";
 
 /** A proposal card is one of the scenario-specific card shapes. */
-export type ProposalCard = RecommendationCard | HotelRecommendationCard;
+export type ProposalCard =
+  | RecommendationCard
+  | HotelRecommendationCard
+  | FlightRecommendationCard;
 
 export interface ProposalOption {
   id: string;
@@ -72,6 +81,21 @@ function hotelRowToText(d: HotelConstraintData): string {
   return parts.join("; ") || "no specific constraints";
 }
 
+function flightRowToText(d: FlightConstraintData): string {
+  const parts: string[] = [];
+  if (typeof d.budget_max_per_person === "number") parts.push(`budget under $${d.budget_max_per_person} per person`);
+  if (d.cabin_class_min) parts.push(`at least ${d.cabin_class_min.replace("_", " ")} class`);
+  if (d.max_stops === 0) parts.push(`nonstop only`);
+  else if (d.max_stops === 1) parts.push(`at most one stop`);
+  if (d.earliest_departure) parts.push(`depart no earlier than ${d.earliest_departure}`);
+  if (d.latest_departure) parts.push(`depart no later than ${d.latest_departure}`);
+  if (d.avoid_red_eye) parts.push(`avoid red-eye flights`);
+  if (d.preferred_airlines?.length) parts.push(`prefer airlines: ${d.preferred_airlines.join(", ")}`);
+  if (d.avoid_airlines?.length) parts.push(`avoid airlines: ${d.avoid_airlines.join(", ")}`);
+  if (d.notes) parts.push(d.notes);
+  return parts.join("; ") || "no specific constraints";
+}
+
 /**
  * Flatten a structured constraint object into a natural-language clause.
  * Scenario-agnostic — dispatches on the caller-provided `scenarioId`.
@@ -85,23 +109,34 @@ export function constraintRowToText(
       return restaurantRowToText(row.data_json as RestaurantConstraintData);
     case "hotel":
       return hotelRowToText(row.data_json as HotelConstraintData);
+    case "flight":
+      return flightRowToText(row.data_json as FlightConstraintData);
   }
 }
 
 /** Narrow `room.type` to our supported scenario union. */
 function assertScenarioId(t: string): RoomScenarioId {
-  if (t === "restaurant" || t === "hotel") return t;
+  if (t === "restaurant" || t === "hotel" || t === "flight") return t;
   throw new Error(`Unsupported room type: ${t}`);
 }
 
-interface HotelRoomContextJson {
+interface RoomContextJson {
   city_id?: string;
   city?: string;
+  // Hotel fields
   destination?: string;
   date_window?: { from?: string | null; to?: string | null } | null;
   check_in?: string;
   check_out?: string;
   guests?: number;
+  // Flight fields
+  departure_city?: string;
+  arrival_city?: string;
+  departure_date?: string;
+  return_date?: string;
+  is_round_trip?: boolean;
+  passengers?: number;
+  cabin_class?: "economy" | "premium_economy" | "business" | "first";
 }
 
 /**
@@ -117,7 +152,7 @@ export async function generateRoomProposal(
   const submitted = constraints.filter((c) => c.submitted);
   if (submitted.length < 2) return null;
 
-  const ctx = room.context_json as HotelRoomContextJson;
+  const ctx = room.context_json as RoomContextJson;
   const cityId = ctx.city_id ?? ctx.city ?? "losangeles";
 
   // Flatten constraints to text, N-aware for prompt tuning.
@@ -156,7 +191,7 @@ export async function generateRoomProposal(
         : [];
       rationaleTail = inputs.map((p) => p.text).join(" | ");
     }
-  } else {
+  } else if (scenarioId === "hotel") {
     // Hotel path: merge → runAgentForHotel (merge and search are decoupled so
     // the caller can override dates/guests from Room context).
     const hotelCtx = {
@@ -197,13 +232,67 @@ export async function generateRoomProposal(
 
     const hotelResult = await runAgentForHotel(mergedQuery, hotelCtx);
     cards = hotelResult.cards;
+  } else {
+    // Flight path: merge → runAgentForFlight. Route/dates/round-trip/cabin are
+    // authoritative Room context; per-member constraints provide soft
+    // preferences (stops, time window, red-eye, airlines).
+    const flightCtx = {
+      cityId,
+      departureCity: ctx.departure_city,
+      arrivalCity: ctx.arrival_city,
+      date: ctx.departure_date ?? ctx.date_window?.from ?? undefined,
+      returnDate: ctx.return_date ?? ctx.date_window?.to ?? undefined,
+      isRoundTrip: ctx.is_round_trip,
+      passengers: ctx.passengers,
+      cabinClass: ctx.cabin_class,
+    };
+
+    let mergedQuery: string;
+    if (isTwoParty) {
+      const [a, b] = submitted;
+      const aText = constraintRowToText(a, "flight");
+      const bText = constraintRowToText(b, "flight");
+      const merged = await mergeTwoPartyQuery("flight", aText, bText, cityId);
+      mergedQuery = merged.mergedQuery;
+      conflict = merged.conflict;
+      conflictReason = merged.conflictReason;
+      if (conflict) affectedUsers = submitted.map((s) => s.user_id);
+      rationaleTail = `${aText} / ${bText}`;
+    } else {
+      const inputs = submitted.map((c) => ({
+        userId: c.user_id,
+        text: constraintRowToText(c, "flight"),
+      }));
+      const merged = await mergeNPartyQuery("flight", inputs, cityId);
+      mergedQuery = merged.mergedQuery;
+      conflict = merged.conflict;
+      conflictReason = merged.conflictReason;
+      affectedUsers = conflict
+        ? merged.conflictAffectedUsers?.length
+          ? merged.conflictAffectedUsers
+          : submitted.map((s) => s.user_id)
+        : [];
+      rationaleTail = inputs.map((p) => p.text).join(" | ");
+    }
+
+    const flightResult = await runAgentForFlight(mergedQuery, flightCtx);
+    if (flightResult.missingFields.length) {
+      throw new Error(
+        `Flight search missing required fields: ${flightResult.missingFields.join(", ")}. Set them in the Room context.`,
+      );
+    }
+    cards = flightResult.cards;
   }
 
   if (cards.length === 0) {
+    const nounPlural =
+      scenarioId === "hotel" ? "hotels" :
+      scenarioId === "flight" ? "flights" :
+      "restaurants";
     throw new Error(
       conflictReason
-        ? `No ${scenarioId === "hotel" ? "hotels" : "restaurants"} matched — conflict: ${conflictReason}`
-        : `No ${scenarioId === "hotel" ? "hotels" : "restaurants"} matched the combined constraints`
+        ? `No ${nounPlural} matched — conflict: ${conflictReason}`
+        : `No ${nounPlural} matched the combined constraints`
     );
   }
 

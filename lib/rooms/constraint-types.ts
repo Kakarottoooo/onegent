@@ -34,7 +34,29 @@ export interface HotelConstraintData {
   notes?: string;
 }
 
+export interface FlightConstraintData {
+  /** Max total price per person, USD. Group cap = LOWEST across members. */
+  budget_max_per_person?: number;
+  /** Stop ceiling: 0 = nonstop only, 1 = at most one stop, 2 = any. Group = STRICTEST. */
+  max_stops?: 0 | 1 | 2;
+  /** Earliest departure local time, "HH:MM" 24h. Intersection across members. */
+  earliest_departure?: string;
+  /** Latest departure local time, "HH:MM" 24h. Intersection across members. */
+  latest_departure?: string;
+  /** Any member =true triggers avoidance for the group. */
+  avoid_red_eye?: boolean;
+  /** Preferred cabin class. Group floor = HIGHEST (first > business > premium_economy > economy). */
+  cabin_class_min?: "economy" | "premium_economy" | "business" | "first";
+  /** UNION soft bias: IATA/airline names preferred. */
+  preferred_airlines?: string[];
+  /** Hard exclusion: airlines the person refuses to fly. */
+  avoid_airlines?: string[];
+  /** Catch-all free-text notes (e.g. "aisle seat", "extra legroom"). */
+  notes?: string;
+}
+
 export type RoomConstraintData<T extends RoomScenarioId = RoomScenarioId> =
   T extends "restaurant" ? RestaurantConstraintData :
   T extends "hotel" ? HotelConstraintData :
+  T extends "flight" ? FlightConstraintData :
   never;

@@ -1,5 +1,5 @@
 import { Restaurant, ReviewSignals, GoogleReview, Hotel, Flight, AfterDinnerVenue } from "./types";
-import { buildKayakFlightsUrl } from "./agent/planners/booking-links";
+import { buildExpediaFlightsUrl } from "./agent/planners/booking-links";
 
 // ─── Geocoding ────────────────────────────────────────────────────────────────
 
@@ -795,7 +795,7 @@ export async function searchFlights(params: {
 
       const price = Number(entry.price ?? 0);
 
-      const bookingLink = buildKayakFlightsUrl({
+      const bookingLink = buildExpediaFlightsUrl({
         origin: depAirport,
         dest: arrAirport,
         date: normalizedDate,

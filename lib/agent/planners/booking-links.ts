@@ -175,6 +175,87 @@ export function buildKayakFlightsUrl(opts: GoogleFlightsOpts): string {
   return `https://www.kayak.com/flights/${orig}-${dest}/${opts.date}/${paxPart}/${cabin}`;
 }
 
+/**
+ * Build an Expedia flight search URL — mirrors the startUrl our booking-autopilot
+ * RPA constructs (see app/api/booking-jobs/[id]/start/route.ts). Keeping user-
+ * facing "View details" links on the same platform the agent books on means
+ * what the user sees pre-booking matches what the agent automates.
+ *
+ * Pattern:
+ *   https://www.expedia.com/Flights-Search?trip={oneway|roundtrip}
+ *     &leg1=from:{ORIG},to:{DEST},departure:{DATE}TANYT
+ *     [&leg2=from:{DEST},to:{ORIG},departure:{RET}TANYT]
+ *     &passengers=adults:{N}
+ *     &options=cabinclass:{coach|premiumcoach|business|first}
+ *     &mode=search
+ */
+const EXPEDIA_CABIN: Record<string, string> = {
+  economy: "coach",
+  premium_economy: "premiumcoach",
+  business: "business",
+  first: "first",
+};
+export function buildExpediaFlightsUrl(opts: GoogleFlightsOpts): string {
+  const orig = opts.origin.toUpperCase();
+  const dest = opts.dest.toUpperCase();
+  const pax = opts.passengers ?? 1;
+  const cabin = EXPEDIA_CABIN[opts.cabinClass ?? "economy"] ?? "coach";
+
+  if (!opts.date) {
+    return `https://www.expedia.com/Flights`;
+  }
+
+  const trip = opts.returnDate ? "roundtrip" : "oneway";
+  const leg1 = `from:${orig},to:${dest},departure:${opts.date}TANYT`;
+  const leg2 = opts.returnDate ? `&leg2=from:${dest},to:${orig},departure:${opts.returnDate}TANYT` : "";
+  return `https://www.expedia.com/Flights-Search?trip=${trip}&leg1=${leg1}${leg2}&passengers=adults:${pax}&options=cabinclass:${cabin}&mode=search`;
+}
+
+/** Booking.com flights cabin class values */
+const BOOKING_FLIGHTS_CABIN: Record<string, string> = {
+  economy: "ECONOMY",
+  premium_economy: "PREMIUM_ECONOMY",
+  business: "BUSINESS",
+  first: "FIRST",
+};
+
+/**
+ * Build a Booking.com Flights search URL fully pre-filled.
+ *
+ * Pattern (round trip):
+ *   https://flights.booking.com/flights/{ORIG}-{DEST}/?type=ROUNDTRIP
+ *     &adults={N}&cabinClass={ECONOMY|...}
+ *     &from={ORIG}.AIRPORT&to={DEST}.AIRPORT
+ *     &depart={YYYY-MM-DD}&return={YYYY-MM-DD}&sort=BEST
+ *
+ * Booking.com flights deep links auto-fill the search form and show results
+ * directly — no Akamai bot blocking on URL-level access (unlike Expedia).
+ */
+export function buildBookingFlightsUrl(opts: GoogleFlightsOpts): string {
+  const orig = opts.origin.toUpperCase();
+  const dest = opts.dest.toUpperCase();
+  const pax = opts.passengers ?? 1;
+  const cabin = BOOKING_FLIGHTS_CABIN[opts.cabinClass ?? "economy"] ?? "ECONOMY";
+
+  if (!opts.date) {
+    return `https://flights.booking.com/flights/${orig}-${dest}/`;
+  }
+
+  const tripType = opts.returnDate ? "ROUNDTRIP" : "ONEWAY";
+  const params: Record<string, string> = {
+    type: tripType,
+    adults: String(pax),
+    cabinClass: cabin,
+    from: `${orig}.AIRPORT`,
+    to: `${dest}.AIRPORT`,
+    depart: opts.date,
+    sort: "BEST",
+  };
+  if (opts.returnDate) params.return = opts.returnDate;
+
+  return `https://flights.booking.com/flights/${orig}-${dest}/?${new URLSearchParams(params).toString()}`;
+}
+
 // ── Airline-specific deep links ──────────────────────────────────────────────
 
 export interface AirlineDeepLinkOpts {

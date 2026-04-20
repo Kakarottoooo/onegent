@@ -484,9 +484,9 @@ export async function runBrowserTask(
 
   trace(`Executor starting —?model: ${modelName}, browser: ${useCloud ? "Browserbase" : "local"}, proxies: ${process.env.BROWSERBASE_USE_PROXIES === "true"}`);
 
-  // In local mode, keep the browser open when we reach paused_payment so the
-  // user can see the pre-filled payment form and enter CVV themselves.
-  // Auto-close after 10 minutes.
+  // In local mode, keep the browser open when we reach a manual handoff point
+  // so the user can inspect the page and continue in the same browser.
+  // Auto-close after 15 minutes.
   let keepBrowserOpen = false;
 
   // Safety net: if the flow reached guest-form filling (restaurant or
@@ -494,6 +494,23 @@ export async function runBrowserTask(
   // we still want to keep the browser open so the user can visually confirm
   // what was filled and submit the form themselves.
   let reachedGuestForm = false;
+
+  const holdBrowserOpenForManualReview = (reason: string) => {
+    if (keepBrowserOpen || useCloud || !input.jobId) return;
+    keepBrowserOpen = true;
+    trace(reason);
+    browserSessionStore.setGetter(input.jobId, () => {
+      const ctx = stagehand.context;
+      if (!ctx) return null;
+      const ap = ctx.activePage();
+      return ap ? getRawPage(ap) : null;
+    }, 15 * 60 * 1000);
+    setTimeout(() => {
+      browserSessionStore.delete(input.jobId!);
+      activeStagehands.delete(input.jobId!);
+      stagehand.close().catch(() => {});
+    }, 15 * 60 * 1000);
+  };
 
   try {
     await stagehand.init();
@@ -897,14 +914,15 @@ The user will enter CVV and confirm payment themselves.`,
         const targetAirline = input.targetAirline;
         const targetPrice = input.targetPrice;
         const targetDepartureTime = input.targetDepartureTime;
+        const targetFlightNumber = input.targetFlightNumber;
 
-        trace(`[flight-rpa] Starting programmatic flight booking: airline="${targetAirline}" price=$${targetPrice} time="${targetDepartureTime}"`);
+        trace(`[flight-rpa] Starting programmatic flight booking: airline="${targetAirline}" price=$${targetPrice} time="${targetDepartureTime}" flightNo="${targetFlightNumber}"`);
 
         const getAllPages = (): Page[] =>
           stagehand.context.pages().map((p: unknown) => getRawPage(p));
 
         const rpaResult = await bookExpediaFlightProgrammatic(
-          raw, flightProfile, targetAirline, targetPrice, targetDepartureTime, trace, getAllPages, stagehand
+          raw, flightProfile, targetAirline, targetPrice, targetDepartureTime, targetFlightNumber, trace, getAllPages, stagehand
         );
 
         const finalScreenshot = await raw.screenshot({ type: "jpeg", quality: 55 }).catch(() => null);
@@ -917,18 +935,31 @@ The user will enter CVV and confirm payment themselves.`,
           // ── AI form fill: passenger info + travel documents ──────────────
           trace("[flight-rpa] Checkout reached — running AI form fill");
           const effectiveFlightProfile = buildEffectiveProfile(input.profile, input.task);
+          let fillStoppedForQuota = false;
+          let fillSummary = "Flight passenger info pre-filled by AI — open to review and complete payment.";
           try {
             const fillResult = await fillFlightGuestFormWithAI(stagehand, effectiveFlightProfile, trace);
             trace(`[flight-rpa] AI fill: filled=${fillResult.filled.join(",")} failed=${fillResult.failed.join(",")}`);
+            fillStoppedForQuota = fillResult.stoppedReason === "quota";
+            if (fillStoppedForQuota) {
+              fillSummary = "Flight checkout reached, but AI form fill stopped because the model API quota was exceeded. Review traveler details and complete payment.";
+            } else if (fillResult.filled.length === 0) {
+              fillSummary = "Flight checkout reached — review traveler details and complete payment.";
+            }
           } catch (fillErr) {
             trace(`[flight-rpa] AI fill error: ${(fillErr as Error).message?.slice(0, 80)}`);
+            fillSummary = "Flight checkout reached — review traveler details and complete payment.";
           }
           // ── AI audit: re-fill any fields AI missed ────────────────────
-          try {
-            const auditResult = await auditAndRefillEmptyFields(stagehand, checkoutPage, effectiveFlightProfile, trace);
-            trace(`[flight-rpa] Audit refill: ${auditResult.refilled.join(",") || "none"}`);
-          } catch (auditErr) {
-            trace(`[flight-rpa] Audit error: ${(auditErr as Error).message?.slice(0, 80)}`);
+          if (!fillStoppedForQuota) {
+            try {
+              const auditResult = await auditAndRefillEmptyFields(stagehand, checkoutPage, effectiveFlightProfile, trace);
+              trace(`[flight-rpa] Audit refill: ${auditResult.refilled.join(",") || "none"}`);
+            } catch (auditErr) {
+              trace(`[flight-rpa] Audit error: ${(auditErr as Error).message?.slice(0, 80)}`);
+            }
+          } else {
+            trace("[flight-rpa] Skipping AI audit refill because the model API quota was exceeded");
           }
 
           const postFillScreenshot = await checkoutPage.screenshot({ type: "jpeg", quality: 55 }).catch(() => null);
@@ -938,9 +969,15 @@ The user will enter CVV and confirm payment themselves.`,
             screenshotBase64: postFillScreenshot?.toString("base64") ?? finalScreenshotBase64,
             handoffUrl: checkoutUrl || rpaResult.currentUrl || input.startUrl,
             sessionUrl,
-            summary: "Flight passenger info pre-filled by AI — open to review and complete payment.",
+            summary: fillSummary,
             debugTrace,
           };
+        }
+
+        if (!useCloud && input.jobId) {
+          holdBrowserOpenForManualReview(
+            "Local mode: flight checkout was not reached — keeping browser open for 15 min for manual review/continue."
+          );
         }
 
         return {
@@ -954,6 +991,11 @@ The user will enter CVV and confirm payment themselves.`,
         };
       } catch (rpaErr) {
         trace(`[flight-rpa] Unexpected error: ${(rpaErr as Error).message?.slice(0, 120)}`);
+        if (!useCloud && input.jobId) {
+          holdBrowserOpenForManualReview(
+            "Local mode: flight booking hit an unexpected error — keeping browser open for 15 min for inspection."
+          );
+        }
         return {
           status: "error" as const,
           screenshotBase64,
@@ -5084,20 +5126,8 @@ The user will enter CVV and confirm payment themselves.`,
     }, trace);
 
     if (finalOutcome.status === "paused_payment" && !useCloud) {
-      keepBrowserOpen = true;
-      trace("Local mode: browser will stay open for 15 minutes —?live view available in OneAgent.");
+      holdBrowserOpenForManualReview("Local mode: browser will stay open for 15 minutes —?live view available in OneAgent.");
       console.log("\n鉁?[stagehand] Payment page is open —?use OneAgent live view or the browser window to complete payment.\n");
-      // Getter is already registered from init — just extend TTL for paused_payment hold.
-      browserSessionStore.setGetter(input.jobId, () => {
-        const ctx = stagehand.context;
-        if (!ctx) return null;
-        const ap = ctx.activePage();
-        return ap ? getRawPage(ap) : null;
-      }, 15 * 60 * 1000);
-      setTimeout(() => {
-        browserSessionStore.delete(input.jobId);
-        stagehand.close().catch(() => {});
-      }, 15 * 60 * 1000);
     }
 
     return finalOutcome;
@@ -5214,18 +5244,7 @@ The user will enter CVV and confirm payment themselves.`,
     // user can visually review what's on the page and submit manually.
     // Mirrors the paused_payment TTL (15 min).
     if (!keepBrowserOpen && reachedGuestForm && !useCloud && input.jobId) {
-      keepBrowserOpen = true;
-      trace("Safety net: guest form was reached — keeping browser open 15 min for manual review/submit.");
-      browserSessionStore.setGetter(input.jobId, () => {
-        const ctx = stagehand.context;
-        if (!ctx) return null;
-        const ap = ctx.activePage();
-        return ap ? getRawPage(ap) : null;
-      }, 15 * 60 * 1000);
-      setTimeout(() => {
-        browserSessionStore.delete(input.jobId!);
-        stagehand.close().catch(() => {});
-      }, 15 * 60 * 1000);
+      holdBrowserOpenForManualReview("Safety net: guest form was reached — keeping browser open 15 min for manual review/submit.");
     }
 
     if (!keepBrowserOpen) {

@@ -13,7 +13,7 @@
  *     these to calibrate when to set `conflict=true`.
  */
 
-export type RoomScenarioId = "restaurant" | "hotel";
+export type RoomScenarioId = "restaurant" | "hotel" | "flight";
 
 export interface RoomConflictConfig {
   /** Singular noun used throughout the prompt, e.g. "restaurant". */
@@ -64,6 +64,26 @@ export const ROOM_CONFLICT_CONFIGS: Record<RoomScenarioId, RoomConflictConfig> =
       '"must be under $80/night" + "must be 5-star luxury"',
       '"pet-friendly required" + "no pets allowed anywhere on property"',
       '"downtown only" + "airport hotel only"',
+    ],
+  },
+  flight: {
+    noun: "flight",
+    nounPlural: "flights",
+    goalTwoParty: "a flight they'll both take together",
+    goalNParty: "a flight they'll all take together",
+    mergeRules: [
+      "Route and dates are fixed by the room context (departure city, arrival city, departure date, return date, one-way vs round-trip) — do NOT let per-person constraints override them",
+      "Cabin class: use the HIGHEST requested class as the group floor (e.g. if anyone asks for business, book business)",
+      "Stops: use the STRICTEST cap (nonstop beats 1-stop beats 2-stop)",
+      "Departure time window: use the INTERSECTION of each person's earliest/latest departure preferences",
+      "Red-eye: if ANYONE says avoid red-eye, avoid red-eye for the group",
+      "Preferred airlines: UNION of preferences, but only treat as soft bias unless someone has a hard exclusion",
+      "Baggage / seat preferences: defer to per-person at booking time, not group search query",
+    ],
+    conflictExamples: [
+      '"nonstop only" + "must fly airline X which has no nonstop on this route"',
+      '"must depart before 9am" + "must depart after 8pm"',
+      '"economy only, under $300" + "business class required"',
     ],
   },
 };

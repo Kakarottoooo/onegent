@@ -17,7 +17,12 @@ type Actable = { act: (instruction: string) => Promise<unknown> };
 export type FillResult = {
   filled: string[];
   failed: string[];
+  stoppedReason?: "quota";
 };
+
+function isQuotaOrBillingError(message: string): boolean {
+  return /credit balance is too low|insufficient_quota|invalid.{0,20}api.{0,20}key|rate limit exceeded|payment required|quota exceeded|exceeded your current quota|credits? exhausted|billing error|billing issue|browser minutes limit/i.test(message);
+}
 
 /**
  * Core contact fields (no billing address, no payment).
@@ -121,6 +126,10 @@ export async function fillFieldsWithAI(
       const msg = err instanceof Error ? err.message : String(err);
       trace(`[fill-form] FAILED "${label}": ${msg.slice(0, 80)}`);
       failed.push(label);
+      if (isQuotaOrBillingError(msg)) {
+        trace('[fill-form] Stopping further AI fill due to quota/billing error');
+        return { filled, failed, stoppedReason: "quota" };
+      }
     }
   }
 

@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useState, useEffect } from "react";
 import GlobalNav from "@/components/GlobalNav";
 import { useLanguage } from "@/app/hooks/useLanguage";
@@ -15,7 +16,7 @@ function getSessionId() {
   return id;
 }
 
-type Tab = "overview" | "scenarios" | "patterns" | "profile";
+type Tab = "overview" | "scenarios" | "patterns";
 
 // ── Sub-components ─────────────────────────────────────────────────────────
 
@@ -525,7 +526,6 @@ export default function InsightsPage() {
   const [profile, setProfile]           = useState<UserPreferenceProfile | null>(null);
   const [taskMemory, setTaskMemory]     = useState<ScenarioMemory[]>([]);
   const [patternMemory, setPatternMemory] = useState<PatternMemory | null>(null);
-  const [relationship, setRelationship] = useState<RelationshipProfile | null>(null);
   const [sessionId] = useState(getSessionId);
   const { t } = useLanguage();
   const ti = t.insights;
@@ -542,7 +542,6 @@ export default function InsightsPage() {
         setProfile(memoryData.profile ?? null);
         setTaskMemory(memoryData.taskMemory ?? []);
         setPatternMemory(memoryData.patternMemory ?? null);
-        setRelationship(memoryData.relationship ?? null);
       })
       .catch(() => {})
       .finally(() => setLoading(false));
@@ -552,7 +551,6 @@ export default function InsightsPage() {
     { id: "overview",  label: ti.tabOverview  },
     { id: "scenarios", label: ti.tabScenarios },
     { id: "patterns",  label: ti.tabPatterns  },
-    { id: "profile",   label: ti.tabProfile   },
   ];
 
   return (
@@ -572,6 +570,46 @@ export default function InsightsPage() {
               ? `${stats.totalEvents} ${ti.feedbackEvents}`
               : ti.emptyHint}
           </p>
+        </div>
+
+        <div
+          style={{
+            marginBottom: 22,
+            padding: "14px 16px",
+            borderRadius: 14,
+            border: "0.5px solid var(--border, #e5e7eb)",
+            background: "rgba(201,168,76,0.06)",
+            display: "flex",
+            justifyContent: "space-between",
+            alignItems: "center",
+            gap: 16,
+            flexWrap: "wrap",
+          }}
+        >
+          <div>
+            <p style={{ fontFamily: "var(--font-dm-sans)", fontSize: 11, fontWeight: 700, letterSpacing: "0.08em", textTransform: "uppercase", color: "var(--text-muted, #aaa)", marginBottom: 6 }}>
+              Profile hub
+            </p>
+            <p style={{ fontFamily: "var(--font-dm-sans)", fontSize: 13, color: "var(--text-secondary, #666)", lineHeight: 1.6 }}>
+              Booking details and learned profile defaults now live together in one place.
+            </p>
+          </div>
+          <Link
+            href="/permissions?tab=learned"
+            style={{
+              padding: "9px 14px",
+              borderRadius: 999,
+              border: "0.5px solid var(--gold, #C9A84C)",
+              color: "var(--gold, #C9A84C)",
+              textDecoration: "none",
+              fontFamily: "var(--font-dm-sans)",
+              fontSize: 12,
+              fontWeight: 700,
+              whiteSpace: "nowrap",
+            }}
+          >
+            Open profile
+          </Link>
         </div>
 
         {/* Tabs */}
@@ -599,14 +637,6 @@ export default function InsightsPage() {
             {activeTab === "overview"  && <OverviewTab stats={stats} policy={policy} profile={profile} ti={ti} />}
             {activeTab === "scenarios" && <ScenariosTab taskMemory={taskMemory} ti={ti} />}
             {activeTab === "patterns"  && <PatternsTab patternMemory={patternMemory} ti={ti} />}
-            {activeTab === "profile"   && (
-              <ProfileTab
-                sessionId={sessionId}
-                relationship={relationship}
-                onSave={setRelationship}
-                ti={ti}
-              />
-            )}
           </>
         )}
       </main>

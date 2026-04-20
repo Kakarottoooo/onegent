@@ -85,8 +85,8 @@ export async function runFlightPipeline(
       ),
     ]);
 
-    // Take best 3 from primary airport
-    const primaryBest = primaryFlights.slice(0, 3);
+    // Take best 5 from primary airport
+    const primaryBest = primaryFlights.slice(0, 5);
 
     // Find cheapest flight from any alternate airport (only if cheaper than primary cheapest)
     const primaryCheapest = primaryFlights.reduce((min, f) => (f.price > 0 && f.price < min ? f.price : min), Infinity);
@@ -110,7 +110,7 @@ export async function runFlightPipeline(
           searchFlights({ ...searchParams, departure_city: intent.departure_city!, arrival_city: alt, maxResults: 4 })
         ),
     ]);
-    const primaryBest = primaryFlights.slice(0, 3);
+    const primaryBest = primaryFlights.slice(0, 5);
     const allAltFlights = altFlightGroups.flat().filter((f) => f.price > 0);
     const cheapestAlt = allAltFlights.sort((a, b) => a.price - b.price)[0];
     const primaryCheapest = primaryFlights.reduce((min, f) => (f.price > 0 && f.price < min ? f.price : min), Infinity);

@@ -1,5 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createBookingJob, getBookingJobsBySession, getBookingJobsByUser, deleteAllBookingJobsBySession, deleteAllMonitorsBySession } from "@/lib/db";
+import {
+  createBookingJob,
+  getBookingJobsBySession,
+  getBookingJobsByUser,
+  deleteAllBookingJobsBySession,
+  deleteAllMonitorsBySession,
+  clearDecisionRoomBookingJobsByIds,
+} from "@/lib/db";
 import type { BookingJob, BookingJobStep } from "@/lib/db";
 import type { AgentAutonomySettings } from "@/lib/autonomy";
 import { auth } from "@clerk/nextjs/server";
@@ -71,7 +78,9 @@ export async function DELETE(req: NextRequest) {
   if (!sessionId) {
     return NextResponse.json({ error: "session_id required" }, { status: 400 });
   }
+  const jobs = await getBookingJobsBySession(sessionId);
   await deleteAllMonitorsBySession(sessionId);
+  await clearDecisionRoomBookingJobsByIds(jobs.map((job) => job.id));
   await deleteAllBookingJobsBySession(sessionId);
   return NextResponse.json({ deleted: true });
 }

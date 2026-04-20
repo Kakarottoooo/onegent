@@ -113,11 +113,13 @@ export async function POST(req: NextRequest, { params }: Params) {
         ? resolveAcceptedOption(rule, joined.length, tallies)
         : null;
 
-  // Once everyone has voted, the proposal either has a winner or it's done.
-  // Splits (unanimous with different approvals, or majority with no option >50%)
-  // used to leave the room stuck in Voting forever — now we close it out and
-  // kick back to collecting so the group can tweak constraints and retry.
-  const autoRejected = proposal.status === "active" && everyoneVoted && !winner;
+  // Important UX rule: while the current slate is still on screen, members may
+  // keep changing picks freely. A fully-voted split (e.g. 2/2 on different
+  // flights under unanimous approval) should NOT auto-reject and bounce the
+  // room back to collecting, because that removes the cards and forces an
+  // unnecessary regenerate. Explicit "decline / request changes" or creator
+  // finalize are the only paths that should close the slate without a winner.
+  const autoRejected = false;
 
   const optionLabel = (optionId: string | null) =>
     options.find((o) => o.id === optionId)?.card?.restaurant?.name ?? "another option";
@@ -191,16 +193,6 @@ export async function POST(req: NextRequest, { params }: Params) {
       constraints,
       roomTitle: room.title,
     }).catch((err) => console.error("recordRoomAcceptance failed:", err));
-  } else if (autoRejected) {
-    await updateProposalStatus(proposalId, "rejected");
-    await updateDecisionRoomStatus(roomId, "collecting");
-    await appendRoomMessage({
-      roomId,
-      senderId: null,
-      content:
-        "The group didn't approve this slate. Tweak your constraints and propose again.",
-      metaJson: { kind: "proposal_rejected", proposal_id: proposalId },
-    });
   }
 
   const counts = tallies.map((t) => ({
@@ -213,7 +205,7 @@ export async function POST(req: NextRequest, { params }: Params) {
     vote: { proposal_id: proposalId, user_id: userId, vote, option_id: optionId, comment },
     accepted: Boolean(winner),
     accepted_option_id: winner,
-    rejected: autoRejected,
+    rejected: false,
     reopened,
     shifted,
     rule,
@@ -222,7 +214,7 @@ export async function POST(req: NextRequest, { params }: Params) {
     everyone_voted: everyoneVoted,
     tallies: counts,
     unanimous: Boolean(winner) && rule === "unanimous",
-    proposal_status: reopened ? "active" : winner ? "accepted" : proposal.status,
+    proposal_status: reopened ? "active" : winner ? "accepted" : "active",
   });
 }
 

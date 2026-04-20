@@ -8,7 +8,7 @@ import { useState, useEffect } from "react";
 import { useLanguage, LANGUAGES } from "@/app/hooks/useLanguage";
 import { useAuth } from "@/app/hooks/useAuth";
 
-type Page = "home" | "tasks" | "monitoring" | "insights" | "metrics" | "rooms" | "other";
+type Page = "home" | "tasks" | "insights" | "metrics" | "rooms" | "other";
 
 interface Props {
   active?: Page;
@@ -21,7 +21,6 @@ function getSessionId() {
 
 export default function GlobalNav({ active }: Props) {
   const [actionCount, setActionCount] = useState(0);
-  const [monitorCount, setMonitorCount] = useState(0);
   const { lang, setLang, current: currentLang, t } = useLanguage();
   const auth = useAuth();
   const [langMenuOpen, setLangMenuOpen] = useState(false);
@@ -44,21 +43,13 @@ export default function GlobalNav({ active }: Props) {
       })
       .catch(() => {});
 
-    fetch(`/api/monitors?session_id=${encodeURIComponent(sid)}`)
-      .then((r) => (r.ok ? r.json() : null))
-      .then((d) => {
-        if (!d?.monitors) return;
-        setMonitorCount(d.monitors.filter((m: { status: string }) => m.status === "active").length);
-      })
-      .catch(() => {});
   }, []);
 
   const links: { href: string; label: string; id: Page; badge?: number }[] = [
     { href: "/tasks", label: t.nav.myTrips, id: "tasks", badge: actionCount || undefined },
     { href: "/rooms", label: "Rooms", id: "rooms" },
-    { href: "/monitoring", label: t.nav.monitoring, id: "monitoring", badge: monitorCount || undefined },
     { href: "/insights", label: t.nav.insights, id: "insights" },
-    { href: "/permissions", label: t.nav.preferences, id: "other" },
+    { href: "/permissions", label: "Profile", id: "other" },
   ];
 
   return (
@@ -141,8 +132,7 @@ export default function GlobalNav({ active }: Props) {
                         fontSize: 10,
                         fontWeight: 700,
                         color: "#fff",
-                        backgroundColor:
-                          link.id === "monitoring" ? "var(--gold, #C9A84C)" : "rgba(220,38,38,0.85)",
+                        backgroundColor: "rgba(220,38,38,0.85)",
                         borderRadius: 20,
                         padding: "1px 5px",
                         lineHeight: 1.5,

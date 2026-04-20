@@ -50,7 +50,7 @@ import { sendPushNotification } from "@/lib/push";
 import type { PushSubscription } from "web-push";
 import type { AutopilotResult, BrowserTaskResult, BrowserTaskInput } from "@/lib/booking-autopilot/types";
 import { runBrowserTask } from "@/lib/booking-autopilot/stagehand-executor";
-import { liveLogClose } from "@/lib/live-log-store";
+import { liveLogClose, liveLogGet } from "@/lib/live-log-store";
 import { buildPreferenceProfile } from "@/lib/policy";
 
 // ── Agent-runtime: activity skill dispatch ─────────────────────────────────
@@ -629,8 +629,40 @@ async function runUniversalStep(
       }
     }
 
-    // If the single attempt threw before producing a BrowserTaskResult, re-throw to outer catch.
-    if (!data) throw browserTaskErr ?? new Error("Browser task failed before returning a result");
+    // If the attempt timed out or threw before producing a BrowserTaskResult,
+    // persist whatever live executor trace we already captured so the tasks UI
+    // doesn't collapse to a single generic timeout line.
+    if (!data) {
+      const terminalError = browserTaskErr ?? new Error("Browser task failed before returning a result");
+      const traceLines = input.jobId ? liveLogGet(input.jobId, 0) : [];
+      for (const entry of traceLines) {
+        log.push({
+          ts: now(),
+          type: "attempt",
+          message: entry,
+          outcome: "Executor trace",
+        });
+      }
+      log.push({
+        ts: now(),
+        type: "failed",
+        message: terminalError.message,
+        outcome: "Error",
+      });
+      return {
+        ...step,
+        status: "error",
+        error: terminalError.message,
+        handoff_url: typeof resolvedBody.startUrl === "string" ? resolvedBody.startUrl : step.fallbackUrl,
+        actionItem: step.fallbackUrl
+          ? {
+              message: "Auto-booking stalled. Tap to continue manually:",
+              options: [{ label: step.label, url: step.fallbackUrl }],
+            }
+          : undefined,
+        decisionLog: log,
+      };
+    }
 
     // ── Persist result immediately after runBrowserTask returns ──────────────
     // Vercel's 5-min maxDuration can kill the function at any moment. Writing
@@ -823,14 +855,15 @@ async function runUniversalStep(
     const bodyWithSlots = data.availableSlots?.length
       ? { ...(step.body as Record<string, unknown>), availableSlots: data.availableSlots }
       : step.body;
+    const manualHandoffUrl = data.handoffUrl ?? step.fallbackUrl;
     log.push({ ts: now(), type: "failed", message: data.error ?? data.summary, outcome: "Failed" });
     return {
       ...step,
       body: bodyWithSlots,
       status: "error",
       error: data.error ?? data.summary,
-      handoff_url: step.fallbackUrl,
-      actionItem: { message: "Auto-booking failed. Tap to complete manually:", options: [{ label: step.label, url: step.fallbackUrl }] },
+      handoff_url: manualHandoffUrl,
+      actionItem: { message: "Auto-booking failed. Tap to complete manually:", options: [{ label: step.label, url: manualHandoffUrl }] },
       decisionLog: log,
     };
   } catch (err) {

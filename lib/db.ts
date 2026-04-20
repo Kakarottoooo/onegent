@@ -2082,6 +2082,32 @@ export async function clearDecisionRoomBookingJob(roomId: string): Promise<void>
 }
 
 /**
+ * Clears any room that still points at a deleted booking job. Used when a task
+ * is manually removed from /tasks so the Decision Room can start a fresh
+ * booking instead of linking to a dangling job id.
+ */
+export async function clearDecisionRoomBookingJobByJobId(bookingJobId: string): Promise<void> {
+  await ensureDecisionRoomTables();
+  await sql`
+    UPDATE decision_rooms
+    SET booking_job_id = NULL, status = 'approving', updated_at = NOW()
+    WHERE booking_job_id = ${bookingJobId}
+  `;
+}
+
+/**
+ * Bulk variant for "Clear all tasks". Any room referencing one of the soon-to-
+ * be-deleted jobs is reset back to the accepted-booking state.
+ */
+export async function clearDecisionRoomBookingJobsByIds(bookingJobIds: string[]): Promise<void> {
+  await ensureDecisionRoomTables();
+  if (bookingJobIds.length === 0) return;
+  for (const bookingJobId of bookingJobIds) {
+    await clearDecisionRoomBookingJobByJobId(bookingJobId);
+  }
+}
+
+/**
  * Soft-delete a member: flips their row to status='left'. All existing
  * queries already filter to status='joined', so the ex-member silently drops
  * out of tallies, member strip, chat roster, etc. — no cascading edits.

@@ -18,11 +18,24 @@ import {
   resolveAcceptedOption,
   tallyVotes,
 } from "@/lib/rooms/proposal-shape";
-import type { RecommendationCard, HotelRecommendationCard } from "@/lib/types";
+import { buildExpediaFlightsUrl } from "@/lib/agent/planners/booking-links";
+import type {
+  RecommendationCard,
+  HotelRecommendationCard,
+  FlightRecommendationCard,
+} from "@/lib/types";
 
-const SUPPORTED_ROOM_TYPES = new Set(["restaurant", "hotel"]);
+const SUPPORTED_ROOM_TYPES = new Set(["restaurant", "hotel", "flight"]);
 
 type Params = { params: Promise<{ id: string }> };
+
+function normalizeFlightClockTime(raw: string | null | undefined): string | undefined {
+  if (!raw) return undefined;
+  const trimmed = raw.trim();
+  if (!trimmed) return undefined;
+  const match = trimmed.match(/(\d{1,2}:\d{2}\s*(?:AM|PM|am|pm)?)/);
+  return match?.[1]?.trim() ?? trimmed;
+}
 
 /**
  * POST /api/rooms/[id]/execute
@@ -99,6 +112,7 @@ export async function POST(req: NextRequest, { params }: Params) {
   const card = (winningCard ?? options[0]?.card) as
     | RecommendationCard
     | HotelRecommendationCard
+    | FlightRecommendationCard
     | undefined;
   if (!card) {
     return NextResponse.json({ error: "Accepted proposal has no option card" }, { status: 500 });
@@ -141,7 +155,7 @@ export async function POST(req: NextRequest, { params }: Params) {
       status: "pending",
     };
     messageContent = `Booking started: ${restaurantName} on ${date} at ${time} for ${covers}.`;
-  } else {
+  } else if (room.type === "hotel") {
     // hotel — group-level defaults come from room.context_json, but the payer
     // may override check-in / check-out / guests at execute time (e.g. to fix
     // a date typo). Body values win when provided.
@@ -203,6 +217,102 @@ export async function POST(req: NextRequest, { params }: Params) {
       status: "pending",
     };
     messageContent = `Booking started: ${hotelName} from ${checkin} to ${checkout} for ${adults} guest${adults === 1 ? "" : "s"}.`;
+  } else {
+    // flight — route is fixed on the accepted card, but the Payer may tweak
+    // date / return_date / passengers / round-trip at execute time (mirrors the
+    // hotel path). Body values win when provided.
+    const fCard = card as FlightRecommendationCard;
+    const flight = fCard?.flight;
+    if (!flight) {
+      return NextResponse.json({ error: "Accepted flight card is missing flight data" }, { status: 500 });
+    }
+    const ctx = (room.context_json ?? {}) as {
+      departure_city?: string;
+      arrival_city?: string;
+      departure_date?: string;
+      return_date?: string;
+      is_round_trip?: boolean;
+      passengers?: number;
+      cabin_class?: string;
+      date_window?: { from?: string | null; to?: string | null } | null;
+    };
+
+    const bodyDate = typeof body?.departure_date === "string" && body.departure_date ? body.departure_date : null;
+    const bodyReturnDate = typeof body?.return_date === "string" && body.return_date ? body.return_date : null;
+    const bodyIsRoundTrip = typeof body?.is_round_trip === "boolean" ? body.is_round_trip : null;
+    const bodyPassengersRaw = body?.passengers;
+    const bodyPassengers = typeof bodyPassengersRaw === "number" && bodyPassengersRaw > 0
+      ? Math.floor(bodyPassengersRaw)
+      : null;
+
+    const depDate = bodyDate ?? ctx.departure_date ?? ctx.date_window?.from ?? null;
+    const isRoundTrip = bodyIsRoundTrip ?? ctx.is_round_trip ?? false;
+    const retDate = isRoundTrip
+      ? (bodyReturnDate ?? ctx.return_date ?? ctx.date_window?.to ?? null)
+      : null;
+    const passengers = bodyPassengers ?? ctx.passengers ?? joined.length ?? 1;
+    const cabinClass = ctx.cabin_class ?? "economy";
+
+    if (!depDate) {
+      return NextResponse.json(
+        { error: "Flight room is missing departure_date — provide it or set it in the room context" },
+        { status: 412 }
+      );
+    }
+    if (isRoundTrip && !retDate) {
+      return NextResponse.json(
+        { error: "Round-trip flight requires return_date" },
+        { status: 400 }
+      );
+    }
+    if (isRoundTrip && retDate && retDate <= depDate) {
+      return NextResponse.json(
+        { error: "Return date must be after departure date" },
+        { status: 400 }
+      );
+    }
+
+    const origin = flight.departure_airport;
+    const dest = flight.arrival_airport;
+    const preferNonstop = flight.stops === 0;
+    const fallbackUrl = buildExpediaFlightsUrl({
+      origin,
+      dest,
+      date: depDate,
+      returnDate: retDate ?? undefined,
+      passengers,
+      cabinClass: cabinClass as "economy" | "premium_economy" | "business" | "first",
+    });
+    const airlineLabel = flight.airline ?? "flight";
+    const label = `${airlineLabel} ${origin}→${dest} ${depDate}`;
+
+    step = {
+      type: "flight",
+      emoji: "✈️",
+      label,
+      apiEndpoint: "/api/booking-autopilot/universal",
+      body: {
+        origin,
+        dest,
+        date: depDate,
+        returnDate: retDate ?? undefined,
+        passengers,
+        cabinClass,
+        preferNonstop,
+        targetAirline: flight.airline,
+        targetPrice: flight.price,
+        targetDepartureTime: normalizeFlightClockTime(flight.departure_time),
+        targetFlightNumber: flight.flight_number,
+        profileId: profile.id,
+        profile: profilePayload,
+        roomId,
+      },
+      fallbackUrl,
+      status: "pending",
+    };
+    messageContent = isRoundTrip
+      ? `Booking started: ${airlineLabel} ${origin}→${dest} ${depDate}, return ${retDate} for ${passengers} passenger${passengers === 1 ? "" : "s"}.`
+      : `Booking started: ${airlineLabel} ${origin}→${dest} ${depDate} for ${passengers} passenger${passengers === 1 ? "" : "s"}.`;
   }
 
   const jobId = randomUUID();

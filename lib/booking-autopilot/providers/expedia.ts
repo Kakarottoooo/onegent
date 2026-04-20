@@ -1433,6 +1433,7 @@ export async function bookExpediaFlightProgrammatic(
   targetAirline: string | undefined,
   targetPrice: number | undefined,
   targetDepartureTime: string | undefined,
+  targetFlightNumber: string | undefined,
   trace: (msg: string) => void,
   /** Optional: returns all open pages so we can switch to a newly opened tab */
   getAllPages?: () => Page[],
@@ -1571,10 +1572,10 @@ export async function bookExpediaFlightProgrammatic(
   await new Promise(r => setTimeout(r, 800));
 
   // ── Step 2: Find, scroll to, and click the target flight card ─────────────
-  trace(`[flight-rpa] Searching for flight: airline="${targetAirline}" price=$${targetPrice} time="${targetDepartureTime}"`);
+  trace(`[flight-rpa] Searching for flight: airline="${targetAirline}" price=$${targetPrice} time="${targetDepartureTime}" flightNo="${targetFlightNumber}"`);
   await safeScreenshot("01-search-results");
 
-  const found = await page.evaluate(({ airline, price, time }: { airline?: string; price?: number; time?: string }) => {
+  const found = await page.evaluate(({ airline, price, time, flightNumber }: { airline?: string; price?: number; time?: string; flightNumber?: string }) => {
     const parseTimeToMinutes = (t: string | null | undefined): number | null => {
       if (!t) return null;
       const raw = t.trim().toLowerCase();
@@ -1589,31 +1590,72 @@ export async function bookExpediaFlightProgrammatic(
       return hour * 60 + minute;
     };
     const timeMinutes = parseTimeToMinutes(time);
+    const normalizeLoose = (s: string | null | undefined): string =>
+      (s ?? "").toLowerCase().replace(/\s+/g, " ").trim();
+    const normalizeTight = (s: string | null | undefined): string =>
+      (s ?? "").toLowerCase().replace(/[^a-z0-9]/g, "");
+    const airlineLoose = normalizeLoose(airline);
+    const airlineWord = airlineLoose.split(" ")[0] ?? "";
+    const flightNumberTight = normalizeTight(flightNumber);
+    const flightDigits = (flightNumber ?? "").replace(/\D/g, "");
+    const priceToken = typeof price === "number" ? `$${price}` : "";
 
     const allButtons = Array.from(document.querySelectorAll<HTMLElement>('button, [role="button"]'));
     const scoredButtons = allButtons
       .map(btn => {
-        const label = ((btn.getAttribute("aria-label") ?? "") + " " + (btn.textContent ?? "")).toLowerCase();
+        const label = normalizeLoose((btn.getAttribute("aria-label") ?? "") + " " + (btn.textContent ?? ""));
         if (!label.includes("select")) return null;
-        const airlineWord = airline?.toLowerCase().split(" ")[0] ?? "";
-        const hasAirline = !airlineWord || label.includes(airlineWord);
-        const hasPrice = !price || label.includes(`$${price}`);
-        if (!hasAirline || !hasPrice) return null;
+        const container = btn.closest('li, article, section, [data-test-id], [data-stid], [class*="uitk-card"], [class*="offer-card"], [class*="result"]');
+        const context = normalizeLoose(container?.textContent ?? btn.parentElement?.textContent ?? "");
+        const combined = `${label} ${context}`.trim();
+        const combinedTight = normalizeTight(combined);
+        const hasAirline = !airlineWord || combined.includes(airlineWord) || combined.includes(airlineLoose);
+        if (!hasAirline) return null;
+        const hasPrice = !priceToken || combined.includes(priceToken);
+        const hasFlightNumber =
+          !flightNumberTight ||
+          combinedTight.includes(flightNumberTight) ||
+          (flightDigits.length >= 3 && combinedTight.includes(flightDigits));
         const departureMatch =
-          label.match(/departing at (\d{1,2}:\d{2}\s*(?:am|pm)?)/i) ??
-          label.match(/\b(\d{1,2}:\d{2}\s*(?:am|pm))\b/i);
+          combined.match(/departing at (\d{1,2}:\d{2}\s*(?:am|pm)?)/i) ??
+          combined.match(/\b(\d{1,2}:\d{2}\s*(?:am|pm)?)\b/i);
         const departureMinutes = parseTimeToMinutes(departureMatch?.[1] ?? null);
-        const timeScore = timeMinutes !== null
-          ? (departureMinutes === timeMinutes ? 3 : 1)
-          : 1;
+        const timeScore =
+          timeMinutes !== null
+            ? departureMinutes === timeMinutes
+              ? 4
+              : departureMinutes !== null && Math.abs(departureMinutes - timeMinutes) <= 5
+                ? 2
+                : 0
+            : 1;
+        const score =
+          (hasFlightNumber ? 5 : 0) +
+          (hasPrice ? 3 : 0) +
+          timeScore;
         const r = btn.getBoundingClientRect();
         if (r.width === 0 || r.height === 0) return null;
-        return { btn, label: label.slice(0, 100), timeScore, departureMinutes: departureMinutes ?? -1 };
+        return {
+          btn,
+          label: combined.slice(0, 140),
+          score,
+          hasPrice,
+          hasFlightNumber,
+          timeScore,
+          departureMinutes: departureMinutes ?? -1,
+        };
       })
-      .filter(Boolean) as Array<{ btn: HTMLElement; label: string; timeScore: number; departureMinutes: number }>;
+      .filter(Boolean) as Array<{
+        btn: HTMLElement;
+        label: string;
+        score: number;
+        hasPrice: boolean;
+        hasFlightNumber: boolean;
+        timeScore: number;
+        departureMinutes: number;
+      }>;
 
     scoredButtons.sort((a, b) => {
-      if (b.timeScore !== a.timeScore) return b.timeScore - a.timeScore;
+      if (b.score !== a.score) return b.score - a.score;
       if (timeMinutes !== null) {
         const aDelta = a.departureMinutes >= 0 ? Math.abs(a.departureMinutes - timeMinutes) : Number.POSITIVE_INFINITY;
         const bDelta = b.departureMinutes >= 0 ? Math.abs(b.departureMinutes - timeMinutes) : Number.POSITIVE_INFINITY;
@@ -1622,7 +1664,13 @@ export async function bookExpediaFlightProgrammatic(
       return 0;
     });
     const best = scoredButtons[0];
-    if (!best) return { found: false, label: "", candidates: 0, x: 0, y: 0, inViewportBefore: false };
+    if (!best) {
+      const samples = allButtons
+        .map(btn => normalizeLoose((btn.getAttribute("aria-label") ?? "") + " " + (btn.textContent ?? "")))
+        .filter(text => text.includes("select"))
+        .slice(0, 6);
+      return { found: false, label: "", candidates: 0, x: 0, y: 0, inViewportBefore: false, samples };
+    }
 
     const rectBefore = best.btn.getBoundingClientRect();
     const inViewportBefore = rectBefore.top >= 0 && rectBefore.bottom <= window.innerHeight;
@@ -1636,10 +1684,14 @@ export async function bookExpediaFlightProgrammatic(
       x: rectAfter.x + rectAfter.width / 2,
       y: rectAfter.y + rectAfter.height / 2,
       inViewportBefore,
+      samples: scoredButtons.slice(0, 4).map(c => c.label),
     };
-  }, { airline: targetAirline, price: targetPrice, time: targetDepartureTime });
+  }, { airline: targetAirline, price: targetPrice, time: targetDepartureTime, flightNumber: targetFlightNumber });
 
   if (!found.found) {
+    if (Array.isArray((found as { samples?: string[] }).samples) && (found as { samples?: string[] }).samples!.length > 0) {
+      trace(`[flight-rpa] Visible select-button samples: ${(found as { samples: string[] }).samples.join(" | ")}`);
+    }
     trace(`[flight-rpa] No matching flight button found (tried airline="${targetAirline}" price=$${targetPrice})`);
     return { reached_checkout: false, currentUrl: getUrl(), error: "Could not find the target flight on the search results page. The flight may no longer be available." };
   }
@@ -1755,7 +1807,7 @@ export async function bookExpediaFlightProgrammatic(
       await new Promise(r => setTimeout(r, 800));
 
       // Re-read position + sanity-check what's actually at that point
-      const preClick = await page.evaluate(() => {
+      const preClick = await page.evaluate((targetTotalPrice?: number) => {
         const dialogs = Array.from(document.querySelectorAll<HTMLElement>('[role="dialog"], [aria-modal="true"], dialog'))
           .filter(el => { const r = el.getBoundingClientRect(); return r.width > 100 && r.height > 100; });
         let modal: HTMLElement | null = null;
@@ -1770,7 +1822,9 @@ export async function bookExpediaFlightProgrammatic(
           .filter(b => (b.textContent ?? "").trim().toLowerCase() === "select")
           .filter(b => { const r = b.getBoundingClientRect(); return r.width > 0 && r.height > 0; });
 
-        // Find cheapest-fare Select button: walk up from each Select to find the $price, pick min
+        // Prefer the total price encoded in aria-label (e.g. "$237" for 2 travelers).
+        // Nearby text often shows per-traveler pricing (e.g. "$119"), which is wrong
+        // for selector matching and caused us to target the wrong button.
         const withPrices = selectBtns.map(btn => {
           let container: HTMLElement | null = btn.parentElement;
           let price = Infinity;
@@ -1779,9 +1833,24 @@ export async function bookExpediaFlightProgrammatic(
             if (match) { price = parseInt(match[1], 10); break; }
             container = container.parentElement;
           }
-          return { btn, price };
+          const ariaLabel = btn.getAttribute("aria-label") ?? "";
+          const ariaMatch = ariaLabel.match(/\$(\d{2,4})\b/);
+          const ariaPrice = ariaMatch ? parseInt(ariaMatch[1], 10) : Infinity;
+          const effectivePrice = Number.isFinite(ariaPrice) ? ariaPrice : price;
+          return { btn, price, ariaPrice, effectivePrice };
         });
-        withPrices.sort((a, b) => a.price - b.price);
+        withPrices.sort((a, b) => {
+          const target = typeof targetTotalPrice === "number" && Number.isFinite(targetTotalPrice)
+            ? targetTotalPrice
+            : null;
+          if (target !== null) {
+            const da = Math.abs(a.effectivePrice - target);
+            const db = Math.abs(b.effectivePrice - target);
+            if (da !== db) return da - db;
+          }
+          if (a.effectivePrice !== b.effectivePrice) return a.effectivePrice - b.effectivePrice;
+          return a.btn.getBoundingClientRect().x - b.btn.getBoundingClientRect().x;
+        });
         const target = withPrices[0]?.btn ?? selectBtns[0];
         if (!target) return { x: 0, y: 0, reason: "no select btn", elAtPoint: "", elText: "", modalRect: "" };
 
@@ -1810,12 +1879,19 @@ export async function bookExpediaFlightProgrammatic(
           elText,
           ancestorBtnText: ancestorText,
           pricesFound: withPrices.map(w => w.price).slice(0, 8),
-          chosenPrice: withPrices[0]?.price ?? -1,
+          ariaPricesFound: withPrices.map(w => Number.isFinite(w.ariaPrice) ? w.ariaPrice : -1).slice(0, 8),
+          chosenPrice: withPrices[0]?.effectivePrice ?? -1,
           modalRect: `${Math.round(modalRect.x)},${Math.round(modalRect.y)} ${Math.round(modalRect.width)}x${Math.round(modalRect.height)}`,
         };
-      }).catch((err: Error) => ({ x: 0, y: 0, reason: `err: ${err.message?.slice(0, 80)}`, elAtPoint: "", elText: "", ancestorBtnText: "", pricesFound: [] as number[], chosenPrice: -1, modalRect: "" }));
+      }, targetPrice).catch((err: Error) => ({
+        x: 0, y: 0, reason: `err: ${err.message?.slice(0, 80)}`, elAtPoint: "", elText: "", ancestorBtnText: "",
+        pricesFound: [] as number[], ariaPricesFound: [] as number[], chosenPrice: -1, modalRect: "",
+      }));
 
-      trace(`[flight-rpa] Pre-click verify: modalRect=${preClick.modalRect} coords=(${Math.round(preClick.x)},${Math.round(preClick.y)}) pricesFound=[${preClick.pricesFound?.join(",")}] chosen=$${preClick.chosenPrice}`);
+      trace(
+        `[flight-rpa] Pre-click verify: modalRect=${preClick.modalRect} coords=(${Math.round(preClick.x)},${Math.round(preClick.y)}) ` +
+        `pricesFound=[${preClick.pricesFound?.join(",")}] ariaPrices=[${preClick.ariaPricesFound?.join(",")}] chosen=$${preClick.chosenPrice}`
+      );
       trace(`[flight-rpa] Pre-click elementFromPoint: <${preClick.elAtPoint}> text="${preClick.elText}" ancestorBtn="${preClick.ancestorBtnText}"`);
 
       const chosenPrice = preClick.chosenPrice ?? 0;
@@ -1856,12 +1932,6 @@ export async function bookExpediaFlightProgrammatic(
       };
 
       const clickFareBySelector = async (): Promise<"locator-click" | "dom-click"> => {
-        const playablePage = resolvePlayablePage();
-        if (playablePage && typeof playablePage.locator === "function") {
-          await playablePage.locator(selector).first().click({ delay: 120, timeout: 5000 });
-          return "locator-click";
-        }
-
         const clicked = await page.evaluate((sel: string) => {
           const candidates = Array.from(document.querySelectorAll<HTMLButtonElement>(sel))
             .filter(btn => {
@@ -1875,8 +1945,15 @@ export async function bookExpediaFlightProgrammatic(
           return true;
         }, selector).catch(() => false);
 
-        if (!clicked) throw new Error(`selector fallback could not find ${selector}`);
-        return "dom-click";
+        if (clicked) return "dom-click";
+
+        const playablePage = resolvePlayablePage();
+        if (playablePage && typeof playablePage.locator === "function") {
+          await playablePage.locator(selector).first().click({ delay: 120, timeout: 5000 });
+          return "locator-click";
+        }
+
+        throw new Error(`selector fallback could not find ${selector}`);
       };
 
       const pressEnterOnFareButton = async (): Promise<"keyboard-press" | "stagehand-keypress" | "dom-enter"> => {
@@ -1924,7 +2001,7 @@ export async function bookExpediaFlightProgrammatic(
         return "dom-enter";
       };
 
-      const runTrajectoryClick = async (x: number, y: number): Promise<"playwright-mouse" | "stagehand-click" | "safe-mouse-click"> => {
+      const runTrajectoryClick = async (x: number, y: number): Promise<"playwright-mouse" | "safe-mouse-click"> => {
         const playablePage = resolvePlayablePage();
         if (playablePage?.mouse?.move && playablePage?.mouse?.down && playablePage?.mouse?.up) {
           await playablePage.mouse.move(100, 500);
@@ -1967,16 +2044,6 @@ export async function bookExpediaFlightProgrammatic(
             el.dispatchEvent(new MouseEvent("mouseover", mouseOpts));
           }
         }, { targetX: x, targetY: y }).catch(() => {});
-
-        const stagehandCoordClick = (page as unknown as {
-          click?: (x: number, y: number, opts?: { button?: string; clickCount?: number }) => Promise<unknown>;
-          mouse?: unknown;
-        }).click;
-        const hasNativeMouse = !!(page as unknown as { mouse?: unknown }).mouse;
-        if (typeof stagehandCoordClick === "function" && !hasNativeMouse) {
-          await stagehandCoordClick(x, y, { button: "left", clickCount: 1 });
-          return "stagehand-click";
-        }
 
         await safeMouseClick(page, x, y);
         return "safe-mouse-click";
@@ -2063,7 +2130,7 @@ export async function bookExpediaFlightProgrammatic(
 
       // Helper: re-measure cheapest-fare button coords in currently-open modal (for D)
       const recomputeFareCoords = async (): Promise<{ x: number; y: number; price: number }> => {
-        return page.evaluate(() => {
+        return page.evaluate((targetTotalPrice?: number) => {
           const dialogs = Array.from(document.querySelectorAll<HTMLElement>('[role="dialog"], [aria-modal="true"], dialog'))
             .filter(el => { const r = el.getBoundingClientRect(); return r.width > 100 && r.height > 100; });
           let modal: HTMLElement | null = null;
@@ -2083,14 +2150,29 @@ export async function bookExpediaFlightProgrammatic(
               if (match) { price = parseInt(match[1], 10); break; }
               container = container.parentElement;
             }
-            return { btn, price };
-          }).sort((a, b) => a.price - b.price);
+            const ariaLabel = btn.getAttribute("aria-label") ?? "";
+            const ariaMatch = ariaLabel.match(/\$(\d{2,4})\b/);
+            const ariaPrice = ariaMatch ? parseInt(ariaMatch[1], 10) : Infinity;
+            const effectivePrice = Number.isFinite(ariaPrice) ? ariaPrice : price;
+            return { btn, price, ariaPrice, effectivePrice };
+          }).sort((a, b) => {
+            const target = typeof targetTotalPrice === "number" && Number.isFinite(targetTotalPrice)
+              ? targetTotalPrice
+              : null;
+            if (target !== null) {
+              const da = Math.abs(a.effectivePrice - target);
+              const db = Math.abs(b.effectivePrice - target);
+              if (da !== db) return da - db;
+            }
+            if (a.effectivePrice !== b.effectivePrice) return a.effectivePrice - b.effectivePrice;
+            return a.btn.getBoundingClientRect().x - b.btn.getBoundingClientRect().x;
+          });
           const target = withPrices[0]?.btn;
           if (!target) return { x: 0, y: 0, price: 0 };
           target.scrollIntoView({ block: "center", behavior: "instant" as ScrollBehavior });
           const r = target.getBoundingClientRect();
-          return { x: r.x + r.width / 2, y: r.y + r.height / 2, price: withPrices[0]?.price ?? 0 };
-        }).catch(() => ({ x: 0, y: 0, price: 0 }));
+          return { x: r.x + r.width / 2, y: r.y + r.height / 2, price: withPrices[0]?.effectivePrice ?? 0 };
+        }, targetPrice).catch(() => ({ x: 0, y: 0, price: 0 }));
       };
 
       let commitResult: { committed: boolean; url: string; reason: string } =
@@ -2128,9 +2210,18 @@ export async function bookExpediaFlightProgrammatic(
         trace(`[flight-rpa] Attempt C prep: modalOpen=${modalOpenForC}`);
         if (modalOpenForC) {
           try {
-            await stagehand.act(
-              `Click the Select button for the cheapest fare tier priced at $${chosenPrice} inside the fare selection drawer on the right side of the page`
-            );
+            const STAGEHAND_ACT_TIMEOUT_MS = 20_000;
+            await Promise.race([
+              stagehand.act(
+                `Click the Select button for the cheapest fare tier priced at $${chosenPrice} inside the fare selection drawer on the right side of the page`
+              ),
+              new Promise<never>((_, reject) =>
+                setTimeout(
+                  () => reject(new Error(`stagehand.act timed out after ${Math.round(STAGEHAND_ACT_TIMEOUT_MS / 1000)}s`)),
+                  STAGEHAND_ACT_TIMEOUT_MS
+                )
+              ),
+            ]);
             await new Promise(r => setTimeout(r, 3000));
             await safeScreenshot("05C-after-stagehand-act");
             commitResult = await checkCommitted();
@@ -2682,15 +2773,77 @@ export async function bookExpediaFlightProgrammatic(
   }
 
   // ── Step 7: Check if we reached checkout ─────────────────────────────────
+  const seatConfirm = await activePage.evaluate(() => {
+    const bodyText = (document.body.textContent ?? "").toLowerCase();
+    const allButtons = Array.from(document.querySelectorAll<HTMLElement>("button, a"));
+    const continueBtn = allButtons.find(btn => {
+      const text = (btn.textContent ?? "").trim().toLowerCase();
+      const rect = btn.getBoundingClientRect();
+      return text.includes("continue to checkout") && rect.width > 0 && rect.height > 0;
+    });
+    if (!continueBtn) {
+      return {
+        hasSeatConfirm: bodyText.includes("continue without choosing seats"),
+        continueTarget: null as { x: number; y: number; text: string } | null,
+      };
+    }
+    continueBtn.scrollIntoView({ block: "center", behavior: "instant" as ScrollBehavior });
+    const rect = continueBtn.getBoundingClientRect();
+    return {
+      hasSeatConfirm:
+        bodyText.includes("continue without choosing seats") ||
+        (continueBtn.textContent ?? "").toLowerCase().includes("continue to checkout"),
+      continueTarget: {
+        x: rect.x + rect.width / 2,
+        y: rect.y + rect.height / 2,
+        text: (continueBtn.textContent ?? "").trim().slice(0, 40),
+      },
+    };
+  }).catch(() => ({
+    hasSeatConfirm: false,
+    continueTarget: null as { x: number; y: number; text: string } | null,
+  }));
+
+  if (seatConfirm.hasSeatConfirm && seatConfirm.continueTarget) {
+    trace(`[flight-rpa] Seat confirmation modal — clicking ${seatConfirm.continueTarget.text} @(${Math.round(seatConfirm.continueTarget.x)},${Math.round(seatConfirm.continueTarget.y)})`);
+    await safeMouseClick(activePage, seatConfirm.continueTarget.x, seatConfirm.continueTarget.y);
+    await new Promise(r => setTimeout(r, 2500));
+    await safeScreenshot("08-after-seat-confirm");
+  }
+
   const currentUrl = getUrl();
+  const checkoutSignals = await activePage.evaluate(() => {
+    const bodyText = (document.body.textContent ?? "").toLowerCase();
+    const stillOnReview =
+      bodyText.includes("skip to checkout") ||
+      bodyText.includes("next: seats") ||
+      bodyText.includes("continue without choosing seats");
+    const hasTravelerCopy =
+      bodyText.includes("traveler information") ||
+      bodyText.includes("passenger information") ||
+      bodyText.includes("who's flying") ||
+      bodyText.includes("traveler 1") ||
+      bodyText.includes("enter payment");
+    const visibleInputs = Array.from(document.querySelectorAll<HTMLInputElement>("input"))
+      .filter(input => {
+        const rect = input.getBoundingClientRect();
+        return rect.width > 0 && rect.height > 0 && input.type !== "hidden";
+      })
+      .map(input => [
+        input.name ?? "",
+        input.id ?? "",
+        input.placeholder ?? "",
+        input.getAttribute("aria-label") ?? "",
+        input.getAttribute("autocomplete") ?? "",
+      ].join(" ").toLowerCase());
+    const hasTravelerFields = visibleInputs.some(desc =>
+      /first.?name|last.?name|given.?name|family.?name|surname|date.?of.?birth|birth.?date|passport|known.?traveler|tsa.?pre|phone|email/.test(desc)
+    );
+    return { stillOnReview, hasTravelerCopy, hasTravelerFields };
+  }).catch(() => ({ stillOnReview: false, hasTravelerCopy: false, hasTravelerFields: false }));
   const onCheckout =
     currentUrl.includes("/checkout") || currentUrl.includes("/Checkout") ||
-    await activePage.evaluate(() => {
-      const bodyText = (document.body.textContent ?? "").toLowerCase();
-      return bodyText.includes("traveler information") || bodyText.includes("passenger information") ||
-        bodyText.includes("who's flying") || bodyText.includes("traveler 1") ||
-        bodyText.includes("review and book") || bodyText.includes("enter payment");
-    }).catch(() => false);
+    ((checkoutSignals.hasTravelerCopy || checkoutSignals.hasTravelerFields) && !checkoutSignals.stillOnReview);
 
   if (!onCheckout) {
     trace(`[flight-rpa] Did not reach checkout — currentUrl=${currentUrl.slice(0, 80)}`);

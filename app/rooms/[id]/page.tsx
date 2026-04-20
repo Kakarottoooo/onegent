@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import dynamic from "next/dynamic";
 import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import { useRoomState } from "@/app/hooks/useRoomState";
@@ -15,11 +16,16 @@ import type {
   DecisionRoomVote,
   UserProfile,
 } from "@/lib/db";
-import type { RecommendationCard } from "@/lib/types";
+import type { RecommendationCard, FlightRecommendationCard } from "@/lib/types";
 import { extractOptions, resolveAcceptedOption, tallyVotes } from "@/lib/rooms/proposal-shape";
 import { CARD, CARD_MUTED, CTA, CTA_GHOST, PAGE } from "@/app/_ui/tokens";
 import GlobalNav from "@/components/GlobalNav";
 import PhotoCarousel from "@/components/PhotoCarousel";
+import FlightCard from "@/components/FlightCard";
+
+// Leaflet pulls in `window` — force client-only so the room detail page (a
+// server component by default) doesn't choke during SSR.
+const MapView = dynamic(() => import("@/components/MapView"), { ssr: false });
 
 type MyConstraint = {
   budget_max?: number;
@@ -40,12 +46,36 @@ type MyHotelConstraint = {
   notes?: string;
 };
 
+type MyFlightConstraint = {
+  budget_max_per_person?: number;
+  max_stops?: 0 | 1 | 2;
+  earliest_departure?: string;
+  latest_departure?: string;
+  avoid_red_eye?: boolean;
+  cabin_class_min?: "economy" | "premium_economy" | "business" | "first";
+  preferred_airlines?: string[];
+  avoid_airlines?: string[];
+  notes?: string;
+};
+
 const VIBES = ["casual", "romantic", "lively", "quiet", "upscale"] as const;
 const DIETARY_OPTIONS = ["vegetarian", "vegan", "gluten-free", "halal", "kosher", "no raw fish"];
 
 const HOTEL_VIBES = ["quiet", "lively", "romantic", "family-friendly", "business"] as const;
 const HOTEL_AMENITIES = ["pool", "gym", "breakfast", "parking", "pet-friendly", "wifi", "spa", "airport-shuttle"];
 const STAR_OPTIONS = [3, 4, 5] as const;
+
+const FLIGHT_STOPS_OPTIONS: Array<{ value: 0 | 1 | 2; label: string }> = [
+  { value: 0, label: "Nonstop only" },
+  { value: 1, label: "≤ 1 stop" },
+  { value: 2, label: "≤ 2 stops" },
+];
+const FLIGHT_CABIN_OPTIONS: Array<{ value: MyFlightConstraint["cabin_class_min"]; label: string }> = [
+  { value: "economy", label: "Economy" },
+  { value: "premium_economy", label: "Premium econ." },
+  { value: "business", label: "Business" },
+  { value: "first", label: "First" },
+];
 
 // Local input/label tokens (room-specific variants of the shared ones).
 const INPUT =
@@ -515,12 +545,17 @@ function HeaderBar({
     <>
       <button
         onClick={() => router.push("/rooms")}
-        className="text-xs text-[var(--text-muted)] hover:text-[var(--text-primary)] mb-3"
+        className="relative mb-4 inline-flex items-center gap-1.5 rounded-xl border border-[var(--gold)]/35 bg-[var(--gold)]/5 px-3 py-1.5 text-sm font-medium text-transparent transition-colors hover:border-[var(--gold)]/60 hover:bg-[var(--gold)]/10"
       >
+        <span aria-hidden className="text-[var(--gold)]">←</span>
+        <span className="text-[var(--gold)]">Back to rooms</span>
         ← All rooms
       </button>
       <div className="flex items-start justify-between gap-3 mb-2">
-        <h1 className="text-lg font-semibold text-[var(--text-primary)] leading-tight flex-1">{title}</h1>
+        <div className="min-w-0 flex-1">
+          <p className="mb-1 text-[11px] uppercase tracking-[0.14em] text-[var(--text-muted)]">Room</p>
+          <h1 className="text-2xl font-semibold text-[var(--text-primary)] leading-tight">{title}</h1>
+        </div>
         <span className={`text-[10px] font-medium px-2 py-0.5 rounded-full whitespace-nowrap mt-1 ${s.tone}`}>
           {s.text}
         </span>
@@ -594,7 +629,7 @@ function RoomActionsMenu({
   const isArchived = status === "done" || status === "abandoned";
   const canCancel = isCreator && !isExecuting && !isArchived;
   const canTransfer = isCreator && !isExecuting && members.filter((m) => m.user_id !== myUserId).length > 0;
-  const canDelete = isCreator && isArchived;
+  const canDelete = isCreator && !isExecuting;
   const canLeave = !isCreator && !isExecuting;
 
   const otherMembers = members.filter((m) => m.user_id !== myUserId);
@@ -662,19 +697,43 @@ function RoomActionsMenu({
     );
   }
 
+  // Non-creator sees a prominent standalone "Leave room" button (no dropdown).
+  if (!isCreator && canLeave) {
+    return (
+      <div className="mb-3 flex justify-end">
+        <button
+          type="button"
+          onClick={leaveRoom}
+          disabled={busy !== null}
+          className="inline-flex items-center gap-1.5 text-sm font-medium text-red-600 border border-red-500/40 bg-red-500/5 hover:bg-red-500/10 hover:border-red-500 px-3 py-1.5 rounded-xl disabled:opacity-40 transition-colors"
+          aria-label="Leave room"
+        >
+          <span aria-hidden>↩</span>
+          Leave room
+        </button>
+        {err && (
+          <div className="ml-2 text-[11px] text-red-600 self-center">{err}</div>
+        )}
+      </div>
+    );
+  }
+
   return (
     <div className="relative mb-3 flex justify-end">
       <button
         type="button"
         onClick={() => { setOpen((v) => !v); setTransferPickerOpen(false); }}
-        className="text-xs text-[var(--text-muted)] hover:text-[var(--text-primary)] px-2 py-1 rounded-lg border border-[var(--border)]"
-        aria-label="Room actions"
+        className="inline-flex items-center gap-1.5 text-sm font-semibold text-[var(--gold)] border border-[var(--gold)]/50 bg-[var(--gold)]/5 hover:bg-[var(--gold)]/10 hover:border-[var(--gold)] px-3 py-1.5 rounded-xl transition-colors"
+        aria-label="Manage room"
+        aria-expanded={open}
       >
-        ⋯ Actions
+        <span aria-hidden>⚙</span>
+        Manage room
+        <span aria-hidden className="text-xs">{open ? "▾" : "▸"}</span>
       </button>
 
       {open && (
-        <div className="absolute right-0 top-full mt-1 w-60 z-20 rounded-xl border border-[var(--border)] bg-[var(--card)] shadow-lg overflow-hidden">
+        <div className="absolute right-0 top-full mt-1 w-64 z-20 rounded-xl border border-[var(--border)] bg-[var(--card)] shadow-lg overflow-hidden">
           {canCancel && (
             <button
               type="button"
@@ -948,6 +1007,9 @@ function ConstraintForm(props: {
 }) {
   if (props.roomType === "hotel") {
     return <HotelConstraintForm {...props} />;
+  }
+  if (props.roomType === "flight") {
+    return <FlightConstraintForm {...props} />;
   }
   return <RestaurantConstraintForm {...props} />;
 }
@@ -1335,6 +1397,223 @@ function HotelConstraintForm({
   );
 }
 
+// ── Flight constraint form ───────────────────────────────────────────────────
+
+function FlightConstraintForm({
+  roomId, initial, refresh, collapsedByDefault = false,
+}: {
+  roomId: string;
+  initial: DecisionRoomConstraintRow | undefined;
+  refresh: () => void;
+  collapsedByDefault?: boolean;
+}) {
+  const [open, setOpen] = useState(!collapsedByDefault);
+  const initialData = (initial?.data_json ?? {}) as MyFlightConstraint;
+  const [budget, setBudget] = useState<string>(
+    initialData.budget_max_per_person ? String(initialData.budget_max_per_person) : ""
+  );
+  const [maxStops, setMaxStops] = useState<MyFlightConstraint["max_stops"]>(initialData.max_stops);
+  const [cabinMin, setCabinMin] = useState<MyFlightConstraint["cabin_class_min"]>(initialData.cabin_class_min);
+  const [earliest, setEarliest] = useState<string>(initialData.earliest_departure ?? "");
+  const [latest, setLatest] = useState<string>(initialData.latest_departure ?? "");
+  const [avoidRedEye, setAvoidRedEye] = useState<boolean>(Boolean(initialData.avoid_red_eye));
+  const [preferred, setPreferred] = useState<string>((initialData.preferred_airlines ?? []).join(", "));
+  const [avoid, setAvoid] = useState<string>((initialData.avoid_airlines ?? []).join(", "));
+  const [notes, setNotes] = useState<string>(initialData.notes ?? "");
+
+  const [saving, setSaving] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  const submitted = Boolean(initial?.submitted);
+
+  function buildData(): MyFlightConstraint {
+    const toList = (s: string) => {
+      const parts = s.split(",").map((p) => p.trim()).filter(Boolean);
+      return parts.length ? parts : undefined;
+    };
+    return {
+      budget_max_per_person: budget ? Number(budget) : undefined,
+      max_stops: maxStops,
+      earliest_departure: earliest || undefined,
+      latest_departure: latest || undefined,
+      avoid_red_eye: avoidRedEye || undefined,
+      cabin_class_min: cabinMin,
+      preferred_airlines: toList(preferred),
+      avoid_airlines: toList(avoid),
+      notes: notes || undefined,
+    };
+  }
+
+  async function save(markSubmitted: boolean) {
+    setSaving(true);
+    setErr(null);
+    try {
+      const res = await fetch(`/api/rooms/${roomId}/constraints`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ data: buildData(), submitted: markSubmitted }),
+      });
+      if (!res.ok) {
+        const { error: msg } = await res.json().catch(() => ({ error: "Save failed" }));
+        setErr(msg ?? "Save failed");
+        return;
+      }
+      refresh();
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <div className={`${CARD} p-4 mb-4`}>
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        className="w-full flex items-center justify-between mb-3 text-left"
+      >
+        <p className="text-sm font-semibold text-[var(--text-primary)]">Your flight preferences</p>
+        <div className="flex items-center gap-2">
+          {submitted && (
+            <span className="text-[10px] font-medium px-2 py-0.5 rounded-full bg-emerald-500/15 text-emerald-600 border border-emerald-500/30">
+              Submitted
+            </span>
+          )}
+          <span className="text-[var(--text-muted)] text-xs">{open ? "▲" : "▼ edit"}</span>
+        </div>
+      </button>
+
+      {!open ? null : (<>
+      <label className={LABEL}>Budget ceiling (per person)</label>
+      <div className="flex items-center gap-2 mb-3">
+        <span className="text-sm text-[var(--text-muted)]">$</span>
+        <input
+          type="number"
+          inputMode="numeric"
+          value={budget}
+          onChange={(e) => setBudget(e.target.value)}
+          placeholder="e.g. 450"
+          className={`flex-1 ${INPUT}`}
+        />
+      </div>
+
+      <label className="text-xs text-[var(--text-secondary)] block mb-2">Max stops</label>
+      <div className="flex flex-wrap gap-1.5 mb-3">
+        {FLIGHT_STOPS_OPTIONS.map((opt) => {
+          const active = maxStops === opt.value;
+          return (
+            <button
+              key={opt.value}
+              type="button"
+              onClick={() => setMaxStops(active ? undefined : opt.value)}
+              className={`text-xs px-2.5 py-1 rounded-full border transition-colors ${
+                active ? PILL_ACTIVE : PILL_IDLE
+              }`}
+            >
+              {opt.label}
+            </button>
+          );
+        })}
+      </div>
+
+      <label className="text-xs text-[var(--text-secondary)] block mb-2">Minimum cabin class</label>
+      <div className="flex flex-wrap gap-1.5 mb-3">
+        {FLIGHT_CABIN_OPTIONS.map((opt) => {
+          const active = cabinMin === opt.value;
+          return (
+            <button
+              key={opt.value}
+              type="button"
+              onClick={() => setCabinMin(active ? undefined : opt.value)}
+              className={`text-xs px-2.5 py-1 rounded-full border transition-colors ${
+                active ? PILL_ACTIVE : PILL_IDLE
+              }`}
+            >
+              {opt.label}
+            </button>
+          );
+        })}
+      </div>
+
+      <div className="grid grid-cols-2 gap-2 mb-3">
+        <div>
+          <label className={LABEL}>Earliest departure</label>
+          <input
+            type="time"
+            value={earliest}
+            onChange={(e) => setEarliest(e.target.value)}
+            className={`w-full ${INPUT}`}
+          />
+        </div>
+        <div>
+          <label className={LABEL}>Latest departure</label>
+          <input
+            type="time"
+            value={latest}
+            onChange={(e) => setLatest(e.target.value)}
+            className={`w-full ${INPUT}`}
+          />
+        </div>
+      </div>
+
+      <label className="flex items-center gap-2 mb-3 cursor-pointer">
+        <input
+          type="checkbox"
+          checked={avoidRedEye}
+          onChange={(e) => setAvoidRedEye(e.target.checked)}
+          className="rounded border-[var(--border)]"
+        />
+        <span className="text-xs text-[var(--text-secondary)]">Avoid red-eye (midnight – 5am departures)</span>
+      </label>
+
+      <label className={LABEL}>Preferred airlines <span className="text-[var(--text-muted)]">(comma-separated)</span></label>
+      <input
+        value={preferred}
+        onChange={(e) => setPreferred(e.target.value)}
+        placeholder="e.g. Delta, United"
+        className={`w-full mb-3 ${INPUT}`}
+      />
+
+      <label className={LABEL}>Avoid airlines <span className="text-[var(--text-muted)]">(comma-separated)</span></label>
+      <input
+        value={avoid}
+        onChange={(e) => setAvoid(e.target.value)}
+        placeholder="e.g. Spirit, Frontier"
+        className={`w-full mb-3 ${INPUT}`}
+      />
+
+      <label className={LABEL}>Notes</label>
+      <textarea
+        value={notes}
+        onChange={(e) => setNotes(e.target.value)}
+        rows={2}
+        placeholder="Anything else? window seat, extra legroom, need wifi…"
+        className={`w-full resize-none mb-3 ${INPUT}`}
+      />
+
+      {err && (
+        <p className="text-xs text-red-600 mb-2">{err}</p>
+      )}
+
+      <div className="flex gap-2">
+        <button
+          onClick={() => save(false)}
+          disabled={saving}
+          className="flex-1 py-2.5 rounded-xl border border-[var(--border)] bg-transparent text-sm font-medium text-[var(--text-primary)] hover:border-[var(--gold)] disabled:opacity-40 transition-colors"
+        >
+          {saving ? "Saving…" : "Save draft"}
+        </button>
+        <button
+          onClick={() => save(true)}
+          disabled={saving}
+          className={`flex-1 py-2.5 ${CTA}`}
+        >
+          {submitted ? "Update" : "Submit"}
+        </button>
+      </div>
+      </>)}
+    </div>
+  );
+}
+
 // ── Propose button ────────────────────────────────────────────────────────────
 
 function ProposeButton({
@@ -1437,6 +1716,11 @@ function ProposalCard({
   const canPickOption = mode === "active" || mode === "accepted";
   const options = useMemo(() => extractOptions(proposal), [proposal]);
   const tallies = useMemo(() => tallyVotes(options, proposal.votes), [options, proposal.votes]);
+  // Flight proposals can switch between card list and map view (routes + airports).
+  // Hotel/restaurant stays in list mode for now — MapView already supports those
+  // via pins but the room layout doesn't have a natural map slot yet.
+  const [viewMode, setViewMode] = useState<"list" | "map">("list");
+  const showMapToggle = roomType === "flight";
   const myVote = proposal.votes.find((v) => v.user_id === userId);
   // Unique voters — approve / decline / request_changes all count as "voted".
   const voterCount = new Set(proposal.votes.map((v) => v.user_id)).size;
@@ -1485,6 +1769,24 @@ function ProposalCard({
       if (!res.ok) {
         const { error: msg } = await res.json().catch(() => ({ error: "Vote failed" }));
         setErr(msg ?? "Vote failed");
+        return;
+      }
+      refresh();
+    } finally {
+      setVoting(null);
+    }
+  }
+
+  async function withdrawVote(optionId: string) {
+    setVoting(optionId);
+    setErr(null);
+    try {
+      const res = await fetch(`/api/rooms/${roomId}/proposals/${proposal.id}/vote`, {
+        method: "DELETE",
+      });
+      if (!res.ok) {
+        const { error: msg } = await res.json().catch(() => ({ error: "Withdraw failed" }));
+        setErr(msg ?? "Withdraw failed");
         return;
       }
       refresh();
@@ -1564,9 +1866,51 @@ function ProposalCard({
         </div>
       )}
 
+      {/* List / Map toggle — flight only (MapView already supports flightCards). */}
+      {showMapToggle && (
+        <div className="flex justify-end mb-2">
+          <div
+            className="flex gap-1 rounded-xl p-1"
+            style={{ backgroundColor: "var(--card)", border: "0.5px solid var(--border)" }}
+          >
+            {(["list", "map"] as const).map((m) => (
+              <button
+                key={m}
+                type="button"
+                onClick={() => setViewMode(m)}
+                aria-pressed={viewMode === m}
+                className="px-3 py-1 rounded-lg text-xs font-medium transition-all capitalize"
+                style={{
+                  backgroundColor: viewMode === m ? "var(--gold)" : "transparent",
+                  color: viewMode === m ? "#fff" : "var(--text-secondary)",
+                }}
+              >
+                {m}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {showMapToggle && viewMode === "map" && (
+        <div
+          className="mb-3 rounded-2xl overflow-hidden border"
+          style={{ borderColor: "var(--border)", height: 480 }}
+        >
+          <MapView
+            pins={[]}
+            label="Flight"
+            flightCards={options
+              .map((o) => o.card as unknown as FlightRecommendationCard)
+              .filter((c) => c?.flight)}
+          />
+        </div>
+      )}
+
       {/* Option cards */}
+      {!(showMapToggle && viewMode === "map") && (
       <div className="flex flex-col gap-2 mb-3">
-        {options.map((o) => {
+        {options.map((o, idx) => {
           const card = o.card;
           const tally = tallies.find((t) => t.option_id === o.id);
           const approvedBy = tally?.approved_by ?? [];
@@ -1577,6 +1921,117 @@ function ProposalCard({
           const isMyPick = myVote?.vote === "approve" && myVote.option_id === o.id;
           const isWinner = mode === "accepted" && winnerId === o.id;
           const loading = voting === o.id;
+
+          if (roomType === "flight") {
+            const fCard = card as unknown as FlightRecommendationCard;
+            const flight = fCard.flight;
+            const clickable = canPickOption && voting === null;
+            const handleCardClick = () => {
+              if (!clickable) return;
+              if (isMyPick) {
+                withdrawVote(o.id);
+              } else {
+                vote("approve", o.id);
+              }
+            };
+            return (
+              <div
+                key={o.id}
+                role={clickable ? "button" : undefined}
+                tabIndex={clickable ? 0 : undefined}
+                aria-pressed={clickable ? isMyPick : undefined}
+                onClick={handleCardClick}
+                onKeyDown={(e) => {
+                  if (!clickable) return;
+                  if (e.key === "Enter" || e.key === " ") {
+                    e.preventDefault();
+                    handleCardClick();
+                  }
+                }}
+                className={`rounded-2xl transition-shadow ${clickable ? "cursor-pointer hover:ring-2 hover:ring-[var(--gold)]/40" : ""} ${
+                  isWinner
+                    ? "ring-2 ring-emerald-500/60"
+                    : isMyPick
+                      ? "ring-2 ring-[var(--gold)]"
+                      : ""
+                } ${loading ? "opacity-60" : ""}`}
+              >
+                <FlightCard card={fCard} index={idx} hideBookingActions />
+                <div className="px-4 pb-3 pt-1 flex items-center justify-between gap-3 flex-wrap">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    {isWinner && (
+                      <span
+                        className="text-[10px] font-semibold px-1.5 py-0.5 rounded-full bg-emerald-500 text-white whitespace-nowrap"
+                        title="Group picked this option"
+                      >
+                        ✓ Picked
+                      </span>
+                    )}
+                    {isMyPick && !isWinner && (
+                      <span
+                        className="text-[10px] font-semibold px-1.5 py-0.5 rounded-full bg-[var(--gold)] text-white whitespace-nowrap"
+                        title="You picked this — click card again to unpick"
+                      >
+                        ✓ Your pick
+                      </span>
+                    )}
+                    {approvedCount > 0 && (
+                      <span
+                        className="text-[10px] font-medium px-1.5 py-0.5 rounded-full bg-emerald-500/15 text-emerald-600 border border-emerald-500/30 whitespace-nowrap"
+                        title={`${approvedCount} of ${memberCount} picked this`}
+                      >
+                        {approvedCount} · {approvedPct}%
+                      </span>
+                    )}
+                    <div className="flex items-center gap-0.5">
+                      {shownAvatars.map((uid) => {
+                        const p = memberProfiles[uid];
+                        const name = p?.display_name ?? `@${p?.profile_code ?? uid.slice(-6)}`;
+                        return p?.avatar_url ? (
+                          // eslint-disable-next-line @next/next/no-img-element
+                          <img
+                            key={uid}
+                            src={p.avatar_url}
+                            alt={name}
+                            title={`${name} picked this`}
+                            className="w-5 h-5 rounded-full ring-2 ring-[var(--card)] -ml-1 first:ml-0"
+                          />
+                        ) : (
+                          <div
+                            key={uid}
+                            title={`${name} picked this`}
+                            className="w-5 h-5 rounded-full bg-[var(--border)] flex items-center justify-center text-[9px] text-[var(--text-secondary)] ring-2 ring-[var(--card)] -ml-1 first:ml-0"
+                          >
+                            {name.slice(0, 1).toUpperCase()}
+                          </div>
+                        );
+                      })}
+                      {overflowAvatars > 0 && (
+                        <div
+                          title={`${overflowAvatars} more picked this`}
+                          className="w-5 h-5 rounded-full bg-[var(--border)] flex items-center justify-center text-[9px] text-[var(--text-secondary)] ring-2 ring-[var(--card)] -ml-1"
+                        >
+                          +{overflowAvatars}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                  {flight?.booking_link && (
+                    <a
+                      href={flight.booking_link}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      onClick={(e) => e.stopPropagation()}
+                      className="text-[13px] font-semibold text-[var(--gold)] hover:underline whitespace-nowrap"
+                    >
+                      View details ↗
+                    </a>
+                  )}
+                </div>
+              </div>
+            );
+          }
+
           return (
             <div
               key={o.id}
@@ -1750,6 +2205,7 @@ function ProposalCard({
           );
         })}
       </div>
+      )}
 
       {/* Aggregate decline / request-changes (apply to the whole slate) */}
       {mode === "active" && (
@@ -1818,6 +2274,7 @@ function AcceptedBlock({
   refresh: () => void;
 }) {
   const isHotel = roomType === "hotel";
+  const isFlight = roomType === "flight";
   // Pick the winning option from the tallies; fall back to the first option
   // (legacy single-card proposals are treated as a single option by extractOptions).
   const options = extractOptions(proposal);
@@ -1838,14 +2295,29 @@ function AcceptedBlock({
     (options.find((o) => o.id === winnerId)?.card as RecommendationCard | undefined) ??
     (options[0]?.card as RecommendationCard | undefined) ??
     ({} as RecommendationCard);
-  // Hotel vs. restaurant display label — used in status banners and CTA copy.
+  // Per-scenario display label — used in status banners and CTA copy.
   const hotelCard = card as unknown as { hotel?: { name?: string } };
+  const flightCard = card as unknown as {
+    flight?: { airline?: string; flight_number?: string; departure_airport?: string; arrival_airport?: string };
+  };
+  const flightLabel = (() => {
+    const f = flightCard.flight;
+    if (!f) return "flight";
+    const airline = f.airline ?? "Flight";
+    const route = f.departure_airport && f.arrival_airport ? ` ${f.departure_airport}→${f.arrival_airport}` : "";
+    const num = f.flight_number ? ` ${f.flight_number}` : "";
+    return `${airline}${num}${route}`.trim();
+  })();
   const targetName = isHotel
     ? hotelCard.hotel?.name ?? "hotel"
-    : card.restaurant?.name ?? "restaurant";
+    : isFlight
+      ? flightLabel
+      : card.restaurant?.name ?? "restaurant";
   const targetNameCapitalized = isHotel
     ? hotelCard.hotel?.name ?? "Hotel"
-    : card.restaurant?.name ?? "Restaurant";
+    : isFlight
+      ? flightLabel
+      : card.restaurant?.name ?? "Restaurant";
   // Hotel stays are group-level defaults from room.context_json. The payer
   // can still tweak them here before kicking off the booking — saves a trip
   // back to the room editor for a one-day typo.
@@ -1871,6 +2343,29 @@ function AcceptedBlock({
   // Default covers = current joined count. Payer can still override for
   // cases like bringing a child (no seat) or a non-member joining on site.
   const [covers, setCovers] = useState(Math.max(1, memberCount));
+
+  // Flight defaults — mirror the hotel pattern. Authoritative source is
+  // room.context_json (set at creation); Payer can still tweak here.
+  const flightInitial = useMemo(() => {
+    if (!isFlight) return { depDate: "", retDate: "", isRT: false, passengers: Math.max(1, memberCount) };
+    const ctx = context as {
+      departure_date?: string;
+      return_date?: string;
+      is_round_trip?: boolean;
+      passengers?: number;
+      date_window?: { from?: string | null; to?: string | null } | null;
+    };
+    return {
+      depDate: ctx.departure_date ?? ctx.date_window?.from ?? "",
+      retDate: ctx.return_date ?? ctx.date_window?.to ?? "",
+      isRT: Boolean(ctx.is_round_trip),
+      passengers: ctx.passengers ?? Math.max(1, memberCount),
+    };
+  }, [isFlight, context, memberCount]);
+  const [depDate, setDepDate] = useState(flightInitial.depDate);
+  const [retDate, setRetDate] = useState(flightInitial.retDate);
+  const [isRT, setIsRT] = useState(flightInitial.isRT);
+  const [flightPassengers, setFlightPassengers] = useState(flightInitial.passengers);
   const [starting, setStarting] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [needsProfile, setNeedsProfile] = useState(false);
@@ -2084,6 +2579,11 @@ function AcceptedBlock({
       if (!checkIn || !checkOut) { setErr("Pick check-in and check-out dates."); return; }
       if (checkIn >= checkOut) { setErr("Check-out must be after check-in."); return; }
       if (!guests || guests < 1) { setErr("Guests must be at least 1."); return; }
+    } else if (isFlight) {
+      if (!depDate) { setErr("Pick a departure date."); return; }
+      if (isRT && !retDate) { setErr("Round-trip needs a return date."); return; }
+      if (isRT && retDate && retDate <= depDate) { setErr("Return date must be after departure."); return; }
+      if (!flightPassengers || flightPassengers < 1) { setErr("Passengers must be at least 1."); return; }
     } else {
       if (!date || !time || !covers) { setErr("Pick a date, time, and party size."); return; }
     }
@@ -2103,6 +2603,11 @@ function AcceptedBlock({
         payload.check_in = checkIn;
         payload.check_out = checkOut;
         payload.guests = guests;
+      } else if (isFlight) {
+        payload.departure_date = depDate;
+        payload.is_round_trip = isRT;
+        if (isRT) payload.return_date = retDate;
+        payload.passengers = flightPassengers;
       } else {
         payload.date = date;
         payload.time = time;
@@ -2139,7 +2644,9 @@ function AcceptedBlock({
         <p className="text-xs text-emerald-600/80">
           {isHotel
             ? "Waiting on the payer to trigger the booking."
-            : "Waiting on the payer to confirm date/time and trigger the booking."}
+            : isFlight
+              ? "Waiting on the payer to confirm dates and trigger the booking."
+              : "Waiting on the payer to confirm date/time and trigger the booking."}
         </p>
       )}
 
@@ -2209,7 +2716,95 @@ function AcceptedBlock({
         </div>
       )}
 
-      {isPayer && status !== "executing" && !isHotel && (
+      {isPayer && status !== "executing" && isFlight && (
+        <div className="mt-3">
+          <div className="rounded-lg border border-emerald-500/30 bg-emerald-500/5 p-3 mb-2">
+            <div className="flex items-center gap-2 mb-2">
+              <button
+                type="button"
+                onClick={() => setIsRT(false)}
+                className={`flex-1 py-1.5 rounded-lg border text-xs transition-colors ${
+                  !isRT ? "border-emerald-500 bg-emerald-500/15 text-emerald-600" : "border-[var(--border)] text-[var(--text-muted)] hover:border-emerald-500/40"
+                }`}
+              >
+                One-way
+              </button>
+              <button
+                type="button"
+                onClick={() => setIsRT(true)}
+                className={`flex-1 py-1.5 rounded-lg border text-xs transition-colors ${
+                  isRT ? "border-emerald-500 bg-emerald-500/15 text-emerald-600" : "border-[var(--border)] text-[var(--text-muted)] hover:border-emerald-500/40"
+                }`}
+              >
+                Round-trip
+              </button>
+            </div>
+            <div className={`grid gap-2 ${isRT ? "grid-cols-3" : "grid-cols-2"}`}>
+              <label className="flex flex-col gap-1">
+                <span className="text-[10px] uppercase tracking-wide text-emerald-600/80">Departure</span>
+                <input
+                  type="date"
+                  value={depDate}
+                  onChange={(e) => setDepDate(e.target.value)}
+                  className={INPUT}
+                />
+              </label>
+              {isRT && (
+                <label className="flex flex-col gap-1">
+                  <span className="text-[10px] uppercase tracking-wide text-emerald-600/80">Return</span>
+                  <input
+                    type="date"
+                    value={retDate}
+                    onChange={(e) => setRetDate(e.target.value)}
+                    className={INPUT}
+                  />
+                </label>
+              )}
+              <label className="flex flex-col gap-1">
+                <span className="text-[10px] uppercase tracking-wide text-emerald-600/80">Passengers</span>
+                <input
+                  type="number"
+                  min={1}
+                  max={9}
+                  value={flightPassengers}
+                  onChange={(e) => setFlightPassengers(Math.max(1, Math.min(9, parseInt(e.target.value, 10) || 1)))}
+                  className={INPUT}
+                />
+              </label>
+            </div>
+            <p className="text-[10px] text-emerald-600/70 mt-2">
+              Defaults come from the room context — tweak here if anything&apos;s off.
+            </p>
+          </div>
+          <button
+            onClick={start}
+            disabled={starting}
+            className={`w-full py-2.5 ${CTA}`}
+          >
+            {starting ? "Starting…" : "🤖 Start booking →"}
+          </button>
+          {err && <p className="text-xs text-red-600 mt-2">{err}</p>}
+          {needsProfile && (
+            <div className="mt-3 bg-[var(--gold)]/10 border border-[var(--gold)]/30 rounded-xl p-3">
+              <p className="text-xs font-medium text-[var(--gold)] mb-1">
+                Booking profile missing
+              </p>
+              <p className="text-[11px] text-[var(--text-secondary)] mb-2">
+                You need a default booking profile (name / email / phone) before
+                the agent can fill the reservation form. Takes 30 seconds.
+              </p>
+              <Link
+                href="/permissions"
+                className="inline-block py-2 px-3 rounded-lg bg-[var(--gold)] text-white text-xs font-medium hover:opacity-90 transition-opacity"
+              >
+                Open Settings → My Profile
+              </Link>
+            </div>
+          )}
+        </div>
+      )}
+
+      {isPayer && status !== "executing" && !isHotel && !isFlight && (
         <div className="mt-3">
           <div className="grid grid-cols-2 gap-2 mb-2">
             <input

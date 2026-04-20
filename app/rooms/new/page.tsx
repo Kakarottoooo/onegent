@@ -7,6 +7,7 @@ import { CITIES_SORTED, DEFAULT_CITY } from "@/lib/cities";
 import { useAuth } from "@/app/hooks/useAuth";
 import { CARD, CTA, PAGE } from "@/app/_ui/tokens";
 import GlobalNav from "@/components/GlobalNav";
+import AirportAutocomplete from "@/components/AirportAutocomplete";
 
 interface Contact {
   contact_user_id: string;
@@ -29,9 +30,18 @@ interface GroupDetail {
 const ALLOWED_TYPES = [
   { id: "restaurant", label: "Restaurant", emoji: "🍽️", phase: 1 },
   { id: "hotel",      label: "Hotel",      emoji: "🏨", phase: 1 },
-  { id: "flight",     label: "Flight",     emoji: "✈️", phase: 2 },
+  { id: "flight",     label: "Flight",     emoji: "✈️", phase: 1 },
   { id: "activity",   label: "Activity",   emoji: "🎟️", phase: 2 },
 ] as const;
+
+type CabinClass = "economy" | "premium_economy" | "business" | "first";
+
+const CABIN_OPTIONS: Array<{ id: CabinClass; label: string }> = [
+  { id: "economy", label: "Economy" },
+  { id: "premium_economy", label: "Premium" },
+  { id: "business", label: "Business" },
+  { id: "first", label: "First" },
+];
 
 type RoomType = typeof ALLOWED_TYPES[number]["id"];
 type ApprovalRule = "unanimous" | "majority";
@@ -63,6 +73,12 @@ export default function NewRoomPage() {
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
   const [guests, setGuests] = useState<number>(2); // hotel-only — defaults to 2, UI caps at 8
+  // Flight-only state
+  const [departureCity, setDepartureCity] = useState("");
+  const [arrivalCity, setArrivalCity] = useState("");
+  const [isRoundTrip, setIsRoundTrip] = useState(true);
+  const [passengers, setPassengers] = useState<number>(2); // caps at 9
+  const [cabinClass, setCabinClass] = useState<CabinClass>("economy");
   const [payerIsSelf, setPayerIsSelf] = useState(true);
 
   // Multi-contact + group picker
@@ -128,7 +144,7 @@ export default function NewRoomPage() {
 
   async function submit() {
     if (!title.trim()) { setError("Give it a title so people know what they're joining."); return; }
-    if (type !== "restaurant" && type !== "hotel") {
+    if (type !== "restaurant" && type !== "hotel" && type !== "flight") {
       setError("That room type isn't supported yet.");
       return;
     }
@@ -146,6 +162,16 @@ export default function NewRoomPage() {
         return;
       }
     }
+    if (type === "flight") {
+      if (!departureCity.trim()) { setError("Flight rooms need a departure city."); return; }
+      if (!arrivalCity.trim()) { setError("Flight rooms need a destination city."); return; }
+      if (!dateFrom) { setError("Flight rooms need a departure date."); return; }
+      if (isRoundTrip) {
+        if (!dateTo) { setError("Round-trip flights need a return date."); return; }
+        if (dateTo <= dateFrom) { setError("Return date has to be after the departure date."); return; }
+      }
+      if (!passengers || passengers < 1) { setError("Need at least one passenger."); return; }
+    }
     setSubmitting(true);
     setError(null);
     try {
@@ -159,6 +185,15 @@ export default function NewRoomPage() {
         context.check_in = dateFrom;
         context.check_out = dateTo;
         context.guests = guests;
+      }
+      if (type === "flight") {
+        context.departure_city = departureCity.trim();
+        context.arrival_city = arrivalCity.trim();
+        context.departure_date = dateFrom;
+        context.is_round_trip = isRoundTrip;
+        if (isRoundTrip && dateTo) context.return_date = dateTo;
+        context.passengers = passengers;
+        context.cabin_class = cabinClass;
       }
       const res = await fetch("/api/rooms", {
         method: "POST",
@@ -271,22 +306,73 @@ export default function NewRoomPage() {
           className={`${INPUT_LG} mb-5`}
         />
 
-        {/* City */}
-        <label className={LABEL}>City</label>
-        <select
-          value={city}
-          onChange={(e) => setCity(e.target.value)}
-          className={`${INPUT_LG} mb-5`}
-        >
-          {CITIES_SORTED.map((c) => (
-            <option key={c.id} value={c.id}>{c.label}</option>
-          ))}
-        </select>
+        {/* City — hidden for flight rooms (Departure city is authoritative) */}
+        {type !== "flight" && (
+          <>
+            <label className={LABEL}>City</label>
+            <select
+              value={city}
+              onChange={(e) => setCity(e.target.value)}
+              className={`${INPUT_LG} mb-5`}
+            >
+              {CITIES_SORTED.map((c) => (
+                <option key={c.id} value={c.id}>{c.label}</option>
+              ))}
+            </select>
+          </>
+        )}
 
-        {/* Date window — required for hotel (check-in/out), optional for restaurant. */}
+        {/* Flight-only: route + round-trip toggle */}
+        {type === "flight" && (
+          <>
+            <label className={LABEL}>Departure</label>
+            <AirportAutocomplete
+              value={departureCity}
+              onChange={setDepartureCity}
+              placeholder="Type city name, IATA code, or airport"
+              className="mb-4"
+            />
+
+            <label className={LABEL}>Destination</label>
+            <AirportAutocomplete
+              value={arrivalCity}
+              onChange={setArrivalCity}
+              placeholder="Type city name, IATA code, or airport"
+              className="mb-4"
+            />
+
+            <label className={LABEL}>Trip type</label>
+            <div className="grid grid-cols-2 gap-2 mb-5">
+              <button
+                type="button"
+                onClick={() => setIsRoundTrip(true)}
+                className={`py-2.5 rounded-xl border text-sm font-medium transition-colors ${
+                  isRoundTrip ? OPTION_ACTIVE : OPTION_IDLE
+                }`}
+              >
+                Round trip
+              </button>
+              <button
+                type="button"
+                onClick={() => setIsRoundTrip(false)}
+                className={`py-2.5 rounded-xl border text-sm font-medium transition-colors ${
+                  !isRoundTrip ? OPTION_ACTIVE : OPTION_IDLE
+                }`}
+              >
+                One-way
+              </button>
+            </div>
+          </>
+        )}
+
+        {/* Date window — required for hotel (check-in/out) and flight (departure / optional return), optional for restaurant. */}
         <label className={LABEL}>
-          {type === "hotel" ? "Check-in / Check-out" : "When?"}{" "}
-          {type !== "hotel" && (
+          {type === "hotel"
+            ? "Check-in / Check-out"
+            : type === "flight"
+              ? isRoundTrip ? "Departure / Return" : "Departure date"
+              : "When?"}{" "}
+          {type !== "hotel" && type !== "flight" && (
             <span className="text-[var(--text-muted)]">(optional)</span>
           )}
         </label>
@@ -295,16 +381,18 @@ export default function NewRoomPage() {
             type="date"
             value={dateFrom}
             onChange={(e) => setDateFrom(e.target.value)}
-            aria-label={type === "hotel" ? "Check-in" : "From"}
+            aria-label={type === "hotel" ? "Check-in" : type === "flight" ? "Departure" : "From"}
             className={`flex-1 ${INPUT_LG}`}
           />
-          <input
-            type="date"
-            value={dateTo}
-            onChange={(e) => setDateTo(e.target.value)}
-            aria-label={type === "hotel" ? "Check-out" : "To"}
-            className={`flex-1 ${INPUT_LG}`}
-          />
+          {(type !== "flight" || isRoundTrip) && (
+            <input
+              type="date"
+              value={dateTo}
+              onChange={(e) => setDateTo(e.target.value)}
+              aria-label={type === "hotel" ? "Check-out" : type === "flight" ? "Return" : "To"}
+              className={`flex-1 ${INPUT_LG}`}
+            />
+          )}
         </div>
 
         {/* Hotel-only: guest count drives the search and the booking job. */}
@@ -319,6 +407,40 @@ export default function NewRoomPage() {
               onChange={(e) => setGuests(Math.max(1, Math.min(8, parseInt(e.target.value, 10) || 1)))}
               className={`${INPUT_LG} mb-5`}
             />
+          </>
+        )}
+
+        {/* Flight-only: passengers + cabin class floor */}
+        {type === "flight" && (
+          <>
+            <div className="grid grid-cols-2 gap-3 mb-5">
+              <div>
+                <label className={LABEL}>Passengers</label>
+                <input
+                  type="number"
+                  min={1}
+                  max={9}
+                  value={passengers}
+                  onChange={(e) => setPassengers(Math.max(1, Math.min(9, parseInt(e.target.value, 10) || 1)))}
+                  className={INPUT_LG}
+                />
+              </div>
+              <div>
+                <label className={LABEL}>Cabin (floor)</label>
+                <select
+                  value={cabinClass}
+                  onChange={(e) => setCabinClass(e.target.value as CabinClass)}
+                  className={INPUT_LG}
+                >
+                  {CABIN_OPTIONS.map((c) => (
+                    <option key={c.id} value={c.id}>{c.label}</option>
+                  ))}
+                </select>
+              </div>
+            </div>
+            <p className="text-[11px] text-[var(--text-muted)] -mt-3 mb-5">
+              Cabin floor = minimum class the group will accept. Individual members can still ask for higher in their constraints.
+            </p>
           </>
         )}
 

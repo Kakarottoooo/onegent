@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { FlightRecommendationCard } from "@/lib/types";
+import { buildExpediaFlightsUrl } from "@/lib/agent/planners/booking-links";
 
 interface FlightCardProps {
   card: FlightRecommendationCard;
@@ -16,6 +17,12 @@ interface FlightCardProps {
   } | null;
   /** Called after a booking job is created — inject inline task card */
   onJobCreated?: (jobId: string) => void;
+  /**
+   * Hide the booking buttons (Search, Book with Autopilot) but keep the
+   * price visible. Used by Decision Room proposal cards — the room supplies
+   * its own "Pick this option" control + a payer-only execute flow.
+   */
+  hideBookingActions?: boolean;
 }
 
 function PlaneIcon() {
@@ -49,13 +56,21 @@ const GROUP_COLOR: Record<FlightRecommendationCard["group"], string> = {
   cheapest: "#1a5fa8",
 };
 
-export default function FlightCard({ card, index, bookingContext, onJobCreated }: FlightCardProps) {
+export default function FlightCard({ card, index, bookingContext, onJobCreated, hideBookingActions }: FlightCardProps) {
   const { flight, group, why_recommended } = card;
   const [booking, setBooking] = useState(false);
   const [noProfile, setNoProfile] = useState(false);
 
   const departureTime = formatTime(flight.departure_time);
   const arrivalTime = formatTime(flight.arrival_time);
+  const manualSearchUrl = buildExpediaFlightsUrl({
+    origin: flight.departure_airport,
+    dest: flight.arrival_airport,
+    date: bookingContext?.date,
+    returnDate: bookingContext?.is_round_trip ? bookingContext?.return_date : undefined,
+    passengers: bookingContext?.passengers ?? 1,
+    cabinClass: (bookingContext?.cabin_class ?? "economy") as "economy" | "premium_economy" | "business" | "first",
+  });
 
   const canAutopilot = !!bookingContext?.date;
 
@@ -119,7 +134,7 @@ export default function FlightCard({ card, index, bookingContext, onJobCreated }
           },
           agentModel,
         },
-        fallbackUrl: flight.booking_link,
+        fallbackUrl: manualSearchUrl,
         status: "pending",
       };
 
@@ -268,13 +283,14 @@ export default function FlightCard({ card, index, bookingContext, onJobCreated }
           </div>
         )}
 
-        {/* Footer: price + book buttons */}
+        {/* Footer: price (always visible) + book buttons (hidden in Decision Room) */}
         <div style={{
           display: "flex", alignItems: "center", justifyContent: "space-between",
           padding: "12px 16px", borderTop: "0.5px solid var(--border)", marginTop: 12,
+          gap: 12, flexWrap: "wrap",
         }}>
           <div>
-            <span style={{ fontFamily: "var(--font-sans)", fontSize: 20, fontWeight: 700, color: "var(--text-primary)" }}>
+            <span style={{ fontFamily: "var(--font-sans)", fontSize: 22, fontWeight: 700, color: "var(--gold)" }}>
               {flight.price > 0 ? `$${flight.price}` : "—"}
             </span>
             <span style={{ fontFamily: "var(--font-sans)", fontSize: 12, color: "var(--text-secondary)", marginLeft: 4 }}>
@@ -282,55 +298,57 @@ export default function FlightCard({ card, index, bookingContext, onJobCreated }
             </span>
           </div>
 
-          <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-            {/* Manual fallback link */}
-            <a
-              href={flight.booking_link}
-              target="_blank"
-              rel="noopener noreferrer"
-              style={{
-                display: "inline-flex", alignItems: "center", gap: 4,
-                padding: "7px 12px", borderRadius: 8,
-                border: "0.5px solid var(--border)", color: "var(--text-secondary)",
-                fontFamily: "var(--font-sans)", fontSize: 12, fontWeight: 400,
-                textDecoration: "none", whiteSpace: "nowrap",
-              }}
-            >
-              Search →
-            </a>
-
-            {/* Autopilot book button */}
-            {canAutopilot ? (
-              <button
-                onClick={handleBookWithAutopilot}
-                disabled={booking}
-                style={{
-                  display: "inline-flex", alignItems: "center", gap: 5,
-                  padding: "8px 16px", background: booking ? "var(--border)" : "var(--gold)",
-                  color: "#fff", borderRadius: 8, border: "none", cursor: booking ? "not-allowed" : "pointer",
-                  fontFamily: "var(--font-sans)", fontSize: 13, fontWeight: 600,
-                  whiteSpace: "nowrap", transition: "background 0.15s",
-                }}
-              >
-                {booking ? "Booking…" : "✈ Book with Autopilot"}
-              </button>
-            ) : (
+          {!hideBookingActions && (
+            <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+              {/* Manual fallback link */}
               <a
-                href={flight.booking_link}
+                href={manualSearchUrl}
                 target="_blank"
                 rel="noopener noreferrer"
                 style={{
-                  display: "inline-flex", alignItems: "center", gap: 5,
-                  padding: "8px 16px", background: "var(--gold)",
-                  color: "#fff", borderRadius: 8,
-                  fontFamily: "var(--font-sans)", fontSize: 13, fontWeight: 500,
+                  display: "inline-flex", alignItems: "center", gap: 4,
+                  padding: "7px 12px", borderRadius: 8,
+                  border: "0.5px solid var(--border)", color: "var(--text-secondary)",
+                  fontFamily: "var(--font-sans)", fontSize: 12, fontWeight: 400,
                   textDecoration: "none", whiteSpace: "nowrap",
                 }}
               >
-                Book on Google Flights →
+                Search →
               </a>
-            )}
-          </div>
+
+              {/* Autopilot book button */}
+              {canAutopilot ? (
+                <button
+                  onClick={handleBookWithAutopilot}
+                  disabled={booking}
+                  style={{
+                    display: "inline-flex", alignItems: "center", gap: 5,
+                    padding: "8px 16px", background: booking ? "var(--border)" : "var(--gold)",
+                    color: "#fff", borderRadius: 8, border: "none", cursor: booking ? "not-allowed" : "pointer",
+                    fontFamily: "var(--font-sans)", fontSize: 13, fontWeight: 600,
+                    whiteSpace: "nowrap", transition: "background 0.15s",
+                  }}
+                >
+                  {booking ? "Booking…" : "✈ Book with Autopilot"}
+                </button>
+              ) : (
+                <a
+                  href={manualSearchUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  style={{
+                    display: "inline-flex", alignItems: "center", gap: 5,
+                    padding: "8px 16px", background: "var(--gold)",
+                    color: "#fff", borderRadius: 8,
+                    fontFamily: "var(--font-sans)", fontSize: 13, fontWeight: 500,
+                    textDecoration: "none", whiteSpace: "nowrap",
+                  }}
+                >
+                  Book on Google Flights →
+                </a>
+              )}
+            </div>
+          )}
         </div>
       </div>
 

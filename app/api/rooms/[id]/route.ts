@@ -27,8 +27,8 @@ export async function GET(_req: Request, { params }: Params) {
 /**
  * DELETE /api/rooms/[id]
  *
- * Permanently remove a room and all its data. Creator-only; only allowed for
- * rooms that are already done or abandoned (i.e. in the History view). This
+ * Permanently remove a room and all its data. Creator-only; blocked only while
+ * booking is actively executing so we don't strand an in-flight booking job. This
  * wipes constraints / proposals / votes / messages / members — irreversible.
  */
 export async function DELETE(_req: Request, { params }: Params) {
@@ -42,9 +42,9 @@ export async function DELETE(_req: Request, { params }: Params) {
   if (room.creator_id !== userId) {
     return NextResponse.json({ error: "Only the creator can delete this room" }, { status: 403 });
   }
-  if (room.status !== "done" && room.status !== "abandoned") {
+  if (room.status === "executing") {
     return NextResponse.json(
-      { error: "Cancel or finish the room first." },
+      { error: "Clear the in-progress booking first." },
       { status: 409 }
     );
   }

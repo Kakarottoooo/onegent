@@ -1,7 +1,7 @@
-"use client";
+﻿"use client";
 
 import { useState, useEffect, useCallback, useRef } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import type { BookingJob, BookingJobStep, DecisionLogEntry, AgentFeedbackStats } from "@/lib/db";
 import type { PolicyBias, UserPreferenceProfile } from "@/lib/policy";
 import type { BookingMonitor } from "@/lib/monitors";
@@ -22,6 +22,60 @@ function getSessionId(): string {
   let id = localStorage.getItem("session_id");
   if (!id) { id = crypto.randomUUID(); localStorage.setItem("session_id", id); }
   return id;
+}
+
+type TaskWorkspaceView = "queue" | "live" | "history";
+
+const TASK_WORKSPACE_TABS: Array<{ id: TaskWorkspaceView; label: string }> = [
+  { id: "queue", label: "Queue" },
+  { id: "live", label: "Live" },
+  { id: "history", label: "History" },
+];
+
+function TaskWorkspaceSwitch({
+  view,
+  setView,
+}: {
+  view: TaskWorkspaceView;
+  setView: (view: TaskWorkspaceView) => void;
+}) {
+  return (
+    <div className="flex gap-1 rounded-xl border border-[var(--border)] bg-[var(--card-2)] p-1">
+      {TASK_WORKSPACE_TABS.map((tab) => (
+        <button
+          key={tab.id}
+          type="button"
+          onClick={() => setView(tab.id)}
+          className={
+            "flex-1 rounded-lg px-3 py-2 text-xs font-medium transition-colors " +
+            (view === tab.id
+              ? "bg-[var(--card)] text-[var(--text-primary)] shadow-sm"
+              : "text-[var(--text-muted)] hover:text-[var(--text-secondary)]")
+          }
+        >
+          {tab.label}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+function classifyTaskWorkspace(job: BookingJob): TaskWorkspaceView {
+  const sem = computeJobSemanticStatus(job);
+  if (sem === "pending" || sem === "running" || sem === "retrying") return "live";
+  if (sem === "blocked_needs_user_input" || sem === "awaiting_payment" || sem === "partially_completed") return "queue";
+  return "history";
+}
+
+function timeAgo(iso: string | null | undefined): string {
+  if (!iso) return "—";
+  const diff = Date.now() - new Date(iso).getTime();
+  const m = Math.floor(diff / 60000);
+  if (m < 1) return "Just now";
+  if (m < 60) return `${m}m ago`;
+  const h = Math.floor(m / 60);
+  if (h < 24) return `${h}h ago`;
+  return `${Math.floor(h / 24)}d ago`;
 }
 
 // ── Feedback helper ────────────────────────────────────────────────────────────
@@ -1634,6 +1688,200 @@ function MonitorPanel({ jobId, sessionId }: { jobId: string; sessionId: string }
   );
 }
 
+interface MonitoringWorkspaceGroup {
+  jobId: string;
+  tripLabel: string;
+  monitors: BookingMonitor[];
+}
+
+function MonitoringWorkspacePanel({
+  sessionId,
+  jobs,
+  onOpenJob,
+}: {
+  sessionId: string;
+  jobs: BookingJob[];
+  onOpenJob: (jobId: string) => void;
+}) {
+  const [groups, setGroups] = useState<MonitoringWorkspaceGroup[]>([]);
+  const [loaded, setLoaded] = useState(false);
+
+  const loadGroups = useCallback(async () => {
+    if (!sessionId) {
+      setGroups([]);
+      setLoaded(true);
+      return;
+    }
+
+    try {
+      const res = await fetch(`/api/monitors?session_id=${encodeURIComponent(sessionId)}`);
+      const data = await res.json().catch(() => ({ monitors: [] }));
+      const monitors: BookingMonitor[] = data.monitors ?? [];
+      const next = new Map<string, MonitoringWorkspaceGroup>();
+
+      for (const monitor of monitors) {
+        if (!next.has(monitor.job_id)) {
+          const job = jobs.find((candidate) => candidate.id === monitor.job_id);
+          next.set(monitor.job_id, {
+            jobId: monitor.job_id,
+            tripLabel: job?.trip_label ?? monitor.step_label ?? "Task",
+            monitors: [],
+          });
+        }
+        next.get(monitor.job_id)!.monitors.push(monitor);
+      }
+
+      setGroups([...next.values()]);
+    } finally {
+      setLoaded(true);
+    }
+  }, [jobs, sessionId]);
+
+  useEffect(() => {
+    loadGroups();
+  }, [loadGroups]);
+
+  useEffect(() => {
+    const timer = setInterval(loadGroups, 60000);
+    return () => clearInterval(timer);
+  }, [loadGroups]);
+
+  const total = groups.reduce((count, group) => count + group.monitors.length, 0);
+  const active = groups.reduce((count, group) => count + group.monitors.filter((monitor) => monitor.status === "active").length, 0);
+  const alerts = groups.reduce((count, group) => count + group.monitors.filter((monitor) => monitor.status === "triggered").length, 0);
+
+  if (!loaded) {
+    return (
+      <div style={{ padding: "24px 20px", borderRadius: 18, border: "0.5px solid var(--border, #e5e7eb)" }}>
+        <p style={{ fontFamily: "var(--font-dm-sans)", fontSize: 13, color: "var(--text-secondary, #666)" }}>Loading live monitors...</p>
+      </div>
+    );
+  }
+
+  if (groups.length === 0) {
+    return (
+      <div style={{ padding: "40px 24px", textAlign: "center", borderRadius: 18, border: "0.5px dashed var(--border, #e5e7eb)" }}>
+        <p style={{ fontSize: 24, fontWeight: 700, marginBottom: 10, color: "var(--text-primary, #111)" }}>Live</p>
+        <p style={{ fontFamily: "var(--font-dm-sans)", fontWeight: 600, fontSize: 14, marginBottom: 6 }}>No live monitors</p>
+        <p style={{ fontFamily: "var(--font-dm-sans)", fontSize: 12, color: "var(--text-secondary, #666)" }}>
+          Availability watches and reservation checks will appear here.
+        </p>
+      </div>
+    );
+  }
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+      <div style={{ display: "flex", alignItems: "stretch", gap: 10, flexWrap: "wrap" }}>
+        {[
+          { label: "Monitors", value: total },
+          { label: "Active", value: active },
+          { label: "Alerts", value: alerts },
+        ].map((item) => (
+          <div
+            key={item.label}
+            style={{
+              minWidth: 120,
+              padding: "12px 14px",
+              borderRadius: 14,
+              border: "0.5px solid var(--border, #e5e7eb)",
+              background: "var(--card-2, #f6f6f4)",
+            }}
+          >
+            <div style={{ fontFamily: "var(--font-dm-sans)", fontSize: 11, color: "var(--text-muted, #999)", textTransform: "uppercase", letterSpacing: "0.08em" }}>
+              {item.label}
+            </div>
+            <div style={{ marginTop: 6, fontFamily: "var(--font-dm-sans)", fontSize: 24, fontWeight: 700, color: "var(--text-primary, #111)" }}>
+              {item.value}
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {groups.map((group) => {
+        const latest = [...group.monitors].sort((a, b) => +new Date(b.last_checked_at ?? b.created_at) - +new Date(a.last_checked_at ?? a.created_at))[0];
+        return (
+          <div
+            key={group.jobId}
+            style={{
+              padding: "16px 18px",
+              borderRadius: 18,
+              border: "0.5px solid var(--border, #e5e7eb)",
+              background: "var(--card, #fff)",
+            }}
+          >
+            <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 16 }}>
+              <div style={{ minWidth: 0 }}>
+                <p style={{ fontFamily: "var(--font-dm-sans)", fontWeight: 700, fontSize: 15, color: "var(--text-primary, #111)" }}>
+                  {group.tripLabel}
+                </p>
+                <p style={{ fontFamily: "var(--font-dm-sans)", fontSize: 12, color: "var(--text-secondary, #666)", marginTop: 4 }}>
+                  {group.monitors.length} live monitor{group.monitors.length === 1 ? "" : "s"} · Updated {timeAgo(latest?.last_checked_at ?? latest?.created_at)}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => onOpenJob(group.jobId)}
+                style={{
+                  flexShrink: 0,
+                  padding: "8px 12px",
+                  borderRadius: 10,
+                  border: "0.5px solid var(--border, #e5e7eb)",
+                  background: "transparent",
+                  color: "var(--text-primary, #111)",
+                  fontFamily: "var(--font-dm-sans)",
+                  fontSize: 12,
+                  fontWeight: 600,
+                  cursor: "pointer",
+                }}
+              >
+                Open task
+              </button>
+            </div>
+
+            <div style={{ display: "flex", flexDirection: "column", gap: 8, marginTop: 14 }}>
+              {group.monitors.map((monitor) => (
+                <div
+                  key={monitor.id}
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "space-between",
+                    gap: 12,
+                    padding: "10px 12px",
+                    borderRadius: 12,
+                    background: "var(--card-2, #f6f6f4)",
+                  }}
+                >
+                  <div style={{ minWidth: 0 }}>
+                    <p style={{ fontFamily: "var(--font-dm-sans)", fontSize: 13, fontWeight: 600, color: "var(--text-primary, #111)" }}>
+                      {monitor.step_emoji} {monitor.step_label}
+                    </p>
+                    <p style={{ fontFamily: "var(--font-dm-sans)", fontSize: 11, color: "var(--text-secondary, #666)", marginTop: 2 }}>
+                      {monitor.type.replace(/_/g, " ")} · {monitor.status} · next check {timeAgo(monitor.next_check_at)}
+                    </p>
+                  </div>
+                  <span
+                    style={{
+                      flexShrink: 0,
+                      fontFamily: "var(--font-dm-sans)",
+                      fontSize: 11,
+                      fontWeight: 700,
+                      color: monitor.status === "triggered" ? "rgba(220,38,38,0.9)" : "var(--gold, #D4A34B)",
+                    }}
+                  >
+                    {monitor.status === "triggered" ? "Alert" : "Watching"}
+                  </span>
+                </div>
+              ))}
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 // ── Agent Insights panel ───────────────────────────────────────────────────────
 
 const PROVIDER_NAMES: Record<string, string> = {
@@ -2424,11 +2672,13 @@ function InsightsPanel({ sessionId }: { sessionId: string }) {
 
 export default function TripsPage() {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const [jobs, setJobs] = useState<BookingJob[]>([]);
   const [loading, setLoading] = useState(true);
   const [, setClockTick] = useState(0);
   const [clearingAll, setClearingAll] = useState(false);
   const [showRestaurantForm, setShowRestaurantForm] = useState(false);
+  const [workspaceView, setWorkspaceView] = useState<TaskWorkspaceView>("queue");
 
   // ── Live panel state ──────────────────────────────────────────────────────────
   const [liveJobId, setLiveJobId] = useState<string | null>(null);
@@ -2527,7 +2777,74 @@ export default function TripsPage() {
     setSelectedJobId(jobs[0]?.id ?? null);
   }, [jobs, selectedJobId]);
 
+  useEffect(() => {
+    const view = searchParams.get("view");
+    if (view === "live" || view === "history") {
+      setWorkspaceView(view);
+      return;
+    }
+    setWorkspaceView("queue");
+  }, [searchParams]);
+
+  useEffect(() => {
+    if (workspaceView === "queue") return;
+    liveJobIdRef.current = null;
+    setLiveJobId(null);
+  }, [workspaceView]);
+
+  const setWorkspaceViewAndUrl = useCallback((next: TaskWorkspaceView) => {
+    setWorkspaceView(next);
+    const href = next === "queue" ? "/tasks" : `/tasks?view=${next}`;
+    router.replace(href, { scroll: false });
+  }, [router]);
+
+  const queueJobs = jobs.filter((job) => classifyTaskWorkspace(job) === "queue");
+  const liveJobs = jobs.filter((job) => classifyTaskWorkspace(job) === "live");
+  const historyJobs = jobs.filter((job) => classifyTaskWorkspace(job) === "history");
+  const visibleJobs =
+    workspaceView === "live"
+      ? liveJobs
+      : workspaceView === "history"
+        ? historyJobs
+        : queueJobs;
+  const visibleActionTotal = visibleJobs.reduce((n, j) => n + j.steps.filter((s) => s.actionItem).length, 0);
   const actionTotal = jobs.reduce((n, j) => n + j.steps.filter((s) => s.actionItem).length, 0);
+  const workspaceCopy =
+    workspaceView === "live"
+      ? {
+          title: "Live operations",
+          subtitle: "Active watches, retries, and background checks.",
+          countLabel: "Live runs",
+          countValue: liveJobs.length,
+          summary: loading
+            ? "Loading..."
+            : liveJobs.length === 0
+              ? "No live runs."
+              : `${liveJobs.length} live run${liveJobs.length === 1 ? "" : "s"} in progress.`,
+        }
+      : workspaceView === "history"
+        ? {
+            title: "Task history",
+            subtitle: "Completed, failed, and archived execution records.",
+            countLabel: "History",
+            countValue: historyJobs.length,
+            summary: loading
+              ? "Loading..."
+              : historyJobs.length === 0
+                ? "No history yet."
+                : `${historyJobs.length} historical task${historyJobs.length === 1 ? "" : "s"} in view.`,
+          }
+        : {
+            title: "Queue",
+            subtitle: "Background jobs and manual follow-ups live here.",
+            countLabel: "Queue",
+            countValue: queueJobs.length,
+            summary: loading
+              ? "Loading..."
+              : queueJobs.length === 0
+                ? "No tasks yet."
+                : `${queueJobs.length} task${queueJobs.length === 1 ? "" : "s"} in queue.`,
+          };
 
   const liveJob = jobs.find((j) => j.id === liveJobId);
   const rightPct = liveJobId ? (100 - splitPct) : 0;
@@ -2558,28 +2875,32 @@ export default function TripsPage() {
       >
         {/* Page title */}
         <div className="mx-auto w-full max-w-[1440px] px-4 md:px-6 py-5">
-          <div className="lg:grid lg:grid-cols-[232px_minmax(0,1fr)] lg:gap-10">
+          <div className="overflow-hidden rounded-[28px] border border-[var(--border)] bg-[linear-gradient(180deg,rgba(255,255,255,0.03),rgba(255,255,255,0)),radial-gradient(circle_at_top_left,rgba(212,163,75,0.08),transparent_26%)] shadow-[0_24px_80px_rgba(0,0,0,0.08)]">
+          <div className="lg:grid lg:grid-cols-[264px_minmax(0,1fr)]">
             <aside className="hidden lg:block">
-              <div className="sticky top-20 border-r border-[var(--border,#e5e7eb)] pr-6">
+              <div className="sticky top-20 px-7 py-7">
                 <p className="text-[11px] uppercase tracking-[0.14em] text-[var(--text-muted,#999)] mb-2">Tasks</p>
-                <p className="text-xl font-semibold text-[var(--text-primary,#111)]">Queue</p>
+                <p className="text-xl font-semibold text-[var(--text-primary,#111)]">Tasks workspace</p>
                 <p className="mt-2 text-sm text-[var(--text-secondary,#666)] leading-6">
-                  Background jobs and manual follow-ups live here.
+                  Background jobs, live monitoring, and follow-ups live here.
                 </p>
                 <div className="mt-5 flex flex-col gap-2">
+                    <TaskWorkspaceSwitch view={workspaceView} setView={setWorkspaceViewAndUrl} />
                     <button
                       onClick={() => setShowRestaurantForm((v) => !v)}
+                      disabled={workspaceView !== "queue"}
                       style={{
                         width: "100%",
                         padding: "11px 14px",
                         borderRadius: 14,
                         border: "none",
-                        background: "var(--gold, #D4A34B)",
+                        background: workspaceView === "queue" ? "var(--gold, #D4A34B)" : "var(--border, #e5e7eb)",
                         color: "#fff",
                         fontFamily: "var(--font-dm-sans)",
                         fontSize: 13,
                         fontWeight: 600,
-                        cursor: "pointer",
+                        cursor: workspaceView === "queue" ? "pointer" : "default",
+                        opacity: workspaceView === "queue" ? 1 : 0.55,
                       }}
                     >
                       {showRestaurantForm ? "Cancel new task" : "+ Restaurant"}
@@ -2605,7 +2926,24 @@ export default function TripsPage() {
                     )}
                 </div>
 
-                {!loading && jobs.length > 0 && (
+                <div className="mt-6 pt-6 border-t border-[var(--border)] space-y-4">
+                  <div>
+                    <p className="text-[10px] uppercase tracking-[0.14em] text-[var(--text-muted)]">Visible now</p>
+                    <p className="mt-1 text-2xl font-semibold text-[var(--text-primary)]">{loading ? "…" : workspaceCopy.countValue}</p>
+                  </div>
+                  <div className="space-y-2 text-sm">
+                    <div className="flex items-center justify-between text-[var(--text-secondary)]">
+                      <span>Mode</span>
+                      <span className="text-[var(--text-primary)] font-medium">{workspaceCopy.title}</span>
+                    </div>
+                    <div className="flex items-center justify-between text-[var(--text-secondary)]">
+                      <span>Surface</span>
+                      <span className="text-[var(--text-primary)] font-medium">Workspace</span>
+                    </div>
+                  </div>
+                </div>
+
+                {!loading && visibleJobs.length > 0 && (
                   <div style={{ marginTop: 24, paddingTop: 20, borderTop: "0.5px solid var(--border, #e5e7eb)" }}>
                     <p style={{
                       fontFamily: "var(--font-dm-sans)",
@@ -2617,7 +2955,7 @@ export default function TripsPage() {
                       marginBottom: 12,
                     }}>Jump to task</p>
                     <div className="flex flex-col gap-1 max-h-[52vh] overflow-y-auto pr-1">
-                      {jobs.map((job) => {
+                      {visibleJobs.map((job) => {
                         const isSelected = selectedJobId === job.id;
                         const blockedCount = job.steps.filter((s) => s.actionItem).length;
                         return (
@@ -2655,7 +2993,7 @@ export default function TripsPage() {
               </div>
             </aside>
 
-            <main className="min-w-0">
+            <main className="min-w-0 border-t border-[var(--border)] lg:border-t-0 lg:border-l px-5 py-6 md:px-7 md:py-7">
         <div style={{ padding: "0 0 4px", maxWidth: "100%", margin: 0 }}>
           <button
             onClick={() => router.back()}
@@ -2693,7 +3031,7 @@ export default function TripsPage() {
                 )}
               </div>
               <p style={{ fontFamily: "var(--font-dm-sans)", fontSize: 12, color: "var(--text-secondary, #666)", marginTop: 4 }}>
-                {loading ? "Loading..." : jobs.length === 0 ? "No tasks yet" : `${jobs.length} task${jobs.length === 1 ? "" : "s"} in queue.`}
+                {workspaceCopy.summary}
               </p>
             </div>
 
@@ -2707,8 +3045,8 @@ export default function TripsPage() {
                 fontSize: 12,
                 color: "var(--text-secondary, #666)",
               }}>
-                <span style={{ color: "var(--text-muted, #999)", marginRight: 6 }}>Tasks</span>
-                <span style={{ color: "var(--text-primary, #111)", fontWeight: 700 }}>{jobs.length}</span>
+                <span style={{ color: "var(--text-muted, #999)", marginRight: 6 }}>{workspaceCopy.countLabel}</span>
+                <span style={{ color: "var(--text-primary, #111)", fontWeight: 700 }}>{workspaceCopy.countValue}</span>
               </div>
               <div style={{
                 padding: "10px 14px",
@@ -2720,7 +3058,7 @@ export default function TripsPage() {
                 color: "var(--text-secondary, #666)",
               }}>
                 <span style={{ color: "var(--text-muted, #999)", marginRight: 6 }}>Actions</span>
-                <span style={{ color: "var(--text-primary, #111)", fontWeight: 700 }}>{actionTotal}</span>
+                <span style={{ color: "var(--text-primary, #111)", fontWeight: 700 }}>{visibleActionTotal}</span>
               </div>
             </div>
           </div>
@@ -2729,11 +3067,16 @@ export default function TripsPage() {
             <div className="lg:hidden" style={{ display: "flex", alignItems: "center", gap: 10 }}>
               <button
                 onClick={() => setShowRestaurantForm((v) => !v)}
+                disabled={workspaceView !== "queue"}
                 style={{
                   display: "flex", alignItems: "center", gap: 4,
                   background: "none", border: "none", cursor: "pointer",
                   fontFamily: "var(--font-dm-sans)", fontSize: 12, fontWeight: 600,
-                  color: showRestaurantForm ? "var(--gold, #D4A34B)" : "var(--text-secondary, #666)",
+                  color: workspaceView !== "queue"
+                    ? "var(--text-muted, #aaa)"
+                    : showRestaurantForm
+                      ? "var(--gold, #D4A34B)"
+                      : "var(--text-secondary, #666)",
                   padding: "2px 0",
                 }}
               >
@@ -2755,10 +3098,13 @@ export default function TripsPage() {
               )}
             </div>
           </div>
+          <div className="lg:hidden" style={{ marginTop: 12 }}>
+            <TaskWorkspaceSwitch view={workspaceView} setView={setWorkspaceViewAndUrl} />
+          </div>
         </div>
         <div style={{ padding: "16px 0 0", display: "flex", flexDirection: "column", gap: 12, maxWidth: "100%", margin: 0 }}>
           {/* Restaurant booking form — shown when user clicks "+ Restaurant" */}
-          {showRestaurantForm && (
+          {workspaceView === "queue" && showRestaurantForm && (
             <RestaurantStepCard
               onCreated={() => {
                 setShowRestaurantForm(false);
@@ -2767,7 +3113,7 @@ export default function TripsPage() {
             />
           )}
 
-          {!loading && jobs.length === 0 && !showRestaurantForm && (
+          {!loading && workspaceView === "queue" && visibleJobs.length === 0 && !showRestaurantForm && (
             <div style={{ textAlign: "center", padding: "60px 20px", borderRadius: 16, border: "0.5px dashed var(--border, #e5e7eb)" }}>
               <p style={{ fontSize: 32, marginBottom: 12 }}>📋</p>
               <p style={{ fontFamily: "var(--font-dm-sans)", fontWeight: 600, fontSize: 14, marginBottom: 6 }}>No tasks yet</p>
@@ -2777,7 +3123,28 @@ export default function TripsPage() {
             </div>
           )}
 
-          {jobs.map((job) => (
+          {workspaceView === "live" && (
+            <MonitoringWorkspacePanel
+              sessionId={sessionId}
+              jobs={jobs}
+              onOpenJob={(jobId) => {
+                setWorkspaceViewAndUrl("queue");
+                requestAnimationFrame(() => focusJob(jobId));
+              }}
+            />
+          )}
+
+          {!loading && workspaceView === "history" && visibleJobs.length === 0 && (
+            <div style={{ textAlign: "center", padding: "60px 20px", borderRadius: 16, border: "0.5px dashed var(--border, #e5e7eb)" }}>
+              <p style={{ fontSize: 24, marginBottom: 12, fontWeight: 700, color: "var(--text-primary, #111)" }}>History</p>
+              <p style={{ fontFamily: "var(--font-dm-sans)", fontWeight: 600, fontSize: 14, marginBottom: 6 }}>No history yet</p>
+              <p style={{ fontFamily: "var(--font-dm-sans)", fontSize: 12, color: "var(--text-secondary, #666)" }}>
+                Completed and failed runs will collect here once tasks finish.
+              </p>
+            </div>
+          )}
+
+          {visibleJobs.map((job) => (
             <div
               key={job.id}
               ref={(node) => {
@@ -2795,11 +3162,12 @@ export default function TripsPage() {
           ))}
 
           {/* Agent Insights — always show at the bottom */}
-          {!loading && sessionId && (
+          {!loading && sessionId && workspaceView === "queue" && (
             <InsightsPanel sessionId={sessionId} />
           )}
         </div>
             </main>
+          </div>
           </div>
         </div>
       </div>
