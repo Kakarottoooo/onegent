@@ -12,7 +12,7 @@ import {
 } from "@/lib/db";
 import { generateRoomProposal } from "@/lib/rooms/propose";
 
-const SUPPORTED_ROOM_TYPES = new Set(["restaurant", "hotel", "flight"]);
+const SUPPORTED_ROOM_TYPES = new Set(["restaurant", "hotel", "flight", "activity"]);
 
 type Params = { params: Promise<{ id: string }> };
 
@@ -112,6 +112,7 @@ export async function POST(req: Request, { params }: Params) {
         restaurant?: { name?: string };
         hotel?: { name?: string };
         flight?: { airline?: string; flight_number?: string; departure_airport?: string; arrival_airport?: string };
+        activity?: { title?: string; short_title?: string; datetime_display?: string; venue_name?: string };
       };
       if (c.restaurant?.name) return c.restaurant.name;
       if (c.hotel?.name) return c.hotel.name;
@@ -123,12 +124,25 @@ export async function POST(req: Request, { params }: Params) {
             : "";
         return `${c.flight.airline ?? "Flight"}${num}${route}`.trim();
       }
+      if (c.activity) {
+        const title = c.activity.short_title ?? c.activity.title ?? "Event";
+        const when = c.activity.datetime_display ? ` · ${c.activity.datetime_display}` : "";
+        return `${title}${when}`.trim();
+      }
       return undefined;
     })
     .filter((n): n is string => Boolean(n))
     .join(" · ");
-  const noun = room.type === "hotel" ? "hotels" : room.type === "flight" ? "flights" : "restaurants";
-  const nounSingular = room.type === "hotel" ? "hotel" : room.type === "flight" ? "flight" : "restaurant";
+  const noun =
+    room.type === "hotel" ? "hotels" :
+    room.type === "flight" ? "flights" :
+    room.type === "activity" ? "events" :
+    "restaurants";
+  const nounSingular =
+    room.type === "hotel" ? "hotel" :
+    room.type === "flight" ? "flight" :
+    room.type === "activity" ? "event" :
+    "restaurant";
   // Log an agent system message so the chat reflects the event.
   await appendRoomMessage({
     roomId,

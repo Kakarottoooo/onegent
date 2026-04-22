@@ -640,7 +640,7 @@ export interface DecisionLogEntry {
 }
 
 export interface BookingJobStep {
-  type: "flight" | "hotel" | "restaurant" | "universal";
+  type: "flight" | "hotel" | "restaurant" | "activity" | "universal";
   emoji: string;
   label: string;
   apiEndpoint: string;
@@ -1274,6 +1274,23 @@ export async function deleteMonitorsByJobId(jobId: string): Promise<void> {
 export async function deleteAllMonitorsBySession(sessionId: string): Promise<void> {
   await ensureBookingMonitorsTable();
   await sql`DELETE FROM booking_monitors WHERE session_id = ${sessionId}`;
+}
+
+/**
+ * Delete monitor rows whose job_id no longer resolves to a booking_jobs row.
+ * These are "orphans" left over from older clear-all / delete paths that did
+ * not cascade. Returns the count of rows removed so callers can surface it.
+ */
+export async function deleteOrphanMonitorsBySession(sessionId: string): Promise<number> {
+  await ensureBookingMonitorsTable();
+  const result = await sql`
+    DELETE FROM booking_monitors
+    WHERE session_id = ${sessionId}
+      AND NOT EXISTS (
+        SELECT 1 FROM booking_jobs WHERE booking_jobs.id = booking_monitors.job_id
+      )
+  `;
+  return result.rowCount ?? 0;
 }
 
 // ─── End Booking Monitors ──────────────────────────────────────────────────────

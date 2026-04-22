@@ -68,12 +68,20 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  const body = ChatRequestSchema.safeParse(await req.json());
+  const rawBody = await req.json().catch(() => null);
+  const body = ChatRequestSchema.safeParse(rawBody);
   if (!body.success) {
-    return NextResponse.json({ error: "Invalid request." }, { status: 400 });
+    console.warn("[chat] invalid request", JSON.stringify({
+      issues: body.error.issues,
+      bodyKeys: rawBody && typeof rawBody === "object" ? Object.keys(rawBody) : null,
+      messagePreview: typeof rawBody?.message === "string" ? rawBody.message.slice(0, 80) : null,
+      historyLen: Array.isArray(rawBody?.history) ? rawBody.history.length : null,
+      category_hint: rawBody?.category_hint,
+    }));
+    return NextResponse.json({ error: "Invalid request.", issues: body.error.issues }, { status: 400 });
   }
 
-  const { message, history, city, gpsCoords, nearLocation, sessionPreferences, profileContext, customWeights, session_id, pinned_plan_id } = body.data;
+  const { message, history, city, gpsCoords, nearLocation, sessionPreferences, profileContext, customWeights, session_id, pinned_plan_id, category_hint } = body.data;
   // Derive userId from Clerk server-side auth — never trust client-supplied user_id
   const { userId: user_id } = await auth().catch(() => ({ userId: null }));
   const request_id = crypto.randomUUID();
@@ -112,7 +120,8 @@ export async function POST(req: NextRequest) {
             customWeights ?? undefined,
             session_id ?? undefined,
             user_id ?? undefined,
-            pinned_plan_id ?? undefined
+            pinned_plan_id ?? undefined,
+            category_hint ?? undefined
           ),
           AGENT_TIMEOUT_MS
         );
@@ -122,6 +131,8 @@ export async function POST(req: NextRequest) {
             ? result.hotelRecommendations.length
             : result.category === "flight"
             ? result.flightRecommendations.length
+            : result.category === "activity"
+            ? result.activityRecommendations.length
             : result.category === "credit_card"
             ? result.creditCardRecommendations.length
             : result.category === "laptop"
@@ -153,6 +164,8 @@ export async function POST(req: NextRequest) {
           headphoneRecommendations: result.headphoneRecommendations,
           device_db_gap_warning: result.device_db_gap_warning,
           subscriptionIntent: result.subscriptionIntent,
+          activityRecommendations: result.activityRecommendations,
+          missing_activity_fields: result.missing_activity_fields,
           missing_credit_card_fields: result.missing_credit_card_fields,
           missing_laptop_use_case: result.category === "laptop" && result.missing_flight_fields.includes("use_case"),
           missing_smartphone_use_case: result.category === "smartphone" && result.missing_flight_fields.includes("use_case"),

@@ -28,10 +28,13 @@ import {
 } from "@/lib/agent/n-party";
 import { runAgentForHotel } from "@/lib/rooms/hotel-search";
 import { runAgentForFlight } from "@/lib/rooms/flight-search";
+import { runAgentForActivity } from "@/lib/rooms/activity-search";
 import type {
   RecommendationCard,
   HotelRecommendationCard,
   FlightRecommendationCard,
+  ActivityRecommendationCard,
+  ActivityEventType,
 } from "@/lib/types";
 import type { DecisionRoom, DecisionRoomConstraintRow } from "@/lib/db";
 import type { RoomScenarioId } from "@/lib/agent/scenario-configs/room-conflict";
@@ -39,13 +42,15 @@ import type {
   RestaurantConstraintData,
   HotelConstraintData,
   FlightConstraintData,
+  ActivityConstraintData,
 } from "@/lib/rooms/constraint-types";
 
 /** A proposal card is one of the scenario-specific card shapes. */
 export type ProposalCard =
   | RecommendationCard
   | HotelRecommendationCard
-  | FlightRecommendationCard;
+  | FlightRecommendationCard
+  | ActivityRecommendationCard;
 
 export interface ProposalOption {
   id: string;
@@ -81,6 +86,21 @@ function hotelRowToText(d: HotelConstraintData): string {
   return parts.join("; ") || "no specific constraints";
 }
 
+function activityRowToText(d: ActivityConstraintData): string {
+  const parts: string[] = [];
+  if (typeof d.budget_max_per_ticket === "number") parts.push(`budget under $${d.budget_max_per_ticket} per ticket`);
+  if (d.seat_type === "premium") parts.push(`premium seating`);
+  else if (d.seat_type === "standard") parts.push(`standard seating`);
+  else if (d.seat_type === "economy") parts.push(`economy seating`);
+  if (d.section_preferences?.length) parts.push(`prefer sections: ${d.section_preferences.join(", ")}`);
+  if (d.avoid_sections?.length) parts.push(`avoid sections: ${d.avoid_sections.join(", ")}`);
+  if (d.accessibility?.wheelchair) parts.push(`wheelchair accessible required`);
+  if (d.accessibility?.companion_seat) parts.push(`companion seat required`);
+  if (d.delivery_preference) parts.push(`delivery: ${d.delivery_preference}`);
+  if (d.notes) parts.push(d.notes);
+  return parts.join("; ") || "no specific constraints";
+}
+
 function flightRowToText(d: FlightConstraintData): string {
   const parts: string[] = [];
   if (typeof d.budget_max_per_person === "number") parts.push(`budget under $${d.budget_max_per_person} per person`);
@@ -111,12 +131,14 @@ export function constraintRowToText(
       return hotelRowToText(row.data_json as HotelConstraintData);
     case "flight":
       return flightRowToText(row.data_json as FlightConstraintData);
+    case "activity":
+      return activityRowToText(row.data_json as ActivityConstraintData);
   }
 }
 
 /** Narrow `room.type` to our supported scenario union. */
 function assertScenarioId(t: string): RoomScenarioId {
-  if (t === "restaurant" || t === "hotel" || t === "flight") return t;
+  if (t === "restaurant" || t === "hotel" || t === "flight" || t === "activity") return t;
   throw new Error(`Unsupported room type: ${t}`);
 }
 
@@ -137,6 +159,13 @@ interface RoomContextJson {
   is_round_trip?: boolean;
   passengers?: number;
   cabin_class?: "economy" | "premium_economy" | "business" | "first";
+  // Activity fields
+  event_name?: string;
+  event_type?: ActivityEventType;
+  event_date?: string;
+  event_date_to?: string;
+  venue_hint?: string;
+  num_tickets?: number;
 }
 
 /**
@@ -232,7 +261,7 @@ export async function generateRoomProposal(
 
     const hotelResult = await runAgentForHotel(mergedQuery, hotelCtx);
     cards = hotelResult.cards;
-  } else {
+  } else if (scenarioId === "flight") {
     // Flight path: merge → runAgentForFlight. Route/dates/round-trip/cabin are
     // authoritative Room context; per-member constraints provide soft
     // preferences (stops, time window, red-eye, airlines).
@@ -282,12 +311,63 @@ export async function generateRoomProposal(
       );
     }
     cards = flightResult.cards;
+  } else {
+    // Activity path: merge → runAgentForActivity. event_name/event_type/city/
+    // date are authoritative Room context; per-member constraints provide soft
+    // preferences (budget, seat tier, section bias, accessibility).
+    const activityCtx = {
+      cityId,
+      city: ctx.city ?? ctx.destination,
+      eventName: ctx.event_name,
+      eventType: ctx.event_type,
+      dateFrom: ctx.event_date ?? ctx.date_window?.from ?? undefined,
+      dateTo: ctx.event_date_to ?? ctx.event_date ?? ctx.date_window?.to ?? undefined,
+      numTickets: ctx.num_tickets ?? submitted.length,
+      venueHint: ctx.venue_hint,
+    };
+
+    let mergedQuery: string;
+    if (isTwoParty) {
+      const [a, b] = submitted;
+      const aText = constraintRowToText(a, "activity");
+      const bText = constraintRowToText(b, "activity");
+      const merged = await mergeTwoPartyQuery("activity", aText, bText, cityId);
+      mergedQuery = merged.mergedQuery;
+      conflict = merged.conflict;
+      conflictReason = merged.conflictReason;
+      if (conflict) affectedUsers = submitted.map((s) => s.user_id);
+      rationaleTail = `${aText} / ${bText}`;
+    } else {
+      const inputs = submitted.map((c) => ({
+        userId: c.user_id,
+        text: constraintRowToText(c, "activity"),
+      }));
+      const merged = await mergeNPartyQuery("activity", inputs, cityId);
+      mergedQuery = merged.mergedQuery;
+      conflict = merged.conflict;
+      conflictReason = merged.conflictReason;
+      affectedUsers = conflict
+        ? merged.conflictAffectedUsers?.length
+          ? merged.conflictAffectedUsers
+          : submitted.map((s) => s.user_id)
+        : [];
+      rationaleTail = inputs.map((p) => p.text).join(" | ");
+    }
+
+    const activityResult = await runAgentForActivity(mergedQuery, activityCtx);
+    if (activityResult.missingFields.length) {
+      throw new Error(
+        `Activity search missing required fields: ${activityResult.missingFields.join(", ")}. Set them in the Room context.`,
+      );
+    }
+    cards = activityResult.cards;
   }
 
   if (cards.length === 0) {
     const nounPlural =
       scenarioId === "hotel" ? "hotels" :
       scenarioId === "flight" ? "flights" :
+      scenarioId === "activity" ? "events" :
       "restaurants";
     throw new Error(
       conflictReason

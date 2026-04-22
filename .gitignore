@@ -46,6 +46,7 @@ next-env.d.ts
 # Booking autopilot saved cookies (sensitive — never commit)
 .booking-cookies/
 .booking-cookies.json
+.ticketmaster-cookies.json
 
 # Dev artifacts
 .next-dev.log

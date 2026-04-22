@@ -13,6 +13,38 @@ Always respond in Chinese. Never respond in Korean.
 
 ---
 
+## Dev Server 重启提示规则
+
+每次改完代码后，必须主动判断改动是否需要用户重启 `npm run dev`。**只要需要重启，就必须在回复里明确告诉用户"此改动需要重启 dev server"并说明原因**，不要让用户自己猜。
+
+### 需要重启的改动（必须提示）
+- `next.config.ts` / `next.config.js`
+- `package.json`（新增/升级/移除依赖）
+- `.env` / `.env.local` / `.env.*`（环境变量）
+- `middleware.ts`（有时需要）
+- `tsconfig.json` 的 `paths` / `baseUrl` / `compilerOptions`
+- `tailwind.config.*` / `postcss.config.*`
+- `instrumentation.ts`
+- 任何 Next.js build-time 配置文件
+- 模块级 registry 注册 / singleton 初始化（HMR 不会重跑 module-level 副作用）
+
+### 不需要重启的改动（不用提示）
+- React 组件（`components/**`、`app/**/*.tsx`）
+- 普通 TS 模块（`lib/**/*.ts`）
+- API routes（`app/api/**/route.ts`）
+- CSS / Tailwind class 改动
+- 图片、静态资源
+
+### 回复格式示例
+
+改了需要重启的文件时，在总结段里加一行：
+
+> ⚠️ **需要重启 dev server**：改动了 `next.config.ts`，请 Ctrl+C 停掉 `npm run dev` 再重新跑。
+
+如果同时还改了不需要重启的文件，只提需要重启的那几个即可。
+
+---
+
 ## Booking Automation Architecture — 必须遵守的设计原则
 
 每次新增预订平台、修改现有 provider、或实现任何自动化填表功能时，必须遵循以下模式。**不允许绕过此规范。**

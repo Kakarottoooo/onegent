@@ -279,7 +279,13 @@ export default function InlineJobCard({ jobId, onNeedsTravelDocs, onDeleted }: I
         </div>
 
         {(job.status === "running" || (isComplete && Date.now() - new Date(job.updated_at).getTime() < 90_000)) && (
-          <a href="/tasks" target="_blank" rel="noopener noreferrer" onClick={(e) => e.stopPropagation()} style={{ flexShrink: 0, padding: "5px 10px", borderRadius: 8, border: "1px solid var(--gold,#D4A34B)", backgroundColor: "transparent", color: job.status === "running" ? "var(--gold,#D4A34B)" : "rgba(212,163,75,0.5)", fontFamily: "var(--font-dm-sans)", fontSize: 11, fontWeight: 600, whiteSpace: "nowrap", textDecoration: "none", display: "inline-block" }}>
+          <a
+            href={`/tasks?view=${job.status === "running" ? "live" : "history"}&focus=${job.id}`}
+            target="_blank"
+            rel="noopener noreferrer"
+            onClick={(e) => e.stopPropagation()}
+            style={{ flexShrink: 0, padding: "5px 10px", borderRadius: 8, border: "1px solid var(--gold,#D4A34B)", backgroundColor: "transparent", color: job.status === "running" ? "var(--gold,#D4A34B)" : "rgba(212,163,75,0.5)", fontFamily: "var(--font-dm-sans)", fontSize: 11, fontWeight: 600, whiteSpace: "nowrap", textDecoration: "none", display: "inline-block" }}
+          >
             {job.status === "running" ? "🖥 Watch" : "🖥 Replay"}
           </a>
         )}
@@ -310,7 +316,12 @@ export default function InlineJobCard({ jobId, onNeedsTravelDocs, onDeleted }: I
             <InlineStepCard key={i} step={step} />
           ))}
           <div style={{ textAlign: "right", paddingTop: 4 }}>
-            <a href="/tasks" target="_blank" rel="noopener noreferrer" style={{ fontFamily: "var(--font-dm-sans)", fontSize: 11, color: "var(--text-muted,#aaa)", textDecoration: "none" }}>
+            <a
+              href={`/tasks?view=${job.status === "running" ? "live" : isComplete ? "history" : "queue"}&focus=${job.id}`}
+              target="_blank"
+              rel="noopener noreferrer"
+              style={{ fontFamily: "var(--font-dm-sans)", fontSize: 11, color: "var(--text-muted,#aaa)", textDecoration: "none" }}
+            >
               View full details in Tasks →
             </a>
           </div>

@@ -2,7 +2,7 @@
 // const client = new Anthropic();
 
 import { googlePlacesSearch, tavilySearch, geocodeLocation, fetchReviewSignals, searchHotels, searchFlights, resolveMultiAirport, normalizeDate, searchAfterDinnerVenue } from "./tools";
-import { UserRequirements, Restaurant, RecommendationCard, SessionPreferences, ScoringDimensions, HotelIntent, RestaurantIntent, FlightIntent, CreditCardIntent, LaptopIntent, LaptopUseCase, ParsedIntent, HotelRecommendationCard, FlightRecommendationCard, CreditCardRecommendationCard, LaptopRecommendationCard, SpendingProfile, CategoryType, Flight, SubscriptionIntent, SmartphoneIntent, SmartphoneUseCase, SmartphoneRecommendationCard, HeadphoneIntent, HeadphoneUseCase, HeadphoneRecommendationCard, ScenarioIntent, DecisionPlan, ResultMode, WeekendTripIntent, CityTripIntent, DateNightIntent, MultilingualQueryContext } from "./types";
+import { UserRequirements, Restaurant, RecommendationCard, SessionPreferences, ScoringDimensions, HotelIntent, RestaurantIntent, FlightIntent, CreditCardIntent, LaptopIntent, LaptopUseCase, ParsedIntent, HotelRecommendationCard, FlightRecommendationCard, CreditCardRecommendationCard, LaptopRecommendationCard, SpendingProfile, CategoryType, Flight, SubscriptionIntent, SmartphoneIntent, SmartphoneUseCase, SmartphoneRecommendationCard, HeadphoneIntent, HeadphoneUseCase, HeadphoneRecommendationCard, ScenarioIntent, DecisionPlan, ResultMode, WeekendTripIntent, CityTripIntent, DateNightIntent, MultilingualQueryContext, ActivityIntent, ActivityRecommendationCard } from "./types";
 import type { WatchCategory } from "./watchTypes";
 import { CITIES, DEFAULT_CITY } from "./cities";
 import { UserRequirementsSchema, RankedItemArraySchema } from "./schemas";
@@ -32,6 +32,8 @@ import { runSmartphonePipeline } from "./agent/pipelines/smartphone";
 import { runHeadphonePipeline } from "./agent/pipelines/headphone";
 import { runHotelPipeline } from "./agent/pipelines/hotel";
 import { runFlightPipeline } from "./agent/pipelines/flight";
+import { runActivityPipeline } from "./agent/pipelines/activity";
+import { parseActivityIntent } from "./agent/parse/activity";
 import { gatherCandidates, rankAndExplain } from "./agent/pipelines/restaurant";
 import { parseWeekendTripIntent } from "./agent/parse/weekend-trip";
 import { parseCityTripIntent } from "./agent/parse/city-trip";
@@ -61,7 +63,8 @@ export async function runAgent(
   customWeights?: Partial<typeof DEFAULT_WEIGHTS>,
   sessionId?: string,
   userId?: string,
-  pinned_plan_id?: string
+  pinned_plan_id?: string,
+  categoryHintOverride?: CategoryType
 ): Promise<{
   requirements:
     | UserRequirements
@@ -72,7 +75,8 @@ export async function runAgent(
     | SmartphoneIntent
     | HeadphoneIntent
     | SubscriptionIntent
-    | ScenarioIntent;
+    | ScenarioIntent
+    | ActivityIntent;
   recommendations: RecommendationCard[];
   hotelRecommendations: HotelRecommendationCard[];
   flightRecommendations: FlightRecommendationCard[];
@@ -83,6 +87,8 @@ export async function runAgent(
   headphoneRecommendations: HeadphoneRecommendationCard[];
   device_db_gap_warning: string | null;
   subscriptionIntent: SubscriptionIntent | null;
+  activityRecommendations: ActivityRecommendationCard[];
+  missing_activity_fields: string[];
   missing_credit_card_fields: string[];
   missing_flight_fields: string[];
   no_direct_available: boolean;
@@ -101,6 +107,15 @@ export async function runAgent(
       ? await getUserPreferences(sessionId ?? "", userId).catch(() => ({}))
       : {};
   const queryContext = await analyzeMultilingualQuery(userMessage, cityFullName, userPreferences, { pinned_plan_id, conversationHistory });
+  if (categoryHintOverride) {
+    queryContext.category_hint = categoryHintOverride;
+    // When NLU already classified as activity, bypass scenario-plan routing
+    // (concert_event DecisionPlan) and fall through to intent.category === "activity"
+    // direct-card path.
+    if (categoryHintOverride === "activity" && queryContext.scenario_hint === "concert_event") {
+      queryContext.scenario_hint = null;
+    }
+  }
 
   function buildBaseResult(
     requirements:
@@ -112,7 +127,8 @@ export async function runAgent(
       | SmartphoneIntent
       | HeadphoneIntent
       | SubscriptionIntent
-      | ScenarioIntent,
+      | ScenarioIntent
+      | ActivityIntent,
     category: CategoryType,
     overrides: Partial<{
       recommendations: RecommendationCard[];
@@ -125,6 +141,8 @@ export async function runAgent(
       headphoneRecommendations: HeadphoneRecommendationCard[];
       device_db_gap_warning: string | null;
       subscriptionIntent: SubscriptionIntent | null;
+      activityRecommendations: ActivityRecommendationCard[];
+      missing_activity_fields: string[];
       missing_credit_card_fields: string[];
       missing_flight_fields: string[];
       no_direct_available: boolean;
@@ -147,6 +165,8 @@ export async function runAgent(
       headphoneRecommendations: [],
       device_db_gap_warning: null,
       subscriptionIntent: null,
+      activityRecommendations: [],
+      missing_activity_fields: [],
       missing_credit_card_fields: [],
       missing_flight_fields: [],
       no_direct_available: false,
@@ -661,6 +681,15 @@ export async function runAgent(
     return buildBaseResult(intent, "hotel", {
       hotelRecommendations,
       suggested_refinements,
+    });
+  }
+
+  // Route to activity pipeline (SeatGeek direct-card path for solo ticketed events)
+  if (intent.category === "activity") {
+    const { activityRecommendations, missing_fields } = await runActivityPipeline(intent);
+    return buildBaseResult(intent, "activity", {
+      activityRecommendations,
+      missing_activity_fields: missing_fields,
     });
   }
 

@@ -4,6 +4,7 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { RecommendationCard as CardType, FeedbackRecord } from "@/lib/types";
 import PhotoCarousel from "@/components/PhotoCarousel";
+import { getBrowserModelForStagehand } from "@/lib/agent-model-config";
 
 interface Props {
   card: CardType;
@@ -111,8 +112,7 @@ export default function RecommendationCard({
     try {
       const sessionId = localStorage.getItem("session_id") ?? crypto.randomUUID();
       if (!localStorage.getItem("session_id")) localStorage.setItem("session_id", sessionId);
-      const savedModel = JSON.parse(localStorage.getItem("agent_model_config") ?? "{}");
-      const agentModel = savedModel.model && savedModel.apiKey ? savedModel : undefined;
+      const agentModel = getBrowserModelForStagehand() ?? undefined;
 
       const otUrl = `https://www.opentable.com/s?term=${encodeURIComponent(card.restaurant.name)}&covers=${resCovers}&dateTime=${resDate}T${resTime}:00`;
       const fallbackUrl = card.opentable_url ?? otUrl;

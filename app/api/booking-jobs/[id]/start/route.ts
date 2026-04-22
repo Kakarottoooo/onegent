@@ -519,6 +519,27 @@ async function runUniversalStep(
           } as unknown as BookingJobStep;
         }
 
+        // ── Payment field check ─────────────────────────────────────────────
+        // Hotel / flight / activity all reach a payment page. If card or billing
+        // address is missing, fail early so the RPA doesn't burn minutes getting
+        // to checkout just to stall on an empty card number field.
+        // Restaurant is excluded — OpenTable/Resy usually book without payment.
+        if (step.type !== "restaurant") {
+          const missingPayment: string[] = [];
+          if (!dbProfile.card_number) missingPayment.push("card number");
+          if (!dbProfile.card_expiry) missingPayment.push("card expiry");
+          if (!dbProfile.address_line1) missingPayment.push("billing address");
+          if (missingPayment.length > 0) {
+            const missingMsg = `Missing payment profile: ${missingPayment.join(", ")}. Please add these in Settings → My Profile, then try booking again.`;
+            return {
+              ...step,
+              status: "error",
+              error: missingMsg,
+              decisionLog: [...log, { type: "error" as const, message: `[payment-check] Missing: ${missingPayment.join(", ")}` }],
+            } as unknown as BookingJobStep;
+          }
+        }
+
         // ── Finalize flight task with travel doc info (now that DB profile is merged) ──
         if (step.type === "flight" && resolvedBody._flightTaskBase) {
           const mergedProfile = resolvedBody.profile as Record<string, string | undefined> | undefined;
@@ -998,12 +1019,22 @@ export async function POST(_req: NextRequest, { params }: Params) {
       await updateBookingJobSteps(id, steps);
     };
 
-    // ── Dispatch: universal/restaurant → Stagehand, activity → agent-runtime, rest → recovery loop ──
+    // ── Dispatch: universal/restaurant → Stagehand, activity → split, rest → recovery loop ──
     // "restaurant" steps use runUniversalStep (same as "universal") because they need
     // runBrowserTask called directly — runStepWithRecovery uses callEndpoint (HTTP) which
     // requires a valid apiEndpoint URL, but restaurant steps don't have one.
+    //
+    // "activity" steps split by apiEndpoint: ticketed events (Broadway, concerts, sports)
+    // built by ActivityCard set apiEndpoint="/api/booking-autopilot/universal" and must go
+    // through Stagehand + provider registry (SeatGeek / Ticketmaster). Legacy date-night
+    // and weekend-trip scenarios keep using the agent-runtime find_activity skill
+    // (Google Places → local experience handoff URL).
+    const isUniversalActivity =
+      (steps[i].type as string) === "activity" &&
+      steps[i].apiEndpoint === "/api/booking-autopilot/universal";
     if (steps[i].type === "universal" || steps[i].type === "restaurant" ||
-        steps[i].type === "hotel" || steps[i].type === "flight") {
+        steps[i].type === "hotel" || steps[i].type === "flight" ||
+        isUniversalActivity) {
       steps[i] = await runUniversalStep(steps[i], onProgress, id, job.user_id);
     } else if ((steps[i].type as string) === "activity") {
       steps[i] = await runActivityStep(steps[i], skillCtx, onProgress);

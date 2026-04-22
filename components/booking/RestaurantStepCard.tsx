@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
+import { getBrowserModelForStagehand } from "@/lib/agent-model-config";
 
 interface RestaurantStepCardProps {
   /** Optional default city pre-filled from trip context */
@@ -68,11 +69,7 @@ export default function RestaurantStepCard({
       if (!localStorage.getItem("session_id")) {
         localStorage.setItem("session_id", sessionId);
       }
-      const savedModel = JSON.parse(
-        localStorage.getItem("agent_model_config") ?? "{}"
-      );
-      const agentModel =
-        savedModel.model && savedModel.apiKey ? savedModel : undefined;
+      const agentModel = getBrowserModelForStagehand() ?? undefined;
 
       const step = {
         type: "restaurant" as const,

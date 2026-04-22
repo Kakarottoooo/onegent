@@ -32,6 +32,13 @@ export const ChatRequestSchema = z.object({
   }).optional(),
   /** G-3: plan ID to use as reference when doing module-level refine */
   pinned_plan_id: z.string().max(128).optional(),
+  /**
+   * Homepage NLU category override. When the chat NLU has already classified
+   * the intent (e.g. "activity"/"hotel"), the client passes it through so the
+   * legacy search pipeline skips its own keyword detection and routes
+   * deterministically.
+   */
+  category_hint: z.enum(["restaurant", "hotel", "flight", "activity"]).optional(),
 });
 
 // ─── AI Response Schemas ───────────────────────────────────────────────────────

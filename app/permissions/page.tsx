@@ -23,6 +23,10 @@ import {
   type AgentAutonomySettings,
   type AutopilotLevel,
 } from "@/lib/autonomy";
+import {
+  getBrowserModelAsLegacy,
+  setBrowserModelFromLegacy,
+} from "@/lib/agent-model-config";
 
 const DIETARY_OPTIONS = ["Vegetarian", "Vegan", "Gluten-free", "Shellfish-free", "Halal", "Kosher"];
 
@@ -708,64 +712,135 @@ const PROVIDER_KEY_STORAGE: Record<string, string> = {
   Google: "provider_key_google",
 };
 
-// Stagehand v3 requires "provider/model" format
-const PROVIDER_GROUPS: {
+type ProviderId = "minimax" | "openai" | "anthropic" | "google";
+
+interface ModelOption {
+  /** Stagehand-style "provider/model" identifier. */
   id: string;
+  provider: ProviderId;
+  model: string;
   label: string;
-  placeholder: string;
-  models: { model: string; label: string; hint: string; badge?: string }[];
-}[] = [
+  hint: string;
+  badge?: string;
+  /**
+   * Phase 1 only wires MiniMax end-to-end for the conversational layer. Other
+   * providers are stubs and will error at call time; we mark them so the UI
+   * can show a "not wired" hint.
+   */
+  stubForConversational?: boolean;
+}
+
+const CONVERSATIONAL_MODELS: ModelOption[] = [
   {
-    id: "OpenAI",
-    label: "OpenAI",
-    placeholder: "sk-...",
-    models: [
-      { model: "openai/gpt-4o-mini", label: "GPT-4o mini", hint: "Recommended — fast & affordable", badge: "★ Best value" },
-      { model: "openai/gpt-4o-2024-08-06", label: "GPT-4o", hint: "Higher accuracy, higher cost" },
-    ],
+    id: "minimax/MiniMax-Text-01",
+    provider: "minimax",
+    model: "MiniMax-Text-01",
+    label: "MiniMax Text-01",
+    hint: "Default — multilingual, fast, no API key needed",
+    badge: "★ Phase 1",
   },
   {
-    id: "Anthropic",
-    label: "Anthropic",
-    placeholder: "sk-ant-...",
-    models: [
-      { model: "anthropic/claude-haiku-4-5-20251001", label: "Claude Haiku 4.5", hint: "Fastest & cheapest Claude" },
-      { model: "anthropic/claude-sonnet-4-6", label: "Claude Sonnet 4.6", hint: "Best reasoning accuracy" },
-    ],
+    id: "openai/gpt-4o-mini",
+    provider: "openai",
+    model: "gpt-4o-mini",
+    label: "GPT-4o mini",
+    hint: "Stub — ships after Phase 1",
+    stubForConversational: true,
   },
   {
-    id: "Google",
-    label: "Google / Gemini",
-    placeholder: "AIza...",
-    models: [
-      { model: "google/gemini-2.0-flash", label: "Gemini 2.0 Flash", hint: "Fast, free tier available" },
-    ],
+    id: "anthropic/claude-haiku-4-5-20251001",
+    provider: "anthropic",
+    model: "claude-haiku-4-5-20251001",
+    label: "Claude Haiku 4.5",
+    hint: "Stub — ships after Phase 1",
+    stubForConversational: true,
+  },
+  {
+    id: "google/gemini-2.0-flash",
+    provider: "google",
+    model: "gemini-2.0-flash",
+    label: "Gemini 2.0 Flash",
+    hint: "Stub — ships after Phase 1",
+    stubForConversational: true,
   },
 ];
 
-export function loadAgentModelConfig(): AgentModelConfig {
-  try {
-    return JSON.parse(localStorage.getItem("agent_model_config") ?? "{}") as AgentModelConfig;
-  } catch { return { model: "", apiKey: "" }; }
-}
+const BROWSER_MODELS: ModelOption[] = [
+  {
+    id: "openai/gpt-4o-mini",
+    provider: "openai",
+    model: "gpt-4o-mini",
+    label: "GPT-4o mini",
+    hint: "Recommended — fast & affordable",
+    badge: "★ Best value",
+  },
+  {
+    id: "openai/gpt-4o-2024-08-06",
+    provider: "openai",
+    model: "gpt-4o-2024-08-06",
+    label: "GPT-4o",
+    hint: "Higher accuracy, higher cost",
+  },
+  {
+    id: "anthropic/claude-haiku-4-5-20251001",
+    provider: "anthropic",
+    model: "claude-haiku-4-5-20251001",
+    label: "Claude Haiku 4.5",
+    hint: "Fastest & cheapest Claude",
+  },
+  {
+    id: "anthropic/claude-sonnet-4-6",
+    provider: "anthropic",
+    model: "claude-sonnet-4-6",
+    label: "Claude Sonnet 4.6",
+    hint: "Best reasoning accuracy",
+  },
+  {
+    id: "google/gemini-2.0-flash",
+    provider: "google",
+    model: "gemini-2.0-flash",
+    label: "Gemini 2.0 Flash",
+    hint: "Fast, free tier available",
+  },
+];
 
-function saveAgentModelConfig(cfg: AgentModelConfig) {
-  localStorage.setItem("agent_model_config", JSON.stringify(cfg));
+const PROVIDER_UI_IDS: Array<{ id: ProviderId; label: string; placeholder: string; needsUserKey: boolean }> = [
+  { id: "openai",    label: "OpenAI",          placeholder: "sk-...",      needsUserKey: true  },
+  { id: "anthropic", label: "Anthropic",       placeholder: "sk-ant-...",  needsUserKey: true  },
+  { id: "google",    label: "Google / Gemini", placeholder: "AIza...",     needsUserKey: true  },
+  { id: "minimax",   label: "MiniMax",         placeholder: "",            needsUserKey: false },
+];
+
+const PROVIDER_LEGACY_STORAGE_ID: Record<ProviderId, string> = {
+  openai: "OpenAI",
+  anthropic: "Anthropic",
+  google: "Google",
+  minimax: "MiniMax",
+};
+
+// Back-compat for legacy imports of this function (external API unchanged).
+export function loadAgentModelConfig(): AgentModelConfig {
+  return getBrowserModelAsLegacy();
 }
 
 export function AgentModelTab() {
-  const [activeModel, setActiveModel] = useState("");
-  // per-provider keys typed by the user (from localStorage)
+  // Layered config — each slot is {provider, model, apiKey} or undefined.
+  const [layered, setLayered] = useState<AgentModelConfigLayered>({});
+  // Per-provider keys typed by the user (localStorage "provider_key_*")
   const [localKeys, setLocalKeys] = useState<Record<string, string>>({});
-  // which providers have server-side env keys
-  const [serverKeys, setServerKeys] = useState<Record<string, boolean>>({});
+  // Which providers have a server-side env key
+  const [serverKeys, setServerKeys] = useState<Record<ProviderId, boolean>>({
+    openai: false,
+    anthropic: false,
+    google: false,
+    minimax: false,
+  });
   const [showKey, setShowKey] = useState<Record<string, boolean>>({});
   const [saved, setSaved] = useState(false);
 
-  // Load active model + per-provider keys from localStorage
+  // Load layered config + per-provider keys from localStorage
   useEffect(() => {
-    const cfg = loadAgentModelConfig();
-    setActiveModel(cfg.model ?? "");
+    setLayered(loadAgentModelConfigLayered());
     const loaded: Record<string, string> = {};
     for (const [pid, storageKey] of Object.entries(PROVIDER_KEY_STORAGE)) {
       loaded[pid] = localStorage.getItem(storageKey) ?? "";
@@ -777,37 +852,59 @@ export function AgentModelTab() {
   useEffect(() => {
     fetch("/api/agent-keys-status")
       .then((r) => r.json())
-      .then((data: { openai: boolean; anthropic: boolean; google: boolean }) => {
-        setServerKeys({ OpenAI: data.openai, Anthropic: data.anthropic, Google: data.google });
+      .then((data: { openai: boolean; anthropic: boolean; google: boolean; minimax?: boolean }) => {
+        setServerKeys({
+          openai: !!data.openai,
+          anthropic: !!data.anthropic,
+          google: !!data.google,
+          // MiniMax always has a server env key in Phase 1 (project ships one).
+          minimax: data.minimax ?? true,
+        });
       })
       .catch(() => {});
   }, []);
 
-  function providerOfModel(model: string): string {
-    return PROVIDER_GROUPS.find((g) => g.models.some((m) => m.model === model))?.id ?? "";
+  function hasProviderKey(provider: ProviderId): boolean {
+    if (provider === "minimax") return true; // server env always present in Phase 1
+    const legacyId = PROVIDER_LEGACY_STORAGE_ID[provider];
+    return !!serverKeys[provider] || !!(localKeys[legacyId] ?? "").trim();
   }
 
-  function resolvedApiKey(providerId: string): string {
-    // If user has a local key use that; otherwise empty (server env key will be used)
-    return localKeys[providerId] ?? "";
+  function resolveApiKeyForProvider(provider: ProviderId): string {
+    if (provider === "minimax") return "";
+    const legacyId = PROVIDER_LEGACY_STORAGE_ID[provider];
+    return localKeys[legacyId] ?? "";
   }
 
-  function selectModel(model: string) {
-    const providerId = providerOfModel(model);
-    const apiKey = resolvedApiKey(providerId);
-    const cfg: AgentModelConfig = { model, apiKey };
-    saveAgentModelConfig(cfg);
-    setActiveModel(model);
+  function selectForLayer(layer: "conversational" | "browser", option: ModelOption) {
+    const apiKey = resolveApiKeyForProvider(option.provider);
+    const next: AgentModelConfigLayered = {
+      ...layered,
+      [layer]: { provider: option.provider, model: option.model, apiKey: apiKey || undefined },
+    };
+    setLayered(next);
+    saveAgentModelConfigLayered(next);
     flash();
   }
 
-  function saveProviderKey(providerId: string, key: string) {
+  function saveProviderKey(legacyProviderId: string, key: string) {
     const trimmed = key.trim();
-    setLocalKeys((prev) => ({ ...prev, [providerId]: trimmed }));
-    localStorage.setItem(PROVIDER_KEY_STORAGE[providerId], trimmed);
-    // If active model belongs to this provider, update its apiKey too
-    if (providerOfModel(activeModel) === providerId) {
-      saveAgentModelConfig({ model: activeModel, apiKey: trimmed });
+    setLocalKeys((prev) => ({ ...prev, [legacyProviderId]: trimmed }));
+    localStorage.setItem(PROVIDER_KEY_STORAGE[legacyProviderId], trimmed);
+    // Mirror the new key into any layer currently pinned to this provider.
+    const provider = (Object.keys(PROVIDER_LEGACY_STORAGE_ID) as ProviderId[]).find(
+      (p) => PROVIDER_LEGACY_STORAGE_ID[p] === legacyProviderId
+    );
+    if (provider) {
+      const next: AgentModelConfigLayered = { ...layered };
+      (["conversational", "browser"] as const).forEach((layer) => {
+        const slot = next[layer];
+        if (slot && slot.provider === provider) {
+          next[layer] = { ...slot, apiKey: trimmed || undefined };
+        }
+      });
+      setLayered(next);
+      saveAgentModelConfigLayered(next);
     }
     flash();
   }
@@ -817,9 +914,13 @@ export function AgentModelTab() {
     setTimeout(() => setSaved(false), 1800);
   }
 
-  const activeLabel = PROVIDER_GROUPS.flatMap((g) => g.models).find((m) => m.model === activeModel)?.label;
-  const activeProvider = providerOfModel(activeModel);
-  const isReady = !!activeModel && (!!localKeys[activeProvider] || !!serverKeys[activeProvider]);
+  const convSlot = layered.conversational;
+  const convActiveId = convSlot ? `${convSlot.provider}/${convSlot.model}` : DEFAULT_CONVERSATIONAL_ID;
+  const browserSlot = layered.browser;
+  const browserActiveId = browserSlot ? `${browserSlot.provider}/${browserSlot.model}` : "";
+
+  const convLabel = CONVERSATIONAL_MODELS.find((m) => m.id === convActiveId)?.label ?? "MiniMax Text-01";
+  const browserLabel = BROWSER_MODELS.find((m) => m.id === browserActiveId)?.label ?? "Not selected";
 
   const inputStyle: React.CSSProperties = {
     flex: 1, padding: "9px 12px", borderRadius: 10, boxSizing: "border-box",
@@ -831,128 +932,121 @@ export function AgentModelTab() {
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 0 }}>
 
-      {/* Status banner */}
+      {/* Status banner — summarises both active layers */}
       <div style={{
         display: "flex", alignItems: "center", gap: 10,
         padding: "12px 14px", borderRadius: 12, marginBottom: 24,
-        backgroundColor: isReady ? "rgba(201,168,76,0.08)" : "var(--card, #fff)",
-        border: `0.5px solid ${isReady ? "var(--gold, #C9A84C)" : "var(--border, #e5e7eb)"}`,
+        backgroundColor: "rgba(201,168,76,0.08)",
+        border: "0.5px solid var(--gold, #C9A84C)",
       }}>
-        <span style={{ fontSize: 20 }}>{isReady ? "✅" : "🤖"}</span>
+        <span style={{ fontSize: 20 }}>🧩</span>
         <div>
           <p style={{ fontFamily: "var(--font-dm-sans)", fontSize: 13, fontWeight: 600, color: "var(--text-primary, #111)" }}>
-            {isReady ? `Using ${activeLabel} for browser automation` : "Select an AI model to enable booking agent"}
+            Layered models — each agent layer can use a different backend
           </p>
           <p style={{ fontFamily: "var(--font-dm-sans)", fontSize: 11, color: "var(--text-muted, #aaa)" }}>
-            {isReady ? "Click any model below to switch instantly" : "Enter an API key for at least one provider, then select a model"}
+            Conversational: {convLabel} · Browser: {browserLabel}
           </p>
         </div>
       </div>
 
-      {/* Provider groups */}
-      {PROVIDER_GROUPS.map((group) => {
-        const hasServerKey = !!serverKeys[group.id];
-        const localKey = localKeys[group.id] ?? "";
-        const hasKey = hasServerKey || !!localKey;
-        const isVisible = showKey[group.id];
+      {/* Section 1 — Conversational */}
+      <LayerSection
+        title="Conversational · homepage chat"
+        description="Used when you talk to the agent from the homepage. Phase 1 ships MiniMax end-to-end; other providers are stubs."
+        status="active"
+        models={CONVERSATIONAL_MODELS}
+        activeId={convActiveId}
+        hasProviderKey={hasProviderKey}
+        onSelect={(m) => selectForLayer("conversational", m)}
+      />
 
-        return (
-          <div key={group.id} style={{ marginBottom: 24 }}>
-            {/* Provider header */}
-            <div style={{
-              display: "flex", alignItems: "center", gap: 8, marginBottom: 10,
-            }}>
-              <p style={{
-                fontFamily: "var(--font-dm-sans)", fontSize: 11, fontWeight: 700,
-                color: "var(--text-muted, #aaa)", textTransform: "uppercase", letterSpacing: "0.08em",
-              }}>
-                {group.label}
-              </p>
-              {hasServerKey && (
-                <span style={{
-                  fontSize: 10, fontFamily: "var(--font-dm-sans)", fontWeight: 600,
-                  padding: "2px 7px", borderRadius: 20,
-                  backgroundColor: "rgba(34,197,94,0.12)", color: "#16a34a",
+      {/* Section 2 — Browser automation */}
+      <LayerSection
+        title="Browser automation · booking agent"
+        description="Used when the agent takes over the browser to make a booking. Pick a model you have an API key for."
+        status="active"
+        models={BROWSER_MODELS}
+        activeId={browserActiveId}
+        hasProviderKey={hasProviderKey}
+        onSelect={(m) => selectForLayer("browser", m)}
+      />
+
+      {/* Section 3 — Reasoning (Coming Soon) */}
+      <LayerSection
+        title="Reasoning · proposal & comparison"
+        description="The layer that generates and critiques recommendations. Wired but not yet switchable — coming after Phase 1."
+        status="coming_soon"
+      />
+
+      {/* Section 4 — Ranking (Coming Soon) */}
+      <LayerSection
+        title="Ranking · final scoring"
+        description="Optional dedicated ranker once the candidate set is built. Reserved slot, same shape as the others."
+        status="coming_soon"
+      />
+
+      {/* Shared API key section */}
+      <div style={{ marginTop: 8, marginBottom: 16 }}>
+        <p style={{
+          fontFamily: "var(--font-dm-sans)", fontSize: 11, fontWeight: 700,
+          color: "var(--text-muted, #aaa)", textTransform: "uppercase",
+          letterSpacing: "0.08em", marginBottom: 10,
+        }}>
+          API keys (shared across layers)
+        </p>
+        {PROVIDER_UI_IDS.filter((p) => p.needsUserKey).map((p) => {
+          const legacyId = PROVIDER_LEGACY_STORAGE_ID[p.id];
+          const hasServerKey = !!serverKeys[p.id];
+          const localKey = localKeys[legacyId] ?? "";
+          const isVisible = showKey[legacyId];
+          return (
+            <div key={p.id} style={{ marginBottom: 12 }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
+                <p style={{
+                  fontFamily: "var(--font-dm-sans)", fontSize: 12, fontWeight: 600,
+                  color: "var(--text-primary, #111)",
                 }}>
-                  ✓ Server key
-                </span>
-              )}
-            </div>
-
-            {/* API key row — hide if server has it */}
-            {!hasServerKey && (
-              <div style={{ display: "flex", gap: 8, marginBottom: 10 }}>
-                <input
-                  style={inputStyle}
-                  type={isVisible ? "text" : "password"}
-                  value={localKey}
-                  placeholder={localKey ? "••••••••••••" : `${group.placeholder} — paste once, saved locally`}
-                  onChange={(e) => saveProviderKey(group.id, e.target.value)}
-                />
-                <button
-                  onClick={() => setShowKey((prev) => ({ ...prev, [group.id]: !prev[group.id] }))}
-                  style={{
-                    padding: "0 12px", borderRadius: 10, border: "0.5px solid var(--border, #e5e7eb)",
-                    background: "var(--card, #fff)", fontFamily: "var(--font-dm-sans)", fontSize: 11,
-                    color: "var(--text-muted, #aaa)", cursor: "pointer", whiteSpace: "nowrap",
-                  }}
-                >
-                  {isVisible ? "Hide" : "Show"}
-                </button>
+                  {p.label}
+                </p>
+                {hasServerKey && (
+                  <span style={{
+                    fontSize: 10, fontFamily: "var(--font-dm-sans)", fontWeight: 600,
+                    padding: "2px 7px", borderRadius: 20,
+                    backgroundColor: "rgba(34,197,94,0.12)", color: "#16a34a",
+                  }}>
+                    ✓ Server key
+                  </span>
+                )}
               </div>
-            )}
-
-            {/* Model chips */}
-            <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
-              {group.models.map((m) => {
-                const active = activeModel === m.model;
-                return (
-                  <div
-                    key={m.model}
-                    onClick={() => hasKey && selectModel(m.model)}
-                    title={!hasKey ? `Enter a ${group.label} API key first` : m.hint}
+              {!hasServerKey && (
+                <div style={{ display: "flex", gap: 8 }}>
+                  <input
+                    style={inputStyle}
+                    type={isVisible ? "text" : "password"}
+                    value={localKey}
+                    placeholder={localKey ? "••••••••••••" : `${p.placeholder} — paste once, saved locally`}
+                    onChange={(e) => saveProviderKey(legacyId, e.target.value)}
+                  />
+                  <button
+                    onClick={() => setShowKey((prev) => ({ ...prev, [legacyId]: !prev[legacyId] }))}
                     style={{
-                      padding: "10px 14px", borderRadius: 12,
-                      cursor: hasKey ? "pointer" : "not-allowed",
-                      opacity: hasKey ? 1 : 0.45,
-                      border: active ? "1.5px solid var(--gold, #C9A84C)" : "0.5px solid var(--border, #e5e7eb)",
-                      backgroundColor: active ? "rgba(201,168,76,0.08)" : "var(--card, #fff)",
-                      transition: "border-color 0.15s, background 0.15s",
-                      minWidth: 120,
+                      padding: "0 12px", borderRadius: 10, border: "0.5px solid var(--border, #e5e7eb)",
+                      background: "var(--card, #fff)", fontFamily: "var(--font-dm-sans)", fontSize: 11,
+                      color: "var(--text-muted, #aaa)", cursor: "pointer", whiteSpace: "nowrap",
                     }}
                   >
-                    <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 3 }}>
-                      {active && <span style={{ fontSize: 10, color: "var(--gold, #C9A84C)" }}>●</span>}
-                      <p style={{
-                        fontFamily: "var(--font-dm-sans)", fontSize: 13, fontWeight: 700,
-                        color: active ? "var(--gold, #C9A84C)" : "var(--text-primary, #111)",
-                      }}>
-                        {m.label}
-                      </p>
-                      {m.badge && (
-                        <span style={{
-                          fontSize: 9, fontFamily: "var(--font-dm-sans)", fontWeight: 600,
-                          padding: "1px 6px", borderRadius: 20,
-                          backgroundColor: active ? "var(--gold, #C9A84C)" : "rgba(201,168,76,0.15)",
-                          color: active ? "#fff" : "var(--gold, #C9A84C)",
-                        }}>
-                          {m.badge}
-                        </span>
-                      )}
-                    </div>
-                    <p style={{ fontFamily: "var(--font-dm-sans)", fontSize: 10.5, color: "var(--text-secondary, #666)" }}>
-                      {m.hint}
-                    </p>
-                  </div>
-                );
-              })}
+                    {isVisible ? "Hide" : "Show"}
+                  </button>
+                </div>
+              )}
             </div>
-          </div>
-        );
-      })}
+          );
+        })}
+      </div>
 
       <p style={{ fontFamily: "var(--font-dm-sans)", fontSize: 11, color: "var(--text-muted, #aaa)", marginTop: 4, lineHeight: 1.6 }}>
-        API keys are stored locally on your device only.
+        API keys are stored locally on your device only. MiniMax uses a server-side key.
       </p>
 
       <p style={{
@@ -961,6 +1055,163 @@ export function AgentModelTab() {
       }}>
         ✓ Saved
       </p>
+    </div>
+  );
+}
+
+// ── Layer section + helpers ─────────────────────────────────────────────────
+
+type AgentModelConfigLayered = {
+  conversational?: { provider: ProviderId; model: string; apiKey?: string };
+  browser?: { provider: ProviderId; model: string; apiKey?: string };
+  reasoning?: { provider: ProviderId; model: string; apiKey?: string };
+  ranking?: { provider: ProviderId; model: string; apiKey?: string };
+};
+
+const DEFAULT_CONVERSATIONAL_ID = "minimax/MiniMax-Text-01";
+
+function loadAgentModelConfigLayered(): AgentModelConfigLayered {
+  if (typeof window === "undefined") return {};
+  try {
+    const raw = window.localStorage.getItem("agent_model_config");
+    if (!raw) return {};
+    const parsed = JSON.parse(raw) as Record<string, unknown>;
+    // The migration logic in lib/agent-model-config.ts already handles legacy
+    // flat records on read; here we accept both shapes defensively.
+    const out: AgentModelConfigLayered = {};
+    for (const layer of ["conversational", "browser", "reasoning", "ranking"] as const) {
+      const v = parsed[layer];
+      if (v && typeof v === "object") {
+        const r = v as Record<string, unknown>;
+        if (typeof r.provider === "string" && typeof r.model === "string") {
+          out[layer] = {
+            provider: r.provider as ProviderId,
+            model: r.model,
+            apiKey: typeof r.apiKey === "string" ? r.apiKey : undefined,
+          };
+        }
+      }
+    }
+    // Legacy flat shape — funnel into browser.
+    if (!out.browser && typeof parsed.model === "string" && parsed.model.includes("/")) {
+      const slash = parsed.model.indexOf("/");
+      out.browser = {
+        provider: parsed.model.slice(0, slash) as ProviderId,
+        model: parsed.model.slice(slash + 1),
+        apiKey: typeof parsed.apiKey === "string" ? (parsed.apiKey as string) : undefined,
+      };
+    }
+    return out;
+  } catch {
+    return {};
+  }
+}
+
+function saveAgentModelConfigLayered(cfg: AgentModelConfigLayered) {
+  if (typeof window === "undefined") return;
+  window.localStorage.setItem("agent_model_config", JSON.stringify(cfg));
+}
+
+interface LayerSectionProps {
+  title: string;
+  description: string;
+  status: "active" | "coming_soon";
+  models?: ModelOption[];
+  activeId?: string;
+  hasProviderKey?: (provider: ProviderId) => boolean;
+  onSelect?: (option: ModelOption) => void;
+}
+
+function LayerSection(props: LayerSectionProps) {
+  return (
+    <div style={{ marginBottom: 24 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
+        <p style={{
+          fontFamily: "var(--font-dm-sans)", fontSize: 11, fontWeight: 700,
+          color: "var(--text-muted, #aaa)", textTransform: "uppercase", letterSpacing: "0.08em",
+        }}>
+          {props.title}
+        </p>
+        {props.status === "coming_soon" ? (
+          <span style={{
+            fontSize: 10, fontFamily: "var(--font-dm-sans)", fontWeight: 600,
+            padding: "2px 7px", borderRadius: 20,
+            backgroundColor: "var(--card-2, #f0f0f0)", color: "var(--text-muted, #888)",
+          }}>
+            Coming soon
+          </span>
+        ) : null}
+      </div>
+      <p style={{
+        fontFamily: "var(--font-dm-sans)", fontSize: 11.5, color: "var(--text-secondary, #666)",
+        lineHeight: 1.5, marginBottom: 10,
+      }}>
+        {props.description}
+      </p>
+
+      {props.status === "coming_soon" ? (
+        <div style={{
+          padding: 14, borderRadius: 12, border: "0.5px dashed var(--border, #e5e7eb)",
+          backgroundColor: "var(--card-2, #fafafa)",
+          fontFamily: "var(--font-dm-sans)", fontSize: 11.5, color: "var(--text-muted, #999)",
+          textAlign: "center",
+        }}>
+          Reserved slot — same config shape as active layers. Turn on in a future release without moving anything.
+        </div>
+      ) : (
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+          {(props.models ?? []).map((m) => {
+            const active = props.activeId === m.id;
+            const hasKey = props.hasProviderKey ? props.hasProviderKey(m.provider) : true;
+            const stubbed = !!m.stubForConversational;
+            const enabled = hasKey && !stubbed;
+            const tooltip = stubbed
+              ? "Stub — will ship after Phase 1"
+              : !hasKey
+                ? `Enter a ${m.provider} API key first`
+                : m.hint;
+            return (
+              <div
+                key={`${props.title}-${m.id}`}
+                onClick={() => enabled && props.onSelect?.(m)}
+                title={tooltip}
+                style={{
+                  padding: "10px 14px", borderRadius: 12,
+                  cursor: enabled ? "pointer" : "not-allowed",
+                  opacity: enabled ? 1 : 0.45,
+                  border: active ? "1.5px solid var(--gold, #C9A84C)" : "0.5px solid var(--border, #e5e7eb)",
+                  backgroundColor: active ? "rgba(201,168,76,0.08)" : "var(--card, #fff)",
+                  transition: "border-color 0.15s, background 0.15s",
+                  minWidth: 140,
+                }}
+              >
+                <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 3 }}>
+                  {active && <span style={{ fontSize: 10, color: "var(--gold, #C9A84C)" }}>●</span>}
+                  <p style={{
+                    fontFamily: "var(--font-dm-sans)", fontSize: 13, fontWeight: 700,
+                    color: active ? "var(--gold, #C9A84C)" : "var(--text-primary, #111)",
+                  }}>
+                    {m.label}
+                  </p>
+                  {m.badge && (
+                    <span style={{
+                      fontSize: 9, fontFamily: "var(--font-dm-sans)", fontWeight: 600,
+                      padding: "1px 6px", borderRadius: 20,
+                      backgroundColor: active ? "var(--gold, #C9A84C)" : "rgba(201,168,76,0.15)",
+                      color: active ? "#fff" : "var(--gold, #C9A84C)",
+                    }}>
+                      {m.badge}
+                    </span>
+                  )}
+                </div>
+                <p style={{ fontFamily: "var(--font-dm-sans)", fontSize: 10.5, color: "var(--text-secondary, #666)" }}>
+                  {m.hint}
+                </p>
+              </div>
+            );
+          })}
+        </div>
+      )}
     </div>
   );
 }

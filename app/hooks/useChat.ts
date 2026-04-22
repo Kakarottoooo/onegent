@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useMemo, useCallback } from "react";
-import { RecommendationCard as CardType, Message, SessionPreferences, HotelRecommendationCard, FlightRecommendationCard, CreditCardRecommendationCard, LaptopRecommendationCard, SmartphoneRecommendationCard, HeadphoneRecommendationCard, CategoryType, SubscriptionIntent, DecisionPlan, ResultMode, ScenarioTelemetryEvent, ScenarioType, OutputLanguage } from "@/lib/types";
+import { RecommendationCard as CardType, Message, SessionPreferences, HotelRecommendationCard, FlightRecommendationCard, CreditCardRecommendationCard, LaptopRecommendationCard, SmartphoneRecommendationCard, HeadphoneRecommendationCard, ActivityRecommendationCard, CategoryType, SubscriptionIntent, DecisionPlan, ResultMode, ScenarioTelemetryEvent, ScenarioType, OutputLanguage } from "@/lib/types";
 import { LearnedWeights } from "@/lib/types";
 import { WATCH_CATEGORY_META } from "@/lib/watchTypes";
 import {
@@ -79,6 +79,7 @@ export function useChat({
   const [laptopDbGapWarning, setLaptopDbGapWarning] = useState<string | null>(null);
   const [allSmartphoneCards, setAllSmartphoneCards] = useState<SmartphoneRecommendationCard[]>([]);
   const [allHeadphoneCards, setAllHeadphoneCards] = useState<HeadphoneRecommendationCard[]>([]);
+  const [allActivityCards, setAllActivityCards] = useState<ActivityRecommendationCard[]>([]);
   const [deviceDbGapWarning, setDeviceDbGapWarning] = useState<string | null>(null);
   const [resultCategory, setResultCategory] = useState<CategoryType>("restaurant");
   const [resultMode, setResultMode] = useState<ResultMode>("category_cards");
@@ -139,6 +140,7 @@ export function useChat({
       setAllLaptopCards([]);
       setAllSmartphoneCards([]);
       setAllHeadphoneCards([]);
+      setAllActivityCards([]);
       setLaptopDbGapWarning(null);
       setDeviceDbGapWarning(null);
       setResultCategory("restaurant");
@@ -188,7 +190,11 @@ export function useChat({
   }
 
   const sendMessage = useCallback(
-    async (text: string, pinnedPlanId?: string) => {
+    async (
+      text: string,
+      pinnedPlanId?: string,
+      opts?: { skipUserPush?: boolean; categoryHint?: "restaurant" | "hotel" | "flight" | "activity" }
+    ) => {
       if (!text.trim() || loading) return;
 
       setActivePrice(null);
@@ -201,6 +207,7 @@ export function useChat({
       setAllLaptopCards([]);
       setAllSmartphoneCards([]);
       setAllHeadphoneCards([]);
+      setAllActivityCards([]);
       setLaptopDbGapWarning(null);
       setDeviceDbGapWarning(null);
       setResultCategory("restaurant");
@@ -212,8 +219,10 @@ export function useChat({
       url.searchParams.set("q", text);
       window.history.replaceState({}, "", url.toString());
 
-      const userMessage: Message = { role: "user", content: text };
-      setMessages((prev) => [...prev, userMessage]);
+      if (!opts?.skipUserPush) {
+        const userMessage: Message = { role: "user", content: text };
+        setMessages((prev) => [...prev, userMessage]);
+      }
       setInput("");
       setLoading(true);
       setLoadingStep(0);
@@ -275,6 +284,7 @@ export function useChat({
             session_id: getTelemetrySessionId(),
             user_id: userId ?? undefined,
             pinned_plan_id: pinnedPlanId ?? undefined,
+            category_hint: opts?.categoryHint ?? undefined,
           }),
         });
 
@@ -673,6 +683,60 @@ export function useChat({
                     setAllHeadphoneCards(headphoneRecs);
                     setDeviceDbGapWarning(event.device_db_gap_warning ?? null);
                   }
+                } else if (category === "activity") {
+                  const activityRecs: ActivityRecommendationCard[] = event.activityRecommendations ?? [];
+                  const missingActivityFields: string[] = event.missing_activity_fields ?? [];
+
+                  if (missingActivityFields.includes("provider_api_key")) {
+                    setMessages((prev) => [
+                      ...prev,
+                      {
+                        role: "assistant",
+                        content:
+                          outputLanguage === "zh"
+                            ? "演出搜索暂不可用：后台未配置 SeatGeek / Ticketmaster API key。"
+                            : "Event search is temporarily unavailable: no SeatGeek or Ticketmaster API key configured on the server.",
+                        category: "activity" as const,
+                        output_language: outputLanguage,
+                      },
+                    ]);
+                  } else if (missingActivityFields.length > 0) {
+                    setMessages((prev) => [
+                      ...prev,
+                      {
+                        role: "assistant",
+                        content: `I need a bit more to find the right tickets: ${missingActivityFields.join(", ")}. Can you share those?`,
+                        category: "activity" as const,
+                        output_language: outputLanguage,
+                      },
+                    ]);
+                  } else if (activityRecs.length === 0) {
+                    setMessages((prev) => [
+                      ...prev,
+                      {
+                        role: "assistant",
+                        content:
+                          outputLanguage === "zh"
+                            ? "没有找到符合条件的演出门票。可以换个日期、城市或关键词再试试。"
+                            : "No events matched that search. Try different dates, a different city, or a different keyword.",
+                        category: "activity" as const,
+                        output_language: outputLanguage,
+                      },
+                    ]);
+                  } else {
+                    const assistantMessage: Message = {
+                      role: "assistant",
+                      content:
+                        outputLanguage === "zh"
+                          ? `找到 ${activityRecs.length} 场符合条件的演出。`
+                          : `Found ${activityRecs.length} event${activityRecs.length > 1 ? "s" : ""} for you.`,
+                      activityCards: activityRecs,
+                      category: "activity" as const,
+                      output_language: outputLanguage,
+                    };
+                    setMessages((prev) => [...prev, assistantMessage]);
+                    setAllActivityCards(activityRecs);
+                  }
                 } else if (category === "subscription") {
                   const intent = event.subscriptionIntent as SubscriptionIntent | null;
                   if (!intent) return;
@@ -796,6 +860,7 @@ export function useChat({
       messages.some((m) => m.role === "assistant") ||
       allHotelCards.length > 0 ||
       allFlightCards.length > 0 ||
+      allActivityCards.length > 0 ||
       allCards.length > 0;
     if (!hasResults) return;
     try {
@@ -811,6 +876,7 @@ export function useChat({
         allLaptopCards,
         allSmartphoneCards,
         allHeadphoneCards,
+        allActivityCards,
         resultCategory,
         resultMode,
         decisionPlan,
@@ -846,6 +912,7 @@ export function useChat({
         if (p.allLaptopCards?.length) setAllLaptopCards(p.allLaptopCards);
         if (p.allSmartphoneCards?.length) setAllSmartphoneCards(p.allSmartphoneCards);
         if (p.allHeadphoneCards?.length) setAllHeadphoneCards(p.allHeadphoneCards);
+        if (p.allActivityCards?.length) setAllActivityCards(p.allActivityCards);
         if (p.resultCategory) setResultCategory(p.resultCategory);
         if (p.resultMode) setResultMode(p.resultMode);
         if (p.decisionPlan) setDecisionPlan(p.decisionPlan);
@@ -958,6 +1025,7 @@ export function useChat({
     setAllLaptopCards([]);
     setAllSmartphoneCards([]);
     setAllHeadphoneCards([]);
+    setAllActivityCards([]);
     setResultCategory("restaurant");
     setResultMode("category_cards");
     setDecisionPlan(null);
@@ -1001,6 +1069,7 @@ export function useChat({
     laptopDbGapWarning,
     allSmartphoneCards,
     allHeadphoneCards,
+    allActivityCards,
     deviceDbGapWarning,
     resultCategory,
     resultMode,

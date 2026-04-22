@@ -18,17 +18,23 @@ export async function GET(_req: NextRequest, { params }: Params) {
   return NextResponse.json({ job });
 }
 
-/** DELETE /api/booking-jobs/[id] — remove a job (not while running) */
+/**
+ * DELETE /api/booking-jobs/[id] — idempotent cascade delete.
+ *
+ * If the job exists and is running, refuse unless `?force=true`. Otherwise
+ * (job exists OR job already gone but orphan monitors / room links remain),
+ * always cascade-clean monitors + decision_room references by id so stale
+ * UI cards can be cleared with a single Delete click.
+ */
 export async function DELETE(req: NextRequest, { params }: Params) {
   const { id } = await params;
   const job = await getBookingJob(id);
-  if (!job) return NextResponse.json({ error: "Not found" }, { status: 404 });
   const force = req.nextUrl.searchParams.get("force") === "true";
-  if (job.status === "running" && !force) {
+  if (job && job.status === "running" && !force) {
     return NextResponse.json({ error: "Cannot delete a running job" }, { status: 409 });
   }
   await deleteMonitorsByJobId(id);
   await clearDecisionRoomBookingJobByJobId(id);
-  await deleteBookingJob(id);
-  return NextResponse.json({ deleted: true, forced: force });
+  if (job) await deleteBookingJob(id);
+  return NextResponse.json({ deleted: true, forced: force, stale: !job });
 }

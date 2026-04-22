@@ -16,12 +16,13 @@ import type {
   DecisionRoomVote,
   UserProfile,
 } from "@/lib/db";
-import type { RecommendationCard, FlightRecommendationCard } from "@/lib/types";
+import type { RecommendationCard, FlightRecommendationCard, ActivityRecommendationCard } from "@/lib/types";
 import { extractOptions, resolveAcceptedOption, tallyVotes } from "@/lib/rooms/proposal-shape";
 import { CARD, CARD_MUTED, CTA, CTA_GHOST, PAGE } from "@/app/_ui/tokens";
 import GlobalNav from "@/components/GlobalNav";
 import PhotoCarousel from "@/components/PhotoCarousel";
 import FlightCard from "@/components/FlightCard";
+import ActivityCard from "@/components/ActivityCard";
 
 // Leaflet pulls in `window` — force client-only so the room detail page (a
 // server component by default) doesn't choke during SSR.
@@ -58,6 +59,16 @@ type MyFlightConstraint = {
   notes?: string;
 };
 
+type MyActivityConstraint = {
+  budget_max_per_ticket?: number;
+  seat_type?: "premium" | "standard" | "economy";
+  section_preferences?: string[];
+  avoid_sections?: string[];
+  accessibility?: { wheelchair?: boolean; companion_seat?: boolean };
+  delivery_preference?: "mobile" | "will_call" | "print";
+  notes?: string;
+};
+
 const VIBES = ["casual", "romantic", "lively", "quiet", "upscale"] as const;
 const DIETARY_OPTIONS = ["vegetarian", "vegan", "gluten-free", "halal", "kosher", "no raw fish"];
 
@@ -75,6 +86,17 @@ const FLIGHT_CABIN_OPTIONS: Array<{ value: MyFlightConstraint["cabin_class_min"]
   { value: "premium_economy", label: "Premium econ." },
   { value: "business", label: "Business" },
   { value: "first", label: "First" },
+];
+
+const ACTIVITY_SEAT_OPTIONS: Array<{ value: NonNullable<MyActivityConstraint["seat_type"]>; label: string }> = [
+  { value: "premium", label: "Premium / front" },
+  { value: "standard", label: "Standard" },
+  { value: "economy", label: "Economy / upper" },
+];
+const ACTIVITY_DELIVERY_OPTIONS: Array<{ value: NonNullable<MyActivityConstraint["delivery_preference"]>; label: string }> = [
+  { value: "mobile", label: "Mobile ticket" },
+  { value: "will_call", label: "Will-call" },
+  { value: "print", label: "Print-at-home" },
 ];
 
 // Local input/label tokens (room-specific variants of the shared ones).
@@ -1011,6 +1033,9 @@ function ConstraintForm(props: {
   if (props.roomType === "flight") {
     return <FlightConstraintForm {...props} />;
   }
+  if (props.roomType === "activity") {
+    return <ActivityConstraintForm {...props} />;
+  }
   return <RestaurantConstraintForm {...props} />;
 }
 
@@ -1614,6 +1639,215 @@ function FlightConstraintForm({
   );
 }
 
+// ── Activity constraint form ──────────────────────────────────────────────────
+
+function ActivityConstraintForm({
+  roomId, initial, refresh, collapsedByDefault = false,
+}: {
+  roomId: string;
+  initial: DecisionRoomConstraintRow | undefined;
+  refresh: () => void;
+  collapsedByDefault?: boolean;
+}) {
+  const [open, setOpen] = useState(!collapsedByDefault);
+  const initialData = (initial?.data_json ?? {}) as MyActivityConstraint;
+  const [budget, setBudget] = useState<string>(
+    initialData.budget_max_per_ticket ? String(initialData.budget_max_per_ticket) : ""
+  );
+  const [seatType, setSeatType] = useState<MyActivityConstraint["seat_type"]>(initialData.seat_type);
+  const [sections, setSections] = useState<string>((initialData.section_preferences ?? []).join(", "));
+  const [avoidSections, setAvoidSections] = useState<string>((initialData.avoid_sections ?? []).join(", "));
+  const [wheelchair, setWheelchair] = useState<boolean>(Boolean(initialData.accessibility?.wheelchair));
+  const [companionSeat, setCompanionSeat] = useState<boolean>(Boolean(initialData.accessibility?.companion_seat));
+  const [delivery, setDelivery] = useState<MyActivityConstraint["delivery_preference"]>(initialData.delivery_preference);
+  const [notes, setNotes] = useState<string>(initialData.notes ?? "");
+
+  const [saving, setSaving] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  const submitted = Boolean(initial?.submitted);
+
+  function buildData(): MyActivityConstraint {
+    const toList = (s: string) => {
+      const parts = s.split(",").map((p) => p.trim()).filter(Boolean);
+      return parts.length ? parts : undefined;
+    };
+    const accessibility =
+      wheelchair || companionSeat
+        ? {
+            wheelchair: wheelchair || undefined,
+            companion_seat: companionSeat || undefined,
+          }
+        : undefined;
+    return {
+      budget_max_per_ticket: budget ? Number(budget) : undefined,
+      seat_type: seatType,
+      section_preferences: toList(sections),
+      avoid_sections: toList(avoidSections),
+      accessibility,
+      delivery_preference: delivery,
+      notes: notes || undefined,
+    };
+  }
+
+  async function save(markSubmitted: boolean) {
+    setSaving(true);
+    setErr(null);
+    try {
+      const res = await fetch(`/api/rooms/${roomId}/constraints`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ data: buildData(), submitted: markSubmitted }),
+      });
+      if (!res.ok) {
+        const { error: msg } = await res.json().catch(() => ({ error: "Save failed" }));
+        setErr(msg ?? "Save failed");
+        return;
+      }
+      refresh();
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <div className={`${CARD} p-4 mb-4`}>
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        className="w-full flex items-center justify-between mb-3 text-left"
+      >
+        <p className="text-sm font-semibold text-[var(--text-primary)]">Your event preferences</p>
+        <div className="flex items-center gap-2">
+          {submitted && (
+            <span className="text-[10px] font-medium px-2 py-0.5 rounded-full bg-emerald-500/15 text-emerald-600 border border-emerald-500/30">
+              Submitted
+            </span>
+          )}
+          <span className="text-[var(--text-muted)] text-xs">{open ? "▲" : "▼ edit"}</span>
+        </div>
+      </button>
+
+      {!open ? null : (<>
+      <label className={LABEL}>Budget ceiling (per ticket)</label>
+      <div className="flex items-center gap-2 mb-3">
+        <span className="text-sm text-[var(--text-muted)]">$</span>
+        <input
+          type="number"
+          inputMode="numeric"
+          value={budget}
+          onChange={(e) => setBudget(e.target.value)}
+          placeholder="e.g. 250"
+          className={`flex-1 ${INPUT}`}
+        />
+      </div>
+
+      <label className="text-xs text-[var(--text-secondary)] block mb-2">Seat tier</label>
+      <div className="flex flex-wrap gap-1.5 mb-3">
+        {ACTIVITY_SEAT_OPTIONS.map((opt) => {
+          const active = seatType === opt.value;
+          return (
+            <button
+              key={opt.value}
+              type="button"
+              onClick={() => setSeatType(active ? undefined : opt.value)}
+              className={`text-xs px-2.5 py-1 rounded-full border transition-colors ${
+                active ? PILL_ACTIVE : PILL_IDLE
+              }`}
+            >
+              {opt.label}
+            </button>
+          );
+        })}
+      </div>
+
+      <label className={LABEL}>Preferred sections <span className="text-[var(--text-muted)]">(comma-separated)</span></label>
+      <input
+        value={sections}
+        onChange={(e) => setSections(e.target.value)}
+        placeholder="e.g. Orchestra, Mezzanine"
+        className={`w-full mb-3 ${INPUT}`}
+      />
+
+      <label className={LABEL}>Avoid sections <span className="text-[var(--text-muted)]">(comma-separated)</span></label>
+      <input
+        value={avoidSections}
+        onChange={(e) => setAvoidSections(e.target.value)}
+        placeholder="e.g. Upper Balcony"
+        className={`w-full mb-3 ${INPUT}`}
+      />
+
+      <label className="text-xs text-[var(--text-secondary)] block mb-2">Delivery</label>
+      <div className="flex flex-wrap gap-1.5 mb-3">
+        {ACTIVITY_DELIVERY_OPTIONS.map((opt) => {
+          const active = delivery === opt.value;
+          return (
+            <button
+              key={opt.value}
+              type="button"
+              onClick={() => setDelivery(active ? undefined : opt.value)}
+              className={`text-xs px-2.5 py-1 rounded-full border transition-colors ${
+                active ? PILL_ACTIVE : PILL_IDLE
+              }`}
+            >
+              {opt.label}
+            </button>
+          );
+        })}
+      </div>
+
+      <label className="flex items-center gap-2 mb-2 cursor-pointer">
+        <input
+          type="checkbox"
+          checked={wheelchair}
+          onChange={(e) => setWheelchair(e.target.checked)}
+          className="rounded border-[var(--border)]"
+        />
+        <span className="text-xs text-[var(--text-secondary)]">Wheelchair accessible seating required</span>
+      </label>
+      <label className="flex items-center gap-2 mb-3 cursor-pointer">
+        <input
+          type="checkbox"
+          checked={companionSeat}
+          onChange={(e) => setCompanionSeat(e.target.checked)}
+          className="rounded border-[var(--border)]"
+        />
+        <span className="text-xs text-[var(--text-secondary)]">Need companion seat next to wheelchair</span>
+      </label>
+
+      <label className={LABEL}>Notes</label>
+      <textarea
+        value={notes}
+        onChange={(e) => setNotes(e.target.value)}
+        rows={2}
+        placeholder="Anything else? aisle seat, no obstructed view, arriving late…"
+        className={`w-full resize-none mb-3 ${INPUT}`}
+      />
+
+      {err && (
+        <p className="text-xs text-red-600 mb-2">{err}</p>
+      )}
+
+      <div className="flex gap-2">
+        <button
+          onClick={() => save(false)}
+          disabled={saving}
+          className="flex-1 py-2.5 rounded-xl border border-[var(--border)] bg-transparent text-sm font-medium text-[var(--text-primary)] hover:border-[var(--gold)] disabled:opacity-40 transition-colors"
+        >
+          {saving ? "Saving…" : "Save draft"}
+        </button>
+        <button
+          onClick={() => save(true)}
+          disabled={saving}
+          className={`flex-1 py-2.5 ${CTA}`}
+        >
+          {submitted ? "Update" : "Submit"}
+        </button>
+      </div>
+      </>)}
+    </div>
+  );
+}
+
 // ── Propose button ────────────────────────────────────────────────────────────
 
 function ProposeButton({
@@ -2032,6 +2266,116 @@ function ProposalCard({
             );
           }
 
+          if (roomType === "activity") {
+            const aCard = card as unknown as ActivityRecommendationCard;
+            const activity = aCard.activity;
+            const clickable = canPickOption && voting === null;
+            const handleCardClick = () => {
+              if (!clickable) return;
+              if (isMyPick) {
+                withdrawVote(o.id);
+              } else {
+                vote("approve", o.id);
+              }
+            };
+            return (
+              <div
+                key={o.id}
+                role={clickable ? "button" : undefined}
+                tabIndex={clickable ? 0 : undefined}
+                aria-pressed={clickable ? isMyPick : undefined}
+                onClick={handleCardClick}
+                onKeyDown={(e) => {
+                  if (!clickable) return;
+                  if (e.key === "Enter" || e.key === " ") {
+                    e.preventDefault();
+                    handleCardClick();
+                  }
+                }}
+                className={`rounded-2xl transition-shadow ${clickable ? "cursor-pointer hover:ring-2 hover:ring-[var(--gold)]/40" : ""} ${
+                  isWinner
+                    ? "ring-2 ring-emerald-500/60"
+                    : isMyPick
+                      ? "ring-2 ring-[var(--gold)]"
+                      : ""
+                } ${loading ? "opacity-60" : ""}`}
+              >
+                <ActivityCard card={aCard} index={idx} hideBookingActions />
+                <div className="px-4 pb-3 pt-1 flex items-center justify-between gap-3 flex-wrap">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    {isWinner && (
+                      <span
+                        className="text-[10px] font-semibold px-1.5 py-0.5 rounded-full bg-emerald-500 text-white whitespace-nowrap"
+                        title="Group picked this option"
+                      >
+                        ✓ Picked
+                      </span>
+                    )}
+                    {isMyPick && !isWinner && (
+                      <span
+                        className="text-[10px] font-semibold px-1.5 py-0.5 rounded-full bg-[var(--gold)] text-white whitespace-nowrap"
+                        title="You picked this — click card again to unpick"
+                      >
+                        ✓ Your pick
+                      </span>
+                    )}
+                    {approvedCount > 0 && (
+                      <span
+                        className="text-[10px] font-medium px-1.5 py-0.5 rounded-full bg-emerald-500/15 text-emerald-600 border border-emerald-500/30 whitespace-nowrap"
+                        title={`${approvedCount} of ${memberCount} picked this`}
+                      >
+                        {approvedCount} · {approvedPct}%
+                      </span>
+                    )}
+                    <div className="flex items-center gap-0.5">
+                      {shownAvatars.map((uid) => {
+                        const p = memberProfiles[uid];
+                        const name = p?.display_name ?? `@${p?.profile_code ?? uid.slice(-6)}`;
+                        return p?.avatar_url ? (
+                          // eslint-disable-next-line @next/next/no-img-element
+                          <img
+                            key={uid}
+                            src={p.avatar_url}
+                            alt={name}
+                            title={`${name} picked this`}
+                            className="w-5 h-5 rounded-full ring-2 ring-[var(--card)] -ml-1 first:ml-0"
+                          />
+                        ) : (
+                          <div
+                            key={uid}
+                            title={`${name} picked this`}
+                            className="w-5 h-5 rounded-full bg-[var(--border)] flex items-center justify-center text-[9px] text-[var(--text-secondary)] ring-2 ring-[var(--card)] -ml-1 first:ml-0"
+                          >
+                            {name.slice(0, 1).toUpperCase()}
+                          </div>
+                        );
+                      })}
+                      {overflowAvatars > 0 && (
+                        <div
+                          title={`${overflowAvatars} more picked this`}
+                          className="w-5 h-5 rounded-full bg-[var(--border)] flex items-center justify-center text-[9px] text-[var(--text-secondary)] ring-2 ring-[var(--card)] -ml-1"
+                        >
+                          +{overflowAvatars}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                  {activity?.booking_link && (
+                    <a
+                      href={activity.booking_link}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      onClick={(e) => e.stopPropagation()}
+                      className="text-[13px] font-semibold text-[var(--gold)] hover:underline whitespace-nowrap"
+                    >
+                      View on SeatGeek ↗
+                    </a>
+                  )}
+                </div>
+              </div>
+            );
+          }
+
           return (
             <div
               key={o.id}
@@ -2275,6 +2619,7 @@ function AcceptedBlock({
 }) {
   const isHotel = roomType === "hotel";
   const isFlight = roomType === "flight";
+  const isActivity = roomType === "activity";
   // Pick the winning option from the tallies; fall back to the first option
   // (legacy single-card proposals are treated as a single option by extractOptions).
   const options = extractOptions(proposal);
@@ -2300,6 +2645,9 @@ function AcceptedBlock({
   const flightCard = card as unknown as {
     flight?: { airline?: string; flight_number?: string; departure_airport?: string; arrival_airport?: string };
   };
+  const activityCard = card as unknown as {
+    activity?: { title?: string; short_title?: string; datetime_display?: string; venue_name?: string };
+  };
   const flightLabel = (() => {
     const f = flightCard.flight;
     if (!f) return "flight";
@@ -2308,16 +2656,25 @@ function AcceptedBlock({
     const num = f.flight_number ? ` ${f.flight_number}` : "";
     return `${airline}${num}${route}`.trim();
   })();
+  const activityLabel = (() => {
+    const a = activityCard.activity;
+    if (!a) return "event";
+    return a.short_title ?? a.title ?? "event";
+  })();
   const targetName = isHotel
     ? hotelCard.hotel?.name ?? "hotel"
     : isFlight
       ? flightLabel
-      : card.restaurant?.name ?? "restaurant";
+      : isActivity
+        ? activityLabel
+        : card.restaurant?.name ?? "restaurant";
   const targetNameCapitalized = isHotel
     ? hotelCard.hotel?.name ?? "Hotel"
     : isFlight
       ? flightLabel
-      : card.restaurant?.name ?? "Restaurant";
+      : isActivity
+        ? activityLabel
+        : card.restaurant?.name ?? "Restaurant";
   // Hotel stays are group-level defaults from room.context_json. The payer
   // can still tweak them here before kicking off the booking — saves a trip
   // back to the room editor for a one-day typo.
@@ -2366,6 +2723,17 @@ function AcceptedBlock({
   const [retDate, setRetDate] = useState(flightInitial.retDate);
   const [isRT, setIsRT] = useState(flightInitial.isRT);
   const [flightPassengers, setFlightPassengers] = useState(flightInitial.passengers);
+
+  // Activity defaults — num_tickets from context_json; Payer can bump for
+  // guest or dependent tickets. Event identity / date is fixed by the accepted
+  // proposal card, so there's nothing date-related to override here.
+  const activityInitial = useMemo(() => {
+    if (!isActivity) return { numTickets: Math.max(1, memberCount) };
+    const ctx = context as { num_tickets?: number };
+    return { numTickets: ctx.num_tickets ?? Math.max(1, memberCount) };
+  }, [isActivity, context, memberCount]);
+  const [numTickets, setNumTickets] = useState(activityInitial.numTickets);
+
   const [starting, setStarting] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [needsProfile, setNeedsProfile] = useState(false);
@@ -2584,6 +2952,8 @@ function AcceptedBlock({
       if (isRT && !retDate) { setErr("Round-trip needs a return date."); return; }
       if (isRT && retDate && retDate <= depDate) { setErr("Return date must be after departure."); return; }
       if (!flightPassengers || flightPassengers < 1) { setErr("Passengers must be at least 1."); return; }
+    } else if (isActivity) {
+      if (!numTickets || numTickets < 1) { setErr("Need at least 1 ticket."); return; }
     } else {
       if (!date || !time || !covers) { setErr("Pick a date, time, and party size."); return; }
     }
@@ -2608,6 +2978,8 @@ function AcceptedBlock({
         payload.is_round_trip = isRT;
         if (isRT) payload.return_date = retDate;
         payload.passengers = flightPassengers;
+      } else if (isActivity) {
+        payload.num_tickets = numTickets;
       } else {
         payload.date = date;
         payload.time = time;
@@ -2646,7 +3018,9 @@ function AcceptedBlock({
             ? "Waiting on the payer to trigger the booking."
             : isFlight
               ? "Waiting on the payer to confirm dates and trigger the booking."
-              : "Waiting on the payer to confirm date/time and trigger the booking."}
+              : isActivity
+                ? "Waiting on the payer to confirm ticket count and trigger the booking."
+                : "Waiting on the payer to confirm date/time and trigger the booking."}
         </p>
       )}
 
@@ -2804,7 +3178,62 @@ function AcceptedBlock({
         </div>
       )}
 
-      {isPayer && status !== "executing" && !isHotel && !isFlight && (
+      {isPayer && status !== "executing" && isActivity && (
+        <div className="mt-3">
+          <div className="rounded-lg border border-emerald-500/30 bg-emerald-500/5 p-3 mb-2">
+            {activityCard.activity?.datetime_display && (
+              <p className="text-[11px] text-emerald-600/80 mb-2">
+                🗓️ {activityCard.activity.datetime_display}
+                {activityCard.activity.venue_name ? ` · ${activityCard.activity.venue_name}` : ""}
+              </p>
+            )}
+            <div className="flex items-center gap-2">
+              <label className="text-xs text-emerald-600 flex-1">Number of tickets</label>
+              <button
+                type="button"
+                onClick={() => setNumTickets(Math.max(1, numTickets - 1))}
+                className="w-8 h-8 rounded-lg border border-[var(--border)] bg-[var(--card)] text-[var(--text-primary)] text-sm hover:border-[var(--gold)] transition-colors"
+              >−</button>
+              <span className="text-sm font-medium w-6 text-center text-[var(--text-primary)]">{numTickets}</span>
+              <button
+                type="button"
+                onClick={() => setNumTickets(Math.min(10, numTickets + 1))}
+                className="w-8 h-8 rounded-lg border border-[var(--border)] bg-[var(--card)] text-[var(--text-primary)] text-sm hover:border-[var(--gold)] transition-colors"
+              >+</button>
+            </div>
+            <p className="text-[10px] text-emerald-600/70 mt-2">
+              Event and date are locked to the accepted option — change ticket count only.
+            </p>
+          </div>
+          <button
+            onClick={start}
+            disabled={starting}
+            className={`w-full py-2.5 ${CTA}`}
+          >
+            {starting ? "Starting…" : "🤖 Start booking →"}
+          </button>
+          {err && <p className="text-xs text-red-600 mt-2">{err}</p>}
+          {needsProfile && (
+            <div className="mt-3 bg-[var(--gold)]/10 border border-[var(--gold)]/30 rounded-xl p-3">
+              <p className="text-xs font-medium text-[var(--gold)] mb-1">
+                Booking profile missing
+              </p>
+              <p className="text-[11px] text-[var(--text-secondary)] mb-2">
+                You need a default booking profile (name / email / phone) before
+                the agent can buy the tickets. Takes 30 seconds.
+              </p>
+              <Link
+                href="/account?tab=profiles"
+                className="inline-block py-2 px-3 rounded-lg bg-[var(--gold)] text-white text-xs font-medium hover:opacity-90 transition-opacity"
+              >
+                Open Settings → My Profile
+              </Link>
+            </div>
+          )}
+        </div>
+      )}
+
+      {isPayer && status !== "executing" && !isHotel && !isFlight && !isActivity && (
         <div className="mt-3">
           <div className="grid grid-cols-2 gap-2 mb-2">
             <input

@@ -95,6 +95,7 @@ import {
   fillFieldsInScopes,
 } from "./shared/form-actions";
 import { bookExpediaFlightProgrammatic } from "./providers/expedia";
+import { bookTicketmasterProgrammatic } from "./providers/ticketmaster-rpa";
 
 type FieldSpec = { patterns: string[]; value: string };
 type AgentExecutionResult = {
@@ -823,11 +824,25 @@ The user will enter CVV and confirm payment themselves.`,
       getProvider(landedUrlAfterSetup)?.id === 'yelp-com' ||
       openPageUrls.find((u) => u && getProvider(u)?.id === 'yelp-com')
     );
+    // SeatGeek: skip the AI agent entirely — event listing detection and checkout form fill
+    // run programmatically through the three-layer pipeline (native setter fill + AI fill + audit).
+    const seatgeekPageOpen = !!(
+      getProvider(input.startUrl)?.id === 'seatgeek-com' ||
+      getProvider(landedUrlAfterSetup)?.id === 'seatgeek-com' ||
+      openPageUrls.find((u) => u && getProvider(u)?.id === 'seatgeek-com')
+    );
+    // Ticketmaster: same skip-agent pattern as SeatGeek. Event page / checkout
+    // detection + form fill run programmatically through the three-layer pipeline.
+    const ticketmasterPageOpen = !!(
+      getProvider(input.startUrl)?.id === 'ticketmaster-com' ||
+      getProvider(landedUrlAfterSetup)?.id === 'ticketmaster-com' ||
+      openPageUrls.find((u) => u && getProvider(u)?.id === 'ticketmaster-com')
+    );
     const expediaFlightPageOpen = isExpediaFlightUrl(input.startUrl);
-    const skipInitialAgent = bookingComPageOpen || expediaPageOpen || hotelsComPageOpen || openTablePageOpen || resyPageOpen || yelpPageOpen || expediaFlightPageOpen;
+    const skipInitialAgent = bookingComPageOpen || expediaPageOpen || hotelsComPageOpen || openTablePageOpen || resyPageOpen || yelpPageOpen || seatgeekPageOpen || ticketmasterPageOpen || expediaFlightPageOpen;
     const initialMaxSteps = skipInitialAgent ? 0 : 40;
 
-    const skipProviderLabel = bookingComPageOpen ? 'Booking.com' : expediaPageOpen ? 'Expedia' : hotelsComPageOpen ? 'Hotels.com' : openTablePageOpen ? 'OpenTable' : resyPageOpen ? 'Resy' : yelpPageOpen ? 'Yelp' : expediaFlightPageOpen ? 'Expedia Flight' : '';
+    const skipProviderLabel = bookingComPageOpen ? 'Booking.com' : expediaPageOpen ? 'Expedia' : hotelsComPageOpen ? 'Hotels.com' : openTablePageOpen ? 'OpenTable' : resyPageOpen ? 'Resy' : yelpPageOpen ? 'Yelp' : seatgeekPageOpen ? 'SeatGeek' : ticketmasterPageOpen ? 'Ticketmaster' : expediaFlightPageOpen ? 'Expedia Flight' : '';
     trace(`Agent starting main run (maxSteps=${initialMaxSteps}, model=${modelName})${skipInitialAgent ? ` [${skipProviderLabel} detected: agent.execute disabled, using programmatic flow only]` : ""}`);
     const t0 = Date.now();
     const result = initialMaxSteps === 0
@@ -1008,6 +1023,72 @@ The user will enter CVV and confirm payment themselves.`,
       }
     }
     // ── End Expedia flight RPA ─────────────────────────────────────────────────
+
+    // ── Ticketmaster programmatic RPA (phase 1: navigate to seat selection) ───
+    // Bypasses the AI agent. Flow: attraction calendar click → Find Tickets →
+    // event page → STOP for user to pick seats → poll Reserve Tickets → checkout.
+    // Once checkout.ticketmaster is reached, the normal guestDetails / payment
+    // layers (via provider.fillGuestForm / fillPaymentForm) take over.
+    if (ticketmasterPageOpen) {
+      const screenshotBuf = await raw.screenshot({ type: "jpeg", quality: 55 }).catch(() => null);
+      const screenshotBase64 = screenshotBuf?.toString("base64") ?? "";
+      try {
+        const getAllPages = (): Page[] =>
+          stagehand.context.pages().map((pg: unknown) => getRawPage(pg));
+        const rpaResult = await bookTicketmasterProgrammatic(
+          raw, input.task, trace, stagehand, getAllPages
+        );
+
+        const finalScreenshot = await raw.screenshot({ type: "jpeg", quality: 55 }).catch(() => null);
+        const finalScreenshotBase64 = finalScreenshot?.toString("base64") ?? screenshotBase64;
+
+        if (rpaResult.reached_checkout) {
+          // Checkout reached — fall through to the normal form-fill pipeline below.
+          // Update currentUrl so the guestDetails/payment stage detection is correct.
+          // activePage stays on the Stagehand wrapper; recovery loop handles tab
+          // switching if Ticketmaster opens checkout in a new tab.
+          currentUrl = rpaResult.currentUrl || currentUrl;
+          agentMessage = "Ticketmaster RPA: reached checkout, handing off to form-fill pipeline";
+          trace(`[tm-rpa] Handoff: currentUrl=${currentUrl.slice(0, 140)}`);
+          // Fall through — do NOT return. Normal recovery loop will detect
+          // guestDetailsStep via provider.getStageSignals and fill the form.
+        } else {
+          if (!useCloud && input.jobId) {
+            holdBrowserOpenForManualReview(
+              "Local mode: Ticketmaster RPA did not reach checkout — keeping browser open for 15 min for manual review/continue."
+            );
+          }
+          return {
+            status: rpaResult.needs_login ? "error" as const : "error" as const,
+            screenshotBase64: finalScreenshotBase64,
+            handoffUrl: rpaResult.currentUrl || input.startUrl,
+            sessionUrl,
+            summary: rpaResult.needs_login
+              ? "Ticketmaster wants you to sign in. Run `node scripts/save-ticketmaster-cookies.mjs` to refresh your saved session, then try again."
+              : (rpaResult.error ?? "Couldn't reach Ticketmaster checkout. Open the link to finish manually."),
+            error: rpaResult.error ?? "Ticketmaster RPA did not reach checkout.",
+            debugTrace,
+          };
+        }
+      } catch (rpaErr) {
+        trace(`[tm-rpa] Unexpected error: ${(rpaErr as Error).message?.slice(0, 120)}`);
+        if (!useCloud && input.jobId) {
+          holdBrowserOpenForManualReview(
+            "Local mode: Ticketmaster RPA crashed — keeping browser open for 15 min for inspection."
+          );
+        }
+        return {
+          status: "error" as const,
+          screenshotBase64,
+          handoffUrl: input.startUrl,
+          sessionUrl,
+          summary: "Ticketmaster booking encountered an error. Open the link to book manually.",
+          error: (rpaErr as Error).message?.slice(0, 200) ?? "Ticketmaster RPA error",
+          debugTrace,
+        };
+      }
+    }
+    // ── End Ticketmaster RPA ────────────────────────────────────────────────────
 
     const p = buildEffectiveProfile(input.profile, input.task);
     const hasProfile = !!(p.full_name || p.first_name || p.last_name || p.email || p.phone);
@@ -4838,6 +4919,19 @@ The user will enter CVV and confirm payment themselves.`,
         });
         currentUrl = assessment.currentUrl;
         pageText = assessment.pageText;
+      }
+    }
+
+    // Independent payment_gate handler — runs even when visibleCheckoutFields=false.
+    // Ticketmaster's card form lives in payments.ticketmaster.com cross-origin iframe,
+    // so main-frame DOM queries find no inputs and onGuestForm stays false. The provider
+    // is responsible for iframe traversal, so we trust it and call fillPaymentForm here.
+    if (!onGuestForm && assessment.stage === "payment_gate") {
+      const paymentProvider = getProvider(currentUrl) ?? getProvider(raw.url());
+      if (paymentProvider?.fillPaymentForm) {
+        trace("[RPA] Payment gate detected outside onGuestForm — running provider fillPaymentForm.");
+        await paymentProvider.fillPaymentForm(raw, p, bookingComHelpers, trace);
+        await new Promise((resolve) => setTimeout(resolve, 800));
       }
     }
 

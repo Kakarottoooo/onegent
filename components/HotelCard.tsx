@@ -4,6 +4,7 @@ import { useState } from "react";
 import { HotelRecommendationCard } from "@/lib/types";
 import { buildBookingComUrl, buildExpediaUrl, buildHotelsComUrl } from "@/lib/agent/planners/booking-links";
 import PhotoCarousel from "@/components/PhotoCarousel";
+import { getBrowserModelAsLegacy } from "@/lib/agent-model-config";
 
 type BookingSite = "booking-com" | "expedia" | "hotels-com";
 const SITE_OPTIONS: { id: BookingSite; label: string; color: string }[] = [
@@ -98,8 +99,8 @@ export default function HotelCard({ card, index, checkIn, checkOut, guests, onJo
     localStorage.setItem("active_profile_id", String(profile.id));
     try {
       const sessionId = localStorage.getItem("session_id") ?? crypto.randomUUID();
-      const savedModel = JSON.parse(localStorage.getItem("agent_model_config") ?? "{}");
       // apiKey may be empty when using a server-side env key — only require model to be set.
+      const savedModel = getBrowserModelAsLegacy();
       const agentModel = savedModel.model ? savedModel : undefined;
 
       // Build a booking.com search URL for this hotel so the agent uses a

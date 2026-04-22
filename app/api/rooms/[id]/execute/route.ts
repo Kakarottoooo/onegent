@@ -23,9 +23,10 @@ import type {
   RecommendationCard,
   HotelRecommendationCard,
   FlightRecommendationCard,
+  ActivityRecommendationCard,
 } from "@/lib/types";
 
-const SUPPORTED_ROOM_TYPES = new Set(["restaurant", "hotel", "flight"]);
+const SUPPORTED_ROOM_TYPES = new Set(["restaurant", "hotel", "flight", "activity"]);
 
 type Params = { params: Promise<{ id: string }> };
 
@@ -113,6 +114,7 @@ export async function POST(req: NextRequest, { params }: Params) {
     | RecommendationCard
     | HotelRecommendationCard
     | FlightRecommendationCard
+    | ActivityRecommendationCard
     | undefined;
   if (!card) {
     return NextResponse.json({ error: "Accepted proposal has no option card" }, { status: 500 });
@@ -217,7 +219,7 @@ export async function POST(req: NextRequest, { params }: Params) {
       status: "pending",
     };
     messageContent = `Booking started: ${hotelName} from ${checkin} to ${checkout} for ${adults} guest${adults === 1 ? "" : "s"}.`;
-  } else {
+  } else if (room.type === "flight") {
     // flight — route is fixed on the accepted card, but the Payer may tweak
     // date / return_date / passengers / round-trip at execute time (mirrors the
     // hotel path). Body values win when provided.
@@ -313,6 +315,49 @@ export async function POST(req: NextRequest, { params }: Params) {
     messageContent = isRoundTrip
       ? `Booking started: ${airlineLabel} ${origin}→${dest} ${depDate}, return ${retDate} for ${passengers} passenger${passengers === 1 ? "" : "s"}.`
       : `Booking started: ${airlineLabel} ${origin}→${dest} ${depDate} for ${passengers} passenger${passengers === 1 ? "" : "s"}.`;
+  } else {
+    // activity — event identity is fixed on the accepted card; the Payer may
+    // override num_tickets at execute time.
+    const aCard = card as ActivityRecommendationCard;
+    const activity = aCard?.activity;
+    if (!activity) {
+      return NextResponse.json({ error: "Accepted activity card is missing activity data" }, { status: 500 });
+    }
+    const ctx = (room.context_json ?? {}) as {
+      num_tickets?: number;
+      event_name?: string;
+    };
+    const bodyTicketsRaw = body?.num_tickets;
+    const bodyTickets = typeof bodyTicketsRaw === "number" && bodyTicketsRaw > 0
+      ? Math.floor(bodyTicketsRaw)
+      : null;
+    const numTickets = bodyTickets ?? ctx.num_tickets ?? joined.length ?? 1;
+    const eventLabel = activity.short_title ?? activity.title ?? ctx.event_name ?? room.title;
+    const when = activity.datetime_display ?? activity.datetime_local ?? "";
+    const fallbackUrl = activity.booking_link;
+
+    step = {
+      type: "activity",
+      emoji: "🎟️",
+      label: eventLabel,
+      apiEndpoint: "/api/booking-autopilot/universal",
+      body: {
+        provider: "seatgeek",
+        eventUrl: activity.booking_link,
+        eventId: activity.id,
+        eventName: eventLabel,
+        eventDateTime: activity.datetime_local,
+        venueName: activity.venue_name,
+        venueCity: activity.venue_city,
+        numTickets,
+        profileId: profile.id,
+        profile: profilePayload,
+        roomId,
+      },
+      fallbackUrl,
+      status: "pending",
+    };
+    messageContent = `Booking started: ${eventLabel}${when ? ` · ${when}` : ""} — ${numTickets} ticket${numTickets === 1 ? "" : "s"}.`;
   }
 
   const jobId = randomUUID();

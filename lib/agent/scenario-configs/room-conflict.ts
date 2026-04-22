@@ -13,7 +13,7 @@
  *     these to calibrate when to set `conflict=true`.
  */
 
-export type RoomScenarioId = "restaurant" | "hotel" | "flight";
+export type RoomScenarioId = "restaurant" | "hotel" | "flight" | "activity";
 
 export interface RoomConflictConfig {
   /** Singular noun used throughout the prompt, e.g. "restaurant". */
@@ -84,6 +84,27 @@ export const ROOM_CONFLICT_CONFIGS: Record<RoomScenarioId, RoomConflictConfig> =
       '"nonstop only" + "must fly airline X which has no nonstop on this route"',
       '"must depart before 9am" + "must depart after 8pm"',
       '"economy only, under $300" + "business class required"',
+    ],
+  },
+  activity: {
+    noun: "event",
+    nounPlural: "events",
+    goalTwoParty: "a set of tickets they'll both attend",
+    goalNParty: "a set of tickets they'll all attend",
+    mergeRules: [
+      "Event identity (event_name, event_date, city, venue) is fixed by the room context — do NOT let per-person constraints override them, everyone attends the SAME show on the SAME night",
+      "Ticket budget per seat: use the LOWEST ceiling as the group cap",
+      "Seat tier: use the HIGHEST requested tier as the group floor (premium > standard > economy). If someone asks for premium the group books premium-or-better, which may raise the per-seat price",
+      "Section preferences: UNION of specific sections members like (e.g. 'lower bowl', 'orchestra'). Treat as soft bias",
+      "Section avoidances: UNION of hard exclusions (e.g. 'no standing room', 'no obstructed view') apply to everyone",
+      "Accessibility: if ANY member needs a wheelchair seat or companion seat, require it for the group — this trumps seat tier",
+      "Delivery: use the INTERSECTION across members (e.g. all accept mobile tickets). Default to mobile if silence",
+      "Seats together: strongly prefer contiguous seats unless a member explicitly opts out",
+    ],
+    conflictExamples: [
+      '"premium front-row only" + "must be under $50 per ticket"',
+      '"wheelchair accessible required" + "only front-row pit tickets"',
+      '"standing room pit" + "seated orchestra only"',
     ],
   },
 };

@@ -31,7 +31,7 @@ const ALLOWED_TYPES = [
   { id: "restaurant", label: "Restaurant", emoji: "🍽️", phase: 1 },
   { id: "hotel",      label: "Hotel",      emoji: "🏨", phase: 1 },
   { id: "flight",     label: "Flight",     emoji: "✈️", phase: 1 },
-  { id: "activity",   label: "Activity",   emoji: "🎟️", phase: 2 },
+  { id: "activity",   label: "Activity",   emoji: "🎟️", phase: 1 },
 ] as const;
 
 type CabinClass = "economy" | "premium_economy" | "business" | "first";
@@ -41,6 +41,18 @@ const CABIN_OPTIONS: Array<{ id: CabinClass; label: string }> = [
   { id: "premium_economy", label: "Premium" },
   { id: "business", label: "Business" },
   { id: "first", label: "First" },
+];
+
+type ActivityEventType = "concert" | "theater" | "sports" | "exhibition" | "comedy" | "festival" | "other";
+
+const ACTIVITY_EVENT_TYPES: Array<{ id: ActivityEventType; label: string }> = [
+  { id: "concert", label: "Concert" },
+  { id: "theater", label: "Theater" },
+  { id: "sports", label: "Sports" },
+  { id: "exhibition", label: "Exhibition" },
+  { id: "comedy", label: "Comedy" },
+  { id: "festival", label: "Festival" },
+  { id: "other", label: "Other" },
 ];
 
 type RoomType = typeof ALLOWED_TYPES[number]["id"];
@@ -79,6 +91,11 @@ export default function NewRoomPage() {
   const [isRoundTrip, setIsRoundTrip] = useState(true);
   const [passengers, setPassengers] = useState<number>(2); // caps at 9
   const [cabinClass, setCabinClass] = useState<CabinClass>("economy");
+  // Activity-only state
+  const [eventName, setEventName] = useState("");
+  const [eventType, setEventType] = useState<ActivityEventType>("concert");
+  const [venueHint, setVenueHint] = useState("");
+  const [numTickets, setNumTickets] = useState<number>(2); // caps at 10
   const [payerIsSelf, setPayerIsSelf] = useState(true);
 
   // Multi-contact + group picker
@@ -144,7 +161,7 @@ export default function NewRoomPage() {
 
   async function submit() {
     if (!title.trim()) { setError("Give it a title so people know what they're joining."); return; }
-    if (type !== "restaurant" && type !== "hotel" && type !== "flight") {
+    if (type !== "restaurant" && type !== "hotel" && type !== "flight" && type !== "activity") {
       setError("That room type isn't supported yet.");
       return;
     }
@@ -172,6 +189,12 @@ export default function NewRoomPage() {
       }
       if (!passengers || passengers < 1) { setError("Need at least one passenger."); return; }
     }
+    if (type === "activity") {
+      if (!eventName.trim()) { setError("Activity rooms need an event or performer name."); return; }
+      if (!dateFrom) { setError("Activity rooms need an event date (or earliest acceptable date)."); return; }
+      if (dateTo && dateTo < dateFrom) { setError("Date range end must be on or after the start."); return; }
+      if (!numTickets || numTickets < 1) { setError("Need at least one ticket."); return; }
+    }
     setSubmitting(true);
     setError(null);
     try {
@@ -194,6 +217,14 @@ export default function NewRoomPage() {
         if (isRoundTrip && dateTo) context.return_date = dateTo;
         context.passengers = passengers;
         context.cabin_class = cabinClass;
+      }
+      if (type === "activity") {
+        context.event_name = eventName.trim();
+        context.event_type = eventType;
+        context.event_date = dateFrom;
+        if (dateTo) context.event_date_to = dateTo;
+        context.num_tickets = numTickets;
+        if (venueHint.trim()) context.venue_hint = venueHint.trim();
       }
       const res = await fetch("/api/rooms", {
         method: "POST",
@@ -365,14 +396,60 @@ export default function NewRoomPage() {
           </>
         )}
 
-        {/* Date window — required for hotel (check-in/out) and flight (departure / optional return), optional for restaurant. */}
+        {/* Activity-only: event identity fields rendered BEFORE the date block. */}
+        {type === "activity" && (
+          <>
+            <label className={LABEL}>Event / Performer</label>
+            <input
+              value={eventName}
+              onChange={(e) => setEventName(e.target.value)}
+              placeholder="e.g. Taylor Swift, Hamilton, Lakers vs Warriors"
+              maxLength={120}
+              className={`${INPUT_LG} mb-4`}
+            />
+
+            <label className={LABEL}>Type</label>
+            <div className="grid grid-cols-4 gap-2 mb-4">
+              {ACTIVITY_EVENT_TYPES.slice(0, 4).map((t) => (
+                <button
+                  key={t.id}
+                  type="button"
+                  onClick={() => setEventType(t.id)}
+                  className={`py-2 rounded-xl border text-xs font-medium transition-colors ${
+                    eventType === t.id ? OPTION_ACTIVE : OPTION_IDLE
+                  }`}
+                >
+                  {t.label}
+                </button>
+              ))}
+            </div>
+            <div className="grid grid-cols-3 gap-2 mb-5">
+              {ACTIVITY_EVENT_TYPES.slice(4).map((t) => (
+                <button
+                  key={t.id}
+                  type="button"
+                  onClick={() => setEventType(t.id)}
+                  className={`py-2 rounded-xl border text-xs font-medium transition-colors ${
+                    eventType === t.id ? OPTION_ACTIVE : OPTION_IDLE
+                  }`}
+                >
+                  {t.label}
+                </button>
+              ))}
+            </div>
+          </>
+        )}
+
+        {/* Date window — required for hotel (check-in/out), flight (departure / optional return), activity (event date + optional date range), optional for restaurant. */}
         <label className={LABEL}>
           {type === "hotel"
             ? "Check-in / Check-out"
             : type === "flight"
               ? isRoundTrip ? "Departure / Return" : "Departure date"
-              : "When?"}{" "}
-          {type !== "hotel" && type !== "flight" && (
+              : type === "activity"
+                ? "Event date (and optional range end)"
+                : "When?"}{" "}
+          {type === "restaurant" && (
             <span className="text-[var(--text-muted)]">(optional)</span>
           )}
         </label>
@@ -381,7 +458,12 @@ export default function NewRoomPage() {
             type="date"
             value={dateFrom}
             onChange={(e) => setDateFrom(e.target.value)}
-            aria-label={type === "hotel" ? "Check-in" : type === "flight" ? "Departure" : "From"}
+            aria-label={
+              type === "hotel" ? "Check-in" :
+              type === "flight" ? "Departure" :
+              type === "activity" ? "Event date" :
+              "From"
+            }
             className={`flex-1 ${INPUT_LG}`}
           />
           {(type !== "flight" || isRoundTrip) && (
@@ -389,11 +471,45 @@ export default function NewRoomPage() {
               type="date"
               value={dateTo}
               onChange={(e) => setDateTo(e.target.value)}
-              aria-label={type === "hotel" ? "Check-out" : type === "flight" ? "Return" : "To"}
+              aria-label={
+                type === "hotel" ? "Check-out" :
+                type === "flight" ? "Return" :
+                type === "activity" ? "Range end (optional)" :
+                "To"
+              }
               className={`flex-1 ${INPUT_LG}`}
             />
           )}
         </div>
+
+        {/* Activity-only: ticket count + optional venue hint. */}
+        {type === "activity" && (
+          <>
+            <div className="grid grid-cols-2 gap-3 mb-5">
+              <div>
+                <label className={LABEL}>Tickets</label>
+                <input
+                  type="number"
+                  min={1}
+                  max={10}
+                  value={numTickets}
+                  onChange={(e) => setNumTickets(Math.max(1, Math.min(10, parseInt(e.target.value, 10) || 1)))}
+                  className={INPUT_LG}
+                />
+              </div>
+              <div>
+                <label className={LABEL}>Venue hint (optional)</label>
+                <input
+                  value={venueHint}
+                  onChange={(e) => setVenueHint(e.target.value)}
+                  placeholder="e.g. Madison Square Garden"
+                  maxLength={80}
+                  className={INPUT_LG}
+                />
+              </div>
+            </div>
+          </>
+        )}
 
         {/* Hotel-only: guest count drives the search and the booking job. */}
         {type === "hotel" && (

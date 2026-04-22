@@ -15,6 +15,7 @@ import {
 import GlobalNav from "@/components/GlobalNav";
 import RestaurantStepCard from "@/components/booking/RestaurantStepCard";
 import BrowserLiveView from "@/components/BrowserLiveView";
+import { getBrowserModelForStagehand } from "@/lib/agent-model-config";
 
 
 function getSessionId(): string {
@@ -417,8 +418,7 @@ function NeedsHelpCard({ step, onManualLink, jobId, stepIndex, onRefresh }: {
     if (retrying) return;
     setRetrying(true);
     // Always patch in latest model config + profile from localStorage so retries use current settings
-    const savedModel = JSON.parse(localStorage.getItem("agent_model_config") ?? "{}");
-    const agentModel = savedModel.model && savedModel.apiKey ? savedModel : undefined;
+    const agentModel = getBrowserModelForStagehand() ?? undefined;
     const activeProfileId = localStorage.getItem("active_profile_id");
     const patchBody = {
       ...(enrichedTask ? { task: enrichedTask } : {}),
@@ -658,8 +658,7 @@ function RetryScheduler({ step, stepIndex, jobId, onScheduled }: {
 
   async function retryNow() {
     setRetrying(true);
-    const savedModel = JSON.parse(localStorage.getItem("agent_model_config") ?? "{}");
-    const agentModel = savedModel.model && savedModel.apiKey ? savedModel : undefined;
+    const agentModel = getBrowserModelForStagehand() ?? undefined;
     const activeProfileId = localStorage.getItem("active_profile_id");
     const patchBody = {
       ...(agentModel ? { agentModel } : {}),
@@ -1698,13 +1697,16 @@ function MonitoringWorkspacePanel({
   sessionId,
   jobs,
   onOpenJob,
+  onDeleteJob,
 }: {
   sessionId: string;
   jobs: BookingJob[];
   onOpenJob: (jobId: string) => void;
+  onDeleteJob: (jobId: string) => Promise<boolean>;
 }) {
   const [groups, setGroups] = useState<MonitoringWorkspaceGroup[]>([]);
   const [loaded, setLoaded] = useState(false);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
 
   const loadGroups = useCallback(async () => {
     if (!sessionId) {
@@ -1716,7 +1718,26 @@ function MonitoringWorkspacePanel({
     try {
       const res = await fetch(`/api/monitors?session_id=${encodeURIComponent(sessionId)}`);
       const data = await res.json().catch(() => ({ monitors: [] }));
-      const monitors: BookingMonitor[] = data.monitors ?? [];
+      let monitors: BookingMonitor[] = data.monitors ?? [];
+
+      // Live monitors group by job_id; if the underlying job was nuked but the
+      // monitor rows survived (legacy clear-all before cascade), the card would
+      // otherwise linger forever. Fire-and-forget cleanup + re-fetch once.
+      const jobIds = new Set(jobs.map((j) => j.id));
+      const hasOrphan = monitors.some((m) => !jobIds.has(m.job_id));
+      if (hasOrphan) {
+        const cleanupRes = await fetch("/api/monitors/cleanup-orphans", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ session_id: sessionId }),
+        });
+        const cleanupBody = await cleanupRes.json().catch(() => ({ removed: 0 }));
+        if ((cleanupBody.removed ?? 0) > 0) {
+          const re = await fetch(`/api/monitors?session_id=${encodeURIComponent(sessionId)}`);
+          const reData = await re.json().catch(() => ({ monitors: [] }));
+          monitors = reData.monitors ?? [];
+        }
+      }
       const next = new Map<string, MonitoringWorkspaceGroup>();
 
       for (const monitor of monitors) {
@@ -1819,24 +1840,52 @@ function MonitoringWorkspacePanel({
                   {group.monitors.length} live monitor{group.monitors.length === 1 ? "" : "s"} · Updated {timeAgo(latest?.last_checked_at ?? latest?.created_at)}
                 </p>
               </div>
-              <button
-                type="button"
-                onClick={() => onOpenJob(group.jobId)}
-                style={{
-                  flexShrink: 0,
-                  padding: "8px 12px",
-                  borderRadius: 10,
-                  border: "0.5px solid var(--border, #e5e7eb)",
-                  background: "transparent",
-                  color: "var(--text-primary, #111)",
-                  fontFamily: "var(--font-dm-sans)",
-                  fontSize: 12,
-                  fontWeight: 600,
-                  cursor: "pointer",
-                }}
-              >
-                Open task
-              </button>
+              <div style={{ display: "flex", gap: 8, flexShrink: 0 }}>
+                <button
+                  type="button"
+                  onClick={() => onOpenJob(group.jobId)}
+                  style={{
+                    padding: "8px 12px",
+                    borderRadius: 10,
+                    border: "0.5px solid var(--border, #e5e7eb)",
+                    background: "transparent",
+                    color: "var(--text-primary, #111)",
+                    fontFamily: "var(--font-dm-sans)",
+                    fontSize: 12,
+                    fontWeight: 600,
+                    cursor: "pointer",
+                  }}
+                >
+                  Open task
+                </button>
+                <button
+                  type="button"
+                  disabled={deletingId === group.jobId}
+                  onClick={async () => {
+                    if (deletingId) return;
+                    if (!confirm(`Delete task "${group.tripLabel}"?`)) return;
+                    setDeletingId(group.jobId);
+                    const ok = await onDeleteJob(group.jobId);
+                    if (ok) {
+                      setGroups((prev) => prev.filter((g) => g.jobId !== group.jobId));
+                    }
+                    setDeletingId(null);
+                  }}
+                  style={{
+                    padding: "8px 12px",
+                    borderRadius: 10,
+                    border: "0.5px solid var(--border, #e5e7eb)",
+                    background: "transparent",
+                    color: deletingId === group.jobId ? "var(--text-muted, #aaa)" : "rgba(220,38,38,0.7)",
+                    fontFamily: "var(--font-dm-sans)",
+                    fontSize: 12,
+                    fontWeight: 600,
+                    cursor: deletingId === group.jobId ? "not-allowed" : "pointer",
+                  }}
+                >
+                  {deletingId === group.jobId ? "Deleting…" : "Delete"}
+                </button>
+              </div>
             </div>
 
             <div style={{ display: "flex", flexDirection: "column", gap: 8, marginTop: 14 }}>
@@ -2779,18 +2828,27 @@ function TripsPageInner() {
 
   useEffect(() => {
     const view = searchParams.get("view");
-    if (view === "live" || view === "history") {
-      setWorkspaceView(view);
-      return;
-    }
-    setWorkspaceView("queue");
-  }, [searchParams]);
+    const focusId = searchParams.get("focus");
+    const nextView: TaskWorkspaceView =
+      view === "live" || view === "history" ? view : "queue";
+    setWorkspaceView(nextView);
 
-  useEffect(() => {
-    if (workspaceView === "queue") return;
-    liveJobIdRef.current = null;
-    setLiveJobId(null);
-  }, [workspaceView]);
+    if (focusId) {
+      setSelectedJobId(focusId);
+      if (nextView === "live") {
+        openLive(focusId);
+      } else {
+        liveJobIdRef.current = null;
+        setLiveJobId(null);
+        requestAnimationFrame(() => {
+          jobRefs.current[focusId]?.scrollIntoView({ behavior: "smooth", block: "start" });
+        });
+      }
+    } else if (nextView !== "live") {
+      liveJobIdRef.current = null;
+      setLiveJobId(null);
+    }
+  }, [searchParams, openLive]);
 
   const setWorkspaceViewAndUrl = useCallback((next: TaskWorkspaceView) => {
     setWorkspaceView(next);
@@ -2996,7 +3054,20 @@ function TripsPageInner() {
             <main className="min-w-0 border-t border-[var(--border)] lg:border-t-0 lg:border-l px-5 py-6 md:px-7 md:py-7">
         <div style={{ padding: "0 0 4px", maxWidth: "100%", margin: 0 }}>
           <button
-            onClick={() => router.back()}
+            onClick={() => {
+              // router.back() is a no-op when the history stack is empty
+              // (direct URL access / refresh / external link). Fall back to
+              // pushing "/" so the button always goes somewhere sensible;
+              // sessionStorage keeps the search results cached on the home
+              // page, keyed by query, so they rehydrate either way.
+              const startUrl = window.location.href;
+              router.back();
+              setTimeout(() => {
+                if (window.location.href === startUrl) {
+                  router.push("/");
+                }
+              }, 300);
+            }}
             style={{
               display: "flex", alignItems: "center", gap: 4,
               background: "none", border: "none", padding: "0 0 10px",
@@ -3130,6 +3201,21 @@ function TripsPageInner() {
               onOpenJob={(jobId) => {
                 setWorkspaceViewAndUrl("queue");
                 requestAnimationFrame(() => focusJob(jobId));
+              }}
+              onDeleteJob={async (jobId) => {
+                try {
+                  const res = await fetch(`/api/booking-jobs/${jobId}`, { method: "DELETE" });
+                  if (res.ok) {
+                    setJobs((prev) => prev.filter((j) => j.id !== jobId));
+                    return true;
+                  }
+                  const body = await res.json().catch(() => ({} as { error?: string }));
+                  alert(body.error ?? "Failed to delete task");
+                  return false;
+                } catch {
+                  alert("Network error — couldn't delete task");
+                  return false;
+                }
               }}
             />
           )}

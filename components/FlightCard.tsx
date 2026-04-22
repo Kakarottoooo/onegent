@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { FlightRecommendationCard } from "@/lib/types";
 import { buildExpediaFlightsUrl } from "@/lib/agent/planners/booking-links";
+import { getBrowserModelAsLegacy } from "@/lib/agent-model-config";
 
 interface FlightCardProps {
   card: FlightRecommendationCard;
@@ -91,7 +92,7 @@ export default function FlightCard({ card, index, bookingContext, onJobCreated, 
   async function proceedWithProfile(profile: { id: number; first_name: string; last_name: string; email: string; phone: string; address_line1?: string; city?: string; state?: string; zip?: string; country?: string }) {
     try {
       const sessionId = localStorage.getItem("session_id") ?? crypto.randomUUID();
-      const savedModel = JSON.parse(localStorage.getItem("agent_model_config") ?? "{}");
+      const savedModel = getBrowserModelAsLegacy();
       const agentModel = savedModel.model ? savedModel : undefined;
 
       const origin = flight.departure_airport;

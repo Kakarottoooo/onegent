@@ -18,19 +18,84 @@ interface TmVenue {
   location?: { latitude?: string; longitude?: string };
 }
 
+interface TmAttraction {
+  url?: string;
+  name?: string;
+}
+
 interface TmEvent {
   id?: string;
   name?: string;
   url?: string;
-  dates?: { start?: { localDate?: string; localTime?: string } };
-  _embedded?: { venues?: TmVenue[] };
+  dates?: {
+    start?: { localDate?: string; localTime?: string };
+    status?: { code?: string };
+  };
+  _embedded?: { venues?: TmVenue[]; attractions?: TmAttraction[] };
   priceRanges?: Array<{ min?: number; max?: number; currency?: string }>;
   classifications?: Array<{ genre?: { name?: string }; subGenre?: { name?: string } }>;
   images?: Array<{ url?: string; width?: number; ratio?: string }>;
 }
 
+// Ticketmaster's Discovery API returns two flavors of event ID:
+//   - "Long IDs" (>= 18 chars, often with underscores) — these resolve under
+//     the canonical URL pattern /{slug}-{mm-dd-yyyy}/event/{id} that TM
+//     redirects to the public ticket page.
+//   - "Short IDs" (~13 chars, alphanumeric only) — standard entries for
+//     long-running resident productions (e.g. Hamilton on Broadway). Their
+//     /event/{id} URL is NOT public-facing and 404s in normal browsers.
+//     For these we fall back to the attraction (artist/show) page URL, which
+//     is stable, or ultimately to a search URL.
+function isShortTmId(id: string): boolean {
+  return id.length < 18 && !id.includes("_");
+}
+
+function buildCanonicalTmUrl(
+  name: string,
+  city: string,
+  localDate: string,
+  id: string
+): string {
+  const slugBase = `${name} ${city}`
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+  const [y, m, d] = localDate.split("-");
+  const datePart = y && m && d ? `${m}-${d}-${y}` : "";
+  const slug = [slugBase, datePart].filter(Boolean).join("-");
+  return `https://www.ticketmaster.com/${slug}/event/${id}`;
+}
+
+function buildTmSearchUrl(name: string, city: string): string {
+  const q = encodeURIComponent(`${name} ${city}`.trim());
+  return `https://www.ticketmaster.com/search?q=${q}`;
+}
+
+function pickEventUrl(event: TmEvent, name: string, city: string, localDate: string): string {
+  const id = event.id ?? "";
+  const attractionUrl = event._embedded?.attractions?.[0]?.url;
+  if (isShortTmId(id)) {
+    // Short ID: /event/{id} is guaranteed to 404. Prefer attraction page
+    // (stable artist/show hub), fall back to site search.
+    return attractionUrl ?? buildTmSearchUrl(name, city);
+  }
+  // Long ID: canonical URL pattern is reliable.
+  return localDate
+    ? buildCanonicalTmUrl(name, city, localDate, id)
+    : attractionUrl ?? event.url ?? buildTmSearchUrl(name, city);
+}
+
 function parseTmEvent(event: TmEvent, fallbackCity: string): TicketmasterEvent | null {
-  if (!event.name || !event.url) return null;
+  if (!event.name || !event.id) return null;
+
+  // Filter: only keep events that are live for ticketing.
+  //   (B) Official `status.code === "onsale"` — if the field is missing
+  //       entirely we pass through (some entries legitimately omit it).
+  // NOTE: we intentionally do NOT require `priceRanges` any more — Ticketmaster
+  // omits them for many long-running Broadway residencies (Hamilton etc.)
+  // whose tickets are very much on sale via partner inventory.
+  const statusCode = event.dates?.status?.code;
+  if (statusCode && statusCode !== "onsale") return null;
 
   const venue = event._embedded?.venues?.[0];
   const venueName = venue?.name ?? "Venue TBD";
@@ -51,10 +116,12 @@ function parseTmEvent(event: TmEvent, fallbackCity: string): TicketmasterEvent |
   const venueLat = venue?.location?.latitude ? parseFloat(venue.location.latitude) : undefined;
   const venueLng = venue?.location?.longitude ? parseFloat(venue.location.longitude) : undefined;
 
+  const canonicalUrl = pickEventUrl(event, event.name, city, date);
+
   return {
-    id: event.id ?? event.url,
+    id: event.id,
     name: event.name,
-    url: event.url,
+    url: canonicalUrl,
     date,
     time,
     venue_name: venueName,
@@ -103,6 +170,17 @@ export async function searchConcertEvents(
     const data = await res.json();
     const rawEvents: TmEvent[] = data?._embedded?.events ?? [];
     const fallbackCity = params.city ?? "";
+    console.log(`[ticketmaster] API returned ${rawEvents.length} raw events (pre-filter)`);
+    if (rawEvents.length > 0) {
+      console.log("[ticketmaster] raw sample", JSON.stringify(rawEvents.slice(0, 3).map((e) => ({
+        id: e.id,
+        name: e.name,
+        localDate: e.dates?.start?.localDate,
+        statusCode: e.dates?.status?.code,
+        hasPriceRanges: Boolean(e.priceRanges?.length),
+        url: e.url,
+      }))));
+    }
 
     return rawEvents
       .map((e) => parseTmEvent(e, fallbackCity))

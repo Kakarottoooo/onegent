@@ -8,6 +8,7 @@ import { parseSubscriptionIntent } from "./subscription";
 import { parseSmartphoneIntent } from "./smartphone";
 import { parseHeadphoneIntent } from "./headphone";
 import { parseLaptopIntent } from "./laptop";
+import { parseActivityIntent } from "./activity";
 
 export async function parseIntent(
   userMessage: string,
@@ -38,6 +39,9 @@ export async function parseIntent(
   }
   if (category === "hotel") {
     return parseHotelIntent(userMessage, cityFullName, queryContext, conversationHistory, profileContext);
+  }
+  if (category === "activity") {
+    return parseActivityIntent(userMessage, cityFullName, queryContext, conversationHistory);
   }
   return parseRestaurantIntent(
     userMessage,

@@ -11,6 +11,7 @@ import CreditCardCard from "@/components/CreditCardCard";
 import LaptopCard from "@/components/LaptopCard";
 import SmartphoneCard from "@/components/SmartphoneCard";
 import HeadphoneCard from "@/components/HeadphoneCard";
+import ActivityCard from "@/components/ActivityCard";
 import ScenarioPlanView from "@/components/ScenarioPlanView";
 import FeedbackPromptCard from "@/components/FeedbackPromptCard";
 import DateRangePicker from "@/components/DateRangePicker";
@@ -29,8 +30,18 @@ import { useAuth } from "@/app/hooks/useAuth";
 import { PlanAction, PlanLinkAction, RecommendationCard as CardType, PostExperienceFeedback, FeedbackRecord } from "@/lib/types";
 import type { FeedbackPromptItem } from "@/app/api/feedback-prompts/route";
 import DecisionRoomModal from "@/components/DecisionRoomModal";
+import ConfirmCard, { type CommitResponse } from "@/components/ConfirmCard";
 import { useLanguage } from "@/app/hooks/useLanguage";
 import GlobalNav from "@/components/GlobalNav";
+import {
+  looksLikeRecommendationAsk,
+  getFallbackQuickPicks,
+  type ConversationalNLUResult,
+  type QuickPick,
+} from "@/lib/conversational-nlu";
+import type { ChatMessage } from "@/lib/llm-client";
+import { loadAgentModelConfig } from "@/lib/agent-model-config";
+import { useRouter } from "next/navigation";
 
 // Leaflet is not SSR-compatible
 const MapView = dynamic(() => import("@/components/MapView"), { ssr: false });
@@ -104,9 +115,20 @@ export default function Home() {
     },
   });
   const { favorites, toggleFavorite } = useFavorites(learnFromFavorite);
+  const router = useRouter();
   const bottomRef = useRef<HTMLDivElement>(null);
   const chatInputRef = useRef("");
   const isComposingRef = useRef(false);
+
+  // P1-15 unified NLU routing state — sits alongside the old chat.messages
+  // thread. Confirm card + quick picks render below the last assistant bubble.
+  const [pendingConfirm, setPendingConfirm] = useState<{
+    nlu: ConversationalNLUResult;
+    message: string;
+    kind: "room" | "plan";
+  } | null>(null);
+  const [pendingQuickPicks, setPendingQuickPicks] = useState<QuickPick[] | null>(null);
+  const [nluPending, setNluPending] = useState(false);
   // Tracks the plan ID that triggered a refine action, for parent_plan_id lineage
   const refinedFromPlanIdRef = useRef<string | null>(null);
   const [prefModalOpen, setPrefModalOpen] = useState(false);
@@ -123,10 +145,10 @@ export default function Home() {
   const { isListening, isSupported: voiceSupported, startListening, stopListening } = useVoiceInput(
     (transcript) => {
       chat.setInput(transcript);
-      // Auto-send after a short delay so the input value is set
+      chatInputRef.current = transcript;
+      // Small delay so the input value is set before we fire the unified NLU route.
       setTimeout(() => {
-        learnFromSearch(transcript);
-        chat.sendMessage(transcript);
+        void sendCurrentInput();
       }, 100);
     }
   );
@@ -151,6 +173,10 @@ export default function Home() {
   const [pendingTravelDoc, setPendingTravelDoc] = useState<TravelDocRequest | null>(null);
   // Timestamp of last successful travel doc save — blocks re-trigger for 10s
   const travelDocSavedAtRef = useRef<number>(0);
+  // NLU conversation history sent to /api/chat/parse. Assistant turns are
+  // JSON-stringified so the LLM sees the same protocol it's asked to emit
+  // (prevents mid-conversation fallback to plain text). Capped at 20 turns.
+  const nluHistoryRef = useRef<ChatMessage[]>([]);
 
   // Load recent jobs for home page strip
   useEffect(() => {
@@ -259,7 +285,8 @@ export default function Home() {
     chat.allCreditCardCards.length > 0 ||
     chat.allLaptopCards.length > 0 ||
     chat.allSmartphoneCards.length > 0 ||
-    chat.allHeadphoneCards.length > 0;
+    chat.allHeadphoneCards.length > 0 ||
+    chat.allActivityCards.length > 0;
   // Concert event plans have map-able venue pins
   const concertVenuePins: MapPin[] = (() => {
     if (chat.resultMode !== "scenario_plan" || !chat.decisionPlan) return [];
@@ -408,9 +435,9 @@ export default function Home() {
     );
   }
 
-  function sendCurrentInput() {
+  async function sendCurrentInput() {
     const text = chatInputRef.current.trim();
-    if (!text || chat.loading || isListening) return;
+    if (!text || chat.loading || isListening || nluPending) return;
 
     // If we're waiting for travel doc info, intercept the message
     if (pendingTravelDoc) {
@@ -428,9 +455,140 @@ export default function Home() {
       return;
     }
 
-    learnFromSearch(text);
-    chat.sendMessage(text);
+    // P1-15 unified entry: every user utterance is first routed through
+    // /api/chat/parse. Based on the NLU intent we either create a Decision
+    // Room (confirm card), pass-through to the old search (create_plan), or
+    // just show a conversational reply (chitchat / clarify).
     chatInputRef.current = "";
+    chat.setInput("");
+    setPendingConfirm(null);
+    setPendingQuickPicks(null);
+
+    // Echo user message immediately so the UX stays snappy during the NLU call.
+    chat.injectUserMessage(text);
+    setNluPending(true);
+
+    try {
+      const cfg = loadAgentModelConfig();
+      const historyToSend = nluHistoryRef.current.slice();
+      const res = await fetch("/api/chat/parse", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          message: text,
+          history: historyToSend,
+          userModel: cfg.conversational,
+        }),
+      });
+      const data = (await res.json().catch(() => null)) as
+        | { ok: boolean; result: ConversationalNLUResult }
+        | null;
+
+      // Network / NLU failure → fall back to the old restaurant search pipeline
+      // so the user still gets results rather than a dead chat.
+      if (!data || !data.ok) {
+        learnFromSearch(text);
+        chat.sendMessage(text, undefined, { skipUserPush: true });
+        return;
+      }
+
+      const nlu = data.result;
+
+      // Record this turn into the NLU history *after* a successful parse.
+      // Assistant content is the slim NLU JSON so follow-up turns see state
+      // (scenario, collected_constraints, missing_fields) not just rendered text.
+      nluHistoryRef.current.push({ role: "user", content: text });
+      nluHistoryRef.current.push({
+        role: "assistant",
+        content: JSON.stringify({
+          intent: nlu.intent,
+          scenario: nlu.scenario,
+          party_type: nlu.party_type,
+          member_names: nlu.member_names,
+          collected_constraints: nlu.collected_constraints,
+          missing_fields: nlu.missing_fields,
+          confirm_ready: nlu.confirm_ready,
+          assistant_reply: nlu.assistant_reply,
+        }),
+      });
+      if (nluHistoryRef.current.length > 20) {
+        nluHistoryRef.current = nluHistoryRef.current.slice(-20);
+      }
+
+      // create_plan + confirm_ready → pass the raw user query to the legacy
+      // search pipeline; it already renders RecommendationCards etc. for
+      // restaurant / hotel / flight / activity solo cases.
+      if (nlu.intent === "create_plan" && nlu.confirm_ready) {
+        learnFromSearch(text);
+        const hint =
+          nlu.scenario === "restaurant" ||
+          nlu.scenario === "hotel" ||
+          nlu.scenario === "flight" ||
+          nlu.scenario === "activity"
+            ? nlu.scenario
+            : undefined;
+        chat.sendMessage(text, undefined, { skipUserPush: true, categoryHint: hint });
+        return;
+      }
+
+      // Everything else: inject the assistant reply as a bubble. Optionally
+      // render a confirm card (create_room confirm_ready) or quick-pick chips
+      // (any missing-fields clarify).
+      if (nlu.assistant_reply) {
+        chat.injectAssistantMessage(nlu.assistant_reply);
+      }
+
+      if (nlu.intent === "create_room" && nlu.confirm_ready) {
+        setPendingConfirm({ nlu, message: text, kind: "room" });
+      } else if (nlu.intent === "create_plan" && nlu.confirm_ready) {
+        // Safety net — shouldn't reach here given the early return above.
+        setPendingConfirm({ nlu, message: text, kind: "plan" });
+      } else if (nlu.suggested_quick_picks && nlu.suggested_quick_picks.length > 0) {
+        setPendingQuickPicks(nlu.suggested_quick_picks);
+      } else if (looksLikeRecommendationAsk(text)) {
+        // Safety net: user clearly asked for a recommendation ("随便 / 你推荐一下")
+        // but the LLM forgot to produce quick_picks. Inject hardcoded defaults
+        // based on the detected scenario so the user still gets tappable buttons.
+        const fallback = getFallbackQuickPicks(nlu.scenario);
+        if (fallback) setPendingQuickPicks(fallback);
+      }
+    } catch {
+      // Parse call blew up — don't swallow the user query, fall back to old search.
+      learnFromSearch(text);
+      chat.sendMessage(text, undefined, { skipUserPush: true });
+    } finally {
+      setNluPending(false);
+    }
+  }
+
+  function handleQuickPick(value: string) {
+    setPendingQuickPicks(null);
+    chatInputRef.current = value;
+    chat.setInput(value);
+    void sendCurrentInput();
+  }
+
+  function handleConfirmCommitted(payload: CommitResponse) {
+    setPendingConfirm(null);
+    // Room created or plan dispatched — current NLU thread is finished; clear
+    // the history so the next utterance starts a fresh conversation.
+    nluHistoryRef.current = [];
+    if (payload.kind === "room" && payload.url) {
+      router.push(payload.url);
+      return;
+    }
+    if (payload.kind === "plan") {
+      const query = payload.search_query ?? "";
+      if (query) {
+        learnFromSearch(query);
+        chat.sendMessage(query, undefined, { skipUserPush: true });
+      }
+    }
+  }
+
+  function handleConfirmEdit() {
+    setPendingConfirm(null);
+    chat.injectAssistantMessage("No problem — what would you like to change?");
   }
 
   function isComparing(card: CardType) {
@@ -692,7 +850,9 @@ export default function Home() {
   // We pass requestId=undefined for now (it's in the SSE data but not surfaced here)
 
   // Shared filter/view bar rendered in both list and map contexts
-  const filterViewBar = chat.resultMode === "category_cards" && hasCategoryResults && (
+  const filterViewBar =
+    ((chat.resultCategory === "restaurant" && chat.allCards.length > 0) ||
+      (chat.resultCategory === "hotel" && chat.allHotelCards.length > 0)) && (
     <div className="flex flex-col gap-2">
       <div className="flex items-center justify-between">
         {/* View toggle */}
@@ -1502,6 +1662,7 @@ export default function Home() {
                 >
                   {th.taglines[heroIdx].sub}
                 </p>
+
                 {/* Scenario quick-start cards */}
                 <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, width: "100%", maxWidth: 440, marginBottom: 24 }}>
                   {th.scenarios.map((s) => (
@@ -1756,10 +1917,136 @@ export default function Home() {
                             ))}
                           </div>
                         )}
+                        {/* Inline activity cards for this message */}
+                        {msg.activityCards && msg.activityCards.length > 0 && (
+                          <div className="flex flex-col gap-3">
+                            {msg.activityCards.map((card, ci) => (
+                              <ActivityCard
+                                key={`${card.activity.id}-${card.group}`}
+                                card={card}
+                                index={ci}
+                                onJobCreated={(jobId) => setInlineItems((prev) => [...prev, { type: "job", jobId }])}
+                              />
+                            ))}
+                          </div>
+                        )}
+                        {/* Inline restaurant cards for this message */}
+                        {msg.cards && msg.cards.length > 0 && (
+                          <>
+                            <div className="flex flex-col gap-3">
+                              {msg.cards.map((card, ci) => (
+                                <RecommendationCard
+                                  key={card.restaurant?.id ?? ci}
+                                  card={card}
+                                  index={ci}
+                                  isFavorite={favorites.has(card.restaurant?.id ?? "")}
+                                  onToggleFavorite={() => {
+                                    const isAdding = !favorites.has(card.restaurant?.id ?? "");
+                                    toggleFavorite(card.restaurant?.id ?? "", card);
+                                    if (isAdding && !auth.isSignedIn && !upgradePromptShown) {
+                                      const newCount = favorites.size + 1;
+                                      if (newCount >= 3) setUpgradePromptShown(true);
+                                    }
+                                  }}
+                                  nearLocationLabel={location.nearLocation || undefined}
+                                  currentQuery={lastUserQuery}
+                                  onCompare={() => {
+                                    toggleCompare(card);
+                                    setCompareOpen(true);
+                                  }}
+                                  isComparing={isComparing(card)}
+                                  onFeedback={handleCardFeedback}
+                                />
+                              ))}
+                            </div>
+                            <button
+                              onClick={() => {
+                                setDecisionRoomQuery(
+                                  lastUserQuery ||
+                                    msg.cards?.[0]?.restaurant?.name ||
+                                    "dinner tonight"
+                                );
+                                setDecisionRoomOpen(true);
+                              }}
+                              style={{
+                                display: "flex",
+                                alignItems: "center",
+                                gap: "6px",
+                                marginTop: "4px",
+                                padding: "9px 16px",
+                                borderRadius: "12px",
+                                border: "1.5px solid #e5e7eb",
+                                background: "#fff",
+                                color: "#374151",
+                                fontSize: "13px",
+                                fontWeight: 500,
+                                cursor: "pointer",
+                                width: "100%",
+                                justifyContent: "center",
+                                fontFamily: "var(--font-dm-sans, system-ui)",
+                              }}
+                            >
+                              <span style={{ fontSize: "15px" }}>🤝</span>
+                              Plan this with someone
+                            </button>
+                          </>
+                        )}
                       </div>
                     )}
                   </div>
                 ))}
+
+                {/* P1-15: NLU pending indicator — shown while /api/chat/parse is in flight */}
+                {nluPending && (
+                  <div
+                    style={{
+                      color: "var(--text-secondary)",
+                      fontSize: "13px",
+                      fontFamily: "var(--font-dm-sans)",
+                      fontStyle: "italic",
+                      padding: "4px 2px",
+                    }}
+                  >
+                    Thinking…
+                  </div>
+                )}
+
+                {/* P1-15: Quick-pick chips — rendered when NLU asked a clarifying question */}
+                {pendingQuickPicks && pendingQuickPicks.length > 0 && (
+                  <div style={{ display: "flex", flexWrap: "wrap", gap: 6, paddingTop: 4 }}>
+                    {pendingQuickPicks.map((pick) => (
+                      <button
+                        key={`qp-${pick.value}`}
+                        type="button"
+                        onClick={() => handleQuickPick(pick.value)}
+                        disabled={chat.loading || nluPending}
+                        style={{
+                          padding: "6px 12px",
+                          borderRadius: 999,
+                          border: "0.5px solid var(--border)",
+                          backgroundColor: "var(--card)",
+                          color: "var(--text-primary)",
+                          fontFamily: "var(--font-dm-sans)",
+                          fontSize: 12,
+                          cursor: "pointer",
+                        }}
+                      >
+                        {pick.label}
+                      </button>
+                    ))}
+                  </div>
+                )}
+
+                {/* P1-15: Inline confirm card — drives Decision Room creation */}
+                {pendingConfirm && (
+                  <ConfirmCard
+                    kind={pendingConfirm.kind}
+                    nlu={pendingConfirm.nlu}
+                    message={pendingConfirm.message}
+                    onConfirmed={handleConfirmCommitted}
+                    onEdit={handleConfirmEdit}
+                  />
+                )}
 
                 {/* 4-Step Loading Progress */}
                 {chat.loading && (
@@ -1898,67 +2185,6 @@ export default function Home() {
                     setPlanFeedbackMessage={setPlanFeedbackMessage}
                     lastUserQuery={lastUserQuery}
                   />
-                )}
-
-                {/* List View */}
-                {chat.resultMode === "category_cards" && chat.displayCards.length > 0 && (
-                  <div className="flex flex-col gap-3">
-                    {chat.displayCards.map((card, i) => (
-                      <RecommendationCard
-                        key={card.restaurant?.id ?? i}
-                        card={card}
-                        index={i}
-                        isFavorite={favorites.has(card.restaurant?.id ?? "")}
-                        onToggleFavorite={() => {
-                          const isAdding = !favorites.has(card.restaurant?.id ?? "");
-                          toggleFavorite(card.restaurant?.id ?? "", card);
-                          // Phase 5.3: Show upgrade prompt after 3rd favorite
-                          if (isAdding && !auth.isSignedIn && !upgradePromptShown) {
-                            const newCount = favorites.size + 1;
-                            if (newCount >= 3) setUpgradePromptShown(true);
-                          }
-                        }}
-                        nearLocationLabel={location.nearLocation || undefined}
-                        currentQuery={lastUserQuery}
-                        onCompare={() => {
-                          toggleCompare(card);
-                          setCompareOpen(true);
-                        }}
-                        isComparing={isComparing(card)}
-                        onFeedback={handleCardFeedback}
-                      />
-                    ))}
-                  </div>
-                )}
-
-                {/* Decision Room — "Plan with someone" button after restaurant results */}
-                {chat.resultMode === "category_cards" && chat.displayCards.length > 0 && (
-                  <button
-                    onClick={() => {
-                      setDecisionRoomQuery(lastUserQuery || chat.displayCards[0]?.restaurant?.name || "dinner tonight");
-                      setDecisionRoomOpen(true);
-                    }}
-                    style={{
-                      display: "flex",
-                      alignItems: "center",
-                      gap: "6px",
-                      marginTop: "4px",
-                      padding: "9px 16px",
-                      borderRadius: "12px",
-                      border: "1.5px solid #e5e7eb",
-                      background: "#fff",
-                      color: "#374151",
-                      fontSize: "13px",
-                      fontWeight: 500,
-                      cursor: "pointer",
-                      width: "100%",
-                      justifyContent: "center",
-                      fontFamily: "var(--font-dm-sans, system-ui)",
-                    }}
-                  >
-                    <span style={{ fontSize: "15px" }}>🤝</span>
-                    Plan this with someone
-                  </button>
                 )}
 
                 {/* Inline booking task cards — below results, newest at bottom */}

@@ -55,8 +55,29 @@ export interface FlightConstraintData {
   notes?: string;
 }
 
+export interface ActivityConstraintData {
+  /** Max price per ticket, in USD. Group cap = LOWEST across members. */
+  budget_max_per_ticket?: number;
+  /** "premium" (VIP/front/orchestra), "standard" (mid-tier), "economy" (cheap seats/GA). */
+  seat_type?: "premium" | "standard" | "economy";
+  /** UNION across members: specific section preferences (e.g. "lower bowl", "orchestra"). */
+  section_preferences?: string[];
+  /** UNION across members: sections to refuse (e.g. "standing room", "obstructed view"). */
+  avoid_sections?: string[];
+  /** Accessibility flags: any member = true means required. */
+  accessibility?: {
+    wheelchair?: boolean;
+    companion_seat?: boolean;
+  };
+  /** Delivery preference: "mobile" | "will_call" | "print". Group = INTERSECTION. */
+  delivery_preference?: "mobile" | "will_call" | "print";
+  /** Catch-all free-text (e.g. "seats together", "no obstruction"). */
+  notes?: string;
+}
+
 export type RoomConstraintData<T extends RoomScenarioId = RoomScenarioId> =
   T extends "restaurant" ? RestaurantConstraintData :
   T extends "hotel" ? HotelConstraintData :
   T extends "flight" ? FlightConstraintData :
+  T extends "activity" ? ActivityConstraintData :
   never;

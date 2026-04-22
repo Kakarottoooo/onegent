@@ -115,6 +115,21 @@ export async function detectCategory(
     restaurantKeywords.some((kw) => lower.includes(kw)) ||
     /餐厅|饭店|吃饭|晚餐|午餐|早餐|约会|西餐|日料|火锅|订位|订座|聚餐/.test(message);
 
+  // Activity keywords — ticketed events (concerts, theater, sports, comedy). Must come
+  // before restaurant/hotel/flight to catch "music ticket" / "see Hamilton" queries.
+  const activityKeywords = [
+    "concert", "concerts", "live music", "gig", "festival", "music festival",
+    "broadway", "musical", "theater show", "theatre show", "opera",
+    "comedy show", "stand up", "stand-up", "standup",
+    "sports game", "nba game", "nfl game", "mlb game", "nhl game", "soccer match",
+    "buy tickets", "get tickets", "see taylor swift", "see coldplay",
+    "see hamilton", "see wicked", "see lion king", "see lakers", "see yankees",
+    "音乐会", "演唱会", "百老汇", "歌剧", "话剧", "音乐剧", "球赛", "比赛", "脱口秀", "相声",
+    "门票", "看秀", "看演出", "看比赛",
+  ];
+  if (activityKeywords.some((kw) => lower.includes(kw) || message.includes(kw))) {
+    return "activity";
+  }
   if (headphoneKeywords.some((kw) => lower.includes(kw))) return "headphone";
   if (smartphoneKeywords.some((kw) => lower.includes(kw))) return "smartphone";
   // Laptop check before flight/hotel to avoid collision

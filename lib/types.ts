@@ -169,6 +169,7 @@ export interface Message {
   laptopCards?: LaptopRecommendationCard[];
   smartphoneCards?: SmartphoneRecommendationCard[];
   headphoneCards?: HeadphoneRecommendationCard[];
+  activityCards?: ActivityRecommendationCard[];
   decisionPlan?: DecisionPlan;
   result_mode?: ResultMode;
   scenario?: ScenarioType;
@@ -353,7 +354,7 @@ export interface BigPurchaseIntent extends BaseIntent {
 
 // ─── Phase 7: Multi-category types ───────────────────────────────────────────
 
-export type CategoryType = "restaurant" | "hotel" | "flight" | "credit_card" | "laptop" | "smartphone" | "headphone" | "subscription" | "trip" | "big_purchase" | "gift" | "fitness" | "unknown";
+export type CategoryType = "restaurant" | "hotel" | "flight" | "activity" | "credit_card" | "laptop" | "smartphone" | "headphone" | "subscription" | "trip" | "big_purchase" | "gift" | "fitness" | "unknown";
 
 export interface BaseIntent {
   category: CategoryType;
@@ -655,7 +656,7 @@ export interface ScenarioTelemetryEvent {
   timestamp: string;
 }
 
-export type ParsedIntent = RestaurantIntent | HotelIntent | FlightIntent | CreditCardIntent | LaptopIntent | SmartphoneIntent | HeadphoneIntent | SubscriptionIntent;
+export type ParsedIntent = RestaurantIntent | HotelIntent | FlightIntent | CreditCardIntent | LaptopIntent | SmartphoneIntent | HeadphoneIntent | SubscriptionIntent | ActivityIntent;
 
 export interface Hotel {
   id: string;
@@ -739,6 +740,75 @@ export interface HotelRecommendationCard {
   location_summary: string;
   scoring?: ScoringDimensions;
   suggested_refinements?: string[];
+}
+
+export type ActivityEventType =
+  | "concert"
+  | "theater"
+  | "sports"
+  | "exhibition"
+  | "comedy"
+  | "festival"
+  | "other";
+
+export interface Activity {
+  id: string;
+  /** Human-readable title, e.g. "Taylor Swift — The Eras Tour". */
+  title: string;
+  /** Short title from SeatGeek (marketing-friendly), falls back to title. */
+  short_title?: string;
+  event_type: ActivityEventType;
+  /** ISO-like local datetime, e.g. "2026-05-20T20:00:00". */
+  datetime_local: string;
+  /** Display-ready date/time, e.g. "Wed, May 20 · 8:00 PM". */
+  datetime_display?: string;
+  venue_name: string;
+  venue_city: string;
+  venue_state?: string;
+  venue_address?: string;
+  /** Lowest listed ticket price on SeatGeek, USD. */
+  price_min: number;
+  /** Highest listed ticket price on SeatGeek, USD. */
+  price_max?: number;
+  /** Median listing price, USD. */
+  price_avg?: number;
+  /** Number of listings available. */
+  listing_count?: number;
+  /** Cover image URL. */
+  image_url?: string;
+  /** SeatGeek event URL — where the booking provider navigates. */
+  booking_link: string;
+  /** Performers / teams / cast (for sports = home/away team names). */
+  performers?: string[];
+}
+
+export interface ActivityRecommendationCard {
+  activity: Activity;
+  rank: number;
+  /** "best_match" | "cheapest" | "premium_seats" — why this showed up. */
+  group: "best_match" | "cheapest" | "premium_seats";
+  why_recommended: string;
+}
+
+export interface ActivityIntent extends BaseIntent {
+  category: "activity";
+  event_type?: ActivityEventType;
+  /** Free-form performer / team / show name from the user. */
+  event_name?: string;
+  /** Authoritative city for the search (mapped to SeatGeek venue.city). */
+  city?: string;
+  /** YYYY-MM-DD — earliest acceptable event date. */
+  date_from?: string;
+  /** YYYY-MM-DD — latest acceptable event date. */
+  date_to?: string;
+  num_tickets?: number;
+  budget_max_per_ticket?: number;
+  seat_type?: "premium" | "standard" | "economy";
+  /** Soft bias — e.g. "orchestra", "lower bowl". */
+  section_preferences?: string[];
+  avoid_sections?: string[];
+  /** any member requested accessibility. */
+  wheelchair_required?: boolean;
 }
 
 // ─── Phase 9: Credit Card types ───────────────────────────────────────────────
