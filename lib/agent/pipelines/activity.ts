@@ -18,9 +18,11 @@ import type {
   ActivityIntent,
   ActivityRecommendationCard,
   ActivityEventType,
+  ActivitySource,
   TicketmasterEvent,
 } from "../../types";
 import { searchConcertEvents } from "../../ticketmaster";
+import { mergeBySource } from "./activity-merge";
 
 const SEATGEEK_BASE = "https://api.seatgeek.com/2";
 
@@ -104,6 +106,19 @@ function toActivity(e: SeatGeekEvent): Activity | null {
     e.performers?.[0]?.images?.large ??
     e.performers?.[0]?.image ??
     undefined;
+  const priceMin = e.stats?.lowest_price ?? 0;
+  const priceMax = e.stats?.highest_price ?? undefined;
+  const priceAvg = e.stats?.average_price ?? e.stats?.median_price ?? undefined;
+  const listingCount = e.stats?.listing_count ?? e.stats?.visible_listing_count ?? undefined;
+  const source: ActivitySource = {
+    provider: "seatgeek",
+    provider_event_id: String(e.id),
+    booking_link: e.url,
+    price_min: priceMin,
+    price_max: priceMax,
+    price_avg: priceAvg,
+    listing_count: listingCount,
+  };
   return {
     id: String(e.id),
     title: e.title,
@@ -115,13 +130,14 @@ function toActivity(e: SeatGeekEvent): Activity | null {
     venue_city: e.venue.city ?? "",
     venue_state: e.venue.state,
     venue_address: e.venue.extended_address ?? e.venue.address,
-    price_min: e.stats?.lowest_price ?? 0,
-    price_max: e.stats?.highest_price ?? undefined,
-    price_avg: e.stats?.average_price ?? e.stats?.median_price ?? undefined,
-    listing_count: e.stats?.listing_count ?? e.stats?.visible_listing_count ?? undefined,
+    price_min: priceMin,
+    price_max: priceMax,
+    price_avg: priceAvg,
+    listing_count: listingCount,
     image_url: image,
     booking_link: e.url,
     performers: perf,
+    sources: [source],
   };
 }
 
@@ -179,7 +195,9 @@ async function fetchSeatGeek(intent: ActivityIntent): Promise<SeatGeekEvent[]> {
       return [];
     }
     const data = (await res.json()) as SeatGeekResponse;
-    return data.events ?? [];
+    const events = data.events ?? [];
+    console.log(`[activity-pipeline] SeatGeek raw events=${events.length} (total=${data.meta?.total ?? "?"})`);
+    return events;
   } catch (err) {
     console.warn("[activity-pipeline] fetch failed", err);
     return [];
@@ -224,6 +242,14 @@ function tmGenreToEventType(genre: string | undefined, fallback: ActivityEventTy
 function ticketmasterToActivity(e: TicketmasterEvent, intentType?: ActivityEventType): Activity | null {
   if (!e.id || !e.name || !e.city) return null;
   const isoDatetime = e.time ? `${e.date}T${e.time}:00` : `${e.date}T00:00:00`;
+  const priceMin = e.price_min ?? 0;
+  const source: ActivitySource = {
+    provider: "ticketmaster",
+    provider_event_id: e.id,
+    booking_link: e.url,
+    price_min: priceMin,
+    price_max: e.price_max,
+  };
   return {
     id: `tm-${e.id}`,
     title: e.name,
@@ -233,13 +259,14 @@ function ticketmasterToActivity(e: TicketmasterEvent, intentType?: ActivityEvent
     venue_name: e.venue_name,
     venue_city: e.city,
     venue_address: e.venue_address,
-    price_min: e.price_min ?? 0,
+    price_min: priceMin,
     price_max: e.price_max,
     price_avg: undefined,
     listing_count: undefined,
     image_url: e.image_url,
     booking_link: e.url,
     performers: [], // TM wrapper doesn't expose attractions; deriveable from name if needed
+    sources: [source],
   };
 }
 
@@ -310,28 +337,33 @@ export async function runActivityPipeline(
 
   const haveSeatGeek = Boolean(process.env.SEATGEEK_CLIENT_ID);
   const haveTicketmaster = Boolean(process.env.TICKETMASTER_API_KEY);
+  console.log(`[activity-pipeline] env haveSeatGeek=${haveSeatGeek} haveTicketmaster=${haveTicketmaster}`);
   if (!haveSeatGeek && !haveTicketmaster) {
     console.warn("[activity-pipeline] no provider keys configured");
     return { activityRecommendations: [], missing_fields: ["provider_api_key"] };
   }
 
-  // Primary: SeatGeek (better pricing/listing metadata)
-  const seatgeekEvents = await fetchSeatGeek(intent);
-  let activities = seatgeekEvents.map(toActivity).filter((a): a is Activity => a !== null);
-  let source: "seatgeek" | "ticketmaster" | "mixed" = "seatgeek";
+  // Parallel fetch — always call both providers when their keys exist. We used
+  // to short-circuit unset providers here, but that swallowed fetchSeatGeek's
+  // internal "GET <url>" / "client_id not set" logs, making it impossible to
+  // tell from the trace whether SG returned zero or was never called.
+  // fetchSeatGeek already returns [] with a warn when env is missing.
+  const [sgEvents, tmActivitiesRaw] = await Promise.all([
+    fetchSeatGeek(intent),
+    haveTicketmaster ? fetchTicketmaster(intent) : Promise.resolve([] as Activity[]),
+  ]);
+  const sgActivities = sgEvents.map(toActivity).filter((a): a is Activity => a !== null);
+  const mergedActivities = mergeBySource([...sgActivities, ...tmActivitiesRaw]);
+  const multiSource = mergedActivities.filter((a) => a.sources.length > 1).length;
+  console.log(
+    `[activity-pipeline] sg=${sgActivities.length} tm=${tmActivitiesRaw.length} merged=${mergedActivities.length} multi_source=${multiSource}`
+  );
 
-  // Fallback: Ticketmaster (better North American coverage for theater / sports)
-  if (activities.length === 0 && haveTicketmaster) {
-    console.log("[activity-pipeline] SeatGeek empty — falling back to Ticketmaster");
-    activities = await fetchTicketmaster(intent);
-    source = "ticketmaster";
-  }
-
-  console.log(`[activity-pipeline] source=${source} count=${activities.length}`);
-
-  if (activities.length === 0) {
+  if (mergedActivities.length === 0) {
     return { activityRecommendations: [], missing_fields: [] };
   }
+
+  const activities = mergedActivities;
 
   // Filter by budget if provided (belt-and-suspenders).
   const budgeted =

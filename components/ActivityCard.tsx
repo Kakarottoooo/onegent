@@ -1,8 +1,13 @@
 "use client";
 
 import { useState } from "react";
-import type { ActivityRecommendationCard } from "@/lib/types";
+import type { ActivityRecommendationCard, ActivitySource } from "@/lib/types";
 import { getBrowserModelAsLegacy } from "@/lib/agent-model-config";
+
+const PROVIDER_LABEL: Record<ActivitySource["provider"], string> = {
+  seatgeek: "SeatGeek",
+  ticketmaster: "Ticketmaster",
+};
 
 const GROUP_LABEL: Record<ActivityRecommendationCard["group"], string> = {
   best_match: "Best Match",
@@ -47,52 +52,61 @@ function formatOverrideDate(ymd: string): string {
 
 export default function ActivityCard({ card, index, hideBookingActions, onJobCreated }: ActivityCardProps) {
   const { activity, group, why_recommended } = card;
-  const [booking, setBooking] = useState(false);
+  // Per-source loading state keyed by provider so clicking one button doesn't freeze another.
+  const [bookingByProvider, setBookingByProvider] = useState<Record<string, boolean>>({});
   const [noProfile, setNoProfile] = useState(false);
   const [showDatePicker, setShowDatePicker] = useState(false);
   const [overrideDate, setOverrideDate] = useState("");
+  // Remember which source the user wanted when we had to pop the date picker.
+  const [pendingSource, setPendingSource] = useState<ActivitySource | null>(null);
   const emoji = EVENT_EMOJI[activity.event_type] ?? EVENT_EMOJI.other;
 
   const activityHasDate = Boolean(activity.datetime_display ?? activity.datetime_local);
 
-  const isTicketmaster = activity.id.startsWith("tm-");
+  const sources = activity.sources ?? [];
   const hasConcretePrice = activity.price_min > 0;
   const priceLabel = (() => {
     if (typeof activity.price_max === "number" && activity.price_max > activity.price_min) {
-      return `$${activity.price_min}–$${activity.price_max}`;
+      return `from $${activity.price_min}`;
     }
-    if (hasConcretePrice) return `$${activity.price_min}`;
-    return isTicketmaster ? "See Ticketmaster" : "—";
+    if (hasConcretePrice) return `from $${activity.price_min}`;
+    // No aggregate price and no sources: dim em-dash. With sources but no price:
+    // lean on the button labels to say where to buy.
+    return "—";
   })();
 
   const venueLine = [activity.venue_name, activity.venue_city].filter(Boolean).join(" · ");
 
-  async function handleBookWithAutopilot() {
-    if (booking) return;
+  async function handleBookWithAutopilot(source: ActivitySource) {
+    if (bookingByProvider[source.provider]) return;
     if (!activityHasDate && !overrideDate) {
+      setPendingSource(source);
       setShowDatePicker(true);
       return;
     }
     setNoProfile(false);
-    setBooking(true);
+    setBookingByProvider((s) => ({ ...s, [source.provider]: true }));
     try {
       const profileRes = await fetch("/api/user/booking-profiles?default=true");
       const { profile } = await profileRes.json();
       if (!profile) { setNoProfile(true); return; }
-      await proceedWithProfile(profile);
+      await proceedWithProfile(profile, source);
     } finally {
-      setBooking(false);
+      setBookingByProvider((s) => ({ ...s, [source.provider]: false }));
     }
   }
 
-  async function proceedWithProfile(profile: { id: number; first_name: string; last_name: string; email: string; phone: string; address_line1?: string; city?: string; state?: string; zip?: string; country?: string }) {
+  async function proceedWithProfile(
+    profile: { id: number; first_name: string; last_name: string; email: string; phone: string; address_line1?: string; city?: string; state?: string; zip?: string; country?: string },
+    source: ActivitySource,
+  ) {
     localStorage.setItem("active_profile_id", String(profile.id));
     try {
       const sessionId = localStorage.getItem("session_id") ?? crypto.randomUUID();
       const savedModel = getBrowserModelAsLegacy();
       const agentModel = savedModel.model ? savedModel : undefined;
 
-      const providerLabel = isTicketmaster ? "Ticketmaster" : "SeatGeek";
+      const providerLabel = PROVIDER_LABEL[source.provider];
       const datePart = activity.datetime_display
         ?? activity.datetime_local?.slice(0, 10)
         ?? (overrideDate ? formatOverrideDate(overrideDate) : "");
@@ -106,12 +120,12 @@ export default function ActivityCard({ card, index, hideBookingActions, onJobCre
       const step = {
         type: "activity",
         emoji: EVENT_EMOJI[activity.event_type] ?? EVENT_EMOJI.other,
-        label: activity.title,
+        label: `${activity.title} (${providerLabel})`,
         apiEndpoint: "/api/booking-autopilot/universal",
         body: {
-          startUrl: activity.booking_link,
+          startUrl: source.booking_link,
           task,
-          fallbackUrl: activity.booking_link,
+          fallbackUrl: source.booking_link,
           profileId: profile.id,
           profile: {
             first_name: profile.first_name,
@@ -126,7 +140,7 @@ export default function ActivityCard({ card, index, hideBookingActions, onJobCre
           },
           agentModel,
         },
-        fallbackUrl: activity.booking_link,
+        fallbackUrl: source.booking_link,
         status: "pending",
       };
       const createRes = await fetch("/api/booking-jobs", {
@@ -144,8 +158,9 @@ export default function ActivityCard({ card, index, hideBookingActions, onJobCre
     }
   }
 
-  const canAutopilot = !!activity.booking_link;
-  const providerShort = isTicketmaster ? "Ticketmaster" : "SeatGeek";
+  const canAutopilot = sources.length > 0;
+  // Primary source for the "View" fallback link — first source (SG-first after merge).
+  const primarySource = sources[0];
 
   return (
     <>
@@ -275,11 +290,11 @@ export default function ActivityCard({ card, index, hideBookingActions, onJobCre
           </span>
         </div>
 
-        {!hideBookingActions && activity.booking_link && (
+        {!hideBookingActions && canAutopilot && primarySource && (
           <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
-            {/* Manual fallback link — user can always open the venue page themselves */}
+            {/* Manual fallback link — uses the primary (first-ranked) source. */}
             <a
-              href={activity.booking_link}
+              href={primarySource.booking_link}
               target="_blank"
               rel="noopener noreferrer"
               style={{
@@ -293,23 +308,29 @@ export default function ActivityCard({ card, index, hideBookingActions, onJobCre
               View ↗
             </a>
 
-            {/* Autopilot book button */}
-            {canAutopilot && (
-              <button
-                onClick={handleBookWithAutopilot}
-                disabled={booking}
-                style={{
-                  display: "inline-flex", alignItems: "center", gap: 5,
-                  padding: "8px 16px", background: booking ? "var(--border)" : "var(--gold)",
-                  color: "#fff", borderRadius: 8, border: "none",
-                  cursor: booking ? "not-allowed" : "pointer",
-                  fontFamily: "var(--font-sans)", fontSize: 13, fontWeight: 600,
-                  whiteSpace: "nowrap", transition: "background 0.15s",
-                }}
-              >
-                {booking ? "Booking…" : `🎟 Book on ${providerShort}`}
-              </button>
-            )}
+            {/* One autopilot button per source — user picks which platform to book through. */}
+            {sources.map((source) => {
+              const isBooking = !!bookingByProvider[source.provider];
+              const label = PROVIDER_LABEL[source.provider];
+              const priceSuffix = source.price_min > 0 ? ` · $${source.price_min}` : "";
+              return (
+                <button
+                  key={`${source.provider}:${source.provider_event_id}`}
+                  onClick={() => handleBookWithAutopilot(source)}
+                  disabled={isBooking}
+                  style={{
+                    display: "inline-flex", alignItems: "center", gap: 5,
+                    padding: "8px 16px", background: isBooking ? "var(--border)" : "var(--gold)",
+                    color: "#fff", borderRadius: 8, border: "none",
+                    cursor: isBooking ? "not-allowed" : "pointer",
+                    fontFamily: "var(--font-sans)", fontSize: 13, fontWeight: 600,
+                    whiteSpace: "nowrap", transition: "background 0.15s",
+                  }}
+                >
+                  {isBooking ? "Booking…" : `🎟 Book on ${label}${priceSuffix}`}
+                </button>
+              );
+            })}
           </div>
         )}
       </div>
@@ -343,11 +364,13 @@ export default function ActivityCard({ card, index, hideBookingActions, onJobCre
             }}
           />
           <button
-            disabled={!overrideDate}
+            disabled={!overrideDate || !pendingSource}
             onClick={() => {
-              if (!overrideDate) return;
+              if (!overrideDate || !pendingSource) return;
+              const src = pendingSource;
               setShowDatePicker(false);
-              handleBookWithAutopilot();
+              setPendingSource(null);
+              handleBookWithAutopilot(src);
             }}
             style={{
               padding: "7px 14px", borderRadius: 6, border: "none",
@@ -359,7 +382,7 @@ export default function ActivityCard({ card, index, hideBookingActions, onJobCre
             Continue →
           </button>
           <button
-            onClick={() => { setShowDatePicker(false); setOverrideDate(""); }}
+            onClick={() => { setShowDatePicker(false); setPendingSource(null); setOverrideDate(""); }}
             style={{
               padding: "7px 12px", borderRadius: 6,
               border: "0.5px solid var(--border)", background: "transparent",

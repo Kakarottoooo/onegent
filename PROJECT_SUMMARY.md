@@ -1,5 +1,5 @@
 ================================================================
-Onegent · AI 决策代理 · 项目总结 · v0.2.29.0
+Onegent · AI 决策代理 · 项目总结 · v0.2.30.0
 ================================================================
 
 【项目定义】
@@ -95,6 +95,100 @@ Recent Updates - 2026-04-20
    - Each page was split into a `*Inner` component plus a top-level default export that wraps the inner component in `<Suspense fallback={null}>`.
    - Production build now prerenders all 56 pages cleanly without CSR-bailout errors.
 
+================================================================
+Recent Updates - 2026-04-22
+================================================================
+
+1. Events 正式成为第三条主线（活动票务 autopilot）
+   - 除 Restaurant / Hotel / Flight 之外，Activity（演唱会、体育赛事、演出）
+     现在是 chat NLU、Decision Room、Autopilot booking 三个层都支持的一等场景。
+   - 入口：首页 chat ("Get me two Hamilton tickets for Saturday night")，
+     或 Decision Room 新建 room 时选 activity。
+   - 数据源：SeatGeek + Ticketmaster 双源并行抓取，产出统一的 ActivityCard。
+
+2. Activity 多源聚合 pipeline
+   - `lib/agent/pipelines/activity.ts` 并行调用 SeatGeek API + Ticketmaster Discovery API。
+   - `lib/agent/pipelines/activity-merge.ts` 按 "标题 + 日期" 归一化去重，
+     单条 Activity 可以同时挂 `sources: ['seatgeek', 'ticketmaster']`。
+   - ActivityCard 按 sources 数量渲染多按钮（"Book on SeatGeek" / "Book on Ticketmaster"），
+     各自独立 loading 状态，互不阻塞。
+   - Ticketmaster 查询窗口 ±1 天 + 客户端日期二次过滤，
+     避免 API 返回跨日场次误入结果集（E2）。
+
+3. SeatGeek 全栈 RPA（从搜索到支付暂停）
+   - Provider：`lib/booking-autopilot/providers/seatgeek-com.ts`，
+     完全遵循 CLAUDE.md 的三层架构（程序化导航 + AI 填表 + AI 验证）。
+   - 导航阶段（Layer 1 程序化）：
+       · 首页搜索框 → 下拉精确匹配 → 跳事件详情
+       · 事件详情：解析数量 → 弹数量 modal → 选目标数量 → 关闭
+       · 最低价 ticket：`a[href*="listing="]` 筛选 + 座位关键词过滤（排除"best value"轮播）
+       · Continue → "No thanks" → "Skip to Checkout" 三连按钮
+       · URL 识别 regex 修正：事件详情页直接进入 Stage C，不重复搜索
+   - Billing 填表（Layer 2 + Layer 3）：
+       · 点 "Add new card" 触发 modal → 原生 setter 填
+         firstName / lastName / address / city / state / zipcode / country / phone
+       · 国家下拉 Downshift autocomplete cleanup：填完后 ESC 关闭建议列表
+       · apt / email 在 Add-card modal 中不存在时标记 `skipped (optional)` /
+         `structurally absent`，不触发无效 AI 补填（节省 OpenAI 额度）
+       · 过期日期 parseExpiry 支持 MM/YY、MM/YYYY、MMYY、MMYYYY 四种输入格式
+   - 支付边界：
+       · 卡号 + CVV 位于 Spreedly 跨域 iframe（`core.spreedly.com/v1/embedded/*`），
+         Same-Origin Policy 物理阻断，任何 JS 不可能填写
+       · 填完 billing 即进入 `paused_payment`，任务摘要明确告知用户
+         "enter card number + CVC to complete payment"
+       · 这是 PCI DSS 合规边界，不是 bug，也无法绕过
+         （Stripe Elements / Braintree Hosted Fields 同理）
+
+4. Ticketmaster RPA（attraction 日历 + Reserve 流程）
+   - Provider：`lib/booking-autopilot/providers/seatgeek-rpa.ts` 类似骨架。
+   - Cookie 持久化：`scripts/save-ticketmaster-cookies.mjs` 一键保存登录态。
+   - 导航：attraction 日历 → 跨月份切换 → 点击目标日期 time slot →
+     侧栏 "Find Tickets" → event page → 监听 "Reserve Tickets" 按钮。
+   - Auth URL 兜底：跳登录页时暂停任务，引导用户手动登录后继续。
+   - Trace 转发 console.log，方便线上 debug。
+
+5. Real Chrome 分支（绕过 DataDome 指纹检测）
+   - 问题：SeatGeek 上线后立刻被 DataDome 拦，因为 Playwright 默认的 Chromium
+     fingerprint 被识别为 bot。
+   - 方案：`lib/booking-autopilot/core/real-chrome.ts` 新增启动分支，
+     用户设 `USE_REAL_CHROME_FOR=seatgeek` 后，autopilot 启动本机真实 Chrome
+     （而非 Playwright 自带的 Chromium），配合 `CHROME_USER_DATA_DIR` 持久化 profile。
+   - 启动前主动清理 stale `chrome.exe` 进程占用 userDataDir 的锁
+     （Chrome 单实例锁是之前 ECONNREFUSED 的根因）。
+   - 只影响 startUrl 匹配 flag 的任务，TM / hotels / flights / restaurants
+     继续走 Playwright Chromium，不受影响。
+
+6. ActivityCard 多按钮 + chat 流内联
+   - `components/ActivityCard.tsx` 按 `activity.sources` 动态渲染多个
+     "Book on <platform>" 按钮，每个按钮独立 loading。
+   - 首页 chat 流：activity cards 按时间顺序内联渲染进消息流
+     （不再堆在底部 grid），和 restaurant / hotel cards 样式统一。
+   - 没有 datetime 的活动 card 目前靠用户在下一轮 chat 里补充日期
+     （Y1 日期选择 overlay 方案已讨论，优先级降后）。
+
+7. 当前阶段总结（2026-04 末）
+   - Autopilot 已覆盖四个品类：餐厅（OpenTable / Resy / Yelp）、
+     酒店（Booking / Expedia / Hotels）、机票（Expedia RPA）、活动（SeatGeek / Ticketmaster）。
+   - 所有品类都跑通 chat → Decision Room → Autopilot 三层闭环。
+   - Billing 能填的字段全部自动化，payment 在 PCI iframe 边界优雅 handoff
+     （这是行业物理边界，不是产品缺陷）。
+   - 三层架构模式（程序化导航 + AI 填表 + AI 验证）沉淀为 CLAUDE.md 强制规范。
+
+8. 下一阶段要做什么
+   - 短期（下周）：
+       · SG / TM / hotel / flight autopilot 实盘回归测试，
+         重点看 cookie 过期后 auth URL 兜底是否能优雅暂停。
+       · Activity 没有 datetime 时的前端交互打磨
+         （datetime overlay 方案 vs chat 二轮补充）。
+   - 中期（本月）：
+       · 学习回路激活：第三阶段的 feedback stats 已经在收数据，
+         下一步接入 ranking 权重调整（哪些 provider 用户更常接受）。
+       · Decision Room 的 activity 多人投票用例手测。
+   - 长期（待定）：
+       · 跨品类的一体化 trip planning（hotel + flight + activity 打包）。
+       · 支付侧继续受限于 iframe 安全模型，可探索 "代付钱包"
+         （用户一次授权，autopilot 用 token 而非明文卡号付款）。
+
 【核心能力速览】
 三条主线，贯穿第四 / 第五阶段的完成态能力：
   · 个人决策：6 层 Agent 管道（NLU → Plan → Tool → Retrieve → Rank → Explain），
@@ -102,7 +196,8 @@ Recent Updates - 2026-04-20
   · 群体决策：Decision Room v2 — 多人结构化约束、AI 合并 + 冲突检测、
     unanimous / majority 投票、payer 一键 booking 闭环
   · Autopilot 执行：Stagehand（AI 层）+ Claude Haiku（感知层）+ Playwright（RPA 兜底），
-    六个 Provider（Booking.com / Expedia / Hotels.com / OpenTable / Resy / Yelp）+ Expedia 机票 RPA
+    八个 Provider（Booking.com / Expedia / Hotels.com / OpenTable / Resy / Yelp /
+    SeatGeek / Ticketmaster）+ Expedia 机票 RPA + Activity 多源聚合
 
 【本文档阅读导航】
   · 新工程师上手 → 直接翻 十二（启动）→ 十三（目录）→ 十四（改动入口）→ 十七（坑）

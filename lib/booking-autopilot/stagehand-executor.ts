@@ -33,6 +33,12 @@ import {
 } from "./core/profile";
 import { buildInstruction } from "./core/instructions";
 import { extractErrorDetails } from "./core/error-utils";
+import {
+  shouldUseRealChrome,
+  buildRealChromeLaunchOptions,
+  resolveRealChromeUserDataDir,
+  ensureUserDataDirFree,
+} from "./core/real-chrome";
 import { getProvider } from "./providers/index";
 export {
   buildFlightTask,
@@ -96,6 +102,7 @@ import {
 } from "./shared/form-actions";
 import { bookExpediaFlightProgrammatic } from "./providers/expedia";
 import { bookTicketmasterProgrammatic } from "./providers/ticketmaster-rpa";
+import { bookSeatGeekProgrammatic } from "./providers/seatgeek-rpa";
 
 type FieldSpec = { patterns: string[]; value: string };
 type AgentExecutionResult = {
@@ -459,6 +466,14 @@ export async function runBrowserTask(
     }
   }
 
+  // Pre-launch cleanup: if a prior run left a Chrome process holding our
+  // persistent userDataDir, Playwright can't spawn a new Chrome against the
+  // same profile — the child exits and the requested CDP port never binds
+  // (manifests as ECONNREFUSED 127.0.0.1:<port>). Kill stale siblings first.
+  if (!useCloud && shouldUseRealChrome(input.startUrl)) {
+    await ensureUserDataDirFree(resolveRealChromeUserDataDir(), trace);
+  }
+
   const stagehand = new Stagehand({
     env: useCloud ? "BROWSERBASE" : "LOCAL",
     ...(useCloud && {
@@ -479,9 +494,16 @@ export async function runBrowserTask(
     ...(!useCloud && {
       localBrowserLaunchOptions: {
         headless: process.env.PLAYWRIGHT_HEADLESS !== "false",
+        // Opt-in: route specific providers (e.g. SeatGeek) to the user's real
+        // Chrome with a persistent profile to bypass DataDome-style bot
+        // fingerprinting. Other providers keep the default Playwright path.
+        ...(shouldUseRealChrome(input.startUrl) && buildRealChromeLaunchOptions(trace)),
       },
     }),
   });
+  if (!useCloud && shouldUseRealChrome(input.startUrl)) {
+    trace(`[real-chrome] Activated for startUrl matching USE_REAL_CHROME_FOR="${process.env.USE_REAL_CHROME_FOR}"`);
+  }
 
   trace(`Executor starting —?model: ${modelName}, browser: ${useCloud ? "Browserbase" : "local"}, proxies: ${process.env.BROWSERBASE_USE_PROXIES === "true"}`);
 
@@ -1089,6 +1111,113 @@ The user will enter CVV and confirm payment themselves.`,
       }
     }
     // ── End Ticketmaster RPA ────────────────────────────────────────────────────
+
+    // ── SeatGeek programmatic RPA (navigate to checkout + open card modal) ─────
+    // Bypasses the AI agent. Flow: homepage search → autocomplete top result →
+    // listing page date match (Show more expansion) → event detail → cheapest
+    // ticket → /checkout URL → click "Add new card" to open billing+card modal.
+    // Once the modal is open, the normal guestDetails / payment layers (via
+    // provider.fillGuestForm / fillPaymentForm) take over.
+    // This path requires real Chrome (USE_REAL_CHROME_FOR=seatgeek) to bypass
+    // DataDome bot fingerprinting — Playwright Chromium gets 403'd otherwise.
+    if (seatgeekPageOpen) {
+      const screenshotBuf = await raw.screenshot({ type: "jpeg", quality: 55 }).catch(() => null);
+      const screenshotBase64 = screenshotBuf?.toString("base64") ?? "";
+      try {
+        const getAllPages = (): Page[] =>
+          stagehand.context.pages().map((pg: unknown) => getRawPage(pg));
+        const rpaResult = await bookSeatGeekProgrammatic(
+          raw, input.task, trace, stagehand, getAllPages
+        );
+
+        const finalScreenshot = await raw.screenshot({ type: "jpeg", quality: 55 }).catch(() => null);
+        const finalScreenshotBase64 = finalScreenshot?.toString("base64") ?? screenshotBase64;
+
+        if (rpaResult.reached_checkout) {
+          // Checkout modal open — call SG provider's fillGuestForm + fillPaymentForm
+          // directly on the new /checkout tab, then return paused_payment.
+          // Do NOT fall through: the generic hotel/listing flow below does not
+          // apply to SeatGeek (wrong page assessment, wrong AI prompts).
+          const checkoutPage = (rpaResult.activePage as Page | undefined) ?? raw;
+          currentUrl = rpaResult.currentUrl || currentUrl;
+          trace(`[sg-rpa] Handoff: currentUrl=${currentUrl.slice(0, 140)}`);
+
+          const sgProvider = getProvider("https://seatgeek.com/checkout");
+          const effectiveProfile = buildEffectiveProfile(input.profile, input.task);
+          // Note: SeatGeek's card number + CVV fields live inside a cross-origin
+          // Spreedly iframe (PCI tokenization) — we can't auto-fill either. The
+          // user must enter both manually. Billing address + exp date we do fill.
+          let fillSummary = "SeatGeek checkout reached — review billing details and enter card number + CVC to complete payment.";
+          // Separate try/catch: guest-form error must NOT skip payment-form fill,
+          // and vice versa. Each is independent and worth attempting.
+          if (sgProvider?.fillGuestForm) {
+            try {
+              await sgProvider.fillGuestForm(checkoutPage, effectiveProfile, { stagehand, rawPage: checkoutPage }, trace);
+            } catch (fillErr) {
+              trace(`[sg-rpa] fillGuestForm error: ${(fillErr as Error).message?.slice(0, 120)}`);
+              fillSummary = "SeatGeek checkout reached, but billing auto-fill hit an error. Review details and enter card number + CVC to complete payment.";
+            }
+          }
+          if (sgProvider?.fillPaymentForm) {
+            try {
+              await sgProvider.fillPaymentForm(checkoutPage, effectiveProfile, { stagehand, rawPage: checkoutPage }, trace);
+            } catch (fillErr) {
+              trace(`[sg-rpa] fillPaymentForm error: ${(fillErr as Error).message?.slice(0, 120)}`);
+            }
+          }
+
+          const postFillScreenshot = await checkoutPage.screenshot({ type: "jpeg", quality: 55 }).catch(() => null);
+          const checkoutUrl = (() => { try { return checkoutPage.url(); } catch { return rpaResult.currentUrl || input.startUrl; } })();
+          if (!useCloud && input.jobId) {
+            holdBrowserOpenForManualReview(
+              "Local mode: SeatGeek checkout reached — keeping browser open for 15 min to enter card number + CVC and complete payment."
+            );
+          }
+          return {
+            status: "paused_payment" as const,
+            screenshotBase64: postFillScreenshot?.toString("base64") ?? finalScreenshotBase64,
+            handoffUrl: checkoutUrl,
+            sessionUrl,
+            summary: fillSummary,
+            debugTrace,
+          };
+        } else {
+          if (!useCloud && input.jobId) {
+            holdBrowserOpenForManualReview(
+              "Local mode: SeatGeek RPA did not reach checkout — keeping browser open for 15 min for manual review/continue."
+            );
+          }
+          return {
+            status: "error" as const,
+            screenshotBase64: finalScreenshotBase64,
+            handoffUrl: rpaResult.currentUrl || input.startUrl,
+            sessionUrl,
+            summary: rpaResult.needs_login
+              ? "SeatGeek wants you to sign in. Open the link to sign in manually, then try again."
+              : (rpaResult.error ?? "Couldn't reach SeatGeek checkout. Open the link to finish manually."),
+            error: rpaResult.error ?? "SeatGeek RPA did not reach checkout.",
+            debugTrace,
+          };
+        }
+      } catch (rpaErr) {
+        trace(`[sg-rpa] Unexpected error: ${(rpaErr as Error).message?.slice(0, 120)}`);
+        if (!useCloud && input.jobId) {
+          holdBrowserOpenForManualReview(
+            "Local mode: SeatGeek RPA crashed — keeping browser open for 15 min for inspection."
+          );
+        }
+        return {
+          status: "error" as const,
+          screenshotBase64,
+          handoffUrl: input.startUrl,
+          sessionUrl,
+          summary: "SeatGeek booking encountered an error. Open the link to book manually.",
+          error: (rpaErr as Error).message?.slice(0, 200) ?? "SeatGeek RPA error",
+          debugTrace,
+        };
+      }
+    }
+    // ── End SeatGeek RPA ────────────────────────────────────────────────────────
 
     const p = buildEffectiveProfile(input.profile, input.task);
     const hasProfile = !!(p.full_name || p.first_name || p.last_name || p.email || p.phone);

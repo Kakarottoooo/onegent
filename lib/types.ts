@@ -751,6 +751,29 @@ export type ActivityEventType =
   | "festival"
   | "other";
 
+export type ActivityProvider = "seatgeek" | "ticketmaster";
+
+/**
+ * One ticket source for an Activity. An Activity aggregates events with the
+ * same normalized title and date across providers — so a single Activity card
+ * can carry both a SeatGeek and a Ticketmaster buy link.
+ */
+export interface ActivitySource {
+  provider: ActivityProvider;
+  /** Provider-specific event id (for debugging / dedup). */
+  provider_event_id: string;
+  /** Buy URL for this source. */
+  booking_link: string;
+  /** Lowest listed ticket price for this source, USD. */
+  price_min: number;
+  /** Highest listed ticket price for this source, USD. */
+  price_max?: number;
+  /** Median listing price for this source, USD. */
+  price_avg?: number;
+  /** Number of listings available from this source. */
+  listing_count?: number;
+}
+
 export interface Activity {
   id: string;
   /** Human-readable title, e.g. "Taylor Swift — The Eras Tour". */
@@ -766,20 +789,28 @@ export interface Activity {
   venue_city: string;
   venue_state?: string;
   venue_address?: string;
-  /** Lowest listed ticket price on SeatGeek, USD. */
+  /** Aggregate lowest price across all sources, USD. (= min of sources.price_min) */
   price_min: number;
-  /** Highest listed ticket price on SeatGeek, USD. */
+  /** Aggregate highest price across all sources, USD. (= max of sources.price_max) */
   price_max?: number;
-  /** Median listing price, USD. */
+  /** Median listing price (from primary source), USD. */
   price_avg?: number;
-  /** Number of listings available. */
+  /** Listing count from primary source. */
   listing_count?: number;
   /** Cover image URL. */
   image_url?: string;
-  /** SeatGeek event URL — where the booking provider navigates. */
+  /**
+   * Primary source buy URL. Kept for back-compat with any code that still
+   * reads a single booking_link; new code should iterate `sources` instead.
+   */
   booking_link: string;
   /** Performers / teams / cast (for sports = home/away team names). */
   performers?: string[];
+  /**
+   * All ticket sources for this event. Guaranteed non-empty. The first entry
+   * is the primary (also mirrored in top-level booking_link / listing_count).
+   */
+  sources: ActivitySource[];
 }
 
 export interface ActivityRecommendationCard {

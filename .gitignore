@@ -47,6 +47,10 @@ next-env.d.ts
 .booking-cookies/
 .booking-cookies.json
 .ticketmaster-cookies.json
+.seatgeek-cookies.json
+
+# Real Chrome persistent profile (opt-in via USE_REAL_CHROME_FOR)
+.chrome-profile-autopilot/
 
 # Dev artifacts
 .next-dev.log
