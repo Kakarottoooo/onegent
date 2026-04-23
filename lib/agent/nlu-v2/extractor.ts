@@ -71,7 +71,10 @@ export async function extractState(input: ExtractStateInput): Promise<IntentStat
   // Defensive merge: if the extractor dropped a previously-known slot (model
   // drift happens), prefer the previously-known value. This keeps the state
   // monotonic across turns — a key invariant for multi-turn UX.
-  return mergePrevIntoNew(input.prev_state, parsed);
+  const merged = mergePrevIntoNew(input.prev_state, parsed);
+  // Belt-and-suspenders: catch the "next month → whole month" trap even if the
+  // model ignored prompt rule #4 (extractor_prompt.md). See scrubWholeMonthAssumption below.
+  return scrubWholeMonthAssumption(merged, input.history ?? [], input.new_user_message);
 }
 
 // ─── Prompt construction ─────────────────────────────────────────────────
@@ -118,6 +121,11 @@ Output rules:
      "this Saturday" on ${today} → compute
      "next weekend" → Saturday of the week after next
      "in 3 days" → ${today} + 3
+   BUT: if the user mentions ONLY a month without any duration cue ("next month",
+   "下个月", "in April", "本月" with no "for N days", "for a week", "N 天", explicit
+   end date, or nights count), LEAVE start_date / end_date / nights BLANK. Do NOT
+   default to the whole month (e.g. May 1 → May 31). The router will then ask
+   the user how long they want to stay.
 5. Scenario selection:
    - "trip" when the user wants MULTIPLE categories bundled (flight + hotel at minimum, optionally restaurants / activities). Cues: "plan a trip to X", "go to X for N days", "帮我安排X旅行".
    - "restaurant" / "hotel" / "flight" / "activity" when the user wants a SINGLE category only.
@@ -498,4 +506,73 @@ function stripUndef<T extends object>(obj: T): Partial<T> {
     if (v !== undefined) (out as unknown as Record<string, unknown>)[k] = v;
   }
   return out;
+}
+
+// ─── Whole-month assumption scrub ───────────────────────────────────────
+// If the model filled start_date/end_date/nights covering a full ~month because
+// the user vaguely said "next month" / "下个月" without stating duration, scrub
+// those fields so the router asks "how long?".
+//
+// Guards against this trap in two parts:
+//   - span:  do we actually have a ≥25-day window?
+//   - cue:   user mentioned a bare month ("next month" / "下个月" / "in April")
+//            AND didn't give an explicit duration ("for a month", "整月",
+//            "for N days", "N 晚"). Both must be true so "Go to Paris for a
+//            month" stays intact.
+
+/** @internal — exported for unit tests. */
+export function scrubWholeMonthAssumption(
+  state: IntentState,
+  history: Turn[],
+  newMessage: string,
+): IntentState {
+  if (state.scenario !== "trip" || !state.trip) return state;
+
+  const span = computeTripSpanDays(state.trip.nights, state.trip.start_date, state.trip.end_date);
+  if (span === null || span < 25) return state;
+
+  const text = [newMessage, ...history.map((t) => t.content)].join(" ").toLowerCase();
+
+  const hasBareMonthCue =
+    /\b(next|this|coming|following)\s+month\b/.test(text) ||
+    /(下个月|下月|本月|这个月)/.test(text) ||
+    /\bin\s+(january|february|march|april|may|june|july|august|september|october|november|december)\b/.test(text);
+
+  const hasExplicitDurationCue =
+    /\b(for\s+)?(a|one|1|the\s+whole|an?\s+entire|the\s+entire)\s+month\b/.test(text) ||
+    /(一整月|一个月|整月|month[- ]long)/.test(text) ||
+    /\bfor\s+\d+\s*(day|days|night|nights|week|weeks)\b/.test(text) ||
+    /\d+\s*(晚|天|周)/.test(text);
+
+  if (!hasBareMonthCue || hasExplicitDurationCue) return state;
+
+  return {
+    ...state,
+    trip: {
+      ...state.trip,
+      start_date: undefined,
+      end_date: undefined,
+      nights: undefined,
+    },
+    planning_assumptions: [
+      ...state.planning_assumptions,
+      "Bare month mention without duration — cleared dates so router asks how long.",
+    ],
+  };
+}
+
+function computeTripSpanDays(
+  nights: number | undefined,
+  start: string | undefined,
+  end: string | undefined,
+): number | null {
+  if (typeof nights === "number" && Number.isFinite(nights)) return nights;
+  if (start && end) {
+    const s = Date.parse(start);
+    const e = Date.parse(end);
+    if (Number.isFinite(s) && Number.isFinite(e) && e >= s) {
+      return Math.round((e - s) / 86_400_000);
+    }
+  }
+  return null;
 }
