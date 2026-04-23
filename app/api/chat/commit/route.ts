@@ -32,7 +32,7 @@ import type {
   ConversationalIntent,
   ConversationalScenario,
   ConversationalNLUResult,
-} from "@/lib/conversational-nlu";
+} from "@/lib/agent/nlu-v2";
 import {
   emptyTripState,
   getMissingFields,
@@ -53,7 +53,7 @@ function parseIntent(value: unknown): ConversationalIntent | null {
     "create_room",
     "refine_existing",
     "chitchat",
-    "other",
+    "unknown",
   ];
   if (typeof value === "string" && (allowed as string[]).includes(value)) {
     return value as ConversationalIntent;
@@ -393,7 +393,7 @@ export async function POST(req: NextRequest) {
     : [];
   const originalMessage = typeof b.message === "string" ? b.message : "";
 
-  if (intent === "chitchat" || intent === "other") {
+  if (intent === "chitchat" || intent === "unknown") {
     return NextResponse.json(
       { error: "nothing to commit — ask a clarifying question instead" },
       { status: 400 }

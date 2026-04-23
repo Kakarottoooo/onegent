@@ -1,28 +1,26 @@
 /**
  * POST /api/chat/parse
  *
- * Every keystroke-cycle on the homepage chat funnels through here. The
- * conversational NLU (Phase 1 layer) classifies the message, lifts
+ * Every keystroke-cycle on the homepage chat funnels through here. The NLU v2
+ * pipeline (extractor → router → chat) classifies the message, lifts
  * constraints, and suggests the next clarifying question. The caller turns
  * the result into chat bubbles + quick-pick buttons + an optional confirm
  * card.
  *
  * This endpoint is intentionally stateless — the client owns the history.
+ * If the v2 pipeline throws, we return a crash-fallback so the UI never
+ * locks up.
  */
 
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@clerk/nextjs/server";
 import {
-  analyzeConversational,
+  analyzeConversationalV2,
   buildFallbackResult,
-  type ConversationalNLUInput,
-} from "@/lib/conversational-nlu";
-import { analyzeConversationalV2 } from "@/lib/agent/nlu-v2";
-import type { ChatMessage, LayerModel, Provider } from "@/lib/llm-client";
+} from "@/lib/agent/nlu-v2";
+import type { ChatMessage } from "@/lib/llm-client";
 
 export const maxDuration = 30;
-
-const KNOWN_PROVIDERS: readonly Provider[] = ["minimax", "openai", "anthropic", "google"];
 
 function parseHistory(value: unknown): ChatMessage[] {
   if (!Array.isArray(value)) return [];
@@ -37,21 +35,6 @@ function parseHistory(value: unknown): ChatMessage[] {
   }
   // Keep the tail — oldest turns fall out of context first.
   return out.slice(-20);
-}
-
-function parseUserModel(value: unknown): LayerModel | undefined {
-  if (!value || typeof value !== "object") return undefined;
-  const v = value as Record<string, unknown>;
-  const provider = v.provider;
-  const model = v.model;
-  if (typeof provider !== "string" || typeof model !== "string") return undefined;
-  if (!KNOWN_PROVIDERS.includes(provider as Provider)) return undefined;
-  if (!model.trim()) return undefined;
-  return {
-    provider: provider as Provider,
-    model,
-    apiKey: typeof v.apiKey === "string" ? v.apiKey : undefined,
-  };
 }
 
 export async function POST(req: NextRequest) {
@@ -77,76 +60,37 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "message required" }, { status: 400 });
   }
 
-  const input: ConversationalNLUInput = {
-    message,
-    history: parseHistory(b.history),
-    pinned_target_id:
-      typeof b.pinned_target_id === "string" && b.pinned_target_id.trim()
-        ? b.pinned_target_id.trim()
-        : undefined,
-    userModel: parseUserModel(b.userModel),
-  };
-
-  // ── NLU v2 (Plan C · Phase B) ────────────────────────────────────────
-  // Flag: NLU_V2_ENABLED=true in .env.local routes ALL solo-scenario traffic
-  // through the three-layer pipeline (extractor → router → chat).
-  // Opt-in per-request via body `use_v2: true` for testing without env vars.
-  //
-  // Phase B scope: v2 handles any scenario it classifies (trip / restaurant /
-  // hotel / flight / activity). v1 is kept only as a crash-fallback until
-  // Phase C migrates multi-party create_room + the last holdouts.
-  //
-  // Back-compat: NLU_V2_ENABLED_FOR_TRIP=true is still honored so Phase A
-  // deployments don't need a config change.
-  const v2EnabledEnv =
-    process.env.NLU_V2_ENABLED === "true" ||
-    process.env.NLU_V2_ENABLED_FOR_TRIP === "true";
-  const v2OptIn = b.use_v2 === true;
-  const shouldTryV2 = v2EnabledEnv || v2OptIn;
-
-  if (shouldTryV2) {
-    try {
-      const v2Result = await analyzeConversationalV2({
-        message,
-        history: input.history,
-        pinned_target_id: input.pinned_target_id,
-      });
-      if (v2Result.scenario) {
-        console.log(
-          `[chat/parse] v2 pipeline succeeded — scenario=${v2Result.scenario} intent=${v2Result.intent} confirm_ready=${v2Result.confirm_ready}`,
-        );
-        return NextResponse.json({
-          ok: true,
-          result: v2Result,
-          user_id: userId ?? null,
-          nlu_version: "v2",
-        });
-      }
-      console.log("[chat/parse] v2 returned scenario=null, deferring to v1");
-      // v2 couldn't classify (chitchat / totally ambiguous) → let v1 try
-    } catch (v2Err) {
-      console.warn(
-        "[chat/parse] v2 pipeline failed, falling back to v1:",
-        v2Err instanceof Error ? v2Err.message : v2Err,
-      );
-      // Fall through to v1
-    }
-  }
+  const history = parseHistory(b.history);
+  const pinned_target_id =
+    typeof b.pinned_target_id === "string" && b.pinned_target_id.trim()
+      ? b.pinned_target_id.trim()
+      : undefined;
 
   try {
-    const v1Result = await analyzeConversational(input);
+    const result = await analyzeConversationalV2({
+      message,
+      history,
+      pinned_target_id,
+    });
+    console.log(
+      `[chat/parse] v2 — scenario=${result.scenario} intent=${result.intent} confirm_ready=${result.confirm_ready}`,
+    );
     return NextResponse.json({
       ok: true,
-      result: v1Result,
+      result,
       user_id: userId ?? null,
-      nlu_version: "v1",
+      nlu_version: "v2",
     });
-  } catch {
+  } catch (err) {
+    console.warn(
+      "[chat/parse] v2 pipeline failed, returning fallback:",
+      err instanceof Error ? err.message : err,
+    );
     return NextResponse.json({
       ok: true,
       result: buildFallbackResult(message),
       user_id: userId ?? null,
-      nlu_version: "v1-fallback",
+      nlu_version: "v2-fallback",
     });
   }
 }

@@ -11,7 +11,7 @@
  */
 
 import { useState } from "react";
-import type { ConversationalNLUResult } from "@/lib/conversational-nlu";
+import type { ConversationalNLUResult } from "@/lib/agent/nlu-v2";
 import type { TripIntentState } from "@/lib/agent/trip-intent-state";
 
 export type ConfirmCardKind = "room" | "plan" | "trip";

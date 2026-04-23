@@ -34,6 +34,46 @@ export type {
   ActivityFields,
 } from "./types";
 
+// ─── v1 compatibility aliases ─────────────────────────────────────────────
+// The v1 module (lib/conversational-nlu.ts) was retired in Phase C cleanup.
+// Its exported type names live on here as aliases so existing callers
+// (page.tsx, ConfirmCard, ConversationalChat, commit/parse routes) can
+// migrate their imports with a one-line path change.
+
+/** @deprecated Use NluV2ParseResult. Kept as an alias for the v1 → v2 migration. */
+export type ConversationalNLUResult = import("./types").NluV2ParseResult;
+/** @deprecated Use NluIntent. */
+export type ConversationalIntent = import("./types").NluIntent;
+/** @deprecated Use NluScenario. */
+export type ConversationalScenario = import("./types").NluScenario;
+
+/**
+ * Crash-fallback NLU result the /api/chat/parse route can return when the
+ * v2 pipeline throws. Kept in the v2 barrel so the v1 file can be deleted.
+ *
+ * Shape mirrors v1's buildFallbackResult: intent=chitchat, scenario=null,
+ * confirm_ready=false — the UI renders the assistant_reply as a regular
+ * chat bubble and waits for the user to rephrase.
+ */
+export function buildFallbackResult(message: string): import("./types").NluV2ParseResult {
+  return {
+    intent: "chitchat",
+    scenario: null,
+    party_type: "solo",
+    member_names: [],
+    collected_constraints: {},
+    missing_fields: [],
+    suggested_clarify_question: null,
+    suggested_quick_picks: null,
+    confirm_ready: false,
+    refined_target_id: null,
+    assistant_reply:
+      message.trim().length === 0
+        ? null
+        : "Sorry, I didn't catch that — could you rephrase?",
+  };
+}
+
 // ─── Top-level orchestrator ───────────────────────────────────────────────
 
 export interface AnalyzeV2Input {

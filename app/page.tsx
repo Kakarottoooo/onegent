@@ -43,7 +43,7 @@ import {
 import type {
   ConversationalNLUResult,
   QuickPick,
-} from "@/lib/conversational-nlu";
+} from "@/lib/agent/nlu-v2";
 import type { ChatMessage } from "@/lib/llm-client";
 import { loadAgentModelConfig } from "@/lib/agent-model-config";
 import { useRouter } from "next/navigation";

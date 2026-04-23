@@ -20,7 +20,7 @@ import ConfirmCard, { type CommitResponse } from "@/components/ConfirmCard";
 import type {
   ConversationalNLUResult,
   QuickPick,
-} from "@/lib/conversational-nlu";
+} from "@/lib/agent/nlu-v2";
 import { loadAgentModelConfig } from "@/lib/agent-model-config";
 
 interface Bubble {
