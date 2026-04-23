@@ -18,13 +18,15 @@
  *   - Caller controls WHEN to synthesize. T14 adds the N/N-members + 30s
  *     debounce trigger on top of this module.
  */
+import { randomUUID } from "crypto";
 import {
   listMemberIntentStates,
   getDecisionRoomById,
   listRoomMembers,
   updateDecisionRoomSynthesis,
-  updateDecisionRoomStatus,
   appendRoomMessage,
+  createRoomProposal,
+  listActiveProposals,
 } from "@/lib/db";
 import {
   type TripIntentState,
@@ -358,7 +360,20 @@ export async function triggerSynthesis(
 
   const result = await synthesizeTripForRoom(roomId);
 
-  if (result.status === "ok") {
+  if (result.status === "ok" && result.package) {
+    // Create the proposal row (one option, the whole TripPackage).
+    // createRoomProposal auto-transitions room.status → "approving".
+    try {
+      await createRoomProposal({
+        id: randomUUID(),
+        roomId,
+        contentJson: result.package.package as unknown as Record<string, unknown>,
+        rationale: `Synthesized from ${result.contributorCount} member${result.contributorCount === 1 ? "" : "s"}' chat preferences`,
+        conflictsJson: null,
+      });
+    } catch (err) {
+      console.warn("[trip-synthesis] createRoomProposal failed", err);
+    }
     try {
       await appendRoomMessage({
         roomId,
@@ -369,12 +384,17 @@ export async function triggerSynthesis(
     } catch (err) {
       console.warn("[trip-synthesis] appendRoomMessage failed", err);
     }
-    try {
-      await updateDecisionRoomStatus(roomId, "approving");
-    } catch (err) {
-      console.warn("[trip-synthesis] updateDecisionRoomStatus failed", err);
-    }
   }
 
   return { triggered: true, reason: result.status, result };
+}
+
+/**
+ * Return the active (status="active") proposal for a trip room. Trip rooms
+ * have at most one active proposal at a time; if multiple exist (force
+ * re-synthesis) the most recent wins. Returns null when no proposal yet.
+ */
+export async function getActiveTripProposal(roomId: string) {
+  const proposals = await listActiveProposals(roomId);
+  return proposals.find((p) => p.status === "active") ?? null;
 }
