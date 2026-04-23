@@ -2036,12 +2036,19 @@ export async function createDecisionRoom(params: {
   contextJson?: Record<string, unknown>;
   deadline?: string | null;
   approvalRule?: ApprovalRule;
+  /** Stage 2: "chat" for the new homepage-chat flow, "classic" (default) for the legacy form flow. */
+  flow?: DecisionRoomFlow;
+  /** Stage 2: sub-booking categories bundled into this room (only meaningful for type="trip"). */
+  categories?: DecisionRoomCategory[];
 }): Promise<DecisionRoom> {
   await ensureDecisionRoomTables();
 
   const payerId = params.payerId ?? params.creatorId;
   const contextJson = JSON.stringify(params.contextJson ?? {});
   const approvalRule: ApprovalRule = params.approvalRule ?? "unanimous";
+  const flow: DecisionRoomFlow = params.flow ?? "classic";
+  // pg TEXT[] accepts a native JS string array; null for non-trip rooms.
+  const categories = params.categories ?? null;
 
   // Retry short-code collisions (unique constraint); fallback 5 tries.
   for (let attempt = 0; attempt < 5; attempt++) {
@@ -2049,10 +2056,11 @@ export async function createDecisionRoom(params: {
     try {
       const result = await sql<DecisionRoom>`
         INSERT INTO decision_rooms
-          (id, short_code, type, title, status, creator_id, payer_id, context_json, deadline, approval_rule)
+          (id, short_code, type, title, status, creator_id, payer_id, context_json, deadline, approval_rule, flow, categories)
         VALUES
           (${params.id}, ${shortCode}, ${params.type}, ${params.title}, 'collecting',
-           ${params.creatorId}, ${payerId}, ${contextJson}::jsonb, ${params.deadline ?? null}, ${approvalRule})
+           ${params.creatorId}, ${payerId}, ${contextJson}::jsonb, ${params.deadline ?? null}, ${approvalRule},
+           ${flow}, ${categories as unknown as string})
         RETURNING *
       `;
       // Creator auto-joins

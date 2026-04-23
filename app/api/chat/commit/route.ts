@@ -19,8 +19,10 @@ import { randomUUID } from "crypto";
 import {
   createDecisionRoom,
   upsertRoomConstraint,
+  upsertMemberIntentState,
   type ApprovalRule,
   type DecisionRoomType,
+  type DecisionRoomCategory,
 } from "@/lib/db";
 import type {
   RestaurantConstraintData,
@@ -44,7 +46,15 @@ import {
 
 export const maxDuration = 30;
 
-const ALLOWED_ROOM_TYPES: DecisionRoomType[] = ["restaurant", "hotel", "flight", "activity"];
+const ALLOWED_ROOM_TYPES: DecisionRoomType[] = ["restaurant", "hotel", "flight", "activity", "trip"];
+
+/**
+ * MVP default categories for a Stage 2 trip room. Matches Stage 1's 4-step
+ * booking-job builder. Future: infer from TripIntentState signals (e.g. skip
+ * flight if user's departure_city == destination_city), and/or let the user
+ * opt-out of a category in the UI before the room is created.
+ */
+const DEFAULT_TRIP_CATEGORIES: DecisionRoomCategory[] = ["hotel", "flight", "activity", "restaurant"];
 const ALLOWED_RULES: ApprovalRule[] = ["unanimous", "majority"];
 
 function parseIntent(value: unknown): ConversationalIntent | null {
@@ -429,13 +439,65 @@ export async function POST(req: NextRequest) {
     }
 
     if (intent === "create_room") {
-      return NextResponse.json(
-        {
-          error:
-            "Multi-party trip rooms are coming in Stage 2. For now I can package this trip for you solo — want me to go ahead?",
-        },
-        { status: 501 }
-      );
+      // Stage 2: multi-party trip room. Creator seeds room_member_intent_state
+      // with their own trip state; invited members will do the same via the
+      // homepage chat after accepting the invite. The synthesis agent (T13)
+      // aggregates across everyone once all members contribute.
+      const approvalRule: ApprovalRule =
+        typeof b.approval_rule === "string" && ALLOWED_RULES.includes(b.approval_rule as ApprovalRule)
+          ? (b.approval_rule as ApprovalRule)
+          : "unanimous";
+
+      const title = buildTripRoomTitle(state, memberNames);
+      const id = randomUUID();
+      const room = await createDecisionRoom({
+        id,
+        type: "trip",
+        title,
+        creatorId: userId,
+        payerId: userId,
+        // Keep the creator's TripIntentState in context_json too — redundant
+        // with member_intent_state[creator] but lets pages that only read
+        // decision_rooms render a summary without a second query.
+        contextJson: { trip_seed: state, member_names: memberNames } as Record<string, unknown>,
+        approvalRule,
+        flow: "chat",
+        categories: DEFAULT_TRIP_CATEGORIES,
+      });
+
+      // Seed creator's IntentState. Minimal shape — synthesis agent only
+      // needs { scenario, trip, party_type, member_names } to merge.
+      try {
+        await upsertMemberIntentState({
+          roomId: room.id,
+          userId,
+          intentStateJson: {
+            intent: "create_room",
+            scenario: "trip",
+            party_type: "multi",
+            member_names: memberNames,
+            trip: state,
+            planning_assumptions: state.planning_assumptions ?? [],
+            confidence: 0.9,
+            turn_count: 1,
+            updated_at: new Date().toISOString(),
+          },
+        });
+      } catch (err) {
+        console.warn("[chat/commit] seed creator intent_state failed", err);
+      }
+
+      return NextResponse.json({
+        ok: true,
+        kind: "room",
+        id: room.id,
+        short_code: room.short_code,
+        url: `/rooms/${room.id}`,
+        invite_url: room.short_code ? `/rooms/join/${room.short_code}` : null,
+        title: room.title,
+        room_type: "trip",
+        categories: room.categories,
+      });
     }
 
     return NextResponse.json({
@@ -624,6 +686,18 @@ function normalizeVibe(raw: string | null): TripVibe | null {
     return "mixed";
   }
   return null;
+}
+
+/**
+ * Title for a Stage 2 multi-party trip room. Prefers a short, human-friendly
+ * form like "NY trip with 李明, 张三" or "3-night Tokyo trip".
+ */
+function buildTripRoomTitle(state: TripIntentState, memberNames: string[]): string {
+  const who = memberNames.slice(0, 2).join(", ") + (memberNames.length > 2 ? " +" : "");
+  const city = state.destination_city ?? "trip";
+  const nights = state.nights ? `${state.nights}-night ` : "";
+  const base = `${nights}${city} trip`.trim();
+  return who ? `${base} with ${who}` : base;
 }
 
 function buildTripSummary(state: TripIntentState): string {
