@@ -523,6 +523,23 @@ export default function GlobalNav({ active }: Props) {
             </>
           ) : (
             <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+              <button
+                onClick={() => auth.signIn()}
+                style={{
+                  background: "var(--gold, #C9A84C)",
+                  color: "#fff",
+                  border: "none",
+                  borderRadius: 999,
+                  padding: "8px 16px",
+                  cursor: "pointer",
+                  fontFamily: "var(--font-dm-sans)",
+                  fontSize: 13,
+                  fontWeight: 600,
+                  lineHeight: 1,
+                }}
+              >
+                {t.nav.signIn ?? "Sign in"}
+              </button>
               <div style={{ position: "relative" }}>
                 <button
                   onClick={() => setLangMenuOpen((open) => !open)}
