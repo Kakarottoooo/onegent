@@ -488,6 +488,8 @@ export interface CityTripIntent extends BaseIntent {
   scenario: "city_trip";
   scenario_goal: string;
   destination_city: string;
+  /** Origin city for flight leg. Required for trip packaging (Stage 1). */
+  departure_city?: string;
   start_date?: string;
   end_date?: string;
   nights?: number;
@@ -500,6 +502,47 @@ export interface CityTripIntent extends BaseIntent {
   planning_assumptions: string[];
   needs_clarification: boolean;
   missing_fields: string[];
+}
+
+// ─── Trip Packaging (Stage 1) ─────────────────────────────────────────────
+// A TripPackage is the cross-category aggregate produced by the city-trip
+// planner: 1-3 tiers, each bundling a hotel + flight + (optional) restaurants
+// + (optional) activities. The user picks a tier → frontend POSTs the tier to
+// /api/booking-jobs/create-trip → N-step BookingJob runs in autopilot.
+
+export type TripTierId = "upscale" | "trendy" | "local";
+
+export interface TripTier {
+  tier_id: TripTierId;
+  tier_label: string;
+  tier_description: string;
+  /** Primary hotel for this tier. Null if hotel pipeline returned nothing. */
+  hotel: HotelRecommendationCard | null;
+  /** Outbound flight for this tier. Null if flight pipeline returned nothing
+   *  or the user skipped flight (e.g. local trip, already in the city). */
+  flight: FlightRecommendationCard | null;
+  /** 2-3 restaurant picks. Phase 1 ships with empty array; Phase 2 populates. */
+  restaurants: RecommendationCard[];
+  /** Activity picks. `null` means user had no activity intent (seeds suggested
+   *  separately by the UI). Empty array means we tried but found nothing. */
+  activities: ActivityRecommendationCard[] | null;
+  /** Rough total across hotel+flight+activities, USD. Optional. */
+  total_cost_estimate?: number;
+}
+
+export interface TripPackage {
+  /** Stable id for this package (used to dedup on UI re-renders). */
+  id: string;
+  scenario: "trip";
+  destination_city: string;
+  departure_city: string;
+  date_range: { from: string; to: string };
+  traveler_count: number;
+  /** Ordered list of tiers. Phase 1 ships with a single "mid" tier; Phase 2
+   *  returns all three (upscale / trendy / local). */
+  tiers: TripTier[];
+  /** Optional rationale lines the planner surfaces to the UI. */
+  planning_assumptions?: string[];
 }
 
 export interface TicketmasterEvent {

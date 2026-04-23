@@ -509,7 +509,10 @@ export async function runBrowserTask(
 
   // In local mode, keep the browser open when we reach a manual handoff point
   // so the user can inspect the page and continue in the same browser.
-  // Auto-close after 15 minutes.
+  // Auto-close after BROWSER_KEEP_OPEN_MS (default 60 minutes; override via
+  // BOOKING_BROWSER_KEEP_OPEN_MINUTES env var if you need longer for testing).
+  const BROWSER_KEEP_OPEN_MS =
+    (Number(process.env.BOOKING_BROWSER_KEEP_OPEN_MINUTES) || 60) * 60 * 1000;
   let keepBrowserOpen = false;
 
   // Safety net: if the flow reached guest-form filling (restaurant or
@@ -527,12 +530,12 @@ export async function runBrowserTask(
       if (!ctx) return null;
       const ap = ctx.activePage();
       return ap ? getRawPage(ap) : null;
-    }, 15 * 60 * 1000);
+    }, BROWSER_KEEP_OPEN_MS);
     setTimeout(() => {
       browserSessionStore.delete(input.jobId!);
       activeStagehands.delete(input.jobId!);
       stagehand.close().catch(() => {});
-    }, 15 * 60 * 1000);
+    }, BROWSER_KEEP_OPEN_MS);
   };
 
   try {
@@ -552,7 +555,7 @@ export async function runBrowserTask(
         if (!ctx) return null;
         const ap = ctx.activePage();
         return ap ? getRawPage(ap) : null;
-      }, 15 * 60 * 1000);
+      }, BROWSER_KEEP_OPEN_MS);
       trace('Local mode: registered dynamic page getter in live-view store for real-time streaming.');
     }
 
@@ -1001,6 +1004,16 @@ The user will enter CVV and confirm payment themselves.`,
 
           const postFillScreenshot = await checkoutPage.screenshot({ type: "jpeg", quality: 55 }).catch(() => null);
           const checkoutUrl = (() => { try { return (checkoutPage as unknown as { url: () => string }).url(); } catch { return rpaResult.currentUrl || input.startUrl; } })();
+          // Keep the Expedia flight browser open so the user can review traveler
+          // details and enter payment info. Without this call, the successful
+          // paused_payment return short-circuits past the central hold at the
+          // end of runBrowserTask and the browser gets torn down with Stagehand
+          // — making the flight tab "flash closed" right after checkout.
+          if (!useCloud && input.jobId) {
+            holdBrowserOpenForManualReview(
+              `Local mode: flight checkout reached — keeping browser open for ${Math.round(BROWSER_KEEP_OPEN_MS / 60000)} minutes to review traveler details and complete payment.`
+            );
+          }
           return {
             status: "paused_payment" as const,
             screenshotBase64: postFillScreenshot?.toString("base64") ?? finalScreenshotBase64,
@@ -1013,7 +1026,7 @@ The user will enter CVV and confirm payment themselves.`,
 
         if (!useCloud && input.jobId) {
           holdBrowserOpenForManualReview(
-            "Local mode: flight checkout was not reached — keeping browser open for 15 min for manual review/continue."
+            `Local mode: flight checkout was not reached — keeping browser open for ${Math.round(BROWSER_KEEP_OPEN_MS / 60000)} minutes for manual review/continue.`
           );
         }
 
@@ -1030,7 +1043,7 @@ The user will enter CVV and confirm payment themselves.`,
         trace(`[flight-rpa] Unexpected error: ${(rpaErr as Error).message?.slice(0, 120)}`);
         if (!useCloud && input.jobId) {
           holdBrowserOpenForManualReview(
-            "Local mode: flight booking hit an unexpected error — keeping browser open for 15 min for inspection."
+            `Local mode: flight booking hit an unexpected error — keeping browser open for ${Math.round(BROWSER_KEEP_OPEN_MS / 60000)} minutes for inspection.`
           );
         }
         return {
@@ -5349,7 +5362,7 @@ The user will enter CVV and confirm payment themselves.`,
     }, trace);
 
     if (finalOutcome.status === "paused_payment" && !useCloud) {
-      holdBrowserOpenForManualReview("Local mode: browser will stay open for 15 minutes —?live view available in OneAgent.");
+      holdBrowserOpenForManualReview(`Local mode: browser will stay open for ${Math.round(BROWSER_KEEP_OPEN_MS / 60000)} minutes —?live view available in OneAgent.`);
       console.log("\n鉁?[stagehand] Payment page is open —?use OneAgent live view or the browser window to complete payment.\n");
     }
 

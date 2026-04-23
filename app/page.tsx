@@ -31,6 +31,9 @@ import { PlanAction, PlanLinkAction, RecommendationCard as CardType, PostExperie
 import type { FeedbackPromptItem } from "@/app/api/feedback-prompts/route";
 import DecisionRoomModal from "@/components/DecisionRoomModal";
 import ConfirmCard, { type CommitResponse } from "@/components/ConfirmCard";
+import TripPackageCard from "@/components/TripPackageCard";
+import type { TripPackage } from "@/lib/types";
+import type { TripIntentState } from "@/lib/agent/trip-intent-state";
 import { useLanguage } from "@/app/hooks/useLanguage";
 import GlobalNav from "@/components/GlobalNav";
 import {
@@ -125,9 +128,21 @@ export default function Home() {
   const [pendingConfirm, setPendingConfirm] = useState<{
     nlu: ConversationalNLUResult;
     message: string;
-    kind: "room" | "plan";
+    kind: "room" | "plan" | "trip";
   } | null>(null);
   const [pendingQuickPicks, setPendingQuickPicks] = useState<QuickPick[] | null>(null);
+  // Phase 1-E: trip packaging result. "planning" while /api/chat/trip/plan runs
+  // (10-15s for hotel+flight pipelines); "ready" once the TripPackage lands.
+  const [tripFlow, setTripFlow] = useState<
+    | { phase: "planning" }
+    | {
+        phase: "ready";
+        pkg: TripPackage;
+        errors?: { hotel?: string | null; flight?: string | null };
+      }
+    | { phase: "error"; message: string }
+    | null
+  >(null);
   const [nluPending, setNluPending] = useState(false);
   // Tracks the plan ID that triggered a refine action, for parent_plan_id lineage
   const refinedFromPlanIdRef = useRef<string | null>(null);
@@ -515,6 +530,15 @@ export default function Home() {
         nluHistoryRef.current = nluHistoryRef.current.slice(-20);
       }
 
+      // Trip scenario runs through a dedicated package planner (not the legacy
+      // search). Surface a ConfirmCard so the user can review what we captured
+      // before we spend 10-15s running hotel+flight pipelines in parallel.
+      if (nlu.intent === "create_plan" && nlu.confirm_ready && nlu.scenario === "trip") {
+        if (nlu.assistant_reply) chat.injectAssistantMessage(nlu.assistant_reply);
+        setPendingConfirm({ nlu, message: text, kind: "trip" });
+        return;
+      }
+
       // create_plan + confirm_ready → pass the raw user query to the legacy
       // search pipeline; it already renders RecommendationCards etc. for
       // restaurant / hotel / flight / activity solo cases.
@@ -577,12 +601,65 @@ export default function Home() {
       router.push(payload.url);
       return;
     }
+    if (payload.kind === "trip" && payload.trip_state) {
+      void runTripPlanner(payload.trip_state, payload.search_query ?? "");
+      return;
+    }
+    if (payload.kind === "trip_clarify") {
+      // Defensive backend response — surface the clarification inline so the
+      // user can fill in the missing bits and re-commit.
+      chat.injectAssistantMessage(
+        payload.message ?? "I need a couple more details before I can package this trip."
+      );
+      return;
+    }
     if (payload.kind === "plan") {
       const query = payload.search_query ?? "";
       if (query) {
         learnFromSearch(query);
         chat.sendMessage(query, undefined, { skipUserPush: true });
       }
+    }
+  }
+
+  async function runTripPlanner(state: TripIntentState, searchQuery: string) {
+    setTripFlow({ phase: "planning" });
+    chat.injectAssistantMessage(
+      searchQuery
+        ? `Packaging your trip — hitting hotel + flight in parallel. This usually takes 10-15s…`
+        : `Packaging your trip — this usually takes 10-15s…`
+    );
+    try {
+      const res = await fetch("/api/chat/trip/plan", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ trip_state: state }),
+      });
+      const data = (await res.json().catch(() => ({}))) as {
+        ok?: boolean;
+        trip_package?: TripPackage;
+        errors?: { hotel?: string | null; flight?: string | null };
+        error?: string;
+      };
+      if (!res.ok || !data.ok || !data.trip_package) {
+        setTripFlow({
+          phase: "error",
+          message: data.error ?? "Trip planner failed. Try again in a minute.",
+        });
+        chat.injectAssistantMessage(
+          `Trip planner hit a snag: ${data.error ?? "unknown error"}. Try a different date or city?`
+        );
+        return;
+      }
+      setTripFlow({
+        phase: "ready",
+        pkg: data.trip_package,
+        errors: data.errors,
+      });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Network error";
+      setTripFlow({ phase: "error", message });
+      chat.injectAssistantMessage(`Trip planner hit a snag: ${message}`);
     }
   }
 
@@ -2046,6 +2123,45 @@ export default function Home() {
                     onConfirmed={handleConfirmCommitted}
                     onEdit={handleConfirmEdit}
                   />
+                )}
+
+                {/* Stage 1 trip flow: planning spinner + TripPackageCard */}
+                {tripFlow?.phase === "planning" && (
+                  <div
+                    style={{
+                      border: "1px solid var(--border, #e5e7eb)",
+                      borderRadius: 14,
+                      padding: 12,
+                      fontFamily: "var(--font-dm-sans)",
+                      fontSize: 13,
+                      color: "var(--text-secondary, #555)",
+                      backgroundColor: "var(--card-2, #f7f7f7)",
+                    }}
+                  >
+                    Packaging your trip… running hotel + flight pipelines in parallel.
+                  </div>
+                )}
+                {tripFlow?.phase === "ready" && (
+                  <TripPackageCard
+                    pkg={tripFlow.pkg}
+                    sessionId={chat.getSessionId()}
+                    errors={tripFlow.errors}
+                    onBooked={() => setTripFlow(null)}
+                  />
+                )}
+                {tripFlow?.phase === "error" && (
+                  <div
+                    style={{
+                      border: "1px solid var(--border, #e5e7eb)",
+                      borderRadius: 14,
+                      padding: 12,
+                      fontFamily: "var(--font-dm-sans)",
+                      fontSize: 13,
+                      color: "#c0392b",
+                    }}
+                  >
+                    Trip planner failed: {tripFlow.message}
+                  </div>
                 )}
 
                 {/* 4-Step Loading Progress */}

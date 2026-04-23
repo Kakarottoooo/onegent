@@ -941,6 +941,7 @@ async function runActivityStep(
 
 export async function POST(_req: NextRequest, { params }: Params) {
   const { id } = await params;
+  console.log(`[start] POST /api/booking-jobs/${id}/start invoked at ${new Date().toISOString()}`);
 
   if (inFlightJobStarts.has(id)) {
     const existingJob = await getBookingJob(id);
@@ -1007,16 +1008,28 @@ export async function POST(_req: NextRequest, { params }: Params) {
 
   const steps: BookingJobStep[] = [...job.steps];
 
-  for (let i = 0; i < steps.length; i++) {
-    // Skip steps that already succeeded — supports partial retry (cron/manual)
-    if (steps[i].status === "done") continue;
+  // Serialize DB writes from concurrent onProgress callbacks. Each step has
+  // its own browser context running in parallel; their progress callbacks would
+  // otherwise issue overlapping UPDATEs to the same booking_jobs row and the
+  // last-to-finish-writing could clobber a newer serialization. Chaining via a
+  // single promise guarantees writes commit in the order they were requested.
+  let dbWriteChain: Promise<void> = Promise.resolve();
+  const writeSteps = () => {
+    const p = dbWriteChain.then(() => updateBookingJobSteps(id, steps)).then(() => {});
+    dbWriteChain = p.catch(() => {});
+    return p;
+  };
 
-    // Snapshot before execution — needed for replan trigger detection
-    const stepBefore = { ...steps[i] };
+  // Execute a single step at index `i`. Catches any throws so one step's
+  // failure never sinks a sibling in parallel mode (Promise.allSettled would
+  // hide it, but we still want a clean error status on the step card).
+  const runStepAt = async (i: number) => {
+    // Skip steps that already succeeded — supports partial retry (cron/manual)
+    if (steps[i].status === "done") return;
 
     const onProgress = async (updated: BookingJobStep) => {
       steps[i] = updated;
-      await updateBookingJobSteps(id, steps);
+      await writeSteps();
     };
 
     // ── Dispatch: universal/restaurant → Stagehand, activity → split, rest → recovery loop ──
@@ -1032,32 +1045,57 @@ export async function POST(_req: NextRequest, { params }: Params) {
     const isUniversalActivity =
       (steps[i].type as string) === "activity" &&
       steps[i].apiEndpoint === "/api/booking-autopilot/universal";
-    if (steps[i].type === "universal" || steps[i].type === "restaurant" ||
-        steps[i].type === "hotel" || steps[i].type === "flight" ||
-        isUniversalActivity) {
-      steps[i] = await runUniversalStep(steps[i], onProgress, id, job.user_id);
-    } else if ((steps[i].type as string) === "activity") {
-      steps[i] = await runActivityStep(steps[i], skillCtx, onProgress);
-    } else {
-      steps[i] = await runStepWithRecovery(steps[i], autonomy, policy, onProgress);
-    }
-    await updateBookingJobSteps(id, steps);
 
-    // ── Scene-level replan ─────────────────────────────────────────────
-    // Check if this step's outcome should cascade to downstream steps.
-    const triggers = detectReplanTriggers(stepBefore, steps[i], i);
-    for (const trigger of triggers) {
-      const replan = computeReplan(steps, trigger, autonomy);
-      if (replan && replan.affectedCount > 0) {
-        // Reconstruct steps array with mutations applied
-        const replanned = applyReplan(steps, replan);
-        for (let j = 0; j < replanned.length; j++) {
-          steps[j] = replanned[j];
+    try {
+      if (steps[i].type === "universal" || steps[i].type === "restaurant" ||
+          steps[i].type === "hotel" || steps[i].type === "flight" ||
+          isUniversalActivity) {
+        steps[i] = await runUniversalStep(steps[i], onProgress, id, job.user_id);
+      } else if ((steps[i].type as string) === "activity") {
+        steps[i] = await runActivityStep(steps[i], skillCtx, onProgress);
+      } else {
+        steps[i] = await runStepWithRecovery(steps[i], autonomy, policy, onProgress);
+      }
+    } catch (err) {
+      const errMsg = err instanceof Error ? err.message : "Unhandled step error";
+      steps[i] = { ...steps[i], status: "error", error: errMsg };
+    }
+    await writeSteps();
+  };
+
+  // Execution mode:
+  //   - steps.length >= 2 → run all steps in parallel via Promise.allSettled
+  //     (trip packaging assumption: hotel / flight / restaurant / activity are
+  //     independent; user wants "one shot, concurrent"). Replan is skipped in
+  //     this mode — there is no sequential hand-off to cascade through.
+  //   - steps.length < 2 → keep the historical sequential loop that supports
+  //     scene-level replan for single-step retries and non-trip jobs.
+  if (steps.length >= 2) {
+    await Promise.allSettled(steps.map((_, i) => runStepAt(i)));
+  } else {
+    for (let i = 0; i < steps.length; i++) {
+      const stepBefore = { ...steps[i] };
+      await runStepAt(i);
+
+      // ── Scene-level replan ─────────────────────────────────────────────
+      // Check if this step's outcome should cascade to downstream steps.
+      const triggers = detectReplanTriggers(stepBefore, steps[i], i);
+      for (const trigger of triggers) {
+        const replan = computeReplan(steps, trigger, autonomy);
+        if (replan && replan.affectedCount > 0) {
+          // Reconstruct steps array with mutations applied
+          const replanned = applyReplan(steps, replan);
+          for (let j = 0; j < replanned.length; j++) {
+            steps[j] = replanned[j];
+          }
+          await writeSteps();
         }
-        await updateBookingJobSteps(id, steps);
       }
     }
   }
+
+  // Make sure every queued DB write has committed before we compute final status.
+  await dbWriteChain.catch(() => {});
 
   const doneCount = steps.filter((s) => s.status === "done").length;
   const awaitingPaymentCount = steps.filter((s) => s.status === "awaiting_confirmation").length;

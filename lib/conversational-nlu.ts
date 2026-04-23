@@ -214,6 +214,11 @@ Decision rules:
      OPTIONAL    [num_tickets, seat_type, budget_max_per_ticket,
                   section_preferences, event_type, performers, ...]
      (num_tickets defaults to 1 if unspecified)
+   - trip:       REQUIRED [destination_city, departure_city, start_date,
+                           (end_date OR nights), travelers]
+     OPTIONAL    [vibe, activities, cuisine_preferences, hotel_star_rating,
+                  hotel_neighborhood, budget_total, ...]
+     (travelers defaults to 1 for solo; ask if multi)
 
    Hard rules:
    - NEVER put OPTIONAL keys in missing_fields, even if the user didn't mention them.
@@ -475,6 +480,62 @@ User: "我和李明想去看湖人比赛，李明只坐下层"
   }, missing_fields=["city","event_date"],
   suggested_clarify_question="在哪个城市看？想哪天？"
 
+Signal cheat-sheet for trip (multi-category package) scenarios:
+- Trip verbs (EN): "plan a trip" / "go to X for N days" / "NY trip" / "package a trip" /
+  "help me plan a vacation" / "flying to X next weekend".
+- Trip verbs (中文): "去X玩" / "去X旅行" / "去X几天" / "打包一下" /
+  "帮我安排整个旅行" / "一条龙帮我搞定".
+- USE scenario="trip" ONLY when the user wants MORE THAN ONE category bundled
+  together (flight + hotel at minimum). A pure "book a hotel in Paris" is
+  scenario="hotel", not "trip". A pure "find me a flight to NY" is "flight".
+- destination_city: where they want to visit (e.g. "New York", "纽约", "Tokyo").
+- departure_city: where they're flying FROM (required for the flight leg). Map
+  "from X" / "flying from X" / "从X出发" / "X 出发" to departure_city.
+- start_date / end_date: trip date range. If the user gives "3 days next weekend",
+  store start_date="next Saturday" AND nights=3 (both). If they give an explicit
+  range "4/25 to 4/28", store both start_date and end_date.
+- travelers: number of people. Solo implies 1; multi must be asked.
+- activities: free-form list of what they want to do. Include Broadway / shows /
+  games / museums / concerts / specific team names. Empty array if none.
+- vibe: "upscale" if luxury/5-star/fine dining signals; "trendy" if hip/cool/
+  trendy; "local" if authentic/local/neighborhood; "mixed" otherwise (default).
+- cuisine_preferences: any mentioned cuisines go here (same as restaurant rules).
+
+Worked examples (trip):
+
+User: "I want to go to NY for 3 days next weekend"
+→ intent=create_plan, scenario=trip, party_type=solo,
+  member_names=[], collected_constraints={
+    destination_city:"New York", start_date:"next Saturday", nights:3
+  }, missing_fields=["departure_city","travelers"],
+  suggested_clarify_question="Where are you flying from, and how many people?"
+
+User: "Plan me a 3-day NY trip next weekend, flying from SFO, 2 people, mid budget, I love Broadway"
+→ intent=create_plan, scenario=trip, party_type=solo,
+  member_names=[], collected_constraints={
+    destination_city:"New York", departure_city:"San Francisco",
+    start_date:"next Saturday", nights:3, travelers:2,
+    vibe:"mixed", activities:["Broadway shows"]
+  }, missing_fields=[],
+  confirm_ready=true,
+  assistant_reply="Got it — packaging a 3-night NY trip from SFO for 2, with Broadway in the mix."
+
+User: "我下个月想全家去洛杉矶玩一周，从上海出发，四个人"
+→ intent=create_room, scenario=trip, party_type=multi,
+  member_names=[], collected_constraints={
+    destination_city:"Los Angeles", departure_city:"Shanghai",
+    start_date:"next month", nights:7, travelers:4
+  }, missing_fields=[],
+  confirm_ready=true,
+  assistant_reply="好的，打包一下从上海去洛杉矶 7 天的全家行程。"
+
+User: "帮我安排下周末的纽约 trip"
+→ intent=create_plan, scenario=trip, party_type=solo,
+  member_names=[], collected_constraints={
+    destination_city:"New York", start_date:"next weekend"
+  }, missing_fields=["departure_city","travelers"],
+  suggested_clarify_question="从哪个城市出发？几个人？"
+
 Return JSON only. If unsure, bias toward asking one clarifying question with
 quick picks rather than guessing.
 
@@ -611,8 +672,18 @@ function hasRequiredForScenario(
         has("party_size", "num_people", "headcount")
       );
     case "trip":
-      // trip is a combined planner; don't force-fire, let the LLM decide.
-      return false;
+      // Multi-category package. Force-fire only when the full 5-slot form is
+      // filled (destination + origin + date range + travelers). That way if
+      // the LLM over-stuffs missing_fields with optional nice-to-haves, we
+      // still advance to confirm.
+      return (
+        has("destination_city", "city", "hotel_city", "arrival_city", "destination") &&
+        has("departure_city", "origin", "origin_city", "from_city") &&
+        has("start_date", "check_in", "departure_date", "date_from") &&
+        (has("end_date", "check_out", "return_date", "date_to") ||
+          has("nights", "duration_nights", "trip_duration_days")) &&
+        has("travelers", "party_size", "passengers", "guests", "num_people")
+      );
     default:
       return false;
   }

@@ -33,6 +33,14 @@ import type {
   ConversationalScenario,
   ConversationalNLUResult,
 } from "@/lib/conversational-nlu";
+import {
+  emptyTripState,
+  getMissingFields,
+  buildClarificationMessage,
+  resolveDateHint,
+  type TripIntentState,
+  type TripVibe,
+} from "@/lib/agent/trip-intent-state";
 
 export const maxDuration = 30;
 
@@ -399,10 +407,49 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  if (intent === "create_room") {
-    if (!scenario || scenario === "trip") {
+  // ── Trip scenario (multi-category package) ──────────────────────────────
+  // Both create_plan + trip and create_room + trip route here. create_plan
+  // returns a kind="trip" handoff so the client fires the trip planner.
+  // create_room + trip is Stage 2 (multi-party trip); for now we return a
+  // clear "coming soon" signal instead of creating a broken Room.
+  if (scenario === "trip") {
+    const state = collectedConstraintsToTripState(constraints);
+    const missing = getMissingFields(state);
+
+    if (missing.length > 0) {
+      // Defensive path — NLU should have kept confirm_ready=false, but if
+      // commit is called anyway, surface a structured clarify response so
+      // the client can show the user what's still needed.
+      return NextResponse.json({
+        ok: true,
+        kind: "trip_clarify",
+        missing_fields: missing,
+        message: buildClarificationMessage(missing),
+      });
+    }
+
+    if (intent === "create_room") {
       return NextResponse.json(
-        { error: "Rooms require a concrete scenario (restaurant/hotel/flight/activity)" },
+        {
+          error:
+            "Multi-party trip rooms are coming in Stage 2. For now I can package this trip for you solo — want me to go ahead?",
+        },
+        { status: 501 }
+      );
+    }
+
+    return NextResponse.json({
+      ok: true,
+      kind: "trip",
+      trip_state: state,
+      search_query: originalMessage || buildTripSummary(state),
+    });
+  }
+
+  if (intent === "create_room") {
+    if (!scenario) {
+      return NextResponse.json(
+        { error: "Rooms require a concrete scenario (restaurant/hotel/flight/activity/trip)" },
         { status: 400 }
       );
     }
@@ -474,6 +521,119 @@ export async function POST(req: NextRequest) {
   }
 
   return NextResponse.json({ error: "unhandled intent" }, { status: 400 });
+}
+
+/**
+ * Map the NLU's free-form collected_constraints object into a TripIntentState
+ * suitable for getMissingFields / the downstream planner. Tolerates several
+ * key aliases because the LLM surfaces constraints inconsistently across
+ * languages and turns.
+ */
+function collectedConstraintsToTripState(
+  c: Record<string, unknown>
+): TripIntentState {
+  const state: TripIntentState = emptyTripState();
+
+  const destination = readString(
+    c,
+    "destination_city",
+    "city",
+    "hotel_city",
+    "arrival_city",
+    "destination"
+  );
+  if (destination) state.destination_city = destination;
+
+  const origin = readString(c, "departure_city", "origin", "origin_city", "from_city");
+  if (origin) state.departure_city = origin;
+
+  // Dates arrive from the NLU as relative strings ("next Saturday", "next
+  // weekend", "tomorrow"). Resolve them to ISO YYYY-MM-DD here so downstream
+  // date math stays safe. Keep the raw string in state.planning_assumptions
+  // so the planner can mention "per your ‘next weekend' request" later.
+  const rawStart = readString(c, "start_date", "check_in", "departure_date", "date_from", "date");
+  const rawEnd = readString(c, "end_date", "check_out", "return_date", "date_to");
+  const today = new Date();
+  const resolvedStart = resolveDateHint(rawStart, today);
+  if (resolvedStart) {
+    state.start_date = resolvedStart;
+    if (rawStart && rawStart !== resolvedStart) {
+      state.planning_assumptions.push(`Interpreted "${rawStart}" as ${resolvedStart}.`);
+    }
+  }
+  const resolvedEnd = resolveDateHint(rawEnd, today);
+  if (resolvedEnd) {
+    state.end_date = resolvedEnd;
+    if (rawEnd && rawEnd !== resolvedEnd) {
+      state.planning_assumptions.push(`Interpreted "${rawEnd}" as ${resolvedEnd}.`);
+    }
+  }
+
+  const nights = readNumber(c, "nights", "duration_nights", "trip_duration_days");
+  if (nights != null) state.nights = nights;
+
+  const travelers = readNumber(c, "travelers", "party_size", "passengers", "guests", "num_people");
+  if (travelers != null) state.travelers = travelers;
+
+  const stars = readNumber(c, "hotel_star_rating", "stars", "min_stars", "star_rating_min");
+  if (stars != null) state.hotel_star_rating = stars;
+
+  const neighborhood = readString(c, "hotel_neighborhood", "neighborhood", "area");
+  if (neighborhood) state.hotel_neighborhood = neighborhood;
+
+  const vibeRaw = readString(c, "vibe", "tier", "budget_tier");
+  const vibe = normalizeVibe(vibeRaw);
+  if (vibe) state.vibe = vibe;
+
+  const budgetTotal = readNumber(c, "budget_total", "total_budget");
+  if (budgetTotal != null) state.budget_total = budgetTotal;
+
+  const activities = c.activities;
+  if (Array.isArray(activities)) {
+    state.activities = activities
+      .filter((a): a is string => typeof a === "string" && a.trim().length > 0)
+      .map((a) => a.trim());
+  }
+
+  const cuisines =
+    (Array.isArray(c.cuisine_preferences) && c.cuisine_preferences) ||
+    (Array.isArray(c.cuisines) && c.cuisines) ||
+    null;
+  if (cuisines) {
+    state.cuisine_preferences = cuisines
+      .filter((a): a is string => typeof a === "string" && a.trim().length > 0)
+      .map((a) => a.trim());
+  }
+
+  return state;
+}
+
+function normalizeVibe(raw: string | null): TripVibe | null {
+  if (!raw) return null;
+  const s = raw.toLowerCase();
+  if (s.includes("upscale") || s.includes("luxury") || s.includes("5-star") || s.includes("五星")) {
+    return "upscale";
+  }
+  if (s.includes("trendy") || s.includes("hip") || s.includes("cool") || s.includes("时髦")) {
+    return "trendy";
+  }
+  if (s.includes("local") || s.includes("authentic") || s.includes("neighborhood") || s.includes("本地")) {
+    return "local";
+  }
+  if (s.includes("mid") || s.includes("mixed") || s.includes("mid budget") || s.includes("中等")) {
+    return "mixed";
+  }
+  return null;
+}
+
+function buildTripSummary(state: TripIntentState): string {
+  const parts: string[] = ["Plan a trip"];
+  if (state.nights) parts.push(`${state.nights}-night`);
+  if (state.destination_city) parts.push(`to ${state.destination_city}`);
+  if (state.departure_city) parts.push(`from ${state.departure_city}`);
+  if (state.travelers) parts.push(`for ${state.travelers} ${state.travelers === 1 ? "person" : "people"}`);
+  if (state.start_date) parts.push(`starting ${state.start_date}`);
+  return parts.join(" ");
 }
 
 function buildPlanQueryFromConstraints(

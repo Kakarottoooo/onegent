@@ -39,11 +39,27 @@ function buildContactFields(p: EffectiveProfile): Record<string, string> {
 }
 
 /**
- * Flight passenger fields — contact info + travel documents.
- * Used for Expedia (and other OTA) flight checkout forms.
+ * Flight passenger fields — name + phone + travel documents only.
+ *
+ * Intentionally EXCLUDES:
+ *  - email   — Expedia uses the account email automatically, no field exists.
+ *              Including it made Stagehand overwrite First name with the
+ *              email string.
+ *  - country — Expedia's flight traveler form has a "Country/Territory Code"
+ *              dropdown that is the PHONE country code, not a passenger
+ *              citizenship field. Including "country" made Stagehand's AI
+ *              fill "United States" into that dropdown and autocomplete
+ *              landed on "American Samoa" (alphabetical hit).
+ *
+ * Other OTAs that DO show a traveler-level email / country field should add
+ * them back in a provider-specific override.
  */
 function buildFlightGuestFields(p: EffectiveProfile): Record<string, string> {
-  const fields = buildContactFields(p);
+  const fields: Record<string, string> = {};
+  if (p.first_name) fields["first name"]   = p.first_name;
+  if (p.last_name)  fields["last name"]    = p.last_name;
+  if (p.phone)      fields["phone number"] = p.phone;
+  // Travel documents (flight-specific)
   if (p.date_of_birth)          fields["date of birth"]           = p.date_of_birth;
   if (p.passport_number)        fields["passport number"]         = p.passport_number;
   if (p.passport_expiry)        fields["passport expiration date"] = p.passport_expiry;
@@ -116,9 +132,19 @@ export async function fillFieldsWithAI(
     try {
       // Phone number: be explicit about digits-only to prevent autocomplete/AI from appending
       // state codes or country suffixes (e.g., Expedia phone field showing "2235331053TN").
+      //
+      // For every other field, ALSO tell Stagehand to skip (do nothing) when no matching
+      // input is visible. Without this, Stagehand will fall back to filling the "closest
+      // text input" — which, e.g., put "gzw...@gmail.com" into Expedia's First name slot
+      // because Expedia's flight traveler form has no email field.
+      //
+      // EVERY instruction asks the AI to CLEAR the existing value first. Without that, a
+      // second pass on the same field (e.g. during re-fill after a form rerender) appends
+      // instead of replacing — we saw phone="2235331053" become "223533105322353" because
+      // Stagehand's default "type" action concatenates onto whatever's already in the field.
       const instruction = label === "phone number"
-        ? `Find the Phone number input field and type only these digits: "${value}". Do not add any letters, country codes, or suffixes.`
-        : `Fill the ${label} field with "${value}"`;
+        ? `Clear the Phone number input field completely, then type only these digits: "${value}". Do not add any letters, country codes, or suffixes. If no phone field is visible, do nothing.`
+        : `Find the "${label}" input field (its label, placeholder, or aria-label must clearly say "${label}"). Clear any existing value, then fill it with "${value}". If no such field is visible on the page, do not fill anything — it's fine to skip.`;
       await stagehand.act(instruction);
       filled.push(label);
       await sleep(350);

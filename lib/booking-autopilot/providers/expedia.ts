@@ -1571,8 +1571,58 @@ export async function bookExpediaFlightProgrammatic(
   }
   await new Promise(r => setTimeout(r, 800));
 
+  // ── Roundtrip detection + leg loop setup ────────────────────────────────
+  // Expedia URL pattern:
+  //   initial (roundtrip):  /Flights-Search?trip=roundtrip&leg1=…&leg2=…
+  //   outbound committed:   /Flights-Search?journeysContinuationId=…
+  //   final committed:      /Flights-Checkout?… (leaves flights-search)
+  // One-way skips the middle state. We detect roundtrip from the initial URL
+  // and run Steps 2–3 twice — once per leg — with target hints appropriate to
+  // each leg.
+  const isRoundtrip =
+    getUrl().toLowerCase().includes("trip=roundtrip") ||
+    /[?&]leg2=/i.test(getUrl());
+  const legsToSelect = isRoundtrip ? 2 : 1;
+  trace(`[flight-rpa] Trip type: ${isRoundtrip ? "roundtrip (2 legs)" : "one-way"}`);
+
+  // Leg-scoped target hints. On the return-selection page the incremental
+  // pricing (+$79 vs $440 outbound total) makes a direct price match useless,
+  // so for leg 1 we drop price/time/flight-number and let the scoring pick the
+  // cheapest select-button. We keep the airline preference — users usually
+  // want the same carrier for both legs.
+  let legTargetAirline = targetAirline;
+  let legTargetPrice = targetPrice;
+  let legTargetDepartureTime = targetDepartureTime;
+  let legTargetFlightNumber = targetFlightNumber;
+
+  for (let leg = 0; leg < legsToSelect; leg++) {
+    const isReturnLeg = leg === 1;
+    const legLabel = isReturnLeg ? "return" : "outbound";
+
+    if (isReturnLeg) {
+      legTargetPrice = undefined;
+      legTargetDepartureTime = undefined;
+      legTargetFlightNumber = undefined;
+
+      trace("[flight-rpa] Outbound committed — waiting for return-flight results to load...");
+      for (let i = 0; i < 20; i++) {
+        await new Promise(r => setTimeout(r, 1000));
+        const hasResults = await page.evaluate(() => {
+          const btns = Array.from(document.querySelectorAll<HTMLElement>('button'));
+          return btns.some(b => {
+            const label = (b.getAttribute("aria-label") ?? "").toLowerCase();
+            return label.includes("select") && label.includes("flight");
+          });
+        }).catch(() => false);
+        if (hasResults) break;
+      }
+      await new Promise(r => setTimeout(r, 800));
+    }
+
+    trace(`[flight-rpa] ── Leg ${leg + 1}/${legsToSelect} (${legLabel}) ──`);
+
   // ── Step 2: Find, scroll to, and click the target flight card ─────────────
-  trace(`[flight-rpa] Searching for flight: airline="${targetAirline}" price=$${targetPrice} time="${targetDepartureTime}" flightNo="${targetFlightNumber}"`);
+  trace(`[flight-rpa] Searching for flight: airline="${legTargetAirline}" price=$${legTargetPrice} time="${legTargetDepartureTime}" flightNo="${legTargetFlightNumber}"`);
   await safeScreenshot("01-search-results");
 
   const found = await page.evaluate(({ airline, price, time, flightNumber }: { airline?: string; price?: number; time?: string; flightNumber?: string }) => {
@@ -1686,14 +1736,14 @@ export async function bookExpediaFlightProgrammatic(
       inViewportBefore,
       samples: scoredButtons.slice(0, 4).map(c => c.label),
     };
-  }, { airline: targetAirline, price: targetPrice, time: targetDepartureTime, flightNumber: targetFlightNumber });
+  }, { airline: legTargetAirline, price: legTargetPrice, time: legTargetDepartureTime, flightNumber: legTargetFlightNumber });
 
   if (!found.found) {
     if (Array.isArray((found as { samples?: string[] }).samples) && (found as { samples?: string[] }).samples!.length > 0) {
       trace(`[flight-rpa] Visible select-button samples: ${(found as { samples: string[] }).samples.join(" | ")}`);
     }
-    trace(`[flight-rpa] No matching flight button found (tried airline="${targetAirline}" price=$${targetPrice})`);
-    return { reached_checkout: false, currentUrl: getUrl(), error: "Could not find the target flight on the search results page. The flight may no longer be available." };
+    trace(`[flight-rpa] No matching flight button found (tried airline="${legTargetAirline}" price=$${legTargetPrice})`);
+    return { reached_checkout: false, currentUrl: getUrl(), error: `Could not find the ${legLabel} flight on the search results page. The flight may no longer be available.` };
   }
   trace(`[flight-rpa] Flight match: "${found.label}" candidates=${found.candidates} inViewportBefore=${found.inViewportBefore} → scrolled, clicking@(${Math.round(found.x)},${Math.round(found.y)})`);
 
@@ -1834,8 +1884,13 @@ export async function bookExpediaFlightProgrammatic(
             container = container.parentElement;
           }
           const ariaLabel = btn.getAttribute("aria-label") ?? "";
-          const ariaMatch = ariaLabel.match(/\$(\d{2,4})\b/);
-          const ariaPrice = ariaMatch ? parseInt(ariaMatch[1], 10) : Infinity;
+          // Handle both "$879" (no commas) and "$1,038" (thousands separator).
+          // Old regex /\$(\d{2,4})\b/ failed on $1,038 because \d only matched
+          // "1" before the comma breaks the digit run, then the 2-4 minimum
+          // wasn't satisfied. Now we match a digit group with optional
+          // thousands commas, then strip commas before parseInt.
+          const ariaMatch = ariaLabel.match(/\$(\d{1,3}(?:,\d{3})+|\d+)/);
+          const ariaPrice = ariaMatch ? parseInt(ariaMatch[1].replace(/,/g, ""), 10) : Infinity;
           const effectivePrice = Number.isFinite(ariaPrice) ? ariaPrice : price;
           return { btn, price, ariaPrice, effectivePrice };
         });
@@ -1883,7 +1938,7 @@ export async function bookExpediaFlightProgrammatic(
           chosenPrice: withPrices[0]?.effectivePrice ?? -1,
           modalRect: `${Math.round(modalRect.x)},${Math.round(modalRect.y)} ${Math.round(modalRect.width)}x${Math.round(modalRect.height)}`,
         };
-      }, targetPrice).catch((err: Error) => ({
+      }, legTargetPrice).catch((err: Error) => ({
         x: 0, y: 0, reason: `err: ${err.message?.slice(0, 80)}`, elAtPoint: "", elText: "", ancestorBtnText: "",
         pricesFound: [] as number[], ariaPricesFound: [] as number[], chosenPrice: -1, modalRect: "",
       }));
@@ -1896,7 +1951,15 @@ export async function bookExpediaFlightProgrammatic(
 
       const chosenPrice = preClick.chosenPrice ?? 0;
       const initialUrl = getUrl();
-      const selector = `button[data-stid="select-button"][aria-label*="for $${chosenPrice}"]`;
+      // Format the price the same way Expedia writes it in aria-label. For
+      // prices >= 1,000 the aria-label uses a thousands separator ("for $1,038"),
+      // so a substring match on "for $1038" would miss. Render the number with
+      // commas when it's 4+ digits so the selector matches both outbound
+      // single-leg totals and roundtrip combined totals on the return modal.
+      const chosenPriceFormatted = chosenPrice >= 1000
+        ? chosenPrice.toLocaleString("en-US")
+        : String(chosenPrice);
+      const selector = `button[data-stid="select-button"][aria-label*="for $${chosenPriceFormatted}"]`;
 
       const resolvePlayablePage = (): (Page & {
         mouse?: {
@@ -2056,13 +2119,21 @@ export async function bookExpediaFlightProgrammatic(
         `stagehandClick=${typeof (page as unknown as { click?: unknown }).click === "function"}`
       );
 
-      // Helper: commit detection — URL leaves Flights-Search OR a Review/Continue CTA appears
+      // Helper: commit detection — URL leaves Flights-Search, OR gains
+      // journeysContinuationId (= outbound just committed on a roundtrip),
+      // OR a Review/Continue CTA appears, OR the bundle popup fires.
       const checkCommitted = async (): Promise<{ committed: boolean; url: string; reason: string }> => {
         const url = getUrl();
+        const urlLc = url.toLowerCase();
+        const initialLc = initialUrl.toLowerCase();
+        const leftFlightsSearch = !urlLc.includes("flights-search");
+        const gainedContinuationId =
+          urlLc.includes("journeyscontinuationid") &&
+          !initialLc.includes("journeyscontinuationid");
         const urlChanged =
           !!initialUrl &&
-          url.toLowerCase() !== initialUrl.toLowerCase() &&
-          !url.toLowerCase().includes("flights-search");
+          urlLc !== initialLc &&
+          (leftFlightsSearch || gainedContinuationId);
         const ctaVisible = await page.evaluate(() => {
           const btns = Array.from(document.querySelectorAll<HTMLElement>('button, a, [role="button"]'))
             .filter(b => { const r = b.getBoundingClientRect(); return r.width > 0 && r.height > 0; });
@@ -2119,7 +2190,7 @@ export async function bookExpediaFlightProgrammatic(
           target.scrollIntoView({ block: "center", behavior: "instant" as ScrollBehavior });
           const r = target.getBoundingClientRect();
           return { found: true, x: r.x + r.width / 2, y: r.y + r.height / 2 };
-        }, { airline: (targetAirline ?? "").toLowerCase() })
+        }, { airline: (legTargetAirline ?? "").toLowerCase() })
           .catch(() => ({ found: false, x: 0, y: 0 }));
         if (!reopen.found) return false;
         await new Promise(r => setTimeout(r, 400));
@@ -2151,8 +2222,10 @@ export async function bookExpediaFlightProgrammatic(
               container = container.parentElement;
             }
             const ariaLabel = btn.getAttribute("aria-label") ?? "";
-            const ariaMatch = ariaLabel.match(/\$(\d{2,4})\b/);
-            const ariaPrice = ariaMatch ? parseInt(ariaMatch[1], 10) : Infinity;
+            // Same comma-aware regex as the pre-click pass above — must handle
+            // "$1,038" on the return-fare modal, not only "$879" outbound totals.
+            const ariaMatch = ariaLabel.match(/\$(\d{1,3}(?:,\d{3})+|\d+)/);
+            const ariaPrice = ariaMatch ? parseInt(ariaMatch[1].replace(/,/g, ""), 10) : Infinity;
             const effectivePrice = Number.isFinite(ariaPrice) ? ariaPrice : price;
             return { btn, price, ariaPrice, effectivePrice };
           }).sort((a, b) => {
@@ -2172,7 +2245,7 @@ export async function bookExpediaFlightProgrammatic(
           target.scrollIntoView({ block: "center", behavior: "instant" as ScrollBehavior });
           const r = target.getBoundingClientRect();
           return { x: r.x + r.width / 2, y: r.y + r.height / 2, price: withPrices[0]?.effectivePrice ?? 0 };
-        }, targetPrice).catch(() => ({ x: 0, y: 0, price: 0 }));
+        }, legTargetPrice).catch(() => ({ x: 0, y: 0, price: 0 }));
       };
 
       let commitResult: { committed: boolean; url: string; reason: string } =
@@ -2314,8 +2387,10 @@ export async function bookExpediaFlightProgrammatic(
       }
     }
   } else {
-    trace("[flight-rpa] Fare modal not detected — continuing");
+    trace(`[flight-rpa] Fare modal not detected for ${legLabel} leg — continuing`);
   }
+
+  } // end of for-leg loop — both outbound and (optional) return committed
 
   // ── Step 4: Dismiss Bundle & Save popup ────────────────────────────────────
   // The real bundle popup contains "Car rental dates" or "Explore packages" button.

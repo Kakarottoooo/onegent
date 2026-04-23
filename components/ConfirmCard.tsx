@@ -12,8 +12,9 @@
 
 import { useState } from "react";
 import type { ConversationalNLUResult } from "@/lib/conversational-nlu";
+import type { TripIntentState } from "@/lib/agent/trip-intent-state";
 
-export type ConfirmCardKind = "room" | "plan";
+export type ConfirmCardKind = "room" | "plan" | "trip";
 
 export interface ConfirmCardProps {
   kind: ConfirmCardKind;
@@ -28,7 +29,10 @@ export interface ConfirmCardProps {
 
 export interface CommitResponse {
   ok: boolean;
-  kind: ConfirmCardKind;
+  /** "trip_clarify" surfaced only when the backend defensively rejects an
+   *  incomplete trip commit; the chat handler treats it as a missing-field
+   *  error and nudges the user back into the conversation. */
+  kind: ConfirmCardKind | "trip_clarify";
   id?: string;
   short_code?: string | null;
   url?: string;
@@ -37,6 +41,11 @@ export interface CommitResponse {
   scenario?: string;
   search_query?: string;
   constraints?: Record<string, unknown>;
+  // Trip handoff fields:
+  trip_state?: TripIntentState;
+  // Trip clarify fields:
+  missing_fields?: string[];
+  message?: string;
   error?: string;
 }
 
@@ -154,7 +163,7 @@ export default function ConfirmCard(props: ConfirmCardProps) {
     <div style={CARD_STYLE}>
       <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
         <span style={PILL}>
-          {props.kind === "room" ? "Decision Room" : "Plan"}
+          {props.kind === "room" ? "Decision Room" : props.kind === "trip" ? "Trip package" : "Plan"}
           {scenario ? ` · ${SCENARIO_EMOJI[scenario] ?? ""} ${scenario}`.trimEnd() : ""}
         </span>
         {memberNames.length > 0 ? (
@@ -208,7 +217,9 @@ export default function ConfirmCard(props: ConfirmCardProps) {
             ? "Working..."
             : props.kind === "room"
               ? "Confirm & create Room"
-              : "Confirm & run search"}
+              : props.kind === "trip"
+                ? "Package my trip"
+                : "Confirm & run search"}
         </button>
         <button type="button" onClick={props.onEdit} style={GHOST_BTN}>
           Edit
