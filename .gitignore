@@ -60,3 +60,4 @@ next-env.d.ts
 .debug-screenshots/
 .ralph-src/
 .ship/
+.claude/skills/gstack/
