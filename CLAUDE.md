@@ -13,54 +13,6 @@ Always respond in Chinese. Never respond in Korean.
 
 ---
 
-## Git 提交 & 推送规则
-
-每完成一个任务（或评估为"已验证成功、有价值"的阶段性成果）后，**直接 commit 并 push 到 GitHub**，不用每次等用户发"commit"/"push"。
-
-### 什么时候直接 push
-- 用户和你讨论过、对齐过的 task 做完了
-- 代码通过 typecheck / 相关测试
-- 改动闭环（不会留半成品，不需要用户再回一句话才能收尾）
-- 文档 / 计划文档更新完
-
-### 什么时候先问一下
-- 小改动但不确定是否值得单独一个 commit（可以先问"要不要合并到下一个 commit"）
-- 涉及破坏性操作（force push、reset、删分支等 —— 按总体 Claude Code 规则本来就要问）
-- 改了 CI / 依赖 / 环境变量这种会影响别人的文件
-
-### 标准流程
-1. `git status` + `git diff --stat` 看范围
-2. `git add <具体文件>`（不用 `-A`）
-3. `git commit` 用 HEREDOC 写清楚"为什么改"（不是"改了什么"）
-4. `git push`
-5. 在回复里报 commit hash 和一句话总结
-
----
-
-## 日志 / Terminal 输出读取规则
-
-用户在讨论 dev server、autopilot job、API 报错时，**不要让用户手动复制粘贴日志**。按以下优先级自己拿：
-
-1. **HTTP 端点** — 运行中的服务，直接 curl
-   - `curl http://localhost:3000/api/xxx`（看 API 响应）
-   - `curl -I http://localhost:3000`（看 server 是否活着）
-
-2. **日志文件** — 用 Read / Grep
-   - `./dev.log`（约定的 dev server 日志落盘路径）
-   - `.next/**`、`logs/**`、项目里任何 `*.log`
-
-3. **run_in_background 启动的进程** — 用 BashOutput 读 stdout
-
-4. **用户自己在跑 `npm run dev`** —— 提醒用户一次性改成：
-   ```bash
-   npm run dev 2>&1 | tee ./dev.log
-   ```
-   之后自己 `tail -100 ./dev.log` 就行。`dev.log` 已加进 `.gitignore`。
-
-**原则：** 用户说"dev server 500 了"或"job 跑不通"时，自己先 curl / 读文件 / tail 日志，拿到证据再讨论根因。不要反手要用户贴日志。
-
----
-
 ## Dev Server 重启提示规则
 
 每次改完代码后，必须主动判断改动是否需要用户重启 `npm run dev`。**只要需要重启，就必须在回复里明确告诉用户"此改动需要重启 dev server"并说明原因**，不要让用户自己猜。
