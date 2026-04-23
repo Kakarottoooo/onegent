@@ -17,6 +17,7 @@ import {
   buildFallbackResult,
   type ConversationalNLUInput,
 } from "@/lib/conversational-nlu";
+import { analyzeConversationalV2 } from "@/lib/agent/nlu-v2";
 import type { ChatMessage, LayerModel, Provider } from "@/lib/llm-client";
 
 export const maxDuration = 30;
@@ -86,18 +87,60 @@ export async function POST(req: NextRequest) {
     userModel: parseUserModel(b.userModel),
   };
 
+  // ── NLU v2 pilot (Plan C · Phase A) ──────────────────────────────────
+  // Flag: NLU_V2_ENABLED_FOR_TRIP=true in .env.local routes trip scenarios
+  // through the new three-layer pipeline (extractor → router → chat).
+  // Non-trip scenarios always stay on v1. Opt-in per-request via body
+  // `use_v2: true` for testing without touching env vars.
+  const v2EnabledEnv = process.env.NLU_V2_ENABLED_FOR_TRIP === "true";
+  const v2OptIn = b.use_v2 === true;
+  const shouldTryV2 = v2EnabledEnv || v2OptIn;
+
   try {
-    const result = await analyzeConversational(input);
+    // Always run v1 first — cheap, reliable classifier + handles non-trip
+    // scenarios where v2 isn't in scope yet.
+    const v1Result = await analyzeConversational(input);
+
+    // If v1 detected trip AND v2 is enabled, re-run with v2 and return its
+    // richer output. v2 is stateless on this pilot (re-parses full history
+    // every turn); state persistence comes in Phase B when we wire up the
+    // history-serialized prev_state carrier.
+    if (shouldTryV2 && v1Result.scenario === "trip") {
+      try {
+        const v2Result = await analyzeConversationalV2({
+          message,
+          history: input.history,
+        });
+        console.log(
+          `[chat/parse] v2 trip pipeline succeeded — intent=${v2Result.intent} confirm_ready=${v2Result.confirm_ready}`,
+        );
+        return NextResponse.json({
+          ok: true,
+          result: v2Result,
+          user_id: userId ?? null,
+          nlu_version: "v2",
+        });
+      } catch (v2Err) {
+        console.warn(
+          "[chat/parse] v2 pipeline failed, falling back to v1:",
+          v2Err instanceof Error ? v2Err.message : v2Err,
+        );
+        // Fall through to v1
+      }
+    }
+
     return NextResponse.json({
       ok: true,
-      result,
+      result: v1Result,
       user_id: userId ?? null,
+      nlu_version: "v1",
     });
   } catch {
     return NextResponse.json({
       ok: true,
       result: buildFallbackResult(message),
       user_id: userId ?? null,
+      nlu_version: "v1-fallback",
     });
   }
 }
