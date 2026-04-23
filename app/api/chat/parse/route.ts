@@ -12,7 +12,7 @@
  * locks up.
  */
 
-import { NextRequest, NextResponse } from "next/server";
+import { NextRequest, NextResponse, after } from "next/server";
 import { auth } from "@clerk/nextjs/server";
 import {
   analyzeConversationalV2,
@@ -23,6 +23,7 @@ import {
   upsertMemberIntentState,
   insertPrivateMessage,
 } from "@/lib/db";
+import { triggerSynthesis } from "@/lib/agent/trip-synthesis";
 import type { ChatMessage } from "@/lib/llm-client";
 
 export const maxDuration = 30;
@@ -88,6 +89,20 @@ export async function POST(req: NextRequest) {
     // is logged and swallowed so the chat reply still surfaces.
     if (roomId && userId) {
       await syncRoomContext(roomId, userId, message, result);
+      // Auto-trigger synthesis in the background via Next.js `after()` so
+      // the chat response returns immediately. triggerSynthesis gates on
+      // room.synthesis_json === null (one-time lock) + all members have
+      // contributed. If that gate fails it no-ops cheaply.
+      after(async () => {
+        try {
+          const outcome = await triggerSynthesis(roomId);
+          if (outcome.triggered) {
+            console.log(`[chat/parse] synthesis trigger result: ${outcome.reason} for room=${roomId}`);
+          }
+        } catch (err) {
+          console.warn("[chat/parse] background synthesis failed:", err);
+        }
+      });
     }
 
     return NextResponse.json({

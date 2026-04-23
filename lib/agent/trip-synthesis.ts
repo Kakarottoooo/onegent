@@ -23,6 +23,8 @@ import {
   getDecisionRoomById,
   listRoomMembers,
   updateDecisionRoomSynthesis,
+  updateDecisionRoomStatus,
+  appendRoomMessage,
 } from "@/lib/db";
 import {
   type TripIntentState,
@@ -276,4 +278,103 @@ export function buildPublicSummary(result: SynthesisResult): string {
   if (m.cuisine_preferences.length > 0) extras.push(`喜欢 ${m.cuisine_preferences.slice(0, 3).join("、")}`);
   const extraLine = extras.length > 0 ? `\n偏好：${extras.join("；")}` : "";
   return `已综合所有人偏好：${parts.join(" · ")}${extraLine}\n方案已出，请投票。`;
+}
+
+// ─── Trigger dispatcher ───────────────────────────────────────────────────
+// Single entry point for both the auto-trigger (fired inline from each chat
+// turn via Next.js `after()`) and the manual re-run endpoint.
+
+export type TriggerReason =
+  | "already_synthesized"   // synthesis_json is non-null and not force re-run
+  | "wrong_type"            // not a trip+chat room
+  | "wrong_status"          // room.status past collecting; caller wants force
+  | "no_joined_members"
+  | "waiting_for_members"   // at least one joined member hasn't contributed yet
+  | "no_room"
+  | SynthesisStatus;        // "ok" | "empty" | "incomplete" | "no_room"
+
+export interface TriggerOutcome {
+  triggered: boolean;
+  reason: TriggerReason;
+  result: SynthesisResult | null;
+}
+
+export interface TriggerOptions {
+  /** Force re-run even when synthesis_json is already populated. Used by the
+   *  manual /api/rooms/[id]/synthesize endpoint. */
+  force?: boolean;
+}
+
+/**
+ * Decide whether to synthesize + actually run it + post public-channel
+ * message + transition room status. Safe to call concurrently — worst case
+ * is two calls both succeed and the last write wins (deterministic content).
+ *
+ * Contract (one-time lock + manual re-run):
+ *   - If `synthesis_json` already set and `force=false` → no-op.
+ *   - Only triggers when ALL joined members have at least one intent_state
+ *     entry (contribution check). No 30s debounce — natural pacing from
+ *     the chat stream is enough.
+ *   - On status="ok":
+ *       1. synthesis_json stored (inside synthesizeTripForRoom)
+ *       2. Public summary message appended to decision_room_messages
+ *       3. Room status transitioned "collecting" → "approving"
+ */
+export async function triggerSynthesis(
+  roomId: string,
+  opts: TriggerOptions = {},
+): Promise<TriggerOutcome> {
+  const room = await getDecisionRoomById(roomId);
+  if (!room) return { triggered: false, reason: "no_room", result: null };
+  if (room.type !== "trip" || room.flow !== "chat") {
+    return { triggered: false, reason: "wrong_type", result: null };
+  }
+
+  if (!opts.force) {
+    if (room.synthesis_json !== null) {
+      return { triggered: false, reason: "already_synthesized", result: null };
+    }
+    if (room.status !== "collecting") {
+      return { triggered: false, reason: "wrong_status", result: null };
+    }
+
+    // All-contributed gate: every joined member must have at least one
+    // intent_state row. No debounce — "waiting_for_members" keeps retrying
+    // each chat turn until the last straggler chats.
+    const [members, intentRows] = await Promise.all([
+      listRoomMembers(roomId),
+      listMemberIntentStates(roomId),
+    ]);
+    const joined = members.filter((m) => m.status === "joined");
+    if (joined.length === 0) {
+      return { triggered: false, reason: "no_joined_members", result: null };
+    }
+    const contributorIds = new Set(intentRows.map((r) => r.user_id));
+    const allContributed = joined.every((m) => contributorIds.has(m.user_id));
+    if (!allContributed) {
+      return { triggered: false, reason: "waiting_for_members", result: null };
+    }
+  }
+
+  const result = await synthesizeTripForRoom(roomId);
+
+  if (result.status === "ok") {
+    try {
+      await appendRoomMessage({
+        roomId,
+        senderId: null,
+        content: buildPublicSummary(result),
+        metaJson: { kind: "trip_synthesis" },
+      });
+    } catch (err) {
+      console.warn("[trip-synthesis] appendRoomMessage failed", err);
+    }
+    try {
+      await updateDecisionRoomStatus(roomId, "approving");
+    } catch (err) {
+      console.warn("[trip-synthesis] updateDecisionRoomStatus failed", err);
+    }
+  }
+
+  return { triggered: true, reason: result.status, result };
 }
