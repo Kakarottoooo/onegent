@@ -8,7 +8,7 @@ NLU 架构重构计划 · Plan C · v1.0 · 2026-04-23
 **阅读指南**
 - 想 30 秒搞懂要做什么：读 "一、Vision" + "三、目标架构"
 - 想知道为什么这样切：读 "二、现状诊断" + "四、为什么选 Plan C"
-- 想开工：读 "六、任务列表" + "七、数据契约"
+- 想开工：读 "六、任务列表" + "七、数据契约" + "八、用户自选模型"
 - 本计划配合 `PROJECT_SUMMARY.md`（三段式骨架章节）和 `CLAUDE.md` 使用
 
 **状态**
@@ -106,6 +106,14 @@ NLU 架构重构计划 · Plan C · v1.0 · 2026-04-23
 三、目标架构 · 代码实现细节
 ================================================================
 
+### 模型选型总原则
+
+**两层都默认 `openai/gpt-4o-mini`**——同一个 provider、同一个 key、
+一致的调用方式。Claude Sonnet 4.6 作为**可选升级/备份**，不默认启用。
+
+未来用户可以在 `Account → Models` 页面按 layer 覆盖默认（复用已有的
+`AgentModelConfig` 基础设施，见 "八、用户自选模型" 章节）。
+
 ### Layer 1 — 对话模型（聊天）
 
 **文件**：`lib/agent/nlu-v2/chat.ts`
@@ -115,11 +123,14 @@ export async function chatTurn(params: {
   history: Turn[];          // 完整对话历史（user + assistant）
   new_user_message: string; // 本轮用户消息
   state_summary: string;    // 人类可读的当前已知信息（由 Layer 2 生成）
+  modelOverride?: LayerModel; // 用户在 Account 页设置的自定义模型
 }): Promise<{ reply: string }>
 ```
 
-- 模型：**Claude Sonnet 4.6**（或 gpt-4o 都行，用户体验优先）
-- System prompt ≤ 50 行：只讲"你是 Onegent 的旅行助手，帮用户聊 trip"，
+- **默认模型**：`openai/gpt-4o-mini`
+- **可升级到**：`anthropic/claude-sonnet-4-6`（用户在 Account 页选、
+  或服务端感知到对话质量不够时 A/B 测试）
+- System prompt ≤ 50 行：只讲"你是 Onegent 的旅行助手"，
   **不教识别场景、不教必填字段、不教 JSON 格式**
 - Prompt 里注入 `state_summary`（Layer 2 产出的人类可读摘要），
   比如 "User wants NY trip, 3 nights, from SFO, 2 people. Still needs: dates."
@@ -132,12 +143,15 @@ export async function chatTurn(params: {
 export async function extractState(params: {
   prev_state: IntentState | null;
   new_user_message: string;
-  new_assistant_reply: string; // Layer 1 的回复
+  new_assistant_reply: string;    // Layer 1 的回复
+  modelOverride?: LayerModel;     // 用户覆盖
 }): Promise<IntentState>
 ```
 
-- 模型：**gpt-4o-mini**（便宜、JSON mode 原生支持）
-- 用 OpenAI JSON mode 强制结构化输出：`response_format: { type: "json_schema", schema: ... }`
+- **默认模型**：`openai/gpt-4o-mini`（JSON mode 原生支持、便宜、快）
+- **可升级到**：`anthropic/claude-haiku-4-5`（成本可对比，latency 可能略低）
+- 用 OpenAI JSON mode 强制结构化：`response_format: { type: "json_schema", schema: ... }`
+- 切到 Anthropic 时用 `tool_use` 包装等效的 schema-forced output
 - System prompt：20 行，单一职责 "merge 旧 state 和新对话，输出 new state"
 - **幂等**：同样输入输出相同，易测
 
@@ -360,7 +374,75 @@ type RouterAction =
 只要 `/api/chat/parse` 返回的 shape 对齐就行。
 
 ================================================================
-八、风险 + 缓解
+八、用户自选模型 · 复用现有 AgentModelConfig 基础设施
+================================================================
+
+好消息：前端已经有 `lib/agent-model-config.ts` + `Account → Models`
+UI 骨架，支持按 layer 存用户自选模型到 `localStorage["agent_model_config"]`。
+NLU v2 直接复用即可，不用重新造轮子。
+
+【现有数据结构】
+
+```typescript
+interface AgentModelConfig {
+  conversational?: LayerModel;  // ← NLU v2 Layer 1 读这个
+  browser?: LayerModel;         // Stagehand 在用
+  reasoning?: LayerModel;        // ← NLU v2 Layer 2 读这个
+  ranking?: LayerModel;          // 餐厅/酒店排序器（已用 gpt-4o-mini）
+}
+
+interface LayerModel {
+  provider: "minimax" | "openai" | "anthropic" | "google";
+  model: string;          // e.g. "gpt-4o-mini" / "claude-sonnet-4-6"
+  apiKey?: string;         // 用户自己的 key，省下服务端额度
+}
+```
+
+【v2 的 resolve 顺序】
+
+```typescript
+function resolveModel(layer: "conversational" | "reasoning"): LayerModel {
+  const userConfig = loadAgentModelConfig()[layer];
+  if (userConfig) return userConfig;                         // 1. 用户覆盖
+  return { provider: "openai", model: "gpt-4o-mini" };       // 2. 默认
+}
+```
+
+Layer 1 / Layer 2 都走这个 resolver。用户没配 → gpt-4o-mini；配了 → 用他们选的。
+
+【常见用户配置示例】
+
+| 用户类型 | Layer 1 选择 | Layer 2 选择 | 成本变化 |
+|---------|-------------|-------------|---------|
+| 默认（大多数） | openai/gpt-4o-mini | openai/gpt-4o-mini | 最低 |
+| 要更自然对话 | anthropic/claude-sonnet-4-6 | openai/gpt-4o-mini | 对话 +10x，提取不变 |
+| 要完全自主（Anthropic 生态）| anthropic/claude-sonnet-4-6 | anthropic/claude-haiku-4-5 | +3-10x |
+| 用自己的 key 省公司额度 | openai/gpt-4o-mini + 自己的 key | 同上 | 用户自掏腰包，对我们免费 |
+
+【SDK 抽象】
+
+为了支持多 provider，我们需要一个薄 SDK 层 `lib/llm-client.ts`（已存在骨架但没实现）。
+Phase A 先只实现 OpenAI，其他 provider 在 Phase B 之后补。
+
+```typescript
+// lib/llm-client.ts
+export async function chatCompletion(params: {
+  layer: LayerModel;              // provider + model 信息
+  system?: string;
+  messages: Message[];
+  max_tokens?: number;
+  timeout_ms?: number;
+  response_format?: "json_object" | "text";
+}): Promise<{ text: string }>
+```
+
+内部按 provider 分发：
+- `openai` → `lib/openai.ts` 的 `openaiChat`（已有）
+- `anthropic` → 用 `@anthropic-ai/sdk`（package.json 已装）
+- `minimax` / `google` → Phase D 之后再加（现在不急）
+
+================================================================
+九、风险 + 缓解
 ================================================================
 
 R1. **Layer 2 提取偏差**（幻觉 / 漏字段 / 填错字段）
@@ -383,20 +465,34 @@ R5. **Stage 2 DR 多成员状态合并复杂度**
     放到 Stage 2 计划中。
 
 ================================================================
-九、决策记录（ADR 精华）
+十、决策记录（ADR 精华）
 ================================================================
 
-ADR-C1. Layer 2 用 OpenAI gpt-4o-mini 不用 Claude Haiku
+ADR-C1. Layer 1 和 Layer 2 都默认 OpenAI gpt-4o-mini
   日期：2026-04-23
-  决策：用 gpt-4o-mini
-  理由：已经付费（Stagehand 在用），JSON mode 原生支持，便宜快。
-  Haiku 也可以，但要加 anthropic-ai/sdk 依赖。可以 Phase C 后实测两者切换。
+  决策：两层都用 gpt-4o-mini 作默认
+  理由：
+  - 同 provider、同 key、同 SDK（用 fetch 直连，无新依赖，已有 lib/openai.ts）
+  - JSON mode 原生支持（Layer 2 严格 schema 验证需要它）
+  - 对话自然度 gpt-4o-mini 对一个"帮用户收集旅行信息"的场景够用
+  - 最便宜：两层加起来每轮 ~$0.0002
+  - 切到 Claude Sonnet 4.6 会涨 10x 成本，收益要看 A/B 数据决定
+  Claude Sonnet 4.6 + Haiku 4.5 保留作备份模型，见下面 ADR-C2。
 
-ADR-C2. Layer 1 用 Claude Sonnet 4.6
+ADR-C2. Claude Sonnet/Haiku 作为 optional upgrade，不默认启用
   日期：2026-04-23
-  决策：先用 Sonnet
-  理由：对话自然度 Sonnet 略胜 gpt-4o，且我们现在 Anthropic SDK 已装。
-  如果 Sonnet 成本高，迁到 gpt-4o-mini 也 work。
+  决策：anthropic 模型通过 `AgentModelConfig` 让用户自选
+  理由：
+  - 部分用户愿意为更自然的对话付费（或用他们自己的 Anthropic 额度）
+  - 服务端如果发现某些场景 gpt-4o-mini 效果差（比如中文长对话），
+    可以 A/B 服务端强制升级到 Sonnet
+  - 复用已存在的 `lib/agent-model-config.ts` 的 layered config 基础设施，
+    前端 Account 页已经有 UI 框架
+  预留的 Layer 映射：
+    `conversational` → Layer 1（聊天）
+    `reasoning` → Layer 2（状态提取）
+    `browser` → 已用于 Stagehand，不归 NLU 管
+    `ranking` → 保留给餐厅/酒店排序器用（现在已经是 gpt-4o-mini）
 
 ADR-C3. 不搞 full agentic tool-use（Plan B）
   日期：2026-04-23
@@ -417,7 +513,7 @@ ADR-C5. 老 NLU 迁移完后**删掉**，不保留作后备
   理由：保留双轨会滋生 drift。一刀切，出了问题回滚 git commit。
 
 ================================================================
-十、代码入口 + 迁移映射
+十一、代码入口 + 迁移映射
 ================================================================
 
 ### 新建（v2）
@@ -448,7 +544,7 @@ lib/agent/nlu-v2/
 - 相关测试文件（如果有）
 
 ================================================================
-十一、下一步 · 立即行动
+十二、下一步 · 立即行动
 ================================================================
 
 1. 本计划提交到 git（与 PROJECT_SUMMARY.md 同级）
