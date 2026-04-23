@@ -13,6 +13,30 @@ Always respond in Chinese. Never respond in Korean.
 
 ---
 
+## Git 提交 & 推送规则
+
+每完成一个任务（或评估为"已验证成功、有价值"的阶段性成果）后，**直接 commit 并 push 到 GitHub**，不用每次等用户发"commit"/"push"。
+
+### 什么时候直接 push
+- 用户和你讨论过、对齐过的 task 做完了
+- 代码通过 typecheck / 相关测试
+- 改动闭环（不会留半成品，不需要用户再回一句话才能收尾）
+- 文档 / 计划文档更新完
+
+### 什么时候先问一下
+- 小改动但不确定是否值得单独一个 commit（可以先问"要不要合并到下一个 commit"）
+- 涉及破坏性操作（force push、reset、删分支等 —— 按总体 Claude Code 规则本来就要问）
+- 改了 CI / 依赖 / 环境变量这种会影响别人的文件
+
+### 标准流程
+1. `git status` + `git diff --stat` 看范围
+2. `git add <具体文件>`（不用 `-A`）
+3. `git commit` 用 HEREDOC 写清楚"为什么改"（不是"改了什么"）
+4. `git push`
+5. 在回复里报 commit hash 和一句话总结
+
+---
+
 ## Dev Server 重启提示规则
 
 每次改完代码后，必须主动判断改动是否需要用户重启 `npm run dev`。**只要需要重启，就必须在回复里明确告诉用户"此改动需要重启 dev server"并说明原因**，不要让用户自己猜。
