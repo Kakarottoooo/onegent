@@ -341,8 +341,18 @@ async function runUniversalStep(
     const rCity = (resolvedBody.city as string | undefined) ?? "";
 
     if (rName && rDate && rTime) {
-      // Build OpenTable search URL: dateTime must be ISO format YYYY-MM-DDTHH:MM:00
-      const otUrl = `https://www.opentable.com/s?term=${encodeURIComponent(rName)}&covers=${rCovers}&dateTime=${rDate}T${rTime}:00`;
+      // Build OpenTable search URL: dateTime must be ISO format YYYY-MM-DDTHH:MM:00.
+      //
+      // Include the city in the `term` query so OpenTable's search isn't
+      // scoped to whatever metro the headless browser last saw (we
+      // consistently got Nashville results when searching for NY restaurants
+      // because Nashville is our DEFAULT_CITY, and OpenTable carries forward
+      // the most-recent-viewed metro via session cookie).
+      //
+      // `term=Restaurant+Name City+Name` reliably biases the match to the
+      // right metro while still matching the restaurant by name.
+      const termRaw = rCity ? `${rName} ${rCity}` : rName;
+      const otUrl = `https://www.opentable.com/s?term=${encodeURIComponent(termRaw)}&covers=${rCovers}&dateTime=${rDate}T${rTime}:00`;
       resolvedBody = { ...resolvedBody, startUrl: otUrl };
 
       if (!resolvedBody.task) {
@@ -839,11 +849,21 @@ async function runUniversalStep(
               }
 
               const allTriedBody = { ...body, platformsTried: [...platformsTried, "opentable", "resy"], officialWebsite, reservationUrl };
+              // If we found a proper reservation page (e.g. Resy for Eleven
+              // Madison Park, SevenRooms for Carbone), that's actually a
+              // "ready for you to book manually" state — not a failure. The
+              // restaurant just uses a non-OpenTable booking system. Reword
+              // so the user doesn't see "not found" when we did find their
+              // reservation page.
+              const foundReservationPage = reservationUrl !== officialWebsite;
+              const errorMessage = foundReservationPage
+                ? `"${rName}" books through their own system (not OpenTable or Resy). We found their reservation page — tap below to finish booking there.`
+                : `"${rName}" is not on OpenTable or Resy, and we couldn't locate a reservation widget on their website. Tap below to try booking on their homepage.`;
               return {
                 ...step,
                 body: allTriedBody,
                 status: "no_availability",
-                error: `"${rName}" is not on OpenTable or Resy. ${reservationUrl !== officialWebsite ? "Found their reservation page — tap to book directly." : "Visit their official website to book directly."}`,
+                error: errorMessage,
                 handoff_url: reservationUrl,
                 decisionLog: log,
               };

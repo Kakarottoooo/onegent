@@ -1,6 +1,6 @@
 import { HotelIntent, HotelRecommendationCard, ScoringDimensions } from "../../types";
 import { searchHotels } from "../../tools";
-import { minimaxChat } from "../../minimax";
+import { openaiChat } from "../../openai";
 import { computeWeightedScore, HOTEL_DEFAULT_WEIGHTS } from "../composer/scoring";
 
 // ─── Phase 7.2: Hotel Pipeline ───────────────────────────────────────────────
@@ -61,9 +61,14 @@ export async function runHotelPipeline(
 
   let text = "";
   const intentSnippet = JSON.stringify(intent).slice(0, 300);
-  console.log(`[runHotelPipeline] calling minimaxChat nights=${nights} intent=${intentSnippet}`);
+  console.log(`[runHotelPipeline] calling openaiChat nights=${nights} intent=${intentSnippet}`);
+  // Ranker switched from MiniMax to OpenAI gpt-4o-mini (same change we did for
+  // restaurant). MiniMax was chronic-timing-out at 30s on hotel's per-venue
+  // prompt under trip-package parallel load. gpt-4o-mini is ~3-5x faster and
+  // an order of magnitude more reliable. Fallback path (below) preserved for
+  // the rare case where OpenAI also fails.
   try {
-    text = await minimaxChat({
+    text = await openaiChat({
       system: systemPrompt,
       messages: [
         ...conversationHistory,
@@ -105,12 +110,12 @@ Return ONLY the JSON array.`,
         },
       ],
       max_tokens: 4096,
-      timeout_ms: 30000,
+      timeout_ms: 25_000,
     });
   } catch (err) {
-    // Loud + full stack so we can actually debug when MiniMax fails in prod.
+    // Loud + full stack so we can actually debug when the ranker fails in prod.
     console.error(
-      "[runHotelPipeline] minimaxChat threw — using SerpAPI data directly. err:",
+      "[runHotelPipeline] openaiChat threw — using SerpAPI data directly. err:",
       err instanceof Error ? `${err.name}: ${err.message}\n${err.stack}` : err,
     );
     // Fallback: build basic cards from SerpAPI data without AI scoring.
@@ -144,10 +149,10 @@ Return ONLY the JSON array.`,
     return { hotelRecommendations: fallbackCards, suggested_refinements: [] };
   }
 
-  console.log(`[runHotelPipeline] minimax response length=${text.length} snippet=${text.slice(0, 120).replace(/\n/g, " ")}`);
+  console.log(`[runHotelPipeline] openai response length=${text.length} snippet=${text.slice(0, 120).replace(/\n/g, " ")}`);
   const jsonMatch = text.match(/\[[\s\S]*\]/);
   if (!jsonMatch) {
-    console.warn("[runHotelPipeline] no JSON array in minimax response");
+    console.warn("[runHotelPipeline] no JSON array in openai response");
     return { hotelRecommendations: [], suggested_refinements: [] };
   }
 

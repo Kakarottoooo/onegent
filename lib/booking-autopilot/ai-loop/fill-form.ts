@@ -142,8 +142,19 @@ export async function fillFieldsWithAI(
       // second pass on the same field (e.g. during re-fill after a form rerender) appends
       // instead of replacing — we saw phone="2235331053" become "223533105322353" because
       // Stagehand's default "type" action concatenates onto whatever's already in the field.
+      // Date of birth: OTA forms split DoB into 3 separate Month/Day/Year
+      // dropdowns (Expedia flight) OR use a single date input (Booking.com
+      // hotel DoB where applicable). Tell the AI about both layouts so it
+      // doesn't fail Stagehand's schema when it can't decide which format.
+      // Value is stored as ISO "YYYY-MM-DD" in BookingProfile.
+      const [yyyy, mm, dd] = label === "date of birth"
+        ? value.split("-")
+        : ["", "", ""];
+
       const instruction = label === "phone number"
         ? `Clear the Phone number input field completely, then type only these digits: "${value}". Do not add any letters, country codes, or suffixes. If no phone field is visible, do nothing.`
+        : label === "date of birth" && yyyy && mm && dd
+        ? `Fill the traveler's date of birth. The form may be either (a) a single date input accepting "${value}" (YYYY-MM-DD), or (b) three separate dropdowns for Month (${mm}, which is month number ${parseInt(mm, 10)}), Day (${dd}), and Year (${yyyy}). Fill whichever layout the page shows. If no date-of-birth field is visible, do nothing — it's fine to skip.`
         : `Find the "${label}" input field (its label, placeholder, or aria-label must clearly say "${label}"). Clear any existing value, then fill it with "${value}". If no such field is visible on the page, do not fill anything — it's fine to skip.`;
       await stagehand.act(instruction);
       filled.push(label);
