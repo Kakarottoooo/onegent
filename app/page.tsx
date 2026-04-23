@@ -39,8 +39,10 @@ import GlobalNav from "@/components/GlobalNav";
 import {
   looksLikeRecommendationAsk,
   getFallbackQuickPicks,
-  type ConversationalNLUResult,
-  type QuickPick,
+} from "@/lib/quick-picks-fallback";
+import type {
+  ConversationalNLUResult,
+  QuickPick,
 } from "@/lib/conversational-nlu";
 import type { ChatMessage } from "@/lib/llm-client";
 import { loadAgentModelConfig } from "@/lib/agent-model-config";

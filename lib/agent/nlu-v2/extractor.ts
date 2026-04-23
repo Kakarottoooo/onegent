@@ -17,7 +17,7 @@
 
 import { openaiChat } from "../../openai";
 import { resolveDateHint } from "../trip-intent-state";
-import type { IntentState, NluIntent, NluScenario, PartyType } from "./types";
+import type { IntentState, NluIntent, NluScenario, PartyType, ProxyConstraints } from "./types";
 
 // Re-exported for callers (matches v1's ChatMessage shape).
 export interface Turn {
@@ -103,6 +103,10 @@ IntentState schema:
   "party_type": "solo" | "multi",
   "member_names": string[],             // other people mentioned by name
   "refined_target_id": string | null,
+  "proxy_member_constraints"?: { [member_name: string]: {
+    "cuisines_dislike"?: string[], "cuisines_like"?: string[], "dietary"?: string[],
+    "budget_max"?: number, "vibe"?: string, "notes"?: string
+  } },
 
   // ONLY populate the sub-object matching the "scenario" value (omit the others)
   "restaurant"?: { city?, date?, time?, party_size?, cuisine?, budget_per_person?, neighborhood?, vibe?, dietary?, notes? },
@@ -160,8 +164,36 @@ Output rules:
    emit "19:00". Leave blank if unmentioned.
 5. Scenario selection:
    - "trip" when the user wants MULTIPLE categories bundled (flight + hotel at minimum, optionally restaurants / activities). Cues: "plan a trip to X", "go to X for N days", "帮我安排X旅行".
-   - "restaurant" / "hotel" / "flight" / "activity" when the user wants a SINGLE category only.
-   - null when the category truly can't be inferred.
+   - "restaurant" / "hotel" / "flight" / "activity" when the user wants a SINGLE category — even if multiple people are co-deciding. "我和李明想吃日料" is scenario="restaurant", NOT "trip". The presence of a co-decider does NOT change the scenario.
+   - null ONLY when the category truly cannot be inferred (e.g. pure chitchat, pure greeting).
+
+WORKED EXAMPLES — use these to calibrate before answering:
+
+  A. 多方餐厅 (most common error source):
+     Input: "我和李明想周五晚上吃日料"
+     → scenario="restaurant", intent="create_room", party_type="multi", member_names=["李明"],
+       restaurant={ date="<this Friday's date>", cuisine="Japanese" }
+     WHY: 单一类别=restaurant; "我和李明想..."是显式co-decider信号→create_room; 日料=cuisine.
+
+  B. 多方活动 (relationship label, not a name):
+     Input: "和女朋友下周五看 Taylor Swift 演唱会，洛杉矶，前排"
+     → scenario="activity", intent="create_room", party_type="multi", member_names=[],
+       activity={ event_name="Taylor Swift", event_type="concert", city="Los Angeles",
+                  event_date="<next Friday>", num_tickets=2, seat_type="premium" }
+     WHY: "女朋友" is a relationship label, not a proper name → member_names stays [].
+
+  C. 单人决策订2人位 (NOT create_room):
+     Input: "Book a table for 2 on Friday"
+     → scenario="restaurant", intent="create_plan", party_type="solo",
+       restaurant={ date="<this Friday>", party_size=2 }
+     WHY: "for 2" = traveler count only, no co-decider signal → create_plan.
+
+  D. 多人旅行 (trip = multiple categories):
+     Input: "我和爸妈国庆从上海飞东京，住5晚，顺便逛一下"
+     → scenario="trip", intent="create_room", party_type="multi",
+       trip={ destination_city="Tokyo", departure_city="Shanghai", nights=5, travelers=3, ... }
+     WHY: flight + hotel + activities bundled together = trip scenario.
+
 6. Intent selection — read CAREFULLY, this is the most-abused slot:
    - "chitchat" for greetings / thanks / small talk with no booking verb.
    - "create_plan" = SOLO DECISION-MAKER. One user is arranging a booking,
@@ -189,6 +221,25 @@ Output rules:
      if only one user is deciding.
 8. Member_names: only non-creator people explicitly named as CO-DECIDERS
    (not "my wife" / "my family" — those are relationships not deciding members).
+8a. proxy_member_constraints — when the user reports a taste/budget preference
+    ON BEHALF OF a named member, capture it here keyed by that member's name:
+      {
+        "<member_name>": {
+          "cuisines_dislike"?: string[],  // "李明 不吃生鱼片" → ["no raw fish"]
+          "cuisines_like"?: string[],
+          "dietary"?: string[],            // vegetarian / vegan / gluten-free / etc.
+          "budget_max"?: number,           // "李明 每人预算 80" → 80
+          "vibe"?: string,
+          "notes"?: string                 // catch-all free-form ("李明 要靠窗")
+        }
+      }
+    Rules:
+      - Only populate for members ALSO listed in member_names.
+      - Do NOT use this for group-wide hints. If the user says "we both want
+        Japanese, budget $80 per person", store cuisine/budget at the scenario
+        level (restaurant.cuisine / restaurant.budget_per_person) — NOT here.
+      - Omit the field entirely when nothing is reported on a specific member's
+        behalf. Do NOT emit "proxy_member_constraints": {} or empty objects.
 9. For trip scenario, always include:
      activities: string[] (empty [] if none mentioned)
      cuisine_preferences: string[] (empty [] if none mentioned)
@@ -318,6 +369,12 @@ function coerceIntentState(raw: Record<string, unknown>, prev: IntentState | nul
     ? raw.planning_assumptions.filter((x): x is string => typeof x === "string")
     : prev?.planning_assumptions ?? [];
 
+  const proxy_member_constraints = coerceProxyMemberConstraints(
+    raw.proxy_member_constraints,
+    prev?.proxy_member_constraints,
+    member_names,
+  );
+
   const state: IntentState = {
     confidence: typeof raw.confidence === "number" ? clamp01(raw.confidence) : 0.5,
     turn_count: typeof raw.turn_count === "number" ? raw.turn_count : (prev?.turn_count ?? 0) + 1,
@@ -328,6 +385,7 @@ function coerceIntentState(raw: Record<string, unknown>, prev: IntentState | nul
     member_names,
     refined_target_id,
     planning_assumptions,
+    ...(proxy_member_constraints ? { proxy_member_constraints } : {}),
   };
 
   // Attach the scenario-specific sub-object. Run a pass that normalizes
@@ -345,6 +403,77 @@ function coerceIntentState(raw: Record<string, unknown>, prev: IntentState | nul
   }
 
   return state;
+}
+
+/**
+ * Coerce the raw `proxy_member_constraints` object from the extractor into
+ * a validated Record<string, ProxyConstraints>. Merges with previous state
+ * per-member (so turn 1's "李明 不吃生鱼片" survives turn 2's "张华吃素"
+ * — different keys add, same-person fields deep-merge with new values winning).
+ * Drops entries for members NOT in member_names (the prompt explicitly forbids
+ * this but LLMs drift — belt-and-suspenders).
+ */
+function coerceProxyMemberConstraints(
+  raw: unknown,
+  prev: IntentState["proxy_member_constraints"] | undefined,
+  memberNames: string[],
+): IntentState["proxy_member_constraints"] | undefined {
+  const fromRaw = parseProxyRecord(raw);
+  const merged: Record<string, ProxyConstraints> = { ...(prev ?? {}) };
+  for (const [name, next] of Object.entries(fromRaw)) {
+    const existing = merged[name] ?? {};
+    merged[name] = {
+      ...existing,
+      ...next,
+      // Array fields: concat + dedupe so "李明 不吃生鱼片" (turn 1) + "李明 also no shrimp" (turn 2) doesn't lose turn 1.
+      ...(mergeArray(existing.cuisines_dislike, next.cuisines_dislike) && {
+        cuisines_dislike: mergeArray(existing.cuisines_dislike, next.cuisines_dislike),
+      }),
+      ...(mergeArray(existing.cuisines_like, next.cuisines_like) && {
+        cuisines_like: mergeArray(existing.cuisines_like, next.cuisines_like),
+      }),
+      ...(mergeArray(existing.dietary, next.dietary) && {
+        dietary: mergeArray(existing.dietary, next.dietary),
+      }),
+    };
+  }
+  // Drop any entries whose names dropped out of member_names (model hallucinated).
+  const allowed = new Set(memberNames);
+  for (const name of Object.keys(merged)) {
+    if (!allowed.has(name)) delete merged[name];
+  }
+  return Object.keys(merged).length > 0 ? merged : undefined;
+}
+
+function parseProxyRecord(raw: unknown): Record<string, ProxyConstraints> {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return {};
+  const out: Record<string, ProxyConstraints> = {};
+  for (const [name, val] of Object.entries(raw as Record<string, unknown>)) {
+    if (!name.trim() || !val || typeof val !== "object" || Array.isArray(val)) continue;
+    const v = val as Record<string, unknown>;
+    const entry: ProxyConstraints = {};
+    const cd = strArrayOrUndef(v.cuisines_dislike);
+    if (cd) entry.cuisines_dislike = cd;
+    const cl = strArrayOrUndef(v.cuisines_like);
+    if (cl) entry.cuisines_like = cl;
+    const d = strArrayOrUndef(v.dietary);
+    if (d) entry.dietary = d;
+    const b = numOrUndef(v.budget_max);
+    if (b) entry.budget_max = b;
+    const vi = strOrUndef(v.vibe);
+    if (vi) entry.vibe = vi;
+    const n = strOrUndef(v.notes);
+    if (n) entry.notes = n;
+    if (Object.keys(entry).length > 0) out[name.trim()] = entry;
+  }
+  return out;
+}
+
+function mergeArray(a: string[] | undefined, b: string[] | undefined): string[] | undefined {
+  if (!a && !b) return undefined;
+  const combined = [...(a ?? []), ...(b ?? [])];
+  const deduped = Array.from(new Set(combined));
+  return deduped.length > 0 ? deduped : undefined;
 }
 
 function coerceRestaurant(

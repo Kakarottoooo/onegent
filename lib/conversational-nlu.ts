@@ -53,82 +53,10 @@ export interface ConversationalNLUResult {
   assistant_reply: string | null;
 }
 
-/**
- * Client-side fallback: detect "I don't know, you pick" phrases so the UI can
- * inject default quick_picks even when the LLM forgot to produce them.
- */
-const RECOMMEND_ASK_PATTERNS = [
-  /随便/,
-  /都行/,
-  /无所谓/,
-  /没偏好/,
-  /你(来)?决定/,
-  /你看着办/,
-  /你(帮我)?推荐/,
-  /推荐一下/,
-  /不知道/,
-  /帮我选/,
-  /surprise me/i,
-  /\brecommend\b/i,
-  /\bup to you\b/i,
-  /\bany(thing)?\b.*(ok|fine|works?)/i,
-];
-
-export function looksLikeRecommendationAsk(text: string): boolean {
-  if (!text) return false;
-  const trimmed = text.trim();
-  if (!trimmed) return false;
-  return RECOMMEND_ASK_PATTERNS.some((re) => re.test(trimmed));
-}
-
-/**
- * Hardcoded default quick_picks used as a UI-side safety net when the LLM
- * returned no quick_picks but the user clearly asked for a recommendation.
- * These mirror the options listed in rule 7(c) of the system prompt.
- */
-const FALLBACK_QUICK_PICKS: Record<ConversationalScenario, QuickPick[]> = {
-  activity: [
-    { label: "《汉密尔顿》", value: "Hamilton" },
-    { label: "《狮子王》", value: "The Lion King" },
-    { label: "《魔法坏女巫》", value: "Wicked" },
-    { label: "《芝加哥》", value: "Chicago" },
-    { label: "《歌剧魅影》", value: "The Phantom of the Opera" },
-  ],
-  hotel: [
-    { label: "Midtown", value: "Midtown" },
-    { label: "Upper East Side", value: "Upper East Side" },
-    { label: "SoHo", value: "SoHo" },
-    { label: "Financial District", value: "Financial District" },
-    { label: "Brooklyn Heights", value: "Brooklyn Heights" },
-  ],
-  flight: [
-    { label: "经济舱", value: "Economy" },
-    { label: "豪华经济", value: "Premium Economy" },
-    { label: "商务舱", value: "Business" },
-    { label: "头等舱", value: "First" },
-  ],
-  restaurant: [
-    { label: "日料", value: "Japanese" },
-    { label: "意大利菜", value: "Italian" },
-    { label: "中餐", value: "Chinese" },
-    { label: "墨西哥菜", value: "Mexican" },
-    { label: "泰餐", value: "Thai" },
-  ],
-  trip: [
-    { label: "纽约", value: "New York" },
-    { label: "东京", value: "Tokyo" },
-    { label: "巴黎", value: "Paris" },
-    { label: "洛杉矶", value: "Los Angeles" },
-  ],
-};
-
-export function getFallbackQuickPicks(
-  scenario: ConversationalScenario | null
-): QuickPick[] | null {
-  if (!scenario) return null;
-  const picks = FALLBACK_QUICK_PICKS[scenario];
-  return picks && picks.length > 0 ? picks : null;
-}
+// UI fallback quick-pick helpers moved to lib/quick-picks-fallback.ts in
+// Phase C so they survive the eventual removal of this whole file (Phase D).
+// Callers that need recommendation-ask detection or hardcoded quick picks
+// should import from @/lib/quick-picks-fallback.
 
 export interface ConversationalNLUInput {
   message: string;

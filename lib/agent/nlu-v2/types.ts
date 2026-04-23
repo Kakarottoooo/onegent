@@ -41,6 +41,24 @@ export interface QuickPick {
   value: string;
 }
 
+/**
+ * Per-member preference hints the user reported on behalf of a named
+ * co-decider. Example: "李明 doesn't eat raw fish, budget $80" →
+ * proxy_member_constraints: { "李明": { dietary: ["no raw fish"], budget_max: 80 } }
+ *
+ * The commit route reads this (via its existing sanitizeProxyMemberConstraints)
+ * to pre-seed the named member's row when they join the Decision Room.
+ * Kept shape-compatible with v1 — field name must stay as-is.
+ */
+export interface ProxyConstraints {
+  cuisines_dislike?: string[];
+  cuisines_like?: string[];
+  dietary?: string[];
+  budget_max?: number;
+  vibe?: string;
+  notes?: string;
+}
+
 // ─── Scenario-specific sub-states ─────────────────────────────────────────
 // Each scenario's fields live in an optional object on IntentState. Only
 // one of {restaurant, hotel, flight, activity, trip} should be populated
@@ -136,6 +154,11 @@ export interface IntentState {
   // Refinement — when intent === "refine_existing", points at the plan
   // being edited. Null for fresh conversations.
   refined_target_id: string | null;
+
+  // Per-member preference hints keyed by member display name. Populated when
+  // the user speaks on behalf of a named co-decider ("李明 doesn't eat
+  // seafood"). Consumed downstream to seed that member's Decision Room row.
+  proxy_member_constraints?: Record<string, ProxyConstraints>;
 
   // Human-readable caveats the LLM inferred (e.g. "user didn't specify
   // time — assuming dinner"). Surfaced back in the UI.

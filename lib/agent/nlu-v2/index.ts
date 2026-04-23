@@ -27,6 +27,7 @@ export type {
   NluScenario,
   PartyType,
   QuickPick,
+  ProxyConstraints,
   RestaurantFields,
   HotelFields,
   FlightFields,
@@ -112,6 +113,12 @@ function toV1CompatShape(
   reply: string,
 ): NluV2ParseResult {
   const collected = flattenScenarioFields(state);
+  // Proxy member constraints are top-level on IntentState but flat on v1's
+  // collected_constraints — write them back under the v1 key so /api/chat/commit's
+  // sanitizeProxyMemberConstraints picks them up unchanged.
+  if (state.proxy_member_constraints && Object.keys(state.proxy_member_constraints).length > 0) {
+    collected.proxy_member_constraints = state.proxy_member_constraints;
+  }
   const missing = action.type === "ask_clarification" ? action.missing : [];
   const quickPicks = action.type === "ask_clarification" ? action.suggested_quick_picks ?? null : null;
   const confirmReady = action.type === "show_confirm_card";
