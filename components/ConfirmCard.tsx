@@ -41,6 +41,10 @@ export interface CommitResponse {
   scenario?: string;
   search_query?: string;
   constraints?: Record<string, unknown>;
+  // Stage 2 trip-room fields — present when a multi-party trip room is created.
+  room_type?: "trip" | string;
+  flow?: "chat" | "classic";
+  categories?: string[] | null;
   // Trip handoff fields:
   trip_state?: TripIntentState;
   // Trip clarify fields:

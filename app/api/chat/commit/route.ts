@@ -492,10 +492,14 @@ export async function POST(req: NextRequest) {
         kind: "room",
         id: room.id,
         short_code: room.short_code,
-        url: `/rooms/${room.id}`,
+        // Chat-flow rooms live on the homepage under ?room_id=<id>; NOT
+        // /rooms/<id> (the legacy form-based UI). See also rooms/join page,
+        // which redirects chat-flow joiners here instead of /rooms/<id>.
+        url: `/?room_id=${room.id}`,
         invite_url: room.short_code ? `/rooms/join/${room.short_code}` : null,
         title: room.title,
         room_type: "trip",
+        flow: "chat",
         categories: room.categories,
       });
     }

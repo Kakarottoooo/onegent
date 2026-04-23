@@ -615,11 +615,26 @@ export default function Home() {
     // the history so the next utterance starts a fresh conversation.
     nluHistoryRef.current = [];
     if (payload.kind === "room" && payload.url) {
-      // Show the invite link before redirecting so the user can copy it for co-deciders.
-      if (payload.invite_url) {
-        const origin = typeof window !== "undefined" ? window.location.origin : "";
-        const fullInvite = `${origin}${payload.invite_url}`;
-        const title = payload.title ? `「${payload.title}」` : "";
+      const origin = typeof window !== "undefined" ? window.location.origin : "";
+      const fullInvite = payload.invite_url ? `${origin}${payload.invite_url}` : null;
+      const title = payload.title ? `「${payload.title}」` : "";
+
+      // Stage 2 chat-flow trip room: DO NOT redirect. The room lives on the
+      // homepage under ?room_id=<id>; we just update the URL + state so the
+      // next chat turn syncs into the room's private channel. The user keeps
+      // talking to the agent right here.
+      if (payload.flow === "chat" && payload.id) {
+        setActiveRoomId(payload.id);
+        router.replace(payload.url);
+        const inviteLine = fullInvite ? `\n邀请链接（发给同行的人）：${fullInvite}` : "";
+        chat.injectAssistantMessage(
+          `Trip 房间${title}已建好！你们每个人继续和我聊偏好，我会综合所有人意见出方案。${inviteLine}`,
+        );
+        return;
+      }
+
+      // Legacy: single-scenario (classic flow) rooms redirect to /rooms/<id>.
+      if (fullInvite) {
         chat.injectAssistantMessage(
           `Decision Room${title}已创建！\n邀请链接：${fullInvite}\n\n即将跳转到房间页面…`
         );

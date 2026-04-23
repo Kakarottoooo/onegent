@@ -34,8 +34,14 @@ export default function JoinRoomPage() {
         setError(msg ?? "Couldn't join.");
         return;
       }
-      const { room } = await res.json() as { room: { id: string } };
-      router.push(`/rooms/${room.id}`);
+      const { room } = await res.json() as { room: { id: string; flow?: string } };
+      // Stage 2: chat-flow rooms live on the homepage under ?room_id=<id>.
+      // Classic flow rooms still land on the form-based /rooms/<id> page.
+      if (room.flow === "chat") {
+        router.push(`/?room_id=${room.id}`);
+      } else {
+        router.push(`/rooms/${room.id}`);
+      }
     } catch {
       setError("Network error. Try again.");
     } finally {
