@@ -92,25 +92,25 @@ export async function POST(req: NextRequest) {
   // through the new three-layer pipeline (extractor → router → chat).
   // Non-trip scenarios always stay on v1. Opt-in per-request via body
   // `use_v2: true` for testing without touching env vars.
+  //
+  // Order: run v2 FIRST when enabled. Why? v1 (MiniMax) timeouts are
+  // chronic; running v1 first means a v1 timeout short-circuits before
+  // v2 ever gets a chance. With v2 first:
+  //   - v2 trip → return v2 (Phase A goal)
+  //   - v2 non-trip → fall through to v1 (v1 is authoritative for
+  //     restaurant/hotel/flight/activity until Phase B migrates them)
+  //   - v2 throws → fall through to v1
   const v2EnabledEnv = process.env.NLU_V2_ENABLED_FOR_TRIP === "true";
   const v2OptIn = b.use_v2 === true;
   const shouldTryV2 = v2EnabledEnv || v2OptIn;
 
-  try {
-    // Always run v1 first — cheap, reliable classifier + handles non-trip
-    // scenarios where v2 isn't in scope yet.
-    const v1Result = await analyzeConversational(input);
-
-    // If v1 detected trip AND v2 is enabled, re-run with v2 and return its
-    // richer output. v2 is stateless on this pilot (re-parses full history
-    // every turn); state persistence comes in Phase B when we wire up the
-    // history-serialized prev_state carrier.
-    if (shouldTryV2 && v1Result.scenario === "trip") {
-      try {
-        const v2Result = await analyzeConversationalV2({
-          message,
-          history: input.history,
-        });
+  if (shouldTryV2) {
+    try {
+      const v2Result = await analyzeConversationalV2({
+        message,
+        history: input.history,
+      });
+      if (v2Result.scenario === "trip") {
         console.log(
           `[chat/parse] v2 trip pipeline succeeded — intent=${v2Result.intent} confirm_ready=${v2Result.confirm_ready}`,
         );
@@ -120,15 +120,22 @@ export async function POST(req: NextRequest) {
           user_id: userId ?? null,
           nlu_version: "v2",
         });
-      } catch (v2Err) {
-        console.warn(
-          "[chat/parse] v2 pipeline failed, falling back to v1:",
-          v2Err instanceof Error ? v2Err.message : v2Err,
-        );
-        // Fall through to v1
       }
+      console.log(
+        `[chat/parse] v2 says scenario=${v2Result.scenario ?? "null"}, deferring to v1`,
+      );
+      // v2 classified non-trip → fall through to v1 which owns those scenarios
+    } catch (v2Err) {
+      console.warn(
+        "[chat/parse] v2 pipeline failed, falling back to v1:",
+        v2Err instanceof Error ? v2Err.message : v2Err,
+      );
+      // Fall through to v1
     }
+  }
 
+  try {
+    const v1Result = await analyzeConversational(input);
     return NextResponse.json({
       ok: true,
       result: v1Result,

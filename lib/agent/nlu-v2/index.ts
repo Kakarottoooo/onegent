@@ -103,8 +103,21 @@ function toV1CompatShape(
   const quickPicks = action.type === "ask_clarification" ? action.suggested_quick_picks ?? null : null;
   const confirmReady = action.type === "show_confirm_card";
 
+  // Stage 1 guardrail: trip packaging is solo-only. Multi-party trip rooms
+  // are a Stage 2 feature (see NLU_REFACTOR_PLAN_C.md + TRIP_PACKAGING_PLAN.md).
+  // If the extractor tags a trip as create_room — easy to do when it over-
+  // interprets "2 people" as multi-decider — force it back to create_plan
+  // so the frontend routes through the trip confirm card (Package my trip)
+  // instead of the Decision Room confirm card (which commit endpoint would
+  // reject with 501 "coming in Stage 2"). Drop this override when Stage 2
+  // multi-party trip rooms land.
+  const effectiveIntent =
+    state.scenario === "trip" && state.intent === "create_room"
+      ? "create_plan"
+      : state.intent;
+
   return {
-    intent: state.intent,
+    intent: effectiveIntent,
     scenario: state.scenario,
     party_type: state.party_type,
     member_names: state.member_names,

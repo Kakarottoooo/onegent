@@ -122,21 +122,39 @@ Output rules:
    - "trip" when the user wants MULTIPLE categories bundled (flight + hotel at minimum, optionally restaurants / activities). Cues: "plan a trip to X", "go to X for N days", "帮我安排X旅行".
    - "restaurant" / "hotel" / "flight" / "activity" when the user wants a SINGLE category only.
    - null when the category truly can't be inferred.
-6. Intent selection:
+6. Intent selection — read CAREFULLY, this is the most-abused slot:
    - "chitchat" for greetings / thanks / small talk with no booking verb.
-   - "create_plan" for solo booking (default when only the user is involved).
-   - "create_room" when other people are mentioned or plural pronouns ("we", "us", "我和X", "几个朋友").
-   - "refine_existing" when the user adjusts a previously returned plan ("换一个酒店", "cheaper").
+   - "create_plan" = SOLO DECISION-MAKER. One user is arranging a booking,
+     even if the trip / reservation is for multiple travelers. Examples:
+       * "I want a 2-person trip to NY"                        → create_plan (1 decider booking for 2)
+       * "Book a table for 4 on Friday"                        → create_plan (1 decider, 4 diners)
+       * "Find a hotel in Tokyo, 3 of us"                      → create_plan
+     This is the DEFAULT. Only escalate to create_room when the user
+     explicitly signals other people are CO-DECIDING.
+   - "create_room" = MULTIPLE DECISION-MAKERS who each need input / voting.
+     Requires one of these SIGNALS (mere "2 people" / "for 4" is NOT enough):
+       * Named other deciders: "我和李明想...", "me and Alice want..."
+       * Explicit group-decision verbs: "let's decide together", "让大家投票", "group vote"
+       * Plural pronouns referring to the deciders (not the travelers):
+           "we're trying to figure out", "我们一起选"
+       * Explicit "create a room" / "组个房间" / "建 decision room" verbs
+     When unsure, prefer create_plan.
+   - "refine_existing" when the user adjusts a previously returned plan
+     ("换一个酒店", "cheaper").
    - "unknown" if the message is too ambiguous.
-7. party_type:
-   - "multi" whenever member_names is non-empty OR plural pronouns appear.
-   - "solo" otherwise.
-8. For trip scenario, always include:
+7. party_type (separate from intent — this describes TRAVELERS, not deciders):
+   - "multi" whenever OTHER PEOPLE are named or plural pronouns appear
+     referring to the deciders. NOT for traveler count alone.
+   - "solo" otherwise. A "for 2 people" trip can still be party_type=solo
+     if only one user is deciding.
+8. Member_names: only non-creator people explicitly named as CO-DECIDERS
+   (not "my wife" / "my family" — those are relationships not deciding members).
+9. For trip scenario, always include:
      activities: string[] (empty [] if none mentioned)
      cuisine_preferences: string[] (empty [] if none mentioned)
      vibe: default "mixed" if user didn't say
      planning_assumptions: string[]
-9. Return ONLY the JSON object, no markdown fences, no prose.
+10. Return ONLY the JSON object, no markdown fences, no prose.
 
 ${SCHEMA_REFERENCE}
 `;
