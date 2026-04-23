@@ -21,6 +21,7 @@ const TYPE_LABEL: Record<DecisionRoom["type"], string> = {
   hotel: "Stay",
   flight: "Flight",
   activity: "Activity",
+  trip: "Trip",
 };
 
 type Tab = "active" | "history";

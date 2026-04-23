@@ -1705,12 +1705,19 @@ export async function ensureDecisionRoomsTable(): Promise<void> {
           booking_job_id TEXT,
           deadline       TIMESTAMPTZ,
           approval_rule  TEXT NOT NULL DEFAULT 'unanimous',
+          synthesis_json JSONB,
+          categories     TEXT[],
+          flow           TEXT NOT NULL DEFAULT 'classic',
           created_at     TIMESTAMPTZ DEFAULT NOW(),
           updated_at     TIMESTAMPTZ DEFAULT NOW()
         )
       `;
       // Phase 2 migration for existing rooms table.
       await sql`ALTER TABLE decision_rooms ADD COLUMN IF NOT EXISTS approval_rule TEXT NOT NULL DEFAULT 'unanimous'`;
+      // Stage 2 migrations — trip package + chat flow.
+      await sql`ALTER TABLE decision_rooms ADD COLUMN IF NOT EXISTS synthesis_json JSONB`;
+      await sql`ALTER TABLE decision_rooms ADD COLUMN IF NOT EXISTS categories TEXT[]`;
+      await sql`ALTER TABLE decision_rooms ADD COLUMN IF NOT EXISTS flow TEXT NOT NULL DEFAULT 'classic'`;
       await sql`CREATE INDEX IF NOT EXISTS decision_rooms_creator_idx ON decision_rooms (creator_id)`;
       await sql`CREATE INDEX IF NOT EXISTS decision_rooms_short_code_idx ON decision_rooms (short_code)`;
       await sql`CREATE INDEX IF NOT EXISTS decision_rooms_status_idx ON decision_rooms (status)`;
@@ -1851,7 +1858,21 @@ export async function ensureDecisionRoomTables(): Promise<void> {
 
 // ── Types ──────────────────────────────────────────────────────────────────
 
-export type DecisionRoomType = "restaurant" | "hotel" | "flight" | "activity";
+export type DecisionRoomType = "restaurant" | "hotel" | "flight" | "activity" | "trip";
+/**
+ * Category of a sub-booking inside a trip room. A restaurant/hotel/flight/
+ * activity room uses `type` directly; a `type="trip"` room carries one or
+ * more of these categories in `categories[]` to describe which sub-bookings
+ * the trip bundles (e.g. ["hotel", "flight", "activity"]).
+ */
+export type DecisionRoomCategory = "restaurant" | "hotel" | "flight" | "activity";
+/**
+ * How the room was created. `"classic"` = legacy form-based DR (user fills
+ * constraints UI → submit). `"chat"` = new Stage 2 flow where homepage chat
+ * auto-builds the constraints. Existing rooms default to `"classic"` via DB
+ * migration; new chat-flow rooms set `flow="chat"` explicitly at INSERT time.
+ */
+export type DecisionRoomFlow = "classic" | "chat";
 export type DecisionRoomStatus =
   | "collecting"   // members still filling constraints
   | "proposing"    // agent generating proposal
@@ -1876,6 +1897,12 @@ export interface DecisionRoom {
   booking_job_id: string | null;
   deadline: string | null;
   approval_rule: ApprovalRule;
+  /** Stage 2: agent-synthesized TripPackage for `type="trip"` rooms. Null for legacy rooms and single-scenario rooms. */
+  synthesis_json: Record<string, unknown> | null;
+  /** Stage 2: sub-categories bundled by a `type="trip"` room. Null for single-scenario rooms. */
+  categories: DecisionRoomCategory[] | null;
+  /** Stage 2: how this room was created — classic form flow vs homepage-chat flow. */
+  flow: DecisionRoomFlow;
   created_at: string;
   updated_at: string;
 }
