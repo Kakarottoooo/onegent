@@ -19,6 +19,9 @@ let decisionRoomConstraintsTableReady: Promise<void> | null = null;
 let decisionRoomProposalsTableReady: Promise<void> | null = null;
 let decisionRoomVotesTableReady: Promise<void> | null = null;
 let decisionRoomMessagesTableReady: Promise<void> | null = null;
+// ── Decision Rooms v2 Stage 2 (chat-flow trip rooms) ───────────────────────
+let roomMemberIntentStateTableReady: Promise<void> | null = null;
+let decisionRoomPrivateMessagesTableReady: Promise<void> | null = null;
 
 // ── Contacts / user profiles (Phase 1.5, layer 2) ──────────────────────────
 let userProfilesTableReady: Promise<void> | null = null;
@@ -1844,6 +1847,49 @@ export async function ensureDecisionRoomMessagesTable(): Promise<void> {
   await decisionRoomMessagesTableReady;
 }
 
+export async function ensureRoomMemberIntentStateTable(): Promise<void> {
+  if (!roomMemberIntentStateTableReady) {
+    roomMemberIntentStateTableReady = (async () => {
+      await sql`
+        CREATE TABLE IF NOT EXISTS room_member_intent_state (
+          room_id           TEXT NOT NULL,
+          user_id           TEXT NOT NULL,
+          intent_state_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+          updated_at        TIMESTAMPTZ DEFAULT NOW(),
+          PRIMARY KEY (room_id, user_id)
+        )
+      `;
+      await sql`CREATE INDEX IF NOT EXISTS room_member_intent_state_room_idx ON room_member_intent_state (room_id)`;
+    })().catch((err) => {
+      roomMemberIntentStateTableReady = null;
+      throw err;
+    });
+  }
+  await roomMemberIntentStateTableReady;
+}
+
+export async function ensureDecisionRoomPrivateMessagesTable(): Promise<void> {
+  if (!decisionRoomPrivateMessagesTableReady) {
+    decisionRoomPrivateMessagesTableReady = (async () => {
+      await sql`
+        CREATE TABLE IF NOT EXISTS decision_room_private_messages (
+          id         BIGSERIAL PRIMARY KEY,
+          room_id    TEXT NOT NULL,
+          user_id    TEXT NOT NULL,
+          role       TEXT NOT NULL,
+          content    TEXT NOT NULL,
+          created_at TIMESTAMPTZ DEFAULT NOW()
+        )
+      `;
+      await sql`CREATE INDEX IF NOT EXISTS decision_room_private_messages_room_user_idx ON decision_room_private_messages (room_id, user_id, created_at DESC)`;
+    })().catch((err) => {
+      decisionRoomPrivateMessagesTableReady = null;
+      throw err;
+    });
+  }
+  await decisionRoomPrivateMessagesTableReady;
+}
+
 /** Ensure all Decision Room v2 tables — called on first API hit. */
 export async function ensureDecisionRoomTables(): Promise<void> {
   await Promise.all([
@@ -1853,6 +1899,8 @@ export async function ensureDecisionRoomTables(): Promise<void> {
     ensureDecisionRoomProposalsTable(),
     ensureDecisionRoomVotesTable(),
     ensureDecisionRoomMessagesTable(),
+    ensureRoomMemberIntentStateTable(),
+    ensureDecisionRoomPrivateMessagesTable(),
   ]);
 }
 
@@ -3351,4 +3399,107 @@ export async function listGroupMembersWithProfiles(
     avatar_url: r.avatar_url,
     added_at: r.added_at,
   }));
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Decision Rooms v2 · Stage 2 — chat-flow CRUD
+// Used by the homepage-chat → DR pipeline: each chat turn upserts the user's
+// IntentState for the active room, and private messages are persisted per
+// member for the room's private channel (never visible to other members).
+// ═══════════════════════════════════════════════════════════════════════════
+
+export type PrivateMessageRole = "user" | "assistant" | "system";
+
+export interface MemberIntentStateRow {
+  user_id: string;
+  intent_state_json: Record<string, unknown>;
+  updated_at: string;
+}
+
+/** Upsert a member's IntentState snapshot for a room. Idempotent — latest write wins. */
+export async function upsertMemberIntentState(params: {
+  roomId: string;
+  userId: string;
+  intentStateJson: Record<string, unknown>;
+}): Promise<void> {
+  await ensureRoomMemberIntentStateTable();
+  const payload = JSON.stringify(params.intentStateJson);
+  await sql`
+    INSERT INTO room_member_intent_state (room_id, user_id, intent_state_json, updated_at)
+    VALUES (${params.roomId}, ${params.userId}, ${payload}::jsonb, NOW())
+    ON CONFLICT (room_id, user_id) DO UPDATE
+      SET intent_state_json = EXCLUDED.intent_state_json,
+          updated_at        = NOW()
+  `;
+}
+
+/** Read one member's IntentState for a room. */
+export async function getMemberIntentState(
+  roomId: string,
+  userId: string,
+): Promise<MemberIntentStateRow | null> {
+  await ensureRoomMemberIntentStateTable();
+  const result = await sql<MemberIntentStateRow>`
+    SELECT user_id, intent_state_json, updated_at
+    FROM room_member_intent_state
+    WHERE room_id = ${roomId} AND user_id = ${userId}
+    LIMIT 1
+  `;
+  return result.rows[0] ?? null;
+}
+
+/** List all members' IntentStates for a room. Used by trip-synthesis aggregation. */
+export async function listMemberIntentStates(
+  roomId: string,
+): Promise<MemberIntentStateRow[]> {
+  await ensureRoomMemberIntentStateTable();
+  const result = await sql<MemberIntentStateRow>`
+    SELECT user_id, intent_state_json, updated_at
+    FROM room_member_intent_state
+    WHERE room_id = ${roomId}
+    ORDER BY updated_at ASC
+  `;
+  return result.rows;
+}
+
+export interface PrivateMessageRow {
+  id: string;
+  role: PrivateMessageRole;
+  content: string;
+  created_at: string;
+}
+
+/** Append a private-channel message (user's side of chat with agent). */
+export async function insertPrivateMessage(params: {
+  roomId: string;
+  userId: string;
+  role: PrivateMessageRole;
+  content: string;
+}): Promise<void> {
+  await ensureDecisionRoomPrivateMessagesTable();
+  await sql`
+    INSERT INTO decision_room_private_messages (room_id, user_id, role, content)
+    VALUES (${params.roomId}, ${params.userId}, ${params.role}, ${params.content})
+  `;
+}
+
+/**
+ * Read the private-channel message history for a (room, user). Ordered oldest
+ * first (chronological), capped at `limit` (default 200). Privacy: caller MUST
+ * authenticate `userId` matches the requester — this function does not check.
+ */
+export async function listPrivateMessages(
+  roomId: string,
+  userId: string,
+  limit: number = 200,
+): Promise<PrivateMessageRow[]> {
+  await ensureDecisionRoomPrivateMessagesTable();
+  const result = await sql<PrivateMessageRow>`
+    SELECT id::text AS id, role, content, created_at
+    FROM decision_room_private_messages
+    WHERE room_id = ${roomId} AND user_id = ${userId}
+    ORDER BY id ASC
+    LIMIT ${limit}
+  `;
+  return result.rows;
 }
