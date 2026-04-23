@@ -13,6 +13,7 @@ import {
   STEP_SEMANTIC_DISPLAY,
 } from "@/lib/status";
 import GlobalNav from "@/components/GlobalNav";
+import TripItineraryCalendar from "@/components/TripItineraryCalendar";
 import RestaurantStepCard from "@/components/booking/RestaurantStepCard";
 import BrowserLiveView from "@/components/BrowserLiveView";
 import { getBrowserModelForStagehand } from "@/lib/agent-model-config";
@@ -3243,6 +3244,9 @@ function TripsPageInner() {
                 transition: "box-shadow 0.18s ease",
               }}
             >
+              {/* D1 Itinerary calendar — only for multi-step jobs. Gives the user
+                  a "what's happening when" view while the parallel pipelines run. */}
+              {job.steps.length >= 2 && <TripItineraryCalendar job={job} />}
               <JobCard job={job} onRefresh={loadJobs} sessionId={sessionId} onOpenLive={openLive} />
             </div>
           ))}

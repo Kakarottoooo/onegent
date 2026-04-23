@@ -388,7 +388,10 @@ export default function TripPackageCard(props: TripPackageCardProps) {
         keepalive: true,
       }).catch(() => {});
       props.onBooked?.(data.jobId);
-      router.push(`/tasks?focus=${encodeURIComponent(data.jobId)}`);
+      // view=live lands on the Live tab so the user sees the agent's real-time
+      // actions (not the Queue tab's static task list). Matches the mental
+      // model: "I just clicked Book, show me what's happening now."
+      router.push(`/tasks?focus=${encodeURIComponent(data.jobId)}&view=live`);
     } catch {
       setSubmitError("Network error — please try again.");
     } finally {

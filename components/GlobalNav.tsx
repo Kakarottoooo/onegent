@@ -9,7 +9,7 @@ import { useRouter } from "next/navigation";
 import { useLanguage, LANGUAGES } from "@/app/hooks/useLanguage";
 import { useAuth } from "@/app/hooks/useAuth";
 
-type Page = "home" | "tasks" | "insights" | "metrics" | "rooms" | "other";
+type Page = "home" | "tasks" | "insights" | "metrics" | "rooms" | "calendar" | "other";
 
 interface Props {
   active?: Page;
@@ -101,6 +101,7 @@ export default function GlobalNav({ active }: Props) {
 
   const links: { href: string; label: string; id: Page; badge?: number }[] = [
     { href: "/tasks", label: t.nav.myTrips, id: "tasks", badge: actionCount || undefined },
+    { href: "/calendar", label: "Calendar", id: "calendar" },
     { href: "/rooms", label: "Rooms", id: "rooms" },
     { href: "/insights", label: "Memory", id: "insights" },
   ];

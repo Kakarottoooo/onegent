@@ -3,8 +3,8 @@ import {
   createBookingJob,
   getBookingJobsBySession,
   getBookingJobsByUser,
-  deleteAllBookingJobsBySession,
-  deleteAllMonitorsBySession,
+  deleteBookingJob,
+  deleteMonitorsByJobId,
   clearDecisionRoomBookingJobsByIds,
 } from "@/lib/db";
 import type { BookingJob, BookingJobStep } from "@/lib/db";
@@ -72,15 +72,36 @@ export async function GET(req: NextRequest) {
   return NextResponse.json({ jobs });
 }
 
-/** DELETE /api/booking-jobs?session_id=... — bulk delete all jobs + their monitors */
+/**
+ * DELETE /api/booking-jobs?session_id=... — bulk delete every job the user
+ * currently sees on this page + their monitors + their Decision Room links.
+ *
+ * "Sees on this page" = session jobs UNION user-owned jobs (same logic as
+ * the GET above). Previously DELETE only scoped by session_id, which left
+ * the user's jobs from earlier sessions intact — they'd disappear from the
+ * page momentarily then come back on the next GET, so Clear all felt broken.
+ */
 export async function DELETE(req: NextRequest) {
   const sessionId = req.nextUrl.searchParams.get("session_id");
   if (!sessionId) {
     return NextResponse.json({ error: "session_id required" }, { status: 400 });
   }
-  const jobs = await getBookingJobsBySession(sessionId);
-  await deleteAllMonitorsBySession(sessionId);
-  await clearDecisionRoomBookingJobsByIds(jobs.map((job) => job.id));
-  await deleteAllBookingJobsBySession(sessionId);
-  return NextResponse.json({ deleted: true });
+  const { userId } = await auth();
+
+  const [sessionJobs, userJobs] = await Promise.all([
+    getBookingJobsBySession(sessionId),
+    userId ? getBookingJobsByUser(userId) : Promise.resolve([] as BookingJob[]),
+  ]);
+  const allJobIds = Array.from(
+    new Set([...sessionJobs, ...userJobs].map((j) => j.id))
+  );
+  if (allJobIds.length === 0) {
+    return NextResponse.json({ deleted: true, count: 0 });
+  }
+
+  // Monitor rows are keyed by job_id (with an index), so per-id delete is cheap.
+  await Promise.all(allJobIds.map((id) => deleteMonitorsByJobId(id)));
+  await clearDecisionRoomBookingJobsByIds(allJobIds);
+  await Promise.all(allJobIds.map((id) => deleteBookingJob(id)));
+  return NextResponse.json({ deleted: true, count: allJobIds.length });
 }
