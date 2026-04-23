@@ -87,20 +87,20 @@ export async function POST(req: NextRequest) {
     userModel: parseUserModel(b.userModel),
   };
 
-  // ── NLU v2 pilot (Plan C · Phase A) ──────────────────────────────────
-  // Flag: NLU_V2_ENABLED_FOR_TRIP=true in .env.local routes trip scenarios
-  // through the new three-layer pipeline (extractor → router → chat).
-  // Non-trip scenarios always stay on v1. Opt-in per-request via body
-  // `use_v2: true` for testing without touching env vars.
+  // ── NLU v2 (Plan C · Phase B) ────────────────────────────────────────
+  // Flag: NLU_V2_ENABLED=true in .env.local routes ALL solo-scenario traffic
+  // through the three-layer pipeline (extractor → router → chat).
+  // Opt-in per-request via body `use_v2: true` for testing without env vars.
   //
-  // Order: run v2 FIRST when enabled. Why? v1 (MiniMax) timeouts are
-  // chronic; running v1 first means a v1 timeout short-circuits before
-  // v2 ever gets a chance. With v2 first:
-  //   - v2 trip → return v2 (Phase A goal)
-  //   - v2 non-trip → fall through to v1 (v1 is authoritative for
-  //     restaurant/hotel/flight/activity until Phase B migrates them)
-  //   - v2 throws → fall through to v1
-  const v2EnabledEnv = process.env.NLU_V2_ENABLED_FOR_TRIP === "true";
+  // Phase B scope: v2 handles any scenario it classifies (trip / restaurant /
+  // hotel / flight / activity). v1 is kept only as a crash-fallback until
+  // Phase C migrates multi-party create_room + the last holdouts.
+  //
+  // Back-compat: NLU_V2_ENABLED_FOR_TRIP=true is still honored so Phase A
+  // deployments don't need a config change.
+  const v2EnabledEnv =
+    process.env.NLU_V2_ENABLED === "true" ||
+    process.env.NLU_V2_ENABLED_FOR_TRIP === "true";
   const v2OptIn = b.use_v2 === true;
   const shouldTryV2 = v2EnabledEnv || v2OptIn;
 
@@ -109,10 +109,11 @@ export async function POST(req: NextRequest) {
       const v2Result = await analyzeConversationalV2({
         message,
         history: input.history,
+        pinned_target_id: input.pinned_target_id,
       });
-      if (v2Result.scenario === "trip") {
+      if (v2Result.scenario) {
         console.log(
-          `[chat/parse] v2 trip pipeline succeeded — intent=${v2Result.intent} confirm_ready=${v2Result.confirm_ready}`,
+          `[chat/parse] v2 pipeline succeeded — scenario=${v2Result.scenario} intent=${v2Result.intent} confirm_ready=${v2Result.confirm_ready}`,
         );
         return NextResponse.json({
           ok: true,
@@ -121,10 +122,8 @@ export async function POST(req: NextRequest) {
           nlu_version: "v2",
         });
       }
-      console.log(
-        `[chat/parse] v2 says scenario=${v2Result.scenario ?? "null"}, deferring to v1`,
-      );
-      // v2 classified non-trip → fall through to v1 which owns those scenarios
+      console.log("[chat/parse] v2 returned scenario=null, deferring to v1");
+      // v2 couldn't classify (chitchat / totally ambiguous) → let v1 try
     } catch (v2Err) {
       console.warn(
         "[chat/parse] v2 pipeline failed, falling back to v1:",

@@ -46,11 +46,24 @@ export interface ExtractStateInput {
 // ─── Public API ──────────────────────────────────────────────────────────
 
 export async function extractState(input: ExtractStateInput): Promise<IntentState> {
-  const today = new Date().toISOString().slice(0, 10);
+  const now = new Date();
+  // Use the SERVER'S LOCAL timezone, not UTC. A dev server in CDT at
+  // 23:40 Wed reads UTC=04:40 Thu, which would anchor the calendar one day
+  // off from what the user sees — "tomorrow" would then resolve to two
+  // days ahead in local time. For prod we'll want the client's TZ plumbed
+  // through; for dev, server-local is a correct default.
+  const pad = (n: number) => String(n).padStart(2, "0");
+  const today = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
+  const todayDayOfWeek = now.toLocaleDateString("en-US", { weekday: "long" });
+  const nowHHMM = `${pad(now.getHours())}:${pad(now.getMinutes())}`;
+  // Pre-computed 14-day calendar. Lets the LLM look up "this Friday" / "next
+  // Saturday" instead of computing offsets — gpt-4o-mini is unreliable at
+  // day-of-week arithmetic even when the anchor is given.
+  const weekdayLookup = buildWeekdayLookup(now);
   const prevSummary = input.prev_state ? formatPrevState(input.prev_state) : "(none — this is the first turn)";
   const historyBlock = formatHistory(input.history ?? []);
 
-  const systemPrompt = buildExtractorSystemPrompt(today);
+  const systemPrompt = buildExtractorSystemPrompt(today, todayDayOfWeek, nowHHMM, weekdayLookup);
   const userPrompt = buildExtractorUserPrompt({
     prevSummary,
     historyBlock,
@@ -108,24 +121,43 @@ IntentState schema:
 }
 `;
 
-function buildExtractorSystemPrompt(today: string): string {
+function buildExtractorSystemPrompt(
+  today: string,
+  todayDayOfWeek: string,
+  nowHHMM: string,
+  weekdayLookup: string,
+): string {
   return `You are Onegent's structured-data extractor. Your job: read a conversation and output the CURRENT best understanding of what the user wants as a JSON object that exactly matches the IntentState schema below.
 
-Today's date: ${today} (use this to resolve relative expressions like "next weekend", "tomorrow", "this Friday" into YYYY-MM-DD).
+Today's date: ${today} (${todayDayOfWeek}). Current time (UTC): ${nowHHMM}.
+
+Calendar for the next 14 days — LOOK UP RELATIVE DATES HERE, DO NOT COMPUTE:
+${weekdayLookup}
+
+Resolution rules for relative expressions (match against the table above):
+  "today"         → row marked (today)
+  "tomorrow"      → row marked (tomorrow)
+  "this <Weekday>" → the NEXT row whose Weekday matches, within the next 7 days
+  "next <Weekday>" → the row marked "next <Weekday>" (7 days after "this <Weekday>")
+  "this weekend"   → Saturday row in the "this week" block
+  "next weekend"   → Saturday row in the "next week" block
+  "in N days"      → pick the row N rows below today
+"this Friday" when today is Wednesday → the Friday 2 rows below. NEVER pick Saturday or any other day — if the table says Friday is 2026-04-24, emit 2026-04-24.
 
 Output rules:
 1. MERGE, don't replace. If prev state has city="New York" and the new turn doesn't contradict it, keep city="New York". Only overwrite when the user explicitly changes their mind.
 2. Only populate ONE scenario sub-object — the one matching \`scenario\`. Omit the others entirely (don't emit empty objects).
 3. If the user hasn't mentioned a slot, OMIT it (don't emit "" or null for free-text slots). For number/boolean slots, only emit when explicitly stated.
-4. Resolve relative dates to YYYY-MM-DD. Examples:
-     "this Saturday" on ${today} → compute
-     "next weekend" → Saturday of the week after next
-     "in 3 days" → ${today} + 3
+4. Use the calendar above for all relative dates. Emit YYYY-MM-DD.
    BUT: if the user mentions ONLY a month without any duration cue ("next month",
    "下个月", "in April", "本月" with no "for N days", "for a week", "N 天", explicit
    end date, or nights count), LEAVE start_date / end_date / nights BLANK. Do NOT
    default to the whole month (e.g. May 1 → May 31). The router will then ask
    the user how long they want to stay.
+   TIME FIELD (restaurant.time, etc.): must be HH:MM (24-hour). If the user says
+   "now" / "right now" / "asap" / "现在" / "立刻" / "马上", resolve to the current
+   time ${nowHHMM} (not the literal word "now"). If they say "7pm" / "晚上7点",
+   emit "19:00". Leave blank if unmentioned.
 5. Scenario selection:
    - "trip" when the user wants MULTIPLE categories bundled (flight + hotel at minimum, optionally restaurants / activities). Cues: "plan a trip to X", "go to X for N days", "帮我安排X旅行".
    - "restaurant" / "hotel" / "flight" / "activity" when the user wants a SINGLE category only.
@@ -190,6 +222,37 @@ Output the new IntentState JSON:`;
 }
 
 // ─── Formatting helpers ─────────────────────────────────────────────────
+
+/**
+ * Build a 14-day calendar lookup table for the extractor prompt. Each row
+ * is a single line like "2026-04-24 (Friday) — this Friday" so the LLM
+ * can resolve "this Friday" / "next weekend" by matching instead of
+ * computing offsets. Why: gpt-4o-mini's day-of-week arithmetic is flaky
+ * even when given the anchor day; observed in production with
+ * "this Friday on Wed" → returned Saturday.
+ *
+ * @internal — exported for unit tests.
+ */
+export function buildWeekdayLookup(anchor: Date): string {
+  const dayNames = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+  const pad = (n: number) => String(n).padStart(2, "0");
+  const rows: string[] = [];
+  for (let offset = 0; offset < 14; offset++) {
+    // Build dates in the server's local TZ (not UTC) so the calendar matches
+    // what the user sees on their own clock when dev server + user share a host.
+    const d = new Date(anchor.getFullYear(), anchor.getMonth(), anchor.getDate() + offset);
+    const iso = `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+    const dow = dayNames[d.getDay()];
+    let label: string;
+    if (offset === 0) label = "(today)";
+    else if (offset === 1) label = "tomorrow";
+    else if (offset < 7) label = `this ${dow}`;
+    else if (offset === 7) label = `next ${dow} / a week from today`;
+    else label = `next ${dow}`;
+    rows.push(`  ${iso} (${dow}) — ${label}`);
+  }
+  return rows.join("\n");
+}
 
 function formatPrevState(s: IntentState): string {
   const copy: Partial<IntentState> = { ...s };
@@ -292,7 +355,7 @@ function coerceRestaurant(
   return {
     city: strOrUndef(r.city) ?? prev?.city,
     date: isoDateOrUndef(r.date) ?? prev?.date,
-    time: strOrUndef(r.time) ?? prev?.time,
+    time: normalizeTime(r.time) ?? prev?.time,
     party_size: numOrUndef(r.party_size) ?? prev?.party_size,
     cuisine: strOrUndef(r.cuisine) ?? prev?.cuisine,
     budget_per_person: numOrUndef(r.budget_per_person) ?? prev?.budget_per_person,
@@ -448,6 +511,26 @@ function coerceEnumOrNull<T extends string>(
 ): T | null {
   if (typeof v === "string" && (allowed as readonly string[]).includes(v)) return v as T;
   return fallback;
+}
+
+/**
+ * Normalize a time string for restaurant.time (and any future HH:MM slot).
+ * - HH:MM passes through unchanged.
+ * - "now" / "asap" / "现在" / "立刻" / "马上" → current server time HH:MM.
+ * - Anything else passes through as-is; the prompt asks for HH:MM so if the
+ *   model emitted "7pm" we let it through and downstream can try to parse it.
+ *
+ * @internal — exported for unit tests.
+ */
+export function normalizeTime(v: unknown): string | undefined {
+  const s = strOrUndef(v);
+  if (!s) return undefined;
+  if (/^\d{1,2}:\d{2}$/.test(s)) return s;
+  if (/^(now|right\s+now|asap|immediately|现在|立刻|马上)$/i.test(s)) {
+    const d = new Date();
+    return `${String(d.getUTCHours()).padStart(2, "0")}:${String(d.getUTCMinutes()).padStart(2, "0")}`;
+  }
+  return s;
 }
 
 /**

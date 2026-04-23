@@ -45,6 +45,12 @@ export interface AnalyzeV2Input {
     extractor?: string;  // Layer 2
   };
   apiKey?: string;
+  /**
+   * Id of a Plan or Room the user is editing, if any. Plumbed through to
+   * IntentState.refined_target_id so downstream code knows refine_existing
+   * is in scope. Mirror of v1's ConversationalNLUInput.pinned_target_id.
+   */
+  pinned_target_id?: string;
 }
 
 /**
@@ -69,6 +75,13 @@ export async function analyzeConversationalV2(
     model: input.model?.extractor,
     apiKey: input.apiKey,
   });
+
+  // Plumb pinned_target_id through. v1 trusted this signal to escalate
+  // ambiguous edits to intent=refine_existing; v2's extractor doesn't see
+  // this param (it's out-of-band from the user message), so we inject here.
+  if (input.pinned_target_id) {
+    state.refined_target_id = input.pinned_target_id;
+  }
 
   // Layer 3: decide action (pure function)
   const action = routeIntent(state);
@@ -137,15 +150,34 @@ function toV1CompatShape(
  * Turn the scenario-specific sub-state into a flat `collected_constraints`
  * bag so v1-consuming code (like `/api/chat/commit`) can read the fields
  * through its existing lookup helpers.
+ *
+ * Key renames exist for scenarios where v2's cleaner naming collides with
+ * v1-era canonical keys used by the commit route and planners. Keeping
+ * flattenScenarioFields emission aligned with v1 keys means no downstream
+ * code has to care whether NLU v1 or v2 produced the state.
  */
-function flattenScenarioFields(state: IntentState): Record<string, unknown> {
+/** @internal — exported for unit tests. */
+export function flattenScenarioFields(state: IntentState): Record<string, unknown> {
   const out: Record<string, unknown> = {};
   if (state.scenario === "restaurant" && state.restaurant) {
     Object.assign(out, stripUndef(state.restaurant));
   } else if (state.scenario === "hotel" && state.hotel) {
-    Object.assign(out, stripUndef(state.hotel));
+    const h = stripUndef(state.hotel) as Record<string, unknown>;
+    // Rename star_rating → stars so buildRoomContext/buildCreatorConstraintSeed
+    // (app/api/chat/commit/route.ts) find it via its existing alias chain.
+    if ("star_rating" in h) {
+      h.stars = h.star_rating;
+      delete h.star_rating;
+    }
+    Object.assign(out, h);
   } else if (state.scenario === "flight" && state.flight) {
-    Object.assign(out, stripUndef(state.flight));
+    const f = stripUndef(state.flight) as Record<string, unknown>;
+    // Rename date → departure_date for the same reason.
+    if ("date" in f) {
+      f.departure_date = f.date;
+      delete f.date;
+    }
+    Object.assign(out, f);
   } else if (state.scenario === "activity" && state.activity) {
     Object.assign(out, stripUndef(state.activity));
   } else if (state.scenario === "trip" && state.trip) {
