@@ -11,9 +11,14 @@ Trip Packaging 计划 · v1.0 · 2026-04-22
 - 改代码前必读：读 "三、Stage 1" 完整 + "四、Stage 2" 的数据契约
 - 本计划配合 `PROJECT_SUMMARY.md` 和 `CLAUDE.md` 使用，不重复这两份文档的内容
 
-**状态**
-- Stage 1（单人 trip 打包）：待开工，预估 7–10 天
-- Stage 2（多人混合房间）：设计已定，实现排在 Stage 1 验收后，预估 2 周
+**状态**（截至 2026-04-23）
+- ✅ Stage 1（单人 trip 打包）：已落地 — `lib/agent/planners/trip-package.ts`、
+  `app/api/booking-jobs/create-trip/route.ts`、`components/TripPackageCard.tsx`、
+  `app/api/chat/trip/*` 全部就位；NLU 三层现在是 `lib/agent/nlu-v2/`（v1 已删除）
+- 🟡 Stage 2（多人混合房间）：设计已定，实现排在 Stage 1 实盘验收后，预估 2 周
+
+> ⚠️ 本文档里提到 `lib/conversational-nlu.ts` 的位置均为历史快照（Stage 1 起草时）。
+> 当前 NLU 入口在 `lib/agent/nlu-v2/`（三层架构），详见 `NLU_REFACTOR_PLAN_C.md` + `CLAUDE.md`。
 
 ================================================================
 一、Vision 与实现目标

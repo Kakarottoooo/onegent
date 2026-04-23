@@ -228,15 +228,15 @@ Onegent 从 Solo 单品类到 Trip 打包到 Decision Room 多人协作，全部
 
 【五个模式映射到同一套骨架】
 
-  | 模式                            | Phase 1 载体                 | Phase 2 载体                      | Phase 3 载体                  |
-  |---------------------------------|------------------------------|-----------------------------------|-------------------------------|
-  | Solo 单品类（餐厅/酒店/机票/活动）| ConversationalNLUResult →    | RecommendationCard[] 纵向列表     | 单 step BookingJob            |
-  |                                 | XxxIntent                    | 点一张卡直接 autopilot            |                               |
-  | Solo 多品类 · Trip（本阶段完成）  | TripIntentState              | TripPackage.*_options（4 列候选） | N step BookingJob 并行        |
-  |                                 |                              | per-category 勾选，一键打包        |                               |
-  | DR 单品类（当前 DR v2）          | RoomConstraint（每人一份）    | Proposal[] + 投票                 | payer 一键触发单 step         |
-  | DR 多品类 · Trip（Stage 2 规划中）| 每人私聊 → TripIntentState    | 房间匿名聚合 → 投 tier            | payer 一键触发 N step 并行    |
-  | 未来任何新品类                    | 复用 NLU + 新 Intent 类型     | 复用 card UI + 新卡片样式          | 复用 BookingJobStep 基础设施  |
+  | 模式                            | Phase 1 载体                       | Phase 2 载体                      | Phase 3 载体                  |
+  |---------------------------------|------------------------------------|-----------------------------------|-------------------------------|
+  | Solo 单品类（餐厅/酒店/机票/活动）| NLU v2 IntentState → XxxIntent     | RecommendationCard[] 纵向列表     | 单 step BookingJob            |
+  |                                 | （`lib/agent/nlu-v2/`）             | 点一张卡直接 autopilot            |                               |
+  | Solo 多品类 · Trip（本阶段完成）  | TripIntentState（v2 state.trip）    | TripPackage.*_options（4 列候选） | N step BookingJob 并行        |
+  |                                 |                                    | per-category 勾选，一键打包        |                               |
+  | DR 单品类（当前 DR v2）          | RoomConstraint（每人一份）          | Proposal[] + 投票                 | payer 一键触发单 step         |
+  | DR 多品类 · Trip（Stage 2 规划中）| 每人私聊 → TripIntentState          | 房间匿名聚合 → 投 tier            | payer 一键触发 N step 并行    |
+  | 未来任何新品类                    | 复用 v2 extractor + 新 XxxFields    | 复用 card UI + 新卡片样式          | 复用 BookingJobStep 基础设施  |
 
 【三段式的可扩展性 · 加东西不动骨架】
 
@@ -267,12 +267,25 @@ Onegent 从 Solo 单品类到 Trip 打包到 Decision Room 多人协作，全部
 
 第 1 层 · 需求理解层
   自然语言 → 结构化意图。解析预算、场景、偏好、限制条件。
-  实现：lib/nlu.ts — 英文快速路径（~300ms 节省），非英文走 MiniMax。
+  两套 NLU 并存，按入口分工：
+
+  · **首页 chat / Decision Room 私聊** → `lib/agent/nlu-v2/` 三层架构
+    - Layer 1 chat.ts（Claude Sonnet 说人话）
+    - Layer 2 extractor.ts（gpt-4o-mini + JSON mode，每轮输出完整 IntentState）
+    - Layer 3 router.ts（纯函数：continue_chat / ask_clarification / show_confirm_card）
+    · 编排器 analyzeConversationalV2()；唯一入口 /api/chat/parse
+    · v1 `lib/conversational-nlu.ts` 已于 Phase D 删除，`ConversationalNLUResult`
+      作为 alias 保留以便渐进迁移（详见 NLU_REFACTOR_PLAN_C.md + CLAUDE.md）
+  · **传统 Agent pipeline 场景解析** → `lib/nlu.ts` + `lib/agent/parse/<scenario>.ts`
+    · 英文快速路径（~300ms 节省），非英文走 MiniMax
+    · 仅供 lib/agent.ts 六层管道使用（不在首页 chat 路径上）
+
   升级：注入用户历史偏好（噪音/价格/距离敏感度），下一轮查询自动带约束。
   升级 2：session preference extraction（3.3a）— 每次餐厅查询后 AI 提取
   偏好信号并累积在 session 内，注入后续 rankAndExplain prompt。
   升级 3：单约束精炼（S-5）— "便宜一点" / "安静一点" / "近一点" 识别为
   refinement intent，上下文感知重跑，不重置整个规划。
+  升级 4（Plan C 2026-04）：NLU v2 三层分离，彻底告别 800 行单 prompt。
 
 第 2 层 · 计划层
   决定"搜什么 / 去哪搜 / 按什么顺序搜"。任务分解，而不是一次性大查询。
@@ -1163,15 +1176,23 @@ components/                            可复用 React 组件
 lib/                                   核心业务逻辑（非 UI）
 ├── agent.ts                           Agent 主入口 runAgent()
 ├── agent/
+│   ├── nlu-v2/                        首页 chat / DR 私聊的三层 NLU（Plan C）
+│   │   ├── types.ts                   IntentState / RouterAction / 各场景 XxxFields
+│   │   ├── extractor.ts               Layer 2：gpt-4o-mini + JSON mode
+│   │   ├── router.ts                  Layer 3：纯函数 routeIntent()
+│   │   ├── chat.ts                    Layer 1：Claude Sonnet 自然语言 reply
+│   │   ├── index.ts                   编排器 analyzeConversationalV2()
+│   │   └── __tests__/                 golden-solo / golden-multi / golden-trip
 │   ├── planners/                      场景规划器（date-night / weekend-trip / city-trip /
-│   │                                  big-purchase / concert-event / fitness / gift）
+│   │                                  big-purchase / concert-event / fitness / gift / trip-package）
 │   ├── pipelines/                     品类 pipeline（restaurant / hotel / flight /
 │   │                                  laptop / smartphone / headphone / credit-card）
 │   ├── planner-engine/                modular planner 引擎（EngineConfig 驱动）
-│   ├── parse/                         每场景 NLU 解析器
+│   ├── parse/                         传统 Agent pipeline 的场景 NLU 解析器（非首页 chat）
 │   ├── composer/scoring.ts            综合打分（产品灵魂，5 维度 + 惩罚）
 │   ├── two-party.ts                   N=2 Decision Room 引擎
 │   ├── n-party.ts                     N≥3 Decision Room 引擎
+│   ├── trip-intent-state.ts           Trip 信息收集状态机
 │   └── scenario-configs/              场景配置（当前仅 city-trip）
 ├── booking-autopilot/
 │   ├── stagehand-executor.ts          主执行器（skipInitialAgent 路由、三层架构入口）
@@ -1196,7 +1217,8 @@ lib/                                   核心业务逻辑（非 UI）
 ├── schema.sql                         建表 DDL
 ├── minimax.ts                         MiniMax API 客户端
 ├── tools.ts                           外部工具（Places / SerpAPI / Tavily / Ticketmaster）
-├── nlu.ts                             NLU 入口（英文快路径 + MiniMax 慢路径）
+├── nlu.ts                             传统 Agent pipeline NLU（英文快路径 + MiniMax 慢路径）
+│                                      · 仅供 lib/agent.ts 使用；首页 chat 走 agent/nlu-v2/
 ├── schemas.ts                         Zod 结构化数据 schema
 ├── types.ts                           共享 TypeScript 类型
 ├── memory.ts, replan.ts, policy.ts    偏好记忆 / 模块级精炼 / 策略层
@@ -1236,6 +1258,14 @@ public/                                静态资源（icons / sw.js / manifest�
   4. `lib/agent/scenario-configs/<s>.ts` 如走 EngineConfig 模式，新增配置
   5. `lib/agent/composer/scoring.ts`     如需新打分维度，扩展打分函数
   6. `lib/types.ts` + `lib/schemas.ts`   新的结构化类型与 Zod schema
+
+新增首页 chat 场景或字段（NLU v2 三层）
+  1. `lib/agent/nlu-v2/types.ts`         `IntentState.XxxFields` 或 `ProxyConstraints`
+  2. `lib/agent/nlu-v2/extractor.ts`     system prompt "WORKED EXAMPLES" 补 1-2 条
+  3. `lib/agent/nlu-v2/router.ts`        `getMissingForScenario()` 声明 REQUIRED
+  4. `lib/agent/nlu-v2/index.ts`         `flattenScenarioFields()` 做 v1-key 对齐
+  5. `lib/agent/nlu-v2/__tests__/`       补 golden test（否则不算完工）
+  完整 Checklist：根目录 `CLAUDE.md` "Conversational NLU Architecture" 章节
 
 改 Decision Room 逻辑
   · 投票规则      → `lib/db.ts` 的 `decideProposalOutcome` / `finalizeProposal`
@@ -1395,6 +1425,14 @@ ADR-7 · Stagehand（AI 浏览器）+ Playwright（RPA）双层降级
   背景：Stagehand.act() 自然语言强但偶发选错元素；纯 Playwright 脚本又脆
   决策：AI-first → 失败自动 fallback 到 Playwright locator；每步独立控制
   影响：provider 可强制走 RPA（例如 OpenTable 时段点击需 CDP 坐标，见 Gotchas）
+
+ADR-8 · 首页 chat NLU 拆成三层（Plan C · 2026-04）
+  背景：v1 `conversational-nlu.ts` 是一个 800+ 行 system prompt，5 场景 × 分类
+        × 约束 × quick_picks × 追问耦合在一起，每加一种 corner case 都变脆
+  决策：Layer 1 chat（Sonnet 说人话）/ Layer 2 extractor（gpt-4o-mini + JSON
+        mode 出 IntentState）/ Layer 3 router（纯函数出 RouterAction）三层分离
+  影响：v1 已删除；新增 scenario 必须同步改 types + extractor prompt +
+        router.getMissingForScenario + golden test；完整 Checklist 见 CLAUDE.md
 
 ================================================================
 十七、踩过的坑（Gotchas · 省你几天）

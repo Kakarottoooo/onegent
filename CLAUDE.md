@@ -142,3 +142,72 @@ lib/booking-autopilot/
 - **payment 字段永远程序化**（跨域 iframe，AI 无法访问；且止步 CVV 规则必须确定性执行）
 - **每次填表后必须调 `auditAndRefillEmptyFields`**，保证零遗漏
 
+---
+
+## Conversational NLU Architecture — 首页 chat 的三层架构
+
+Homepage `/` 和 Decision Room 私聊复用同一套 NLU v2 管道。**新增场景 / 加约束字段 / 调 router 行为时必须遵守这个分层，不允许把逻辑回流到单一 prompt。**
+
+### 核心模式：对话 + 提取 + 路由 三职责分离
+
+```
+❌ 错误：一个 800 行的 system prompt 同时管分类、约束、quick_picks、追问
+✅ 正确：chat 说人话 / extractor 出 JSON / router 决定下一步
+```
+
+### 标准三层
+
+```
+Layer 1 — Chat（Claude Sonnet 4.6）
+  └─ lib/agent/nlu-v2/chat.ts · chatTurn()
+       输入：history + new_user_message + state_summary + router_action
+       输出：纯文本 assistant_reply（只负责"说人话"）
+
+Layer 2 — Extractor（gpt-4o-mini + JSON mode）
+  └─ lib/agent/nlu-v2/extractor.ts · extractState()
+       输入：prev_state + new_user_message + history
+       输出：完整 IntentState（schema 校验过的结构化记忆）
+       每轮对话跑一次，merge 进旧 state
+
+Layer 3 — Router（纯函数，不是 LLM）
+  └─ lib/agent/nlu-v2/router.ts · routeIntent(state)
+       输入：IntentState
+       输出：RouterAction
+         · continue_chat — 闲聊或还在信息收集早期
+         · ask_clarification { missing, suggested_quick_picks }
+         · show_confirm_card { kind: "plan" | "room" | "trip" }
+       纯函数 → 可单测 → 行为确定性
+```
+
+### 新增场景 / 约束字段时的 Checklist
+
+1. **`lib/agent/nlu-v2/types.ts`** — 在 `IntentState` 上加对应 scenario 的 `XxxFields` 接口；如是 room 场景的 per-member 约束加到 `ProxyConstraints`
+2. **`lib/agent/nlu-v2/extractor.ts`** — 在 system prompt 的 "WORKED EXAMPLES" 里加 1-2 条该场景/字段的示例（必须含中文 + 英文输入）
+3. **`lib/agent/nlu-v2/router.ts`** — 在 `getMissingForScenario()` 里声明 REQUIRED keys；scenario 转 kind 的 mapping 加对应分支
+4. **`lib/agent/nlu-v2/index.ts · flattenScenarioFields()`** — 如果字段名跟 `/api/chat/commit` 老的 key 不对齐，在这里做 rename（如 `star_rating → stars`）
+5. **golden test** — 在 `lib/agent/nlu-v2/__tests__/golden-*.test.ts` 补一个覆盖该字段的 case
+
+### 关键文件位置
+
+```
+lib/agent/nlu-v2/
+  types.ts              — IntentState / RouterAction / 各场景 XxxFields
+  extractor.ts          — Layer 2，system prompt + JSON mode
+  router.ts             — Layer 3，纯函数 + routeIntent + getMissingForScenario
+  chat.ts               — Layer 1，自然语言 reply
+  index.ts              — 编排器 analyzeConversationalV2() + v1-compat shape
+  __tests__/            — golden-solo / golden-multi / golden-trip 等
+
+app/api/chat/parse/route.ts     — 唯一入口，调用 analyzeConversationalV2
+app/api/chat/commit/route.ts    — 消费 NluV2ParseResult，commit 到 DB
+lib/quick-picks-fallback.ts     — 客户端兜底 quick_picks（LLM 偶尔忘）
+```
+
+### 设计原则总结
+
+- **chat / extractor / router 三职责严格分离**，不允许 router 里调 LLM，也不允许 extractor 出自然语言
+- **Extractor 每轮都要产出完整 IntentState**（不是 delta）— 新老 state merge 在 extractor 内部完成
+- **Router 是纯函数** — 任何"看 state 决定 UI"的逻辑都放这里，不放进 extractor prompt
+- **v1 `conversational-nlu.ts` 已删除**，`ConversationalNLUResult` 现在只是 `NluV2ParseResult` 的别名
+- **新增 scenario 必须补 golden test**，否则不算完工
+

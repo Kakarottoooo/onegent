@@ -11,10 +11,14 @@ NLU 架构重构计划 · Plan C · v1.0 · 2026-04-23
 - 想开工：读 "六、任务列表" + "七、数据契约" + "八、用户自选模型"
 - 本计划配合 `PROJECT_SUMMARY.md`（三段式骨架章节）和 `CLAUDE.md` 使用
 
-**状态**
-- 方案已定（2026-04-23 用户确认），文档编写完成
-- 实际开工：**待 Stage 1 Trip Packaging 验收跑稳后启动**（不抢占当前闭环）
-- 预估工期：3–5 天（试点 trip 场景）；全量迁移 1–2 周
+**状态**（截至 2026-04-23）
+- ✅ Phase A · Trip 试点：T1–T6 全部落地（`lib/agent/nlu-v2/` 三层上线）
+- ✅ Phase B · Solo 单品类：T7–T10 restaurant / hotel / flight / activity 全部迁完
+- ✅ Phase C · Decision Room：T11 create_room 迁完 + proxy_member_constraints
+  ／ T12 commit 路由只消费 RouterAction ／ T13 `lib/conversational-nlu.ts` 已删除
+- ✅ Phase D · 清理：C5/C6 retire v1 + 简化 `/api/chat/parse`（commit `f79eed5`）
+- 🟡 T14 文档更新：PROJECT_SUMMARY + CLAUDE.md NLU 章节同步（本次）
+- 🟡 T15 Stage 2 DR 前置：room 场景"匿名多人合并"extractor 扩展（待 Trip Stage 2 一起做）
 
 ================================================================
 一、Vision — 为什么要重构 NLU
