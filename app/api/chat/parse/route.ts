@@ -18,6 +18,11 @@ import {
   analyzeConversationalV2,
   buildFallbackResult,
 } from "@/lib/agent/nlu-v2";
+import {
+  isRoomMember,
+  upsertMemberIntentState,
+  insertPrivateMessage,
+} from "@/lib/db";
 import type { ChatMessage } from "@/lib/llm-client";
 
 export const maxDuration = 30;
@@ -65,6 +70,8 @@ export async function POST(req: NextRequest) {
     typeof b.pinned_target_id === "string" && b.pinned_target_id.trim()
       ? b.pinned_target_id.trim()
       : undefined;
+  const roomId =
+    typeof b.room_id === "string" && b.room_id.trim() ? b.room_id.trim() : undefined;
 
   try {
     const result = await analyzeConversationalV2({
@@ -73,8 +80,16 @@ export async function POST(req: NextRequest) {
       pinned_target_id,
     });
     console.log(
-      `[chat/parse] v2 — scenario=${result.scenario} intent=${result.intent} confirm_ready=${result.confirm_ready}`,
+      `[chat/parse] v2 — scenario=${result.scenario} intent=${result.intent} confirm_ready=${result.confirm_ready}${roomId ? ` room=${roomId}` : ""}`,
     );
+
+    // Stage 2: if the user is chatting inside a room context, sync their
+    // IntentState + private-channel messages. Non-fatal: any failure here
+    // is logged and swallowed so the chat reply still surfaces.
+    if (roomId && userId) {
+      await syncRoomContext(roomId, userId, message, result);
+    }
+
     return NextResponse.json({
       ok: true,
       result,
@@ -92,5 +107,55 @@ export async function POST(req: NextRequest) {
       user_id: userId ?? null,
       nlu_version: "v2-fallback",
     });
+  }
+}
+
+/**
+ * Mirror this turn into the room's async state: upsert the user's IntentState
+ * (so trip-synthesis can read everyone's latest preferences) + append their
+ * user/assistant messages to the private channel. Gated by isRoomMember —
+ * a stranger who guesses a room_id can NOT write into it.
+ *
+ * Runs fully async from each member's perspective — member A completing
+ * their turn does not wait on member B. The synthesis agent (T13/T14)
+ * decides when "everyone's ready".
+ */
+async function syncRoomContext(
+  roomId: string,
+  userId: string,
+  userMessage: string,
+  result: Awaited<ReturnType<typeof analyzeConversationalV2>>,
+): Promise<void> {
+  try {
+    const member = await isRoomMember(roomId, userId);
+    if (!member) {
+      console.warn(`[chat/parse] user ${userId} tried to sync into room ${roomId} but is not a member — skipping`);
+      return;
+    }
+    const writes: Promise<unknown>[] = [
+      insertPrivateMessage({ roomId, userId, role: "user", content: userMessage }),
+    ];
+    if (result.__v2_state) {
+      writes.push(
+        upsertMemberIntentState({
+          roomId,
+          userId,
+          intentStateJson: result.__v2_state as unknown as Record<string, unknown>,
+        }),
+      );
+    }
+    if (result.assistant_reply) {
+      writes.push(
+        insertPrivateMessage({
+          roomId,
+          userId,
+          role: "assistant",
+          content: result.assistant_reply,
+        }),
+      );
+    }
+    await Promise.all(writes);
+  } catch (err) {
+    console.warn(`[chat/parse] room sync failed for room=${roomId} user=${userId}:`, err);
   }
 }

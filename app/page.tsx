@@ -121,6 +121,18 @@ export default function Home() {
   });
   const { favorites, toggleFavorite } = useFavorites(learnFromFavorite);
   const router = useRouter();
+  // Stage 2: homepage chat can be scoped to a Decision Room via ?room_id=<id>.
+  // When present, each chat turn mirrors the user's IntentState + messages
+  // into the room's private channel (see /api/chat/parse · syncRoomContext).
+  // Uses window.location directly to avoid Next.js Suspense-boundary
+  // requirements around useSearchParams during SSG/SSR.
+  const [activeRoomId, setActiveRoomId] = useState<string | null>(null);
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const params = new URLSearchParams(window.location.search);
+    const roomId = params.get("room_id");
+    setActiveRoomId(roomId && roomId.trim() ? roomId.trim() : null);
+  }, []);
   const bottomRef = useRef<HTMLDivElement>(null);
   const chatInputRef = useRef("");
   const isComposingRef = useRef(false);
@@ -495,6 +507,9 @@ export default function Home() {
           message: text,
           history: historyToSend,
           userModel: cfg.conversational,
+          // Stage 2: when the homepage is scoped to a room, the server mirrors
+          // this turn into room_member_intent_state + private messages.
+          ...(activeRoomId ? { room_id: activeRoomId } : {}),
         }),
       });
       const data = (await res.json().catch(() => null)) as
