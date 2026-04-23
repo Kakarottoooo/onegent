@@ -37,6 +37,30 @@ Always respond in Chinese. Never respond in Korean.
 
 ---
 
+## 日志 / Terminal 输出读取规则
+
+用户在讨论 dev server、autopilot job、API 报错时，**不要让用户手动复制粘贴日志**。按以下优先级自己拿：
+
+1. **HTTP 端点** — 运行中的服务，直接 curl
+   - `curl http://localhost:3000/api/xxx`（看 API 响应）
+   - `curl -I http://localhost:3000`（看 server 是否活着）
+
+2. **日志文件** — 用 Read / Grep
+   - `./dev.log`（约定的 dev server 日志落盘路径）
+   - `.next/**`、`logs/**`、项目里任何 `*.log`
+
+3. **run_in_background 启动的进程** — 用 BashOutput 读 stdout
+
+4. **用户自己在跑 `npm run dev`** —— 提醒用户一次性改成：
+   ```bash
+   npm run dev 2>&1 | tee ./dev.log
+   ```
+   之后自己 `tail -100 ./dev.log` 就行。`dev.log` 已加进 `.gitignore`。
+
+**原则：** 用户说"dev server 500 了"或"job 跑不通"时，自己先 curl / 读文件 / tail 日志，拿到证据再讨论根因。不要反手要用户贴日志。
+
+---
+
 ## Dev Server 重启提示规则
 
 每次改完代码后，必须主动判断改动是否需要用户重启 `npm run dev`。**只要需要重启，就必须在回复里明确告诉用户"此改动需要重启 dev server"并说明原因**，不要让用户自己猜。
