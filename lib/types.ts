@@ -504,30 +504,32 @@ export interface CityTripIntent extends BaseIntent {
   missing_fields: string[];
 }
 
-// ─── Trip Packaging (Stage 1) ─────────────────────────────────────────────
-// A TripPackage is the cross-category aggregate produced by the city-trip
-// planner: 1-3 tiers, each bundling a hotel + flight + (optional) restaurants
-// + (optional) activities. The user picks a tier → frontend POSTs the tier to
-// /api/booking-jobs/create-trip → N-step BookingJob runs in autopilot.
+// ─── Trip Packaging ──────────────────────────────────────────────────────
+// A TripPackage is the cross-category aggregate produced by the trip
+// planner: 4 parallel pipelines (hotel + flight + restaurant + activity)
+// each return up to 5 option cards. The user picks:
+//   - 1 hotel (or skip)
+//   - 1 flight (or skip)
+//   - 0-3 restaurants (or skip)
+//   - 0-3 activities (or skip)
+// Minimum 1 selected, else create-trip rejects. The selection payload goes
+// to /api/booking-jobs/create-trip which maps each selected card to a
+// BookingJobStep and kicks off an N-step (1-8) parallel autopilot job.
 
-export type TripTierId = "upscale" | "trendy" | "local";
+/** User's per-category selection. Pass to /api/booking-jobs/create-trip. */
+export interface TripSelection {
+  hotel_id: string | null;
+  flight_id: string | null;
+  restaurant_ids: string[];
+  activity_ids: string[];
+}
 
-export interface TripTier {
-  tier_id: TripTierId;
-  tier_label: string;
-  tier_description: string;
-  /** Primary hotel for this tier. Null if hotel pipeline returned nothing. */
-  hotel: HotelRecommendationCard | null;
-  /** Outbound flight for this tier. Null if flight pipeline returned nothing
-   *  or the user skipped flight (e.g. local trip, already in the city). */
-  flight: FlightRecommendationCard | null;
-  /** 2-3 restaurant picks. Phase 1 ships with empty array; Phase 2 populates. */
-  restaurants: RecommendationCard[];
-  /** Activity picks. `null` means user had no activity intent (seeds suggested
-   *  separately by the UI). Empty array means we tried but found nothing. */
-  activities: ActivityRecommendationCard[] | null;
-  /** Rough total across hotel+flight+activities, USD. Optional. */
-  total_cost_estimate?: number;
+/** Per-category error info when a pipeline failed / returned nothing. */
+export interface TripPackageErrors {
+  hotel?: string | null;
+  flight?: string | null;
+  restaurant?: string | null;
+  activity?: string | null;
 }
 
 export interface TripPackage {
@@ -538,9 +540,16 @@ export interface TripPackage {
   departure_city: string;
   date_range: { from: string; to: string };
   traveler_count: number;
-  /** Ordered list of tiers. Phase 1 ships with a single "mid" tier; Phase 2
-   *  returns all three (upscale / trendy / local). */
-  tiers: TripTier[];
+  /** Up to 5 candidate hotels — user picks exactly 1 (or skips). */
+  hotel_options: HotelRecommendationCard[];
+  /** Up to 5 candidate flights — user picks exactly 1 (or skips). */
+  flight_options: FlightRecommendationCard[];
+  /** Up to 5 candidate restaurants — user picks 0-3. */
+  restaurant_options: RecommendationCard[];
+  /** Up to 5 candidate activities — user picks 0-3. */
+  activity_options: ActivityRecommendationCard[];
+  /** Per-category error info so the UI can show "No hotels found" etc. */
+  errors?: TripPackageErrors;
   /** Optional rationale lines the planner surfaces to the UI. */
   planning_assumptions?: string[];
 }

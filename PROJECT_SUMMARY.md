@@ -205,6 +205,62 @@ Recent Updates - 2026-04-22
   · 架构师 / 重构前必读 → 十五（数据流）、十六（关键设计决策 ADR）
   · 改 Booking 自动化 → 本文 十四 + 根目录 `CLAUDE.md` 的 "Booking Automation Architecture" 章节
 
+【三段式骨架 · 所有模式共用的结构 · 2026-04-23】
+
+Onegent 从 Solo 单品类到 Trip 打包到 Decision Room 多人协作，全部
+按同一个 "Phase 1 收集 → Phase 2 选择 → Phase 3 执行" 的三段式骨架
+运行。这是理解代码架构、决定新功能如何插入的核心视角。
+
+            ┌──────────────────────────────────────┐
+  Phase 1 → │  信息收集（chat / form / 私聊）        │  agent 和用户对话
+            │  产物：Intent / IntentState / Constraint│  或结构化表单
+            └──────────────┬───────────────────────┘
+                           ↓
+            ┌──────────────────────────────────────┐
+  Phase 2 → │  选择（候选卡片 / 投票 / 勾选）         │  系统给 N 个候选
+            │  产物：RecommendationCard / Proposal   │  用户挑要执行的
+            └──────────────┬───────────────────────┘
+                           ↓
+            ┌──────────────────────────────────────┐
+  Phase 3 → │  执行（BookingJob.steps 并行 autopilot）│  后台跑到 paused_
+            │  产物：支付边界（CVC 手填）             │  payment
+            └──────────────────────────────────────┘
+
+【五个模式映射到同一套骨架】
+
+  | 模式                            | Phase 1 载体                 | Phase 2 载体                      | Phase 3 载体                  |
+  |---------------------------------|------------------------------|-----------------------------------|-------------------------------|
+  | Solo 单品类（餐厅/酒店/机票/活动）| ConversationalNLUResult →    | RecommendationCard[] 纵向列表     | 单 step BookingJob            |
+  |                                 | XxxIntent                    | 点一张卡直接 autopilot            |                               |
+  | Solo 多品类 · Trip（本阶段完成）  | TripIntentState              | TripPackage.*_options（4 列候选） | N step BookingJob 并行        |
+  |                                 |                              | per-category 勾选，一键打包        |                               |
+  | DR 单品类（当前 DR v2）          | RoomConstraint（每人一份）    | Proposal[] + 投票                 | payer 一键触发单 step         |
+  | DR 多品类 · Trip（Stage 2 规划中）| 每人私聊 → TripIntentState    | 房间匿名聚合 → 投 tier            | payer 一键触发 N step 并行    |
+  | 未来任何新品类                    | 复用 NLU + 新 Intent 类型     | 复用 card UI + 新卡片样式          | 复用 BookingJobStep 基础设施  |
+
+【三段式的可扩展性 · 加东西不动骨架】
+
+这种"三明治"结构是 Onegent 能快速迭代的核心原因——每层都能独立
+加功能，互不影响。
+
+  · 加新品类（车租 / 船票 / 露营 / 剧本杀 / 婚礼策划 ...）
+      写新 pipeline（lib/agent/pipelines/xxx.ts）
+    + 新 Intent 类型（lib/types.ts 的 XxxIntent）
+    + 新 card 组件（components/XxxCard.tsx）
+    骨架的三个 phase 组件都不用改。
+
+  · 加新信息收集模式（语音输入 / 图片 upload / 日历同步 / voice memo）
+      扩展 Phase 1 的 input channel（比如 voice → speech-to-text → NLU）
+    Phase 2/3 完全不用动——产物还是同一套 Intent/Constraint。
+
+  · 加新执行模式（代付钱包 / 预约模式 / 团购 / 日程同步）
+      扩展 Phase 3 的 autopilot 或 step 类型
+    Phase 1/2 完全不用动——输入还是同一套选择结果。
+
+  · 加新协作形态（三人拼团 / 私聊 + 公开频道混合模式）
+      Phase 1 加一层"聚合"（多人 Intent → 合并约束）
+    Phase 2/3 可以复用现有组件
+
 ================================================================
 一、核心架构 · 6 层 Agent 设计（已全部实现）
 ================================================================

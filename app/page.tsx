@@ -138,7 +138,7 @@ export default function Home() {
     | {
         phase: "ready";
         pkg: TripPackage;
-        errors?: { hotel?: string | null; flight?: string | null };
+        errors?: { hotel?: string | null; flight?: string | null; restaurant?: string | null; activity?: string | null };
       }
     | { phase: "error"; message: string }
     | null
@@ -638,7 +638,7 @@ export default function Home() {
       const data = (await res.json().catch(() => ({}))) as {
         ok?: boolean;
         trip_package?: TripPackage;
-        errors?: { hotel?: string | null; flight?: string | null };
+        errors?: { hotel?: string | null; flight?: string | null; restaurant?: string | null; activity?: string | null };
         error?: string;
       };
       if (!res.ok || !data.ok || !data.trip_package) {

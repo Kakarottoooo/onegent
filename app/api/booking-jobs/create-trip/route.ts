@@ -1,24 +1,31 @@
 /**
  * POST /api/booking-jobs/create-trip
  *
- * Given a TripPackage + a selected tier, construct a multi-step BookingJob
- * where each non-null tier slot (hotel, flight, [restaurants], [activities])
- * becomes one BookingJobStep. Phase 1 ships with hotel + flight only;
- * restaurants + activities land in Phase 2.
+ * Given a TripPackage + a user's per-category selection, construct a multi-
+ * step BookingJob where each selected card (hotel, flight, restaurants[0..3],
+ * activities[0..3]) becomes one BookingJobStep.
  *
  * Body:
  *   {
  *     session_id: string,
  *     trip_package: TripPackage,
- *     selected_tier_id: TripTierId,
+ *     selection: {
+ *       hotel_id: string | null,          // single-select; null = skip
+ *       flight_id: string | null,
+ *       restaurant_ids: string[],         // 0-3 multi-select
+ *       activity_ids: string[],           // 0-3 multi-select
+ *     },
  *     profile_id?: number
  *   }
  *
- * Returns: { jobId, trip_label, step_count }
+ * Validation:
+ *   - At least 1 step must be built (else 422).
+ *   - restaurant_ids + activity_ids capped at 3 each.
+ *   - IDs that don't match any card in trip_package.*_options are ignored
+ *     (logged, not fatal).
  *
- * Execution architecture: the created BookingJob gets picked up by
- * POST /api/booking-jobs/[id]/start, which currently runs steps sequentially.
- * T10 (parallel execution) is a Phase 2 follow-up.
+ * Execution: the created job is picked up by /api/booking-jobs/[id]/start
+ * which already parallelizes steps.length >= 2.
  */
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@clerk/nextjs/server";
@@ -32,20 +39,31 @@ import {
 import { buildExpediaFlightsUrl } from "@/lib/agent/planners/booking-links";
 import type {
   TripPackage,
-  TripTier,
-  TripTierId,
+  TripSelection,
   HotelRecommendationCard,
   FlightRecommendationCard,
+  RecommendationCard,
+  ActivityRecommendationCard,
 } from "@/lib/types";
 
 export const maxDuration = 30;
 
+const MAX_RESTAURANT_PICKS = 3;
+const MAX_ACTIVITY_PICKS = 3;
+
 interface CreateTripBody {
   session_id?: unknown;
   trip_package?: unknown;
-  selected_tier_id?: unknown;
+  selection?: unknown;
   profile_id?: unknown;
 }
+
+type ProfilePayload = {
+  first_name: string;
+  last_name: string | null;
+  email: string;
+  phone: string | null;
+};
 
 export async function POST(req: NextRequest) {
   const { userId } = await auth();
@@ -59,31 +77,32 @@ export async function POST(req: NextRequest) {
   }
   if (!body) return NextResponse.json({ error: "Empty body" }, { status: 400 });
 
-  const sessionId = typeof body.session_id === "string" && body.session_id.trim()
-    ? body.session_id.trim()
-    : null;
+  const sessionId =
+    typeof body.session_id === "string" && body.session_id.trim() ? body.session_id.trim() : null;
   if (!sessionId) {
     return NextResponse.json({ error: "session_id required" }, { status: 400 });
   }
 
   const pkg = coerceTripPackage(body.trip_package);
   if (!pkg) {
-    return NextResponse.json({ error: "trip_package required (must match TripPackage shape)" }, { status: 400 });
-  }
-
-  const selectedTierId =
-    typeof body.selected_tier_id === "string" ? (body.selected_tier_id as TripTierId) : null;
-  const selectedTier = selectedTierId
-    ? pkg.tiers.find((t) => t.tier_id === selectedTierId)
-    : pkg.tiers[0];
-  if (!selectedTier) {
     return NextResponse.json(
-      { error: `selected_tier_id "${selectedTierId}" not found in trip_package` },
+      { error: "trip_package required (must match TripPackage shape with *_options arrays)" },
       { status: 400 }
     );
   }
 
-  // Resolve booking profile: body.profile_id wins, else user's default.
+  const selection = coerceSelection(body.selection);
+  if (!selection) {
+    return NextResponse.json(
+      {
+        error:
+          "selection required — { hotel_id, flight_id, restaurant_ids[], activity_ids[] } (hotel/flight ids nullable for skip)",
+      },
+      { status: 400 }
+    );
+  }
+
+  // Resolve booking profile — body.profile_id wins, else user's default.
   const profileId =
     typeof body.profile_id === "number" && body.profile_id > 0 ? body.profile_id : null;
   const profile = profileId
@@ -98,32 +117,75 @@ export async function POST(req: NextRequest) {
       { status: 412 }
     );
   }
-  const profilePayload = {
+  const profilePayload: ProfilePayload = {
     first_name: profile.first_name,
     last_name: profile.last_name,
     email: profile.email,
     phone: profile.phone,
   };
 
+  // Build steps from selected cards. Unknown ids are silently skipped (logged).
   const steps: BookingJobStep[] = [];
 
-  const hotelStep = buildHotelStep(selectedTier, pkg, profile.id, profilePayload);
-  if (hotelStep) steps.push(hotelStep);
+  if (selection.hotel_id) {
+    const card = pkg.hotel_options.find((c) => c.hotel.id === selection.hotel_id);
+    if (card) {
+      const step = buildHotelStep(card, pkg, profile.id, profilePayload);
+      if (step) steps.push(step);
+    } else {
+      console.warn(`[create-trip] hotel_id=${selection.hotel_id} not in trip_package — skipping`);
+    }
+  }
 
-  const flightStep = buildFlightStep(selectedTier, pkg, profile.id, profilePayload);
-  if (flightStep) steps.push(flightStep);
+  if (selection.flight_id) {
+    const card = pkg.flight_options.find((c) => c.flight.id === selection.flight_id);
+    if (card) {
+      const step = buildFlightStep(card, pkg, profile.id, profilePayload);
+      if (step) steps.push(step);
+    } else {
+      console.warn(`[create-trip] flight_id=${selection.flight_id} not in trip_package — skipping`);
+    }
+  }
 
-  // Restaurants + activities: Phase 2 will expand here.
+  for (const id of selection.restaurant_ids.slice(0, MAX_RESTAURANT_PICKS)) {
+    const card = pkg.restaurant_options.find((c) => c.restaurant.id === id);
+    if (card) {
+      const step = buildRestaurantStep(card, pkg, profile.id, profilePayload);
+      if (step) steps.push(step);
+    } else {
+      console.warn(`[create-trip] restaurant_id=${id} not in trip_package — skipping`);
+    }
+  }
+
+  for (const id of selection.activity_ids.slice(0, MAX_ACTIVITY_PICKS)) {
+    const card = pkg.activity_options.find((c) => c.activity.id === id);
+    if (card) {
+      const step = buildActivityStep(card, pkg, profile.id, profilePayload);
+      if (step) steps.push(step);
+    } else {
+      console.warn(`[create-trip] activity_id=${id} not in trip_package — skipping`);
+    }
+  }
 
   if (steps.length === 0) {
     return NextResponse.json(
-      { error: "Selected tier has no bookable hotel or flight — cannot build a trip job" },
+      {
+        error:
+          "Selection is empty — pick at least one hotel, flight, restaurant, or activity before booking.",
+      },
       { status: 422 }
     );
   }
 
   const jobId = randomUUID();
-  const tripLabel = buildTripLabel(pkg, selectedTier);
+  const tripLabel = buildTripLabel(pkg, steps);
+
+  console.log("[create-trip] built steps", {
+    jobId,
+    selection,
+    step_types: steps.map((s) => s.type),
+    step_count: steps.length,
+  });
 
   const job = await createBookingJob({
     id: jobId,
@@ -138,21 +200,23 @@ export async function POST(req: NextRequest) {
     status: job.status,
     trip_label: tripLabel,
     step_count: steps.length,
-    selected_tier_id: selectedTier.tier_id,
+    breakdown: {
+      hotel: !!selection.hotel_id,
+      flight: !!selection.flight_id,
+      restaurants: selection.restaurant_ids.length,
+      activities: selection.activity_ids.length,
+    },
   });
 }
 
 // ─── Step builders ────────────────────────────────────────────────────────
 
 function buildHotelStep(
-  tier: TripTier,
+  card: HotelRecommendationCard,
   pkg: TripPackage,
   profileId: number,
-  profilePayload: { first_name: string; last_name: string | null; email: string; phone: string | null }
+  profilePayload: ProfilePayload
 ): BookingJobStep | null {
-  const card = tier.hotel;
-  if (!card) return null;
-
   const hotelName = card.hotel.name;
   const checkin = pkg.date_range.from;
   const checkout = pkg.date_range.to;
@@ -184,14 +248,11 @@ function buildHotelStep(
 }
 
 function buildFlightStep(
-  tier: TripTier,
+  card: FlightRecommendationCard,
   pkg: TripPackage,
   profileId: number,
-  profilePayload: { first_name: string; last_name: string | null; email: string; phone: string | null }
+  profilePayload: ProfilePayload
 ): BookingJobStep | null {
-  const card = tier.flight;
-  if (!card) return null;
-
   const flight = card.flight;
   const origin = flight.departure_airport;
   const dest = flight.arrival_airport;
@@ -200,7 +261,7 @@ function buildFlightStep(
   const depDate = pkg.date_range.from;
   const retDate = pkg.date_range.to;
   const passengers = pkg.traveler_count;
-  const cabinClass = tier.tier_id === "upscale" ? "business" : "economy";
+  const cabinClass = "economy"; // Phase 2: upscale tier dropped; UI could add a cabin picker later
   const preferNonstop = flight.stops === 0;
 
   const fallbackUrl = buildExpediaFlightsUrl({
@@ -238,15 +299,103 @@ function buildFlightStep(
   };
 }
 
+function buildRestaurantStep(
+  card: RecommendationCard,
+  pkg: TripPackage,
+  profileId: number,
+  profilePayload: ProfilePayload
+): BookingJobStep | null {
+  const restaurantName = card.restaurant.name;
+  // Default restaurant time: dinner on the first trip day. Users can change
+  // later from the Tasks page. Phase 2-C.2 (itinerary view) may let the user
+  // tweak per-day/time before commit.
+  const date = pkg.date_range.from;
+  const time = "19:00";
+  const covers = pkg.traveler_count;
+  const city = pkg.destination_city;
+
+  const fallbackUrl =
+    card.opentable_url ||
+    `https://www.opentable.com/s?term=${encodeURIComponent(restaurantName)}&covers=${covers}&dateTime=${date}T${time}:00`;
+
+  return {
+    type: "restaurant",
+    emoji: "🍽️",
+    label: restaurantName,
+    apiEndpoint: "/api/booking-jobs/start",
+    body: {
+      restaurantName,
+      city,
+      date,
+      time,
+      covers,
+      profileId,
+      profile: profilePayload,
+    },
+    fallbackUrl,
+    status: "pending",
+  };
+}
+
+function buildActivityStep(
+  card: ActivityRecommendationCard,
+  pkg: TripPackage,
+  profileId: number,
+  profilePayload: ProfilePayload
+): BookingJobStep | null {
+  const activity = card.activity;
+  const primarySource = activity.sources[0];
+  if (!primarySource) return null;
+
+  const label = activity.short_title ?? activity.title;
+  const numTickets = pkg.traveler_count;
+  const when = activity.datetime_display ?? activity.datetime_local;
+
+  // Task string is REQUIRED: runUniversalStep calls input.task.match(...)
+  // early to parse fallback URL hints, and a missing task throws
+  // "Cannot read properties of undefined (reading 'match')" which kills the
+  // step before the SeatGeek / Ticketmaster provider can even initialize.
+  const task = `Buy ${numTickets} ticket${numTickets === 1 ? "" : "s"} for "${activity.title}" at ${activity.venue_name} on ${when} through ${primarySource.provider}. Navigate to the event page, pick the cheapest available seats together, fill in any required guest info, and stop before entering card number or CVV. Fallback URL: ${primarySource.booking_link}`;
+
+  return {
+    type: "activity",
+    emoji: "🎟️",
+    label,
+    apiEndpoint: "/api/booking-autopilot/universal",
+    body: {
+      startUrl: primarySource.booking_link,
+      task,
+      activity_name: activity.title,
+      activity_id: activity.id,
+      venue_name: activity.venue_name,
+      city: activity.venue_city,
+      event_date: activity.datetime_local,
+      num_tickets: numTickets,
+      provider: primarySource.provider,
+      profileId,
+      profile: profilePayload,
+    },
+    fallbackUrl: primarySource.booking_link,
+    status: "pending",
+  };
+}
+
 // ─── Helpers ──────────────────────────────────────────────────────────────
 
-function buildTripLabel(pkg: TripPackage, tier: TripTier): string {
+function buildTripLabel(pkg: TripPackage, steps: BookingJobStep[]): string {
   const nights = daysBetween(pkg.date_range.from, pkg.date_range.to);
-  const parts: string[] = [];
-  parts.push(`${pkg.destination_city} trip`);
-  if (nights > 0) parts.push(`${nights}n`);
-  parts.push(`(${tier.tier_label})`);
-  return parts.join(" ");
+  const counts = {
+    hotel: steps.filter((s) => s.type === "hotel").length,
+    flight: steps.filter((s) => s.type === "flight").length,
+    restaurant: steps.filter((s) => s.type === "restaurant").length,
+    activity: steps.filter((s) => s.type === "activity").length,
+  };
+  const composition: string[] = [];
+  if (counts.hotel) composition.push(`${counts.hotel}🏨`);
+  if (counts.flight) composition.push(`${counts.flight}✈`);
+  if (counts.restaurant) composition.push(`${counts.restaurant}🍽`);
+  if (counts.activity) composition.push(`${counts.activity}🎟`);
+  return `${pkg.destination_city} trip ${nights}n (${composition.join(" + ")})`;
 }
 
 function daysBetween(from: string, to: string): number {
@@ -263,11 +412,8 @@ function normalizeFlightClockTime(raw: string | null | undefined): string | unde
   return match?.[1]?.trim() ?? trimmed;
 }
 
-/**
- * Shape-check an incoming trip_package. Returns the object if it matches
- * TripPackage, null otherwise. Does not validate recommendation card shapes
- * deeply — downstream step builders surface missing fields with clear errors.
- */
+// ─── Coercers ─────────────────────────────────────────────────────────────
+
 function coerceTripPackage(raw: unknown): TripPackage | null {
   if (!raw || typeof raw !== "object") return null;
   const r = raw as Record<string, unknown>;
@@ -279,10 +425,35 @@ function coerceTripPackage(raw: unknown): TripPackage | null {
   const d = dates as Record<string, unknown>;
   if (typeof d.from !== "string" || typeof d.to !== "string") return null;
   if (typeof r.traveler_count !== "number" || r.traveler_count < 1) return null;
-  if (!Array.isArray(r.tiers) || r.tiers.length === 0) return null;
-  // Trust the shape beyond this — the step builders handle per-card nulls.
+  // At least one option category must be an array — even if empty (all 4 failed).
+  // Step builders handle empty options via the selection lookup (unknown id skipped).
+  if (!Array.isArray(r.hotel_options)) return null;
+  if (!Array.isArray(r.flight_options)) return null;
+  if (!Array.isArray(r.restaurant_options)) return null;
+  if (!Array.isArray(r.activity_options)) return null;
   return r as unknown as TripPackage;
 }
 
-// Unused imports referenced via type-only casts above — keep linter happy.
-export type { HotelRecommendationCard, FlightRecommendationCard };
+function coerceSelection(raw: unknown): TripSelection | null {
+  if (!raw || typeof raw !== "object") return null;
+  const r = raw as Record<string, unknown>;
+  const hotel_id =
+    typeof r.hotel_id === "string" && r.hotel_id.trim() ? r.hotel_id.trim() : null;
+  const flight_id =
+    typeof r.flight_id === "string" && r.flight_id.trim() ? r.flight_id.trim() : null;
+  const restaurant_ids = Array.isArray(r.restaurant_ids)
+    ? r.restaurant_ids.filter((s): s is string => typeof s === "string" && s.trim().length > 0)
+    : [];
+  const activity_ids = Array.isArray(r.activity_ids)
+    ? r.activity_ids.filter((s): s is string => typeof s === "string" && s.trim().length > 0)
+    : [];
+  return { hotel_id, flight_id, restaurant_ids, activity_ids };
+}
+
+// Re-export types to keep the linter quiet about the unused type-only imports.
+export type {
+  HotelRecommendationCard,
+  FlightRecommendationCard,
+  RecommendationCard,
+  ActivityRecommendationCard,
+};

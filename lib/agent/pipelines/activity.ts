@@ -372,13 +372,17 @@ export async function runActivityPipeline(
       : activities;
   const pool = budgeted.length > 0 ? budgeted : activities;
 
-  // Three-bucket ranking.
-  const bestMatch = pool.slice(0, 3).map((a, i) => buildCard(a, i + 1, "best_match", intent));
+  // Three-bucket ranking. For Trip Packaging we want a full row of 5 cards in
+  // the UI, so take up to 5 from the best-match bucket (previously 3) and
+  // then fill remaining slots with cheapest / premium picks via the dedup
+  // pass below. If the raw pool has fewer than 5 events the downstream
+  // slice(0, 5) is a no-op.
+  const bestMatch = pool.slice(0, 5).map((a, i) => buildCard(a, i + 1, "best_match", intent));
 
   const cheapest = [...pool]
     .filter((a) => a.price_min > 0)
     .sort((a, b) => a.price_min - b.price_min)
-    .slice(0, 2)
+    .slice(0, 3)
     .map((a, i) => buildCard(a, bestMatch.length + i + 1, "cheapest", intent));
 
   const premiumSeats =

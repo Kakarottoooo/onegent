@@ -1,6 +1,6 @@
 import { UserRequirements, Restaurant, RecommendationCard, SessionPreferences, ScoringDimensions } from "../../types";
 import { googlePlacesSearch, tavilySearch, geocodeLocation, fetchReviewSignals } from "../../tools";
-import { minimaxChat } from "../../minimax";
+import { openaiChat } from "../../openai";
 import { CITIES, DEFAULT_CITY } from "../../cities";
 import { RankedItemArraySchema } from "../../schemas";
 import { computeWeightedScore, DEFAULT_WEIGHTS, formatSessionPreferences } from "../composer/scoring";
@@ -349,13 +349,6 @@ Return ONLY the JSON array, no other text.`,
     },
   ];
 
-  const text = await minimaxChat({
-    system: systemPrompt,
-    messages,
-    max_tokens: 4096,
-    timeout_ms: 60000,
-  });
-
   const effectiveWeights = customWeights
     ? { ...DEFAULT_WEIGHTS, ...customWeights }
     : DEFAULT_WEIGHTS;
@@ -364,6 +357,30 @@ Return ONLY the JSON array, no other text.`,
     restaurants,
     effectiveWeights
   );
+
+  // Restaurant ranking / explanation uses OpenAI gpt-4o-mini. We switched
+  // from MiniMax after observing chronic 30-60s timeouts on the largest
+  // prompts (restaurant is the heaviest — it includes per-venue review
+  // signals that blow up token count vs other categories). gpt-4o-mini is
+  // cheap, fast, already used by Stagehand for its act() loops, and far
+  // more reliable under parallel load. If it still fails we fall back to
+  // SerpAPI-derived cards so the UI never shows an empty column.
+  //
+  // Timeout kept strictly under trip-package's outer 45s timeout so the
+  // fallback path always has room to run (outer would otherwise kill the
+  // whole pipeline before our catch fires).
+  let text: string;
+  try {
+    text = await openaiChat({
+      system: systemPrompt,
+      messages,
+      max_tokens: 4096,
+      timeout_ms: 25_000,
+    });
+  } catch (err) {
+    console.warn("[rankAndExplain] openaiChat threw — using SerpAPI data directly. err:", err);
+    return fallbackResult;
+  }
 
   const jsonMatch = text.match(/\[[\s\S]*\]/);
   if (!jsonMatch) return fallbackResult;

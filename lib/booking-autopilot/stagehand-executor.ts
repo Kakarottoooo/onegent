@@ -1090,7 +1090,7 @@ The user will enter CVV and confirm payment themselves.`,
         } else {
           if (!useCloud && input.jobId) {
             holdBrowserOpenForManualReview(
-              "Local mode: Ticketmaster RPA did not reach checkout — keeping browser open for 15 min for manual review/continue."
+              `Local mode: Ticketmaster RPA did not reach checkout — keeping browser open for ${Math.round(BROWSER_KEEP_OPEN_MS / 60000)} minutes for manual review/continue.`
             );
           }
           return {
@@ -1109,7 +1109,7 @@ The user will enter CVV and confirm payment themselves.`,
         trace(`[tm-rpa] Unexpected error: ${(rpaErr as Error).message?.slice(0, 120)}`);
         if (!useCloud && input.jobId) {
           holdBrowserOpenForManualReview(
-            "Local mode: Ticketmaster RPA crashed — keeping browser open for 15 min for inspection."
+            `Local mode: Ticketmaster RPA crashed — keeping browser open for ${Math.round(BROWSER_KEEP_OPEN_MS / 60000)} minutes for inspection.`
           );
         }
         return {
@@ -1183,7 +1183,7 @@ The user will enter CVV and confirm payment themselves.`,
           const checkoutUrl = (() => { try { return checkoutPage.url(); } catch { return rpaResult.currentUrl || input.startUrl; } })();
           if (!useCloud && input.jobId) {
             holdBrowserOpenForManualReview(
-              "Local mode: SeatGeek checkout reached — keeping browser open for 15 min to enter card number + CVC and complete payment."
+              `Local mode: SeatGeek checkout reached — keeping browser open for ${Math.round(BROWSER_KEEP_OPEN_MS / 60000)} minutes to enter card number + CVC and complete payment.`
             );
           }
           return {
@@ -1197,7 +1197,7 @@ The user will enter CVV and confirm payment themselves.`,
         } else {
           if (!useCloud && input.jobId) {
             holdBrowserOpenForManualReview(
-              "Local mode: SeatGeek RPA did not reach checkout — keeping browser open for 15 min for manual review/continue."
+              `Local mode: SeatGeek RPA did not reach checkout — keeping browser open for ${Math.round(BROWSER_KEEP_OPEN_MS / 60000)} minutes for manual review/continue.`
             );
           }
           return {
@@ -1216,7 +1216,7 @@ The user will enter CVV and confirm payment themselves.`,
         trace(`[sg-rpa] Unexpected error: ${(rpaErr as Error).message?.slice(0, 120)}`);
         if (!useCloud && input.jobId) {
           holdBrowserOpenForManualReview(
-            "Local mode: SeatGeek RPA crashed — keeping browser open for 15 min for inspection."
+            `Local mode: SeatGeek RPA crashed — keeping browser open for ${Math.round(BROWSER_KEEP_OPEN_MS / 60000)} minutes for inspection.`
           );
         }
         return {
@@ -5361,9 +5361,24 @@ The user will enter CVV and confirm payment themselves.`,
       bookingComPassedGuestDetails: bookingComFinalPaymentDomState,
     }, trace);
 
-    if (finalOutcome.status === "paused_payment" && !useCloud) {
-      holdBrowserOpenForManualReview(`Local mode: browser will stay open for ${Math.round(BROWSER_KEEP_OPEN_MS / 60000)} minutes —?live view available in OneAgent.`);
-      console.log("\n鉁?[stagehand] Payment page is open —?use OneAgent live view or the browser window to complete payment.\n");
+    // Keep the browser open for any non-completed terminal state so the user
+    // can see the actual page the RPA landed on:
+    //   paused_payment → enter CVC
+    //   no_availability → "Eleven Madison Park isn't on OpenTable" etc — user
+    //                      sees the last-tried page (OpenTable search / Resy /
+    //                      Google Places handoff) and can continue manually
+    //   error / captcha / needs_login → manual intervention required
+    // Only "completed" (fully booked) closes the browser immediately because
+    // there's nothing left for the user to do.
+    const shouldHoldOpen =
+      !useCloud && finalOutcome.status !== "completed";
+    if (shouldHoldOpen) {
+      holdBrowserOpenForManualReview(
+        `Local mode: browser will stay open for ${Math.round(BROWSER_KEEP_OPEN_MS / 60000)} minutes — status=${finalOutcome.status}, review the page and continue manually if needed.`
+      );
+      if (finalOutcome.status === "paused_payment") {
+        console.log("\n鉁?[stagehand] Payment page is open —?use OneAgent live view or the browser window to complete payment.\n");
+      }
     }
 
     return finalOutcome;

@@ -70,8 +70,10 @@ export async function POST(req: NextRequest) {
     const result = await buildTripPackage(state);
     console.log("[trip/plan] done", {
       elapsed_ms: Date.now() - start,
-      hotel_ok: !!result.package.tiers[0]?.hotel,
-      flight_ok: !!result.package.tiers[0]?.flight,
+      hotel_options: result.package.hotel_options.length,
+      flight_options: result.package.flight_options.length,
+      restaurant_options: result.package.restaurant_options.length,
+      activity_options: result.package.activity_options.length,
       errors: result.errors,
     });
     return NextResponse.json({
