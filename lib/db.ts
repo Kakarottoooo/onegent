@@ -2154,6 +2154,24 @@ export async function updateDecisionRoomApprovalRule(
   `;
 }
 
+/**
+ * Store the synthesized TripPackage for a chat-flow trip room. Called by the
+ * trip-synthesis agent (lib/agent/trip-synthesis.ts) once all members have
+ * contributed and the aggregate state is complete.
+ */
+export async function updateDecisionRoomSynthesis(
+  roomId: string,
+  synthesisJson: Record<string, unknown>,
+): Promise<void> {
+  await ensureDecisionRoomTables();
+  const payload = JSON.stringify(synthesisJson);
+  await sql`
+    UPDATE decision_rooms
+    SET synthesis_json = ${payload}::jsonb, updated_at = NOW()
+    WHERE id = ${roomId}
+  `;
+}
+
 export async function setDecisionRoomBookingJob(
   roomId: string,
   bookingJobId: string
