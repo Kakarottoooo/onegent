@@ -87,7 +87,10 @@ export async function extractState(input: ExtractStateInput): Promise<IntentStat
   const merged = mergePrevIntoNew(input.prev_state, parsed);
   // Belt-and-suspenders: catch the "next month → whole month" trap even if the
   // model ignored prompt rule #4 (extractor_prompt.md). See scrubWholeMonthAssumption below.
-  return scrubWholeMonthAssumption(merged, input.history ?? [], input.new_user_message);
+  const scrubbed = scrubWholeMonthAssumption(merged, input.history ?? [], input.new_user_message);
+  // For create_room restaurant with named members, infer party_size = members + creator
+  // so the router doesn't ask "how many people?" when the user already said "me and 李明".
+  return fillCreateRoomPartySize(scrubbed);
 }
 
 // ─── Prompt construction ─────────────────────────────────────────────────
@@ -769,6 +772,32 @@ export function scrubWholeMonthAssumption(
     planning_assumptions: [
       ...state.planning_assumptions,
       "Bare month mention without duration — cleared dates so router asks how long.",
+    ],
+  };
+}
+
+/**
+ * For create_room restaurant with named co-deciders, inject party_size =
+ * member_names.length + 1 (members + creator) when the user didn't state it.
+ * "我和李明想吃日料" → party_size=2 without asking a follow-up question.
+ * Only applies when party_size is genuinely missing — never overwrites an
+ * explicit value the user gave.
+ */
+function fillCreateRoomPartySize(state: IntentState): IntentState {
+  if (
+    state.intent !== "create_room" ||
+    state.scenario !== "restaurant" ||
+    !state.restaurant ||
+    typeof state.restaurant.party_size === "number" ||
+    state.member_names.length === 0
+  ) return state;
+  const inferred = state.member_names.length + 1;
+  return {
+    ...state,
+    restaurant: { ...state.restaurant, party_size: inferred },
+    planning_assumptions: [
+      ...state.planning_assumptions,
+      `Inferred party_size=${inferred} from ${state.member_names.length} named member(s) + creator`,
     ],
   };
 }

@@ -600,7 +600,18 @@ export default function Home() {
     // the history so the next utterance starts a fresh conversation.
     nluHistoryRef.current = [];
     if (payload.kind === "room" && payload.url) {
-      router.push(payload.url);
+      // Show the invite link before redirecting so the user can copy it for co-deciders.
+      if (payload.invite_url) {
+        const origin = typeof window !== "undefined" ? window.location.origin : "";
+        const fullInvite = `${origin}${payload.invite_url}`;
+        const title = payload.title ? `「${payload.title}」` : "";
+        chat.injectAssistantMessage(
+          `Decision Room${title}已创建！\n邀请链接：${fullInvite}\n\n即将跳转到房间页面…`
+        );
+        setTimeout(() => router.push(payload.url!), 2000);
+      } else {
+        router.push(payload.url);
+      }
       return;
     }
     if (payload.kind === "trip" && payload.trip_state) {

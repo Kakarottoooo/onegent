@@ -182,6 +182,21 @@ export default function ConfirmCard(props: ConfirmCardProps) {
         {summary}
       </div>
 
+      {props.kind === "room" ? (
+        <div
+          style={{
+            fontSize: 12,
+            fontFamily: "var(--font-dm-sans)",
+            color: "var(--text-muted, #888)",
+            lineHeight: 1.5,
+          }}
+        >
+          {memberNames.length > 0
+            ? `创建后你将获得邀请链接，可分享给 ${memberNames.slice(0, 3).join("、")}${memberNames.length > 3 ? " 等人" : ""}。`
+            : "创建后你将获得邀请链接，可分享给其他决策成员。"}
+        </div>
+      ) : null}
+
       {rows.length > 0 ? (
         <div
           style={{
