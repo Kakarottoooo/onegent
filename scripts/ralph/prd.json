@@ -1,48 +1,110 @@
 {
   "project": "onegent",
   "branchName": "ralph/positioning-shift-travel-only",
-  "description": "Positioning shift: archive non-travel categories and politely decline non-travel requests at the NLU layer. Part of the refocus from generalist recommendation engine to AI Travel Execution Layer. Conservative first pass — no new APIs, no DB migrations, only code archival + two prompt edits.",
+  "description": "Positioning shift: archive non-travel categories (laptop/smartphone/headphone/credit_card/big_purchase/gift/fitness) and teach the NLU v2 layer to politely decline non-travel requests. These categories are already unreachable at runtime because NluScenario type excludes them — we just need to clean up dead code and add a graceful decline path.",
   "userStories": [
     {
       "id": "US-001",
-      "title": "Archive non-travel categories and clean dead imports from app/page.tsx",
-      "description": "As a product, we're refocusing Onegent on travel (restaurant / hotel / flight / activity / trip). The NluScenario type in lib/agent/nlu-v2/types.ts already excludes laptop/smartphone/headphone/credit_card/big_purchase/gift/fitness — meaning those code paths can never be reached at runtime. Move them to an _archived/ directory preserving git history, remove their imports from app/page.tsx (which still imports 4 dead Card components), and keep tsc + tests green.",
+      "title": "Remove 4 non-travel Card imports and JSX from app/page.tsx",
+      "description": "As the homepage, I need to stop importing and rendering CreditCardCard, LaptopCard, SmartphoneCard, HeadphoneCard so those component files can be archived in a later story without breaking typecheck.",
       "acceptanceCriteria": [
-        "Create directory lib/agent/_archived/2026-04-positioning-shift/pipelines/ and move lib/agent/pipelines/laptop.ts, smartphone.ts, headphone.ts, credit-card.ts into it using `git mv` (preserves history)",
-        "Create directory lib/agent/_archived/2026-04-positioning-shift/planners/ and move lib/agent/planners/big-purchase.ts, fitness.ts, gift.ts into it using `git mv`",
-        "Create directory components/_archived/2026-04-positioning-shift/ and move components/CreditCardCard.tsx, LaptopCard.tsx, SmartphoneCard.tsx, HeadphoneCard.tsx into it using `git mv`",
-        "Create lib/agent/_archived/2026-04-positioning-shift/README.md explaining: (a) positioning shift from generalist to travel-focused, (b) archive date 2026-04-24, (c) list of archived files, (d) note that code is preserved not deleted in case future reversal needed",
-        "Create components/_archived/2026-04-positioning-shift/README.md with same explanation",
-        "In app/page.tsx: delete the 4 imports at lines ~10-13 (CreditCardCard, LaptopCard, SmartphoneCard, HeadphoneCard) and remove ALL JSX blocks that render these components. Search the file for each component name to find usage sites — they may appear in map loops branching on cardType",
-        "Grep the entire repo for any other imports of the archived files (lib/agent.ts, lib/agent/planner-engine/*, lib/agent/composer/*, etc) and either remove the import + corresponding registration entry OR repoint to the _archived path — whichever keeps behavior unchanged for remaining travel scenarios",
-        "`tsc --noEmit` returns 0 errors",
-        "`npm test` passes 100% (no regressions in existing golden tests or any other test)",
-        "`npm run build` completes successfully",
-        "Commit message: 'feat: US-001 - archive non-travel categories'"
+        "Delete the 4 import lines at the top of app/page.tsx: CreditCardCard, LaptopCard, SmartphoneCard, HeadphoneCard",
+        "Grep app/page.tsx for each component name and delete every JSX usage plus the surrounding map/branch that references cardType === 'credit_card' | 'laptop' | 'smartphone' | 'headphone'",
+        "Typecheck passes",
+        "Verify in browser using dev-browser skill"
       ],
       "priority": 1,
       "passes": false,
-      "notes": "CRITICAL SAFETY: use `git mv` only, never `rm`. Do NOT touch lib/booking-autopilot/. Do NOT run DB migrations (lib/schema.sql is fine to read but do not change). Do NOT modify .env.local or any secrets. Do NOT add new dependencies to package.json. The Card components are truly unreachable at runtime — NluScenario type = 'restaurant' | 'hotel' | 'flight' | 'activity' | 'trip' only — so deleting JSX branches that check for laptop/credit_card/etc is safe. If you find a registry file that has hardcoded registrations like `registerPipeline(laptopPipeline)`, remove that line entirely (do not comment out — the file has git history). If a test file imports archived code, check whether the test is still relevant: if yes, repoint import to _archived path; if the test is validating behavior that no longer exists, move the test file to the archive too with a note."
+      "notes": ""
     },
     {
       "id": "US-002",
-      "title": "NLU v2 politely decline non-travel requests via prompt edits",
-      "description": "As a user asking about non-travel topics (e.g. 'help me buy a laptop', '推荐 brooklyn 的瑜伽课', 'gift ideas for mom'), I want Onegent to politely decline and redirect me to ChatGPT or Claude, rather than getting a confused clarification loop. The NluScenario type already excludes non-travel scenarios, so the extractor physically cannot mis-classify these — we just need the chat layer to respond gracefully when it receives an out-of-scope message.",
+      "title": "Archive 4 non-travel Card components under components/_archived/",
+      "description": "As a cleanup, I want the 4 non-travel Card component files moved to components/_archived/2026-04-positioning-shift/ preserving git history.",
       "acceptanceCriteria": [
-        "Modify lib/agent/nlu-v2/extractor.ts system prompt: add a rule (near the scenario classification rules) stating: 'If the user's message is clearly about a NON-travel topic (consumer electronics, shopping, gifts, fitness classes, credit cards, personal advice, coding help, general Q&A), set intent=\"chitchat\", scenario=null, AND append a string to planning_assumptions in the form \"out_of_scope: <brief topic>\" (e.g. \"out_of_scope: electronics shopping\"). Do NOT try to force non-travel requests into a travel scenario.'",
-        "Modify lib/agent/nlu-v2/chat.ts system prompt: add a rule stating: 'If the state_summary passed to you contains a planning_assumptions entry starting with \"out_of_scope:\", reply politely in the user\\'s language (Chinese or English) that Onegent now focuses on travel (restaurants, hotels, flights, activities, trip planning) and suggest they try ChatGPT or Claude for other topics. Do not pretend to help or ask clarifying questions.'",
-        "Inspect lib/agent/nlu-v2/router.ts buildStateSummary(): verify that planning_assumptions is included in the summary output so chat.ts can see it. If NOT currently included, add it — append planning_assumptions entries at the end of the summary string when non-empty. Otherwise leave unchanged.",
-        "Create lib/agent/nlu-v2/__tests__/golden-out-of-scope.test.ts with at least 3 test cases: 'help me buy a laptop for coding' (English), '推荐 brooklyn 周六早上的瑜伽课' (Chinese), 'gift ideas for my mom birthday budget $150' (English). Each case must assert: intent === 'chitchat', scenario === null, AND planning_assumptions includes at least one string starting with 'out_of_scope:'",
-        "All existing golden tests still pass unchanged: golden-solo.test.ts, golden-multi.test.ts, golden-trip.test.ts (and any others in lib/agent/nlu-v2/__tests__/). Do NOT modify their expected values.",
-        "Do NOT modify lib/agent/nlu-v2/types.ts (no new NluIntent variant, no new RouterAction variant, no new NluScenario value)",
-        "Do NOT modify the routeIntent() function branching logic in router.ts (only buildStateSummary if necessary)",
-        "`tsc --noEmit` returns 0 errors",
-        "`npm test` passes 100%",
-        "Commit message: 'feat: US-002 - NLU v2 politely decline non-travel requests'"
+        "Create directory components/_archived/2026-04-positioning-shift/ with a README.md that lists the archived files and explains the 2026-04 positioning shift to travel-only",
+        "Use git mv to move CreditCardCard.tsx, LaptopCard.tsx, SmartphoneCard.tsx, HeadphoneCard.tsx from components/ into the new archive directory",
+        "Grep the whole repo for any remaining imports of these files and delete those import lines or repoint to the archive path, whichever keeps typecheck green",
+        "Typecheck passes"
       ],
       "priority": 2,
       "passes": false,
-      "notes": "This story is deliberately a PROMPT-ENGINEERING change, not a code-architecture change. The router already correctly handles 'scenario=null + intent=chitchat' → it returns { type: 'continue_chat' }, which passes the state_summary to chat.ts. All we're doing is: (a) teach extractor to tag out-of-scope requests, (b) teach chat.ts to recognize the tag and decline. If you find yourself adding new types or modifying router logic, stop — you're over-engineering. Golden test format: inspect golden-solo.test.ts for the pattern (it uses the real extractor + router pipeline end-to-end with a test harness). Requires OPENAI_API_KEY in the test environment — if CI runs without it, check whether existing golden tests are gated by an env check and follow the same pattern."
+      "notes": ""
+    },
+    {
+      "id": "US-003",
+      "title": "Archive 3 non-travel planners under lib/agent/_archived/",
+      "description": "As a cleanup, I want the big-purchase, fitness, and gift planners moved out of lib/agent/planners/ and any registry entries that mention them removed.",
+      "acceptanceCriteria": [
+        "Create directory lib/agent/_archived/2026-04-positioning-shift/planners/ with a README.md explaining the positioning shift",
+        "Use git mv to move lib/agent/planners/big-purchase.ts, fitness.ts, gift.ts into the archive directory",
+        "Grep lib/agent.ts, lib/agent/planner-engine/, and lib/agent/composer/ for references to these planner names and remove every import line plus any registerPlanner / planners[] entries that register them",
+        "Typecheck passes",
+        "Tests pass"
+      ],
+      "priority": 3,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-004",
+      "title": "Archive 4 non-travel pipelines under lib/agent/_archived/",
+      "description": "As a cleanup, I want the laptop, smartphone, headphone, and credit-card pipelines moved out of lib/agent/pipelines/ and any registry entries that mention them removed.",
+      "acceptanceCriteria": [
+        "Create directory lib/agent/_archived/2026-04-positioning-shift/pipelines/ with a README.md explaining the positioning shift",
+        "Use git mv to move lib/agent/pipelines/laptop.ts, smartphone.ts, headphone.ts, credit-card.ts into the archive directory",
+        "Grep lib/agent.ts, lib/agent/planner-engine/, and lib/agent/composer/ for references to these pipeline names and remove every import line plus any registerPipeline / pipelines[] entries that register them",
+        "Typecheck passes",
+        "Tests pass"
+      ],
+      "priority": 4,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-005",
+      "title": "Teach NLU extractor to tag non-travel messages as out_of_scope",
+      "description": "As an extractor, I need to recognize when a user message is about a non-travel topic (electronics, shopping, gifts, fitness, credit cards, personal advice) and tag it so downstream layers can decline gracefully.",
+      "acceptanceCriteria": [
+        "Add a rule to the system prompt in lib/agent/nlu-v2/extractor.ts: when the user message is clearly about a non-travel topic, set intent='chitchat' AND scenario=null AND append a string to planning_assumptions in the format 'out_of_scope: <brief topic>' (e.g. 'out_of_scope: electronics shopping')",
+        "The rule must list the 6 out-of-scope categories: electronics, shopping, gifts, fitness, credit cards, personal advice",
+        "Do not modify lib/agent/nlu-v2/types.ts (no new NluIntent or NluScenario values)",
+        "Typecheck passes"
+      ],
+      "priority": 5,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-006",
+      "title": "Teach NLU chat.ts to politely decline when out_of_scope tag is present",
+      "description": "As the chat reply layer, when the state summary indicates an out_of_scope assumption, I need to reply politely in the user's language redirecting them to ChatGPT or Claude for non-travel topics.",
+      "acceptanceCriteria": [
+        "Add a rule to the system prompt in lib/agent/nlu-v2/chat.ts: when state_summary contains a planning_assumption starting with 'out_of_scope:', reply politely that Onegent focuses on travel (restaurants, hotels, flights, activities, trip planning) and suggest ChatGPT or Claude for other topics. Respond in Chinese if the user's last message is Chinese, English otherwise.",
+        "Verify that buildStateSummary() in lib/agent/nlu-v2/router.ts includes planning_assumptions in its output so the chat layer can see them — if it does not, append them to the summary string (non-empty entries only)",
+        "Do not modify routeIntent() branching logic and do not add a new RouterAction variant",
+        "Typecheck passes"
+      ],
+      "priority": 6,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-007",
+      "title": "Add golden-out-of-scope.test.ts covering 3 non-travel decline cases",
+      "description": "As a regression guard, I need a golden test that verifies the NLU pipeline produces out_of_scope tags and a decline reply for non-travel user messages.",
+      "acceptanceCriteria": [
+        "Create lib/agent/nlu-v2/__tests__/golden-out-of-scope.test.ts following the same pattern as golden-solo.test.ts (real extractor + router pipeline, requires OPENAI_API_KEY)",
+        "Test case 1: input 'help me buy a laptop for coding' — assert intent === 'chitchat' AND scenario === null AND planning_assumptions contains a string starting with 'out_of_scope:'",
+        "Test case 2: input '推荐 brooklyn 周六早上的瑜伽课' — same assertions",
+        "Test case 3: input 'gift ideas for my mom birthday budget 150' — same assertions",
+        "All pre-existing golden tests (golden-solo, golden-multi, golden-trip) still pass unchanged",
+        "Tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 7,
+      "passes": false,
+      "notes": ""
     }
   ]
 }
