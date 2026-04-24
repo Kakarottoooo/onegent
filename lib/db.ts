@@ -26,6 +26,10 @@ let decisionRoomPrivateMessagesTableReady: Promise<void> | null = null;
 // ── User-to-user DM (Stage 2+) ─────────────────────────────────────────────
 let userDirectMessagesTableReady: Promise<void> | null = null;
 
+// ── Chat sessions (ChatGPT-style persistent solo threads) ──────────────────
+let chatSessionsTableReady: Promise<void> | null = null;
+let chatSessionMessagesTableReady: Promise<void> | null = null;
+
 // ── Contacts / user profiles (Phase 1.5, layer 2) ──────────────────────────
 let userProfilesTableReady: Promise<void> | null = null;
 let userContactsTableReady: Promise<void> | null = null;
@@ -3708,6 +3712,193 @@ export async function listDirectMessagesBetween(
     FROM user_direct_messages
     WHERE (from_user_id = ${userA} AND to_user_id = ${userB})
        OR (from_user_id = ${userB} AND to_user_id = ${userA})
+    ORDER BY id ASC
+    LIMIT ${limit}
+  `;
+  return result.rows;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Chat sessions — ChatGPT-style persistent solo threads.
+// A session is the minimum unit for "one conversation on the homepage".
+// Rooms are the upgraded form of a session (session.upgraded_room_id is set
+// once the user confirms a create_room). Both appear in the sidebar; the
+// session keeps its ID so revisiting it lands on the room page.
+// ═══════════════════════════════════════════════════════════════════════════
+
+export interface ChatSession {
+  id: string;
+  user_id: string;
+  title: string;
+  upgraded_room_id: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ChatSessionMessageRow {
+  id: string;
+  role: "user" | "assistant";
+  content: string;
+  created_at: string;
+}
+
+export async function ensureChatSessionsTable(): Promise<void> {
+  if (!chatSessionsTableReady) {
+    chatSessionsTableReady = (async () => {
+      await sql`
+        CREATE TABLE IF NOT EXISTS chat_sessions (
+          id               TEXT PRIMARY KEY,
+          user_id          TEXT NOT NULL,
+          title            TEXT NOT NULL,
+          upgraded_room_id TEXT,
+          created_at       TIMESTAMPTZ DEFAULT NOW(),
+          updated_at       TIMESTAMPTZ DEFAULT NOW()
+        )
+      `;
+      await sql`CREATE INDEX IF NOT EXISTS chat_sessions_user_updated_idx ON chat_sessions (user_id, updated_at DESC)`;
+    })().catch((err) => {
+      chatSessionsTableReady = null;
+      throw err;
+    });
+  }
+  await chatSessionsTableReady;
+}
+
+export async function ensureChatSessionMessagesTable(): Promise<void> {
+  if (!chatSessionMessagesTableReady) {
+    chatSessionMessagesTableReady = (async () => {
+      await sql`
+        CREATE TABLE IF NOT EXISTS chat_session_messages (
+          id         BIGSERIAL PRIMARY KEY,
+          session_id TEXT NOT NULL,
+          role       TEXT NOT NULL,
+          content    TEXT NOT NULL,
+          created_at TIMESTAMPTZ DEFAULT NOW()
+        )
+      `;
+      await sql`CREATE INDEX IF NOT EXISTS chat_session_messages_session_idx ON chat_session_messages (session_id, id)`;
+    })().catch((err) => {
+      chatSessionMessagesTableReady = null;
+      throw err;
+    });
+  }
+  await chatSessionMessagesTableReady;
+}
+
+/** Create a new chat session. Title defaults to first 40 chars of seed message. */
+export async function createChatSession(params: {
+  id: string;
+  userId: string;
+  title: string;
+}): Promise<ChatSession> {
+  await ensureChatSessionsTable();
+  const result = await sql<ChatSession>`
+    INSERT INTO chat_sessions (id, user_id, title)
+    VALUES (${params.id}, ${params.userId}, ${params.title})
+    RETURNING *
+  `;
+  return result.rows[0];
+}
+
+/** Lookup helper; null when session doesn't exist or belongs to another user. */
+export async function getChatSession(
+  sessionId: string,
+  userId: string,
+): Promise<ChatSession | null> {
+  await ensureChatSessionsTable();
+  const result = await sql<ChatSession>`
+    SELECT * FROM chat_sessions WHERE id = ${sessionId} AND user_id = ${userId} LIMIT 1
+  `;
+  return result.rows[0] ?? null;
+}
+
+/** Update the session's title (user-triggered rename, or first-LLM-summary). */
+export async function updateChatSessionTitle(
+  sessionId: string,
+  userId: string,
+  title: string,
+): Promise<void> {
+  await ensureChatSessionsTable();
+  await sql`
+    UPDATE chat_sessions
+    SET title = ${title}, updated_at = NOW()
+    WHERE id = ${sessionId} AND user_id = ${userId}
+  `;
+}
+
+/** Flag this session as "upgraded to a room" (session stays, URL in sidebar
+ *  now routes to the room instead of the solo thread). */
+export async function markSessionUpgraded(
+  sessionId: string,
+  userId: string,
+  roomId: string,
+): Promise<void> {
+  await ensureChatSessionsTable();
+  await sql`
+    UPDATE chat_sessions
+    SET upgraded_room_id = ${roomId}, updated_at = NOW()
+    WHERE id = ${sessionId} AND user_id = ${userId}
+  `;
+}
+
+/** Bump the session's updated_at so the sidebar sort surfaces it. */
+export async function touchChatSession(sessionId: string, userId: string): Promise<void> {
+  await ensureChatSessionsTable();
+  await sql`
+    UPDATE chat_sessions SET updated_at = NOW()
+    WHERE id = ${sessionId} AND user_id = ${userId}
+  `;
+}
+
+/** List this user's sessions, newest-active first. Limit 100 for now. */
+export async function listMyChatSessions(userId: string): Promise<ChatSession[]> {
+  await ensureChatSessionsTable();
+  const result = await sql<ChatSession>`
+    SELECT * FROM chat_sessions
+    WHERE user_id = ${userId}
+    ORDER BY updated_at DESC
+    LIMIT 100
+  `;
+  return result.rows;
+}
+
+export async function deleteChatSession(sessionId: string, userId: string): Promise<void> {
+  await Promise.all([ensureChatSessionsTable(), ensureChatSessionMessagesTable()]);
+  await sql`DELETE FROM chat_session_messages WHERE session_id = ${sessionId}`;
+  await sql`DELETE FROM chat_sessions WHERE id = ${sessionId} AND user_id = ${userId}`;
+}
+
+/** Append a message to a session's thread. Touches the session's updated_at
+ *  so the sidebar reflects activity. */
+export async function insertChatSessionMessage(params: {
+  sessionId: string;
+  role: "user" | "assistant";
+  content: string;
+}): Promise<void> {
+  await ensureChatSessionMessagesTable();
+  await sql`
+    INSERT INTO chat_session_messages (session_id, role, content)
+    VALUES (${params.sessionId}, ${params.role}, ${params.content})
+  `;
+  // Bump the session's updated_at so it rises to the top of the sidebar.
+  await sql`
+    UPDATE chat_sessions SET updated_at = NOW() WHERE id = ${params.sessionId}
+  `;
+}
+
+export async function listChatSessionMessages(
+  sessionId: string,
+  userId: string,
+  limit: number = 200,
+): Promise<ChatSessionMessageRow[]> {
+  await Promise.all([ensureChatSessionsTable(), ensureChatSessionMessagesTable()]);
+  // Auth gate: only the owner can read.
+  const session = await getChatSession(sessionId, userId);
+  if (!session) return [];
+  const result = await sql<ChatSessionMessageRow>`
+    SELECT id::text AS id, role, content, created_at
+    FROM chat_session_messages
+    WHERE session_id = ${sessionId}
     ORDER BY id ASC
     LIMIT ${limit}
   `;

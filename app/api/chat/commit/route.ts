@@ -25,6 +25,7 @@ import {
   insertPrivateMessage,
   sendDirectMessage,
   getUserProfile,
+  markSessionUpgraded,
   type ApprovalRule,
   type DecisionRoomType,
   type DecisionRoomCategory,
@@ -573,6 +574,20 @@ export async function POST(req: NextRequest) {
           }
         } else {
           unresolvedNames.push(r.name);
+        }
+      }
+
+      // If this commit came from a solo session (homepage sidebar thread),
+      // flag that session as "upgraded to a room" so the sidebar can show
+      // the 🏠 icon and route future clicks to the room instead of the
+      // dead solo URL. Non-fatal — session polish not on the critical path.
+      const incomingSessionId =
+        typeof b.session_id === "string" && b.session_id.trim() ? b.session_id.trim() : null;
+      if (incomingSessionId) {
+        try {
+          await markSessionUpgraded(incomingSessionId, userId, room.id);
+        } catch (err) {
+          console.warn(`[chat/commit] markSessionUpgraded failed for session=${incomingSessionId}`, err);
         }
       }
 

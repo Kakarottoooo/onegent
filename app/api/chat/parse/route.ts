@@ -14,6 +14,7 @@
 
 import { NextRequest, NextResponse, after } from "next/server";
 import { auth } from "@clerk/nextjs/server";
+import { randomUUID } from "crypto";
 import {
   analyzeConversationalV2,
   buildFallbackResult,
@@ -22,6 +23,9 @@ import {
   isRoomMember,
   upsertMemberIntentState,
   insertPrivateMessage,
+  createChatSession,
+  insertChatSessionMessage,
+  getChatSession,
 } from "@/lib/db";
 import { triggerSynthesis } from "@/lib/agent/trip-synthesis";
 import type { ChatMessage } from "@/lib/llm-client";
@@ -73,6 +77,8 @@ export async function POST(req: NextRequest) {
       : undefined;
   const roomId =
     typeof b.room_id === "string" && b.room_id.trim() ? b.room_id.trim() : undefined;
+  const incomingSessionId =
+    typeof b.session_id === "string" && b.session_id.trim() ? b.session_id.trim() : undefined;
 
   try {
     const result = await analyzeConversationalV2({
@@ -83,6 +89,20 @@ export async function POST(req: NextRequest) {
     console.log(
       `[chat/parse] v2 — scenario=${result.scenario} intent=${result.intent} confirm_ready=${result.confirm_ready}${roomId ? ` room=${roomId}` : ""}`,
     );
+
+    // Sessions (ChatGPT-style solo thread): when not in a room context,
+    // mirror the turn into chat_session_messages. Auto-create a session on
+    // first message. `resolvedSessionId` is returned in the response so the
+    // client can update the URL to ?session_id=<id>.
+    let resolvedSessionId: string | null = null;
+    if (!roomId && userId) {
+      resolvedSessionId = await syncSessionContext(
+        userId,
+        incomingSessionId,
+        message,
+        result.assistant_reply,
+      );
+    }
 
     // Stage 2: if the user is chatting inside a room context, sync their
     // IntentState + private-channel messages. Non-fatal: any failure here
@@ -110,6 +130,7 @@ export async function POST(req: NextRequest) {
       result,
       user_id: userId ?? null,
       nlu_version: "v2",
+      session_id: resolvedSessionId,
     });
   } catch (err) {
     console.warn(
@@ -172,5 +193,47 @@ async function syncRoomContext(
     await Promise.all(writes);
   } catch (err) {
     console.warn(`[chat/parse] room sync failed for room=${roomId} user=${userId}:`, err);
+  }
+}
+
+/**
+ * Persist this turn into the user's solo chat session (ChatGPT-style
+ * sidebar history). Creates the session on first message when no
+ * incoming session_id is provided. Returns the session id so the
+ * response can echo it back for the client to update the URL.
+ *
+ * Silently returns null on any failure — session continuity is a polish,
+ * not a critical path.
+ */
+async function syncSessionContext(
+  userId: string,
+  incomingSessionId: string | undefined,
+  userMessage: string,
+  assistantReply: string | null | undefined,
+): Promise<string | null> {
+  try {
+    let sessionId = incomingSessionId ?? null;
+    if (sessionId) {
+      // Defensive: make sure this user owns the session before writing.
+      const existing = await getChatSession(sessionId, userId);
+      if (!existing) sessionId = null;
+    }
+    if (!sessionId) {
+      sessionId = randomUUID();
+      const title = (userMessage.trim() || "New chat").slice(0, 80);
+      await createChatSession({ id: sessionId, userId, title });
+    }
+    await insertChatSessionMessage({ sessionId, role: "user", content: userMessage });
+    if (assistantReply && assistantReply.trim()) {
+      await insertChatSessionMessage({
+        sessionId,
+        role: "assistant",
+        content: assistantReply,
+      });
+    }
+    return sessionId;
+  } catch (err) {
+    console.warn(`[chat/parse] session sync failed for user=${userId}:`, err);
+    return null;
   }
 }
