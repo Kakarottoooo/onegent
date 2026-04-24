@@ -133,6 +133,39 @@ export default function Home() {
     const roomId = params.get("room_id");
     setActiveRoomId(roomId && roomId.trim() ? roomId.trim() : null);
   }, []);
+  // Stage 2 chat continuity: when the page loads (or activeRoomId changes
+  // because the user opened ?room_id=<id>), pull this user's private message
+  // history from the server and replay it into the chat thread so refreshing,
+  // closing and re-opening, or following an invite link doesn't lose the
+  // ongoing conversation. Only runs once per room (replayedRoomIds ref guard).
+  const replayedRoomIds = useRef<Set<string>>(new Set());
+  useEffect(() => {
+    if (!activeRoomId) return;
+    if (replayedRoomIds.current.has(activeRoomId)) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch(`/api/rooms/${activeRoomId}/private-messages`);
+        if (!res.ok) return;
+        const data = (await res.json()) as {
+          messages: Array<{ id: string; role: "user" | "assistant" | "system"; content: string; created_at: string }>;
+        };
+        if (cancelled || !data.messages || data.messages.length === 0) return;
+        // Mark replayed BEFORE injecting so any side-effect re-render doesn't loop.
+        replayedRoomIds.current.add(activeRoomId);
+        for (const m of data.messages) {
+          if (m.role === "user") chat.injectUserMessage(m.content);
+          else chat.injectAssistantMessage(m.content);
+        }
+      } catch {
+        // Network failure here is non-fatal — user can still chat fresh.
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeRoomId]);
   const bottomRef = useRef<HTMLDivElement>(null);
   const chatInputRef = useRef("");
   const isComposingRef = useRef(false);

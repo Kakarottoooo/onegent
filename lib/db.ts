@@ -1959,7 +1959,9 @@ export interface DecisionRoomMember {
   room_id: string;
   user_id: string;
   role: "creator" | "member";
-  status: "joined" | "left";
+  /** Stage 2 added "invited" — pre-added by the room creator via contact
+   *  resolution; flips to "joined" when the user accepts the invite. */
+  status: "joined" | "left" | "invited";
   joined_at: string;
 }
 
@@ -2101,14 +2103,23 @@ export async function getDecisionRoomByShortCode(shortCode: string): Promise<Dec
  * approving / executing). With `archived: true` returns done / abandoned —
  * the History tab on /rooms.
  */
+/**
+ * Stage 2: extends DecisionRoom with the caller's membership status — lets
+ * the /rooms list distinguish active rooms (joined) from pending invites.
+ */
+export interface DecisionRoomWithMembership extends DecisionRoom {
+  member_status: "joined" | "invited";
+}
+
 export async function listMyDecisionRooms(
   userId: string,
-  opts: { archived?: boolean } = {}
-): Promise<DecisionRoom[]> {
+  opts: { archived?: boolean; includeInvited?: boolean } = {}
+): Promise<DecisionRoomWithMembership[]> {
   await ensureDecisionRoomTables();
   if (opts.archived) {
-    const result = await sql<DecisionRoom>`
-      SELECT r.*
+    // Archive view ignores includeInvited — invites are never archived.
+    const result = await sql<DecisionRoomWithMembership>`
+      SELECT r.*, m.status AS member_status
       FROM decision_rooms r
       JOIN decision_room_members m ON m.room_id = r.id
       WHERE m.user_id = ${userId}
@@ -2119,8 +2130,22 @@ export async function listMyDecisionRooms(
     `;
     return result.rows;
   }
-  const result = await sql<DecisionRoom>`
-    SELECT r.*
+  // Active view: always include 'joined'; optionally include 'invited'.
+  if (opts.includeInvited) {
+    const result = await sql<DecisionRoomWithMembership>`
+      SELECT r.*, m.status AS member_status
+      FROM decision_rooms r
+      JOIN decision_room_members m ON m.room_id = r.id
+      WHERE m.user_id = ${userId}
+        AND m.status IN ('joined', 'invited')
+        AND r.status NOT IN ('done', 'abandoned')
+      ORDER BY (m.status = 'invited') DESC, r.updated_at DESC
+      LIMIT 100
+    `;
+    return result.rows;
+  }
+  const result = await sql<DecisionRoomWithMembership>`
+    SELECT r.*, m.status AS member_status
     FROM decision_rooms r
     JOIN decision_room_members m ON m.room_id = r.id
     WHERE m.user_id = ${userId}
@@ -2310,6 +2335,56 @@ export async function joinDecisionRoom(roomId: string, userId: string): Promise<
   `;
   await sql`UPDATE decision_rooms SET updated_at = NOW() WHERE id = ${roomId}`;
   return result.rows[0];
+}
+
+/**
+ * Stage 2: pre-add a contact as a pending invitee on a chat-flow trip room.
+ * Differs from joinDecisionRoom in that the row starts at status='invited' —
+ * the user has to accept (POST /api/rooms/[id]/accept-invite) to flip it to
+ * 'joined'. ON CONFLICT DO NOTHING so an existing 'joined' row is never
+ * downgraded by re-inviting.
+ */
+export async function inviteToDecisionRoom(
+  roomId: string,
+  userId: string,
+): Promise<void> {
+  await ensureDecisionRoomTables();
+  await sql`
+    INSERT INTO decision_room_members (room_id, user_id, role, status)
+    VALUES (${roomId}, ${userId}, 'member', 'invited')
+    ON CONFLICT (room_id, user_id) DO NOTHING
+  `;
+}
+
+/**
+ * Stage 2: resolve a list of free-form display names (member_names from NLU)
+ * to the caller's contacts. A name matches when it equals the contact's
+ * nickname OR the peer's display_name OR the peer's profile_code (case-
+ * insensitive). Returns one entry per input name, with contact_user_id=null
+ * when no match — caller decides whether to fall back to the manual invite_url.
+ *
+ * Keeps the original input order so the caller can correlate with the source
+ * member_names array.
+ */
+export async function resolveContactsByNames(
+  ownerId: string,
+  names: string[],
+): Promise<Array<{ name: string; contact_user_id: string | null }>> {
+  if (names.length === 0) return [];
+  const contacts = await listContactsWithProfiles(ownerId);
+  const norm = (s: string | null | undefined) => (s ?? "").trim().toLowerCase();
+  return names.map((name) => {
+    const target = norm(name);
+    if (!target) return { name, contact_user_id: null };
+    const hit = contacts.find(
+      (c) =>
+        norm(c.nickname) === target ||
+        norm(c.display_name) === target ||
+        norm(c.profile_code) === target ||
+        norm(c.profile_code).replace(/^@/, "") === target.replace(/^@/, ""),
+    );
+    return { name, contact_user_id: hit?.contact_user_id ?? null };
+  });
 }
 
 export async function listRoomMembers(roomId: string): Promise<DecisionRoomMember[]> {

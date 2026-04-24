@@ -62,6 +62,10 @@ export async function GET(req: NextRequest) {
   if (!userId) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
   const archived = req.nextUrl.searchParams.get("archived") === "1";
-  const rooms = await listMyDecisionRooms(userId, { archived });
+  // Stage 2: ?include_invited=1 surfaces rooms the user is pre-invited to
+  // (status='invited' from contact-based auto-invite). Default false to
+  // preserve legacy behavior — only joined rooms.
+  const includeInvited = req.nextUrl.searchParams.get("include_invited") === "1";
+  const rooms = await listMyDecisionRooms(userId, { archived, includeInvited });
   return NextResponse.json({ rooms });
 }

@@ -20,6 +20,8 @@ import {
   createDecisionRoom,
   upsertRoomConstraint,
   upsertMemberIntentState,
+  resolveContactsByNames,
+  inviteToDecisionRoom,
   type ApprovalRule,
   type DecisionRoomType,
   type DecisionRoomCategory,
@@ -487,6 +489,28 @@ export async function POST(req: NextRequest) {
         console.warn("[chat/commit] seed creator intent_state failed", err);
       }
 
+      // Stage 2 invite-UX: resolve named members to contacts + pre-invite.
+      // Resolved contacts get added with status='invited'; they'll see the
+      // pending invitation in their /rooms list and accept to join. Names
+      // that don't match a contact (typos, non-contacts) are returned in
+      // the response so the UI can prompt the user to share the link instead.
+      const resolved = await resolveContactsByNames(userId, memberNames).catch(() => []);
+      const invitedUserIds: string[] = [];
+      const unresolvedNames: string[] = [];
+      for (const r of resolved) {
+        if (r.contact_user_id && r.contact_user_id !== userId) {
+          try {
+            await inviteToDecisionRoom(room.id, r.contact_user_id);
+            invitedUserIds.push(r.contact_user_id);
+          } catch (err) {
+            console.warn(`[chat/commit] inviteToDecisionRoom failed for ${r.contact_user_id}`, err);
+            unresolvedNames.push(r.name);
+          }
+        } else {
+          unresolvedNames.push(r.name);
+        }
+      }
+
       return NextResponse.json({
         ok: true,
         kind: "room",
@@ -501,6 +525,8 @@ export async function POST(req: NextRequest) {
         room_type: "trip",
         flow: "chat",
         categories: room.categories,
+        invited_user_ids: invitedUserIds,
+        unresolved_names: unresolvedNames,
       });
     }
 

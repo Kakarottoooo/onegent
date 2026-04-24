@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useAuth } from "@/app/hooks/useAuth";
-import type { DecisionRoom } from "@/lib/db";
+import type { DecisionRoom, DecisionRoomWithMembership } from "@/lib/db";
 import { CARD, CTA, PAGE } from "@/app/_ui/tokens";
 import GlobalNav from "@/components/GlobalNav";
 
@@ -62,7 +62,8 @@ function TabSwitch({
 export default function RoomsListPage() {
   const { isSignedIn, userId } = useAuth();
   const [tab, setTab] = useState<Tab>("active");
-  const [rooms, setRooms] = useState<DecisionRoom[] | null>(null);
+  const [rooms, setRooms] = useState<DecisionRoomWithMembership[] | null>(null);
+  const [acceptBusyId, setAcceptBusyId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [reloadTick, setReloadTick] = useState(0);
   const [menu, setMenu] = useState<RoomContextMenuState>(null);
@@ -87,9 +88,12 @@ export default function RoomsListPage() {
     setError(null);
     (async () => {
       try {
-        const res = await fetch(tab === "history" ? "/api/rooms?archived=1" : "/api/rooms");
+        // Stage 2: include_invited=1 surfaces pending trip-room invites so
+        // the invitee sees them on the active tab. Archive view ignores it.
+        const url = tab === "history" ? "/api/rooms?archived=1" : "/api/rooms?include_invited=1";
+        const res = await fetch(url);
         if (!res.ok) throw new Error();
-        const data = (await res.json()) as { rooms: DecisionRoom[] };
+        const data = (await res.json()) as { rooms: DecisionRoomWithMembership[] };
         if (!cancelled) setRooms(data.rooms);
       } catch {
         if (!cancelled) setError("Couldn't load your rooms.");
@@ -119,6 +123,28 @@ export default function RoomsListPage() {
       window.removeEventListener("keydown", onKeyDown);
     };
   }, [menu]);
+
+  async function acceptInvite(room: DecisionRoomWithMembership) {
+    setError(null);
+    setAcceptBusyId(room.id);
+    try {
+      const res = await fetch(`/api/rooms/${room.id}/accept-invite`, { method: "POST" });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data.error ?? "Couldn't accept the invite.");
+      }
+      // Navigate based on the room's flow — chat-flow rooms live on the
+      // homepage; classic rooms render the legacy form UI.
+      if (room.flow === "chat") {
+        window.location.href = `/?room_id=${room.id}`;
+      } else {
+        window.location.href = `/rooms/${room.id}`;
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Couldn't accept the invite.");
+      setAcceptBusyId(null);
+    }
+  }
 
   async function runRoomAction(room: DecisionRoom, action: "archive" | "delete") {
     setMenu(null);
@@ -371,6 +397,42 @@ export default function RoomsListPage() {
               <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
                 {rooms.map((r) => {
                   const status = STATUS_LABEL[r.status];
+                  // Stage 2: invited rooms render an Accept card instead of
+                  // a Link (the user isn't a joined member yet).
+                  if (r.member_status === "invited") {
+                    const isBusy = acceptBusyId === r.id;
+                    return (
+                      <div
+                        key={r.id}
+                        className={`${CARD} p-4 border-[var(--gold)] block`}
+                        style={{ borderColor: "var(--gold)" }}
+                      >
+                        <div className="flex items-start justify-between gap-3 mb-3">
+                          <div className="flex-1 min-w-0">
+                            <p className="text-sm font-semibold text-[var(--text-primary)] truncate">{r.title}</p>
+                            <p className="text-xs text-[var(--text-muted)] mt-0.5">
+                              {TYPE_LABEL[r.type]} · <span className="font-mono">{r.short_code}</span>
+                            </p>
+                          </div>
+                          <span className="text-[10px] font-medium px-2 py-0.5 rounded-full whitespace-nowrap bg-[var(--gold)]/15 text-[var(--gold)] border border-[var(--gold)]/30">
+                            Invited
+                          </span>
+                        </div>
+                        <p className="text-xs text-[var(--text-muted)] mb-3">
+                          You&apos;ve been invited to this {TYPE_LABEL[r.type].toLowerCase()} room.
+                        </p>
+                        <button
+                          type="button"
+                          disabled={isBusy}
+                          onClick={() => acceptInvite(r)}
+                          className="w-full rounded-lg py-2 text-sm font-semibold disabled:opacity-50"
+                          style={{ background: "var(--gold)", color: "#fff" }}
+                        >
+                          {isBusy ? "Accepting…" : "Accept invite →"}
+                        </button>
+                      </div>
+                    );
+                  }
                   return (
                     <Link
                       key={r.id}
