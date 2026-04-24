@@ -1,5 +1,5 @@
 ================================================================
-Onegent · AI 决策代理 · 项目总结 · v0.2.36.0
+Onegent · AI 决策代理 · 项目总结 · v0.2.37.0
 ================================================================
 
 【项目定义】
@@ -16,6 +16,187 @@ Onegent · AI 决策代理 · 项目总结 · v0.2.36.0
 活动 / 多人 trip），非旅行品类（笔记本 / 手机 / 耳机 / 信用卡 /
 礼物 / 健身）已归档。详见本文档头部 "Recent Updates - 2026-04-24
 (cont. 2) · Positioning Shift"。
+
+================================================================
+Recent Updates - 2026-04-24 (cont. 6) · Week 4 #3 /developers landing + 自助 key dashboard
+================================================================
+
+v0.2.36.0 把 MCP / ChatGPT 分发渠道做完后,v0.2.37.0 补齐 B 端的"前门"——
+完整的 /developers landing + 文档 + pricing + 自助 API key 仪表盘。
+Stripe 打法的最后一块:不只是 API 能调,还要让 caller 一进网站就明白
+"这是干什么的、怎么用、怎么开始"。
+
+战略意义:这一轮 17 个 commit 把品牌定位 "AI Travel Execution Layer"
+从内部说法变成可点击的产品页面。一个开发者从 onegent.com/developers
+进来,5 分钟内能 sign up → mint test key → 在 Claude Desktop 里跑通
+第一次预订,完全自助,不需要发邮件。
+
+1. 命名 + 定位锁定(讨论 → 写进 memory)
+   讨论了 4 个方案(全盘改名 / 公司+产品双层 / 保留 Onegent 改显示层 /
+   延迟决策),选"保留 Onegent + 改显示层 + 定 tagline":
+   · Tagline:"Onegent — AI books your trip end-to-end"
+   · 外部显示名:"Travel Booking Agent"
+   · 一句话描述:"Book restaurants, hotels, flights, and activities
+     through an AI agent that navigates real booking sites."
+   理由:零流量零品牌 equity 阶段,改公司名收益 0,信息缺口靠 tagline
+   补。Stripe 2010-2013 同款打法。
+
+2. UI 设计标杆 + 写进 auto-memory(永久指令)
+   用户:"那个UI要做的有高级感,高大上一点,有设计感一点,像apple一样,
+   你是顶级的网站Ui设计师,要有创新,要做到一目了然和让人赏心悦目。
+   不要害怕工时久就偷懒做简单版本,要做就要做到完美和注重品质和细节。"
+   存入 memory/feedback_ui_quality_bar.md → 后续做用户可见 UI 时默认
+   按 Apple/Linear/Stripe/Mercury 标准,不再降级到 MVP。
+   设计方向选 A + 暗仪表盘混搭:landing/docs Mercury 白净派,/keys
+   Linear 暗调派,marketing→product 视觉过渡。
+
+3. 数据库 schema(US-W4-010)
+   - api_keys 加 user_id TEXT NULL 列(NULL=B端 org-key,有值=自助
+     用户 key)
+   - lazy migration 自动 ALTER TABLE ADD COLUMN IF NOT EXISTS,不
+     破坏既有 7 条 CLI mint 的 key
+   - 新增 partial index api_keys_user_active_idx ON (user_id) WHERE
+     user_id IS NOT NULL AND is_active = TRUE
+   - createApiKey 加 userId 参数;新 helper findApiKeysByUserId、
+     findApiKeyById(后者用于 revoke 鉴权 user_id 匹配)
+   - 8 个 require-api-key tests 零回归
+
+4. Design tokens 基础设施(US-W4-011 + 012)
+   - app/developers/_styles/tokens.css:9 阶 ink 灰阶 + 金 #C9A84C
+     accent + 4 motion durations + 3 ease curves。dark theme via
+     [data-theme="dashboard"] 选择器,vars 全部翻黑(true black
+     #0A0A0B 底,亮金 #D4B860 accent)。prefers-reduced-motion 全
+     局零化 animation duration。
+   - typography.css:.dev-display(clamp 48→96px Playfair)+
+     .dev-h1/h2/h3(serif/sans 混搭)+ .dev-token-underline(纯 CSS
+     keyframe scaleX(0→1) draw 320ms 后 ease-out-expo)+
+     .dev-fade-up--delay-{1..4}(staggered 60/160/280/420ms 入场)
+   - layout.tsx + DevNav(粘性,scroll>8 触发 backdrop-blur)+
+     DevFooter(4 列编辑式)+ shell.css(.dev-cta-pill / -ghost /
+     .dev-badge--live 含金色 pulse 动画 / -preview / -beta)
+   - Clerk v7 不再导出 SignedIn/SignedOut → 改 useUser() + isLoaded
+     gate 防止 hydration flicker
+
+5. Landing 页面 7 个 signature moves(US-W4-013..017)
+   全部承诺达成,每个都是"design-bar = high"的具体动作:
+
+   ① Hero — 双层动态标题
+     "Your AI books your trip end-to-end." Playfair 600 clamp 48→
+     96px,"end-to-end" 戴金色 underline 320ms 后 scaleX 弹出。
+     Lead + 3 row check-icon trust meta(provider list / 支付安全
+     stop-before-CVV / REST/MCP/Apps 三 surface 覆盖)。staggered
+     fade-up 入场。
+
+   ② Code Preview — 3-tab 实活卡片
+     curl / Claude Desktop / TypeScript,切 tab clip-path inset
+     wipe(100% → 0%)动画 ease-out-expo。手 tokenize 成
+     .tok-{keyword,string,fn,prop,...} 颜色 span(无 shiki/prism
+     依赖,3 段短代码不值得)。Copy 按钮 navigator.clipboard +
+     icon 切 + "Copied" 2s 自动恢复。macOS 3-dot chrome + 1px 金
+     hover border。
+
+   ③ Scenario Grid — 4 张定制 SVG 卡
+     餐厅(刀叉)/ 酒店(楼宇 + 窗格)/ 机票(纸飞机)/ 活动(穿孔
+     票 + 星)定制单色 stroke=1.5 SVG。卡片 hover translateY(-4px)
+     + shadow-hover + icon rotate(6deg) + 顶部金色 gradient sheen
+     ::before fade-in。Restaurant/Hotel = Live(脉动绿点),Flight/
+     Activity = Preview(暖金 pill)。
+
+   ④ How It Works — SVG 流程图 + 旅行 token
+     横向 4 节点(Your AI agent → /api/v1 → engine → real booking
+     site)+ 1px 金色 hairline 跨连。28px 金色 gradient blob @
+     keyframes 4.6s L→R 循环 = 数据流 token。Mobile <880px:
+     grid 转竖排 + 3 段竖向 connector 各跑 2.4s 下行 token。每节
+     点定制 SVG glyph(LLM 气泡 / curly braces / 六边核心 / 子午
+     线地球)。
+
+   ⑤ Trust strip — 真实 metrics + count-up
+     server component 调 lib/core.computeProviderRanking({sinceDays:
+     30}),agent_feedback < 10 行时 fallback 到 placeholder(6 /
+     12,847 / 94.2% / 210ms)+ "Pre-launch placeholders" 透明披露。
+     AnimatedCounter client component:IntersectionObserver gate
+     滚到视野启动 + rAF ease-out-cubic 1600ms 计数。% / ms 后缀
+     金色 0.55em。dark inverted 块衬出对比。
+
+   ⑥ Pricing — Anthropic editorial 单宣告
+     不做 tier 表,整页一句 dev-mega "Free during private beta."
+     (clamp 72→128px Playfair)+ lead 平直说"$0.40/booking,
+     usage-based,no per-seat tax"。3 张卡(Beta access · Free
+     真实卡 / Production · 虚卡虚线 / High-volume · 虚卡虚线),虚
+     卡背景 ink-50 + dashed border + ::before "Coming with v0.3"
+     mono 角标。底部 fineprint 2 列(infrastructure-priced 含义 +
+     "你不付钱的事")。
+
+   ⑦ Dashboard — 暗调 Linear 风(US-W4-024)
+     [data-theme="dashboard"] 翻 dark palette。DevNav 在
+     /developers/keys 路径下用 usePathname 隐身,DashboardNav
+     接管。每张 KeyCard 携带 hash-derived 金色 gradient ::before
+     (linearGradient(${hue}deg, accent, transparent)),0.06 opacity
+     —— 同色调但每 key 独一无二,Linear identity 暗号。Created /
+     last used 相对时间(just now / 12m / 5d / 2mo)+ revoke ghost
+     button(hover 转 danger)。Empty / Loading / Signed-out 三种
+     状态各自 UI。
+
+6. Docs 系统(US-W4-019..022)
+   - 装 next-mdx-remote + rehype-slug + rehype-autolink-headings +
+     remark-gfm(GFM 表格)。MdxContent.tsx 在 RSC 编译,每个 prose
+     primitive(h1-h3/p/ul/ol/blockquote/code/pre/a/table/hr)定制
+     .dev-doc-* class 覆盖原生太小的尺寸。
+   - h2/h3 hover 浮现 dev-doc-anchor 金色 # 链(opacity 0→1 fade,
+     Stripe Atlas 模式)。
+   - /developers/docs hub:3 张大卡(REST · Claude · ChatGPT)hover
+     glyph 反相 + → 2px translateX。
+   - /developers/docs/api/v1:server component readFile docs/api/
+     v1.md → MdxContent 渲染。220px sticky TOC rail(< 1024px 隐藏)
+     + 面包屑。
+   - /developers/docs/integrations/[slug]:动态 route allowlist
+     ["claude-mcp", "chatgpt-apps"],generateStaticParams 预构建,
+     非白名单 slug → notFound()。
+   - 4 个 docs 路由全部 200(api/v1 渲染 338KB,真 markdown + 表
+     + 代码块)
+
+7. /api/developers/keys CRUD(US-W4-023)
+   - GET:Clerk auth → findApiKeysByUserId → 返回时 strip key_hash,
+     仅 prefix 暴露给 UI,env 推断("test"/"live")
+   - POST:Clerk auth → name 校验(1-80 chars)→ 软 cap 10 keys/user
+     防爆增 → createApiKey({ organizationName: name, userId, env })
+     → plaintext 一次性返。default env=test 防新手误烧产线
+   - DELETE [id]:Clerk auth → findApiKeyById → user_id 不匹配返
+     404(不返 403 防 leak key id 存在性)→ deactivateApiKey 软删
+
+8. CreateKeySheet + RevealKeySheet(全屏 slide-up)
+   - dev-sheet primitive:fixed inset auto 0 0 0 + animation 420ms
+     ease-out-expo translateY(100% → 0)+ backdrop blur(8px)
+   - CreateKeySheet:label input + Test/Live radio cards(选中金
+     accent fill)+ submit POST → onCreated 翻 RevealSheet
+   - RevealKeySheet:big mono pre + click-to-copy + warning
+     "treat like password" 金边 + acknowledgment checkbox gates
+     Done 按钮 → 强制用户 active 确认"我抄好了"才能关。golden glow
+     ::before 让 plaintext 看起来像被揭开的秘密。
+
+9. 主 app footer 入口(US-W4-025)
+   主 app 没有真 footer(C 端 chat UI 占满),退而求其次:GlobalNav
+   account dropdown 的 Settings 区,Billing 之后加 "For developers ↗"。
+   仅签到用户可见,匿名访客不需要(他们走外部链接 /docs 直接到)。
+
+10. 17 commit 全推 + 真烟测全绿
+    landing 主页 Hero+Scenarios+Flow+Trust 全部 4 段渲染 200/141KB,
+    pricing 71KB, docs hub 89KB, api/v1 docs 338KB(MDX 真 render),
+    integrations 两个 slug 各 ~175KB, /keys 仪表盘 62KB(SSR
+    "Sign in required" 状态)。typecheck 全程零 error。Clerk v7
+    迁移坑 + .next/dev/lock 互斥都解掉。
+
+11. Week 4 全部完成
+    ✓ #1  Week 2 lib/core 抽象
+    ✓ #2  MCP connector(Claude + ChatGPT)
+    ✓ #3  /developers landing + dashboard + docs
+    ✓ #11 C 端 dogfood
+    待办:
+    ⏳ #21 npm publish @onegent/mcp-server(用户手动)
+    ⏳ #22 onegent.com/api/mcp hosted endpoint + Apps 提交
+    ⏳ #23 Claude.ai remote MCP OAuth 2.0
+    Week 5 候选:lib/core/execution/recovery.ts Phase 3 stage=
+    unknown 终态没触发 Resy fallback(Carbone / Le Bernardin hit)
 
 ================================================================
 Recent Updates - 2026-04-24 (cont. 5) · Week 4 #2 MCP connector (Claude + ChatGPT 分发窗口)
@@ -1682,6 +1863,21 @@ Cron：4 个定时任务（反馈提示 / 价格检查 / 场馆质量 / 笔记�
 ================================================================
 九、版本历史摘要
 ================================================================
+
+v0.2.37.0（2026-04-24）— **Week 4 #3 · /developers landing + 自助 key dashboard**
+  · 紧接 v0.2.36.0 MCP 分发渠道,v0.2.37.0 把 B 端"前门"全部铺好:Mercury 白
+    净派 landing(7 signature moves: Hero+CodePreview+ScenarioGrid+HowItWorks+
+    TrustStrip+Pricing+Footer)+ Linear 暗调 keys dashboard(自助 mint/revoke,
+    一次性 plaintext reveal)+ 完整 MDX 文档(api/v1 + claude-mcp + chatgpt-apps
+    经 next-mdx-remote 在 RSC 渲染)
+  · 设计 bar 锁定 + 写入 memory:"做就要做到完美" → 后续 UI 默认按 Apple/Linear/
+    Stripe/Mercury 标准,不再 MVP 偷懒
+  · 命名定位锁定:tagline "Onegent — AI books your trip end-to-end",显示名
+    "Travel Booking Agent",公司名 Onegent 保留(零流量阶段不折腾)
+  · 数据 schema:api_keys.user_id 字段 + 索引,createApiKey 接受 userId,
+    findApiKeysByUserId / findApiKeyById helpers,既有 8 个 require-api-key
+    tests 零回归
+  · 17 个 US-W4-01x..02x commits 全推,真烟测全部 200,typecheck 全程零 error
 
 v0.2.36.0（2026-04-24）— **Week 4 #2 · @onegent/mcp-server(Claude + ChatGPT 分发窗口)**
   · 紧接 v0.2.35.0 REST API 就位,Week 4 #2 把 API 外接到 AI 分发渠道:
