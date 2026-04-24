@@ -1,6 +1,7 @@
 import { Hero } from "./_components/Hero";
 
 import "./_styles/hero.css";
+import "./_styles/code-preview.css";
 
 export default function DevelopersHomePage() {
   return (

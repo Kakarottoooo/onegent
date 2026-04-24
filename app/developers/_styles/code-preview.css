@@ -1,0 +1,169 @@
+/*
+ * Code preview card — the live signature element on the hero.
+ * Dark code block on the white page (Mercury / Stripe convention),
+ * 1px gold border on hover, smooth tab change via clip-path wipe.
+ */
+
+.dev-code-preview {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  background: #0a0a0b;
+  border: 1px solid var(--ink-200);
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  font-family: ui-monospace, "JetBrains Mono", "SF Mono", "Cascadia Code", "Roboto Mono", Menlo, monospace;
+  transition:
+    border-color var(--motion-base) var(--ease-out-soft),
+    box-shadow var(--motion-base) var(--ease-out-soft);
+}
+
+.dev-code-preview:hover {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent), var(--shadow-3);
+}
+
+/* macOS-style traffic-light row + tab strip */
+.dev-code-preview-chrome {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: 0 var(--space-4);
+  height: 40px;
+  background: #131316;
+  border-bottom: 1px solid #27272a;
+}
+
+.dev-code-preview-dots {
+  display: flex;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.dev-code-preview-dots span {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: #2a2a2e;
+}
+
+.dev-code-preview-tabs {
+  display: flex;
+  align-items: center;
+  gap: 0;
+  margin-left: var(--space-3);
+}
+
+.dev-code-tab {
+  background: transparent;
+  border: none;
+  padding: 6px 12px;
+  font-family: inherit;
+  font-size: var(--text-mono-sm);
+  color: #71717a;
+  cursor: pointer;
+  position: relative;
+  transition: color var(--motion-fast) var(--ease-out-soft);
+}
+
+.dev-code-tab:hover {
+  color: #d4d4d8;
+}
+
+.dev-code-tab[data-active="true"] {
+  color: var(--accent);
+}
+
+.dev-code-tab[data-active="true"]::after {
+  content: "";
+  position: absolute;
+  left: 12px;
+  right: 12px;
+  bottom: -1px;
+  height: 1px;
+  background: var(--accent);
+}
+
+.dev-code-preview-copy {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: transparent;
+  border: 1px solid #27272a;
+  padding: 4px 10px;
+  border-radius: var(--radius-sm);
+  font-family: inherit;
+  font-size: var(--text-mono-xs);
+  color: #a1a1aa;
+  cursor: pointer;
+  transition:
+    color var(--motion-fast) var(--ease-out-soft),
+    border-color var(--motion-fast) var(--ease-out-soft),
+    background var(--motion-fast) var(--ease-out-soft);
+}
+
+.dev-code-preview-copy:hover {
+  color: #fafafa;
+  border-color: #3f3f46;
+}
+
+.dev-code-preview-copy[data-copied="true"] {
+  color: #4ade80;
+  border-color: rgba(74, 222, 128, 0.3);
+  background: rgba(74, 222, 128, 0.06);
+}
+
+/* Body */
+.dev-code-preview-body {
+  flex: 1;
+  overflow: hidden;
+  padding: var(--space-5) var(--space-6);
+  position: relative;
+}
+
+.dev-code-preview-pane {
+  margin: 0;
+  font-family: inherit;
+  font-size: var(--text-mono-sm);
+  line-height: 1.65;
+  color: #e4e4e7;
+  white-space: pre;
+  /* Wipe-in animation: clip from right → reveals content like typing */
+  clip-path: inset(0 0 0 0);
+  animation: dev-code-wipe-in var(--motion-slower) var(--ease-out-expo);
+}
+
+@keyframes dev-code-wipe-in {
+  from {
+    clip-path: inset(0 100% 0 0);
+  }
+  to {
+    clip-path: inset(0 0 0 0);
+  }
+}
+
+/* Footer caption */
+.dev-code-preview-foot {
+  padding: var(--space-3) var(--space-5);
+  background: #0a0a0b;
+  border-top: 1px solid #27272a;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: var(--text-mono-xs);
+  color: #52525b;
+}
+
+/* Token colors — soft gold/sage palette tuned for our gold accent */
+.tok-comment { color: #52525b; font-style: italic; }
+.tok-keyword { color: #c9a84c; }
+.tok-string  { color: #a7f3d0; }
+.tok-number  { color: #fde68a; }
+.tok-fn      { color: #fbbf24; }
+.tok-prop    { color: #f4f4f5; }
+.tok-punct   { color: #a1a1aa; }
+.tok-meta    { color: #818cf8; }
+.tok-url     { color: #67e8f9; text-decoration: underline; text-decoration-color: rgba(103, 232, 249, 0.3); }

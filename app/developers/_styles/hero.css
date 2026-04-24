@@ -82,49 +82,15 @@
   color: var(--ink-400);
 }
 
-/* Right-side art placeholder. Replaced by US-W4-014 Code Preview. */
-.dev-hero-art {
+/* Right column hosts CodePreview (US-W4-014). */
+.dev-hero-code {
+  height: 460px;
   position: relative;
-  height: 420px;
-  border-radius: var(--radius-lg);
-  background: var(--ink-50);
-  border: 1px solid var(--ink-200);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  overflow: hidden;
-}
-
-.dev-hero-art::before {
-  content: "";
-  position: absolute;
-  inset: 0;
-  background:
-    radial-gradient(
-      circle at 30% 20%,
-      rgba(201, 168, 76, 0.08),
-      transparent 50%
-    ),
-    radial-gradient(
-      circle at 80% 80%,
-      rgba(201, 168, 76, 0.05),
-      transparent 50%
-    );
-  pointer-events: none;
-}
-
-.dev-hero-art-placeholder {
-  position: relative;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: var(--space-3);
-  color: var(--ink-400);
 }
 
 @media (max-width: 960px) {
-  .dev-hero-art {
-    height: 320px;
+  .dev-hero-code {
+    height: 400px;
     order: -1;
   }
 }

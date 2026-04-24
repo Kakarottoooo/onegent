@@ -1,13 +1,11 @@
 import Link from "next/link";
 
+import { CodePreview } from "./CodePreview";
+
 /**
  * Landing hero. The signature moment: massive serif headline with a
- * gold underline drawn under "end-to-end". Pure server component —
- * all motion is CSS, no client JS.
- *
- * Right-side art is a placeholder until US-W4-014 lands the live code
- * preview. The placeholder still has a tasteful gold-tinted gradient
- * so the page doesn't look broken in the meantime.
+ * gold underline drawn under "end-to-end". Right column is the live
+ * 3-tab CodePreview from US-W4-014.
  */
 export function Hero() {
   return (
@@ -59,10 +57,8 @@ export function Hero() {
             </div>
           </div>
 
-          <div className="dev-hero-art dev-fade-up dev-fade-up--delay-2">
-            <div className="dev-hero-art-placeholder">
-              <span className="dev-mono-sm">// preview lands in US-W4-014</span>
-            </div>
+          <div className="dev-hero-code dev-fade-up dev-fade-up--delay-2">
+            <CodePreview />
           </div>
         </div>
       </div>
