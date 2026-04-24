@@ -1,5 +1,5 @@
 ================================================================
-Onegent · AI 决策代理 · 项目总结 · v0.2.30.0
+Onegent · AI 决策代理 · 项目总结 · v0.2.31.0
 ================================================================
 
 【项目定义】
@@ -189,6 +189,172 @@ Recent Updates - 2026-04-22
        · 支付侧继续受限于 iframe 安全模型，可探索 "代付钱包"
          （用户一次授权，autopilot 用 token 而非明文卡号付款）。
 
+================================================================
+Recent Updates - 2026-04-23
+================================================================
+
+1. Stage 1 · Solo Trip Packaging（单人 trip 跨品类打包）
+   - 首页 chat 新增 trip scenario，一句"下周五从 Nashville 飞纽约过周末"可以
+     同时组装 hotel + flight + activity + restaurant 四个品类的完整方案。
+   - Phase 1 收集：`lib/agent/trip-intent-state.ts` TripIntentState 状态机
+     维护 destination / origin / dates / travelers / vibe / budget 等字段，
+     NLU v2 extractor 每轮输出 state.trip，router 判断 confirm_ready。
+   - Phase 2 选择：`lib/agent/planners/trip-package.ts` 并行触发四条品类
+     pipeline，组装成 TripPackage.*_options（多 tier 候选），前端用
+     `components/TripPackageCard.tsx` 按 category 分列展示，用户逐列勾选。
+   - Phase 3 执行：`/api/booking-jobs/create-trip` 把勾选的组合拆成 N 步
+     BookingJob，复用 Autopilot 既有 provider 基础设施并行执行。
+   - ConfirmCard（`components/ConfirmCard.tsx`）支持三种 kind：
+       · plan  → 旧 search handoff
+       · room  → 创建 Decision Room
+       · trip  → 触发 trip packaging 流水线
+     通过 kind 分发，复用同一张卡片 UI。
+
+2. Stage 2 · Trip Decision Room（多人 trip 协作房间）
+   - Decision Rooms v2 扩展支持多人 trip 场景：一个房间跨 hotel / flight /
+     activity / restaurant 多品类，每位成员在**私聊频道**里分别对 agent 说
+     偏好，房间自动聚合成匿名方案放到公开频道投票。
+   - DB schema 扩展：
+       · `decision_rooms.type` 新增 "trip"
+       · 新列 `flow ∈ { "chat", "classic" }`，trip 房间默认 "chat"
+       · 新列 `categories text[]`（trip 房间列出要覆盖的品类）
+   - 新表 `room_member_intent_state`：每位成员一行，存 IntentState JSON
+     （include TripIntentState + planning_assumptions + turn_count）。
+     chat 每轮自动 upsert（`/api/chat/parse` → syncRoomContext）。
+   - 新表 `decision_room_private_messages`：每位成员的 agent 私聊频道，
+     (room_id, user_id, role, content, created_at) 存所有来往消息，
+     刷新 / 重进房间从 DB 回放，agent "记忆"跨会话持续。
+   - 聚合 agent：`lib/agent/trip-synthesis.ts`
+       · `mergeTripIntents` 纯函数，按字段策略合并多人 IntentState
+         （scalar: latest-wins，budget: min，arrays: union，dates: intersection）
+       · `triggerSynthesis` 带 force 模式 + 30s 防抖锁，N/N 成员全部贡献
+         后自动触发，也支持用户手动在聊天里说"出方案"再触发
+       · 出方案后写 `decision_room_proposals`（3 tier：经济 / 均衡 / 升级），
+         房间公开频道写 `trip_synthesized` 系统消息 + 给每个成员发 DM 通知。
+   - 投票 & 执行：proposals 支持多 option tier 投票，通过后 payer 一键调
+     `/api/booking-jobs/create-trip` 把 accepted package 下发成 N 步 autopilot。
+   - UI：trip 房间不走传统 `/rooms/[id]` 表单页，而是住在首页
+     `/?room_id=<id>` 上——创建者和成员都在同一个 chat 界面里继续说话，
+     ribbon 变成金色 "Decision Room" 条，每轮 chat 同步到自己的私聊频道。
+
+3. 联系人图谱 & 邀请体验升级（Invite-UX）
+   - 聊天里一句"和 ziweiB、张三去纽约"直接进入聚合流程：
+       · NLU 把 `member_names` 抽出来返回
+       · commit 时调 `resolveContactsByNames`，匹配到 contacts 的人自动
+         `inviteToDecisionRoom(room_id, user_id)` 以 `status='invited'` 预加房间
+       · 匹配不到的名字回包 `unresolved_names`，ConfirmCard 在确认前用
+         红色警告提醒"ziweiX 还不在你的联系人里，不会自动收到邀请 DM"
+   - `listMyDecisionRooms` 支持 `include_invited=1`，`/rooms` 页新增
+     Accept / Decline 两个按钮，点 Accept 调 `/accept-invite` 翻为 joined。
+   - `listRoomMembersWithInvited`：新的 DB helper，返回所有成员（含 invited）
+     与旧 `listRoomMembers`（只返回 joined）分开，修掉了之前 accept 403 的 bug。
+   - 主页 chat 历史回放（room context 连续性）：打开 `?room_id=<id>` 自动
+     拉 `/api/rooms/[id]/private-messages` 回放进 chat，nluHistoryRef 也
+     rehydrate，agent 不再"失忆"。
+
+4. 用户互发 DM（user-to-user messaging）
+   - 新表 `user_direct_messages`：(from_user_id, to_user_id, role, content,
+     meta_json, created_at)。`role ∈ { "user", "agent" }`——agent-role DM
+     用来代表房间 agent 主动通知（如"ziweiA 邀请你一起计划 Trip ..."）。
+   - 端点：`POST /api/dm/[userId]` 发送（gate 到 contacts），
+     `GET /api/dm/[userId]` 拉会话流。
+   - UI：`/contacts` 升级为 Telegram 风格左右分栏——左侧联系人列表，
+     右侧 `components/ContactDmPane.tsx` DM 面板。点左侧切右侧，
+     同一页内部状态驱动不重新挂载。
+   - GlobalNav 加 Contacts 入口；未登录用户在 nav 右上角显示 Sign in
+     按钮（之前靠 🇺🇸 emoji 渲染，Windows 下变 "US" 字符的 bug 一并修掉）。
+   - 自动 DM：trip 房间创建时，对每个被自动邀请的联系人发一条 agent-role DM
+     "${creatorName} just invited you to a trip: '...'. Open Rooms to accept."，
+     `meta_json.kind = "trip_invite"` 方便后续分类展示。
+   - Delete room 兜底：删房前先给所有非创建者成员（包括 invited）发 agent DM
+     "${creatorName} dismissed the trip '...'. The room is no longer available."，
+     避免房间从他们 sidebar 里静默消失。
+
+5. ChatGPT 风格持久化 Solo 会话（Sessions）
+   - 新表 `chat_sessions`（id, user_id, title, upgraded_room_id, updated_at 等）
+     + `chat_session_messages`（session_id, role, content, created_at）。
+   - 首页首条消息自动 create_session，URL 带上 `?session_id=<id>`；
+     下一轮 chat 写 session_messages，刷新 / 侧栏点回来从 DB 回放。
+   - `components/Sidebar.tsx`：桌面左侧 260px 常驻侧栏，分
+     **Rooms** + **Sessions** 两区。右键上下文菜单（Delete / Leave / Decline），
+     30s polling 增量刷新。
+   - Session → Room 升级路径：在 session 里触发 confirm 建 trip room 后，
+     `markSessionUpgraded(session_id, user_id, room_id)` 把 session 标记成
+     "已升级"，sidebar 把它从 Sessions 列表里隐藏（单一入口：房间代替 session）。
+   - DB-as-source-of-truth 架构：commit 时 server 把整段 pre-confirm 对话 +
+     一条 agent welcome 落进创建者 private channel；给每个被邀请成员也 seed
+     一条 welcome。client 不再靠 `injectAssistantMessage(welcome)` 的内存
+     绕路——确认后清屏 → replay 从 DB 拉回来，Strict Mode 双跑、刷新、换
+     浏览器都稳。
+   - Zombie room 兜底：浏览器 URL 指向已删房间时，room title effect 收到
+     404/403 自动清 `activeRoomId` 并 `router.replace("/")`，不让 UI 停在
+     僵尸壳子上继续发 synthesize 403。
+
+6. NLU v2 · Trip scenario 全量支持
+   - `lib/agent/nlu-v2/types.ts` 加 `TripFields` + `scenario='trip'`。
+   - extractor.ts system prompt 新增 trip 示例（中文 + 英文），能正确抽出
+     `destination_city / departure_city / start_date / nights / travelers /
+     vibe / member_names`。
+   - router.ts `getMissingForScenario('trip')` 声明 required:
+     destination + (start_date OR end_date) + travelers。
+   - party_type 检测：member_names.length > 0 或 travelers > 1 → "multi"，
+     否则 "solo"。multi 场景自动把 intent 升级为 create_room（而非 create_plan）。
+   - 新 golden test: `golden-trip.test.ts` 覆盖 solo / multi 两条路径，
+     保证新场景不会回归。
+
+7. 其他 bugfix / 收尾
+   - `lib/conversational-nlu.ts` 已在 Phase D 删除，`ConversationalNLUResult`
+     现作为 alias 指向 `NluV2ParseResult`，所有 5 个 caller 换 import 到 nlu-v2。
+   - `/api/chat/parse` 简化：单入口调 `analyzeConversationalV2`，不再 if/else
+     走 v1 / v2 分支。
+   - 客户端快速选择兜底：`lib/quick-picks-fallback.ts` 在 LLM 偶尔忘记产出
+     quick_picks 时注入硬编码默认项，保证用户永远有可点按钮。
+   - `/rooms/join/[short_code]` 页对 chat-flow 房间不跳 `/rooms/<id>`，
+     而是跳 `/?room_id=<id>`，和主页 chat 对齐。
+
+================================================================
+Recent Updates - 2026-04-24
+================================================================
+
+1. Session → Room 升级路径：DB 为单一真相源
+   - 之前的做法：把创建 room 前后的 in-memory chat messages 通过
+     `upgradedRoomsRef` Map + 时间窗加上 `replayedRoomIds.add(id)`
+     三重保险尝试"无缝保留"，但 React Strict Mode 双跑 + router.replace
+     异步 + setState 时序组合下仍然偶尔清空聊天。
+   - 新做法：commit 时 server 把所有 pre-confirm 历史 + 一条
+     welcome assistant 消息落进创建者的 private channel，被邀请成员也
+     seed 一条 welcome。Client 确认后直接 clearChat → 让 replay effect
+     从 DB 拉回来。所有路径单一机制，无时序依赖。
+   - Bug 表象：两边用户进入房间都是空白 → 根因是被邀请者 private channel
+     根本没 seed 过任何消息。现在 server 显式为每位被邀请用户写一条
+     "${creator} 邀请你一起计划 Trip「...」" 的欢迎语。
+
+2. 僵尸 room_id URL 兜底
+   - 场景：用户 A 删了房间，但浏览器 B 的 tab 还停在 `?room_id=X`。
+     再刷新会触发一连串 404/403，但 UI 不自知，仍显示 "Decision Room"
+     ribbon；用户打字触发 synthesize → 403 → 过去的 UX 只冒一句
+     "方案生成失败了，先稍等再试一下。" 毫无信息量。
+   - 两层防御：
+       · Room title effect 检测 `/api/rooms/[id]` 返回 404/403
+         → 清 activeRoomId + `router.replace("/")` + 丢 replay 标记
+       · Synthesize 失败若是 404/403 → 发一条人话消息
+         "这个房间已经不存在了（被删除或你不是成员）。我带你回到首页重新开始。"
+         再做同样的清理
+
+================================================================
+数据库（34 张表 · +5 from v0.2.29.0）
+================================================================
+
+Stage 2 新增 5 张表，旧的 29 张不变：
+
+| 表名 | 用途 |
+|------|------|
+| room_member_intent_state | 每位房间成员的 IntentState JSON（含 TripIntentState） |
+| decision_room_private_messages | 每位成员的私聊频道（chat ↔ agent） |
+| user_direct_messages | 用户互发 DM（含 role='agent' 的系统通知） |
+| chat_sessions | ChatGPT 风格持久化 solo chat 会话 |
+| chat_session_messages | chat_sessions 的消息流 |
+
 【核心能力速览】
 三条主线，贯穿第四 / 第五阶段的完成态能力：
   · 个人决策：6 层 Agent 管道（NLU → Plan → Tool → Retrieve → Rank → Explain），
@@ -235,7 +401,8 @@ Onegent 从 Solo 单品类到 Trip 打包到 Decision Room 多人协作，全部
   | Solo 多品类 · Trip（本阶段完成）  | TripIntentState（v2 state.trip）    | TripPackage.*_options（4 列候选） | N step BookingJob 并行        |
   |                                 |                                    | per-category 勾选，一键打包        |                               |
   | DR 单品类（当前 DR v2）          | RoomConstraint（每人一份）          | Proposal[] + 投票                 | payer 一键触发单 step         |
-  | DR 多品类 · Trip（Stage 2 规划中）| 每人私聊 → TripIntentState          | 房间匿名聚合 → 投 tier            | payer 一键触发 N step 并行    |
+  | DR 多品类 · Trip（Stage 2 已完成）| 每人私聊 → TripIntentState          | trip-synthesis 聚合 → 多 tier    | payer 一键触发 N step 并行    |
+  |                                  | room_member_intent_state 持久化     | 成员独立投 approve/decline        | create-trip → BookingJob 拆步  |
   | 未来任何新品类                    | 复用 v2 extractor + 新 XxxFields    | 复用 card UI + 新卡片样式          | 复用 BookingJobStep 基础设施  |
 
 【三段式的可扩展性 · 加东西不动骨架】
@@ -678,6 +845,19 @@ Onegent 从 Solo 单品类到 Trip 打包到 Decision Room 多人协作，全部
   ✅ 旅行证件系统：护照号/DOB/国籍/KTN/驾照（AES-256 加密，存于 BookingProfile）
   ✅ InlineJobCard：任务卡内联显示在主聊天页结果列表下方，不跳转 /tasks
   ✅ 对话式证件收集：缺少证件时 agent 在聊天框发问，用户回复后自动解析保存并重试任务
+  ✅ Trip scenario 首页 chat 一等场景（TripIntentState 状态机 + NLU v2 trip fields）
+  ✅ Stage 1 · Solo Trip Packaging：单人 hotel+flight+activity+restaurant 打包 +
+     多 tier 候选卡 + 一键创建 N 步 BookingJob（`/api/booking-jobs/create-trip`）
+  ✅ Stage 2 · 多人 Trip Decision Room：chat flow room + 每人私聊频道 +
+     trip-synthesis 聚合 agent（N/N 成员 + 30s 防抖 / force 手动）+ 多 tier 投票
+  ✅ 联系人 → 房间自动邀请链路：memberNames 解析 → invited 状态预加 →
+     agent-role DM 通知 → 被邀请人 Accept 直接进 chat-flow 房间
+  ✅ 用户互发 DM 系统（user_direct_messages，role=user/agent + meta_json 分类）
+  ✅ Telegram 风格 /contacts 左右分栏 + ContactDmPane 复用
+  ✅ ChatGPT 风格 Sessions：chat_sessions + sidebar 常驻 + 新建/切换 session
+  ✅ Session → Room 升级路径（DB 作为唯一真相源，不依赖内存 hand-off）
+  ✅ 主页 chat 历史回放（room + session 两套 context 都支持刷新恢复）
+  ✅ Zombie room_id URL 兜底（404/403 自动清 context + router.replace）
 
 还差什么（仅剩 3 个边界）：
   ① 实时订位可用性 — agent 现已能抓取并展示 OpenTable 可用时段列表（no_availability
@@ -813,11 +993,11 @@ AI：MiniMax（NLU + 评论信号解析 + 语义排序 + 双人约束合并）
          PWA（离线支持）
 API 层：30+ 个路由端点
 Cron：4 个定时任务（反馈提示 / 价格检查 / 场馆质量 / 笔记本价格）
-测试：Vitest（22+ 个测试文件 · 100% 通过）
-版本：v0.2.29.0
+测试：Vitest（22+ 个测试文件 · 100% 通过 · golden-trip 等 Stage 2 测试已纳入）
+版本：v0.2.31.0
 
 ================================================================
-八、数据库（29 张表）
+八、数据库（34 张表）
 ================================================================
 
 | 表名 | 用途 |
@@ -850,10 +1030,41 @@ Cron：4 个定时任务（反馈提示 / 价格检查 / 场馆质量 / 笔记�
 | user_contacts | 联系人图谱 |
 | user_groups | 用户自定义分组 |
 | user_group_members | 群组成员关系 |
+| room_member_intent_state | 每位 Room 成员的 IntentState JSON（Stage 2） |
+| decision_room_private_messages | 每位成员的私聊 chat ↔ agent 频道（Stage 2） |
+| user_direct_messages | 用户互发 DM（role=user\|agent，Stage 2） |
+| chat_sessions | ChatGPT 风格持久化 solo 会话（Sessions） |
+| chat_session_messages | chat_sessions 的消息流 |
 
 ================================================================
 九、版本历史摘要
 ================================================================
+
+v0.2.31.0（2026-04-24）— Stage 2 Trip Room + DM + Sessions + DB-as-truth
+  · Stage 1 · Solo Trip Packaging：首页 chat trip scenario，单人 hotel+flight+activity+
+    restaurant 一次性打包；Phase 1 TripIntentState → Phase 2 TripPackageCard 多 tier →
+    Phase 3 `/api/booking-jobs/create-trip` 拆成 N 步并行 Autopilot
+  · Stage 2 · 多人 Trip Decision Room：decision_rooms 新增 type='trip' + flow='chat' +
+    categories[]；每成员私聊频道（decision_room_private_messages）+ IntentState 持久化
+    （room_member_intent_state）+ trip-synthesis 聚合 agent（N/N 触发 + 30s 防抖）+
+    多 tier proposal 投票 + payer 一键 create-trip 执行
+  · Invite-UX 全链路：memberNames → resolveContactsByNames → inviteToDecisionRoom
+    (status='invited') → agent-role DM 到被邀请人 → /rooms 页 Accept 按钮 →
+    `/api/rooms/[id]/accept-invite` 翻 joined → 进入 chat-flow 房间；
+    unresolved_names 在 ConfirmCard 预警
+  · 用户互发 DM：user_direct_messages 表（role=user|agent + meta_json），
+    /api/dm/[userId] POST+GET，Telegram 风格 /contacts 分栏，GlobalNav Contacts 入口，
+    Delete room 自动给所有成员发"已解散"DM
+  · ChatGPT 风格 Sessions：chat_sessions + chat_session_messages 表，首条消息自动
+    create_session + URL ?session_id=<id>，Sidebar 常驻左侧分 Rooms / Sessions 两区，
+    session → room 升级标记 upgraded_room_id（单入口原则）
+  · DB-as-source-of-truth 架构：commit 时 server seed 完整对话 + welcome 到创建者
+    private channel + 每位被邀请成员的 welcome，client 确认后 clearChat → replay 从
+    DB 拉回（不再依赖 Strict Mode 下脆弱的内存 hand-off）
+  · Zombie room_id URL 兜底：404/403 自动清 activeRoomId + router.replace("/")
+  · NLU v2 trip 支持：TripFields 类型 + extractor WORKED EXAMPLES + router
+    getMissingForScenario('trip') + golden-trip.test.ts
+  · `lib/conversational-nlu.ts` 已删除，`ConversationalNLUResult` alias 到 NluV2ParseResult
 
 v0.2.29.0（2026-04-18）— Decision Rooms v2 + 社交协作层
   · Decision Room 升级为 `/rooms` 独立产品面：列表页 / 新建页 / 房间页 / join by short code
