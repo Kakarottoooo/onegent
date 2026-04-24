@@ -1,0 +1,143 @@
+/*
+ * Scenario grid — 4 cards each capturing one bookable scenario.
+ * Cards lift + the icon rotates 6° on hover; badge pulses on Live cards.
+ */
+
+.dev-section {
+  padding: var(--space-32) 0;
+}
+
+@media (max-width: 720px) {
+  .dev-section {
+    padding: var(--space-20) 0;
+  }
+}
+
+.dev-section-header {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  max-width: 64ch;
+  margin-bottom: var(--space-16);
+}
+
+.dev-section-header__eyebrow {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-3);
+  width: fit-content;
+}
+
+.dev-section-header__eyebrow::before {
+  content: "";
+  width: 24px;
+  height: 1px;
+  background: var(--accent);
+}
+
+.dev-scenario-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: var(--space-4);
+}
+
+@media (max-width: 1100px) {
+  .dev-scenario-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+@media (max-width: 560px) {
+  .dev-scenario-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.dev-scenario-card {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-5);
+  padding: var(--space-8);
+  background: var(--surface-raised);
+  border: 1px solid var(--ink-200);
+  border-radius: var(--radius-lg);
+  transition:
+    transform var(--motion-base) var(--ease-out-soft),
+    border-color var(--motion-base) var(--ease-out-soft),
+    box-shadow var(--motion-base) var(--ease-out-soft);
+  overflow: hidden;
+  isolation: isolate;
+}
+
+.dev-scenario-card::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: var(--radius-lg);
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--accent) 5%, transparent),
+    transparent 40%
+  );
+  opacity: 0;
+  transition: opacity var(--motion-base) var(--ease-out-soft);
+  pointer-events: none;
+  z-index: -1;
+}
+
+.dev-scenario-card:hover {
+  transform: translateY(-4px);
+  border-color: var(--ink-300);
+  box-shadow: var(--shadow-hover);
+}
+
+.dev-scenario-card:hover::before {
+  opacity: 1;
+}
+
+.dev-scenario-card-icon {
+  width: 48px;
+  height: 48px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--ink-900);
+  transition: transform var(--motion-base) var(--ease-out-soft);
+}
+
+.dev-scenario-card:hover .dev-scenario-card-icon {
+  transform: rotate(6deg);
+}
+
+.dev-scenario-card-title {
+  font-family: var(--font-playfair), Georgia, serif;
+  font-size: 24px;
+  font-weight: 600;
+  letter-spacing: -0.025em;
+  color: var(--ink-900);
+}
+
+.dev-scenario-card-providers {
+  font-family: var(--font-dm-sans), system-ui, sans-serif;
+  font-size: 13px;
+  line-height: 1.55;
+  color: var(--ink-500);
+}
+
+.dev-scenario-card-meta {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  margin-top: auto;
+  padding-top: var(--space-4);
+  border-top: 1px solid var(--ink-200);
+}
+
+.dev-scenario-card-time {
+  font-family: ui-monospace, "SF Mono", monospace;
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  color: var(--ink-400);
+  text-transform: uppercase;
+}
