@@ -90,7 +90,12 @@ export async function extractState(input: ExtractStateInput): Promise<IntentStat
   const scrubbed = scrubWholeMonthAssumption(merged, input.history ?? [], input.new_user_message);
   // For create_room restaurant with named members, infer party_size = members + creator
   // so the router doesn't ask "how many people?" when the user already said "me and 李明".
-  return fillCreateRoomPartySize(scrubbed);
+  const partyFilled = fillCreateRoomPartySize(scrubbed);
+  // Safety net: if the model extracted named co-deciders ("我和 ziweiB") AND tagged
+  // party_type=multi, but failed to upgrade intent from create_plan → create_room
+  // (observed on ambiguous English usernames), force the upgrade here. Mirror of
+  // prompt rule #6 — named co-deciders always implies create_room.
+  return upgradeMultiPartyToRoom(partyFilled);
 }
 
 // ─── Prompt construction ─────────────────────────────────────────────────
@@ -798,6 +803,34 @@ function fillCreateRoomPartySize(state: IntentState): IntentState {
     planning_assumptions: [
       ...state.planning_assumptions,
       `Inferred party_size=${inferred} from ${state.member_names.length} named member(s) + creator`,
+    ],
+  };
+}
+
+/**
+ * Safety-net upgrade: extractor prompt rule #6 says named co-deciders ALWAYS
+ * trigger create_room, but gpt-4o-mini occasionally keeps intent=create_plan
+ * when the name is ambiguous (English usernames like "ziweiB", abbreviations,
+ * etc.) while still correctly extracting member_names and party_type=multi.
+ * We flip it here: if the model already agreed this is a multi-party party
+ * (member_names non-empty AND party_type=multi), the intent must be
+ * create_room (or refine_existing / chitchat, which we don't touch).
+ *
+ * Narrower condition than "member_names.length > 0 alone" so we don't disturb
+ * the cases where the prompt deliberately kept create_plan (e.g. user says
+ * "book for me and my wife" — "老婆" is relationship, not name; member_names
+ * stays empty; this function no-ops).
+ */
+function upgradeMultiPartyToRoom(state: IntentState): IntentState {
+  if (state.intent !== "create_plan") return state;
+  if (state.party_type !== "multi") return state;
+  if (state.member_names.length === 0) return state;
+  return {
+    ...state,
+    intent: "create_room",
+    planning_assumptions: [
+      ...state.planning_assumptions,
+      `Upgraded intent → create_room because ${state.member_names.length} named co-decider(s) present`,
     ],
   };
 }
