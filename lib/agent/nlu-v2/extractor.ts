@@ -795,22 +795,45 @@ export function scrubWholeMonthAssumption(
  * explicit value the user gave.
  */
 function fillCreateRoomPartySize(state: IntentState): IntentState {
+  // Restaurant: party_size = members + creator.
   if (
-    state.intent !== "create_room" ||
-    state.scenario !== "restaurant" ||
-    !state.restaurant ||
-    typeof state.restaurant.party_size === "number" ||
-    state.member_names.length === 0
-  ) return state;
-  const inferred = state.member_names.length + 1;
-  return {
-    ...state,
-    restaurant: { ...state.restaurant, party_size: inferred },
-    planning_assumptions: [
-      ...state.planning_assumptions,
-      `Inferred party_size=${inferred} from ${state.member_names.length} named member(s) + creator`,
-    ],
-  };
+    state.intent === "create_room" &&
+    state.scenario === "restaurant" &&
+    state.restaurant &&
+    typeof state.restaurant.party_size !== "number" &&
+    state.member_names.length > 0
+  ) {
+    const inferred = state.member_names.length + 1;
+    return {
+      ...state,
+      restaurant: { ...state.restaurant, party_size: inferred },
+      planning_assumptions: [
+        ...state.planning_assumptions,
+        `Inferred party_size=${inferred} from ${state.member_names.length} named member(s) + creator`,
+      ],
+    };
+  }
+  // Trip: travelers = members + creator. Applies whether or not intent was
+  // already upgraded to create_room — fires on party_type=multi alone so
+  // "我和 ziwei Guo 去纽约" doesn't get asked "how many travelers?" when the
+  // count is literally right there in the first sentence.
+  if (
+    state.scenario === "trip" &&
+    state.trip &&
+    typeof state.trip.travelers !== "number" &&
+    state.member_names.length > 0
+  ) {
+    const inferred = state.member_names.length + 1;
+    return {
+      ...state,
+      trip: { ...state.trip, travelers: inferred },
+      planning_assumptions: [
+        ...state.planning_assumptions,
+        `Inferred travelers=${inferred} from ${state.member_names.length} named member(s) + creator`,
+      ],
+    };
+  }
+  return state;
 }
 
 /**
