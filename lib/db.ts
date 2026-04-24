@@ -915,12 +915,25 @@ export async function getAgentLogs(params: {
   sessionId?: string;
   jobId?: string;
   level?: AgentLog["level"];
+  /**
+   * Filter on agent_logs.source. Used by lib/core/audit/ to isolate
+   * structured audit events (source="audit") from the free-form debug
+   * traces written by the executor. Omit to return all sources.
+   */
+  source?: string;
   limit?: number;
 }): Promise<AgentLog[]> {
   await ensureAgentLogsTable();
-  const { sessionId, jobId, level, limit = 100 } = params;
+  const { sessionId, jobId, level, source, limit = 100 } = params;
 
   if (jobId) {
+    if (source) {
+      const r = await sql<AgentLog>`
+        SELECT * FROM agent_logs WHERE job_id = ${jobId} AND source = ${source}
+        ORDER BY created_at DESC LIMIT ${limit}
+      `;
+      return r.rows;
+    }
     const r = await sql<AgentLog>`
       SELECT * FROM agent_logs WHERE job_id = ${jobId}
       ORDER BY created_at DESC LIMIT ${limit}
