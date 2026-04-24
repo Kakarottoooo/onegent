@@ -7,10 +7,6 @@ import RecommendationCard from "@/components/RecommendationCard";
 import HotelCard from "@/components/HotelCard";
 import FlightCard from "@/components/FlightCard";
 import InlineJobCard, { type TravelDocRequest } from "@/components/booking/InlineJobCard";
-import CreditCardCard from "@/components/CreditCardCard";
-import LaptopCard from "@/components/LaptopCard";
-import SmartphoneCard from "@/components/SmartphoneCard";
-import HeadphoneCard from "@/components/HeadphoneCard";
 import ActivityCard from "@/components/ActivityCard";
 import ScenarioPlanView from "@/components/ScenarioPlanView";
 import FeedbackPromptCard from "@/components/FeedbackPromptCard";
@@ -582,10 +578,6 @@ export default function Home() {
     chat.allCards.length > 0 ||
     chat.allHotelCards.length > 0 ||
     chat.allFlightCards.length > 0 ||
-    chat.allCreditCardCards.length > 0 ||
-    chat.allLaptopCards.length > 0 ||
-    chat.allSmartphoneCards.length > 0 ||
-    chat.allHeadphoneCards.length > 0 ||
     chat.allActivityCards.length > 0;
   // Concert event plans have map-able venue pins
   const concertVenuePins: MapPin[] = (() => {
@@ -2994,180 +2986,6 @@ export default function Home() {
                         />
                       ) : null
                     )}
-                  </div>
-                )}
-
-                {/* Credit Card Results */}
-                {chat.resultCategory === "credit_card" && chat.allCreditCardCards.length > 0 && (
-                  <div className="flex flex-col gap-3">
-                    <div
-                      style={{
-                        fontSize: "11px",
-                        color: "var(--text-secondary)",
-                        fontFamily: "var(--font-dm-sans)",
-                        padding: "0 2px 4px",
-                      }}
-                    >
-                      Ranked by annual net gain vs your current card portfolio · Rates as of last verification date
-                    </div>
-                    {chat.allCreditCardCards.map((card, i) => (
-                      <CreditCardCard key={card.card.id} card={card} index={i} />
-                    ))}
-                    <div
-                      style={{
-                        fontSize: "11px",
-                        color: "var(--text-secondary)",
-                        fontFamily: "var(--font-dm-sans)",
-                        padding: "4px 2px 0",
-                        fontStyle: "italic",
-                      }}
-                    >
-                      This tool provides information for reference only and does not constitute financial advice. Confirm current terms at the issuer&apos;s website before applying.
-                    </div>
-                  </div>
-                )}
-
-                {/* Laptop Results */}
-                {chat.resultCategory === "laptop" && chat.allLaptopCards.length > 0 && (
-                  <div className="flex flex-col gap-3">
-                    <div
-                      style={{
-                        fontSize: "11px",
-                        color: "var(--text-secondary)",
-                        fontFamily: "var(--font-dm-sans)",
-                        padding: "0 2px 4px",
-                      }}
-                    >
-                      Ranked by weighted signal score for your use case · Specs from Wirecutter, NotebookCheck, The Verge · Prices are MSRP
-                    </div>
-                    {chat.laptopDbGapWarning && (
-                      <div
-                        style={{
-                          background: "var(--card)",
-                          border: "1px solid #E8A020",
-                          borderLeft: "3px solid #E8A020",
-                          borderRadius: "8px",
-                          padding: "10px 14px",
-                          fontFamily: "var(--font-dm-sans)",
-                          fontSize: "13px",
-                          color: "var(--text-primary)",
-                          lineHeight: "1.5",
-                        }}
-                      >
-                        <span style={{ fontWeight: 600, color: "#E8A020", marginRight: "6px" }}>⚠ Data gap:</span>
-                        {chat.laptopDbGapWarning}
-                      </div>
-                    )}
-                    {chat.allLaptopCards.map((card, i) => (
-                      <LaptopCard key={card.device.id} card={card} index={i} />
-                    ))}
-                    <div
-                      style={{
-                        fontSize: "11px",
-                        color: "var(--text-secondary)",
-                        fontFamily: "var(--font-dm-sans)",
-                        padding: "4px 2px 0",
-                        fontStyle: "italic",
-                      }}
-                    >
-                      Recommendations are based on static review data and may not reflect the latest models or price changes. Always verify specs and pricing before purchase.
-                    </div>
-                  </div>
-                )}
-
-                {/* Smartphone Results */}
-                {chat.resultCategory === "smartphone" && chat.allSmartphoneCards.length > 0 && (
-                  <div className="flex flex-col gap-3">
-                    <div
-                      style={{
-                        fontSize: "11px",
-                        color: "var(--text-secondary)",
-                        fontFamily: "var(--font-dm-sans)",
-                        padding: "0 2px 4px",
-                      }}
-                    >
-                      Ranked by weighted signal score for your use case · Data from GSMA, GSMArena, The Verge · Prices are MSRP
-                    </div>
-                    {chat.deviceDbGapWarning && (
-                      <div
-                        style={{
-                          background: "var(--card)",
-                          border: "1px solid #E8A020",
-                          borderLeft: "3px solid #E8A020",
-                          borderRadius: "8px",
-                          padding: "10px 14px",
-                          fontFamily: "var(--font-dm-sans)",
-                          fontSize: "13px",
-                          color: "var(--text-primary)",
-                          lineHeight: "1.5",
-                        }}
-                      >
-                        <span style={{ fontWeight: 600, color: "#E8A020", marginRight: "6px" }}>⚠ Data gap:</span>
-                        {chat.deviceDbGapWarning}
-                      </div>
-                    )}
-                    {chat.allSmartphoneCards.map((card, i) => (
-                      <SmartphoneCard key={card.device.id} card={card} index={i} />
-                    ))}
-                    <div
-                      style={{
-                        fontSize: "11px",
-                        color: "var(--text-secondary)",
-                        fontFamily: "var(--font-dm-sans)",
-                        padding: "4px 2px 0",
-                        fontStyle: "italic",
-                      }}
-                    >
-                      Recommendations are based on static review data and may not reflect the latest models or price changes. Always verify specs and pricing before purchase.
-                    </div>
-                  </div>
-                )}
-
-                {/* Headphone Results */}
-                {chat.resultCategory === "headphone" && chat.allHeadphoneCards.length > 0 && (
-                  <div className="flex flex-col gap-3">
-                    <div
-                      style={{
-                        fontSize: "11px",
-                        color: "var(--text-secondary)",
-                        fontFamily: "var(--font-dm-sans)",
-                        padding: "0 2px 4px",
-                      }}
-                    >
-                      Ranked by weighted signal score for your use case · Data from Rtings, The Verge, SoundGuys · Prices are MSRP
-                    </div>
-                    {chat.deviceDbGapWarning && (
-                      <div
-                        style={{
-                          background: "var(--card)",
-                          border: "1px solid #E8A020",
-                          borderLeft: "3px solid #E8A020",
-                          borderRadius: "8px",
-                          padding: "10px 14px",
-                          fontFamily: "var(--font-dm-sans)",
-                          fontSize: "13px",
-                          color: "var(--text-primary)",
-                          lineHeight: "1.5",
-                        }}
-                      >
-                        <span style={{ fontWeight: 600, color: "#E8A020", marginRight: "6px" }}>⚠ Data gap:</span>
-                        {chat.deviceDbGapWarning}
-                      </div>
-                    )}
-                    {chat.allHeadphoneCards.map((card, i) => (
-                      <HeadphoneCard key={card.device.id} card={card} index={i} />
-                    ))}
-                    <div
-                      style={{
-                        fontSize: "11px",
-                        color: "var(--text-secondary)",
-                        fontFamily: "var(--font-dm-sans)",
-                        padding: "4px 2px 0",
-                        fontStyle: "italic",
-                      }}
-                    >
-                      Recommendations are based on static review data and may not reflect the latest models or price changes. Always verify specs and pricing before purchase.
-                    </div>
                   </div>
                 )}
 

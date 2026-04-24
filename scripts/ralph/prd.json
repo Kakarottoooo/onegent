@@ -14,8 +14,8 @@
         "Verify in browser using dev-browser skill"
       ],
       "priority": 1,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Completed 2026-04-24. No cardType === branches existed; used resultCategory === branches instead. Also removed 4 lines from hasCategoryResults aggregation."
     },
     {
       "id": "US-002",

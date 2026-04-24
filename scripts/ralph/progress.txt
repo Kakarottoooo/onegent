@@ -9,5 +9,19 @@ Started: 2026-04-24 (positioning-shift-travel-only)
 - Booking Automation three-layer architecture (see root CLAUDE.md): programmatic nav + AI form fill + AI audit. Do not add new code to lib/booking-autopilot/ for this PRD.
 - Golden tests for NLU live in lib/agent/nlu-v2/__tests__/golden-*.test.ts. They call the real extractor + router pipeline and require OPENAI_API_KEY.
 - Existing golden tests (golden-solo, golden-multi, golden-trip) define expected behavior for the current scenarios — do NOT edit their expected values.
+- Homepage (app/page.tsx) uses `resultCategory === "..."` string comparisons (not a `cardType ===` check) to gate per-category JSX blocks. Search for `resultCategory === "<category>"` when removing a category from the UI.
+- Homepage also aggregates per-category results into `hasCategoryResults` — every new/removed category must be added/removed there too, or empty-state detection breaks.
 
+---
+
+## 2026-04-24 - US-001
+- Removed the 4 non-travel Card imports (CreditCardCard, LaptopCard, SmartphoneCard, HeadphoneCard) from app/page.tsx.
+- Removed the 4 JSX blocks gated on `resultCategory === "credit_card" | "laptop" | "smartphone" | "headphone"` (~170 lines).
+- Removed the 4 `chat.all{Xxx}Cards.length > 0` clauses from the `hasCategoryResults` aggregation so empty-state logic still works.
+- Files changed: app/page.tsx
+- Typecheck: passed (`npx tsc --noEmit` exit 0).
+- **Learnings for future iterations:**
+  - The PRD acceptance criteria mentioned `cardType === '...'` branches — those do not exist in this codebase; the actual gate is `resultCategory === '...'`. Grep for the real pattern before blind-deleting.
+  - The `hasCategoryResults` boolean at the top of the component aggregates per-category `all<Xxx>Cards.length > 0` checks. When removing a category's UI, also strip its aggregation line or you'll keep a reference to a non-existent field on the `chat` object (though `useChat` may still expose it — typecheck would not catch it alone).
+  - No browser verification done in this iteration (no live dev server spun up). Future UI-touching stories should consider /browse verification.
 ---
