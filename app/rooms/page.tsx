@@ -433,10 +433,14 @@ export default function RoomsListPage() {
                       </div>
                     );
                   }
+                  // Stage 2: chat-flow rooms live on the homepage, not /rooms/<id>.
+                  // Following the "right" URL is the only reliable way users get
+                  // their chat history back via UX-4 replay.
+                  const targetHref = r.flow === "chat" ? `/?room_id=${r.id}` : `/rooms/${r.id}`;
                   return (
                     <Link
                       key={r.id}
-                      href={`/rooms/${r.id}`}
+                      href={targetHref}
                       onContextMenu={(event) => {
                         event.preventDefault();
                         setMenu({
