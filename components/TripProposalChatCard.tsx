@@ -81,10 +81,11 @@ const WRAPPER: React.CSSProperties = {
   display: "flex",
   flexDirection: "column",
   overflow: "hidden",
-  position: "relative",
-  width: "min(95vw, 1600px)",
-  left: "50%",
-  transform: "translateX(-50%)",
+  // Fill the chat column — no viewport breakout. The 4 columns reflow to
+  // whatever width is available (sidebar collapse makes more room). Media
+  // queries below collapse to 2 cols at ≤1023px and 1 col at ≤639px so the
+  // cards stay readable at tight widths.
+  width: "100%",
 };
 const HEADER: React.CSSProperties = {
   padding: "14px 16px",

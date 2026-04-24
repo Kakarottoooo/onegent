@@ -47,6 +47,8 @@ export interface SidebarProps {
 }
 
 const SIDEBAR_WIDTH = 260;
+const SIDEBAR_COLLAPSED_WIDTH = 44;
+const COLLAPSED_STORAGE_KEY = "onegent.sidebar.collapsed";
 
 export default function Sidebar({ activeSessionId, activeRoomId, reloadTick }: SidebarProps) {
   const { isSignedIn, userId } = useAuth();
@@ -57,6 +59,29 @@ export default function Sidebar({ activeSessionId, activeRoomId, reloadTick }: S
   const [menu, setMenu] = useState<ContextMenuState | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [localReloadTick, setLocalReloadTick] = useState(0);
+  // Collapse state persists across reloads. Default expanded; hydrate from
+  // localStorage on mount to avoid SSR mismatch.
+  const [collapsed, setCollapsed] = useState<boolean>(false);
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    try {
+      const stored = window.localStorage.getItem(COLLAPSED_STORAGE_KEY);
+      if (stored === "1") setCollapsed(true);
+    } catch {
+      // localStorage disabled — stay expanded.
+    }
+  }, []);
+  function toggleCollapsed() {
+    setCollapsed((prev) => {
+      const next = !prev;
+      try {
+        window.localStorage.setItem(COLLAPSED_STORAGE_KEY, next ? "1" : "0");
+      } catch {
+        // non-fatal
+      }
+      return next;
+    });
+  }
 
   const load = useCallback(async () => {
     try {
@@ -234,58 +259,110 @@ export default function Sidebar({ activeSessionId, activeRoomId, reloadTick }: S
   const Inner = (
     <div
       style={{
-        width: SIDEBAR_WIDTH,
+        width: collapsed ? SIDEBAR_COLLAPSED_WIDTH : SIDEBAR_WIDTH,
         height: "100vh",
         background: "var(--card, #1a1714)",
         borderRight: "1px solid var(--border, #2a2622)",
         display: "flex",
         flexDirection: "column",
         overflow: "hidden",
+        transition: "width 160ms ease",
       }}
     >
-      {/* Top: New chat button */}
-      <div style={{ padding: 12, borderBottom: "1px solid var(--border, #2a2622)" }}>
+      {/* Top: Collapse toggle + New chat button.
+          When collapsed, only the chevron button + a compact "+" icon fit. */}
+      <div
+        style={{
+          padding: collapsed ? "8px 4px" : "12px",
+          borderBottom: "1px solid var(--border, #2a2622)",
+          display: "flex",
+          flexDirection: collapsed ? "column" : "row",
+          gap: 6,
+          alignItems: "stretch",
+        }}
+      >
+        <button
+          type="button"
+          onClick={toggleCollapsed}
+          aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
+          title={collapsed ? "Expand sidebar" : "Collapse sidebar"}
+          style={{
+            width: collapsed ? "100%" : 32,
+            height: 32,
+            padding: 0,
+            background: "transparent",
+            border: "1px solid var(--border, #2a2622)",
+            borderRadius: 8,
+            color: "var(--text-muted, #888)",
+            fontSize: 14,
+            cursor: "pointer",
+            flexShrink: 0,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+          }}
+        >
+          {collapsed ? "›" : "‹"}
+        </button>
         <button
           type="button"
           onClick={goNewChat}
+          title="New chat"
           style={{
-            width: "100%",
-            padding: "10px 12px",
+            flex: 1,
+            padding: collapsed ? 0 : "10px 12px",
+            width: collapsed ? "100%" : undefined,
+            height: collapsed ? 32 : undefined,
             background: "transparent",
             border: "1px solid var(--gold, #C9A84C)",
             borderRadius: 10,
             color: "var(--gold, #C9A84C)",
             fontFamily: "var(--font-dm-sans)",
-            fontSize: 13,
+            fontSize: collapsed ? 16 : 13,
             fontWeight: 600,
             cursor: "pointer",
-            textAlign: "left",
+            textAlign: collapsed ? "center" : "left",
             display: "flex",
             alignItems: "center",
+            justifyContent: collapsed ? "center" : "flex-start",
             gap: 8,
           }}
         >
           <span style={{ fontSize: 16 }}>+</span>
-          <span>New chat</span>
+          {collapsed ? null : <span>New chat</span>}
         </button>
       </div>
 
-      {/* Scroll area */}
-      <div style={{ flex: 1, overflowY: "auto", padding: "8px 4px" }}>
+      {/* Scroll area. Collapsed mode shows icon-only squares for each row;
+          expanded mode shows the full title + subtitle + context menu. */}
+      <div style={{ flex: 1, overflowY: "auto", padding: collapsed ? "6px 4px" : "8px 4px" }}>
         {/* Rooms section */}
-        <SectionLabel text="Rooms" />
+        {collapsed ? null : <SectionLabel text="Rooms" />}
         {rooms === null ? (
-          <SidebarSkeleton />
+          collapsed ? null : <SidebarSkeleton />
         ) : rooms.length === 0 ? (
-          <EmptyHint text="No rooms yet" />
+          collapsed ? null : <EmptyHint text="No rooms yet" />
         ) : (
           rooms.map((r) => {
             const isActive = activeRoomId === r.id;
             const isInvited = r.member_status === "invited";
+            const icon = isInvited ? "✉️" : "🏠";
+            if (collapsed) {
+              return (
+                <IconOnlyRow
+                  key={r.id}
+                  icon={icon}
+                  title={r.title}
+                  active={isActive}
+                  onClick={() => goRoom(r)}
+                  dimmed={busyId === r.id}
+                />
+              );
+            }
             return (
               <SidebarRow
                 key={r.id}
-                icon={isInvited ? "✉️" : "🏠"}
+                icon={icon}
                 title={r.title}
                 subtitle={isInvited ? "Invited · tap to accept" : undefined}
                 active={isActive}
@@ -298,23 +375,34 @@ export default function Sidebar({ activeSessionId, activeRoomId, reloadTick }: S
         )}
 
         {/* Sessions section */}
-        <SectionLabel text="Sessions" />
+        {collapsed ? null : <SectionLabel text="Sessions" />}
         {sessions === null ? (
-          <SidebarSkeleton />
+          collapsed ? null : <SidebarSkeleton />
         ) : soloSessions.length === 0 ? (
-          <EmptyHint text="Your previous chats will show up here." />
+          collapsed ? null : <EmptyHint text="Your previous chats will show up here." />
         ) : (
-          soloSessions.map((s) => (
-            <SidebarRow
-              key={s.id}
-              icon="💬"
-              title={s.title || "Untitled"}
-              active={activeSessionId === s.id}
-              onClick={() => goSession(s)}
-              onContextMenu={(e) => openSessionMenu(s, e)}
-              dimmed={busyId === s.id}
-            />
-          ))
+          soloSessions.map((s) =>
+            collapsed ? (
+              <IconOnlyRow
+                key={s.id}
+                icon="💬"
+                title={s.title || "Untitled"}
+                active={activeSessionId === s.id}
+                onClick={() => goSession(s)}
+                dimmed={busyId === s.id}
+              />
+            ) : (
+              <SidebarRow
+                key={s.id}
+                icon="💬"
+                title={s.title || "Untitled"}
+                active={activeSessionId === s.id}
+                onClick={() => goSession(s)}
+                onContextMenu={(e) => openSessionMenu(s, e)}
+                dimmed={busyId === s.id}
+              />
+            ),
+          )
         )}
       </div>
     </div>
@@ -597,6 +685,61 @@ function SidebarRow({
           </span>
         ) : null}
       </span>
+    </button>
+  );
+}
+
+/**
+ * Compact square tile used when the sidebar is collapsed. Shows just the icon;
+ * hovering surfaces the full title as a native tooltip. Context menu is
+ * intentionally omitted — users expand the sidebar to delete/leave, which
+ * makes the collapsed mode pure navigation (less risk of destructive
+ * right-click slips on a tiny target).
+ */
+function IconOnlyRow({
+  icon,
+  title,
+  active,
+  onClick,
+  dimmed,
+}: {
+  icon: string;
+  title: string;
+  active?: boolean;
+  onClick: () => void;
+  dimmed?: boolean;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      title={title}
+      aria-label={title}
+      disabled={dimmed}
+      style={{
+        width: 32,
+        height: 32,
+        margin: "4px auto",
+        padding: 0,
+        background: active ? "rgba(201,168,76,0.14)" : "transparent",
+        border: "1px solid " + (active ? "rgba(201,168,76,0.35)" : "var(--border, #2a2622)"),
+        borderRadius: 8,
+        color: active ? "var(--gold, #C9A84C)" : "var(--text-primary, #e5e5e5)",
+        fontSize: 14,
+        cursor: dimmed ? "wait" : "pointer",
+        opacity: dimmed ? 0.5 : 1,
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+      }}
+      onMouseEnter={(e) => {
+        if (!active) e.currentTarget.style.background = "rgba(255,255,255,0.04)";
+      }}
+      onMouseLeave={(e) => {
+        if (!active) e.currentTarget.style.background = "transparent";
+      }}
+    >
+      <span>{icon}</span>
     </button>
   );
 }
