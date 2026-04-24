@@ -1885,9 +1885,12 @@ export async function ensureDecisionRoomPrivateMessagesTable(): Promise<void> {
           user_id    TEXT NOT NULL,
           role       TEXT NOT NULL,
           content    TEXT NOT NULL,
+          meta_json  JSONB,
           created_at TIMESTAMPTZ DEFAULT NOW()
         )
       `;
+      // Safe forward-migration: add the column to pre-existing tables if missing.
+      await sql`ALTER TABLE decision_room_private_messages ADD COLUMN IF NOT EXISTS meta_json JSONB`;
       await sql`CREATE INDEX IF NOT EXISTS decision_room_private_messages_room_user_idx ON decision_room_private_messages (room_id, user_id, created_at DESC)`;
     })().catch((err) => {
       decisionRoomPrivateMessagesTableReady = null;
@@ -3610,6 +3613,7 @@ export interface PrivateMessageRow {
   id: string;
   role: PrivateMessageRole;
   content: string;
+  meta_json: Record<string, unknown> | null;
   created_at: string;
 }
 
@@ -3619,11 +3623,18 @@ export async function insertPrivateMessage(params: {
   userId: string;
   role: PrivateMessageRole;
   content: string;
+  /**
+   * Optional structured payload to tag the message (e.g. inline card markers).
+   * Used by trip-synthesis to seed a `{kind:'trip_proposal_card', proposal_id}`
+   * marker that the client swaps for a `<TripProposalChatCard />` on render.
+   */
+  metaJson?: Record<string, unknown> | null;
 }): Promise<void> {
   await ensureDecisionRoomPrivateMessagesTable();
+  const metaPayload = params.metaJson ? JSON.stringify(params.metaJson) : null;
   await sql`
-    INSERT INTO decision_room_private_messages (room_id, user_id, role, content)
-    VALUES (${params.roomId}, ${params.userId}, ${params.role}, ${params.content})
+    INSERT INTO decision_room_private_messages (room_id, user_id, role, content, meta_json)
+    VALUES (${params.roomId}, ${params.userId}, ${params.role}, ${params.content}, ${metaPayload}::jsonb)
   `;
 }
 
@@ -3639,13 +3650,112 @@ export async function listPrivateMessages(
 ): Promise<PrivateMessageRow[]> {
   await ensureDecisionRoomPrivateMessagesTable();
   const result = await sql<PrivateMessageRow>`
-    SELECT id::text AS id, role, content, created_at
+    SELECT id::text AS id, role, content, meta_json, created_at
     FROM decision_room_private_messages
     WHERE room_id = ${roomId} AND user_id = ${userId}
     ORDER BY id ASC
     LIMIT ${limit}
   `;
   return result.rows;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Trip proposal per-user selections (Stage 2 · α voting semantics)
+//
+// When synthesis produces a TripPackage proposal, each joined member picks
+// their preferred items per category (1 hotel / 1 flight / N restaurants /
+// N activities). Selections are aggregated to show "N picked" badges and
+// the payer can trigger booking with the consensus (or their own override).
+// ═══════════════════════════════════════════════════════════════════════════
+
+export interface TripSelectionRow {
+  id: string;
+  room_id: string;
+  proposal_id: string;
+  user_id: string;
+  selection_json: {
+    hotel_id: string | null;
+    flight_id: string | null;
+    restaurant_ids: string[];
+    activity_ids: string[];
+  };
+  updated_at: string;
+}
+
+let decisionRoomTripSelectionsTableReady: Promise<void> | null = null;
+
+export async function ensureDecisionRoomTripSelectionsTable(): Promise<void> {
+  if (!decisionRoomTripSelectionsTableReady) {
+    decisionRoomTripSelectionsTableReady = (async () => {
+      await sql`
+        CREATE TABLE IF NOT EXISTS decision_room_trip_selections (
+          id             BIGSERIAL PRIMARY KEY,
+          room_id        TEXT NOT NULL,
+          proposal_id    TEXT NOT NULL,
+          user_id        TEXT NOT NULL,
+          selection_json JSONB NOT NULL,
+          updated_at     TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          UNIQUE (proposal_id, user_id)
+        )
+      `;
+      await sql`CREATE INDEX IF NOT EXISTS decision_room_trip_selections_proposal_idx ON decision_room_trip_selections (proposal_id)`;
+      await sql`CREATE INDEX IF NOT EXISTS decision_room_trip_selections_room_idx ON decision_room_trip_selections (room_id)`;
+    })().catch((err) => {
+      decisionRoomTripSelectionsTableReady = null;
+      throw err;
+    });
+  }
+  await decisionRoomTripSelectionsTableReady;
+}
+
+/** Upsert one user's trip selection for a proposal. */
+export async function upsertTripSelection(params: {
+  roomId: string;
+  proposalId: string;
+  userId: string;
+  selection: {
+    hotel_id: string | null;
+    flight_id: string | null;
+    restaurant_ids: string[];
+    activity_ids: string[];
+  };
+}): Promise<void> {
+  await ensureDecisionRoomTripSelectionsTable();
+  const payload = JSON.stringify(params.selection);
+  await sql`
+    INSERT INTO decision_room_trip_selections (room_id, proposal_id, user_id, selection_json, updated_at)
+    VALUES (${params.roomId}, ${params.proposalId}, ${params.userId}, ${payload}::jsonb, NOW())
+    ON CONFLICT (proposal_id, user_id) DO UPDATE
+      SET selection_json = EXCLUDED.selection_json,
+          updated_at     = NOW()
+  `;
+}
+
+/** List all selections for a proposal. Used for aggregate "N picked" counts. */
+export async function listTripSelections(proposalId: string): Promise<TripSelectionRow[]> {
+  await ensureDecisionRoomTripSelectionsTable();
+  const result = await sql<TripSelectionRow>`
+    SELECT id::text AS id, room_id, proposal_id, user_id, selection_json, updated_at
+    FROM decision_room_trip_selections
+    WHERE proposal_id = ${proposalId}
+    ORDER BY updated_at ASC
+  `;
+  return result.rows;
+}
+
+/** Fetch one user's selection for a proposal. */
+export async function getMyTripSelection(
+  proposalId: string,
+  userId: string,
+): Promise<TripSelectionRow | null> {
+  await ensureDecisionRoomTripSelectionsTable();
+  const result = await sql<TripSelectionRow>`
+    SELECT id::text AS id, room_id, proposal_id, user_id, selection_json, updated_at
+    FROM decision_room_trip_selections
+    WHERE proposal_id = ${proposalId} AND user_id = ${userId}
+    LIMIT 1
+  `;
+  return result.rows[0] ?? null;
 }
 
 // ═══════════════════════════════════════════════════════════════════════════

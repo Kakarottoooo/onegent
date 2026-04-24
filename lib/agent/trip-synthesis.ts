@@ -30,6 +30,7 @@ import {
   sendDirectMessage,
   areContacts,
   getUserProfile,
+  insertPrivateMessage,
 } from "@/lib/db";
 import {
   type TripIntentState,
@@ -366,9 +367,10 @@ export async function triggerSynthesis(
   if (result.status === "ok" && result.package) {
     // Create the proposal row (one option, the whole TripPackage).
     // createRoomProposal auto-transitions room.status → "approving".
+    const proposalId = randomUUID();
     try {
       await createRoomProposal({
-        id: randomUUID(),
+        id: proposalId,
         roomId,
         contentJson: result.package.package as unknown as Record<string, unknown>,
         rationale: `Synthesized from ${result.contributorCount} member${result.contributorCount === 1 ? "" : "s"}' chat preferences`,
@@ -376,6 +378,38 @@ export async function triggerSynthesis(
       });
     } catch (err) {
       console.warn("[trip-synthesis] createRoomProposal failed", err);
+    }
+
+    // Stage 2 · T11 inline proposal card: seed a marker message into EACH
+    // joined member's private channel. Client detects meta_json.kind and
+    // renders a <TripProposalChatCard /> instead of a plain text bubble.
+    // `created_at` ordering puts this at the end of their replay so the
+    // card appears right after whatever they last said.
+    try {
+      const members = await listRoomMembers(roomId);
+      const cardContent =
+        "✅ 方案已出！在下方卡片里选择你的偏好，实时看大家的共识进度。";
+      const cardMeta = {
+        kind: "trip_proposal_card" as const,
+        proposal_id: proposalId,
+        room_id: roomId,
+      };
+      for (const m of members) {
+        if (m.status !== "joined") continue;
+        try {
+          await insertPrivateMessage({
+            roomId,
+            userId: m.user_id,
+            role: "assistant",
+            content: cardContent,
+            metaJson: cardMeta,
+          });
+        } catch (err) {
+          console.warn(`[trip-synthesis] seed proposal card for ${m.user_id} failed`, err);
+        }
+      }
+    } catch (err) {
+      console.warn("[trip-synthesis] proposal-card seed phase failed", err);
     }
     try {
       await appendRoomMessage({

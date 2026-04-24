@@ -32,6 +32,7 @@ import type { FeedbackPromptItem } from "@/app/api/feedback-prompts/route";
 import DecisionRoomModal from "@/components/DecisionRoomModal";
 import ConfirmCard, { type CommitResponse } from "@/components/ConfirmCard";
 import TripPackageCard from "@/components/TripPackageCard";
+import TripProposalChatCard from "@/components/TripProposalChatCard";
 import type { TripPackage } from "@/lib/types";
 import type { TripIntentState } from "@/lib/agent/trip-intent-state";
 import { useLanguage } from "@/app/hooks/useLanguage";
@@ -132,6 +133,10 @@ export default function Home() {
   // this homepage mount continue that thread. First user message in a fresh
   // session creates one on the server, and we update the URL then.
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
+  // Stage 2 · T11: when a trip room has an active proposal, render
+  // <TripProposalChatCard> inline in the chat stream. The id comes from the
+  // most recent private_message with meta_json.kind='trip_proposal_card'.
+  const [activeProposalId, setActiveProposalId] = useState<string | null>(null);
   // Titles for the context ribbon so the user can tell "which room" / "which
   // chat" they're in without looking at the sidebar.
   const [activeRoomTitle, setActiveRoomTitle] = useState<string | null>(null);
@@ -205,9 +210,11 @@ export default function Home() {
   useEffect(() => {
     if (!activeRoomId) {
       setActiveRoomTitle(null);
+      setActiveProposalId(null);
       return;
     }
     setActiveRoomTitle(null);
+    setActiveProposalId(null);
     let cancelled = false;
     (async () => {
       try {
@@ -302,7 +309,13 @@ export default function Home() {
         const res = await fetch(`/api/rooms/${activeRoomId}/private-messages`);
         if (!res.ok) return;
         const data = (await res.json()) as {
-          messages: Array<{ id: string; role: "user" | "assistant" | "system"; content: string; created_at: string }>;
+          messages: Array<{
+            id: string;
+            role: "user" | "assistant" | "system";
+            content: string;
+            meta_json: { kind?: string; proposal_id?: string } | null;
+            created_at: string;
+          }>;
         };
         if (cancelled) return;
         // Mark replayed BEFORE injecting so any side-effect re-render doesn't loop.
@@ -313,14 +326,30 @@ export default function Home() {
         // a real switch. Inject each persisted message so the user sees the
         // full thread that the server seeded (pre-confirm history + welcome
         // for the creator; a single welcome for invited members).
+        // Special case: messages with meta_json.kind === 'trip_proposal_card'
+        // are marker rows — skip the text bubble; the card is rendered via
+        // activeProposalId state instead. Keep the LAST such proposal_id so
+        // we always show the most recent proposal (force re-synthesis creates
+        // a new marker message after the old one).
+        let latestProposalId: string | null = null;
         for (const m of data.messages) {
+          if (m.meta_json?.kind === "trip_proposal_card" && m.meta_json?.proposal_id) {
+            latestProposalId = m.meta_json.proposal_id;
+            continue;
+          }
           if (m.role === "user") chat.injectUserMessage(m.content);
           else chat.injectAssistantMessage(m.content);
         }
+        setActiveProposalId(latestProposalId);
         // Rehydrate NLU history (same rationale as session replay below).
-        // Skip system-role messages — only user/assistant feed the extractor.
+        // Skip system-role messages + marker messages — only user/assistant
+        // text feeds the extractor.
         nluHistoryRef.current = data.messages
-          .filter((m) => m.role === "user" || m.role === "assistant")
+          .filter(
+            (m) =>
+              (m.role === "user" || m.role === "assistant") &&
+              m.meta_json?.kind !== "trip_proposal_card",
+          )
           .slice(-20)
           .map((m) => ({ role: m.role as "user" | "assistant", content: m.content }));
       } catch {
@@ -833,8 +862,25 @@ export default function Home() {
             }
             if (data.reason === "ok") {
               chat.injectAssistantMessage(
-                "✅ 方案已出！在 Rooms 页可以查看 3 套 tier + 投票。我也给每位成员发了通知。",
+                "✅ 方案已出！在下方卡片里选择你的偏好，实时看大家的共识进度。",
               );
+              // Fetch the active proposal id so the inline card mounts right
+              // away (server also seeded a meta_json marker message for the
+              // next replay, but we don't want to refetch private-messages
+              // just to parse it out).
+              try {
+                const propRes = await fetch(`/api/rooms/${activeRoomId}/trip-proposal`);
+                if (propRes.ok) {
+                  const propBody = (await propRes.json()) as {
+                    proposal?: { id?: string } | null;
+                  };
+                  if (propBody.proposal?.id) {
+                    setActiveProposalId(propBody.proposal.id);
+                  }
+                }
+              } catch {
+                // Non-fatal; card will show after next page load via replay.
+              }
             } else if (data.reason === "waiting_for_members") {
               const need = (data.member_count ?? 0) - (data.contributor_count ?? 0);
               chat.injectAssistantMessage(
@@ -2587,6 +2633,19 @@ export default function Home() {
                     sessionId={activeSessionId}
                     onConfirmed={handleConfirmCommitted}
                     onEdit={handleConfirmEdit}
+                  />
+                )}
+
+                {/* Stage 2 · T11: inline trip proposal card for multi-party trip rooms.
+                    Mounts when synthesis has created a proposal (activeProposalId is
+                    set via the private-messages replay or after a force-synthesize
+                    click). 4-column picker + per-item vote badges + payer-only book. */}
+                {activeRoomId && activeProposalId && (
+                  <TripProposalChatCard
+                    key={activeProposalId}
+                    roomId={activeRoomId}
+                    proposalId={activeProposalId}
+                    userId={userId ?? null}
                   />
                 )}
 
