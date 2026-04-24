@@ -546,13 +546,14 @@ export default function TripProposalChatCard(props: TripProposalChatCardProps) {
     );
   }
 
-  // Executing mode — the payer has triggered booking. Show a compact "trip
-  // is live" state so user B (who might still see the vote card mid-refresh)
-  // gets the signal that it's been booked and can jump to the task view.
-  const isExecuting =
-    data.room.status === "executing" ||
-    data.proposal?.status === "accepted" ||
-    !!data.room.booking_job_id;
+  // Executing mode — the payer has triggered booking. Only gate on
+  // booking_job_id: proposal.status flips to "accepted" the instant the
+  // approval threshold is met (votes alone), which is BEFORE Book has
+  // been clicked. If we use status==="accepted" here the card swaps to
+  // the "See progress →" shell prematurely, the link goes to /tasks
+  // without ?focus (booking_job_id is still null), and the payer
+  // never gets the chance to actually click Book.
+  const isExecuting = !!data.room.booking_job_id;
   if (isExecuting) {
     const taskUrl = data.room.booking_job_id
       ? `/tasks?focus=${encodeURIComponent(data.room.booking_job_id)}&view=live`
