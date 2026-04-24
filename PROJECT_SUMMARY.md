@@ -1,5 +1,5 @@
 ================================================================
-Onegent · AI 决策代理 · 项目总结 · v0.2.31.0
+Onegent · AI 决策代理 · 项目总结 · v0.2.32.0
 ================================================================
 
 【项目定义】
@@ -342,10 +342,133 @@ Recent Updates - 2026-04-24
          再做同样的清理
 
 ================================================================
-数据库（34 张表 · +5 from v0.2.29.0）
+Recent Updates - 2026-04-24 (cont.) · Stage 2 · T11 全量落地
 ================================================================
 
-Stage 2 新增 5 张表，旧的 29 张不变：
+本轮一次性把 Stage 2 的 "inline proposal card + 投票 + payer 下单 +
+Autopilot 启动" 闭环跑通，包括 UI / server / DB / 状态机各层。
+
+1. Inline Trip Proposal Card（T11 完成 · `components/TripProposalChatCard.tsx`）
+   - 4 列设计（🏨 Hotel · ✈ Flight · 🍽 Food · 🎟 Shows）和 Solo 的
+     `TripPackageCard` 一致，但是 95% 只读 + 每张 minicard 左上角
+     新增 `N/M picked` 投票聚合徽章（当 ≥50% 成员选它时变金色）
+   - 4s 轮询 `/api/rooms/[id]/trip-proposal`，跨客户端实时看共识进度
+   - 宽度 100% 填充 chat 列，不再强行 95vw 突围（侧栏折叠后更宽敞）
+   - 媒体查询继续在 ≤1023px / ≤639px 折叠成 2 列 / 1 列
+
+2. α 投票语义 · "Lock in = Approve" 合并交互
+   - 最初设计是"三 pill 投票（Approve/Decline/Request changes）+
+     Lock in my picks"两步冗余，用户要点两次。合并成：
+       · 金色主按钮 **"Lock in & approve"** —— 一次点击同时
+         `PUT /trip-selection` + `POST /vote(approve)`
+       · 已批准后按钮变 **"✓ Update my picks"**（只保存选择，不改投票）
+       · 辅助小按钮 **"Decline"** 作为显式退出（投 decline 会卡住
+         approval gate，payer 不能绕过强行下单）
+   - 门槛达到后服务器自动把 `proposal.status` 升级到 `accepted`
+     （复用老 DR 的 vote endpoint machinery，一行服务端代码没改）
+   - Payer 的 **"Book this trip"** 按钮 disabled 直到 approval 达标，
+     hover 显示 "Need X more approval(s)"
+
+3. DB schema 扩展（+1 新表 · +1 新列）
+   - 新表 `decision_room_trip_selections`：(room_id, proposal_id,
+     user_id, selection_json, updated_at)，UNIQUE (proposal_id, user_id)
+     用于 upsert。存每人每品类的勾选（1 hotel + 1 flight + N rest + N act）
+   - `decision_room_private_messages` 加 `meta_json JSONB` 列（安全向前
+     迁移 ALTER TABLE ADD IF NOT EXISTS）。trip-synthesis 在合成成功后
+     为每位 joined 成员的私聊频道 seed 一条
+     `meta_json={kind:'trip_proposal_card', proposal_id}` 的 marker —
+     客户端检测到后就 mount TripProposalChatCard（不渲染成文字气泡）
+
+4. 新 3 个 API endpoints
+   - `GET /api/rooms/[id]/trip-proposal` → 返回 TripPackage + 聚合投票
+     计数 + 我的选择 + my_vote + vote_tally + is_synthesizing + room meta
+   - `PUT /api/rooms/[id]/trip-selection` → upsert 我的选择，gate 到
+     proposal.status=active
+   - `/api/rooms/[id]/book-trip` 大改：
+       · 去掉旧 approval-vote 门禁（α 语义下 selection 本身就是投票）
+       · 加回真正的 approval-rule gate（unanimous / majority, N<3
+         强制 unanimous）—— 未达标 409 带回 needed/approved_count 进度
+       · consensus 算法：按每品类投票数多数派挑选，tie-break 按
+         package option 顺序。payer 可 body override 任一字段
+       · create-trip 返回后 fire-and-forget `POST /start` 启动
+         Autopilot（漏了这一步任务会卡 queued）
+       · 二次守护：`booking_job_id` 已存在时拒绝重复下单
+
+5. Proposal Watcher + 跨客户端同步 (`page.tsx`)
+   - 进 trip 房间后每 4s poll `/trip-proposal`。一旦 `proposal.id`
+     出现（可能是别人触发了合成）就 setActiveProposalId → 卡片自动
+     mount，无需刷新
+   - 拿到 `is_synthesizing: true` 时展示合成进度卡（同样的 4 品类
+     脉冲 chip + 滑动金色进度条）——让**所有成员**在 5-15s pipeline
+     期间都看到"正在为你们综合方案…"，不只是触发人
+   - Server 侧 `is_synthesizing` 启发式：`proposal===null && 所有
+     joined 成员都有 intent_state_row` → 认定流水线正在跑
+
+6. Executing 态渲染
+   - `booking_job_id` 一旦写入（payer 点 Book 之后），卡片整张坍缩为
+     单行 "✈️ Trip booked · See progress →"
+   - 点按钮跳 `/tasks?focus=<jobId>&view=live`，直接进到 Live 视图看
+     Playwright 步骤滚动
+   - 严格 gate on `booking_job_id`（不是 proposal.status=accepted）——
+     否则全员 approve 后 payer 还没点 Book 就已经被推去空 /tasks
+
+7. NLU 抗性（extractor 后处理两层安全网）
+   - `downgradeSpuriousRefine`：新增一轮后处理，防 gpt-4o-mini 把
+     "想看百老汇、自由女神、想住希尔顿" 这种逗号列表误判成
+     `intent=refine_existing`（router 会把 refine_existing 短路成
+     `continue_chat`，ConfirmCard 永不出现）。fresh session 没历史 +
+     无 refined_target_id → 降级到 `create_plan` 或 `create_room`
+   - `fillCreateRoomPartySize` 扩展到 trip scenario：既然用户说了
+     "和 ziwei Guo"，自动推断 `travelers = member_names.length + 1`，
+     router 不再问 "how many travelers?"
+
+8. In-room synthesize 触发器 + 重复防护
+   - `/api/chat/parse` 加 `isSynthesisTrigger` 正则：用户在 trip 房间
+     里说 "给我方案" / "生成方案" / "synthesize" 等语义 → 强制把
+     NLU 结果改写成 `intent=create_room, confirm_ready=true`，客户端
+     fire force synthesize；同时把 `assistant_reply` 换成 "好的，
+     我去综合大家的偏好，出一套方案" 防止 Sonnet 幻觉行程
+   - **去重守护双层**：
+       · Server（parse route）：触发时先 `listActiveProposals`，
+         已有 active/accepted proposal 就**不**改写 intent——只换
+         assistant_reply "方案已经出好了…如果想重新生成一套，说
+         「重新生成」。"
+       · Client（page.tsx:787）：fire /synthesize 前检查
+         `activeProposalId`，已有就 return（防 user 2 说完整 trip
+         请求又造一个新 proposal orphan 所有票）
+
+9. Collapsible Sidebar（侧栏可折叠）
+   - 左上角 chevron `‹ / ›` 切换 260px ↔ 44px
+   - 折叠态只剩 "+" 图标 + 每个 room/session 的单字符 icon tile
+     （hover 显示完整标题 native tooltip）
+   - localStorage 持久化偏好（`onegent.sidebar.collapsed`）
+   - 160ms 宽度过渡动画
+   - 折叠后给 proposal card 多腾出 216px，4 列布局 1366px 笔记本
+     也舒服
+
+10. Getters / helpers 新增
+    - `getLatestTripProposal(roomId)` — 返回 active OR accepted 的最
+      新 proposal（老的 `getActiveTripProposal` 只认 active，门槛达
+      成瞬间会让卡片闪现 "No proposal available yet"）。
+    - `/trip-proposal` 和 `/book-trip` 用新的；`/trip-selection` 保
+      留老的（accept 后不应让成员改选择）
+
+11. 一揽子 bug 修复
+    - create-trip 返的是 `jobId`（camelCase），book-trip 之前只找
+      `job_id / booking_job_id / id` 三个下划线别名 → 500。加 `jobId`
+      作为优先 fallback
+    - `/tasks` 没有 `[id]` 动态路由，url 改成 `?focus=<id>&view=live`
+      query 模式（对齐 Solo TripPackageCard）
+    - minicard `border: "Xpx solid Y"` 与选中态 `borderColor` 覆盖
+      冲突，React 每次 rerender warn。全部替换成 `borderWidth /
+      borderStyle / borderColor` 长字段（MINI_CARD_BASE / SELECT_PILL
+      / LOCK_BTN 三处）
+
+================================================================
+数据库（35 张表 · +6 from v0.2.29.0）
+================================================================
+
+Stage 2 共新增 6 张表（5 张 + T11 的 selections 表）：
 
 | 表名 | 用途 |
 |------|------|
@@ -354,6 +477,7 @@ Stage 2 新增 5 张表，旧的 29 张不变：
 | user_direct_messages | 用户互发 DM（含 role='agent' 的系统通知） |
 | chat_sessions | ChatGPT 风格持久化 solo chat 会话 |
 | chat_session_messages | chat_sessions 的消息流 |
+| decision_room_trip_selections | Trip room 每成员每品类勾选（α 投票） |
 
 【核心能力速览】
 三条主线，贯穿第四 / 第五阶段的完成态能力：
@@ -858,6 +982,10 @@ Onegent 从 Solo 单品类到 Trip 打包到 Decision Room 多人协作，全部
   ✅ Session → Room 升级路径（DB 作为唯一真相源，不依赖内存 hand-off）
   ✅ 主页 chat 历史回放（room + session 两套 context 都支持刷新恢复）
   ✅ Zombie room_id URL 兜底（404/403 自动清 context + router.replace）
+  ✅ Inline Trip Proposal 卡片（T11）：4 列内联 + N/M picked 徽章 + α 投票 +
+     Executing 态 + 跨客户端 Proposal Watcher + Synthesis 进度卡
+  ✅ /book-trip 自动启动 Autopilot（POST /start 真正 kick off Playwright）
+  ✅ Stage 2 端到端 2 人 trip 验收通过（合成 → 投票 → 下单 → autopilot）
 
 还差什么（仅剩 3 个边界）：
   ① 实时订位可用性 — agent 现已能抓取并展示 OpenTable 可用时段列表（no_availability
@@ -994,10 +1122,10 @@ AI：MiniMax（NLU + 评论信号解析 + 语义排序 + 双人约束合并）
 API 层：30+ 个路由端点
 Cron：4 个定时任务（反馈提示 / 价格检查 / 场馆质量 / 笔记本价格）
 测试：Vitest（22+ 个测试文件 · 100% 通过 · golden-trip 等 Stage 2 测试已纳入）
-版本：v0.2.31.0
+版本：v0.2.32.0
 
 ================================================================
-八、数据库（34 张表）
+八、数据库（35 张表）
 ================================================================
 
 | 表名 | 用途 |
@@ -1035,10 +1163,38 @@ Cron：4 个定时任务（反馈提示 / 价格检查 / 场馆质量 / 笔记�
 | user_direct_messages | 用户互发 DM（role=user\|agent，Stage 2） |
 | chat_sessions | ChatGPT 风格持久化 solo 会话（Sessions） |
 | chat_session_messages | chat_sessions 的消息流 |
+| decision_room_trip_selections | Trip α 投票：每成员每品类勾选（T11） |
 
 ================================================================
 九、版本历史摘要
 ================================================================
+
+v0.2.32.0（2026-04-24）— Stage 2 · T11 全量落地（inline proposal card + α 投票 + Autopilot 启动）
+  · 新组件 `TripProposalChatCard.tsx`：4 列（🏨 · ✈ · 🍽 · 🎟）内联在聊天流，
+    每张 minicard 带 "N/M picked" 聚合徽章（≥50% 变金），4s 轮询实时同步共识
+  · α 投票语义合并交互：一个金色 "Lock in & approve" 按钮原子化完成
+    `PUT /trip-selection` + `POST /vote(approve)`，老的三 pill 投票行全部
+    去掉；留一个辅助 "Decline" 作为退出出口
+  · 新表 `decision_room_trip_selections` (proposal_id, user_id, selection_json)
+    + `decision_room_private_messages` 加 `meta_json JSONB` 列（inline card marker）
+  · 新 3 个 API endpoint：GET `/trip-proposal`（含 is_synthesizing 启发式）、
+    PUT `/trip-selection`、/book-trip 重写（approval-rule gate + consensus
+    算法 + fire-and-forget POST `/start` 真正启动 Autopilot）
+  · 跨客户端 Proposal Watcher：进房后 4s poll `/trip-proposal`，别人触发
+    合成后这边自动 mount 卡片；合成中显示脉冲进度卡（所有成员都能看到，
+    不只是触发人）
+  · Executing 态：`booking_job_id` 写入后卡片坍缩成 "✈️ Trip booked ·
+    See progress →"，跳 /tasks?focus=<jobId>&view=live 看 Live 视图滚动
+  · NLU 硬化：`downgradeSpuriousRefine` 后处理防 extractor 误把全新 trip
+    请求打成 refine_existing；`fillCreateRoomPartySize` 扩展到 trip 场景
+    （和 ziwei Guo = 2 travelers 自动推断）；`isSynthesisTrigger` in-room
+    触发器 + 双层去重守护防重复造 proposal 把老票变成孤魂
+  · Collapsible Sidebar：260px ↔ 44px chevron 切换，localStorage 持久化，
+    折叠给 proposal card 多腾出 216px
+  · bug 收尾：book-trip 读 create-trip 返的 camelCase `jobId`；`/tasks`
+    URL 改成 `?focus=...` query；SELECT_PILL / LOCK_BTN 的 border
+    shorthand → longhand 修掉 React rerender warning；getLatestTripProposal
+    helper 让 active+accepted proposal 都正常返给客户端
 
 v0.2.31.0（2026-04-24）— Stage 2 Trip Room + DM + Sessions + DB-as-truth
   · Stage 1 · Solo Trip Packaging：首页 chat trip scenario，单人 hotel+flight+activity+
