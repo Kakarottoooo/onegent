@@ -35,6 +35,8 @@ import { bookRestaurantTool } from "./tools/book-restaurant.js";
 import { bookHotelTool } from "./tools/book-hotel.js";
 import { bookFlightTool } from "./tools/book-flight.js";
 import { bookActivityTool } from "./tools/book-activity.js";
+import { getJobStatusTool } from "./tools/get-job-status.js";
+import { getJobAuditTool } from "./tools/get-job-audit.js";
 
 const SERVER_NAME = "onegent";
 const SERVER_VERSION = "0.1.0";
@@ -44,7 +46,8 @@ const TOOLS: ToolDefinition[] = [
   bookHotelTool,
   bookFlightTool,
   bookActivityTool,
-  // get_job_status / get_job_audit — filled in by US-W4-005
+  getJobStatusTool,
+  getJobAuditTool,
 ];
 
 // Lazy client init: list_tools should work without an API key so Claude
