@@ -1,0 +1,4 @@
+# Shell scripts must keep LF line endings so they run correctly under Bash on Windows.
+# Without this rule, core.autocrlf=true (the repo default on Windows checkouts) rewrites
+# them to CRLF and bash interprets \r as part of each command, breaking the script.
+*.sh text eol=lf
