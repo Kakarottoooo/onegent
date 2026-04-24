@@ -220,6 +220,19 @@ export async function POST(req: NextRequest, { params }: Params) {
   await updateProposalStatus(proposal.id, "accepted");
   await updateDecisionRoomStatus(roomId, "executing");
 
+  // Kick off the autopilot. create-trip just builds the job rows (status
+  // "queued"); /start is what actually launches the Playwright steps.
+  // Fire-and-forget — if it fails, the tasks page exposes a Retry button.
+  // Matches TripPackageCard (Solo flow) which does the same.
+  try {
+    await fetch(`${origin}/api/booking-jobs/${bookingJobId}/start`, {
+      method: "POST",
+      headers: { Cookie: cookieHeader },
+    });
+  } catch (err) {
+    console.warn(`[rooms/${roomId}/book-trip] /start kickoff failed for job ${bookingJobId}`, err);
+  }
+
   return NextResponse.json({
     ok: true,
     booking_job_id: bookingJobId,
