@@ -157,9 +157,11 @@ export default function Home() {
     setActiveSessionId((prev) => (prev === s ? prev : s));
   }, [urlRoomId, urlSessionId]);
 
-  // When the user switches between rooms / sessions (or into one from a fresh
-  // `/`), wipe the in-memory chat column so the new thread replays from DB
-  // cleanly instead of bleeding the previous thread's bubbles.
+  // When the user actively SWITCHES between existing threads (sidebar click,
+  // back button, etc.) wipe the in-memory chat column so the new thread
+  // replays from DB cleanly. Do NOT clear when a brand-new session is
+  // created mid-turn (from "none" → "session:X") — the user just typed a
+  // message and got a reply; those must stay on screen.
   const lastContextRef = useRef<string>("");
   useEffect(() => {
     const ctx = activeRoomId
@@ -167,7 +169,12 @@ export default function Home() {
       : activeSessionId
         ? `session:${activeSessionId}`
         : "none";
-    if (lastContextRef.current && lastContextRef.current !== ctx) {
+    const prev = lastContextRef.current;
+    const isRealSwitch =
+      prev !== "" && // initial render, nothing to compare against
+      prev !== ctx &&
+      prev !== "none"; // "none → session:X" is session creation, not a switch
+    if (isRealSwitch) {
       chat.clearChat();
     }
     lastContextRef.current = ctx;
