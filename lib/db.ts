@@ -858,6 +858,7 @@ export interface ApiKeyRow {
   key_hash: string;
   key_prefix: string;
   organization_name: string;
+  user_id: string | null;
   is_active: boolean;
   rate_limit_per_day: number | null;
   allowed_job_types: string[] | null;
@@ -877,6 +878,7 @@ async function ensureApiKeysTable(): Promise<void> {
           key_hash             VARCHAR(64) NOT NULL UNIQUE,
           key_prefix           VARCHAR(16) NOT NULL,
           organization_name    TEXT NOT NULL,
+          user_id              TEXT,
           is_active            BOOLEAN NOT NULL DEFAULT TRUE,
           rate_limit_per_day   INTEGER,
           allowed_job_types    TEXT[],
@@ -885,8 +887,12 @@ async function ensureApiKeysTable(): Promise<void> {
           revoked_at           TIMESTAMPTZ
         )
       `;
+      // Forward-compat: add user_id to pre-existing tables created before
+      // self-serve dashboard. NULL = legacy B-end / org-minted key.
+      await sql`ALTER TABLE api_keys ADD COLUMN IF NOT EXISTS user_id TEXT`;
       await sql`CREATE INDEX IF NOT EXISTS api_keys_hash_active_idx ON api_keys (key_hash) WHERE is_active = TRUE`;
       await sql`CREATE INDEX IF NOT EXISTS api_keys_org_idx ON api_keys (organization_name)`;
+      await sql`CREATE INDEX IF NOT EXISTS api_keys_user_active_idx ON api_keys (user_id) WHERE user_id IS NOT NULL AND is_active = TRUE`;
     })().catch((err) => {
       apiKeysTableReady = null;
       throw err;
@@ -897,16 +903,23 @@ async function ensureApiKeysTable(): Promise<void> {
 
 /**
  * Generate a new API key. Returns plaintext ONCE — caller must ship it to the
- * B 端 customer and never log it again. We only persist sha256(plaintext).
+ * customer and never log it again. We only persist sha256(plaintext).
+ *
+ * Two modes:
+ *  - B 端 / CLI mint: pass organizationName, omit userId. Legacy admin path.
+ *  - Self-serve via /developers/keys: pass userId (Clerk) AND organizationName
+ *    (used as the user-provided key label, e.g. "Production", "Local dev").
  *
  * @param params.env - "live" | "test" (default "live"). Controls key prefix.
  * @param params.allowedJobTypes - null = all scenarios; otherwise restrict to listed scenarios.
+ * @param params.userId - Clerk user id for self-serve keys; null/undefined for org-minted.
  */
 export async function createApiKey(params: {
   organizationName: string;
   env?: "live" | "test";
   rateLimitPerDay?: number | null;
   allowedJobTypes?: string[] | null;
+  userId?: string | null;
 }): Promise<{ id: string; plaintextKey: string; row: ApiKeyRow }> {
   await ensureApiKeysTable();
   const env = params.env ?? "live";
@@ -917,10 +930,11 @@ export async function createApiKey(params: {
   const id = randomUUID();
   const allowedJobTypesArr = params.allowedJobTypes ?? null;
   const rateLimit = params.rateLimitPerDay ?? null;
+  const userId = params.userId ?? null;
 
   const result = await sql<ApiKeyRow>`
-    INSERT INTO api_keys (id, key_hash, key_prefix, organization_name, rate_limit_per_day, allowed_job_types)
-    VALUES (${id}, ${keyHash}, ${keyPrefix}, ${params.organizationName}, ${rateLimit}, ${allowedJobTypesArr as unknown as string})
+    INSERT INTO api_keys (id, key_hash, key_prefix, organization_name, user_id, rate_limit_per_day, allowed_job_types)
+    VALUES (${id}, ${keyHash}, ${keyPrefix}, ${params.organizationName}, ${userId}, ${rateLimit}, ${allowedJobTypesArr as unknown as string})
     RETURNING *
   `;
   return { id, plaintextKey, row: result.rows[0] };
@@ -933,6 +947,30 @@ export async function findApiKeyByHash(keyHash: string): Promise<ApiKeyRow | nul
     SELECT * FROM api_keys
     WHERE key_hash = ${keyHash} AND is_active = TRUE
     LIMIT 1
+  `;
+  return result.rows[0] ?? null;
+}
+
+/**
+ * List all keys (active + revoked) owned by a Clerk user. Used by the
+ * self-serve dashboard. Newest first. Caller is responsible for hiding
+ * key_hash from the response — only the prefix is safe to show in UI.
+ */
+export async function findApiKeysByUserId(userId: string): Promise<ApiKeyRow[]> {
+  await ensureApiKeysTable();
+  const result = await sql<ApiKeyRow>`
+    SELECT * FROM api_keys
+    WHERE user_id = ${userId}
+    ORDER BY created_at DESC
+  `;
+  return result.rows;
+}
+
+/** Look up a single key by id. Used by the dashboard's revoke endpoint to authorize. */
+export async function findApiKeyById(keyId: string): Promise<ApiKeyRow | null> {
+  await ensureApiKeysTable();
+  const result = await sql<ApiKeyRow>`
+    SELECT * FROM api_keys WHERE id = ${keyId} LIMIT 1
   `;
   return result.rows[0] ?? null;
 }
