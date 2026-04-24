@@ -27,6 +27,7 @@ import {
   insertChatSessionMessage,
   getChatSession,
   getDecisionRoomById,
+  listActiveProposals,
 } from "@/lib/db";
 import { triggerSynthesis } from "@/lib/agent/trip-synthesis";
 import type { ChatMessage } from "@/lib/llm-client";
@@ -144,16 +145,39 @@ export async function POST(req: NextRequest) {
     if (roomId && isSynthesisTrigger(message)) {
       const room = await getDecisionRoomById(roomId).catch(() => null);
       if (room && room.type === "trip") {
-        console.log(
-          `[chat/parse] synthesis trigger matched — overriding intent=create_room confirm_ready=true for room=${roomId}`,
+        // IMPORTANT: only override when NO proposal exists yet. If the room
+        // already has one (active or accepted), re-firing synthesize would
+        // create a duplicate proposal and orphan every vote that was cast
+        // against the first one — users see the approval count "reset" to 0
+        // and can never converge on the threshold.
+        //
+        // After the first proposal exists, the user's "给方案" / "plan"
+        // request means "show me what you already generated" — the card is
+        // already on screen, we just nudge them to look at it.
+        const proposals = await listActiveProposals(roomId).catch(() => []);
+        const hasLiveProposal = proposals.some(
+          (p) => p.status === "active" || p.status === "accepted",
         );
-        result.intent = "create_room";
-        result.scenario = "trip";
-        result.confirm_ready = true;
-        // Replace whatever Sonnet said so the user doesn't see a fabricated
-        // itinerary. The client will follow up with the real synthesis outcome
-        // ("方案已出" / "还在等 N 位成员" / "信息不足缺 X") in a second bubble.
-        result.assistant_reply = "好的，我去综合大家的偏好，出一套方案。";
+        if (hasLiveProposal) {
+          console.log(
+            `[chat/parse] synthesis trigger matched but room=${roomId} already has a proposal — refusing to duplicate`,
+          );
+          result.assistant_reply =
+            "方案已经出好了，在下方卡片里选择你的偏好就行。如果想重新生成一套，说「重新生成」。";
+          // Deliberately leave intent/confirm_ready alone — we DON'T want
+          // the client to trigger synthesize again.
+        } else {
+          console.log(
+            `[chat/parse] synthesis trigger matched — overriding intent=create_room confirm_ready=true for room=${roomId}`,
+          );
+          result.intent = "create_room";
+          result.scenario = "trip";
+          result.confirm_ready = true;
+          // Replace whatever Sonnet said so the user doesn't see a fabricated
+          // itinerary. The client will follow up with the real synthesis outcome
+          // ("方案已出" / "还在等 N 位成员" / "信息不足缺 X") in a second bubble.
+          result.assistant_reply = "好的，我去综合大家的偏好，出一套方案。";
+        }
       }
     }
 
