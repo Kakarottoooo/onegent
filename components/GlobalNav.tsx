@@ -490,6 +490,18 @@ export default function GlobalNav({ active }: Props) {
                         <span>Billing</span>
                         <span style={{ fontSize: 11, color: "rgba(244,231,200,0.42)" }}>↗</span>
                       </button>
+
+                      <button
+                        type="button"
+                        onClick={() => {
+                          router.push("/developers");
+                          closeAccountMenus();
+                        }}
+                        style={accountItemStyle}
+                      >
+                        <span>For developers</span>
+                        <span style={{ fontSize: 11, color: "rgba(201,168,76,0.7)" }}>↗</span>
+                      </button>
                     </div>
 
                     <div style={{ padding: "8px 0", borderTop: "0.5px solid rgba(255,255,255,0.06)" }}>
