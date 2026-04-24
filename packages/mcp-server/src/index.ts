@@ -61,8 +61,22 @@ function getClient(): OnegentClient {
 
 async function main(): Promise<void> {
   const server = new Server(
-    { name: SERVER_NAME, version: SERVER_VERSION },
-    { capabilities: { tools: {} } },
+    {
+      name: SERVER_NAME,
+      version: SERVER_VERSION,
+      title: "Travel Booking Agent",
+    },
+    {
+      capabilities: { tools: {} },
+      instructions:
+        "Onegent — AI books your trip end-to-end. Use book_restaurant, book_hotel, " +
+        "book_flight, or book_activity to start a booking; each returns a jobId. " +
+        "Then call get_job_status every 15-60 seconds until the status is terminal " +
+        "(done, error, paused_payment, captcha, needs_login). If a booking errors, " +
+        "call get_job_audit for diagnostic context. The agent always stops before " +
+        "submitting credit card CVV — when status='paused_payment' the user must " +
+        "confirm the charge in Onegent's app before the booking finalizes.",
+    },
   );
 
   server.setRequestHandler(ListToolsRequestSchema, async () => ({
