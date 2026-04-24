@@ -10,7 +10,7 @@
  *   "plan" — hands off to the existing homepage search pipeline
  */
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import type { ConversationalNLUResult } from "@/lib/agent/nlu-v2";
 import type { TripIntentState } from "@/lib/agent/trip-intent-state";
 
@@ -141,11 +141,57 @@ const SCENARIO_EMOJI: Record<string, string> = {
 export default function ConfirmCard(props: ConfirmCardProps) {
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Stage 2 contact check — for kind="room", we resolve member_names against
+  // the user's contacts so they can see BEFORE committing which names will
+  // actually receive the invite DM and which ones won't (typo, not a contact).
+  const [unresolvedNames, setUnresolvedNames] = useState<string[] | null>(null);
 
   const summary = props.nlu.assistant_reply ?? "Ready to proceed.";
   const scenario = props.nlu.scenario ?? "";
   const memberNames = props.nlu.member_names;
   const rows = summarizeConstraints(props.nlu.collected_constraints);
+
+  useEffect(() => {
+    if (props.kind !== "room" || memberNames.length === 0) {
+      setUnresolvedNames(null);
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch("/api/contacts");
+        if (!res.ok) return;
+        const data = (await res.json()) as {
+          contacts: Array<{
+            contact_user_id: string;
+            nickname: string | null;
+            display_name: string | null;
+            profile_code: string;
+          }>;
+        };
+        const norm = (s: string | null | undefined) => (s ?? "").trim().toLowerCase();
+        const unresolved: string[] = [];
+        for (const name of memberNames) {
+          const target = norm(name);
+          if (!target) continue;
+          const hit = (data.contacts ?? []).find(
+            (c) =>
+              norm(c.nickname) === target ||
+              norm(c.display_name) === target ||
+              norm(c.profile_code) === target ||
+              norm(c.profile_code).replace(/^@/, "") === target.replace(/^@/, ""),
+          );
+          if (!hit) unresolved.push(name);
+        }
+        if (!cancelled) setUnresolvedNames(unresolved);
+      } catch {
+        if (!cancelled) setUnresolvedNames(null);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [props.kind, memberNames]);
 
   async function handleConfirm() {
     if (submitting) return;
@@ -211,6 +257,30 @@ export default function ConfirmCard(props: ConfirmCardProps) {
           {memberNames.length > 0
             ? `创建后你将获得邀请链接，可分享给 ${memberNames.slice(0, 3).join("、")}${memberNames.length > 3 ? " 等人" : ""}。`
             : "创建后你将获得邀请链接，可分享给其他决策成员。"}
+        </div>
+      ) : null}
+
+      {/* Stage 2 warning: any member_names NOT in the user's contacts won't
+          get the auto DM — surface it BEFORE commit so the user can back out
+          and add them as contacts first. */}
+      {props.kind === "room" && unresolvedNames && unresolvedNames.length > 0 ? (
+        <div
+          style={{
+            fontSize: 12,
+            fontFamily: "var(--font-dm-sans)",
+            padding: "8px 10px",
+            borderRadius: 8,
+            border: "1px solid rgba(232,90,79,0.4)",
+            background: "rgba(232,90,79,0.08)",
+            color: "#e85a4f",
+            lineHeight: 1.5,
+          }}
+        >
+          ⚠️ {unresolvedNames.join("、")} 还不在你的联系人里 — 他们不会自动收到邀请 DM。先去{" "}
+          <a href="/contacts" style={{ textDecoration: "underline", color: "inherit" }}>
+            Contacts
+          </a>{" "}
+          加上这些人再回来，或者先建 room 后手动分享邀请链接。
         </div>
       ) : null}
 

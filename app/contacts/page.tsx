@@ -13,6 +13,7 @@ import {
   PAGE,
 } from "@/app/_ui/tokens";
 import GlobalNav from "@/components/GlobalNav";
+import ContactDmPane from "@/components/ContactDmPane";
 
 interface MyProfile {
   user_id: string;
@@ -64,6 +65,9 @@ export default function ContactsPage() {
   const { isSignedIn } = useAuth();
   const [myProfile, setMyProfile] = useState<MyProfile | null>(null);
   const [contacts, setContacts] = useState<Contact[] | null>(null);
+  // Telegram-style split: selecting a contact opens their DM thread in the
+  // right pane. Click "Chat" on any contact to set this.
+  const [selectedPeerId, setSelectedPeerId] = useState<string | null>(null);
   const [codeCopied, setCodeCopied] = useState(false);
 
   // Add-by-code flow
@@ -329,7 +333,18 @@ export default function ContactsPage() {
   return (
     <div className={PAGE}>
       <GlobalNav active="contacts" />
-      <div className="max-w-md md:max-w-2xl lg:max-w-3xl mx-auto px-5 md:px-6 py-8">
+      <div
+        className="flex flex-col md:flex-row gap-4 px-4 md:px-6 py-6"
+        style={{ height: "calc(100vh - 80px)" }}
+      >
+        {/* LEFT: master contact list + management tools */}
+        <aside
+          className="flex-shrink-0 overflow-y-auto"
+          style={{
+            width: "100%",
+            maxWidth: 420,
+          }}
+        >
         <Link
           href="/rooms"
           className="text-xs text-[var(--text-muted)] hover:text-[var(--text-primary)] mb-4 inline-block"
@@ -759,12 +774,17 @@ export default function ContactsPage() {
                       </button>
                     ) : (
                       <div className="flex gap-2 text-xs items-center">
-                        <Link
-                          href={`/contacts/${encodeURIComponent(c.contact_user_id)}`}
-                          className="px-2 py-1 rounded-md border border-[var(--gold)] text-[var(--gold)] hover:bg-[var(--gold)]/10 font-medium"
+                        <button
+                          type="button"
+                          onClick={() => setSelectedPeerId(c.contact_user_id)}
+                          className={`px-2 py-1 rounded-md border font-medium ${
+                            selectedPeerId === c.contact_user_id
+                              ? "border-[var(--gold)] bg-[var(--gold)] text-white"
+                              : "border-[var(--gold)] text-[var(--gold)] hover:bg-[var(--gold)]/10"
+                          }`}
                         >
                           Chat
-                        </Link>
+                        </button>
                         <button
                           onClick={() => {
                             setEditingId(c.contact_user_id);
@@ -835,6 +855,26 @@ export default function ContactsPage() {
             )}
           </div>
         )}
+        </aside>
+
+        {/* RIGHT: DM thread of selected contact (Telegram-style split view) */}
+        <section
+          className="flex-1 min-w-0 hidden md:flex flex-col"
+          style={{ height: "100%" }}
+        >
+          {selectedPeerId ? (
+            <ContactDmPane peerId={selectedPeerId} />
+          ) : (
+            <div
+              className={`${CARD} flex-1 flex items-center justify-center`}
+              style={{ minHeight: 320 }}
+            >
+              <p className="text-sm text-[var(--text-muted)] text-center px-6">
+                Pick a contact on the left to start chatting.
+              </p>
+            </div>
+          )}
+        </section>
       </div>
     </div>
   );
