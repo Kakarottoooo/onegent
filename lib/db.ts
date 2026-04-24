@@ -1,4 +1,5 @@
 import { sql, db } from "@vercel/postgres";
+import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { encrypt, decrypt } from "./encryption";
 
 export { sql };
@@ -845,6 +846,111 @@ export async function deleteBookingJob(id: string): Promise<void> {
 export async function deleteAllBookingJobsBySession(sessionId: string): Promise<void> {
   await ensureBookingJobsTable();
   await sql`DELETE FROM booking_jobs WHERE session_id = ${sessionId}`;
+}
+
+// ─── API Keys (B 端公开 REST API 认证) ────────────────────────────────────────
+// sha256(plaintext) 存 key_hash。Plaintext 格式 ogk_live_<32 char base64url>
+// 或 ogk_test_<32 char base64url> — 发给 B 端 caller 时只展示一次,本地只存 hash。
+// 用于 /api/v1/* 端点认证,C 端 /api/chat / /api/booking-jobs 不走这层。
+
+export interface ApiKeyRow {
+  id: string;
+  key_hash: string;
+  key_prefix: string;
+  organization_name: string;
+  is_active: boolean;
+  rate_limit_per_day: number | null;
+  allowed_job_types: string[] | null;
+  created_at: string;
+  last_used_at: string | null;
+  revoked_at: string | null;
+}
+
+let apiKeysTableReady: Promise<void> | null = null;
+
+async function ensureApiKeysTable(): Promise<void> {
+  if (!apiKeysTableReady) {
+    apiKeysTableReady = (async () => {
+      await sql`
+        CREATE TABLE IF NOT EXISTS api_keys (
+          id                   TEXT PRIMARY KEY,
+          key_hash             VARCHAR(64) NOT NULL UNIQUE,
+          key_prefix           VARCHAR(16) NOT NULL,
+          organization_name    TEXT NOT NULL,
+          is_active            BOOLEAN NOT NULL DEFAULT TRUE,
+          rate_limit_per_day   INTEGER,
+          allowed_job_types    TEXT[],
+          created_at           TIMESTAMPTZ DEFAULT NOW(),
+          last_used_at         TIMESTAMPTZ,
+          revoked_at           TIMESTAMPTZ
+        )
+      `;
+      await sql`CREATE INDEX IF NOT EXISTS api_keys_hash_active_idx ON api_keys (key_hash) WHERE is_active = TRUE`;
+      await sql`CREATE INDEX IF NOT EXISTS api_keys_org_idx ON api_keys (organization_name)`;
+    })().catch((err) => {
+      apiKeysTableReady = null;
+      throw err;
+    });
+  }
+  await apiKeysTableReady;
+}
+
+/**
+ * Generate a new API key. Returns plaintext ONCE — caller must ship it to the
+ * B 端 customer and never log it again. We only persist sha256(plaintext).
+ *
+ * @param params.env - "live" | "test" (default "live"). Controls key prefix.
+ * @param params.allowedJobTypes - null = all scenarios; otherwise restrict to listed scenarios.
+ */
+export async function createApiKey(params: {
+  organizationName: string;
+  env?: "live" | "test";
+  rateLimitPerDay?: number | null;
+  allowedJobTypes?: string[] | null;
+}): Promise<{ id: string; plaintextKey: string; row: ApiKeyRow }> {
+  await ensureApiKeysTable();
+  const env = params.env ?? "live";
+  const rand = randomBytes(24).toString("base64url"); // 32 base64url chars
+  const plaintextKey = `ogk_${env}_${rand}`;
+  const keyHash = createHash("sha256").update(plaintextKey).digest("hex");
+  const keyPrefix = `ogk_${env}`;
+  const id = randomUUID();
+  const allowedJobTypesArr = params.allowedJobTypes ?? null;
+  const rateLimit = params.rateLimitPerDay ?? null;
+
+  const result = await sql<ApiKeyRow>`
+    INSERT INTO api_keys (id, key_hash, key_prefix, organization_name, rate_limit_per_day, allowed_job_types)
+    VALUES (${id}, ${keyHash}, ${keyPrefix}, ${params.organizationName}, ${rateLimit}, ${allowedJobTypesArr as unknown as string})
+    RETURNING *
+  `;
+  return { id, plaintextKey, row: result.rows[0] };
+}
+
+/** Look up an active api_key by sha256(plaintext). Used by /api/v1 middleware. */
+export async function findApiKeyByHash(keyHash: string): Promise<ApiKeyRow | null> {
+  await ensureApiKeysTable();
+  const result = await sql<ApiKeyRow>`
+    SELECT * FROM api_keys
+    WHERE key_hash = ${keyHash} AND is_active = TRUE
+    LIMIT 1
+  `;
+  return result.rows[0] ?? null;
+}
+
+/** Bump last_used_at. Middleware calls this fire-and-forget. */
+export async function updateApiKeyLastUsed(keyId: string): Promise<void> {
+  await ensureApiKeysTable();
+  await sql`UPDATE api_keys SET last_used_at = NOW() WHERE id = ${keyId}`;
+}
+
+/** Soft-revoke: is_active = FALSE + revoked_at. The row stays for audit. */
+export async function deactivateApiKey(keyId: string): Promise<void> {
+  await ensureApiKeysTable();
+  await sql`
+    UPDATE api_keys
+    SET is_active = FALSE, revoked_at = NOW()
+    WHERE id = ${keyId}
+  `;
 }
 
 // ─── Agent Logs ───────────────────────────────────────────────────────────────
