@@ -33,6 +33,7 @@ import { DEFAULT_CONSENT_POLICY } from "@/lib/core/consent/default-policy";
 import { validateConsent } from "@/lib/core/consent/validator";
 import type { ConsentPolicy } from "@/lib/core/consent/types";
 import { runExecutionJob, type ExecutionContext } from "./executor";
+import { tryProviderFallbackChain } from "./recovery-providers";
 import type {
   ExecutionJobRequest,
   ExecutionJobResult,
@@ -66,25 +67,58 @@ export async function runExecutionJobWithRecovery(
     };
   }
 
-  // ── Phase 2: time fallback (restaurant + no_availability) ──
+  // ── Phase 2 vs Phase 3 branching (restaurant + no_availability only) ──
+  //
+  // Two distinct failure shapes need different fallback strategies:
+  //
+  //   A. "no_availability" due to NO AVAILABLE TIME SLOTS (venue exists, all
+  //      slots are booked near the requested time)
+  //      → Phase 2 time fallback (try ±30/60/90 min on SAME provider)
+  //      → if time fallbacks also fail, FALL THROUGH to Phase 3 provider chain
+  //
+  //   B. "no_availability" due to VENUE NOT ON THIS PLATFORM ("not found on
+  //      OpenTable" — venue doesn't list there at all)
+  //      → skip time fallback (time doesn't help when venue isn't indexed)
+  //      → jump directly to Phase 3 provider chain (try Resy / website)
+  //
+  // Detection mirrors route.ts:740-742's isNotFoundError regex.
   if (
     phase1.result.status === "no_availability" &&
     request.request.scenario === "restaurant"
   ) {
-    const phase2 = await tryTimeFallbacks(
+    const isNotFound = /not found on (opentable|resy)/i.test(phase1.result.summary);
+    let attemptsAfter = phase1.attemptCount;
+
+    if (!isNotFound) {
+      const phase2 = await tryTimeFallbacks(
+        request,
+        ctx,
+        policy,
+        phase1.attemptCount,
+      );
+      if (phase2) return phase2;
+      // Note: tryTimeFallbacks returns null on exhaustion. We don't have its
+      // exact attempt count from the outside, so approximate: add the number
+      // of candidate times attempted. For Phase 3 counting we use a simple
+      // lower bound — Phase 3 increments from here.
+      attemptsAfter = phase1.attemptCount + 1;
+    }
+
+    // ── Phase 3: provider fallback chain (Resy → Google Places website) ──
+    const phase3 = await tryProviderFallbackChain(
       request,
       ctx,
       policy,
-      phase1.attemptCount,
+      attemptsAfter,
     );
-    if (phase2) return phase2;
+    if (phase3) return phase3;
   }
 
-  // ── Phase 3 / 4 / provider chain (US-007b · US-007c) ──
-  // Not yet implemented — fall through to the Phase 1 terminal result.
-  // Once US-007b lands, venue switch runs here; once US-007c lands,
-  // restaurant-scenario provider fallback (OpenTable → Resy → Yelp → website)
-  // runs before this bail-out.
+  // ── Phase 4 (all failed) ──
+  // Venue switch + action-item are intentionally NOT implemented here —
+  // they're C 端 UI concerns (BookingJobStep.fallbackCandidates + actionItem
+  // field). The legacy route.ts#runStepWithRecovery retains them. New-path
+  // callers that need those should pass USE_CORE_EXECUTOR=false in US-009.
 
   return {
     ...phase1.result,

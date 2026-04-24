@@ -1,0 +1,327 @@
+/**
+ * lib/core/execution/recovery-providers · provider fallback chain
+ *
+ * When the primary provider doesn't have the venue, try alternate providers
+ * of the same intent. Restaurant-only at this layer — hotel flows through
+ * Booking.com (with Hotels.com as a built-in provider alias handled inside
+ * lib/booking-autopilot/providers/), and flight uses Expedia alone.
+ *
+ * Restaurant chain:
+ *   OpenTable (primary, already tried by recovery.Phase 1)
+ *     → Resy
+ *     → Google Places lookup → navigate official website for reservation link
+ *     → return no_availability with manual-handoff URL
+ *
+ * Each step:
+ *   - Gated by validateConsent({ type: "use_provider", providerId })
+ *   - Writes writeAudit({ type: "provider_fallback" }) on transition
+ *   - Uses runBrowserTask directly (not runExecutionJob) because the
+ *     provider here is NOT the primary for this scenario — we have to
+ *     construct the URL / task ourselves; runExecutionJob would route
+ *     right back to OpenTable.
+ *
+ * Called by recovery.ts Phase 3 after Phase 1 or Phase 2 fails.
+ */
+
+import { runBrowserTask } from "@/lib/booking-autopilot/stagehand-executor";
+import { buildRestaurantTask } from "@/lib/booking-autopilot/core/task-builders";
+import type {
+  BrowserTaskInput,
+  BrowserTaskResult,
+  BookingProfile,
+} from "@/lib/booking-autopilot/types";
+
+import { writeAudit } from "@/lib/core/audit/audit-log";
+import { validateConsent } from "@/lib/core/consent/validator";
+import type { ConsentPolicy } from "@/lib/core/consent/types";
+
+import { resolveProfile, type ExecutionContext } from "./executor";
+import type {
+  ExecutionJobRequest,
+  ExecutionJobResult,
+} from "./types";
+
+// ─── Public API ──────────────────────────────────────────────────────────────
+
+/**
+ * Try alternate providers after the primary (OpenTable for restaurant) fails.
+ * Returns a successful ExecutionJobResult when any provider books, or a
+ * handoff-style "no_availability" result pointing at the venue's own
+ * reservation page (website fallback). Returns null only when no
+ * alternate provider is allowed or reachable at all.
+ *
+ * Non-restaurant scenarios return null immediately (no multi-provider
+ * chain defined for hotel/flight/activity at this layer).
+ */
+export async function tryProviderFallbackChain(
+  request: ExecutionJobRequest,
+  ctx: ExecutionContext,
+  policy: ConsentPolicy,
+  attemptsBefore: number,
+): Promise<ExecutionJobResult | null> {
+  if (request.request.scenario !== "restaurant") return null;
+
+  const profile = await resolveProfile(request, ctx.userId ?? null);
+  let attempts = attemptsBefore;
+
+  // ── Step 1: Resy ──
+  const resyCheck = validateConsent(policy, {
+    type: "use_provider",
+    providerId: "resy-com",
+  });
+  if (resyCheck.allowed) {
+    await writeAudit({
+      jobId: ctx.jobId,
+      type: "provider_fallback",
+      stepIndex: ctx.stepIndex,
+      message: "Trying Resy after OpenTable miss",
+      details: { fromProvider: "opentable-com", toProvider: "resy-com" },
+    });
+
+    attempts++;
+    const resyResult = await tryResy(request, ctx, profile);
+    if (resyResult) {
+      return bookedResult(resyResult, ctx.jobId, attempts);
+    }
+  } else {
+    await writeAudit({
+      jobId: ctx.jobId,
+      type: "action_denied",
+      stepIndex: ctx.stepIndex,
+      message: `Resy blocked by consent policy: ${resyCheck.reason}`,
+    });
+  }
+
+  // ── Step 2: Google Places → official website ──
+  const websiteCheck = validateConsent(policy, {
+    type: "use_provider",
+    providerId: "website-generic",
+  });
+  if (websiteCheck.allowed) {
+    await writeAudit({
+      jobId: ctx.jobId,
+      type: "provider_fallback",
+      stepIndex: ctx.stepIndex,
+      message: "Looking up official website via Google Places",
+      details: { fromProvider: "resy-com", toProvider: "website-generic" },
+    });
+
+    attempts++;
+    const websiteResult = await tryWebsiteHandoff(request, ctx, profile);
+    if (websiteResult) {
+      return {
+        ...websiteResult,
+        attemptCount: attempts,
+        usedFallback: true,
+      };
+    }
+  } else {
+    await writeAudit({
+      jobId: ctx.jobId,
+      type: "action_denied",
+      stepIndex: ctx.stepIndex,
+      message: `Website fallback blocked by consent policy: ${websiteCheck.reason}`,
+    });
+  }
+
+  return null;
+}
+
+// ─── Provider attempts ───────────────────────────────────────────────────────
+
+/**
+ * Build a Resy search URL and run a browser task against it. Returns the
+ * raw BrowserTaskResult only if isGenuineBooking() is satisfied — we
+ * don't want Resy's "restaurant not found" page to be mistaken for
+ * success. Returns null on any failure / not-genuine-booking.
+ *
+ * Mirrors route.ts:772-796 exactly, including the cityToResySlug
+ * fallback to "nashville" for unknown cities.
+ */
+async function tryResy(
+  request: ExecutionJobRequest,
+  ctx: ExecutionContext,
+  profile: BookingProfile,
+): Promise<BrowserTaskResult | null> {
+  if (request.request.scenario !== "restaurant") return null;
+  const p = request.request.params;
+
+  const { cityToResySlug } = await import(
+    "@/lib/booking-autopilot/providers/resy-com"
+  );
+  const resySlug = cityToResySlug(p.city || "nashville");
+  const resyUrl = `https://resy.com/cities/${resySlug}?date=${p.date}&seats=${p.covers}&query=${encodeURIComponent(p.restaurant_name)}`;
+
+  const { task } = buildRestaurantTask({
+    restaurantName: p.restaurant_name,
+    city: p.city,
+    date: p.date,
+    time: p.time,
+    covers: p.covers,
+    profile,
+  });
+
+  const input: BrowserTaskInput = {
+    startUrl: resyUrl,
+    task,
+    profile,
+    jobId: ctx.jobId,
+    stepIndex: ctx.stepIndex ?? 0,
+    profileId: request.profileId,
+  };
+
+  try {
+    const result = await runBrowserTask(input);
+    return isGenuineBooking(result, resyUrl) ? result : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Google Places → find the venue's official website → navigate to it →
+ * try to locate a reservations link. Returns a synthetic ExecutionJobResult
+ * with status="no_availability" (since this is a hand-off, not a true
+ * Onegent-completed booking), handoffUrl set to either the reservation
+ * page or the homepage.
+ *
+ * Returns null if Google Places can't find the venue at all.
+ *
+ * Mirrors route.ts:798-872.
+ */
+async function tryWebsiteHandoff(
+  request: ExecutionJobRequest,
+  ctx: ExecutionContext,
+  profile: BookingProfile,
+): Promise<ExecutionJobResult | null> {
+  if (request.request.scenario !== "restaurant") return null;
+  const p = request.request.params;
+
+  // Step A: Google Places lookup to find the official website URL.
+  let officialWebsite: string | undefined;
+  try {
+    const { googlePlacesSearch } = await import("@/lib/tools");
+    const results = await googlePlacesSearch({
+      query: p.restaurant_name,
+      location: p.city || "Nashville, TN",
+      maxResults: 3,
+    });
+    // Prefer a name-similar result; fall back to first hit. Mirrors
+    // route.ts:808-814's fuzzy-match approach (8-char prefix substring).
+    const normalize = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, "");
+    const targetNorm = normalize(p.restaurant_name);
+    const match =
+      results.find((r) => {
+        const nameNorm = normalize(r.name);
+        return (
+          nameNorm.includes(targetNorm.slice(0, 8)) ||
+          targetNorm.includes(nameNorm.slice(0, 8))
+        );
+      }) ?? results[0];
+    officialWebsite = match?.url;
+  } catch {
+    // Swallowed: fall through to "no website found".
+  }
+
+  if (!officialWebsite) return null;
+
+  // Step B: Navigate the website looking for a reservations link.
+  const browseInput: BrowserTaskInput = {
+    startUrl: officialWebsite,
+    task: `On the restaurant website for "${p.restaurant_name}", find and click a "Reservations", "Book a Table", "Book Now", or "Reserve" link or button. Navigate to the reservation page. Do not fill any forms — just navigate to where reservations can be made.`,
+    profile,
+    jobId: ctx.jobId,
+    stepIndex: ctx.stepIndex ?? 0,
+    profileId: request.profileId,
+  };
+
+  let reservationUrl = officialWebsite;
+  try {
+    const websiteData = await runBrowserTask(browseInput);
+    if (
+      websiteData.handoffUrl &&
+      websiteData.handoffUrl !== officialWebsite &&
+      websiteData.handoffUrl.startsWith("http")
+    ) {
+      reservationUrl = websiteData.handoffUrl;
+    }
+  } catch {
+    // Swallowed: reservationUrl stays at officialWebsite.
+  }
+
+  const foundReservationPage = reservationUrl !== officialWebsite;
+  const summary = foundReservationPage
+    ? `"${p.restaurant_name}" books through their own system (not OpenTable or Resy). We found their reservation page — tap below to finish booking there.`
+    : `"${p.restaurant_name}" is not on OpenTable or Resy, and we couldn't locate a reservation widget on their website. Tap below to try booking on their homepage.`;
+
+  const now = new Date().toISOString();
+  return {
+    jobId: ctx.jobId,
+    status: "no_availability",
+    handoffUrl: reservationUrl,
+    summary,
+    decisionLog: [],
+    createdAt: now,
+    updatedAt: now,
+    completedAt: now,
+    attemptCount: 1, // overwritten by caller
+    usedFallback: true,
+  };
+}
+
+// ─── Helpers ─────────────────────────────────────────────────────────────────
+
+/**
+ * Guard against false positives: Stagehand's final-outcome.ts sometimes
+ * returns status="paused_payment" for runs that never left the search
+ * page. isGenuineBooking ensures we only treat a Resy result as "booked"
+ * when the agent actually advanced past the search URL and the summary
+ * doesn't contain a known failure phrase.
+ *
+ * Mirrors route.ts:763-770 verbatim.
+ */
+function isGenuineBooking(d: BrowserTaskResult, searchUrl: string): boolean {
+  if (
+    d.status === "no_availability" ||
+    d.status === "error" ||
+    d.status === "captcha" ||
+    d.status === "needs_login"
+  ) {
+    return false;
+  }
+  const s = d.summary.toLowerCase();
+  if (s.includes("skipped initial agent run")) return false;
+  if (s.includes("not found") || s.includes("no availability") || s.includes("didn't find")) {
+    return false;
+  }
+  if (d.handoffUrl === searchUrl) return false; // never left search page
+  return true;
+}
+
+/**
+ * Map a successful BrowserTaskResult → ExecutionJobResult, with attemptCount
+ * and usedFallback=true.
+ */
+function bookedResult(
+  task: BrowserTaskResult,
+  jobId: string,
+  attempts: number,
+): ExecutionJobResult {
+  const now = new Date().toISOString();
+  return {
+    jobId,
+    status: task.status === "paused_payment" ? "paused_payment" : "completed",
+    handoffUrl: task.handoffUrl,
+    sessionUrl: task.sessionUrl,
+    summary: task.summary,
+    screenshotBase64: task.screenshotBase64,
+    decisionLog: [],
+    error: task.error,
+    availableSlots: task.availableSlots,
+    createdAt: now,
+    updatedAt: now,
+    completedAt: now,
+    attemptCount: attempts,
+    usedFallback: true,
+  };
+}
