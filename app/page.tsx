@@ -137,6 +137,10 @@ export default function Home() {
   // <TripProposalChatCard> inline in the chat stream. The id comes from the
   // most recent private_message with meta_json.kind='trip_proposal_card'.
   const [activeProposalId, setActiveProposalId] = useState<string | null>(null);
+  // True while /api/rooms/[id]/synthesize is in-flight. Drives an inline
+  // progress card below the chat so members see the 5-15s pipeline wait
+  // as work-in-progress, not a stalled bot.
+  const [synthesizing, setSynthesizing] = useState(false);
   // Titles for the context ribbon so the user can tell "which room" / "which
   // chat" they're in without looking at the sidebar.
   const [activeRoomTitle, setActiveRoomTitle] = useState<string | null>(null);
@@ -830,6 +834,7 @@ export default function Home() {
         // duplicate. Interpret the user's intent as "synthesize the plan for
         // THIS room now" and kick off the trip-synthesis pipeline. Chat bubble
         // below echoes the status so the user knows what's happening.
+        setSynthesizing(true);
         void (async () => {
           try {
             const res = await fetch(`/api/rooms/${activeRoomId}/synthesize`, {
@@ -899,6 +904,8 @@ export default function Home() {
             }
           } catch {
             chat.injectAssistantMessage("方案生成出错了，稍后再试。");
+          } finally {
+            setSynthesizing(false);
           }
         })();
         return;
@@ -2647,6 +2654,94 @@ export default function Home() {
                     proposalId={activeProposalId}
                     userId={userId ?? null}
                   />
+                )}
+
+                {/* Stage 2 synthesize progress: 4 parallel pipelines kicking off
+                    in the background can take 5-15s; without this indicator the
+                    chat looks frozen between "好的，我去综合方案" and the
+                    proposal card landing. Each chip pulses gold via a shared
+                    keyframe so users see forward motion. */}
+                {synthesizing && (
+                  <div
+                    style={{
+                      border: "1px solid rgba(201,168,76,0.35)",
+                      borderRadius: 14,
+                      padding: 14,
+                      backgroundColor: "var(--card-2, #f7f7f7)",
+                      marginTop: 8,
+                      fontFamily: "var(--font-dm-sans)",
+                    }}
+                  >
+                    <style>{`
+                      @keyframes synthPulse {
+                        0%, 100% { opacity: 0.55; }
+                        50%      { opacity: 1;    }
+                      }
+                      .synth-chip {
+                        animation: synthPulse 1.4s ease-in-out infinite;
+                      }
+                      .synth-chip-1 { animation-delay: 0s; }
+                      .synth-chip-2 { animation-delay: 0.15s; }
+                      .synth-chip-3 { animation-delay: 0.3s; }
+                      .synth-chip-4 { animation-delay: 0.45s; }
+                      @keyframes synthBar {
+                        0%   { transform: translateX(-100%); }
+                        100% { transform: translateX(400%);  }
+                      }
+                    `}</style>
+                    <div style={{ fontSize: 13, fontWeight: 600, color: "var(--text-primary, #111)", marginBottom: 10 }}>
+                      🤖 正在为你们综合方案…
+                    </div>
+                    <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 10 }}>
+                      {[
+                        { emoji: "🏨", label: "Hotel", cls: "synth-chip-1" },
+                        { emoji: "✈", label: "Flight", cls: "synth-chip-2" },
+                        { emoji: "🎟", label: "Shows", cls: "synth-chip-3" },
+                        { emoji: "🍽", label: "Food", cls: "synth-chip-4" },
+                      ].map((c) => (
+                        <span
+                          key={c.label}
+                          className={`synth-chip ${c.cls}`}
+                          style={{
+                            padding: "4px 10px",
+                            borderRadius: 999,
+                            fontSize: 11,
+                            color: "var(--text-secondary, #555)",
+                            borderWidth: 1,
+                            borderStyle: "solid",
+                            borderColor: "rgba(201,168,76,0.35)",
+                            backgroundColor: "var(--card, #fff)",
+                          }}
+                        >
+                          {c.emoji} {c.label}
+                        </span>
+                      ))}
+                    </div>
+                    <div
+                      style={{
+                        position: "relative",
+                        height: 4,
+                        borderRadius: 2,
+                        background: "rgba(201,168,76,0.12)",
+                        overflow: "hidden",
+                      }}
+                    >
+                      <div
+                        style={{
+                          position: "absolute",
+                          left: 0,
+                          top: 0,
+                          height: "100%",
+                          width: "25%",
+                          background: "var(--gold, #c9a648)",
+                          animation: "synthBar 1.8s ease-in-out infinite",
+                        }}
+                      />
+                    </div>
+                    <div style={{ fontSize: 11, color: "var(--text-muted, #888)", marginTop: 8 }}>
+                      并行跑 4 条品类 pipeline，通常 5-15 秒。
+                    </div>
+                  </div>
                 )}
 
                 {/* Stage 1 trip flow: planning spinner + TripPackageCard */}
