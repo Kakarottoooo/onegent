@@ -95,7 +95,13 @@ export async function extractState(input: ExtractStateInput): Promise<IntentStat
   // party_type=multi, but failed to upgrade intent from create_plan → create_room
   // (observed on ambiguous English usernames), force the upgrade here. Mirror of
   // prompt rule #6 — named co-deciders always implies create_room.
-  return upgradeMultiPartyToRoom(partyFilled);
+  const upgraded = upgradeMultiPartyToRoom(partyFilled);
+  // Second safety net: downgrade a spurious `refine_existing` on fresh turns.
+  // Observed on trip requests with concrete preferences ("想看百老汇狮子王,
+  // 自由女神像, 想住希尔顿") — the model reads the comma list as "adjustments"
+  // and labels it refine_existing, but there's nothing to refine. Router then
+  // short-circuits to continue_chat and no ConfirmCard appears.
+  return downgradeSpuriousRefine(upgraded, input.history ?? []);
 }
 
 // ─── Prompt construction ─────────────────────────────────────────────────
@@ -831,6 +837,39 @@ function upgradeMultiPartyToRoom(state: IntentState): IntentState {
     planning_assumptions: [
       ...state.planning_assumptions,
       `Upgraded intent → create_room because ${state.member_names.length} named co-decider(s) present`,
+    ],
+  };
+}
+
+/**
+ * Safety-net downgrade: `refine_existing` should only fire when the user is
+ * adjusting a PREVIOUSLY returned plan. If this is the first turn of a fresh
+ * session (or no refined_target_id is set AND no meaningful prior history
+ * exists), the model misread the request — downgrade back to create_plan /
+ * create_room so the router can advance to a ConfirmCard.
+ *
+ * Seen on trip requests with comma-separated preference lists ("想看百老汇,
+ * 自由女神, 住希尔顿") — model interpreted the list as refinements and
+ * tagged refine_existing even though nothing is there to refine.
+ *
+ * Downgrade target chosen by member_names: named co-deciders → create_room,
+ * otherwise create_plan. Same rule upgradeMultiPartyToRoom uses.
+ */
+function downgradeSpuriousRefine(state: IntentState, history: Turn[]): IntentState {
+  if (state.intent !== "refine_existing") return state;
+  // Keep refine_existing when the extractor found a target id OR when there
+  // was a real multi-turn conversation before this one. Threshold kept loose
+  // (≥3 history turns) to avoid catching one-off "hmm, actually cheaper"
+  // edits — those legitimately refine whatever just got shown.
+  if (state.refined_target_id) return state;
+  if (history.length >= 3) return state;
+  const target: NluIntent = state.member_names.length > 0 ? "create_room" : "create_plan";
+  return {
+    ...state,
+    intent: target,
+    planning_assumptions: [
+      ...state.planning_assumptions,
+      `Downgraded intent refine_existing → ${target} (no target id + fresh session)`,
     ],
   };
 }
