@@ -6,10 +6,6 @@ import { UserRequirements, Restaurant, RecommendationCard, SessionPreferences, S
 import type { WatchCategory } from "./watchTypes";
 import { CITIES, DEFAULT_CITY } from "./cities";
 import { UserRequirementsSchema, RankedItemArraySchema } from "./schemas";
-import { recommendCreditCards } from "./creditCardEngine";
-import { recommendLaptops, classifyMentionedModels } from "./laptopEngine";
-import { recommendSmartphones, classifyMentionedSmartphones } from "./smartphoneEngine";
-import { recommendHeadphones, classifyMentionedHeadphones } from "./headphoneEngine";
 import { detectScenarioFromMessage, parseScenarioIntent, runScenarioPlanner, runWeekendTripPlanner, runCityTripPlanner } from "./scenario2";
 import { minimaxChat } from "./minimax";
 import { analyzeMultilingualQuery, resolveLocationHint } from "./nlu";
@@ -26,10 +22,6 @@ export type StreamCallbacks = {
 
 import { DEFAULT_WEIGHTS, HOTEL_DEFAULT_WEIGHTS, computeWeightedScore, extractRefinements, formatSessionPreferences } from "./agent/composer/scoring";
 import { parseIntent } from "./agent/parse/index";
-import { runCreditCardPipeline } from "./agent/pipelines/credit-card";
-import { runLaptopPipeline } from "./agent/pipelines/laptop";
-import { runSmartphonePipeline } from "./agent/pipelines/smartphone";
-import { runHeadphonePipeline } from "./agent/pipelines/headphone";
 import { runHotelPipeline } from "./agent/pipelines/hotel";
 import { runFlightPipeline } from "./agent/pipelines/flight";
 import { runActivityPipeline } from "./agent/pipelines/activity";
@@ -37,7 +29,7 @@ import { parseActivityIntent } from "./agent/parse/activity";
 import { gatherCandidates, rankAndExplain } from "./agent/pipelines/restaurant";
 import { parseWeekendTripIntent } from "./agent/parse/weekend-trip";
 import { parseCityTripIntent } from "./agent/parse/city-trip";
-import { buildWeekendTripFlightIntent, buildWeekendTripHotelIntent, buildWeekendTripCardIntent, buildWeekendTripRestaurantRequirements } from "./agent/planners/weekend-trip";
+import { buildWeekendTripFlightIntent, buildWeekendTripHotelIntent, buildWeekendTripRestaurantRequirements } from "./agent/planners/weekend-trip";
 import { buildCityTripHotelIntent, buildCityTripRestaurantRequirements, buildCityTripBarRequirements } from "./agent/planners/city-trip";
 import { buildDateNightFallbackIntent } from "./agent/planners/date-night";
 import { parseConcertEventIntent } from "./agent/parse/concert-event";
@@ -203,16 +195,12 @@ export async function runAgent(
           );
 
           if (hotelRecommendations.length > 0) {
-            // Rebuild weekend_trip plan with new hotel but original flight cards
-            const creditCardIntent = buildWeekendTripCardIntent(scenarioIntent);
-            const { creditCardRecommendations } = await runCreditCardPipeline(creditCardIntent);
-
             // Carry over flight recommendations from the existing plan via the evidence_card_ids
             const decisionPlan = runWeekendTripPlanner({
               scenarioIntent,
               flightRecommendations: [],   // no new flights; plan builder handles missing
               hotelRecommendations,
-              creditCardRecommendations,
+              creditCardRecommendations: [],
               userMessage,
               outputLanguage: queryContext.output_language,
             });
@@ -222,7 +210,6 @@ export async function runAgent(
                 scenarioIntent,
                 decisionPlan: { ...decisionPlan, id: crypto.randomUUID() },
                 hotelRecommendations,
-                creditCardRecommendations,
                 result_mode: "scenario_plan",
               });
             }
@@ -235,14 +222,11 @@ export async function runAgent(
           const { flightRecommendations, no_direct_available } = await runFlightPipeline(flightIntent);
 
           if (flightRecommendations.length > 0) {
-            const creditCardIntent = buildWeekendTripCardIntent(scenarioIntent);
-            const { creditCardRecommendations } = await runCreditCardPipeline(creditCardIntent);
-
             const decisionPlan = runWeekendTripPlanner({
               scenarioIntent,
               flightRecommendations,
               hotelRecommendations: [],
-              creditCardRecommendations,
+              creditCardRecommendations: [],
               userMessage,
               outputLanguage: queryContext.output_language,
             });
@@ -252,7 +236,6 @@ export async function runAgent(
                 scenarioIntent,
                 decisionPlan: { ...decisionPlan, id: crypto.randomUUID() },
                 flightRecommendations,
-                creditCardRecommendations,
                 no_direct_available,
                 result_mode: "scenario_plan",
               });
@@ -309,10 +292,6 @@ export async function runAgent(
     ]);
     const { flightRecommendations, no_direct_available } = flightResult;
 
-    // Credit card recommendation: run only if flight+hotel succeeded (best-effort, non-blocking)
-    const creditCardIntent = buildWeekendTripCardIntent(scenarioIntent);
-    const { creditCardRecommendations } = await runCreditCardPipeline(creditCardIntent).catch(() => ({ creditCardRecommendations: [] }));
-
     if (hotelRecommendations.length === 0 && flightRecommendations.length === 0) {
       const refinedIntent: WeekendTripIntent = {
         ...scenarioIntent,
@@ -326,7 +305,6 @@ export async function runAgent(
       return buildBaseResult(refinedIntent, "trip", {
         scenarioIntent: refinedIntent,
         result_mode: "followup_refinement",
-        creditCardRecommendations,
         flightRecommendations,
         hotelRecommendations,
       });
@@ -347,7 +325,6 @@ export async function runAgent(
       return buildBaseResult(refinedIntent, "trip", {
         scenarioIntent: refinedIntent,
         result_mode: "followup_refinement",
-        creditCardRecommendations,
         flightRecommendations: [],
         hotelRecommendations,
       });
@@ -367,7 +344,6 @@ export async function runAgent(
       return buildBaseResult(refinedIntent, "trip", {
         scenarioIntent: refinedIntent,
         result_mode: "followup_refinement",
-        creditCardRecommendations,
         flightRecommendations,
         hotelRecommendations: [],
       });
@@ -377,7 +353,7 @@ export async function runAgent(
       scenarioIntent,
       flightRecommendations,
       hotelRecommendations,
-      creditCardRecommendations,
+      creditCardRecommendations: [],
       restaurantRecommendations: Array.isArray(restaurantCards) ? restaurantCards as import("./types").RecommendationCard[] : [],
       userMessage,
       outputLanguage: queryContext.output_language,
@@ -388,7 +364,6 @@ export async function runAgent(
       decisionPlan,
       flightRecommendations,
       hotelRecommendations,
-      creditCardRecommendations,
       no_direct_available,
       result_mode: decisionPlan ? "scenario_plan" : "followup_refinement",
     });
@@ -483,61 +458,6 @@ export async function runAgent(
     });
   }
 
-  // Route to credit card pipeline if needed
-  if (intent.category === "credit_card") {
-    if (intent.needs_spending_info) {
-      return buildBaseResult(intent, "credit_card", {
-        missing_credit_card_fields: ["monthly spending by category", "cash back or travel rewards preference", "any cards you already hold"],
-      });
-    }
-    const { creditCardRecommendations } = await runCreditCardPipeline(intent);
-    return buildBaseResult(intent, "credit_card", {
-      creditCardRecommendations,
-    });
-  }
-
-  // Route to laptop pipeline if needed
-  if (intent.category === "laptop") {
-    if (intent.needs_use_case_info) {
-      return buildBaseResult(intent, "laptop", {
-        missing_flight_fields: ["use_case"],
-      });
-    }
-    const { laptopRecommendations, laptop_db_gap_warning } = await runLaptopPipeline(intent);
-    return buildBaseResult(intent, "laptop", {
-      laptopRecommendations,
-      laptop_db_gap_warning,
-    });
-  }
-
-  // Route to smartphone pipeline if needed
-  if (intent.category === "smartphone") {
-    if ((intent as SmartphoneIntent).needs_use_case_info) {
-      return buildBaseResult(intent, "smartphone", {
-        missing_flight_fields: ["use_case"],
-      });
-    }
-    const { smartphoneRecommendations, db_gap_warning } = await runSmartphonePipeline(intent as SmartphoneIntent);
-    return buildBaseResult(intent, "smartphone", {
-      smartphoneRecommendations,
-      device_db_gap_warning: db_gap_warning,
-    });
-  }
-
-  // Route to headphone pipeline if needed
-  if (intent.category === "headphone") {
-    if ((intent as HeadphoneIntent).needs_use_case_info) {
-      return buildBaseResult(intent, "headphone", {
-        missing_flight_fields: ["use_case"],
-      });
-    }
-    const { headphoneRecommendations, db_gap_warning } = await runHeadphonePipeline(intent as HeadphoneIntent);
-    return buildBaseResult(intent, "headphone", {
-      headphoneRecommendations,
-      device_db_gap_warning: db_gap_warning,
-    });
-  }
-
   // Route to flight pipeline if needed
   if (intent.category === "flight") {
     const { flightRecommendations, missing_fields, no_direct_available } = await runFlightPipeline(intent);
@@ -568,6 +488,19 @@ export async function runAgent(
       activityRecommendations,
       missing_activity_fields: missing_fields,
     });
+  }
+
+  // Non-travel categories are unreachable via the NluScenario union (see
+  // lib/agent/nlu-v2/types.ts) but ParsedIntent still allows them structurally.
+  // Guard here so the restaurant path only ever sees RestaurantIntent; a future
+  // US will add a proper graceful-decline reply via NLU v2.
+  if (
+    intent.category === "credit_card" ||
+    intent.category === "laptop" ||
+    intent.category === "smartphone" ||
+    intent.category === "headphone"
+  ) {
+    return buildBaseResult(intent, intent.category);
   }
 
   // Otherwise continue with restaurant pipeline

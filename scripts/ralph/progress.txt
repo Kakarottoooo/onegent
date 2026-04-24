@@ -15,7 +15,10 @@ Started: 2026-04-24 (positioning-shift-travel-only)
 - lib/agent.ts routes non-travel scenarios via `if (detectedScenario === "gift" | "fitness" | "big_purchase")` branches that call the planners in lib/agent/planners/. Archiving a planner means deleting its import AND its usage branch — typecheck will fail otherwise.
 - `detectScenarioFromMessage` in lib/scenario2.ts still returns `"big_purchase"` for matching messages. After archival the branch handler is gone, so these messages just fall through to the default `parseIntent` flow. That's intentional — the NLU v2 layer (the only live NLU now) can't produce those scenarios anyway.
 - `lib/__tests__/scenario2.test.ts` mixes unrelated describe blocks for multiple planners in one file. When archiving a planner referenced from there, delete its describe blocks inline rather than archiving the whole test file.
-- Pre-existing vitest failures on this branch (as of 2026-04-24): 13 tests across `components/__tests__/RecommendationCard.test.tsx` (11), `lib/__tests__/ai-loop.test.ts` (1), `lib/__tests__/weekend-trip.test.ts` (1), `lib/__tests__/scenario2.test.ts — open-flight Google Flights URL` (1). Do NOT try to "fix" these in a positioning-shift story — they are unrelated to archival work. Verify new work by checking the delta vs this baseline, not the absolute count.
+- `ParsedIntent` (lib/types.ts) is still a union of all intents including credit_card/laptop/smartphone/headphone, even after the pipelines are archived. After removing their routes in lib/agent.ts, add a guard `if (intent.category === "credit_card" | "laptop" | "smartphone" | "headphone") return buildBaseResult(intent, "restaurant");` before the restaurant fallback so TypeScript narrows to RestaurantIntent. The branch is unreachable at runtime via the NluScenario union but the type system cannot prove that on its own.
+- Weekend trip flow calls `runCreditCardPipeline` in 3 places (refine-hotel, refine-flight, main). After archiving credit-card.ts, pass `creditCardRecommendations: []` to `runWeekendTripPlanner` — it handles empty via `pickCardForSpend` returning `undefined`, and `buildWeekendTripOption`'s `card` param is optional. Don't forget to also strip `creditCardRecommendations,` from the shorthand returns in `buildBaseResult` calls, otherwise a ReferenceError.
+- Live travel-scoped credit-card logic that stays is `lib/agent/planners/trip-card.ts` (`getBestCardForTrip` / `buildTripCardCallout`) which uses `recommendCreditCards` from the engine directly, NOT the archived pipeline.
+- Pre-existing vitest failures on this branch (as of 2026-04-24): 14 tests across `components/__tests__/RecommendationCard.test.tsx` (11), `lib/__tests__/ai-loop.test.ts` (1), `lib/__tests__/weekend-trip.test.ts` (1), `lib/__tests__/scenario2.test.ts — open-flight Google Flights URL` (1). Do NOT try to "fix" these in a positioning-shift story — they are unrelated to archival work. Verify new work by checking the delta vs this baseline, not the absolute count.
 
 ---
 
@@ -56,4 +59,25 @@ Started: 2026-04-24 (positioning-shift-travel-only)
   - Archived files' relative imports break after `git mv` (e.g. `../../outputCopy` no longer resolves). DON'T hand-edit them to `../../../../outputCopy` — add `**/_archived/**` to tsconfig and vitest excludes instead. Preserves the archived snapshot verbatim and avoids brittle paths.
   - `lib/agent/parse/gift.ts` and `lib/agent/parse/fitness.ts` were orphaned by US-003 (no longer imported anywhere). Left in place intentionally — a follow-up cleanup story can remove them. Grep for `parseGiftIntent`/`parseFitnessIntent` before touching them.
   - The acceptance criteria grep scope in the PRD (`lib/agent.ts`, `lib/agent/planner-engine/`, `lib/agent/composer/`) is too narrow when a story also has to satisfy "Tests pass" — you still need to grep `lib/__tests__/` for tests that import the archived symbols.
+---
+
+## 2026-04-24 - US-004
+- Created `lib/agent/_archived/2026-04-positioning-shift/pipelines/README.md` (documenting the archive + the intentionally-broken relative imports that `**/_archived/**` skips).
+- Used `git mv` to relocate `credit-card.ts`, `laptop.ts`, `smartphone.ts`, `headphone.ts` from `lib/agent/pipelines/` into `lib/agent/_archived/2026-04-positioning-shift/pipelines/`. No companion tests existed for these pipelines.
+- Edited `lib/agent.ts`:
+  - Removed the 4 pipeline imports (`runCreditCardPipeline` / `runLaptopPipeline` / `runSmartphonePipeline` / `runHeadphonePipeline`).
+  - Removed `buildWeekendTripCardIntent` from the `weekend-trip` planner import (it stays defined in `weekend-trip.ts` but is now orphaned — deliberate, scope-minimal).
+  - Weekend-trip refine blocks: dropped `creditCardIntent` + `runCreditCardPipeline` calls and passed `creditCardRecommendations: []` to `runWeekendTripPlanner`; also stripped `creditCardRecommendations` from the refine-block `buildBaseResult` shorthand returns.
+  - Weekend-trip main flow: same treatment; also stripped `creditCardRecommendations` from the three `buildBaseResult` shorthand returns (no-inventory, no-flights, no-hotels, final success).
+  - Deleted the 4 standalone category routes (`if (intent.category === "credit_card")` / `"laptop"` / `"smartphone"` / `"headphone"`) — 54 lines removed.
+  - Added a defensive guard right before the restaurant fallback so TypeScript narrows `ParsedIntent` to `RestaurantIntent`: `if (intent.category === "credit_card" || "laptop" || "smartphone" || "headphone") return buildBaseResult(intent, "restaurant");`
+- Net change: lib/agent.ts shrank 101 → 17 insertions, 84 deletions.
+- Files changed: lib/agent.ts (modified); lib/agent/_archived/2026-04-positioning-shift/pipelines/README.md (new); 4 renames.
+- Typecheck: passed (`npx tsc --noEmit` exit 0). Tests: 504 passed / 14 failed — exact baseline breakdown (11 RecommendationCard + 1 ai-loop + 1 scenario2 open-flight URL + 1 weekend-trip MiniMax fallback). Zero new failures.
+- **Learnings for future iterations:**
+  - `ParsedIntent` union includes categories that are "dead" via NluScenario, but TypeScript can't prove reachability. When you remove a narrowing branch for category X, TS flow analysis will forward an X-shaped intent into the next branch — you need an explicit runtime guard to narrow back to `RestaurantIntent`.
+  - When a pipeline is called from *multiple* code paths (here: standalone `intent.category === "credit_card"` route + 3 weekend-trip locations), strip them all in one pass. Grep for the function name before starting; the PRD acceptance criteria list only mentions "imports + registerPipeline entries" which is narrower than the real call-site set.
+  - `pickCardForSpend(empty_array, n)` returns `undefined`; `buildWeekendTripOption`'s `card` is optional; `runWeekendTripPlanner` still produces a valid plan with `creditCardRecommendations: []`. So the weekend-trip flow degrades gracefully when the credit-card pipeline is removed — no need to gate-out that flow.
+  - Prior failed iterations left partial work on disk (the README and some lib/agent.ts edits were already in place when this iteration started). Always `git status` + `git diff` at the start of a story and reconcile with what's already done before re-applying edits.
+  - Baseline total count in the Codebase Patterns was "13" but the breakdown actually sums to 14 (11+1+1+1) — updated the count in place.
 ---

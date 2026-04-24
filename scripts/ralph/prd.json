@@ -58,8 +58,8 @@
         "Tests pass"
       ],
       "priority": 4,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Completed 2026-04-24. git mv moved credit-card.ts, laptop.ts, smartphone.ts, headphone.ts into lib/agent/_archived/2026-04-positioning-shift/pipelines/ with a README. Dropped 4 imports + the 4 standalone category routes in lib/agent.ts, and stripped creditCard pipeline calls from weekend_trip (main flow + refine-flight + refine-hotel) — the weekend_trip planner now receives creditCardRecommendations: [] so the trip plan still runs but without a card callout (trip-card.ts — getBestCardForTrip / buildTripCardCallout — remains untouched for future travel-scoped use). Added a defensive guard `if (intent.category === credit_card | laptop | smartphone | headphone) return buildBaseResult(intent, 'restaurant')` right before the restaurant fallback so TypeScript can narrow ParsedIntent to RestaurantIntent; the branch is unreachable at runtime via NluScenario but ParsedIntent still structurally allows those categories. Typecheck clean. Test suite at 14 failures — identical breakdown to pre-existing baseline (11 RecommendationCard + 1 ai-loop + 1 scenario2 open-flight URL + 1 weekend-trip MiniMax) — zero new failures."
     },
     {
       "id": "US-005",
