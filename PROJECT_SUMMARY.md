@@ -1,5 +1,5 @@
 ================================================================
-Onegent · AI 决策代理 · 项目总结 · v0.2.34.0
+Onegent · AI 决策代理 · 项目总结 · v0.2.35.0
 ================================================================
 
 【项目定义】
@@ -16,6 +16,129 @@ Onegent · AI 决策代理 · 项目总结 · v0.2.34.0
 活动 / 多人 trip），非旅行品类（笔记本 / 手机 / 耳机 / 信用卡 /
 礼物 / 健身）已归档。详见本文档头部 "Recent Updates - 2026-04-24
 (cont. 2) · Positioning Shift"。
+
+================================================================
+Recent Updates - 2026-04-24 (cont. 4) · Week 3 REST API 全量落地 + Week 4 #11 C 端 dogfood 闭环
+================================================================
+
+v0.2.34.0 把 lib/core 抽出来后,v0.2.35.0 是"把基础设施装到水龙头上"——
+Week 3 造 REST API + API key 认证 + 文档,让 B 端 caller 用 curl 就能调;
+Week 4 #11 把 C 端真实流量(用户点"Reserve with Agent")接进同一条 lib/core
+执行路径,通过 Week 2 建的 dual-gate 激活 runExecutionJobWithRecovery。
+
+从此 C 端和 B 端共用同一个执行引擎——任何 Week 2 引擎的改进,两端
+自动受益。"AI Travel Execution Layer" 从 pitch 变 `grep dual-gate` 能看
+到的代码事实。
+
+1. Week 3 REST API(US-W3-001 到 US-W3-007,7 个 commit)
+   所有端点在 /api/v1/*,用 Authorization: Bearer ogk_(live|test)_xxx 认证:
+     POST   /api/v1/execution-jobs                   创建 job 异步执行
+     GET    /api/v1/execution-jobs/[jobId]           轮询 status
+     GET    /api/v1/execution-jobs/[jobId]/audit     结构化决策审计流
+     GET    /api/v1/metrics/providers/[providerId]   per-provider 成功率
+
+2. API key 认证基础设施(US-W3-001 + 002)
+   - lib/db.ts 新增 api_keys 表 + 4 helpers:createApiKey /
+     findApiKeyByHash / updateApiKeyLastUsed / deactivateApiKey
+   - sha256(plaintext) 存 hash;plaintext 只发给 caller 一次
+   - key 格式 ogk_(live|test)_[32 base64url chars],对齐 Stripe 约定
+   - 字段:id(uuid) / key_hash / key_prefix / organization_name /
+     is_active / rate_limit_per_day(占位) / allowed_job_types(限 scope)
+   - lib/api-auth/require-api-key.ts middleware:
+       Route-level helper(不用全局 middleware.ts,Edge runtime 无 pg 支持)
+       Authorization: Bearer <key> → sha256 → findApiKeyByHash → 401/403/503
+       6 个失败分支(missing / scheme / empty / malformed / invalid / db-503)
+       成功后 fire-and-forget updateApiKeyLastUsed,不阻请求
+   - 8 个 vitest 全绿,包括 plaintext 不泄露到 DB / sha256 only 的关键断言
+
+3. REST 路由实现(US-W3-003 到 006)
+   - POST execution-jobs:zod 校验 ExecutionJobRequest(lib/api-v1/schemas.ts
+     mirror lib/core types) → allowedJobTypes scope 检查 → createJob →
+     fire-and-forget runExecutionJobWithRecovery().then(completeJob) → 202
+     + jobId + _links
+   - GET [jobId]:getJob → 映射 BookingJob+Step → ExecutionJobResult,
+     BookingJob.status + step.status 一起决定 ExecutionJobStatus
+     (paused_payment / completed / no_availability / captcha / needs_login)
+   - GET [jobId]/audit:queryAudit 透传,200 + events[],空 audit rows
+     返 200+[],job 本身不存在才返 404
+   - GET metrics/providers/[id]:computeSuccessRate 透传 + ?timeRangeDays
+     (clamp [1,365] 默认 30)
+
+4. 文档 + CLI(US-W3-007)
+   - docs/api/v1.md:4 个端点完整 request/response shape + 所有 scenario
+     params 表 + ConsentPolicy 默认值表 + 错误码按 HTTP status 分组 +
+     job lifecycle ASCII 图 + 完整 curl quickstart + 未落地项清单
+   - scripts/admin/create-api-key.mjs:CLI mint key,不引新依赖
+     (node crypto + @vercel/postgres 够),--org --env --scenarios
+     --rate-limit-per-day,plaintext 只打印一次
+
+5. Week 4 #11 C 端 dogfood(真流量验证 Week 2 dual-gate)
+   - lib/core/cend-adapter.ts 新文件:createJobViaCore(step, meta)
+     把 BookingJobStep.body 的 camelCase legacy shape(restaurantName /
+     covers / inline profile)反向构造成 ExecutionJobRequest,然后调
+     lib/core.createJob(自动打 __source="lib/core/execution" marker)
+   - 两个 C 端入口加条件分支,dogfood 只在:
+       USE_CORE_EXECUTOR_FOR_CEND=true (env 保护)
+       AND userId truthy (跳过匿名会话)
+       AND steps.length === 1
+       AND steps[0].type === "restaurant"  (最小面只切单餐厅)
+     才走 createJobViaCore,否则 fall through 老 createBookingJob:
+       a) app/api/booking-jobs/route.ts POST         "Reserve with Agent"路径
+       b) app/api/booking-jobs/create-trip/route.ts  多品类 trip 里单餐厅情况
+   - try/catch 兜底:adapter 抛错自动 fall through 老 path,零回归风险
+   - 关 env flag 立即回老路径,单键杀回
+   - observability 补丁:[start]/start/route.ts 加 console.log 打印
+     dual-gate 命中状态 + useCoreFlag + hasCoreMarker 便于真流量验证
+
+6. 端到端真流量验证(决定性时刻)
+   本地 dev 开 USE_CORE_EXECUTOR=true + USE_CORE_EXECUTOR_FOR_CEND=true,
+   UI 点 "Reserve with Agent",dev.log 出现完整链路证据:
+     [booking-jobs] via lib/core (USE_CORE_EXECUTOR_FOR_CEND) { jobId: '...' }
+     [start] runUniversalStep invoked { hasCoreMarker: true, useCoreFlag: true }
+     [start] dual-gate HIT — routing via lib/core.runExecutionJobWithRecovery
+     [stagehand] Executor starting ... (Stagehand 真实被 lib/core 驱动)
+   本地浏览器打开、导航到 OpenTable、跑 Stagehand 程序化流程——与老路径
+   行为完全一致,但内部走的是 Week 2 抽出来的 recovery 引擎。
+
+7. 今天 B 端也 curl 全通
+   Layer 1 冒烟六条 curl 全绿:
+     ① 无 Authorization → 401 missing_authorization        ✅
+     ② 乱 key → 401 invalid_api_key                         ✅
+     ③ 正确 key metrics → 200 empty-zero record             ✅
+     ④ 不存在 jobId → 404 job_not_found                     ✅
+     ⑤ POST 缺字段 → 400 invalid_request + zod details      ✅
+     ⑥ POST 合法 body → 202 + jobId + Stagehand 真启动      ✅
+   第 ⑥ 条甚至触发了真浏览器自动化(Le Bernardin not on OpenTable
+   所以终态 paused_payment/unknown,符合 Week 2 recovery 预期)。
+
+8. Posture 延续 v0.2.34.0 的所有承诺
+   - lib/booking-autopilot/ 零改动
+   - 老 createBookingJob 路径零改动,只加 if 分支在前面
+   - 关 env flag(USE_CORE_EXECUTOR 或 USE_CORE_EXECUTOR_FOR_CEND)秒杀回
+   - C 端现有 trip / DR / chat-commit 流量不受影响(条件不满足自动 fall through)
+
+9. 10 个 commit 序列(master)
+     e8a4651  feat(api-keys): api_keys 表 + 4 DB helpers
+     f016038  feat(api-v1): requireApiKey auth guard + 8 unit tests
+     80f5478  feat(api-v1): POST /api/v1/execution-jobs
+     6558f04  feat(api-v1): GET /api/v1/execution-jobs/[jobId]
+     2fd63bd  feat(api-v1): GET .../audit
+     f33bb9f  feat(api-v1): GET /api/v1/metrics/providers/[id]
+     638d1a8  docs(api): v1.md + create-api-key.mjs CLI
+     81912e0  feat(cend): dogfood single-restaurant trips via lib/core
+     f11e240  feat(cend): 同样分支加到 /api/booking-jobs POST(Reserve 路径)
+     05e5bc8  chore(start): dual-gate observability 日志
+
+10. Week 4 剩余(推迟到下一轮)
+    - #2  MCP connector 占位 Claude / ChatGPT 分发窗口
+    - #3  /developers landing 页面(B 端入口,用来展示 docs/api/v1.md
+          的精华 + 主动发 key,转化 curl 用户为付费 caller)
+    潜在 Week 5 引擎修:OpenTable 搜索结果页 stage=unknown 终态时,
+    lib/core/execution/recovery.ts 的 Phase 3 provider chain 现在只在
+    status === "no_availability" 时触发,unknown 态直接终态。
+    Carbone / Le Bernardin / Osteria La Baia 等 OpenTable 搜索页返
+    "not on reservation network" 的情况会 hit 这个边界。不是 Week 3-4
+    scope,但是引擎层接下来最值得修的一点。
 
 ================================================================
 Recent Updates - 2026-04-24 (cont. 3) · Week 2 · lib/core 抽象完成(B 端基础设施就位)
@@ -1437,6 +1560,21 @@ Cron：4 个定时任务（反馈提示 / 价格检查 / 场馆质量 / 笔记�
 ================================================================
 九、版本历史摘要
 ================================================================
+
+v0.2.35.0（2026-04-24）— **Week 3 REST API + Week 4 #11 C 端 dogfood 闭环**
+  · 紧接 v0.2.34.0 lib/core 抽象,Week 3 把基础设施装水龙头:造 /api/v1/*
+    REST API + API key 认证 + 完整 docs/api/v1.md + create-api-key.mjs CLI
+    (7 个 US-W3-00x,10 个新端点/文件)
+  · Week 4 #11 真流量 dogfood:lib/core/cend-adapter.ts 把 C 端 BookingJobStep
+    legacy shape 反向转 ExecutionJobRequest,在 /api/booking-jobs POST +
+    create-trip 加条件分支(USE_CORE_EXECUTOR_FOR_CEND=true + single restaurant
+    + Clerk user)走 lib/core.createJob,step.body.__source 激活 Week 2 dual-gate
+  · 决定性验证:UI 点"Reserve with Agent",dev.log 完整显示
+    [booking-jobs] via lib/core → [start] dual-gate HIT → [stagehand] 真跑,
+    C 端 + B 端从此共用同一执行引擎,"AI Travel Execution Layer"从 pitch 变代码事实
+  · B 端 curl 6/6 全绿(missing_auth / invalid_key / metrics / 404 / 400 / 202+jobId)
+  · 10 个 commit: e8a4651 → 05e5bc8, tsc 0 error, lib/core+api-auth 31 测试全绿
+  · Posture 延续:lib/booking-autopilot 零改,老路径零改,关任一 env flag 秒回退
 
 v0.2.34.0（2026-04-24）— **Week 2 · lib/core 抽象完成**(B 端基础设施就位)
   · 紧接 v0.2.33.0 定位转型,Week 2 把 Execution Engine 从 Next.js app 抽
