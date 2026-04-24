@@ -11,6 +11,7 @@ import type { BookingJob, BookingJobStep } from "@/lib/db";
 import type { AgentAutonomySettings } from "@/lib/autonomy";
 import { auth } from "@clerk/nextjs/server";
 import { randomUUID } from "crypto";
+import { createJobViaCore } from "@/lib/core/cend-adapter";
 
 /** POST /api/booking-jobs — create a new background booking job */
 export async function POST(req: NextRequest) {
@@ -31,6 +32,29 @@ export async function POST(req: NextRequest) {
   const jobId = randomUUID();
 
   const initialSteps: BookingJobStep[] = steps.map((s) => ({ ...s, status: "pending" }));
+
+  // ── Dogfood: single-restaurant jobs go through lib/core.createJob when the
+  //    flag is on AND we have a Clerk user (skip anonymous sessions). Same
+  //    gate shape as in create-trip/route.ts. Activates Week 2's dual-gate.
+  if (
+    process.env.USE_CORE_EXECUTOR_FOR_CEND === "true" &&
+    userId &&
+    initialSteps.length === 1 &&
+    initialSteps[0].type === "restaurant"
+  ) {
+    console.log("[booking-jobs] via lib/core (USE_CORE_EXECUTOR_FOR_CEND)", { jobId });
+    try {
+      const coreJob = await createJobViaCore(initialSteps[0], {
+        userId,
+        sessionId,
+        tripLabel,
+        jobId,
+      });
+      return NextResponse.json({ jobId: coreJob.id, status: coreJob.status, _source: "lib/core/execution" });
+    } catch (err) {
+      console.error("[booking-jobs] lib/core adapter failed, falling back to legacy", err);
+    }
+  }
 
   const job = await createBookingJob({
     id: jobId,
