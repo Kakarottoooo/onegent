@@ -142,6 +142,15 @@ export default function Home() {
   useEffect(() => {
     if (!activeRoomId) return;
     if (replayedRoomIds.current.has(activeRoomId)) return;
+    // Skip replay when the chat already has in-memory messages — that means
+    // the user is mid-session (e.g. just created this room and the messages
+    // that built the confirm card are still on screen). Replaying here would
+    // duplicate every bubble. Mark the room as "replayed" so a later nav
+    // doesn't retry either.
+    if (chat.messages.length > 0) {
+      replayedRoomIds.current.add(activeRoomId);
+      return;
+    }
     let cancelled = false;
     (async () => {
       try {
