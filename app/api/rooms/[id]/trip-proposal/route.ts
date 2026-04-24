@@ -29,6 +29,7 @@ import {
   listTripSelections,
   getMyTripSelection,
   listProposalVotes,
+  listMemberIntentStates,
   type VoteKind,
 } from "@/lib/db";
 import { getLatestTripProposal } from "@/lib/agent/trip-synthesis";
@@ -76,6 +77,16 @@ export async function GET(_req: Request, { params }: Params) {
   const joinedCount = members.filter((m) => m.status === "joined").length;
 
   if (!proposal) {
+    // is_synthesizing heuristic: no proposal exists yet, but every joined
+    // member has already contributed an intent state — the synthesis pipeline
+    // is either running right now or about to. Lets clients that DIDN'T
+    // trigger the synthesize call themselves (the other members) still render
+    // a progress indicator while they wait for the plan to land.
+    const intents = await listMemberIntentStates(roomId).catch(() => []);
+    const contributorIds = new Set(intents.map((i) => i.user_id));
+    const joinedIds = members.filter((m) => m.status === "joined").map((m) => m.user_id);
+    const isSynthesizing =
+      joinedIds.length > 0 && joinedIds.every((id) => contributorIds.has(id));
     return NextResponse.json({
       ok: true,
       proposal: null,
@@ -83,6 +94,7 @@ export async function GET(_req: Request, { params }: Params) {
       my_vote: null,
       vote_tally: { approve: 0, decline: 0, request_changes: 0, voters: [] },
       aggregate: emptyAggregate(joinedCount),
+      is_synthesizing: isSynthesizing,
       room: {
         creator_id: room.creator_id,
         payer_id: room.payer_id ?? room.creator_id,
@@ -144,6 +156,7 @@ export async function GET(_req: Request, { params }: Params) {
     my_vote: myVote,
     vote_tally: { ...tally, voters },
     aggregate,
+    is_synthesizing: false,
     room: {
       creator_id: room.creator_id,
       payer_id: room.payer_id ?? room.creator_id,

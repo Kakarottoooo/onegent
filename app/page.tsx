@@ -365,6 +365,45 @@ export default function Home() {
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeRoomId]);
+
+  // Proposal watcher: poll /trip-proposal every 4s while in a trip room so
+  // member B (who didn't trigger synthesize) still sees the card appear the
+  // moment the server creates the proposal. Also surfaces is_synthesizing
+  // so B gets the progress card during the 5-15s wait.
+  const [remoteSynthesizing, setRemoteSynthesizing] = useState(false);
+  useEffect(() => {
+    if (!activeRoomId) {
+      setRemoteSynthesizing(false);
+      return;
+    }
+    let cancelled = false;
+    const tick = async () => {
+      try {
+        const res = await fetch(`/api/rooms/${activeRoomId}/trip-proposal`);
+        if (!res.ok || cancelled) return;
+        const data = (await res.json()) as {
+          proposal?: { id?: string } | null;
+          is_synthesizing?: boolean;
+        };
+        if (cancelled) return;
+        if (data.proposal?.id) {
+          setActiveProposalId((prev) => (prev === data.proposal!.id ? prev : data.proposal!.id!));
+          setRemoteSynthesizing(false);
+        } else {
+          setRemoteSynthesizing(!!data.is_synthesizing);
+        }
+      } catch {
+        // Non-fatal; keep polling.
+      }
+    };
+    void tick();
+    const id = setInterval(() => void tick(), 4000);
+    return () => {
+      cancelled = true;
+      clearInterval(id);
+    };
+  }, [activeRoomId]);
+
   const bottomRef = useRef<HTMLDivElement>(null);
   const chatInputRef = useRef("");
   const isComposingRef = useRef(false);
@@ -834,6 +873,17 @@ export default function Home() {
         // duplicate. Interpret the user's intent as "synthesize the plan for
         // THIS room now" and kick off the trip-synthesis pipeline. Chat bubble
         // below echoes the status so the user knows what's happening.
+        //
+        // BUT: if this room already has a proposal, firing force synthesis
+        // again creates a brand-new proposal row and orphans every vote
+        // cast against the first one. Instead, just nudge the user to the
+        // card that's already on screen.
+        if (activeProposalId) {
+          chat.injectAssistantMessage(
+            "方案已经在下方卡片里了，看看你们的偏好是否勾对就行 ↓",
+          );
+          return;
+        }
         setSynthesizing(true);
         void (async () => {
           try {
@@ -2660,8 +2710,12 @@ export default function Home() {
                     in the background can take 5-15s; without this indicator the
                     chat looks frozen between "好的，我去综合方案" and the
                     proposal card landing. Each chip pulses gold via a shared
-                    keyframe so users see forward motion. */}
-                {synthesizing && (
+                    keyframe so users see forward motion.
+                    Visible on TWO triggers: the local user fired synthesize
+                    (synthesizing), OR another member did and the server flagged
+                    is_synthesizing for the room (remoteSynthesizing via the
+                    proposal-watcher poll). */}
+                {(synthesizing || remoteSynthesizing) && (
                   <div
                     style={{
                       border: "1px solid rgba(201,168,76,0.35)",
