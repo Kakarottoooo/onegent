@@ -1,97 +1,48 @@
 {
-  "project": "restaurant-agent",
-  "branchName": "ralph/multi-platform-restaurant",
-  "description": "Multi-platform restaurant booking: Resy + Yelp providers with automatic OpenTable → Resy → Yelp fallback",
+  "project": "onegent",
+  "branchName": "ralph/positioning-shift-travel-only",
+  "description": "Positioning shift: archive non-travel categories and politely decline non-travel requests at the NLU layer. Part of the refocus from generalist recommendation engine to AI Travel Execution Layer. Conservative first pass — no new APIs, no DB migrations, only code archival + two prompt edits.",
   "userStories": [
     {
       "id": "US-001",
-      "title": "Resy provider — URL matching, stage signals, city slug map",
-      "description": "As a developer, I need a Resy provider so the executor can navigate resy.com and detect which stage it's in.",
+      "title": "Archive non-travel categories and clean dead imports from app/page.tsx",
+      "description": "As a product, we're refocusing Onegent on travel (restaurant / hotel / flight / activity / trip). The NluScenario type in lib/agent/nlu-v2/types.ts already excludes laptop/smartphone/headphone/credit_card/big_purchase/gift/fitness — meaning those code paths can never be reached at runtime. Move them to an _archived/ directory preserving git history, remove their imports from app/page.tsx (which still imports 4 dead Card components), and keep tsc + tests green.",
       "acceptanceCriteria": [
-        "Create lib/booking-autopilot/providers/resy-com.ts implementing BrowserProvider",
-        "id: 'resy-com'",
-        "matchesUrl returns true for resy.com URLs",
-        "City slug map: Nashville=nash, New York=nyc, LA=la, Chicago=chi, SF=sf, Miami=miami, DC=dc, Boston=bos, Atlanta=atl, Austin=aus, Seattle=sea, Denver=den, Portland=pdx",
-        "getStageSignals: searchResults=true when URL contains resy.com/cities/ without venue slug",
-        "getStageSignals: hotelDetail=true when URL contains resy.com/cities/{city}/venues/ or /restaurant/",
-        "getStageSignals: guestDetailsStep=true when URL contains /book or page has visible name/email/phone input",
-        "resyProvider registered in registry and index.ts",
-        "Typecheck passes"
+        "Create directory lib/agent/_archived/2026-04-positioning-shift/pipelines/ and move lib/agent/pipelines/laptop.ts, smartphone.ts, headphone.ts, credit-card.ts into it using `git mv` (preserves history)",
+        "Create directory lib/agent/_archived/2026-04-positioning-shift/planners/ and move lib/agent/planners/big-purchase.ts, fitness.ts, gift.ts into it using `git mv`",
+        "Create directory components/_archived/2026-04-positioning-shift/ and move components/CreditCardCard.tsx, LaptopCard.tsx, SmartphoneCard.tsx, HeadphoneCard.tsx into it using `git mv`",
+        "Create lib/agent/_archived/2026-04-positioning-shift/README.md explaining: (a) positioning shift from generalist to travel-focused, (b) archive date 2026-04-24, (c) list of archived files, (d) note that code is preserved not deleted in case future reversal needed",
+        "Create components/_archived/2026-04-positioning-shift/README.md with same explanation",
+        "In app/page.tsx: delete the 4 imports at lines ~10-13 (CreditCardCard, LaptopCard, SmartphoneCard, HeadphoneCard) and remove ALL JSX blocks that render these components. Search the file for each component name to find usage sites — they may appear in map loops branching on cardType",
+        "Grep the entire repo for any other imports of the archived files (lib/agent.ts, lib/agent/planner-engine/*, lib/agent/composer/*, etc) and either remove the import + corresponding registration entry OR repoint to the _archived path — whichever keeps behavior unchanged for remaining travel scenarios",
+        "`tsc --noEmit` returns 0 errors",
+        "`npm test` passes 100% (no regressions in existing golden tests or any other test)",
+        "`npm run build` completes successfully",
+        "Commit message: 'feat: US-001 - archive non-travel categories'"
       ],
       "priority": 1,
       "passes": false,
-      "notes": "Resy URL patterns: search=resy.com/cities/nash?date=...&seats=2&query=..., venue=resy.com/cities/nash/venues/urban-grub, booking form opens inline or modal. Follow opentable-com.ts as template."
+      "notes": "CRITICAL SAFETY: use `git mv` only, never `rm`. Do NOT touch lib/booking-autopilot/. Do NOT run DB migrations (lib/schema.sql is fine to read but do not change). Do NOT modify .env.local or any secrets. Do NOT add new dependencies to package.json. The Card components are truly unreachable at runtime — NluScenario type = 'restaurant' | 'hotel' | 'flight' | 'activity' | 'trip' only — so deleting JSX branches that check for laptop/credit_card/etc is safe. If you find a registry file that has hardcoded registrations like `registerPipeline(laptopPipeline)`, remove that line entirely (do not comment out — the file has git history). If a test file imports archived code, check whether the test is still relevant: if yes, repoint import to _archived path; if the test is validating behavior that no longer exists, move the test file to the archive too with a note."
     },
     {
       "id": "US-002",
-      "title": "Resy time slot selection and guest form fill",
-      "description": "As a user, I want the executor to find my restaurant on Resy and click the closest available time slot, then fill my contact info.",
+      "title": "NLU v2 politely decline non-travel requests via prompt edits",
+      "description": "As a user asking about non-travel topics (e.g. 'help me buy a laptop', '推荐 brooklyn 的瑜伽课', 'gift ideas for mom'), I want Onegent to politely decline and redirect me to ChatGPT or Claude, rather than getting a confused clarification loop. The NluScenario type already excludes non-travel scenarios, so the extractor physically cannot mis-classify these — we just need the chat layer to respond gracefully when it receives an out-of-scope message.",
       "acceptanceCriteria": [
-        "In stagehand-executor.ts, add Resy listing handler (startProvider?.id === 'resy-com') mirroring OpenTable handler",
-        "Use CDP coordinate click (sh(raw).click(x,y)) not DOM .click()",
-        "After slot click: check for URL change to /book or reservation form appearance",
-        "Detect correct restaurant before proceeding (match venue name on page vs targetHotelName)",
-        "fillGuestForm in resy-com.ts: fill first name, last name, email, phone using nativeFill pattern",
-        "Handle both phone-only form and full name/email form",
-        "Resy no-results detection: check for 'no results' / 'no restaurants' text",
-        "Typecheck passes"
+        "Modify lib/agent/nlu-v2/extractor.ts system prompt: add a rule (near the scenario classification rules) stating: 'If the user's message is clearly about a NON-travel topic (consumer electronics, shopping, gifts, fitness classes, credit cards, personal advice, coding help, general Q&A), set intent=\"chitchat\", scenario=null, AND append a string to planning_assumptions in the form \"out_of_scope: <brief topic>\" (e.g. \"out_of_scope: electronics shopping\"). Do NOT try to force non-travel requests into a travel scenario.'",
+        "Modify lib/agent/nlu-v2/chat.ts system prompt: add a rule stating: 'If the state_summary passed to you contains a planning_assumptions entry starting with \"out_of_scope:\", reply politely in the user\\'s language (Chinese or English) that Onegent now focuses on travel (restaurants, hotels, flights, activities, trip planning) and suggest they try ChatGPT or Claude for other topics. Do not pretend to help or ask clarifying questions.'",
+        "Inspect lib/agent/nlu-v2/router.ts buildStateSummary(): verify that planning_assumptions is included in the summary output so chat.ts can see it. If NOT currently included, add it — append planning_assumptions entries at the end of the summary string when non-empty. Otherwise leave unchanged.",
+        "Create lib/agent/nlu-v2/__tests__/golden-out-of-scope.test.ts with at least 3 test cases: 'help me buy a laptop for coding' (English), '推荐 brooklyn 周六早上的瑜伽课' (Chinese), 'gift ideas for my mom birthday budget $150' (English). Each case must assert: intent === 'chitchat', scenario === null, AND planning_assumptions includes at least one string starting with 'out_of_scope:'",
+        "All existing golden tests still pass unchanged: golden-solo.test.ts, golden-multi.test.ts, golden-trip.test.ts (and any others in lib/agent/nlu-v2/__tests__/). Do NOT modify their expected values.",
+        "Do NOT modify lib/agent/nlu-v2/types.ts (no new NluIntent variant, no new RouterAction variant, no new NluScenario value)",
+        "Do NOT modify the routeIntent() function branching logic in router.ts (only buildStateSummary if necessary)",
+        "`tsc --noEmit` returns 0 errors",
+        "`npm test` passes 100%",
+        "Commit message: 'feat: US-002 - NLU v2 politely decline non-travel requests'"
       ],
       "priority": 2,
       "passes": false,
-      "notes": "Resy time slot buttons look similar to OpenTable (12h format). Resy uses React so must use CDP click. Copy the OpenTable handler from stagehand-executor.ts and adapt selectors."
-    },
-    {
-      "id": "US-003",
-      "title": "Multi-platform fallback: OpenTable → Resy → Yelp",
-      "description": "As a user, when a restaurant isn't found on OpenTable, I want the system to automatically try Resy (and then Yelp) instead of just failing.",
-      "acceptanceCriteria": [
-        "In app/api/booking-jobs/[id]/start/route.ts, after runUniversalStep returns no_availability with 'not found on OpenTable':",
-        "  - Build Resy search URL: https://resy.com/cities/{citySlug}?date={date}&seats={covers}&query={restaurantName}",
-        "  - citySlug derived from city in step.body (Nashville→nash, New York→nyc, etc.)",
-        "  - Update step.body.startUrl to Resy URL and retry runUniversalStep",
-        "If Resy also returns no_availability with 'not found', try Yelp URL as final fallback",
-        "Log each platform attempt: 'Trying Resy for {restaurantName}...'",
-        "step.body.platformsTried updated with each attempt ['opentable', 'resy']",
-        "If all platforms fail: status=no_availability with summary listing all platforms tried",
-        "Typecheck passes"
-      ],
-      "priority": 3,
-      "passes": false,
-      "notes": "Resy city slugs: check the CITIES config in lib/cities.ts for the city IDs (nashville, new_york, etc.) and map to Resy slugs. The fallback should be transparent to the user — they just see 'Trying Resy...' in the log."
-    },
-    {
-      "id": "US-004",
-      "title": "Yelp Reservations provider",
-      "description": "As a user, I want the system to search Yelp as a last resort, following their reservation link which may redirect to OpenTable or Resy.",
-      "acceptanceCriteria": [
-        "Create lib/booking-autopilot/providers/yelp-com.ts implementing BrowserProvider",
-        "id: 'yelp-com'",
-        "matchesUrl returns true for yelp.com URLs",
-        "Yelp search URL: https://www.yelp.com/search?find_desc={restaurantName}&find_loc={city}",
-        "In stagehand-executor.ts: Yelp listing handler finds restaurant card, clicks 'Make a Reservation'",
-        "If the reservation link redirects to OpenTable or Resy (likely), the executor follows the redirect and the existing OpenTable/Resy handler takes over",
-        "getStageSignals: searchResults=true for yelp.com/search URLs",
-        "No-results detection: 'didn't find any results' text on Yelp",
-        "yelp provider registered in registry and index.ts",
-        "Typecheck passes"
-      ],
-      "priority": 4,
-      "passes": false,
-      "notes": "Yelp's 'Make a Reservation' button usually redirects to OpenTable or Resy widget. The executor should follow that redirect and let the target platform handler take over. Main challenge: finding the right restaurant card on Yelp search results."
-    },
-    {
-      "id": "US-005",
-      "title": "Update RestaurantStepCard and RecommendationCard platform display",
-      "description": "As a user, I want to see which platform the agent is using when it tries multiple platforms.",
-      "acceptanceCriteria": [
-        "stepStatusLabel in tasks/page.tsx: show platform in message when relevant",
-        "Decision log entries show 'Trying Resy...' / 'Trying Yelp...' as the agent switches platforms",
-        "The 'not found on OpenTable' banner replaced with 'Trying Resy...' spinner while fallback is running",
-        "Typecheck passes"
-      ],
-      "priority": 5,
-      "passes": false,
-      "notes": "Minor UI polish. The key is that users understand why the agent is taking longer (checking multiple platforms)."
+      "notes": "This story is deliberately a PROMPT-ENGINEERING change, not a code-architecture change. The router already correctly handles 'scenario=null + intent=chitchat' → it returns { type: 'continue_chat' }, which passes the state_summary to chat.ts. All we're doing is: (a) teach extractor to tag out-of-scope requests, (b) teach chat.ts to recognize the tag and decline. If you find yourself adding new types or modifying router logic, stop — you're over-engineering. Golden test format: inspect golden-solo.test.ts for the pattern (it uses the real extractor + router pipeline end-to-end with a test harness). Requires OPENAI_API_KEY in the test environment — if CI runs without it, check whether existing golden tests are gated by an env check and follow the same pattern."
     }
   ]
 }

@@ -1,3 +1,13 @@
 # Ralph Progress Log
-Started: Tue Apr 14 02:56:22     2026
+Started: 2026-04-24 (positioning-shift-travel-only)
+---
+
+## Codebase Patterns
+- Use `git mv` (not `rm` + create) when relocating files, so history is preserved.
+- NluScenario type in lib/agent/nlu-v2/types.ts is the single source of truth for supported scenarios. If a category is not in this union, its code is unreachable at runtime — safe to archive.
+- All DB schema changes must use `ALTER TABLE ... ADD COLUMN IF NOT EXISTS` (forward-compatible pattern, see lib/schema.sql).
+- Booking Automation three-layer architecture (see root CLAUDE.md): programmatic nav + AI form fill + AI audit. Do not add new code to lib/booking-autopilot/ for this PRD.
+- Golden tests for NLU live in lib/agent/nlu-v2/__tests__/golden-*.test.ts. They call the real extractor + router pipeline and require OPENAI_API_KEY.
+- Existing golden tests (golden-solo, golden-multi, golden-trip) define expected behavior for the current scenarios — do NOT edit their expected values.
+
 ---
