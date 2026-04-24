@@ -1,5 +1,5 @@
 ================================================================
-Onegent · AI 决策代理 · 项目总结 · v0.2.37.1
+Onegent · AI 决策代理 · 项目总结 · v0.2.38.0
 ================================================================
 
 【项目定义】
@@ -16,6 +16,107 @@ Onegent · AI 决策代理 · 项目总结 · v0.2.37.1
 活动 / 多人 trip），非旅行品类（笔记本 / 手机 / 耳机 / 信用卡 /
 礼物 / 健身）已归档。详见本文档头部 "Recent Updates - 2026-04-24
 (cont. 2) · Positioning Shift"。
+
+================================================================
+Recent Updates - 2026-04-24 (cont. 8) · Week 5 #1 · 修引擎边界:Phase 3 trigger
+================================================================
+
+第一个真正的 engine fix —— W4 全部装好后,第一次回头修引擎层的一个
+真实生产 bug:Carbone / Le Bernardin / Osteria La Baia / Ci Siamo
+这类餐厅(在 OpenTable 搜索能搜到但用自己的预订系统)从来没触发过
+Resy fallback,用户看到一个"error"就以为完了,其实 Resy 上能预订。
+
+1. 根因(从 backlog 笔记的"stage=unknown"挖到了更准确的描述)
+   - lib/core/execution/recovery.ts Phase 3 trigger 现在是:
+       if (phase1.result.status === "no_availability" && scenario === "restaurant")
+   - 但 lib/booking-autopilot/core/final-outcome.ts:389-399 的"Unverified
+     checkout field values"分支返的是 status="error",不是
+     "no_availability"。因为:
+       · OpenTable 把 Carbone 等列在搜索结果里,agent 点进详情页
+       · 详情页没 embedded booking widget(他们用自己的系统)
+       · assessBookingStage 一直返 stage="unknown"
+       · continuation pass 跑完仍 unknown
+       · final-outcome 没匹配到任何 special-case branch
+       · 落到 "Unverified checkout field" 兜底返 status="error"
+   - recovery.ts 看到 error 直接 return,Phase 3 永远没机会跑
+
+2. 修法:白名单 + 黑名单双 pattern 的 predicate 函数(US-W5-001)
+   - 新文件 lib/core/execution/should-try-fallback.ts
+   - shouldTryProviderFallback({scenario, status, summary, error?}) → boolean
+   - 9 个 FALLBACK_WORTHY_PATTERNS(从生产 summary/error 字符串里反向
+     提取):
+       · /not found on (opentable|resy|yelp)/i
+       · /\b(stalled|stuck|stopped) at\b/i
+       · /no recogni[sz]able page signals/i
+       · /\bstage[ :=]unknown\b/i
+       · /unverified checkout field/i
+       · /guest.*values were not verified/i
+       · /reached a payment-like page/i
+       · /reservations? not (yet )?available (on|through)/i
+       · /book.*(through|on) (their|its) (own|website|direct)/i
+   - 4 个 FALLBACK_BLOCKED_PATTERNS(强制不进 Phase 3,即使白名单也命中):
+       · /page load failed|browser failed/i
+       · /chrome-error|about:blank/i
+       · /quota|billing/ + /\bHTTP 4(0[12]|29)\b/
+       · /blocked the automated browser|bot protection/i
+       · /captcha/i (defense in depth)
+   - 设计原则:白名单优于黑名单 + 黑名单优于白名单(precedence test 锁定)。
+     避免 transient infra 失败浪费 2-3min Resy 路径。
+
+3. recovery.ts wire-up(US-W5-002)
+   - 把 inline check 换成 shouldTryProviderFallback() 调用
+   - Phase 2(time fallback)trigger 收紧:只在 status="no_availability"
+     AND venue IS in catalog 才跑(error-status 的 escalation 直接跳过
+     time,因为时间不能解决"venue 在另一个平台"的问题)
+   - 三种触发路径明确了:
+       A. no_availability + slot 满 → Phase 2(time)→ Phase 3(provider)
+       B. no_availability + "not found" → Phase 3 directly
+       C. error + 白名单 hit → Phase 3 directly(NEW)
+       D. error + 黑名单 hit → no fallback(NEW · fast-fail)
+       E. captcha / needs_login → no fallback(unchanged)
+
+4. 测试覆盖(US-W5-001 unit + US-W5-003 integration)
+   - 21 个 should-try-fallback unit tests(每个 pattern 一条 + 边界):
+       · scenario gating(hotel/flight/activity 都 reject)
+       · no_availability classic(true 不论 summary)
+       · 8 个白名单 pattern 各一条 happy case
+       · 4 个黑名单 pattern 各一条 deny case
+       · 2 个 unrecognized error(默认不 fallback)
+       · 4 个非 eligible status(captcha/needs_login/completed/paused_payment)
+       · blocklist precedence(双命中时 deny 赢)
+   - 3 个 integration tests 锁端到端控制流:
+       · status=error + "Stalled at listing" → Resy 真被调用且成功
+       · status=error + "Unverified checkout field" → Phase 3 真触发
+       · status=error + "HTTP 402 quota" → Phase 3 NOT 触发(单一 call)
+   - 28/28 全绿,7 个既有 integration test 零回归
+
+5. 影响的真实 venue 列表(用户提供)
+   Carbone(Greenwich Village):自有系统 + Tock
+   Le Bernardin(Midtown):Tock-based
+   Osteria La Baia(Midtown):自有系统
+   Ci Siamo(Hudson Yards):Tock-based
+   修复后预期:agent 在 OpenTable 触底 → recovery 看到 "Stalled at
+   listing" → shouldTryProviderFallback 返 true → 跳 Resy → Resy 把
+   Le Bernardin 等 Tock 餐厅的预订漏斗暴露出来 → 用户拿到
+   paused_payment 而不是 error。
+
+6. 4 commit 推上 master
+   f15b3b7 feat(core): shouldTryProviderFallback predicate + 21 unit tests
+   1dd7822 feat(core): recovery.ts uses shouldTryProviderFallback
+   a8f1cd3 test(core): 3 integration tests for US-W5 error-status
+   (本 commit) docs: v0.2.38.0 release notes
+
+7. 没做的(刻意推迟)
+   - final-outcome.ts 的根本性重新分类(option B):error → no_availability
+     的 semantic 重命名。等真有真流量数据证明白名单不够再考虑。
+   - 真线上 dogfood 验证:dev 环境跑一次 Carbone 看是否 Resy 真接住。
+     (建议下次开 npm run dev 后实际试一次预订,作为 W5 dogfood)。
+
+8. 战略意义
+   v0.2.34→37 一直在搭基础设施(lib/core 抽象 / REST API / MCP / landing
+   /dashboard / cross-surface nav)。v0.2.38 是第一次回到引擎本身修一个
+   会让用户当场骂街的 bug —— 标志 Stripe 打法第一阶段完成,接下来要从
+   "造水管"切到"水管里流的水好不好喝"。
 
 ================================================================
 Recent Updates - 2026-04-24 (cont. 7) · v0.2.37.1 post-ship polish
@@ -1900,6 +2001,20 @@ Cron：4 个定时任务（反馈提示 / 价格检查 / 场馆质量 / 笔记�
 ================================================================
 九、版本历史摘要
 ================================================================
+
+v0.2.38.0（2026-04-24）— **Week 5 #1 · 修 Phase 3 trigger 引擎边界**
+  · 真实 bug:Carbone / Le Bernardin / Osteria La Baia / Ci Siamo 这类
+    OpenTable 列在搜索但用自己预订系统的餐厅,final-outcome.ts 返
+    status="error"(不是 no_availability),recovery.ts 旧 trigger 只看
+    no_availability → Phase 3(Resy fallback)永远没触发
+  · 新文件 lib/core/execution/should-try-fallback.ts:9 白名单 + 4 黑名单
+    pattern 的 predicate。白名单从生产 summary 反向提取(Stalled at /
+    Unverified checkout / stage=unknown / books through their own 等);
+    黑名单 fast-fail infra 失败(HTTP 402 quota / bot block / page load
+    fail)避免浪费 2-3min Resy 路径
+  · recovery.ts 把 inline check 换成 helper 调用,Phase 2 time fallback
+    trigger 同步收紧(error-escalation 直接跳 Phase 3,跳过 time)
+  · 24 新测试(21 unit + 3 integration)+ 7 既有 zero regression
 
 v0.2.37.1（2026-04-24）— **post-ship polish**
   · hooks-rules hotfix:DevNav 的 useEffect 移到 early return 之前,修
