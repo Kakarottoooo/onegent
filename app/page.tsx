@@ -132,6 +132,10 @@ export default function Home() {
   // this homepage mount continue that thread. First user message in a fresh
   // session creates one on the server, and we update the URL then.
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
+  // Titles for the context ribbon so the user can tell "which room" / "which
+  // chat" they're in without looking at the sidebar.
+  const [activeRoomTitle, setActiveRoomTitle] = useState<string | null>(null);
+  const [activeSessionTitle, setActiveSessionTitle] = useState<string | null>(null);
   // Bump to trigger a sidebar refetch (after creating a room / new session).
   const [sidebarReloadTick, setSidebarReloadTick] = useState(0);
   useEffect(() => {
@@ -147,6 +151,36 @@ export default function Home() {
   // history from the server and replay it into the chat thread so refreshing,
   // closing and re-opening, or following an invite link doesn't lose the
   // ongoing conversation. Only runs once per room (replayedRoomIds ref guard).
+  // Clear + (lazy-fetch) the room title when active room changes. Kept
+  // separate from the message-replay effect so the title updates even if
+  // history replay is skipped (e.g. already populated chat).
+  useEffect(() => {
+    if (!activeRoomId) {
+      setActiveRoomTitle(null);
+      return;
+    }
+    setActiveRoomTitle(null);
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch(`/api/rooms/${activeRoomId}`);
+        if (!res.ok) return;
+        const data = (await res.json()) as { room?: { title?: string } };
+        if (!cancelled && data.room?.title) setActiveRoomTitle(data.room.title);
+      } catch {
+        // non-fatal
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [activeRoomId]);
+
+  // Reset session title when active session clears.
+  useEffect(() => {
+    if (!activeSessionId) setActiveSessionTitle(null);
+  }, [activeSessionId]);
+
   const replayedRoomIds = useRef<Set<string>>(new Set());
   const replayedSessionIds = useRef<Set<string>>(new Set());
   // Session history replay — parallel to the room one below. Fires only when
@@ -170,10 +204,12 @@ export default function Home() {
           return;
         }
         const data = (await res.json()) as {
+          session?: { id: string; title: string } | null;
           messages: Array<{ id: string; role: "user" | "assistant"; content: string; created_at: string }>;
         };
         console.log(`[session-replay] got ${data.messages?.length ?? 0} messages for ${activeSessionId}`);
         if (cancelled) return;
+        if (data.session?.title) setActiveSessionTitle(data.session.title);
         // Mark replayed even on empty — otherwise we'd keep re-fetching.
         replayedSessionIds.current.add(activeSessionId);
         if (!data.messages || data.messages.length === 0) return;
@@ -1687,10 +1723,10 @@ export default function Home() {
       {/* ─── Nav ─────────────────────────────────────────────── */}
       <GlobalNav active="home" />
 
-      {/* Stage 2: room context ribbon — only shown when ?room_id is in the URL.
-          Tells the user they're chatting inside a Decision Room (not their solo
-          homepage) + lets them exit back to solo. */}
-      {activeRoomId && (
+      {/* Stage 2: context ribbon — tells the user what thread/room they're in.
+          Gold = Decision Room (multi-party, syncs to everyone); neutral =
+          solo Session. Without either, no ribbon shows (fresh /). */}
+      {activeRoomId ? (
         <div
           style={{
             background: "linear-gradient(180deg, rgba(201,168,76,0.18) 0%, rgba(201,168,76,0.04) 100%)",
@@ -1705,10 +1741,12 @@ export default function Home() {
             color: "var(--text-primary, #111)",
           }}
         >
-          <div style={{ display: "flex", alignItems: "center", gap: 8, minWidth: 0 }}>
-            <span style={{ fontSize: 14 }}>🏠</span>
-            <span>
-              You&apos;re in a <strong>Decision Room</strong>. Each turn here syncs to the room.
+          <div style={{ display: "flex", alignItems: "center", gap: 8, minWidth: 0, overflow: "hidden" }}>
+            <span style={{ fontSize: 14, flexShrink: 0 }}>🏠</span>
+            <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+              <strong style={{ color: "var(--gold, #C9A84C)" }}>Decision Room</strong>
+              {activeRoomTitle ? <> · {activeRoomTitle}</> : null}
+              <span style={{ opacity: 0.7 }}> · each turn syncs to everyone</span>
             </span>
           </div>
           <div style={{ display: "flex", gap: 8, flexShrink: 0 }}>
@@ -1748,7 +1786,52 @@ export default function Home() {
             </button>
           </div>
         </div>
-      )}
+      ) : activeSessionId ? (
+        /* Solo chat session ribbon — neutral styling to distinguish from
+           Rooms. Only exit action; session list is in the sidebar. */
+        <div
+          style={{
+            background: "rgba(255,255,255,0.03)",
+            borderBottom: "1px solid var(--border, #2a2622)",
+            padding: "8px 16px",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+            gap: 12,
+            fontFamily: "var(--font-dm-sans)",
+            fontSize: 12,
+            color: "var(--text-muted, #888)",
+          }}
+        >
+          <div style={{ display: "flex", alignItems: "center", gap: 8, minWidth: 0, overflow: "hidden" }}>
+            <span style={{ fontSize: 14, flexShrink: 0 }}>💬</span>
+            <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+              <strong style={{ color: "var(--text-primary, #eee)" }}>Solo chat</strong>
+              {activeSessionTitle ? <> · {activeSessionTitle}</> : null}
+              <span style={{ opacity: 0.7 }}> · private to you</span>
+            </span>
+          </div>
+          <button
+            type="button"
+            onClick={() => {
+              setActiveSessionId(null);
+              router.push("/");
+            }}
+            style={{
+              background: "transparent",
+              border: "1px solid var(--border, #2a2622)",
+              borderRadius: 8,
+              padding: "4px 10px",
+              fontSize: 11,
+              color: "var(--text-muted, #888)",
+              cursor: "pointer",
+              flexShrink: 0,
+            }}
+          >
+            New chat
+          </button>
+        </div>
+      ) : null}
 
       {/* Phase 5.3: Upgrade prompt toast (shown after 3rd favorite when not signed in) */}
       {upgradePromptShown && !auth.isSignedIn && (
