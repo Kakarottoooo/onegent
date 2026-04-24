@@ -1,5 +1,5 @@
 ================================================================
-Onegent · AI 决策代理 · 项目总结 · v0.2.33.0
+Onegent · AI 决策代理 · 项目总结 · v0.2.34.0
 ================================================================
 
 【项目定义】
@@ -16,6 +16,173 @@ Onegent · AI 决策代理 · 项目总结 · v0.2.33.0
 活动 / 多人 trip），非旅行品类（笔记本 / 手机 / 耳机 / 信用卡 /
 礼物 / 健身）已归档。详见本文档头部 "Recent Updates - 2026-04-24
 (cont. 2) · Positioning Shift"。
+
+================================================================
+Recent Updates - 2026-04-24 (cont. 3) · Week 2 · lib/core 抽象完成(B 端基础设施就位)
+================================================================
+
+v0.2.33.0 把产品定位收窄到 Travel Execution Layer 后,Week 2 是"把 pitch 变产品"
+的第一步:把 Execution Engine 从 Next.js app 里抽出来,放进 channel-agnostic 的
+`lib/core/` 模块,让同一套能力既能被 C 端 chat UI 调用(现状),也能被未来的
+REST API / MCP connector / 外部 agent 调用。
+
+这是从"一个 AI 产品"走向"AI 产品们的基础设施"(Stripe / Plaid / Twilio 模式)
+的第一块砖。Week 3 做 REST endpoint 暴露,Week 3-4 做 MCP connector 分发,
+Week 4 做 /developers landing 页。本轮完全不碰 lib/booking-autopilot(护城河
+代码零风险),完全不改现有 C 端 job 创建路径(零回归保证)。
+
+1. `lib/core/` 目录结构(新增 11 个 source file)
+   - `execution/` — 执行引擎
+       types.ts               B 端公共契约(ExecutionJobRequest / Result)
+       executor.ts            单步 adapter,包 lib/booking-autopilot.runBrowserTask
+       recovery.ts            retry + time fallback + Phase 2/3 智能分支
+       recovery-providers.ts  provider fallback chain(OpenTable → Resy → website)
+       job-manager.ts         createJob / getJob / completeJob 契约映射
+   - `consent/` — B 端权限契约(新增)
+       types.ts               ConsentPolicy + ConsentAction + ValidationResult
+       default-policy.ts      DEFAULT_CONSENT_POLICY 等价 C 端当前全自动行为
+       validator.ts           纯函数 switch-case,无 side effect
+   - `audit/` — 结构化审计事件
+       types.ts               AuditLogEntry + AuditEventType(12 variants)
+       audit-log.ts           writeAudit / queryAudit 包 agent_logs 表
+   - `metrics/` — 分析层(B 端 pitch 数据源)
+       types.ts               ProviderSuccessRate / ProviderRankingEntry
+       success-rate.ts        computeSuccessRate / computeProviderRanking
+   - `__tests__/integration.test.ts` + `consent/__tests__/validator.test.ts`
+     合计 23 个单测 + smoke test
+   - `index.ts`               barrel export,所有 public API 从这一处引用
+
+2. 声明式 B 端契约 · ExecutionJobRequest
+   - 替代旧 BrowserTaskInput(命令式:给 URL + task 文本)为声明式:告诉 executor
+     "你要订什么",让它自己决定 URL / provider / fallback 链
+   - Discriminated union 按 scenario 分 params(restaurant / hotel / flight /
+     activity),TypeScript 窄化干净
+   - 4 个 scenario params 完整覆盖现有 C 端所有 runBrowserTask 调用路径(验证
+     过行为映射表,每段对照 route.ts 逐行)
+   - Flight 的 4 个 target hints(Airline / Price / DepartureTime / FlightNumber)
+     从 BrowserTaskInput 内化到 FlightBookingParams
+   - ClientMetadata(agentId / userId / sessionId / idempotencyKey)为 Week 3
+     REST endpoint 的幂等性 + 多租户隔离准备
+   - activity scenario 暂不支持(走 lib/agent-runtime/skills/,和 runBrowserTask
+     不同路径,Week 3+ 统一时再决定合并)
+
+3. Consent 契约(B 端权限层)
+   - 4 个 ConsentAction 变体:adjust_time / switch_venue / retry / use_provider
+   - paymentPolicy 字段:stop_before_cvc(默认,对齐 PCI iframe 物理边界) /
+     stop_before_card / user_pays_elsewhere
+   - submit_payment 故意不是 ConsentAction —— executor 物理上不会提交 payment,
+     做成 action 会误导未来开发者以为代码路径存在
+   - blocklist > allowlist 优先级(对齐 Stripe / AWS IAM)
+   - Exhaustive switch 保证未来加新 action 必须同步加 validator 分支(编译期 catch)
+   - DEFAULT_CONSENT_POLICY 每个字段对应今天 C 端现有参数:
+       allowTimeAdjustment=true, max 90min    (对齐 filterTimeFallbacks)
+       allowVenueSwitch=true                   (对齐 fallbackCandidates 循环)
+       maxRetries=3                            (对齐 recovery.ts)
+       paymentPolicy=stop_before_cvc           (对齐 PCI iframe 物理边界)
+       maxJobDurationSeconds=420               (对齐 BROWSER_TASK_TIMEOUT_MS=7min)
+
+4. Audit 契约(结构化审计事件)
+   - 存储复用 agent_logs 表(零 DB migration),用 source="audit" 区分
+     结构化 audit 事件 vs. 自由格式 debug 日志;queryAudit 过滤这个值
+   - 12 个 AuditEventType 分两组:Lifecycle(job_created / started / paused_payment
+     / completed / failed / aborted)+ Decision(step_attempt / action_allowed /
+     action_denied / time_adjusted / venue_switched / provider_fallback)
+   - writeAudit 沿用 writeAgentLog 的 try/catch 吞错 —— audit 挂不能阻塞真实
+     booking(reliability > observability 的权衡)
+   - level 映射:job_failed / job_aborted / action_denied → warn, 其他 → info
+     (运维 dashboard 能直接过滤 warn 看关键事件,不用解 details JSONB)
+   - lib/db.getAgentLogs 小扩容加 source 参数(只 jobId 分支生效,向后兼容)
+
+5. Metrics 读模型(B 端 pitch 数据源)
+   - 破例不走严格 adapter 姿势 —— 直接写 SQL(而不是包 getAgentFeedbackStats)。
+     理由:那个函数返单体 blob 适合 C 端 Agent Insights 面板,B 端需要
+     细粒度(单 provider + 时间窗口)查询
+   - MetricsTimeRange 只支持 sinceDays(覆盖 95% B 端问题)
+   - 零样本返 successRate=0 不是 NaN(前端模板安全)
+   - minSampleSize 默认 0(避免数据积累期给 caller 空结果);B 端 /developers
+     landing 场景应显式传 5-10 防止 1/1 = 100% 误导
+   - Ranking 同率打破规则:totalAttempts 降序(同成功率下样本多的更可信)
+   - 下游预览:Week 3 `GET /api/v1/metrics/providers/opentable-com?days=30`
+     + Week 4 /developers landing "OpenTable 87% success rate" 卡片
+
+6. 执行引擎(三层)
+   - **Executor(单步 adapter)**:resolveProfile(inline > DB > default) +
+     buildStartUrlAndTask(scenario → { startUrl, task }) + 调 runBrowserTask +
+     audit 写入 + consent 传递。不做 fallback,纯 adapter。
+     行为映射 route.ts:319-915 逐段对照过,包括 flight passport check 回补。
+   - **Recovery(完整链路)**:runExecutionJobWithRecovery 主入口,编排 4 phase:
+       Phase 1 tryPrimary        retry up to maxRetries with [0,2000,5000]ms backoff
+       Phase 2 tryTimeFallbacks  ±30/60/90min 候选,policy-gated 
+       Phase 3 provider chain    OpenTable → Resy → Google Places website
+       Phase 4 (明确不搬)        venue switch / actionItem 留老 path 服务 C 端 UI
+     每个决策点都 validateConsent + writeAudit。Phase 2/3 智能分支:
+     "not found on opentable" 跳过 Phase 2 直进 Phase 3;"no slot near 7pm" 走
+     Phase 2,失败再 fall through Phase 3。
+   - **Recovery-providers**:tryResy(cityToResySlug URL + isGenuineBooking gate)
+     + tryWebsiteHandoff(Google Places + 8-char fuzzy match + 导航找预订链接)。
+     restaurant-only,hotel/flight 各有单一 primary provider 不需要 chain。
+
+7. 双轨并存架构(姿势 D · 零回归保证)
+   - route.ts 的 runStepWithRecovery / runUniversalStep / runActivityStep / POST
+     handler 全部 0 行修改
+   - 新 path 的触发需要双重 gate 同时满足:
+       process.env.USE_CORE_EXECUTOR === "true"          (env flag kill-switch)
+       AND step.body.__source === "lib/core/execution"   (per-job marker)
+   - Marker 只由 lib/core/execution/job-manager.createJob 写入。所有现有 C 端
+     job 创建路径(chat-commit / trip-package / DR synthesis / create-trip)
+     都不经过 job-manager,没 marker → 即使 flag=true 仍走 legacy path
+   - Week 3 /api/v1/execution-jobs B 端 caller 通过 job-manager.createJob 创建
+     的 job 会自然带 marker → 走新 path。这是正确的分发策略。
+   - route.ts 新加一个 runUniversalStepViaCore 薄 helper:从 step.body 反构
+     ExecutionJobRequest → 调 runExecutionJobWithRecovery → 映射
+     ExecutionJobResult 回 BookingJobStep。~45 行,纯映射无业务逻辑。
+
+8. 测试 · 工程数据
+   - 23 个 lib/core 单测全绿:
+       validator.test.ts(16 tests)  纯函数,4 ConsentAction × allow/deny 边界
+       integration.test.ts(7 tests) smoke,mock runBrowserTask / lib/db / tools,
+                                     覆盖单次成功 / transient retry / maxRetries
+                                     gate / Phase 2 time fallback / consent
+                                     两维度独立性 / Phase 3 provider chain
+   - 82 个 NLU v2 测试零回归(含 v0.2.33.0 的 out-of-scope golden)
+   - tsc --noEmit 0 错 · npm run build 成功 · 每 story 落盘前都跑过
+   - 代码体量:~2800 新代码,0 行 legacy 删除,0 行 lib/booking-autopilot 修改
+
+9. Week 2 story 落地顺序(每 story 一 commit + 一 push)
+     US-001 types                              ExecutionJobRequest / Result
+     US-002 consent/                           policy + validator
+     US-003 audit/                             writeAudit + queryAudit
+     US-004 metrics/                           success rate + ranking
+     US-005 execution/executor.ts              单步 adapter
+     US-006 execution/job-manager.ts           createJob / getJob / completeJob
+     US-007a execution/recovery.ts             retry + time fallback
+     US-007b execution/recovery-providers.ts   provider fallback chain
+     US-008 index.ts barrel + tests            23 个测试全绿
+     US-009 route.ts USE_CORE_EXECUTOR flag    双重 gate,零 legacy 修改
+
+10. 开发流程本身的价值(下轮继续用)
+    - 每 story 做完主动验证:行为映射表(对照 route.ts 逐段标注等价性 / 简化 /
+      增强 / 差异),tsc / build / test 三件套,commit message 写"为什么"而非
+      "改了什么"
+    - 每 story 独立 commit 独立 push · Git 历史可 bisect · 任何 story 都能
+      单独 revert
+    - 直接在 master 上线性推进(对单人 + 顺序开发最务实),不搞 feature 分支
+      最后大 merge 的复杂性
+
+11. 下一步路线(Week 3 · 4 · 5)
+    - **Week 3 REST endpoint**:`/api/v1/execution-jobs` POST/GET 端点 +
+      `api_keys` 表 + API key middleware。lib/core 契约直接对外,让 B 端
+      caller 能 curl 测试。这一步相当于"AI Travel Execution Layer" 从
+      pitch 词变成 "curl 得通的 API"
+    - **Week 3-4 MCP connector**:新 repo onegent-mcp-connector,装
+      @modelcontextprotocol/sdk,实现 book_restaurant / plan_group_dinner
+      tool。内部 fetch /api/v1/execution-jobs。目标:Claude Desktop / ChatGPT
+      用户通过 connector directory 添加 Onegent 后直接说"帮我订下周的酒店"。
+      这是分发窗口期红利
+    - **Week 4 /developers landing**:`app/developers/page.tsx` 一页,hero
+      "AI Travel Execution Layer for agents and groups" + 3 卖点卡 + waitlist
+      表单。Metrics 读模型(Week 2 做的)提供"OpenTable success rate 87%"这种
+      数字卡片数据源
 
 ================================================================
 Recent Updates - 2026-04-24 (cont. 2) · Positioning Shift to Travel Execution Layer
@@ -1270,6 +1437,55 @@ Cron：4 个定时任务（反馈提示 / 价格检查 / 场馆质量 / 笔记�
 ================================================================
 九、版本历史摘要
 ================================================================
+
+v0.2.34.0（2026-04-24）— **Week 2 · lib/core 抽象完成**(B 端基础设施就位)
+  · 紧接 v0.2.33.0 定位转型,Week 2 把 Execution Engine 从 Next.js app 抽
+    到 channel-agnostic 的 lib/core/ 模块。同一套执行能力既能被 C 端 chat
+    UI 调用(现状),也能被未来 REST API / MCP connector / 外部 agent 调用
+  · 新增 11 个 source file + 2 个 test file,~2800 行新代码,0 行 legacy
+    删除,0 行 lib/booking-autopilot/ 修改
+  · lib/core 目录结构:
+      execution/  — types + executor(单步) + recovery(4 phase) +
+                    recovery-providers(OpenTable→Resy→website chain) +
+                    job-manager(createJob/completeJob)
+      consent/    — policy + validator,4 ConsentAction × allow/deny,
+                    DEFAULT_CONSENT_POLICY 每字段对齐今天 C 端 C 端行为
+      audit/      — writeAudit / queryAudit,复用 agent_logs 表 + source=
+                    "audit" marker 区分结构化 vs. debug log(零 DB migration)
+      metrics/    — computeSuccessRate / computeProviderRanking,直接 SQL
+                    聚合(破例不包 getAgentFeedbackStats,因 B 端需 per-provider
+                    + timeRange 细查询)
+      index.ts    — barrel,所有 public API 从这一处对外
+  · 声明式 B 端契约 ExecutionJobRequest:scenario discriminator + 各 params,
+    4 个 scenario(restaurant/hotel/flight/activity)完整覆盖现有所有
+    runBrowserTask 调用路径(activity 暂不支持,走 lib/agent-runtime/skills/)
+  · 双轨并存架构(姿势 D · 零回归保证):
+      route.ts 的 runStepWithRecovery / runUniversalStep / runActivityStep /
+        POST handler 全部 0 修改
+      新 path 触发需 USE_CORE_EXECUTOR=true AND body.__source="lib/core/
+        execution" 双重 gate 同时满足
+      现有 C 端 job 创建路径(chat-commit / trip-package / DR synthesis)
+        都不经过 job-manager → 没 marker → 即使 flag=true 仍走 legacy
+      Week 3 /api/v1/ B 端 caller 通过 job-manager 创建的 job 自然带
+        marker → 走新 path。正确的分发策略
+  · Recovery 4 phase 实现 + Phase 2/3 智能分支:
+      Phase 1 tryPrimary         retry up to maxRetries with [0,2000,5000]ms
+      Phase 2 tryTimeFallbacks   ±30/60/90min candidates,consent-gated
+      Phase 3 provider chain     OpenTable → Resy → Google Places website
+      Phase 4 (不搬) venue switch / actionItem 留老 path 服务 C 端 UI
+      "not found on opentable" 跳 Phase 2 直进 Phase 3;"no slot near 7pm"
+        走 Phase 2 失败再 fall through Phase 3
+  · 每个决策点都 validateConsent + writeAudit;4 ConsentAction(adjust_time /
+    switch_venue / retry / use_provider)exhaustive switch 编译期 catch 缺失
+  · 验证:tsc 0 错 + npm run build 成功 + 23 lib/core tests + 82 NLU v2
+    零回归 + 每 story 主动验证(行为映射表对照 route.ts 逐段标注等价性 /
+    简化 / 增强 / 差异)
+  · Week 2 story 落地:US-001..006 是纯新模块(零现有代码修改),US-007a/b
+    是 recovery 搬家(姿势 D 保证新 path 独立),US-008 是 barrel + 23 tests,
+    US-009 是 route.ts 加双重 gate(~45 行 helper,0 行 legacy 修改)
+  · 下一步:Week 3 `/api/v1/execution-jobs` REST endpoint + api_keys 表 →
+    Week 3-4 MCP connector 占位 Claude/ChatGPT directory 分发红利 →
+    Week 4 /developers landing(消费 metrics/ 数据源)
 
 v0.2.33.0（2026-04-24）— **Positioning Shift · Travel Execution Layer**（战略转型）
   · 定位从"多品类决策助手"收窄为 **AI Travel Execution Layer**，
