@@ -16,17 +16,19 @@ export function DevNav() {
   const { isSignedIn, isLoaded } = useUser();
   const pathname = usePathname();
 
-  // Dashboard owns its own chrome; suppress the marketing nav there.
-  if (pathname?.startsWith("/developers/keys")) {
-    return null;
-  }
-
+  // ALL hooks must run on every render — never put a useEffect after
+  // the early-return below or React will yell about hook count drift.
   useEffect(() => {
     const onScroll = () => setScrolled(window.scrollY > 8);
     onScroll();
     window.addEventListener("scroll", onScroll, { passive: true });
     return () => window.removeEventListener("scroll", onScroll);
   }, []);
+
+  // Dashboard owns its own chrome; suppress the marketing nav there.
+  if (pathname?.startsWith("/developers/keys")) {
+    return null;
+  }
 
   // Don't render auth UI until Clerk has hydrated, otherwise the
   // signed-in/out branches flicker on every page load.
