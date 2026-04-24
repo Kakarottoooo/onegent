@@ -2,6 +2,9 @@
   "name": "restaurant-agent",
   "version": "0.1.0",
   "private": true,
+  "workspaces": [
+    "packages/*"
+  ],
   "scripts": {
     "dev": "next dev",
     "build": "next build",
@@ -9,7 +12,8 @@
     "start": "next start",
     "lint": "eslint",
     "test": "vitest",
-    "test:coverage": "vitest run --coverage"
+    "test:coverage": "vitest run --coverage",
+    "build:mcp": "npm run build -w @onegent/mcp-server"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.79.0",

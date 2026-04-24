@@ -1,0 +1,53 @@
+{
+  "name": "@onegent/mcp-server",
+  "version": "0.1.0",
+  "description": "Book restaurants, hotels, flights, and activities through an AI agent that navigates real booking sites.",
+  "keywords": [
+    "mcp",
+    "modelcontextprotocol",
+    "ai-agent",
+    "travel",
+    "booking",
+    "restaurant",
+    "hotel",
+    "flight",
+    "onegent"
+  ],
+  "license": "MIT",
+  "author": "Onegent",
+  "homepage": "https://github.com/kakarottoooo/onegent/tree/master/packages/mcp-server",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/kakarottoooo/onegent.git",
+    "directory": "packages/mcp-server"
+  },
+  "bugs": {
+    "url": "https://github.com/kakarottoooo/onegent/issues"
+  },
+  "type": "module",
+  "main": "./dist/index.js",
+  "bin": {
+    "onegent-mcp-server": "./dist/index.js"
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "build": "tsc",
+    "prepublishOnly": "npm run build",
+    "start": "node ./dist/index.js",
+    "dev": "tsc --watch"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.0.4",
+    "zod": "^4.3.6"
+  },
+  "devDependencies": {
+    "@types/node": "^20",
+    "typescript": "^5"
+  }
+}
