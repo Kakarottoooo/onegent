@@ -213,15 +213,20 @@ async function syncSessionContext(
 ): Promise<string | null> {
   try {
     let sessionId = incomingSessionId ?? null;
+    let created = false;
     if (sessionId) {
       // Defensive: make sure this user owns the session before writing.
       const existing = await getChatSession(sessionId, userId);
-      if (!existing) sessionId = null;
+      if (!existing) {
+        console.warn(`[chat/parse] session ${sessionId} not owned by user=${userId}; creating fresh`);
+        sessionId = null;
+      }
     }
     if (!sessionId) {
       sessionId = randomUUID();
       const title = (userMessage.trim() || "New chat").slice(0, 80);
       await createChatSession({ id: sessionId, userId, title });
+      created = true;
     }
     await insertChatSessionMessage({ sessionId, role: "user", content: userMessage });
     if (assistantReply && assistantReply.trim()) {
@@ -231,9 +236,12 @@ async function syncSessionContext(
         content: assistantReply,
       });
     }
+    console.log(
+      `[chat/parse] session sync ok — session=${sessionId} ${created ? "(new)" : "(existing)"} user=${userId}`,
+    );
     return sessionId;
   } catch (err) {
-    console.warn(`[chat/parse] session sync failed for user=${userId}:`, err);
+    console.warn(`[chat/parse] session sync FAILED for user=${userId}, incoming=${incomingSessionId ?? "none"}:`, err);
     return null;
   }
 }

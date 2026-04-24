@@ -157,24 +157,32 @@ export default function Home() {
     if (replayedSessionIds.current.has(activeSessionId)) return;
     if (chat.messages.length > 0) {
       replayedSessionIds.current.add(activeSessionId);
+      console.log(`[session-replay] skipped ${activeSessionId} — chat already has ${chat.messages.length} msgs`);
       return;
     }
     let cancelled = false;
     (async () => {
       try {
+        console.log(`[session-replay] fetching /api/chat/sessions/${activeSessionId}/messages`);
         const res = await fetch(`/api/chat/sessions/${activeSessionId}/messages`);
-        if (!res.ok) return;
+        if (!res.ok) {
+          console.warn(`[session-replay] fetch failed: ${res.status}`);
+          return;
+        }
         const data = (await res.json()) as {
           messages: Array<{ id: string; role: "user" | "assistant"; content: string; created_at: string }>;
         };
-        if (cancelled || !data.messages || data.messages.length === 0) return;
+        console.log(`[session-replay] got ${data.messages?.length ?? 0} messages for ${activeSessionId}`);
+        if (cancelled) return;
+        // Mark replayed even on empty — otherwise we'd keep re-fetching.
         replayedSessionIds.current.add(activeSessionId);
+        if (!data.messages || data.messages.length === 0) return;
         for (const m of data.messages) {
           if (m.role === "user") chat.injectUserMessage(m.content);
           else chat.injectAssistantMessage(m.content);
         }
-      } catch {
-        // non-fatal
+      } catch (err) {
+        console.warn("[session-replay] error", err);
       }
     })();
     return () => {
