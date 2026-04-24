@@ -94,8 +94,8 @@
 }
 
 /* Decorative gold underline that animates from left → right under
- * a hero word. The animation kicks in on `.is-mounted` so SSR
- * doesn't show a flash of completed state. */
+ * a hero word. Pure CSS — animation runs once on first paint, so
+ * SSR never flashes a completed state. */
 .dev-token-underline {
   position: relative;
   display: inline-block;
@@ -107,14 +107,43 @@
   position: absolute;
   left: 0;
   right: 0;
-  bottom: -0.08em;
+  bottom: -0.06em;
   height: 0.06em;
   background: var(--accent);
   transform-origin: left;
   transform: scaleX(0);
-  transition: transform var(--motion-slower) var(--ease-out-expo) 220ms;
+  animation: dev-underline-draw var(--motion-slower) var(--ease-out-expo) 320ms forwards;
 }
 
-.is-mounted .dev-token-underline::after {
-  transform: scaleX(1);
+@keyframes dev-underline-draw {
+  to {
+    transform: scaleX(1);
+  }
+}
+
+/* Hero text fades up on load — staggered children. */
+.dev-fade-up {
+  opacity: 0;
+  transform: translateY(12px);
+  animation: dev-fade-up var(--motion-slow) var(--ease-out-expo) forwards;
+}
+
+.dev-fade-up--delay-1 {
+  animation-delay: 60ms;
+}
+.dev-fade-up--delay-2 {
+  animation-delay: 160ms;
+}
+.dev-fade-up--delay-3 {
+  animation-delay: 280ms;
+}
+.dev-fade-up--delay-4 {
+  animation-delay: 420ms;
+}
+
+@keyframes dev-fade-up {
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
