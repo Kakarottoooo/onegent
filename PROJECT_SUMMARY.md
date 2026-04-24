@@ -1,5 +1,5 @@
 ================================================================
-Onegent · AI 决策代理 · 项目总结 · v0.2.32.0
+Onegent · AI 决策代理 · 项目总结 · v0.2.33.0
 ================================================================
 
 【项目定义】
@@ -10,6 +10,108 @@ Onegent · AI 决策代理 · 项目总结 · v0.2.32.0
 核心标签：决策平台 · 场景编排 · 自主执行 · 个性化记忆 · 持续学习 · 双人协作决策
 
 产品地址：https://onegent.one/
+
+**垂直聚焦（v0.2.33.0, 2026-04-24）**：从多品类决策助手收窄为
+**AI Travel Execution Layer**——专注旅行场景（餐厅 / 酒店 / 机票 /
+活动 / 多人 trip），非旅行品类（笔记本 / 手机 / 耳机 / 信用卡 /
+礼物 / 健身）已归档。详见本文档头部 "Recent Updates - 2026-04-24
+(cont. 2) · Positioning Shift"。
+
+================================================================
+Recent Updates - 2026-04-24 (cont. 2) · Positioning Shift to Travel Execution Layer
+================================================================
+
+本轮是**战略级定位转型**，不是功能迭代。动机来自深度战略讨论后的
+判断：Onegent 真正独特的两样资产（Decision Room 多人协作 + Autopilot
+浏览器自动化执行）在旅行场景是 10 分价值，在 3C / 礼物 / 健身
+场景是 0 分价值（后者通用 AI 助手都能做、Amazon 一键购买已做完
+"最后一公里"）。定位窄才讲得清差异化、才讲得清 B 端故事
+（"给其他 agent 用的 travel execution API"）。
+
+1. 代码归档 — 非旅行品类整体搬到 `_archived/` 目录
+   - Pipelines 归档（`lib/agent/_archived/2026-04-positioning-shift/pipelines/`）：
+     `credit-card.ts / laptop.ts / smartphone.ts / headphone.ts`
+   - Planners 归档（`lib/agent/_archived/2026-04-positioning-shift/planners/`）：
+     `big-purchase.ts / fitness.ts / gift.ts` + 对应 `__tests__/`
+   - Components 归档（`components/_archived/2026-04-positioning-shift/`）：
+     `CreditCardCard.tsx / LaptopCard.tsx / SmartphoneCard.tsx / HeadphoneCard.tsx`
+   - 所有归档用 `git mv` 保留历史；每个归档目录带 README.md 说明
+     归档原因 + 日期 + 文件清单，未来如需拉回可溯源
+   - `tsconfig.json` + `vitest.config.ts` 把 `**/_archived/**` 加入
+     exclude，归档代码不参与 typecheck 也不跑测试
+
+2. 首页清理 — `app/page.tsx` 净删 182 行死代码
+   - 删 4 个 Card import（`CreditCardCard / LaptopCard / SmartphoneCard / HeadphoneCard`）
+   - 删 4 个 JSX 渲染块（gated on `resultCategory === "credit_card" | "laptop" | "smartphone" | "headphone"`）
+   - 删 `hasCategoryResults` 聚合里 4 个 `chat.all{Xxx}Cards.length > 0` 检查
+   - 这些代码实际在运行时**永远不会被触发**，因为 `NluScenario`
+     类型早已不包含这些场景——属于幽灵 UI，本轮一起清掉
+
+3. Agent orchestrator 清理 — `lib/agent.ts` 净删 226 行
+   - 删 4 个 pipeline import + 4 个 planner import
+   - 删 3 个 `detectedScenario === "gift" | "fitness" | "big_purchase"`
+     分支 + 4 个独立 category 路由
+   - 3 处 weekend-trip call site 去掉 `runCreditCardPipeline`，
+     planner 现在接收 `creditCardRecommendations: []` 优雅降级
+   - 补一个防御性 TS narrowing guard 让 restaurant fallback
+     正确收窄 `ParsedIntent → RestaurantIntent`
+   - `lib/__tests__/scenario2.test.ts` 删 big-purchase 相关 describe
+
+4. NLU v2 非旅行请求礼貌拒绝（核心行为变化）
+   - `lib/agent/nlu-v2/extractor.ts` +35 行：插入 CRITICAL — OUT-OF-SCOPE
+     DETECTION 块，列出 6 类非旅行话题（electronics / shopping /
+     gifts / fitness / credit cards / personal advice）。匹配后要求
+     `intent="chitchat"` + `scenario=null` + 在 `planning_assumptions`
+     append 字符串 `"out_of_scope: <brief topic>"`。新增 WORKED
+     EXAMPLE E 覆盖 laptop / yoga / gift 三类 query
+   - `lib/agent/nlu-v2/chat.ts` +3 行：插入 CRITICAL — OUT-OF-SCOPE
+     DECLINE 指令。看到 `out_of_scope:` 前缀就礼貌拒绝（匹配用户
+     语言：中文对中文、英文对英文），1-2 句，指向 ChatGPT / Claude
+   - `lib/agent/nlu-v2/router.ts` +12 行：`buildStateSummary()` 提取
+     `planning_assumptions` 过滤空值后 append 到 no-scenario 和
+     主场景两个返回路径（` Planning assumptions: a; b.`），让 chat
+     层能看到 tag
+   - 纯 prompt + summary 改动，不新增 `NluIntent` / `RouterAction`
+     变体，不改 `routeIntent()` 分支逻辑
+
+5. 新 Golden Test — 守住 decline 路径不回归
+   - `lib/agent/nlu-v2/__tests__/golden-out-of-scope.test.ts` +75 行
+   - 3 个 case：英文电子（"help me buy a laptop for coding"）、中文
+     健身（"推荐 brooklyn 周六早上的瑜伽课"）、英文礼物（"gift ideas
+     for my mom birthday budget 150"）
+   - 驱动真实 `extractState()` LLM 调用，`describe.skipIf(!OPENAI_API_KEY)`
+     让 CI 没 key 时优雅 skip，本地/生产 3/3 pass
+
+6. 用户层的影响面
+   - **C 端主流量（餐厅/酒店/机票/活动/trip）完全无感**——这些 UI
+     和 Autopilot 路径零改动
+   - **边缘用户（问 "帮我买笔记本"）**得到一个清晰的礼貌答复，而不是
+     困惑的"我不太懂但我试试"——这是主动筛选，不是流失
+   - **Decision Room / Autopilot 两大核心资产**未改动分毫，它们是
+     这次定位收窄后的护城河
+
+7. 工程质量数据
+   - 27 个文件改动（+377 / -609，净减 232 行）
+   - 9 个 atomic commits（7 feat + 2 chore），每个独立可 bisect
+   - `tsc --noEmit` 0 错误
+   - `npm run build` 成功（所有 prerender 通过）
+   - NLU v2 测试套件 85/85 全绿（82 pre-existing + 3 新 golden）
+   - Ralph 自主代码 agent 跑完全部 7 个 user story，期间自主发现
+     PRD 里的 bug（我写的 `cardType ===` 其实是 `resultCategory ===`）
+     并 grep 找到正确模式——`scripts/ralph/progress.txt` 记录了
+     完整 learning 链
+
+8. 下一步路线图（不在本轮 scope）
+   - **Week 2 · `lib/core/` 抽象**：把 Execution Engine（Autopilot）+
+     Group Coordination（Decision Room）+ Provider Adapters 从
+     current app 抽出来，形成 channel-agnostic 的"核心"
+   - **Week 3 · `/api/v1/execution-jobs` REST 接口 + `api_keys` 表**：
+     让外部 agent 能以 B 端身份调用 Onegent 的 travel execution 能力
+   - **Week 4 · `app/developers` landing**：B 端入口页，"AI Travel
+     Execution Layer for agents and groups" 一句话 pitch + waitlist
+   - **Week 5 · MCP connector**：占位 Claude / ChatGPT 的 connector
+     directory 分发窗口
+   - C 端 app 保留并持续迭代——它是 B 端 API 的 dogfood 客户
 
 ================================================================
 Recent Updates - 2026-04-18
@@ -1168,6 +1270,34 @@ Cron：4 个定时任务（反馈提示 / 价格检查 / 场馆质量 / 笔记�
 ================================================================
 九、版本历史摘要
 ================================================================
+
+v0.2.33.0（2026-04-24）— **Positioning Shift · Travel Execution Layer**（战略转型）
+  · 定位从"多品类决策助手"收窄为 **AI Travel Execution Layer**，
+    专注餐厅 / 酒店 / 机票 / 活动 / 多人 trip 五条旅行主线
+  · 代码归档 11 个非旅行文件 + 2 个 test 到 `_archived/2026-04-positioning-shift/`：
+    4 pipelines（laptop/smartphone/headphone/credit-card）+
+    3 planners（big-purchase/fitness/gift）+
+    4 components（CreditCardCard/LaptopCard/SmartphoneCard/HeadphoneCard）
+    用 `git mv` 保留历史，每个归档目录带 README 说明原因
+  · 首页 `app/page.tsx` 净删 182 行死代码（4 import + 4 JSX + 4 聚合检查）
+  · `lib/agent.ts` 净删 226 行（8 import + 3 scenario 分支 + 4 独立路由）
+  · `tsconfig.json` + `vitest.config.ts` 新增 `**/_archived/**` 到 exclude，
+    归档代码不参与 typecheck 也不跑测试
+  · NLU v2 非旅行请求礼貌拒绝：
+    `extractor.ts` +35 行 OUT-OF-SCOPE DETECTION（6 类非旅行话题 tag
+      `out_of_scope:` 前缀到 `planning_assumptions`）
+    `chat.ts` +3 行 OUT-OF-SCOPE DECLINE（看到前缀→礼貌引导 ChatGPT/Claude，
+      语言匹配）
+    `router.ts` +12 行 `buildStateSummary()` 把 `planning_assumptions`
+      append 到两个返回路径让 chat 层能看到 tag
+    纯 prompt + summary 改动，不新增类型、不改 router 分支逻辑
+  · 新 golden test `golden-out-of-scope.test.ts` 3 case（英文 laptop /
+    中文瑜伽 / 英文 gift）驱动真实 LLM 守住 decline 路径
+  · 工程数据：27 文件（+377 -609），9 atomic commits（7 feat + 2 chore），
+    tsc 0 错，build 绿，NLU v2 85/85 pass，Ralph 自主 agent 跑完全部
+    7 个 user story
+  · 为下一阶段铺路：Week 2 `lib/core/` 抽 Execution Engine → Week 3
+    REST API + `api_keys` → Week 4 `/developers` landing → Week 5 MCP
 
 v0.2.32.0（2026-04-24）— Stage 2 · T11 全量落地（inline proposal card + α 投票 + Autopilot 启动）
   · 新组件 `TripProposalChatCard.tsx`：4 列（🏨 · ✈ · 🍽 · 🎟）内联在聊天流，
