@@ -5,6 +5,7 @@ import { AuthStateProvider } from "./contexts/AuthContext";
 import { ClerkSync } from "./contexts/ClerkSync";
 import { ChunkErrorRecovery } from "./contexts/ChunkErrorRecovery";
 import { ServiceWorkerManager } from "./contexts/ServiceWorkerManager";
+import { BrandStrip } from "@/components/BrandStrip";
 import "./globals.css";
 
 const playfair = Playfair_Display({
@@ -46,6 +47,7 @@ export default function RootLayout({
         <ServiceWorkerManager />
         {/* ClerkSync bridges Clerk state to AuthContext (only rendered when Clerk is configured) */}
         {clerkEnabled && <ClerkSync />}
+        <BrandStrip />
         {children}
       </body>
     </html>
