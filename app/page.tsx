@@ -212,6 +212,18 @@ export default function Home() {
     (async () => {
       try {
         const res = await fetch(`/api/rooms/${activeRoomId}`);
+        // Stale URL ↔ deleted/inaccessible room: kick the user back to / so
+        // they don't keep firing synthesize/parse with a zombie room id.
+        // 404 = room doesn't exist; 403 = user isn't a member (e.g. room
+        // was deleted and membership cleaned up, or they left/declined).
+        if (res.status === 404 || res.status === 403) {
+          if (!cancelled) {
+            setActiveRoomId(null);
+            replayedRoomIds.current.delete(activeRoomId);
+            router.replace("/");
+          }
+          return;
+        }
         if (!res.ok) return;
         const data = (await res.json()) as { room?: { title?: string } };
         if (!cancelled && data.room?.title) setActiveRoomTitle(data.room.title);
@@ -222,7 +234,7 @@ export default function Home() {
     return () => {
       cancelled = true;
     };
-  }, [activeRoomId]);
+  }, [activeRoomId, router]);
 
   // Reset session title when active session clears.
   useEffect(() => {
@@ -796,6 +808,18 @@ export default function Home() {
               headers: { "Content-Type": "application/json" },
               body: JSON.stringify({ force: true }),
             });
+            // Stale room id in the URL (deleted / left / never joined). Kick
+            // back to / so the user can start fresh instead of looping on
+            // "方案生成失败了".
+            if (res.status === 404 || res.status === 403) {
+              chat.injectAssistantMessage(
+                "这个房间已经不存在了（被删除或你不是成员）。我带你回到首页重新开始。",
+              );
+              setActiveRoomId(null);
+              replayedRoomIds.current.delete(activeRoomId);
+              router.replace("/");
+              return;
+            }
             const data = (await res.json().catch(() => ({}))) as {
               ok?: boolean;
               reason?: string;
