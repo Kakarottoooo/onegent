@@ -253,6 +253,12 @@ export default function Home() {
           if (m.role === "user") chat.injectUserMessage(m.content);
           else chat.injectAssistantMessage(m.content);
         }
+        // Rehydrate the NLU history so the extractor sees the prior turns
+        // on the next /api/chat/parse call — otherwise the agent acts
+        // amnesiac after a refresh (sees only the new message).
+        nluHistoryRef.current = data.messages
+          .slice(-20)
+          .map((m) => ({ role: m.role, content: m.content }));
       } catch (err) {
         console.warn("[session-replay] error", err);
       }
@@ -290,6 +296,12 @@ export default function Home() {
           if (m.role === "user") chat.injectUserMessage(m.content);
           else chat.injectAssistantMessage(m.content);
         }
+        // Rehydrate NLU history (same rationale as session replay below).
+        // Skip system-role messages — only user/assistant feed the extractor.
+        nluHistoryRef.current = data.messages
+          .filter((m) => m.role === "user" || m.role === "assistant")
+          .slice(-20)
+          .map((m) => ({ role: m.role as "user" | "assistant", content: m.content }));
       } catch {
         // Network failure here is non-fatal — user can still chat fresh.
       }
