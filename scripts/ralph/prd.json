@@ -86,8 +86,8 @@
         "Typecheck passes"
       ],
       "priority": 6,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Completed 2026-04-24. Two-file prompt+glue change. (1) lib/agent/nlu-v2/router.ts · buildStateSummary: added a planning-assumptions suffix (' Planning assumptions: a; b.') appended to every branch — the early-return no-scenario branch AND the main scenario branch — so the chat layer always sees assumptions regardless of scenario. Filtered to non-empty strings per PRD. (2) lib/agent/nlu-v2/chat.ts · buildSystemPrompt: inserted a 'CRITICAL — OUT-OF-SCOPE DECLINE' block above the state summary; tells the model to politely redirect to ChatGPT/Claude when the state contains an 'out_of_scope:' planning assumption, language-matched (Chinese if last user message is Chinese else English), 1-2 sentences. Zero changes to routeIntent() branching or RouterAction variants — out_of_scope still flows through as continue_chat because extractor sets intent='chitchat'. Typecheck clean. All 82 NLU v2 tests pass (golden-solo/multi/trip unchanged)."
     },
     {
       "id": "US-007",

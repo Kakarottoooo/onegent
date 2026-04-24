@@ -100,10 +100,18 @@ export function getMissingForScenario(state: IntentState): string[] {
  * the whole conversation history itself.
  */
 export function buildStateSummary(state: IntentState): string {
+  const assumptions = (state.planning_assumptions ?? []).filter(
+    (a): a is string => typeof a === "string" && a.trim().length > 0,
+  );
+  const assumptionsSuffix = assumptions.length > 0
+    ? ` Planning assumptions: ${assumptions.join("; ")}.`
+    : "";
+
   if (!state.scenario) {
-    return state.intent === "chitchat"
+    const base = state.intent === "chitchat"
       ? "User is chatting casually — no booking intent yet."
       : "User wants to book something but the category isn't clear yet.";
+    return base + assumptionsSuffix;
   }
 
   const parts: string[] = [];
@@ -134,7 +142,7 @@ export function buildStateSummary(state: IntentState): string {
   } else {
     parts.push("All required info collected — ready to confirm.");
   }
-  return parts.join(" ");
+  return parts.join(" ") + assumptionsSuffix;
 }
 
 // ─── Per-scenario missing-field checks ────────────────────────────────────
