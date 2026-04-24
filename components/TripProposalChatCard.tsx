@@ -445,19 +445,40 @@ export default function TripProposalChatCard(props: TripProposalChatCardProps) {
   }
 
   async function handleLockIn() {
-    if (saveInflight) return;
+    if (saveInflight || !data?.proposal?.id) return;
     setSaveInflight(true);
     setSaveError(null);
     try {
-      const res = await fetch(`/api/rooms/${props.roomId}/trip-selection`, {
+      // Step 1: persist the selection.
+      const selRes = await fetch(`/api/rooms/${props.roomId}/trip-selection`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(selection),
       });
-      if (!res.ok) {
-        const body = (await res.json().catch(() => ({}))) as { error?: string };
+      if (!selRes.ok) {
+        const body = (await selRes.json().catch(() => ({}))) as { error?: string };
         setSaveError(body.error ?? "Couldn't save selection.");
         return;
+      }
+      // Step 2: locking IS approving. Cast an approve vote in the same click
+      // so members don't have to click twice (UX simplification). Server
+      // upserts by (proposal_id, user_id) so a repeat lock-in just refreshes
+      // the same approve. A user who explicitly wants to reject can still
+      // click Decline below to overwrite.
+      if (data.my_vote !== "approve") {
+        const voteRes = await fetch(
+          `/api/rooms/${props.roomId}/proposals/${data.proposal.id}/vote`,
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ vote: "approve", option_id: "legacy" }),
+          },
+        );
+        if (!voteRes.ok) {
+          const body = (await voteRes.json().catch(() => ({}))) as { error?: string };
+          setSaveError(body.error ?? "Selection saved but vote failed.");
+          return;
+        }
       }
       // Immediately re-fetch so everyone's counts update.
       await fetchProposal();
@@ -561,7 +582,7 @@ export default function TripProposalChatCard(props: TripProposalChatCardProps) {
     rule === "unanimous" ? joinedMembers : Math.floor(joinedMembers / 2) + 1;
   const approvalMet = approvedCount >= approvalThreshold && joinedMembers > 0;
 
-  const voteLabel = `${totalVoters}/${joinedMembers} 人已提交选择 · ${approvedCount}/${approvalThreshold} 已批准（${rule}）`;
+  const voteLabel = `${totalVoters}/${joinedMembers} 人已提交选择`;
 
   return (
     <div style={WRAPPER} data-trip-proposal>
@@ -656,81 +677,64 @@ export default function TripProposalChatCard(props: TripProposalChatCardProps) {
         </ColumnSection>
       </div>
 
-      {/* Vote row — every member gets Approve / Decline / Request changes.
-          Payer's Book button below stays disabled until the approval
-          threshold is met (same gate the server enforces in /book-trip). */}
-      <div
-        style={{
-          padding: "10px 16px",
-          borderTop: "1px solid var(--border, #e5e7eb)",
-          display: "flex",
-          alignItems: "center",
-          gap: 10,
-          flexWrap: "wrap",
-          fontFamily: "var(--font-dm-sans)",
-          fontSize: 12,
-          color: "var(--text-secondary, #555)",
-        }}
-      >
-        <span>
-          投票（{rule} 规则，需 {approvalThreshold}/{joinedMembers} 批准）：
-        </span>
-        <VoteButton
-          label="✓ Approve"
-          active={data.my_vote === "approve"}
-          loading={voteInflight === "approve"}
-          onClick={() => handleVote("approve")}
-          variant="approve"
-        />
-        <VoteButton
-          label="✗ Decline"
-          active={data.my_vote === "decline"}
-          loading={voteInflight === "decline"}
-          onClick={() => handleVote("decline")}
-          variant="decline"
-        />
-        <VoteButton
-          label="↺ Request changes"
-          active={data.my_vote === "request_changes"}
-          loading={voteInflight === "request_changes"}
-          onClick={() => handleVote("request_changes")}
-          variant="neutral"
-        />
-        {voteError ? (
-          <span style={{ color: "#c0392b" }}>{voteError}</span>
-        ) : null}
-        <span style={{ marginLeft: "auto", color: approvalMet ? "var(--gold, #c9a648)" : "var(--text-muted, #888)", fontWeight: 600 }}>
-          {approvedCount}/{approvalThreshold} approved{approvalMet ? " ✓" : ""}
-        </span>
-      </div>
-
       <div style={FOOTER}>
         <div>
           <div style={{ fontSize: 13, fontWeight: 600, color: "var(--text-primary, #111)", fontFamily: "var(--font-dm-sans)" }}>
             {totalSelected === 0 ? "Nothing selected yet" : `${totalSelected} selected`}
+            {data.my_vote === "approve" ? (
+              <span style={{ marginLeft: 8, color: "#1f7a38", fontSize: 11 }}>· ✓ you approved</span>
+            ) : data.my_vote === "decline" ? (
+              <span style={{ marginLeft: 8, color: "#c0392b", fontSize: 11 }}>· ✗ you declined</span>
+            ) : null}
           </div>
           <div style={{ fontSize: 11, color: "var(--text-muted, #888)", fontFamily: "var(--font-dm-sans)" }}>
             {isPayer
               ? approvalMet
-                ? "Everyone approved — ready to book."
-                : `Waiting on approvals — need ${approvalThreshold - approvedCount} more.`
-              : "Lock in your picks + vote so the group can move forward."}
+                ? `${approvedCount}/${approvalThreshold} approved — ready to book.`
+                : `Approvals: ${approvedCount}/${approvalThreshold} (${rule}). Need ${approvalThreshold - approvedCount} more.`
+              : `Approvals so far: ${approvedCount}/${approvalThreshold} (${rule}).`}
           </div>
         </div>
         <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
           {saveError ? (
             <div style={{ color: "#c0392b", fontSize: 11, fontFamily: "var(--font-dm-sans)" }}>{saveError}</div>
           ) : null}
+          {voteError ? (
+            <div style={{ color: "#c0392b", fontSize: 11, fontFamily: "var(--font-dm-sans)" }}>{voteError}</div>
+          ) : null}
           {bookError ? (
             <div style={{ color: "#c0392b", fontSize: 11, fontFamily: "var(--font-dm-sans)" }}>{bookError}</div>
           ) : null}
+          {/* Decline is the escape hatch: lets a member register dissent
+              without leaving the room or ignoring the card. Server's
+              approval-rule gate won't clear with a decline logged. */}
+          <button
+            type="button"
+            onClick={() => handleVote("decline")}
+            disabled={voteInflight === "decline"}
+            title="Decline this plan — payer can't book until you retract"
+            style={{
+              ...LOCK_BTN,
+              opacity: voteInflight === "decline" ? 0.5 : 1,
+              borderColor:
+                data.my_vote === "decline" ? "rgba(192,57,43,0.6)" : "var(--border, #d0d0d0)",
+              color: data.my_vote === "decline" ? "#c0392b" : "var(--text-primary, #111)",
+            }}
+          >
+            {data.my_vote === "decline" ? "✗ Declined" : "Decline"}
+          </button>
           <button
             type="button"
             onClick={handleLockIn}
             disabled={saveInflight || totalSelected === 0}
+            title="Save your picks and approve the plan"
             style={{ ...LOCK_BTN, opacity: saveInflight || totalSelected === 0 ? 0.5 : 1 }}
           >
-            {saveInflight ? "Saving…" : "Lock in my picks"}
+            {saveInflight
+              ? "Saving…"
+              : data.my_vote === "approve"
+                ? "✓ Update my picks"
+                : "Lock in & approve"}
           </button>
           {isPayer ? (
             <button
@@ -753,53 +757,6 @@ export default function TripProposalChatCard(props: TripProposalChatCardProps) {
   );
 }
 
-/**
- * Colored pill button for voting. `active` = the caller's current vote;
- * the badge fills with the vote's semantic color to confirm their choice.
- */
-function VoteButton({
-  label,
-  active,
-  loading,
-  onClick,
-  variant,
-}: {
-  label: string;
-  active: boolean;
-  loading: boolean;
-  onClick: () => void;
-  variant: "approve" | "decline" | "neutral";
-}) {
-  const palette =
-    variant === "approve"
-      ? { fg: "#1f7a38", bg: "rgba(31,122,56,0.10)", border: "rgba(31,122,56,0.4)" }
-      : variant === "decline"
-        ? { fg: "#c0392b", bg: "rgba(192,57,43,0.10)", border: "rgba(192,57,43,0.4)" }
-        : { fg: "var(--text-secondary, #555)", bg: "transparent", border: "var(--border, #d0d0d0)" };
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      disabled={loading}
-      style={{
-        padding: "5px 10px",
-        borderRadius: 999,
-        borderWidth: 1,
-        borderStyle: "solid",
-        borderColor: active ? palette.fg : palette.border,
-        background: active ? palette.bg : "transparent",
-        color: palette.fg,
-        fontFamily: "var(--font-dm-sans)",
-        fontSize: 12,
-        fontWeight: active ? 600 : 500,
-        cursor: loading ? "wait" : "pointer",
-        opacity: loading ? 0.6 : 1,
-      }}
-    >
-      {loading ? "…" : label}
-    </button>
-  );
-}
 
 // ─── Subcomponents ───────────────────────────────────────────────────────
 

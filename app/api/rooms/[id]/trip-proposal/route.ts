@@ -31,7 +31,7 @@ import {
   listProposalVotes,
   type VoteKind,
 } from "@/lib/db";
-import { getActiveTripProposal } from "@/lib/agent/trip-synthesis";
+import { getLatestTripProposal } from "@/lib/agent/trip-synthesis";
 
 type Params = { params: Promise<{ id: string }> };
 
@@ -68,7 +68,10 @@ export async function GET(_req: Request, { params }: Params) {
     return NextResponse.json({ error: "Not a member of this room" }, { status: 403 });
   }
 
-  const proposal = await getActiveTripProposal(roomId);
+  // Use the latest variant so accepted proposals (post full-approval but
+  // pre-book) still surface — otherwise the card flashes "No proposal
+  // available yet" the instant the threshold is met.
+  const proposal = await getLatestTripProposal(roomId);
   const members = await listRoomMembers(roomId);
   const joinedCount = members.filter((m) => m.status === "joined").length;
 

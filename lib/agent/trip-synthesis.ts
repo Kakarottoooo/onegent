@@ -472,3 +472,19 @@ export async function getActiveTripProposal(roomId: string) {
   const proposals = await listActiveProposals(roomId);
   return proposals.find((p) => p.status === "active") ?? null;
 }
+
+/**
+ * Like getActiveTripProposal, but also returns proposals whose status has
+ * been auto-promoted to "accepted" (happens the instant the approval-vote
+ * threshold is met — see /api/rooms/[id]/proposals/[pid]/vote). The card
+ * UI needs to keep rendering in this window so members can either watch
+ * the payer book or see the executing-mode follow-up.
+ */
+export async function getLatestTripProposal(roomId: string) {
+  const proposals = await listActiveProposals(roomId);
+  return (
+    proposals.find((p) => p.status === "active") ??
+    proposals.find((p) => p.status === "accepted") ??
+    null
+  );
+}

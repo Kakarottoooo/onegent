@@ -32,7 +32,7 @@ import {
   listProposalVotes,
   listRoomMembers,
 } from "@/lib/db";
-import { getActiveTripProposal } from "@/lib/agent/trip-synthesis";
+import { getLatestTripProposal } from "@/lib/agent/trip-synthesis";
 import { extractOptions, tallyVotes, resolveAcceptedOption } from "@/lib/rooms/proposal-shape";
 import type { TripPackage } from "@/lib/types";
 
@@ -67,10 +67,20 @@ export async function POST(req: NextRequest, { params }: Params) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 
-  const proposal = await getActiveTripProposal(roomId);
+  // Accept both "active" (pre-approval) and "accepted" (threshold met,
+  // pre-booking) — the payer's Book click IS the signal to move from
+  // accepted → executing. If it's already executing we should not allow
+  // a second booking job.
+  const proposal = await getLatestTripProposal(roomId);
   if (!proposal) {
     return NextResponse.json(
       { error: "No active trip proposal yet — wait for synthesis to complete." },
+      { status: 409 },
+    );
+  }
+  if (room.booking_job_id) {
+    return NextResponse.json(
+      { error: "A booking job is already in progress for this trip.", booking_job_id: room.booking_job_id },
       { status: 409 },
     );
   }
