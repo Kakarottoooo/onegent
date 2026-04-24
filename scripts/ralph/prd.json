@@ -28,8 +28,8 @@
         "Typecheck passes"
       ],
       "priority": 2,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Completed 2026-04-24. git mv preserved history; no imports anywhere referenced the 4 component paths, so no follow-up edits were needed. Typecheck green."
     },
     {
       "id": "US-003",

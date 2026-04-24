@@ -25,3 +25,15 @@ Started: 2026-04-24 (positioning-shift-travel-only)
   - The `hasCategoryResults` boolean at the top of the component aggregates per-category `all<Xxx>Cards.length > 0` checks. When removing a category's UI, also strip its aggregation line or you'll keep a reference to a non-existent field on the `chat` object (though `useChat` may still expose it — typecheck would not catch it alone).
   - No browser verification done in this iteration (no live dev server spun up). Future UI-touching stories should consider /browse verification.
 ---
+
+## 2026-04-24 - US-002
+- Created components/_archived/2026-04-positioning-shift/ with a README documenting the positioning shift and the 4 archived card files.
+- Used `git mv` to relocate CreditCardCard.tsx, LaptopCard.tsx, SmartphoneCard.tsx, HeadphoneCard.tsx into the archive directory so history is preserved.
+- Grep confirmed zero import references to the old `components/<Name>` paths (US-001 already removed the last consumer from app/page.tsx), so no follow-up import edits were required.
+- Files changed: components/_archived/2026-04-positioning-shift/README.md (new), components/{CreditCardCard,LaptopCard,SmartphoneCard,HeadphoneCard}.tsx -> components/_archived/2026-04-positioning-shift/*.tsx (rename).
+- Typecheck: passed (`npx tsc --noEmit` exit 0).
+- **Learnings for future iterations:**
+  - When archiving React components, the homepage-level cleanup in US-001 was enough to leave zero live imports — so the grep-for-imports step is often a no-op after a prior story already stripped usage. Still run it: `Grep` for both `components/<Name>` and `from "components/<Name>"` variants.
+  - Hooks like `app/hooks/useChat.ts` reference **types** such as `LaptopRecommendationCard` (not the component files). Don't confuse a TYPE grep hit with a COMPONENT IMPORT hit — type references live alongside the schema, not the UI. If the grep hit is inside `const [allXxxCards, setAllXxxCards] = useState<XxxRecommendationCard[]>` it is NOT a card-component import.
+  - Untracked file `scripts/ralph/.last-branch` is created by the ralph loop harness and should NOT be staged in story commits; only stage files you actually touched.
+---
