@@ -33,6 +33,8 @@ import { createClient, OnegentApiError, type OnegentClient } from "./api-client.
 import type { ToolDefinition } from "./tools/types.js";
 import { bookRestaurantTool } from "./tools/book-restaurant.js";
 import { bookHotelTool } from "./tools/book-hotel.js";
+import { bookFlightTool } from "./tools/book-flight.js";
+import { bookActivityTool } from "./tools/book-activity.js";
 
 const SERVER_NAME = "onegent";
 const SERVER_VERSION = "0.1.0";
@@ -40,7 +42,8 @@ const SERVER_VERSION = "0.1.0";
 const TOOLS: ToolDefinition[] = [
   bookRestaurantTool,
   bookHotelTool,
-  // book_flight / book_activity — filled in by US-W4-004
+  bookFlightTool,
+  bookActivityTool,
   // get_job_status / get_job_audit — filled in by US-W4-005
 ];
 
