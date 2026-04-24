@@ -163,10 +163,13 @@ export default function Home() {
   // created mid-turn (from "none" → "session:X") — the user just typed a
   // message and got a reply; those must stay on screen.
   const lastContextRef = useRef<string>("");
-  // Set by handleConfirmCommitted when an in-session confirm upgrades into
-  // a new room. Same visible conversation → keep the chat rendered rather
-  // than clearing + re-fetching identical seeded history.
-  const suppressNextClearRef = useRef(false);
+  // Recently-upgraded room ids with their upgrade timestamp. A "one-shot"
+  // boolean flag doesn't survive React Strict Mode's double-effect pass
+  // (first run consumes it, second run clears the chat). A 5s time window
+  // covers both passes plus any follow-up renders without needing a manual
+  // reset, and still lets normal sidebar-switches back to the same room
+  // clear properly later.
+  const upgradedRoomsRef = useRef<Map<string, number>>(new Map());
   useEffect(() => {
     const ctx = activeRoomId
       ? `room:${activeRoomId}`
@@ -178,10 +181,11 @@ export default function Home() {
       prev !== "" && // initial render, nothing to compare against
       prev !== ctx &&
       prev !== "none"; // "none → session:X" is session creation, not a switch
-    if (isRealSwitch && !suppressNextClearRef.current) {
+    const upgradedAt = activeRoomId ? upgradedRoomsRef.current.get(activeRoomId) : undefined;
+    const isRecentUpgrade = upgradedAt !== undefined && Date.now() - upgradedAt < 5000;
+    if (isRealSwitch && !isRecentUpgrade) {
       chat.clearChat();
     }
-    suppressNextClearRef.current = false;
     lastContextRef.current = ctx;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeRoomId, activeSessionId]);
@@ -883,12 +887,13 @@ export default function Home() {
       // talking to the agent right here.
       if (payload.flow === "chat" && payload.id) {
         // Session-to-room upgrade: the chat column already shows the exact
-        // pre-confirm conversation that got seeded into the room. Tell the
-        // context-switch effect to skip its clearChat(), and mark the new
-        // room as "already replayed" so the replay effect doesn't re-inject.
-        suppressNextClearRef.current = true;
+        // pre-confirm conversation that got seeded into the room. Mark this
+        // room as "just upgraded" (with a timestamp) so the context-switch
+        // effect skips clearChat, and mark it already-replayed since the
+        // chat's in-memory content already matches what's in DB.
+        upgradedRoomsRef.current.set(payload.id, Date.now());
         replayedRoomIds.current.add(payload.id);
-        // Also bump sidebar so it picks up the now-upgraded session's
+        // Bump sidebar so it picks up the now-upgraded session's
         // upgraded_room_id flag and hides it from the Sessions list.
         setSidebarReloadTick((n) => n + 1);
         setActiveRoomId(payload.id);
