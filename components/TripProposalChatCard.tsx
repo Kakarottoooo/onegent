@@ -141,7 +141,12 @@ const COLUMN_BODY: React.CSSProperties = {
 };
 const MINI_CARD_BASE: React.CSSProperties = {
   position: "relative",
-  border: "1px solid var(--border, #e5e7eb)",
+  // Long-hand border properties (not shorthand) so the `selected` style can
+  // override borderColor/borderWidth without React warning about shorthand +
+  // longhand collision during rerender.
+  borderWidth: 1,
+  borderStyle: "solid",
+  borderColor: "var(--border, #e5e7eb)",
   borderRadius: 10,
   padding: 0,
   backgroundColor: "var(--card, #fff)",

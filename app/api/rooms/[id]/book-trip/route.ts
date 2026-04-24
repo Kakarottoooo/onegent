@@ -160,7 +160,11 @@ export async function POST(req: NextRequest, { params }: Params) {
     );
   }
 
-  const bookingJobId = tripBody.job_id ?? tripBody.booking_job_id ?? tripBody.id;
+  // create-trip returns { jobId } (camelCase). Fall through to other aliases
+  // defensively in case the shape ever changes, but jobId is the current
+  // source of truth.
+  const bookingJobId =
+    tripBody.jobId ?? tripBody.job_id ?? tripBody.booking_job_id ?? tripBody.id;
   if (!bookingJobId || typeof bookingJobId !== "string") {
     return NextResponse.json(
       { error: "create-trip didn't return a booking_job_id.", detail: tripBody },
