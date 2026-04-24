@@ -27,17 +27,31 @@ import {
   CallToolRequestSchema,
   ListToolsRequestSchema,
 } from "@modelcontextprotocol/sdk/types.js";
+import { z } from "zod";
+
+import { createClient, OnegentApiError, type OnegentClient } from "./api-client.js";
+import type { ToolDefinition } from "./tools/types.js";
+import { bookRestaurantTool } from "./tools/book-restaurant.js";
+import { bookHotelTool } from "./tools/book-hotel.js";
 
 const SERVER_NAME = "onegent";
 const SERVER_VERSION = "0.1.0";
 
-// Tool registry — filled in by US-W4-003 ~ 005. Each entry pairs the tool
-// metadata (shown to the LLM) with a handler that makes the REST call.
-const TOOLS: Array<{
-  name: string;
-  description: string;
-  inputSchema: Record<string, unknown>;
-}> = [];
+const TOOLS: ToolDefinition[] = [
+  bookRestaurantTool,
+  bookHotelTool,
+  // book_flight / book_activity — filled in by US-W4-004
+  // get_job_status / get_job_audit — filled in by US-W4-005
+];
+
+// Lazy client init: list_tools should work without an API key so Claude
+// Desktop can show what's available before the user wires up auth. The
+// key is only required when a tool is actually invoked.
+let clientCache: OnegentClient | null = null;
+function getClient(): OnegentClient {
+  if (!clientCache) clientCache = createClient();
+  return clientCache;
+}
 
 async function main(): Promise<void> {
   const server = new Server(
@@ -46,18 +60,48 @@ async function main(): Promise<void> {
   );
 
   server.setRequestHandler(ListToolsRequestSchema, async () => ({
-    tools: TOOLS,
+    tools: TOOLS.map((t) => ({
+      name: t.name,
+      description: t.description,
+      inputSchema: t.inputSchema,
+    })),
   }));
 
   server.setRequestHandler(CallToolRequestSchema, async (request) => {
-    throw new Error(`Unknown tool: ${request.params.name}`);
+    const tool = TOOLS.find((t) => t.name === request.params.name);
+    if (!tool) {
+      return {
+        isError: true,
+        content: [{ type: "text", text: `Unknown tool: ${request.params.name}` }],
+      };
+    }
+
+    try {
+      const client = getClient();
+      const text = await tool.handler(request.params.arguments, client);
+      return { content: [{ type: "text", text }] };
+    } catch (err) {
+      return { isError: true, content: [{ type: "text", text: formatError(err) }] };
+    }
   });
 
   const transport = new StdioServerTransport();
   await server.connect(transport);
 
-  // MCP protocol owns stdout — always log to stderr.
-  console.error(`[onegent-mcp] ${SERVER_NAME}@${SERVER_VERSION} ready on stdio`);
+  console.error(`[onegent-mcp] ${SERVER_NAME}@${SERVER_VERSION} ready on stdio (${TOOLS.length} tools)`);
+}
+
+function formatError(err: unknown): string {
+  if (err instanceof z.ZodError) {
+    const details = err.issues.map((i) => `  • ${i.path.join(".") || "(root)"}: ${i.message}`).join("\n");
+    return `Invalid tool arguments:\n${details}`;
+  }
+  if (err instanceof OnegentApiError) {
+    const codePart = err.code ? ` (${err.code})` : "";
+    return `Onegent API error${codePart}: ${err.message}`;
+  }
+  if (err instanceof Error) return err.message;
+  return String(err);
 }
 
 main().catch((err) => {
