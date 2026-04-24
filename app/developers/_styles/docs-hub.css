@@ -1,0 +1,107 @@
+/*
+ * Docs hub — 3 large cards leading to API ref / Claude / ChatGPT.
+ * Cards lift with shadow on hover. Match scenario-grid's hover
+ * choreography but at a different scale (larger cards, more content).
+ */
+
+.dev-doc-cards {
+  display: grid;
+  gap: var(--space-4);
+}
+
+.dev-doc-card {
+  display: grid;
+  grid-template-columns: 56px 1fr auto;
+  gap: var(--space-6);
+  align-items: center;
+  padding: var(--space-6) var(--space-8);
+  border: 1px solid var(--ink-200);
+  border-radius: var(--radius-lg);
+  background: var(--surface);
+  text-decoration: none;
+  color: inherit;
+  transition:
+    transform var(--motion-base) var(--ease-out-soft),
+    border-color var(--motion-base) var(--ease-out-soft),
+    box-shadow var(--motion-base) var(--ease-out-soft);
+}
+
+.dev-doc-card:hover {
+  transform: translateY(-2px);
+  border-color: var(--ink-300);
+  box-shadow: var(--shadow-2);
+}
+
+.dev-doc-card-glyph {
+  width: 56px;
+  height: 56px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--ink-50);
+  border-radius: var(--radius);
+  color: var(--ink-900);
+  transition: background var(--motion-base) var(--ease-out-soft), color var(--motion-base) var(--ease-out-soft);
+}
+
+.dev-doc-card:hover .dev-doc-card-glyph {
+  background: var(--ink-900);
+  color: var(--surface);
+}
+
+.dev-doc-card-body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.dev-doc-card-title {
+  font-family: var(--font-playfair), Georgia, serif;
+  font-size: 24px;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  color: var(--ink-900);
+  margin: 0;
+}
+
+.dev-doc-card-desc {
+  font-family: var(--font-dm-sans), system-ui, sans-serif;
+  font-size: 14px;
+  line-height: 1.55;
+  color: var(--ink-500);
+  margin: 0;
+  max-width: 70ch;
+}
+
+.dev-doc-card-foot {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  font-family: ui-monospace, monospace;
+  font-size: 12px;
+  color: var(--ink-400);
+  flex-shrink: 0;
+}
+
+.dev-doc-card-foot span:last-child {
+  font-size: 18px;
+  color: var(--ink-300);
+  transition: transform var(--motion-fast) var(--ease-out-soft), color var(--motion-fast) var(--ease-out-soft);
+}
+
+.dev-doc-card:hover .dev-doc-card-foot span:last-child {
+  color: var(--accent);
+  transform: translateX(2px);
+}
+
+@media (max-width: 640px) {
+  .dev-doc-card {
+    grid-template-columns: 56px 1fr;
+    grid-template-rows: auto auto;
+  }
+  .dev-doc-card-foot {
+    grid-column: 1 / -1;
+    padding-top: var(--space-3);
+    border-top: 1px solid var(--ink-200);
+  }
+}
