@@ -1,0 +1,138 @@
+/*
+ * Pricing page — Anthropic / Apple editorial scale.
+ * One enormous serif statement carries the whole page; tier
+ * cards below soften the unfamiliarity but the headline does
+ * the work.
+ */
+
+.dev-pricing {
+  padding: clamp(var(--space-16), 12vw, var(--space-40)) 0 var(--space-32);
+}
+
+.dev-pricing-eyebrow {
+  margin-bottom: var(--space-12);
+  display: inline-flex !important;
+}
+
+.dev-pricing-statement {
+  margin: 0;
+  max-width: 18ch;
+  font-weight: 600;
+}
+
+.dev-pricing-sub {
+  margin-top: var(--space-10);
+  max-width: 56ch;
+}
+
+.dev-pricing-grid {
+  margin-top: var(--space-20);
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: var(--space-4);
+}
+
+@media (max-width: 880px) {
+  .dev-pricing-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.dev-pricing-card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  padding: var(--space-8);
+  border: 1px solid var(--ink-200);
+  border-radius: var(--radius-lg);
+  background: var(--surface);
+  position: relative;
+  transition:
+    transform var(--motion-base) var(--ease-out-soft),
+    border-color var(--motion-base) var(--ease-out-soft),
+    box-shadow var(--motion-base) var(--ease-out-soft);
+}
+
+.dev-pricing-card:hover {
+  transform: translateY(-2px);
+  border-color: var(--ink-300);
+  box-shadow: var(--shadow-2);
+}
+
+.dev-pricing-card[data-dim="true"] {
+  background: var(--ink-50);
+  border-style: dashed;
+  border-color: var(--ink-300);
+}
+
+.dev-pricing-card[data-dim="true"]::before {
+  content: "Coming with v0.3";
+  position: absolute;
+  top: var(--space-4);
+  right: var(--space-4);
+  font-family: ui-monospace, monospace;
+  font-size: 10px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--ink-400);
+}
+
+.dev-pricing-card-value {
+  font-family: var(--font-playfair), Georgia, serif;
+  font-size: 32px;
+  font-weight: 600;
+  letter-spacing: -0.025em;
+  color: var(--ink-900);
+  margin-top: var(--space-1);
+}
+
+.dev-pricing-card-note {
+  font-size: 13px;
+  line-height: 1.55;
+  color: var(--ink-500);
+  margin: 0;
+}
+
+.dev-pricing-cta {
+  margin-top: var(--space-16);
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  flex-wrap: wrap;
+}
+
+.dev-pricing-fineprint {
+  margin-top: var(--space-20);
+  padding-top: var(--space-10);
+  border-top: 1px solid var(--ink-200);
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--space-12);
+  max-width: 100%;
+}
+
+@media (max-width: 720px) {
+  .dev-pricing-fineprint {
+    grid-template-columns: 1fr;
+  }
+}
+
+.dev-pricing-fineprint p {
+  font-size: 14px;
+  line-height: 1.7;
+  color: var(--ink-500);
+  margin: 0;
+}
+
+.dev-pricing-fineprint strong {
+  color: var(--ink-900);
+  font-weight: 600;
+  display: block;
+  margin-bottom: var(--space-2);
+}
+
+.dev-pricing-fineprint code {
+  background: var(--ink-100);
+  border-radius: var(--radius-xs);
+  color: var(--ink-700);
+}
