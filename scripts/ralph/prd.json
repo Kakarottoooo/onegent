@@ -103,8 +103,8 @@
         "Typecheck passes"
       ],
       "priority": 7,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Completed 2026-04-24. Created lib/agent/nlu-v2/__tests__/golden-out-of-scope.test.ts with 3 cases (O1 English electronics, O2 Chinese yoga/fitness, O3 English gift) wrapped in `describe.skipIf(!process.env.OPENAI_API_KEY)` so CI without the key still passes cleanly. Each test calls real `extractState()` with prev_state=null + the raw user message, then asserts intent==='chitchat', scenario===null, and planning_assumptions contains an entry starting with 'out_of_scope:'. Per-test timeout raised to 30s to accommodate LLM latency. With OPENAI_API_KEY exported from .env.local: all 3 pass (7.65s). Full NLU v2 suite: 85 tests pass (82 pre-existing + 3 new), zero regressions in golden-solo/multi/trip. Typecheck clean."
     }
   ]
 }

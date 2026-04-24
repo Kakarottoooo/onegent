@@ -23,6 +23,8 @@ Started: 2026-04-24 (positioning-shift-travel-only)
 - `buildStateSummary()` in `lib/agent/nlu-v2/router.ts` appends a generic `" Planning assumptions: a; b."` suffix (non-empty entries only) to BOTH the no-scenario early-return branch and the main scenario branch. Any `planning_assumptions` prefix contract (e.g. `"out_of_scope:"`, future ones) automatically reaches the chat layer — no further glue needed.
 - `lib/agent/nlu-v2/chat.ts` system prompt has a `CRITICAL — OUT-OF-SCOPE DECLINE` block that overrides the action hint when the state summary contains `out_of_scope:`. Pattern: put cross-cutting "decline/gate" rules ABOVE the state_summary and action_hint sections so the model reads them first.
 - Out-of-scope user messages route as `{type: "continue_chat"}` (because extractor sets `intent="chitchat"`) — the polite decline is emitted by the chat layer using state_summary context alone. Do NOT add a new RouterAction variant for decline; that would fracture the router invariant that "chat content lives in Layer 1, decisions live in Layer 3."
+- Golden tests that need to drive the real `extractState()` LLM call (as opposed to hand-building IntentState) must wrap the suite in `describe.skipIf(!process.env.OPENAI_API_KEY)` so CI without the key still passes. Also raise per-test timeout to ~30s because extractor.ts's own openaiChat timeout is 20s. Vitest setup doesn't auto-load `.env.local` — run these tests with `export OPENAI_API_KEY=$(grep ^OPENAI_API_KEY= .env.local | cut -d= -f2-)` prepended.
+- The .env.local pattern for local vitest runs is: `export OPENAI_API_KEY=$(grep ^OPENAI_API_KEY= .env.local | cut -d= -f2-); npx vitest run <path>`. Do NOT modify vitest.setup.ts to auto-load dotenv — it would change behavior for all existing tests and could leak secrets into test output.
 
 ---
 
@@ -114,4 +116,21 @@ Started: 2026-04-24 (positioning-shift-travel-only)
   - When adding cross-cutting overrides to chat.ts system prompt (decline, disclaimer, safety gate), put them ABOVE the `Current conversation state` block. LLMs weight earlier instructions more heavily, and this way the override can explicitly reference + supersede the downstream action hint ("ignore the action hint below in this case").
   - `buildStateSummary()` has TWO return paths — the early-return for `!state.scenario` AND the main join at the bottom. Applying a suffix in only one spot would silently drop the assumption for exactly the case we need it most (out_of_scope ⇒ scenario=null ⇒ early-return path). Always check both branches when adding a "common tail" behavior.
   - The PRD's acceptance criterion was phrased as "include planning_assumptions in its output" — I chose the more general "append all non-empty entries" interpretation over "append only out_of_scope:-prefixed entries". This keeps the extractor→chat wire generic: future prefix contracts (e.g. "needs_consent:", "needs_disclaimer:") will flow through without more router edits. The chat layer still only reacts to the specific `"out_of_scope:"` prefix it recognizes.
+---
+
+## 2026-04-24 - US-007
+- Added `lib/agent/nlu-v2/__tests__/golden-out-of-scope.test.ts` — a new golden suite that drives the REAL `extractState()` LLM call with 3 non-travel user messages and asserts the extractor prompt contract: `intent==='chitchat'`, `scenario===null`, and `planning_assumptions` contains an entry starting with `"out_of_scope:"`.
+- Cases: O1 English electronics (`"help me buy a laptop for coding"`), O2 Chinese fitness (`"推荐 brooklyn 周六早上的瑜伽课"`), O3 English gift (`"gift ideas for my mom birthday budget 150"`) — all 3 PRD test inputs covered.
+- Suite is wrapped in `describe.skipIf(!process.env.OPENAI_API_KEY)` so CI without the key still passes. Per-test timeout raised to 30s to accommodate LLM latency.
+- Shared helper `assertOutOfScope(state)` centralizes the 3 assertions for DRY.
+- Files changed: lib/agent/nlu-v2/__tests__/golden-out-of-scope.test.ts (new, 68 lines).
+- Typecheck: passed (`npx tsc --noEmit` exit 0).
+- Tests (with OPENAI_API_KEY exported from .env.local): 3/3 pass in 7.65s. Full NLU v2 suite: 85 pass (82 pre-existing + 3 new) in 7.37s. Zero regressions in golden-solo / golden-multi / golden-trip.
+- **Learnings for future iterations:**
+  - Vitest setup (`vitest.setup.ts`) does NOT auto-load `.env.local`. For tests that need env vars, export them before running: `export OPENAI_API_KEY=$(grep ^OPENAI_API_KEY= .env.local | cut -d= -f2-); npx vitest run <path>`. Don't modify vitest.setup.ts to add dotenv — that would change behavior globally and could leak secrets into CI logs.
+  - Real-extractor tests should use `describe.skipIf(!process.env.OPENAI_API_KEY)` (not `it.skipIf`) so the whole suite is reported as skipped in absent-key runs — cleaner CI output than 3 individual skips.
+  - Per-test timeout for LLM-driven tests: 30s is a safe default (extractor.ts's own `openaiChat` timeout is 20s, leave 10s slack for network + cold start).
+  - Pre-existing golden tests (solo/multi/trip) hand-build IntentState and only exercise the router — they do NOT actually call the LLM. Golden-out-of-scope is the first golden test that drives the extractor. Future cross-cutting extractor-prompt contracts (e.g. disclaimer prefixes, consent gates) should follow the same `describe.skipIf` + `extractState()` pattern rather than the router-only pattern.
+  - Assert on `Array.isArray(state.planning_assumptions)` before the `.some()` call — the type says it's always an array, but a belt-and-suspenders runtime check protects against future schema drift from the extractor.
+  - Per PRD: the test asserts on extracted state only, NOT on the chat reply. Rendering the decline reply requires another LLM call to Claude Sonnet (chat layer) — that's deterministic prompt behavior already covered manually, not a testable state invariant.
 ---
