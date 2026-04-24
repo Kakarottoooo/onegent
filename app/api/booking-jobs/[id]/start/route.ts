@@ -397,6 +397,12 @@ async function runUniversalStep(
   bookingJobId: string,
   jobUserId?: string | null,
 ): Promise<BookingJobStep> {
+  console.log("[start] runUniversalStep invoked", {
+    jobId: bookingJobId,
+    stepType: step.type,
+    hasCoreMarker: (step.body as Record<string, unknown>)?.__source === "lib/core/execution",
+    useCoreFlag: process.env.USE_CORE_EXECUTOR === "true",
+  });
   // ── US-009: Dispatch to lib/core new path when flag + marker match ──
   // Requires BOTH:
   //   1. env USE_CORE_EXECUTOR === "true" (global kill-switch)
@@ -411,6 +417,10 @@ async function runUniversalStep(
     process.env.USE_CORE_EXECUTOR === "true" &&
     bodyAny.__source === "lib/core/execution"
   ) {
+    console.log("[start] dual-gate HIT — routing via lib/core.runExecutionJobWithRecovery", {
+      jobId: bookingJobId,
+      scenario: bodyAny.scenario,
+    });
     return runUniversalStepViaCore(
       step,
       bodyAny,
