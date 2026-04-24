@@ -27,6 +27,9 @@ import {
   appendRoomMessage,
   createRoomProposal,
   listActiveProposals,
+  sendDirectMessage,
+  areContacts,
+  getUserProfile,
 } from "@/lib/db";
 import {
   type TripIntentState,
@@ -383,6 +386,43 @@ export async function triggerSynthesis(
       });
     } catch (err) {
       console.warn("[trip-synthesis] appendRoomMessage failed", err);
+    }
+
+    // Fan out "plan ready" DMs to every joined member (except the creator
+    // themselves) — the public-channel message isn't visible in chat-flow
+    // rooms, so without this members have no in-chat signal. from_user_id
+    // is the room creator (the party the DM system treats as "sender"); the
+    // DM UI badges role='agent' distinctly so recipients know it's system-
+    // generated, not personally typed.
+    try {
+      const creatorProfile = await getUserProfile(room.creator_id).catch(() => null);
+      const creatorLabel =
+        creatorProfile?.display_name || creatorProfile?.username || "Your room";
+      const dmContent = `✅ Trip plan ready for "${room.title}" — open Rooms → this trip to review the 3 tier options and vote.`;
+      const members = await listRoomMembers(roomId);
+      for (const m of members) {
+        if (m.user_id === room.creator_id) continue;
+        if (m.status !== "joined") continue;
+        if (!(await areContacts(room.creator_id, m.user_id).catch(() => false))) continue;
+        try {
+          await sendDirectMessage({
+            fromUserId: room.creator_id,
+            toUserId: m.user_id,
+            role: "agent",
+            content: dmContent,
+            metaJson: {
+              kind: "trip_synthesis_ready",
+              room_id: roomId,
+              room_title: room.title,
+              triggered_by: creatorLabel,
+            },
+          });
+        } catch (err) {
+          console.warn(`[trip-synthesis] member DM failed for ${m.user_id}`, err);
+        }
+      }
+    } catch (err) {
+      console.warn("[trip-synthesis] member-notify phase failed", err);
     }
   }
 

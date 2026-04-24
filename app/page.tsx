@@ -763,6 +763,56 @@ export default function Home() {
         chat.injectAssistantMessage(nlu.assistant_reply);
       }
 
+      if (nlu.intent === "create_room" && nlu.confirm_ready && activeRoomId) {
+        // Already in a room — don't pop another ConfirmCard to create a
+        // duplicate. Interpret the user's intent as "synthesize the plan for
+        // THIS room now" and kick off the trip-synthesis pipeline. Chat bubble
+        // below echoes the status so the user knows what's happening.
+        void (async () => {
+          try {
+            const res = await fetch(`/api/rooms/${activeRoomId}/synthesize`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ force: true }),
+            });
+            const data = (await res.json().catch(() => ({}))) as {
+              ok?: boolean;
+              reason?: string;
+              missing?: string[];
+              contributor_count?: number | null;
+              member_count?: number | null;
+            };
+            if (!res.ok || !data.ok) {
+              chat.injectAssistantMessage("方案生成失败了，先稍等再试一下。");
+              return;
+            }
+            if (data.reason === "ok") {
+              chat.injectAssistantMessage(
+                "✅ 方案已出！在 Rooms 页可以查看 3 套 tier + 投票。我也给每位成员发了通知。",
+              );
+            } else if (data.reason === "waiting_for_members") {
+              const need = (data.member_count ?? 0) - (data.contributor_count ?? 0);
+              chat.injectAssistantMessage(
+                `还在等 ${need} 位成员说偏好。他们都聊过一轮后，我会自动综合方案。`,
+              );
+            } else if (data.reason === "incomplete") {
+              chat.injectAssistantMessage(
+                `信息还不够完整：缺 ${data.missing?.join("、") ?? "关键字段"}。继续补充我就能出方案了。`,
+              );
+            } else if (data.reason === "already_synthesized") {
+              chat.injectAssistantMessage(
+                "之前已经出过方案了。去 Rooms 页看 + 投票吧。",
+              );
+            } else {
+              chat.injectAssistantMessage(`方案状态: ${data.reason ?? "unknown"}`);
+            }
+          } catch {
+            chat.injectAssistantMessage("方案生成出错了，稍后再试。");
+          }
+        })();
+        return;
+      }
+
       if (nlu.intent === "create_room" && nlu.confirm_ready) {
         setPendingConfirm({ nlu, message: text, kind: "room" });
       } else if (nlu.intent === "create_plan" && nlu.confirm_ready) {
