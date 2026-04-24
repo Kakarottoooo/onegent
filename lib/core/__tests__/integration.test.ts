@@ -296,4 +296,98 @@ describe("runExecutionJobWithRecovery · integration", () => {
     expect(secondUrl).toContain("resy.com");
     expect(result.status).toBe("no_availability");
   });
+
+  // ── US-W5: error-status escalation to Phase 3 ──────────────────────────────
+  // Carbone / Le Bernardin / Osteria La Baia / Ci Siamo class of failures:
+  // venue appears in OpenTable search but uses a non-OpenTable booking system,
+  // so the executor returns status="error" (not "no_availability") with summaries
+  // matching shouldTryProviderFallback's whitelist. Without US-W5 these would
+  // never have triggered the Resy fallback.
+
+  it('status="error" + "Stalled at listing" triggers Phase 3 (US-W5 fix)', async () => {
+    // Phase 1: OpenTable agent gets stuck at the venue's detail page because
+    // the booking widget is missing (venue uses its own platform).
+    // Phase 3: Resy succeeds.
+    // maxRetries=1 keeps Phase 1 to a single attempt — status="error" would
+    // otherwise retry per RETRY_BACKOFF_MS table.
+    mockedRunBrowserTask
+      .mockResolvedValueOnce(
+        makeTaskResult({
+          status: "error",
+          summary: "The agent stopped before reaching the checkout form.",
+          error: "Stalled at listing — couldn't advance past detail page",
+        }),
+      )
+      .mockResolvedValueOnce(
+        makeTaskResult({
+          status: "paused_payment",
+          summary: "Reached payment page on Resy",
+          handoffUrl: "https://resy.com/cities/ny/some-venue?payment=1",
+        }),
+      );
+
+    const result = await runExecutionJobWithRecovery(
+      { ...RESTAURANT_REQUEST, consent: { maxRetries: 1 } },
+      { jobId: "test-w5-stalled", userId: null, stepIndex: 0 },
+    );
+
+    expect(mockedRunBrowserTask.mock.calls.length).toBeGreaterThanOrEqual(2);
+    const secondUrl = mockedRunBrowserTask.mock.calls[1][0].startUrl as string;
+    expect(secondUrl).toContain("resy.com");
+    expect(result.status).toBe("paused_payment");
+    expect(result.usedFallback).toBe(true);
+  });
+
+  it('status="error" + "Unverified checkout field" triggers Phase 3 (US-W5 fix)', async () => {
+    // Phase 1: OpenTable agent landed on what looked like a payment page but
+    // fields were not actually populated — final-outcome.ts:391-398's path.
+    // Phase 3: Resy fails too; we return phase1 result.
+    mockedRunBrowserTask
+      .mockResolvedValueOnce(
+        makeTaskResult({
+          status: "error",
+          summary:
+            "The agent appeared to finish, but guest/contact/card values were not verified in distinct checkout fields.",
+          error: "Unverified checkout field values on final state.",
+        }),
+      )
+      .mockResolvedValueOnce(
+        makeTaskResult({
+          status: "no_availability",
+          summary: "Not found on Resy",
+        }),
+      );
+
+    const result = await runExecutionJobWithRecovery(
+      { ...RESTAURANT_REQUEST, consent: { maxRetries: 1 } },
+      { jobId: "test-w5-unverified", userId: null, stepIndex: 0 },
+    );
+
+    expect(mockedRunBrowserTask.mock.calls.length).toBeGreaterThanOrEqual(2);
+    const secondUrl = mockedRunBrowserTask.mock.calls[1][0].startUrl as string;
+    expect(secondUrl).toContain("resy.com");
+  });
+
+  it('status="error" + HTTP 402 quota does NOT trigger Phase 3 (US-W5 fast-fail)', async () => {
+    // Phase 1: LLM provider rejected the run for billing/quota reasons.
+    // Phase 3 must NOT fire — Resy would hit the same quota wall and burn 2-3min
+    // for nothing. shouldTryProviderFallback's blocklist catches this.
+    mockedRunBrowserTask.mockResolvedValueOnce(
+      makeTaskResult({
+        status: "error",
+        summary: "The automation provider rejected this run before the booking flow could finish.",
+        error: "Quota/billing issue (HTTP 402) from anthropic. Check credits and retry.",
+      }),
+    );
+
+    const result = await runExecutionJobWithRecovery(
+      { ...RESTAURANT_REQUEST, consent: { maxRetries: 1 } },
+      { jobId: "test-w5-quota", userId: null, stepIndex: 0 },
+    );
+
+    // Exactly ONE browser call — primary only, no Phase 3.
+    expect(mockedRunBrowserTask).toHaveBeenCalledTimes(1);
+    expect(result.status).toBe("error");
+    expect(result.usedFallback).toBe(false);
+  });
 });
