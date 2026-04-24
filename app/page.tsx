@@ -138,13 +138,49 @@ export default function Home() {
   const [activeSessionTitle, setActiveSessionTitle] = useState<string | null>(null);
   // Bump to trigger a sidebar refetch (after creating a room / new session).
   const [sidebarReloadTick, setSidebarReloadTick] = useState(0);
+  // Read query params fresh on every render — `useSearchParams` needs a
+  // Suspense boundary during SSG and plain `useEffect([])` only runs on mount
+  // so same-route nav (sidebar click → new ?session_id) keeps stale state.
+  // Direct window.location read + sync-to-state effect reacts correctly.
+  const urlRoomId =
+    typeof window !== "undefined"
+      ? new URLSearchParams(window.location.search).get("room_id")
+      : null;
+  const urlSessionId =
+    typeof window !== "undefined"
+      ? new URLSearchParams(window.location.search).get("session_id")
+      : null;
+  useEffect(() => {
+    const r = urlRoomId && urlRoomId.trim() ? urlRoomId.trim() : null;
+    const s = urlSessionId && urlSessionId.trim() ? urlSessionId.trim() : null;
+    setActiveRoomId((prev) => (prev === r ? prev : r));
+    setActiveSessionId((prev) => (prev === s ? prev : s));
+  }, [urlRoomId, urlSessionId]);
+
+  // When the user switches between rooms / sessions (or into one from a fresh
+  // `/`), wipe the in-memory chat column so the new thread replays from DB
+  // cleanly instead of bleeding the previous thread's bubbles.
+  const lastContextRef = useRef<string>("");
+  useEffect(() => {
+    const ctx = activeRoomId
+      ? `room:${activeRoomId}`
+      : activeSessionId
+        ? `session:${activeSessionId}`
+        : "none";
+    if (lastContextRef.current && lastContextRef.current !== ctx) {
+      chat.clearChat();
+    }
+    lastContextRef.current = ctx;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeRoomId, activeSessionId]);
+  // popstate fires on back/forward — force a re-render so the reads above pick
+  // up the new URL. router.push/replace already triggers React re-render on
+  // their own, but the browser buttons don't reach React without this.
   useEffect(() => {
     if (typeof window === "undefined") return;
-    const params = new URLSearchParams(window.location.search);
-    const roomId = params.get("room_id");
-    const sessionId = params.get("session_id");
-    setActiveRoomId(roomId && roomId.trim() ? roomId.trim() : null);
-    setActiveSessionId(sessionId && sessionId.trim() ? sessionId.trim() : null);
+    const onPop = () => setSidebarReloadTick((n) => n + 1);
+    window.addEventListener("popstate", onPop);
+    return () => window.removeEventListener("popstate", onPop);
   }, []);
   // Stage 2 chat continuity: when the page loads (or activeRoomId changes
   // because the user opened ?room_id=<id>), pull this user's private message
