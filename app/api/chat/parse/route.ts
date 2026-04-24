@@ -26,6 +26,7 @@ import {
   createChatSession,
   insertChatSessionMessage,
   getChatSession,
+  getDecisionRoomById,
 } from "@/lib/db";
 import { triggerSynthesis } from "@/lib/agent/trip-synthesis";
 import type { ChatMessage } from "@/lib/llm-client";
@@ -45,6 +46,50 @@ function parseHistory(value: unknown): ChatMessage[] {
   }
   // Keep the tail — oldest turns fall out of context first.
   return out.slice(-20);
+}
+
+/**
+ * Detect user-typed "synthesize / show me the plan / give me options" phrases.
+ * When the user is already inside a trip room, the extractor layer tends to
+ * classify these as chitchat and the chat layer (Sonnet) hallucinates a
+ * freeform itinerary — bypassing the room's structured synthesis pipeline.
+ *
+ * Returning true flips the NLU result to intent=create_room + confirm_ready,
+ * which the client (page.tsx) routes to POST /api/rooms/[id]/synthesize.
+ *
+ * Conservative patterns — only fires when the intent is unambiguous. Picky
+ * on purpose: false positives here would skip the clarification loop.
+ */
+function isSynthesisTrigger(message: string): boolean {
+  const m = message.trim().toLowerCase();
+  if (!m) return false;
+  // Chinese cues. Tolerate extra particles (吧 啊 呀 呢 了).
+  const zh = [
+    /给.{0,4}方案/, // 给我方案 / 给个方案 / 给我一个方案
+    /出[一二三]?套?方案/, // 出方案 / 出一套方案
+    /看看方案/,
+    /综合.{0,5}方案/,
+    /生成.{0,3}方案/,
+    /方案[呢吧啊]/,
+    /(?:开始|现在).{0,4}(?:出|给|综合|生成)/,
+    /我想看看?方案/,
+  ];
+  for (const re of zh) {
+    if (re.test(message)) return true;
+  }
+  // English cues.
+  const en = [
+    /\b(?:give|show|send)\s+(?:me\s+)?(?:the\s+)?(?:plan|options?|proposal|itinerary)\b/,
+    /\bsynthes[iy]ze\b/,
+    /\bgenerate\s+(?:the\s+)?(?:plan|options?|itinerary)\b/,
+    /\blet'?s\s+see\s+(?:the\s+)?(?:plan|options?)\b/,
+    /\bwhat\s+(?:do\s+you\s+have|have\s+you\s+got)\b/,
+    /\bready\s+to\s+see\b/,
+  ];
+  for (const re of en) {
+    if (re.test(m)) return true;
+  }
+  return false;
 }
 
 export async function POST(req: NextRequest) {
@@ -89,6 +134,28 @@ export async function POST(req: NextRequest) {
     console.log(
       `[chat/parse] v2 — scenario=${result.scenario} intent=${result.intent} confirm_ready=${result.confirm_ready}${roomId ? ` room=${roomId}` : ""}`,
     );
+
+    // In-trip-room synthesize trigger: when the user's in a trip room and
+    // clearly asks for the plan ("给我方案", "synthesize"), override the
+    // NLU result so the client fires /api/rooms/[id]/synthesize instead of
+    // showing Sonnet's hallucinated itinerary as a regular chat bubble.
+    // This is a deterministic gate — pure regex on the user message, run
+    // AFTER the NLU result comes back, so the extractor/router stay pure.
+    if (roomId && isSynthesisTrigger(message)) {
+      const room = await getDecisionRoomById(roomId).catch(() => null);
+      if (room && room.type === "trip") {
+        console.log(
+          `[chat/parse] synthesis trigger matched — overriding intent=create_room confirm_ready=true for room=${roomId}`,
+        );
+        result.intent = "create_room";
+        result.scenario = "trip";
+        result.confirm_ready = true;
+        // Replace whatever Sonnet said so the user doesn't see a fabricated
+        // itinerary. The client will follow up with the real synthesis outcome
+        // ("方案已出" / "还在等 N 位成员" / "信息不足缺 X") in a second bubble.
+        result.assistant_reply = "好的，我去综合大家的偏好，出一套方案。";
+      }
+    }
 
     // Sessions (ChatGPT-style solo thread): when not in a room context,
     // mirror the turn into chat_session_messages. Auto-create a session on
