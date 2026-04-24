@@ -1921,7 +1921,19 @@ export default function Home() {
 
       {/* ─── List Mode ──────────────────────────────────────── */}
       {!isMapMode && (
-        <div className="flex-1 overflow-y-auto" style={{ minHeight: 0 }}>
+        <div
+          className="flex-1 overflow-y-auto"
+          style={{
+            minHeight: 0,
+            // Left-edge accent stripe visually brands the current context.
+            // Gold strip = Decision Room, muted strip = Solo chat, none = fresh.
+            borderLeft: activeRoomId
+              ? "3px solid rgba(201,168,76,0.55)"
+              : activeSessionId
+                ? "3px solid rgba(255,255,255,0.12)"
+                : "none",
+          }}
+        >
           <div className="max-w-2xl md:max-w-3xl lg:max-w-4xl mx-auto w-full px-4 md:px-6 lg:px-8 py-6">
 
             {!hasMessages ? (
@@ -2222,8 +2234,13 @@ export default function Home() {
                         <div
                           className="px-4 py-3 max-w-xs"
                           style={{
-                            backgroundColor: "var(--text-primary)",
-                            color: "var(--bg)",
+                            // Bubble color signals which thread type you're in:
+                            //   room  → gold (collaborative, brand color)
+                            //   other → cream (default solo look)
+                            backgroundColor: activeRoomId
+                              ? "var(--gold, #C9A84C)"
+                              : "var(--text-primary)",
+                            color: activeRoomId ? "#fff" : "var(--bg)",
                             borderRadius: "18px 18px 4px 18px",
                             fontFamily: "var(--font-dm-sans)",
                             fontSize: "14px",
