@@ -21,6 +21,13 @@ export interface ConfirmCardProps {
   nlu: ConversationalNLUResult;
   /** Last user message — forwarded to /api/chat/commit for plan queries. */
   message: string;
+  /**
+   * Stage 2: full conversation history at the moment confirm is clicked. Sent
+   * with the commit request so chat-flow rooms can seed their private channel
+   * with the pre-creation conversation, and refresh / reopen restores it via
+   * /api/rooms/[id]/private-messages → UX-4 replay.
+   */
+  history?: Array<{ role: "user" | "assistant"; content: string }>;
   /** Called with the commit response (room_id + url, or plan hand-off payload). */
   onConfirmed: (payload: CommitResponse) => void;
   /** User clicked "edit" — put focus back on the input so they can keep chatting. */
@@ -148,7 +155,13 @@ export default function ConfirmCard(props: ConfirmCardProps) {
       const res = await fetch("/api/chat/commit", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ result: props.nlu, message: props.message }),
+        body: JSON.stringify({
+          result: props.nlu,
+          message: props.message,
+          // Stage 2: send the chat conversation so the room can seed its
+          // private channel with what got built up before commit.
+          ...(props.history && props.history.length > 0 ? { history: props.history } : {}),
+        }),
       });
       const data = (await res.json().catch(() => ({}))) as CommitResponse;
       if (!res.ok || !data.ok) {

@@ -1602,6 +1602,69 @@ export default function Home() {
       {/* ─── Nav ─────────────────────────────────────────────── */}
       <GlobalNav active="home" />
 
+      {/* Stage 2: room context ribbon — only shown when ?room_id is in the URL.
+          Tells the user they're chatting inside a Decision Room (not their solo
+          homepage) + lets them exit back to solo. */}
+      {activeRoomId && (
+        <div
+          style={{
+            background: "linear-gradient(180deg, rgba(201,168,76,0.18) 0%, rgba(201,168,76,0.04) 100%)",
+            borderBottom: "1px solid rgba(201,168,76,0.28)",
+            padding: "8px 16px",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+            gap: 12,
+            fontFamily: "var(--font-dm-sans)",
+            fontSize: 12,
+            color: "var(--text-primary, #111)",
+          }}
+        >
+          <div style={{ display: "flex", alignItems: "center", gap: 8, minWidth: 0 }}>
+            <span style={{ fontSize: 14 }}>🏠</span>
+            <span>
+              You&apos;re in a <strong>Decision Room</strong>. Each turn here syncs to the room.
+            </span>
+          </div>
+          <div style={{ display: "flex", gap: 8, flexShrink: 0 }}>
+            <button
+              type="button"
+              onClick={() => router.push("/rooms")}
+              style={{
+                background: "transparent",
+                border: "1px solid rgba(201,168,76,0.4)",
+                borderRadius: 8,
+                padding: "4px 10px",
+                fontSize: 11,
+                color: "var(--gold, #C9A84C)",
+                cursor: "pointer",
+              }}
+            >
+              All rooms
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                replayedRoomIds.current.delete(activeRoomId);
+                setActiveRoomId(null);
+                router.replace("/");
+              }}
+              style={{
+                background: "transparent",
+                border: "1px solid rgba(201,168,76,0.2)",
+                borderRadius: 8,
+                padding: "4px 10px",
+                fontSize: 11,
+                color: "var(--text-muted, #888)",
+                cursor: "pointer",
+              }}
+            >
+              Exit room
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* Phase 5.3: Upgrade prompt toast (shown after 3rd favorite when not signed in) */}
       {upgradePromptShown && !auth.isSignedIn && (
         <div
@@ -2196,6 +2259,13 @@ export default function Home() {
                     kind={pendingConfirm.kind}
                     nlu={pendingConfirm.nlu}
                     message={pendingConfirm.message}
+                    // Stage 2: pass the conversation that built up to confirm
+                    // so chat-flow trip rooms can seed their private channel.
+                    // Use chat.messages (rendered text), NOT nluHistoryRef
+                    // (which stores stringified NLU JSON for the next parse).
+                    history={chat.messages
+                      .filter((m) => (m.role === "user" || m.role === "assistant") && typeof m.content === "string" && m.content.trim().length > 0)
+                      .map((m) => ({ role: m.role as "user" | "assistant", content: m.content }))}
                     onConfirmed={handleConfirmCommitted}
                     onEdit={handleConfirmEdit}
                   />

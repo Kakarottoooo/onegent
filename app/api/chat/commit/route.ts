@@ -22,6 +22,7 @@ import {
   upsertMemberIntentState,
   resolveContactsByNames,
   inviteToDecisionRoom,
+  insertPrivateMessage,
   type ApprovalRule,
   type DecisionRoomType,
   type DecisionRoomCategory,
@@ -487,6 +488,40 @@ export async function POST(req: NextRequest) {
         });
       } catch (err) {
         console.warn("[chat/commit] seed creator intent_state failed", err);
+      }
+
+      // Persist the pre-creation chat history (the conversation that built
+      // up to this confirm card) into the creator's private channel. Without
+      // this, A would refresh after creating the room and see an empty chat
+      // because syncRoomContext only fires for turns AFTER the room exists.
+      // Body shape: { history: [{role:"user"|"assistant", content:string}, ...] }
+      const rawHistory = Array.isArray(b.history) ? (b.history as unknown[]) : [];
+      for (const entry of rawHistory) {
+        if (!entry || typeof entry !== "object") continue;
+        const e = entry as Record<string, unknown>;
+        const role = e.role;
+        const content = e.content;
+        if ((role !== "user" && role !== "assistant") || typeof content !== "string" || !content.trim()) continue;
+        try {
+          await insertPrivateMessage({ roomId: room.id, userId, role, content });
+        } catch (err) {
+          console.warn("[chat/commit] seed pre-creation history msg failed", err);
+        }
+      }
+      // Also persist the final user message that triggered the confirm (the
+      // client already echoed it but the rawHistory snapshot may not include
+      // the just-typed turn).
+      if (originalMessage.trim()) {
+        try {
+          await insertPrivateMessage({
+            roomId: room.id,
+            userId,
+            role: "user",
+            content: originalMessage,
+          });
+        } catch (err) {
+          console.warn("[chat/commit] seed final user msg failed", err);
+        }
       }
 
       // Stage 2 invite-UX: resolve named members to contacts + pre-invite.
