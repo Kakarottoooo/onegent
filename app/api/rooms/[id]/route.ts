@@ -1,9 +1,13 @@
 import { NextResponse } from "next/server";
 import { auth } from "@clerk/nextjs/server";
 import {
+  areContacts,
   deleteDecisionRoom,
   getDecisionRoomById,
+  getUserProfile,
   isRoomMember,
+  listRoomMembers,
+  sendDirectMessage,
 } from "@/lib/db";
 
 type Params = { params: Promise<{ id: string }> };
@@ -47,6 +51,42 @@ export async function DELETE(_req: Request, { params }: Params) {
       { error: "Clear the in-progress booking first." },
       { status: 409 }
     );
+  }
+
+  // Before deleting, notify every non-creator member via DM so they know the
+  // room was dismissed (otherwise the room silently disappears from their
+  // sidebar on next poll). Each DM is best-effort — a failure doesn't block
+  // the delete.
+  try {
+    const members = await listRoomMembers(id);
+    const creatorProfile = await getUserProfile(userId).catch(() => null);
+    const creatorLabel =
+      creatorProfile?.display_name ||
+      creatorProfile?.username ||
+      "The creator";
+    for (const m of members) {
+      if (m.user_id === userId) continue;
+      if (m.status === "left") continue; // they already left; don't follow them
+      // Only DM if they're still a contact (the DM API gates on this too).
+      if (!(await areContacts(userId, m.user_id).catch(() => false))) continue;
+      try {
+        await sendDirectMessage({
+          fromUserId: userId,
+          toUserId: m.user_id,
+          role: "agent",
+          content: `${creatorLabel} dismissed the trip "${room.title}". The room is no longer available.`,
+          metaJson: {
+            kind: "trip_dismissed",
+            room_id: id,
+            room_title: room.title,
+          },
+        });
+      } catch (err) {
+        console.warn(`[rooms/delete] DM to ${m.user_id} failed`, err);
+      }
+    }
+  } catch (err) {
+    console.warn(`[rooms/delete] member-notify phase failed`, err);
   }
 
   await deleteDecisionRoom(id);

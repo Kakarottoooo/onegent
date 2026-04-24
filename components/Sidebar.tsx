@@ -86,6 +86,26 @@ export default function Sidebar({ activeSessionId, activeRoomId, reloadTick }: S
     load();
   }, [isSignedIn, reloadTick, localReloadTick, load]);
 
+  // Keep the sidebar fresh so creator-side deletions, new DMs creating
+  // invited rooms, etc. show up without a manual refresh. Polls every 30s
+  // while the tab is visible; pauses when hidden to avoid wasted calls.
+  useEffect(() => {
+    if (!isSignedIn) return;
+    const tick = () => {
+      if (typeof document !== "undefined" && document.visibilityState !== "visible") return;
+      load();
+    };
+    const interval = setInterval(tick, 30_000);
+    const onVisible = () => {
+      if (document.visibilityState === "visible") load();
+    };
+    document.addEventListener("visibilitychange", onVisible);
+    return () => {
+      clearInterval(interval);
+      document.removeEventListener("visibilitychange", onVisible);
+    };
+  }, [isSignedIn, load]);
+
   // Dismiss the context menu on any click / esc / scroll.
   useEffect(() => {
     if (!menu) return;
