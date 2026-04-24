@@ -36,6 +36,7 @@ import type { TripPackage } from "@/lib/types";
 import type { TripIntentState } from "@/lib/agent/trip-intent-state";
 import { useLanguage } from "@/app/hooks/useLanguage";
 import GlobalNav from "@/components/GlobalNav";
+import Sidebar from "@/components/Sidebar";
 import {
   looksLikeRecommendationAsk,
   getFallbackQuickPicks,
@@ -127,11 +128,19 @@ export default function Home() {
   // Uses window.location directly to avoid Next.js Suspense-boundary
   // requirements around useSearchParams during SSG/SSR.
   const [activeRoomId, setActiveRoomId] = useState<string | null>(null);
+  // Sessions (ChatGPT-style persistent solo threads): ?session_id=<id> makes
+  // this homepage mount continue that thread. First user message in a fresh
+  // session creates one on the server, and we update the URL then.
+  const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
+  // Bump to trigger a sidebar refetch (after creating a room / new session).
+  const [sidebarReloadTick, setSidebarReloadTick] = useState(0);
   useEffect(() => {
     if (typeof window === "undefined") return;
     const params = new URLSearchParams(window.location.search);
     const roomId = params.get("room_id");
+    const sessionId = params.get("session_id");
     setActiveRoomId(roomId && roomId.trim() ? roomId.trim() : null);
+    setActiveSessionId(sessionId && sessionId.trim() ? sessionId.trim() : null);
   }, []);
   // Stage 2 chat continuity: when the page loads (or activeRoomId changes
   // because the user opened ?room_id=<id>), pull this user's private message
@@ -139,6 +148,41 @@ export default function Home() {
   // closing and re-opening, or following an invite link doesn't lose the
   // ongoing conversation. Only runs once per room (replayedRoomIds ref guard).
   const replayedRoomIds = useRef<Set<string>>(new Set());
+  const replayedSessionIds = useRef<Set<string>>(new Set());
+  // Session history replay — parallel to the room one below. Fires only when
+  // ?session_id is present (and no ?room_id, which takes priority).
+  useEffect(() => {
+    if (activeRoomId) return; // room context wins
+    if (!activeSessionId) return;
+    if (replayedSessionIds.current.has(activeSessionId)) return;
+    if (chat.messages.length > 0) {
+      replayedSessionIds.current.add(activeSessionId);
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch(`/api/chat/sessions/${activeSessionId}/messages`);
+        if (!res.ok) return;
+        const data = (await res.json()) as {
+          messages: Array<{ id: string; role: "user" | "assistant"; content: string; created_at: string }>;
+        };
+        if (cancelled || !data.messages || data.messages.length === 0) return;
+        replayedSessionIds.current.add(activeSessionId);
+        for (const m of data.messages) {
+          if (m.role === "user") chat.injectUserMessage(m.content);
+          else chat.injectAssistantMessage(m.content);
+        }
+      } catch {
+        // non-fatal
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeSessionId, activeRoomId]);
+
   useEffect(() => {
     if (!activeRoomId) return;
     if (replayedRoomIds.current.has(activeRoomId)) return;
@@ -552,10 +596,13 @@ export default function Home() {
           // Stage 2: when the homepage is scoped to a room, the server mirrors
           // this turn into room_member_intent_state + private messages.
           ...(activeRoomId ? { room_id: activeRoomId } : {}),
+          // Sessions: solo chats mirror into chat_session_messages. Server
+          // auto-creates the session on the first turn and echoes the id back.
+          ...(activeSessionId ? { session_id: activeSessionId } : {}),
         }),
       });
       const data = (await res.json().catch(() => null)) as
-        | { ok: boolean; result: ConversationalNLUResult }
+        | { ok: boolean; result: ConversationalNLUResult; session_id?: string | null }
         | null;
 
       // Network / NLU failure → fall back to the old restaurant search pipeline
@@ -567,6 +614,21 @@ export default function Home() {
       }
 
       const nlu = data.result;
+
+      // Sessions: if the server just auto-created a session (no incoming
+      // session_id), it echoes the new id back. Adopt it so next turn syncs
+      // to the same thread + update the URL so refresh / logo return lands
+      // in the same conversation. Mark as "replayed" so the history-replay
+      // effect doesn't re-fetch and dedupe.
+      if (data.session_id && data.session_id !== activeSessionId && !activeRoomId) {
+        setActiveSessionId(data.session_id);
+        replayedSessionIds.current.add(data.session_id);
+        setSidebarReloadTick((n) => n + 1);
+        if (typeof window !== "undefined") {
+          const newUrl = `/?session_id=${encodeURIComponent(data.session_id)}`;
+          router.replace(newUrl);
+        }
+      }
 
       // Record this turn into the NLU history *after* a successful parse.
       // Assistant content is the slim NLU JSON so follow-up turns see state
@@ -1155,10 +1217,16 @@ export default function Home() {
   );
 
   return (
-    <main
-      className="flex flex-col"
-      style={{ height: "100dvh", backgroundColor: "var(--bg)", overflow: "hidden" }}
-    >
+    <div style={{ display: "flex", height: "100dvh" }}>
+      <Sidebar
+        activeSessionId={activeSessionId}
+        activeRoomId={activeRoomId}
+        reloadTick={sidebarReloadTick}
+      />
+      <main
+        className="flex flex-col"
+        style={{ flex: 1, minWidth: 0, backgroundColor: "var(--bg)", overflow: "hidden" }}
+      >
       {/* GPS Error Toast */}
       {location.gpsError && (
         <div
@@ -2877,7 +2945,8 @@ export default function Home() {
           userId={auth.userId}
         />
       )}
-    </main>
+      </main>
+    </div>
   );
 }
 
