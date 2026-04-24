@@ -9,7 +9,12 @@
  * Onegent /api/v1/* surface; this package does not contain any booking
  * logic itself — it is a thin stdio ↔ HTTP adapter.
  *
- * Config (Claude Desktop → claude_desktop_config.json):
+ * Usage:
+ *   onegent-mcp-server              # stdio mode (Claude Desktop, default)
+ *   onegent-mcp-server --http       # Streamable HTTP mode (ChatGPT Apps)
+ *   onegent-mcp-server --http --port 8080
+ *
+ * Claude Desktop config (stdio):
  *   {
  *     "mcpServers": {
  *       "onegent": {
@@ -21,107 +26,62 @@
  *   }
  */
 
-import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
-import {
-  CallToolRequestSchema,
-  ListToolsRequestSchema,
-} from "@modelcontextprotocol/sdk/types.js";
-import { z } from "zod";
+import { createOnegentServer, SERVER_NAME, SERVER_VERSION, TOOLS } from "./server-factory.js";
+import { startHttpServer } from "./http-server.js";
 
-import { createClient, OnegentApiError, type OnegentClient } from "./api-client.js";
-import type { ToolDefinition } from "./tools/types.js";
-import { bookRestaurantTool } from "./tools/book-restaurant.js";
-import { bookHotelTool } from "./tools/book-hotel.js";
-import { bookFlightTool } from "./tools/book-flight.js";
-import { bookActivityTool } from "./tools/book-activity.js";
-import { getJobStatusTool } from "./tools/get-job-status.js";
-import { getJobAuditTool } from "./tools/get-job-audit.js";
+interface CliArgs {
+  mode: "stdio" | "http";
+  port: number;
+}
 
-const SERVER_NAME = "onegent";
-const SERVER_VERSION = "0.1.0";
+function parseArgs(argv: string[]): CliArgs {
+  const args: CliArgs = { mode: "stdio", port: 3333 };
+  for (let i = 0; i < argv.length; i++) {
+    const a = argv[i];
+    if (a === "--http") args.mode = "http";
+    else if (a === "--port") {
+      const n = Number(argv[++i]);
+      if (!Number.isFinite(n) || n <= 0) {
+        throw new Error(`--port expects a positive number, got: ${argv[i]}`);
+      }
+      args.port = n;
+    } else if (a === "--help" || a === "-h") {
+      printUsage();
+      process.exit(0);
+    }
+  }
+  return args;
+}
 
-const TOOLS: ToolDefinition[] = [
-  bookRestaurantTool,
-  bookHotelTool,
-  bookFlightTool,
-  bookActivityTool,
-  getJobStatusTool,
-  getJobAuditTool,
-];
-
-// Lazy client init: list_tools should work without an API key so Claude
-// Desktop can show what's available before the user wires up auth. The
-// key is only required when a tool is actually invoked.
-let clientCache: OnegentClient | null = null;
-function getClient(): OnegentClient {
-  if (!clientCache) clientCache = createClient();
-  return clientCache;
+function printUsage(): void {
+  console.error(
+    [
+      `${SERVER_NAME}-mcp-server v${SERVER_VERSION} — Travel Booking Agent`,
+      ``,
+      `Usage:`,
+      `  onegent-mcp-server                     stdio mode (Claude Desktop, default)`,
+      `  onegent-mcp-server --http [--port N]   Streamable HTTP mode (ChatGPT Apps, self-host)`,
+      ``,
+      `Env:`,
+      `  ONEGENT_API_KEY        required (ogk_live_... or ogk_test_...)`,
+      `  ONEGENT_API_BASE_URL   optional, defaults to https://onegent.com/api/v1`,
+    ].join("\n"),
+  );
 }
 
 async function main(): Promise<void> {
-  const server = new Server(
-    {
-      name: SERVER_NAME,
-      version: SERVER_VERSION,
-      title: "Travel Booking Agent",
-    },
-    {
-      capabilities: { tools: {} },
-      instructions:
-        "Onegent — AI books your trip end-to-end. Use book_restaurant, book_hotel, " +
-        "book_flight, or book_activity to start a booking; each returns a jobId. " +
-        "Then call get_job_status every 15-60 seconds until the status is terminal " +
-        "(done, error, paused_payment, captcha, needs_login). If a booking errors, " +
-        "call get_job_audit for diagnostic context. The agent always stops before " +
-        "submitting credit card CVV — when status='paused_payment' the user must " +
-        "confirm the charge in Onegent's app before the booking finalizes.",
-    },
-  );
+  const args = parseArgs(process.argv.slice(2));
 
-  server.setRequestHandler(ListToolsRequestSchema, async () => ({
-    tools: TOOLS.map((t) => ({
-      name: t.name,
-      description: t.description,
-      inputSchema: t.inputSchema,
-    })),
-  }));
+  if (args.mode === "http") {
+    await startHttpServer({ port: args.port, createServer: createOnegentServer });
+    return; // http server keeps itself alive
+  }
 
-  server.setRequestHandler(CallToolRequestSchema, async (request) => {
-    const tool = TOOLS.find((t) => t.name === request.params.name);
-    if (!tool) {
-      return {
-        isError: true,
-        content: [{ type: "text", text: `Unknown tool: ${request.params.name}` }],
-      };
-    }
-
-    try {
-      const client = getClient();
-      const text = await tool.handler(request.params.arguments, client);
-      return { content: [{ type: "text", text }] };
-    } catch (err) {
-      return { isError: true, content: [{ type: "text", text: formatError(err) }] };
-    }
-  });
-
+  const server = createOnegentServer();
   const transport = new StdioServerTransport();
   await server.connect(transport);
-
   console.error(`[onegent-mcp] ${SERVER_NAME}@${SERVER_VERSION} ready on stdio (${TOOLS.length} tools)`);
-}
-
-function formatError(err: unknown): string {
-  if (err instanceof z.ZodError) {
-    const details = err.issues.map((i) => `  • ${i.path.join(".") || "(root)"}: ${i.message}`).join("\n");
-    return `Invalid tool arguments:\n${details}`;
-  }
-  if (err instanceof OnegentApiError) {
-    const codePart = err.code ? ` (${err.code})` : "";
-    return `Onegent API error${codePart}: ${err.message}`;
-  }
-  if (err instanceof Error) return err.message;
-  return String(err);
 }
 
 main().catch((err) => {

@@ -1,0 +1,36 @@
+{
+  "$comment": "ChatGPT Apps manifest template for Travel Booking Agent by Onegent. Verify against the latest schema at https://platform.openai.com/docs/apps before submitting — the field names below target the MCP-era Apps SDK spec and may need adjustment.",
+  "schemaVersion": "1.0.0",
+  "name": "Travel Booking Agent",
+  "description": "Book restaurants, hotels, flights, and activities through an AI agent that navigates real booking sites.",
+  "longDescription": "Onegent — AI books your trip end-to-end. Ask for a restaurant reservation, hotel stay, flight, or activity in natural language, and this app hands off to Onegent's agent, which navigates OpenTable / Booking.com / Expedia / Viator on your behalf. The agent always stops before submitting your credit card's CVV — you confirm the final charge. Typical booking completion: 30-240 seconds depending on venue.",
+  "icon": {
+    "url": "https://onegent.com/icon-512.png",
+    "background": "#ffffff"
+  },
+  "mcp": {
+    "url": "https://onegent.com/api/mcp",
+    "transport": "streamable_http",
+    "auth": {
+      "type": "api_key",
+      "location": "header",
+      "headerName": "Authorization",
+      "headerPrefix": "Bearer ",
+      "keyFormatHint": "ogk_live_... or ogk_test_..."
+    }
+  },
+  "categories": ["travel", "productivity", "lifestyle"],
+  "developer": {
+    "name": "Onegent",
+    "website": "https://onegent.com",
+    "email": "beta@onegent.com",
+    "privacyPolicy": "https://onegent.com/privacy",
+    "termsOfService": "https://onegent.com/terms"
+  },
+  "supportedLocales": ["en-US"],
+  "safetyNotes": [
+    "Never submits CVV on behalf of the user — all bookings pause at payment for explicit user authorization.",
+    "All bookings are confirmable; see get_job_status + get_job_audit for full trace.",
+    "API keys can be scoped to specific booking scenarios and revoked at any time."
+  ]
+}
