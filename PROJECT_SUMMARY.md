@@ -1,5 +1,5 @@
 ================================================================
-Onegent · AI 决策代理 · 项目总结 · v0.2.35.0
+Onegent · AI 决策代理 · 项目总结 · v0.2.36.0
 ================================================================
 
 【项目定义】
@@ -16,6 +16,128 @@ Onegent · AI 决策代理 · 项目总结 · v0.2.35.0
 活动 / 多人 trip），非旅行品类（笔记本 / 手机 / 耳机 / 信用卡 /
 礼物 / 健身）已归档。详见本文档头部 "Recent Updates - 2026-04-24
 (cont. 2) · Positioning Shift"。
+
+================================================================
+Recent Updates - 2026-04-24 (cont. 5) · Week 4 #2 MCP connector (Claude + ChatGPT 分发窗口)
+================================================================
+
+v0.2.35.0 把 REST API 装好 + 真流量跑通后,v0.2.36.0 是"把水龙头接到外面的水管"——
+Week 4 #2 建 @onegent/mcp-server 独立 npm 包,让 Claude Desktop / Claude.ai /
+ChatGPT Apps 用户用一行 npx config 就能在他们的 LLM 里说"book Carbone tomorrow
+7pm"直接跑 Onegent 的执行引擎。
+
+本轮做了三件事:定位锁定(tagline + 显示名)→ 6 工具 MCP server
+(stdio+HTTP 双 transport)→ 完整接入文档。全程复用 Week 3 刚交付的
+/api/v1/* REST surface,MCP server 不含任何 booking 逻辑,只是
+stdio/HTTP ↔ HTTP 的 thin adapter——等于我们自己成为 /api/v1 的第一个
+外部 SDK client(dogfood API 契约)。
+
+1. 定位锁定(不改公司名,改显示层)
+   讨论了 4 个方案(全盘改名 / 公司+产品两层 / 保留 Onegent 靠 tagline 补信息
+   / 延迟决策),选了"最便宜但足够解决问题"的一条:
+   · Tagline:"Onegent — AI books your trip end-to-end"
+   · 外部显示名:"Travel Booking Agent" (MCP title + ChatGPT Apps name)
+   · 一句话描述:"Book restaurants, hotels, flights, and activities through
+     an AI agent that navigates real booking sites."
+   理由是现在零流量零品牌 equity,改公司名收益也是零;"Onegent"不误导只是
+   不信息,信息缺口靠 tagline + description 补。参照 Stripe 2010-2013 做法。
+
+2. Monorepo + @onegent/mcp-server 骨架(US-W4-001)
+   - root package.json 加 "workspaces": ["packages/*"] + build:mcp alias
+   - root tsconfig 排除 packages/** 避免 Next.js 误抓 ESM 源码
+   - packages/mcp-server/:独立 package.json(bin=onegent-mcp-server,
+     type=module, @modelcontextprotocol/sdk ^1 + zod 依赖),自己的
+     tsconfig(NodeNext ESM, target ES2022, emit dist/),npm publish
+     时 files=["dist","README.md"]
+
+3. REST client + OnegentApiError(US-W4-002)
+   - src/api-client.ts:Node 18+ global fetch + AbortController(15s timeout),
+     读 ONEGENT_API_KEY + ONEGENT_API_BASE_URL env,Authorization: Bearer
+     自动加头,4xx/5xx 映射到 OnegentApiError 带 code + message + status
+   - 类型手写(BookingProfile / ExecutionRequest 4-scenario 联合 / 
+     ExecutionJobResult / AuditEvent),不从 @/lib/api-v1 import,保证
+     npm 包能独立发布不拖 Next.js 依赖
+
+4. 6 个 MCP 工具(US-W4-003 + 004 + 005)
+   - book_restaurant:zod 校验 date=YYYY-MM-DD + time=HH:MM + covers ∈ [1,20]
+     + profile/profileId 互斥 refinement,tool description 告诉 LLM 调完后
+     去 poll get_job_status + 警告 paused_payment
+   - book_hotel:check_out > check_in refinement,guests ∈ [1,10]
+   - book_flight(preview):origin/destination 接受 IATA 或城市名,optional
+     return_date 区分 one-way,cabin enum,description 诚实标注 "preview"
+     + 90-240s 完成窗口
+   - book_activity(preview):optional activity_name 让 agent 自选,description
+     承认成功率因目的地而异
+   - get_job_status:switch case 按 status 输出人话指引(queued→"wait 15-30s",
+     done→relay confirmation code, paused_payment→"user must approve"), 
+     error 时带 error.code + .message
+   - get_job_audit:默认 50 条 limit(max 500),格式化 ts + level + message
+     + 截断 200 字符 data preview
+
+5. 双 transport + server-factory(US-W4-007)
+   - src/server-factory.ts:抽出 Server 构造 + tool dispatcher,stdio 和
+     HTTP 共用;每个 Server 实例携带 title="Travel Booking Agent" + 全局
+     instructions 教 LLM 整条 book→poll→confirm 生命周期
+   - src/http-server.ts:StreamableHTTPServerTransport stateless 模式
+     (sessionIdGenerator=undefined 适合 Vercel/Cloud Run),每请求新 Server
+     实例避免跨用户 state 泄漏
+   - src/index.ts CLI:--http [--port N] flag,默认 stdio;无 arg npx 调用
+     直接进 stdio 模式对齐 Claude Desktop 配置
+   - chatgpt-apps/manifest.json:OpenAI Apps SDK 提交模板,url 指向
+     https://onegent.com/api/mcp(部署在后续 story)
+   - 真 E2E:curl -XPOST 打 /tools/list 拿到 SSE stream 含 6 个 tool 完整
+     JSON Schema,证明 HTTP transport 端到端通
+
+6. 用户文档(US-W4-006 + 008)
+   - packages/mcp-server/README.md:npm 包首页,hero + tagline + 6 tools
+     capability table(含 typical completion 窗口)+ claude_desktop_config.json
+     完整 JSON + env 表 + sample LLM turn(book Carbone → poll → confirm)
+     + 4 条 troubleshooting(用户实际会踩的坑)+ 自托管开发指引
+   - docs/integrations/claude-mcp.md:Claude Desktop 用户视角端到端,
+     含 macOS/Windows 配置路径 + 首次 booking walkthrough + expected status
+     timeline 表 + 专门的"Payment safety"section 把 paused_payment 讲成
+     feature 而非 bug + Claude.ai remote MCP roadmap 占位
+   - docs/integrations/chatgpt-apps.md:两条路(Apps SDK preview + Custom
+     GPT Action 今天可用)对照表 + Apps SDK 架构图 + inline OpenAPI 3.1
+     spec 给 Custom GPT 直接粘 + curl auth 自测命令 + Custom GPT 限制
+     (个人账号/不能上 GPT Store)
+
+7. 合计产出
+   - 9 个 US-W4-00x commits(今天 15+ 个 commit 推到 master)
+   - 新增文件:packages/mcp-server/(13 个文件)+ docs/integrations/
+     (2 个 md)+ PROJECT_SUMMARY.md 本节
+   - 改动:root package.json + tsconfig.json
+   - 真 smoke 通过:stdio "ready on stdio (6 tools)" + HTTP curl SSE
+     tools/list 完整响应
+   - 不含:npm publish(留给下次有 access token 时再做)+ onegent.com/api/mcp
+     hosted 端点部署(Week 5 或进 /developers landing 时一起)
+
+8. 战略意义 / positioning shift reinforcement
+   v0.2.33.0 把定位从多品类决策助手收窄到 "AI Travel Execution Layer",
+   v0.2.34.0 抽 lib/core 把代码对齐定位,v0.2.35.0 外露 REST API 让 B 端
+   看得见,v0.2.36.0 把 API 通过 MCP 和 ChatGPT Apps 两个 AI 分发渠道
+   放出去——不再需要用户先知道 Onegent 是什么,他们在 Claude 里说"book
+   me a table at Carbone"就能直接用,Onegent 变成"后面那层看不见的
+   Travel Execution Layer"。Stripe 打法完成:公司品牌让位于功能可用性,
+   分发交给 Claude / ChatGPT 已有的用户基数。
+
+9. Week 4 剩余
+   ⏳ #3 /developers landing 页面(B 端自助申请 key + 文档索引)
+   Week 5 候选(非 Week 4 scope):
+     · recovery.ts Phase 3 provider chain 只在 status=no_availability 触发;
+       OpenTable stage=unknown 终态没走 Resy fallback(Carbone / Le Bernardin
+       / Osteria La Baia 都 hit 这个边界)
+     · Claude.ai remote MCP OAuth 2.0 接入
+     · onegent.com/api/mcp hosted HTTP endpoint 部署 + ChatGPT Apps 提交
+
+10. Posture 延续
+    · C 端 / B 端 / MCP-C 端全部共用 lib/core.createJob(dual-gate 已证明
+      工作)
+    · Week 2 建的 __source 标记 + ConsentPolicy stop_before_cvc
+      invariant 跨所有 3 条入口一致
+    · "AI books your trip end-to-end" tagline 现在有代码对应:单一 booking
+      请求 → lib/core 同一执行路径 → 同一 audit trail → 同一 paused_payment
+      user-consent 模型
 
 ================================================================
 Recent Updates - 2026-04-24 (cont. 4) · Week 3 REST API 全量落地 + Week 4 #11 C 端 dogfood 闭环
@@ -1560,6 +1682,20 @@ Cron：4 个定时任务（反馈提示 / 价格检查 / 场馆质量 / 笔记�
 ================================================================
 九、版本历史摘要
 ================================================================
+
+v0.2.36.0（2026-04-24）— **Week 4 #2 · @onegent/mcp-server(Claude + ChatGPT 分发窗口)**
+  · 紧接 v0.2.35.0 REST API 就位,Week 4 #2 把 API 外接到 AI 分发渠道:
+    新建 packages/mcp-server/ npm workspace,独立发布的 @onegent/mcp-server
+    包,双 transport(stdio for Claude Desktop + Streamable HTTP for ChatGPT
+    Apps),暴露 6 工具 book_restaurant/hotel/flight/activity + get_job_status
+    + get_job_audit,全部走 /api/v1/* REST(即 dogfood Week 3 交付的 API 契约)
+  · 定位层锁定:tagline "Onegent — AI books your trip end-to-end",外部显示名
+    "Travel Booking Agent",公司名 Onegent 保留不改(零流量零 equity 阶段不折腾)
+  · 真 E2E 证据:curl -XPOST /tools/list 在 HTTP transport 上拿到 SSE stream
+    含 6 工具完整 JSON Schema;stdio 模式启动打印 "ready on stdio (6 tools)"
+  · 用户文档双轨:packages/mcp-server/README.md(npm 首页) + docs/integrations/
+    claude-mcp.md(Claude Desktop 安装到首次 booking 端到端)+ chatgpt-apps.md
+    (Apps SDK preview + Custom GPT Action inline OpenAPI 双路径对照)
 
 v0.2.35.0（2026-04-24）— **Week 3 REST API + Week 4 #11 C 端 dogfood 闭环**
   · 紧接 v0.2.34.0 lib/core 抽象,Week 3 把基础设施装水龙头:造 /api/v1/*
