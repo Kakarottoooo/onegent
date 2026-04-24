@@ -59,6 +59,14 @@ import { buildPreferenceProfile } from "@/lib/policy";
 import { findActivitySkill } from "@/lib/agent-runtime/skills/find-activity";
 import type { SkillContext } from "@/lib/agent-runtime/types";
 
+// ── US-009: lib/core new-path types (for the USE_CORE_EXECUTOR branch) ─────
+import type {
+  ExecutionJobRequest,
+  ExecutionParams,
+  ExecutionScenario,
+  ConsentPolicy,
+} from "@/lib/core";
+
 export const maxDuration = 300;
 
 type Params = { params: Promise<{ id: string }> };
@@ -314,6 +322,73 @@ async function runStepWithRecovery(
   };
 }
 
+// ── US-009: lib/core new-path adapter ──────────────────────────────────────
+// Invoked by runUniversalStep when USE_CORE_EXECUTOR=true AND the job's
+// step.body carries the lib/core/execution marker. Reconstructs an
+// ExecutionJobRequest from the body (body was serialized by
+// lib/core/execution/job-manager.createJob so the shape is known),
+// delegates to runExecutionJobWithRecovery, maps the result back to
+// BookingJobStep so the surrounding runStepWithRecovery / /tasks UI
+// sees no difference vs. the legacy path.
+async function runUniversalStepViaCore(
+  step: BookingJobStep,
+  body: Record<string, unknown>,
+  bookingJobId: string,
+  jobUserId: string | null | undefined,
+  onProgress: (s: BookingJobStep) => Promise<void>,
+): Promise<BookingJobStep> {
+  // Lazy import keeps the module load cost off the legacy hot path.
+  const { runExecutionJobWithRecovery } = await import(
+    "@/lib/core/execution/recovery"
+  );
+
+  const request: ExecutionJobRequest = {
+    request: {
+      scenario: body.scenario as ExecutionScenario,
+      // Trust the __source marker — body.params was produced by
+      // lib/core/execution/job-manager.buildStepFromRequest and carries
+      // the right shape for this scenario.
+      params: body.params,
+    } as ExecutionParams,
+    profileId: typeof body.profileId === "number" ? body.profileId : undefined,
+    consent: body.consent as ConsentPolicy | undefined,
+  };
+
+  const stepIndex = typeof body.stepIndex === "number" ? body.stepIndex : 0;
+
+  await onProgress({ ...step, status: "loading" });
+
+  const result = await runExecutionJobWithRecovery(request, {
+    jobId: bookingJobId,
+    userId: jobUserId ?? null,
+    stepIndex,
+  });
+
+  // Map ExecutionJobStatus → BookingJobStep.status. Mirrors the mapping
+  // in lib/core/execution/job-manager.mapJobStatusToStepStatus but kept
+  // inline here to avoid pulling that internal helper onto route.ts's
+  // import surface.
+  const stepStatus: BookingJobStep["status"] =
+    result.status === "paused_payment"
+      ? "awaiting_confirmation"
+      : result.status === "completed"
+      ? "done"
+      : result.status === "no_availability"
+      ? "no_availability"
+      : "error";
+
+  return {
+    ...step,
+    status: stepStatus,
+    handoff_url: result.handoffUrl ?? step.handoff_url,
+    session_url: result.sessionUrl ?? step.session_url,
+    error: result.error ?? step.error,
+    attemptCount: result.attemptCount ?? step.attemptCount,
+    usedFallback: result.usedFallback ?? step.usedFallback,
+    decisionLog: result.decisionLog,
+  };
+}
+
 // ── Universal step via Stagehand browser executor ─────────────────────────
 
 async function runUniversalStep(
@@ -322,6 +397,29 @@ async function runUniversalStep(
   bookingJobId: string,
   jobUserId?: string | null,
 ): Promise<BookingJobStep> {
+  // ── US-009: Dispatch to lib/core new path when flag + marker match ──
+  // Requires BOTH:
+  //   1. env USE_CORE_EXECUTOR === "true" (global kill-switch)
+  //   2. step.body.__source === "lib/core/execution" (per-job marker, set
+  //      by lib/core/execution/job-manager.createJob when the job was
+  //      created via the new path — e.g. from a B 端 REST caller)
+  // This way legacy C 端 flows (chat-commit / trip-packaging / DR
+  // synthesis) which don't write the marker always continue on the old
+  // path regardless of the flag. Zero-regression by construction.
+  const bodyAny = step.body as Record<string, unknown>;
+  if (
+    process.env.USE_CORE_EXECUTOR === "true" &&
+    bodyAny.__source === "lib/core/execution"
+  ) {
+    return runUniversalStepViaCore(
+      step,
+      bodyAny,
+      bookingJobId,
+      jobUserId,
+      onProgress,
+    );
+  }
+
   const log: DecisionLogEntry[] = [];
   await onProgress({ ...step, status: "loading", decisionLog: log });
 
