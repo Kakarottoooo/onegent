@@ -2422,6 +2422,24 @@ export async function listRoomMembers(roomId: string): Promise<DecisionRoomMembe
   return result.rows;
 }
 
+/**
+ * Stage 2 variant: includes pending invitees. Use this ONLY when you need
+ * to act on invited rows (accept-invite, leave-invited, delete-room notify).
+ * Regular flows should stick with listRoomMembers (joined-only) to keep
+ * "who's in the room" semantics consistent.
+ */
+export async function listRoomMembersWithInvited(
+  roomId: string,
+): Promise<DecisionRoomMember[]> {
+  await ensureDecisionRoomTables();
+  const result = await sql<DecisionRoomMember>`
+    SELECT * FROM decision_room_members
+    WHERE room_id = ${roomId} AND status IN ('joined', 'invited')
+    ORDER BY joined_at ASC
+  `;
+  return result.rows;
+}
+
 export async function isRoomMember(roomId: string, userId: string): Promise<boolean> {
   await ensureDecisionRoomTables();
   const result = await sql`

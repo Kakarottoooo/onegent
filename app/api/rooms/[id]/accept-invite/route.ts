@@ -11,7 +11,7 @@
  */
 import { NextResponse } from "next/server";
 import { auth } from "@clerk/nextjs/server";
-import { getDecisionRoomById, joinDecisionRoom, listRoomMembers } from "@/lib/db";
+import { getDecisionRoomById, joinDecisionRoom, listRoomMembersWithInvited } from "@/lib/db";
 
 type Params = { params: Promise<{ id: string }> };
 
@@ -26,7 +26,8 @@ export async function POST(_req: Request, { params }: Params) {
   if (!room) return NextResponse.json({ error: "Room not found" }, { status: 404 });
 
   // Verify the caller is invited (or already joined — idempotent).
-  const members = await listRoomMembers(roomId);
+  // Must use the "with invited" variant — listRoomMembers filters invited out.
+  const members = await listRoomMembersWithInvited(roomId);
   const me = members.find((m) => m.user_id === userId);
   if (!me) {
     return NextResponse.json(

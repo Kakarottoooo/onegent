@@ -6,7 +6,7 @@ import {
   getDecisionRoomById,
   getUserProfile,
   isRoomMember,
-  listRoomMembers,
+  listRoomMembersWithInvited,
   sendDirectMessage,
 } from "@/lib/db";
 
@@ -58,7 +58,9 @@ export async function DELETE(_req: Request, { params }: Params) {
   // sidebar on next poll). Each DM is best-effort — a failure doesn't block
   // the delete.
   try {
-    const members = await listRoomMembers(id);
+    // Include invited members too — they were expecting to join, so they
+    // should also get the dismissal DM.
+    const members = await listRoomMembersWithInvited(id);
     const creatorProfile = await getUserProfile(userId).catch(() => null);
     const creatorLabel =
       creatorProfile?.display_name ||

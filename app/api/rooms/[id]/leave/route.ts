@@ -7,7 +7,7 @@ import {
   getUserProfile,
   isRoomMember,
   leaveDecisionRoom,
-  listRoomMembers,
+  listRoomMembersWithInvited,
   sql,
 } from "@/lib/db";
 
@@ -34,8 +34,9 @@ export async function POST(_req: Request, { params }: Params) {
 
   // Stage 2: the caller might be a pending-invite (status='invited') member
   // in which case isRoomMember returns false but they should still be able
-  // to decline. Look up raw member status before the isRoomMember gate.
-  const members = await listRoomMembers(roomId);
+  // to decline. Use the with-invited variant — listRoomMembers alone drops
+  // invited rows.
+  const members = await listRoomMembersWithInvited(roomId);
   const me = members.find((m) => m.user_id === userId);
   if (me?.status === "invited") {
     await declineRoomInvite(roomId, userId);
