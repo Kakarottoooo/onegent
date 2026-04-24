@@ -527,6 +527,9 @@ export async function POST(req: NextRequest) {
         }
       }
 
+      // Deferred: we'll seed the assistant welcome message below AFTER invites
+      // are resolved so it can include the real invite URL + handle list.
+
       // Stage 2 invite-UX: resolve named members to contacts + pre-invite.
       // Resolved contacts get added with status='invited'; they'll see the
       // pending invitation in their /rooms list and accept to join. Names
@@ -588,6 +591,48 @@ export async function POST(req: NextRequest) {
           await markSessionUpgraded(incomingSessionId, userId, room.id);
         } catch (err) {
           console.warn(`[chat/commit] markSessionUpgraded failed for session=${incomingSessionId}`, err);
+        }
+      }
+
+      // Seed welcome assistant message into the CREATOR's private channel.
+      // The client doesn't inject it in memory — it clears chat and replays
+      // from DB on room enter, so this is what the creator sees right after
+      // clicking "Confirm & create Room".
+      const inviteLineForCreator = room.short_code
+        ? `\n邀请链接（发给同行的人）：/rooms/join/${room.short_code}`
+        : "";
+      const whoList = memberNames.length > 0 ? memberNames.join("、") : "";
+      const creatorWelcome =
+        `Trip 房间「${room.title}」已建好！${whoList ? `已邀请 ${whoList}。` : ""}${inviteLineForCreator}\n\n` +
+        `继续和我聊具体偏好（预算、住哪区、想吃什么、想玩啥），我会综合你们每个人的想法出完整方案。`;
+      try {
+        await insertPrivateMessage({
+          roomId: room.id,
+          userId,
+          role: "assistant",
+          content: creatorWelcome,
+        });
+      } catch (err) {
+        console.warn("[chat/commit] seed creator welcome failed", err);
+      }
+
+      // Seed welcome for each INVITED user into their own private channel.
+      // Without this, invited users open the room and see a blank chat. This
+      // gives them context + a prompt to start contributing preferences.
+      const invitedWelcome =
+        `${creatorLabel} 邀请你一起计划 Trip「${room.title}」。\n\n` +
+        `告诉我你对这次行程的偏好（预算、住哪区、想吃什么、想玩啥、出行时间偏好等），` +
+        `我会把你们每个人的想法综合起来出方案。你说的内容只有你自己能看到，我只会把汇总后的方案发到群里。`;
+      for (const invitedId of invitedUserIds) {
+        try {
+          await insertPrivateMessage({
+            roomId: room.id,
+            userId: invitedId,
+            role: "assistant",
+            content: invitedWelcome,
+          });
+        } catch (err) {
+          console.warn(`[chat/commit] seed invited welcome failed for ${invitedId}`, err);
         }
       }
 

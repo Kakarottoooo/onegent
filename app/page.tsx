@@ -163,13 +163,6 @@ export default function Home() {
   // created mid-turn (from "none" → "session:X") — the user just typed a
   // message and got a reply; those must stay on screen.
   const lastContextRef = useRef<string>("");
-  // Recently-upgraded room ids with their upgrade timestamp. A "one-shot"
-  // boolean flag doesn't survive React Strict Mode's double-effect pass
-  // (first run consumes it, second run clears the chat). A 5s time window
-  // covers both passes plus any follow-up renders without needing a manual
-  // reset, and still lets normal sidebar-switches back to the same room
-  // clear properly later.
-  const upgradedRoomsRef = useRef<Map<string, number>>(new Map());
   useEffect(() => {
     const ctx = activeRoomId
       ? `room:${activeRoomId}`
@@ -181,9 +174,12 @@ export default function Home() {
       prev !== "" && // initial render, nothing to compare against
       prev !== ctx &&
       prev !== "none"; // "none → session:X" is session creation, not a switch
-    const upgradedAt = activeRoomId ? upgradedRoomsRef.current.get(activeRoomId) : undefined;
-    const isRecentUpgrade = upgradedAt !== undefined && Date.now() - upgradedAt < 5000;
-    if (isRealSwitch && !isRecentUpgrade) {
+    if (isRealSwitch) {
+      // Clear on every real context switch — including session→room upgrade.
+      // The room replay effect below re-fetches the (server-seeded) private
+      // channel right after, so the user sees the full conversation restored
+      // from DB. Relying on in-memory messages surviving upgrade was fragile
+      // (Strict Mode, React render timing, etc.) — DB is the source of truth.
       chat.clearChat();
     }
     lastContextRef.current = ctx;
@@ -288,15 +284,6 @@ export default function Home() {
   useEffect(() => {
     if (!activeRoomId) return;
     if (replayedRoomIds.current.has(activeRoomId)) return;
-    // Skip replay when the chat already has in-memory messages — that means
-    // the user is mid-session (e.g. just created this room and the messages
-    // that built the confirm card are still on screen). Replaying here would
-    // duplicate every bubble. Mark the room as "replayed" so a later nav
-    // doesn't retry either.
-    if (chat.messages.length > 0) {
-      replayedRoomIds.current.add(activeRoomId);
-      return;
-    }
     let cancelled = false;
     (async () => {
       try {
@@ -305,9 +292,15 @@ export default function Home() {
         const data = (await res.json()) as {
           messages: Array<{ id: string; role: "user" | "assistant" | "system"; content: string; created_at: string }>;
         };
-        if (cancelled || !data.messages || data.messages.length === 0) return;
+        if (cancelled) return;
         // Mark replayed BEFORE injecting so any side-effect re-render doesn't loop.
+        // We mark even on empty so the effect doesn't refetch on every render.
         replayedRoomIds.current.add(activeRoomId);
+        if (!data.messages || data.messages.length === 0) return;
+        // Fresh context — the context-switch effect already cleared chat on
+        // a real switch. Inject each persisted message so the user sees the
+        // full thread that the server seeded (pre-confirm history + welcome
+        // for the creator; a single welcome for invited members).
         for (const m of data.messages) {
           if (m.role === "user") chat.injectUserMessage(m.content);
           else chat.injectAssistantMessage(m.content);
@@ -886,23 +879,14 @@ export default function Home() {
       // next chat turn syncs into the room's private channel. The user keeps
       // talking to the agent right here.
       if (payload.flow === "chat" && payload.id) {
-        // Session-to-room upgrade: the chat column already shows the exact
-        // pre-confirm conversation that got seeded into the room. Mark this
-        // room as "just upgraded" (with a timestamp) so the context-switch
-        // effect skips clearChat, and mark it already-replayed since the
-        // chat's in-memory content already matches what's in DB.
-        upgradedRoomsRef.current.set(payload.id, Date.now());
-        replayedRoomIds.current.add(payload.id);
-        // Bump sidebar so it picks up the now-upgraded session's
-        // upgraded_room_id flag and hides it from the Sessions list.
+        // Session-to-room upgrade: clear the in-memory chat and switch context
+        // into the new room. The room replay effect below fetches the private
+        // channel (which the server just seeded with history + welcome) and
+        // injects it back — single source of truth, no fragile in-memory hand-off.
         setSidebarReloadTick((n) => n + 1);
         setActiveRoomId(payload.id);
         setActiveSessionId(null);
         router.replace(payload.url);
-        const inviteLine = fullInvite ? `\n邀请链接（发给同行的人）：${fullInvite}` : "";
-        chat.injectAssistantMessage(
-          `Trip 房间${title}已建好！你们每个人继续和我聊偏好，我会综合所有人意见出方案。${inviteLine}`,
-        );
         return;
       }
 
