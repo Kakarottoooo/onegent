@@ -28,6 +28,8 @@ import {
   listRoomMembers,
   listTripSelections,
   getMyTripSelection,
+  listProposalVotes,
+  type VoteKind,
 } from "@/lib/db";
 import { getActiveTripProposal } from "@/lib/agent/trip-synthesis";
 
@@ -75,20 +77,39 @@ export async function GET(_req: Request, { params }: Params) {
       ok: true,
       proposal: null,
       my_selection: null,
+      my_vote: null,
+      vote_tally: { approve: 0, decline: 0, request_changes: 0, voters: [] },
       aggregate: emptyAggregate(joinedCount),
       room: {
         creator_id: room.creator_id,
         payer_id: room.payer_id ?? room.creator_id,
         approval_rule: room.approval_rule ?? "unanimous",
         status: room.status,
+        booking_job_id: room.booking_job_id ?? null,
       },
     });
   }
 
-  const [selections, mySelection] = await Promise.all([
+  const [selections, mySelection, votes] = await Promise.all([
     listTripSelections(proposal.id),
     getMyTripSelection(proposal.id, userId),
+    listProposalVotes(proposal.id),
   ]);
+
+  // Only one "option" exists for trip proposals (content_json is a flat
+  // TripPackage, not wrapped as {options:[{id,card}]}). extractOptions()
+  // falls back to id="legacy" — we tally all approves against that single
+  // bucket. This keeps the reused machinery backward-compatible.
+  const tally = { approve: 0, decline: 0, request_changes: 0 };
+  let myVote: VoteKind | null = null;
+  const voters: Array<{ user_id: string; vote: VoteKind; option_id: string | null }> = [];
+  for (const v of votes) {
+    if (v.vote === "approve") tally.approve += 1;
+    else if (v.vote === "decline") tally.decline += 1;
+    else if (v.vote === "request_changes") tally.request_changes += 1;
+    voters.push({ user_id: v.user_id, vote: v.vote, option_id: v.option_id });
+    if (v.user_id === userId) myVote = v.vote;
+  }
 
   const aggregate = emptyAggregate(joinedCount);
   for (const row of selections) {
@@ -117,12 +138,15 @@ export async function GET(_req: Request, { params }: Params) {
       status: proposal.status,
     },
     my_selection: mySelection?.selection_json ?? null,
+    my_vote: myVote,
+    vote_tally: { ...tally, voters },
     aggregate,
     room: {
       creator_id: room.creator_id,
       payer_id: room.payer_id ?? room.creator_id,
       approval_rule: room.approval_rule ?? "unanimous",
       status: room.status,
+      booking_job_id: room.booking_job_id ?? null,
     },
   });
 }

@@ -39,6 +39,8 @@ export interface TripProposalChatCardProps {
   userId: string | null;
 }
 
+type VoteKind = "approve" | "decline" | "request_changes";
+
 interface ApiResponse {
   ok: true;
   proposal: {
@@ -53,6 +55,13 @@ interface ApiResponse {
     restaurant_ids: string[];
     activity_ids: string[];
   } | null;
+  my_vote: VoteKind | null;
+  vote_tally: {
+    approve: number;
+    decline: number;
+    request_changes: number;
+    voters: Array<{ user_id: string; vote: VoteKind; option_id: string | null }>;
+  };
   aggregate: {
     hotel_counts: Record<string, number>;
     flight_counts: Record<string, number>;
@@ -66,6 +75,7 @@ interface ApiResponse {
     payer_id: string;
     approval_rule: string;
     status: string;
+    booking_job_id: string | null;
   };
 }
 
@@ -328,6 +338,8 @@ export default function TripProposalChatCard(props: TripProposalChatCardProps) {
   const [saveError, setSaveError] = useState<string | null>(null);
   const [bookInflight, setBookInflight] = useState(false);
   const [bookError, setBookError] = useState<string | null>(null);
+  const [voteInflight, setVoteInflight] = useState<VoteKind | null>(null);
+  const [voteError, setVoteError] = useState<string | null>(null);
 
   const fetchProposal = useCallback(async () => {
     try {
@@ -403,6 +415,35 @@ export default function TripProposalChatCard(props: TripProposalChatCardProps) {
     });
   }
 
+  async function handleVote(vote: VoteKind) {
+    if (voteInflight || !data?.proposal?.id) return;
+    setVoteInflight(vote);
+    setVoteError(null);
+    try {
+      // Trip proposals have a single option (extractOptions returns id="legacy").
+      // approve votes require option_id; decline/request_changes are optional
+      // so we pass it uniformly for consistency.
+      const res = await fetch(
+        `/api/rooms/${props.roomId}/proposals/${data.proposal.id}/vote`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ vote, option_id: "legacy" }),
+        },
+      );
+      if (!res.ok) {
+        const body = (await res.json().catch(() => ({}))) as { error?: string };
+        setVoteError(body.error ?? "Couldn't submit vote.");
+        return;
+      }
+      await fetchProposal();
+    } catch {
+      setVoteError("Network error — try again.");
+    } finally {
+      setVoteInflight(null);
+    }
+  }
+
   async function handleLockIn() {
     if (saveInflight) return;
     setSaveInflight(true);
@@ -476,7 +517,51 @@ export default function TripProposalChatCard(props: TripProposalChatCardProps) {
     );
   }
 
-  const voteLabel = `${totalVoters}/${joinedMembers} 人已提交选择`;
+  // Executing mode — the payer has triggered booking. Show a compact "trip
+  // is live" state so user B (who might still see the vote card mid-refresh)
+  // gets the signal that it's been booked and can jump to the task view.
+  const isExecuting =
+    data.room.status === "executing" ||
+    data.proposal?.status === "accepted" ||
+    !!data.room.booking_job_id;
+  if (isExecuting) {
+    const taskUrl = data.room.booking_job_id
+      ? `/tasks?focus=${encodeURIComponent(data.room.booking_job_id)}&view=live`
+      : "/tasks";
+    return (
+      <div style={WRAPPER}>
+        <div style={HEADER}>
+          <div>
+            <div style={HEADER_TITLE}>
+              ✈️ Trip booked · {pkg.destination_city}
+            </div>
+            <div style={HEADER_META}>
+              {pkg.date_range.from} → {pkg.date_range.to} · 预订已启动，agent 正在执行
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={() => router.push(taskUrl)}
+            style={{ ...BOOK_BTN }}
+          >
+            See progress →
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  // Approval math — trip rooms have a single "option" (legacy id), so one
+  // approve vote per member counts toward the threshold. N<3 → unanimous
+  // regardless of the room's raw rule. Mirror of /book-trip's server gate.
+  const rawRule = data.room.approval_rule;
+  const rule = joinedMembers < 3 ? "unanimous" : rawRule;
+  const approvedCount = data.vote_tally.approve;
+  const approvalThreshold =
+    rule === "unanimous" ? joinedMembers : Math.floor(joinedMembers / 2) + 1;
+  const approvalMet = approvedCount >= approvalThreshold && joinedMembers > 0;
+
+  const voteLabel = `${totalVoters}/${joinedMembers} 人已提交选择 · ${approvedCount}/${approvalThreshold} 已批准（${rule}）`;
 
   return (
     <div style={WRAPPER} data-trip-proposal>
@@ -571,13 +656,65 @@ export default function TripProposalChatCard(props: TripProposalChatCardProps) {
         </ColumnSection>
       </div>
 
+      {/* Vote row — every member gets Approve / Decline / Request changes.
+          Payer's Book button below stays disabled until the approval
+          threshold is met (same gate the server enforces in /book-trip). */}
+      <div
+        style={{
+          padding: "10px 16px",
+          borderTop: "1px solid var(--border, #e5e7eb)",
+          display: "flex",
+          alignItems: "center",
+          gap: 10,
+          flexWrap: "wrap",
+          fontFamily: "var(--font-dm-sans)",
+          fontSize: 12,
+          color: "var(--text-secondary, #555)",
+        }}
+      >
+        <span>
+          投票（{rule} 规则，需 {approvalThreshold}/{joinedMembers} 批准）：
+        </span>
+        <VoteButton
+          label="✓ Approve"
+          active={data.my_vote === "approve"}
+          loading={voteInflight === "approve"}
+          onClick={() => handleVote("approve")}
+          variant="approve"
+        />
+        <VoteButton
+          label="✗ Decline"
+          active={data.my_vote === "decline"}
+          loading={voteInflight === "decline"}
+          onClick={() => handleVote("decline")}
+          variant="decline"
+        />
+        <VoteButton
+          label="↺ Request changes"
+          active={data.my_vote === "request_changes"}
+          loading={voteInflight === "request_changes"}
+          onClick={() => handleVote("request_changes")}
+          variant="neutral"
+        />
+        {voteError ? (
+          <span style={{ color: "#c0392b" }}>{voteError}</span>
+        ) : null}
+        <span style={{ marginLeft: "auto", color: approvalMet ? "var(--gold, #c9a648)" : "var(--text-muted, #888)", fontWeight: 600 }}>
+          {approvedCount}/{approvalThreshold} approved{approvalMet ? " ✓" : ""}
+        </span>
+      </div>
+
       <div style={FOOTER}>
         <div>
           <div style={{ fontSize: 13, fontWeight: 600, color: "var(--text-primary, #111)", fontFamily: "var(--font-dm-sans)" }}>
             {totalSelected === 0 ? "Nothing selected yet" : `${totalSelected} selected`}
           </div>
           <div style={{ fontSize: 11, color: "var(--text-muted, #888)", fontFamily: "var(--font-dm-sans)" }}>
-            {isPayer ? "You're the payer — click Book when the group's ready." : "Lock in your picks so the payer sees your vote."}
+            {isPayer
+              ? approvalMet
+                ? "Everyone approved — ready to book."
+                : `Waiting on approvals — need ${approvalThreshold - approvedCount} more.`
+              : "Lock in your picks + vote so the group can move forward."}
           </div>
         </div>
         <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
@@ -599,8 +736,13 @@ export default function TripProposalChatCard(props: TripProposalChatCardProps) {
             <button
               type="button"
               onClick={handleBook}
-              disabled={bookInflight || totalSelected === 0}
-              style={{ ...BOOK_BTN, opacity: bookInflight || totalSelected === 0 ? 0.5 : 1 }}
+              disabled={bookInflight || totalSelected === 0 || !approvalMet}
+              title={!approvalMet ? `Need ${approvalThreshold - approvedCount} more approval(s) before booking.` : undefined}
+              style={{
+                ...BOOK_BTN,
+                opacity: bookInflight || totalSelected === 0 || !approvalMet ? 0.5 : 1,
+                cursor: bookInflight || totalSelected === 0 || !approvalMet ? "not-allowed" : "pointer",
+              }}
             >
               {bookInflight ? "Booking…" : "Book this trip"}
             </button>
@@ -608,6 +750,54 @@ export default function TripProposalChatCard(props: TripProposalChatCardProps) {
         </div>
       </div>
     </div>
+  );
+}
+
+/**
+ * Colored pill button for voting. `active` = the caller's current vote;
+ * the badge fills with the vote's semantic color to confirm their choice.
+ */
+function VoteButton({
+  label,
+  active,
+  loading,
+  onClick,
+  variant,
+}: {
+  label: string;
+  active: boolean;
+  loading: boolean;
+  onClick: () => void;
+  variant: "approve" | "decline" | "neutral";
+}) {
+  const palette =
+    variant === "approve"
+      ? { fg: "#1f7a38", bg: "rgba(31,122,56,0.10)", border: "rgba(31,122,56,0.4)" }
+      : variant === "decline"
+        ? { fg: "#c0392b", bg: "rgba(192,57,43,0.10)", border: "rgba(192,57,43,0.4)" }
+        : { fg: "var(--text-secondary, #555)", bg: "transparent", border: "var(--border, #d0d0d0)" };
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={loading}
+      style={{
+        padding: "5px 10px",
+        borderRadius: 999,
+        borderWidth: 1,
+        borderStyle: "solid",
+        borderColor: active ? palette.fg : palette.border,
+        background: active ? palette.bg : "transparent",
+        color: palette.fg,
+        fontFamily: "var(--font-dm-sans)",
+        fontSize: 12,
+        fontWeight: active ? 600 : 500,
+        cursor: loading ? "wait" : "pointer",
+        opacity: loading ? 0.6 : 1,
+      }}
+    >
+      {loading ? "…" : label}
+    </button>
   );
 }
 

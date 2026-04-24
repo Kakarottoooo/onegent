@@ -29,8 +29,11 @@ import {
   updateProposalStatus,
   getMyTripSelection,
   listTripSelections,
+  listProposalVotes,
+  listRoomMembers,
 } from "@/lib/db";
 import { getActiveTripProposal } from "@/lib/agent/trip-synthesis";
+import { extractOptions, tallyVotes, resolveAcceptedOption } from "@/lib/rooms/proposal-shape";
 import type { TripPackage } from "@/lib/types";
 
 export const maxDuration = 60;
@@ -68,6 +71,36 @@ export async function POST(req: NextRequest, { params }: Params) {
   if (!proposal) {
     return NextResponse.json(
       { error: "No active trip proposal yet — wait for synthesis to complete." },
+      { status: 409 },
+    );
+  }
+
+  // Approval-rule gate (reused from classic DR). Trip rooms have a single
+  // "option" (extractOptions falls back to id="legacy" since the TripPackage
+  // is stored raw). We tally approves against that bucket and require
+  // unanimous for N<3, otherwise the room's configured rule. Payer cannot
+  // book until the threshold is met — gives every member a real veto.
+  const [members, votes] = await Promise.all([
+    listRoomMembers(roomId),
+    listProposalVotes(proposal.id),
+  ]);
+  const joined = members.filter((m) => m.status === "joined");
+  const rawRule = room.approval_rule ?? "unanimous";
+  const rule = joined.length < 3 ? "unanimous" : rawRule;
+  const options = extractOptions(proposal);
+  const tallies = tallyVotes(options, votes);
+  const winner = resolveAcceptedOption(rule, joined.length, tallies);
+  if (!winner) {
+    const approvedCount = tallies[0]?.approved_by.length ?? 0;
+    const needed = rule === "unanimous" ? joined.length : Math.floor(joined.length / 2) + 1;
+    return NextResponse.json(
+      {
+        error: "Approval threshold not met yet.",
+        rule,
+        approved_count: approvedCount,
+        needed,
+        joined_count: joined.length,
+      },
       { status: 409 },
     );
   }
