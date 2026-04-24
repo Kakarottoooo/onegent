@@ -72,8 +72,8 @@
         "Typecheck passes"
       ],
       "priority": 5,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Completed 2026-04-24. Added a CRITICAL OUT-OF-SCOPE DETECTION block between rule 4 and rule 5 of the extractor system prompt, listing all 6 categories (electronics/shopping/gifts/fitness/credit cards/personal advice) and the exact emit pattern (intent='chitchat' + scenario=null + planning_assumptions append 'out_of_scope: <brief topic>'). Also added WORKED EXAMPLE E covering all 3 US-007 test inputs. No changes to types.ts, coerceIntentState, or any runtime logic — purely a prompt edit. The existing planning_assumptions array already flows through coercion/validation unchanged. Typecheck clean; all 82 NLU v2 tests still pass."
     },
     {
       "id": "US-006",

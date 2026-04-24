@@ -19,6 +19,7 @@ Started: 2026-04-24 (positioning-shift-travel-only)
 - Weekend trip flow calls `runCreditCardPipeline` in 3 places (refine-hotel, refine-flight, main). After archiving credit-card.ts, pass `creditCardRecommendations: []` to `runWeekendTripPlanner` — it handles empty via `pickCardForSpend` returning `undefined`, and `buildWeekendTripOption`'s `card` param is optional. Don't forget to also strip `creditCardRecommendations,` from the shorthand returns in `buildBaseResult` calls, otherwise a ReferenceError.
 - Live travel-scoped credit-card logic that stays is `lib/agent/planners/trip-card.ts` (`getBestCardForTrip` / `buildTripCardCallout`) which uses `recommendCreditCards` from the engine directly, NOT the archived pipeline.
 - Pre-existing vitest failures on this branch (as of 2026-04-24): 14 tests across `components/__tests__/RecommendationCard.test.tsx` (11), `lib/__tests__/ai-loop.test.ts` (1), `lib/__tests__/weekend-trip.test.ts` (1), `lib/__tests__/scenario2.test.ts — open-flight Google Flights URL` (1). Do NOT try to "fix" these in a positioning-shift story — they are unrelated to archival work. Verify new work by checking the delta vs this baseline, not the absolute count.
+- Out-of-scope decline is implemented as an **extractor prompt contract**, NOT a new type/enum. The extractor tags non-travel messages via `intent="chitchat"` + `scenario=null` + a `planning_assumptions` string `"out_of_scope: <brief topic>"` — `types.ts` stays untouched. Downstream (router/chat) keys off the literal `"out_of_scope:"` prefix. When adding out-of-scope categories in the future, edit ONLY the extractor prompt block and the WORKED EXAMPLE — no code/type change needed.
 
 ---
 
@@ -80,4 +81,21 @@ Started: 2026-04-24 (positioning-shift-travel-only)
   - `pickCardForSpend(empty_array, n)` returns `undefined`; `buildWeekendTripOption`'s `card` is optional; `runWeekendTripPlanner` still produces a valid plan with `creditCardRecommendations: []`. So the weekend-trip flow degrades gracefully when the credit-card pipeline is removed — no need to gate-out that flow.
   - Prior failed iterations left partial work on disk (the README and some lib/agent.ts edits were already in place when this iteration started). Always `git status` + `git diff` at the start of a story and reconcile with what's already done before re-applying edits.
   - Baseline total count in the Codebase Patterns was "13" but the breakdown actually sums to 14 (11+1+1+1) — updated the count in place.
+---
+
+## 2026-04-24 - US-005
+- Taught `lib/agent/nlu-v2/extractor.ts` to tag non-travel messages as out-of-scope via a new CRITICAL OUT-OF-SCOPE DETECTION block inserted between rule 4 and rule 5 of the system prompt.
+- The block enumerates all 6 categories explicitly: electronics / shopping / gifts / fitness / credit cards / personal advice (with parenthetical examples so gpt-4o-mini can map synonyms).
+- Specifies the exact emit contract: `intent="chitchat"` + `scenario=null` + append `"out_of_scope: <brief 1-4 word topic>"` to `planning_assumptions`. The `"out_of_scope:"` prefix is called out as REQUIRED verbatim because the downstream chat layer (US-006) will key off it.
+- Added WORKED EXAMPLE E right after example D (trip), covering `"help me buy a laptop for coding"` → `out_of_scope: electronics shopping`, plus inline references for the yoga and gift cases (= the 3 test inputs US-007 will assert on).
+- Zero code / types.ts / coercion changes — the existing `planning_assumptions` array already flows through `coerceIntentState` (line 382) and into `IntentState.planning_assumptions` unchanged. No new `NluIntent` or `NluScenario` values were introduced.
+- Files changed: lib/agent/nlu-v2/extractor.ts (prompt only — +25 lines in OUT-OF-SCOPE block, +9 lines in WORKED EXAMPLE E).
+- Typecheck: passed (`npx tsc --noEmit` exit 0).
+- Tests: all 82 NLU v2 tests still pass (`npx vitest run lib/agent/nlu-v2/__tests__/`). No golden regressions — existing golden-solo / golden-multi / golden-trip inputs are all travel-domain, so the new OUT-OF-SCOPE rule does not fire on them.
+- **Learnings for future iterations:**
+  - Keeping the out-of-scope path as a **prompt-only contract** (no new enum value, no new state field) is possible because `IntentState.planning_assumptions: string[]` is already a free-form channel for inferred caveats. Downstream layers can recognize specific prefixes (here `"out_of_scope:"`) to trigger behavior. This pattern avoids widening discriminated unions and keeps the extractor's coercion code untouched.
+  - For US-006, `buildStateSummary()` in `lib/agent/nlu-v2/router.ts` must include `planning_assumptions` (or at least the `"out_of_scope:"` entries) in its output — the PRD acceptance criteria already calls this out. Don't assume the chat layer already sees them.
+  - The extractor's system prompt has a numbered-rule structure (1-10). When inserting a new cross-cutting concern, prefer an UNNUMBERED labeled block (`CRITICAL — OUT-OF-SCOPE DETECTION`) over renumbering rules 5-10 — avoids a 10-line noisy diff and keeps the critical rule visually distinct.
+  - Confirmed: gpt-4o-mini coercion at `coerceIntentState` accepts any `string[]` in `planning_assumptions` (line 382-384). Arbitrary string prefixes like `"out_of_scope:"` pass through unchanged — no schema-validator to fight.
+  - No CLAUDE.md file exists in `lib/agent/nlu-v2/`. The root CLAUDE.md already documents the three-layer architecture; no need to add a per-directory CLAUDE.md for a single prompt tweak.
 ---
