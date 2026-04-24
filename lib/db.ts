@@ -23,6 +23,9 @@ let decisionRoomMessagesTableReady: Promise<void> | null = null;
 let roomMemberIntentStateTableReady: Promise<void> | null = null;
 let decisionRoomPrivateMessagesTableReady: Promise<void> | null = null;
 
+// ── User-to-user DM (Stage 2+) ─────────────────────────────────────────────
+let userDirectMessagesTableReady: Promise<void> | null = null;
+
 // ── Contacts / user profiles (Phase 1.5, layer 2) ──────────────────────────
 let userProfilesTableReady: Promise<void> | null = null;
 let userContactsTableReady: Promise<void> | null = null;
@@ -3599,6 +3602,112 @@ export async function listPrivateMessages(
     SELECT id::text AS id, role, content, created_at
     FROM decision_room_private_messages
     WHERE room_id = ${roomId} AND user_id = ${userId}
+    ORDER BY id ASC
+    LIMIT ${limit}
+  `;
+  return result.rows;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// User-to-user DM (Stage 2+)
+// Private message channel between any two contacts. Role "agent" is reserved
+// for messages sent by the from_user's agent on their behalf (auto-invites,
+// etc.) — the UI must label these distinctly so the recipient knows they
+// weren't personally typed.
+// ═══════════════════════════════════════════════════════════════════════════
+
+export type DmRole = "user" | "agent";
+
+export interface DirectMessageRow {
+  id: string;
+  from_user_id: string;
+  to_user_id: string;
+  role: DmRole;
+  content: string;
+  meta_json: Record<string, unknown> | null;
+  created_at: string;
+}
+
+export async function ensureUserDirectMessagesTable(): Promise<void> {
+  if (!userDirectMessagesTableReady) {
+    userDirectMessagesTableReady = (async () => {
+      await sql`
+        CREATE TABLE IF NOT EXISTS user_direct_messages (
+          id           BIGSERIAL PRIMARY KEY,
+          from_user_id TEXT NOT NULL,
+          to_user_id   TEXT NOT NULL,
+          role         TEXT NOT NULL DEFAULT 'user',
+          content      TEXT NOT NULL,
+          meta_json    JSONB,
+          created_at   TIMESTAMPTZ DEFAULT NOW(),
+          CHECK (from_user_id <> to_user_id)
+        )
+      `;
+      await sql`CREATE INDEX IF NOT EXISTS user_direct_messages_pair_idx ON user_direct_messages (from_user_id, to_user_id, created_at)`;
+      await sql`CREATE INDEX IF NOT EXISTS user_direct_messages_inbox_idx ON user_direct_messages (to_user_id, created_at DESC)`;
+    })().catch((err) => {
+      userDirectMessagesTableReady = null;
+      throw err;
+    });
+  }
+  await userDirectMessagesTableReady;
+}
+
+/**
+ * True if these two users are mutual contacts (one-hop friendship). Returns
+ * false for self (userA === userB). Used by the DM API route to gate
+ * message sends — non-contacts can't spam each other.
+ */
+export async function areContacts(userA: string, userB: string): Promise<boolean> {
+  if (userA === userB) return false;
+  await ensureUserContactsTable();
+  const result = await sql`
+    SELECT 1 FROM user_contacts
+    WHERE owner_id = ${userA} AND contact_user_id = ${userB}
+    LIMIT 1
+  `;
+  return result.rows.length > 0;
+}
+
+/**
+ * Append a DM. Does NOT enforce contact-relationship — the API route gates
+ * that. Keeps this helper composable (e.g. agent auto-invites can skip the
+ * contact check if caller already verified).
+ */
+export async function sendDirectMessage(params: {
+  fromUserId: string;
+  toUserId: string;
+  role?: DmRole;
+  content: string;
+  metaJson?: Record<string, unknown> | null;
+}): Promise<DirectMessageRow> {
+  await ensureUserDirectMessagesTable();
+  const role = params.role ?? "user";
+  const meta = params.metaJson ? JSON.stringify(params.metaJson) : null;
+  const result = await sql<DirectMessageRow>`
+    INSERT INTO user_direct_messages (from_user_id, to_user_id, role, content, meta_json)
+    VALUES (${params.fromUserId}, ${params.toUserId}, ${role}, ${params.content}, ${meta}::jsonb)
+    RETURNING id::text AS id, from_user_id, to_user_id, role, content, meta_json, created_at
+  `;
+  return result.rows[0];
+}
+
+/**
+ * Full chronological thread between two users (both directions). Limit
+ * returned rows to `limit` (default 200). Oldest first so the client can
+ * render top-down and auto-scroll to bottom.
+ */
+export async function listDirectMessagesBetween(
+  userA: string,
+  userB: string,
+  limit: number = 200,
+): Promise<DirectMessageRow[]> {
+  await ensureUserDirectMessagesTable();
+  const result = await sql<DirectMessageRow>`
+    SELECT id::text AS id, from_user_id, to_user_id, role, content, meta_json, created_at
+    FROM user_direct_messages
+    WHERE (from_user_id = ${userA} AND to_user_id = ${userB})
+       OR (from_user_id = ${userB} AND to_user_id = ${userA})
     ORDER BY id ASC
     LIMIT ${limit}
   `;

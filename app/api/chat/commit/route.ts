@@ -23,6 +23,8 @@ import {
   resolveContactsByNames,
   inviteToDecisionRoom,
   insertPrivateMessage,
+  sendDirectMessage,
+  getUserProfile,
   type ApprovalRule,
   type DecisionRoomType,
   type DecisionRoomCategory,
@@ -532,6 +534,13 @@ export async function POST(req: NextRequest) {
       const resolved = await resolveContactsByNames(userId, memberNames).catch(() => []);
       const invitedUserIds: string[] = [];
       const unresolvedNames: string[] = [];
+      // Resolve the creator's display name once so the DM reads naturally
+      // ("🤖 Alice just invited you..." instead of "user_abc123 just...").
+      const creatorProfile = await getUserProfile(userId).catch(() => null);
+      const creatorLabel =
+        creatorProfile?.display_name ||
+        creatorProfile?.username ||
+        "A contact";
       for (const r of resolved) {
         if (r.contact_user_id && r.contact_user_id !== userId) {
           try {
@@ -540,6 +549,27 @@ export async function POST(req: NextRequest) {
           } catch (err) {
             console.warn(`[chat/commit] inviteToDecisionRoom failed for ${r.contact_user_id}`, err);
             unresolvedNames.push(r.name);
+            continue;
+          }
+          // Agent-role DM to the invited contact so they see the invitation
+          // in their Contacts thread + know who to say yes to. role='agent'
+          // is labeled distinctly in the DM UI so recipients know this
+          // message wasn't personally typed.
+          try {
+            await sendDirectMessage({
+              fromUserId: userId,
+              toUserId: r.contact_user_id,
+              role: "agent",
+              content: `${creatorLabel} just invited you to a trip: "${title}". Open Rooms to accept.`,
+              metaJson: {
+                kind: "trip_invite",
+                room_id: room.id,
+                room_short_code: room.short_code,
+                accept_path: "/rooms",
+              },
+            });
+          } catch (err) {
+            console.warn(`[chat/commit] agent DM failed for ${r.contact_user_id}`, err);
           }
         } else {
           unresolvedNames.push(r.name);

@@ -315,7 +315,7 @@ export default function ContactsPage() {
   if (!isSignedIn) {
     return (
       <div className={PAGE}>
-        <GlobalNav active="other" />
+        <GlobalNav active="contacts" />
         <div className="flex items-center justify-center p-6">
           <div className={`${CARD} p-6 max-w-sm text-center`}>
             <p className="text-sm text-[var(--text-secondary)] mb-3">Sign in to manage contacts.</p>
@@ -328,7 +328,7 @@ export default function ContactsPage() {
 
   return (
     <div className={PAGE}>
-      <GlobalNav active="other" />
+      <GlobalNav active="contacts" />
       <div className="max-w-md md:max-w-2xl lg:max-w-3xl mx-auto px-5 md:px-6 py-8">
         <Link
           href="/rooms"
@@ -758,7 +758,13 @@ export default function ContactsPage() {
                         Save
                       </button>
                     ) : (
-                      <div className="flex gap-2 text-xs">
+                      <div className="flex gap-2 text-xs items-center">
+                        <Link
+                          href={`/contacts/${encodeURIComponent(c.contact_user_id)}`}
+                          className="px-2 py-1 rounded-md border border-[var(--gold)] text-[var(--gold)] hover:bg-[var(--gold)]/10 font-medium"
+                        >
+                          Chat
+                        </Link>
                         <button
                           onClick={() => {
                             setEditingId(c.contact_user_id);
