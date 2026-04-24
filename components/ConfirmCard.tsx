@@ -28,6 +28,12 @@ export interface ConfirmCardProps {
    * /api/rooms/[id]/private-messages → UX-4 replay.
    */
   history?: Array<{ role: "user" | "assistant"; content: string }>;
+  /**
+   * Active solo session id, if any. Forwarded to /api/chat/commit so the
+   * server can flag the session as upgraded (upgraded_room_id) once the
+   * room is created — sidebar will then show only the room row, not both.
+   */
+  sessionId?: string | null;
   /** Called with the commit response (room_id + url, or plan hand-off payload). */
   onConfirmed: (payload: CommitResponse) => void;
   /** User clicked "edit" — put focus back on the input so they can keep chatting. */
@@ -207,6 +213,10 @@ export default function ConfirmCard(props: ConfirmCardProps) {
           // Stage 2: send the chat conversation so the room can seed its
           // private channel with what got built up before commit.
           ...(props.history && props.history.length > 0 ? { history: props.history } : {}),
+          // Sidebar "single-entry" rule: when an in-session commit creates a
+          // room, markSessionUpgraded flags the session so it's hidden from
+          // the Sessions list (the Room row above represents it instead).
+          ...(props.sessionId ? { session_id: props.sessionId } : {}),
         }),
       });
       const data = (await res.json().catch(() => ({}))) as CommitResponse;

@@ -163,6 +163,10 @@ export default function Home() {
   // created mid-turn (from "none" → "session:X") — the user just typed a
   // message and got a reply; those must stay on screen.
   const lastContextRef = useRef<string>("");
+  // Set by handleConfirmCommitted when an in-session confirm upgrades into
+  // a new room. Same visible conversation → keep the chat rendered rather
+  // than clearing + re-fetching identical seeded history.
+  const suppressNextClearRef = useRef(false);
   useEffect(() => {
     const ctx = activeRoomId
       ? `room:${activeRoomId}`
@@ -174,9 +178,10 @@ export default function Home() {
       prev !== "" && // initial render, nothing to compare against
       prev !== ctx &&
       prev !== "none"; // "none → session:X" is session creation, not a switch
-    if (isRealSwitch) {
+    if (isRealSwitch && !suppressNextClearRef.current) {
       chat.clearChat();
     }
+    suppressNextClearRef.current = false;
     lastContextRef.current = ctx;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeRoomId, activeSessionId]);
@@ -877,7 +882,17 @@ export default function Home() {
       // next chat turn syncs into the room's private channel. The user keeps
       // talking to the agent right here.
       if (payload.flow === "chat" && payload.id) {
+        // Session-to-room upgrade: the chat column already shows the exact
+        // pre-confirm conversation that got seeded into the room. Tell the
+        // context-switch effect to skip its clearChat(), and mark the new
+        // room as "already replayed" so the replay effect doesn't re-inject.
+        suppressNextClearRef.current = true;
+        replayedRoomIds.current.add(payload.id);
+        // Also bump sidebar so it picks up the now-upgraded session's
+        // upgraded_room_id flag and hides it from the Sessions list.
+        setSidebarReloadTick((n) => n + 1);
         setActiveRoomId(payload.id);
+        setActiveSessionId(null);
         router.replace(payload.url);
         const inviteLine = fullInvite ? `\n邀请链接（发给同行的人）：${fullInvite}` : "";
         chat.injectAssistantMessage(
@@ -2556,6 +2571,7 @@ export default function Home() {
                     history={chat.messages
                       .filter((m) => (m.role === "user" || m.role === "assistant") && typeof m.content === "string" && m.content.trim().length > 0)
                       .map((m) => ({ role: m.role as "user" | "assistant", content: m.content }))}
+                    sessionId={activeSessionId}
                     onConfirmed={handleConfirmCommitted}
                     onEdit={handleConfirmEdit}
                   />
