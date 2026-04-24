@@ -1,0 +1,120 @@
+/*
+ * Reusable typography classes for the developer surface.
+ * Use Playfair (serif) for editorial moments — display / headline /
+ * pricing single-statement; DM Sans for everything else.
+ */
+
+.dev-eyebrow {
+  font-family: var(--font-dm-sans), "DM Sans", system-ui, sans-serif;
+  font-size: var(--text-eyebrow);
+  font-weight: 500;
+  letter-spacing: var(--tracking-eyebrow);
+  text-transform: uppercase;
+  color: var(--ink-500);
+}
+
+.dev-display {
+  font-family: var(--font-playfair), "Playfair Display", Georgia, serif;
+  font-size: clamp(48px, 8vw, var(--text-display));
+  font-weight: 600;
+  line-height: var(--lh-tight);
+  letter-spacing: var(--tracking-tighter);
+  color: var(--ink-900);
+}
+
+.dev-mega {
+  font-family: var(--font-playfair), "Playfair Display", Georgia, serif;
+  font-size: clamp(72px, 12vw, var(--text-mega));
+  font-weight: 600;
+  line-height: 0.95;
+  letter-spacing: var(--tracking-tighter);
+  color: var(--ink-900);
+}
+
+.dev-h1 {
+  font-family: var(--font-playfair), "Playfair Display", Georgia, serif;
+  font-size: clamp(36px, 5vw, var(--text-h1));
+  font-weight: 600;
+  line-height: var(--lh-tight);
+  letter-spacing: var(--tracking-tight);
+  color: var(--ink-900);
+}
+
+.dev-h2 {
+  font-family: var(--font-playfair), "Playfair Display", Georgia, serif;
+  font-size: clamp(28px, 3.5vw, var(--text-h2));
+  font-weight: 600;
+  line-height: var(--lh-snug);
+  letter-spacing: var(--tracking-tight);
+  color: var(--ink-900);
+}
+
+.dev-h3 {
+  font-family: var(--font-dm-sans), "DM Sans", system-ui, sans-serif;
+  font-size: var(--text-h3);
+  font-weight: 600;
+  line-height: var(--lh-snug);
+  letter-spacing: var(--tracking-tight);
+  color: var(--ink-900);
+}
+
+.dev-lead {
+  font-family: var(--font-dm-sans), "DM Sans", system-ui, sans-serif;
+  font-size: clamp(18px, 2vw, var(--text-lead));
+  font-weight: 400;
+  line-height: var(--lh-relaxed);
+  color: var(--ink-500);
+}
+
+.dev-body {
+  font-family: var(--font-dm-sans), "DM Sans", system-ui, sans-serif;
+  font-size: var(--text-body);
+  font-weight: 400;
+  line-height: var(--lh-relaxed);
+  color: var(--ink-700);
+}
+
+.dev-body-sm {
+  font-family: var(--font-dm-sans), "DM Sans", system-ui, sans-serif;
+  font-size: var(--text-body-sm);
+  line-height: var(--lh-normal);
+  color: var(--ink-500);
+}
+
+.dev-mono {
+  font-family: ui-monospace, "JetBrains Mono", "SF Mono", "Cascadia Code", "Roboto Mono", Menlo, monospace;
+  font-size: var(--text-mono);
+  letter-spacing: 0;
+}
+
+.dev-mono-sm {
+  font-family: ui-monospace, "JetBrains Mono", "SF Mono", "Cascadia Code", "Roboto Mono", Menlo, monospace;
+  font-size: var(--text-mono-sm);
+  letter-spacing: 0;
+}
+
+/* Decorative gold underline that animates from left → right under
+ * a hero word. The animation kicks in on `.is-mounted` so SSR
+ * doesn't show a flash of completed state. */
+.dev-token-underline {
+  position: relative;
+  display: inline-block;
+  white-space: nowrap;
+}
+
+.dev-token-underline::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: -0.08em;
+  height: 0.06em;
+  background: var(--accent);
+  transform-origin: left;
+  transform: scaleX(0);
+  transition: transform var(--motion-slower) var(--ease-out-expo) 220ms;
+}
+
+.is-mounted .dev-token-underline::after {
+  transform: scaleX(1);
+}
