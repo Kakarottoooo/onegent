@@ -22,6 +22,14 @@ import { useRouter } from "next/navigation";
 import { useAuth } from "@/app/hooks/useAuth";
 import type { DecisionRoomWithMembership } from "@/lib/db";
 
+interface ContextMenuState {
+  kind: "room" | "session";
+  x: number;
+  y: number;
+  room?: DecisionRoomWithMembership;
+  session?: SessionRow;
+}
+
 interface SessionRow {
   id: string;
   title: string;
@@ -41,11 +49,14 @@ export interface SidebarProps {
 const SIDEBAR_WIDTH = 260;
 
 export default function Sidebar({ activeSessionId, activeRoomId, reloadTick }: SidebarProps) {
-  const { isSignedIn } = useAuth();
+  const { isSignedIn, userId } = useAuth();
   const router = useRouter();
   const [rooms, setRooms] = useState<DecisionRoomWithMembership[] | null>(null);
   const [sessions, setSessions] = useState<SessionRow[] | null>(null);
   const [mobileOpen, setMobileOpen] = useState(false);
+  const [menu, setMenu] = useState<ContextMenuState | null>(null);
+  const [busyId, setBusyId] = useState<string | null>(null);
+  const [localReloadTick, setLocalReloadTick] = useState(0);
 
   const load = useCallback(async () => {
     try {
@@ -73,7 +84,96 @@ export default function Sidebar({ activeSessionId, activeRoomId, reloadTick }: S
       return;
     }
     load();
-  }, [isSignedIn, reloadTick, load]);
+  }, [isSignedIn, reloadTick, localReloadTick, load]);
+
+  // Dismiss the context menu on any click / esc / scroll.
+  useEffect(() => {
+    if (!menu) return;
+    const close = () => setMenu(null);
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setMenu(null);
+    };
+    window.addEventListener("click", close);
+    window.addEventListener("scroll", close, true);
+    window.addEventListener("keydown", onKey);
+    return () => {
+      window.removeEventListener("click", close);
+      window.removeEventListener("scroll", close, true);
+      window.removeEventListener("keydown", onKey);
+    };
+  }, [menu]);
+
+  function openRoomMenu(room: DecisionRoomWithMembership, e: React.MouseEvent) {
+    e.preventDefault();
+    e.stopPropagation();
+    const x = Math.min(e.clientX, window.innerWidth - 200);
+    const y = Math.min(e.clientY, window.innerHeight - 140);
+    setMenu({ kind: "room", x, y, room });
+  }
+
+  function openSessionMenu(session: SessionRow, e: React.MouseEvent) {
+    e.preventDefault();
+    e.stopPropagation();
+    const x = Math.min(e.clientX, window.innerWidth - 200);
+    const y = Math.min(e.clientY, window.innerHeight - 140);
+    setMenu({ kind: "session", x, y, session });
+  }
+
+  async function deleteRoom(room: DecisionRoomWithMembership) {
+    setMenu(null);
+    if (!confirm(`Delete "${room.title}" permanently? This can't be undone.`)) return;
+    setBusyId(room.id);
+    try {
+      const res = await fetch(`/api/rooms/${room.id}`, { method: "DELETE" });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        alert(data.error ?? "Couldn't delete room.");
+        return;
+      }
+      // If the user was in this room's URL, bounce to /.
+      if (activeRoomId === room.id) router.push("/");
+      setLocalReloadTick((n) => n + 1);
+    } finally {
+      setBusyId(null);
+    }
+  }
+
+  async function leaveRoom(room: DecisionRoomWithMembership) {
+    setMenu(null);
+    const verb = room.member_status === "invited" ? "Decline invite to" : "Leave";
+    if (!confirm(`${verb} "${room.title}"?`)) return;
+    setBusyId(room.id);
+    try {
+      const res = await fetch(`/api/rooms/${room.id}/leave`, { method: "POST" });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        alert(data.error ?? "Couldn't leave room.");
+        return;
+      }
+      if (activeRoomId === room.id) router.push("/");
+      setLocalReloadTick((n) => n + 1);
+    } finally {
+      setBusyId(null);
+    }
+  }
+
+  async function deleteSession(session: SessionRow) {
+    setMenu(null);
+    if (!confirm(`Delete "${session.title}"? This conversation will be lost.`)) return;
+    setBusyId(session.id);
+    try {
+      const res = await fetch(`/api/chat/sessions/${session.id}`, { method: "DELETE" });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        alert(data.error ?? "Couldn't delete session.");
+        return;
+      }
+      if (activeSessionId === session.id) router.push("/");
+      setLocalReloadTick((n) => n + 1);
+    } finally {
+      setBusyId(null);
+    }
+  }
 
   // Filter sessions: hide those that were upgraded to rooms — the room list
   // above already shows them, and showing both is the "duplicate entry"
@@ -170,6 +270,8 @@ export default function Sidebar({ activeSessionId, activeRoomId, reloadTick }: S
                 subtitle={isInvited ? "Invited · tap to accept" : undefined}
                 active={isActive}
                 onClick={() => goRoom(r)}
+                onContextMenu={(e) => openRoomMenu(r, e)}
+                dimmed={busyId === r.id}
               />
             );
           })
@@ -189,6 +291,8 @@ export default function Sidebar({ activeSessionId, activeRoomId, reloadTick }: S
               title={s.title || "Untitled"}
               active={activeSessionId === s.id}
               onClick={() => goSession(s)}
+              onContextMenu={(e) => openSessionMenu(s, e)}
+              dimmed={busyId === s.id}
             />
           ))
         )}
@@ -259,7 +363,91 @@ export default function Sidebar({ activeSessionId, activeRoomId, reloadTick }: S
           </div>
         </>
       )}
+
+      {/* Right-click context menu */}
+      {menu && (
+        <div
+          onClick={(e) => e.stopPropagation()}
+          style={{
+            position: "fixed",
+            left: menu.x,
+            top: menu.y,
+            zIndex: 50,
+            minWidth: 180,
+            background: "var(--card, #1a1714)",
+            border: "1px solid var(--border, #2a2622)",
+            borderRadius: 10,
+            boxShadow: "0 20px 48px rgba(0,0,0,0.32)",
+            overflow: "hidden",
+          }}
+        >
+          {menu.kind === "room" && menu.room && (() => {
+            const r = menu.room;
+            const isCreator = r.creator_id === userId;
+            if (isCreator) {
+              return (
+                <MenuButton
+                  onClick={() => deleteRoom(r)}
+                  danger
+                  label="Delete room"
+                />
+              );
+            }
+            return (
+              <MenuButton
+                onClick={() => leaveRoom(r)}
+                danger
+                label={r.member_status === "invited" ? "Decline invite" : "Leave room"}
+              />
+            );
+          })()}
+          {menu.kind === "session" && menu.session && (
+            <MenuButton
+              onClick={() => deleteSession(menu.session!)}
+              danger
+              label="Delete session"
+            />
+          )}
+        </div>
+      )}
     </>
+  );
+}
+
+function MenuButton({
+  label,
+  onClick,
+  danger,
+}: {
+  label: string;
+  onClick: () => void;
+  danger?: boolean;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      style={{
+        display: "block",
+        width: "100%",
+        padding: "10px 14px",
+        background: "transparent",
+        border: "none",
+        textAlign: "left",
+        fontFamily: "var(--font-dm-sans)",
+        fontSize: 13,
+        color: danger ? "#e85a4f" : "var(--text-primary, #e5e5e5)",
+        cursor: "pointer",
+      }}
+      onMouseEnter={(e) => {
+        e.currentTarget.style.background = danger ? "rgba(232,90,79,0.08)" : "rgba(255,255,255,0.05)";
+      }}
+      onMouseLeave={(e) => {
+        e.currentTarget.style.background = "transparent";
+      }}
+    >
+      {label}
+    </button>
   );
 }
 
@@ -322,17 +510,23 @@ function SidebarRow({
   subtitle,
   active,
   onClick,
+  onContextMenu,
+  dimmed,
 }: {
   icon: string;
   title: string;
   subtitle?: string;
   active?: boolean;
   onClick: () => void;
+  onContextMenu?: (e: React.MouseEvent) => void;
+  dimmed?: boolean;
 }) {
   return (
     <button
       type="button"
       onClick={onClick}
+      onContextMenu={onContextMenu}
+      disabled={dimmed}
       style={{
         width: "calc(100% - 8px)",
         margin: "2px 4px",
@@ -343,7 +537,8 @@ function SidebarRow({
         color: active ? "var(--gold, #C9A84C)" : "var(--text-primary, #e5e5e5)",
         fontFamily: "var(--font-dm-sans)",
         fontSize: 12,
-        cursor: "pointer",
+        cursor: dimmed ? "wait" : "pointer",
+        opacity: dimmed ? 0.5 : 1,
         display: "flex",
         alignItems: "flex-start",
         gap: 8,

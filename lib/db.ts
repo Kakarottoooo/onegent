@@ -2283,6 +2283,24 @@ export async function leaveDecisionRoom(
 }
 
 /**
+ * Stage 2: decline a pending invitation — removes the invited row entirely
+ * (vs leaveDecisionRoom which soft-deletes to keep history). A declined
+ * invite can be re-sent by the creator without conflict because the row
+ * no longer exists.
+ */
+export async function declineRoomInvite(
+  roomId: string,
+  userId: string,
+): Promise<boolean> {
+  await ensureDecisionRoomTables();
+  const result = await sql`
+    DELETE FROM decision_room_members
+    WHERE room_id = ${roomId} AND user_id = ${userId} AND status = 'invited'
+  `;
+  return (result.rowCount ?? 0) > 0;
+}
+
+/**
  * Hand the creator role to another joined member. If the current creator was
  * also the payer, the payer moves with them. Does NOT remove the old creator
  * from the room — callers (e.g. a creator "transfer-and-leave" flow) must

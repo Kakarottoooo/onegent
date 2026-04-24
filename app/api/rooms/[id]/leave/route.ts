@@ -2,10 +2,12 @@ import { NextResponse } from "next/server";
 import { auth } from "@clerk/nextjs/server";
 import {
   appendRoomMessage,
+  declineRoomInvite,
   getDecisionRoomById,
   getUserProfile,
   isRoomMember,
   leaveDecisionRoom,
+  listRoomMembers,
   sql,
 } from "@/lib/db";
 
@@ -29,6 +31,17 @@ export async function POST(_req: Request, { params }: Params) {
   const { id: roomId } = await params;
   const room = await getDecisionRoomById(roomId);
   if (!room) return NextResponse.json({ error: "Room not found" }, { status: 404 });
+
+  // Stage 2: the caller might be a pending-invite (status='invited') member
+  // in which case isRoomMember returns false but they should still be able
+  // to decline. Look up raw member status before the isRoomMember gate.
+  const members = await listRoomMembers(roomId);
+  const me = members.find((m) => m.user_id === userId);
+  if (me?.status === "invited") {
+    await declineRoomInvite(roomId, userId);
+    return NextResponse.json({ left: true, declined: true });
+  }
+
   if (!(await isRoomMember(roomId, userId))) {
     return NextResponse.json({ error: "Not a member" }, { status: 403 });
   }
