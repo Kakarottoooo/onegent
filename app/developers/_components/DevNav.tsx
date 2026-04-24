@@ -1,18 +1,25 @@
 "use client";
 
 import Link from "next/link";
+import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
 import { SignInButton, UserButton, useUser } from "@clerk/nextjs";
 
 /**
  * Developer surface nav — sticky, transparent at the top, gains a hairline
- * border + backdrop-blur once the user scrolls. Same-page logic for the
- * whole developer surface; the dashboard at /developers/keys gets its own
- * inverted variant defined in DevDashboardNav.
+ * border + backdrop-blur once the user scrolls. Hides itself entirely on
+ * /developers/keys so the dashboard can render its own dark-themed nav
+ * without two stacked headers.
  */
 export function DevNav() {
   const [scrolled, setScrolled] = useState(false);
   const { isSignedIn, isLoaded } = useUser();
+  const pathname = usePathname();
+
+  // Dashboard owns its own chrome; suppress the marketing nav there.
+  if (pathname?.startsWith("/developers/keys")) {
+    return null;
+  }
 
   useEffect(() => {
     const onScroll = () => setScrolled(window.scrollY > 8);
