@@ -37,6 +37,7 @@ import {
   type BookingJobStep,
 } from "@/lib/db";
 import { buildExpediaFlightsUrl } from "@/lib/agent/planners/booking-links";
+import { createJobViaCore } from "@/lib/core/cend-adapter";
 import type {
   TripPackage,
   TripSelection,
@@ -186,6 +187,34 @@ export async function POST(req: NextRequest) {
     step_types: steps.map((s) => s.type),
     step_count: steps.length,
   });
+
+  // ── Dogfood: single-restaurant trips go through lib/core.createJob ──
+  // Activates Week 2's dual-gate in [id]/start: because lib/core.createJob
+  // stamps step.body.__source="lib/core/execution", the start route's
+  // runUniversalStepViaCore branch fires instead of legacy runUniversalStep.
+  // Flag-gated so rollback is one env var away.
+  const useCoreForCend =
+    process.env.USE_CORE_EXECUTOR_FOR_CEND === "true" &&
+    steps.length === 1 &&
+    steps[0].type === "restaurant";
+
+  if (useCoreForCend) {
+    console.log("[create-trip] via lib/core (USE_CORE_EXECUTOR_FOR_CEND)", { jobId });
+    try {
+      const job = await createJobViaCore(steps[0], { userId, sessionId, tripLabel, jobId });
+      return NextResponse.json({
+        jobId: job.id,
+        status: job.status,
+        trip_label: tripLabel,
+        step_count: 1,
+        breakdown: { hotel: false, flight: false, restaurants: 1, activities: 0 },
+        _source: "lib/core/execution",
+      });
+    } catch (err) {
+      // Don't break the C-end flow if the adapter misfires — fall through to legacy.
+      console.error("[create-trip] lib/core adapter failed, falling back to legacy", err);
+    }
+  }
 
   const job = await createBookingJob({
     id: jobId,
