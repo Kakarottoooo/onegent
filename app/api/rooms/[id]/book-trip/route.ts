@@ -180,7 +180,10 @@ export async function POST(req: NextRequest, { params }: Params) {
   return NextResponse.json({
     ok: true,
     booking_job_id: bookingJobId,
-    url: `/tasks/${bookingJobId}`,
+    // /tasks has no dynamic segment; it reads ?focus=<id>&view=live to zoom
+    // into a specific job + land on the live-activity tab. Matches the URL
+    // shape TripPackageCard (Solo flow) uses after its own booking click.
+    url: `/tasks?focus=${encodeURIComponent(bookingJobId)}&view=live`,
     selection,
     contributors: allSelections.length,
   });
