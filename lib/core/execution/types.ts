@@ -28,6 +28,7 @@
 
 import type { BookingProfile } from "@/lib/booking-autopilot/types";
 import type { DecisionLogEntry } from "@/lib/db";
+import type { ConsentPolicy } from "../consent/types";
 
 // ─── Scenario discriminator ──────────────────────────────────────────────────
 
@@ -169,11 +170,8 @@ export interface ExecutionJobRequest {
    * (time adjustment, venue switch, retry, payment stop). When omitted, the
    * executor uses DEFAULT_CONSENT_POLICY from lib/core/consent/ which matches
    * today's C 端 behavior (full autonomy up to the PCI iframe boundary).
-   *
-   * Defined as `unknown` here to avoid a circular import — the real type lives
-   * in lib/core/consent/types.ts. Executor validates it at runtime.
    */
-  consent?: unknown;
+  consent?: ConsentPolicy;
 
   /** Who's calling + optional idempotency. */
   clientMetadata?: ClientMetadata;
