@@ -187,7 +187,11 @@ const SELECT_PILL: React.CSSProperties = {
   fontSize: 12,
   fontWeight: 700,
   letterSpacing: 0.2,
-  border: "1.5px solid #111",
+  // Long-hand so the active / disabled variants can override borderColor
+  // without React warning about shorthand + longhand collision on rerender.
+  borderWidth: 1.5,
+  borderStyle: "solid",
+  borderColor: "#111",
   backgroundColor: "#fff",
   color: "#111",
   cursor: "pointer",
@@ -293,7 +297,11 @@ const FOOTER: React.CSSProperties = {
 const LOCK_BTN: React.CSSProperties = {
   padding: "9px 16px",
   borderRadius: 10,
-  border: "1px solid var(--border, #d0d0d0)",
+  // Long-hand so the Decline variant can override borderColor inline
+  // without React warning about shorthand + longhand collision.
+  borderWidth: 1,
+  borderStyle: "solid",
+  borderColor: "var(--border, #d0d0d0)",
   backgroundColor: "transparent",
   color: "var(--text-primary, #111)",
   fontFamily: "var(--font-dm-sans)",
