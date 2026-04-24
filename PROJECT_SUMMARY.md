@@ -1,5 +1,5 @@
 ================================================================
-Onegent · AI 决策代理 · 项目总结 · v0.2.37.0
+Onegent · AI 决策代理 · 项目总结 · v0.2.37.1
 ================================================================
 
 【项目定义】
@@ -16,6 +16,43 @@ Onegent · AI 决策代理 · 项目总结 · v0.2.37.0
 活动 / 多人 trip），非旅行品类（笔记本 / 手机 / 耳机 / 信用卡 /
 礼物 / 健身）已归档。详见本文档头部 "Recent Updates - 2026-04-24
 (cont. 2) · Positioning Shift"。
+
+================================================================
+Recent Updates - 2026-04-24 (cont. 7) · v0.2.37.1 post-ship polish
+================================================================
+
+v0.2.37.0 推完 + 用户实际跑过 mint key → reveal → revoke 端到端流程后,
+两个补漏:
+
+1. hooks-rules hotfix(commit d414e43)
+   DevNav 的 useEffect 写在 `if (pathname?.startsWith("/developers/keys"))
+   return null;` 之后,导致 /developers/keys 上 hook 数 = 3, 其他
+   /developers/* 上 hook 数 = 4。React hydration 检测到飘移 → 报
+   "Rendered fewer hooks than expected"。修法:把 useEffect 上移到
+   early return 之前,加注释警告未来编辑。
+
+2. BrandStrip 跨 surface 导航(commit ff019b0)
+   用户提:"developers 和 c 端页面好像没有链接,要不要做个按钮让它们
+   互相前往"。讨论 4 方案,选 Apple-style top utility strip:
+   · components/BrandStrip.tsx:client component,usePathname 检测
+     "在 /developers/* 还是 /",据此设 data-current
+   · 36px 高 ribbon 在 root layout app/layout.tsx 顶部渲染,所有
+     surface(/、/developers、/developers/keys、docs、pricing)统一戴
+   · 当前 surface 名旁戴 5px 金色脉动小点(2.6s @keyframes pulse,
+     prefers-reduced-motion 关掉)
+   · position: relative scrolls away → main navs 仍 sticky top:0
+     正常工作,无 offset 调整
+   · 颜色硬编码(#fafaf9 / #c9a84c),不依赖 var(),保证 dashboard
+     dark theme [data-theme="dashboard"] 不漏色到 strip
+   · mobile <540px 收紧间距 + dot 仍在
+   战略意义:解决"匿名访客在 / 找不到 /developers"的零路径问题 +
+   "active 开发者要 scroll 到 footer 才找到 consumer app"的友 friction。
+   现在双向都是 1 click。
+
+3. PROJECT_SUMMARY.md banner 升 v0.2.37.0 → v0.2.37.1(本节)
+
+3 commits 总 +1 hotfix + 1 small feature + 1 docs。Week 4 完整收尾,
+真正 ready 给外部开发者看。
 
 ================================================================
 Recent Updates - 2026-04-24 (cont. 6) · Week 4 #3 /developers landing + 自助 key dashboard
@@ -1863,6 +1900,13 @@ Cron：4 个定时任务（反馈提示 / 价格检查 / 场馆质量 / 笔记�
 ================================================================
 九、版本历史摘要
 ================================================================
+
+v0.2.37.1（2026-04-24）— **post-ship polish**
+  · hooks-rules hotfix:DevNav 的 useEffect 移到 early return 之前,修
+    /developers/keys 的 "Rendered fewer hooks than expected" 崩页
+  · BrandStrip:Apple-style 36px 顶部 ribbon 跨 surface 导航
+    (Onegent · For travelers · For developers),当前 surface 戴金色脉动
+    小点。所有页面统一,1-click 横跳
 
 v0.2.37.0（2026-04-24）— **Week 4 #3 · /developers landing + 自助 key dashboard**
   · 紧接 v0.2.36.0 MCP 分发渠道,v0.2.37.0 把 B 端"前门"全部铺好:Mercury 白
