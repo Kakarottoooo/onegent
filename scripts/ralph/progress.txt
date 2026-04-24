@@ -11,6 +11,11 @@ Started: 2026-04-24 (positioning-shift-travel-only)
 - Existing golden tests (golden-solo, golden-multi, golden-trip) define expected behavior for the current scenarios — do NOT edit their expected values.
 - Homepage (app/page.tsx) uses `resultCategory === "..."` string comparisons (not a `cardType ===` check) to gate per-category JSX blocks. Search for `resultCategory === "<category>"` when removing a category from the UI.
 - Homepage also aggregates per-category results into `hasCategoryResults` — every new/removed category must be added/removed there too, or empty-state detection breaks.
+- When archiving code with its own tests, prefer excluding `**/_archived/**` in tsconfig.json + vitest.config.ts instead of rewriting relative imports inside the archived files. Keeps history clean and avoids brittle `../../../../` paths.
+- lib/agent.ts routes non-travel scenarios via `if (detectedScenario === "gift" | "fitness" | "big_purchase")` branches that call the planners in lib/agent/planners/. Archiving a planner means deleting its import AND its usage branch — typecheck will fail otherwise.
+- `detectScenarioFromMessage` in lib/scenario2.ts still returns `"big_purchase"` for matching messages. After archival the branch handler is gone, so these messages just fall through to the default `parseIntent` flow. That's intentional — the NLU v2 layer (the only live NLU now) can't produce those scenarios anyway.
+- `lib/__tests__/scenario2.test.ts` mixes unrelated describe blocks for multiple planners in one file. When archiving a planner referenced from there, delete its describe blocks inline rather than archiving the whole test file.
+- Pre-existing vitest failures on this branch (as of 2026-04-24): 13 tests across `components/__tests__/RecommendationCard.test.tsx` (11), `lib/__tests__/ai-loop.test.ts` (1), `lib/__tests__/weekend-trip.test.ts` (1), `lib/__tests__/scenario2.test.ts — open-flight Google Flights URL` (1). Do NOT try to "fix" these in a positioning-shift story — they are unrelated to archival work. Verify new work by checking the delta vs this baseline, not the absolute count.
 
 ---
 

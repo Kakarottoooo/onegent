@@ -40,14 +40,9 @@ import { parseCityTripIntent } from "./agent/parse/city-trip";
 import { buildWeekendTripFlightIntent, buildWeekendTripHotelIntent, buildWeekendTripCardIntent, buildWeekendTripRestaurantRequirements } from "./agent/planners/weekend-trip";
 import { buildCityTripHotelIntent, buildCityTripRestaurantRequirements, buildCityTripBarRequirements } from "./agent/planners/city-trip";
 import { buildDateNightFallbackIntent } from "./agent/planners/date-night";
-import { parseBigPurchaseIntent, runBigPurchasePlanner } from "./agent/planners/big-purchase";
 import { parseConcertEventIntent } from "./agent/parse/concert-event";
 import { runConcertEventPlanner } from "./agent/planners/concert-event";
-import { parseGiftIntent } from "./agent/parse/gift";
-import { runGiftPlanner } from "./agent/planners/gift";
-import { parseFitnessIntent } from "./agent/parse/fitness";
-import { runFitnessPlanner } from "./agent/planners/fitness";
-import { ConcertEventIntent, FitnessIntent, GiftIntent } from "./types";
+import { ConcertEventIntent } from "./types";
 
 // ─── Main Agent Function ──────────────────────────────────────────────────────
 
@@ -469,124 +464,6 @@ export async function runAgent(
       result_mode: "scenario_plan",
       output_language: queryContext.output_language,
     });
-  }
-
-  if (detectedScenario === "gift") {
-    const giftIntent = parseGiftIntent(userMessage, queryContext);
-    const decisionPlan = await runGiftPlanner({
-      intent: giftIntent,
-      outputLanguage: queryContext.output_language,
-    });
-
-    if (!decisionPlan) {
-      const noResults: GiftIntent = {
-        ...giftIntent,
-        needs_clarification: true,
-        missing_fields: [...giftIntent.missing_fields, "no products found — try different interests or budget"],
-      };
-      return buildBaseResult(noResults, "gift", {
-        scenarioIntent: noResults,
-        result_mode: "followup_refinement",
-      });
-    }
-
-    return buildBaseResult(giftIntent, "gift", {
-      scenarioIntent: giftIntent,
-      decisionPlan,
-      result_mode: "scenario_plan",
-      output_language: queryContext.output_language,
-    });
-  }
-
-  if (detectedScenario === "fitness") {
-    const fitnessIntent = parseFitnessIntent(userMessage, queryContext);
-    const decisionPlan = await runFitnessPlanner({
-      intent: fitnessIntent,
-      outputLanguage: queryContext.output_language,
-    });
-
-    if (!decisionPlan) {
-      const noResults: FitnessIntent = {
-        ...fitnessIntent,
-        needs_clarification: true,
-        missing_fields: [...fitnessIntent.missing_fields, "no studios found — try a different neighborhood or activity"],
-      };
-      return buildBaseResult(noResults, "fitness", {
-        scenarioIntent: noResults,
-        result_mode: "followup_refinement",
-      });
-    }
-
-    return buildBaseResult(fitnessIntent, "fitness", {
-      scenarioIntent: fitnessIntent,
-      decisionPlan,
-      result_mode: "scenario_plan",
-      output_language: queryContext.output_language,
-    });
-  }
-
-  if (detectedScenario === "big_purchase") {
-    const bigPurchaseIntent = parseBigPurchaseIntent(userMessage, queryContext);
-    const { product_category } = bigPurchaseIntent;
-
-    // Route to the appropriate existing pipeline and build a DecisionPlan from results
-    if (product_category === "laptop") {
-      const laptopIntent = await parseIntent(userMessage, cityFullName, { ...queryContext, category_hint: "laptop" }, sessionPreferences, profileContext, conversationHistory);
-      if (laptopIntent.category === "laptop") {
-        const { laptopRecommendations, laptop_db_gap_warning } = await runLaptopPipeline(laptopIntent);
-        const decisionPlan = runBigPurchasePlanner({
-          intent: bigPurchaseIntent,
-          recommendations: laptopRecommendations,
-          outputLanguage: queryContext.output_language,
-        });
-        return buildBaseResult(laptopIntent, "big_purchase", {
-          scenarioIntent: bigPurchaseIntent,
-          decisionPlan,
-          laptopRecommendations,
-          laptop_db_gap_warning,
-          result_mode: decisionPlan ? "scenario_plan" : "category_cards",
-        });
-      }
-    }
-
-    if (product_category === "headphone") {
-      const headphoneIntent = await parseIntent(userMessage, cityFullName, { ...queryContext, category_hint: "headphone" }, sessionPreferences, profileContext, conversationHistory);
-      if (headphoneIntent.category === "headphone") {
-        const { headphoneRecommendations, db_gap_warning: headphone_db_gap } = await runHeadphonePipeline(headphoneIntent);
-        const decisionPlan = runBigPurchasePlanner({
-          intent: bigPurchaseIntent,
-          recommendations: headphoneRecommendations,
-          outputLanguage: queryContext.output_language,
-        });
-        return buildBaseResult(headphoneIntent, "big_purchase", {
-          scenarioIntent: bigPurchaseIntent,
-          decisionPlan,
-          headphoneRecommendations,
-          device_db_gap_warning: headphone_db_gap,
-          result_mode: decisionPlan ? "scenario_plan" : "category_cards",
-        });
-      }
-    }
-
-    if (product_category === "smartphone") {
-      const smartphoneIntent = await parseIntent(userMessage, cityFullName, { ...queryContext, category_hint: "smartphone" }, sessionPreferences, profileContext, conversationHistory);
-      if (smartphoneIntent.category === "smartphone") {
-        const { smartphoneRecommendations, db_gap_warning: smartphone_db_gap } = await runSmartphonePipeline(smartphoneIntent);
-        const decisionPlan = runBigPurchasePlanner({
-          intent: bigPurchaseIntent,
-          recommendations: smartphoneRecommendations,
-          outputLanguage: queryContext.output_language,
-        });
-        return buildBaseResult(smartphoneIntent, "big_purchase", {
-          scenarioIntent: bigPurchaseIntent,
-          decisionPlan,
-          smartphoneRecommendations,
-          device_db_gap_warning: smartphone_db_gap,
-          result_mode: decisionPlan ? "scenario_plan" : "category_cards",
-        });
-      }
-    }
-    // Fall through for unsupported product_category — handled by standard category flow below
   }
 
   // Layer 1: Parse intent (with session preferences + profile context)

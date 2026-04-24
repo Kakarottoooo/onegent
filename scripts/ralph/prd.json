@@ -43,8 +43,8 @@
         "Tests pass"
       ],
       "priority": 3,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Completed 2026-04-24. git mv moved big-purchase.ts, fitness.ts, gift.ts plus the 2 companion test files (gift.test.ts, fitness.test.ts) into lib/agent/_archived/2026-04-positioning-shift/planners/. Removed 3 imports + the gift/fitness/big_purchase scenario branches from lib/agent.ts, dropped the parseBigPurchaseIntent + runBigPurchasePlanner describe blocks from lib/__tests__/scenario2.test.ts, and added **/_archived/** to tsconfig.json exclude and vitest.config.ts exclude so archived code is skipped by typecheck/tests while history is preserved. Typecheck clean; 13 test failures in the suite are all pre-existing (verified by re-running the same tests on the pre-change state) — US-003 introduced 0 new failures."
     },
     {
       "id": "US-004",

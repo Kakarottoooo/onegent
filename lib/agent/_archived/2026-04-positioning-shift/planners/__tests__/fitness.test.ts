@@ -7,7 +7,7 @@ vi.mock("../tools", () => ({
 
 import { googlePlacesSearch } from "../tools";
 import { parseFitnessIntent } from "../agent/parse/fitness";
-import { runFitnessPlanner } from "../agent/planners/fitness";
+import { runFitnessPlanner } from "../agent/_archived/2026-04-positioning-shift/planners/fitness";
 
 // ─── Fixtures ─────────────────────────────────────────────────────────────────
 

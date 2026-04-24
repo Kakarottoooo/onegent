@@ -11,7 +11,7 @@ vi.stubEnv("SERPAPI_KEY", "test-api-key");
 
 import { searchShoppingProducts } from "../serpapi-shopping";
 import { parseGiftIntent } from "../agent/parse/gift";
-import { runGiftPlanner } from "../agent/planners/gift";
+import { runGiftPlanner } from "../agent/_archived/2026-04-positioning-shift/planners/gift";
 import type { MultilingualQueryContext } from "../types";
 
 const BASE_CONTEXT: MultilingualQueryContext = {
