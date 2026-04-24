@@ -42,3 +42,18 @@ Started: 2026-04-24 (positioning-shift-travel-only)
   - Hooks like `app/hooks/useChat.ts` reference **types** such as `LaptopRecommendationCard` (not the component files). Don't confuse a TYPE grep hit with a COMPONENT IMPORT hit — type references live alongside the schema, not the UI. If the grep hit is inside `const [allXxxCards, setAllXxxCards] = useState<XxxRecommendationCard[]>` it is NOT a card-component import.
   - Untracked file `scripts/ralph/.last-branch` is created by the ralph loop harness and should NOT be staged in story commits; only stage files you actually touched.
 ---
+
+## 2026-04-24 - US-003
+- Created `lib/agent/_archived/2026-04-positioning-shift/planners/` with a README documenting why the archived planners intentionally have broken relative imports (skipped by the `**/_archived/**` exclude globs).
+- Used `git mv` to relocate `big-purchase.ts`, `fitness.ts`, `gift.ts` into the archive directory, plus the 2 companion tests (`lib/__tests__/gift.test.ts` → `.../planners/__tests__/gift.test.ts` and same for `fitness.test.ts`).
+- Edited `lib/agent.ts`: removed 5 planner imports (`parseBigPurchaseIntent`/`runBigPurchasePlanner`, `parseGiftIntent`/`runGiftPlanner`, `parseFitnessIntent`/`runFitnessPlanner`) plus dropped `FitnessIntent`/`GiftIntent` from the types import, then deleted the 3 `if (detectedScenario === "gift" | "fitness" | "big_purchase")` branches (125 lines removed).
+- Edited `lib/__tests__/scenario2.test.ts`: removed the big-purchase import and deleted the `describe("parseBigPurchaseIntent")` + `describe("runBigPurchasePlanner")` blocks plus the orphaned `LaptopRecommendationCard` / `MultilingualQueryContext` type imports and the `baseQueryContext` / `makeLaptopCard` / `baseBigPurchaseIntent` helpers (199 lines removed). Kept the `describe("detectScenarioFromMessage")` big_purchase section because it tests the regex detector in `lib/scenario2.ts`, not the archived planner.
+- Added `**/_archived/**` to the `exclude` arrays in both `tsconfig.json` and `vitest.config.ts`.
+- Files changed: lib/agent.ts, lib/__tests__/scenario2.test.ts, tsconfig.json, vitest.config.ts, scripts/ralph/prd.json, scripts/ralph/progress.txt (modified); lib/agent/_archived/2026-04-positioning-shift/planners/README.md (new); 5 renames (3 planners + 2 tests).
+- Typecheck: passed (`npx tsc --noEmit` exit 0). Tests: 504 passed / 14 failed — all 14 failures are pre-existing (baseline captured in Codebase Patterns above). US-003 introduced 0 new failures.
+- **Learnings for future iterations:**
+  - When a planner has tests in both its own file AND mixed into a shared test file, handle them differently: archive the dedicated test files (move + rely on `_archived` vitest exclude), but delete the inline describe blocks from the shared file.
+  - Archived files' relative imports break after `git mv` (e.g. `../../outputCopy` no longer resolves). DON'T hand-edit them to `../../../../outputCopy` — add `**/_archived/**` to tsconfig and vitest excludes instead. Preserves the archived snapshot verbatim and avoids brittle paths.
+  - `lib/agent/parse/gift.ts` and `lib/agent/parse/fitness.ts` were orphaned by US-003 (no longer imported anywhere). Left in place intentionally — a follow-up cleanup story can remove them. Grep for `parseGiftIntent`/`parseFitnessIntent` before touching them.
+  - The acceptance criteria grep scope in the PRD (`lib/agent.ts`, `lib/agent/planner-engine/`, `lib/agent/composer/`) is too narrow when a story also has to satisfy "Tests pass" — you still need to grep `lib/__tests__/` for tests that import the archived symbols.
+---
