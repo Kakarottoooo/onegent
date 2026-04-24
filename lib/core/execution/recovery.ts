@@ -34,6 +34,7 @@ import { validateConsent } from "@/lib/core/consent/validator";
 import type { ConsentPolicy } from "@/lib/core/consent/types";
 import { runExecutionJob, type ExecutionContext } from "./executor";
 import { tryProviderFallbackChain } from "./recovery-providers";
+import { shouldTryProviderFallback } from "./should-try-fallback";
 import type {
   ExecutionJobRequest,
   ExecutionJobResult,
@@ -67,29 +68,53 @@ export async function runExecutionJobWithRecovery(
     };
   }
 
-  // ── Phase 2 vs Phase 3 branching (restaurant + no_availability only) ──
+  // ── Phase 2 vs Phase 3 branching ──
   //
-  // Two distinct failure shapes need different fallback strategies:
+  // Three distinct failure shapes drive two different fallback strategies:
   //
   //   A. "no_availability" due to NO AVAILABLE TIME SLOTS (venue exists, all
   //      slots are booked near the requested time)
   //      → Phase 2 time fallback (try ±30/60/90 min on SAME provider)
   //      → if time fallbacks also fail, FALL THROUGH to Phase 3 provider chain
   //
-  //   B. "no_availability" due to VENUE NOT ON THIS PLATFORM ("not found on
-  //      OpenTable" — venue doesn't list there at all)
+  //   B. "no_availability" due to VENUE NOT IN PROVIDER'S CATALOG ("not found
+  //      on OpenTable" — venue doesn't list there at all)
   //      → skip time fallback (time doesn't help when venue isn't indexed)
   //      → jump directly to Phase 3 provider chain (try Resy / website)
   //
-  // Detection mirrors route.ts:740-742's isNotFoundError regex.
+  //   C. "error" due to VENUE-USES-DIFFERENT-SYSTEM (Carbone / Le Bernardin /
+  //      Osteria La Baia / Ci Siamo: appear in OpenTable search but the
+  //      detail page has no embedded booking widget; final-outcome.ts then
+  //      returns status="error" with summaries like "Stalled at listing" or
+  //      "Unverified checkout field". Whitelist-matched in
+  //      shouldTryProviderFallback.)
+  //      → skip time fallback (different-platform issue, not slot issue)
+  //      → jump directly to Phase 3 provider chain
+  //
+  // shouldTryProviderFallback() owns the trigger logic + a deny-list for
+  // infra failures (HTTP 402 quota / bot block / page load failed) so we
+  // don't burn 2-3 min on a Resy run that has no chance of success.
   if (
-    phase1.result.status === "no_availability" &&
-    request.request.scenario === "restaurant"
+    shouldTryProviderFallback({
+      scenario: request.request.scenario,
+      status: phase1.result.status,
+      summary: phase1.result.summary,
+      error: phase1.result.error,
+    })
   ) {
-    const isNotFound = /not found on (opentable|resy)/i.test(phase1.result.summary);
+    // Phase 2 (time fallback) only fires for "true slot unavailable" cases
+    // — i.e. status="no_availability" AND venue IS in OpenTable's catalog.
+    // For "venue not in catalog" or "wrong-platform error" escalations, time
+    // shifts won't help; jump straight to the provider chain.
+    const isNoAvailability = phase1.result.status === "no_availability";
+    const isNotFound =
+      isNoAvailability &&
+      /not found on (opentable|resy)/i.test(phase1.result.summary);
+    const phase2Eligible = isNoAvailability && !isNotFound;
+
     let attemptsAfter = phase1.attemptCount;
 
-    if (!isNotFound) {
+    if (phase2Eligible) {
       const phase2 = await tryTimeFallbacks(
         request,
         ctx,
