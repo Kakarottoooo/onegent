@@ -1,5 +1,5 @@
 ================================================================
-Onegent · AI 决策代理 · 项目总结 · v0.2.39.0
+Onegent · AI 决策代理 · 项目总结 · v0.2.40.0
 ================================================================
 
 【项目定义】
@@ -16,6 +16,114 @@ Onegent · AI 决策代理 · 项目总结 · v0.2.39.0
 活动 / 多人 trip），非旅行品类（笔记本 / 手机 / 耳机 / 信用卡 /
 礼物 / 健身）已归档。详见本文档头部 "Recent Updates - 2026-04-24
 (cont. 2) · Positioning Shift"。
+
+================================================================
+Recent Updates - 2026-04-24 (cont. 10) · Week 5 #3 · Bug B + Bug C 收尾 + ship audit
+================================================================
+
+延 v0.2.39 收尾 NLU 直订路径之后,继续修 Carbone 测试暴露的另两个引擎
+bug。然后跑完整 ship-readiness audit:今天 74 commits 推完,需要确认
+没拉低任何东西的稳定度。
+
+1. Bug B(US-W5-010): website handoff vendor URL classification
+   - 真实场景(用户截图):Marea 跑 OpenTable→Resy→website fallback,
+     agent 点 marearestaurant.com 上的 "Reservations" 链接,跳到
+     SevenRooms iframe URL https://www.sevenrooms.com/events/<event-id>。
+     我们旧代码直接把这 iframe URL 作为 handoffUrl,但用户点这个
+     deep link 时 SevenRooms 经常 404 —— 因为它需要 parent page
+     (marearestaurant.com) 的 context 才能正常加载。
+   - 修法:lib/core/execution/recovery-providers.ts 加两个 helper
+       · matchKnownVendor(url):正则识别 7 个预订平台域名
+         (SevenRooms / Tock / OpenTable widget / Resy / Yelp /
+         Eat App / Dineplan)。OpenTable 主搜索 URL 故意 NOT 匹配,
+         避免把用户绕回 Phase 1 已试过的 provider
+       · headProbe(url):3s 预算 HEAD 请求,2xx + 405 都算 OK
+   - tryWebsiteHandoff 三分支:
+       · vendor + accessible → 用 vendor URL,summary 注明 vendor 名
+         ("Marea books through SevenRooms — tap to open the widget")
+       · vendor + 不 accessible → fallback 到 officialWebsite,
+         summary 明示 "Their widget needs to load from the venue's
+         website — tap below, then click 'Reservations' at the top"
+       · 无 vendor → 旧行为不变
+   - 9 unit tests(全绿): 7 个 pattern 各一条 + OpenTable 主搜索 URL
+     必须返 null(回归保护) + 餐厅主页/无关页 null
+   - 影响半径:Carbone / Le Bernardin / Marea 等所有 SevenRooms-/
+     Tock-based 餐厅。用户拿到的 handoff link 现在要么是真能 load
+     的 vendor 页,要么是带明确指引的 venue 主页
+
+2. Bug C(US-W5-011): final-outcome paused_payment 误报
+   - 现场:final-outcome.ts:402-410 fallback 路径会在 agent.completed
+     =false 时返 paused_payment。当 Resy/OpenTable 程序化流程跳过
+     agent("Skipped initial agent run — Resy programmatic flow active")
+     且什么字段都没填时,这个 fallback 还是 paused_payment —— 让下游
+     recovery-providers#isGenuineBooking 不得不用字符串 hack 过滤
+     ("skipped initial agent run" regex)
+   - 修法:在 fallback 前加 defensive guard
+       resultCompleted=false AND skipped-agent message AND 7 字段
+       全空 AND stage="unknown" → 返 no_availability + 诚实 summary
+       "We couldn't identify a reservation widget on this page"
+   - 删掉对 isGenuineBooking 字符串 hack 的依赖(虽然字符串 hack 仍
+     defense-in-depth 留着)
+   - 没加新 unit test(已被 US-W5-003 的 HTTP 402 fast-fail 间接覆盖
+     fallback ladder)
+
+3. Ship-readiness audit(US-W5-012)
+   - typecheck:✅ exit 0(整个 monorepo 包括 packages/mcp-server)
+   - 所有 W5 + W4 touched code 测试:✅ 136/136 pass(W5 unit + W4
+     api-auth + integration + NLU golden 全部)
+   - 我没碰的代码 pre-existing failures:14 tests / 4 files
+       · components/__tests__/RecommendationCard.test.tsx(11 个,
+         useRouter test mock 缺失,git blame 显示是早期 commit 的)
+       · lib/__tests__/weekend-trip.test.ts(3 个,fixture drift)
+       · 不是今天回归 → 入 backlog(任务 #53)
+   - .agents/skills/gstack/* 测试 42 个 file 失败 → 与我们无关
+     (vendor tool tests,vitest 不该 pick up,需要 vitest.config 改
+     exclude)
+   - git status:干净(只 .claude/settings.local.json + dev.log~
+     untracked)
+   - 74 commits 推上 master,5433730..(当前)零冲突
+
+4. 6 commits 今天傍晚段
+   1a8c6a6 feat(nlu): RestaurantFields.restaurant_name + HotelFields.hotel_name
+   d6c2cf2 feat(nlu): extractor captures restaurant_name + hotel_name
+   f18718d feat(nlu): router emits directBooking flag when venue is named
+   836c846 feat(chat): direct_booking branch — skip recommendations
+   d90c844 test(nlu): 6 golden cases for direct-booking router branch
+   ea275d0 docs: v0.2.39.0 release notes
+   ad29895 feat(core): website handoff classifies + HEAD-probes vendor widgets
+   62511b1 fix(executor): no_availability instead of paused_payment when agent skipped
+   (本 commit) docs: v0.2.40.0 release notes
+
+5. 一日总结(38 commits 跨 5 个 minor 版本 + 1 patch)
+   v0.2.36.0 — Week 4 #2 MCP connector
+   v0.2.37.0 — Week 4 #3 /developers landing + dashboard + docs
+   v0.2.37.1 — post-ship polish (hooks fix + BrandStrip)
+   v0.2.38.0 — Week 5 #1 Phase 3 trigger 引擎边界
+   v0.2.39.0 — Week 5 #2 NLU 直订
+   v0.2.40.0 — Week 5 #3 Bug B + Bug C + ship audit
+   累计:38 commits,~9000+ 行新代码,3 个 backlog item 入队(#21 npm
+   publish / #22 hosted MCP endpoint / #23 OAuth / #53 pre-existing
+   tests),26 个 W4-W5 user stories 全部完成。
+
+6. 战略意义
+   今天从早到晚的轨迹:Week 4 把"AI Travel Execution Layer" pitch 变
+   成可点击的产品(MCP server + landing + dashboard + docs),Week 5
+   回头修两层引擎 bug(Phase 3 trigger + NLU venue capture)+ 两层
+   边缘 bug(vendor widget classification + paused_payment 误报)。
+   现在外部开发者从 onegent.com/developers 进来 → 自助 mint key →
+   Claude Desktop 接入 → "Book Carbone" → NLU 抓到店名 → 直接到
+   booking-job → 引擎走 OpenTable → stage=unknown → Phase 3 → Resy
+   → 找到 → SevenRooms vendor URL classified → handoff 落到能 load
+   的页面 —— 整条链路可被一个真实开发者今天就跑通。
+
+7. 没做的(明天/Week 6 候选)
+   - #21 npm publish @onegent/mcp-server(用户手动 5min)
+   - #22 onegent.com/api/mcp hosted endpoint(1-2 day 编码 + 5-10
+     工作日 ChatGPT Apps review)
+   - #23 Claude.ai remote MCP OAuth 2.0
+   - #53 修 pre-existing test failures(2-3h)
+   - 真线上 dogfood:重启 dev server 后用 "Book Carbone" 跑端到端
+     验证今天所有 fix 联动
 
 ================================================================
 Recent Updates - 2026-04-24 (cont. 9) · Week 5 #2 · NLU 直订:"Book Carbone" 真去 booking
@@ -2130,6 +2238,19 @@ Cron：4 个定时任务（反馈提示 / 价格检查 / 场馆质量 / 笔记�
 ================================================================
 九、版本历史摘要
 ================================================================
+
+v0.2.40.0（2026-04-24）— **Week 5 #3 · Bug B + Bug C 收尾 + ship-readiness audit**
+  · Bug B (US-W5-010):recovery-providers.ts 加 matchKnownVendor + headProbe
+    helpers,tryWebsiteHandoff 三分支处理 vendor widget URLs (SevenRooms /
+    Tock / OpenTable widget / Resy / Yelp / Eat App / Dineplan):accessible
+    用 vendor URL,不 accessible fallback 到 officialWebsite + 明示 "click
+    Reservations",无 vendor 行为不变。9 unit tests 全绿。
+  · Bug C (US-W5-011):final-outcome.ts 加 defensive guard,当 agent skipped
+    + 7 字段全空 + stage=unknown → 返 no_availability(原:paused_payment
+    误报,逼下游 isGenuineBooking 用字符串 hack)
+  · Ship audit (US-W5-012):typecheck ✅ exit 0,W5+W4 touched code 136/136
+    tests pass 零自回归。Pre-existing 14 test failures 入 backlog #53。
+    今天累计 74 commits,5 minor + 1 patch 版本(v0.2.36→40)。
 
 v0.2.39.0（2026-04-24）— **Week 5 #2 · NLU 直订:"Book Carbone" 真去 booking**
   · 真实 bug:用户说 "Book Carbone..." NLU v2 RestaurantFields schema 没
