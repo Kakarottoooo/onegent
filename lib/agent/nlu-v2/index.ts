@@ -169,6 +169,9 @@ function toV1CompatShape(
   // solo (create_plan) and multi (create_room + flow="chat") now.
   const effectiveIntent = state.intent;
 
+  const directBooking =
+    action.type === "show_confirm_card" && action.directBooking === true;
+
   return {
     intent: effectiveIntent,
     scenario: state.scenario,
@@ -181,6 +184,7 @@ function toV1CompatShape(
     confirm_ready: confirmReady,
     refined_target_id: state.refined_target_id,
     assistant_reply: reply,
+    ...(directBooking ? { direct_booking: true } : {}),
     __v2_state: state,
     __v2_action: action,
   };

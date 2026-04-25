@@ -204,11 +204,18 @@ export type RouterAction =
    * All required fields present, scenario + party decided. Show the inline
    * confirm card so the user can commit (create room / run plan / package trip).
    * The `kind` maps 1:1 to the current ConfirmCard component's kind prop.
+   *
+   * When `directBooking=true`, the user named one specific venue
+   * (restaurant_name / hotel_name set). The commit route should bypass the
+   * recommendation pipeline and create a booking-job pointing at that exact
+   * venue instead of LLM-picking one. Frontend may also render the confirm
+   * card with venue-specific copy ("Book Carbone for 2 on Apr 28").
    */
   | {
       type: "show_confirm_card";
       kind: "plan" | "room" | "trip";
       state: IntentState;
+      directBooking?: boolean;
     };
 
 // ─── Backward-compat shape returned by /api/chat/parse ────────────────────
@@ -230,6 +237,15 @@ export interface NluV2ParseResult {
   refined_target_id: string | null;
   /** The natural-language reply from Layer 1. */
   assistant_reply: string | null;
+
+  /**
+   * True when the user named one specific venue (restaurant_name or
+   * hotel_name) so /api/chat/commit should skip the LLM-recommendation
+   * pass and create a booking-job pointing directly at that venue.
+   * Frontend may also render the confirm card with venue-specific copy.
+   * Always undefined when scenario is not restaurant/hotel.
+   */
+  direct_booking?: boolean;
 
   /** Debug-only: the raw IntentState + RouterAction for server-side logs.
    *  Not rendered by the frontend. */

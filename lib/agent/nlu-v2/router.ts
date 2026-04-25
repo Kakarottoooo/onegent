@@ -66,7 +66,21 @@ export function routeIntent(state: IntentState): RouterAction {
       ? "room"
       : "plan";
 
-  return { type: "show_confirm_card", kind, state };
+  // Direct-booking shortcut: user named one specific venue.
+  // Solo flow only — Decision Rooms (multi-decider) keep going through the
+  // recommendation/voting flow even when the creator names a venue, because
+  // the other members haven't said they want THAT venue specifically.
+  const directBooking =
+    kind === "plan" &&
+    ((state.scenario === "restaurant" && truthy(state.restaurant?.restaurant_name)) ||
+      (state.scenario === "hotel" && truthy(state.hotel?.hotel_name)));
+
+  return {
+    type: "show_confirm_card",
+    kind,
+    state,
+    ...(directBooking ? { directBooking: true } : {}),
+  };
 }
 
 /**
