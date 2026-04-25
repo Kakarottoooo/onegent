@@ -106,6 +106,76 @@ describe("Golden restaurant cases · solo create_plan", () => {
       budget_per_person: 80,
     });
   });
+
+  // ── US-W5: direct-booking shortcut for named venues ────────────────────
+  it("R6. restaurant_name + all required → directBooking flag on action", () => {
+    const state = baseState({
+      scenario: "restaurant",
+      restaurant: {
+        restaurant_name: "Carbone",
+        city: "New York",
+        date: "2026-05-02",
+        time: "19:00",
+        party_size: 2,
+      },
+    });
+    const action = routeIntent(state);
+    expect(action.type).toBe("show_confirm_card");
+    if (action.type === "show_confirm_card") {
+      expect(action.kind).toBe("plan");
+      expect(action.directBooking).toBe(true);
+    }
+  });
+
+  it("R7. restaurant_name set but date missing → no directBooking, still asks", () => {
+    const state = baseState({
+      scenario: "restaurant",
+      restaurant: {
+        restaurant_name: "Carbone",
+        city: "New York",
+        time: "19:00",
+        party_size: 2,
+      },
+    });
+    const action = routeIntent(state);
+    expect(action.type).toBe("ask_clarification");
+    if (action.type === "ask_clarification") {
+      expect(action.missing).toContain("date");
+    }
+  });
+
+  it("R8. NO restaurant_name → directBooking flag is omitted (recommendation path)", () => {
+    const state = baseState({
+      scenario: "restaurant",
+      restaurant: {
+        city: "NYC",
+        date: "2026-05-02",
+        time: "19:00",
+        party_size: 2,
+        cuisine: "Italian",
+      },
+    });
+    const action = routeIntent(state);
+    expect(action.type).toBe("show_confirm_card");
+    if (action.type === "show_confirm_card") {
+      expect(action.directBooking).toBeUndefined();
+    }
+  });
+
+  it("R9. flattenScenarioFields includes restaurant_name when set", () => {
+    const state = baseState({
+      scenario: "restaurant",
+      restaurant: {
+        restaurant_name: "Carbone",
+        city: "New York",
+        date: "2026-05-02",
+        time: "19:00",
+        party_size: 2,
+      },
+    });
+    const flat = flattenScenarioFields(state);
+    expect(flat.restaurant_name).toBe("Carbone");
+  });
 });
 
 // ─── Hotel ──────────────────────────────────────────────────────────────
@@ -143,6 +213,47 @@ describe("Golden hotel cases · solo create_plan", () => {
     });
     const missing = getMissingForScenario(state);
     expect(missing).toEqual(["check_in"]);
+  });
+
+  // ── US-W5: direct-booking for named hotel ────────────────────────────
+  it("H_DB1. hotel_name + all required → directBooking flag on action", () => {
+    const state = baseState({
+      scenario: "hotel",
+      hotel: {
+        hotel_name: "The Pierre",
+        city: "New York",
+        check_in: "2026-04-28",
+        check_out: "2026-04-30",
+        guests: 2,
+      },
+    });
+    const action = routeIntent(state);
+    expect(action.type).toBe("show_confirm_card");
+    if (action.type === "show_confirm_card") {
+      expect(action.directBooking).toBe(true);
+    }
+  });
+
+  it("H_DB2. hotel_name + create_room → NO directBooking (room stays recommendation)", () => {
+    const state = baseState({
+      intent: "create_room",
+      scenario: "hotel",
+      party_type: "multi",
+      member_names: ["Alice"],
+      hotel: {
+        hotel_name: "The Pierre",
+        city: "New York",
+        check_in: "2026-04-28",
+        check_out: "2026-04-30",
+        guests: 2,
+      },
+    });
+    const action = routeIntent(state);
+    expect(action.type).toBe("show_confirm_card");
+    if (action.type === "show_confirm_card") {
+      expect(action.kind).toBe("room");
+      expect(action.directBooking).toBeUndefined();
+    }
   });
 
   it("H4. Missing both check_out and nights", () => {
