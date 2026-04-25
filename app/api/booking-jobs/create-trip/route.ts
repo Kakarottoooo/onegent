@@ -37,7 +37,7 @@ import {
   type BookingJobStep,
 } from "@/lib/db";
 import { buildExpediaFlightsUrl } from "@/lib/agent/planners/booking-links";
-import { createJobViaCore } from "@/lib/core/cend-adapter";
+import { isCoreSupported, markStepForCore } from "@/lib/core/cend-adapter";
 import type {
   TripPackage,
   TripSelection,
@@ -181,60 +181,54 @@ export async function POST(req: NextRequest) {
   const jobId = randomUUID();
   const tripLabel = buildTripLabel(pkg, steps);
 
+  // ── Dogfood: per-step dual-gate ───────────────────────────────────────────
+  // When USE_CORE_EXECUTOR_FOR_CEND is on, re-shape every core-supported
+  // step's body (restaurant / hotel / flight) into ExecutionParams shape +
+  // stamp __source="lib/core/execution". The start route's runUniversalStep
+  // dual-gate watches that marker per-step and dispatches to
+  // runExecutionJobWithRecovery for marked steps; activity stays on legacy
+  // because lib/core throws "not supported yet" for it (W6 backlog).
+  //
+  // Per-step (not per-trip) means a hotel + flight + restaurant + activity
+  // trip routes the first three through lib/core and activity through legacy.
+  // Single env-var kill-switch preserves one-flag rollback.
+  const useCoreForCend = process.env.USE_CORE_EXECUTOR_FOR_CEND === "true";
+  const finalSteps: BookingJobStep[] = useCoreForCend
+    ? steps.map((s) => (isCoreSupported(s.type) ? markStepForCore(s) : s))
+    : steps;
+
+  const viaCoreCount = finalSteps.filter(
+    (s) => (s.body as Record<string, unknown>).__source === "lib/core/execution",
+  ).length;
+
   console.log("[create-trip] built steps", {
     jobId,
     selection,
-    step_types: steps.map((s) => s.type),
-    step_count: steps.length,
+    step_types: finalSteps.map((s) => s.type),
+    step_count: finalSteps.length,
+    via_core: viaCoreCount,
   });
-
-  // ── Dogfood: single-restaurant trips go through lib/core.createJob ──
-  // Activates Week 2's dual-gate in [id]/start: because lib/core.createJob
-  // stamps step.body.__source="lib/core/execution", the start route's
-  // runUniversalStepViaCore branch fires instead of legacy runUniversalStep.
-  // Flag-gated so rollback is one env var away.
-  const useCoreForCend =
-    process.env.USE_CORE_EXECUTOR_FOR_CEND === "true" &&
-    steps.length === 1 &&
-    steps[0].type === "restaurant";
-
-  if (useCoreForCend) {
-    console.log("[create-trip] via lib/core (USE_CORE_EXECUTOR_FOR_CEND)", { jobId });
-    try {
-      const job = await createJobViaCore(steps[0], { userId, sessionId, tripLabel, jobId });
-      return NextResponse.json({
-        jobId: job.id,
-        status: job.status,
-        trip_label: tripLabel,
-        step_count: 1,
-        breakdown: { hotel: false, flight: false, restaurants: 1, activities: 0 },
-        _source: "lib/core/execution",
-      });
-    } catch (err) {
-      // Don't break the C-end flow if the adapter misfires — fall through to legacy.
-      console.error("[create-trip] lib/core adapter failed, falling back to legacy", err);
-    }
-  }
 
   const job = await createBookingJob({
     id: jobId,
     sessionId,
     userId,
     tripLabel,
-    steps,
+    steps: finalSteps,
   });
 
   return NextResponse.json({
     jobId: job.id,
     status: job.status,
     trip_label: tripLabel,
-    step_count: steps.length,
+    step_count: finalSteps.length,
     breakdown: {
       hotel: !!selection.hotel_id,
       flight: !!selection.flight_id,
       restaurants: selection.restaurant_ids.length,
       activities: selection.activity_ids.length,
     },
+    ...(viaCoreCount > 0 ? { _via_core: viaCoreCount } : {}),
   });
 }
 

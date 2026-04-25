@@ -11,7 +11,7 @@ import type { BookingJob, BookingJobStep } from "@/lib/db";
 import type { AgentAutonomySettings } from "@/lib/autonomy";
 import { auth } from "@clerk/nextjs/server";
 import { randomUUID } from "crypto";
-import { createJobViaCore } from "@/lib/core/cend-adapter";
+import { isCoreSupported, markStepForCore } from "@/lib/core/cend-adapter";
 
 /** POST /api/booking-jobs — create a new background booking job */
 export async function POST(req: NextRequest) {
@@ -33,27 +33,29 @@ export async function POST(req: NextRequest) {
 
   const initialSteps: BookingJobStep[] = steps.map((s) => ({ ...s, status: "pending" }));
 
-  // ── Dogfood: single-restaurant jobs go through lib/core.createJob when the
-  //    flag is on AND we have a Clerk user (skip anonymous sessions). Same
-  //    gate shape as in create-trip/route.ts. Activates Week 2's dual-gate.
-  if (
-    process.env.USE_CORE_EXECUTOR_FOR_CEND === "true" &&
-    userId &&
-    initialSteps.length === 1 &&
-    initialSteps[0].type === "restaurant"
-  ) {
-    console.log("[booking-jobs] via lib/core (USE_CORE_EXECUTOR_FOR_CEND)", { jobId });
-    try {
-      const coreJob = await createJobViaCore(initialSteps[0], {
-        userId,
-        sessionId,
-        tripLabel,
-        jobId,
-      });
-      return NextResponse.json({ jobId: coreJob.id, status: coreJob.status, _source: "lib/core/execution" });
-    } catch (err) {
-      console.error("[booking-jobs] lib/core adapter failed, falling back to legacy", err);
-    }
+  // ── Dogfood: per-step dual-gate ───────────────────────────────────────────
+  // When USE_CORE_EXECUTOR_FOR_CEND is on AND we have a Clerk user (skip
+  // anonymous sessions), re-shape every supported step's body to the lib/core
+  // ExecutionParams form + stamp __source="lib/core/execution". Per-step,
+  // not per-job: a future trip mixing restaurant + activity would route
+  // restaurant through lib/core and activity through legacy. Today this
+  // entrypoint is single-step (direct-booking from chat-commit), so it's
+  // effectively all-or-nothing — but keeping the per-step branch matches
+  // create-trip and avoids drift.
+  const useCoreForCend = process.env.USE_CORE_EXECUTOR_FOR_CEND === "true" && !!userId;
+  const finalSteps: BookingJobStep[] = useCoreForCend
+    ? initialSteps.map((s) => (isCoreSupported(s.type) ? markStepForCore(s) : s))
+    : initialSteps;
+
+  const viaCoreCount = finalSteps.filter(
+    (s) => (s.body as Record<string, unknown>).__source === "lib/core/execution",
+  ).length;
+  if (viaCoreCount > 0) {
+    console.log("[booking-jobs] dual-gate per-step", {
+      jobId,
+      step_count: finalSteps.length,
+      via_core: viaCoreCount,
+    });
   }
 
   const job = await createBookingJob({
@@ -61,11 +63,15 @@ export async function POST(req: NextRequest) {
     sessionId,
     userId: userId ?? null,
     tripLabel,
-    steps: initialSteps,
+    steps: finalSteps,
     autonomySettings,
   });
 
-  return NextResponse.json({ jobId: job.id, status: job.status });
+  return NextResponse.json({
+    jobId: job.id,
+    status: job.status,
+    ...(viaCoreCount > 0 ? { _via_core: viaCoreCount } : {}),
+  });
 }
 
 /**
