@@ -123,8 +123,8 @@ IntentState schema:
   } },
 
   // ONLY populate the sub-object matching the "scenario" value (omit the others)
-  "restaurant"?: { city?, date?, time?, party_size?, cuisine?, budget_per_person?, neighborhood?, vibe?, dietary?, notes? },
-  "hotel"?: { city?, check_in?, check_out?, nights?, guests?, star_rating?, neighborhood?, budget_max_per_night?, amenities?, vibe?, notes? },
+  "restaurant"?: { restaurant_name?, city?, date?, time?, party_size?, cuisine?, budget_per_person?, neighborhood?, vibe?, dietary?, notes? },
+  "hotel"?: { hotel_name?, city?, check_in?, check_out?, nights?, guests?, star_rating?, neighborhood?, budget_max_per_night?, amenities?, vibe?, notes? },
   "flight"?: { origin?, dest?, date?, return_date?, is_round_trip?, passengers?, cabin_class?, max_stops?, preferred_airlines?, avoid_red_eye?, earliest_departure?, latest_departure?, notes? },
   "activity"?: { event_name?, event_type?, city?, event_date?, event_date_to?, num_tickets?, seat_type?, budget_max_per_ticket?, section_preferences?, avoid_sections?, wheelchair_required?, notes? },
   "trip"?: {
@@ -242,6 +242,37 @@ WORKED EXAMPLES — use these to calibrate before answering:
           sub-object.
      Same pattern for: "推荐 brooklyn 周六早上的瑜伽课" → "out_of_scope: yoga class";
                        "gift ideas for my mom birthday budget 150" → "out_of_scope: gift ideas".
+
+  F. 指定具体餐厅 (named-venue direct booking):
+     Input: "Book Carbone in NYC tomorrow 7pm for 2"
+     → scenario="restaurant", intent="create_plan", party_type="solo",
+       restaurant={ restaurant_name="Carbone", city="New York", date="<tomorrow>", time="19:00", party_size=2 }
+     WHY: User pointed at ONE specific venue ("Carbone") and used a booking verb
+          ("Book"). Capture the proper noun in restaurant_name verbatim — do NOT
+          translate / normalize / "expand" it. Skip cuisine because the venue
+          implies it. Downstream router uses restaurant_name to skip the
+          recommendation pass and go straight to a direct-booking confirm card.
+
+  G. 指定具体餐厅 — 中文:
+     Input: "给我订北京饭店明晚 7 点 2 人"
+     → scenario="restaurant", intent="create_plan", party_type="solo",
+       restaurant={ restaurant_name="北京饭店", date="<tomorrow>", time="19:00", party_size=2 }
+     WHY: 显式店名 + 订位动词 → direct booking。restaurant_name 保持中文原文。
+          city 未提则不填,router 会问。
+
+  H. 指定具体酒店:
+     Input: "Reserve The Pierre New York April 28 to 30 2 guests"
+     → scenario="hotel", intent="create_plan", party_type="solo",
+       hotel={ hotel_name="The Pierre", city="New York", check_in="2026-04-28",
+               check_out="2026-04-30", guests=2 }
+     WHY: Same pattern as F/G but for hotel. star_rating + neighborhood are
+          implied by the named venue — leave them blank.
+
+  CRITICAL — DO NOT populate restaurant_name / hotel_name speculatively:
+     "Find me a romantic Italian place" → restaurant_name STAYS BLANK (the
+     user is describing taste, not naming a venue). Only fill the slot when
+     the user explicitly names ONE specific venue. False positives turn the
+     direct-booking shortcut into a venue lottery.
 
 6. Intent selection — read CAREFULLY, this is the most-abused slot:
    - "chitchat" for greetings / thanks / small talk with no booking verb.
@@ -531,6 +562,7 @@ function coerceRestaurant(
 ): IntentState["restaurant"] {
   const r = (raw && typeof raw === "object" ? raw : {}) as Record<string, unknown>;
   return {
+    restaurant_name: strOrUndef(r.restaurant_name) ?? prev?.restaurant_name,
     city: strOrUndef(r.city) ?? prev?.city,
     date: isoDateOrUndef(r.date) ?? prev?.date,
     time: normalizeTime(r.time) ?? prev?.time,
@@ -550,6 +582,7 @@ function coerceHotel(
 ): IntentState["hotel"] {
   const h = (raw && typeof raw === "object" ? raw : {}) as Record<string, unknown>;
   return {
+    hotel_name: strOrUndef(h.hotel_name) ?? prev?.hotel_name,
     city: strOrUndef(h.city) ?? prev?.city,
     check_in: isoDateOrUndef(h.check_in) ?? prev?.check_in,
     check_out: isoDateOrUndef(h.check_out) ?? prev?.check_out,
