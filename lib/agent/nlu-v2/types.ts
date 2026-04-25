@@ -67,6 +67,14 @@ export interface ProxyConstraints {
 // produce and for the router to test.
 
 export interface RestaurantFields {
+  /**
+   * Specific venue name when the user named one (e.g. "Carbone", "Le Bernardin",
+   * "北京饭店"). Set ONLY when the user pointed at one specific restaurant —
+   * never inferred or "best-guessed" from cuisine + city. The router treats
+   * a populated restaurant_name as a signal to skip the LLM recommendation
+   * pass and go straight to a direct-booking confirm card.
+   */
+  restaurant_name?: string;
   city?: string;
   date?: string;         // ISO YYYY-MM-DD (resolved by extractor, not raw "Friday")
   time?: string;         // HH:MM 24h
@@ -80,6 +88,13 @@ export interface RestaurantFields {
 }
 
 export interface HotelFields {
+  /**
+   * Specific hotel name when the user named one (e.g. "The Pierre",
+   * "Park Hyatt NYC"). Same direct-booking semantics as
+   * RestaurantFields.restaurant_name — populated only when the user
+   * pointed at one specific property, never inferred.
+   */
+  hotel_name?: string;
   city?: string;
   check_in?: string;      // ISO YYYY-MM-DD
   check_out?: string;     // ISO YYYY-MM-DD

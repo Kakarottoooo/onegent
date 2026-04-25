@@ -247,24 +247,26 @@ const scenarioLabel = (s: NluScenario): string => {
 
 function summarizeRestaurant(r: NonNullable<IntentState["restaurant"]>): string[] {
   const parts: string[] = [];
+  if (r.restaurant_name) parts.push(`at "${r.restaurant_name}"`);
   if (r.city) parts.push(`in ${r.city}`);
   if (r.date) parts.push(`on ${r.date}`);
   if (r.time) parts.push(`at ${r.time}`);
   if (r.party_size) parts.push(`for ${r.party_size}`);
-  if (r.cuisine) parts.push(`cuisine: ${r.cuisine}`);
+  if (r.cuisine && !r.restaurant_name) parts.push(`cuisine: ${r.cuisine}`);
   if (r.budget_per_person) parts.push(`budget $${r.budget_per_person}/person`);
   return parts;
 }
 
 function summarizeHotel(h: NonNullable<IntentState["hotel"]>): string[] {
   const parts: string[] = [];
+  if (h.hotel_name) parts.push(`at "${h.hotel_name}"`);
   if (h.city) parts.push(`in ${h.city}`);
   if (h.check_in) parts.push(`check in ${h.check_in}`);
   if (h.check_out) parts.push(`check out ${h.check_out}`);
   else if (h.nights) parts.push(`${h.nights} night${h.nights === 1 ? "" : "s"}`);
   if (h.guests) parts.push(`${h.guests} guest${h.guests === 1 ? "" : "s"}`);
-  if (h.star_rating) parts.push(`${h.star_rating}-star`);
-  if (h.neighborhood) parts.push(`${h.neighborhood} area`);
+  if (h.star_rating && !h.hotel_name) parts.push(`${h.star_rating}-star`);
+  if (h.neighborhood && !h.hotel_name) parts.push(`${h.neighborhood} area`);
   return parts;
 }
 
