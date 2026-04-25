@@ -1,5 +1,5 @@
 ================================================================
-Onegent · AI 决策代理 · 项目总结 · v0.2.40.0
+Onegent · AI 决策代理 · 项目总结 · v0.2.41.0
 ================================================================
 
 【项目定义】
@@ -16,6 +16,122 @@ Onegent · AI 决策代理 · 项目总结 · v0.2.40.0
 活动 / 多人 trip），非旅行品类（笔记本 / 手机 / 耳机 / 信用卡 /
 礼物 / 健身）已归档。详见本文档头部 "Recent Updates - 2026-04-24
 (cont. 2) · Positioning Shift"。
+
+================================================================
+Recent Updates - 2026-04-25 (cont. 11) · Week 6 #1 · C 端 dogfood 扩面:hotel + flight 接进 lib/core
+================================================================
+
+延 v0.2.40 全天硬核之后,今天小步推进:把 C 端 trip booking 的
+hotel + flight 也接进 lib/core 的执行管线,把 Week 4 #11 单餐厅
+dogfood 扩到三 scenario,让双轨制只剩 activity 一处。
+
+1. 现状梳理(决定方案 C 之前)
+   - lib/core/execution/executor.ts 实际已支持 restaurant + hotel
+     + flight(buildStartUrlAndTask 三个 case),activity 直接 throw
+     "Activity scenario not supported by runExecutionJob yet"
+   - lib/core/cend-adapter.ts 旧 createJobViaCore 只接 restaurant
+     (hard-throw 其他 type)
+   - app/api/booking-jobs/{create-trip,POST}/route.ts 双轨 gate 都
+     是 length===1 && type==="restaurant" —— 多 step trip / hotel /
+     flight 全部走老路径
+   - [id]/start/route.ts 的 dual-gate 是 per-step 按 step.body.__source
+     marker 分发的(这点之前的设计就是对的)—— 意味着 trip 多 step
+     可以混走两条路径
+   - activity 不走 stagehand-executor,走 lib/agent-runtime/skills/
+     find-activity(Google Places → 本地体验 handoff URL),要接进
+     lib/core 需要把 SkillContext(policy/autonomy/preference profile)
+     转译成 ExecutionContext + ConsentPolicy —— 不在 W6 #1 范围
+
+2. 方案 C(Hybrid):今天接 hotel + flight,activity 拆 backlog
+   - 工作量 ~半天 + ship,activity 单独立 #58 等真用起来再设计
+   - Linus 论:"Solve the problem in front of you. Don't pretend
+     you'll solve a different problem." Activity 是另一个系统
+
+3. US-W6-001: cend-adapter 重构
+   - 删旧 createJobViaCore(单 scenario,直接 createBookingJob)
+   - 新导出:
+       · CORE_SUPPORTED_SCENARIOS 常量 = ["restaurant","hotel","flight"]
+       · isCoreSupported(stepType): boolean — 给 caller 用作 gate
+       · markStepForCore(step): BookingJobStep — 纯函数,只重塑 body
+   - markStepForCore 干两件事:
+       (a) camelCase → snake_case 的 ExecutionParams 转换
+           - restaurant: restaurantName → restaurant_name(其他字段同名)
+           - hotel: 完全 1:1(legacy create-trip 已用 snake_case)
+           - flight: returnDate→return_date / cabinClass→cabin_class +
+             cabin alias(coach→economy / premiumcoach→premium_economy)
+             + 5 个 target* hint 透传(targetAirline / targetPrice /
+             targetDepartureTime / targetFlightNumber / 等)
+           - 未知 cabin 值 silently dropped(不传歪 cabin 给 executor)
+       (b) profile + profileId preserve + __source="lib/core/execution"
+           marker stamp(start route 的 dual-gate 按这个分发)
+   - 必填字段缺失抛错(caller 应该 isCoreSupported gate + upstream 校验)
+   - activity 调用直接抛 "not supported by lib/core"
+
+4. US-W6-002: route 层 per-step gating
+   - app/api/booking-jobs/route.ts(POST,direct-booking 链路从
+     chat-commit 进来) + app/api/booking-jobs/create-trip/route.ts
+     (trip packaging)同样模式:
+       const useCoreForCend = process.env.USE_CORE_EXECUTOR_FOR_CEND === "true";
+       const finalSteps = useCoreForCend
+         ? steps.map(s => isCoreSupported(s.type) ? markStepForCore(s) : s)
+         : steps;
+   - 删除旧 try/catch 单 step early-return + fallback 块
+   - 单次 createBookingJob(steps: finalSteps),trip multi-step 不破坏
+     (parallel execution 由 [id]/start 的 Promise.allSettled 负责)
+   - response 加 _via_core 字段(viaCoreCount > 0 时)便于 dev 观察分发
+
+5. US-W6-003: cend-adapter unit tests + array.map 集成测试
+   - lib/core/__tests__/cend-adapter.test.ts:20 个 test
+       · CORE_SUPPORTED_SCENARIOS 内容
+       · isCoreSupported × 4(三 yes / activity no / universal no)
+       · restaurant × 4(转换 / profile preserve / outer fields preserve /
+         covers as string 抛错)
+       · hotel × 2(1:1 / hotel_name 空抛错)
+       · flight × 6(return_date 重命名 / one-way 不带 / cabin alias /
+         未知 cabin drop / target* 透传 / origin 空抛错)
+       · guards × 3(activity throw / 无 profile 不 spread / 无 profileId 不 spread)
+       · trip-level array.map × 1(hotel+flight+restaurant+activity 混合,
+         前三个有 marker activity 没碰)
+   - 不写整 route 集成测(create-trip 要 mock Clerk + DB 整片;array.map
+     模式覆盖了核心行为,真路径用 dev 上跑一次 trip 验证就够)
+
+6. 测试 + typecheck
+   - npx vitest run lib/core/__tests__ lib/core/execution/__tests__:
+     ✅ 4 files / 60 tests pass(20 新 + 40 老,零回归)
+   - npx tsc --noEmit:✅ exit 0 整 monorepo
+
+7. 影响半径
+   - C 端 trip booking 所有 hotel + flight + restaurant step 现在
+     默认走 lib/core/execution/recovery.ts(USE_CORE_EXECUTOR_FOR_CEND
+     是 kill-switch,生产环境 .env.local 已开,关一下变量回滚)
+   - lib/core 内部:Phase 1 retry / Phase 2 time fallback / Phase 3
+     provider chain / consent-gating / audit log 全部用上
+   - activity 维持原 path(runActivityStep + findActivitySkill),
+     体感无差异
+   - direct-booking 链路(/api/booking-jobs POST 单 restaurant)同步
+     走 lib/core,跟 W5 #2 真流量验过的 Carbone 路径一致
+
+8. 仍未完成 / 后续(backlog)
+   - #58 activity 接 lib/core(等 MCP book_activity 真用起来再设计
+     ExecutionContext 怎么承载 SkillContext)
+   - #21/22/23 MCP publish + hosted endpoint + OAuth
+   - #53 pre-existing test failures
+   - vitest.config exclude .agents/skills/gstack/**
+   - REAL E2E 浏览器实测一次 hotel+flight trip booking(curl 验过 NLU
+     侧,这次的改动只动 step shaping,行为应与之前等价 —— 但建议测一次
+     再放心)
+
+9. 战略意义
+   今天的小修把 W4 #11 dogfood "只覆盖单餐厅" 的尴尬收掉:从今天起
+   C 端跑出来的所有 hotel/flight/restaurant booking 都和 B 端 REST API
+   走完全相同的 lib/core 管线,C 端是真的 dogfood lib/core 而不是只
+   "试用一个最小 scenario"。这意味着任何 W5+ 引擎修复(Phase 3 trigger /
+   vendor widget classification / paused_payment 防误报)C 端能直接受益
+   而不需要二次集成。
+
+10. 4 commits 今天傍晚段
+   (本 commit) feat(core): cend-adapter supports hotel + flight + per-step gating
+   (后续 docs commit) docs: v0.2.41.0 release notes
 
 ================================================================
 Recent Updates - 2026-04-24 (cont. 10) · Week 5 #3 · Bug B + Bug C 收尾 + ship audit
@@ -101,6 +217,7 @@ bug。然后跑完整 ship-readiness audit:今天 74 commits 推完,需要确认
    v0.2.38.0 — Week 5 #1 Phase 3 trigger 引擎边界
    v0.2.39.0 — Week 5 #2 NLU 直订
    v0.2.40.0 — Week 5 #3 Bug B + Bug C + ship audit
+   v0.2.41.0 — Week 6 #1 C 端 dogfood 扩面 (hotel + flight 接 lib/core)
    累计:38 commits,~9000+ 行新代码,3 个 backlog item 入队(#21 npm
    publish / #22 hosted MCP endpoint / #23 OAuth / #53 pre-existing
    tests),26 个 W4-W5 user stories 全部完成。
