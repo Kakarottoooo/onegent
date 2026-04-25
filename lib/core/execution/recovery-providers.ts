@@ -249,10 +249,44 @@ async function tryWebsiteHandoff(
     // Swallowed: reservationUrl stays at officialWebsite.
   }
 
+  // ── US-W5 Bug B: validate vendor widget URLs ────────────────────────────
+  // Many top-tier restaurants (Carbone, Le Bernardin, Marea …) embed their
+  // booking widget via SevenRooms / Tock / Resy / etc. The agent often lands
+  // on the iframe's src URL (e.g. https://www.sevenrooms.com/events/<id>),
+  // which we capture above. But that URL frequently 404s when opened
+  // standalone — it depends on the parent page for context. Without this
+  // check we'd ship the user a dead link.
+  //
+  // HEAD-test the URL when it matches a known vendor; if it doesn't load
+  // standalone, fall back to the venue's main site with clearer copy.
   const foundReservationPage = reservationUrl !== officialWebsite;
-  const summary = foundReservationPage
-    ? `"${p.restaurant_name}" books through their own system (not OpenTable or Resy). We found their reservation page — tap below to finish booking there.`
-    : `"${p.restaurant_name}" is not on OpenTable or Resy, and we couldn't locate a reservation widget on their website. Tap below to try booking on their homepage.`;
+  const vendor = foundReservationPage ? matchKnownVendor(reservationUrl) : null;
+  let summary: string;
+
+  if (foundReservationPage && vendor) {
+    const accessible = await headProbe(reservationUrl);
+    if (accessible) {
+      summary =
+        `"${p.restaurant_name}" books through ${vendor.name} (not OpenTable or Resy). ` +
+        `Tap below to open the reservation widget — your details are saved.`;
+    } else {
+      // Vendor URL doesn't load standalone. Send the user to the venue's
+      // homepage with explicit instructions instead of a dead deep link.
+      reservationUrl = officialWebsite;
+      summary =
+        `"${p.restaurant_name}" books through ${vendor.name} (not OpenTable or Resy). ` +
+        `Their widget needs to load from the venue's website — tap below to open it, ` +
+        `then click "Reservations" at the top.`;
+    }
+  } else if (foundReservationPage) {
+    summary =
+      `"${p.restaurant_name}" books through their own system (not OpenTable or Resy). ` +
+      `We found their reservation page — tap below to finish booking there.`;
+  } else {
+    summary =
+      `"${p.restaurant_name}" is not on OpenTable or Resy, and we couldn't locate ` +
+      `a reservation widget on their website. Tap below to try booking on their homepage.`;
+  }
 
   const now = new Date().toISOString();
   return {
@@ -267,6 +301,68 @@ async function tryWebsiteHandoff(
     attemptCount: 1, // overwritten by caller
     usedFallback: true,
   };
+}
+
+// ─── Vendor classification (US-W5 Bug B) ─────────────────────────────────────
+
+interface KnownVendor {
+  pattern: RegExp;
+  name: string;
+}
+
+/**
+ * Booking-widget vendor URLs we recognise. Used by tryWebsiteHandoff to
+ * decide whether to HEAD-probe a candidate handoff URL before surfacing it
+ * to the user. Order matters only for telemetry — the first match wins.
+ *
+ * Add a new entry when we see another vendor consistently produce dead
+ * deep links. Today's set covers the long-tail of top NYC restaurants
+ * (SevenRooms is by far the most common; Tock is rising for prix-fixe).
+ */
+const KNOWN_BOOKING_VENDORS: readonly KnownVendor[] = [
+  { pattern: /sevenrooms\.com/i, name: "SevenRooms" },
+  { pattern: /(?:explore)?tock\.com/i, name: "Tock" },
+  { pattern: /opentable\.com\/(?:widget|restref|booking)/i, name: "OpenTable widget" },
+  { pattern: /resy\.com\/(?:cities|events)/i, name: "Resy" },
+  { pattern: /yelp\.com\/(?:reservations|biz_redir)/i, name: "Yelp Reservations" },
+  { pattern: /eatapp\.co/i, name: "Eat App" },
+  { pattern: /respak\.io|reservation\.dineplan/i, name: "Dineplan" },
+];
+
+/** Exported only for unit tests — internal signal-classifier. */
+export function matchKnownVendor(url: string): KnownVendor | null {
+  for (const v of KNOWN_BOOKING_VENDORS) {
+    if (v.pattern.test(url)) return v;
+  }
+  return null;
+}
+
+/**
+ * HEAD-probe a URL with a 3 s budget. Returns true when the server responds
+ * 2xx OR with 405 (method not allowed but URL otherwise reachable). Returns
+ * false on 4xx (excluding 405), 5xx, network error, or timeout.
+ *
+ * Kept local to recovery-providers because no other lib/core caller needs
+ * "is this URL probably reachable" semantics yet — promote to a util when
+ * a second consumer appears.
+ */
+async function headProbe(url: string): Promise<boolean> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 3000);
+  try {
+    const res = await fetch(url, {
+      method: "HEAD",
+      signal: controller.signal,
+      redirect: "follow",
+    });
+    if (res.ok) return true;
+    if (res.status === 405) return true; // server rejects HEAD but URL is fine
+    return false;
+  } catch {
+    return false;
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
