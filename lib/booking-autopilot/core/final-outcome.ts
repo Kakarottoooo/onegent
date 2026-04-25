@@ -399,6 +399,46 @@ export function determineFinalOutcome(
     };
   }
 
+  // ── US-W5 Bug C: skipped-agent + nothing-filled defensive return ────────
+  // When a provider's programmatic flow short-circuits the agent
+  // (resultMessage contains "Skipped initial agent run") AND nothing made
+  // it into the form AND we still don't recognise the page, we used to
+  // fall through to "paused_payment" below — which made downstream
+  // recovery-providers#isGenuineBooking lean on string heuristics
+  // ("skipped initial agent run") to filter the false positive.
+  //
+  // Returning no_availability here is the honest answer: we never reached
+  // a payment gate, never filled a single field, never identified a stage.
+  // Removes the need for the string-match guard one layer up.
+  const skippedInitialAgent = /skipped initial agent run/i.test(resultMessage ?? "");
+  const nothingEntered =
+    !hasEnteredFullName &&
+    !hasEnteredFirstName &&
+    !hasEnteredLastName &&
+    !hasEnteredEmail &&
+    !hasEnteredPhone &&
+    !hasEnteredCardNumber &&
+    !hasEnteredCardExpiry;
+  if (
+    !resultCompleted &&
+    skippedInitialAgent &&
+    nothingEntered &&
+    assessment.stage === "unknown"
+  ) {
+    trace(
+      "Programmatic flow skipped agent + nothing filled + stage unknown → no_availability (was: paused_payment fallback).",
+    );
+    return {
+      status: "no_availability",
+      screenshotBase64,
+      handoffUrl,
+      sessionUrl,
+      summary:
+        "We couldn't identify a reservation widget on this page. The venue may not list this slot or use a non-standard booking system.",
+      debugTrace,
+    };
+  }
+
   trace(`Executor reached fallback terminal state with agent.completed=${String(resultCompleted)}.`);
   return {
     status: resultCompleted ? "completed" : "paused_payment",
