@@ -1,5 +1,5 @@
 ================================================================
-Onegent · AI 决策代理 · 项目总结 · v0.2.38.0
+Onegent · AI 决策代理 · 项目总结 · v0.2.39.0
 ================================================================
 
 【项目定义】
@@ -16,6 +16,135 @@ Onegent · AI 决策代理 · 项目总结 · v0.2.38.0
 活动 / 多人 trip），非旅行品类（笔记本 / 手机 / 耳机 / 信用卡 /
 礼物 / 健身）已归档。详见本文档头部 "Recent Updates - 2026-04-24
 (cont. 2) · Positioning Shift"。
+
+================================================================
+Recent Updates - 2026-04-24 (cont. 9) · Week 5 #2 · NLU 直订:"Book Carbone" 真去 booking
+================================================================
+
+第二个 Week 5 修复 —— Week 5 #1 修了引擎层 Phase 3 trigger,但用户实际
+跑 Carbone 时发现根因更靠前:NLU 根本没识别用户指定了具体店名,把
+"Book Carbone in NYC" 当成普通"我想吃 NYC 餐厅",返了 5 家通用 Italian
+推荐(Carbone 不在其中)。用户点了 Marea,然后 Marea 不在 OpenTable,
+website fallback 跳到主页就死了。
+
+本轮修 NLU 数据流,从用户输入到 booking-job 创建不再丢店名信号。
+
+1. 根因(用户截图 + dev.log 揭示)
+   - 用户:"Book Carbone in NYC tomorrow 7pm for 2"
+   - NLU v2 extractor 分类正确(scenario=restaurant, intent=create_plan,
+     confirm_ready=true)但 RestaurantFields schema **整个没有
+     restaurant_name 字段** —— "Carbone" 这个 entity extractor 提取了也
+     没地方塞,被默默丢
+   - /api/chat/commit 返 kind=plan → /api/chat 收到 search_query +
+     city/date/time/party_size,LLM 推荐 5 家通用店
+   - 用户点 Marea → booking-jobs 创建 jobId=ea3f8fe6 → OpenTable 没收录
+     Marea(它在 SevenRooms)→ Phase 3 老 isNotFound 正则命中(因为
+     summary 含 "not found on OpenTable"),Resy 没找到 → website fallback
+     跳到 marearestaurant.com 主页 → final-outcome 返 status=error
+   - 用户看到的:浏览器停在 Marea 主页章鱼 logo,啥都没订。
+
+2. 修法 5 commits,每层一个:
+
+   US-W5-005 — Schema 加 restaurant_name + hotel_name(types.ts)
+     · RestaurantFields.restaurant_name?: string
+     · HotelFields.hotel_name?: string
+     · flight 不加(航班号不是常见用户输入,preferred_airlines 已能覆盖)
+     · 注释强调"only when user pointed at ONE specific venue,never
+       inferred from cuisine/star-rating"
+
+   US-W5-006 — Extractor prompt 加 worked examples(extractor.ts)
+     · Example F:"Book Carbone in NYC tmrw 7pm for 2" →
+       restaurant_name="Carbone"
+     · Example G:"给我订北京饭店明晚 7 点 2 人" →
+       restaurant_name="北京饭店"(中文原文,不翻译)
+     · Example H:"Reserve The Pierre New York Apr 28-30" →
+       hotel_name="The Pierre"
+     · CRITICAL anti-pattern callout:"Find me a romantic Italian place"
+       → restaurant_name STAYS BLANK(speculative population 会摧毁
+       direct-booking 的语义)
+     · coerceRestaurant + coerceHotel 加 *_name 字段透传
+
+   US-W5-007 — Router emit directBooking flag(router.ts)
+     · RouterAction.show_confirm_card 加 directBooking?: boolean
+     · NluV2ParseResult 加 direct_booking?: boolean
+     · routeIntent 当 (restaurant + restaurant_name) OR (hotel + hotel_name)
+       AND kind="plan" 时 set directBooking=true
+     · Decision Rooms(intent=create_room)即使 creator 命名 venue 也
+       NOT 设 flag —— co-deciders 需要看到/投票才行,room 流程保持
+       推荐管线
+     · toV1CompatShape pass-through
+
+   US-W5-008 — chat/commit direct_booking 分支(commit/route.ts + page.tsx)
+     · 后端读 nluRaw.direct_booking → buildDirectBookingPayload
+       构造 BookingJobStep(restaurantName / hotelName + city / date /
+       time / covers/guests)→ 返 kind="direct_booking" + venue_name
+       + booking_step
+     · 前端 handleConfirmCommitted 加 async + 新分支 handleDirectBooking:
+         fetch /api/user/booking-profiles?default=true
+         → 拼上 profileId + profile
+         → POST /api/booking-jobs(同 RecommendationCard.handleReserve 模式)
+         → fire /start
+         → router.push("/tasks")
+     · ConfirmCard.CommitResponse.kind union 加 "direct_booking"
+       + venue_name + booking_step optional 字段
+     · 无 profile 时 graceful 返"please add booking profile in Settings"
+
+   US-W5-009 — Golden tests + 真流量验证(本节)
+     · 6 个新 router golden tests:
+         R6: restaurant_name + all required → directBooking=true
+         R7: restaurant_name 但 date 缺 → still ask_clarification
+         R8: NO restaurant_name → directBooking undefined(回归保护)
+         R9: flattenScenarioFields 含 restaurant_name
+         H_DB1: hotel_name 同 R6
+         H_DB2: hotel_name + create_room → directBooking undefined
+     · 88/88 NLU tests 全绿(6 新 + 82 原,零回归)
+
+3. 端到端预期路径(Book Carbone)
+   "Book Carbone in NYC tomorrow 7pm for 2"
+     → POST /api/chat/parse
+     → extractor 识别 restaurant_name="Carbone" + city="New York"
+       + date="2026-04-25" + time="19:00" + party_size=2
+     → router 发现 restaurant_name set + kind=plan → directBooking=true
+     → NluV2ParseResult.direct_booking=true + confirm_ready=true
+     → 前端 ConfirmCard 显示"Book Carbone for 2 on 2026-04-25 at 19:00"
+     → 用户点 Confirm
+     → POST /api/chat/commit 返 kind="direct_booking" + booking_step
+       (restaurantName="Carbone", body 完整)
+     → 前端 handleDirectBooking → fetch profile → POST /api/booking-jobs
+     → jobId 创建,/start fire,跳 /tasks
+     → executor 走 OpenTable("Carbone" 在 OpenTable 搜索能搜到!)
+     → 详情页无 booking widget(Carbone 用 SevenRooms)→ stage=unknown
+     → final-outcome 返 status=error + summary "Stalled at listing"
+     → recovery.ts shouldTryProviderFallback (US-W5-001) 命中 whitelist
+     → Phase 3 触发 → Resy fallback → 找到 Carbone 的 Resy 入口(如有)
+     → status=paused_payment + handoffUrl 落到 Carbone Resy 页
+   两个 W5 修复(NLU + recovery)联动闭环。
+
+4. 6 commits 推上 master
+   1a8c6a6 feat(nlu): RestaurantFields.restaurant_name + HotelFields.hotel_name
+   d6c2cf2 feat(nlu): extractor captures restaurant_name + hotel_name
+   f18718d feat(nlu): router emits directBooking flag when venue is named
+   836c846 feat(chat): direct_booking branch — skip recommendations
+   d90c844 test(nlu): 6 golden cases for direct-booking router branch
+   (本 commit) docs: v0.2.39.0 release notes
+
+5. 没做的(刻意推迟)
+   - flight scenario 加 flight_number 字段:用户说"book UA123" 太罕见,
+     等真有需求再加
+   - Decision Room 流程的 venue-pinned 行为:Stage 2 trip room 决定后
+     可能要 review,但目前 Decision Room 创建后 co-deciders 还是看到
+     推荐
+   - Marea 等"OpenTable 不收录但用户搜不到"的处理:这个跟 US-W5 NLU
+     fix 无关,属于推荐管线/Google Places 信号补全问题
+   - Bug B(website handoff URL 跳到主页死循环):用户原 ask 的 #3,
+     待 Carbone 真测后再决定 priority
+
+6. 战略意义
+   v0.2.38(W5 #1)修了引擎层"venue 不在 primary provider 时不 fallback"
+   bug。但发现有用户的 Carbone 根本进不到引擎层 —— NLU 已经把店名丢
+   了。v0.2.39(W5 #2)修这个 NLU 数据流,把"用户说什么"忠实送到执行层。
+   两层 fix 加起来,从 chat 输入到 booking-job 创建之间不再有 entity
+   leak。下次跑 Carbone 应该能看到 W5-001 的白名单 fallback 真触发。
 
 ================================================================
 Recent Updates - 2026-04-24 (cont. 8) · Week 5 #1 · 修引擎边界:Phase 3 trigger
@@ -2001,6 +2130,20 @@ Cron：4 个定时任务（反馈提示 / 价格检查 / 场馆质量 / 笔记�
 ================================================================
 九、版本历史摘要
 ================================================================
+
+v0.2.39.0（2026-04-24）— **Week 5 #2 · NLU 直订:"Book Carbone" 真去 booking**
+  · 真实 bug:用户说 "Book Carbone..." NLU v2 RestaurantFields schema 没
+    restaurant_name 字段,"Carbone"被默默丢,/api/chat/commit 返 plan
+    handoff → /api/chat 推 5 家通用 Italian → 用户点 Marea → Marea
+    booking 失败浏览器停在主页章鱼 logo
+  · 修 5 个文件 5 commits 端到端:RestaurantFields/HotelFields 加 *_name 字段
+    + extractor 加 3 worked examples + router emit directBooking flag +
+    chat/commit kind="direct_booking" 分支 + 前端 handleDirectBooking
+    POST 直接到 booking-jobs(跳过 47s 推荐)
+  · 6 新 golden tests(R6-R9 + H_DB1-2),88/88 NLU 测试全绿,零回归
+  · 联动 v0.2.38 W5 #1:Carbone 进入 OpenTable 后会触发 stage=unknown
+    → recovery shouldTryProviderFallback whitelist 命中 → Phase 3
+    Resy fallback 真跑
 
 v0.2.38.0（2026-04-24）— **Week 5 #1 · 修 Phase 3 trigger 引擎边界**
   · 真实 bug:Carbone / Le Bernardin / Osteria La Baia / Ci Siamo 这类
