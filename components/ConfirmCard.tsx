@@ -44,8 +44,11 @@ export interface CommitResponse {
   ok: boolean;
   /** "trip_clarify" surfaced only when the backend defensively rejects an
    *  incomplete trip commit; the chat handler treats it as a missing-field
-   *  error and nudges the user back into the conversation. */
-  kind: ConfirmCardKind | "trip_clarify";
+   *  error and nudges the user back into the conversation.
+   *  "direct_booking" surfaced when the user named one specific venue (US-W5);
+   *  the chat handler skips the recommendation render and POSTs the
+   *  embedded `booking_step` to /api/booking-jobs immediately. */
+  kind: ConfirmCardKind | "trip_clarify" | "direct_booking";
   id?: string;
   short_code?: string | null;
   url?: string;
@@ -64,6 +67,16 @@ export interface CommitResponse {
   missing_fields?: string[];
   message?: string;
   error?: string;
+  // US-W5 direct-booking fields (kind="direct_booking"):
+  venue_name?: string;
+  booking_step?: {
+    type: "restaurant" | "hotel";
+    emoji: string;
+    label: string;
+    apiEndpoint: "/api/booking-jobs/start";
+    body: Record<string, unknown>;
+    status: "pending";
+  };
 }
 
 const CARD_STYLE: React.CSSProperties = {

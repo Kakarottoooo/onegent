@@ -983,7 +983,7 @@ export default function Home() {
     void sendCurrentInput();
   }
 
-  function handleConfirmCommitted(payload: CommitResponse) {
+  async function handleConfirmCommitted(payload: CommitResponse) {
     setPendingConfirm(null);
     // Room created or plan dispatched — current NLU thread is finished; clear
     // the history so the next utterance starts a fresh conversation.
@@ -1038,6 +1038,87 @@ export default function Home() {
         learnFromSearch(query);
         chat.sendMessage(query, undefined, { skipUserPush: true });
       }
+    }
+    if (payload.kind === "direct_booking") {
+      await handleDirectBooking(payload);
+    }
+  }
+
+  // US-W5: direct-booking shortcut. The user named one specific venue
+  // ("Book Carbone..."); the commit route returned a pre-built BookingJobStep
+  // pointing at that venue. Skip the recommendation pipeline and post
+  // straight to /api/booking-jobs the same way RecommendationCard.handleReserve
+  // does for clicked recommendations.
+  async function handleDirectBooking(payload: CommitResponse) {
+    if (!payload.booking_step || !payload.venue_name) return;
+
+    chat.injectAssistantMessage(
+      `Booking ${payload.venue_name}…`
+    );
+
+    try {
+      const profileRes = await fetch("/api/user/booking-profiles?default=true");
+      const { profile } = (await profileRes.json().catch(() => ({}))) as {
+        profile?: {
+          id: number;
+          first_name: string;
+          last_name: string;
+          email: string;
+          phone: string;
+        };
+      };
+      if (!profile) {
+        chat.injectAssistantMessage(
+          `I need your contact info to book — add a booking profile in Settings, then try again.`
+        );
+        return;
+      }
+
+      const sessionId =
+        localStorage.getItem("session_id") ?? crypto.randomUUID();
+      if (!localStorage.getItem("session_id")) {
+        localStorage.setItem("session_id", sessionId);
+      }
+      localStorage.setItem("active_profile_id", String(profile.id));
+
+      const step = {
+        ...payload.booking_step,
+        body: {
+          ...payload.booking_step.body,
+          profileId: profile.id,
+          profile: {
+            first_name: profile.first_name,
+            last_name: profile.last_name,
+            email: profile.email,
+            phone: profile.phone,
+          },
+        },
+      };
+
+      const createRes = await fetch("/api/booking-jobs", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          session_id: sessionId,
+          trip_label: payload.venue_name,
+          steps: [step],
+        }),
+      });
+      if (!createRes.ok) {
+        chat.injectAssistantMessage(
+          `Couldn't start the booking job — please try the Reserve button on a recommendation card instead.`
+        );
+        return;
+      }
+      const { jobId } = (await createRes.json()) as { jobId: string };
+      void fetch(`/api/booking-jobs/${jobId}/start`, { method: "POST" }).catch(
+        () => {}
+      );
+      router.push("/tasks");
+    } catch {
+      chat.injectAssistantMessage(
+        `Network hiccup while starting the booking. Try again in a moment.`
+      );
     }
   }
 

@@ -726,6 +726,28 @@ export async function POST(req: NextRequest) {
         { status: 400 }
       );
     }
+
+    // ── US-W5: direct-booking shortcut ──────────────────────────────────
+    // When NLU set direct_booking=true, the user named one specific venue
+    // (restaurant_name / hotel_name in collected_constraints). Skip the LLM
+    // recommendation pass entirely — emit a kind="direct_booking" payload
+    // that the client uses to POST /api/booking-jobs straight away with a
+    // step pointing at that exact venue.
+    //
+    // Decision Rooms (intent==="create_room") deliberately do NOT take this
+    // shortcut even when the creator names a venue — co-deciders need to
+    // see/vote on the option, so we keep the recommendation path for them.
+    const directBookingFlag =
+      typeof (nluRaw as { direct_booking?: boolean }).direct_booking === "boolean"
+        ? Boolean((nluRaw as { direct_booking?: boolean }).direct_booking)
+        : false;
+    if (directBookingFlag) {
+      const directPayload = buildDirectBookingPayload(scenario, constraints);
+      if (directPayload) return NextResponse.json(directPayload);
+      // Fall through if we couldn't build the step (e.g. flag set but no
+      // restaurant_name in constraints — defensive guard, shouldn't happen).
+    }
+
     // Hand off to the existing chat pipeline — the client will call /api/chat
     // with this query and constraints and let runAgent persist the plan.
     return NextResponse.json({
@@ -738,6 +760,92 @@ export async function POST(req: NextRequest) {
   }
 
   return NextResponse.json({ error: "unhandled intent" }, { status: 400 });
+}
+
+// ── US-W5: direct-booking payload builder ────────────────────────────────
+// Mirrors the BookingJobStep shape that RecommendationCard.handleReserve
+// posts to /api/booking-jobs. The client fills in profileId + profile from
+// /api/user/booking-profiles?default=true before posting (we don't have
+// the user's profile here on the server side of /api/chat/commit anyway).
+
+interface DirectBookingPayload {
+  ok: true;
+  kind: "direct_booking";
+  scenario: "restaurant" | "hotel";
+  venue_name: string;
+  booking_step: {
+    type: "restaurant" | "hotel";
+    emoji: string;
+    label: string;
+    apiEndpoint: "/api/booking-jobs/start";
+    body: Record<string, unknown>;
+    status: "pending";
+  };
+}
+
+function buildDirectBookingPayload(
+  scenario: ConversationalScenario,
+  constraints: Record<string, unknown>,
+): DirectBookingPayload | null {
+  if (scenario === "restaurant") {
+    const name = readString(constraints, "restaurant_name");
+    if (!name) return null;
+    const city = readString(constraints, "city") ?? "";
+    const date = readString(constraints, "date");
+    const time = readString(constraints, "time");
+    const covers = readNumber(constraints, "party_size", "covers", "guests") ?? 2;
+    const body: Record<string, unknown> = {
+      restaurantName: name,
+      city,
+      covers,
+    };
+    if (date) body.date = date;
+    if (time) body.time = time;
+    return {
+      ok: true,
+      kind: "direct_booking",
+      scenario: "restaurant",
+      venue_name: name,
+      booking_step: {
+        type: "restaurant",
+        emoji: "\u{1F37D}️",
+        label: name,
+        apiEndpoint: "/api/booking-jobs/start",
+        body,
+        status: "pending",
+      },
+    };
+  }
+  if (scenario === "hotel") {
+    const name = readString(constraints, "hotel_name");
+    if (!name) return null;
+    const city = readString(constraints, "city") ?? "";
+    const checkIn = readString(constraints, "check_in", "date");
+    const checkOut = readString(constraints, "check_out", "date_to");
+    const guests = readNumber(constraints, "guests", "party_size") ?? 2;
+    const body: Record<string, unknown> = {
+      hotelName: name,
+      city,
+      guests,
+    };
+    if (checkIn) body.checkIn = checkIn;
+    if (checkOut) body.checkOut = checkOut;
+    return {
+      ok: true,
+      kind: "direct_booking",
+      scenario: "hotel",
+      venue_name: name,
+      booking_step: {
+        type: "hotel",
+        emoji: "\u{1F3E8}",
+        label: name,
+        apiEndpoint: "/api/booking-jobs/start",
+        body,
+        status: "pending",
+      },
+    };
+  }
+  return null;
 }
 
 /**
