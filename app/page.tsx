@@ -187,6 +187,20 @@ export default function Home() {
       // from DB. Relying on in-memory messages surviving upgrade was fragile
       // (Strict Mode, React render timing, etc.) — DB is the source of truth.
       chat.clearChat();
+      // CRITICAL: also evict the prev thread from the replayed-set guards.
+      // Without this, switching A → B → A leaves A's chat blank — the replay
+      // effect sees has(A)===true and skips the re-fetch even though we just
+      // cleared the in-memory messages. Encoded prev as "room:X" / "session:X"
+      // above; parse it back.
+      if (prev.startsWith("session:")) {
+        replayedSessionIds.current.delete(prev.slice("session:".length));
+      } else if (prev.startsWith("room:")) {
+        replayedRoomIds.current.delete(prev.slice("room:".length));
+      }
+      // Wipe NLU memory too — the prev thread's IntentState/history would
+      // otherwise leak into the next thread's first parse call.
+      nluHistoryRef.current = [];
+      lastNluStateRef.current = null;
     }
     lastContextRef.current = ctx;
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -256,12 +270,12 @@ export default function Home() {
   useEffect(() => {
     if (activeRoomId) return; // room context wins
     if (!activeSessionId) return;
+    // The session-creation path (homepage parse → server echoes new id) seeds
+    // replayedSessionIds eagerly so this effect skips. Anything else that
+    // lands in this effect (sidebar switch back to A, refresh, deep-link)
+    // wants a fresh fetch — we no longer guard on chat.messages.length, that
+    // check used the stale closure value and silently dropped real switches.
     if (replayedSessionIds.current.has(activeSessionId)) return;
-    if (chat.messages.length > 0) {
-      replayedSessionIds.current.add(activeSessionId);
-      console.log(`[session-replay] skipped ${activeSessionId} — chat already has ${chat.messages.length} msgs`);
-      return;
-    }
     let cancelled = false;
     (async () => {
       try {
