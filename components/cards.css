@@ -1,0 +1,259 @@
+/*
+ * Customer-end recommendation card styles.
+ *
+ * Refactored from inline style={{...}} blocks in RecommendationCard.tsx
+ * (Phase 0 of the customer-end visual upgrade — Phase A + Phase C lite).
+ *
+ * Scope today: outer card chrome + photo area + rank/title header + the
+ * "Why it fits" / "Watch out" / "Real reviews say" colored tab strips.
+ * Inner booking flow, review quote rendering, and date picker still use
+ * inline style for now — they'll move in batch 2 once we agree on the
+ * direction.
+ *
+ * Design intent (Linear Project Card / Apple Notes Inbox tile):
+ *   - Tighter shadow language (warm-tinted, layered, not pure black)
+ *   - Hover lift + soft glow, not just opacity dim
+ *   - Gold accent reserved for rank badge + key dividers (used to be
+ *     sprinkled everywhere — now precise)
+ *   - Border becomes a hairline that subtly tints gold on hover
+ *   - 18px → 19px name w/ tighter tracking; price/cuisine eyebrow uppercase
+ */
+
+/* ─── Outer card ────────────────────────────────────────────────────────── */
+.rec-card {
+  background-color: var(--card);
+  border-radius: var(--radius-lg);
+  border: 1px solid var(--border);
+  overflow: hidden;
+  box-shadow: var(--shadow-1);
+  transition:
+    transform var(--motion-base) var(--ease-out-expo),
+    box-shadow var(--motion-base) var(--ease-out-expo),
+    border-color var(--motion-base) var(--ease-out-expo);
+  position: relative;
+}
+
+.rec-card:hover {
+  transform: translateY(-2px);
+  box-shadow: var(--shadow-hover);
+  border-color: rgba(201, 168, 76, 0.45);
+}
+
+/* Subtle inner highlight on the top edge — feels glassier than a flat fill */
+.rec-card::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 1px;
+  background: linear-gradient(
+    90deg,
+    transparent 0%,
+    rgba(255, 255, 255, 0.5) 50%,
+    transparent 100%
+  );
+  pointer-events: none;
+  z-index: 1;
+}
+
+/* ─── Body ──────────────────────────────────────────────────────────────── */
+.rec-card__body {
+  padding: var(--space-5);
+}
+
+/* ─── Header (rank · name · rating · favorite) ──────────────────────────── */
+.rec-card__header {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-3);
+  margin-bottom: var(--space-2);
+}
+
+.rec-card__rank {
+  flex-shrink: 0;
+  width: 28px;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--radius-pill);
+  background: linear-gradient(
+    180deg,
+    var(--ink-8) 0%,
+    var(--ink-9) 100%
+  );
+  color: var(--bg);
+  font-family: var(--font-dm-sans);
+  font-size: var(--text-sm);
+  font-weight: 600;
+  letter-spacing: var(--tracking-tight);
+  margin-top: 2px;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.08),
+    0 2px 4px rgba(74, 63, 47, 0.18);
+}
+
+.rec-card__title-wrap {
+  flex: 1;
+  min-width: 0;
+}
+
+.rec-card__name {
+  font-family: var(--font-playfair);
+  font-size: 19px;
+  font-weight: 600;
+  color: var(--ink-8);
+  line-height: var(--lh-tight);
+  letter-spacing: var(--tracking-tight);
+}
+
+.rec-card__rating {
+  font-family: var(--font-dm-sans);
+  font-size: var(--text-sm);
+  font-weight: 600;
+  color: var(--gold);
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.rec-card__favorite-btn {
+  font-size: 18px;
+  line-height: 1;
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 2px;
+  border-radius: var(--radius-sm);
+  transition:
+    transform var(--motion-fast) var(--ease-out-expo),
+    background-color var(--motion-fast) var(--ease-out-expo);
+}
+
+.rec-card__favorite-btn:hover {
+  transform: scale(1.12);
+  background-color: var(--card-2);
+}
+
+.rec-card__favorite-btn:active {
+  transform: scale(0.94);
+}
+
+/* ─── Cuisine + price (eyebrow row) ─────────────────────────────────────── */
+.rec-card__meta {
+  font-family: var(--font-dm-sans);
+  font-size: var(--text-sm);
+  color: var(--ink-6);
+  margin-bottom: var(--space-1);
+  letter-spacing: var(--tracking-tight);
+}
+
+.rec-card__address-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin-bottom: var(--space-3);
+}
+
+.rec-card__address {
+  font-family: var(--font-dm-sans);
+  font-size: var(--text-xs);
+  color: var(--ink-5);
+  line-height: var(--lh-snug);
+}
+
+.rec-card__distance {
+  flex-shrink: 0;
+  font-family: var(--font-dm-sans);
+  font-size: 11px;
+  color: var(--ink-6);
+  background-color: var(--card-2);
+  border: 1px solid var(--ink-3);
+  border-radius: var(--radius-pill);
+  padding: 2px var(--space-2);
+  white-space: nowrap;
+  letter-spacing: var(--tracking-tight);
+}
+
+/* ─── Gold divider (between metadata and "Why fits") ───────────────────── */
+.rec-card__divider {
+  width: 36px;
+  height: 2px;
+  background: linear-gradient(90deg, var(--gold) 0%, var(--amber) 100%);
+  border-radius: var(--radius-pill);
+  margin-bottom: var(--space-3);
+  opacity: 0.85;
+}
+
+/* ─── Description ───────────────────────────────────────────────────────── */
+.rec-card__description {
+  font-family: var(--font-dm-sans);
+  font-size: var(--text-sm);
+  color: var(--ink-6);
+  font-style: italic;
+  line-height: var(--lh-normal);
+  margin-bottom: var(--space-3);
+}
+
+/* ─── Tab strips (Why fits / Watch out / Real reviews) ─────────────────── */
+.rec-card__tab {
+  border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+  padding: var(--space-3) var(--space-3);
+  margin-bottom: var(--space-2);
+  border-left: 3px solid;
+}
+
+.rec-card__tab--why {
+  background-color: var(--why-bg);
+  border-left-color: var(--gold);
+}
+
+.rec-card__tab--watchout {
+  background-color: var(--watchout-bg);
+  border-left-color: var(--amber);
+}
+
+.rec-card__tab--reviews {
+  background-color: var(--card-2);
+  border-left-color: var(--ink-5);
+}
+
+.rec-card__tab-label {
+  font-family: var(--font-dm-sans);
+  font-size: var(--text-xs);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: var(--tracking-eyebrow);
+  margin-bottom: 4px;
+}
+
+.rec-card__tab--why .rec-card__tab-label {
+  color: var(--why-label);
+}
+
+.rec-card__tab--watchout .rec-card__tab-label {
+  color: var(--watchout-label);
+}
+
+.rec-card__tab--reviews .rec-card__tab-label {
+  color: var(--ink-6);
+}
+
+.rec-card__tab-text {
+  font-family: var(--font-dm-sans);
+  font-size: var(--text-sm);
+  line-height: var(--lh-normal);
+}
+
+.rec-card__tab--why .rec-card__tab-text {
+  color: var(--why-text);
+}
+
+.rec-card__tab--watchout .rec-card__tab-text {
+  color: var(--watchout-text);
+}
+
+.rec-card__tab--reviews .rec-card__tab-text {
+  color: var(--ink-6);
+}

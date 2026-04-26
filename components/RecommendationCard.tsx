@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { RecommendationCard as CardType, FeedbackRecord } from "@/lib/types";
 import PhotoCarousel from "@/components/PhotoCarousel";
 import { getBrowserModelForStagehand } from "@/lib/agent-model-config";
+import "./cards.css";
 
 interface Props {
   card: CardType;
@@ -288,14 +289,7 @@ export default function RecommendationCard({
         <a href="/account?tab=profiles" style={{ color: "var(--gold)", fontWeight: 600 }}>Set up your profile →</a>
       </div>
     )}
-    <div
-      className="animate-fadeIn overflow-hidden"
-      style={{
-        backgroundColor: "var(--card)",
-        borderRadius: "16px",
-        border: "0.5px solid var(--border)",
-      }}
-    >
+    <div className="rec-card animate-fadeIn">
       {/* Photo carousel */}
       <PhotoCarousel
         images={
@@ -310,63 +304,22 @@ export default function RecommendationCard({
         emptyEmoji="🍽️"
       />
 
-      <div style={{ padding: "16px" }}>
+      <div className="rec-card__body">
         {/* Card Header */}
-        <div className="flex items-start gap-3 mb-2">
-          <div
-            className="flex-shrink-0 flex items-center justify-center"
-            style={{
-              width: "26px",
-              height: "26px",
-              borderRadius: "50%",
-              backgroundColor: "var(--text-primary)",
-              color: "var(--bg)",
-              fontFamily: "var(--font-dm-sans)",
-              fontSize: "12px",
-              fontWeight: 600,
-              marginTop: "2px",
-            }}
-          >
-            {index + 1}
-          </div>
+        <div className="rec-card__header">
+          <div className="rec-card__rank">{index + 1}</div>
 
-          <div className="flex-1 min-w-0">
-            <h3
-              style={{
-                fontFamily: "var(--font-playfair)",
-                fontSize: "18px",
-                fontWeight: 600,
-                color: "var(--text-primary)",
-                lineHeight: 1.2,
-              }}
-            >
-              {r.name}
-            </h3>
+          <div className="rec-card__title-wrap">
+            <h3 className="rec-card__name">{r.name}</h3>
           </div>
 
           <div className="flex items-center gap-2 flex-shrink-0">
-            <span
-              style={{
-                fontFamily: "var(--font-dm-sans)",
-                fontSize: "13px",
-                fontWeight: 600,
-                color: "var(--gold)",
-              }}
-            >
-              ★ {r.rating}
-            </span>
+            <span className="rec-card__rating">★ {r.rating}</span>
             {onToggleFavorite && (
               <button
                 onClick={onToggleFavorite}
                 aria-label={isFavorite ? "Remove from favorites" : "Save to favorites"}
-                className="transition-transform hover:scale-110 active:scale-95"
-                style={{
-                  fontSize: "16px",
-                  lineHeight: 1,
-                  background: "none",
-                  border: "none",
-                  cursor: "pointer",
-                }}
+                className="rec-card__favorite-btn"
               >
                 {isFavorite ? "❤️" : "🤍"}
               </button>
@@ -375,142 +328,39 @@ export default function RecommendationCard({
         </div>
 
         {/* Cuisine + price */}
-        <p
-          style={{
-            fontFamily: "var(--font-dm-sans)",
-            fontSize: "13px",
-            color: "var(--text-secondary)",
-            marginBottom: "4px",
-          }}
-        >
+        <p className="rec-card__meta">
           {r.cuisine} &middot; {r.price}
         </p>
 
         {/* Address + distance */}
-        <div
-          className="flex items-center gap-2"
-          style={{ marginBottom: "12px" }}
-        >
-          <p
-            className="truncate"
-            style={{
-              fontFamily: "var(--font-dm-sans)",
-              fontSize: "12px",
-              color: "var(--text-muted)",
-            }}
-          >
-            {r.address}
-          </p>
+        <div className="rec-card__address-row">
+          <p className="rec-card__address truncate">{r.address}</p>
           {r.distance !== undefined && nearLocationLabel && (
-            <span
-              className="flex-shrink-0"
-              style={{
-                fontFamily: "var(--font-dm-sans)",
-                fontSize: "11px",
-                color: "var(--text-secondary)",
-                backgroundColor: "var(--card-2)",
-                border: "0.5px solid var(--border)",
-                borderRadius: "10px",
-                padding: "2px 8px",
-                whiteSpace: "nowrap",
-              }}
-            >
+            <span className="rec-card__distance">
               {(r.distance * 0.000621371).toFixed(1)} mi from {nearLocationLabel}
             </span>
           )}
         </div>
 
         {/* Gold divider */}
-        <div
-          style={{
-            width: "32px",
-            height: "2px",
-            backgroundColor: "var(--gold)",
-            marginBottom: "12px",
-          }}
-        />
+        <div className="rec-card__divider" />
 
         {/* Description */}
         {r.description && (
-          <p
-            style={{
-              fontFamily: "var(--font-dm-sans)",
-              fontSize: "13px",
-              color: "var(--text-secondary)",
-              fontStyle: "italic",
-              lineHeight: 1.5,
-              marginBottom: "12px",
-            }}
-          >
-            {r.description}
-          </p>
+          <p className="rec-card__description">{r.description}</p>
         )}
 
         {/* Why it fits */}
-        <div
-          style={{
-            backgroundColor: "var(--why-bg)",
-            borderLeft: "3px solid var(--gold)",
-            borderRadius: "0 8px 8px 0",
-            padding: "10px 12px",
-            marginBottom: "10px",
-          }}
-        >
-          <p
-            style={{
-              fontFamily: "var(--font-dm-sans)",
-              fontSize: "12px",
-              fontWeight: 500,
-              color: "var(--why-label)",
-              marginBottom: "4px",
-            }}
-          >
-            Why it fits
-          </p>
-          <p
-            style={{
-              fontFamily: "var(--font-dm-sans)",
-              fontSize: "13px",
-              color: "var(--why-text)",
-              lineHeight: 1.5,
-            }}
-          >
-            {card.why_recommended}
-          </p>
+        <div className="rec-card__tab rec-card__tab--why">
+          <p className="rec-card__tab-label">Why it fits</p>
+          <p className="rec-card__tab-text">{card.why_recommended}</p>
         </div>
 
         {/* Watch out */}
         {card.watch_out && (
-          <div
-            style={{
-              backgroundColor: "var(--watchout-bg)",
-              borderLeft: "3px solid var(--amber)",
-              borderRadius: "0 8px 8px 0",
-              padding: "10px 12px",
-              marginBottom: "10px",
-            }}
-          >
-            <p
-              style={{
-                fontFamily: "var(--font-dm-sans)",
-                fontSize: "12px",
-                fontWeight: 500,
-                color: "var(--watchout-label)",
-                marginBottom: "4px",
-              }}
-            >
-              Watch out
-            </p>
-            <p
-              style={{
-                fontFamily: "var(--font-dm-sans)",
-                fontSize: "13px",
-                color: "var(--watchout-text)",
-                lineHeight: 1.5,
-              }}
-            >
-              {card.watch_out}
-            </p>
+          <div className="rec-card__tab rec-card__tab--watchout">
+            <p className="rec-card__tab-label">Watch out</p>
+            <p className="rec-card__tab-text">{card.watch_out}</p>
           </div>
         )}
 
