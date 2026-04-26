@@ -13,6 +13,28 @@ Always respond in Chinese. Never respond in Korean.
 
 ---
 
+## Booking-autopilot 双份代码规则（DELETE_BY: 2026-05-26）
+
+`lib/booking-autopilot/` 和 `worker/src/booking-autopilot/` 现在是**故意复制的两份**（Worker D1 把 lib 整个 fork 到了 worker/src）。Vercel 老路径用 lib，Railway worker 用 worker/src。两边对哪些 scenario 谁跑由 Vercel 的 `USE_WORKER_FOR` env var 决定。
+
+### 改动规矩
+
+| 改动类型 | 改哪边 |
+|---|---|
+| 新增 provider / 新功能 | **只动 `worker/src/booking-autopilot/`**（lib 冻结） |
+| Bug fix（USE_WORKER_FOR 覆盖的 scenario，比如 restaurant） | 只改 `worker/src/booking-autopilot/` |
+| Bug fix（USE_WORKER_FOR 没覆盖的 scenario，比如 hotel/flight） | 改 `lib/booking-autopilot/`（这些还走 Vercel） |
+| `lib/db.ts` / schema 变化 | **两边都改**（同一个 Neon DB） |
+| `lib/core/` 改动 | 两边都改（worker/src/core 是 lib/core 的 fork） |
+| `lib/encryption.ts` / `lib/autonomy.ts` / `lib/agent/planners/booking-links.ts` 改动 | **两边都改** |
+| NLU / chat / UI / API routes | 只在 root（这些**不在** worker 里） |
+
+### 30 天到期后
+
+2026-05-26 之后，`lib/booking-autopilot/` + `app/api/booking-jobs/[id]/start/route.ts` 的老 in-process 执行段（`runStepWithRecovery` / `runUniversalStep`）+ `vercel.json` 的 retry-jobs cron + `app/api/cron/retry-jobs/route.ts` 一起删，回归单份 worker 代码。
+
+---
+
 ## Dev Server 重启提示规则
 
 每次改完代码后，必须主动判断改动是否需要用户重启 `npm run dev`。**只要需要重启，就必须在回复里明确告诉用户"此改动需要重启 dev server"并说明原因**，不要让用户自己猜。

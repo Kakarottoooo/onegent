@@ -1,5 +1,5 @@
 ================================================================
-Onegent · Travel Execution Layer for AI Agents · v0.2.52.0
+Onegent · Travel Execution Layer for AI Agents · v0.2.53.0
 ================================================================
 
 【一句话定位（2026-04-26 锁定）】
@@ -31,6 +31,124 @@ ChatGPT Apps + 第三方 agent builder via /api/v1）
 活动 / 多人 trip），非旅行品类（笔记本 / 手机 / 耳机 / 信用卡 /
 礼物 / 健身）已归档。详见本文档头部 "Recent Updates - 2026-04-24
 (cont. 2) · Positioning Shift"。
+
+================================================================
+Recent Updates - 2026-04-26 (cont. 4) · Worker → Railway migration (Sprint 1 #1 shipped)
+================================================================
+
+Booking-autopilot 执行层从 Vercel serverless 整体搬到了 Railway 长进程
+容器。这是 Sprint 1 路线图的第一块——拆掉 Vercel 5min 函数硬上限对真
+booking 流程的杀伤，让 worker 可以跑任意时长的 Playwright 任务，并把
+unit economics 从"按 Browserbase 浏览器分钟计费"切换成"按 Railway 容
+器小时计费 + 简单站本地 Chrome 免费"。
+
+【根本动机 — stagehand-executor.ts 实证】
+- Vercel maxDuration=300s < 代码里 BROWSER_TASK_TIMEOUT_MS=420s,
+  浏览器"正常超时"已超 Vercel kill 时间, job 频繁烂尾
+- 强制 Browserbase (line 426-440 hard fail), 按浏览器分钟计费,
+  10k 单/月 ≈ 333 小时浏览器时间, unit economics 跑不通
+- USE_REAL_CHROME_FOR 本地 Chrome 路径 chromium ~200MB 超 Vercel 250MB
+  lambda 上限, Vercel 上根本启动不了
+
+【架构 — 新】
+```
+Vercel (picksy)                       Railway (worker)
+─────────────────                     ──────────────────
+POST /api/booking-jobs/[id]/start  →  while(!shuttingDown) {
+  if step.type ∈ USE_WORKER_FOR        const job = await claimOne()  // FOR UPDATE SKIP LOCKED
+     && body.__source = lib/core         await runJob(job)            // → runExecutionJobWithRecovery
+  → return 202 (status='pending')    } // bounded MAX_CONCURRENT_JOBS=2
+  else: legacy in-process exec       // setInterval 60s: processScheduledRetries
+```
+
+Postgres `booking_jobs` 表当队列, FOR UPDATE SKIP LOCKED 防 double-claim
+across instances. 不引入 Redis / SQS / Inngest 任何额外依赖.
+
+【路线决策 — 都按推荐执行】
+- 灰度策略: binary on/off + per-scenario 分阶 (USE_WORKER_FOR=restaurant
+  先, hotel/flight/activity 等 restaurant 跑稳后扩). 跳过 percentage
+  rollout — 0 真实用户阶段 cargo cult.
+- 状态机: 复用现有 `pending` 不加 `queued` — DHH/Solid Queue 一贯思路,
+  零 schema 改动零 UI 改动, 语义完美对齐.
+- 并发模型: in-process bounded MAX_CONCURRENT_JOBS=2, 不开 multi-instance.
+  patio11 风格 — 早期正确性 > 吞吐.
+- 双份代码: lib/booking-autopilot/ 整个 fork 到 worker/src/, 30 天后
+  (DELETE_BY: 2026-05-26) 删 lib/ 那份回归单源. 期间 USE_WORKER 没
+  覆盖的 scenario 用 lib/, 覆盖的用 worker/src/.
+
+【D1-D5 拆解】
+- D1 (commit 2707299) — 拆 worker/ 骨架 + Dockerfile + 主轮询
+  - worker/ standalone npm 项目 (不进 monorepo workspaces, Docker 干净)
+  - tsconfig paths 把 @/lib/* 重映射到 ./src/*, copy 来的 ~17800 行 lib
+    代码一行不用改
+  - Dockerfile base: mcr.microsoft.com/playwright:v1.58.2-noble
+    (chromium 预装, ~200MB)
+  - 用 tsx 跑 TypeScript 源码 (不预编译), 8 行手写 dotenv-lite 本地
+    .env.local 加载
+  - 验证: npm start 连 Neon, 每 10s "no jobs" 日志
+
+- D2 (commit bdb3f3d) — Vercel 灰度门 + worker claim/run
+  - app/api/booking-jobs/[id]/start/route.ts:1059-1093 加 USE_WORKER_FOR
+    + per-step __source marker 双门控. mismatch 自然 fallthrough 老路径,
+    零回归.
+  - worker/src/index.ts: claimOne() FOR UPDATE SKIP LOCKED + runJob()
+    复刻 route.ts 的 parallel-vs-sequential 切分 + serialized DB writes
+    + bounded concurrency + 10min 单步 hard timeout (Promise.race) +
+    SIGTERM graceful drain (60s)
+  - lib/core/execution/runExecutionJobWithRecovery 直接被 worker 复用,
+    600 行 orchestration 不重写.
+
+- D3 (Railway dashboard 操作) — 部署上线 + smoke test
+  - Railway service 创建, Root Directory=worker, env vars 9 个
+  - 首次 deploy 翻车: service 自动命名 @onegent/mcp-server 触发 Railway
+    的 npm workspace 自动检测, start command 被注入 --workspace= flag,
+    container crash loop. 修法: Settings → Deploy → Custom Start Command
+    显式设 npx tsx src/index.ts.
+  - Browserbase 第一次 retry 撞 402 free plan minutes exhausted. 修法:
+    USE_REAL_CHROME_FOR=opentable,resy,yelp 切本地 chromium (Docker
+    image 自带), 餐厅 scenario 完全免 Browserbase.
+  - smoke test: Carbone NYC OpenTable booking → worker pick up →
+    OpenTable not found → Resy not found → Google Places 找到官网 →
+    handoff URL 到 carbonenewyork.com. 完整 fallback chain ✅
+
+- D4 (commit 24bf415) — Scheduled retry scanner 进 worker
+  - worker/src/index.ts setInterval 60s 扫 retryScheduledFor ≤ now 的
+    step, 重置到 pending, main loop 自然 claim. 不需要 HTTP fire-and-
+    forget (worker 反正在 polling).
+  - Vercel /api/cron/retry-jobs **保留** 30 天 fallback (USE_WORKER_FOR
+    没覆盖的 scenario 还需要它). 两路共存, FOR UPDATE SKIP LOCKED 防
+    double-claim.
+
+- D5 (this section) — release notes + memory + 30 天规则
+  - PROJECT_SUMMARY v0.2.53.0
+  - CLAUDE.md 加 "Booking-autopilot 双份代码规则 (DELETE_BY: 2026-05-26)"
+  - infra_stack memory 更新 worker host = Railway
+
+【经济账】
+- Vercel: $0 (免费 Hobby, picksy 项目不变)
+- Neon: $0 (免费, 同前)
+- Clerk: $0 (Hobby, 同前)
+- Railway: ~$5-10/mo (单 1GB 容器, 24/7)
+- Browserbase: $0 (free 用完, 餐厅 scenario 已切本地 Chrome; 酒店/机票
+  scenario 还在 Vercel 老路径用 Browserbase, 后续灰度时再决定升级 Pro
+  还是接受失败率)
+- 总: ~$5-10/mo, 比之前纯 Vercel + Browserbase free-tier-ceiling 模式
+  既便宜又能跑长时间任务
+
+【未完成 — 留 Sprint 1 后续】
+- USE_WORKER_FOR 扩到 hotel/flight/activity (需要先 Browserbase Pro
+  或者验证这些站本地 Chrome 抗性)
+- Vercel /api/cron/retry-jobs + lib/booking-autopilot/ + start route 老
+  in-process 段 30 天后清理
+- worker healthcheck endpoint (Railway 已直接监控进程, 优先级低)
+- Decision Room v0.5 (Date Night / Weekend Trip 流程) — Lane C 真正的
+  C 端 moat
+
+【阻塞点】
+- Browserbase Pro $99/mo 升级时机 — 需要真有付费用户或者 hotel/flight
+  scenario 真上线时再决定
+- Cofounder / 早期合伙人搜索 — 6 个月独干会燃尽, Lane A+C 双线压力
+- B2B Lane C 验证 — 4 个客户类型 × 5 contacts cold outreach 还没启动
 
 ================================================================
 Recent Updates - 2026-04-26 (cont. 3) · @onegent/mcp-server v0.1.0 published to npm
