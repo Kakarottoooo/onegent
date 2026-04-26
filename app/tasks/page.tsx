@@ -432,124 +432,80 @@ function NeedsHelpCard({ step, onManualLink, jobId, stepIndex, onRefresh }: {
       <div style={{ padding: 0 }}>
 
         {/* Agent question bubble */}
-        <div style={{
-          display: "flex", gap: 10, alignItems: "flex-start", marginBottom: 12,
-        }}>
-          <div style={{
-            width: 28, height: 28, borderRadius: "50%", flexShrink: 0,
-            backgroundColor: "var(--gold, #C9A84C)",
-            display: "flex", alignItems: "center", justifyContent: "center",
-            fontSize: 14,
-          }}>
-            🤖
-          </div>
-          <div style={{
-            flex: 1, backgroundColor: "var(--card, #fff)", borderRadius: "4px 12px 12px 12px",
-            border: "0.5px solid var(--border, #e5e7eb)",
-            padding: "10px 13px",
-            fontFamily: "var(--font-dm-sans)", fontSize: 13,
-            color: "var(--text-primary, #111)", lineHeight: 1.6,
-            minHeight: 40,
-          }}>
-            {questionLoading
-              ? <span style={{ color: "var(--text-muted, #aaa)" }}>Analysing what went wrong…</span>
-              : question}
+        <div className="help-card__bubble-row">
+          <div className="help-card__avatar">🤖</div>
+          <div className={`help-card__bubble${questionLoading ? " help-card__bubble--loading" : ""}`}>
+            {questionLoading ? "Analysing what went wrong…" : question}
           </div>
         </div>
 
-        {/* Agent's follow-up after user answers */}
         {agentReply && (
-          <div style={{
-            display: "flex", gap: 10, alignItems: "flex-start", marginBottom: 12,
-          }}>
-            <div style={{
-              width: 28, height: 28, borderRadius: "50%", flexShrink: 0,
-              backgroundColor: "var(--gold, #C9A84C)",
-              display: "flex", alignItems: "center", justifyContent: "center",
-              fontSize: 14,
-            }}>
-              🤖
-            </div>
-            <div style={{
-              flex: 1, backgroundColor: "var(--card, #fff)", borderRadius: "4px 12px 12px 12px",
-              border: "0.5px solid var(--border, #e5e7eb)",
-              padding: "10px 13px",
-              fontFamily: "var(--font-dm-sans)", fontSize: 13,
-              color: "var(--text-primary, #111)", lineHeight: 1.6,
-            }}>
-              {agentReply}
-            </div>
+          <div className="help-card__bubble-row">
+            <div className="help-card__avatar">🤖</div>
+            <div className="help-card__bubble">{agentReply}</div>
           </div>
         )}
 
-        {/* Retry CTA */}
         {readyToRetry && (
-          <button onClick={handleRetry} disabled={retrying} style={{
-            width: "100%", padding: "11px 0", borderRadius: 12, marginBottom: 10,
-            border: "none",
-            backgroundColor: retrying ? "var(--border, #e5e7eb)" : "var(--gold, #C9A84C)",
-            color: retrying ? "var(--text-muted, #aaa)" : "#fff",
-            fontFamily: "var(--font-dm-sans)", fontSize: 14,
-            fontWeight: 700, cursor: retrying ? "default" : "pointer",
-            transition: "background 0.2s",
-          }}>
+          <button
+            onClick={handleRetry}
+            disabled={retrying}
+            className="retry-sched__primary"
+            style={{ marginBottom: 10 }}
+          >
             {retrying ? "Starting…" : "↺ Retry booking"}
           </button>
         )}
 
-        {/* Answer input — shown until agent has enough to retry */}
         {!staticHelp && !readyToRetry && !questionLoading && (
-          <div style={{
-            display: "flex", gap: 8, alignItems: "flex-end",
-            backgroundColor: "var(--card, #fff)", borderRadius: 14,
-            border: "0.5px solid var(--border, #e5e7eb)",
-            padding: "8px 10px",
-          }}>
+          <div className="help-card__form">
             <textarea
               value={answer}
               onChange={(e) => setAnswer(e.target.value)}
               onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendAnswer(); } }}
               placeholder="Type your answer…"
               rows={1}
-              style={{
-                flex: 1, border: "none", outline: "none", resize: "none",
-                fontFamily: "var(--font-dm-sans)", fontSize: 13,
-                color: "var(--text-primary, #111)", backgroundColor: "transparent",
-                lineHeight: 1.5,
-              }}
+              className="help-card__input"
+              style={{ resize: "none", lineHeight: 1.5 }}
             />
-            <button onClick={sendAnswer} disabled={sendingAnswer || !answer.trim()} style={{
-              flexShrink: 0, width: 32, height: 32, borderRadius: 8, border: "none",
-              backgroundColor: sendingAnswer || !answer.trim() ? "var(--border)" : "var(--gold, #C9A84C)",
-              color: "#fff", cursor: sendingAnswer || !answer.trim() ? "default" : "pointer",
-              fontSize: 15, display: "flex", alignItems: "center", justifyContent: "center",
-              transition: "background 0.2s",
-            }}>
+            <button
+              onClick={sendAnswer}
+              disabled={sendingAnswer || !answer.trim()}
+              className="help-card__send"
+              style={{ width: 36, padding: 0 }}
+            >
               {sendingAnswer ? "…" : "↑"}
             </button>
           </div>
         )}
 
         {staticHelp && step.error && (
-          <p style={{
-            marginTop: 8,
-            fontFamily: "var(--font-dm-sans)",
-            fontSize: 11,
-            color: "var(--text-muted, #aaa)",
-            lineHeight: 1.5,
-          }}>
+          <p
+            style={{
+              marginTop: 8,
+              fontFamily: "var(--font-dm-sans)",
+              fontSize: 11,
+              color: "var(--ink-5)",
+              lineHeight: 1.5,
+            }}
+          >
             {step.error}
           </p>
         )}
 
-        {/* Manual fallback — subtle */}
         {step.actionItem?.options.map((opt, j) => (
-          <button key={j} onClick={() => onManualLink(opt.label, opt.url, j)} style={{
-            width: "100%", marginTop: 8, padding: "6px 12px", borderRadius: 10,
-            border: "0.5px solid var(--border, #e5e7eb)", background: "transparent",
-            color: "var(--text-muted, #aaa)", fontFamily: "var(--font-dm-sans)",
-            fontSize: 11, cursor: "pointer", textAlign: "left",
-          }}>
+          <button
+            key={j}
+            onClick={() => onManualLink(opt.label, opt.url, j)}
+            className="retry-sched__chip"
+            style={{
+              width: "100%",
+              marginTop: 8,
+              textAlign: "left",
+              fontSize: 11,
+              color: "var(--ink-5)",
+            }}
+          >
             ↗ Book manually instead
           </button>
         ))}
@@ -1099,106 +1055,68 @@ function InterventionBanner({ step, jobId, onOpenLive }: { step: BookingJobStep;
       </div>
       {/* Modal */}
       {open && step.handoff_url && (
-        <div style={{
-          position: "fixed", inset: 0, zIndex: 1000,
-          backgroundColor: "rgba(0,0,0,0.55)", backdropFilter: "blur(4px)",
-          display: "flex", alignItems: "center", justifyContent: "center", padding: 20,
-        }} onClick={() => setOpen(false)}>
-          <div style={{
-            backgroundColor: "var(--card, #fff)", borderRadius: 20,
-            padding: "28px 24px", maxWidth: 440, width: "100%",
-            boxShadow: "0 24px 80px rgba(0,0,0,0.18)",
-          }} onClick={(e) => e.stopPropagation()}>
+        <div className="intervention-modal__backdrop" onClick={() => setOpen(false)}>
+          <div className="intervention-modal__content" onClick={(e) => e.stopPropagation()}>
+            <div className="intervention-modal__icon">{emoji}</div>
+            <p className="intervention-modal__title">{title}</p>
+            <p className="intervention-modal__subtitle">{subtitle}</p>
 
-            {/* Icon */}
-            <div style={{ fontSize: 40, textAlign: "center", marginBottom: 16 }}>{emoji}</div>
-
-            {/* Title */}
-            <p style={{
-              fontFamily: "var(--font-playfair, serif)", fontSize: 20, fontWeight: 700,
-              color: "var(--text-primary, #111)", textAlign: "center", marginBottom: 8,
-            }}>
-              {title}
-            </p>
-            <p style={{
-              fontFamily: "var(--font-dm-sans)", fontSize: 13, color: "var(--text-secondary, #666)",
-              textAlign: "center", lineHeight: 1.6, marginBottom: 24,
-            }}>
-              {subtitle}
-            </p>
-
-            {/* What the agent did */}
-            <div style={{
-              backgroundColor: "var(--bg, #fafaf9)", borderRadius: 12,
-              padding: "12px 14px", marginBottom: 20,
-              border: "0.5px solid var(--border, #e5e7eb)",
-            }}>
-              <p style={{ fontFamily: "var(--font-dm-sans)", fontSize: 11, fontWeight: 700, color: "var(--text-muted, #aaa)", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 6 }}>
-                What the agent did
-              </p>
-              <p style={{ fontFamily: "var(--font-dm-sans)", fontSize: 12, color: "var(--text-secondary, #666)", lineHeight: 1.5 }}>
+            <div className="intervention-modal__what">
+              <p className="intervention-modal__what-label">What the agent did</p>
+              <p className="intervention-modal__what-text">
                 {step.decisionLog?.filter(e => e.type === "succeeded").at(-1)?.message
                   ?? "Navigated the booking site and filled in all available details."}
               </p>
             </div>
 
-            {/* CTA — three cases:
-                1. Browserbase cloud session: show direct interactive link (works on mobile)
-                2. Session-bound local URL (basket_id / secure.booking.com): show instructions
-                3. Regular URL: show open link button */}
+            {/* CTA — three cases (cloud session / local browser / generic link). color
+                stays inline because each variant uses its semantic stack. */}
             {hasCloudSession ? (
               <>
-                <a href={step.session_url} target="_blank" rel="noopener noreferrer"
+                <a
+                  href={step.session_url}
+                  target="_blank"
+                  rel="noopener noreferrer"
                   onClick={() => setOpen(false)}
-                  style={{
-                    display: "block", width: "100%", padding: "13px 0", borderRadius: 12,
-                    backgroundColor: color, color: "#fff", textAlign: "center",
-                    fontFamily: "var(--font-dm-sans)", fontSize: 14, fontWeight: 700,
-                    textDecoration: "none", boxSizing: "border-box",
-                  }}>
+                  className="intervention-modal__cta"
+                  style={{ background: color, color: "#fff" }}
+                >
                   💳 Open payment page →
                 </a>
-                <p style={{
-                  fontFamily: "var(--font-dm-sans)", fontSize: 11,
-                  color: "var(--text-muted, #aaa)", textAlign: "center",
-                  marginTop: 8, lineHeight: 1.5,
-                }}>
+                <p className="intervention-modal__caption">
                   Opens in a cloud browser — card details are already filled in.<br />
                   Just enter your CVC and confirm.
                 </p>
               </>
             ) : step.handoff_url && (step.handoff_url.includes("basket_id=") || step.handoff_url.includes("secure.booking.com/book")) ? (
-              <div style={{
-                padding: "12px 14px", borderRadius: 12, border: `1px solid ${color}`,
-                backgroundColor: isPaymentWait ? "rgba(22,163,74,0.06)" : "rgba(220,38,38,0.05)",
-                fontFamily: "var(--font-dm-sans)", fontSize: 13, color: "var(--text-primary, #111)",
-                lineHeight: 1.5, textAlign: "center",
-              }}>
+              <div
+                className="intervention-modal__instructions"
+                style={{
+                  border: `1px solid ${color}`,
+                  background: isPaymentWait ? "rgba(22,163,74,0.06)" : "rgba(220,38,38,0.05)",
+                }}
+              >
                 <span style={{ fontSize: 20 }}>🖥️</span><br />
                 <strong>Use OneAgent live browser or the local browser window</strong><br />
-                <span style={{ fontSize: 12, color: "var(--text-secondary, #666)" }}>
+                <span style={{ fontSize: 12, color: "var(--ink-6)" }}>
                   The booking session is open in the Playwright browser on your screen.<br />
                   Find that window, enter the CVV, and click 完成预订.
                 </span>
               </div>
             ) : (
-              <a href={step.handoff_url ?? "#"} target="_blank" rel="noopener noreferrer"
+              <a
+                href={step.handoff_url ?? "#"}
+                target="_blank"
+                rel="noopener noreferrer"
                 onClick={() => setOpen(false)}
-                style={{
-                  display: "block", width: "100%", padding: "13px 0", borderRadius: 12,
-                  backgroundColor: color, color: "#fff", textAlign: "center",
-                  fontFamily: "var(--font-dm-sans)", fontSize: 14, fontWeight: 700,
-                  textDecoration: "none", boxSizing: "border-box",
-                }}>
+                className="intervention-modal__cta"
+                style={{ background: color, color: "#fff" }}
+              >
                 {isPaymentWait ? "Complete payment →" : "Sign in to continue →"}
               </a>
             )}
 
-            <button onClick={() => setOpen(false)} style={{
-              display: "block", width: "100%", marginTop: 10, padding: "9px 0",
-              background: "none", border: "none", cursor: "pointer",
-              fontFamily: "var(--font-dm-sans)", fontSize: 12, color: "var(--text-muted, #aaa)",
-            }}>
+            <button onClick={() => setOpen(false)} className="intervention-modal__dismiss">
               Dismiss
             </button>
           </div>
