@@ -1,5 +1,5 @@
 ================================================================
-Onegent · AI 决策代理 · 项目总结 · v0.2.41.0
+Onegent · AI 决策代理 · 项目总结 · v0.2.42.0
 ================================================================
 
 【项目定义】
@@ -16,6 +16,142 @@ Onegent · AI 决策代理 · 项目总结 · v0.2.41.0
 活动 / 多人 trip），非旅行品类（笔记本 / 手机 / 耳机 / 信用卡 /
 礼物 / 健身）已归档。详见本文档头部 "Recent Updates - 2026-04-24
 (cont. 2) · Positioning Shift"。
+
+================================================================
+Recent Updates - 2026-04-25 (cont. 12) · Week 6 #2 · activity 接进 lib/core + 删 agent-runtime 死代码
+================================================================
+
+接 W6 #1 之后,把最后一个 scenario(activity)也接进 lib/core,把双轨制
+彻底收掉。同时一次性删了一大块死代码(整个 lib/agent-runtime/ 子树 +
+/api/autopilot/activity/ route)。
+
+1. 现状澄清(我之前误判了)
+   - 用户问:"activity 能不能也走 Stagehand AI?"
+   - 实际 grep 全仓库后发现:**所有真实生产 caller 创建的 activity step
+     都已经走 Stagehand**(apiEndpoint="/api/booking-autopilot/universal"
+     → runUniversalStep → runBrowserTask)
+       · components/ActivityCard.tsx:124(用户首页搜活动直接 Book)
+       · app/api/booking-jobs/create-trip/route.ts:387(trip 选 activity)
+       · app/api/rooms/[id]/execute/route.ts:343(Decision Room 投活动)
+   - 子系统 B(runActivityStep + findActivitySkill + lib/agent-runtime/)
+     是死代码 —— grep 找不到任何 caller 调 runTask / bootstrapRuntime /
+     dateNightScenario.build。lib/agent-runtime/scenarios/date-night.ts
+     只是个 TaskDef builder,但实际的 date_night planner 走的是
+     lib/scenario2.ts(完全独立),不依赖 agent-runtime
+   - 所以 #58 backlog 描述的"1-2 天工作 + 转译 SkillContext" 是高估了 ——
+     SkillContext 没人在生产用,根本不需要转译
+
+2. 方案 Z(选定 + 执行)
+   - X: ActivityBookingParams 加 booking_link?: string + task?: string,
+     buildActivityContext 透传 caller 的 deep link
+   - +: 同时删 lib/agent-runtime/ 整个目录 + /api/autopilot/activity/
+   - Y(以后再补): lib/core 自己接 SeatGeek/Ticketmaster search API
+     让 B 端 caller 不必自己拿 URL —— 等真有用户抱怨再加
+   - Linus 论:"Read the code, find out which paths are dead." 接 lib/core
+     之前先减小 surface area
+   - Patrick Collison 论:"Reduce surface area before adding features."
+
+3. US-W6-005: 删死代码
+   - rm -rf lib/agent-runtime/(8 个文件:index/registry/runner/types +
+     reserve-restaurant/search-hotel/search-flight/find-activity skill +
+     scenarios/date-night)
+   - rm -rf app/api/autopilot/activity/(POST endpoint 没人调)
+   - rmdir app/api/autopilot/(变空)
+   - app/api/booking-jobs/[id]/start/route.ts:
+       · 删 import findActivitySkill / SkillContext
+       · 删 runActivityStep 整个函数(40 行)
+       · 删 isUniversalActivity 检测和分支
+       · 删 skillCtx 构造(policy/autonomy/profile 仍 load 但不再封装成
+         SkillContext)
+       · dispatch 简化:universal/restaurant/hotel/flight/activity 全走
+         runUniversalStep,其他 fallback 走 runStepWithRecovery(legacy)
+
+4. US-W6-006: lib/core executor 加 activity case
+   - lib/core/execution/types.ts: ActivityBookingParams 加
+       · booking_link?: string(SeatGeek/Ticketmaster deep link,REQUIRED
+         today 但 schema 上 optional 留给未来 search 能力)
+       · task?: string(caller 自定义 prompt;不传则 lib/core 用默认
+         "buy tickets, fill guest info, stop before CVV")
+   - lib/core/execution/executor.ts: buildStartUrlAndTask 加 case "activity"
+     → buildActivityContext(params, profile)
+       · 没传 booking_link → throw "booking_link required for activity..."
+         (caller bug,upstream 应该传)
+       · 有传 → 直接 startUrl = booking_link,task 用 caller 的 or 默认
+   - 删除老的 throw "Activity scenario not supported yet"
+
+5. US-W6-007: cend-adapter 加 activity 进 CORE_SUPPORTED_SCENARIOS
+   - 加 "activity" 进数组(现在 4 个:restaurant/hotel/flight/activity)
+   - convertBodyToParams 加 case "activity" → convertActivity(body)
+   - convertActivity:
+       · activity_name → event_name (REQUIRED)
+       · city → city
+       · event_date → event_date
+       · num_tickets → num_tickets
+       · startUrl → booking_link (REQUIRED)
+       · task → task (OPTIONAL,trim 后非空才透传)
+   - 文件头注释更新:不再说"activity 不支持"
+
+6. caller body 标准化(三个 caller 字段对齐)
+   - 之前三个 caller 的 activity step body 字段名不一致:
+       · ActivityCard.tsx 缺 activity_name/city/event_date/num_tickets
+       · rooms-execute.ts 用 eventName/eventDateTime/venueCity/numTickets
+         (camelCase 不一致)+ 缺 task 字段
+   - 改 ActivityCard.tsx:补全 standardized fields(activity_name +
+     activity_id + venue_name + city + event_date + num_tickets + provider)
+   - 改 rooms-execute.ts:rename 字段对齐 + 加 task prompt(之前根本没传
+     task 就直接 runBrowserTask,可能一直依赖默认或漏)
+   - 标准化以后 cend-adapter 不需要写 3 路兼容 dispatch,convertActivity
+     只读一种 body shape
+
+7. 测试 + typecheck
+   - lib/core/__tests__/cend-adapter.test.ts:
+       · CORE_SUPPORTED_SCENARIOS 改成 4 项
+       · isCoreSupported 加 activity → true
+       · 新增 activity 测试组(4 测):
+           - 转换 startUrl→booking_link + 标准字段
+           - 不传 task 时 params 不带 task key(executor 用默认)
+           - 缺 startUrl 抛错
+           - num_tickets 不是 number 抛错
+       · trip-level test 改成 4 scenario 全 marked
+       · 新增 unknown step type 不动测试
+   - npx vitest run lib/core/__tests__ lib/core/execution/__tests__:
+     ✅ 4 files / 63 tests pass(20→24 cend-adapter,40 老测无回归)
+   - npx tsc --noEmit:✅ exit 0(rm -rf .next 后,因为 .next 缓存
+     一直引用已删 route)
+
+8. 影响半径
+   - C 端三个 activity 入口(ActivityCard / create-trip / rooms-execute)
+     的 body 现在 shape 一致,USE_CORE_EXECUTOR_FOR_CEND=true 时全部走
+     lib/core/execution/recovery 管线
+   - 任何引擎层修复(Phase 3 trigger / vendor URL classification /
+     paused_payment 防误报)C 端 activity 自动受益
+   - lib/agent-runtime/ 整个不存在 → 无人 import,代码搜索更干净
+   - /api/autopilot/activity/ route 不存在 → 一个未维护的 endpoint 消失
+
+9. 仍未完成 / 后续(backlog)
+   - Y 方向:lib/core 自己跑 SeatGeek/Ticketmaster search(B 端 caller
+     不必自己拿 URL)。等真有用户提需求再做
+   - #21/22/23 MCP publish + hosted endpoint + OAuth
+   - #53 pre-existing test failures
+   - vitest.config exclude .agents/skills/gstack/**
+   - REAL E2E 浏览器实测一次 activity booking(hotel+flight 同样)
+
+10. 战略意义
+    今天连 W6 #1 + #2 一并交付,意味着:
+    - C 端跟 B 端 REST API 完全共用 lib/core 管线 — restaurant/hotel/
+      flight/activity 四个 scenario 一个不缺
+    - lib/core 是真的 single source of truth,不是"主要场景 + 小漏洞"
+    - lib/agent-runtime/ 这种半成品死代码清掉,reduce surface area,
+      未来读代码不会再被"哦这个 skill 系统是干嘛的"绕进去
+    - 如果以后要加新 scenario(比如 car_rental / experiences),只需
+      lib/core/execution/types.ts + executor.ts + cend-adapter.ts 三处
+      改动,有清晰的 add-pattern
+
+11. 6 commits 今天
+   ef22017 feat(core): cend-adapter supports hotel + flight + per-step dual-gate
+   f0d506f docs: v0.2.41.0
+   (本 commit) feat(core): activity 接 lib/core + 删 agent-runtime 死代码
+   (后续 docs commit) docs: v0.2.42.0
 
 ================================================================
 Recent Updates - 2026-04-25 (cont. 11) · Week 6 #1 · C 端 dogfood 扩面:hotel + flight 接进 lib/core
@@ -218,6 +354,7 @@ bug。然后跑完整 ship-readiness audit:今天 74 commits 推完,需要确认
    v0.2.39.0 — Week 5 #2 NLU 直订
    v0.2.40.0 — Week 5 #3 Bug B + Bug C + ship audit
    v0.2.41.0 — Week 6 #1 C 端 dogfood 扩面 (hotel + flight 接 lib/core)
+   v0.2.42.0 — Week 6 #2 activity 接 lib/core + 删 agent-runtime 死代码
    累计:38 commits,~9000+ 行新代码,3 个 backlog item 入队(#21 npm
    publish / #22 hosted MCP endpoint / #23 OAuth / #53 pre-existing
    tests),26 个 W4-W5 user stories 全部完成。
