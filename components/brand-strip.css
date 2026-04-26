@@ -10,32 +10,29 @@
  */
 
 .brand-strip {
-  /* Fixed so we float over GlobalNav cleanly when shown, with no layout
-     impact. The component is conditionally rendered — when hidden it is
-     not in the DOM at all (BrandStrip.tsx returns null), so no .brand-strip
-     element exists to leave residue. The animation below plays once on
-     mount each time the user summons the strip. */
-  position: fixed;
-  top: 0;
-  left: 0;
-  right: 0;
+  /* Normal flow (position relative). BrandStrip.tsx conditionally mounts,
+     so when shown it takes its 36px of layout space and pushes GlobalNav
+     and the rest of the page down naturally. When hidden it's removed
+     from the DOM and the layout collapses back. This avoids the previous
+     fixed-position approach where the strip overlaid GlobalNav and
+     hid the consumer nav row. */
+  position: relative;
   height: 36px;
   background: #fafaf9;
   border-bottom: 0.5px solid #e7e5e4;
-  /* Above GlobalNav (z-index 100 in the consumer surface) so the slide-in
-     covers it cleanly while the user is interacting with the strip. */
   z-index: 110;
   font-family: var(--font-dm-sans), "DM Sans", system-ui, sans-serif;
-  animation: brand-strip-slide-in 200ms cubic-bezier(0.4, 0, 0.2, 1);
+  /* Mount-time fade — content materializes rather than appearing harshly.
+     Layout shift itself is instant (the 36px space appears at once); the
+     fade softens the chrome's arrival. */
+  animation: brand-strip-fade-in 180ms cubic-bezier(0.4, 0, 0.2, 1);
 }
 
-@keyframes brand-strip-slide-in {
+@keyframes brand-strip-fade-in {
   from {
-    transform: translateY(-100%);
     opacity: 0;
   }
   to {
-    transform: translateY(0);
     opacity: 1;
   }
 }
