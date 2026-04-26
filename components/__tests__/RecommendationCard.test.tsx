@@ -11,6 +11,23 @@ vi.mock("next/image", () => ({
   },
 }));
 
+// useRouter is called in RecommendationCard:78 for the booking handoff
+// (router.push("/tasks") on Reserve). The test environment has no app
+// router context — without this mock, every render throws
+// "invariant expected app router to be mounted".
+vi.mock("next/navigation", () => ({
+  useRouter: () => ({
+    push: vi.fn(),
+    replace: vi.fn(),
+    back: vi.fn(),
+    forward: vi.fn(),
+    refresh: vi.fn(),
+    prefetch: vi.fn(),
+  }),
+  usePathname: () => "/",
+  useSearchParams: () => new URLSearchParams(),
+}));
+
 const baseCard: CardType = {
   rank: 1,
   score: 9.0,
@@ -44,11 +61,13 @@ describe("RecommendationCard", () => {
     expect(screen.getByText("3")).toBeInTheDocument();
   });
 
-  it("renders the SVG placeholder when image_url is undefined", () => {
+  it("renders the emoji placeholder when images and image_url are undefined", () => {
+    // PhotoCarousel's empty state used to render an SVG placeholder; it now
+    // shows the emptyEmoji prop ("🍽️" for restaurant cards) instead.
     const { container } = render(
       <RecommendationCard card={baseCard} index={0} />
     );
-    expect(container.querySelector("svg")).toBeInTheDocument();
+    expect(screen.getByText("🍽️")).toBeInTheDocument();
     expect(container.querySelector("img")).toBeNull();
   });
 

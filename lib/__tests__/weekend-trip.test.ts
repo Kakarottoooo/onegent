@@ -3,19 +3,18 @@ import { detectScenarioFromMessage } from "../scenario2";
 import { runHotelPipeline } from "../agent/pipelines/hotel";
 import type { HotelIntent, Hotel } from "../types";
 
+// hotel.ts switched its ranker from MiniMax to OpenAI gpt-4o-mini (see
+// hotel.ts:65 inline comment). Tests must mock @/lib/openai's openaiChat;
+// the previous MiniMax-via-fetch fixture no longer reaches the ranker.
+const mockOpenaiChat = vi.fn();
+vi.mock("../openai", () => ({
+  openaiChat: (...args: unknown[]) => mockOpenaiChat(...args),
+}));
+
 // ─── Fetch mock helpers ───────────────────────────────────────────────────────
 
 const mockFetch = vi.fn();
 vi.stubGlobal("fetch", mockFetch);
-
-function makeMiniMaxResponse(content: string) {
-  return {
-    ok: true,
-    status: 200,
-    json: async () => ({ choices: [{ message: { content } }] }),
-    text: async () => content,
-  };
-}
 
 function makeSerpHotelResponse(properties: object[]) {
   return {
@@ -49,8 +48,10 @@ function makeSerpHotelProperty(overrides: Record<string, unknown> = {}) {
 
 beforeEach(() => {
   mockFetch.mockReset();
+  mockOpenaiChat.mockReset();
   process.env.MINIMAX_API_KEY = "test-key";
   process.env.SERPAPI_KEY = "test-serpapi-key";
+  process.env.OPENAI_API_KEY = "test-openai-key";
 });
 
 // ─── Case 1: Scenario detection — flight + hotel + restaurant signals ─────────
@@ -139,7 +140,7 @@ describe("Case 3: Hotel pipeline MiniMax fallback", () => {
     priorities: [],
   };
 
-  it("returns fallback cards when MiniMax throws (timeout)", async () => {
+  it("returns fallback cards when the OpenAI ranker throws (timeout)", async () => {
     // SerpAPI returns 3 hotels
     mockFetch.mockResolvedValueOnce(
       makeSerpHotelResponse([
@@ -148,8 +149,8 @@ describe("Case 3: Hotel pipeline MiniMax fallback", () => {
         makeSerpHotelProperty({ name: "Hotel C", overall_rating: 4.0, reviews: 200 }),
       ])
     );
-    // MiniMax throws (simulates timeout)
-    mockFetch.mockRejectedValueOnce(new Error("AbortError: timeout"));
+    // Ranker throws (simulates upstream timeout)
+    mockOpenaiChat.mockRejectedValueOnce(new Error("AbortError: timeout"));
 
     const { hotelRecommendations } = await runHotelPipeline(intent, [], "Los Angeles, CA");
     // Should NOT return empty — fallback builds basic cards
@@ -157,7 +158,7 @@ describe("Case 3: Hotel pipeline MiniMax fallback", () => {
     expect(hotelRecommendations[0].hotel.name).toBeTruthy();
   });
 
-  it("returns AI-ranked cards when MiniMax succeeds", async () => {
+  it("returns AI-ranked cards when the OpenAI ranker succeeds", async () => {
     const properties = [
       makeSerpHotelProperty({ name: "Beverly Hills Hotel", overall_rating: 4.8, reviews: 2000 }),
       makeSerpHotelProperty({ name: "Budget Inn", overall_rating: 3.8, reviews: 100 }),
@@ -185,7 +186,7 @@ describe("Case 3: Hotel pipeline MiniMax fallback", () => {
         suggested_refinements: ["更便宜一点", "带早餐的"],
       },
     ]);
-    mockFetch.mockResolvedValueOnce(makeMiniMaxResponse(aiResponse));
+    mockOpenaiChat.mockResolvedValueOnce(aiResponse);
 
     const { hotelRecommendations } = await runHotelPipeline(intent, [], "Los Angeles, CA");
     expect(hotelRecommendations.length).toBe(1);
@@ -218,7 +219,7 @@ describe("Case 4: Hotel star filter fallback", () => {
         makeSerpHotelProperty({ name: "The Plaza NYC", overall_rating: 4.7, reviews: 5000 }),
       ])
     );
-    // MiniMax for ranking
+    // OpenAI for ranking
     const aiResponse = JSON.stringify([
       {
         rank: 1,
@@ -233,7 +234,7 @@ describe("Case 4: Hotel star filter fallback", () => {
         suggested_refinements: [],
       },
     ]);
-    mockFetch.mockResolvedValueOnce(makeMiniMaxResponse(aiResponse));
+    mockOpenaiChat.mockResolvedValueOnce(aiResponse);
 
     const { hotelRecommendations } = await runHotelPipeline(intent, [], "New York, NY");
     // Two SerpAPI calls should have been made (with filter, then without)
