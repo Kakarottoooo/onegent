@@ -1,26 +1,30 @@
 /*
  * Customer-end recommendation card styles.
  *
- * Refactored from inline style={{...}} blocks in RecommendationCard.tsx
- * (Phase 0 of the customer-end visual upgrade — Phase A + Phase C lite).
+ * Phase 0 batch 1 introduced .rec-card (RecommendationCard / restaurants).
+ * Phase 0 batch 2 (this file) extends the same visual language to
+ * .hotel-card / .flight-card / .activity-card so all four product cards
+ * share one design system instead of looking like four different products.
  *
- * Scope today: outer card chrome + photo area + rank/title header + the
- * "Why it fits" / "Watch out" / "Real reviews say" colored tab strips.
- * Inner booking flow, review quote rendering, and date picker still use
- * inline style for now — they'll move in batch 2 once we agree on the
- * direction.
+ * Shared chrome (outer shell + hover lift + top-edge highlight + rank
+ * badge + gold divider + Why/Watchout tab strips) is declared once via
+ * :where() selector lists. Card-type-specific extras (hotel amenity pills,
+ * flight time rail, activity provider pills, booking site selector)
+ * live in their own sections below.
  *
  * Design intent (Linear Project Card / Apple Notes Inbox tile):
  *   - Tighter shadow language (warm-tinted, layered, not pure black)
- *   - Hover lift + soft glow, not just opacity dim
- *   - Gold accent reserved for rank badge + key dividers (used to be
- *     sprinkled everywhere — now precise)
+ *   - Hover lift + soft glow + gold-tinted border, not just opacity dim
+ *   - Gold accent reserved for rank badge + key dividers + primary CTA
  *   - Border becomes a hairline that subtly tints gold on hover
- *   - 18px → 19px name w/ tighter tracking; price/cuisine eyebrow uppercase
+ *   - Eyebrow labels (uppercase + tracked) for "Why it fits" / metadata
  */
 
-/* ─── Outer card ────────────────────────────────────────────────────────── */
-.rec-card {
+/* ═══════════════════════════════════════════════════════════════════════
+ * SHARED — chrome that applies to every product card type
+ * ═══════════════════════════════════════════════════════════════════════ */
+
+:where(.rec-card, .hotel-card, .flight-card, .activity-card) {
   background-color: var(--card);
   border-radius: var(--radius-lg);
   border: 1px solid var(--border);
@@ -33,14 +37,14 @@
   position: relative;
 }
 
-.rec-card:hover {
+:where(.rec-card, .hotel-card, .flight-card, .activity-card):hover {
   transform: translateY(-2px);
   box-shadow: var(--shadow-hover);
   border-color: rgba(201, 168, 76, 0.45);
 }
 
 /* Subtle inner highlight on the top edge — feels glassier than a flat fill */
-.rec-card::before {
+:where(.rec-card, .hotel-card, .flight-card, .activity-card)::before {
   content: "";
   position: absolute;
   top: 0;
@@ -57,20 +61,36 @@
   z-index: 1;
 }
 
-/* ─── Body ──────────────────────────────────────────────────────────────── */
-.rec-card__body {
+/* ─── Body padding ──────────────────────────────────────────────────────── */
+:where(
+  .rec-card__body,
+  .hotel-card__body,
+  .flight-card__body,
+  .activity-card__body
+) {
   padding: var(--space-5);
 }
 
-/* ─── Header (rank · name · rating · favorite) ──────────────────────────── */
-.rec-card__header {
+/* ─── Header layout ─────────────────────────────────────────────────────── */
+:where(
+  .rec-card__header,
+  .hotel-card__header,
+  .flight-card__header,
+  .activity-card__header
+) {
   display: flex;
   align-items: flex-start;
   gap: var(--space-3);
   margin-bottom: var(--space-2);
 }
 
-.rec-card__rank {
+/* ─── Rank badge (gradient + inset highlight) ──────────────────────────── */
+:where(
+  .rec-card__rank,
+  .hotel-card__rank,
+  .flight-card__rank,
+  .activity-card__rank
+) {
   flex-shrink: 0;
   width: 28px;
   height: 28px;
@@ -94,12 +114,24 @@
     0 2px 4px rgba(74, 63, 47, 0.18);
 }
 
-.rec-card__title-wrap {
+/* ─── Title wrap ────────────────────────────────────────────────────────── */
+:where(
+  .rec-card__title-wrap,
+  .hotel-card__title-wrap,
+  .flight-card__title-wrap,
+  .activity-card__title-wrap
+) {
   flex: 1;
   min-width: 0;
 }
 
-.rec-card__name {
+/* ─── Card name ─────────────────────────────────────────────────────────── */
+:where(
+  .rec-card__name,
+  .hotel-card__name,
+  .flight-card__name,
+  .activity-card__name
+) {
   font-family: var(--font-playfair);
   font-size: 19px;
   font-weight: 600;
@@ -107,6 +139,167 @@
   line-height: var(--lh-tight);
   letter-spacing: var(--tracking-tight);
 }
+
+/* ─── Gold divider (gold→amber gradient pill) ──────────────────────────── */
+:where(
+  .rec-card__divider,
+  .hotel-card__divider,
+  .flight-card__divider,
+  .activity-card__divider
+) {
+  width: 36px;
+  height: 2px;
+  background: linear-gradient(90deg, var(--gold) 0%, var(--amber) 100%);
+  border-radius: var(--radius-pill);
+  margin-bottom: var(--space-3);
+  opacity: 0.85;
+}
+
+/* ─── Tab strips (Why fits / Watch out / Real reviews) ─────────────────── */
+:where(
+  .rec-card__tab,
+  .hotel-card__tab,
+  .flight-card__tab,
+  .activity-card__tab
+) {
+  border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+  padding: var(--space-3) var(--space-3);
+  margin-bottom: var(--space-2);
+  border-left: 3px solid;
+}
+
+:where(
+  .rec-card__tab--why,
+  .hotel-card__tab--why,
+  .flight-card__tab--why,
+  .activity-card__tab--why
+) {
+  background-color: var(--why-bg);
+  border-left-color: var(--gold);
+}
+
+:where(
+  .rec-card__tab--watchout,
+  .hotel-card__tab--watchout,
+  .flight-card__tab--watchout,
+  .activity-card__tab--watchout
+) {
+  background-color: var(--watchout-bg);
+  border-left-color: var(--amber);
+}
+
+:where(
+  .rec-card__tab--reviews,
+  .hotel-card__tab--reviews
+) {
+  background-color: var(--card-2);
+  border-left-color: var(--ink-5);
+}
+
+:where(
+  .rec-card__tab-label,
+  .hotel-card__tab-label,
+  .flight-card__tab-label,
+  .activity-card__tab-label
+) {
+  font-family: var(--font-dm-sans);
+  font-size: var(--text-xs);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: var(--tracking-eyebrow);
+  margin-bottom: 4px;
+}
+
+:where(
+  .rec-card__tab--why,
+  .hotel-card__tab--why,
+  .flight-card__tab--why,
+  .activity-card__tab--why
+)
+  :where(
+    .rec-card__tab-label,
+    .hotel-card__tab-label,
+    .flight-card__tab-label,
+    .activity-card__tab-label
+  ) {
+  color: var(--why-label);
+}
+
+:where(
+  .rec-card__tab--watchout,
+  .hotel-card__tab--watchout,
+  .flight-card__tab--watchout,
+  .activity-card__tab--watchout
+)
+  :where(
+    .rec-card__tab-label,
+    .hotel-card__tab-label,
+    .flight-card__tab-label,
+    .activity-card__tab-label
+  ) {
+  color: var(--watchout-label);
+}
+
+:where(
+  .rec-card__tab--reviews,
+  .hotel-card__tab--reviews
+)
+  :where(.rec-card__tab-label, .hotel-card__tab-label) {
+  color: var(--ink-6);
+}
+
+:where(
+  .rec-card__tab-text,
+  .hotel-card__tab-text,
+  .flight-card__tab-text,
+  .activity-card__tab-text
+) {
+  font-family: var(--font-dm-sans);
+  font-size: var(--text-sm);
+  line-height: var(--lh-normal);
+}
+
+:where(
+  .rec-card__tab--why,
+  .hotel-card__tab--why,
+  .flight-card__tab--why,
+  .activity-card__tab--why
+)
+  :where(
+    .rec-card__tab-text,
+    .hotel-card__tab-text,
+    .flight-card__tab-text,
+    .activity-card__tab-text
+  ) {
+  color: var(--why-text);
+}
+
+:where(
+  .rec-card__tab--watchout,
+  .hotel-card__tab--watchout,
+  .flight-card__tab--watchout,
+  .activity-card__tab--watchout
+)
+  :where(
+    .rec-card__tab-text,
+    .hotel-card__tab-text,
+    .flight-card__tab-text,
+    .activity-card__tab-text
+  ) {
+  color: var(--watchout-text);
+}
+
+:where(
+  .rec-card__tab--reviews,
+  .hotel-card__tab--reviews
+)
+  :where(.rec-card__tab-text, .hotel-card__tab-text) {
+  color: var(--ink-6);
+}
+
+/* ═══════════════════════════════════════════════════════════════════════
+ * REC-CARD specific (RecommendationCard — restaurant)
+ * ═══════════════════════════════════════════════════════════════════════ */
 
 .rec-card__rating {
   font-family: var(--font-dm-sans);
@@ -140,7 +333,6 @@
   transform: scale(0.94);
 }
 
-/* ─── Cuisine + price (eyebrow row) ─────────────────────────────────────── */
 .rec-card__meta {
   font-family: var(--font-dm-sans);
   font-size: var(--text-sm);
@@ -176,17 +368,6 @@
   letter-spacing: var(--tracking-tight);
 }
 
-/* ─── Gold divider (between metadata and "Why fits") ───────────────────── */
-.rec-card__divider {
-  width: 36px;
-  height: 2px;
-  background: linear-gradient(90deg, var(--gold) 0%, var(--amber) 100%);
-  border-radius: var(--radius-pill);
-  margin-bottom: var(--space-3);
-  opacity: 0.85;
-}
-
-/* ─── Description ───────────────────────────────────────────────────────── */
 .rec-card__description {
   font-family: var(--font-dm-sans);
   font-size: var(--text-sm);
@@ -196,64 +377,442 @@
   margin-bottom: var(--space-3);
 }
 
-/* ─── Tab strips (Why fits / Watch out / Real reviews) ─────────────────── */
-.rec-card__tab {
-  border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
-  padding: var(--space-3) var(--space-3);
-  margin-bottom: var(--space-2);
-  border-left: 3px solid;
+/* ═══════════════════════════════════════════════════════════════════════
+ * HOTEL-CARD specific
+ * ═══════════════════════════════════════════════════════════════════════ */
+
+.hotel-card__stars {
+  font-family: var(--font-dm-sans);
+  font-size: var(--text-sm);
+  color: var(--gold);
+  letter-spacing: 1px;
 }
 
-.rec-card__tab--why {
-  background-color: var(--why-bg);
-  border-left-color: var(--gold);
+.hotel-card__rating {
+  font-family: var(--font-dm-sans);
+  font-size: var(--text-sm);
+  color: var(--gold);
+  font-weight: 600;
 }
 
-.rec-card__tab--watchout {
-  background-color: var(--watchout-bg);
-  border-left-color: var(--amber);
+.hotel-card__rating-count {
+  color: var(--ink-5);
+  font-weight: 400;
 }
 
-.rec-card__tab--reviews {
-  background-color: var(--card-2);
-  border-left-color: var(--ink-5);
+.hotel-card__star-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-wrap: wrap;
 }
 
-.rec-card__tab-label {
+.hotel-card__location {
   font-family: var(--font-dm-sans);
   font-size: var(--text-xs);
+  color: var(--ink-5);
+  margin-bottom: var(--space-2);
+  line-height: var(--lh-snug);
+}
+
+.hotel-card__price {
+  font-family: var(--font-dm-sans);
+  font-size: var(--text-md);
+  font-weight: 600;
+  color: var(--ink-8);
+  margin-bottom: var(--space-3);
+  letter-spacing: var(--tracking-tight);
+}
+
+.hotel-card__price-detail {
+  font-size: var(--text-sm);
+  font-weight: 400;
+  color: var(--ink-5);
+}
+
+.hotel-card__skip-note {
+  font-family: var(--font-dm-sans);
+  font-size: var(--text-xs);
+  color: var(--ink-5);
+  margin-bottom: var(--space-3);
+  font-style: italic;
+}
+
+/* Amenity pill row */
+.hotel-card__amenities {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: var(--space-3);
+}
+
+.hotel-card__amenity {
+  font-family: var(--font-dm-sans);
+  font-size: 11px;
+  color: var(--ink-6);
+  border: 1px solid var(--ink-3);
+  border-radius: var(--radius-pill);
+  padding: 2px var(--space-2);
+  letter-spacing: var(--tracking-tight);
+}
+
+/* Site selector tabs (Booking.com / Expedia / Hotels.com) */
+.hotel-card__site-row {
+  display: flex;
+  gap: 6px;
+  margin-bottom: var(--space-3);
+}
+
+.hotel-card__site {
+  flex: 1;
+  padding: var(--space-1) 0;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--ink-3);
+  background-color: transparent;
+  color: var(--ink-5);
+  font-family: var(--font-dm-sans);
+  font-size: 11px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all var(--motion-fast) var(--ease-out-expo);
+  white-space: nowrap;
+}
+
+.hotel-card__site:hover {
+  border-color: var(--ink-4);
+  color: var(--ink-7);
+  background-color: var(--card-2);
+}
+
+.hotel-card__site--active {
+  border-width: 1.5px;
+  font-weight: 600;
+}
+
+/* Footer CTA row */
+.hotel-card__cta-row {
+  border-top: 1px solid var(--ink-2);
+  padding-top: var(--space-3);
+  display: flex;
+  gap: var(--space-2);
+}
+
+.hotel-card__cta-secondary {
+  flex: 1;
+  text-align: center;
+  padding: var(--space-2) 0;
+  border-radius: var(--radius);
+  border: 1px solid var(--ink-3);
+  font-family: var(--font-dm-sans);
+  font-size: var(--text-sm);
+  color: var(--ink-6);
+  text-decoration: none;
+  transition: all var(--motion-fast) var(--ease-out-expo);
+}
+
+.hotel-card__cta-secondary:hover {
+  border-color: var(--gold);
+  color: var(--gold-text);
+  background-color: var(--gold-soft);
+}
+
+.hotel-card__cta-primary {
+  flex: 2;
+  text-align: center;
+  padding: var(--space-2) 0;
+  border-radius: var(--radius);
+  background: linear-gradient(180deg, var(--gold) 0%, var(--gold-strong) 100%);
+  font-family: var(--font-dm-sans);
+  font-size: var(--text-sm);
+  font-weight: 600;
+  color: #fff;
+  border: none;
+  cursor: pointer;
+  letter-spacing: var(--tracking-tight);
+  transition:
+    transform var(--motion-fast) var(--ease-out-expo),
+    box-shadow var(--motion-fast) var(--ease-out-expo);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.18),
+    0 2px 4px rgba(184, 146, 61, 0.2);
+}
+
+.hotel-card__cta-primary:hover:not(:disabled) {
+  transform: translateY(-1px);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.25),
+    0 4px 10px rgba(184, 146, 61, 0.32);
+}
+
+.hotel-card__cta-primary:active:not(:disabled) {
+  transform: translateY(0);
+}
+
+.hotel-card__cta-primary:disabled {
+  background: var(--ink-3);
+  cursor: default;
+  box-shadow: none;
+}
+
+/* ═══════════════════════════════════════════════════════════════════════
+ * FLIGHT-CARD specific
+ * ═══════════════════════════════════════════════════════════════════════ */
+
+/* Airline + flight number subtitle */
+.flight-card__subtitle {
+  font-family: var(--font-dm-sans);
+  font-size: var(--text-xs);
+  color: var(--ink-5);
+  margin-top: 2px;
+  letter-spacing: var(--tracking-tight);
+}
+
+/* Time rail — depart → duration → arrive */
+.flight-card__time-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  margin-bottom: var(--space-3);
+}
+
+.flight-card__time {
+  font-family: var(--font-playfair);
+  font-size: var(--text-xl);
+  font-weight: 600;
+  color: var(--ink-8);
+  line-height: var(--lh-tight);
+  letter-spacing: var(--tracking-tight);
+}
+
+.flight-card__airport {
+  font-family: var(--font-dm-sans);
+  font-size: var(--text-xs);
+  color: var(--ink-5);
+  letter-spacing: var(--tracking-eyebrow);
+  text-transform: uppercase;
+  margin-top: 2px;
+}
+
+.flight-card__duration {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  position: relative;
+}
+
+.flight-card__duration-line {
+  width: 100%;
+  height: 1px;
+  background: linear-gradient(
+    90deg,
+    transparent,
+    var(--ink-3) 20%,
+    var(--ink-3) 80%,
+    transparent
+  );
+  position: relative;
+}
+
+.flight-card__duration-line::before {
+  content: "✈";
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  background: var(--card);
+  padding: 0 var(--space-2);
+  color: var(--gold);
+  font-size: 10px;
+}
+
+.flight-card__duration-text {
+  font-family: var(--font-dm-sans);
+  font-size: 11px;
+  color: var(--ink-5);
+  letter-spacing: var(--tracking-tight);
+}
+
+.flight-card__stops {
+  font-family: var(--font-dm-sans);
+  font-size: 10px;
+  color: var(--ink-4);
+  text-transform: uppercase;
+  letter-spacing: var(--tracking-eyebrow);
+}
+
+.flight-card__price {
+  font-family: var(--font-dm-sans);
+  font-size: var(--text-xl);
+  font-weight: 600;
+  color: var(--ink-8);
+  letter-spacing: var(--tracking-tight);
+}
+
+.flight-card__price-meta {
+  font-family: var(--font-dm-sans);
+  font-size: var(--text-xs);
+  color: var(--ink-5);
+  margin-top: 2px;
+}
+
+/* Baggage / amenity pill row */
+.flight-card__pills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: var(--space-3);
+}
+
+.flight-card__pill {
+  font-family: var(--font-dm-sans);
+  font-size: 11px;
+  color: var(--ink-6);
+  border: 1px solid var(--ink-3);
+  border-radius: var(--radius-pill);
+  padding: 2px var(--space-2);
+  letter-spacing: var(--tracking-tight);
+}
+
+/* Footer CTA — same as hotel */
+.flight-card__cta-row {
+  border-top: 1px solid var(--ink-2);
+  padding-top: var(--space-3);
+  display: flex;
+  gap: var(--space-2);
+}
+
+.flight-card__cta-primary {
+  flex: 1;
+  text-align: center;
+  padding: var(--space-2) 0;
+  border-radius: var(--radius);
+  background: linear-gradient(180deg, var(--gold) 0%, var(--gold-strong) 100%);
+  font-family: var(--font-dm-sans);
+  font-size: var(--text-sm);
+  font-weight: 600;
+  color: #fff;
+  border: none;
+  cursor: pointer;
+  letter-spacing: var(--tracking-tight);
+  transition:
+    transform var(--motion-fast) var(--ease-out-expo),
+    box-shadow var(--motion-fast) var(--ease-out-expo);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.18),
+    0 2px 4px rgba(184, 146, 61, 0.2);
+}
+
+.flight-card__cta-primary:hover:not(:disabled) {
+  transform: translateY(-1px);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.25),
+    0 4px 10px rgba(184, 146, 61, 0.32);
+}
+
+.flight-card__cta-primary:disabled {
+  background: var(--ink-3);
+  cursor: default;
+  box-shadow: none;
+}
+
+/* ═══════════════════════════════════════════════════════════════════════
+ * ACTIVITY-CARD specific
+ * ═══════════════════════════════════════════════════════════════════════ */
+
+.activity-card__group-badge {
+  display: inline-block;
+  font-family: var(--font-dm-sans);
+  font-size: 10px;
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: var(--tracking-eyebrow);
-  margin-bottom: 4px;
+  padding: 3px var(--space-2);
+  border-radius: var(--radius-pill);
+  color: #fff;
 }
 
-.rec-card__tab--why .rec-card__tab-label {
-  color: var(--why-label);
-}
-
-.rec-card__tab--watchout .rec-card__tab-label {
-  color: var(--watchout-label);
-}
-
-.rec-card__tab--reviews .rec-card__tab-label {
-  color: var(--ink-6);
-}
-
-.rec-card__tab-text {
+.activity-card__when {
   font-family: var(--font-dm-sans);
   font-size: var(--text-sm);
+  color: var(--ink-7);
+  margin-bottom: 4px;
+  letter-spacing: var(--tracking-tight);
+  font-weight: 500;
+}
+
+.activity-card__venue {
+  font-family: var(--font-dm-sans);
+  font-size: var(--text-xs);
+  color: var(--ink-5);
+  margin-bottom: var(--space-2);
+}
+
+.activity-card__price {
+  font-family: var(--font-dm-sans);
+  font-size: var(--text-md);
+  font-weight: 600;
+  color: var(--ink-8);
+  margin-bottom: var(--space-3);
+  letter-spacing: var(--tracking-tight);
+}
+
+.activity-card__why {
+  font-family: var(--font-dm-sans);
+  font-size: var(--text-sm);
+  color: var(--ink-7);
   line-height: var(--lh-normal);
+  margin-bottom: var(--space-3);
 }
 
-.rec-card__tab--why .rec-card__tab-text {
-  color: var(--why-text);
+/* Provider buttons (SeatGeek / Ticketmaster) */
+.activity-card__providers {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
 }
 
-.rec-card__tab--watchout .rec-card__tab-text {
-  color: var(--watchout-text);
+.activity-card__provider {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding: var(--space-3);
+  border-radius: var(--radius);
+  border: 1px solid var(--ink-3);
+  background-color: var(--card-2);
+  font-family: var(--font-dm-sans);
+  font-size: var(--text-sm);
+  cursor: pointer;
+  transition: all var(--motion-fast) var(--ease-out-expo);
+  text-align: left;
 }
 
-.rec-card__tab--reviews .rec-card__tab-text {
-  color: var(--ink-6);
+.activity-card__provider:hover:not(:disabled) {
+  border-color: var(--gold);
+  background-color: var(--gold-soft);
+  transform: translateY(-1px);
+  box-shadow: var(--shadow-1);
+}
+
+.activity-card__provider:disabled {
+  cursor: default;
+  opacity: 0.6;
+}
+
+.activity-card__provider-name {
+  font-weight: 600;
+  color: var(--ink-8);
+}
+
+.activity-card__provider-action {
+  font-family: var(--font-dm-sans);
+  font-size: var(--text-xs);
+  font-weight: 600;
+  color: var(--gold);
+  text-transform: uppercase;
+  letter-spacing: var(--tracking-eyebrow);
+  white-space: nowrap;
 }

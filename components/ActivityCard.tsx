@@ -3,6 +3,7 @@
 import { useState } from "react";
 import type { ActivityRecommendationCard, ActivitySource } from "@/lib/types";
 import { getBrowserModelAsLegacy } from "@/lib/agent-model-config";
+import "./cards.css";
 
 const PROVIDER_LABEL: Record<ActivitySource["provider"], string> = {
   seatgeek: "SeatGeek",
@@ -182,15 +183,7 @@ export default function ActivityCard({ card, index, hideBookingActions, onJobCre
 
   return (
     <>
-    <div
-      style={{
-        background: "var(--card)",
-        borderRadius: 16,
-        border: "0.5px solid var(--border)",
-        overflow: "hidden",
-        marginBottom: 12,
-      }}
-    >
+    <div className="activity-card" style={{ marginBottom: 12 }}>
       {activity.image_url ? (
         <div style={{ position: "relative", width: "100%", height: 160, overflow: "hidden" }}>
           {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -204,71 +197,72 @@ export default function ActivityCard({ card, index, hideBookingActions, onJobCre
 
       {/* Header row */}
       <div
+        className="activity-card__header"
         style={{
-          display: "flex",
+          padding: "14px 16px 10px",
+          borderBottom: "1px solid var(--ink-2)",
+          marginBottom: 0,
           alignItems: "center",
           gap: 10,
-          padding: "14px 16px 10px",
-          borderBottom: "0.5px solid var(--border)",
         }}
       >
-        <div
-          style={{
-            width: 26, height: 26, borderRadius: "50%",
-            background: "var(--text-primary)", color: "var(--bg)",
-            display: "flex", alignItems: "center", justifyContent: "center",
-            fontFamily: "var(--font-sans)", fontSize: 12, fontWeight: 600, flexShrink: 0,
-          }}
-        >
-          {index + 1}
-        </div>
+        <div className="activity-card__rank">{index + 1}</div>
 
         <div style={{ fontSize: 22, flexShrink: 0 }} aria-hidden>{emoji}</div>
 
-        <div style={{ flex: 1, minWidth: 0 }}>
-          <div style={{
-            fontFamily: "var(--font-serif)", fontSize: 16, fontWeight: 600,
-            color: "var(--text-primary)", whiteSpace: "nowrap",
-            overflow: "hidden", textOverflow: "ellipsis",
-          }}>
+        <div className="activity-card__title-wrap">
+          <div
+            className="activity-card__name"
+            style={{
+              fontSize: 16,
+              whiteSpace: "nowrap",
+              overflow: "hidden",
+              textOverflow: "ellipsis",
+            }}
+          >
             {activity.title}
           </div>
           {activity.performers && activity.performers.length > 0 && (
-            <div style={{
-              fontFamily: "var(--font-sans)", fontSize: 11,
-              color: "var(--text-secondary)", marginTop: 2,
-              whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
-            }}>
+            <div
+              style={{
+                fontFamily: "var(--font-dm-sans)",
+                fontSize: 11,
+                color: "var(--ink-5)",
+                marginTop: 2,
+                whiteSpace: "nowrap",
+                overflow: "hidden",
+                textOverflow: "ellipsis",
+                letterSpacing: "var(--tracking-tight)",
+              }}
+            >
               {activity.performers.join(" · ")}
             </div>
           )}
         </div>
 
-        <div style={{
-          padding: "3px 9px", borderRadius: 20,
-          border: `1px solid ${GROUP_COLOR[group]}`, color: GROUP_COLOR[group],
-          fontFamily: "var(--font-sans)", fontSize: 11, fontWeight: 600, flexShrink: 0,
-        }}>
+        {/* Group badge color is per-group brand color, kept inline */}
+        <span
+          className="activity-card__group-badge"
+          style={{
+            backgroundColor: GROUP_COLOR[group],
+            color: "#fff",
+            border: "none",
+          }}
+        >
           {GROUP_LABEL[group]}
-        </div>
+        </span>
       </div>
 
       {/* Detail rows */}
       <div style={{ padding: "12px 16px", display: "flex", flexDirection: "column", gap: 6 }}>
         {activity.datetime_display && (
-          <div style={{
-            display: "flex", alignItems: "center", gap: 6,
-            fontFamily: "var(--font-sans)", fontSize: 13, color: "var(--text-primary)",
-          }}>
+          <div className="activity-card__when" style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 0 }}>
             <span style={{ color: "var(--gold)" }} aria-hidden>🗓️</span>
             <span>{activity.datetime_display}</span>
           </div>
         )}
         {venueLine && (
-          <div style={{
-            display: "flex", alignItems: "center", gap: 6,
-            fontFamily: "var(--font-sans)", fontSize: 13, color: "var(--text-secondary)",
-          }}>
+          <div className="activity-card__venue" style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 0 }}>
             <span style={{ color: "var(--gold)" }} aria-hidden>📍</span>
             <span style={{ whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
               {venueLine}
@@ -277,29 +271,48 @@ export default function ActivityCard({ card, index, hideBookingActions, onJobCre
         )}
       </div>
 
-      {/* Why recommended */}
       {why_recommended && (
-        <div style={{
-          margin: "0 16px", padding: "8px 12px",
-          background: "var(--card-2)", borderLeft: "3px solid var(--gold)",
-          borderRadius: "0 6px 6px 0", fontFamily: "var(--font-sans)",
-          fontSize: 12, color: "var(--text-secondary)", lineHeight: 1.5,
-        }}>
-          {why_recommended}
+        <div
+          className="activity-card__tab activity-card__tab--why"
+          style={{ margin: "0 16px var(--space-2)" }}
+        >
+          <p className="activity-card__tab-text">{why_recommended}</p>
         </div>
       )}
 
-      {/* Footer: price + manual link + autopilot book button */}
-      <div style={{
-        display: "flex", alignItems: "center", justifyContent: "space-between",
-        padding: "12px 16px", borderTop: "0.5px solid var(--border)", marginTop: 12,
-        gap: 12, flexWrap: "wrap",
-      }}>
+      {/* Footer: price + provider book buttons */}
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+          padding: "12px 16px",
+          borderTop: "1px solid var(--ink-2)",
+          marginTop: 12,
+          gap: 12,
+          flexWrap: "wrap",
+        }}
+      >
         <div>
-          <span style={{ fontFamily: "var(--font-sans)", fontSize: 22, fontWeight: 700, color: "var(--gold)" }}>
+          <span
+            style={{
+              fontFamily: "var(--font-dm-sans)",
+              fontSize: 22,
+              fontWeight: 700,
+              color: "var(--gold)",
+              letterSpacing: "var(--tracking-tight)",
+            }}
+          >
             {priceLabel}
           </span>
-          <span style={{ fontFamily: "var(--font-sans)", fontSize: 12, color: "var(--text-secondary)", marginLeft: 4 }}>
+          <span
+            style={{
+              fontFamily: "var(--font-dm-sans)",
+              fontSize: 12,
+              color: "var(--ink-5)",
+              marginLeft: 4,
+            }}
+          >
             {activity.listing_count
               ? `· ${activity.listing_count} listings`
               : hasConcretePrice
@@ -310,23 +323,30 @@ export default function ActivityCard({ card, index, hideBookingActions, onJobCre
 
         {!hideBookingActions && canAutopilot && primarySource && (
           <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
-            {/* Manual fallback link — uses the primary (first-ranked) source. */}
             <a
               href={primarySource.booking_link}
               target="_blank"
               rel="noopener noreferrer"
               style={{
-                display: "inline-flex", alignItems: "center", gap: 4,
-                padding: "7px 12px", borderRadius: 8,
-                border: "0.5px solid var(--border)", color: "var(--text-secondary)",
-                fontFamily: "var(--font-sans)", fontSize: 12, fontWeight: 400,
-                textDecoration: "none", whiteSpace: "nowrap",
+                display: "inline-flex",
+                alignItems: "center",
+                gap: 4,
+                padding: "7px 12px",
+                borderRadius: "var(--radius-sm)",
+                border: "1px solid var(--ink-3)",
+                color: "var(--ink-6)",
+                fontFamily: "var(--font-dm-sans)",
+                fontSize: 12,
+                fontWeight: 500,
+                textDecoration: "none",
+                whiteSpace: "nowrap",
+                transition: "all var(--motion-fast) var(--ease-out-expo)",
               }}
             >
               View ↗
             </a>
 
-            {/* One autopilot button per source — user picks which platform to book through. */}
+            {/* One book button per provider source */}
             {sources.map((source) => {
               const isBooking = !!bookingByProvider[source.provider];
               const label = PROVIDER_LABEL[source.provider];
@@ -336,13 +356,12 @@ export default function ActivityCard({ card, index, hideBookingActions, onJobCre
                   key={`${source.provider}:${source.provider_event_id}`}
                   onClick={() => handleBookWithAutopilot(source)}
                   disabled={isBooking}
+                  className="hotel-card__cta-primary"
                   style={{
-                    display: "inline-flex", alignItems: "center", gap: 5,
-                    padding: "8px 16px", background: isBooking ? "var(--border)" : "var(--gold)",
-                    color: "#fff", borderRadius: 8, border: "none",
-                    cursor: isBooking ? "not-allowed" : "pointer",
-                    fontFamily: "var(--font-sans)", fontSize: 13, fontWeight: 600,
-                    whiteSpace: "nowrap", transition: "background 0.15s",
+                    flex: "0 0 auto",
+                    padding: "8px 16px",
+                    whiteSpace: "nowrap",
+                    fontSize: 13,
                   }}
                 >
                   {isBooking ? "Booking…" : `🎟 Book on ${label}${priceSuffix}`}

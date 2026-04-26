@@ -5,6 +5,7 @@ import { HotelRecommendationCard } from "@/lib/types";
 import { buildBookingComUrl, buildExpediaUrl, buildHotelsComUrl } from "@/lib/agent/planners/booking-links";
 import PhotoCarousel from "@/components/PhotoCarousel";
 import { getBrowserModelAsLegacy } from "@/lib/agent-model-config";
+import "./cards.css";
 
 type BookingSite = "booking-com" | "expedia" | "hotels-com";
 const SITE_OPTIONS: { id: BookingSite; label: string; color: string }[] = [
@@ -186,17 +187,7 @@ export default function HotelCard({ card, index, checkIn, checkOut, guests, onJo
 
   return (
     <>
-    <div
-      style={{
-        backgroundColor: "var(--card)",
-        borderRadius: "16px",
-        border: "0.5px solid var(--border)",
-        overflow: "hidden",
-        opacity: 1,
-        transform: "translateY(0)",
-        transition: "opacity 0.3s ease, transform 0.3s ease",
-      }}
-    >
+    <div className="hotel-card">
       {/* Image carousel */}
       <PhotoCarousel
         images={
@@ -225,52 +216,25 @@ export default function HotelCard({ card, index, checkIn, checkOut, guests, onJo
         }
       />
 
-
-      <div style={{ padding: "16px" }}>
-        {/* Header row */}
-        <div style={{ display: "flex", alignItems: "flex-start", gap: "10px", marginBottom: "6px" }}>
-          {/* Rank badge */}
-          <div
-            style={{
-              width: "26px",
-              height: "26px",
-              borderRadius: "50%",
-              backgroundColor: "var(--text-primary)",
-              color: "var(--bg)",
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              fontFamily: "var(--font-dm-sans)",
-              fontSize: "11px",
-              fontWeight: 700,
-              flexShrink: 0,
-            }}
-          >
-            {index + 1}
-          </div>
-          <div style={{ flex: 1, minWidth: 0 }}>
-            <h3
-              style={{
-                fontFamily: "var(--font-playfair)",
-                fontSize: "18px",
-                fontWeight: 600,
-                color: "var(--text-primary)",
-                lineHeight: 1.3,
-                marginBottom: "2px",
-              }}
-            >
+      <div className="hotel-card__body">
+        <div className="hotel-card__header">
+          <div className="hotel-card__rank">{index + 1}</div>
+          <div className="hotel-card__title-wrap">
+            <h3 className="hotel-card__name" style={{ marginBottom: "2px" }}>
               {hotel.name}
             </h3>
-            {/* Stars + Rating */}
-            <div style={{ display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
-              <span style={{ fontFamily: "var(--font-dm-sans)", fontSize: "13px", color: "var(--gold)" }}>
-                {"★".repeat(starCount)}{"☆".repeat(5 - starCount)}
+            <div className="hotel-card__star-row">
+              <span className="hotel-card__stars">
+                {"★".repeat(starCount)}
+                {"☆".repeat(5 - starCount)}
               </span>
               {hotel.rating > 0 && (
-                <span style={{ fontFamily: "var(--font-dm-sans)", fontSize: "13px", color: "var(--gold)" }}>
+                <span className="hotel-card__rating">
                   ⭐ {hotel.rating.toFixed(1)}
                   {hotel.review_count > 0 && (
-                    <span style={{ color: "var(--text-secondary)" }}> ({hotel.review_count.toLocaleString()})</span>
+                    <span className="hotel-card__rating-count">
+                      {" "}({hotel.review_count.toLocaleString()})
+                    </span>
                   )}
                 </span>
               )}
@@ -278,180 +242,71 @@ export default function HotelCard({ card, index, checkIn, checkOut, guests, onJo
           </div>
         </div>
 
-        {/* Location */}
-        <p
-          style={{
-            fontFamily: "var(--font-dm-sans)",
-            fontSize: "12px",
-            color: "var(--text-secondary)",
-            marginBottom: "8px",
-          }}
-        >
+        <p className="hotel-card__location">
           {card.location_summary || hotel.address}
         </p>
 
-        {/* Price */}
         {hotel.price_per_night > 0 && (
-          <p
-            style={{
-              fontFamily: "var(--font-dm-sans)",
-              fontSize: "15px",
-              fontWeight: 600,
-              color: "var(--text-primary)",
-              marginBottom: "12px",
-            }}
-          >
+          <p className="hotel-card__price">
             ${hotel.price_per_night}/night
             {hotel.total_price > hotel.price_per_night && (
-              <span style={{ fontSize: "13px", fontWeight: 400, color: "var(--text-secondary)" }}>
+              <span className="hotel-card__price-detail">
                 {" "}· {card.price_summary}
               </span>
             )}
           </p>
         )}
 
-        {/* Gold divider */}
-        <div
-          style={{
-            width: "32px",
-            height: "2px",
-            backgroundColor: "var(--gold)",
-            marginBottom: "12px",
-          }}
-        />
+        <div className="hotel-card__divider" />
 
-        {/* Why it fits */}
         {card.why_recommended && (
-          <div
-            style={{
-              backgroundColor: "var(--card-2)",
-              borderLeft: "3px solid var(--gold)",
-              borderRadius: "0 8px 8px 0",
-              padding: "10px 12px",
-              marginBottom: "8px",
-            }}
-          >
-            <p
-              style={{
-                fontFamily: "var(--font-dm-sans)",
-                fontSize: "11px",
-                fontWeight: 500,
-                color: "var(--text-secondary)",
-                marginBottom: "4px",
-                textTransform: "uppercase",
-                letterSpacing: "0.05em",
-              }}
-            >
-              Why it fits
-            </p>
-            <p
-              style={{
-                fontFamily: "var(--font-dm-sans)",
-                fontSize: "13px",
-                color: "var(--text-primary)",
-                lineHeight: 1.5,
-              }}
-            >
-              {card.why_recommended}
-            </p>
+          <div className="hotel-card__tab hotel-card__tab--why">
+            <p className="hotel-card__tab-label">Why it fits</p>
+            <p className="hotel-card__tab-text">{card.why_recommended}</p>
           </div>
         )}
 
-        {/* Watch out */}
         {card.watch_out && (
-          <div
-            style={{
-              backgroundColor: "#FDF6EC",
-              borderLeft: "3px solid #E8A020",
-              borderRadius: "0 8px 8px 0",
-              padding: "10px 12px",
-              marginBottom: "8px",
-            }}
-          >
-            <p
-              style={{
-                fontFamily: "var(--font-dm-sans)",
-                fontSize: "11px",
-                fontWeight: 500,
-                color: "#8B5E14",
-                marginBottom: "4px",
-                textTransform: "uppercase",
-                letterSpacing: "0.05em",
-              }}
-            >
-              Watch out
-            </p>
-            <p
-              style={{
-                fontFamily: "var(--font-dm-sans)",
-                fontSize: "13px",
-                color: "#6B4A1A",
-                lineHeight: 1.5,
-              }}
-            >
-              {card.watch_out}
-            </p>
+          <div className="hotel-card__tab hotel-card__tab--watchout">
+            <p className="hotel-card__tab-label">Watch out</p>
+            <p className="hotel-card__tab-text">{card.watch_out}</p>
           </div>
         )}
 
-        {/* Not great if */}
         {card.not_great_if && (
-          <p
-            style={{
-              fontFamily: "var(--font-dm-sans)",
-              fontSize: "12px",
-              color: "var(--text-secondary)",
-              marginBottom: "12px",
-              fontStyle: "italic",
-            }}
-          >
-            Skip if: {card.not_great_if}
-          </p>
+          <p className="hotel-card__skip-note">Skip if: {card.not_great_if}</p>
         )}
 
-        {/* Amenities */}
         {hotel.amenities.length > 0 && (
-          <div style={{ display: "flex", flexWrap: "wrap", gap: "6px", marginBottom: "12px" }}>
+          <div className="hotel-card__amenities">
             {hotel.amenities.slice(0, 6).map((amenity) => (
-              <span
-                key={amenity}
-                style={{
-                  fontFamily: "var(--font-dm-sans)",
-                  fontSize: "11px",
-                  color: "var(--text-secondary)",
-                  border: "0.5px solid var(--border)",
-                  borderRadius: "12px",
-                  padding: "2px 8px",
-                }}
-              >
+              <span key={amenity} className="hotel-card__amenity">
                 {amenity}
               </span>
             ))}
           </div>
         )}
 
-        {/* Site selector */}
-        <div style={{ display: "flex", gap: "6px", marginBottom: "10px" }}>
+        {/* Site selector — site.color stays inline because each brand has
+            its own accent (Booking.com #003580, Expedia #00355F, Hotels.com
+            #D4001A) and we don't want to bake brand colors into globals. */}
+        <div className="hotel-card__site-row">
           {SITE_OPTIONS.map((site) => {
             const active = bookingSite === site.id;
             return (
               <button
                 key={site.id}
                 onClick={() => setBookingSite(site.id)}
-                style={{
-                  flex: 1,
-                  padding: "5px 0",
-                  borderRadius: "8px",
-                  border: active ? `1.5px solid ${site.color}` : "1px solid var(--border)",
-                  backgroundColor: active ? `${site.color}14` : "transparent",
-                  color: active ? site.color : "var(--text-secondary)",
-                  fontFamily: "var(--font-dm-sans)",
-                  fontSize: "11px",
-                  fontWeight: active ? 600 : 400,
-                  cursor: "pointer",
-                  transition: "all 0.15s",
-                  whiteSpace: "nowrap",
-                }}
+                className={`hotel-card__site${active ? " hotel-card__site--active" : ""}`}
+                style={
+                  active
+                    ? {
+                        borderColor: site.color,
+                        color: site.color,
+                        backgroundColor: `${site.color}14`,
+                      }
+                    : undefined
+                }
               >
                 {site.label}
               </button>
@@ -459,50 +314,19 @@ export default function HotelCard({ card, index, checkIn, checkOut, guests, onJo
           })}
         </div>
 
-        {/* Footer */}
-        <div
-          style={{
-            borderTop: "0.5px solid var(--border)",
-            paddingTop: "12px",
-            display: "flex",
-            gap: "8px",
-          }}
-        >
+        <div className="hotel-card__cta-row">
           <a
             href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(hotel.name + " " + hotel.address)}`}
             target="_blank"
             rel="noopener noreferrer"
-            style={{
-              flex: 1,
-              textAlign: "center",
-              padding: "8px 0",
-              borderRadius: "10px",
-              border: "0.5px solid var(--border)",
-              fontFamily: "var(--font-dm-sans)",
-              fontSize: "13px",
-              color: "var(--text-secondary)",
-              textDecoration: "none",
-            }}
+            className="hotel-card__cta-secondary"
           >
             Map
           </a>
           <button
             onClick={handleBook}
             disabled={booking}
-            style={{
-              flex: 2,
-              textAlign: "center",
-              padding: "8px 0",
-              borderRadius: "10px",
-              backgroundColor: booking ? "var(--border)" : "var(--gold)",
-              fontFamily: "var(--font-dm-sans)",
-              fontSize: "13px",
-              fontWeight: 500,
-              color: "#fff",
-              border: "none",
-              cursor: booking ? "default" : "pointer",
-              transition: "background-color 0.2s",
-            }}
+            className="hotel-card__cta-primary"
           >
             {booking ? "Starting agent…" : "Book with Agent →"}
           </button>

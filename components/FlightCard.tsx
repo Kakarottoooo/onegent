@@ -4,6 +4,7 @@ import { useState } from "react";
 import { FlightRecommendationCard } from "@/lib/types";
 import { buildExpediaFlightsUrl } from "@/lib/agent/planners/booking-links";
 import { getBrowserModelAsLegacy } from "@/lib/agent-model-config";
+import "./cards.css";
 
 interface FlightCardProps {
   card: FlightRecommendationCard;
@@ -161,98 +162,98 @@ export default function FlightCard({ card, index, bookingContext, onJobCreated, 
 
   return (
     <>
-      <div
-        style={{
-          background: "var(--card)",
-          borderRadius: 16,
-          border: "0.5px solid var(--border)",
-          overflow: "hidden",
-          marginBottom: 12,
-        }}
-      >
+      <div className="flight-card" style={{ marginBottom: 12 }}>
         {/* Header row */}
         <div
+          className="flight-card__header"
           style={{
-            display: "flex",
+            padding: "14px 16px 10px",
+            borderBottom: "1px solid var(--ink-2)",
+            marginBottom: 0,
             alignItems: "center",
             gap: 10,
-            padding: "14px 16px 10px",
-            borderBottom: "0.5px solid var(--border)",
           }}
         >
-          <div
-            style={{
-              width: 26, height: 26, borderRadius: "50%",
-              background: "var(--text-primary)", color: "var(--bg)",
-              display: "flex", alignItems: "center", justifyContent: "center",
-              fontFamily: "var(--font-sans)", fontSize: 12, fontWeight: 600, flexShrink: 0,
-            }}
-          >
-            {index + 1}
-          </div>
+          <div className="flight-card__rank">{index + 1}</div>
 
           {flight.airline_logo ? (
             // eslint-disable-next-line @next/next/no-img-element
-            <img src={flight.airline_logo} alt={flight.airline}
-              style={{ width: 28, height: 28, objectFit: "contain", borderRadius: 4 }} />
+            <img
+              src={flight.airline_logo}
+              alt={flight.airline}
+              style={{ width: 28, height: 28, objectFit: "contain", borderRadius: 4, flexShrink: 0 }}
+            />
           ) : (
-            <div style={{ color: "var(--gold)", flexShrink: 0 }}><PlaneIcon /></div>
+            <div style={{ color: "var(--gold)", flexShrink: 0 }}>
+              <PlaneIcon />
+            </div>
           )}
 
-          <div style={{ flex: 1, minWidth: 0 }}>
-            <div style={{
-              fontFamily: "var(--font-serif)", fontSize: 16, fontWeight: 600,
-              color: "var(--text-primary)", whiteSpace: "nowrap",
-              overflow: "hidden", textOverflow: "ellipsis",
-            }}>
+          <div className="flight-card__title-wrap">
+            <div
+              className="flight-card__name"
+              style={{
+                fontSize: 16,
+                whiteSpace: "nowrap",
+                overflow: "hidden",
+                textOverflow: "ellipsis",
+              }}
+            >
               {flight.airline}
               {flight.flight_number && (
-                <span style={{
-                  fontFamily: "var(--font-sans)", fontSize: 12, fontWeight: 400,
-                  color: "var(--text-secondary)", marginLeft: 6,
-                }}>
+                <span className="flight-card__subtitle" style={{ marginLeft: 6 }}>
                   {flight.flight_number}
                 </span>
               )}
             </div>
           </div>
 
-          <div style={{
-            padding: "3px 9px", borderRadius: 20,
-            border: `1px solid ${GROUP_COLOR[group]}`, color: GROUP_COLOR[group],
-            fontFamily: "var(--font-sans)", fontSize: 11, fontWeight: 600, flexShrink: 0,
-          }}>
+          {/* Group pill (Nonstop / 1 Stop / etc) — color is per-group, kept inline */}
+          <div
+            style={{
+              padding: "3px 9px",
+              borderRadius: "var(--radius-pill)",
+              border: `1px solid ${GROUP_COLOR[group]}`,
+              color: GROUP_COLOR[group],
+              fontFamily: "var(--font-dm-sans)",
+              fontSize: 11,
+              fontWeight: 600,
+              flexShrink: 0,
+              letterSpacing: "var(--tracking-tight)",
+            }}
+          >
             {GROUP_LABEL[group]}
           </div>
         </div>
 
-        {/* Route row */}
-        <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "14px 16px" }}>
+        {/* Time rail — depart → duration → arrive */}
+        <div className="flight-card__time-row" style={{ padding: "14px 16px" }}>
           <div style={{ textAlign: "center", minWidth: 64 }}>
-            <div style={{ fontFamily: "var(--font-sans)", fontSize: 22, fontWeight: 700, color: "var(--text-primary)", lineHeight: 1.1 }}>
-              {departureTime}
-            </div>
-            <div style={{ fontFamily: "var(--font-sans)", fontSize: 12, fontWeight: 600, color: "var(--gold)", marginTop: 2 }}>
+            <div className="flight-card__time">{departureTime}</div>
+            <div className="flight-card__airport" style={{ color: "var(--gold)" }}>
               {flight.departure_airport}
             </div>
-            <div style={{ fontFamily: "var(--font-sans)", fontSize: 11, color: "var(--text-secondary)", marginTop: 1, maxWidth: 72, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+            <div
+              style={{
+                fontFamily: "var(--font-dm-sans)",
+                fontSize: 11,
+                color: "var(--ink-5)",
+                marginTop: 1,
+                maxWidth: 72,
+                whiteSpace: "nowrap",
+                overflow: "hidden",
+                textOverflow: "ellipsis",
+              }}
+            >
               {flight.departure_city.split("(")[0].trim()}
             </div>
           </div>
 
-          <div style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", gap: 4 }}>
-            <div style={{ fontFamily: "var(--font-sans)", fontSize: 11, color: "var(--text-secondary)" }}>
-              {flight.duration}
-            </div>
-            <div style={{ width: "100%", display: "flex", alignItems: "center", gap: 3 }}>
-              <div style={{ flex: 1, height: 1, background: "var(--border)" }} />
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="var(--gold)">
-                <path d="M21 16v-2l-8-5V3.5c0-.83-.67-1.5-1.5-1.5S10 2.67 10 3.5V9l-8 5v2l8-2.5V19l-2 1.5V22l3.5-1 3.5 1v-1.5L13 19v-5.5l8 2.5z" />
-              </svg>
-              <div style={{ flex: 1, height: 1, background: "var(--border)" }} />
-            </div>
+          <div className="flight-card__duration">
+            <div className="flight-card__duration-text">{flight.duration}</div>
+            <div className="flight-card__duration-line" />
             {flight.stops > 0 && flight.layover_city && (
-              <div style={{ fontFamily: "var(--font-sans)", fontSize: 10, color: "var(--text-secondary)", textAlign: "center" }}>
+              <div className="flight-card__stops" style={{ textTransform: "none", letterSpacing: 0, color: "var(--ink-5)" }}>
                 via {flight.layover_city}
                 {flight.layover_duration && ` · ${flight.layover_duration}`}
               </div>
@@ -260,75 +261,81 @@ export default function FlightCard({ card, index, bookingContext, onJobCreated, 
           </div>
 
           <div style={{ textAlign: "center", minWidth: 64 }}>
-            <div style={{ fontFamily: "var(--font-sans)", fontSize: 22, fontWeight: 700, color: "var(--text-primary)", lineHeight: 1.1 }}>
-              {arrivalTime}
-            </div>
-            <div style={{ fontFamily: "var(--font-sans)", fontSize: 12, fontWeight: 600, color: "var(--gold)", marginTop: 2 }}>
+            <div className="flight-card__time">{arrivalTime}</div>
+            <div className="flight-card__airport" style={{ color: "var(--gold)" }}>
               {flight.arrival_airport}
             </div>
-            <div style={{ fontFamily: "var(--font-sans)", fontSize: 11, color: "var(--text-secondary)", marginTop: 1, maxWidth: 72, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+            <div
+              style={{
+                fontFamily: "var(--font-dm-sans)",
+                fontSize: 11,
+                color: "var(--ink-5)",
+                marginTop: 1,
+                maxWidth: 72,
+                whiteSpace: "nowrap",
+                overflow: "hidden",
+                textOverflow: "ellipsis",
+              }}
+            >
               {flight.arrival_city.split("(")[0].trim()}
             </div>
           </div>
         </div>
 
-        {/* Why recommended */}
         {why_recommended && (
-          <div style={{
-            margin: "0 16px", padding: "8px 12px",
-            background: "var(--card-2)", borderLeft: "3px solid var(--gold)",
-            borderRadius: "0 6px 6px 0", fontFamily: "var(--font-sans)",
-            fontSize: 12, color: "var(--text-secondary)", lineHeight: 1.5,
-          }}>
-            {why_recommended}
+          <div
+            className="flight-card__tab flight-card__tab--why"
+            style={{ margin: "0 16px var(--space-2)" }}
+          >
+            <p className="flight-card__tab-text">{why_recommended}</p>
           </div>
         )}
 
-        {/* Footer: price (always visible) + book buttons (hidden in Decision Room) */}
-        <div style={{
-          display: "flex", alignItems: "center", justifyContent: "space-between",
-          padding: "12px 16px", borderTop: "0.5px solid var(--border)", marginTop: 12,
-          gap: 12, flexWrap: "wrap",
-        }}>
+        {/* Footer: price + booking actions */}
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+            padding: "12px 16px",
+            borderTop: "1px solid var(--ink-2)",
+            marginTop: 12,
+            gap: 12,
+            flexWrap: "wrap",
+          }}
+        >
           <div>
-            <span style={{ fontFamily: "var(--font-sans)", fontSize: 22, fontWeight: 700, color: "var(--gold)" }}>
+            <span className="flight-card__price" style={{ color: "var(--gold)" }}>
               {flight.price > 0 ? `$${flight.price}` : "—"}
             </span>
-            <span style={{ fontFamily: "var(--font-sans)", fontSize: 12, color: "var(--text-secondary)", marginLeft: 4 }}>
+            <span className="flight-card__price-meta" style={{ display: "inline", marginLeft: 4 }}>
               /person
             </span>
           </div>
 
           {!hideBookingActions && (
             <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-              {/* Manual fallback link */}
               <a
                 href={manualSearchUrl}
                 target="_blank"
                 rel="noopener noreferrer"
+                className="flight-card__pill"
                 style={{
-                  display: "inline-flex", alignItems: "center", gap: 4,
-                  padding: "7px 12px", borderRadius: 8,
-                  border: "0.5px solid var(--border)", color: "var(--text-secondary)",
-                  fontFamily: "var(--font-sans)", fontSize: 12, fontWeight: 400,
-                  textDecoration: "none", whiteSpace: "nowrap",
+                  textDecoration: "none",
+                  display: "inline-flex",
+                  alignItems: "center",
+                  padding: "7px 12px",
                 }}
               >
                 Search →
               </a>
 
-              {/* Autopilot book button */}
               {canAutopilot ? (
                 <button
                   onClick={handleBookWithAutopilot}
                   disabled={booking}
-                  style={{
-                    display: "inline-flex", alignItems: "center", gap: 5,
-                    padding: "8px 16px", background: booking ? "var(--border)" : "var(--gold)",
-                    color: "#fff", borderRadius: 8, border: "none", cursor: booking ? "not-allowed" : "pointer",
-                    fontFamily: "var(--font-sans)", fontSize: 13, fontWeight: 600,
-                    whiteSpace: "nowrap", transition: "background 0.15s",
-                  }}
+                  className="flight-card__cta-primary"
+                  style={{ flex: "0 0 auto", padding: "8px 16px", whiteSpace: "nowrap" }}
                 >
                   {booking ? "Booking…" : "✈ Book with Autopilot"}
                 </button>
@@ -337,12 +344,14 @@ export default function FlightCard({ card, index, bookingContext, onJobCreated, 
                   href={manualSearchUrl}
                   target="_blank"
                   rel="noopener noreferrer"
+                  className="flight-card__cta-primary"
                   style={{
-                    display: "inline-flex", alignItems: "center", gap: 5,
-                    padding: "8px 16px", background: "var(--gold)",
-                    color: "#fff", borderRadius: 8,
-                    fontFamily: "var(--font-sans)", fontSize: 13, fontWeight: 500,
-                    textDecoration: "none", whiteSpace: "nowrap",
+                    flex: "0 0 auto",
+                    padding: "8px 16px",
+                    whiteSpace: "nowrap",
+                    textDecoration: "none",
+                    display: "inline-flex",
+                    alignItems: "center",
                   }}
                 >
                   Book on Google Flights →
