@@ -1056,6 +1056,42 @@ export async function POST(_req: NextRequest, { params }: Params) {
     await updateBookingJobStatus(id, "pending");
   }
 
+  // ── USE_WORKER_FOR feature flag (Worker D2) ────────────────────────────
+  // When every step.type is in USE_WORKER_FOR AND every step body carries
+  // the lib/core "__source" marker, hand off to the Railway worker by
+  // leaving status='pending' and returning 202. The worker polls
+  // booking_jobs.status='pending' and claims via FOR UPDATE SKIP LOCKED.
+  //
+  // The double check (env list + per-step marker) is intentional: the env
+  // gate is the operator's risk control, the marker check is the technical
+  // precondition (worker only knows how to execute lib/core-shape jobs).
+  // Mismatched jobs fall through to the legacy in-process path below.
+  const workerScenarios = (process.env.USE_WORKER_FOR ?? "")
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean);
+  if (workerScenarios.length > 0) {
+    const allRoutable = job.steps.every((step) => {
+      if (!workerScenarios.includes(step.type)) return false;
+      const body = step.body as Record<string, unknown> | undefined;
+      return body?.__source === "lib/core/execution";
+    });
+    if (allRoutable) {
+      console.log(
+        `[start] ${id} routed to Railway worker (USE_WORKER_FOR=${workerScenarios.join(",")})`,
+      );
+      return NextResponse.json(
+        {
+          jobId: id,
+          status: "pending",
+          steps: job.steps,
+          routedToWorker: true,
+        },
+        { status: 202 },
+      );
+    }
+  }
+
   // Use the autonomy settings saved at job-creation time, fall back to defaults
   const autonomy: AgentAutonomySettings = job.autonomy_settings ?? DEFAULT_AUTONOMY;
 
