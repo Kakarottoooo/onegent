@@ -1,0 +1,34 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "lib": ["ES2022", "DOM"],
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "esModuleInterop": true,
+    "resolveJsonModule": true,
+    "isolatedModules": true,
+    "skipLibCheck": true,
+    "strict": true,
+    "noEmit": true,
+    "allowJs": true,
+    "baseUrl": ".",
+    "paths": {
+      "@/lib/db": ["./src/db"],
+      "@/lib/encryption": ["./src/encryption"],
+      "@/lib/autonomy": ["./src/autonomy"],
+      "@/lib/agent/planners/booking-links": ["./src/booking-links"],
+      "@/lib/tools": ["./src/tools"],
+      "@/lib/types": ["./src/types"],
+      "@/lib/browser-session-store": ["./src/browser-session-store"],
+      "@/lib/live-log-store": ["./src/live-log-store"],
+      "@/lib/monitors": ["./src/monitors"],
+      "@/lib/memory": ["./src/memory"],
+      "@/lib/booking-autopilot": ["./src/booking-autopilot"],
+      "@/lib/booking-autopilot/*": ["./src/booking-autopilot/*"],
+      "@/lib/core": ["./src/core"],
+      "@/lib/core/*": ["./src/core/*"]
+    }
+  },
+  "include": ["src/**/*.ts"],
+  "exclude": ["node_modules", "**/__tests__/**", "**/*.test.ts"]
+}

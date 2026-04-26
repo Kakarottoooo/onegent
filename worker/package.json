@@ -1,0 +1,27 @@
+{
+  "name": "@onegent/worker",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Onegent booking-autopilot worker — Playwright execution layer that runs on Railway, polls Postgres for queued jobs.",
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "start": "tsx src/index.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.79.0",
+    "@browserbasehq/stagehand": "^3.2.0",
+    "@vercel/postgres": "^0.10.0",
+    "playwright": "^1.58.2",
+    "zod": "^4.3.6"
+  },
+  "devDependencies": {
+    "@types/node": "^20",
+    "tsx": "^4.20.0",
+    "typescript": "^5"
+  }
+}
