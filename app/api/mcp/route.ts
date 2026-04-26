@@ -78,6 +78,11 @@ export async function POST(req: Request): Promise<Response> {
     server = createOnegentServer({ apiKey });
     transport = new WebStandardStreamableHTTPServerTransport({
       sessionIdGenerator: undefined, // stateless — each request is independent
+      // JSON response mode: each tool returns immediately (book_* → jobId,
+      // get_* → REST round-trip), no server-initiated subscription messages.
+      // Avoids the SSE ReadableStream path which we don't need and which
+      // tripped a Vercel-runtime-specific TypeError on first deploy.
+      enableJsonResponse: true,
     });
 
     await server.connect(transport);
