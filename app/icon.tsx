@@ -1,15 +1,18 @@
 /**
- * App icon — generated dynamically via Next.js ImageResponse.
+ * Onegent brand mark — finalized 2026-04-26.
  *
- * Rendered to /icon (and used as <link rel="icon"> in layout). Replaces
- * the legacy public/icon-512.png + icon-192.png which were leftover from
- * the pre-rebrand "F" placeholder.
+ * Design: ring + horizon line through middle (geometric "O" suggesting
+ * journey) on a deep ink navy gradient. Cream foreground for hotel-
+ * monogram + travel-horizon meaning rolled into one mark.
  *
- * For the ChatGPT Apps submission, point the icon URL at:
- *   https://onegent.one/icon
+ * Used for:
+ *   - Browser favicon (auto-wired by Next.js app/icon convention)
+ *   - npm @onegent/mcp-server display in Claude Desktop config
+ *   - ChatGPT Apps marketplace listing (manifest.json icon.url)
+ *   - All other surfaces that need a unified brand mark
  *
- * Style: serif "O" monogram on deep ink ground — luxury hotel monogram
- * vibe, travel-appropriate, brand-coherent with Playfair-driven typography.
+ * To preview alternate palettes (legacy A/B/D/E + C variants), see git
+ * history — the /brand exploration folder was deleted after this pick.
  */
 import { ImageResponse } from "next/og";
 
@@ -27,24 +30,30 @@ export default function Icon() {
           alignItems: "center",
           justifyContent: "center",
           background: "linear-gradient(135deg, #0a0e1a 0%, #1a2238 100%)",
-          fontFamily: "Georgia, 'Times New Roman', serif",
+          position: "relative",
         }}
       >
+        {/* Ring */}
         <div
           style={{
+            width: 320,
+            height: 320,
+            borderRadius: 320,
+            border: "20px solid #f5e6c8",
             display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            fontSize: 380,
-            fontWeight: 900,
-            color: "#f5e6c8",
-            letterSpacing: "-0.04em",
-            lineHeight: 1,
-            marginBottom: 24,
           }}
-        >
-          O
-        </div>
+        />
+        {/* Horizon line through middle */}
+        <div
+          style={{
+            position: "absolute",
+            top: 246,
+            left: 56,
+            width: 400,
+            height: 20,
+            background: "#f5e6c8",
+          }}
+        />
       </div>
     ),
     { ...size },

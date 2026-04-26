@@ -5,8 +5,8 @@
   "description": "Book restaurants, hotels, flights, and activities through an AI agent that navigates real booking sites.",
   "longDescription": "Onegent — AI books your trip end-to-end. Ask for a restaurant reservation, hotel stay, flight, or activity in natural language, and this app hands off to Onegent's agent, which navigates OpenTable / Booking.com / Expedia / Viator on your behalf. The agent always stops before submitting your credit card's CVV — you confirm the final charge. Typical booking completion: 30-240 seconds depending on venue.",
   "icon": {
-    "url": "https://onegent.one/icon-512.png",
-    "background": "#ffffff"
+    "url": "https://onegent.one/icon",
+    "background": "#0a0e1a"
   },
   "mcp": {
     "url": "https://onegent.one/api/mcp",
