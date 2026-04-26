@@ -12,29 +12,54 @@ export const metadata = {
 
 const OPTIONS = [
   {
+    id: "c",
+    name: "C — Horizon O · cream + black (current)",
+    desc: "Original C reference — geometric ring with horizon line. Modern minimalist.",
+  },
+  {
+    id: "f",
+    name: "F — Sunrise · burnt orange + amber",
+    desc: "Same structure, horizon lowered (sun cresting). Warm, inviting, dawn departure vibe.",
+  },
+  {
+    id: "g",
+    name: "G — Twilight · pink + lavender",
+    desc: "Horizon raised (sun setting). Premium, romantic, evening arrival.",
+  },
+  {
+    id: "h",
+    name: "H — Aperture · forest emerald + gold",
+    desc: "Three concentric rings. Camera iris / target / lens. Nature + precision.",
+  },
+  {
+    id: "i",
+    name: "I — Polar Compass · royal blue + white",
+    desc: "Ring + cross axes + center dot. Cardinal directions, map, orientation.",
+  },
+  {
+    id: "j",
+    name: "J — Orbit · coral + cream on black",
+    desc: "Big ring + small ring + connection. Round trip / departure-return / planetary orbit.",
+  },
+  {
     id: "a",
-    name: "A — Serif O on deep ink",
-    desc: "Luxury hotel monogram. Cream Georgia O on navy gradient. (Currently shipped at /icon)",
+    name: "A — Serif O on deep ink (reference)",
+    desc: "Original serif option for comparison. Luxury hotel monogram.",
   },
   {
     id: "b",
-    name: "B — Inverse: dark O on cream",
-    desc: "Editorial / book-cover. Same monogram, flipped. Ages well.",
-  },
-  {
-    id: "c",
-    name: "C — Horizon O",
-    desc: "Geometric ring with horizon line. Modern minimalist (Vercel/Linear). Suggests journey.",
+    name: "B — Inverse: dark O on cream (reference)",
+    desc: "Original serif option for comparison. Book-cover editorial.",
   },
   {
     id: "d",
-    name: "D — Wordmark 'On.'",
-    desc: "Type-as-logo. The period = emphasis. Identity-forward.",
+    name: "D — Wordmark 'On.' (reference)",
+    desc: "Original wordmark option for comparison. Type-as-logo.",
   },
   {
     id: "e",
-    name: "E — Stacked O + NEGENT",
-    desc: "Editorial crest. Big O, small subscript. Recognizable at large sizes, collapses to clean O at favicon scale.",
+    name: "E — Stacked O + NEGENT (reference)",
+    desc: "Original wordmark option for comparison. Editorial crest.",
   },
 ];
 
