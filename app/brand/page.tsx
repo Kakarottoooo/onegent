@@ -13,53 +13,53 @@ export const metadata = {
 const OPTIONS = [
   {
     id: "c",
-    name: "C — Horizon O · cream + black (current)",
-    desc: "Original C reference — geometric ring with horizon line. Modern minimalist.",
+    name: "C — original · cream + black",
+    desc: "The reference. Cream ring on pure black, cream horizon line through middle.",
+  },
+  {
+    id: "c-warm",
+    name: "C-warm · burnt orange + amber on deep brown",
+    desc: "F's palette on C's structure. Sunrise / dawn departure. Most consumer-warm.",
+  },
+  {
+    id: "c-twilight",
+    name: "C-twilight · pink + lavender on deep purple",
+    desc: "G's palette on C's structure. Romantic / evening arrival. Most distinctive.",
+  },
+  {
+    id: "c-forest",
+    name: "C-forest · gold on deep emerald",
+    desc: "H's palette on C's structure. Luxury / Aman-resort / nature precision. Most premium.",
+  },
+  {
+    id: "c-navy",
+    name: "C-navy · cream on deep ink",
+    desc: "A's palette on C's structure. Hotel monogram + journey horizon. Most editorial.",
   },
   {
     id: "f",
-    name: "F — Sunrise · burnt orange + amber",
-    desc: "Same structure, horizon lowered (sun cresting). Warm, inviting, dawn departure vibe.",
+    name: "F — Sunrise (variant: horizon lowered) reference",
+    desc: "F was sunrise w/ horizon lowered — for comparison vs C-warm (centered horizon).",
   },
   {
     id: "g",
-    name: "G — Twilight · pink + lavender",
-    desc: "Horizon raised (sun setting). Premium, romantic, evening arrival.",
+    name: "G — Twilight (variant: horizon raised) reference",
+    desc: "G was twilight w/ horizon raised — for comparison vs C-twilight (centered).",
   },
   {
     id: "h",
-    name: "H — Aperture · forest emerald + gold",
-    desc: "Three concentric rings. Camera iris / target / lens. Nature + precision.",
+    name: "H — Aperture (3 concentric rings) reference",
+    desc: "Different structure (rings, no horizon line) for comparison.",
   },
   {
     id: "i",
-    name: "I — Polar Compass · royal blue + white",
-    desc: "Ring + cross axes + center dot. Cardinal directions, map, orientation.",
+    name: "I — Polar Compass reference",
+    desc: "Different structure (ring + cross axes) for comparison.",
   },
   {
     id: "j",
-    name: "J — Orbit · coral + cream on black",
-    desc: "Big ring + small ring + connection. Round trip / departure-return / planetary orbit.",
-  },
-  {
-    id: "a",
-    name: "A — Serif O on deep ink (reference)",
-    desc: "Original serif option for comparison. Luxury hotel monogram.",
-  },
-  {
-    id: "b",
-    name: "B — Inverse: dark O on cream (reference)",
-    desc: "Original serif option for comparison. Book-cover editorial.",
-  },
-  {
-    id: "d",
-    name: "D — Wordmark 'On.' (reference)",
-    desc: "Original wordmark option for comparison. Type-as-logo.",
-  },
-  {
-    id: "e",
-    name: "E — Stacked O + NEGENT (reference)",
-    desc: "Original wordmark option for comparison. Editorial crest.",
+    name: "J — Orbit reference",
+    desc: "Different structure (big + small rings) for comparison.",
   },
 ];
 
