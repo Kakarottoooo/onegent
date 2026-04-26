@@ -10,39 +10,40 @@
  */
 
 .brand-strip {
-  position: sticky;
+  /* Fixed instead of sticky on purpose:
+     - Sidebar.tsx is also `position: sticky; top: 0`. Both trying to stick
+       at viewport top creates conflicting containing blocks — the sidebar's
+       column would clip BrandStrip's hide-transform on its half, leaving
+       the brand-mark visibly hanging in the upper-left corner.
+     - Fixed lets BrandStrip slide in/out cleanly without fighting any other
+       sticky ancestor.
+     - It does NOT take layout space (which is fine — default state is
+       hidden, and when shown it overlays the top 36px of GlobalNav). */
+  position: fixed;
   top: 0;
+  left: 0;
+  right: 0;
   height: 36px;
   background: #fafaf9;
   border-bottom: 0.5px solid #e7e5e4;
-  z-index: 30;
+  /* Above GlobalNav (which has no z-index) so the slide-in covers it
+     cleanly while the user is interacting with the strip. */
+  z-index: 40;
   font-family: var(--font-dm-sans), "DM Sans", system-ui, sans-serif;
   transform: translateY(0);
   opacity: 1;
-  visibility: visible;
-  /* Snappier hide than the previous 240ms — the strip is meant to get
-     out of the way quickly once the user is done with it. */
+  pointer-events: auto;
   transition:
     transform 160ms cubic-bezier(0.4, 0, 0.2, 1),
-    opacity 160ms cubic-bezier(0.4, 0, 0.2, 1),
-    visibility 0s linear 0s;
+    opacity 160ms cubic-bezier(0.4, 0, 0.2, 1);
   will-change: transform, opacity;
 }
 
 .brand-strip--hidden {
-  /* Triple-defense hide: transform out of flow + opacity 0 + visibility
-     hidden after the animation finishes. Earlier transform-only setup
-     left the brand-mark visibly hanging in the corner on some renders
-     (likely stacking-context interactions with sticky parents). */
   transform: translateY(-100%);
   opacity: 0;
-  visibility: hidden;
-  /* Delay the visibility flip until the transform/opacity finish so the
-     fade-out is still smooth — visibility doesn't tween. */
-  transition:
-    transform 160ms cubic-bezier(0.4, 0, 0.2, 1),
-    opacity 160ms cubic-bezier(0.4, 0, 0.2, 1),
-    visibility 0s linear 160ms;
+  /* When hidden the strip can't intercept clicks meant for content below. */
+  pointer-events: none;
 }
 
 .brand-strip-inner {
