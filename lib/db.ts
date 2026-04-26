@@ -991,6 +991,341 @@ export async function deactivateApiKey(keyId: string): Promise<void> {
   `;
 }
 
+// ─── OAuth 2.0 Provider ──────────────────────────────────────────────────────
+// Lets Onegent act as an OAuth 2.0 Identity Provider for third-party MCP
+// clients (Claude.ai web, ChatGPT Apps marketplace, custom agents). Token
+// flow: client redirects user → /oauth/authorize (Clerk-gated consent) →
+// authorization code → POST /oauth/token (PKCE verified) → access_token +
+// refresh_token. Tokens are opaque (sha256 stored, plaintext never logged
+// after issuance) so we can revoke instantly.
+//
+// Coexists with API keys: /api/mcp accepts BOTH. ogk_live_* / ogk_test_*
+// → API key path; everything else → OAuth path.
+
+export interface OAuthClientRow {
+  id: string;
+  name: string;
+  client_secret_hash: string;
+  redirect_uris: string[];
+  allowed_scopes: string[];
+  created_at: string;
+}
+
+export interface OAuthAuthorizationCodeRow {
+  code: string;
+  client_id: string;
+  user_id: string;
+  redirect_uri: string;
+  scopes: string[];
+  code_challenge: string;
+  code_challenge_method: string;
+  expires_at: string;
+  used: boolean;
+  created_at: string;
+}
+
+export interface OAuthAccessTokenRow {
+  token_hash: string;
+  client_id: string;
+  user_id: string;
+  scopes: string[];
+  expires_at: string;
+  revoked: boolean;
+  created_at: string;
+}
+
+export interface OAuthRefreshTokenRow {
+  token_hash: string;
+  access_token_hash: string;
+  client_id: string;
+  user_id: string;
+  scopes: string[];
+  expires_at: string;
+  revoked: boolean;
+  created_at: string;
+}
+
+let oauthTablesReady: Promise<void> | null = null;
+
+async function ensureOAuthTables(): Promise<void> {
+  if (!oauthTablesReady) {
+    oauthTablesReady = (async () => {
+      await sql`
+        CREATE TABLE IF NOT EXISTS oauth_clients (
+          id                 TEXT PRIMARY KEY,
+          name               TEXT NOT NULL,
+          client_secret_hash VARCHAR(64) NOT NULL,
+          redirect_uris      JSONB NOT NULL DEFAULT '[]',
+          allowed_scopes     JSONB NOT NULL DEFAULT '[]',
+          created_at         TIMESTAMPTZ DEFAULT NOW()
+        )
+      `;
+      await sql`
+        CREATE TABLE IF NOT EXISTS oauth_authorization_codes (
+          code                  TEXT PRIMARY KEY,
+          client_id             TEXT NOT NULL REFERENCES oauth_clients(id) ON DELETE CASCADE,
+          user_id               TEXT NOT NULL,
+          redirect_uri          TEXT NOT NULL,
+          scopes                JSONB NOT NULL DEFAULT '[]',
+          code_challenge        TEXT NOT NULL,
+          code_challenge_method TEXT NOT NULL DEFAULT 'S256',
+          expires_at            TIMESTAMPTZ NOT NULL,
+          used                  BOOLEAN NOT NULL DEFAULT FALSE,
+          created_at            TIMESTAMPTZ DEFAULT NOW()
+        )
+      `;
+      await sql`
+        CREATE TABLE IF NOT EXISTS oauth_access_tokens (
+          token_hash VARCHAR(64) PRIMARY KEY,
+          client_id  TEXT NOT NULL REFERENCES oauth_clients(id) ON DELETE CASCADE,
+          user_id    TEXT NOT NULL,
+          scopes     JSONB NOT NULL DEFAULT '[]',
+          expires_at TIMESTAMPTZ NOT NULL,
+          revoked    BOOLEAN NOT NULL DEFAULT FALSE,
+          created_at TIMESTAMPTZ DEFAULT NOW()
+        )
+      `;
+      await sql`
+        CREATE TABLE IF NOT EXISTS oauth_refresh_tokens (
+          token_hash        VARCHAR(64) PRIMARY KEY,
+          access_token_hash VARCHAR(64) NOT NULL,
+          client_id         TEXT NOT NULL REFERENCES oauth_clients(id) ON DELETE CASCADE,
+          user_id           TEXT NOT NULL,
+          scopes            JSONB NOT NULL DEFAULT '[]',
+          expires_at        TIMESTAMPTZ NOT NULL,
+          revoked           BOOLEAN NOT NULL DEFAULT FALSE,
+          created_at        TIMESTAMPTZ DEFAULT NOW()
+        )
+      `;
+      await sql`CREATE INDEX IF NOT EXISTS oauth_codes_expires_idx ON oauth_authorization_codes (expires_at) WHERE used = FALSE`;
+      await sql`CREATE INDEX IF NOT EXISTS oauth_access_user_idx ON oauth_access_tokens (user_id) WHERE revoked = FALSE`;
+      await sql`CREATE INDEX IF NOT EXISTS oauth_access_expires_idx ON oauth_access_tokens (expires_at) WHERE revoked = FALSE`;
+      await sql`CREATE INDEX IF NOT EXISTS oauth_refresh_user_idx ON oauth_refresh_tokens (user_id) WHERE revoked = FALSE`;
+    })().catch((err) => {
+      oauthTablesReady = null;
+      throw err;
+    });
+  }
+  await oauthTablesReady;
+}
+
+/**
+ * Register a new OAuth client (e.g. ChatGPT Apps, Claude.ai web). Returns
+ * plaintext secret ONCE — caller must show it once and never log again.
+ * Stored as sha256(plaintext) for verification at /oauth/token.
+ */
+export async function createOAuthClient(params: {
+  id: string;
+  name: string;
+  redirectUris: string[];
+  allowedScopes: string[];
+}): Promise<{ clientSecret: string; row: OAuthClientRow }> {
+  await ensureOAuthTables();
+  const secret = randomBytes(32).toString("base64url"); // 43 chars
+  const secretHash = createHash("sha256").update(secret).digest("hex");
+  const result = await sql<OAuthClientRow>`
+    INSERT INTO oauth_clients (id, name, client_secret_hash, redirect_uris, allowed_scopes)
+    VALUES (
+      ${params.id},
+      ${params.name},
+      ${secretHash},
+      ${JSON.stringify(params.redirectUris)}::jsonb,
+      ${JSON.stringify(params.allowedScopes)}::jsonb
+    )
+    RETURNING *
+  `;
+  return { clientSecret: secret, row: result.rows[0] };
+}
+
+export async function getOAuthClient(clientId: string): Promise<OAuthClientRow | null> {
+  await ensureOAuthTables();
+  const result = await sql<OAuthClientRow>`
+    SELECT * FROM oauth_clients WHERE id = ${clientId} LIMIT 1
+  `;
+  return result.rows[0] ?? null;
+}
+
+/**
+ * Verify client_id + client_secret combo (used by /oauth/token endpoint).
+ * Returns the client row if credentials match, null otherwise.
+ */
+export async function verifyOAuthClient(
+  clientId: string,
+  clientSecret: string,
+): Promise<OAuthClientRow | null> {
+  const client = await getOAuthClient(clientId);
+  if (!client) return null;
+  const candidateHash = createHash("sha256").update(clientSecret).digest("hex");
+  if (candidateHash !== client.client_secret_hash) return null;
+  return client;
+}
+
+/**
+ * Generate + store an authorization code (10 min expiry, single-use).
+ * Caller (POST /oauth/authorize/decide) builds the redirect URL with
+ * ?code=<returned> & state=<from request>.
+ */
+export async function createAuthorizationCode(params: {
+  clientId: string;
+  userId: string;
+  redirectUri: string;
+  scopes: string[];
+  codeChallenge: string;
+  codeChallengeMethod: string;
+}): Promise<string> {
+  await ensureOAuthTables();
+  const code = randomBytes(32).toString("base64url");
+  const expiresAt = new Date(Date.now() + 10 * 60 * 1000).toISOString(); // 10 min
+  await sql`
+    INSERT INTO oauth_authorization_codes
+      (code, client_id, user_id, redirect_uri, scopes, code_challenge, code_challenge_method, expires_at)
+    VALUES (
+      ${code},
+      ${params.clientId},
+      ${params.userId},
+      ${params.redirectUri},
+      ${JSON.stringify(params.scopes)}::jsonb,
+      ${params.codeChallenge},
+      ${params.codeChallengeMethod},
+      ${expiresAt}
+    )
+  `;
+  return code;
+}
+
+/**
+ * Atomically consume an authorization code: returns row if valid + unused +
+ * not expired, marks used=TRUE in same transaction. Used by /oauth/token.
+ */
+export async function consumeAuthorizationCode(
+  code: string,
+): Promise<OAuthAuthorizationCodeRow | null> {
+  await ensureOAuthTables();
+  const result = await sql<OAuthAuthorizationCodeRow>`
+    UPDATE oauth_authorization_codes
+    SET used = TRUE
+    WHERE code = ${code}
+      AND used = FALSE
+      AND expires_at > NOW()
+    RETURNING *
+  `;
+  return result.rows[0] ?? null;
+}
+
+/**
+ * Issue an opaque access token + refresh token pair. Returns plaintext
+ * tokens ONCE — caller (POST /oauth/token) ships them in the JSON
+ * response and never logs them again. Only sha256 is persisted.
+ *
+ * Defaults: access_token expires in 1 hour, refresh_token in 30 days.
+ */
+export async function issueAccessAndRefreshTokens(params: {
+  clientId: string;
+  userId: string;
+  scopes: string[];
+  accessTtlSeconds?: number;
+  refreshTtlSeconds?: number;
+}): Promise<{
+  accessToken: string;
+  refreshToken: string;
+  expiresIn: number;
+}> {
+  await ensureOAuthTables();
+  const accessTtl = params.accessTtlSeconds ?? 3600;
+  const refreshTtl = params.refreshTtlSeconds ?? 30 * 24 * 3600;
+  const accessToken = randomBytes(32).toString("base64url");
+  const refreshToken = randomBytes(32).toString("base64url");
+  const accessHash = createHash("sha256").update(accessToken).digest("hex");
+  const refreshHash = createHash("sha256").update(refreshToken).digest("hex");
+  const accessExp = new Date(Date.now() + accessTtl * 1000).toISOString();
+  const refreshExp = new Date(Date.now() + refreshTtl * 1000).toISOString();
+  const scopesJson = JSON.stringify(params.scopes);
+
+  await sql`
+    INSERT INTO oauth_access_tokens (token_hash, client_id, user_id, scopes, expires_at)
+    VALUES (${accessHash}, ${params.clientId}, ${params.userId}, ${scopesJson}::jsonb, ${accessExp})
+  `;
+  await sql`
+    INSERT INTO oauth_refresh_tokens (token_hash, access_token_hash, client_id, user_id, scopes, expires_at)
+    VALUES (${refreshHash}, ${accessHash}, ${params.clientId}, ${params.userId}, ${scopesJson}::jsonb, ${refreshExp})
+  `;
+  return { accessToken, refreshToken, expiresIn: accessTtl };
+}
+
+/**
+ * Validate an access token presented by an MCP client. Returns user_id +
+ * scopes if valid, null otherwise. Called from /api/mcp on every request
+ * that uses OAuth (token doesn't start with ogk_).
+ */
+export async function validateAccessToken(
+  plaintextToken: string,
+): Promise<{ user_id: string; scopes: string[]; client_id: string } | null> {
+  await ensureOAuthTables();
+  const tokenHash = createHash("sha256").update(plaintextToken).digest("hex");
+  const result = await sql<OAuthAccessTokenRow>`
+    SELECT * FROM oauth_access_tokens
+    WHERE token_hash = ${tokenHash}
+      AND revoked = FALSE
+      AND expires_at > NOW()
+    LIMIT 1
+  `;
+  const row = result.rows[0];
+  if (!row) return null;
+  return {
+    user_id: row.user_id,
+    scopes: row.scopes,
+    client_id: row.client_id,
+  };
+}
+
+/**
+ * Exchange a refresh token for a new access token (and rotate the refresh
+ * token). Used by POST /oauth/token with grant_type=refresh_token.
+ */
+export async function rotateRefreshToken(
+  plaintextRefresh: string,
+): Promise<{
+  accessToken: string;
+  refreshToken: string;
+  expiresIn: number;
+} | null> {
+  await ensureOAuthTables();
+  const refreshHash = createHash("sha256").update(plaintextRefresh).digest("hex");
+
+  // Atomically revoke the old refresh token and capture its claims
+  const oldResult = await sql<OAuthRefreshTokenRow>`
+    UPDATE oauth_refresh_tokens
+    SET revoked = TRUE
+    WHERE token_hash = ${refreshHash}
+      AND revoked = FALSE
+      AND expires_at > NOW()
+    RETURNING *
+  `;
+  const old = oldResult.rows[0];
+  if (!old) return null;
+
+  // Revoke the matching access token (if still active)
+  await sql`
+    UPDATE oauth_access_tokens
+    SET revoked = TRUE
+    WHERE token_hash = ${old.access_token_hash} AND revoked = FALSE
+  `;
+
+  // Issue fresh pair
+  return issueAccessAndRefreshTokens({
+    clientId: old.client_id,
+    userId: old.user_id,
+    scopes: old.scopes,
+  });
+}
+
+/** Revoke an access token (e.g. on user logout / app uninstall). */
+export async function revokeAccessToken(plaintextToken: string): Promise<void> {
+  await ensureOAuthTables();
+  const tokenHash = createHash("sha256").update(plaintextToken).digest("hex");
+  await sql`UPDATE oauth_access_tokens SET revoked = TRUE WHERE token_hash = ${tokenHash}`;
+}
+
 // ─── Agent Logs ───────────────────────────────────────────────────────────────
 // Persistent log of agent actions, errors, and notable events.
 // Queryable via GET /api/agent-logs — can be read by Claude Code for debugging.
