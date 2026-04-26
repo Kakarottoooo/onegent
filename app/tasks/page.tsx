@@ -194,17 +194,15 @@ function SatisfactionWidget({ jobId }: { jobId: string }) {
 
   if (sent) {
     return (
-      <p style={{ fontFamily: "var(--font-dm-sans)", fontSize: 11, color: "var(--text-muted, #aaa)", textAlign: "center", padding: "10px 0" }}>
+      <p className="sat-widget__sent">
         Thanks — your feedback helps the agent improve ✓
       </p>
     );
   }
 
   return (
-    <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 14px", borderTop: "0.5px solid var(--border, #e5e7eb)", justifyContent: "center" }}>
-      <p style={{ fontFamily: "var(--font-dm-sans)", fontSize: 11, color: "var(--text-secondary, #666)", whiteSpace: "nowrap" }}>
-        How did this go?
-      </p>
+    <div className="sat-widget">
+      <p className="sat-widget__prompt">How did this go?</p>
       {[
         { outcome: "satisfied" as const, emoji: "😊", label: "Great" },
         { outcome: "ok" as const, emoji: "👍", label: "OK" },
@@ -213,14 +211,7 @@ function SatisfactionWidget({ jobId }: { jobId: string }) {
         <button
           key={outcome}
           onClick={() => pick(outcome)}
-          style={{
-            display: "flex", alignItems: "center", gap: 4,
-            padding: "4px 10px", borderRadius: 8,
-            border: chosen === outcome ? "0.5px solid var(--gold, #D4A34B)" : "0.5px solid var(--border, #e5e7eb)",
-            background: chosen === outcome ? "rgba(212,163,75,0.08)" : "transparent",
-            fontFamily: "var(--font-dm-sans)", fontSize: 12,
-            color: "var(--text-secondary, #666)", cursor: "pointer",
-          }}
+          className={`sat-widget__btn${chosen === outcome ? " sat-widget__btn--chosen" : ""}`}
         >
           <span>{emoji}</span><span>{label}</span>
         </button>
@@ -613,32 +604,23 @@ function RestaurantTimePicker({
   }
 
   return (
-    <div style={{
-      background: "rgba(212,163,75,0.06)", border: "0.5px solid rgba(212,163,75,0.3)",
-      borderRadius: 10, padding: "12px 14px", display: "flex", flexDirection: "column", gap: 8,
-    }}>
-      <p style={{ fontFamily: "var(--font-dm-sans)", fontSize: 12, fontWeight: 700, color: "var(--gold, #D4A34B)", margin: 0 }}>
+    <div className="time-picker">
+      <p className="time-picker__title">
         🕐 7:00 PM wasn&apos;t available — pick another time:
       </p>
-      <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+      <div className="time-picker__slots">
         {slots.map(slot => (
           <button
             key={slot}
             onClick={() => bookSlot(slot)}
             disabled={!!booking}
-            style={{
-              padding: "5px 12px", borderRadius: 20, border: "0.5px solid rgba(212,163,75,0.5)",
-              background: booking === slot ? "var(--gold, #D4A34B)" : "transparent",
-              color: booking === slot ? "#fff" : "var(--gold, #D4A34B)",
-              fontFamily: "var(--font-dm-sans)", fontSize: 12, fontWeight: 600,
-              cursor: booking ? "not-allowed" : "pointer", opacity: booking && booking !== slot ? 0.5 : 1,
-            }}
+            className={`time-picker__slot${booking === slot ? " time-picker__slot--booking" : ""}`}
           >
             {booking === slot ? "Booking…" : slot}
           </button>
         ))}
       </div>
-      <p style={{ fontFamily: "var(--font-dm-sans)", fontSize: 11, color: "var(--text-muted, #aaa)", margin: 0 }}>
+      <p className="time-picker__hint">
         Tap a time → agent will book it automatically
       </p>
     </div>
@@ -689,15 +671,9 @@ function RetryScheduler({ step, stepIndex, jobId, onScheduled }: {
   if (step.retryScheduledFor) {
     const retryDate = new Date(step.retryScheduledFor);
     return (
-      <div style={{ borderTop: "0.5px solid rgba(212,163,75,0.25)", padding: "8px 12px", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, backgroundColor: "rgba(212,163,75,0.05)" }}>
-        <p style={{ fontFamily: "var(--font-dm-sans)", fontSize: 11, color: "var(--gold, #D4A34B)" }}>
-          ↺ Retry scheduled for {retryDate.toLocaleString()}
-        </p>
-        <button onClick={() => scheduleRetry(null)} disabled={scheduling} style={{
-          background: "none", border: "0.5px solid var(--border, #e5e7eb)",
-          borderRadius: 6, padding: "2px 8px", fontFamily: "var(--font-dm-sans)",
-          fontSize: 10, color: "var(--text-muted, #aaa)", cursor: "pointer",
-        }}>
+      <div className="retry-sched--scheduled">
+        <p>↺ Retry scheduled for {retryDate.toLocaleString()}</p>
+        <button onClick={() => scheduleRetry(null)} disabled={scheduling} className="retry-sched__cancel">
           Cancel
         </button>
       </div>
@@ -705,33 +681,23 @@ function RetryScheduler({ step, stepIndex, jobId, onScheduled }: {
   }
 
   return (
-    <div style={{ borderTop: "0.5px solid var(--border, #e5e7eb)", padding: "8px 12px", backgroundColor: "var(--card-2, #f9f9f9)" }}>
-      {/* Retry now */}
-      <button onClick={retryNow} disabled={retrying} style={{
-        width: "100%", padding: "9px 0", borderRadius: 10, marginBottom: 10,
-        border: "none", backgroundColor: retrying ? "var(--border)" : "var(--gold, #D4A34B)",
-        color: "#fff", fontFamily: "var(--font-dm-sans)", fontSize: 13, fontWeight: 600,
-        cursor: retrying ? "default" : "pointer", transition: "background 0.2s",
-      }}>
+    <div className="retry-sched">
+      <button onClick={retryNow} disabled={retrying} className="retry-sched__primary">
         {retrying ? "Starting agent…" : "↺ Retry now"}
       </button>
-      {/* Schedule retry */}
-      <p style={{ fontFamily: "var(--font-dm-sans)", fontSize: 11, color: "var(--text-muted, #aaa)", marginBottom: 6 }}>
-        Or retry automatically:
-      </p>
-      <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+      <p className="retry-sched__hint">Or retry automatically:</p>
+      <div className="retry-sched__chips">
         {[
           { label: "In 2 hours", hours: 2 },
           { label: "In 6 hours", hours: 6 },
           { label: "Tomorrow", hours: 24 },
         ].map(({ label, hours }) => (
-          <button key={hours} onClick={() => scheduleRetry(hours)} disabled={scheduling} style={{
-            padding: "4px 10px", borderRadius: 8,
-            border: "0.5px solid var(--border, #e5e7eb)",
-            background: "var(--card, #fff)",
-            fontFamily: "var(--font-dm-sans)", fontSize: 11,
-            color: "var(--text-secondary, #666)", cursor: "pointer",
-          }}>
+          <button
+            key={hours}
+            onClick={() => scheduleRetry(hours)}
+            disabled={scheduling}
+            className="retry-sched__chip"
+          >
             {label}
           </button>
         ))}
@@ -799,25 +765,26 @@ function LiveLogPanel({ jobId }: { jobId: string }) {
   }, [jobId]);
 
   if (lines.length === 0 && !closed) return (
-    <div style={{ padding: "6px 12px 6px 44px", fontFamily: "var(--font-dm-sans)", fontSize: 10, color: "var(--text-muted,#aaa)" }}>
-      Waiting for agent logs…
-    </div>
+    <div className="live-log__waiting">Waiting for agent logs…</div>
   );
 
   return (
-    <div style={{ borderTop: "0.5px solid var(--border,#e5e7eb)", padding: "8px 12px 8px 44px" }}>
-      <p style={{ fontFamily: "var(--font-dm-sans)", fontSize: 10, fontWeight: 700, color: "var(--text-muted,#aaa)", letterSpacing: "0.05em", textTransform: "uppercase", marginBottom: 4 }}>
-        Live agent log {closed ? "(finished)" : "● streaming"}
+    <div className="live-log">
+      <p className="live-log__eyebrow">
+        {closed ? "Live agent log (finished)" : (
+          <>
+            <span className="live-log__streaming-dot" />
+            Live agent log
+          </>
+        )}
       </p>
-      <div ref={boxRef} style={{
-        maxHeight: 180, overflowY: "auto", display: "flex", flexDirection: "column", gap: 1,
-        fontFamily: "monospace", fontSize: 10, lineHeight: 1.5,
-      }}>
-        {lines.map((line, i) => (
-          <span key={i} style={{ color: line.includes("FAIL") || line.includes("failed") || line.includes("ERROR") ? "rgba(220,38,38,0.8)" : line.includes("✓") || line.includes("filled") || line.includes("clicked") ? "rgba(22,163,74,0.85)" : "var(--text-secondary,#555)" }}>
-            {line}
-          </span>
-        ))}
+      <div ref={boxRef} className="live-log__lines">
+        {lines.map((line, i) => {
+          const isFail = line.includes("FAIL") || line.includes("failed") || line.includes("ERROR");
+          const isOk = line.includes("✓") || line.includes("filled") || line.includes("clicked");
+          const cls = `live-log__line${isFail ? " live-log__line--fail" : isOk ? " live-log__line--ok" : ""}`;
+          return <span key={i} className={cls}>{line}</span>;
+        })}
       </div>
     </div>
   );
