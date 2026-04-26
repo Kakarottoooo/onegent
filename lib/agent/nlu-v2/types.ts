@@ -219,7 +219,7 @@ export type RouterAction =
     };
 
 // ─── Backward-compat shape returned by /api/chat/parse ────────────────────
-// We keep emitting a v1-shaped response so the existing ConversationalChat
+// We keep emitting a v1-shaped response so the existing homepage chat
 // + ConfirmCard components work unchanged during the migration. Internally
 // we populate this from the new (state, action) pair; see `toV1Response()`
 // in router.ts once we write it.

@@ -13,6 +13,7 @@
 import { useEffect, useState } from "react";
 import type { ConversationalNLUResult } from "@/lib/agent/nlu-v2";
 import type { TripIntentState } from "@/lib/agent/trip-intent-state";
+import "./chat.css";
 
 export type ConfirmCardKind = "room" | "plan" | "trip";
 
@@ -78,52 +79,6 @@ export interface CommitResponse {
     status: "pending";
   };
 }
-
-const CARD_STYLE: React.CSSProperties = {
-  border: "1px solid var(--border, #e5e7eb)",
-  backgroundColor: "var(--card, #fff)",
-  borderRadius: 14,
-  padding: 14,
-  marginTop: 8,
-  display: "flex",
-  flexDirection: "column",
-  gap: 10,
-};
-
-const PILL: React.CSSProperties = {
-  display: "inline-block",
-  padding: "2px 8px",
-  borderRadius: 999,
-  fontSize: 11,
-  fontFamily: "var(--font-dm-sans)",
-  border: "1px solid var(--border, #e5e7eb)",
-  color: "var(--text-secondary, #555)",
-  backgroundColor: "var(--card-2, #f7f7f7)",
-};
-
-const PRIMARY_BTN: React.CSSProperties = {
-  flex: 1,
-  padding: "9px 12px",
-  borderRadius: 10,
-  border: "none",
-  backgroundColor: "var(--gold, #c9a648)",
-  color: "#fff",
-  fontFamily: "var(--font-dm-sans)",
-  fontSize: 13,
-  fontWeight: 600,
-  cursor: "pointer",
-};
-
-const GHOST_BTN: React.CSSProperties = {
-  padding: "9px 12px",
-  borderRadius: 10,
-  border: "1px solid var(--border, #e5e7eb)",
-  backgroundColor: "transparent",
-  color: "var(--text-primary, #111)",
-  fontFamily: "var(--font-dm-sans)",
-  fontSize: 13,
-  cursor: "pointer",
-};
 
 function formatConstraintValue(key: string, value: unknown): string {
   if (value === null || value === undefined) return "";
@@ -246,37 +201,23 @@ export default function ConfirmCard(props: ConfirmCardProps) {
   }
 
   return (
-    <div style={CARD_STYLE}>
-      <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-        <span style={PILL}>
+    <div className="confirm-card">
+      <div className="confirm-card__pills">
+        <span className="confirm-card__pill">
           {props.kind === "room" ? "Decision Room" : props.kind === "trip" ? "Trip package" : "Plan"}
           {scenario ? ` · ${SCENARIO_EMOJI[scenario] ?? ""} ${scenario}`.trimEnd() : ""}
         </span>
         {memberNames.length > 0 ? (
-          <span style={PILL}>with {memberNames.slice(0, 3).join(", ")}{memberNames.length > 3 ? " +" : ""}</span>
+          <span className="confirm-card__pill">
+            with {memberNames.slice(0, 3).join(", ")}{memberNames.length > 3 ? " +" : ""}
+          </span>
         ) : null}
       </div>
 
-      <div
-        style={{
-          fontFamily: "var(--font-dm-sans)",
-          fontSize: 14,
-          color: "var(--text-primary, #111)",
-          lineHeight: 1.5,
-        }}
-      >
-        {summary}
-      </div>
+      <div className="confirm-card__summary">{summary}</div>
 
       {props.kind === "room" ? (
-        <div
-          style={{
-            fontSize: 12,
-            fontFamily: "var(--font-dm-sans)",
-            color: "var(--text-muted, #888)",
-            lineHeight: 1.5,
-          }}
-        >
+        <div className="confirm-card__hint">
           {memberNames.length > 0
             ? `创建后你将获得邀请链接，可分享给 ${memberNames.slice(0, 3).join("、")}${memberNames.length > 3 ? " 等人" : ""}。`
             : "创建后你将获得邀请链接，可分享给其他决策成员。"}
@@ -287,56 +228,32 @@ export default function ConfirmCard(props: ConfirmCardProps) {
           get the auto DM — surface it BEFORE commit so the user can back out
           and add them as contacts first. */}
       {props.kind === "room" && unresolvedNames && unresolvedNames.length > 0 ? (
-        <div
-          style={{
-            fontSize: 12,
-            fontFamily: "var(--font-dm-sans)",
-            padding: "8px 10px",
-            borderRadius: 8,
-            border: "1px solid rgba(232,90,79,0.4)",
-            background: "rgba(232,90,79,0.08)",
-            color: "#e85a4f",
-            lineHeight: 1.5,
-          }}
-        >
+        <div className="confirm-card__warn">
           ⚠️ {unresolvedNames.join("、")} 还不在你的联系人里 — 他们不会自动收到邀请 DM。先去{" "}
-          <a href="/contacts" style={{ textDecoration: "underline", color: "inherit" }}>
-            Contacts
-          </a>{" "}
+          <a href="/contacts">Contacts</a>{" "}
           加上这些人再回来，或者先建 room 后手动分享邀请链接。
         </div>
       ) : null}
 
       {rows.length > 0 ? (
-        <div
-          style={{
-            display: "grid",
-            gridTemplateColumns: "max-content 1fr",
-            columnGap: 12,
-            rowGap: 4,
-            fontSize: 12,
-            fontFamily: "var(--font-dm-sans)",
-          }}
-        >
+        <div className="confirm-card__rows">
           {rows.map(({ k, v }) => (
             <div key={k} style={{ display: "contents" }}>
-              <div style={{ color: "var(--text-muted, #888)" }}>{k}</div>
-              <div style={{ color: "var(--text-primary, #111)" }}>{v}</div>
+              <div className="confirm-card__row-key">{k}</div>
+              <div className="confirm-card__row-value">{v}</div>
             </div>
           ))}
         </div>
       ) : null}
 
-      {error ? (
-        <div style={{ color: "#c0392b", fontSize: 12, fontFamily: "var(--font-dm-sans)" }}>{error}</div>
-      ) : null}
+      {error ? <div className="confirm-card__error">{error}</div> : null}
 
-      <div style={{ display: "flex", gap: 8 }}>
+      <div className="confirm-card__cta-row">
         <button
           type="button"
           disabled={submitting}
           onClick={handleConfirm}
-          style={{ ...PRIMARY_BTN, opacity: submitting ? 0.7 : 1 }}
+          className="confirm-card__cta-primary"
         >
           {submitting
             ? "Working..."
@@ -346,7 +263,7 @@ export default function ConfirmCard(props: ConfirmCardProps) {
                 ? "Package my trip"
                 : "Confirm & run search"}
         </button>
-        <button type="button" onClick={props.onEdit} style={GHOST_BTN}>
+        <button type="button" onClick={props.onEdit} className="confirm-card__cta-ghost">
           Edit
         </button>
       </div>

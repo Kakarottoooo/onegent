@@ -1,5 +1,5 @@
 ================================================================
-Onegent · AI 决策代理 · 项目总结 · v0.2.43.0
+Onegent · AI 决策代理 · 项目总结 · v0.2.47.0
 ================================================================
 
 【项目定义】
@@ -16,6 +16,70 @@ Onegent · AI 决策代理 · 项目总结 · v0.2.43.0
 活动 / 多人 trip），非旅行品类（笔记本 / 手机 / 耳机 / 信用卡 /
 礼物 / 健身）已归档。详见本文档头部 "Recent Updates - 2026-04-24
 (cont. 2) · Positioning Shift"。
+
+================================================================
+Recent Updates - 2026-04-26 · Phase A — 主页 chat 链路 Claude.ai 风格重构
+================================================================
+
+用户反馈"对话 UI 不够好看,金色 bubble 像茶饮店"。深入产品级讨论后
+拍板: 走 Claude.ai 路线 (去 bubble + 大字 + 大留白) + onegent-flavored
+session UX (路线 4: 一个 session = 一次"找 trip 的过程"). 整体 ABC
+分 3 个 Phase, 这次只做 Phase A (chat 视觉重构).
+
+audit 中发现关键事实: chat_sessions DB schema + API + Sidebar 都已
+存在 (B 阶段大部分已实现, 之前 plan 严重 over-estimate). ConversationalChat.tsx
+是 358 行的孤儿组件 (主页直接在 page.tsx 写 chat,从来没用过), 顺手删掉.
+
+1. 新建 components/chat.css (340 行) — 跟 cards.css/tasks.css 一致的
+   page-scoped BEM module. 复用 globals.css 的 9-step ink + spacing/
+   radius/shadow/motion token. 设计哲学:
+   - 去 bubble (Claude.ai 2024 删 bubble 是因为 content 才是产品)
+   - 用户消息: 细灰边框 + 暖 cream 底 (var(--ink-1)) + 16 radius
+     symmetric (无 iMessage tail), 不再黑底/金底实心
+   - Assistant: 完全无容器, 直接 ink-7 文字
+   - 字号 13 → 15 (text-md), 行高 1.5 → 1.65 (lh-relaxed)
+   - 消息间距 8 → 24 (space-6)
+   - Quickpicks: 12px 灰胶囊 → 14px chip + hover gold border + lift
+   - Submit: 圆形 floating + linear-gradient(gold, gold-strong) + scale(1.04) hover
+   - Mic: silent default (gold border on hover), listening 才 gradient
+   - Input: 13px → 15px, focus gold border + gold-glow shadow
+   - ConfirmCard: 16px radius, gold-gradient CTA, ghost edit 按钮
+
+2. app/page.tsx chat 区域 inline style 全清 (~144 行净减)
+   - 用户 bubble 黑底/金底 iMessage tail → chat-msg chat-msg--user
+   - assistant <p> gray 13px → chat-msg chat-msg--assistant + stack wrapper
+   - Quickpicks 12px 灰胶囊 → chat-quickpicks/chat-quickpick
+   - Bottom bar div + input + mic + send + new-chat → chat-bottombar
+     系列 BEM
+   - Thinking indicator inline → chat-thinking
+   - 移除 activeRoomId-based bubble 颜色分支 (room 模式不再用 gold
+     实心 — 统一去 bubble 让 thread 视觉一致)
+
+3. components/ConfirmCard.tsx 16 处 inline style → BEM (~119 行净减)
+   - CARD_STYLE/PILL/PRIMARY_BTN/GHOST_BTN 4 个 const → confirm-card
+     系列 BEM (confirm-card/__pills/__pill/__summary/__hint/__warn/
+     __rows/__row-key/__row-value/__error/__cta-row/__cta-primary/__cta-ghost)
+   - 沿用 cards.css 的 :where() 共享 chrome 设计哲学
+   - CTA: linear-gradient(gold, gold-strong) + translateY(-1px) hover
+   - Ghost edit: gold border on hover
+
+4. 删孤儿 ConversationalChat.tsx (358 行)
+   - grep 确认 prod code 0 引用 (只有 doc 注释 + nlu-v2 alias 注释)
+   - 同步清理 lib/agent/nlu-v2/index.ts 和 types.ts 的 doc 注释 (改"homepage chat")
+   - 减债 358 行 — 之前被 stale plan 误以为是当前 chat 入口
+
+净改动: -541 行删 / +340 chat.css / 总 -201 行 (代码瘦身)
+typecheck pass / RecommendationCard 11/11 测试 green
+
+下一步 (Phase B' + C' 已规划):
+  B'1: chat_session_messages 加 nlu_state JSONB column, parse 端点
+       接受 prev_nlu_state, 加载历史时 hydrate (Q4 b 选择)
+  B'2: verify + 微调 hero 渐隐 (Q5 c 选择)
+  C'1: NLU async 抽 destination → PATCH session title
+       (从 "Tokyo trip..." → "Tokyo · Apr 24-28")
+  C'2: Sidebar 改成 Drafts/Completed 分栏 + ✓
+  C'3: chat_sessions 加 destination/scenario/upgraded_plan_id/
+       upgraded_trip_id 列 (Q3 a: plan 创建即 completed)
 
 ================================================================
 Recent Updates - 2026-04-25 (cont. 13) · 全天 customer-end UI 系统升级 + 性能 + pre-existing test 收尾

@@ -37,7 +37,7 @@ export type {
 // ─── v1 compatibility aliases ─────────────────────────────────────────────
 // The v1 module (lib/conversational-nlu.ts) was retired in Phase C cleanup.
 // Its exported type names live on here as aliases so existing callers
-// (page.tsx, ConfirmCard, ConversationalChat, commit/parse routes) can
+// (page.tsx, ConfirmCard, commit/parse routes) can
 // migrate their imports with a one-line path change.
 
 /** @deprecated Use NluV2ParseResult. Kept as an alias for the v1 → v2 migration. */
@@ -144,7 +144,7 @@ export async function analyzeConversationalV2(
 // ─── V1-compat projection ─────────────────────────────────────────────────
 // Flattens v2's (state, action, reply) into the same ConversationalNLUResult
 // shape `/api/chat/parse` has been returning since Phase 1. This lets the
-// frontend (ConversationalChat + ConfirmCard) render v2 responses without
+// frontend (homepage chat + ConfirmCard) render v2 responses without
 // any component changes.
 
 function toV1CompatShape(

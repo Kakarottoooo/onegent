@@ -1,0 +1,443 @@
+/* ─── Chat surface — Claude.ai-inspired BEM ──────────────────────────────
+ *
+ * Used by app/page.tsx (homepage chat thread + bottom input bar) and
+ * components/ConfirmCard.tsx (inline confirm card rendered below the
+ * last assistant bubble when NLU signals confirm_ready).
+ *
+ * Design philosophy:
+ *   ── DE-bubble. Claude.ai removed bubbles in 2024 because content,
+ *      not the container, is the product. User messages get a quiet
+ *      hairline border on a tinted surface; assistant text flows
+ *      directly with no chrome at all.
+ *   ── Generous whitespace. Message gap is var(--space-6) (24px),
+ *      not 8px. The thread reads like Medium, not Slack.
+ *   ── Larger type. 15px (var(--text-md)) with 1.65 line-height —
+ *      content-first, not notification-first.
+ *   ── Cards are the visual ace. Because chrome is minimal, the
+ *      embedded recommendation cards become the eye candy. Aligns
+ *      with cards.css visual language (warm shadows, gold gradient).
+ *   ── Submit = floating circle, not rectangle button. Round =
+ *      "action", rectangle = "form control".
+ *
+ * Tokens: globals.css 9-step ink, spacing/radius/shadow/motion.
+ * Avoid hardcoded literals — every literal is design debt.
+ * ─────────────────────────────────────────────────────────────────────── */
+
+/* ─── Thread container ────────────────────────────────────────────────── */
+.chat-thread {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-6); /* 24px between consecutive messages */
+}
+
+/* ─── Message bubbles (or lack thereof) ───────────────────────────────── */
+.chat-msg {
+  font-family: var(--font-dm-sans);
+  font-size: var(--text-md); /* 15px */
+  line-height: var(--lh-relaxed); /* 1.65 */
+  white-space: pre-wrap;
+  animation: chatFadeUp var(--motion-base) var(--ease-out-soft);
+}
+
+/* User message — quiet outlined card, NOT iMessage filled bubble.
+   Sits right-aligned with a max-width so long prompts wrap nicely. */
+.chat-msg--user {
+  align-self: flex-end;
+  max-width: min(560px, 82%);
+  padding: var(--space-3) var(--space-4); /* 12 16 */
+  border-radius: var(--radius-lg); /* 16 — symmetric, no tail */
+  border: 1px solid var(--ink-3);
+  background: var(--ink-1); /* cream surface */
+  color: var(--ink-9);
+}
+
+/* Assistant message — no container at all, just text. The visual hierarchy
+   is "what was said" (right) vs "what was answered" (left). */
+.chat-msg--assistant {
+  align-self: flex-start;
+  max-width: 92%;
+  padding: var(--space-1) 0;
+  color: var(--ink-7);
+}
+
+/* Inline-card wrapper — assistant message that embeds product cards.
+   We need a column flex to stack text + cards with consistent gap. */
+.chat-msg--assistant-stack {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3); /* 12 between text and embedded cards */
+}
+
+/* Soft "Thinking…" indicator while NLU parse is in flight. */
+.chat-thinking {
+  align-self: flex-start;
+  color: var(--ink-5);
+  font-size: var(--text-sm);
+  font-family: var(--font-dm-sans);
+  font-style: italic;
+  padding: var(--space-1) 0;
+  animation: chatFadeUp var(--motion-base) var(--ease-out-soft);
+}
+
+/* ─── Quick-pick chips ─────────────────────────────────────────────────
+ * Bigger, more clickable than the old 12px gray pellets — they're now
+ * the user's primary path forward when NLU asks a clarifying question,
+ * so they deserve visual weight.
+ * ─────────────────────────────────────────────────────────────────── */
+.chat-quickpicks {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2); /* 8 */
+  padding-top: var(--space-2);
+  align-self: flex-start;
+}
+
+.chat-quickpick {
+  padding: var(--space-2) var(--space-4); /* 8 16 */
+  border-radius: var(--radius-pill);
+  border: 1px solid var(--ink-3);
+  background: var(--card);
+  color: var(--ink-7);
+  font-family: var(--font-dm-sans);
+  font-size: var(--text-base); /* 14 */
+  font-weight: 500;
+  cursor: pointer;
+  transition:
+    border-color var(--motion-fast) var(--ease-in-out),
+    color var(--motion-fast) var(--ease-in-out),
+    transform var(--motion-fast) var(--ease-out-soft),
+    box-shadow var(--motion-fast) var(--ease-in-out);
+}
+
+.chat-quickpick:hover:not(:disabled) {
+  border-color: var(--gold);
+  color: var(--ink-9);
+  transform: translateY(-1px);
+  box-shadow: var(--shadow-1);
+}
+
+.chat-quickpick:active:not(:disabled) {
+  transform: translateY(0);
+  box-shadow: none;
+}
+
+.chat-quickpick:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  transform: none;
+  box-shadow: none;
+}
+
+/* ─── Bottom input bar ────────────────────────────────────────────────── */
+.chat-bottombar {
+  flex-shrink: 0;
+  border-top: 1px solid var(--ink-2);
+  padding: var(--space-3) var(--space-4);
+  background: var(--card);
+  position: relative;
+  z-index: 10;
+}
+
+.chat-bottombar__inner {
+  max-width: 56rem; /* lg:max-w-4xl, matches existing layout */
+  margin: 0 auto;
+  display: flex;
+  gap: var(--space-2);
+  align-items: center;
+}
+
+.chat-input {
+  flex: 1;
+  min-width: 0;
+  padding: var(--space-3) var(--space-4); /* 12 16 */
+  border-radius: var(--radius-2xl); /* 24 — pill */
+  border: 1px solid var(--ink-3);
+  background: var(--card);
+  color: var(--ink-9);
+  font-family: var(--font-dm-sans);
+  font-size: var(--text-md); /* 15 */
+  outline: none;
+  transition:
+    border-color var(--motion-fast) var(--ease-in-out),
+    box-shadow var(--motion-fast) var(--ease-in-out);
+}
+
+.chat-input::placeholder {
+  color: var(--ink-4);
+}
+
+.chat-input:focus {
+  border-color: var(--gold);
+  box-shadow: var(--shadow-gold-glow);
+}
+
+.chat-input--listening {
+  border-color: var(--gold);
+}
+
+.chat-input:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+/* "+ New chat" — kept compact, square, secondary chrome */
+.chat-newchat {
+  flex-shrink: 0;
+  width: 36px;
+  height: 36px;
+  border-radius: var(--radius-sm); /* 8 */
+  border: 1px solid var(--ink-3);
+  background: transparent;
+  color: var(--ink-5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 16px;
+  line-height: 1;
+  cursor: pointer;
+  transition:
+    border-color var(--motion-fast) var(--ease-in-out),
+    color var(--motion-fast) var(--ease-in-out);
+}
+
+.chat-newchat:hover {
+  border-color: var(--ink-5);
+  color: var(--ink-7);
+}
+
+/* Mic — silent default state, gold-glow when listening. Visually quieter
+   than the send button so the eye lands on the gold submit. */
+.chat-mic {
+  flex-shrink: 0;
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  border: 1px solid var(--ink-3);
+  background: var(--card);
+  color: var(--ink-6);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition:
+    border-color var(--motion-fast) var(--ease-in-out),
+    color var(--motion-fast) var(--ease-in-out),
+    background-color var(--motion-fast) var(--ease-in-out),
+    transform var(--motion-fast) var(--ease-out-soft),
+    box-shadow var(--motion-fast) var(--ease-in-out);
+}
+
+.chat-mic:hover:not(:disabled) {
+  border-color: var(--gold);
+  color: var(--gold);
+}
+
+.chat-mic--listening {
+  background: linear-gradient(180deg, var(--gold), var(--gold-strong));
+  color: #fff;
+  border-color: var(--gold);
+  transform: scale(1.06);
+  box-shadow: var(--shadow-gold-glow);
+}
+
+.chat-mic:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+/* Send — the gold gradient floating circle. This is the visual ace of the
+   bottom bar. Hover lifts it slightly with a brand glow. */
+.chat-send {
+  flex-shrink: 0;
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  border: none;
+  background: linear-gradient(180deg, var(--gold), var(--gold-strong));
+  color: #fff;
+  font-size: 20px;
+  line-height: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition:
+    opacity var(--motion-fast) var(--ease-in-out),
+    transform var(--motion-fast) var(--ease-out-soft),
+    box-shadow var(--motion-fast) var(--ease-in-out);
+}
+
+.chat-send:hover:not(:disabled) {
+  transform: scale(1.04);
+  box-shadow: var(--shadow-gold-glow);
+}
+
+.chat-send:active:not(:disabled) {
+  transform: scale(0.98);
+}
+
+.chat-send:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+/* ─── ConfirmCard — inline below the last assistant bubble ─────────────
+ * Uses the same warm-shadow + gold-gradient CTA language as cards.css.
+ * Sits inline in the chat thread, so it shares chat fade-up motion.
+ * ─────────────────────────────────────────────────────────────────── */
+.confirm-card {
+  border: 1px solid var(--ink-3);
+  background: var(--card);
+  border-radius: var(--radius-lg); /* 16 */
+  padding: var(--space-4); /* 16 */
+  margin-top: var(--space-2);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  box-shadow: var(--shadow-1);
+  animation: chatFadeUp var(--motion-base) var(--ease-out-soft);
+}
+
+.confirm-card__pills {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+
+.confirm-card__pill {
+  display: inline-flex;
+  align-items: center;
+  padding: var(--space-1) var(--space-3); /* 4 12 */
+  border-radius: var(--radius-pill);
+  border: 1px solid var(--ink-3);
+  background: var(--ink-1);
+  color: var(--ink-6);
+  font-family: var(--font-dm-sans);
+  font-size: var(--text-xs); /* 11 */
+  font-weight: 500;
+  letter-spacing: var(--tracking-tight);
+}
+
+.confirm-card__summary {
+  color: var(--ink-8);
+  font-family: var(--font-dm-sans);
+  font-size: var(--text-md); /* 15 */
+  line-height: var(--lh-relaxed);
+}
+
+.confirm-card__hint {
+  color: var(--ink-5);
+  font-family: var(--font-dm-sans);
+  font-size: var(--text-sm); /* 13 */
+  line-height: var(--lh-relaxed);
+}
+
+.confirm-card__warn {
+  font-family: var(--font-dm-sans);
+  font-size: var(--text-sm);
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-sm);
+  border: 1px solid rgba(232, 90, 79, 0.4);
+  background: rgba(232, 90, 79, 0.08);
+  color: #e85a4f;
+  line-height: var(--lh-relaxed);
+}
+
+.confirm-card__warn a {
+  color: inherit;
+  text-decoration: underline;
+}
+
+.confirm-card__rows {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  column-gap: var(--space-3);
+  row-gap: var(--space-1);
+  font-family: var(--font-dm-sans);
+  font-size: var(--text-sm); /* 13 */
+}
+
+.confirm-card__row-key {
+  color: var(--ink-5);
+  text-transform: capitalize;
+}
+
+.confirm-card__row-value {
+  color: var(--ink-8);
+}
+
+.confirm-card__error {
+  color: var(--danger);
+  font-family: var(--font-dm-sans);
+  font-size: var(--text-sm);
+}
+
+.confirm-card__cta-row {
+  display: flex;
+  gap: var(--space-2);
+}
+
+.confirm-card__cta-primary {
+  flex: 1;
+  padding: var(--space-3) var(--space-4); /* 12 16 */
+  border-radius: var(--radius-sm); /* 8 — slightly less round than pill so
+                                       it feels distinct from quick-pick chips */
+  border: none;
+  background: linear-gradient(180deg, var(--gold), var(--gold-strong));
+  color: #fff;
+  font-family: var(--font-dm-sans);
+  font-size: var(--text-base); /* 14 */
+  font-weight: 600;
+  cursor: pointer;
+  transition:
+    opacity var(--motion-fast) var(--ease-in-out),
+    transform var(--motion-fast) var(--ease-out-soft),
+    box-shadow var(--motion-fast) var(--ease-in-out);
+}
+
+.confirm-card__cta-primary:hover:not(:disabled) {
+  transform: translateY(-1px);
+  box-shadow: var(--shadow-2);
+}
+
+.confirm-card__cta-primary:active:not(:disabled) {
+  transform: translateY(0);
+}
+
+.confirm-card__cta-primary:disabled {
+  opacity: 0.7;
+  cursor: not-allowed;
+}
+
+.confirm-card__cta-ghost {
+  padding: var(--space-3) var(--space-4);
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--ink-3);
+  background: transparent;
+  color: var(--ink-7);
+  font-family: var(--font-dm-sans);
+  font-size: var(--text-base);
+  font-weight: 500;
+  cursor: pointer;
+  transition:
+    border-color var(--motion-fast) var(--ease-in-out),
+    color var(--motion-fast) var(--ease-in-out);
+}
+
+.confirm-card__cta-ghost:hover {
+  border-color: var(--gold);
+  color: var(--ink-9);
+}
+
+/* ─── Motion ───────────────────────────────────────────────────────── */
+@keyframes chatFadeUp {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}

@@ -45,6 +45,7 @@ import type {
 import type { ChatMessage } from "@/lib/llm-client";
 import { loadAgentModelConfig } from "@/lib/agent-model-config";
 import { useRouter } from "next/navigation";
+import "@/components/chat.css";
 
 // Leaflet is not SSR-compatible
 const MapView = dynamic(() => import("@/components/MapView"), { ssr: false });
@@ -2540,22 +2541,7 @@ export default function Home() {
                   <div key={i}>
                     {msg.role === "user" ? (
                       <div className="flex justify-end">
-                        <div
-                          className="px-4 py-3 max-w-xs"
-                          style={{
-                            // Bubble color signals which thread type you're in:
-                            //   room  → gold (collaborative, brand color)
-                            //   other → cream (default solo look)
-                            backgroundColor: activeRoomId
-                              ? "var(--gold, #C9A84C)"
-                              : "var(--text-primary)",
-                            color: activeRoomId ? "#fff" : "var(--bg)",
-                            borderRadius: "18px 18px 4px 18px",
-                            fontFamily: "var(--font-dm-sans)",
-                            fontSize: "14px",
-                            lineHeight: 1.5,
-                          }}
-                        >
+                        <div className="chat-msg chat-msg--user">
                           {msg.content}
                         </div>
                       </div>
@@ -2585,18 +2571,8 @@ export default function Home() {
                         )}
                       </div>
                     ) : (
-                      <div className="flex flex-col gap-3">
-                        <p
-                          style={{
-                            color: "var(--text-secondary)",
-                            fontSize: "13px",
-                            fontFamily: "var(--font-dm-sans)",
-                            paddingTop: "4px",
-                            paddingBottom: "4px",
-                          }}
-                        >
-                          {msg.content}
-                        </p>
+                      <div className="chat-msg--assistant-stack">
+                        <p className="chat-msg chat-msg--assistant">{msg.content}</p>
                         {/* Inline hotel cards for this message */}
                         {msg.hotelCards && msg.hotelCards.length > 0 && (
                           <div className="flex flex-col gap-3">
@@ -2707,39 +2683,18 @@ export default function Home() {
                 ))}
 
                 {/* P1-15: NLU pending indicator — shown while /api/chat/parse is in flight */}
-                {nluPending && (
-                  <div
-                    style={{
-                      color: "var(--text-secondary)",
-                      fontSize: "13px",
-                      fontFamily: "var(--font-dm-sans)",
-                      fontStyle: "italic",
-                      padding: "4px 2px",
-                    }}
-                  >
-                    Thinking…
-                  </div>
-                )}
+                {nluPending && <div className="chat-thinking">Thinking…</div>}
 
                 {/* P1-15: Quick-pick chips — rendered when NLU asked a clarifying question */}
                 {pendingQuickPicks && pendingQuickPicks.length > 0 && (
-                  <div style={{ display: "flex", flexWrap: "wrap", gap: 6, paddingTop: 4 }}>
+                  <div className="chat-quickpicks">
                     {pendingQuickPicks.map((pick) => (
                       <button
                         key={`qp-${pick.value}`}
                         type="button"
                         onClick={() => handleQuickPick(pick.value)}
                         disabled={chat.loading || nluPending}
-                        style={{
-                          padding: "6px 12px",
-                          borderRadius: 999,
-                          border: "0.5px solid var(--border)",
-                          backgroundColor: "var(--card)",
-                          color: "var(--text-primary)",
-                          fontFamily: "var(--font-dm-sans)",
-                          fontSize: 12,
-                          cursor: "pointer",
-                        }}
+                        className="chat-quickpick"
                       >
                         {pick.label}
                       </button>
@@ -3137,23 +3092,15 @@ export default function Home() {
       )}
 
       {/* ─── Bottom Input Bar ─────────────────────────────────── */}
-      <div
-        className="flex-shrink-0 border-t px-4 py-3 z-10"
-        style={{ backgroundColor: "var(--card)", borderColor: "var(--border)" }}
-      >
-        <div className="max-w-2xl md:max-w-3xl lg:max-w-4xl mx-auto flex gap-2 items-center">
+      <div className="chat-bottombar">
+        <div className="chat-bottombar__inner">
           {/* New chat button — only show when there's conversation history */}
           {hasMessages && (
             <button
               onClick={() => { chat.clearChat(); setInlineItems([]); setPendingTravelDoc(null); }}
               title="Start a new conversation"
-              style={{
-                flexShrink: 0, width: 36, height: 36, borderRadius: 10,
-                border: "0.5px solid var(--border)", backgroundColor: "var(--card)",
-                color: "var(--text-secondary)", cursor: "pointer",
-                display: "flex", alignItems: "center", justifyContent: "center",
-                fontSize: 16, lineHeight: 1,
-              }}
+              className="chat-newchat"
+              aria-label="Start a new conversation"
             >
               ✕
             </button>
@@ -3189,16 +3136,7 @@ export default function Home() {
                 : "Describe what you're looking for..."
             }
             aria-label="Search for restaurants"
-            className="flex-1 outline-none px-4 py-2.5"
-            style={{
-              backgroundColor: "var(--bg)",
-              border: `0.5px solid ${isListening ? "var(--gold)" : "var(--border)"}`,
-              borderRadius: "24px",
-              color: "var(--text-primary)",
-              fontFamily: "var(--font-dm-sans)",
-              fontSize: "13px",
-              transition: "border-color 0.2s",
-            }}
+            className={`chat-input${isListening ? " chat-input--listening" : ""}`}
             disabled={chat.loading || isListening}
           />
           {/* Phase 5.2: Mic button — hidden when voice not supported */}
@@ -3207,63 +3145,21 @@ export default function Home() {
               onClick={isListening ? stopListening : startListening}
               disabled={chat.loading}
               aria-label={isListening ? "Stop listening" : "Start voice input"}
-              style={{
-                width: "44px",
-                height: "44px",
-                borderRadius: "50%",
-                backgroundColor: isListening ? "var(--gold)" : "var(--text-primary)",
-                color: isListening ? "#fff" : "var(--gold)",
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-                flexShrink: 0,
-                border: "none",
-                cursor: chat.loading ? "not-allowed" : "pointer",
-                opacity: chat.loading ? 0.4 : 1,
-                transition: "background-color 0.2s, transform 0.2s",
-                transform: isListening ? "scale(1.08)" : "scale(1)",
-                boxShadow: isListening ? "0 0 0 4px rgba(201,168,76,0.25)" : "none",
-              }}
+              className={`chat-mic${isListening ? " chat-mic--listening" : ""}`}
             >
-              {isListening ? (
-                // Animated pulse when listening
-                <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
-                  <rect x="9" y="2" width="6" height="14" rx="3" />
-                  <path d="M5 11a7 7 0 0 0 14 0" stroke="currentColor" strokeWidth="2" fill="none" strokeLinecap="round"/>
-                  <line x1="12" y1="18" x2="12" y2="22" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/>
-                  <line x1="8" y1="22" x2="16" y2="22" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/>
-                </svg>
-              ) : (
-                <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
-                  <rect x="9" y="2" width="6" height="14" rx="3" />
-                  <path d="M5 11a7 7 0 0 0 14 0" stroke="currentColor" strokeWidth="2" fill="none" strokeLinecap="round"/>
-                  <line x1="12" y1="18" x2="12" y2="22" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/>
-                  <line x1="8" y1="22" x2="16" y2="22" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/>
-                </svg>
-              )}
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
+                <rect x="9" y="2" width="6" height="14" rx="3" />
+                <path d="M5 11a7 7 0 0 0 14 0" stroke="currentColor" strokeWidth="2" fill="none" strokeLinecap="round"/>
+                <line x1="12" y1="18" x2="12" y2="22" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/>
+                <line x1="8" y1="22" x2="16" y2="22" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/>
+              </svg>
             </button>
           )}
           <button
             onClick={sendCurrentInput}
             disabled={chat.loading || !chat.input.trim()}
             aria-label="Send"
-            style={{
-              width: "44px",
-              height: "44px",
-              borderRadius: "50%",
-              backgroundColor: "var(--gold)",
-              color: "#fff",
-              fontSize: "20px",
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              flexShrink: 0,
-              opacity: chat.loading || !chat.input.trim() ? 0.4 : 1,
-              cursor:
-                chat.loading || !chat.input.trim() ? "not-allowed" : "pointer",
-              transition: "opacity 0.2s",
-              border: "none",
-            }}
+            className="chat-send"
           >
             ↑
           </button>
