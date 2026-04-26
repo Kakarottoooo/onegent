@@ -1998,60 +1998,98 @@ function InsightsPanel({ sessionId }: { sessionId: string }) {
 
           {/* ── Task memory tab ── */}
           {!loading && activeTab === "task" && (
-            <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-              <p style={{ fontFamily: "var(--font-dm-sans)", fontSize: 11, color: "var(--text-secondary, #666)", fontStyle: "italic" }}>
+            <div className="insights">
+              <p className="insights__subtitle" style={{ fontStyle: "italic", marginTop: 0 }}>
                 How your preferences differ by booking context.
               </p>
               {taskMemory.length === 0 && (
-                <p style={{ fontFamily: "var(--font-dm-sans)", fontSize: 12, color: "var(--text-muted, #aaa)" }}>
+                <p className="insights__empty" style={{ padding: 0, fontSize: 12 }}>
                   Complete a few trips with feedback to build scenario memory.
                 </p>
               )}
               {taskMemory.map((mem) => (
-                <div key={`${mem.scenario}-${mem.stepType}`} style={{
-                  padding: "10px 12px", borderRadius: 10,
-                  border: "0.5px solid var(--border, #e5e7eb)",
-                  background: "var(--card-2, #f9f9f9)",
-                }}>
-                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 6 }}>
+                <div
+                  key={`${mem.scenario}-${mem.stepType}`}
+                  className="insights__list-item"
+                  style={{ flexDirection: "column", alignItems: "stretch", gap: 6 }}
+                >
+                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
                     <div style={{ display: "flex", gap: 6 }}>
-                      <span style={{
-                        fontFamily: "var(--font-dm-sans)", fontSize: 10, fontWeight: 700,
-                        color: "#8b5cf6", background: "rgba(139,92,246,0.08)",
-                        borderRadius: 4, padding: "1px 5px",
-                      }}>
+                      <span
+                        className="insights__chip"
+                        style={{
+                          fontSize: 10,
+                          fontWeight: 700,
+                          color: "#8b5cf6",
+                          background: "rgba(139,92,246,0.08)",
+                          borderColor: "rgba(139,92,246,0.25)",
+                        }}
+                      >
                         {mem.scenarioLabel}
                       </span>
-                      <span style={{
-                        fontFamily: "var(--font-dm-sans)", fontSize: 10, fontWeight: 600,
-                        color: "var(--text-secondary, #666)", background: "var(--border, #e5e7eb)",
-                        borderRadius: 4, padding: "1px 5px", textTransform: "capitalize",
-                      }}>
+                      <span
+                        className="insights__chip"
+                        style={{
+                          fontSize: 10,
+                          fontWeight: 600,
+                          textTransform: "capitalize",
+                        }}
+                      >
                         {mem.stepType}
                       </span>
                     </div>
-                    <span style={{ fontFamily: "var(--font-dm-sans)", fontSize: 10, color: "var(--text-muted, #aaa)" }}>
+                    <span
+                      style={{
+                        fontFamily: "var(--font-dm-sans)",
+                        fontSize: 10,
+                        color: "var(--ink-5)",
+                        letterSpacing: "var(--tracking-tight)",
+                      }}
+                    >
                       {mem.totalEvents} events
                     </span>
                   </div>
-                  <p style={{ fontFamily: "var(--font-dm-sans)", fontSize: 12, color: "var(--text-primary, #111)", marginBottom: 8, lineHeight: 1.4 }}>
+                  <p
+                    style={{
+                      fontFamily: "var(--font-dm-sans)",
+                      fontSize: 12,
+                      color: "var(--ink-8)",
+                      lineHeight: 1.4,
+                    }}
+                  >
                     {mem.keyInsight}
                   </p>
                   <div style={{ display: "flex", gap: 12 }}>
                     {mem.timeAdjustAcceptance !== null && (
                       <div style={{ flex: 1 }}>
-                        <p style={{ fontFamily: "var(--font-dm-sans)", fontSize: 10, color: "var(--text-muted, #aaa)", marginBottom: 3 }}>Time adjust</p>
+                        <p className="insights__metric-label" style={{ marginBottom: 3 }}>Time adjust</p>
                         <ProgressBar value={mem.timeAdjustAcceptance} color="rgba(234,88,12,0.7)" />
-                        <p style={{ fontFamily: "var(--font-dm-sans)", fontSize: 10, color: "rgba(234,88,12,0.8)", marginTop: 2 }}>
+                        <p
+                          style={{
+                            fontFamily: "var(--font-dm-sans)",
+                            fontSize: 10,
+                            color: "rgba(234,88,12,0.85)",
+                            marginTop: 2,
+                            fontWeight: 600,
+                          }}
+                        >
                           {Math.round(mem.timeAdjustAcceptance * 100)}% accepted
                         </p>
                       </div>
                     )}
                     {mem.venueSwitchAcceptance !== null && (
                       <div style={{ flex: 1 }}>
-                        <p style={{ fontFamily: "var(--font-dm-sans)", fontSize: 10, color: "var(--text-muted, #aaa)", marginBottom: 3 }}>Venue switch</p>
+                        <p className="insights__metric-label" style={{ marginBottom: 3 }}>Venue switch</p>
                         <ProgressBar value={mem.venueSwitchAcceptance} color="#6366f1" />
-                        <p style={{ fontFamily: "var(--font-dm-sans)", fontSize: 10, color: "#6366f1", marginTop: 2 }}>
+                        <p
+                          style={{
+                            fontFamily: "var(--font-dm-sans)",
+                            fontSize: 10,
+                            color: "#6366f1",
+                            marginTop: 2,
+                            fontWeight: 600,
+                          }}
+                        >
                           {Math.round(mem.venueSwitchAcceptance * 100)}% accepted
                         </p>
                       </div>
@@ -2064,9 +2102,9 @@ function InsightsPanel({ sessionId }: { sessionId: string }) {
 
           {/* ── Patterns tab ── */}
           {!loading && activeTab === "patterns" && (
-            <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+            <div className="insights" style={{ gap: 16 }}>
               {!patternMemory && (
-                <p style={{ fontFamily: "var(--font-dm-sans)", fontSize: 12, color: "var(--text-muted, #aaa)" }}>
+                <p className="insights__empty" style={{ padding: 0, fontSize: 12 }}>
                   Complete a few trips with feedback to build behavioral patterns.
                 </p>
               )}
@@ -2075,27 +2113,48 @@ function InsightsPanel({ sessionId }: { sessionId: string }) {
                 <>
                   {/* Stated vs actual */}
                   <div>
-                    <p style={{ fontFamily: "var(--font-dm-sans)", fontSize: 11, fontWeight: 700, color: "var(--text-muted, #aaa)", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 8 }}>
+                    <p className="insights__eyebrow" style={{ marginBottom: 8 }}>
                       Stated vs actual tolerance
                     </p>
-                    <div style={{
-                      padding: "10px 12px", borderRadius: 10, lineHeight: 1.5,
-                      background: patternMemory.statedVsActual.conclusion === "more_strict"
-                        ? "rgba(220,38,38,0.04)" : patternMemory.statedVsActual.conclusion === "more_liberal"
-                        ? "rgba(22,163,74,0.04)" : "var(--card-2, #f9f9f9)",
-                      border: `0.5px solid ${patternMemory.statedVsActual.conclusion === "more_strict"
-                        ? "rgba(220,38,38,0.15)" : patternMemory.statedVsActual.conclusion === "more_liberal"
-                        ? "rgba(22,163,74,0.15)" : "var(--border, #e5e7eb)"}`,
-                    }}>
-                      <p style={{ fontFamily: "var(--font-dm-sans)", fontSize: 12, color: "var(--text-primary, #111)" }}>
+                    <div
+                      style={{
+                        padding: "10px 12px",
+                        borderRadius: "var(--radius)",
+                        lineHeight: 1.5,
+                        background:
+                          patternMemory.statedVsActual.conclusion === "more_strict"
+                            ? "rgba(220,38,38,0.04)"
+                            : patternMemory.statedVsActual.conclusion === "more_liberal"
+                            ? "rgba(22,163,74,0.04)"
+                            : "var(--card-2)",
+                        border: `1px solid ${
+                          patternMemory.statedVsActual.conclusion === "more_strict"
+                            ? "rgba(220,38,38,0.15)"
+                            : patternMemory.statedVsActual.conclusion === "more_liberal"
+                            ? "rgba(22,163,74,0.15)"
+                            : "var(--ink-2)"
+                        }`,
+                      }}
+                    >
+                      <p
+                        style={{
+                          fontFamily: "var(--font-dm-sans)",
+                          fontSize: 12,
+                          color: "var(--ink-8)",
+                          lineHeight: "var(--lh-normal)",
+                        }}
+                      >
                         {patternMemory.statedVsActual.insight}
                       </p>
                       {patternMemory.statedVsActual.actualAcceptanceRate !== null && (
                         <div style={{ marginTop: 8 }}>
                           <ProgressBar
                             value={patternMemory.statedVsActual.actualAcceptanceRate}
-                            color={patternMemory.statedVsActual.conclusion === "more_strict"
-                              ? "rgba(220,38,38,0.6)" : "rgba(22,163,74,0.7)"}
+                            color={
+                              patternMemory.statedVsActual.conclusion === "more_strict"
+                                ? "rgba(220,38,38,0.65)"
+                                : "rgba(22,163,74,0.75)"
+                            }
                           />
                         </div>
                       )}
@@ -2105,23 +2164,49 @@ function InsightsPanel({ sessionId }: { sessionId: string }) {
                   {/* Satisfaction predictors */}
                   {patternMemory.satisfactionPredictors.length > 0 && (
                     <div>
-                      <p style={{ fontFamily: "var(--font-dm-sans)", fontSize: 11, fontWeight: 700, color: "var(--text-muted, #aaa)", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 8 }}>
+                      <p className="insights__eyebrow" style={{ marginBottom: 8 }}>
                         What drives your satisfaction
                       </p>
                       {patternMemory.satisfactionPredictors.map((pred) => (
-                        <div key={pred.agentDecision} style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 8 }}>
+                        <div
+                          key={pred.agentDecision}
+                          style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 8 }}
+                        >
                           <div style={{ flex: 1 }}>
-                            <p style={{ fontFamily: "var(--font-dm-sans)", fontSize: 11, color: "var(--text-secondary, #666)" }}>{pred.insight}</p>
+                            <p
+                              style={{
+                                fontFamily: "var(--font-dm-sans)",
+                                fontSize: 11,
+                                color: "var(--ink-6)",
+                                lineHeight: "var(--lh-normal)",
+                              }}
+                            >
+                              {pred.insight}
+                            </p>
                           </div>
                           {pred.avgScore !== null && (
                             <div style={{ display: "flex", alignItems: "center", gap: 6, flexShrink: 0 }}>
                               <div style={{ width: 60 }}>
                                 <ProgressBar
                                   value={pred.avgScore}
-                                  color={pred.avgScore >= 0.7 ? "rgba(22,163,74,0.7)" : pred.avgScore >= 0.4 ? "var(--gold, #D4A34B)" : "rgba(220,38,38,0.6)"}
+                                  color={
+                                    pred.avgScore >= 0.7
+                                      ? "rgba(22,163,74,0.75)"
+                                      : pred.avgScore >= 0.4
+                                      ? "var(--gold)"
+                                      : "rgba(220,38,38,0.65)"
+                                  }
                                 />
                               </div>
-                              <span style={{ fontFamily: "var(--font-dm-sans)", fontSize: 11, fontWeight: 600, color: "var(--text-secondary, #666)" }}>
+                              <span
+                                style={{
+                                  fontFamily: "var(--font-dm-sans)",
+                                  fontSize: 11,
+                                  fontWeight: 700,
+                                  color: "var(--ink-7)",
+                                  letterSpacing: "var(--tracking-tight)",
+                                }}
+                              >
                                 {Math.round(pred.avgScore * 100)}%
                               </span>
                             </div>
@@ -2134,19 +2219,40 @@ function InsightsPanel({ sessionId }: { sessionId: string }) {
                   {/* Override triggers */}
                   {patternMemory.overrideTriggers.length > 0 && (
                     <div>
-                      <p style={{ fontFamily: "var(--font-dm-sans)", fontSize: 11, fontWeight: 700, color: "var(--text-muted, #aaa)", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 8 }}>
+                      <p className="insights__eyebrow" style={{ marginBottom: 8 }}>
                         When you take control
                       </p>
                       {patternMemory.overrideTriggers.map((t, i) => (
-                        <div key={i} style={{
-                          display: "flex", justifyContent: "space-between", alignItems: "center",
-                          padding: "5px 0", borderBottom: "0.5px solid var(--border, #e5e7eb)",
-                        }}>
-                          <p style={{ fontFamily: "var(--font-dm-sans)", fontSize: 11, color: "var(--text-secondary, #666)" }}>{t.description}</p>
-                          <span style={{
-                            fontFamily: "var(--font-dm-sans)", fontSize: 10, fontWeight: 700,
-                            color: "rgba(220,38,38,0.8)", flexShrink: 0, marginLeft: 8,
-                          }}>
+                        <div
+                          key={i}
+                          style={{
+                            display: "flex",
+                            justifyContent: "space-between",
+                            alignItems: "center",
+                            padding: "5px 0",
+                            borderBottom: "1px solid var(--ink-2)",
+                          }}
+                        >
+                          <p
+                            style={{
+                              fontFamily: "var(--font-dm-sans)",
+                              fontSize: 11,
+                              color: "var(--ink-6)",
+                            }}
+                          >
+                            {t.description}
+                          </p>
+                          <span
+                            style={{
+                              fontFamily: "var(--font-dm-sans)",
+                              fontSize: 10,
+                              fontWeight: 700,
+                              color: "rgba(220,38,38,0.85)",
+                              flexShrink: 0,
+                              marginLeft: 8,
+                              letterSpacing: "var(--tracking-tight)",
+                            }}
+                          >
                             {Math.round(t.overrideRate * 100)}%
                           </span>
                         </div>
@@ -2160,60 +2266,89 @@ function InsightsPanel({ sessionId }: { sessionId: string }) {
 
           {/* ── Relationship / Profile tab ── */}
           {!loading && activeTab === "relationship" && (
-            <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-              <p style={{ fontFamily: "var(--font-dm-sans)", fontSize: 11, color: "var(--text-secondary, #666)", fontStyle: "italic" }}>
+            <div className="insights" style={{ gap: 14 }}>
+              <p className="insights__subtitle" style={{ fontStyle: "italic", marginTop: 0 }}>
                 Who are you booking for? The agent remembers your group&apos;s preferences and history.
               </p>
 
               {!relEditMode && relationship && (
-                <>
-                  <div style={{ padding: "12px 14px", borderRadius: 12, border: "0.5px solid var(--border, #e5e7eb)", background: "var(--card-2, #f9f9f9)" }}>
-                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 8 }}>
-                      <div>
-                        <p style={{ fontFamily: "var(--font-dm-sans)", fontWeight: 700, fontSize: 14 }}>{relationship.name}</p>
-                        <p style={{ fontFamily: "var(--font-dm-sans)", fontSize: 11, color: "var(--text-muted, #aaa)", textTransform: "capitalize" }}>{relationship.type}</p>
-                      </div>
-                      <button onClick={() => setRelEditMode(true)} style={{
-                        background: "none", border: "0.5px solid var(--border, #e5e7eb)",
-                        borderRadius: 6, padding: "3px 8px", fontFamily: "var(--font-dm-sans)",
-                        fontSize: 11, color: "var(--text-secondary, #666)", cursor: "pointer",
-                      }}>Edit</button>
-                    </div>
-                    {relationship.constraints.length > 0 && (
-                      <div style={{ marginBottom: 8 }}>
-                        <p style={{ fontFamily: "var(--font-dm-sans)", fontSize: 10, fontWeight: 600, color: "var(--text-muted, #aaa)", marginBottom: 4 }}>NEEDS</p>
-                        <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
-                          {relationship.constraints.map((c) => (
-                            <span key={c} style={{
-                              fontFamily: "var(--font-dm-sans)", fontSize: 11,
-                              color: "rgba(22,163,74,0.85)", background: "rgba(22,163,74,0.08)",
-                              borderRadius: 6, padding: "2px 7px",
-                            }}>{c}</span>
-                          ))}
-                        </div>
-                      </div>
-                    )}
-                    {relationship.avoid_types.length > 0 && (
-                      <div style={{ marginBottom: 8 }}>
-                        <p style={{ fontFamily: "var(--font-dm-sans)", fontSize: 10, fontWeight: 600, color: "var(--text-muted, #aaa)", marginBottom: 4 }}>AVOIDS</p>
-                        <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
-                          {relationship.avoid_types.map((a) => (
-                            <span key={a} style={{
-                              fontFamily: "var(--font-dm-sans)", fontSize: 11,
-                              color: "rgba(220,38,38,0.75)", background: "rgba(220,38,38,0.06)",
-                              borderRadius: 6, padding: "2px 7px",
-                            }}>{a}</span>
-                          ))}
-                        </div>
-                      </div>
-                    )}
-                    {relationship.notes && (
-                      <p style={{ fontFamily: "var(--font-dm-sans)", fontSize: 11, color: "var(--text-secondary, #666)", lineHeight: 1.5, fontStyle: "italic" }}>
-                        {relationship.notes}
+                <div className="insights__list-item" style={{ flexDirection: "column", alignItems: "stretch", gap: 8 }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+                    <div>
+                      <p
+                        style={{
+                          fontFamily: "var(--font-dm-sans)",
+                          fontWeight: 700,
+                          fontSize: 14,
+                          color: "var(--ink-8)",
+                          letterSpacing: "var(--tracking-tight)",
+                        }}
+                      >
+                        {relationship.name}
                       </p>
-                    )}
+                      <p
+                        style={{
+                          fontFamily: "var(--font-dm-sans)",
+                          fontSize: 11,
+                          color: "var(--ink-5)",
+                          textTransform: "capitalize",
+                          letterSpacing: "var(--tracking-eyebrow)",
+                          marginTop: 2,
+                        }}
+                      >
+                        {relationship.type}
+                      </p>
+                    </div>
+                    <button onClick={() => setRelEditMode(true)} className="monitor-panel__item-action">
+                      Edit
+                    </button>
                   </div>
-                </>
+                  {relationship.constraints.length > 0 && (
+                    <div>
+                      <p className="insights__metric-label" style={{ marginBottom: 4 }}>Needs</p>
+                      <div className="insights__row">
+                        {relationship.constraints.map((c) => (
+                          <span key={c} className="insights__chip insights__chip--success">
+                            {c}
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                  {relationship.avoid_types.length > 0 && (
+                    <div>
+                      <p className="insights__metric-label" style={{ marginBottom: 4 }}>Avoids</p>
+                      <div className="insights__row">
+                        {relationship.avoid_types.map((a) => (
+                          <span
+                            key={a}
+                            className="insights__chip"
+                            style={{
+                              color: "rgba(220,38,38,0.8)",
+                              background: "rgba(220,38,38,0.06)",
+                              borderColor: "rgba(220,38,38,0.25)",
+                            }}
+                          >
+                            {a}
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                  {relationship.notes && (
+                    <p
+                      style={{
+                        fontFamily: "var(--font-dm-sans)",
+                        fontSize: 11,
+                        color: "var(--ink-6)",
+                        lineHeight: "var(--lh-normal)",
+                        fontStyle: "italic",
+                      }}
+                    >
+                      {relationship.notes}
+                    </p>
+                  )}
+                </div>
               )}
 
               {(!relationship || relEditMode) && (
@@ -2222,23 +2357,26 @@ function InsightsPanel({ sessionId }: { sessionId: string }) {
                     value={relForm.name}
                     onChange={(e) => setRelForm((f) => ({ ...f, name: e.target.value }))}
                     placeholder={relEditMode ? "Profile name" : "Give this profile a name (e.g. 'Alex & Jordan')"}
-                    style={{
-                      width: "100%", padding: "8px 10px", borderRadius: 8,
-                      border: "0.5px solid var(--border, #e5e7eb)", background: "var(--card, #fff)",
-                      fontFamily: "var(--font-dm-sans)", fontSize: 12,
-                      boxSizing: "border-box",
-                    }}
+                    className="help-card__input"
+                    style={{ fontSize: 12, padding: "8px 10px" }}
                   />
                   <div style={{ display: "flex", gap: 6 }}>
                     {(["solo", "couple", "friends", "family"] as RelationshipType[]).map((t) => (
-                      <button key={t} onClick={() => setRelForm((f) => ({ ...f, type: t }))} style={{
-                        flex: 1, padding: "5px 2px", borderRadius: 8, cursor: "pointer",
-                        border: `0.5px solid ${relForm.type === t ? "var(--gold, #D4A34B)" : "var(--border, #e5e7eb)"}`,
-                        background: relForm.type === t ? "rgba(212,163,75,0.1)" : "transparent",
-                        fontFamily: "var(--font-dm-sans)", fontSize: 11,
-                        color: relForm.type === t ? "var(--gold, #D4A34B)" : "var(--text-secondary, #666)",
-                        fontWeight: relForm.type === t ? 700 : 400, textTransform: "capitalize",
-                      }}>
+                      <button
+                        key={t}
+                        onClick={() => setRelForm((f) => ({ ...f, type: t }))}
+                        className={`hotel-card__site${relForm.type === t ? " hotel-card__site--active" : ""}`}
+                        style={
+                          relForm.type === t
+                            ? {
+                                borderColor: "var(--gold)",
+                                color: "var(--gold-text)",
+                                background: "var(--gold-soft)",
+                                textTransform: "capitalize",
+                              }
+                            : { textTransform: "capitalize" }
+                        }
+                      >
                         {t}
                       </button>
                     ))}
@@ -2247,51 +2385,39 @@ function InsightsPanel({ sessionId }: { sessionId: string }) {
                     value={relForm.constraints}
                     onChange={(e) => setRelForm((f) => ({ ...f, constraints: e.target.value }))}
                     placeholder="Must-haves (comma separated): quiet venue, needs parking, vegetarian"
-                    style={{
-                      width: "100%", padding: "8px 10px", borderRadius: 8,
-                      border: "0.5px solid var(--border, #e5e7eb)", background: "var(--card, #fff)",
-                      fontFamily: "var(--font-dm-sans)", fontSize: 12,
-                      boxSizing: "border-box",
-                    }}
+                    className="help-card__input"
+                    style={{ fontSize: 12, padding: "8px 10px" }}
                   />
                   <input
                     value={relForm.avoid_types}
                     onChange={(e) => setRelForm((f) => ({ ...f, avoid_types: e.target.value }))}
                     placeholder="Things to avoid: chain hotels, loud restaurants, outdoor in rain"
-                    style={{
-                      width: "100%", padding: "8px 10px", borderRadius: 8,
-                      border: "0.5px solid var(--border, #e5e7eb)", background: "var(--card, #fff)",
-                      fontFamily: "var(--font-dm-sans)", fontSize: 12,
-                      boxSizing: "border-box",
-                    }}
+                    className="help-card__input"
+                    style={{ fontSize: 12, padding: "8px 10px" }}
                   />
                   <textarea
                     value={relForm.notes}
                     onChange={(e) => setRelForm((f) => ({ ...f, notes: e.target.value }))}
                     placeholder="Free notes: 'She doesn't like spicy food. He hates jazz bars.'"
                     rows={2}
-                    style={{
-                      width: "100%", padding: "8px 10px", borderRadius: 8,
-                      border: "0.5px solid var(--border, #e5e7eb)", background: "var(--card, #fff)",
-                      fontFamily: "var(--font-dm-sans)", fontSize: 12, resize: "none",
-                      boxSizing: "border-box",
-                    }}
+                    className="help-card__input"
+                    style={{ fontSize: 12, padding: "8px 10px", resize: "none" }}
                   />
                   <div style={{ display: "flex", gap: 8 }}>
-                    <button onClick={saveRelationship} disabled={!relForm.name.trim()} style={{
-                      flex: 1, padding: "8px", borderRadius: 8, border: "none",
-                      background: "var(--gold, #D4A34B)", color: "#fff",
-                      fontFamily: "var(--font-dm-sans)", fontSize: 12, fontWeight: 700,
-                      cursor: relForm.name.trim() ? "pointer" : "not-allowed", opacity: relForm.name.trim() ? 1 : 0.5,
-                    }}>
+                    <button
+                      onClick={saveRelationship}
+                      disabled={!relForm.name.trim()}
+                      className="help-card__send"
+                      style={{ flex: 1, fontWeight: 700 }}
+                    >
                       {relEditMode ? "Save changes" : "Create profile"}
                     </button>
                     {relEditMode && (
-                      <button onClick={() => setRelEditMode(false)} style={{
-                        padding: "8px 12px", borderRadius: 8,
-                        border: "0.5px solid var(--border, #e5e7eb)", background: "transparent",
-                        fontFamily: "var(--font-dm-sans)", fontSize: 12, cursor: "pointer",
-                      }}>
+                      <button
+                        onClick={() => setRelEditMode(false)}
+                        className="monitor-panel__item-action"
+                        style={{ padding: "8px 12px" }}
+                      >
                         Cancel
                       </button>
                     )}
@@ -2302,30 +2428,54 @@ function InsightsPanel({ sessionId }: { sessionId: string }) {
           )}
 
           {!loading && activeTab === "overview" && stats && stats.totalEvents === 0 && (
-            <p style={{ fontFamily: "var(--font-dm-sans)", fontSize: 12, color: "var(--text-secondary, #666)", textAlign: "center" }}>
+            <p
+              className="insights__empty"
+              style={{ padding: 0, fontSize: 12 }}
+            >
               No data yet — insights appear after you complete trips and give feedback.
             </p>
           )}
 
           {activeTab === "overview" && stats && stats.totalEvents > 0 && (
-            <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
+            <div className="insights" style={{ gap: 20 }}>
 
               {/* Acceptance rate */}
               <div>
-                <p style={{ fontFamily: "var(--font-dm-sans)", fontSize: 11, fontWeight: 700, color: "var(--text-muted, #aaa)", letterSpacing: "0.06em", textTransform: "uppercase", marginBottom: 10 }}>
+                <p className="insights__eyebrow" style={{ marginBottom: 10 }}>
                   Did you accept the agent&apos;s decisions?
                 </p>
                 <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                  <ProgressBar value={stats.adjustmentAcceptanceRate} color="rgba(22,163,74,0.7)" />
-                  <span style={{ fontFamily: "var(--font-dm-sans)", fontSize: 13, fontWeight: 700, color: "rgba(22,163,74,0.85)", flexShrink: 0 }}>
+                  <ProgressBar value={stats.adjustmentAcceptanceRate} color="rgba(22,163,74,0.75)" />
+                  <span
+                    style={{
+                      fontFamily: "var(--font-dm-sans)",
+                      fontSize: 13,
+                      fontWeight: 700,
+                      color: "rgba(22,163,74,0.9)",
+                      flexShrink: 0,
+                      letterSpacing: "var(--tracking-tight)",
+                    }}
+                  >
                     {Math.round(stats.adjustmentAcceptanceRate * 100)}%
                   </span>
                 </div>
                 <div style={{ display: "flex", gap: 16, marginTop: 6 }}>
-                  <span style={{ fontFamily: "var(--font-dm-sans)", fontSize: 11, color: "rgba(22,163,74,0.8)" }}>
+                  <span
+                    style={{
+                      fontFamily: "var(--font-dm-sans)",
+                      fontSize: 11,
+                      color: "rgba(22,163,74,0.85)",
+                    }}
+                  >
                     ✓ {stats.outcomeBreakdown.accepted} accepted
                   </span>
-                  <span style={{ fontFamily: "var(--font-dm-sans)", fontSize: 11, color: "rgba(220,38,38,0.75)" }}>
+                  <span
+                    style={{
+                      fontFamily: "var(--font-dm-sans)",
+                      fontSize: 11,
+                      color: "rgba(220,38,38,0.8)",
+                    }}
+                  >
                     ↗ {stats.outcomeBreakdown.manual_override} manual override
                   </span>
                 </div>
@@ -2334,7 +2484,7 @@ function InsightsPanel({ sessionId }: { sessionId: string }) {
               {/* Satisfaction */}
               {(stats.outcomeBreakdown.satisfied + stats.outcomeBreakdown.ok + stats.outcomeBreakdown.unsatisfied) > 0 && (
                 <div>
-                  <p style={{ fontFamily: "var(--font-dm-sans)", fontSize: 11, fontWeight: 700, color: "var(--text-muted, #aaa)", letterSpacing: "0.06em", textTransform: "uppercase", marginBottom: 8 }}>
+                  <p className="insights__eyebrow" style={{ marginBottom: 8 }}>
                     Satisfaction
                   </p>
                   <div style={{ display: "flex", gap: 12 }}>
@@ -2343,10 +2493,16 @@ function InsightsPanel({ sessionId }: { sessionId: string }) {
                       { emoji: "👍", label: "OK", count: stats.outcomeBreakdown.ok },
                       { emoji: "😕", label: "Needed fixes", count: stats.outcomeBreakdown.unsatisfied },
                     ].map(({ emoji, label, count }) => (
-                      <div key={label} style={{ textAlign: "center", flex: 1 }}>
+                      <div
+                        key={label}
+                        className="insights__metric"
+                        style={{ flex: 1, alignItems: "center", textAlign: "center" }}
+                      >
                         <p style={{ fontSize: 20, marginBottom: 2 }}>{emoji}</p>
-                        <p style={{ fontFamily: "var(--font-dm-sans)", fontSize: 13, fontWeight: 700 }}>{count}</p>
-                        <p style={{ fontFamily: "var(--font-dm-sans)", fontSize: 10, color: "var(--text-muted, #aaa)" }}>{label}</p>
+                        <p className="insights__metric-value" style={{ fontSize: 16 }}>
+                          {count}
+                        </p>
+                        <p className="insights__metric-label">{label}</p>
                       </div>
                     ))}
                   </div>
@@ -2356,20 +2512,55 @@ function InsightsPanel({ sessionId }: { sessionId: string }) {
               {/* Provider success rates */}
               {stats.providerStats.length > 0 && (
                 <div>
-                  <p style={{ fontFamily: "var(--font-dm-sans)", fontSize: 11, fontWeight: 700, color: "var(--text-muted, #aaa)", letterSpacing: "0.06em", textTransform: "uppercase", marginBottom: 10 }}>
+                  <p className="insights__eyebrow" style={{ marginBottom: 10 }}>
                     Provider acceptance rates
                   </p>
                   <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
                     {stats.providerStats.map((p) => (
                       <div key={p.provider} style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                        <span style={{ fontFamily: "var(--font-dm-sans)", fontSize: 12, color: "var(--text-secondary, #666)", width: 100, flexShrink: 0 }}>
+                        <span
+                          style={{
+                            fontFamily: "var(--font-dm-sans)",
+                            fontSize: 12,
+                            color: "var(--ink-7)",
+                            width: 100,
+                            flexShrink: 0,
+                            letterSpacing: "var(--tracking-tight)",
+                          }}
+                        >
                           {PROVIDER_NAMES[p.provider] ?? p.provider}
                         </span>
-                        <ProgressBar value={p.rate} color={p.rate > 0.7 ? "rgba(22,163,74,0.7)" : p.rate > 0.4 ? "var(--gold, #D4A34B)" : "rgba(220,38,38,0.65)"} />
-                        <span style={{ fontFamily: "var(--font-dm-sans)", fontSize: 12, fontWeight: 600, flexShrink: 0, minWidth: 36 }}>
+                        <ProgressBar
+                          value={p.rate}
+                          color={
+                            p.rate > 0.7
+                              ? "rgba(22,163,74,0.75)"
+                              : p.rate > 0.4
+                              ? "var(--gold)"
+                              : "rgba(220,38,38,0.65)"
+                          }
+                        />
+                        <span
+                          style={{
+                            fontFamily: "var(--font-dm-sans)",
+                            fontSize: 12,
+                            fontWeight: 700,
+                            flexShrink: 0,
+                            minWidth: 36,
+                            color: "var(--ink-8)",
+                            letterSpacing: "var(--tracking-tight)",
+                          }}
+                        >
                           {Math.round(p.rate * 100)}%
                         </span>
-                        <span style={{ fontFamily: "var(--font-dm-sans)", fontSize: 10, color: "var(--text-muted, #aaa)", flexShrink: 0 }}>
+                        <span
+                          style={{
+                            fontFamily: "var(--font-dm-sans)",
+                            fontSize: 10,
+                            color: "var(--ink-4)",
+                            flexShrink: 0,
+                          }}
+                        >
                           ({p.total})
                         </span>
                       </div>
@@ -2381,7 +2572,7 @@ function InsightsPanel({ sessionId }: { sessionId: string }) {
               {/* Step type manual rate */}
               {stats.manualByType.length > 0 && (
                 <div>
-                  <p style={{ fontFamily: "var(--font-dm-sans)", fontSize: 11, fontWeight: 700, color: "var(--text-muted, #aaa)", letterSpacing: "0.06em", textTransform: "uppercase", marginBottom: 10 }}>
+                  <p className="insights__eyebrow" style={{ marginBottom: 10 }}>
                     Which tasks need most manual help?
                   </p>
                   <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
@@ -2389,11 +2580,28 @@ function InsightsPanel({ sessionId }: { sessionId: string }) {
                       const manualRate = t.total > 0 ? t.manual / t.total : 0;
                       return (
                         <div key={t.step_type} style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                          <span style={{ fontFamily: "var(--font-dm-sans)", fontSize: 12, color: "var(--text-secondary, #666)", width: 80, flexShrink: 0, textTransform: "capitalize" }}>
+                          <span
+                            style={{
+                              fontFamily: "var(--font-dm-sans)",
+                              fontSize: 12,
+                              color: "var(--ink-7)",
+                              width: 80,
+                              flexShrink: 0,
+                              textTransform: "capitalize",
+                              letterSpacing: "var(--tracking-tight)",
+                            }}
+                          >
                             {t.step_type}
                           </span>
-                          <ProgressBar value={manualRate} color="rgba(220,38,38,0.5)" />
-                          <span style={{ fontFamily: "var(--font-dm-sans)", fontSize: 12, flexShrink: 0 }}>
+                          <ProgressBar value={manualRate} color="rgba(220,38,38,0.55)" />
+                          <span
+                            style={{
+                              fontFamily: "var(--font-dm-sans)",
+                              fontSize: 12,
+                              flexShrink: 0,
+                              color: "var(--ink-7)",
+                            }}
+                          >
                             {t.manual}/{t.total} manual
                           </span>
                         </div>
@@ -2406,16 +2614,40 @@ function InsightsPanel({ sessionId }: { sessionId: string }) {
               {/* Agent decision type usage */}
               {stats.decisionTypeUsage.length > 0 && (
                 <div>
-                  <p style={{ fontFamily: "var(--font-dm-sans)", fontSize: 11, fontWeight: 700, color: "var(--text-muted, #aaa)", letterSpacing: "0.06em", textTransform: "uppercase", marginBottom: 8 }}>
+                  <p className="insights__eyebrow" style={{ marginBottom: 8 }}>
                     How the agent solved bookings
                   </p>
                   <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
                     {stats.decisionTypeUsage.map((d) => (
-                      <div key={d.agent_decision} style={{ display: "flex", justifyContent: "space-between" }}>
-                        <span style={{ fontFamily: "var(--font-dm-sans)", fontSize: 12, color: "var(--text-secondary, #666)" }}>
+                      <div
+                        key={d.agent_decision}
+                        style={{
+                          display: "flex",
+                          justifyContent: "space-between",
+                          padding: "4px 0",
+                          borderBottom: "1px solid var(--ink-2)",
+                        }}
+                      >
+                        <span
+                          style={{
+                            fontFamily: "var(--font-dm-sans)",
+                            fontSize: 12,
+                            color: "var(--ink-7)",
+                          }}
+                        >
                           {DECISION_LABELS[d.agent_decision] ?? d.agent_decision}
                         </span>
-                        <span style={{ fontFamily: "var(--font-dm-sans)", fontSize: 12, fontWeight: 600 }}>{d.count}×</span>
+                        <span
+                          style={{
+                            fontFamily: "var(--font-dm-sans)",
+                            fontSize: 12,
+                            fontWeight: 700,
+                            color: "var(--ink-8)",
+                            letterSpacing: "var(--tracking-tight)",
+                          }}
+                        >
+                          {d.count}×
+                        </span>
                       </div>
                     ))}
                   </div>
@@ -2425,13 +2657,39 @@ function InsightsPanel({ sessionId }: { sessionId: string }) {
               {/* Top overridden venues */}
               {stats.topOverriddenVenues.length > 0 && (
                 <div>
-                  <p style={{ fontFamily: "var(--font-dm-sans)", fontSize: 11, fontWeight: 700, color: "var(--text-muted, #aaa)", letterSpacing: "0.06em", textTransform: "uppercase", marginBottom: 8 }}>
+                  <p className="insights__eyebrow" style={{ marginBottom: 8 }}>
                     Venues you most often booked differently
                   </p>
                   {stats.topOverriddenVenues.map((v) => (
-                    <div key={v.venue_name} style={{ display: "flex", justifyContent: "space-between", padding: "3px 0" }}>
-                      <span style={{ fontFamily: "var(--font-dm-sans)", fontSize: 12, color: "var(--text-secondary, #666)" }}>{v.venue_name}</span>
-                      <span style={{ fontFamily: "var(--font-dm-sans)", fontSize: 12, color: "rgba(220,38,38,0.75)", fontWeight: 600 }}>{v.overrides}× overridden</span>
+                    <div
+                      key={v.venue_name}
+                      style={{
+                        display: "flex",
+                        justifyContent: "space-between",
+                        padding: "4px 0",
+                        borderBottom: "1px solid var(--ink-2)",
+                      }}
+                    >
+                      <span
+                        style={{
+                          fontFamily: "var(--font-dm-sans)",
+                          fontSize: 12,
+                          color: "var(--ink-7)",
+                        }}
+                      >
+                        {v.venue_name}
+                      </span>
+                      <span
+                        style={{
+                          fontFamily: "var(--font-dm-sans)",
+                          fontSize: 12,
+                          color: "rgba(220,38,38,0.8)",
+                          fontWeight: 700,
+                          letterSpacing: "var(--tracking-tight)",
+                        }}
+                      >
+                        {v.overrides}× overridden
+                      </span>
                     </div>
                   ))}
                 </div>
