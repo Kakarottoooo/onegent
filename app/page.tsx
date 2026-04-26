@@ -884,19 +884,22 @@ export default function Home() {
         return;
       }
 
-      // create_plan + confirm_ready → pass the raw user query to the legacy
-      // search pipeline; it already renders RecommendationCards etc. for
-      // restaurant / hotel / flight / activity solo cases.
+      // create_plan + confirm_ready (restaurant/hotel/flight/activity) → also
+      // surface a ConfirmCard before kicking off the search/booking pipeline.
+      // Three reasons:
+      //   1. The chat layer's reply ("ready to search? confirm below.") implies
+      //      a button — short-circuiting straight into search violated that
+      //      promise and stranded the user.
+      //   2. /api/chat/commit's direct_booking branch (US-W5) only fires when
+      //      the user goes through ConfirmCard. Bypassing it meant a venue-
+      //      named ask like "book Carbone for 2 at 7pm" silently fell back to
+      //      a recommendation list instead of a real booking job.
+      //   3. The ConfirmCard commit is also what flags the session as Completed
+      //      (markSessionUpgradedPlan / Trip). Without it, the sidebar's
+      //      Completed section stayed perpetually empty for solo plans.
       if (nlu.intent === "create_plan" && nlu.confirm_ready) {
-        learnFromSearch(text);
-        const hint =
-          nlu.scenario === "restaurant" ||
-          nlu.scenario === "hotel" ||
-          nlu.scenario === "flight" ||
-          nlu.scenario === "activity"
-            ? nlu.scenario
-            : undefined;
-        chat.sendMessage(text, undefined, { skipUserPush: true, categoryHint: hint });
+        if (nlu.assistant_reply) chat.injectAssistantMessage(nlu.assistant_reply);
+        setPendingConfirm({ nlu, message: text, kind: "plan" });
         return;
       }
 
