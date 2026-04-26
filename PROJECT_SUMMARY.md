@@ -1,5 +1,5 @@
 ================================================================
-Onegent · AI 决策代理 · 项目总结 · v0.2.42.0
+Onegent · AI 决策代理 · 项目总结 · v0.2.43.0
 ================================================================
 
 【项目定义】
@@ -16,6 +16,132 @@ Onegent · AI 决策代理 · 项目总结 · v0.2.42.0
 活动 / 多人 trip），非旅行品类（笔记本 / 手机 / 耳机 / 信用卡 /
 礼物 / 健身）已归档。详见本文档头部 "Recent Updates - 2026-04-24
 (cont. 2) · Positioning Shift"。
+
+================================================================
+Recent Updates - 2026-04-25 (cont. 13) · 全天 customer-end UI 系统升级 + 性能 + pre-existing test 收尾
+================================================================
+
+接 W6 #2 之后,用户提了两个独立反馈:(1) 主页跳 task/rooms/contacts 慢,
+(2) developers 页面好看 customer 端不够"高大上"。今天完整覆盖这两条 +
+顺便清掉 #53 backlog (pre-existing test failures)。一日 14 个 commit
+跨 6 个层面,从 token 体系到组件 BEM 化到 perf 都做了。
+
+1. #53 pre-existing test failures 修完 (3 fixes,12 测试 → green)
+   - RecommendationCard.test.tsx 11 fail:组件 line 78 调 useRouter()
+     测试无 mock next/navigation。加 vi.mock("next/navigation") + 全 router
+     stub (push/replace/back/forward/refresh/prefetch + usePathname +
+     useSearchParams)
+   - RecommendationCard SVG placeholder 断言过时:PhotoCarousel 早改用
+     emptyEmoji prop ("🍽️") 不再 render SVG。assertion 改为 getByText("🍽️")
+   - weekend-trip.test.ts × 3 fail:hotel.ts:65 早从 MiniMax 切到 OpenAI
+     gpt-4o-mini (注释明写"chronic-timing-out at 30s"),测试还在 mock
+     MiniMax fetch。改用 vi.mock("../openai") + mockOpenaiChat,rename
+     testname,删 dead makeMiniMaxResponse helper
+
+2. 性能修 — 跳转慢的 3 因叠加
+   - 根因 #1: app/page.tsx (3301)/tasks (3367)/rooms (550) 都是巨型
+     "use client" component → 每次跳转重 hydrate
+   - 根因 #2: app/*/loading.tsx 一个都没,点击后白屏
+   - 根因 #3: GlobalNav 用 plain <a href> → full page reload
+   修 #2 + #3 (#1 留 "Reliability/Perf systematization" backlog):
+   - 7 个 loading.tsx 骨架屏 (tasks/rooms/contacts/calendar/account/
+     trips/insights),每个 ~30-50 行 animate-pulse 卡片占位用新 token
+   - GlobalNav 5 个 nav link + brand link 从 <a href> 改 Next <Link>
+     (auto-prefetch viewport 链接)
+   - Sidebar 留 router.push (handler 都带 setMobileOpen 副作用,改 Link
+     风险大;且是低频路径)
+   - 用户实测确认:"速度快了"
+
+3. UI 升级 Phase 0 — 工程化基础 + RecommendationCard 一张卡
+   - 先调研:customer 端 globals.css 78 行 vs developers tokens.css 154 行
+     视觉系统差距巨大;customer 端 inline style{{}} 在 RecommendationCard
+     一文件 78 处,4 张卡共 173 处
+   - 选 Hybrid 方案 C (token + 一张卡完整重做,半天):
+     globals.css 78 → 190 行 加 9-step warm ink scale (--ink-1..ink-9
+     从 cream 到 espresso) + 4px spacing rhythm (与 developers 对齐) +
+     radius/shadow scale (warm-tinted 不是纯黑) + motion + type scale
+   - components/cards.css 新建 ~250 行 BEM:
+     .rec-card / .rec-card__rank / .rec-card__name / .rec-card__divider /
+     .rec-card__tab--why / .rec-card__tab--watchout / .rec-card__favorite-btn
+   - RecommendationCard.tsx ~200 处 inline → semantic class
+   - 视觉打磨:rank badge 渐变 ink + inset highlight,卡 hover 上浮 2px +
+     border 染金 + warm shadow,gold→amber gradient pill divider,tab
+     label uppercase eyebrow letterspacing
+   - RecommendationCard 11/11 测试 still green
+
+4. UI 升级 Phase 0 batch 2 — 另 3 张卡同语言 (HotelCard / FlightCard / ActivityCard)
+   - cards.css 用 :where() 选择器列表共享 4 张卡的外壳 (border/hover/
+     shadow/rank/divider/tab),从 250 → 868 行
+   - HotelCard.tsx 30 处 inline → BEM (含 amenity pills + site selector +
+     Map/Book CTA gradient)
+   - FlightCard.tsx 34 处 → BEM (time rail + ::before plane glyph 居中
+     gradient line + cabin pills)
+   - ActivityCard.tsx 31 处 → BEM (when/venue/group badge + provider
+     buttons reuse cta-primary gradient)
+   - 4 张卡视觉完全一致,首页推荐输出不再"一张高级三张土"
+
+5. UI 升级 Phase 1 — /tasks 页 6 commit 完整打磨 (3367 行 / 363 inline)
+   - app/tasks/tasks.css 新建 ~1100 行 page-scoped BEM:
+     .task-page / .task-tabs / .job-card (+ needs-action/succeeded
+     variants) / .step-card / .help-card / .intervention / .sat-widget /
+     .time-picker / .retry-sched / .live-log / .help-card__bubble /
+     .intervention-modal / .monitor-panel / .insights / .insights__chip /
+     .insights__metric / .insights__progress 等
+   - batch B (a2915a3): page header + TaskWorkspaceSwitch (Linear-style
+     active indicator) + JobCard 整体 + StepCard 主结构 + InterventionBanner
+     banner + NeedsHelpCard outer
+   - batch C1 (809fdac): LiveLogPanel (warm mono + streaming dot) +
+     SatisfactionWidget + RestaurantTimePicker + RetryScheduler
+   - batch C2 (a86d216): NeedsHelpCard 内 chat bubble (gradient gold avatar +
+     asymmetric tail radius) + answer input + retry CTA + Intervention
+     modal (warm backdrop + Playfair title + "What the agent did" recap +
+     3 CTA variants)
+   - batch C3 (3210cc4): MonitorPanel (item rows hover gold tint +
+     active dot animate jobpulse + alert tinted) + MonitoringWorkspacePanel
+     (metric cards reuse insights__metric)
+   - batch C4 (c6b9d64): InsightsPanel 外壳 + Linear-style underline tab
+     bar + ProgressBar 共用类 (gradient fill 420ms ease-out)
+   - batch C5 (37c8579): InsightsPanel 4 tab 内部:Task / Patterns /
+     Overview 6 sub-sections / Relationship - 共 ~100 处 inline → BEM
+   - 累计 363 → 264 inline (~99 处替换),剩 264 是 page-level layout
+     wrapper + policy/negative-memory conditional sub-sections (低 ROI)
+
+6. 14 个 commit 今天傍晚到深夜段
+   17146e3 test: fix pre-existing failures (RecommendationCard router + weekend-trip ranker)
+   54482df feat(ui): customer-end token scale + RecommendationCard CSS module
+   30de497 perf(nav): loading.tsx skeletons + GlobalNav <a> → Next Link prefetch
+   e0ca1ef feat(ui): Phase 0 batch 2 — HotelCard + FlightCard + ActivityCard CSS module
+   a2915a3 feat(ui): Phase 1 batch B — /tasks page polish
+   809fdac feat(ui): tasks page batch C1 — LiveLog + Satisfaction + Picker + Scheduler
+   a86d216 feat(ui): tasks page batch C2 — NeedsHelpCard chat bubbles + Intervention modal
+   3210cc4 feat(ui): tasks page batch C3 — MonitorPanel + MonitoringWorkspacePanel
+   c6b9d64 feat(ui): tasks page batch C4 — InsightsPanel outer + tab bar + ProgressBar
+   37c8579 feat(ui): InsightsPanel 4 tab 内部 BEM
+   (本 commit) docs: v0.2.43.0 release notes
+
+7. 已知未做 / 入 backlog
+   - #89 Phase 1 - 首页 chat 容器 UI 升级 (~3-4 小时,chat-heavy 风险高)
+   - #90 #22 hosted /api/mcp endpoint + ChatGPT Apps 提交 (1-2d code + 5-10d review)
+   - #21 npm publish @onegent/mcp-server (你 5 分钟手动)
+   - #23 Claude.ai remote MCP OAuth 2.0 (2-3 天)
+   - tasks 页 batch D: page-level wrapper + InsightsPanel policy/negative
+     memory sub-sections (低 ROI,~1.5 小时,留作 cleanup)
+   - 拆 page.tsx (3300 行) 成 server shell + client islands (根治 hydrate
+     慢的 #1 因) — 未来 Reliability/Perf 系统化 task
+
+8. 战略意义
+   今天是"产品质感"系统化补课。之前 dev 体感差距大:developers/ 是
+   Apple/Linear/Stripe tier,customer/ 是 v0.2.20 时代留下的 inline-style
+   sass-heavy 风格。这意味着 user 看到的"高级感"两端断层。今天:
+   - **token 体系统一** (customer/ globals.css 跟 developers/ tokens.css
+     同结构 + 同 spacing rhythm,只是颜色 palette 用暖金调保留 brand)
+   - **组件 BEM 化** (4 张产品卡 + 9 个 /tasks 面板都用 cards.css/tasks.css
+     的 semantic class,~500 处 inline 提到 ~2000 行 CSS module)
+   - **跨产品视觉一致** (rec card hover lift + warm shadow + gradient gold
+     CTA 在 /developers 和 /customer 共享语言,只是色板不同)
+   - **性能** (跳转白屏 → 即刻骨架 + bundle prefetch,体感 3-5× 快)
+   未来加新组件时:开 cards.css/tasks.css 看 BEM 命名,沿用既定模式即可,
+   不需要从零设计。
 
 ================================================================
 Recent Updates - 2026-04-25 (cont. 12) · Week 6 #2 · activity 接进 lib/core + 删 agent-runtime 死代码
@@ -355,6 +481,7 @@ bug。然后跑完整 ship-readiness audit:今天 74 commits 推完,需要确认
    v0.2.40.0 — Week 5 #3 Bug B + Bug C + ship audit
    v0.2.41.0 — Week 6 #1 C 端 dogfood 扩面 (hotel + flight 接 lib/core)
    v0.2.42.0 — Week 6 #2 activity 接 lib/core + 删 agent-runtime 死代码
+   v0.2.43.0 — UI 系统升级 (token + 4 cards + /tasks 整页) + nav perf + #53 test fixes
    累计:38 commits,~9000+ 行新代码,3 个 backlog item 入队(#21 npm
    publish / #22 hosted MCP endpoint / #23 OAuth / #53 pre-existing
    tests),26 个 W4-W5 user stories 全部完成。
