@@ -11,7 +11,7 @@ import {
 } from "@modelcontextprotocol/sdk/types.js";
 import { z } from "zod";
 
-import { createClient, OnegentApiError, type OnegentClient } from "./api-client.js";
+import { createClient, configFromApiKey, loadConfig, OnegentApiError, type OnegentClient } from "./api-client.js";
 import type { ToolDefinition } from "./tools/types.js";
 import { bookRestaurantTool } from "./tools/book-restaurant.js";
 import { bookHotelTool } from "./tools/book-hotel.js";
@@ -41,7 +41,16 @@ const SERVER_INSTRUCTIONS =
   "submitting credit card CVV — when status='paused_payment' the user must " +
   "confirm the charge in Onegent's app before the booking finalizes.";
 
-export function createOnegentServer(): Server {
+export interface CreateOnegentServerOptions {
+  /**
+   * Per-request API key, used by the hosted HTTP transport (Next.js
+   * /api/mcp route extracts from Authorization header). When omitted,
+   * falls back to ONEGENT_API_KEY env var (stdio mode default).
+   */
+  apiKey?: string;
+}
+
+export function createOnegentServer(opts: CreateOnegentServerOptions = {}): Server {
   const server = new Server(
     {
       name: SERVER_NAME,
@@ -56,7 +65,10 @@ export function createOnegentServer(): Server {
 
   let clientCache: OnegentClient | null = null;
   const getClient = (): OnegentClient => {
-    if (!clientCache) clientCache = createClient();
+    if (!clientCache) {
+      const cfg = opts.apiKey ? configFromApiKey(opts.apiKey) : loadConfig();
+      clientCache = createClient(cfg);
+    }
     return clientCache;
   };
 

@@ -151,6 +151,15 @@ export function loadConfig(): OnegentClientConfig {
         "and set it in your MCP client config (e.g. Claude Desktop's env block).",
     );
   }
+  return configFromApiKey(apiKey);
+}
+
+/**
+ * Build a config from an explicit apiKey (e.g. one received per-request via
+ * an HTTP Authorization header). Honors ONEGENT_API_BASE_URL env override
+ * the same way loadConfig() does.
+ */
+export function configFromApiKey(apiKey: string): OnegentClientConfig {
   const baseUrl = (process.env.ONEGENT_API_BASE_URL?.trim() || DEFAULT_BASE_URL).replace(/\/+$/, "");
   return { apiKey, baseUrl, timeoutMs: DEFAULT_TIMEOUT_MS };
 }
