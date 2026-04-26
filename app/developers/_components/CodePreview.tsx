@@ -19,7 +19,7 @@ interface Tab {
   jsx: React.ReactNode;
 }
 
-const CURL_RAW = `curl -X POST https://onegent.com/api/v1/execution-jobs \\
+const CURL_RAW = `curl -X POST https://onegent.one/api/v1/execution-jobs \\
   -H "Authorization: Bearer ogk_live_..." \\
   -H "Content-Type: application/json" \\
   -d '{
@@ -61,7 +61,7 @@ const CLAUDE_RAW = `// ~/Library/Application Support/Claude/claude_desktop_confi
 
 const TS_RAW = `import "dotenv/config";
 
-const res = await fetch("https://onegent.com/api/v1/execution-jobs", {
+const res = await fetch("https://onegent.one/api/v1/execution-jobs", {
   method: "POST",
   headers: {
     Authorization: \`Bearer \${process.env.ONEGENT_API_KEY}\`,
@@ -189,7 +189,7 @@ function CurlSnippet() {
   return (
     <>
       <span className="tok-fn">curl</span> <span className="tok-keyword">-X POST</span>{" "}
-      <span className="tok-url">https://onegent.com/api/v1/execution-jobs</span>{" "}
+      <span className="tok-url">https://onegent.one/api/v1/execution-jobs</span>{" "}
       <span className="tok-punct">{"\\"}</span>
       {"\n  "}
       <span className="tok-keyword">-H</span>{" "}
@@ -283,7 +283,7 @@ function TsSnippet() {
       {"\n\n"}
       <span className="tok-keyword">const</span> res = <span className="tok-keyword">await</span>{" "}
       <span className="tok-fn">fetch</span>(
-      <span className="tok-string">{`"https://onegent.com/api/v1/execution-jobs"`}</span>, {"{"}
+      <span className="tok-string">{`"https://onegent.one/api/v1/execution-jobs"`}</span>, {"{"}
       {"\n  "}
       <span className="tok-prop">method</span>: <span className="tok-string">{`"POST"`}</span>,
       {"\n  "}

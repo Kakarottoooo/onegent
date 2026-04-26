@@ -26,7 +26,7 @@ User in ChatGPT
   OpenAI ────────► HTTPS ────────► @onegent/mcp-server --http
                                           │
                                           ▼
-                                 https://onegent.com/api/v1/*
+                                 https://onegent.one/api/v1/*
 ```
 
 OpenAI routes the user's natural-language request to an MCP server you've registered. Your MCP server calls Onegent's REST API with the user's scoped API key.
@@ -34,7 +34,7 @@ OpenAI routes the user's natural-language request to an MCP server you've regist
 ### Preparing the submission
 
 1. **Host the HTTP MCP server** at a stable HTTPS URL. Options:
-   - **Onegent-hosted (recommended)**: we're deploying `https://onegent.com/api/mcp` in v0.2.37+. Third parties can use this directly — no self-hosting required. You'd submit an "app" that proxies to our endpoint.
+   - **Onegent-hosted (recommended)**: we're deploying `https://onegent.one/api/mcp` in v0.2.37+. Third parties can use this directly — no self-hosting required. You'd submit an "app" that proxies to our endpoint.
    - **Self-host**: run the package on Fly, Cloud Run, Railway, or any HTTPS-terminating platform. Reverse-proxy 443 → the container's 3333.
 
 2. **Prepare the manifest**. Start from the template at [`packages/mcp-server/chatgpt-apps/manifest.json`](../../packages/mcp-server/chatgpt-apps/manifest.json). Key fields:
@@ -87,7 +87,7 @@ The older but still-supported Custom GPT path lets you build a private GPT that 
      title: Onegent Travel Booking Execution API
      version: "1"
    servers:
-     - url: https://onegent.com/api/v1
+     - url: https://onegent.one/api/v1
    paths:
      /execution-jobs:
        post:

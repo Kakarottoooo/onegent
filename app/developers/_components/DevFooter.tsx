@@ -72,8 +72,8 @@ export function DevFooter() {
           >
             GitHub
           </FooterLink>
-          <FooterLink href="mailto:beta@onegent.com" external>
-            beta@onegent.com
+          <FooterLink href="mailto:beta@onegent.one" external>
+            beta@onegent.one
           </FooterLink>
         </FooterColumn>
       </div>

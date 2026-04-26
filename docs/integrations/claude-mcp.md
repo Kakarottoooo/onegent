@@ -7,7 +7,7 @@
 
 - [Claude Desktop](https://claude.ai/download) 0.7.0 or newer (MCP support required)
 - Node.js 18+ on your machine (`npx` is used to run the server)
-- An Onegent API key — request one at `beta@onegent.com` until the self-serve `/developers` page launches
+- An Onegent API key — request one at `beta@onegent.one` until the self-serve `/developers` page launches
 
 ## 1. Install
 
@@ -72,7 +72,7 @@ When you see `confirmationCode`, the reservation is live — check your email fo
 
 Onegent **never submits your credit card CVV automatically.** When the agent reaches a payment step, the job pauses at status `paused_payment`. You must:
 
-1. Open https://onegent.com in your browser
+1. Open https://onegent.one in your browser
 2. Sign in with the same account that owns the API key
 3. Review the booking and click **Confirm charge**
 
@@ -84,10 +84,10 @@ This is non-negotiable — it's the safety invariant that lets us give an LLM bo
 Claude didn't load the server. Fully quit + relaunch Claude Desktop. Check the log file.
 
 **"401 invalid_api_key"**
-Your key format is right but it doesn't match an active key. Regenerate via `beta@onegent.com` for now; self-serve key rotation at `/developers` ships in v0.2.36+.
+Your key format is right but it doesn't match an active key. Regenerate via `beta@onegent.one` for now; self-serve key rotation at `/developers` ships in v0.2.36+.
 
 **"Network error / timeout"**
-Can you hit `https://onegent.com/api/v1/metrics/providers/opentable` from your terminal with a valid key? If not, the Onegent API is unreachable — check https://onegent.com/status.
+Can you hit `https://onegent.one/api/v1/metrics/providers/opentable` from your terminal with a valid key? If not, the Onegent API is unreachable — check https://onegent.one/status.
 
 **Job is stuck in `queued` for >2 minutes**
 Onegent's executor queue is either overloaded or your request hit a provider we don't yet support at the requested city. Call `get_job_audit` with the jobId to see what the agent observed.

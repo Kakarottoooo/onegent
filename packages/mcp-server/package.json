@@ -27,7 +27,7 @@
   "type": "module",
   "main": "./dist/index.js",
   "bin": {
-    "onegent-mcp-server": "./dist/index.js"
+    "onegent-mcp-server": "dist/index.js"
   },
   "files": [
     "dist",

@@ -6,14 +6,14 @@
  *
  * Env:
  *   ONEGENT_API_KEY       required, format ogk_(live|test)_...
- *   ONEGENT_API_BASE_URL  optional, defaults to https://onegent.com/api/v1
+ *   ONEGENT_API_BASE_URL  optional, defaults to https://onegent.one/api/v1
  *
  * Types below mirror docs/api/v1.md; kept hand-written (not imported
  * from @/lib/api-v1) so this package can publish standalone without
  * pulling in the Next.js app.
  */
 
-const DEFAULT_BASE_URL = "https://onegent.com/api/v1";
+const DEFAULT_BASE_URL = "https://onegent.one/api/v1";
 const DEFAULT_TIMEOUT_MS = 15_000;
 
 export interface OnegentClientConfig {
@@ -147,7 +147,7 @@ export function loadConfig(): OnegentClientConfig {
   const apiKey = process.env.ONEGENT_API_KEY?.trim();
   if (!apiKey) {
     throw new Error(
-      "ONEGENT_API_KEY env var is required. Get one at https://onegent.com/developers " +
+      "ONEGENT_API_KEY env var is required. Get one at https://onegent.one/developers " +
         "and set it in your MCP client config (e.g. Claude Desktop's env block).",
     );
   }

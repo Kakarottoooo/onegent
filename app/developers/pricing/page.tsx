@@ -41,7 +41,7 @@ export default function PricingPage() {
           <PricingCard
             label="Beta access"
             value="Free"
-            note="Up to 100 bookings/month while we shake out edge cases. Email beta@onegent.com to request a key."
+            note="Up to 100 bookings/month while we shake out edge cases. Email beta@onegent.one to request a key."
           />
           <PricingCard
             label="Production · planned"
@@ -58,7 +58,7 @@ export default function PricingPage() {
         </div>
 
         <div className="dev-pricing-cta">
-          <Link href="mailto:beta@onegent.com?subject=Onegent%20beta%20access" className="dev-cta-pill">
+          <Link href="mailto:beta@onegent.one?subject=Onegent%20beta%20access" className="dev-cta-pill">
             Request beta access
           </Link>
           <Link href="/developers/docs" className="dev-cta-ghost">

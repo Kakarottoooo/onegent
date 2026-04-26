@@ -4,7 +4,7 @@
 
 **Onegent — AI books your trip end-to-end.**
 
-This is a [Model Context Protocol](https://modelcontextprotocol.io) server that exposes [Onegent](https://onegent.com)'s trip-booking execution engine to AI clients — Claude Desktop, Claude.ai, ChatGPT Apps, or any other MCP-compatible LLM host.
+This is a [Model Context Protocol](https://modelcontextprotocol.io) server that exposes [Onegent](https://onegent.one)'s trip-booking execution engine to AI clients — Claude Desktop, Claude.ai, ChatGPT Apps, or any other MCP-compatible LLM host.
 
 Instead of giving the LLM generic web-browsing tools and hoping it figures out a booking flow, this server hands it six purpose-built tools that map directly to Onegent's production REST API. The agent navigates OpenTable / Resy / Booking.com / Expedia / Viator on your behalf and stops before charging your card — you confirm the final submit.
 
@@ -57,7 +57,7 @@ Any host that launches stdio MCP servers via command/args works. Set `ONEGENT_AP
 
 ## Get an API key
 
-1. Visit https://onegent.com/developers (launching with v0.2.36+ — email `beta@onegent.com` for early access)
+1. Visit https://onegent.one/developers (launching with v0.2.36+ — email `beta@onegent.one` for early access)
 2. Sign in and create a key scoped to the scenarios you need
 3. Keys are prefixed `ogk_live_` for production or `ogk_test_` for sandbox
 
@@ -66,7 +66,7 @@ Any host that launches stdio MCP servers via command/args works. Set `ONEGENT_AP
 | Variable | Required | Default | Description |
 |---|---|---|---|
 | `ONEGENT_API_KEY` | yes | — | Format: `ogk_(live\|test)_xxxxxxxx…`. Treat like a secret. |
-| `ONEGENT_API_BASE_URL` | no | `https://onegent.com/api/v1` | Override for self-hosted / staging |
+| `ONEGENT_API_BASE_URL` | no | `https://onegent.one/api/v1` | Override for self-hosted / staging |
 
 ## Usage (sample LLM turn)
 
@@ -98,7 +98,7 @@ The key format is right (`ogk_live_…`) but it doesn't match any active key. Re
 The LLM called a tool with bad args. The error message lists which fields are wrong — usually `date` format (must be `YYYY-MM-DD`) or missing `profile`/`profileId`.
 
 **Job stuck in `queued` for minutes**
-Onegent's executor queue may be backed up. Call `get_job_audit` for details, or email support@onegent.com with the jobId.
+Onegent's executor queue may be backed up. Call `get_job_audit` for details, or email support@onegent.one with the jobId.
 
 **`paused_payment` is expected**
 Onegent never submits CVV on its own — by design. The user must confirm the final charge in the Onegent web app. This is a safety feature.
@@ -113,7 +113,7 @@ cd onegent
 npm install
 npm run build:mcp
 # Run against staging:
-ONEGENT_API_BASE_URL=https://staging.onegent.com/api/v1 \
+ONEGENT_API_BASE_URL=https://staging.onegent.one/api/v1 \
 ONEGENT_API_KEY=ogk_test_... \
   node packages/mcp-server/dist/index.js
 ```

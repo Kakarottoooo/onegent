@@ -65,7 +65,7 @@ function printUsage(): void {
       ``,
       `Env:`,
       `  ONEGENT_API_KEY        required (ogk_live_... or ogk_test_...)`,
-      `  ONEGENT_API_BASE_URL   optional, defaults to https://onegent.com/api/v1`,
+      `  ONEGENT_API_BASE_URL   optional, defaults to https://onegent.one/api/v1`,
     ].join("\n"),
   );
 }
