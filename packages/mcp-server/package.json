@@ -1,7 +1,7 @@
 {
   "name": "@onegent/mcp-server",
-  "version": "0.1.0",
-  "description": "Book restaurants, hotels, flights, and activities through an AI agent that navigates real booking sites.",
+  "version": "0.1.1",
+  "description": "Travel execution layer for AI agents — book restaurants, hotels, flights, and activities through an AI agent that navigates real booking sites.",
   "keywords": [
     "mcp",
     "modelcontextprotocol",
@@ -15,14 +15,9 @@
   ],
   "license": "MIT",
   "author": "Onegent",
-  "homepage": "https://github.com/kakarottoooo/onegent/tree/master/packages/mcp-server",
-  "repository": {
-    "type": "git",
-    "url": "git+https://github.com/kakarottoooo/onegent.git",
-    "directory": "packages/mcp-server"
-  },
+  "homepage": "https://onegent.one/developers/docs/integrations/claude-mcp",
   "bugs": {
-    "url": "https://github.com/kakarottoooo/onegent/issues"
+    "url": "mailto:support@onegent.one"
   },
   "type": "module",
   "main": "./dist/index.js",

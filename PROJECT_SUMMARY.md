@@ -1,8 +1,23 @@
 ================================================================
-Onegent · AI 决策代理 · 项目总结 · v0.2.51.0
+Onegent · Travel Execution Layer for AI Agents · v0.2.52.0
 ================================================================
 
-【项目定义】
+【一句话定位（2026-04-26 锁定）】
+**Onegent is the travel execution layer for AI agents and groups.**
+**Onegent 是给 AI agent 和多人用户使用的旅行预订执行层。**
+
+不是 "AI 帮你做任何事"（horizontal 跑腿被 OpenAI Computer Use /
+Browserbase 吃）。
+不是 "AI 帮你规划行程"（Booking AI Trip Planner 已经在做）。
+而是 **agent 真正把行程订下来 — 跨 OTA fallback、payment safety、
+multi-person Decision Room** 的执行能力本身。
+
+Wedge：travel vertical（餐厅 / 酒店 / 机票 / 活动 / 多人 trip）
+Backend：Agent Execution Layer（同一引擎服务 C 端 + Claude Desktop +
+ChatGPT Apps + 第三方 agent builder via /api/v1）
+明确不做：horizontal AI doer
+
+【项目定义（旧版本，保留作为决策路径参考）】
 不是"让用户自己搜、比、选"的传统 App，也不是"联网搜一搜再总结"的通用 AI。
 而是：把"搜索 → 比较 → 筛选 → 排序 → 推荐 → 执行 → 反馈 → 学习"
 整条链路交给 agent 自动完成，用户只做最终批准。

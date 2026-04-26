@@ -103,20 +103,16 @@ Onegent's executor queue may be backed up. Call `get_job_audit` for details, or 
 **`paused_payment` is expected**
 Onegent never submits CVV on its own — by design. The user must confirm the final charge in the Onegent web app. This is a safety feature.
 
-## Development
+## Source access
 
-This package lives in the Onegent monorepo at [`packages/mcp-server/`](https://github.com/kakarottoooo/onegent/tree/master/packages/mcp-server).
+The package source lives in a private repo. For source access (eval / contribution / security audit), email `support@onegent.one`.
 
-```bash
-git clone https://github.com/kakarottoooo/onegent.git
-cd onegent
-npm install
-npm run build:mcp
-# Run against staging:
-ONEGENT_API_BASE_URL=https://staging.onegent.one/api/v1 \
-ONEGENT_API_KEY=ogk_test_... \
-  node packages/mcp-server/dist/index.js
-```
+## Report bugs
+
+Email `support@onegent.one` with:
+- The `jobId` from the failing run (if applicable)
+- Your MCP client (Claude Desktop / ChatGPT Apps / other) + version
+- A short description of what you expected vs. what happened
 
 ## License
 
