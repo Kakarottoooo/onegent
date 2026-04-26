@@ -3,48 +3,29 @@
  * surfaces. Hardcoded colors (not var() refs) so it renders identically
  * regardless of which surface's design tokens are in scope.
  *
- * Apple Mac menu-bar pattern: collapsed to a 4px hairline by default so
- * it doesn't compete with the per-surface main nav. The hairline is a
- * faint warm-gold gradient — visible enough to discover, quiet enough
- * to ignore. Hover the ribbon zone → expands to 36px with content fade.
- *
- * Mobile / touch (≤768px) sticks with the always-on 36px shape because
- * hover doesn't exist on those devices and the surface tabs would be
- * unreachable otherwise.
+ * Visibility: hidden by default (translateY -100%); reveals when the user
+ * wheel-scrolls with the cursor over the top nav zone. BrandStrip.tsx
+ * owns the gesture detection and toggles .brand-strip--hidden. Touch/
+ * mobile bypasses the gesture and stays always-on (no wheel concept).
  */
 
 .brand-strip {
-  position: relative;
-  height: 4px;
-  /* Faint gold hairline — strongest in the middle, fades to either edge.
-     Mimics the Apple menu-bar's "barely there" quality. */
-  background: linear-gradient(
-    90deg,
-    transparent 0%,
-    rgba(201, 168, 76, 0.18) 30%,
-    rgba(201, 168, 76, 0.32) 50%,
-    rgba(201, 168, 76, 0.18) 70%,
-    transparent 100%
-  );
-  border-bottom: none;
-  /* Sit above per-surface navs so the hover hot zone is reachable even
-     when a sticky nav lives directly below us. */
-  z-index: 30;
-  overflow: hidden;
-  cursor: pointer;
-  font-family: var(--font-dm-sans), "DM Sans", system-ui, sans-serif;
-  transition:
-    height 220ms cubic-bezier(0.16, 1, 0.3, 1),
-    background 220ms cubic-bezier(0.16, 1, 0.3, 1),
-    border-color 220ms cubic-bezier(0.16, 1, 0.3, 1);
-}
-
-.brand-strip:hover,
-.brand-strip:focus-within {
+  position: sticky;
+  top: 0;
   height: 36px;
   background: #fafaf9;
   border-bottom: 0.5px solid #e7e5e4;
-  cursor: default;
+  z-index: 30;
+  font-family: var(--font-dm-sans), "DM Sans", system-ui, sans-serif;
+  transform: translateY(0);
+  transition: transform 240ms cubic-bezier(0.16, 1, 0.3, 1);
+  will-change: transform;
+}
+
+.brand-strip--hidden {
+  /* Slide fully off-screen. The 0.5px border is included in the 36px
+     height so -100% is enough; no extra offset needed. */
+  transform: translateY(-100%);
 }
 
 .brand-strip-inner {
@@ -56,18 +37,6 @@
   grid-template-columns: 1fr auto 1fr;
   align-items: center;
   gap: 16px;
-  /* Hidden in collapsed state. Slight delay on the way in so the height
-     animation has time to make room before content fades up. */
-  opacity: 0;
-  transition: opacity 160ms cubic-bezier(0.22, 1, 0.36, 1);
-  pointer-events: none;
-}
-
-.brand-strip:hover .brand-strip-inner,
-.brand-strip:focus-within .brand-strip-inner {
-  opacity: 1;
-  transition-delay: 90ms;
-  pointer-events: auto;
 }
 
 .brand-strip-spacer {
@@ -157,25 +126,7 @@
   background: #d4d4d8;
 }
 
-/* ── Mobile / touch — always-on, no hover-collapse ────────────────── */
-/* Hover doesn't exist on touch devices, so the collapsed hairline would
-   trap the surface switcher. Detect coarse pointers + small viewports
-   and force the always-visible 36px shape. */
-
-@media (hover: none), (max-width: 768px) {
-  .brand-strip {
-    height: 36px;
-    background: #fafaf9;
-    border-bottom: 0.5px solid #e7e5e4;
-    cursor: default;
-    overflow: visible;
-  }
-  .brand-strip-inner {
-    opacity: 1;
-    pointer-events: auto;
-    transition: none;
-  }
-}
+/* ── Mobile ───────────────────────────────────────────────────────── */
 
 @media (max-width: 540px) {
   .brand-strip {
