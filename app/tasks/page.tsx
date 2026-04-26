@@ -17,6 +17,7 @@ import TripItineraryCalendar from "@/components/TripItineraryCalendar";
 import RestaurantStepCard from "@/components/booking/RestaurantStepCard";
 import BrowserLiveView from "@/components/BrowserLiveView";
 import { getBrowserModelForStagehand } from "@/lib/agent-model-config";
+import "./tasks.css";
 
 
 function getSessionId(): string {
@@ -42,18 +43,13 @@ function TaskWorkspaceSwitch({
   setView: (view: TaskWorkspaceView) => void;
 }) {
   return (
-    <div className="flex gap-1 rounded-xl border border-[var(--border)] bg-[var(--card-2)] p-1">
+    <div className="task-tabs">
       {TASK_WORKSPACE_TABS.map((tab) => (
         <button
           key={tab.id}
           type="button"
           onClick={() => setView(tab.id)}
-          className={
-            "flex-1 rounded-lg px-3 py-2 text-xs font-medium transition-colors " +
-            (view === tab.id
-              ? "bg-[var(--card)] text-[var(--text-primary)] shadow-sm"
-              : "text-[var(--text-muted)] hover:text-[var(--text-secondary)]")
-          }
+          className={`task-tabs__btn${view === tab.id ? " task-tabs__btn--active" : ""}`}
         >
           {tab.label}
         </button>
@@ -441,8 +437,8 @@ function NeedsHelpCard({ step, onManualLink, jobId, stepIndex, onRefresh }: {
   }
 
   return (
-    <div style={{ borderTop: "0.5px solid var(--border, #e5e7eb)", backgroundColor: "var(--bg, #fafaf9)" }}>
-      <div style={{ padding: "14px" }}>
+    <div className="help-card">
+      <div style={{ padding: 0 }}>
 
         {/* Agent question bubble */}
         <div style={{
@@ -870,111 +866,83 @@ function StepCard({ step, stepIndex, jobId, onRefresh, onOpenLive }: {
     window.open(url, "_blank");
   }
 
+  const stepCardClass = `step-card${
+    step.actionItem ? " step-card--needs-action" : step.status === "done" ? " step-card--done" : ""
+  }`;
+
   return (
-    <div style={{
-      borderRadius: 12,
-      border: `0.5px solid ${step.actionItem ? "rgba(220,38,38,0.3)" : step.status === "done" ? "rgba(22,163,74,0.2)" : "var(--border, #e5e7eb)"}`,
-      backgroundColor: step.actionItem ? "rgba(220,38,38,0.03)" : step.status === "done" ? "rgba(22,163,74,0.03)" : "var(--card-2, #f9f9f9)",
-      overflow: "hidden",
-    }}>
-      {/* Main row */}
-      <div style={{ display: "flex", alignItems: "flex-start", gap: 10, padding: "10px 12px" }}>
-        {/* Status badge */}
-        <div style={{
-          flexShrink: 0, width: 22, height: 22, borderRadius: "50%",
-          backgroundColor: color, color: "#fff",
-          display: "flex", alignItems: "center", justifyContent: "center",
-          fontSize: 11, fontWeight: 700, marginTop: 1,
-          animation: step.status === "loading" ? "jobpulse 1.2s ease-in-out infinite" : "none",
-        }}>
+    <div className={stepCardClass}>
+      <div className="step-card__row">
+        <div
+          className="step-card__status"
+          style={{
+            backgroundColor: color,
+            animation: step.status === "loading" ? "jobpulse 1.2s ease-in-out infinite" : "none",
+          }}
+        >
           {stepStatusIcon(step)}
         </div>
 
         <div style={{ flex: 1, minWidth: 0 }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
-            <span style={{ fontSize: 15 }}>{step.emoji}</span>
-            <p style={{ fontFamily: "var(--font-dm-sans)", fontSize: 13, fontWeight: 600 }}>
-              {step.label}
-            </p>
+          <div className="step-card__title-row">
+            <span className="step-card__emoji">{step.emoji}</span>
+            <p className="step-card__title">{step.label}</p>
             {(step.timeAdjusted || step.usedFallback) && (
-              <span style={{
-                fontSize: 10, fontFamily: "var(--font-dm-sans)",
-                color: "rgba(234,88,12,0.9)", backgroundColor: "rgba(234,88,12,0.08)",
-                border: "0.5px solid rgba(234,88,12,0.25)",
-                borderRadius: 4, padding: "1px 5px", fontWeight: 500,
-              }}>
+              <span className="step-card__pill step-card__pill--adjusted">
                 {step.timeAdjusted ? "⏰ time adjusted" : "🔄 alternative"}
               </span>
             )}
             {step.replanAdjusted && (
-              <span style={{
-                fontSize: 10, fontFamily: "var(--font-dm-sans)",
-                color: "#8b5cf6", backgroundColor: "rgba(139,92,246,0.08)",
-                border: "0.5px solid rgba(139,92,246,0.25)",
-                borderRadius: 4, padding: "1px 5px", fontWeight: 500,
-              }}>
+              <span className="step-card__pill step-card__pill--replan">
                 ⟳ scene-replanned
               </span>
             )}
             {step.replanFlagged && !step.replanAdjusted && (
-              <span style={{
-                fontSize: 10, fontFamily: "var(--font-dm-sans)",
-                color: "rgba(234,88,12,0.85)", backgroundColor: "rgba(234,88,12,0.07)",
-                border: "0.5px solid rgba(234,88,12,0.2)",
-                borderRadius: 4, padding: "1px 5px", fontWeight: 500,
-              }}>
+              <span className="step-card__pill step-card__pill--review">
                 ⚠ review schedule
               </span>
             )}
           </div>
-          <p style={{ fontFamily: "var(--font-dm-sans)", fontSize: 11, color, marginTop: 2 }}>
+          <p className="step-card__sub" style={{ color }}>
             {stepStatusLabel(step)}
             {step.selected_time && ` · ${step.type === "flight" ? "Price:" : "Time:"} ${step.selected_time}`}
           </p>
-          {/* Show last log entry inline when step is still loading — surfaces agent result
-              even if the Vercel function was killed before writing the final step status */}
           {step.status === "loading" && hasLog && (() => {
             const last = step.decisionLog!.at(-1);
             return last ? (
-              <p style={{
-                fontFamily: "var(--font-dm-sans)", fontSize: 11, marginTop: 3,
-                color: last.type === "failed" ? "rgba(220,38,38,0.75)" :
-                       last.type === "succeeded" ? "rgba(22,163,74,0.85)" :
-                       "var(--text-secondary, #666)",
-                maxWidth: 280, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
-              }} title={last.message}>
+              <p
+                className="step-card__sub"
+                style={{
+                  marginTop: 3,
+                  color:
+                    last.type === "failed" ? "rgba(220,38,38,0.75)" :
+                    last.type === "succeeded" ? "rgba(22,163,74,0.85)" :
+                    "var(--ink-6)",
+                  maxWidth: 280,
+                  overflow: "hidden",
+                  textOverflow: "ellipsis",
+                  whiteSpace: "nowrap",
+                }}
+                title={last.message}
+              >
                 {last.message}
               </p>
             ) : null;
           })()}
           {step.status === "error" && step.error && (
-            <p style={{
-              fontFamily: "var(--font-dm-sans)", fontSize: 11, marginTop: 3,
-              color: "rgba(220,38,38,0.75)",
-              maxWidth: 280, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
-            }} title={step.error}>
+            <p className="step-card__error" title={step.error}>
               {step.error}
             </p>
           )}
           {hasLog && (
-            <button onClick={() => setLogOpen((o) => !o)} style={{
-              marginTop: 4, background: "none", border: "none", padding: 0,
-              fontFamily: "var(--font-dm-sans)", fontSize: 11,
-              color: "var(--text-muted, #aaa)", cursor: "pointer",
-              textDecoration: "underline", textUnderlineOffset: 2,
-            }}>
+            <button onClick={() => setLogOpen((o) => !o)} className="step-card__log-toggle">
               {logOpen ? "Hide agent log ▲" : `View agent log (${step.decisionLog!.length} steps) ▼`}
             </button>
           )}
         </div>
 
         {step.status === "done" && step.handoff_url && (
-          <button onClick={handleOpenAgentLink} style={{
-            flexShrink: 0, padding: "5px 12px", borderRadius: 8,
-            border: "none", background: "rgba(22,163,74,0.12)",
-            color: "rgba(22,163,74,0.9)", fontFamily: "var(--font-dm-sans)",
-            fontSize: 11, fontWeight: 600, cursor: "pointer", whiteSpace: "nowrap",
-          }}>
+          <button onClick={handleOpenAgentLink} className="step-card__open-cta">
             Open →
           </button>
         )}
@@ -985,14 +953,8 @@ function StepCard({ step, stepIndex, jobId, onRefresh, onOpenLive }: {
 
       {/* Decision log */}
       {logOpen && step.decisionLog && (
-        <div style={{
-          borderTop: "0.5px solid var(--border, #e5e7eb)",
-          padding: "10px 12px 10px 44px",
-          display: "flex", flexDirection: "column", gap: 6,
-        }}>
-          <p style={{ fontFamily: "var(--font-dm-sans)", fontSize: 10, fontWeight: 700, color: "var(--text-muted, #aaa)", letterSpacing: "0.05em", textTransform: "uppercase", marginBottom: 2 }}>
-            Agent decision log
-          </p>
+        <div className="step-card__log">
+          <p className="step-card__log-eyebrow">Agent decision log</p>
           {step.decisionLog.map((entry, i) => (
             <div key={i} style={{
               display: "flex", gap: 8, alignItems: "flex-start",
@@ -1126,42 +1088,43 @@ function InterventionBanner({ step, jobId, onOpenLive }: { step: BookingJobStep;
 
   return (
     <>
-      {/* Inline banner */}
-      <div style={{ borderTop: `0.5px solid ${border}`, padding: "10px 14px", backgroundColor: bg }}>
+      {/* Inline banner — uses .intervention BEM with semantic accent (gold for
+          payment-pending, red for sign-in-needed). border/bg/color stay
+          inline so each variant uses its own semantic color stack. */}
+      <div className="intervention" style={{ borderTopColor: border, background: bg }}>
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
           <div style={{ flex: 1 }}>
-            <p style={{ fontFamily: "var(--font-dm-sans)", fontSize: 12, fontWeight: 700, color, marginBottom: 2 }}>
+            <p className="intervention__title" style={{ color }}>
               {emoji} {title}
             </p>
-            <p style={{ fontFamily: "var(--font-dm-sans)", fontSize: 11, color: "var(--text-secondary, #666)" }}>
-              {subtitle}
-            </p>
+            <p className="intervention__msg">{subtitle}</p>
           </div>
           <div style={{ display: "flex", gap: 8, flexShrink: 0 }}>
             {isPaymentWait && hasCloudSession && (
-              <a href={step.session_url} target="_blank" rel="noopener noreferrer" style={{
-                padding: "7px 14px", borderRadius: 8, border: `1px solid ${color}`,
-                backgroundColor: color, color: "#fff",
-                fontFamily: "var(--font-dm-sans)", fontSize: 12, fontWeight: 600, cursor: "pointer",
-                textDecoration: "none", display: "inline-block",
-              }}>
+              <a
+                href={step.session_url}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="intervention__btn"
+                style={{ background: color }}
+              >
                 💳 Enter CVC →
               </a>
             )}
             {isPaymentWait && !hasCloudSession && (
-              <button onClick={() => onOpenLive?.()} style={{
-                padding: "7px 14px", borderRadius: 8, border: `1px solid ${color}`,
-                backgroundColor: "transparent", color,
-                fontFamily: "var(--font-dm-sans)", fontSize: 12, fontWeight: 600, cursor: "pointer",
-              }}>
+              <button
+                onClick={() => onOpenLive?.()}
+                className="intervention__btn"
+                style={{ background: "transparent", color, border: `1px solid ${color}` }}
+              >
                 🖥️ Watch live
               </button>
             )}
-            <button onClick={() => setOpen(true)} style={{
-              padding: "7px 14px", borderRadius: 8, border: "none",
-              backgroundColor: color, color: "#fff",
-              fontFamily: "var(--font-dm-sans)", fontSize: 12, fontWeight: 600, cursor: "pointer",
-            }}>
+            <button
+              onClick={() => setOpen(true)}
+              className="intervention__btn"
+              style={{ background: color }}
+            >
               Details →
             </button>
           </div>
@@ -1345,73 +1308,72 @@ function JobCard({ job, onRefresh, sessionId, onOpenLive }: { job: BookingJob; o
     }
   }
 
+  const jobCardClass = `job-card${
+    semanticStatus === "blocked_needs_user_input" || semanticStatus === "partially_completed"
+      ? " job-card--needs-action"
+      : semanticStatus.startsWith("succeeded")
+      ? " job-card--succeeded"
+      : ""
+  }`;
+
   return (
-    <div style={{
-      borderRadius: 16,
-      border: `0.5px solid ${
-        semanticStatus === "blocked_needs_user_input" || semanticStatus === "partially_completed"
-          ? "rgba(220,38,38,0.3)"
-          : semanticStatus.startsWith("succeeded")
-          ? "rgba(22,163,74,0.25)"
-          : "var(--border, #e5e7eb)"
-      }`,
-      backgroundColor: "var(--card, #fff)",
-      overflow: "hidden",
-    }}>
+    <div className={jobCardClass}>
       {/* Header */}
-      <div onClick={() => setExpanded((e) => !e)} style={{ padding: "14px 16px", cursor: "pointer", display: "flex", alignItems: "center", gap: 12 }}>
-        <div style={{ flexShrink: 0, width: 9, height: 9, borderRadius: "50%", backgroundColor: statusDisplay.color, animation: statusDisplay.animate ? "jobpulse 1.4s ease-in-out infinite" : "none" }} />
+      <div onClick={() => setExpanded((e) => !e)} className="job-card__header">
+        <div
+          className="job-card__status-dot"
+          style={{
+            backgroundColor: statusDisplay.color,
+            animation: statusDisplay.animate ? "jobpulse 1.4s ease-in-out infinite" : "none",
+          }}
+        />
         <div style={{ flex: 1, minWidth: 0 }}>
-          <p style={{ fontFamily: "var(--font-dm-sans)", fontWeight: 700, fontSize: 14, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-            {job.trip_label}
-          </p>
-          <div style={{ display: "flex", flexWrap: "wrap", gap: "3px 8px", marginTop: 2 }}>
-            <span style={{ fontFamily: "var(--font-dm-sans)", fontSize: 11, color: statusDisplay.color, fontWeight: 500 }}>
+          <p className="job-card__title">{job.trip_label}</p>
+          <div className="job-card__meta-row">
+            <span
+              className="job-card__meta-item job-card__meta-item--strong"
+              style={{ color: statusDisplay.color }}
+            >
               {statusDisplay.label}
             </span>
             {isComplete && (
-              <span style={{ fontFamily: "var(--font-dm-sans)", fontSize: 11, color: "var(--text-secondary, #666)" }}>
+              <span className="job-card__meta-item">
                 {doneCount}/{job.steps.length} ready
               </span>
             )}
             {adjustedCount > 0 && (
-              <span style={{ fontFamily: "var(--font-dm-sans)", fontSize: 11, color: "rgba(234,88,12,0.85)" }}>
+              <span className="job-card__meta-item job-card__meta-item--warn">
                 {adjustedCount} agent adjustment{adjustedCount > 1 ? "s" : ""}
               </span>
             )}
             {replanCount > 0 && (
-              <span style={{ fontFamily: "var(--font-dm-sans)", fontSize: 11, color: "#8b5cf6" }}>
+              <span className="job-card__meta-item job-card__meta-item--purple">
                 ⟳ {replanCount} scene replan{replanCount > 1 ? "s" : ""}
               </span>
             )}
             {actionCount > 0 && (
-              <span style={{ fontFamily: "var(--font-dm-sans)", fontSize: 11, color: "rgba(220,38,38,0.85)", fontWeight: 600 }}>
+              <span className="job-card__meta-item job-card__meta-item--alert">
                 {actionCount} need{actionCount > 1 ? "" : "s"} decision
               </span>
             )}
-            <span style={{ fontFamily: "var(--font-dm-sans)", fontSize: 11, color: "var(--text-muted, #aaa)" }}>
+            <span className="job-card__meta-item job-card__meta-item--muted">
               {formatDate(job.created_at)}
             </span>
           </div>
         </div>
         {(job.status === "running" || (isComplete && Date.now() - new Date(job.updated_at).getTime() < 90_000)) && (
-          <button onClick={(e) => { e.stopPropagation(); onOpenLive?.(job.id); }} style={{
-            flexShrink: 0, padding: "7px 12px", borderRadius: 10,
-            border: "1px solid var(--gold, #D4A34B)", backgroundColor: "transparent",
-            color: job.status === "running" ? "var(--gold, #D4A34B)" : "rgba(212,163,75,0.5)",
-            fontFamily: "var(--font-dm-sans)", fontSize: 12,
-            fontWeight: 600, cursor: "pointer", whiteSpace: "nowrap",
-          }}>
+          <button
+            onClick={(e) => { e.stopPropagation(); onOpenLive?.(job.id); }}
+            className={`job-card__cta ${job.status === "running" ? "job-card__cta--watch" : "job-card__cta--watch-replay"}`}
+          >
             {job.status === "running" ? "🖥️ Watch live" : "🖥️ Replay"}
           </button>
         )}
         {job.status === "done" && doneCount > 0 && (
-          <button onClick={(e) => { e.stopPropagation(); openAll(); }} style={{
-            flexShrink: 0, padding: "7px 14px", borderRadius: 10,
-            border: "none", backgroundColor: "var(--gold, #D4A34B)",
-            color: "#fff", fontFamily: "var(--font-dm-sans)", fontSize: 12,
-            fontWeight: 600, cursor: "pointer", whiteSpace: "nowrap",
-          }}>
+          <button
+            onClick={(e) => { e.stopPropagation(); openAll(); }}
+            className="job-card__cta job-card__cta--open-all"
+          >
             Open all →
           </button>
         )}
@@ -1420,38 +1382,18 @@ function JobCard({ job, onRefresh, sessionId, onOpenLive }: { job: BookingJob; o
             onClick={handleResetStuck}
             disabled={resetting}
             title="Job appears stuck — click to reset and retry"
-            style={{
-              flexShrink: 0, padding: "6px 12px", borderRadius: 10,
-              border: "none", backgroundColor: resetting ? "var(--border)" : "rgba(234,88,12,0.85)",
-              color: "#fff", fontFamily: "var(--font-dm-sans)", fontSize: 12,
-              fontWeight: 600, cursor: resetting ? "default" : "pointer", whiteSpace: "nowrap",
-            }}
+            className="job-card__cta job-card__cta--reset"
           >
             {resetting ? "Starting…" : "↺ Reset & Retry"}
           </button>
         )}
-        <span style={{ color: "var(--text-muted, #aaa)", fontSize: 12, flexShrink: 0 }}>
-          {expanded ? "▲" : "▼"}
-        </span>
+        <span className="job-card__expand">{expanded ? "▲" : "▼"}</span>
         <button
           onClick={handleDelete}
           disabled={deleting}
           title={isRunning ? "Force remove this running trip" : "Delete trip record"}
-          style={{
-            flexShrink: 0,
-            background: "none",
-            border: "0.5px solid var(--border, #e5e7eb)",
-            borderRadius: 8,
-            padding: "5px 10px",
-            fontFamily: "var(--font-dm-sans)",
-            fontSize: 12,
-            color: isRunning ? "rgba(234,88,12,0.8)" : "rgba(220,38,38,0.65)",
-            cursor: deleting ? "default" : "pointer",
-            opacity: deleting ? 0.4 : 1,
-            display: "flex",
-            alignItems: "center",
-            gap: 4,
-          }}
+          className={`job-card__delete${isRunning ? " job-card__delete--running" : ""}`}
+          style={{ opacity: deleting ? 0.4 : 1 }}
         >
           🗑
         </button>
@@ -1459,11 +1401,11 @@ function JobCard({ job, onRefresh, sessionId, onOpenLive }: { job: BookingJob; o
 
       {expanded && (
         <>
-          <div style={{ borderTop: "0.5px solid var(--border, #e5e7eb)", padding: "12px 14px", display: "flex", flexDirection: "column", gap: 8 }}>
+          <div className="job-card__body">
             {/* Tier: needs decision (floated to top) */}
             {actionCount > 0 && (
               <>
-                <p style={{ fontFamily: "var(--font-dm-sans)", fontSize: 10, fontWeight: 700, color: "rgba(220,38,38,0.7)", letterSpacing: "0.06em", textTransform: "uppercase" }}>
+                <p className="job-card__section-label job-card__section-label--alert">
                   Needs your decision
                 </p>
                 {job.steps.filter((s) => s.actionItem).map((step, i) => (
@@ -1474,7 +1416,7 @@ function JobCard({ job, onRefresh, sessionId, onOpenLive }: { job: BookingJob; o
             )}
             {/* Other steps */}
             {actionCount > 0 && (
-              <p style={{ fontFamily: "var(--font-dm-sans)", fontSize: 10, fontWeight: 700, color: "var(--text-muted, #aaa)", letterSpacing: "0.06em", textTransform: "uppercase" }}>
+              <p className="job-card__section-label job-card__section-label--muted">
                 Other steps
               </p>
             )}
@@ -3080,57 +3022,26 @@ function TripsPageInner() {
           </button>
           <div className="lg:flex lg:items-end lg:justify-between" style={{ gap: 16 }}>
             <div>
-              <p style={{
-                fontFamily: "var(--font-dm-sans)",
-                fontSize: 11,
-                fontWeight: 600,
-                letterSpacing: "0.14em",
-                textTransform: "uppercase",
-                color: "var(--text-muted, #999)",
-              }}>
-                Workspace
-              </p>
+              <p className="task-page__eyebrow">Workspace</p>
               <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 4 }}>
-                <p style={{ fontFamily: "var(--font-dm-sans)", fontWeight: 700, fontSize: 28, lineHeight: 1.1 }}>Tasks</p>
+                <p className="task-page__title">Tasks</p>
                 {actionTotal > 0 && (
-                  <span style={{
-                    fontFamily: "var(--font-dm-sans)", fontSize: 11, fontWeight: 700,
-                    color: "#fff", backgroundColor: "rgba(220,38,38,0.85)",
-                    borderRadius: 20, padding: "2px 7px",
-                  }}>
+                  <span className="task-page__action-badge">
                     {actionTotal} action{actionTotal > 1 ? "s" : ""} needed
                   </span>
                 )}
               </div>
-              <p style={{ fontFamily: "var(--font-dm-sans)", fontSize: 12, color: "var(--text-secondary, #666)", marginTop: 4 }}>
-                {workspaceCopy.summary}
-              </p>
+              <p className="task-page__subtitle">{workspaceCopy.summary}</p>
             </div>
 
             <div className="hidden lg:flex" style={{ alignItems: "center", gap: 10 }}>
-              <div style={{
-                padding: "10px 14px",
-                borderRadius: 14,
-                border: "0.5px solid var(--border, #e5e7eb)",
-                background: "var(--card-2, #f6f6f4)",
-                fontFamily: "var(--font-dm-sans)",
-                fontSize: 12,
-                color: "var(--text-secondary, #666)",
-              }}>
-                <span style={{ color: "var(--text-muted, #999)", marginRight: 6 }}>{workspaceCopy.countLabel}</span>
-                <span style={{ color: "var(--text-primary, #111)", fontWeight: 700 }}>{workspaceCopy.countValue}</span>
+              <div className="task-meta-card">
+                <span className="task-meta-card__label">{workspaceCopy.countLabel}</span>
+                <span className="task-meta-card__value">{workspaceCopy.countValue}</span>
               </div>
-              <div style={{
-                padding: "10px 14px",
-                borderRadius: 14,
-                border: "0.5px solid var(--border, #e5e7eb)",
-                background: "var(--card-2, #f6f6f4)",
-                fontFamily: "var(--font-dm-sans)",
-                fontSize: 12,
-                color: "var(--text-secondary, #666)",
-              }}>
-                <span style={{ color: "var(--text-muted, #999)", marginRight: 6 }}>Actions</span>
-                <span style={{ color: "var(--text-primary, #111)", fontWeight: 700 }}>{visibleActionTotal}</span>
+              <div className="task-meta-card">
+                <span className="task-meta-card__label">Actions</span>
+                <span className="task-meta-card__value">{visibleActionTotal}</span>
               </div>
             </div>
           </div>

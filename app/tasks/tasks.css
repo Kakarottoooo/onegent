@@ -1,0 +1,686 @@
+/*
+ * /tasks page-scoped styles.
+ *
+ * Phase 1 of the customer-end visual upgrade — extracts inline style={{}}
+ * blocks from app/tasks/page.tsx into BEM classes. Scope today (Phase 1
+ * batch B):
+ *   - .task-page shell (page wrap, header, workspace meta cards)
+ *   - .task-tabs (Queue/Live/History switcher — Linear-style indicator)
+ *   - .job-card (each booking job's outer card + header + status pills)
+ *   - .step-card (each step's progress row + status badge + meta)
+ *   - .help-card (NeedsHelpCard — failed step needs decision)
+ *   - .intervention (InterventionBanner — awaiting CVC / login)
+ *
+ * Inner panels NOT yet migrated (Phase 1 batch C — next session):
+ *   - LiveLogPanel, MonitorPanel, InsightsPanel
+ *   - RestaurantTimePicker, RetryScheduler
+ *   - Restaurant-not-found special case
+ *
+ * Design intent (Linear App / Stripe Dashboard tool-tier):
+ *   - Tighter spacing rhythm via tokens (4px base)
+ *   - Status-aware borders + tinted backgrounds (semantic colors not hard-coded)
+ *   - Hover lift on cards but more restrained than product cards (these
+ *     aren't recommendations, they're status containers)
+ *   - Linear-style tab switch with sliding active indicator
+ *   - CTAs use the gradient gold from cards.css for visual cohesion
+ */
+
+/* ═══════════════════════════════════════════════════════════════════════
+ * PAGE SHELL
+ * ═══════════════════════════════════════════════════════════════════════ */
+
+.task-page {
+  min-height: 100vh;
+  background: var(--bg);
+}
+
+.task-page__eyebrow {
+  font-family: var(--font-dm-sans);
+  font-size: var(--text-xs);
+  font-weight: 600;
+  letter-spacing: var(--tracking-eyebrow);
+  text-transform: uppercase;
+  color: var(--ink-5);
+}
+
+.task-page__title {
+  font-family: var(--font-dm-sans);
+  font-size: 32px;
+  font-weight: 700;
+  color: var(--ink-8);
+  line-height: var(--lh-tight);
+  letter-spacing: var(--tracking-tight);
+  margin-top: 4px;
+}
+
+.task-page__subtitle {
+  font-family: var(--font-dm-sans);
+  font-size: var(--text-sm);
+  color: var(--ink-6);
+  margin-top: var(--space-1);
+}
+
+.task-page__action-badge {
+  display: inline-flex;
+  align-items: center;
+  font-family: var(--font-dm-sans);
+  font-size: var(--text-xs);
+  font-weight: 700;
+  color: #fff;
+  background: linear-gradient(
+    180deg,
+    rgb(220, 38, 38) 0%,
+    rgb(185, 28, 28) 100%
+  );
+  border-radius: var(--radius-pill);
+  padding: 2px var(--space-2);
+  letter-spacing: var(--tracking-tight);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.18),
+    0 2px 4px rgba(220, 38, 38, 0.25);
+}
+
+/* Workspace meta cards (Visible / Actions) */
+.task-meta-card {
+  padding: var(--space-3) var(--space-4);
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  background: var(--card-2);
+  font-family: var(--font-dm-sans);
+  font-size: var(--text-sm);
+  color: var(--ink-6);
+  box-shadow: var(--shadow-1);
+}
+
+.task-meta-card__label {
+  color: var(--ink-5);
+  margin-right: var(--space-2);
+  font-size: var(--text-xs);
+  letter-spacing: var(--tracking-tight);
+}
+
+.task-meta-card__value {
+  color: var(--ink-8);
+  font-weight: 700;
+  letter-spacing: var(--tracking-tight);
+}
+
+/* ═══════════════════════════════════════════════════════════════════════
+ * TASK TABS (Queue / Live / History)
+ * ═══════════════════════════════════════════════════════════════════════ */
+
+.task-tabs {
+  display: flex;
+  gap: 2px;
+  padding: 4px;
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  background: var(--card-2);
+  box-shadow: inset 0 1px 2px rgba(74, 63, 47, 0.04);
+}
+
+.task-tabs__btn {
+  flex: 1;
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  font-family: var(--font-dm-sans);
+  font-size: var(--text-xs);
+  font-weight: 500;
+  color: var(--ink-5);
+  letter-spacing: var(--tracking-tight);
+  transition:
+    background-color var(--motion-fast) var(--ease-out-expo),
+    color var(--motion-fast) var(--ease-out-expo),
+    box-shadow var(--motion-fast) var(--ease-out-expo);
+}
+
+.task-tabs__btn:hover {
+  color: var(--ink-7);
+}
+
+.task-tabs__btn--active {
+  background: var(--card);
+  color: var(--ink-8);
+  font-weight: 600;
+  box-shadow:
+    0 1px 2px rgba(74, 63, 47, 0.08),
+    inset 0 0 0 1px var(--border);
+}
+
+/* ═══════════════════════════════════════════════════════════════════════
+ * JOB CARD
+ * ═══════════════════════════════════════════════════════════════════════ */
+
+.job-card {
+  border-radius: var(--radius-lg);
+  border: 1px solid var(--border);
+  background: var(--card);
+  overflow: hidden;
+  box-shadow: var(--shadow-1);
+  transition:
+    box-shadow var(--motion-base) var(--ease-out-expo),
+    border-color var(--motion-base) var(--ease-out-expo);
+  position: relative;
+}
+
+.job-card:hover {
+  box-shadow: var(--shadow-2);
+  border-color: rgba(201, 168, 76, 0.35);
+}
+
+/* Status-tinted variants — subtle border + glow when needs attention */
+.job-card--needs-action {
+  border-color: rgba(220, 38, 38, 0.32);
+}
+
+.job-card--needs-action:hover {
+  border-color: rgba(220, 38, 38, 0.5);
+  box-shadow:
+    var(--shadow-2),
+    0 0 0 3px rgba(220, 38, 38, 0.08);
+}
+
+.job-card--succeeded {
+  border-color: rgba(22, 163, 74, 0.28);
+}
+
+.job-card__header {
+  padding: var(--space-4);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  transition: background-color var(--motion-fast) var(--ease-out-expo);
+}
+
+.job-card__header:hover {
+  background: rgba(201, 168, 76, 0.04);
+}
+
+.job-card__status-dot {
+  flex-shrink: 0;
+  width: 10px;
+  height: 10px;
+  border-radius: var(--radius-pill);
+  box-shadow: 0 0 0 3px rgba(255, 255, 255, 0.5);
+}
+
+.job-card__title {
+  font-family: var(--font-dm-sans);
+  font-size: var(--text-md);
+  font-weight: 700;
+  color: var(--ink-8);
+  letter-spacing: var(--tracking-tight);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.job-card__meta-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 3px var(--space-2);
+  margin-top: 3px;
+}
+
+.job-card__meta-item {
+  font-family: var(--font-dm-sans);
+  font-size: 11px;
+  color: var(--ink-5);
+  letter-spacing: var(--tracking-tight);
+}
+
+.job-card__meta-item--strong {
+  font-weight: 500;
+}
+
+.job-card__meta-item--alert {
+  color: rgba(220, 38, 38, 0.85);
+  font-weight: 600;
+}
+
+.job-card__meta-item--warn {
+  color: rgba(234, 88, 12, 0.85);
+}
+
+.job-card__meta-item--purple {
+  color: #8b5cf6;
+}
+
+.job-card__meta-item--muted {
+  color: var(--ink-4);
+}
+
+/* Job-level CTA buttons (Watch live / Open all / Reset) */
+.job-card__cta {
+  flex-shrink: 0;
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-sm);
+  font-family: var(--font-dm-sans);
+  font-size: var(--text-xs);
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+  letter-spacing: var(--tracking-tight);
+  transition: all var(--motion-fast) var(--ease-out-expo);
+}
+
+.job-card__cta--watch {
+  background: transparent;
+  border: 1px solid var(--gold);
+  color: var(--gold);
+}
+
+.job-card__cta--watch:hover {
+  background: var(--gold-soft);
+}
+
+.job-card__cta--watch-replay {
+  background: transparent;
+  border: 1px solid var(--ink-3);
+  color: var(--ink-5);
+}
+
+.job-card__cta--open-all {
+  background: linear-gradient(180deg, var(--gold) 0%, var(--gold-strong) 100%);
+  border: none;
+  color: #fff;
+  padding: var(--space-2) var(--space-4);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.18),
+    0 2px 4px rgba(184, 146, 61, 0.2);
+}
+
+.job-card__cta--open-all:hover {
+  transform: translateY(-1px);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.25),
+    0 4px 10px rgba(184, 146, 61, 0.32);
+}
+
+.job-card__cta--reset {
+  background: rgba(234, 88, 12, 0.85);
+  border: none;
+  color: #fff;
+}
+
+.job-card__cta--reset:hover:not(:disabled) {
+  background: rgba(234, 88, 12, 1);
+}
+
+.job-card__cta--reset:disabled {
+  background: var(--ink-3);
+  cursor: default;
+}
+
+.job-card__expand {
+  color: var(--ink-4);
+  font-size: var(--text-xs);
+  flex-shrink: 0;
+  transition: transform var(--motion-fast) var(--ease-out-expo);
+}
+
+.job-card__delete {
+  flex-shrink: 0;
+  background: none;
+  border: 1px solid var(--ink-3);
+  border-radius: var(--radius-sm);
+  padding: 5px var(--space-2);
+  font-family: var(--font-dm-sans);
+  font-size: var(--text-xs);
+  color: rgba(220, 38, 38, 0.65);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  transition: all var(--motion-fast) var(--ease-out-expo);
+}
+
+.job-card__delete:hover:not(:disabled) {
+  border-color: rgba(220, 38, 38, 0.4);
+  background: rgba(220, 38, 38, 0.06);
+  color: rgba(220, 38, 38, 0.9);
+}
+
+.job-card__delete--running {
+  color: rgba(234, 88, 12, 0.85);
+}
+
+.job-card__body {
+  border-top: 1px solid var(--ink-2);
+  padding: var(--space-3) var(--space-4);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.job-card__section-label {
+  font-family: var(--font-dm-sans);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: var(--tracking-eyebrow);
+  text-transform: uppercase;
+  margin-top: var(--space-1);
+}
+
+.job-card__section-label--alert {
+  color: rgba(220, 38, 38, 0.75);
+}
+
+.job-card__section-label--muted {
+  color: var(--ink-4);
+}
+
+/* ═══════════════════════════════════════════════════════════════════════
+ * STEP CARD
+ * ═══════════════════════════════════════════════════════════════════════ */
+
+.step-card {
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  background: var(--card-2);
+  overflow: hidden;
+  transition:
+    border-color var(--motion-base) var(--ease-out-expo);
+}
+
+.step-card--needs-action {
+  border-color: rgba(220, 38, 38, 0.3);
+  background: rgba(220, 38, 38, 0.03);
+}
+
+.step-card--done {
+  border-color: rgba(22, 163, 74, 0.22);
+  background: rgba(22, 163, 74, 0.03);
+}
+
+.step-card__row {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-2);
+  padding: var(--space-3);
+}
+
+.step-card__status {
+  flex-shrink: 0;
+  width: 24px;
+  height: 24px;
+  border-radius: var(--radius-pill);
+  color: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 11px;
+  font-weight: 700;
+  margin-top: 1px;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.15),
+    0 1px 2px rgba(0, 0, 0, 0.08);
+}
+
+.step-card__title-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.step-card__emoji {
+  font-size: 15px;
+}
+
+.step-card__title {
+  font-family: var(--font-dm-sans);
+  font-size: var(--text-sm);
+  font-weight: 600;
+  color: var(--ink-8);
+  letter-spacing: var(--tracking-tight);
+}
+
+.step-card__pill {
+  font-size: 10px;
+  font-family: var(--font-dm-sans);
+  border-radius: var(--radius-xs);
+  padding: 1px var(--space-1);
+  font-weight: 500;
+  border: 1px solid;
+  letter-spacing: var(--tracking-tight);
+}
+
+.step-card__pill--adjusted {
+  color: rgba(234, 88, 12, 0.9);
+  background: rgba(234, 88, 12, 0.08);
+  border-color: rgba(234, 88, 12, 0.25);
+}
+
+.step-card__pill--replan {
+  color: #8b5cf6;
+  background: rgba(139, 92, 246, 0.08);
+  border-color: rgba(139, 92, 246, 0.25);
+}
+
+.step-card__pill--review {
+  color: rgba(234, 88, 12, 0.85);
+  background: rgba(234, 88, 12, 0.07);
+  border-color: rgba(234, 88, 12, 0.2);
+}
+
+.step-card__sub {
+  font-family: var(--font-dm-sans);
+  font-size: 11px;
+  margin-top: 2px;
+  letter-spacing: var(--tracking-tight);
+}
+
+.step-card__error {
+  font-family: var(--font-dm-sans);
+  font-size: 11px;
+  margin-top: 3px;
+  color: rgba(220, 38, 38, 0.75);
+  max-width: 280px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.step-card__log-toggle {
+  margin-top: 4px;
+  background: none;
+  border: none;
+  padding: 0;
+  font-family: var(--font-dm-sans);
+  font-size: 11px;
+  color: var(--ink-4);
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  transition: color var(--motion-fast) var(--ease-out-expo);
+}
+
+.step-card__log-toggle:hover {
+  color: var(--ink-6);
+}
+
+.step-card__open-cta {
+  flex-shrink: 0;
+  padding: 5px var(--space-3);
+  border-radius: var(--radius-sm);
+  border: none;
+  background: rgba(22, 163, 74, 0.12);
+  color: rgba(22, 163, 74, 0.95);
+  font-family: var(--font-dm-sans);
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+  letter-spacing: var(--tracking-tight);
+  transition: all var(--motion-fast) var(--ease-out-expo);
+}
+
+.step-card__open-cta:hover {
+  background: rgba(22, 163, 74, 0.2);
+}
+
+/* Decision log timeline */
+.step-card__log {
+  border-top: 1px solid var(--ink-2);
+  padding: var(--space-3) var(--space-3) var(--space-3) 44px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.step-card__log-eyebrow {
+  font-family: var(--font-dm-sans);
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--ink-4);
+  letter-spacing: var(--tracking-eyebrow);
+  text-transform: uppercase;
+  margin-bottom: 2px;
+}
+
+/* ═══════════════════════════════════════════════════════════════════════
+ * HELP CARD (NeedsHelpCard — failed step needing user decision)
+ * ═══════════════════════════════════════════════════════════════════════ */
+
+.help-card {
+  border-top: 1px solid rgba(220, 38, 38, 0.18);
+  padding: var(--space-3) var(--space-4);
+  background: linear-gradient(
+    180deg,
+    rgba(220, 38, 38, 0.04) 0%,
+    rgba(220, 38, 38, 0.02) 100%
+  );
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.help-card__title {
+  font-family: var(--font-dm-sans);
+  font-size: var(--text-sm);
+  font-weight: 700;
+  color: rgba(185, 28, 28, 0.95);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0;
+}
+
+.help-card__msg {
+  font-family: var(--font-dm-sans);
+  font-size: var(--text-xs);
+  color: var(--ink-6);
+  line-height: var(--lh-normal);
+  margin: 0;
+}
+
+.help-card__actions {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  margin-top: 2px;
+}
+
+.help-card__btn {
+  display: block;
+  width: 100%;
+  padding: var(--space-2) 0;
+  border-radius: var(--radius);
+  background: linear-gradient(
+    180deg,
+    rgba(220, 38, 38, 0.85) 0%,
+    rgba(185, 28, 28, 0.95) 100%
+  );
+  color: #fff;
+  text-align: center;
+  font-family: var(--font-dm-sans);
+  font-size: var(--text-sm);
+  font-weight: 700;
+  text-decoration: none;
+  border: none;
+  cursor: pointer;
+  letter-spacing: var(--tracking-tight);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.2),
+    0 2px 6px rgba(220, 38, 38, 0.25);
+  transition:
+    transform var(--motion-fast) var(--ease-out-expo),
+    box-shadow var(--motion-fast) var(--ease-out-expo);
+}
+
+.help-card__btn:hover {
+  transform: translateY(-1px);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.25),
+    0 4px 12px rgba(220, 38, 38, 0.35);
+}
+
+/* ═══════════════════════════════════════════════════════════════════════
+ * INTERVENTION BANNER (awaiting CVC / login)
+ * ═══════════════════════════════════════════════════════════════════════ */
+
+.intervention {
+  border-top: 1px solid rgba(201, 168, 76, 0.3);
+  padding: var(--space-3) var(--space-4);
+  background: linear-gradient(
+    180deg,
+    rgba(201, 168, 76, 0.06) 0%,
+    rgba(201, 168, 76, 0.02) 100%
+  );
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.intervention__title {
+  font-family: var(--font-dm-sans);
+  font-size: var(--text-sm);
+  font-weight: 700;
+  color: var(--gold-text);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0;
+}
+
+.intervention__msg {
+  font-family: var(--font-dm-sans);
+  font-size: var(--text-xs);
+  color: var(--ink-6);
+  line-height: var(--lh-normal);
+  margin: 0;
+}
+
+.intervention__btn {
+  display: inline-block;
+  padding: var(--space-2) var(--space-4);
+  border-radius: var(--radius);
+  background: linear-gradient(180deg, var(--gold) 0%, var(--gold-strong) 100%);
+  color: #fff;
+  text-align: center;
+  font-family: var(--font-dm-sans);
+  font-size: var(--text-sm);
+  font-weight: 600;
+  text-decoration: none;
+  border: none;
+  cursor: pointer;
+  letter-spacing: var(--tracking-tight);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.18),
+    0 2px 4px rgba(184, 146, 61, 0.2);
+  transition:
+    transform var(--motion-fast) var(--ease-out-expo),
+    box-shadow var(--motion-fast) var(--ease-out-expo);
+}
+
+.intervention__btn:hover {
+  transform: translateY(-1px);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.25),
+    0 4px 10px rgba(184, 146, 61, 0.32);
+}
