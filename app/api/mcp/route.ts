@@ -72,21 +72,29 @@ export async function POST(req: Request): Promise<Response> {
   });
 
   // ── Dispatch through MCP Streamable HTTP transport ─────────────────────
-  let server: Awaited<ReturnType<typeof createOnegentServer>> | null = null;
-  let transport: WebStandardStreamableHTTPServerTransport | null = null;
+  // build_marker so we can verify Vercel actually deployed this version
+  console.log(`[/api/mcp] BUILD=v3-jsonresponse method=${(parsedBody as { method?: string })?.method ?? "?"}`);
+
   try {
-    server = createOnegentServer({ apiKey });
-    transport = new WebStandardStreamableHTTPServerTransport({
+    const server = createOnegentServer({ apiKey });
+    const transport = new WebStandardStreamableHTTPServerTransport({
       sessionIdGenerator: undefined, // stateless — each request is independent
-      // JSON response mode: each tool returns immediately (book_* → jobId,
-      // get_* → REST round-trip), no server-initiated subscription messages.
-      // Avoids the SSE ReadableStream path which we don't need and which
-      // tripped a Vercel-runtime-specific TypeError on first deploy.
-      enableJsonResponse: true,
+      enableJsonResponse: true, // JSON request/response, no SSE
     });
 
+    console.log(`[/api/mcp] transport options: enableJsonResponse=true, sessionIdGenerator=undefined`);
+
     await server.connect(transport);
-    return await transport.handleRequest(reqForTransport, { parsedBody });
+    const response = await transport.handleRequest(reqForTransport, { parsedBody });
+
+    console.log(`[/api/mcp] response: status=${response.status} content-type=${response.headers.get("content-type")}`);
+
+    // Note: NOT cleaning up transport/server here. For SSE mode, the response
+    // body is a ReadableStream that Vercel needs to consume after we return.
+    // For JSON mode, the response is fully buffered so cleanup *would* be
+    // safe — but we have no way to discriminate, so play it safe and let GC
+    // reclaim once the response is sent.
+    return response;
   } catch (err) {
     console.error("[/api/mcp] handler crashed:", err);
     return jsonError(
@@ -94,10 +102,6 @@ export async function POST(req: Request): Promise<Response> {
       "internal_error",
       err instanceof Error ? err.message : "Unknown error",
     );
-  } finally {
-    // Stateless cleanup — close in reverse order
-    if (transport) await transport.close().catch(() => {});
-    if (server) await server.close().catch(() => {});
   }
 }
 
