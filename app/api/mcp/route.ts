@@ -140,6 +140,29 @@ function createReqShim(req: Request): IncomingMessage {
     httpVersionMinor: 1,
     socket: null,
     connection: null,
+    // Readable stream surface — SDK may call destroy/pause/resume during
+    // cleanup. We've already passed the parsed body, so these are no-ops.
+    destroy(): void {
+      ee.emit("close");
+    },
+    pause(): unknown {
+      return undefined;
+    },
+    resume(): unknown {
+      return undefined;
+    },
+    pipe<T>(dest: T): T {
+      return dest;
+    },
+    unpipe(): unknown {
+      return undefined;
+    },
+    read(): null {
+      return null;
+    },
+    readable: false,
+    readableEnded: true,
+    complete: true,
   }) as unknown as IncomingMessage;
 }
 
@@ -227,6 +250,18 @@ function createResShim(): {
     flushHeaders(): void {
       // no-op — we batch into a single Response
     },
+
+    // Writable stream surface — SDK may call destroy during cleanup.
+    destroy(): void {
+      finish();
+    },
+
+    cork(): void {},
+    uncork(): void {},
+
+    writable: true,
+    writableEnded: false,
+    writableFinished: false,
   }) as unknown as ServerResponse;
 
   return { resShim: shim, response };
