@@ -94,11 +94,17 @@ export function BrandStrip() {
     };
   }, []);
 
+  // Conditional mount instead of CSS-only hide. Earlier transform/opacity/
+  // visibility triple-defense couldn't fully suppress the strip in the
+  // sidebar column — some stacking-context interaction left the brand-mark
+  // visibly bleeding through. Removing the element from the DOM entirely
+  // is the only 100% reliable way to guarantee no residue.
+  // Trade-off: no fade-out animation (snap-out instead). Show still slides
+  // in via the CSS @keyframes on the mounted element.
+  if (hidden) return null;
+
   return (
-    <div
-      className={`brand-strip${hidden ? " brand-strip--hidden" : ""}`}
-      role="banner"
-    >
+    <div className="brand-strip" role="banner">
       <div className="brand-strip-inner">
         <Link href="/" className="brand-strip-mark" aria-label="Onegent home">
           <span>Onegent</span>
