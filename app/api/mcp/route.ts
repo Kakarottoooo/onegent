@@ -72,9 +72,11 @@ export async function POST(req: Request): Promise<Response> {
   });
 
   // ── Dispatch through MCP Streamable HTTP transport ─────────────────────
-  // build_marker so we can verify Vercel actually deployed this version
-  console.log(`[/api/mcp] BUILD=v3-jsonresponse method=${(parsedBody as { method?: string })?.method ?? "?"}`);
-
+  // We do NOT cleanup transport/server in a finally block: the SDK's send()
+  // call inside the JSON-response Promise races against any synchronous
+  // close, and tearing down the streamMapping mid-flight leaves the
+  // Promise hanging (Vercel then sends an empty SSE 200). GC reclaims the
+  // per-request transport/server once the Response is consumed.
   try {
     const server = createOnegentServer({ apiKey });
     const transport = new WebStandardStreamableHTTPServerTransport({
@@ -82,19 +84,8 @@ export async function POST(req: Request): Promise<Response> {
       enableJsonResponse: true, // JSON request/response, no SSE
     });
 
-    console.log(`[/api/mcp] transport options: enableJsonResponse=true, sessionIdGenerator=undefined`);
-
     await server.connect(transport);
-    const response = await transport.handleRequest(reqForTransport, { parsedBody });
-
-    console.log(`[/api/mcp] response: status=${response.status} content-type=${response.headers.get("content-type")}`);
-
-    // Note: NOT cleaning up transport/server here. For SSE mode, the response
-    // body is a ReadableStream that Vercel needs to consume after we return.
-    // For JSON mode, the response is fully buffered so cleanup *would* be
-    // safe — but we have no way to discriminate, so play it safe and let GC
-    // reclaim once the response is sent.
-    return response;
+    return await transport.handleRequest(reqForTransport, { parsedBody });
   } catch (err) {
     console.error("[/api/mcp] handler crashed:", err);
     return jsonError(

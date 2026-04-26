@@ -1,5 +1,5 @@
 ================================================================
-Onegent · Travel Execution Layer for AI Agents · v0.2.53.0
+Onegent · Travel Execution Layer for AI Agents · v0.2.54.0
 ================================================================
 
 【一句话定位（2026-04-26 锁定）】
@@ -31,6 +31,83 @@ ChatGPT Apps + 第三方 agent builder via /api/v1）
 活动 / 多人 trip），非旅行品类（笔记本 / 手机 / 耳机 / 信用卡 /
 礼物 / 健身）已归档。详见本文档头部 "Recent Updates - 2026-04-24
 (cont. 2) · Positioning Shift"。
+
+================================================================
+Recent Updates - 2026-04-26 (cont. 5) · Hosted /api/mcp endpoint live (Sprint 1 #2 — code done)
+================================================================
+
+Sprint 1 #2 的代码部分上线：`https://onegent.one/api/mcp` 是一个 MCP
+Streamable HTTP endpoint，跟 npm @onegent/mcp-server (stdio) 共享同一个
+`createOnegentServer()` factory + 6 个工具定义。任何 MCP 客户端
+（Claude.ai web、ChatGPT Apps、自建 agent、curl）都能 POST JSON-RPC
+到这个 URL，带 `Authorization: Bearer ogk_live_...` header。
+
+【为什么这件事是 distribution 解锁】
+- stdio 通道（npm + Claude Desktop）触达 power user，需要装 + JSON 配置
+- HTTP 通道触达消费者（Claude.ai 千万级 + ChatGPT Apps 亿级），一键添加
+- 没这个 endpoint 也没法提交 ChatGPT Apps marketplace（必须 HTTPS URL）
+
+【架构】
+```
+packages/mcp-server/src/             →  app/api/mcp/route.ts
+  server-factory.ts                       (Next.js App Router)
+  tools/{6 个文件}.ts                        ↓
+  api-client.ts                       WebStandardStreamableHTTPServerTransport
+       ↓                                    ↓
+  npm @onegent/mcp-server (stdio)     POST /api/mcp (HTTPS)
+  Claude Desktop / 命令行              Claude.ai / ChatGPT / curl
+
+共享: createOnegentServer({ apiKey? }) — apiKey 来自 env 或 HTTP header
+```
+
+【D1-D5 拆解】
+- D1 (commit bbb0053) — server-factory 加 apiKey 参数
+  - api-client.ts 抽 configFromApiKey() helper
+  - createOnegentServer() 接 { apiKey } 可选参数, 走 cfg 路径而不是 env
+  - stdio 路径不变（无 apiKey 时 fall back 到 loadConfig env-based）
+
+- D2 (commit bbb0053) — Next.js route + monorepo workspace import 配通
+  - app/api/mcp/route.ts (124 行)
+  - packages/mcp-server/package.json 加 exports field 暴露子模块
+  - root package.json 加 prebuild → npm run build:mcp (Vercel build 链)
+  - next.config.ts 加 transpilePackages (防御性, 让 Turbopack 处理 .js→.ts)
+
+- D3 (commits 5662797, 0c70367, 1e8e029, b79c01f) — 部署 + 4 轮调试上线
+  四次接力修 transport bridging:
+  - 5662797: 第一版 Node http req/res shim 缺 stream 接口 → 加 destroy/
+    pause/resume/pipe/cork (但 Hono Node→Web 转换层仍出错)
+  - 0c70367: 改用 WebStandardStreamableHTTPServerTransport 直接接 Web
+    Request → 跳过整个 shim 层, 280 行 → 124 行
+  - 1e8e029: 加 enableJsonResponse=true 跳过 SSE ReadableStream 路径
+  - b79c01f: **关键修复** — 删 finally 里的 transport.close() / server.close()
+    在 JSON 模式下, send() 的 Promise resolve 跟 finally 的 close() race,
+    后者赢 → 删 streamMapping → send 找不到 stream → Promise hang →
+    Vercel 等到 SSE 默认 fallback 返回空 200. 删 finally 后 GC 自然回收.
+  smoke test verified: tools/list 返回 6 个工具完整 schema
+
+- D4 (in progress, partial) — ChatGPT Apps manifest 提交准备
+  - manifest.json 已经指向 https://onegent.one/api/mcp ✅
+  - 但 OpenAI review 强制查 /privacy + /terms 页面, 两个都 404 ❌
+  - **D4 半完工** — 等 privacy/terms 页面写完再提交
+  - 决定: 用 LLM 生成 SaaS 标准模板, 不付律师 (YC 早期 startup 通用做法)
+
+- D5 (this section, commits b79c01f cleanup + this commit) — release notes
+  - PROJECT_SUMMARY v0.2.54.0
+  - app/api/mcp/route.ts 删 debug console.log (D3 排错时加的)
+
+【Auth 方案 — 当前 vs 计划】
+- **当前 (#22 范围)**: Bearer token in Authorization header. 用户去
+  /developers/keys 创建 ogk_live_... key, 复制粘贴到 Claude.ai 的 MCP
+  server 配置里. 体验 ≈ Stripe API key 配置.
+- **计划 (#23, 后续 backlog)**: OAuth 2.0 — 用户在 Claude.ai 点 "Connect
+  Onegent", 弹 OAuth 窗, 授权后 Claude.ai 自动管 token. 体验 = 普通
+  消费级 SaaS. 实现复杂 (需要 OAuth provider + token 管理 + scopes).
+
+【未完成 — 留 #22 收尾】
+- /privacy + /terms 页面写完 (LLM 生成模板, ~30min)
+- ChatGPT Apps developer portal 手动提交 manifest
+- OpenAI review 5-10 天 (人工审核)
+- 通过后 onegent 出现在 ChatGPT Apps marketplace (Discoverability 解锁)
 
 ================================================================
 Recent Updates - 2026-04-26 (cont. 4) · Worker → Railway migration (Sprint 1 #1 shipped)
