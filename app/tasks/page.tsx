@@ -1786,8 +1786,14 @@ const DECISION_LABELS: Record<string, string> = {
 
 function ProgressBar({ value, color }: { value: number; color: string }) {
   return (
-    <div style={{ height: 4, borderRadius: 2, backgroundColor: "var(--border, #e5e7eb)", overflow: "hidden", flex: 1 }}>
-      <div style={{ height: "100%", width: `${Math.round(value * 100)}%`, backgroundColor: color, borderRadius: 2, transition: "width 0.4s ease" }} />
+    <div className="insights__progress-track" style={{ flex: 1 }}>
+      <div
+        className="insights__progress-fill"
+        style={{
+          width: `${Math.round(value * 100)}%`,
+          background: color,
+        }}
+      />
     </div>
   );
 }
@@ -1875,48 +1881,100 @@ function InsightsPanel({ sessionId }: { sessionId: string }) {
 
   if (!stats && !open) {
     return (
-      <button onClick={() => setOpen(true)} style={{
-        width: "100%", padding: "10px", borderRadius: 12,
-        border: "0.5px dashed var(--border, #e5e7eb)", background: "transparent",
-        fontFamily: "var(--font-dm-sans)", fontSize: 12,
-        color: "var(--text-muted, #aaa)", cursor: "pointer",
-      }}>
+      <button
+        onClick={() => setOpen(true)}
+        className="monitor-panel__empty"
+        style={{
+          width: "100%",
+          padding: 10,
+          borderRadius: "var(--radius)",
+          border: "1px dashed var(--ink-3)",
+          background: "transparent",
+          cursor: "pointer",
+          fontStyle: "normal",
+          color: "var(--ink-5)",
+          fontSize: 12,
+        }}
+      >
         📊 View Agent Insights
       </button>
     );
   }
 
   return (
-    <div style={{ borderRadius: 16, border: "0.5px solid var(--border, #e5e7eb)", backgroundColor: "var(--card, #fff)", overflow: "hidden" }}>
-      {/* Header */}
-      <button onClick={() => setOpen((o) => !o)} style={{
-        width: "100%", padding: "14px 16px", background: "none", border: "none",
-        display: "flex", alignItems: "center", justifyContent: "space-between",
-        cursor: "pointer",
-      }}>
+    <div className="insights__section" style={{ padding: 0 }}>
+      {/* Header (collapse button) */}
+      <button
+        onClick={() => setOpen((o) => !o)}
+        style={{
+          width: "100%",
+          padding: "14px 16px",
+          background: "none",
+          border: "none",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+          cursor: "pointer",
+        }}
+      >
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
           <span style={{ fontSize: 16 }}>📊</span>
-          <p style={{ fontFamily: "var(--font-dm-sans)", fontWeight: 700, fontSize: 13 }}>Agent Insights</p>
+          <p
+            className="insights__title"
+            style={{ fontSize: 13, marginTop: 0 }}
+          >
+            Agent Insights
+          </p>
           {stats && (
-            <span style={{ fontFamily: "var(--font-dm-sans)", fontSize: 11, color: "var(--text-muted, #aaa)" }}>
+            <span
+              style={{
+                fontFamily: "var(--font-dm-sans)",
+                fontSize: 11,
+                color: "var(--ink-5)",
+                letterSpacing: "var(--tracking-tight)",
+              }}
+            >
               {stats.totalEvents} events
             </span>
           )}
         </div>
-        <span style={{ color: "var(--text-muted, #aaa)", fontSize: 12 }}>{open ? "▲" : "▼"}</span>
+        <span style={{ color: "var(--ink-4)", fontSize: 12 }}>{open ? "▲" : "▼"}</span>
       </button>
 
-      {/* Tab bar */}
+      {/* Tab bar — Linear-style underline */}
       {open && (
-        <div style={{ borderTop: "0.5px solid var(--border, #e5e7eb)", display: "flex", gap: 0, overflowX: "auto" }}>
+        <div
+          style={{
+            borderTop: "1px solid var(--ink-2)",
+            display: "flex",
+            gap: 0,
+            overflowX: "auto",
+            background: "var(--card-2)",
+          }}
+        >
           {INSIGHTS_TABS.map((tab) => (
-            <button key={tab.id} onClick={() => setActiveTab(tab.id)} style={{
-              flex: 1, padding: "8px 4px", background: "none", border: "none",
-              borderBottom: activeTab === tab.id ? "2px solid var(--gold, #D4A34B)" : "2px solid transparent",
-              fontFamily: "var(--font-dm-sans)", fontSize: 11, fontWeight: activeTab === tab.id ? 700 : 400,
-              color: activeTab === tab.id ? "var(--gold, #D4A34B)" : "var(--text-muted, #aaa)",
-              cursor: "pointer", whiteSpace: "nowrap",
-            }}>
+            <button
+              key={tab.id}
+              onClick={() => setActiveTab(tab.id)}
+              style={{
+                flex: 1,
+                padding: "10px 8px",
+                background: "none",
+                border: "none",
+                borderBottom: activeTab === tab.id
+                  ? "2px solid var(--gold)"
+                  : "2px solid transparent",
+                fontFamily: "var(--font-dm-sans)",
+                fontSize: 11,
+                fontWeight: activeTab === tab.id ? 700 : 500,
+                color: activeTab === tab.id ? "var(--gold-text)" : "var(--ink-5)",
+                cursor: "pointer",
+                whiteSpace: "nowrap",
+                letterSpacing: "var(--tracking-eyebrow)",
+                textTransform: "uppercase",
+                transition: "all var(--motion-fast) var(--ease-out-expo)",
+              }}
+            >
               {tab.label}
             </button>
           ))}
@@ -1925,7 +1983,18 @@ function InsightsPanel({ sessionId }: { sessionId: string }) {
 
       {open && (
         <div style={{ padding: "14px 16px" }}>
-          {loading && <p style={{ fontFamily: "var(--font-dm-sans)", fontSize: 12, color: "var(--text-muted, #aaa)", textAlign: "center" }}>Loading…</p>}
+          {loading && (
+            <p
+              style={{
+                fontFamily: "var(--font-dm-sans)",
+                fontSize: 12,
+                color: "var(--ink-5)",
+                textAlign: "center",
+              }}
+            >
+              Loading…
+            </p>
+          )}
 
           {/* ── Task memory tab ── */}
           {!loading && activeTab === "task" && (
