@@ -32,10 +32,12 @@ if (existsSync(localEnvPath)) {
 // Imports below this line — must come AFTER env hydration so any module-level
 // env reads (lib/db.ts uses POSTGRES_URL via @vercel/postgres) see the values.
 import {
+  getJobsWithPendingRetries,
   updateBookingJobStatus,
   updateBookingJobSteps,
   type BookingJob,
   type BookingJobStep,
+  type DecisionLogEntry,
 } from "@/lib/db";
 import { runExecutionJobWithRecovery } from "@/lib/core/execution/recovery";
 import type {
@@ -52,6 +54,10 @@ const MAX_CONCURRENT_JOBS = parseInt(
 );
 const STEP_TIMEOUT_MS = parseInt(
   process.env.STEP_TIMEOUT_MS ?? `${10 * 60 * 1000}`, // 10 min default
+  10,
+);
+const RETRY_SCAN_INTERVAL_MS = parseInt(
+  process.env.RETRY_SCAN_INTERVAL_MS ?? "60000", // 60s default
   10,
 );
 const WORKER_ID =
@@ -225,6 +231,69 @@ async function runJob(job: BookingJob): Promise<void> {
   );
 }
 
+// ── Scheduled-retry scanner ────────────────────────────────────────────────
+//
+// Mirrors app/api/cron/retry-jobs/route.ts: scan booking_jobs for steps
+// with retryScheduledFor in the past, reset them to 'pending', and clear
+// retry metadata. The main poll loop will then claim+execute naturally —
+// no HTTP fire-and-forget needed (unlike the Vercel cron).
+//
+// Coexistence: Vercel's /api/cron/retry-jobs continues to run on its
+// hourly schedule, calling /api/booking-jobs/[id]/start which short-
+// circuits to 202 for worker-routable jobs. Both paths are convergent
+// (UPDATEs to status='pending' are idempotent; FOR UPDATE SKIP LOCKED
+// in claimOne prevents double-claim). Once we burn the 30-day fallback
+// window we'll delete the Vercel cron in a separate cleanup pass.
+async function processScheduledRetries(): Promise<void> {
+  let jobs: BookingJob[];
+  try {
+    jobs = await getJobsWithPendingRetries();
+  } catch (err) {
+    logError("retry scan failed", err);
+    return;
+  }
+
+  if (jobs.length === 0) return;
+
+  const now = new Date().toISOString();
+  let resetCount = 0;
+
+  for (const job of jobs) {
+    const updatedSteps: BookingJobStep[] = job.steps.map((step) => {
+      if (
+        step.retryScheduledFor &&
+        step.retryScheduledFor <= now &&
+        step.status !== "done"
+      ) {
+        resetCount++;
+        const retryEntry: DecisionLogEntry = {
+          ts: now,
+          type: "retry",
+          message: `Scheduled retry triggered by worker at ${new Date(now).toLocaleTimeString()}`,
+        };
+        return {
+          ...step,
+          status: "pending" as const,
+          retryScheduledFor: undefined,
+          error: undefined,
+          attemptCount: 0,
+          decisionLog: [...(step.decisionLog ?? []), retryEntry],
+        };
+      }
+      return step;
+    });
+
+    try {
+      await updateBookingJobSteps(job.id, updatedSteps);
+      await updateBookingJobStatus(job.id, "pending");
+    } catch (err) {
+      logError(`retry reset failed for job ${job.id}`, err);
+    }
+  }
+
+  log(`retry scan: ${resetCount} step(s) reset across ${jobs.length} job(s)`);
+}
+
 // ── Main loop with bounded concurrency ─────────────────────────────────────
 async function main(): Promise<void> {
   if (!process.env.POSTGRES_URL) {
@@ -235,11 +304,20 @@ async function main(): Promise<void> {
   log(
     `config: poll=${POLL_INTERVAL_MS / 1000}s ` +
       `max_concurrent=${MAX_CONCURRENT_JOBS} ` +
-      `step_timeout=${STEP_TIMEOUT_MS / 1000}s`,
+      `step_timeout=${STEP_TIMEOUT_MS / 1000}s ` +
+      `retry_scan=${RETRY_SCAN_INTERVAL_MS / 1000}s`,
   );
 
   await sql`SELECT 1 AS ping`;
   log(`postgres connected`);
+
+  // Scheduled-retry scanner runs in its own setInterval — independent of
+  // the main claim loop so a long-running browser task can't starve retries.
+  const retryTimer = setInterval(() => {
+    processScheduledRetries().catch((err) => logError("retry scan threw", err));
+  }, RETRY_SCAN_INTERVAL_MS);
+  // Run once on startup so we don't wait the full interval after a deploy.
+  processScheduledRetries().catch((err) => logError("initial retry scan threw", err));
 
   while (!shuttingDown) {
     if (activeJobs >= MAX_CONCURRENT_JOBS) {
@@ -280,6 +358,8 @@ async function main(): Promise<void> {
         activeJobs--;
       });
   }
+
+  clearInterval(retryTimer);
 
   // Drain in-flight before exit (Railway gives ~10s after SIGTERM)
   log(`shutdown initiated — waiting for ${activeJobs} in-flight job(s) to drain (max 60s)`);
