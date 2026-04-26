@@ -894,7 +894,7 @@ function buildWeekendTripOption(params: {
     const intent = params.scenarioIntent;
     const flight = params.flight.flight;
     // Prefer IATA codes from the actual flight result — they land more reliably
-    // in Google Flights than city names. Fall back to city names if IATA unavailable.
+    // in Kayak's path-style URL than city names. Fall back to city names if IATA unavailable.
     const origin =
       flight.departure_airport?.match(/^[A-Z]{3}$/)
         ? flight.departure_airport

@@ -946,7 +946,10 @@ describe("weekend trip pre-filled booking URLs (3b-1)", () => {
     expect(url).toContain("booking.example.com");
   });
 
-  it("open-flight secondary action uses Google Flights deep link when intent has route+date", () => {
+  it("open-flight secondary action uses Kayak deep link when intent has route+date", () => {
+    // Source switched from Google Flights (#flt= fragment is partial fill —
+    // origin only) to Kayak's path-style URL which lands fully pre-filtered.
+    // See lib/agent/planners/booking-links.ts buildKayakFlightsUrl.
     const result = runWeekendTripPlanner({
       scenarioIntent: {
         ...makeBaseWeekendTripIntent(),
@@ -967,7 +970,7 @@ describe("weekend trip pre-filled booking URLs (3b-1)", () => {
     const flightAction = result?.primary_plan.secondary_actions?.find(
       (a) => a.id === "open-flight"
     );
-    expect(flightAction?.url).toContain("google.com/flights");
+    expect(flightAction?.url).toContain("kayak.com/flights");
     expect(flightAction?.url).toContain("2026-04-11");
   });
 });

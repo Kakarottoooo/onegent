@@ -111,9 +111,15 @@ describe("executeAction", () => {
   it("calls page.evaluate for scroll_down", async () => {
     const { executeAction } = await import("../booking-autopilot/ai-loop/execute");
     const mockEval = vi.fn().mockResolvedValue(undefined);
-    const mockPage = { act: vi.fn(), evaluate: mockEval, waitForLoadState: vi.fn() } as any;
+    // scroll_* / wait branches go through stagehand.context.activePage(), not
+    // stagehand directly — mock both shapes so the test exercises the page call.
+    const innerPage = { evaluate: mockEval, waitForLoadState: vi.fn() };
+    const mockStagehand = {
+      act: vi.fn(),
+      context: { activePage: () => innerPage },
+    } as any;
 
-    await executeAction(mockPage, {
+    await executeAction(mockStagehand, {
       type: "scroll_down", reasoning: "need to scroll", confidence: 1
     }, vi.fn());
 
