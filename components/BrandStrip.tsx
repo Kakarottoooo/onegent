@@ -46,7 +46,9 @@ export function BrandStrip() {
     // intentionally looking at chrome. A wheel event with the cursor here
     // is the "summon the strip" signal.
     const NAV_ZONE_PX = 80;
-    const IDLE_HIDE_MS = 1800;
+    // Snappier than the original 1.8s — once the cursor leaves the nav
+    // zone the strip should clear out promptly so it doesn't feel sticky.
+    const IDLE_HIDE_MS = 1000;
     let mouseY = 9999;
     let hideTimer: ReturnType<typeof setTimeout> | null = null;
 

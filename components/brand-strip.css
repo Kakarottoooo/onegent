@@ -18,14 +18,31 @@
   z-index: 30;
   font-family: var(--font-dm-sans), "DM Sans", system-ui, sans-serif;
   transform: translateY(0);
-  transition: transform 240ms cubic-bezier(0.16, 1, 0.3, 1);
-  will-change: transform;
+  opacity: 1;
+  visibility: visible;
+  /* Snappier hide than the previous 240ms — the strip is meant to get
+     out of the way quickly once the user is done with it. */
+  transition:
+    transform 160ms cubic-bezier(0.4, 0, 0.2, 1),
+    opacity 160ms cubic-bezier(0.4, 0, 0.2, 1),
+    visibility 0s linear 0s;
+  will-change: transform, opacity;
 }
 
 .brand-strip--hidden {
-  /* Slide fully off-screen. The 0.5px border is included in the 36px
-     height so -100% is enough; no extra offset needed. */
+  /* Triple-defense hide: transform out of flow + opacity 0 + visibility
+     hidden after the animation finishes. Earlier transform-only setup
+     left the brand-mark visibly hanging in the corner on some renders
+     (likely stacking-context interactions with sticky parents). */
   transform: translateY(-100%);
+  opacity: 0;
+  visibility: hidden;
+  /* Delay the visibility flip until the transform/opacity finish so the
+     fade-out is still smooth — visibility doesn't tween. */
+  transition:
+    transform 160ms cubic-bezier(0.4, 0, 0.2, 1),
+    opacity 160ms cubic-bezier(0.4, 0, 0.2, 1),
+    visibility 0s linear 160ms;
 }
 
 .brand-strip-inner {
