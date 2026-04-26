@@ -1385,128 +1385,141 @@ function MonitorPanel({ jobId, sessionId }: { jobId: string; sessionId: string }
   if (!loaded || monitors.length === 0) return null;
 
   return (
-    <div style={{ borderRadius: 12, border: "0.5px solid var(--border, #e5e7eb)", overflow: "hidden" }}>
-      {/* Header */}
-      <div style={{ padding: "10px 14px", background: "var(--card-2, #f9f9f9)", display: "flex", alignItems: "center", gap: 8 }}>
+    <div className="monitor-panel" style={{ padding: 0 }}>
+      <div
+        className="monitor-panel__header"
+        style={{ padding: "10px 14px", background: "var(--card-2)", margin: 0 }}
+      >
         <span style={{ fontSize: 13 }}>📡</span>
-        <p style={{ fontFamily: "var(--font-dm-sans)", fontSize: 12, fontWeight: 700 }}>
+        <p
+          className="monitor-panel__title"
+          style={{ fontSize: 12, marginTop: 0, flex: 1 }}
+        >
           Agent monitoring
         </p>
         {active.length > 0 && (
-          <span style={{
-            fontFamily: "var(--font-dm-sans)", fontSize: 10, fontWeight: 700,
-            color: "var(--gold, #D4A34B)", background: "rgba(212,163,75,0.12)",
-            borderRadius: 10, padding: "1px 6px",
-          }}>
+          <span className="insights__chip insights__chip--gold" style={{ fontSize: 10, fontWeight: 700 }}>
             {active.length} active
           </span>
         )}
         {triggered.length > 0 && (
-          <span style={{
-            fontFamily: "var(--font-dm-sans)", fontSize: 10, fontWeight: 700,
-            color: "#fff", background: "rgba(220,38,38,0.8)",
-            borderRadius: 10, padding: "1px 6px",
-          }}>
+          <span
+            className="insights__chip"
+            style={{
+              fontSize: 10,
+              fontWeight: 700,
+              color: "#fff",
+              background: "rgba(220,38,38,0.85)",
+              borderColor: "rgba(220,38,38,0.85)",
+            }}
+          >
             {triggered.length} alert{triggered.length > 1 ? "s" : ""}
           </span>
         )}
       </div>
 
-      {/* Monitor list */}
-      <div style={{ display: "flex", flexDirection: "column" }}>
+      <div className="monitor-panel__list" style={{ gap: 0 }}>
         {monitors.map((monitor) => (
-          <div key={monitor.id} style={{
-            borderTop: "0.5px solid var(--border, #e5e7eb)",
-            padding: "10px 14px",
-            background: monitor.status === "triggered" ? "rgba(220,38,38,0.03)" : "transparent",
-            opacity: monitor.status === "cancelled" ? 0.5 : 1,
-          }}>
-            <div style={{ display: "flex", alignItems: "flex-start", gap: 8 }}>
-              {/* Pulse dot */}
-              <div style={{
-                flexShrink: 0, marginTop: 3,
-                width: 7, height: 7, borderRadius: "50%",
-                backgroundColor: MONITOR_STATUS_COLOR[monitor.status] ?? "var(--text-muted, #aaa)",
+          <div
+            key={monitor.id}
+            className="monitor-panel__item"
+            style={{
+              borderRadius: 0,
+              borderTop: "1px solid var(--ink-2)",
+              border: "none",
+              padding: "10px 14px",
+              background: monitor.status === "triggered" ? "rgba(220,38,38,0.03)" : "transparent",
+              opacity: monitor.status === "cancelled" ? 0.5 : 1,
+              alignItems: "flex-start",
+            }}
+          >
+            <div
+              style={{
+                flexShrink: 0,
+                marginTop: 6,
+                width: 7,
+                height: 7,
+                borderRadius: "var(--radius-pill)",
+                backgroundColor: MONITOR_STATUS_COLOR[monitor.status] ?? "var(--ink-4)",
                 animation: monitor.status === "active" ? "jobpulse 2s ease-in-out infinite" : "none",
-              }} />
-              <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
-                  <span style={{ fontSize: 13 }}>{monitor.step_emoji}</span>
-                  <p style={{ fontFamily: "var(--font-dm-sans)", fontSize: 12, fontWeight: 600 }}>
-                    {monitor.step_label}
-                  </p>
-                  <span style={{ fontFamily: "var(--font-dm-sans)", fontSize: 10, color: "var(--text-muted, #aaa)" }}>
-                    {MONITOR_TYPE_EMOJI[monitor.type]} {MONITOR_TYPE_LABEL[monitor.type] ?? monitor.type}
-                  </span>
-                  {monitor.status === "cancelled" && (
-                    <span style={{ fontFamily: "var(--font-dm-sans)", fontSize: 10, color: "var(--text-muted, #aaa)" }}>· stopped</span>
-                  )}
-                </div>
-
-                {/* Alert message */}
-                {monitor.status === "triggered" && monitor.trigger_message && (
-                  <div style={{ marginTop: 5, padding: "6px 8px", borderRadius: 6, background: "rgba(220,38,38,0.06)", border: "0.5px solid rgba(220,38,38,0.2)" }}>
-                    <p style={{ fontFamily: "var(--font-dm-sans)", fontSize: 11, color: "rgba(185,28,28,0.9)", lineHeight: 1.45 }}>
-                      ⚠ {monitor.trigger_message}
-                    </p>
-                    {monitor.trigger_data && typeof (monitor.trigger_data as Record<string, unknown>).handoff_url === "string" && (
-                      <a
-                        href={(monitor.trigger_data as Record<string, string>).handoff_url}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        style={{
-                          display: "inline-block", marginTop: 5,
-                          fontFamily: "var(--font-dm-sans)", fontSize: 11, fontWeight: 600,
-                          color: "rgba(185,28,28,0.9)",
-                        }}
-                      >
-                        Book now →
-                      </a>
-                    )}
-                  </div>
-                )}
-
-                {/* Last checked */}
-                {monitor.last_checked_at && monitor.status === "active" && (
-                  <p style={{ fontFamily: "var(--font-dm-sans)", fontSize: 10, color: "var(--text-muted, #aaa)", marginTop: 3 }}>
-                    Last checked {formatTime(monitor.last_checked_at)}
-                    {" · "} Next check {formatTime(monitor.next_check_at)}
-                  </p>
+              }}
+            />
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
+                <span style={{ fontSize: 13 }}>{monitor.step_emoji}</span>
+                <p className="monitor-panel__item-text" style={{ fontWeight: 600 }}>
+                  {monitor.step_label}
+                </p>
+                <span className="monitor-panel__item-meta" style={{ marginTop: 0 }}>
+                  {MONITOR_TYPE_EMOJI[monitor.type]} {MONITOR_TYPE_LABEL[monitor.type] ?? monitor.type}
+                </span>
+                {monitor.status === "cancelled" && (
+                  <span className="monitor-panel__item-meta" style={{ marginTop: 0 }}>· stopped</span>
                 )}
               </div>
 
-              {/* Action buttons */}
-              <div style={{ display: "flex", gap: 4, flexShrink: 0 }}>
-                {/* Stop button — active or triggered monitors */}
-                {(monitor.status === "active" || monitor.status === "triggered") && (
-                  <button
-                    onClick={() => cancelMonitor(monitor.id)}
-                    style={{
-                      background: "none",
-                      border: "0.5px solid var(--border, #e5e7eb)",
-                      borderRadius: 6, padding: "2px 7px",
-                      fontFamily: "var(--font-dm-sans)", fontSize: 10,
-                      color: "var(--text-muted, #aaa)", cursor: "pointer",
-                    }}
-                  >
-                    Stop
-                  </button>
-                )}
-                {/* Delete button — all monitors */}
-                <button
-                  onClick={() => deleteMonitor(monitor.id)}
-                  title="Delete monitor"
+              {monitor.status === "triggered" && monitor.trigger_message && (
+                <div
                   style={{
-                    background: "none",
-                    border: "0.5px solid var(--border, #e5e7eb)",
-                    borderRadius: 6, padding: "2px 6px",
-                    fontSize: 11, color: "var(--text-muted, #aaa)",
-                    cursor: "pointer", lineHeight: 1,
+                    marginTop: 5,
+                    padding: "6px 8px",
+                    borderRadius: "var(--radius-sm)",
+                    background: "rgba(220,38,38,0.06)",
+                    border: "1px solid rgba(220,38,38,0.2)",
                   }}
                 >
-                  🗑
+                  <p
+                    style={{
+                      fontFamily: "var(--font-dm-sans)",
+                      fontSize: 11,
+                      color: "rgba(185,28,28,0.9)",
+                      lineHeight: 1.45,
+                    }}
+                  >
+                    ⚠ {monitor.trigger_message}
+                  </p>
+                  {monitor.trigger_data && typeof (monitor.trigger_data as Record<string, unknown>).handoff_url === "string" && (
+                    <a
+                      href={(monitor.trigger_data as Record<string, string>).handoff_url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      style={{
+                        display: "inline-block",
+                        marginTop: 5,
+                        fontFamily: "var(--font-dm-sans)",
+                        fontSize: 11,
+                        fontWeight: 600,
+                        color: "rgba(185,28,28,0.95)",
+                      }}
+                    >
+                      Book now →
+                    </a>
+                  )}
+                </div>
+              )}
+
+              {monitor.last_checked_at && monitor.status === "active" && (
+                <p className="monitor-panel__item-meta">
+                  Last checked {formatTime(monitor.last_checked_at)}
+                  {" · "} Next check {formatTime(monitor.next_check_at)}
+                </p>
+              )}
+            </div>
+
+            <div style={{ display: "flex", gap: 4, flexShrink: 0 }}>
+              {(monitor.status === "active" || monitor.status === "triggered") && (
+                <button onClick={() => cancelMonitor(monitor.id)} className="monitor-panel__item-action">
+                  Stop
                 </button>
-              </div>
+              )}
+              <button
+                onClick={() => deleteMonitor(monitor.id)}
+                title="Delete monitor"
+                className="monitor-panel__item-action"
+                style={{ padding: "2px 6px", lineHeight: 1, fontSize: 11 }}
+              >
+                🗑
+              </button>
             </div>
           </div>
         ))}
@@ -1601,18 +1614,43 @@ function MonitoringWorkspacePanel({
 
   if (!loaded) {
     return (
-      <div style={{ padding: "24px 20px", borderRadius: 18, border: "0.5px solid var(--border, #e5e7eb)" }}>
-        <p style={{ fontFamily: "var(--font-dm-sans)", fontSize: 13, color: "var(--text-secondary, #666)" }}>Loading live monitors...</p>
+      <div className="monitor-panel">
+        <p style={{ fontFamily: "var(--font-dm-sans)", fontSize: 13, color: "var(--ink-6)" }}>
+          Loading live monitors...
+        </p>
       </div>
     );
   }
 
   if (groups.length === 0) {
     return (
-      <div style={{ padding: "40px 24px", textAlign: "center", borderRadius: 18, border: "0.5px dashed var(--border, #e5e7eb)" }}>
-        <p style={{ fontSize: 24, fontWeight: 700, marginBottom: 10, color: "var(--text-primary, #111)" }}>Live</p>
-        <p style={{ fontFamily: "var(--font-dm-sans)", fontWeight: 600, fontSize: 14, marginBottom: 6 }}>No live monitors</p>
-        <p style={{ fontFamily: "var(--font-dm-sans)", fontSize: 12, color: "var(--text-secondary, #666)" }}>
+      <div
+        className="monitor-panel"
+        style={{ textAlign: "center", padding: "var(--space-10) var(--space-6)", borderStyle: "dashed" }}
+      >
+        <p
+          style={{
+            fontSize: 24,
+            fontWeight: 700,
+            marginBottom: 10,
+            color: "var(--ink-8)",
+            fontFamily: "var(--font-dm-sans)",
+          }}
+        >
+          Live
+        </p>
+        <p
+          style={{
+            fontFamily: "var(--font-dm-sans)",
+            fontWeight: 600,
+            fontSize: 14,
+            marginBottom: 6,
+            color: "var(--ink-7)",
+          }}
+        >
+          No live monitors
+        </p>
+        <p className="monitor-panel__empty" style={{ padding: 0, fontStyle: "normal" }}>
           Availability watches and reservation checks will appear here.
         </p>
       </div>
@@ -1627,22 +1665,9 @@ function MonitoringWorkspacePanel({
           { label: "Active", value: active },
           { label: "Alerts", value: alerts },
         ].map((item) => (
-          <div
-            key={item.label}
-            style={{
-              minWidth: 120,
-              padding: "12px 14px",
-              borderRadius: 14,
-              border: "0.5px solid var(--border, #e5e7eb)",
-              background: "var(--card-2, #f6f6f4)",
-            }}
-          >
-            <div style={{ fontFamily: "var(--font-dm-sans)", fontSize: 11, color: "var(--text-muted, #999)", textTransform: "uppercase", letterSpacing: "0.08em" }}>
-              {item.label}
-            </div>
-            <div style={{ marginTop: 6, fontFamily: "var(--font-dm-sans)", fontSize: 24, fontWeight: 700, color: "var(--text-primary, #111)" }}>
-              {item.value}
-            </div>
+          <div key={item.label} className="insights__metric" style={{ minWidth: 120 }}>
+            <div className="insights__metric-label">{item.label}</div>
+            <div className="insights__metric-value">{item.value}</div>
           </div>
         ))}
       </div>
@@ -1650,21 +1675,28 @@ function MonitoringWorkspacePanel({
       {groups.map((group) => {
         const latest = [...group.monitors].sort((a, b) => +new Date(b.last_checked_at ?? b.created_at) - +new Date(a.last_checked_at ?? a.created_at))[0];
         return (
-          <div
-            key={group.jobId}
-            style={{
-              padding: "16px 18px",
-              borderRadius: 18,
-              border: "0.5px solid var(--border, #e5e7eb)",
-              background: "var(--card, #fff)",
-            }}
-          >
+          <div key={group.jobId} className="monitor-panel">
             <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 16 }}>
               <div style={{ minWidth: 0 }}>
-                <p style={{ fontFamily: "var(--font-dm-sans)", fontWeight: 700, fontSize: 15, color: "var(--text-primary, #111)" }}>
+                <p
+                  style={{
+                    fontFamily: "var(--font-dm-sans)",
+                    fontWeight: 700,
+                    fontSize: 15,
+                    color: "var(--ink-8)",
+                    letterSpacing: "var(--tracking-tight)",
+                  }}
+                >
                   {group.tripLabel}
                 </p>
-                <p style={{ fontFamily: "var(--font-dm-sans)", fontSize: 12, color: "var(--text-secondary, #666)", marginTop: 4 }}>
+                <p
+                  style={{
+                    fontFamily: "var(--font-dm-sans)",
+                    fontSize: 12,
+                    color: "var(--ink-6)",
+                    marginTop: 4,
+                  }}
+                >
                   {group.monitors.length} live monitor{group.monitors.length === 1 ? "" : "s"} · Updated {timeAgo(latest?.last_checked_at ?? latest?.created_at)}
                 </p>
               </div>
@@ -1672,17 +1704,8 @@ function MonitoringWorkspacePanel({
                 <button
                   type="button"
                   onClick={() => onOpenJob(group.jobId)}
-                  style={{
-                    padding: "8px 12px",
-                    borderRadius: 10,
-                    border: "0.5px solid var(--border, #e5e7eb)",
-                    background: "transparent",
-                    color: "var(--text-primary, #111)",
-                    fontFamily: "var(--font-dm-sans)",
-                    fontSize: 12,
-                    fontWeight: 600,
-                    cursor: "pointer",
-                  }}
+                  className="monitor-panel__item-action"
+                  style={{ padding: "8px 12px", fontWeight: 600 }}
                 >
                   Open task
                 </button>
@@ -1699,16 +1722,11 @@ function MonitoringWorkspacePanel({
                     }
                     setDeletingId(null);
                   }}
+                  className="monitor-panel__item-action"
                   style={{
                     padding: "8px 12px",
-                    borderRadius: 10,
-                    border: "0.5px solid var(--border, #e5e7eb)",
-                    background: "transparent",
-                    color: deletingId === group.jobId ? "var(--text-muted, #aaa)" : "rgba(220,38,38,0.7)",
-                    fontFamily: "var(--font-dm-sans)",
-                    fontSize: 12,
                     fontWeight: 600,
-                    cursor: deletingId === group.jobId ? "not-allowed" : "pointer",
+                    color: deletingId === group.jobId ? "var(--ink-4)" : "rgba(220,38,38,0.75)",
                   }}
                 >
                   {deletingId === group.jobId ? "Deleting…" : "Delete"}
@@ -1716,25 +1734,14 @@ function MonitoringWorkspacePanel({
               </div>
             </div>
 
-            <div style={{ display: "flex", flexDirection: "column", gap: 8, marginTop: 14 }}>
+            <div className="monitor-panel__list" style={{ marginTop: 14 }}>
               {group.monitors.map((monitor) => (
-                <div
-                  key={monitor.id}
-                  style={{
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "space-between",
-                    gap: 12,
-                    padding: "10px 12px",
-                    borderRadius: 12,
-                    background: "var(--card-2, #f6f6f4)",
-                  }}
-                >
-                  <div style={{ minWidth: 0 }}>
-                    <p style={{ fontFamily: "var(--font-dm-sans)", fontSize: 13, fontWeight: 600, color: "var(--text-primary, #111)" }}>
+                <div key={monitor.id} className="monitor-panel__item">
+                  <div style={{ minWidth: 0, flex: 1 }}>
+                    <p className="monitor-panel__item-text" style={{ fontWeight: 600 }}>
                       {monitor.step_emoji} {monitor.step_label}
                     </p>
-                    <p style={{ fontFamily: "var(--font-dm-sans)", fontSize: 11, color: "var(--text-secondary, #666)", marginTop: 2 }}>
+                    <p className="monitor-panel__item-meta">
                       {monitor.type.replace(/_/g, " ")} · {monitor.status} · next check {timeAgo(monitor.next_check_at)}
                     </p>
                   </div>
@@ -1744,7 +1751,9 @@ function MonitoringWorkspacePanel({
                       fontFamily: "var(--font-dm-sans)",
                       fontSize: 11,
                       fontWeight: 700,
-                      color: monitor.status === "triggered" ? "rgba(220,38,38,0.9)" : "var(--gold, #D4A34B)",
+                      color: monitor.status === "triggered" ? "rgba(220,38,38,0.9)" : "var(--gold)",
+                      textTransform: "uppercase",
+                      letterSpacing: "var(--tracking-eyebrow)",
                     }}
                   >
                     {monitor.status === "triggered" ? "Alert" : "Watching"}
