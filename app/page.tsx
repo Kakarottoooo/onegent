@@ -273,7 +273,13 @@ export default function Home() {
         }
         const data = (await res.json()) as {
           session?: { id: string; title: string } | null;
-          messages: Array<{ id: string; role: "user" | "assistant"; content: string; created_at: string }>;
+          messages: Array<{
+            id: string;
+            role: "user" | "assistant";
+            content: string;
+            nlu_state?: unknown | null;
+            created_at: string;
+          }>;
         };
         console.log(`[session-replay] got ${data.messages?.length ?? 0} messages for ${activeSessionId}`);
         if (cancelled) return;
@@ -291,6 +297,16 @@ export default function Home() {
         nluHistoryRef.current = data.messages
           .slice(-20)
           .map((m) => ({ role: m.role, content: m.content }));
+        // Hydrate prev_nlu_state from the latest assistant turn that has one.
+        // Walk backwards so a session that ended on a user turn still finds the
+        // prior assistant state.
+        for (let i = data.messages.length - 1; i >= 0; i--) {
+          const m = data.messages[i];
+          if (m.role === "assistant" && m.nlu_state) {
+            lastNluStateRef.current = m.nlu_state;
+            break;
+          }
+        }
       } catch (err) {
         console.warn("[session-replay] error", err);
       }
@@ -474,6 +490,11 @@ export default function Home() {
   // JSON-stringified so the LLM sees the same protocol it's asked to emit
   // (prevents mid-conversation fallback to plain text). Capped at 20 turns.
   const nluHistoryRef = useRef<ChatMessage[]>([]);
+  // Hydrated IntentState from the most recent assistant turn. Sent as
+  // prev_nlu_state on the next /api/chat/parse call so the extractor merges
+  // into existing constraints instead of starting fresh — keeps refresh /
+  // sidebar-switch from feeling like the agent has amnesia.
+  const lastNluStateRef = useRef<unknown | null>(null);
 
   // Load recent jobs for home page strip
   useEffect(() => {
@@ -777,6 +798,10 @@ export default function Home() {
           // Sessions: solo chats mirror into chat_session_messages. Server
           // auto-creates the session on the first turn and echoes the id back.
           ...(activeSessionId ? { session_id: activeSessionId } : {}),
+          // Hydrated NLU state from the prior assistant turn. Lets the extractor
+          // merge into existing constraints — keeps refresh / sidebar-switch
+          // from feeling like the agent has amnesia.
+          ...(lastNluStateRef.current ? { prev_nlu_state: lastNluStateRef.current } : {}),
         }),
       });
       const data = (await res.json().catch(() => null)) as
@@ -827,6 +852,13 @@ export default function Home() {
       });
       if (nluHistoryRef.current.length > 20) {
         nluHistoryRef.current = nluHistoryRef.current.slice(-20);
+      }
+      // Capture the IntentState snapshot so the next turn sends prev_nlu_state.
+      // The server already persisted this onto the assistant chat_session_messages
+      // row via syncSessionContext, but holding it client-side avoids a DB
+      // round-trip on the next turn.
+      if (nlu.__v2_state) {
+        lastNluStateRef.current = nlu.__v2_state;
       }
 
       // Trip scenario runs through a dedicated package planner (not the legacy
@@ -989,6 +1021,7 @@ export default function Home() {
     // Room created or plan dispatched — current NLU thread is finished; clear
     // the history so the next utterance starts a fresh conversation.
     nluHistoryRef.current = [];
+    lastNluStateRef.current = null;
     if (payload.kind === "room" && payload.url) {
       const origin = typeof window !== "undefined" ? window.location.origin : "";
       const fullInvite = payload.invite_url ? `${origin}${payload.invite_url}` : null;
@@ -3097,7 +3130,7 @@ export default function Home() {
           {/* New chat button — only show when there's conversation history */}
           {hasMessages && (
             <button
-              onClick={() => { chat.clearChat(); setInlineItems([]); setPendingTravelDoc(null); }}
+              onClick={() => { chat.clearChat(); setInlineItems([]); setPendingTravelDoc(null); nluHistoryRef.current = []; lastNluStateRef.current = null; }}
               title="Start a new conversation"
               className="chat-newchat"
               aria-label="Start a new conversation"

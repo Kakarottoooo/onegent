@@ -4042,6 +4042,11 @@ export interface ChatSessionMessageRow {
   id: string;
   role: "user" | "assistant";
   content: string;
+  /** NLU IntentState snapshot — present on assistant rows when the v2
+   *  pipeline produced one. Used to hydrate `prev_state` on the next
+   *  parse call so the extractor sees prior constraints/scenario after
+   *  page refresh or sidebar switch. JSONB column. */
+  nlu_state: unknown | null;
   created_at: string;
 }
 
@@ -4076,9 +4081,13 @@ export async function ensureChatSessionMessagesTable(): Promise<void> {
           session_id TEXT NOT NULL,
           role       TEXT NOT NULL,
           content    TEXT NOT NULL,
+          nlu_state  JSONB,
           created_at TIMESTAMPTZ DEFAULT NOW()
         )
       `;
+      // Add nlu_state column to legacy tables that pre-date NLU hydration.
+      // No-op when the column already exists.
+      await sql`ALTER TABLE chat_session_messages ADD COLUMN IF NOT EXISTS nlu_state JSONB`;
       await sql`CREATE INDEX IF NOT EXISTS chat_session_messages_session_idx ON chat_session_messages (session_id, id)`;
     })().catch((err) => {
       chatSessionMessagesTableReady = null;
@@ -4172,16 +4181,22 @@ export async function deleteChatSession(sessionId: string, userId: string): Prom
 }
 
 /** Append a message to a session's thread. Touches the session's updated_at
- *  so the sidebar reflects activity. */
+ *  so the sidebar reflects activity. The optional `nluState` snapshot is
+ *  persisted on assistant rows so the next turn can hydrate prev_state. */
 export async function insertChatSessionMessage(params: {
   sessionId: string;
   role: "user" | "assistant";
   content: string;
+  nluState?: unknown;
 }): Promise<void> {
   await ensureChatSessionMessagesTable();
+  const nluStateJson =
+    params.nluState !== undefined && params.nluState !== null
+      ? JSON.stringify(params.nluState)
+      : null;
   await sql`
-    INSERT INTO chat_session_messages (session_id, role, content)
-    VALUES (${params.sessionId}, ${params.role}, ${params.content})
+    INSERT INTO chat_session_messages (session_id, role, content, nlu_state)
+    VALUES (${params.sessionId}, ${params.role}, ${params.content}, ${nluStateJson}::jsonb)
   `;
   // Bump the session's updated_at so it rises to the top of the sidebar.
   await sql`
@@ -4199,7 +4214,7 @@ export async function listChatSessionMessages(
   const session = await getChatSession(sessionId, userId);
   if (!session) return [];
   const result = await sql<ChatSessionMessageRow>`
-    SELECT id::text AS id, role, content, created_at
+    SELECT id::text AS id, role, content, nlu_state, created_at
     FROM chat_session_messages
     WHERE session_id = ${sessionId}
     ORDER BY id ASC

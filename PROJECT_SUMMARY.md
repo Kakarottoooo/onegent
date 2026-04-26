@@ -1,5 +1,5 @@
 ================================================================
-Onegent · AI 决策代理 · 项目总结 · v0.2.47.0
+Onegent · AI 决策代理 · 项目总结 · v0.2.48.0
 ================================================================
 
 【项目定义】
@@ -16,6 +16,67 @@ Onegent · AI 决策代理 · 项目总结 · v0.2.47.0
 活动 / 多人 trip），非旅行品类（笔记本 / 手机 / 耳机 / 信用卡 /
 礼物 / 健身）已归档。详见本文档头部 "Recent Updates - 2026-04-24
 (cont. 2) · Positioning Shift"。
+
+================================================================
+Recent Updates - 2026-04-26 (cont. 1) · Phase B' — NLU state 持久化跨会话
+================================================================
+
+Phase A (chat 视觉重构) 之后立刻接 B'. 目的: 解决"用户从 sidebar 点回
+旧 session,extractor 看不到之前抽出的 constraints"——这是 Claude.ai 之
+类成熟产品的隐性体验, onegent 没做就是"agent 健忘"。
+
+之前架构: nluHistoryRef 把 stringified NLU JSON 塞进 history 的 assistant
+content,extractor 看到时反向 reconstruct 部分 state. 算 hack,refresh
+后会丢。这次改成真正的 nlu_state JSONB column 持久化。
+
+1. lib/db.ts — chat_session_messages 加 nlu_state JSONB
+   - ChatSessionMessageRow 加 nlu_state?: unknown 字段
+   - ensureChatSessionMessagesTable: CREATE TABLE 含 nlu_state JSONB
+     + ALTER TABLE ADD COLUMN IF NOT EXISTS (兼容老表)
+   - insertChatSessionMessage 加可选 nluState 参数, JSON.stringify 后
+     用 ::jsonb 插入
+   - listChatSessionMessages SELECT 加 nlu_state 列
+
+2. app/api/chat/parse/route.ts — prev_nlu_state in / __v2_state out
+   - body 解析加 prev_nlu_state (JSON object), 传给 analyzeConversationalV2
+     的 prev_state 参数 (extractor 已支持 merge 模式)
+   - syncSessionContext 接 nluState 参数, 持久化到 assistant message
+     的 nlu_state 列 (来自 result.__v2_state)
+   - syncRoomContext 不需改 (room 已经 upsert IntentState 到
+     room_member_intent_state 表)
+
+3. app/page.tsx — client side hydrate
+   - 加 lastNluStateRef (useRef<unknown>) 存最后一条 assistant 的 IntentState
+   - session-replay 拉 nlu_state 从 messages 反向 walk 找最近一条
+     assistant 的 nlu_state, 写入 ref
+   - /api/chat/parse fetch body 加 prev_nlu_state: lastNluStateRef.current
+     (条件展开,无值时不发)
+   - 收到 result 后 if (nlu.__v2_state) lastNluStateRef.current = nlu.__v2_state
+   - clearChat / handleConfirmCommitted 时 reset lastNluStateRef = null
+
+4. B'2: hero 渐隐 — verify 后判断保持现状
+   - 现状: !hasMessages 条件渲染 hero (line 2282), 一旦发消息 hard cutoff
+   - URL ?session_id replace 已经在做 (line 805)
+   - 已符合 Q5(c) "对话开始 = hero 让位" 目的
+   - fade-out 改动需 wrapper + delay state + 400ms timer, 在 page.tsx
+     3300 行内 risk 高 / 收益低 (用户发消息后视线在 input,看不到 hero
+     消失). Claude.ai 自己也是 hard cutoff. 留低 ROI backlog
+
+效果: 跨 session 切换 / 浏览器 refresh 后, NLU 仍然记得之前抽出的
+scenario / constraints / member_names 等. 不再是"接着聊却像第一次见面"。
+
+向下兼容: ALTER TABLE ADD COLUMN IF NOT EXISTS, 老表自动加列. 旧
+session 没 nlu_state 行的 message — fetch 后 lastNluStateRef 仍是 null,
+parse 不发 prev_nlu_state body, server 当作新对话处理 (extractor 自己
+能从 history 部分恢复). 零数据迁移成本.
+
+typecheck pass / lib/agent/nlu-v2 88/88 测试 green
+
+下一步 (Phase C' 已规划):
+  C'3: chat_sessions 加 destination/scenario/upgraded_plan_id/
+       upgraded_trip_id 列 (基础 schema)
+  C'1: NLU async 抽 destination → PATCH session title
+  C'2: Sidebar 改成 Drafts/Completed 分栏 + ✓
 
 ================================================================
 Recent Updates - 2026-04-26 · Phase A — 主页 chat 链路 Claude.ai 风格重构

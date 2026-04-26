@@ -125,12 +125,19 @@ export async function POST(req: NextRequest) {
     typeof b.room_id === "string" && b.room_id.trim() ? b.room_id.trim() : undefined;
   const incomingSessionId =
     typeof b.session_id === "string" && b.session_id.trim() ? b.session_id.trim() : undefined;
+  // Hydrated IntentState from the prior assistant turn — when present, lets the
+  // extractor merge into existing constraints/scenario instead of starting from
+  // scratch. The client pulls this from the most recent assistant message of
+  // the replayed session (chat_session_messages.nlu_state JSONB column).
+  const prevNluState =
+    b.prev_nlu_state && typeof b.prev_nlu_state === "object" ? b.prev_nlu_state : null;
 
   try {
     const result = await analyzeConversationalV2({
       message,
       history,
       pinned_target_id,
+      prev_state: prevNluState as Parameters<typeof analyzeConversationalV2>[0]["prev_state"],
     });
     console.log(
       `[chat/parse] v2 — scenario=${result.scenario} intent=${result.intent} confirm_ready=${result.confirm_ready}${roomId ? ` room=${roomId}` : ""}`,
@@ -192,6 +199,7 @@ export async function POST(req: NextRequest) {
         incomingSessionId,
         message,
         result.assistant_reply,
+        result.__v2_state ?? null,
       );
     }
 
@@ -301,6 +309,7 @@ async function syncSessionContext(
   incomingSessionId: string | undefined,
   userMessage: string,
   assistantReply: string | null | undefined,
+  nluState: unknown,
 ): Promise<string | null> {
   try {
     let sessionId = incomingSessionId ?? null;
@@ -321,10 +330,13 @@ async function syncSessionContext(
     }
     await insertChatSessionMessage({ sessionId, role: "user", content: userMessage });
     if (assistantReply && assistantReply.trim()) {
+      // Persist the IntentState snapshot on the assistant row so a refresh
+      // or sidebar switch can hydrate prev_state on the next parse turn.
       await insertChatSessionMessage({
         sessionId,
         role: "assistant",
         content: assistantReply,
+        nluState: nluState ?? undefined,
       });
     }
     console.log(
