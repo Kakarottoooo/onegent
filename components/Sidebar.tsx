@@ -34,8 +34,37 @@ interface SessionRow {
   id: string;
   title: string;
   upgraded_room_id: string | null;
+  /** Set when the user committed kind="plan" — sentinel "plan" or scenario name. */
+  upgraded_plan_id: string | null;
+  /** Set when the user committed kind="trip" — sentinel "trip". */
+  upgraded_trip_id: string | null;
+  /** NLU-extracted destination for the sidebar subtitle, when known. */
+  destination: string | null;
+  /** Scenario for the row icon: restaurant/hotel/flight/activity/trip. */
+  scenario: string | null;
+  /** Stamped when any upgraded_* flips. Drives Drafts vs Completed sort. */
+  completed_at: string | null;
   created_at: string;
   updated_at: string;
+}
+
+const SCENARIO_EMOJI: Record<string, string> = {
+  restaurant: "🍽️",
+  hotel: "🏨",
+  flight: "✈️",
+  activity: "🎟️",
+  trip: "🧳",
+};
+
+function sessionEmoji(s: SessionRow): string {
+  if (s.scenario && SCENARIO_EMOJI[s.scenario]) return SCENARIO_EMOJI[s.scenario];
+  return "💬";
+}
+
+function sessionSubtitle(s: SessionRow, isCompleted: boolean): string | undefined {
+  if (s.destination) return s.destination;
+  if (isCompleted) return "Completed";
+  return undefined;
 }
 
 export interface SidebarProps {
@@ -226,6 +255,17 @@ export default function Sidebar({ activeSessionId, activeRoomId, reloadTick }: S
   // points at a room keeps its title + 🏠 badge via the room card instead.
   const soloSessions = (sessions ?? []).filter((s) => !s.upgraded_room_id);
 
+  // Onegent-flavored split: Drafts (still exploring) vs Completed (the user
+  // committed a plan or a trip from this thread). Q3 a: plan/trip creation is
+  // the moment the conversation has done its job — everything after is
+  // "actioning the result", which lives in /tasks not /chat.
+  const draftSessions = soloSessions.filter(
+    (s) => !s.upgraded_plan_id && !s.upgraded_trip_id,
+  );
+  const completedSessions = soloSessions.filter(
+    (s) => s.upgraded_plan_id || s.upgraded_trip_id,
+  );
+
   function goNewChat() {
     setMobileOpen(false);
     router.push("/");
@@ -374,18 +414,19 @@ export default function Sidebar({ activeSessionId, activeRoomId, reloadTick }: S
           })
         )}
 
-        {/* Sessions section */}
-        {collapsed ? null : <SectionLabel text="Sessions" />}
+        {/* Drafts — sessions still being explored. Top of the list because
+            this is what the user is most likely to come back to. */}
+        {collapsed ? null : <SectionLabel text="Drafts" />}
         {sessions === null ? (
           collapsed ? null : <SidebarSkeleton />
-        ) : soloSessions.length === 0 ? (
-          collapsed ? null : <EmptyHint text="Your previous chats will show up here." />
+        ) : draftSessions.length === 0 ? (
+          collapsed ? null : <EmptyHint text="Your in-flight chats will show up here." />
         ) : (
-          soloSessions.map((s) =>
+          draftSessions.map((s) =>
             collapsed ? (
               <IconOnlyRow
                 key={s.id}
-                icon="💬"
+                icon={sessionEmoji(s)}
                 title={s.title || "Untitled"}
                 active={activeSessionId === s.id}
                 onClick={() => goSession(s)}
@@ -394,8 +435,9 @@ export default function Sidebar({ activeSessionId, activeRoomId, reloadTick }: S
             ) : (
               <SidebarRow
                 key={s.id}
-                icon="💬"
+                icon={sessionEmoji(s)}
                 title={s.title || "Untitled"}
+                subtitle={sessionSubtitle(s, false)}
                 active={activeSessionId === s.id}
                 onClick={() => goSession(s)}
                 onContextMenu={(e) => openSessionMenu(s, e)}
@@ -404,6 +446,27 @@ export default function Sidebar({ activeSessionId, activeRoomId, reloadTick }: S
             ),
           )
         )}
+
+        {/* Completed — sessions that produced a plan or trip handoff. The
+            ✓ marker tells the user "this exploration is done"; clicking still
+            opens the chat thread so they can see what they decided. */}
+        {!collapsed && completedSessions.length > 0 ? (
+          <>
+            <SectionLabel text="Completed" />
+            {completedSessions.map((s) => (
+              <SidebarRow
+                key={s.id}
+                icon={sessionEmoji(s)}
+                title={`${s.title || "Untitled"} ✓`}
+                subtitle={sessionSubtitle(s, true)}
+                active={activeSessionId === s.id}
+                onClick={() => goSession(s)}
+                onContextMenu={(e) => openSessionMenu(s, e)}
+                dimmed={busyId === s.id}
+              />
+            ))}
+          </>
+        ) : null}
       </div>
     </div>
   );

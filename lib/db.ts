@@ -4033,7 +4033,25 @@ export interface ChatSession {
   id: string;
   user_id: string;
   title: string;
+  /** When set, the user upgraded this solo session into a Decision Room.
+   *  Sidebar shows the room icon + routes future clicks to /?room_id=. */
   upgraded_room_id: string | null;
+  /** Set when the user committed a `kind="plan"` from this session. Plans
+   *  have no DB record (they hand off to the search pipeline), so this is
+   *  just a sentinel string ("plan") rather than an FK. */
+  upgraded_plan_id: string | null;
+  /** Set when the user committed a `kind="trip"` from this session. Same
+   *  semantics as upgraded_plan_id — sentinel for "completed via trip". */
+  upgraded_trip_id: string | null;
+  /** NLU-extracted destination, used by the sidebar to label the session
+   *  ("Tokyo · Apr 24-28" instead of the first 80 chars of message 1). */
+  destination: string | null;
+  /** NLU-extracted scenario (restaurant/hotel/flight/activity/trip).
+   *  Used to render the right emoji in the sidebar. */
+  scenario: string | null;
+  /** Stamped when any of the upgraded_* columns flips. Lets the sidebar
+   *  sort completed below drafts. */
+  completed_at: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -4059,10 +4077,22 @@ export async function ensureChatSessionsTable(): Promise<void> {
           user_id          TEXT NOT NULL,
           title            TEXT NOT NULL,
           upgraded_room_id TEXT,
+          upgraded_plan_id TEXT,
+          upgraded_trip_id TEXT,
+          destination      TEXT,
+          scenario         TEXT,
+          completed_at     TIMESTAMPTZ,
           created_at       TIMESTAMPTZ DEFAULT NOW(),
           updated_at       TIMESTAMPTZ DEFAULT NOW()
         )
       `;
+      // Backfill columns onto pre-existing tables. ADD COLUMN IF NOT EXISTS
+      // is no-op when the column is already there, so safe to run every cold start.
+      await sql`ALTER TABLE chat_sessions ADD COLUMN IF NOT EXISTS upgraded_plan_id TEXT`;
+      await sql`ALTER TABLE chat_sessions ADD COLUMN IF NOT EXISTS upgraded_trip_id TEXT`;
+      await sql`ALTER TABLE chat_sessions ADD COLUMN IF NOT EXISTS destination TEXT`;
+      await sql`ALTER TABLE chat_sessions ADD COLUMN IF NOT EXISTS scenario TEXT`;
+      await sql`ALTER TABLE chat_sessions ADD COLUMN IF NOT EXISTS completed_at TIMESTAMPTZ`;
       await sql`CREATE INDEX IF NOT EXISTS chat_sessions_user_updated_idx ON chat_sessions (user_id, updated_at DESC)`;
     })().catch((err) => {
       chatSessionsTableReady = null;
@@ -4139,7 +4169,8 @@ export async function updateChatSessionTitle(
 }
 
 /** Flag this session as "upgraded to a room" (session stays, URL in sidebar
- *  now routes to the room instead of the solo thread). */
+ *  now routes to the room instead of the solo thread). Stamps completed_at
+ *  so the sidebar shows it under "Completed". */
 export async function markSessionUpgraded(
   sessionId: string,
   userId: string,
@@ -4148,9 +4179,76 @@ export async function markSessionUpgraded(
   await ensureChatSessionsTable();
   await sql`
     UPDATE chat_sessions
-    SET upgraded_room_id = ${roomId}, updated_at = NOW()
+    SET upgraded_room_id = ${roomId}, completed_at = NOW(), updated_at = NOW()
     WHERE id = ${sessionId} AND user_id = ${userId}
   `;
+}
+
+/** Flag this session as "completed via a plan handoff" — plans don't have
+ *  DB records (they hand off to the search pipeline), so we just stamp a
+ *  sentinel + completed_at. Sidebar shows it under "Completed". */
+export async function markSessionUpgradedPlan(
+  sessionId: string,
+  userId: string,
+  scenario: string | null,
+): Promise<void> {
+  await ensureChatSessionsTable();
+  await sql`
+    UPDATE chat_sessions
+    SET upgraded_plan_id = ${scenario ?? "plan"},
+        completed_at = NOW(),
+        updated_at = NOW()
+    WHERE id = ${sessionId} AND user_id = ${userId}
+  `;
+}
+
+/** Same as markSessionUpgradedPlan but for `kind="trip"` (multi-category
+ *  trip package handoff). */
+export async function markSessionUpgradedTrip(
+  sessionId: string,
+  userId: string,
+): Promise<void> {
+  await ensureChatSessionsTable();
+  await sql`
+    UPDATE chat_sessions
+    SET upgraded_trip_id = ${"trip"},
+        completed_at = NOW(),
+        updated_at = NOW()
+    WHERE id = ${sessionId} AND user_id = ${userId}
+  `;
+}
+
+/** Update NLU-extracted metadata (destination + scenario) on a session.
+ *  Called by the auto-title endpoint after the LLM names the session. */
+export async function updateChatSessionMeta(
+  sessionId: string,
+  userId: string,
+  meta: { destination?: string | null; scenario?: string | null; title?: string | null },
+): Promise<void> {
+  await ensureChatSessionsTable();
+  // Build the SET clause dynamically — only touch fields the caller passed.
+  // sql template literal doesn't support dynamic SET, so do per-field updates.
+  if (meta.title !== undefined) {
+    await sql`
+      UPDATE chat_sessions
+      SET title = ${meta.title}, updated_at = NOW()
+      WHERE id = ${sessionId} AND user_id = ${userId}
+    `;
+  }
+  if (meta.destination !== undefined) {
+    await sql`
+      UPDATE chat_sessions
+      SET destination = ${meta.destination}, updated_at = NOW()
+      WHERE id = ${sessionId} AND user_id = ${userId}
+    `;
+  }
+  if (meta.scenario !== undefined) {
+    await sql`
+      UPDATE chat_sessions
+      SET scenario = ${meta.scenario}, updated_at = NOW()
+      WHERE id = ${sessionId} AND user_id = ${userId}
+    `;
+  }
 }
 
 /** Bump the session's updated_at so the sidebar sort surfaces it. */

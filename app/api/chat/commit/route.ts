@@ -26,6 +26,8 @@ import {
   sendDirectMessage,
   getUserProfile,
   markSessionUpgraded,
+  markSessionUpgradedPlan,
+  markSessionUpgradedTrip,
   type ApprovalRule,
   type DecisionRoomType,
   type DecisionRoomCategory,
@@ -655,6 +657,18 @@ export async function POST(req: NextRequest) {
       });
     }
 
+    // Solo trip handoff (intent==="create_plan" + scenario==="trip"). Mark
+    // the session completed so the sidebar shows it under "Completed".
+    const tripIncomingSessionId =
+      typeof b.session_id === "string" && b.session_id.trim() ? b.session_id.trim() : null;
+    if (tripIncomingSessionId) {
+      try {
+        await markSessionUpgradedTrip(tripIncomingSessionId, userId);
+      } catch (err) {
+        console.warn(`[chat/commit] markSessionUpgradedTrip failed for session=${tripIncomingSessionId}`, err);
+      }
+    }
+
     return NextResponse.json({
       ok: true,
       kind: "trip",
@@ -746,6 +760,19 @@ export async function POST(req: NextRequest) {
       if (directPayload) return NextResponse.json(directPayload);
       // Fall through if we couldn't build the step (e.g. flag set but no
       // restaurant_name in constraints — defensive guard, shouldn't happen).
+    }
+
+    // Plan committed — flag the session as completed so the sidebar moves it
+    // from Drafts to Completed (Q3 a: plan creation is the moment the user's
+    // exploration converges; everything after is "actioning the result").
+    const planIncomingSessionId =
+      typeof b.session_id === "string" && b.session_id.trim() ? b.session_id.trim() : null;
+    if (planIncomingSessionId) {
+      try {
+        await markSessionUpgradedPlan(planIncomingSessionId, userId, scenario);
+      } catch (err) {
+        console.warn(`[chat/commit] markSessionUpgradedPlan failed for session=${planIncomingSessionId}`, err);
+      }
     }
 
     // Hand off to the existing chat pipeline — the client will call /api/chat

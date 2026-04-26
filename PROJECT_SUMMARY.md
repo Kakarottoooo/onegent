@@ -1,5 +1,5 @@
 ================================================================
-Onegent · AI 决策代理 · 项目总结 · v0.2.48.0
+Onegent · AI 决策代理 · 项目总结 · v0.2.49.0
 ================================================================
 
 【项目定义】
@@ -16,6 +16,73 @@ Onegent · AI 决策代理 · 项目总结 · v0.2.48.0
 活动 / 多人 trip），非旅行品类（笔记本 / 手机 / 耳机 / 信用卡 /
 礼物 / 健身）已归档。详见本文档头部 "Recent Updates - 2026-04-24
 (cont. 2) · Positioning Shift"。
+
+================================================================
+Recent Updates - 2026-04-26 (cont. 2) · Phase C' — onegent-flavored session UX
+================================================================
+
+把 ChatGPT 通用风格的 "Sessions" 列表改成 onegent 自己的语义: 一个
+session = 一次"找 trip 的探索过程"。Sidebar 分 Drafts (在聊还没敲定)
+和 Completed (已经创建了 plan / trip), Completed 标 ✓ + scenario emoji
++ destination 副标。
+
+不开 separate LLM endpoint — 复用现有 NLU result 抽 destination/scenario
+就够了 (0 latency, 0 cost). title 不动, 因为副标 "🍽️ Manhattan" 已经
+够给 onegent 味道, title 还是 first-message-80-chars。
+
+1. lib/db.ts — chat_sessions schema 扩 5 列
+   - upgraded_plan_id TEXT (sentinel "plan" 或 scenario 名,plan 没 DB record)
+   - upgraded_trip_id TEXT (sentinel "trip")
+   - destination TEXT (NLU-extracted, sidebar 副标)
+   - scenario TEXT (NLU-extracted, sidebar emoji 选择)
+   - completed_at TIMESTAMPTZ (任一 upgraded_* flip 时 stamp)
+   - ALTER TABLE ADD COLUMN IF NOT EXISTS × 5 (向后兼容老表, 0 数据迁移成本)
+   - 新 helpers: markSessionUpgradedPlan, markSessionUpgradedTrip,
+     updateChatSessionMeta (动态 SET title / destination / scenario)
+   - markSessionUpgraded (room) 也补 stamp completed_at = NOW()
+
+2. app/api/chat/commit/route.ts — plan / trip 分支挂接
+   - kind="plan" return 之前调 markSessionUpgradedPlan(sessionId, userId, scenario)
+     (Q3 a: plan 创建即 completed)
+   - kind="trip" return 之前调 markSessionUpgradedTrip(sessionId, userId)
+   - kind="room" 沿用 markSessionUpgraded (现在带 completed_at)
+
+3. app/api/chat/parse/route.ts — NLU result → metadata
+   - syncSessionContext 后, 用 result.scenario + extractDestination(constraints)
+     一并 updateChatSessionMeta (失败 swallow, 不阻塞 chat 链路)
+   - extractDestination helper: 多 key fallback (destination/location/city/
+     dest/arrival_city/neighborhood), 截 40 字符,数组取第一个
+
+4. components/Sidebar.tsx — Drafts / Completed 分栏
+   - SessionRow type 扩 5 字段 (upgraded_plan_id/trip_id/destination/scenario/completed_at)
+   - SCENARIO_EMOJI 表 (restaurant 🍽 / hotel 🏨 / flight ✈ / activity 🎟 / trip 🧳)
+   - sessionEmoji() / sessionSubtitle() helpers
+   - filter 拆: drafts (无 upgraded_plan/trip) + completed (有任一 upgraded_plan/trip)
+     room-upgraded 仍然 hide (Rooms 区显示, 避免 duplicate)
+   - 渲染两个 SectionLabel: Drafts (顶部) + Completed (下方,有 ✓ 标)
+   - SidebarRow subtitle 显示 destination 或 "Completed"
+
+效果:
+- Sidebar 不再是平的 "Sessions" 列表,分了 Drafts / Completed 两栏
+- 每条 session 自动带 scenario emoji (🍽 / 🏨 / ✈ / 🎟 / 🧳),不再统一 💬
+- 有 destination 抽到的 session 副标显示 "Manhattan" / "Tokyo" 等
+- 完成 plan/trip 后 session 自动归档到 Completed + ✓ 标
+
+跟 ChatGPT 区别:
+ChatGPT 的 sidebar 是平的 "Today / Yesterday / Last 7 days" 时间分组,
+对话的"完成度"概念缺失 (因为它没有"任务完成"这个产品语义)。
+Onegent 的 sidebar 反映"找 trip 探索过程的状态" — Drafts 是在聊,
+Completed 是已经下决定了。这个分栏在 Brian Chesky / Tobi Lütke 的
+"产品语义优于通用模式"哲学下是 onegent 真正的护城河。
+
+向下兼容: ALTER TABLE ADD COLUMN IF NOT EXISTS, 老 session row 5 个
+新 column 都是 NULL → 全部归入 Drafts (不会突然消失). 旧的
+markSessionUpgraded(roomId) call 仍工作 (room session 仍走 hide 路径).
+
+typecheck pass / lib + components 测试 609/611 (2 pre-existing failures
+in lib/__tests__/ai-loop.test.ts + scenario2.test.ts, 跟 chat session
+完全无关 — 已 git stash verify, 是 booking-autopilot/ai-loop 和 booking-
+links 的旧问题, 留 backlog 不在 Phase A/B/C 范围)
 
 ================================================================
 Recent Updates - 2026-04-26 (cont. 1) · Phase B' — NLU state 持久化跨会话

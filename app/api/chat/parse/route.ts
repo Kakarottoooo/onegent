@@ -26,6 +26,7 @@ import {
   createChatSession,
   insertChatSessionMessage,
   getChatSession,
+  updateChatSessionMeta,
   getDecisionRoomById,
   listActiveProposals,
 } from "@/lib/db";
@@ -201,6 +202,24 @@ export async function POST(req: NextRequest) {
         result.assistant_reply,
         result.__v2_state ?? null,
       );
+      // Onegent-flavored sidebar metadata: scenario + destination land on the
+      // session row so it labels itself "🍽️ NY · Italian dinner" instead of
+      // a 80-char message truncation. No extra LLM call — we already paid for
+      // result.scenario + collected_constraints above.
+      if (resolvedSessionId) {
+        const destination = extractDestination(result.collected_constraints);
+        const scenario = result.scenario ?? null;
+        if (destination !== null || scenario !== null) {
+          try {
+            await updateChatSessionMeta(resolvedSessionId, userId, {
+              destination,
+              scenario,
+            });
+          } catch (err) {
+            console.warn(`[chat/parse] updateChatSessionMeta failed for ${resolvedSessionId}`, err);
+          }
+        }
+      }
     }
 
     // Stage 2: if the user is chatting inside a room context, sync their
@@ -304,6 +323,27 @@ async function syncRoomContext(
  * Silently returns null on any failure — session continuity is a polish,
  * not a critical path.
  */
+/** Pull a short, human-friendly destination label out of the NLU's
+ *  collected_constraints. Falls back through several common keys because
+ *  scenarios disagree on naming (restaurant uses "location", flight uses
+ *  "dest", trip uses "destination"). Returns null when nothing usable. */
+function extractDestination(constraints: Record<string, unknown> | null | undefined): string | null {
+  if (!constraints) return null;
+  const candidateKeys = ["destination", "location", "city", "dest", "arrival_city", "neighborhood"];
+  for (const key of candidateKeys) {
+    const v = constraints[key];
+    if (typeof v === "string" && v.trim()) {
+      // Trim airport-code parens etc. Cap length so a runaway value doesn't
+      // blow out the sidebar row.
+      return v.trim().slice(0, 40);
+    }
+    if (Array.isArray(v) && v.length > 0 && typeof v[0] === "string" && v[0].trim()) {
+      return v[0].trim().slice(0, 40);
+    }
+  }
+  return null;
+}
+
 async function syncSessionContext(
   userId: string,
   incomingSessionId: string | undefined,
