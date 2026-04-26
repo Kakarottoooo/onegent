@@ -1,5 +1,5 @@
 ================================================================
-Onegent · AI 决策代理 · 项目总结 · v0.2.49.0
+Onegent · AI 决策代理 · 项目总结 · v0.2.51.0
 ================================================================
 
 【项目定义】
@@ -16,6 +16,62 @@ Onegent · AI 决策代理 · 项目总结 · v0.2.49.0
 活动 / 多人 trip），非旅行品类（笔记本 / 手机 / 耳机 / 信用卡 /
 礼物 / 健身）已归档。详见本文档头部 "Recent Updates - 2026-04-24
 (cont. 2) · Positioning Shift"。
+
+================================================================
+Recent Updates - 2026-04-26 (cont. 3) · @onegent/mcp-server v0.1.0 published to npm
+================================================================
+
+Backlog #21 终于落地 — `@onegent/mcp-server@0.1.0` 上架 npm registry，
+任何 Claude Desktop / ChatGPT Apps / 其他 MCP-compatible LLM 用户从今天
+起可以 `npx -y @onegent/mcp-server` 一行调起 onegent travel booking
+agent 的 stdio / Streamable HTTP 接口。
+
+发布前修了一个 critical 错配 — 代码里所有 hardcode 的 `onegent.com`
+其实是别人的域名（早期 placeholder 抄过来一直没改），实际生产域名是
+`onegent.one`（Porkbun 注册）。MCP 包默认 base URL、README、ChatGPT
+Apps manifest、developers landing 页面的 curl/fetch 演示、文档教程里
+所有的 URL + email 全部一次性扫干净。
+
+1. fix(domain): rename onegent.com → onegent.one (commit da800ba)
+   - packages/mcp-server/src/api-client.ts — DEFAULT_BASE_URL
+   - packages/mcp-server/src/index.ts — --help 文本
+   - packages/mcp-server/README.md — 4 处 URL + 1 处 staging URL
+   - packages/mcp-server/chatgpt-apps/manifest.json — icon/mcp.url/contact
+   - docs/integrations/{claude-mcp,chatgpt-apps}.md — 教程 URL
+   - app/developers/_components/CodePreview.tsx — landing 上展示的 demo
+   - app/developers/_components/DevFooter.tsx — beta@onegent.one mailto
+   - app/developers/pricing/page.tsx — beta access mailto + body copy
+   - 顺手把 npm pkg fix 提示的 bin 字段 `./dist/index.js` → `dist/index.js`
+     一起 commit 了
+
+2. infra 准备
+   - 域名 onegent.one 在 Porkbun，DNS 已经指向 Vercel picksy 项目
+   - Porkbun email forwarding 配了 beta + support → gzw13979725269@gmail.com
+   - Vercel env vars 补齐 OPENAI/GEMINI/GOOGLE_GENERATIVE_AI/
+     BOOKING_ENCRYPTION_KEY/CRON_SECRET 5 个缺失项；NEXT_PUBLIC_APP_URL
+     去掉末尾斜杠
+   - Clerk production instance 创建（Clone development instance），
+     phone auth 在 dev 关掉避免触发 Pro 计费墙
+   - GitHub repo 改成 Private（保护核心 SaaS 代码不被竞品抄；npm 包
+     的 dist/ 仍然公开发，因为这是 wrapper 必须开源用户才能装）
+
+3. Vercel 触发 master push 自动 deploy（30 秒上线），smoke test
+   `curl -X POST https://onegent.one/api/v1/execution-jobs` 期望 401
+   missing_authorization → ✅ 实测通过
+
+4. npm publish 流程
+   - npm 账号: kakarottoooo (gzw139797256269@gmail.com)
+   - @onegent npm org 已建（free Hobby 计划）
+   - 2FA 走浏览器 SSO 流程发包成功
+   - 验证: `npm view @onegent/mcp-server` shows v0.1.0, MIT, 21.3 kB
+   - tarball 可下载: https://registry.npmjs.org/@onegent/mcp-server/-/mcp-server-0.1.0.tgz
+
+剩下 backlog:
+- #22 onegent.one/api/mcp hosted Streamable HTTP endpoint + ChatGPT Apps
+  正式提交（5-10 天 review）
+- #23 Claude.ai remote MCP OAuth 2.0 接入（2-3 天）
+- worker 部署：booking-autopilot 当前还跑在 Vercel serverless 上（受
+  250MB 限制，Playwright 跑不了），未来要拆到 Railway / Render
 
 ================================================================
 Recent Updates - 2026-04-26 (cont. 2) · Phase C' — onegent-flavored session UX
