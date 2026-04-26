@@ -34,6 +34,7 @@ import type {
   ExecutionJobResult,
   ExecutionJobStatus,
   ExecutionParams,
+  ActivityBookingParams,
   FlightBookingParams,
   HotelBookingParams,
   RestaurantBookingParams,
@@ -286,9 +287,10 @@ export async function resolveProfile(
  * Scenario-specific URL construction and task prompts mirror the existing
  * route.ts logic exactly so behavior is preserved when US-009 swaps C 端.
  *
- * Throws "activity scenario not supported yet" when called with activity —
- * activity flows through a different runtime skill (lib/agent-runtime/skills/)
- * and doesn't use runBrowserTask. Unifying the two is out of Week 2 scope.
+ * Activity differs from restaurant/hotel/flight: lib/core doesn't construct
+ * the startUrl itself — caller passes booking_link (SeatGeek / Ticketmaster
+ * deep link from prior search). Future enhancement: omit booking_link and
+ * have buildActivityContext run its own SeatGeek search.
  */
 export function buildStartUrlAndTask(
   params: ExecutionParams,
@@ -302,9 +304,7 @@ export function buildStartUrlAndTask(
     case "flight":
       return buildFlightContext(params.params, profile);
     case "activity":
-      throw new Error(
-        "Activity scenario not supported by runExecutionJob yet — activity steps flow through lib/agent-runtime/skills/. Use route.ts#runActivityStep for now.",
-      );
+      return buildActivityContext(params.params, profile);
   }
 }
 
@@ -403,6 +403,37 @@ function buildFlightContext(
     `7. STOP before entering the CVV or clicking the final "Complete booking" / "Purchase" button.`,
     `Do NOT navigate to hotels, do NOT use hotel booking steps.`,
   ].join(" ");
+
+  return { startUrl, task };
+}
+
+function buildActivityContext(
+  p: ActivityBookingParams,
+  _profile: BookingProfile,
+): { startUrl: string; task: string } {
+  // Caller (ActivityCard / create-trip / rooms-execute) already resolved the
+  // SeatGeek / Ticketmaster / Vivid deep link via search APIs upstream.
+  // lib/core doesn't replicate that search today — see ActivityBookingParams
+  // .booking_link doc for the future-search note.
+  if (!p.booking_link) {
+    throw new Error(
+      `buildActivityContext: booking_link required for activity "${p.event_name}". ` +
+        `lib/core does not yet run its own SeatGeek/Ticketmaster search — caller must pass a deep link.`,
+    );
+  }
+
+  const startUrl = p.booking_link;
+
+  // Caller can override the prompt for vendor-specific steps; otherwise
+  // lib/core builds a generic ticket-buying task that stops before CVV.
+  const task =
+    p.task ??
+    [
+      `Book ${p.num_tickets} ticket${p.num_tickets === 1 ? "" : "s"} for "${p.event_name}" on ${p.event_date}.`,
+      `You are starting on the event page — find the "Find Tickets" / "Buy" button, select seats (prefer cheapest available unless a premium tier was requested), and proceed to checkout.`,
+      `Fill in all guest information (first/last name, email, phone, address, zip) and card details.`,
+      `Stop before entering CVV or clicking the final payment confirmation button.`,
+    ].join(" ");
 
   return { startUrl, task };
 }

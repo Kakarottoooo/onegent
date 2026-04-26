@@ -336,20 +336,24 @@ export async function POST(req: NextRequest, { params }: Params) {
     const when = activity.datetime_display ?? activity.datetime_local ?? "";
     const fallbackUrl = activity.booking_link;
 
+    // Standardized activity body shape — matches ActivityCard + create-trip
+    // so cend-adapter's convertActivity can convert all three uniformly.
+    const activityTask = `Buy ${numTickets} ticket${numTickets === 1 ? "" : "s"} for "${eventLabel}" at ${activity.venue_name} on ${when}. Navigate to the event page, pick the cheapest available seats together, fill in any required guest info, and stop before entering card number or CVV. Fallback URL: ${activity.booking_link}`;
     step = {
       type: "activity",
       emoji: "🎟️",
       label: eventLabel,
       apiEndpoint: "/api/booking-autopilot/universal",
       body: {
+        activity_name: eventLabel,
+        activity_id: activity.id,
+        venue_name: activity.venue_name,
+        city: activity.venue_city,
+        event_date: activity.datetime_local,
+        num_tickets: numTickets,
         provider: "seatgeek",
-        eventUrl: activity.booking_link,
-        eventId: activity.id,
-        eventName: eventLabel,
-        eventDateTime: activity.datetime_local,
-        venueName: activity.venue_name,
-        venueCity: activity.venue_city,
-        numTickets,
+        startUrl: activity.booking_link,
+        task: activityTask,
         profileId: profile.id,
         profile: profilePayload,
         roomId,

@@ -53,12 +53,6 @@ import { runBrowserTask } from "@/lib/booking-autopilot/stagehand-executor";
 import { liveLogClose, liveLogGet } from "@/lib/live-log-store";
 import { buildPreferenceProfile } from "@/lib/policy";
 
-// ── Agent-runtime: activity skill dispatch ─────────────────────────────────
-// Restaurant / hotel / flight use the 4-phase recovery loop below.
-// Activity steps (and future new types) are dispatched through the agent-runtime.
-import { findActivitySkill } from "@/lib/agent-runtime/skills/find-activity";
-import type { SkillContext } from "@/lib/agent-runtime/types";
-
 // ── US-009: lib/core new-path types (for the USE_CORE_EXECUTOR branch) ─────
 import type {
   ExecutionJobRequest,
@@ -1022,49 +1016,6 @@ async function runUniversalStep(
   }
 }
 
-// ── Activity step via agent-runtime skill ─────────────────────────────────
-
-async function runActivityStep(
-  step: BookingJobStep,
-  ctx: SkillContext,
-  onProgress: (s: BookingJobStep) => Promise<void>
-): Promise<BookingJobStep> {
-  const log: DecisionLogEntry[] = [];
-  const withLog = { ...ctx, log: (e: Omit<DecisionLogEntry, "ts">) => log.push({ ...e, ts: new Date().toISOString() } as DecisionLogEntry) };
-
-  await onProgress({ ...step, status: "loading", decisionLog: log });
-
-  const outcome = await findActivitySkill.execute(
-    step.body as Parameters<typeof findActivitySkill.execute>[0],
-    withLog
-  );
-
-  if (outcome.status === "succeeded" || outcome.status === "adjusted" || outcome.status === "fallback") {
-    log.push({ ts: new Date().toISOString(), type: "succeeded",
-      message: `Found ${outcome.result.entityLabel}`, outcome: "Ready ✓" });
-    return {
-      ...step, status: "done",
-      handoff_url: outcome.result.handoffUrl,
-      selected_time: outcome.result.scheduledAt,
-      usedFallback: outcome.status === "fallback",
-      decisionLog: log,
-    };
-  }
-
-  if (outcome.status === "blocked") {
-    log.push({ ts: new Date().toISOString(), type: "skipped",
-      message: outcome.reason, outcome: "No availability" });
-    return {
-      ...step, status: "no_availability", error: outcome.reason,
-      actionItem: { message: outcome.actionItem ?? outcome.reason, options: [] },
-      decisionLog: log,
-    };
-  }
-
-  log.push({ ts: new Date().toISOString(), type: "failed", message: outcome.reason, outcome: "Error" });
-  return { ...step, status: "error", error: outcome.reason, decisionLog: log };
-}
-
 // ── Route handler ──────────────────────────────────────────────────────────
 
 export async function POST(_req: NextRequest, { params }: Params) {
@@ -1121,18 +1072,12 @@ export async function POST(_req: NextRequest, { params }: Params) {
 
   await updateBookingJobStatus(id, "running");
 
-  // Shared skill context for agent-runtime dispatched steps (activity, etc.)
-  const skillCtx: SkillContext = {
-    jobId: id,
-    sessionId: job.session_id,
-    tripLabel: job.trip_label,
-    autonomy,
-    policy,
-    profile,
-    relationship: null,
-    baseUrl: BASE_URL,
-    log: () => {}, // fire-and-forget; step logs are written via onProgress
-  };
+  // policy + autonomy + profile (loaded above) are consumed by
+  // runStepWithRecovery for legacy non-universal steps. Universal steps
+  // (restaurant/hotel/flight/activity → runUniversalStep) read consent from
+  // step.body.consent when routing through lib/core; UI-side preference
+  // bias is currently only applied in the legacy recovery loop.
+  void profile;
 
   const steps: BookingJobStep[] = [...job.steps];
 
@@ -1160,27 +1105,24 @@ export async function POST(_req: NextRequest, { params }: Params) {
       await writeSteps();
     };
 
-    // ── Dispatch: universal/restaurant → Stagehand, activity → split, rest → recovery loop ──
-    // "restaurant" steps use runUniversalStep (same as "universal") because they need
-    // runBrowserTask called directly — runStepWithRecovery uses callEndpoint (HTTP) which
-    // requires a valid apiEndpoint URL, but restaurant steps don't have one.
+    // ── Dispatch ──────────────────────────────────────────────────────────
+    // universal / restaurant / hotel / flight / activity all go through
+    // runUniversalStep → runBrowserTask (Stagehand AI). When the step body
+    // carries the lib/core marker (__source="lib/core/execution"),
+    // runUniversalStep dispatches to runExecutionJobWithRecovery instead.
     //
-    // "activity" steps split by apiEndpoint: ticketed events (Broadway, concerts, sports)
-    // built by ActivityCard set apiEndpoint="/api/booking-autopilot/universal" and must go
-    // through Stagehand + provider registry (SeatGeek / Ticketmaster). Legacy date-night
-    // and weekend-trip scenarios keep using the agent-runtime find_activity skill
-    // (Google Places → local experience handoff URL).
-    const isUniversalActivity =
-      (steps[i].type as string) === "activity" &&
-      steps[i].apiEndpoint === "/api/booking-autopilot/universal";
-
+    // The legacy runStepWithRecovery (HTTP-via-callEndpoint, autonomy +
+    // policy aware) is kept as a default branch for any future step.type
+    // that wants to opt out of Stagehand — none today.
     try {
-      if (steps[i].type === "universal" || steps[i].type === "restaurant" ||
-          steps[i].type === "hotel" || steps[i].type === "flight" ||
-          isUniversalActivity) {
+      if (
+        steps[i].type === "universal" ||
+        steps[i].type === "restaurant" ||
+        steps[i].type === "hotel" ||
+        steps[i].type === "flight" ||
+        steps[i].type === "activity"
+      ) {
         steps[i] = await runUniversalStep(steps[i], onProgress, id, job.user_id);
-      } else if ((steps[i].type as string) === "activity") {
-        steps[i] = await runActivityStep(steps[i], skillCtx, onProgress);
       } else {
         steps[i] = await runStepWithRecovery(steps[i], autonomy, policy, onProgress);
       }

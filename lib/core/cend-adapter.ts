@@ -8,15 +8,17 @@
  * (in /api/booking-jobs/[id]/start) routes it through lib/core's
  * runExecutionJobWithRecovery instead of the legacy recovery loop.
  *
- * Used today by `app/api/booking-jobs/create-trip/route.ts` when
- * USE_CORE_EXECUTOR_FOR_CEND=true. Per-step (not per-trip): restaurant +
- * hotel + flight steps get marked; activity steps stay on the legacy path
- * because lib/core/execution doesn't support activity yet (it routes through
- * lib/agent-runtime/skills/find-activity, which has its own SkillContext
- * shape that ExecutionContext doesn't carry — see Week 6 backlog).
+ * Used today by `app/api/booking-jobs/create-trip/route.ts` and
+ * `app/api/booking-jobs/route.ts` (POST direct-booking) when
+ * USE_CORE_EXECUTOR_FOR_CEND=true. Per-step (not per-trip): every supported
+ * scenario in a multi-step trip gets independently re-shaped + marked.
+ *
+ * All four current scenarios (restaurant / hotel / flight / activity) are
+ * supported. Activity expects the C-end caller (ActivityCard, create-trip,
+ * rooms-execute) to have already resolved a SeatGeek / Ticketmaster deep
+ * link — it gets passed through as ActivityBookingParams.booking_link.
  *
  * What this file does NOT do:
- *   - Activity conversion — lib/core throws "not supported yet" (W6 backlog)
  *   - Payment profile mapping — inline profile is the contact layer only;
  *     card data still goes through lib/db profile lookup inside executor
  *   - Multi-step trip orchestration — caller (create-trip) keeps assembling
@@ -31,15 +33,17 @@ import type {
   RestaurantBookingParams,
   HotelBookingParams,
   FlightBookingParams,
+  ActivityBookingParams,
 } from "@/lib/core";
 
 // ─── Public API ──────────────────────────────────────────────────────────────
 
-/** Scenarios lib/core/execution can run today. Activity excluded — see file header. */
+/** Scenarios lib/core/execution can run today. */
 export const CORE_SUPPORTED_SCENARIOS: ReadonlyArray<ExecutionScenario> = [
   "restaurant",
   "hotel",
   "flight",
+  "activity",
 ] as const;
 
 export function isCoreSupported(stepType: BookingJobStep["type"]): boolean {
@@ -98,6 +102,8 @@ function convertBodyToParams(
       return convertHotel(body);
     case "flight":
       return convertFlight(body);
+    case "activity":
+      return convertActivity(body);
     default:
       throw new Error(`convertBodyToParams: unsupported scenario "${scenario}"`);
   }
@@ -145,6 +151,23 @@ function convertFlight(body: Record<string, unknown>): FlightBookingParams {
     ...(targetPrice !== undefined ? { targetPrice } : {}),
     ...(targetDepartureTime ? { targetDepartureTime } : {}),
     ...(targetFlightNumber ? { targetFlightNumber } : {}),
+  };
+}
+
+function convertActivity(body: Record<string, unknown>): ActivityBookingParams {
+  // C-end activity steps (ActivityCard / create-trip buildActivityStep /
+  // rooms-execute) put the SeatGeek/Ticketmaster deep link in `startUrl`
+  // and the agent prompt in `task`. lib/core's ActivityBookingParams
+  // takes them as `booking_link` + `task` so the executor can stage them.
+  // Other body keys (activity_name / venue_name / event_date / num_tickets /
+  // city) line up with our scenario contract.
+  return {
+    event_name: expectString(body, "activity_name"),
+    city: expectString(body, "city"),
+    event_date: expectString(body, "event_date"),
+    num_tickets: expectNumber(body, "num_tickets"),
+    booking_link: expectString(body, "startUrl"),
+    ...(typeof body.task === "string" && body.task.trim() ? { task: body.task } : {}),
   };
 }
 

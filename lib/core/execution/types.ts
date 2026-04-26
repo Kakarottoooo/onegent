@@ -118,6 +118,21 @@ export interface ActivityBookingParams {
   seat_type?: "premium" | "standard" | "economy";
   /** Upper budget per ticket, in USD. */
   budget_max_per_ticket?: number;
+
+  /**
+   * Direct booking URL for the event (SeatGeek / Ticketmaster / Vivid /
+   * StubHub deep link). REQUIRED today — lib/core does not yet do its own
+   * SeatGeek / Ticketmaster search (see Backlog: extend buildActivityContext
+   * to search when omitted). C-end callers (ActivityCard, create-trip,
+   * Decision Room execute) already have this URL from prior search APIs.
+   */
+  booking_link?: string;
+  /**
+   * Optional caller-built task prompt for the Stagehand agent. When omitted,
+   * lib/core builds a generic "buy {num_tickets} tickets, fill guest info,
+   * stop before CVV" task. Override when you need vendor-specific steps.
+   */
+  task?: string;
 }
 
 // ─── Discriminated union for params ──────────────────────────────────────────

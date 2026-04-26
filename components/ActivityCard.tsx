@@ -117,12 +117,30 @@ export default function ActivityCard({ card, index, hideBookingActions, onJobCre
         "Stop before entering CVV or clicking the final payment confirmation button.",
       ].join(" ");
 
+      // event_date defaults to the override (date picker) when the activity
+      // itself didn't ship a datetime — Stagehand needs *some* date so the
+      // event-page selector can disambiguate multiple performances.
+      const eventDateLocal =
+        activity.datetime_local ??
+        (overrideDate ? `${overrideDate}T00:00:00` : "");
+
       const step = {
         type: "activity",
         emoji: EVENT_EMOJI[activity.event_type] ?? EVENT_EMOJI.other,
         label: `${activity.title} (${providerLabel})`,
         apiEndpoint: "/api/booking-autopilot/universal",
         body: {
+          // Standardized activity fields — match create-trip + rooms-execute
+          // body shape so cend-adapter can convert all three uniformly into
+          // ActivityBookingParams when USE_CORE_EXECUTOR_FOR_CEND is on.
+          activity_name: activity.title,
+          activity_id: activity.id,
+          venue_name: activity.venue_name,
+          city: activity.venue_city,
+          event_date: eventDateLocal,
+          num_tickets: 1,
+          provider: source.provider,
+          // Stagehand entry fields (and lib/core ActivityBookingParams)
           startUrl: source.booking_link,
           task,
           fallbackUrl: source.booking_link,

@@ -89,20 +89,22 @@ function flightStep(overrides: Partial<Record<string, unknown>> = {}): BookingJo
 }
 
 describe("CORE_SUPPORTED_SCENARIOS", () => {
-  it("matches the scenarios lib/core/execution can run today (excludes activity)", () => {
-    expect([...CORE_SUPPORTED_SCENARIOS]).toEqual(["restaurant", "hotel", "flight"]);
+  it("matches the four scenarios lib/core/execution can run today", () => {
+    expect([...CORE_SUPPORTED_SCENARIOS]).toEqual([
+      "restaurant",
+      "hotel",
+      "flight",
+      "activity",
+    ]);
   });
 });
 
 describe("isCoreSupported", () => {
-  it("returns true for restaurant / hotel / flight", () => {
+  it("returns true for restaurant / hotel / flight / activity", () => {
     expect(isCoreSupported("restaurant")).toBe(true);
     expect(isCoreSupported("hotel")).toBe(true);
     expect(isCoreSupported("flight")).toBe(true);
-  });
-
-  it("returns false for activity (lib/core throws — Week 6 backlog)", () => {
-    expect(isCoreSupported("activity")).toBe(false);
+    expect(isCoreSupported("activity")).toBe(true);
   });
 
   it("returns false for the legacy 'universal' step type", () => {
@@ -228,15 +230,67 @@ describe("markStepForCore — flight", () => {
   });
 });
 
-describe("markStepForCore — guards", () => {
-  it("throws when called on activity (caller must isCoreSupported-gate first)", () => {
-    const activityStep = {
-      ...restaurantStep(),
-      type: "activity" as const,
+describe("markStepForCore — activity", () => {
+  function activityStep(overrides: Partial<Record<string, unknown>> = {}): BookingJobStep {
+    return {
+      type: "activity",
+      emoji: "🎟️",
+      label: "Hamilton",
+      apiEndpoint: "/api/booking-autopilot/universal",
+      body: {
+        activity_name: "Hamilton",
+        activity_id: "hmlt-2026-05-01",
+        venue_name: "Richard Rodgers Theatre",
+        city: "New York",
+        event_date: "2026-05-01T19:00:00",
+        num_tickets: 2,
+        provider: "seatgeek",
+        startUrl: "https://seatgeek.com/hamilton-tickets/2026-05-01",
+        task: "Buy 2 tickets for Hamilton on 2026-05-01. Stop before CVV.",
+        profileId: 42,
+        profile: SAMPLE_PROFILE,
+        ...overrides,
+      },
+      fallbackUrl: "https://seatgeek.com/hamilton-tickets/2026-05-01",
+      status: "pending",
     };
-    expect(() => markStepForCore(activityStep)).toThrow(/not supported by lib\/core/);
+  }
+
+  it("converts startUrl → booking_link and copies task + standardized fields", () => {
+    const marked = markStepForCore(activityStep());
+    const body = marked.body as Record<string, unknown>;
+    expect(body.scenario).toBe("activity");
+    expect(body.__source).toBe("lib/core/execution");
+    expect(body.params).toEqual({
+      event_name: "Hamilton",
+      city: "New York",
+      event_date: "2026-05-01T19:00:00",
+      num_tickets: 2,
+      booking_link: "https://seatgeek.com/hamilton-tickets/2026-05-01",
+      task: "Buy 2 tickets for Hamilton on 2026-05-01. Stop before CVV.",
+    });
   });
 
+  it("omits `task` from params when caller did not provide one (executor builds default)", () => {
+    const marked = markStepForCore(activityStep({ task: undefined }));
+    const params = (marked.body as Record<string, unknown>).params as Record<string, unknown>;
+    expect("task" in params).toBe(false);
+  });
+
+  it("throws when startUrl (booking_link) is missing — lib/core has no SeatGeek search yet", () => {
+    expect(() => markStepForCore(activityStep({ startUrl: "" }))).toThrow(
+      /missing required string field "startUrl"/,
+    );
+  });
+
+  it("throws on missing num_tickets (string instead of number)", () => {
+    expect(() => markStepForCore(activityStep({ num_tickets: "two" }))).toThrow(
+      /missing required number field "num_tickets"/,
+    );
+  });
+});
+
+describe("markStepForCore — guards", () => {
   it("does not stamp `profile` key when inline profile is absent (avoids spread of undefined)", () => {
     const marked = markStepForCore(restaurantStep({ profile: undefined }));
     const body = marked.body as Record<string, unknown>;
@@ -251,21 +305,27 @@ describe("markStepForCore — guards", () => {
 });
 
 describe("trip-level per-step gating (array.map pattern from create-trip route)", () => {
-  it("marks restaurant + hotel + flight, leaves activity untouched", () => {
-    const activityStep: BookingJobStep = {
-      type: "activity",
-      emoji: "🎟️",
-      label: "Hamilton",
-      apiEndpoint: "/api/booking-autopilot/universal",
-      body: { startUrl: "https://seatgeek.com/x", task: "buy tickets" },
-      fallbackUrl: "https://seatgeek.com/x",
-      status: "pending",
-    };
+  it("marks all four scenarios in a mixed trip", () => {
     const trip: BookingJobStep[] = [
       hotelStep(),
       flightStep(),
       restaurantStep(),
-      activityStep,
+      {
+        type: "activity",
+        emoji: "🎟️",
+        label: "Hamilton",
+        apiEndpoint: "/api/booking-autopilot/universal",
+        body: {
+          activity_name: "Hamilton",
+          city: "New York",
+          event_date: "2026-05-01T19:00:00",
+          num_tickets: 2,
+          startUrl: "https://seatgeek.com/x",
+          task: "buy tickets",
+        },
+        fallbackUrl: "https://seatgeek.com/x",
+        status: "pending",
+      },
     ];
 
     const marked = trip.map((s) => (isCoreSupported(s.type) ? markStepForCore(s) : s));
@@ -275,9 +335,25 @@ describe("trip-level per-step gating (array.map pattern from create-trip route)"
       "lib/core/execution",
       "lib/core/execution",
       "lib/core/execution",
-      undefined, // activity untouched
+      "lib/core/execution",
     ]);
-    // Activity step body should be byte-for-byte the original — no scenario/params injection.
-    expect(marked[3].body).toEqual(activityStep.body);
+    const scenarios = marked.map((s) => (s.body as Record<string, unknown>).scenario);
+    expect(scenarios).toEqual(["hotel", "flight", "restaurant", "activity"]);
+  });
+
+  it("leaves an unknown step type untouched (no scenario/params injection)", () => {
+    const unknownStep: BookingJobStep = {
+      type: "universal" as BookingJobStep["type"],
+      emoji: "?",
+      label: "legacy",
+      apiEndpoint: "/api/booking-autopilot/universal",
+      body: { startUrl: "https://example.com", task: "do something" },
+      fallbackUrl: "",
+      status: "pending",
+    };
+    const trip: BookingJobStep[] = [restaurantStep(), unknownStep];
+    const marked = trip.map((s) => (isCoreSupported(s.type) ? markStepForCore(s) : s));
+    expect((marked[0].body as Record<string, unknown>).__source).toBe("lib/core/execution");
+    expect(marked[1].body).toEqual(unknownStep.body);
   });
 });
