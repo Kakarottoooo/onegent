@@ -551,8 +551,6 @@ across instances. 不引入 Redis / SQS / Inngest 任何额外依赖.
 - Vercel /api/cron/retry-jobs + lib/booking-autopilot/ + start route 老
   in-process 段 30 天后清理
 - worker healthcheck endpoint (Railway 已直接监控进程, 优先级低)
-- Decision Room v0.5 (Date Night / Weekend Trip 流程) — Lane C 真正的
-  C 端 moat
 
 【阻塞点】
 - Browserbase Pro $99/mo 升级时机 — 需要真有付费用户或者 hotel/flight
