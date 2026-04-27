@@ -5,9 +5,12 @@
 
 ## Prerequisites
 
-- [Claude Desktop](https://claude.ai/download) 0.7.0 or newer (MCP support required)
-- Node.js 18+ on your machine (`npx` is used to run the server)
-- An Onegent API key — request one at `beta@onegent.one` until the self-serve `/developers` page launches
+- An Onegent account — [sign up](https://onegent.one) (free).
+- **For Claude Desktop (sections 1–5 below):**
+  - [Claude Desktop](https://claude.ai/download) 0.7.0 or newer.
+  - Node.js 18+ on your machine (`npx` runs the server).
+  - An API key generated at [/developers/keys](https://onegent.one/developers/keys).
+- **For Claude.ai web (section 6 below):** no API key, no Node.js. The connector handles auth via OAuth 2.0 — you just sign in during setup.
 
 ## 1. Install
 
@@ -84,7 +87,7 @@ This is non-negotiable — it's the safety invariant that lets us give an LLM bo
 Claude didn't load the server. Fully quit + relaunch Claude Desktop. Check the log file.
 
 **"401 invalid_api_key"**
-Your key format is right but it doesn't match an active key. Regenerate via `beta@onegent.one` for now; self-serve key rotation at `/developers` ships in v0.2.36+.
+Your key format is right but it doesn't match an active key. Revoke + regenerate at [/developers/keys](https://onegent.one/developers/keys), then update the `ONEGENT_API_KEY` value in `claude_desktop_config.json` and relaunch Claude Desktop.
 
 **"Network error / timeout"**
 Can you hit `https://onegent.one/api/v1/metrics/providers/opentable` from your terminal with a valid key? If not, the Onegent API is unreachable — check https://onegent.one/status.
@@ -95,11 +98,83 @@ Onegent's executor queue is either overloaded or your request hit a provider we 
 **Claude keeps re-polling the same job forever**
 Claude Desktop has a per-conversation tool call budget. If the job is still running when the budget runs out, save the jobId and paste it into a new chat — `get_job_status` with that jobId continues to work.
 
-## 6. Claude.ai (remote MCP) — roadmap
+## 6. Claude.ai web (remote MCP)
 
-Claude Desktop uses stdio transport, which needs a local Node.js runtime. For Claude.ai web users, MCP servers must be hosted remotely and authenticate via OAuth 2.0. Onegent's hosted remote MCP connector is on the roadmap for v0.2.37+.
+Claude.ai web supports remote MCP servers over Streamable HTTP — no local install, no Node.js, no API-key copy-paste. Onegent's hosted endpoint at `https://onegent.one/api/mcp` accepts OAuth 2.0 Bearer tokens; sign in once and the Travel Booking Agent shows up in every chat.
 
-Until then: Claude Desktop on Mac/Windows is the supported path.
+### Add Onegent in Claude.ai
+
+1. Open https://claude.ai → **Settings** → **Connectors** (the wording may be **Custom integrations** or **Integrations** depending on your account's rollout).
+2. Add a new custom connector with the URL:
+   ```
+   https://onegent.one/api/mcp
+   ```
+3. Claude.ai discovers Onegent's OAuth endpoints from [`/.well-known/oauth-authorization-server`](https://onegent.one/.well-known/oauth-authorization-server) and redirects you to Onegent's consent page.
+4. Sign in to Onegent (the same account you use at https://onegent.one). Review the requested scopes — `book` (the four `book_*` tools) and `read` (`get_job_status`, `get_job_audit`) — then click **Approve**.
+5. Open any new Claude chat. The hammer icon should list **Travel Booking Agent** with the same 6 tools as Claude Desktop in section 2.
+
+### Behind the scenes
+
+```
+                claude.ai web                            Onegent
+                ─────────────                            ───────
+discovery   →   GET /.well-known/oauth-authorization-server
+                    issuer + endpoints + supported scopes/methods
+
+authorize   →   redirect to /oauth/authorize?response_type=code
+                    &client_id=…&redirect_uri=…&scope=book+read
+                    &code_challenge=<S256>&state=…
+                                                          ↓
+                                                   Clerk-gated consent page
+                                                          ↓
+                                                  user clicks Approve
+                                                          ↓
+                redirect back to claude.ai with ?code=…&state=…
+
+token       →   POST /oauth/token (Basic client_secret + PKCE verifier)
+                    ← access_token (1h) + refresh_token (30d) + scope
+
+each call   →   POST /api/mcp with Authorization: Bearer <access_token>
+                    Onegent validates the token, scope-checks the tool,
+                    bridges the OAuth user to the underlying execution
+                    engine, and returns the same JSON-RPC shape as the
+                    stdio path.
+```
+
+PKCE is mandatory (S256 only). Refresh tokens rotate on every use. The full machine-readable metadata lives at the `.well-known` URL above.
+
+### Scopes
+
+| Scope | Tools allowed |
+|---|---|
+| `book` | `book_restaurant`, `book_hotel`, `book_flight`, `book_activity` |
+| `read` | `get_job_status`, `get_job_audit` |
+
+Claude.ai requests both at consent so the agent can book *and* poll status. Granting only one scope still works for the matching tool subset, but the booking → status loop won't be useful with `book` alone.
+
+### Revoking access
+
+- **From Claude.ai**: Settings → Connectors → Onegent → **Remove**. Claude.ai discards its stored tokens.
+- **From the protocol level**: Onegent's `/oauth/revoke` (RFC 7009) accepts the access_token directly. Useful if you need to invalidate a specific grant without re-running the connector flow.
+
+Access tokens expire after 1 hour and refresh tokens after 30 days, so an abandoned connector becomes inert quickly even without explicit revoke.
+
+### Troubleshooting
+
+**"This integration could not be added" / "Discovery failed"**
+The `.well-known` metadata must be reachable. Confirm:
+
+```bash
+curl https://onegent.one/.well-known/oauth-authorization-server
+```
+
+returns JSON with `authorization_endpoint` and `token_endpoint`. If you're behind a corporate proxy that strips `.well-known` paths, ask your network team to allowlist it.
+
+**"insufficient_scope" when invoking a `book_*` tool**
+The grant only covered `read`. Disconnect Onegent in claude.ai, reconnect, and Approve both scopes.
+
+**`invalid_token` (401) on every call**
+The access token expired. Claude.ai should silently refresh; if it doesn't, remove + re-add the connector to force a fresh OAuth dance.
 
 ## Reference
 

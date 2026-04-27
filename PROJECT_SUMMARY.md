@@ -1,5 +1,5 @@
 ================================================================
-Onegent · Travel Execution Layer for AI Agents · v0.2.54.0
+Onegent · Travel Execution Layer for AI Agents · v0.2.55.0
 ================================================================
 
 【一句话定位（2026-04-26 锁定）】
@@ -31,6 +31,113 @@ ChatGPT Apps + 第三方 agent builder via /api/v1）
 活动 / 多人 trip），非旅行品类（笔记本 / 手机 / 耳机 / 信用卡 /
 礼物 / 健身）已归档。详见本文档头部 "Recent Updates - 2026-04-24
 (cont. 2) · Positioning Shift"。
+
+================================================================
+Recent Updates - 2026-04-27 · Sprint 2 #1 · Onegent as OAuth 2.0 Identity Provider (D1-D5 shipped)
+================================================================
+
+Onegent 现在是一个 OAuth 2.0 Identity Provider。第三方 MCP 客户端
+（claude.ai web、ChatGPT Apps、第三方 agent builder）可以走标准的
+auth-code-with-PKCE 流程让最终用户登录 Onegent，不再要求每个用户手
+动复制 `ogk_live_*` API key 进 AI 客户端配置。这是 Sprint 2 #1 的全
+部目标 —— 把 Sprint 1 #2 上线的 hosted /api/mcp 从"开发者级 API key
+手动配置"升级到"消费级一键 Connect"。
+
+【为什么这件事是 distribution 解锁】
+- Sprint 1 #2 上线了 `https://onegent.one/api/mcp` MCP endpoint，但
+  当时只接 `Authorization: Bearer ogk_live_...`。要求每个用户先去
+  /developers/keys 生成 key、复制、粘贴进 claude.ai 配置 — 三步操作，
+  消费级 SaaS 体验不及格。
+- claude.ai web 和 ChatGPT Apps marketplace 的 MCP connector 一键添加
+  入口要求 OAuth；没 OAuth = 进不了 marketplace 的 "Connect" 按钮。
+- OAuth 上线后，从"先去 Onegent 网站生成 key + 复制 + 粘贴"压成"在
+  claude.ai 点 Connect Onegent → 弹 consent → Approve"。
+
+【架构 — /api/mcp 双轨 auth】
+```
+Authorization: Bearer ogk_live_xxx     →  既有路径,直接走
+                                          require-api-key.ts → /api/v1/*
+Authorization: Bearer <opaque>         →  validateAccessToken()
+                                          → checkScopeForRpc(book/read)
+                                          → findOrCreateOAuthBridgeApiKey()
+                                            (HMAC-SHA256-derived 合成
+                                             ogk_live_* key)
+                                          → 复用既有 require-api-key 路径
+```
+HMAC 派生的 bridge key 让 OAuth 用户串入既有 /api/v1/* API key 链路 —
+旧 lipa 集成零改动，require-api-key.ts 一行没动。bridge key 写 api_keys
+表标 `source='oauth-bridge'`，findApiKeysByUserId 过滤掉，不在用户
+dashboard "My Keys" 显示。HMAC 派生意味着不需要 plaintext 缓存表 —
+每次请求按 user_id 重新派生同一个 plaintext。
+
+【D1-D5 拆解】
+- D1 (commit 6ac2509) — schema + .well-known discovery + oslo
+  · 4 张表 ensureOAuthTables() 自动迁移：oauth_clients /
+    oauth_authorization_codes / oauth_access_tokens / oauth_refresh_tokens
+  · app/.well-known/oauth-authorization-server/route.ts (RFC 8414)：
+    issuer + 3 个 endpoint + scopes [book, read] + S256-only PKCE +
+    client_secret_basic / client_secret_post 双客户端认证
+  · 装 oslo（TypeScript-first crypto helpers，base64url 编解码）
+  · scripts/admin/register-oauth-client.mjs CLI 注册新 client，plaintext
+    secret 一次性返回（DB 只存 sha256）
+
+- D2 (commit 0dde391) — /oauth/authorize consent page (Clerk-gated, branded)
+  · GET /oauth/authorize 校验 client_id + redirect_uri + response_type +
+    code_challenge；未登录 Clerk 跳 sign-in；登录后 SSR 渲染 Onegent
+    风格 consent 卡（client app 名 + 用户邮箱 + 请求 scopes 解释）
+  · POST /oauth/authorize/decide：Approve → mint auth code（10 分钟
+    过期，one-time，绑 PKCE challenge + redirect_uri + user_id + scopes）
+    → 302 redirect_uri?code=...&state=...；Deny → redirect 带
+    error=access_denied
+
+- D3 (commit 7b3960f) — /oauth/token + /oauth/revoke + PKCE
+  · POST /oauth/token：client_secret_basic / _post 双客户端认证
+  · grant_type=authorization_code：consume code → verify PKCE (sha256 +
+    base64url 比 challenge) → 校验 code/client/redirect_uri 绑定 → issue
+    access_token (1h) + refresh_token (30d)
+  · grant_type=refresh_token：原子 UPDATE rotation 防 race，关联
+    access_token 同步 revoke，issue 新 pair
+  · POST /oauth/revoke (RFC 7009)：永远 200 防 token enumeration
+  · 端到端验收 5/5：auth code 兑换 → 200，re-use code → 400 invalid_grant，
+    refresh → 200 + 轮换，revoke → 200，PKCE 短 verifier → 400
+
+- D4 (commits b93452b + 9312374 + b818149) — /api/mcp 双轨 auth + scope check
+  · app/api/mcp/route.ts：token 前缀分流；OAuth 路径走 validateAccessToken
+    → checkScopeForRpc → findOrCreateOAuthBridgeApiKey → 复用 ogk_ 路径
+  · lib/oauth/scope-check.ts：6 工具 → book/read 映射；只 gate
+    tools/call，tools/list/initialize/ping passthrough
+  · lib/db.ts::findOrCreateOAuthBridgeApiKey：HMAC-SHA256 派生 plaintext，
+    INSERT ... ON CONFLICT DO NOTHING by sha256(plaintext)；api_keys 加
+    source 列，findApiKeysByUserId 过滤 oauth-bridge
+  · 6 vitest cases 覆盖 scope check 全分支
+  · 端到端 prod 验收 5/5：OAuth tools/list → 200 + 6 工具，OAuth
+    tools/call get_job_status → 200 跑通完整链路（OAuth → bridge key →
+    prod /api/v1/* require-api-key → 404 job 不存在），无 auth / bogus
+    token → 401，老 ogk_live_* 路径零回归
+  · **新 prod env var：`OAUTH_BRIDGE_HMAC_SECRET`** (32+ chars base64url，
+    Vercel Settings → Environment Variables 须设；缺则 OAuth 路径 500
+    bridge_key_failed)
+
+- D5 (本条 release notes) — claude-mcp.md docs + PROJECT_SUMMARY
+  · docs/integrations/claude-mcp.md 第 6 节从 "Claude.ai (remote MCP) —
+    roadmap" 改成完整 claude.ai web OAuth 操作指南（Add connector +
+    consent flow ASCII 图 + scopes 表 + 撤销 + troubleshoot）
+  · prerequisites 修：beta@onegent.one 邮件申请改成 /developers/keys
+    自助页指引；troubleshooting 里 "Regenerate via beta@onegent.one"
+    改 self-serve revoke + regenerate 流程
+
+【未完成 — Sprint 2 #1 长尾】
+- claude.ai web 浏览器真实操作验证（D5-C/E pending）：Connectors UI 输
+  入 https://onegent.one/api/mcp，看走 RFC 7591 DCR 自动注册还是要手动
+  填 client credentials；走通后真调一次工具
+- RFC 7591 `/oauth/register` Dynamic Client Registration（D5-D，
+  conditional on D5-C 结果）
+- ChatGPT Apps 表单重测（D4-D）：OpenAI 开发者后台用 OAuth 重新提交
+  manifest，要 ChatGPT 真实 redirect_uri 才能注册 chatgpt-apps client
+- /developers/connected-apps 用户 dashboard：用户看自己授权过哪些
+  OAuth client + 一键 revoke（目前要后台 SQL 或直接调 /oauth/revoke）
+- /developers/docs/oauth.md：面向第三方 agent builder 的端到端 OAuth
+  integration 指南（如何把 Onegent 接进你自己的 agent）
 
 ================================================================
 Recent Updates - 2026-04-26 (cont. 5) · Hosted /api/mcp endpoint live (Sprint 1 #2 — code done)
