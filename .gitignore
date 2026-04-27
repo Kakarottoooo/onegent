@@ -48,6 +48,8 @@ next-env.d.ts
 .booking-cookies/
 .booking-cookies.json
 .ticketmaster-cookies.json
+# Local-only notes / secrets ledger (OAuth client_secrets, etc.)
+*.local.md
 .seatgeek-cookies.json
 
 # Real Chrome persistent profile (opt-in via USE_REAL_CHROME_FOR)
