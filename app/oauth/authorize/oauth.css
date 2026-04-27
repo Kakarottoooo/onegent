@@ -1,0 +1,306 @@
+/*
+ * OAuth consent page — branded but restrained.
+ *
+ * Visual logic: deep ink-navy backdrop matches the brand mark; the consent
+ * card itself is cream-on-navy so users immediately see "this is the same
+ * brand, but I'm in a trust moment." Body copy stays high-contrast and
+ * the primary CTA is the only saturated element — every other surface is
+ * monochrome ink so attention lands on Approve.
+ */
+
+.oauth-page {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 48px 24px;
+  background:
+    radial-gradient(120% 80% at 50% -10%, rgba(245, 230, 200, 0.08) 0%, transparent 60%),
+    linear-gradient(135deg, #0a0e1a 0%, #1a2238 100%);
+  font-family: var(--font-dm-sans), system-ui, -apple-system, sans-serif;
+  color: #f5e6c8;
+}
+
+.oauth-card {
+  width: 100%;
+  max-width: 480px;
+  background: #faf6ec;
+  color: #1a1a1a;
+  border-radius: 16px;
+  padding: 40px 36px 32px;
+  box-shadow:
+    0 1px 0 rgba(255, 255, 255, 0.4) inset,
+    0 24px 60px rgba(0, 0, 0, 0.45),
+    0 6px 16px rgba(0, 0, 0, 0.25);
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+}
+
+/* ── Brand row ──────────────────────────────────────────────────────── */
+.oauth-brand {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.oauth-brand__mark {
+  width: 36px;
+  height: 36px;
+  display: block;
+  border-radius: 8px;
+}
+
+.oauth-brand__wordmark {
+  font-family: var(--font-playfair), Georgia, serif;
+  font-size: 20px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  color: #1a1a1a;
+}
+
+/* ── Header ─────────────────────────────────────────────────────────── */
+.oauth-header {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.oauth-eyebrow {
+  display: inline-block;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.18em;
+  color: #8a7a4e;
+}
+
+.oauth-eyebrow--danger {
+  color: #b91c1c;
+}
+
+.oauth-title {
+  font-family: var(--font-playfair), Georgia, serif;
+  font-size: 28px;
+  font-weight: 600;
+  line-height: 1.2;
+  letter-spacing: -0.02em;
+  color: #0a0e1a;
+  margin: 0;
+}
+
+.oauth-title__client {
+  color: #1a2238;
+  font-style: italic;
+}
+
+/* ── Body copy ──────────────────────────────────────────────────────── */
+.oauth-prose {
+  font-size: 15px;
+  line-height: 1.55;
+  color: #3a3530;
+  margin: 0;
+}
+
+.oauth-prose strong {
+  color: #1a1a1a;
+  font-weight: 600;
+}
+
+/* ── Account chip (signed-in state) ─────────────────────────────────── */
+.oauth-account {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 14px;
+  background: rgba(26, 34, 56, 0.04);
+  border: 1px solid rgba(26, 34, 56, 0.08);
+  border-radius: 10px;
+}
+
+.oauth-account__avatar {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, #1a2238, #2a3458);
+  color: #f5e6c8;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 600;
+  font-size: 15px;
+  flex-shrink: 0;
+}
+
+.oauth-account__meta {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.oauth-account__label {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  color: #8a7a4e;
+}
+
+.oauth-account__email {
+  font-size: 14px;
+  color: #1a1a1a;
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ── Scope list ─────────────────────────────────────────────────────── */
+.oauth-scopes {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.oauth-scope {
+  display: flex;
+  gap: 12px;
+  padding: 14px 16px;
+  background: #fff;
+  border: 1px solid rgba(26, 34, 56, 0.08);
+  border-radius: 10px;
+}
+
+.oauth-scope__check {
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: #1a2238;
+  color: #f5e6c8;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 13px;
+  font-weight: 600;
+  flex-shrink: 0;
+  margin-top: 1px;
+}
+
+.oauth-scope__body {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.oauth-scope__title {
+  font-size: 14px;
+  font-weight: 600;
+  color: #0a0e1a;
+  line-height: 1.4;
+}
+
+.oauth-scope__desc {
+  font-size: 13px;
+  color: #4a4540;
+  line-height: 1.5;
+}
+
+.oauth-scope__code {
+  display: inline-block;
+  align-self: flex-start;
+  margin-top: 4px;
+  font-family: ui-monospace, "SF Mono", Menlo, monospace;
+  font-size: 11px;
+  color: #8a7a4e;
+  background: rgba(26, 34, 56, 0.05);
+  padding: 2px 6px;
+  border-radius: 4px;
+}
+
+/* ── Actions ────────────────────────────────────────────────────────── */
+.oauth-actions {
+  display: flex;
+  gap: 12px;
+  justify-content: flex-end;
+  align-items: center;
+  margin-top: 4px;
+}
+
+.oauth-cta {
+  font-family: inherit;
+  font-size: 14px;
+  font-weight: 600;
+  padding: 11px 20px;
+  border-radius: 8px;
+  cursor: pointer;
+  border: 1px solid transparent;
+  transition: background 160ms ease, color 160ms ease, transform 120ms ease;
+}
+
+.oauth-cta:active {
+  transform: translateY(1px);
+}
+
+.oauth-cta--primary {
+  background: #1a2238;
+  color: #f5e6c8;
+}
+
+.oauth-cta--primary:hover {
+  background: #0a0e1a;
+}
+
+.oauth-cta--ghost {
+  background: transparent;
+  color: #4a4540;
+  border-color: rgba(26, 34, 56, 0.12);
+}
+
+.oauth-cta--ghost:hover {
+  background: rgba(26, 34, 56, 0.04);
+  color: #1a1a1a;
+}
+
+/* ── Footer ─────────────────────────────────────────────────────────── */
+.oauth-fineprint {
+  font-size: 12px;
+  line-height: 1.6;
+  color: #6b6560;
+  margin: 0;
+  padding-top: 16px;
+  border-top: 1px solid rgba(26, 34, 56, 0.08);
+}
+
+.oauth-fineprint a {
+  color: #1a2238;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.oauth-fineprint a:hover {
+  color: #0a0e1a;
+}
+
+/* ── Responsive ─────────────────────────────────────────────────────── */
+@media (max-width: 520px) {
+  .oauth-card {
+    padding: 32px 24px 24px;
+    border-radius: 12px;
+  }
+
+  .oauth-title {
+    font-size: 24px;
+  }
+
+  .oauth-actions {
+    flex-direction: column-reverse;
+    align-items: stretch;
+  }
+
+  .oauth-cta {
+    width: 100%;
+  }
+}
