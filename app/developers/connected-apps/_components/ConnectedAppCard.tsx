@@ -71,7 +71,7 @@ export function ConnectedAppCard({
           ))}
         </div>
         <div className="dev-key-info-row">
-          {row.clientUri ? (
+          {row.clientUri && (
             <a
               href={row.clientUri}
               className="dev-key-prefix"
@@ -81,15 +81,15 @@ export function ConnectedAppCard({
             >
               {hostname(row.clientUri)} ↗
             </a>
-          ) : (
-            <span className="dev-key-prefix" style={{ opacity: 0.5 }}>
-              no client_uri
-            </span>
           )}
           <span className="dev-key-meta">
             <span>Connected {relativeTime(row.firstAuthorizedAt)}</span>
-            <span>·</span>
-            <span>Last token {relativeTime(row.lastTokenAt)}</span>
+            {row.lastTokenAt !== row.firstAuthorizedAt && (
+              <>
+                <span>·</span>
+                <span>Last token {relativeTime(row.lastTokenAt)}</span>
+              </>
+            )}
           </span>
         </div>
       </div>
