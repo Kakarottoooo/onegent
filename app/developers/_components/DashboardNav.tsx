@@ -1,15 +1,28 @@
 "use client";
 
 import Link from "next/link";
+import { usePathname } from "next/navigation";
 import { UserButton } from "@clerk/nextjs";
 
 /**
- * Dark-themed nav for /developers/keys. Mirrors DevNav structure but
- * uses dashboard tokens (which flip via data-theme="dashboard" on the
- * wrapper). UserButton stays — it's the only Clerk component the
- * dashboard needs.
+ * Dark-themed nav shared by every /developers/* dashboard sub-page.
+ * Active route is highlighted via usePathname() match against each link's
+ * href — so a new sub-page only needs to be added to NAV_ITEMS, no manual
+ * per-page styling.
+ *
+ * UserButton stays — it's the only Clerk component the dashboard needs.
  */
+
+const NAV_ITEMS: Array<{ href: string; label: string }> = [
+  { href: "/developers", label: "Overview" },
+  { href: "/developers/docs", label: "Docs" },
+  { href: "/developers/keys", label: "API keys" },
+  { href: "/developers/connected-apps", label: "Connected apps" },
+];
+
 export function DashboardNav() {
+  const pathname = usePathname();
+
   return (
     <header
       style={{
@@ -75,23 +88,27 @@ export function DashboardNav() {
             gap: "var(--space-8)",
           }}
         >
-          <Link href="/developers" style={{ color: "var(--ink-500)", textDecoration: "none", fontSize: "14px" }}>
-            Overview
-          </Link>
-          <Link href="/developers/docs" style={{ color: "var(--ink-500)", textDecoration: "none", fontSize: "14px" }}>
-            Docs
-          </Link>
-          <Link
-            href="/developers/keys"
-            style={{
-              color: "var(--accent)",
-              textDecoration: "none",
-              fontSize: "14px",
-              fontWeight: 500,
-            }}
-          >
-            API keys
-          </Link>
+          {NAV_ITEMS.map((item) => {
+            // Exact match for /developers (root), prefix match for sub-pages.
+            const isActive =
+              item.href === "/developers"
+                ? pathname === item.href
+                : pathname?.startsWith(item.href) ?? false;
+            return (
+              <Link
+                key={item.href}
+                href={item.href}
+                style={{
+                  color: isActive ? "var(--accent)" : "var(--ink-500)",
+                  textDecoration: "none",
+                  fontSize: "14px",
+                  fontWeight: isActive ? 500 : 400,
+                }}
+              >
+                {item.label}
+              </Link>
+            );
+          })}
         </nav>
 
         <UserButton

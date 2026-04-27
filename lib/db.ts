@@ -1419,6 +1419,90 @@ export async function revokeAccessToken(plaintextToken: string): Promise<void> {
   await sql`UPDATE oauth_access_tokens SET revoked = TRUE WHERE token_hash = ${tokenHash}`;
 }
 
+export interface ConnectedAppRow {
+  client_id: string;
+  name: string;
+  client_uri: string | null;
+  dynamically_registered: boolean;
+  scopes: string[];
+  first_authorized_at: string;
+  last_token_at: string;
+}
+
+/**
+ * List all OAuth clients the user has at least one live grant for. A "grant"
+ * is any active (non-revoked, non-expired) access_token OR refresh_token —
+ * because once the access token expires (1h) the connection is still live as
+ * long as the refresh token is valid (30d).
+ *
+ * One row per (client). Scopes are pulled from the most recent token issued
+ * for the pair. Used by /developers/connected-apps to render the user-facing
+ * "Apps you've granted access" list.
+ */
+export async function findConnectedAppsByUserId(
+  userId: string,
+): Promise<ConnectedAppRow[]> {
+  await ensureOAuthTables();
+  const result = await sql<ConnectedAppRow>`
+    WITH user_grants AS (
+      SELECT client_id, scopes, created_at
+      FROM oauth_access_tokens
+      WHERE user_id = ${userId} AND revoked = FALSE AND expires_at > NOW()
+      UNION ALL
+      SELECT client_id, scopes, created_at
+      FROM oauth_refresh_tokens
+      WHERE user_id = ${userId} AND revoked = FALSE AND expires_at > NOW()
+    )
+    SELECT
+      c.id AS client_id,
+      c.name,
+      c.client_uri,
+      c.dynamically_registered,
+      (
+        SELECT g2.scopes FROM user_grants g2
+        WHERE g2.client_id = c.id
+        ORDER BY g2.created_at DESC LIMIT 1
+      ) AS scopes,
+      MIN(g.created_at) AS first_authorized_at,
+      MAX(g.created_at) AS last_token_at
+    FROM oauth_clients c
+    JOIN user_grants g ON g.client_id = c.id
+    GROUP BY c.id, c.name, c.client_uri, c.dynamically_registered
+    ORDER BY MAX(g.created_at) DESC
+  `;
+  return result.rows;
+}
+
+/**
+ * Revoke ALL active access + refresh tokens for the given (user, client) pair.
+ * Used by the user-facing "Disconnect" button on /developers/connected-apps.
+ *
+ * Does NOT delete the oauth_clients row — the client may have other users'
+ * grants, and even for solo clients the row stays so re-authorization can
+ * detect the same client_id (rather than creating a duplicate). If the user
+ * re-authorizes via the same client they'll get a fresh pair of tokens.
+ */
+export async function revokeUserAppGrants(
+  userId: string,
+  clientId: string,
+): Promise<{ accessRevoked: number; refreshRevoked: number }> {
+  await ensureOAuthTables();
+  const accessRes = await sql`
+    UPDATE oauth_access_tokens
+    SET revoked = TRUE
+    WHERE user_id = ${userId} AND client_id = ${clientId} AND revoked = FALSE
+  `;
+  const refreshRes = await sql`
+    UPDATE oauth_refresh_tokens
+    SET revoked = TRUE
+    WHERE user_id = ${userId} AND client_id = ${clientId} AND revoked = FALSE
+  `;
+  return {
+    accessRevoked: accessRes.rowCount ?? 0,
+    refreshRevoked: refreshRes.rowCount ?? 0,
+  };
+}
+
 // ─── Agent Logs ───────────────────────────────────────────────────────────────
 // Persistent log of agent actions, errors, and notable events.
 // Queryable via GET /api/agent-logs — can be read by Claude Code for debugging.
