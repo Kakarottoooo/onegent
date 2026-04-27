@@ -23,6 +23,7 @@ export function GET(): Response {
       authorization_endpoint: `${ISSUER}/oauth/authorize`,
       token_endpoint: `${ISSUER}/oauth/token`,
       revocation_endpoint: `${ISSUER}/oauth/revoke`,
+      registration_endpoint: `${ISSUER}/oauth/register`,
 
       // Scopes: coarse-grained per Sprint 2 #1 architecture decision
       scopes_supported: ["book", "read"],
@@ -46,7 +47,9 @@ export function GET(): Response {
       response_modes_supported: ["query"],
 
       // No userinfo endpoint — MCP clients call /api/mcp directly
-      // No registration endpoint — clients are pre-registered via dashboard
+      // Registration endpoint is RFC 7591 Dynamic Client Registration —
+      // MCP clients (claude.ai web, ChatGPT Apps) register themselves.
+      // For pre-registered enterprise clients use scripts/admin/register-oauth-client.mjs.
 
       service_documentation:
         "https://onegent.one/developers/docs/integrations/claude-mcp",

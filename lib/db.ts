@@ -1079,6 +1079,13 @@ export interface OAuthClientRow {
   redirect_uris: string[];
   allowed_scopes: string[];
   created_at: string;
+  // RFC 7591 dynamically registered clients (e.g. claude.ai web, ChatGPT Apps)
+  // are tagged true so admin queries can audit them. Pre-registered clients
+  // (via scripts/admin/register-oauth-client.mjs) keep this false.
+  dynamically_registered: boolean;
+  // Optional metadata from RFC 7591 client metadata; surfaced on the consent
+  // page so users see what they're authorizing.
+  client_uri: string | null;
 }
 
 export interface OAuthAuthorizationCodeRow {
@@ -1167,6 +1174,8 @@ async function ensureOAuthTables(): Promise<void> {
           created_at        TIMESTAMPTZ DEFAULT NOW()
         )
       `;
+      await sql`ALTER TABLE oauth_clients ADD COLUMN IF NOT EXISTS dynamically_registered BOOLEAN NOT NULL DEFAULT FALSE`;
+      await sql`ALTER TABLE oauth_clients ADD COLUMN IF NOT EXISTS client_uri TEXT`;
       await sql`CREATE INDEX IF NOT EXISTS oauth_codes_expires_idx ON oauth_authorization_codes (expires_at) WHERE used = FALSE`;
       await sql`CREATE INDEX IF NOT EXISTS oauth_access_user_idx ON oauth_access_tokens (user_id) WHERE revoked = FALSE`;
       await sql`CREATE INDEX IF NOT EXISTS oauth_access_expires_idx ON oauth_access_tokens (expires_at) WHERE revoked = FALSE`;
@@ -1189,18 +1198,24 @@ export async function createOAuthClient(params: {
   name: string;
   redirectUris: string[];
   allowedScopes: string[];
+  dynamicallyRegistered?: boolean;
+  clientUri?: string | null;
 }): Promise<{ clientSecret: string; row: OAuthClientRow }> {
   await ensureOAuthTables();
   const secret = randomBytes(32).toString("base64url"); // 43 chars
   const secretHash = createHash("sha256").update(secret).digest("hex");
+  const dynamicallyRegistered = params.dynamicallyRegistered ?? false;
+  const clientUri = params.clientUri ?? null;
   const result = await sql<OAuthClientRow>`
-    INSERT INTO oauth_clients (id, name, client_secret_hash, redirect_uris, allowed_scopes)
+    INSERT INTO oauth_clients (id, name, client_secret_hash, redirect_uris, allowed_scopes, dynamically_registered, client_uri)
     VALUES (
       ${params.id},
       ${params.name},
       ${secretHash},
       ${JSON.stringify(params.redirectUris)}::jsonb,
-      ${JSON.stringify(params.allowedScopes)}::jsonb
+      ${JSON.stringify(params.allowedScopes)}::jsonb,
+      ${dynamicallyRegistered},
+      ${clientUri}
     )
     RETURNING *
   `;

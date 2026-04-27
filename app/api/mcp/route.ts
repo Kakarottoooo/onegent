@@ -41,6 +41,13 @@ export const dynamic = "force-dynamic";
 
 const API_KEY_PREFIXES = ["ogk_live_", "ogk_test_"];
 
+// RFC 9728 §5.1 — every 401 from a protected resource MUST include the
+// resource_metadata parameter so clients can discover the authorization
+// server. Without this header claude.ai's MCP connector errors out with
+// "Couldn't reach the MCP server" because it has no way to find the OAuth
+// flow.
+const WWW_AUTHENTICATE_BASE = `Bearer realm="onegent-mcp", resource_metadata="https://onegent.one/.well-known/oauth-protected-resource"`;
+
 export async function POST(req: Request): Promise<Response> {
   // ── Auth — extract Bearer token ─────────────────────────────────────────
   const auth = req.headers.get("authorization");
@@ -49,13 +56,13 @@ export async function POST(req: Request): Promise<Response> {
       401,
       "missing_authorization",
       "Authorization: Bearer <token> header required. Get an API key at https://onegent.one/developers/keys, or run an OAuth flow per https://onegent.one/.well-known/oauth-authorization-server",
-      { "WWW-Authenticate": 'Bearer realm="onegent-mcp"' },
+      { "WWW-Authenticate": WWW_AUTHENTICATE_BASE },
     );
   }
   const bearerToken = auth.slice(7).trim();
   if (!bearerToken) {
     return jsonError(401, "empty_token", "Bearer token is empty.", {
-      "WWW-Authenticate": 'Bearer realm="onegent-mcp"',
+      "WWW-Authenticate": WWW_AUTHENTICATE_BASE,
     });
   }
 
@@ -90,7 +97,7 @@ export async function POST(req: Request): Promise<Response> {
         401,
         "invalid_token",
         "Bearer token is not a valid Onegent API key (ogk_live_/ogk_test_) or active OAuth access token.",
-        { "WWW-Authenticate": 'Bearer realm="onegent-mcp", error="invalid_token"' },
+        { "WWW-Authenticate": `${WWW_AUTHENTICATE_BASE}, error="invalid_token"` },
       );
     }
 
@@ -102,7 +109,7 @@ export async function POST(req: Request): Promise<Response> {
         "insufficient_scope",
         `Tool "${scopeResult.toolName}" requires "${scopeResult.required}" scope; this token has [${scopeResult.granted.join(", ") || "none"}].`,
         {
-          "WWW-Authenticate": `Bearer realm="onegent-mcp", error="insufficient_scope", scope="${scopeResult.required}"`,
+          "WWW-Authenticate": `${WWW_AUTHENTICATE_BASE}, error="insufficient_scope", scope="${scopeResult.required}"`,
         },
       );
     }
