@@ -33,6 +33,63 @@ ChatGPT Apps + 第三方 agent builder via /api/v1）
 (cont. 2) · Positioning Shift"。
 
 ================================================================
+Recent Updates - 2026-04-27 (cont. 1) · Sprint 2 #1 closed · DCR + claude.ai web verified
+================================================================
+
+D5 计划里 D5-D 是 conditional("如果 claude.ai 用 DCR 才做")。今天浏
+览器测了下，claude.ai 确实走 RFC 7591 Dynamic Client Registration —
+而且不只 DCR，还要 RFC 9728 Protected Resource Metadata 才能完成
+discovery。两个都补完后，claude.ai 真实链路一次跑通。
+
+【今天补的 4 个端点 / 改动 — commit dd9837c】
+- 新 GET /.well-known/oauth-protected-resource (RFC 9728):resource =
+  /api/mcp,authorization_servers = [issuer],scopes_supported,
+  bearer_methods_supported = [header]
+- 新 POST /oauth/register (RFC 7591 DCR):接客户端 metadata,验
+  redirect_uris(https/localhost),品牌仿冒 blocklist(Onegent /
+  Anthropic / OpenAI / Apple / Google / Microsoft 6 个 substring),
+  mint dcr_<random> client_id + 32B base64url client_secret,持久化
+  标 dynamically_registered=true
+- 改 /.well-known/oauth-authorization-server:advertise
+  registration_endpoint = /oauth/register
+- 改 /api/mcp 401 WWW-Authenticate:加 resource_metadata 参数指向
+  protected-resource metadata URL(RFC 9728 §5.1 要求,缺这个 claude.ai
+  就报 "Couldn't reach the MCP server")
+
+【真实 prod 验证 — gzw19914760905@outlook.com Max account】
+1. claude.ai Settings → Connectors → Add custom connector,URL =
+   https://onegent.one/api/mcp → 走完 DCR 自动注册 + OAuth dance +
+   Approve → 状态从 "Connect" 变 "Configure"
+2. Configure 页 → Tool permissions → 看到全部 6 工具(book_activity /
+   book_flight / book_hotel / book_restaurant / get_job_audit /
+   get_job_status),全部默认 "Needs approval"
+3. 新开 chat → "check the status of jobId test-d5-smoke" → Claude
+   触发 get_job_status → 链路全跑 → /api/v1/execution-jobs 返 404
+   → Claude 自然语言转述给用户("Onegent returned a 404 — no job
+   with the ID test-d5-smoke was found"),证明 OAuth Bearer →
+   bridge key → /api/v1/* require-api-key → 业务层错误传播链路
+   完整闭环
+
+【Sprint 2 #1 状态】
+- ✅ D1 schema + .well-known discovery (commit 6ac2509)
+- ✅ D2 /oauth/authorize consent (commit 0dde391)
+- ✅ D3 /oauth/token + /oauth/revoke + PKCE (commit 7b3960f)
+- ✅ D4 /api/mcp 双轨 auth + scope check (commits b93452b + 9312374 +
+     b818149)
+- ✅ D5 docs §6 + PROJECT_SUMMARY v0.2.55.0 + DCR + RFC 9728
+     (commits df2fe63 + dd9837c + 这个 commit)
+- ✅ 4 个 RFC 一次接通:6749 / 7591 / 7636 / 9728
+
+【剩下的长尾(未完成)— 不阻塞 Sprint 2 #1】
+- D4-D ChatGPT Apps 表单重测:OpenAI 开发者后台用 OAuth 重新提交
+  manifest,等用户拿到 ChatGPT 真实 redirect_uri
+- /developers/connected-apps 用户 dashboard:让用户看自己授权过的
+  OAuth client 列表 + 一键 revoke(目前要后台 SQL 或调 /oauth/revoke)
+- /developers/docs/oauth.md:面向第三方 agent builder 的端到端 OAuth
+  integration 指南
+- Worker 30-day cleanup(DELETE_BY: 2026-05-26)— 单独工作流
+
+================================================================
 Recent Updates - 2026-04-27 · Sprint 2 #1 · Onegent as OAuth 2.0 Identity Provider (D1-D5 shipped)
 ================================================================
 
