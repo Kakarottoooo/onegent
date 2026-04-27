@@ -1,6 +1,6 @@
 {
   "name": "@onegent/mcp-server",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "Travel execution layer for AI agents — book restaurants, hotels, flights, and activities through an AI agent that navigates real booking sites.",
   "keywords": [
     "mcp",
