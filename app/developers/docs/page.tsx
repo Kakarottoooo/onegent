@@ -5,7 +5,8 @@ import "../_styles/docs-hub.css";
 
 export const metadata = {
   title: "Docs",
-  description: "REST API reference, Claude Desktop integration, ChatGPT Apps integration.",
+  description:
+    "REST API reference, OAuth 2.0 integration, Claude Desktop integration, ChatGPT Apps integration.",
 };
 
 interface DocCard {
@@ -26,6 +27,15 @@ const DOCS: DocCard[] = [
       "Every endpoint under /api/v1, with schemas, error codes, the job lifecycle diagram, and full curl quickstart.",
     meta: "~12 min",
     glyph: <ApiGlyph />,
+  },
+  {
+    href: "/developers/docs/oauth",
+    eyebrow: "OAuth 2.0 · IdP",
+    title: "OAuth integration",
+    description:
+      "Plug Onegent into your custom AI agent — discovery, DCR or pre-registered clients, authorization code + PKCE, token rotation, scopes, and worked TS / Python / curl samples.",
+    meta: "~15 min",
+    glyph: <OAuthGlyph />,
   },
   {
     href: "/developers/docs/integrations/claude-mcp",
@@ -55,9 +65,9 @@ export default function DocsHubPage() {
           <span className="dev-eyebrow dev-section-header__eyebrow">
             Documentation
           </span>
-          <h1 className="dev-h1">Three doors into Onegent.</h1>
+          <h1 className="dev-h1">Four doors into Onegent.</h1>
           <p className="dev-lead">
-            Same engine, three integration surfaces. Pick the one that
+            Same engine, four integration surfaces. Pick the one that
             fits how your agent already talks to the world.
           </p>
         </header>
@@ -106,6 +116,16 @@ function ChatGptGlyph() {
       <circle cx="12" cy="12" r="9" />
       <path d="M9 9.5c0-1.5 1-2.5 3-2.5s3 1 3 2.5-1 2-2 2.5-1 1-1 2v0.5" />
       <circle cx="12" cy="16.5" r="0.5" fill="currentColor" />
+    </svg>
+  );
+}
+
+function OAuthGlyph() {
+  return (
+    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <rect x="5" y="11" width="14" height="9" rx="2" />
+      <path d="M8 11V7a4 4 0 0 1 8 0v4" />
+      <circle cx="12" cy="15.5" r="1" fill="currentColor" />
     </svg>
   );
 }
