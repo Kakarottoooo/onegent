@@ -1,5 +1,5 @@
 ================================================================
-Onegent · Travel Execution Layer for AI Agents · v0.2.55.1
+Onegent · Travel Execution Layer for AI Agents · v0.2.56.0
 ================================================================
 
 【一句话定位（2026-04-26 锁定）】
@@ -31,6 +31,134 @@ ChatGPT Apps + 第三方 agent builder via /api/v1）
 活动 / 多人 trip），非旅行品类（笔记本 / 手机 / 耳机 / 信用卡 /
 礼物 / 健身）已归档。详见本文档头部 "Recent Updates - 2026-04-24
 (cont. 2) · Positioning Shift"。
+
+================================================================
+Recent Updates - 2026-04-27 (cont. 4) · Pricing v0.1 — 第一个付费形态上线
+================================================================
+
+Onegent 第一次有了**真实可付费的产品形态**。Stripe sandbox 配置完整、
+prod E2E 跑通、user 走完 Checkout → webhook → Neon → /account/billing
+显示 PRO 整条链路无误。原来 PROJECT_SUMMARY 里每条 backlog 都标"等付费
+用户敲门"的阻塞从今天起可以解锁。
+
+【价格结构】
+- Free: 3 bookings/月 + 1 Decision Room/月，跨 surface 共享额度
+  （onegent.one + Claude.ai connector + ChatGPT App + 第三方 OAuth agent
+  全部按 user_id 聚合配额）
+- Pro: \$9/月 或 \$79/年（年付省 27%），无限 bookings + 无限 DR + 价格
+  监控 + 优先 autopilot 队列 + email 1 工作日响应
+- 不做 Concierge / Enterprise tier — 等真有 100 个 Pro 用户再分层
+  （DHH/PG 视角：don't optimize for problems you don't have）
+
+【架构】
+```
+DB
+├── user_subscriptions(user_id PK, stripe_customer_id, stripe_subscription_id,
+│       tier{free|pro}, status, current_period_end, cancel_at_period_end,
+│       plan_interval, created_at, updated_at) — Stripe-mirrored 状态
+└── user_usage_counters(user_id, period_start DATE, bookings_used,
+        rooms_used, updated_at) — 月度 calendar-month 计数器
+        period_start = DATE_TRUNC('month', NOW() AT TIME ZONE 'UTC')
+        每月 1 号 UTC 0:00 自然新行 → 配额自动重置
+
+lib/billing/
+├── quota.ts — getUserTier / canBookMore / canCreateRoom /
+│              buildQuotaExceededBody
+│   active set: { active, trialing, past_due } 都给 Pro 待遇
+│   past_due 故意保留 Pro，等 Stripe smart retry 救（~50% 成功率）
+└── stripe.ts — Stripe SDK singleton + isStripeConfigured() guard
+
+app/api/billing/
+├── checkout/  — POST: 预创建 Customer 写 user_subscriptions row
+│                tier=free 占位, metadata.user_id 双写（subscription_data
+│                + customer.metadata）→ 创建 Checkout Session 返 url
+├── webhook/   — POST: stripe-signature 验签后 switch 4 个事件:
+│                customer.subscription.{created,updated,deleted} +
+│                invoice.payment_failed → upsertUserSubscription
+│                idempotent (PRIMARY KEY user_id), 失败也 200 防 retry storm
+├── portal/    — POST: 拿 stripe_customer_id 创建 Stripe Customer Portal
+│                session 返 url（管订阅、付款方式、取消、看 invoice）
+└── me/        — GET: { tier, bookings.{used,limit}, rooms.{used,limit},
+                   subscription.{status, current_period_end,
+                   cancel_at_period_end, plan_interval} } 给 BillingTab 用
+
+【quota gate 落点】
+- app/api/booking-jobs/[id]/start/route.ts:
+  · 入口加 canBookMore(job.user_id) → 不通过返 402 + upgrade_url JSON
+  · runStepAt 末尾 transition→done/awaiting_confirmation 时
+    incrementUsageCounter(user_id, "booking") 幂等防重计
+- worker/src/index.ts runStepAt: 镜像同样 increment（worker 跑 restaurant
+  时的计数路径，跟 Vercel 走 hotel/flight/activity 互斥）
+- app/api/mcp/route.ts OAuth path:
+  · isBookToolCall(parsedBody) 仅对 book_* tools 走 quota 检查
+  · tools/list / get_job_status / get_job_audit 通通免计数
+  · 超额返 HTTP 402 + 同样的 upgrade_url JSON, claude.ai/ChatGPT 都会把
+    body 传给 LLM, agent 能告知用户去 onegent.one/pricing
+
+【UI】
+- /pricing — server-rendered, 消费端 warm-gold/cream tokens
+  Hero "Free for casual use. Pro when you want more."
+  Free + Pro 双卡, $79/年 saves 27% 副文案, 9 行 feature comparison 表,
+  6 题 FAQ, 底部跳转 /developers/pricing 给 agent builder
+- /account/billing → BillingTab.tsx
+  Pro: tier badge + next renewal + cancellation/past_due warning +
+       Manage subscription → Stripe Portal
+  Free: usage progress bar (X/3 + Y/1), 超限红条, Upgrade → /pricing
+- GlobalNav 加 Pricing 入口 — 之前 Tasks/Calendar/Rooms/Contacts/Memory
+  五项都是 app 内部, 没有外部能让用户发现 pricing 的链接
+
+【环境配置】
+Stripe 开了 sandbox（"onegent sandbox"，独立于将来 live 账号）:
+- Product: Onegent Pro · 2 prices (monthly $9 + yearly $79)
+- Webhook endpoint: https://onegent.one/api/billing/webhook (4 events)
+- 5 个 env vars 在 .env.local + Vercel 项目（Production/Preview/Development）:
+  · STRIPE_PUBLISHABLE_KEY / STRIPE_SECRET_KEY
+  · STRIPE_WEBHOOK_SECRET / STRIPE_PRICE_MONTHLY / STRIPE_PRICE_YEARLY
+- 切 live 模式时 5 个值都要换（test→live key 不互通）+ 重新创建 webhook
+
+【E2E smoke test 跑过的路径】
+1. localhost:3000/pricing 渲染、Pricing 主导航点击 ✓
+2. Upgrade button → /api/billing/checkout 200 → window.location.href ✓
+3. checkout.stripe.com 页面正确显示 Onegent Pro $9/month + sandbox badge ✓
+4. 测试卡 4242 4242 4242 4242 完成支付 ✓
+5. success_url 跳回 /account?tab=billing&checkout=success ✓
+6. Stripe webhook 打到 onegent.one/api/billing/webhook ✓
+7. 签名校验通过 + handleSubscriptionUpdate ✓
+8. user_subscriptions 行写入 tier=pro / status=active /
+   stripe_subscription_id / plan_interval=month ✓
+9. /account/billing 显示 PRO badge ✓
+10. /api/billing/me 返回正确 tier+usage payload ✓
+
+【已知小毛病 — 已修待 resend】
+- Stripe API 2026-04-22.dahlia 把 current_period_end 从 subscription 顶层
+  搬到 items.data[0]，第一次 webhook 写入 period_end=null
+- commit 1d350d4 加了 periodEndUnixFromSubscription() 双形态探测函数
+- 用户回 Stripe Webhook 页 Resend 一次, handler 走新代码就把 period_end
+  字段补上, /account/billing 的 "Next renewal" 文案就显示
+
+【没做（按设计文档原则推迟）】
+- live mode key 切换 — 等真有付费意愿用户再切, 现在 sandbox 验证够用
+- API tier 计费 (per-call billing for agent builders) — 等 /api/v1 真有
+  集成流量再说, 当前 OAuth IdP 跑过的 claude.ai connector 是验证流量
+- B2B Enterprise tier — 跟 patio11 视角一致, B2B 要冷启动 outreach 验证
+  willingness to pay 后再设计 SKU
+- Free tier 4th booking 触发 402 的实测 — 流程上肯定会触发(代码 review
+  通过), 但需要造一个 free 测试账号跑 4 次 booking 才能 e2e 验
+
+【影响】
+之前 PROJECT_SUMMARY 多个 backlog 都标"等付费用户敲门":
+- Browserbase Pro \$99/mo 升级时机 — 现在如果 Pro 用户付费了, 这 \$99/mo
+  立刻在经济账上合理
+- Worker 双份代码 cleanup — DELETE_WHEN 触发条件之一是"升 Browserbase
+  Pro", 链式解锁
+- B2B Lane C 验证 — 有 C 端付费数据后, B2B 谈 enterprise tier 才有依据
+所有这些"等付费用户"的依赖现在都解锁了。
+
+【Commit 链】
+- ab1a3fb feat(billing): pricing scaffold (schema + quota + /pricing + gate)
+- 03efd0e feat(billing): Stripe routes + MCP gate + account billing tab
+- 461b89c feat(nav): add Pricing link to GlobalNav
+- 1d350d4 fix(billing/webhook): handle current_period_end on items[0]
 
 ================================================================
 Recent Updates - 2026-04-27 (cont. 3) · Worker 30 天 cleanup deadline 解除 — 双份代码继续共存到 Browserbase Pro 升级
