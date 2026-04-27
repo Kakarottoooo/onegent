@@ -82,6 +82,12 @@ export const bookHotelTool: ToolDefinition = {
     required: ["destination", "check_in", "check_out", "guests"],
     additionalProperties: false,
   },
+  annotations: {
+    title: "Book a hotel stay",
+    readOnlyHint: false,
+    openWorldHint: true,
+    destructiveHint: false,
+  },
   async handler(rawArgs, client) {
     const args = InputSchema.parse(rawArgs);
     const { profile, profileId, ...params } = args;

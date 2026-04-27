@@ -88,6 +88,12 @@ export const bookFlightTool: ToolDefinition = {
     required: ["origin", "destination", "depart_date", "passengers"],
     additionalProperties: false,
   },
+  annotations: {
+    title: "Book a flight",
+    readOnlyHint: false,
+    openWorldHint: true,
+    destructiveHint: false,
+  },
   async handler(rawArgs, client) {
     const args = InputSchema.parse(rawArgs);
     const { profile, profileId, ...params } = args;

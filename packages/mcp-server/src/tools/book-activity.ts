@@ -74,6 +74,12 @@ export const bookActivityTool: ToolDefinition = {
     required: ["city", "date", "participants"],
     additionalProperties: false,
   },
+  annotations: {
+    title: "Book an activity or tour",
+    readOnlyHint: false,
+    openWorldHint: true,
+    destructiveHint: false,
+  },
   async handler(rawArgs, client) {
     const args = InputSchema.parse(rawArgs);
     const { profile, profileId, ...params } = args;

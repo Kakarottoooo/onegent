@@ -77,6 +77,7 @@ export function createOnegentServer(opts: CreateOnegentServerOptions = {}): Serv
       name: t.name,
       description: t.description,
       inputSchema: t.inputSchema,
+      ...(t.annotations ? { annotations: t.annotations } : {}),
     })),
   }));
 

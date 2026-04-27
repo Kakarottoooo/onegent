@@ -29,6 +29,13 @@ export const getJobAuditTool: ToolDefinition = {
     required: ["jobId"],
     additionalProperties: false,
   },
+  annotations: {
+    title: "Read booking job audit trail",
+    readOnlyHint: true,
+    openWorldHint: false,
+    destructiveHint: false,
+    idempotentHint: true,
+  },
   async handler(rawArgs, client) {
     const { jobId, limit } = InputSchema.parse(rawArgs);
     const result = await client.getExecutionJobAudit(jobId, limit ?? DEFAULT_LIMIT);

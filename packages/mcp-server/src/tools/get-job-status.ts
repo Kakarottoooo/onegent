@@ -25,6 +25,13 @@ export const getJobStatusTool: ToolDefinition = {
     required: ["jobId"],
     additionalProperties: false,
   },
+  annotations: {
+    title: "Check booking job status",
+    readOnlyHint: true,
+    openWorldHint: false,
+    destructiveHint: false,
+    idempotentHint: true,
+  },
   async handler(rawArgs, client) {
     const { jobId } = InputSchema.parse(rawArgs);
     const result = await client.getExecutionJob(jobId);

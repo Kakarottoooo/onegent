@@ -73,6 +73,12 @@ export const bookRestaurantTool: ToolDefinition = {
     required: ["restaurant_name", "city", "date", "time", "covers"],
     additionalProperties: false,
   },
+  annotations: {
+    title: "Book a restaurant reservation",
+    readOnlyHint: false,
+    openWorldHint: true,
+    destructiveHint: false,
+  },
   async handler(rawArgs, client) {
     const args = InputSchema.parse(rawArgs);
     const { profile, profileId, ...params } = args;
