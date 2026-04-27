@@ -33,6 +33,112 @@ ChatGPT Apps + 第三方 agent builder via /api/v1）
 (cont. 2) · Positioning Shift"。
 
 ================================================================
+Recent Updates - 2026-04-27 (cont. 2) · ChatGPT Apps submitted + connected-apps dashboard + MCP tool annotations + OAuth dev guide
+================================================================
+
+Sprint 2 #1 那两条 release notes（主条 + cont. 1）只覆盖了 OAuth IdP 协
+议层 + claude.ai 验证。今天后半场又干了 5 件事，外加把 Onegent 真正
+推进了 ChatGPT Apps marketplace 审核队列。这条 release note 把这部
+分一次性归档。
+
+【里程碑：ChatGPT Apps 提交 v1.0.0 → Status: Review】
+2026-04-27 当天傍晚，Onegent 的 Travel Booking Agent 应用通过 OpenAI
+Apps 开发者后台 (platform.openai.com/apps) 提交审核。OpenAI 5-10 工
+作日异步审核中。提交全套包括：
+  - MCP Server URL: https://onegent.one/api/mcp
+  - Auth: OAuth 2.0（OpenAI 自动从 .well-known 抓全部 metadata + DCR
+    自我注册自己）
+  - 6 工具的完整 tool annotations（readOnlyHint / openWorldHint /
+    destructiveHint）
+  - 5 个 happy-path test cases（restaurant/hotel/flight/activity 各
+    一个 + status check）+ 3 个 negative cases
+  - Screenshot：706×800 PNG 显示 ChatGPT 调 get_job_status 的 tool
+    call widget，#212121 padding 跟 ChatGPT 暗色主题无缝
+  - Test credentials：用 Clerk sign-in token 给 reviewer 一条单次免
+    验证登录 URL（绕过 Clerk dev instance 的 adaptive new-device
+    challenge），加 email/password 备份
+  - Identity verification：通过 OpenAI org settings → Persona 完成
+    个人开发者身份验证
+
+整个 submit 流程踩过的所有坑（Clerk dev/prod instance 混淆 / new-device
+challenge / sign-in token 配 Fallback development host / 706 像素
+精确化 / tool annotations 必须项 / Persona ID 验证）已落入 memory
+openai_apps_submission_journey.md，未来任何 marketplace 提交（Microsoft、
+Apple Intelligence 等）按那条 memory 走都不用再 trial-and-error。
+
+【今天后半场 5 个 commits】
+
+- /developers/connected-apps 用户自助 OAuth 管理 dashboard (commits
+  880cfd7 + 52a8dd8)
+  · 新 lib/db.ts::findConnectedAppsByUserId(userId) UNION 查询找出
+    用户所有活跃 grant（access OR refresh 任一未过期就算连着）
+  · 新 lib/db.ts::revokeUserAppGrants(userId, clientId) soft-revoke
+    一对 (user, client) 下所有 access + refresh tokens；不删 oauth_clients
+    行，client 仍可被其他用户授权
+  · 新 GET /api/developers/connected-apps + DELETE /[clientId] 路由，
+    Clerk-gated，shape 跟 /api/developers/keys 一致
+  · 新 app/developers/connected-apps/{layout,page}.tsx +
+    _components/ConnectedAppCard.tsx，复用 keys 那边的 dev-key-card 风
+    格（gradient + badge row + Disconnect 按钮）
+  · DashboardNav 从 keys/_components/ 提到 _components/ 共享，加
+    Connected apps 链接 + usePathname() 高亮
+  · polish (52a8dd8)：null client_uri 时不显示占位灰条；first_authorized_at
+    == last_token_at 时折叠成单行 "Connected Xm ago"
+
+- MCP tool annotations on all 6 tools (commit 541522f)
+  · packages/mcp-server/src/tools/types.ts 加 ToolAnnotations interface
+    + ToolDefinition.annotations 可选字段
+  · 6 工具文件分别加 annotations block：
+    book_{restaurant,hotel,flight,activity}: readOnly=false, openWorld=true,
+      destructive=false（payment-safety stop 解决 destructive 模糊性 —
+      工具本身只入队 job，不直接扣款）
+    get_job_{status,audit}: readOnly=true, openWorld=false, destructive=false,
+      idempotent=true
+  · server-factory.ts ListToolsRequestSchema handler 条件 spread
+    annotations（仅 defined 时输出，避免空对象污染老客户端）
+  · 这是 ChatGPT Apps 表单 "Tool justification" 红色 missing 项的硬性
+    要求 — 没这个 submit 就被拦
+
+- /developers/docs/oauth 第三方 agent builder 集成指南 (commit 52b7d59)
+  · docs/oauth.md ~600 行 11 节完整手册：Quick reference / Discovery /
+    Client registration (DCR + 预注册) / Authorization + PKCE /
+    Token exchange + refresh rotation / Revoke / Calling /api/mcp /
+    Scopes / 工作代码示例 (TypeScript Node 18+ / Python 3.11+ requests
+    / curl) / Common errors 表 / Going further
+  · 新 app/developers/docs/oauth/page.tsx 路由，复用 api/v1 page 的
+    MdxContent + sidebar TOC pattern
+  · /developers/docs landing 从 "Three doors" → "Four doors"，加
+    OAuth 卡 + 锁形 glyph
+  · 受众：LangChain / CrewAI / Lindy / 内部 agent / 任何想直接接
+    OAuth IdP 的第三方开发者（不是 Claude/ChatGPT marketplace 用户）
+
+- DashboardNav refactor：从重复 nav header 变成 tab strip (commit
+  2a6b18f)
+  · 用户截图反馈 /developers/connected-apps 上有两层 nav：上面
+    BrandStrip（Onegent / Developers + Docs/Pricing/Dashboard + 头像），
+    下面 DashboardNav 又一遍 Onegent / Dashboard + nav links + 头像
+  · 修：DashboardNav 砍掉 logo 块 + UserButton，高度 64→44px，active
+    tab 加 2px 金色下划线。Stripe / Linear / GitHub 同款 "global nav
+    + section tabs" 分层
+  · BrandStrip 单独负责品牌 + 账号，DashboardNav 单独负责 sub-page
+    导航，零 duplication
+
+【今天累计 commits】
+14 个 prod commits：6ac2509 → 0dde391 → 7b3960f → d27e13c → b93452b →
+9312374 → b818149 → df2fe63 → dd9837c → f0e7ba7 → 880cfd7 → 52a8dd8 →
+541522f → 52b7d59 → 2a6b18f
+
+涵盖：OAuth 2.0 IdP 全栈（D1-D5）+ RFC 9728 + RFC 7591 DCR + MCP tool
+annotations + connected-apps dashboard + 第三方集成指南 + DashboardNav
+polish + ChatGPT Apps 上架审核提交。
+
+【未完成长尾】
+- ChatGPT Apps marketplace review 结果（5-10 工作日异步）—— 反应式
+- @onegent/mcp-server npm 发版（让 Claude Desktop 用户也拿到 tool
+  annotations，~5 分钟工作）
+- Worker 30-day cleanup（DELETE_BY: 2026-05-26 仍有效）
+
+================================================================
 Recent Updates - 2026-04-27 (cont. 1) · Sprint 2 #1 closed · DCR + claude.ai web verified
 ================================================================
 
