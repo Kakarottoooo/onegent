@@ -106,6 +106,7 @@ export default function GlobalNav({ active }: Props) {
     { href: "/rooms", label: "Rooms", id: "rooms" },
     { href: "/contacts", label: "Contacts", id: "contacts" },
     { href: "/insights", label: "Memory", id: "insights" },
+    { href: "/pricing", label: "Pricing", id: "other" },
   ];
 
   const accountSections: { label: string; tab: string }[] = [
