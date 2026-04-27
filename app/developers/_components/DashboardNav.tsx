@@ -2,15 +2,18 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { UserButton } from "@clerk/nextjs";
 
 /**
- * Dark-themed nav shared by every /developers/* dashboard sub-page.
- * Active route is highlighted via usePathname() match against each link's
- * href — so a new sub-page only needs to be added to NAV_ITEMS, no manual
- * per-page styling.
+ * Sub-nav (tab strip) shared by every /developers/* dashboard sub-page.
  *
- * UserButton stays — it's the only Clerk component the dashboard needs.
+ * Why no logo or UserButton here: the global BrandStrip already provides
+ * brand identity + account / sign-out controls at the very top of the
+ * viewport. Repeating them in this dashboard sub-nav was creating a
+ * double-stutter (two "Onegent" wordmarks, two avatars stacked) — a
+ * classic Stripe-style "global nav + section tabs" layout fixes it.
+ *
+ * Active route is highlighted via usePathname() match against each link's
+ * href so a new sub-page only needs to be added to NAV_ITEMS.
  */
 
 const NAV_ITEMS: Array<{ href: string; label: string }> = [
@@ -29,97 +32,52 @@ export function DashboardNav() {
         position: "sticky",
         top: 0,
         zIndex: 40,
-        height: "var(--nav-height)",
         background: "rgba(10, 10, 11, 0.78)",
         backdropFilter: "saturate(140%) blur(16px)",
         WebkitBackdropFilter: "saturate(140%) blur(16px)",
         borderBottom: "1px solid var(--ink-200)",
       }}
     >
-      <div
+      <nav
         style={{
           maxWidth: "var(--container)",
           margin: "0 auto",
           padding: "0 var(--space-8)",
-          height: "100%",
+          height: "44px",
           display: "flex",
           alignItems: "center",
-          justifyContent: "space-between",
-          gap: "var(--space-12)",
+          gap: "var(--space-8)",
         }}
+        aria-label="Dashboard sections"
       >
-        <Link
-          href="/developers"
-          style={{
-            display: "flex",
-            alignItems: "baseline",
-            gap: "var(--space-3)",
-            textDecoration: "none",
-            color: "var(--ink-900)",
-          }}
-        >
-          <span
-            style={{
-              fontFamily: "var(--font-playfair), serif",
-              fontWeight: 600,
-              fontSize: "22px",
-              letterSpacing: "-0.02em",
-            }}
-          >
-            Onegent
-          </span>
-          <span
-            style={{
-              fontFamily: "var(--font-dm-sans), system-ui, sans-serif",
-              fontSize: "14px",
-              fontWeight: 400,
-              color: "var(--ink-500)",
-              letterSpacing: "0.01em",
-            }}
-          >
-            / Dashboard
-          </span>
-        </Link>
-
-        <nav
-          style={{
-            display: "flex",
-            alignItems: "center",
-            gap: "var(--space-8)",
-          }}
-        >
-          {NAV_ITEMS.map((item) => {
-            // Exact match for /developers (root), prefix match for sub-pages.
-            const isActive =
-              item.href === "/developers"
-                ? pathname === item.href
-                : pathname?.startsWith(item.href) ?? false;
-            return (
-              <Link
-                key={item.href}
-                href={item.href}
-                style={{
-                  color: isActive ? "var(--accent)" : "var(--ink-500)",
-                  textDecoration: "none",
-                  fontSize: "14px",
-                  fontWeight: isActive ? 500 : 400,
-                }}
-              >
-                {item.label}
-              </Link>
-            );
-          })}
-        </nav>
-
-        <UserButton
-          appearance={{
-            baseTheme: undefined,
-            elements: {
-              avatarBox: { width: "32px", height: "32px" },
-            },
-          }}
-        />
-      </div>
+        {NAV_ITEMS.map((item) => {
+          // Exact match for /developers (root), prefix match for sub-pages.
+          const isActive =
+            item.href === "/developers"
+              ? pathname === item.href
+              : pathname?.startsWith(item.href) ?? false;
+          return (
+            <Link
+              key={item.href}
+              href={item.href}
+              style={{
+                color: isActive ? "var(--accent)" : "var(--ink-500)",
+                textDecoration: "none",
+                fontSize: "14px",
+                fontWeight: isActive ? 500 : 400,
+                position: "relative",
+                paddingBottom: "2px",
+                borderBottom: isActive
+                  ? "2px solid var(--accent)"
+                  : "2px solid transparent",
+                transition: "color 120ms ease, border-color 120ms ease",
+              }}
+            >
+              {item.label}
+            </Link>
+          );
+        })}
+      </nav>
     </header>
   );
 }
