@@ -1,5 +1,5 @@
 ================================================================
-Onegent · Travel Execution Layer for AI Agents · v0.2.55.0
+Onegent · Travel Execution Layer for AI Agents · v0.2.55.1
 ================================================================
 
 【一句话定位（2026-04-26 锁定）】
@@ -31,6 +31,69 @@ ChatGPT Apps + 第三方 agent builder via /api/v1）
 活动 / 多人 trip），非旅行品类（笔记本 / 手机 / 耳机 / 信用卡 /
 礼物 / 健身）已归档。详见本文档头部 "Recent Updates - 2026-04-24
 (cont. 2) · Positioning Shift"。
+
+================================================================
+Recent Updates - 2026-04-27 (cont. 3) · Worker 30 天 cleanup deadline 解除 — 双份代码继续共存到 Browserbase Pro 升级
+================================================================
+
+CLAUDE.md 上原本写的 "Booking-autopilot 双份代码规则（DELETE_BY: 2026-05-26）"
+今天主动废除，改成 conditional trigger：满足"hotel/flight/activity 切到 worker"
+之一时再删。
+
+【为什么本来要删】
+Sprint 1 #1 (D1) 把 lib/booking-autopilot/ 整个 fork 到 worker/src/，
+留 30 天双份过渡期。原计划 2026-05-26 删 root 那份回归"单源"。
+
+【为什么不删了】
+Phase 1 调研（不动代码，只看文件 + diff + grep + tsconfig）发现：
+
+1. **物理上无法"回归单源"**：worker 是 standalone Docker 项目，不进
+   monorepo workspace（D1 故意决定，PROJECT_SUMMARY L428）。worker 通过
+   tsconfig paths 把 `@/lib/*` 重定向到自己的 `./src/*`，所以 worker 必
+   须有自己的代码副本。"删 lib/" 真正含义只能是 "Vercel 这一侧不再
+   in-process 跑"。
+
+2. **Vercel 现在还在跑 hotel/flight/activity**：当前 prod USE_WORKER_FOR
+   = `restaurant`（推断自 PROJECT_SUMMARY L415），其它 3 个 scenario 还
+   在 lib/booking-autopilot/ in-process 跑。要删 lib 必须先把这 3 个切
+   到 worker。
+
+3. **切 hotel/flight/activity 到 worker 有真实阻塞**：
+   - **Browserbase Pro $99/mo** —— Booking/Expedia 反检测能力强，本地
+     chromium 不一定撑得住，Browserbase free tier 已经撞过 402 minutes
+     exhausted。
+   - **没付费用户** —— PROJECT_SUMMARY L495 明确："需要真有付费用户或
+     hotel/flight scenario 真上线时再决定"，提前烧 $99/mo 是 cargo cult。
+
+4. **双份维护成本目前是 0**：
+   - `diff -rq lib/booking-autopilot worker/src/booking-autopilot` 输出空
+   - D1 fork 之后没有任何同步过的 bug fix，说明实际维护负担为 0
+   - 未来真出现需要同步的 hotfix 时再触发清理也不晚
+
+【新规则】
+触发删除的条件（满足任一即可）：
+- 升 Browserbase Pro，把 USE_WORKER_FOR 扩到 restaurant,hotel,flight,activity
+- 验证 hotel/flight 在 worker 容器的本地 chromium 抗反检测能力，扩
+  USE_REAL_CHROME_FOR
+- 双份代码真的开始 diverge（worker/src 改了但 lib 没跟，或反之）
+
+【哲学视角】
+- **Linus**: 双份 byte-identical 代码理论上是 git 的耻辱，但维护成本为 0
+  时不必处理。等真有 diverge 信号再动。
+- **PG / patio11**: Don't optimize for problems you don't have. 没付费
+  用户阶段不该烧 $99/mo 解决"还没产生压力"的债务。
+- **Kent Beck**: Make the change easy, then make the easy change. 现在
+  状态：删除条件未到（hotel/flight 没切 worker），先不动是对的；当条件
+  到了那天，CLAUDE.md 已经写好了清理清单，直接执行。
+
+【改动文件】
+- CLAUDE.md — "双份代码规则" section 重写：DELETE_BY → DELETE_WHEN，
+  增加触发条件、修正改动规矩描述、列出删除清单
+- PROJECT_SUMMARY.md — 本条 cont. 3 + 版本 v0.2.55.0 → v0.2.55.1
+
+【没改动的代码】
+零代码改动。这是个文档/规则决策，不是 refactor。worker、Vercel、prod
+所有路径继续按原样跑。
 
 ================================================================
 Recent Updates - 2026-04-27 (cont. 2) · ChatGPT Apps submitted + connected-apps dashboard + MCP tool annotations + OAuth dev guide

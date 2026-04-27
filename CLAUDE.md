@@ -13,25 +13,41 @@ Always respond in Chinese. Never respond in Korean.
 
 ---
 
-## Booking-autopilot 双份代码规则（DELETE_BY: 2026-05-26）
+## Booking-autopilot 双份代码规则（DELETE_WHEN: hotel/flight/activity 全部切到 worker 后）
 
-`lib/booking-autopilot/` 和 `worker/src/booking-autopilot/` 现在是**故意复制的两份**（Worker D1 把 lib 整个 fork 到了 worker/src）。Vercel 老路径用 lib，Railway worker 用 worker/src。两边对哪些 scenario 谁跑由 Vercel 的 `USE_WORKER_FOR` env var 决定。
+`lib/booking-autopilot/` 和 `worker/src/booking-autopilot/` 现在是**故意复制的两份**（Worker D1 把 lib 整个 fork 到了 worker/src）。Vercel 老路径用 lib，Railway worker 用 worker/src。两边对哪些 scenario 谁跑由 Vercel 的 `USE_WORKER_FOR` env var 决定（当前 prod 仅 `restaurant`）。
 
-### 改动规矩
+> **2026-04-27 决策更新**：原 30 天 deadline (2026-05-26) 已解除。理由：
+> 1. 删 lib 的真实前提是 hotel/flight/activity 全部切到 worker —— 这又依赖 **Browserbase Pro $99/mo 升级** 或验证本地 chromium 在 Booking/Expedia 上抗反检测，**两个条件都还没到位**
+> 2. fork 至今 byte-identical（`diff -rq` 输出空），双份维护**实际成本为 0**
+> 3. 没付费用户 → 不该烧钱解决"还没真实压力"的问题（PG / patio11 视角）
+>
+> 触发删除的条件（满足任一即可）：
+> - 升 Browserbase Pro，把 `USE_WORKER_FOR` 扩到 `restaurant,hotel,flight,activity`
+> - 验证 hotel/flight 在 worker 容器的本地 chromium 跑通，扩 `USE_REAL_CHROME_FOR`
+> - 出现需要在 worker/src 而 lib 不动（或反之）的 hotfix，导致两边真的开始 diverge
+
+### 改动规矩（双份共存期间）
 
 | 改动类型 | 改哪边 |
 |---|---|
-| 新增 provider / 新功能 | **只动 `worker/src/booking-autopilot/`**（lib 冻结） |
-| Bug fix（USE_WORKER_FOR 覆盖的 scenario，比如 restaurant） | 只改 `worker/src/booking-autopilot/` |
-| Bug fix（USE_WORKER_FOR 没覆盖的 scenario，比如 hotel/flight） | 改 `lib/booking-autopilot/`（这些还走 Vercel） |
+| 新增 provider / 新功能 | **优先只动 `worker/src/booking-autopilot/`**；lib 那边除非真有 Vercel scenario 在用，否则别同步（反正删除条件触发时 lib 整个删） |
+| Bug fix（USE_WORKER_FOR 覆盖的 scenario，当前仅 restaurant） | 只改 `worker/src/booking-autopilot/` |
+| Bug fix（USE_WORKER_FOR 没覆盖的 scenario，hotel/flight/activity） | 改 `lib/booking-autopilot/`（这些还在 Vercel in-process 跑） |
 | `lib/db.ts` / schema 变化 | **两边都改**（同一个 Neon DB） |
 | `lib/core/` 改动 | 两边都改（worker/src/core 是 lib/core 的 fork） |
 | `lib/encryption.ts` / `lib/autonomy.ts` / `lib/agent/planners/booking-links.ts` 改动 | **两边都改** |
 | NLU / chat / UI / API routes | 只在 root（这些**不在** worker 里） |
 
-### 30 天到期后
+### 删除条件触发后的清理清单
 
-2026-05-26 之后，`lib/booking-autopilot/` + `app/api/booking-jobs/[id]/start/route.ts` 的老 in-process 执行段（`runStepWithRecovery` / `runUniversalStep`）+ `vercel.json` 的 retry-jobs cron + `app/api/cron/retry-jobs/route.ts` 一起删，回归单份 worker 代码。
+满足上面任一触发条件后，一次性清理：
+- 删 `lib/booking-autopilot/` 整个目录
+- 删 `app/api/booking-jobs/[id]/start/route.ts` 的 `runStepWithRecovery` / `runUniversalStep` 老 in-process 执行段（保留 USE_WORKER_FOR 分流门 + 202 enqueue 路径）
+- 删 `vercel.json` 的 retry-jobs cron 条目
+- 删 `app/api/cron/retry-jobs/route.ts`
+- 修复 21+ `/lib/**` 文件对 `lib/booking-autopilot/*` 的 import（lib/core/ → 改成调 worker 队列；lib/itinerary、lib/agent/planners/booking-links.ts 等同理）
+- typecheck + smoke test 一遍后才能 ship
 
 ---
 
