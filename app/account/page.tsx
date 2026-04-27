@@ -9,6 +9,7 @@ import {
   BookingProfileTab,
   ControlsSettingsTab,
 } from "@/app/permissions/page";
+import { BillingTab } from "./_components/BillingTab";
 
 type AccountTab =
   | "identity"
@@ -901,51 +902,7 @@ function AccountPageInner() {
 
         {activeTab === "models" && <AgentModelTab />}
 
-        {activeTab === "billing" && (
-          <div
-            style={{
-              borderRadius: 18,
-              border: "0.5px solid var(--border, #e5e7eb)",
-              background: "var(--card, #fff)",
-              padding: "18px 18px 20px",
-            }}
-          >
-            <p
-              style={{
-                fontFamily: "var(--font-dm-sans)",
-                fontSize: 11,
-                fontWeight: 700,
-                textTransform: "uppercase",
-                letterSpacing: "0.08em",
-                color: "var(--text-muted, #aaa)",
-                marginBottom: 10,
-              }}
-            >
-              Billing
-            </p>
-            <p
-              style={{
-                fontFamily: "var(--font-dm-sans)",
-                fontSize: 13,
-                color: "var(--text-primary, #111)",
-                lineHeight: 1.7,
-                marginBottom: 8,
-              }}
-            >
-              Billing controls are not wired up yet.
-            </p>
-            <p
-              style={{
-                fontFamily: "var(--font-dm-sans)",
-                fontSize: 12,
-                color: "var(--text-secondary, #666)",
-                lineHeight: 1.7,
-              }}
-            >
-              This section is reserved for subscription, payment method, and invoice settings.
-            </p>
-          </div>
-        )}
+        {activeTab === "billing" && <BillingTab />}
       </main>
     </div>
   );

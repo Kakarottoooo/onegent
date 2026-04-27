@@ -34,6 +34,7 @@ import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/
 
 import { findOrCreateOAuthBridgeApiKey, validateAccessToken } from "@/lib/db";
 import { checkScopeForRpc } from "@/lib/oauth/scope-check";
+import { canBookMore, buildQuotaExceededBody } from "@/lib/billing/quota";
 
 export const maxDuration = 60;
 export const runtime = "nodejs";
@@ -112,6 +113,29 @@ export async function POST(req: Request): Promise<Response> {
           "WWW-Authenticate": `${WWW_AUTHENTICATE_BASE}, error="insufficient_scope", scope="${scopeResult.required}"`,
         },
       );
+    }
+
+    // ── Billing quota gate (book_* tools only) ──────────────────────────
+    // tools/list / get_job_status / get_job_audit are free of quota — only
+    // the booking-creating tools count against the user's monthly limit.
+    // We inspect the parsedBody directly (mirrors checkScopeForRpc shape)
+    // rather than re-deriving from the scope check result, since the scope
+    // check ok-result doesn't surface the tool name.
+    if (isBookToolCall(parsedBody)) {
+      const quota = await canBookMore(oauth.user_id);
+      if (!quota.allowed) {
+        const body = buildQuotaExceededBody(quota);
+        // Return HTTP 402 (consistent with REST quota response). Both
+        // claude.ai and ChatGPT MCP clients surface the response body
+        // back to the LLM so the agent can tell the user about the
+        // upgrade_url. We don't shoehorn this into a JSON-RPC error
+        // (-32xxx) because the auth/scope failures above also use
+        // HTTP-level statuses, not JSON-RPC errors.
+        return new Response(JSON.stringify(body), {
+          status: 402,
+          headers: { "content-type": "application/json" },
+        });
+      }
     }
 
     try {
@@ -196,4 +220,15 @@ function jsonError(
     status,
     headers: { "Content-Type": "application/json", ...extraHeaders },
   });
+}
+
+/** True iff the JSON-RPC body is `tools/call` for one of the four
+ *  booking-creating tools. Used to scope the billing quota check —
+ *  read-only tools (tools/list, get_job_status, get_job_audit) bypass. */
+function isBookToolCall(parsedBody: unknown): boolean {
+  if (!parsedBody || typeof parsedBody !== "object") return false;
+  const rpc = parsedBody as { method?: unknown; params?: { name?: unknown } };
+  if (rpc.method !== "tools/call") return false;
+  const toolName = rpc.params?.name;
+  return typeof toolName === "string" && toolName.startsWith("book_");
 }
