@@ -35,6 +35,7 @@ import {
   getJobsWithPendingRetries,
   updateBookingJobStatus,
   updateBookingJobSteps,
+  incrementUsageCounter,
   type BookingJob,
   type BookingJobStep,
   type DecisionLogEntry,
@@ -194,6 +195,11 @@ async function runJob(job: BookingJob): Promise<void> {
 
   const runStepAt = async (i: number): Promise<void> => {
     if (updatedSteps[i].status === "done") return;
+    // Snapshot terminal-success state before this run — billing counter
+    // increments only on transition INTO a terminal success state, so a
+    // payment retry from awaiting_confirmation doesn't double-count.
+    const wasTerminalSuccess =
+      updatedSteps[i].status === "awaiting_confirmation";
     try {
       updatedSteps[i] = await runStep(job, updatedSteps[i], i);
     } catch (err) {
@@ -202,6 +208,23 @@ async function runJob(job: BookingJob): Promise<void> {
       logError(`step ${i} of job ${job.id} threw`, err);
     }
     await writeSteps();
+
+    // Mirror the Vercel /start route's billing counter increment. Wrapped
+    // so a counter-write failure never tanks the booking. Anonymous jobs
+    // (job.user_id null/empty) bypass.
+    const isTerminalSuccess =
+      updatedSteps[i].status === "done" ||
+      updatedSteps[i].status === "awaiting_confirmation";
+    if (!wasTerminalSuccess && isTerminalSuccess && job.user_id) {
+      try {
+        await incrementUsageCounter(job.user_id, "booking");
+      } catch (err) {
+        logError(
+          `usage counter increment failed for user ${job.user_id}`,
+          err,
+        );
+      }
+    }
   };
 
   if (updatedSteps.length >= 2) {

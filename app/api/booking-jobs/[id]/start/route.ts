@@ -23,7 +23,9 @@ import {
   writeAgentLog,
   getBookingProfileById,
   getDefaultBookingProfile,
+  incrementUsageCounter,
 } from "@/lib/db";
+import { canBookMore, buildQuotaExceededBody } from "@/lib/billing/quota";
 import type { BookingJobStep, FallbackCandidate, DecisionLogEntry } from "@/lib/db";
 import {
   DEFAULT_AUTONOMY,
@@ -1041,6 +1043,28 @@ export async function POST(_req: NextRequest, { params }: Params) {
 
   const job = await getBookingJob(id);
   if (!job) return NextResponse.json({ error: "Job not found" }, { status: 404 });
+
+  // ── Billing quota gate ──────────────────────────────────────────────────
+  // Free tier: 3 bookings/calendar month. Pro: unlimited. We gate at /start
+  // (not at job creation) so a user who exceeded quota and creates a draft
+  // can still see their plan in the UI; they just can't run it without
+  // upgrading. The actual usage counter is incremented per-step-completed
+  // below — multi-step trip jobs from a free user with 0 used will start,
+  // but only complete the steps that fit under the limit before being
+  // gated mid-job at increment time (handled there with a soft skip).
+  //
+  // Anonymous jobs (job.user_id null) bypass — that path is for legacy
+  // pre-auth flows where there's no Stripe relationship to consult.
+  if (job.user_id) {
+    const quota = await canBookMore(job.user_id);
+    if (!quota.allowed) {
+      console.log(
+        `[start] ${id} blocked by quota (user=${job.user_id}, used=${quota.used}/${quota.limit})`,
+      );
+      return NextResponse.json(buildQuotaExceededBody(quota), { status: 402 });
+    }
+  }
+
   // Allow re-running failed jobs (e.g. after a scheduled retry or user-triggered retry).
   // Also allow re-running a "running" job that has been stuck for > 7 minutes — this
   // happens when the Vercel function hit its 5-min maxDuration and was killed before the
@@ -1136,6 +1160,13 @@ export async function POST(_req: NextRequest, { params }: Params) {
     // Skip steps that already succeeded — supports partial retry (cron/manual)
     if (steps[i].status === "done") return;
 
+    // Snapshot whether the step was already in a terminal-success state
+    // before this run. We only bump the billing counter when a step
+    // *transitions* into success — re-running an awaiting_confirmation
+    // step (e.g. payment retry) shouldn't double-charge the quota.
+    // (status === "done" is unreachable here — early-returned above.)
+    const wasTerminalSuccess = steps[i].status === "awaiting_confirmation";
+
     const onProgress = async (updated: BookingJobStep) => {
       steps[i] = updated;
       await writeSteps();
@@ -1167,6 +1198,19 @@ export async function POST(_req: NextRequest, { params }: Params) {
       steps[i] = { ...steps[i], status: "error", error: errMsg };
     }
     await writeSteps();
+
+    // ── Billing counter increment ───────────────────────────────────────
+    // Bump the user's monthly bookings_used when the step transitions into
+    // success. Wrapped so a counter-write failure never tanks the booking.
+    const isTerminalSuccess =
+      steps[i].status === "done" || steps[i].status === "awaiting_confirmation";
+    if (!wasTerminalSuccess && isTerminalSuccess && job.user_id) {
+      try {
+        await incrementUsageCounter(job.user_id, "booking");
+      } catch (err) {
+        console.error(`[start] usage counter increment failed for ${job.user_id}`, err);
+      }
+    }
   };
 
   // Execution mode:

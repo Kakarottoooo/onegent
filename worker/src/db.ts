@@ -4320,3 +4320,74 @@ export async function listChatSessionMessages(
   `;
   return result.rows;
 }
+
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Billing — usage counter (worker write path)
+// ═══════════════════════════════════════════════════════════════════════════
+//
+// The worker only needs to *bump* the counter when a step transitions to a
+// terminal success state. Vercel does the upfront quota gate before
+// enqueuing the job. The user_subscriptions / getUserSubscription helpers
+// stay Vercel-only (worker never reads them).
+//
+// Schema is identical to lib/db.ts — both sides write to the same Neon DB,
+// so whichever instance runs the migration first wins.
+
+let userUsageCountersTableReady_billing: Promise<void> | null = null;
+
+export async function ensureUserUsageCountersTable(): Promise<void> {
+  if (!userUsageCountersTableReady_billing) {
+    userUsageCountersTableReady_billing = (async () => {
+      await sql`
+        CREATE TABLE IF NOT EXISTS user_usage_counters (
+          user_id        TEXT NOT NULL,
+          period_start   DATE NOT NULL,
+          bookings_used  INTEGER NOT NULL DEFAULT 0,
+          rooms_used     INTEGER NOT NULL DEFAULT 0,
+          updated_at     TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          PRIMARY KEY (user_id, period_start)
+        )
+      `;
+      await sql`CREATE INDEX IF NOT EXISTS user_usage_user_idx ON user_usage_counters (user_id)`;
+    })().catch((err) => {
+      userUsageCountersTableReady_billing = null;
+      throw err;
+    });
+  }
+  await userUsageCountersTableReady_billing;
+}
+
+export async function incrementUsageCounter(
+  userId: string,
+  kind: "booking" | "room",
+): Promise<void> {
+  await ensureUserUsageCountersTable();
+  if (kind === "booking") {
+    await sql`
+      INSERT INTO user_usage_counters (user_id, period_start, bookings_used, updated_at)
+      VALUES (
+        ${userId},
+        DATE_TRUNC('month', NOW() AT TIME ZONE 'UTC')::date,
+        1,
+        NOW()
+      )
+      ON CONFLICT (user_id, period_start) DO UPDATE SET
+        bookings_used = user_usage_counters.bookings_used + 1,
+        updated_at    = NOW()
+    `;
+  } else {
+    await sql`
+      INSERT INTO user_usage_counters (user_id, period_start, rooms_used, updated_at)
+      VALUES (
+        ${userId},
+        DATE_TRUNC('month', NOW() AT TIME ZONE 'UTC')::date,
+        1,
+        NOW()
+      )
+      ON CONFLICT (user_id, period_start) DO UPDATE SET
+        rooms_used = user_usage_counters.rooms_used + 1,
+        updated_at = NOW()
+    `;
+  }
+}

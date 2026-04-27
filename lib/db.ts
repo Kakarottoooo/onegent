@@ -42,6 +42,10 @@ let userContactsBackfillRan: Promise<void> | null = null;
 let userGroupsTableReady: Promise<void> | null = null;
 let userGroupMembersTableReady: Promise<void> | null = null;
 
+// ── Billing (Pricing v0.1: free 3 bookings/mo + Pro $9 unlimited) ──────────
+let userSubscriptionsTableReady: Promise<void> | null = null;
+let userUsageCountersTableReady: Promise<void> | null = null;
+
 /**
  * Initialize the database tables if they don't exist.
  * Call once on first deploy or via a setup script.
@@ -4831,4 +4835,224 @@ export async function listChatSessionMessages(
     LIMIT ${limit}
   `;
   return result.rows;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Billing — user_subscriptions + user_usage_counters
+// ═══════════════════════════════════════════════════════════════════════════
+//
+// Pricing v0.1 — Free: 3 bookings/mo + 1 Decision Room/mo · Pro: unlimited.
+// Stripe is the source of truth for subscription state; we mirror just
+// enough into Postgres to gate /api/booking-jobs/start and /api/mcp without
+// hitting Stripe on the hot path.
+
+export type BillingTier = "free" | "pro";
+
+export type UserSubscriptionRow = {
+  user_id: string;
+  stripe_customer_id: string;
+  stripe_subscription_id: string | null;
+  tier: BillingTier;
+  status: string | null;
+  current_period_end: string | null;
+  cancel_at_period_end: boolean;
+  plan_interval: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type UserUsageRow = {
+  user_id: string;
+  period_start: string; // YYYY-MM-DD (first day of UTC month)
+  bookings_used: number;
+  rooms_used: number;
+  updated_at: string;
+};
+
+export async function ensureUserSubscriptionsTable(): Promise<void> {
+  if (!userSubscriptionsTableReady) {
+    userSubscriptionsTableReady = (async () => {
+      await sql`
+        CREATE TABLE IF NOT EXISTS user_subscriptions (
+          user_id                TEXT PRIMARY KEY,
+          stripe_customer_id     TEXT NOT NULL,
+          stripe_subscription_id TEXT,
+          tier                   TEXT NOT NULL DEFAULT 'free',
+          status                 TEXT,
+          current_period_end     TIMESTAMPTZ,
+          cancel_at_period_end   BOOLEAN NOT NULL DEFAULT FALSE,
+          plan_interval          TEXT,
+          created_at             TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          updated_at             TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        )
+      `;
+      await sql`CREATE INDEX IF NOT EXISTS user_subs_customer_idx ON user_subscriptions (stripe_customer_id)`;
+      await sql`CREATE INDEX IF NOT EXISTS user_subs_subscription_idx ON user_subscriptions (stripe_subscription_id) WHERE stripe_subscription_id IS NOT NULL`;
+    })().catch((err) => {
+      userSubscriptionsTableReady = null;
+      throw err;
+    });
+  }
+  await userSubscriptionsTableReady;
+}
+
+export async function ensureUserUsageCountersTable(): Promise<void> {
+  if (!userUsageCountersTableReady) {
+    userUsageCountersTableReady = (async () => {
+      await sql`
+        CREATE TABLE IF NOT EXISTS user_usage_counters (
+          user_id        TEXT NOT NULL,
+          period_start   DATE NOT NULL,
+          bookings_used  INTEGER NOT NULL DEFAULT 0,
+          rooms_used     INTEGER NOT NULL DEFAULT 0,
+          updated_at     TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          PRIMARY KEY (user_id, period_start)
+        )
+      `;
+      await sql`CREATE INDEX IF NOT EXISTS user_usage_user_idx ON user_usage_counters (user_id)`;
+    })().catch((err) => {
+      userUsageCountersTableReady = null;
+      throw err;
+    });
+  }
+  await userUsageCountersTableReady;
+}
+
+/** Returns the subscription row for a user, or null if they've never been
+ *  through Stripe (they're free-tier by default — see resolveTier). */
+export async function getUserSubscription(
+  userId: string,
+): Promise<UserSubscriptionRow | null> {
+  await ensureUserSubscriptionsTable();
+  const result = await sql<UserSubscriptionRow>`
+    SELECT * FROM user_subscriptions WHERE user_id = ${userId}
+  `;
+  return result.rows[0] ?? null;
+}
+
+/** Upserts a subscription row from Stripe webhook data. The webhook is the
+ *  source of truth — we never write tier='pro' from anywhere else. */
+export async function upsertUserSubscription(params: {
+  userId: string;
+  stripeCustomerId: string;
+  stripeSubscriptionId: string | null;
+  tier: BillingTier;
+  status: string | null;
+  currentPeriodEnd: Date | null;
+  cancelAtPeriodEnd: boolean;
+  planInterval: string | null;
+}): Promise<void> {
+  await ensureUserSubscriptionsTable();
+  const periodEnd = params.currentPeriodEnd
+    ? params.currentPeriodEnd.toISOString()
+    : null;
+  await sql`
+    INSERT INTO user_subscriptions (
+      user_id, stripe_customer_id, stripe_subscription_id, tier, status,
+      current_period_end, cancel_at_period_end, plan_interval, updated_at
+    )
+    VALUES (
+      ${params.userId}, ${params.stripeCustomerId}, ${params.stripeSubscriptionId},
+      ${params.tier}, ${params.status}, ${periodEnd},
+      ${params.cancelAtPeriodEnd}, ${params.planInterval}, NOW()
+    )
+    ON CONFLICT (user_id) DO UPDATE SET
+      stripe_customer_id     = EXCLUDED.stripe_customer_id,
+      stripe_subscription_id = EXCLUDED.stripe_subscription_id,
+      tier                   = EXCLUDED.tier,
+      status                 = EXCLUDED.status,
+      current_period_end     = EXCLUDED.current_period_end,
+      cancel_at_period_end   = EXCLUDED.cancel_at_period_end,
+      plan_interval          = EXCLUDED.plan_interval,
+      updated_at             = NOW()
+  `;
+}
+
+/** Find the userId associated with a Stripe customer (webhook reverse-lookup
+ *  when subscription event arrives without a Clerk userId in metadata). */
+export async function findUserBySubscriptionCustomerId(
+  stripeCustomerId: string,
+): Promise<string | null> {
+  await ensureUserSubscriptionsTable();
+  const result = await sql<{ user_id: string }>`
+    SELECT user_id FROM user_subscriptions WHERE stripe_customer_id = ${stripeCustomerId}
+  `;
+  return result.rows[0]?.user_id ?? null;
+}
+
+/** Returns the current calendar-month usage for a user. Returns zero counters
+ *  if no row exists yet (first booking of the month).
+ *
+ *  We use DATE_TRUNC('month', NOW() AT TIME ZONE 'UTC')::date as the period
+ *  key — every user's billing month rolls over at UTC 0:00 on the 1st. This
+ *  is intentionally simpler than Stripe's per-customer billing cycle anchor
+ *  (which would require us to track current_period_start/end per user). */
+export async function getCurrentUsage(userId: string): Promise<{
+  bookings_used: number;
+  rooms_used: number;
+  period_start: string;
+}> {
+  await ensureUserUsageCountersTable();
+  const result = await sql<UserUsageRow>`
+    SELECT user_id, period_start::text AS period_start, bookings_used, rooms_used, updated_at
+    FROM user_usage_counters
+    WHERE user_id = ${userId}
+      AND period_start = DATE_TRUNC('month', NOW() AT TIME ZONE 'UTC')::date
+  `;
+  if (result.rows[0]) {
+    return {
+      bookings_used: result.rows[0].bookings_used,
+      rooms_used: result.rows[0].rooms_used,
+      period_start: result.rows[0].period_start,
+    };
+  }
+  // No row yet → zero counters. Return current period_start for display.
+  const periodStart = await sql<{ ps: string }>`
+    SELECT DATE_TRUNC('month', NOW() AT TIME ZONE 'UTC')::date::text AS ps
+  `;
+  return {
+    bookings_used: 0,
+    rooms_used: 0,
+    period_start: periodStart.rows[0]!.ps,
+  };
+}
+
+/** Atomically bumps the per-user-per-month counter. Idempotent on the row
+ *  shape (INSERT...ON CONFLICT) so racing increments don't lose updates.
+ *
+ *  Caller is responsible for *when* to call this — e.g., booking-job step
+ *  transition to 'done' or 'awaiting_confirmation'. We don't try to debounce
+ *  here because step status writes are already idempotent at the call site. */
+export async function incrementUsageCounter(
+  userId: string,
+  kind: "booking" | "room",
+): Promise<void> {
+  await ensureUserUsageCountersTable();
+  if (kind === "booking") {
+    await sql`
+      INSERT INTO user_usage_counters (user_id, period_start, bookings_used, updated_at)
+      VALUES (
+        ${userId},
+        DATE_TRUNC('month', NOW() AT TIME ZONE 'UTC')::date,
+        1,
+        NOW()
+      )
+      ON CONFLICT (user_id, period_start) DO UPDATE SET
+        bookings_used = user_usage_counters.bookings_used + 1,
+        updated_at    = NOW()
+    `;
+  } else {
+    await sql`
+      INSERT INTO user_usage_counters (user_id, period_start, rooms_used, updated_at)
+      VALUES (
+        ${userId},
+        DATE_TRUNC('month', NOW() AT TIME ZONE 'UTC')::date,
+        1,
+        NOW()
+      )
+      ON CONFLICT (user_id, period_start) DO UPDATE SET
+        rooms_used = user_usage_counters.rooms_used + 1,
+        updated_at = NOW()
+    `;
+  }
 }
