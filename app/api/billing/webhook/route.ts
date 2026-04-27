@@ -116,6 +116,27 @@ function planIntervalFromSubscription(sub: Stripe.Subscription): string | null {
   return item?.price?.recurring?.interval ?? null;
 }
 
+/**
+ * Stripe API 2025-09+ moved `current_period_end` off the Subscription root and
+ * onto each subscription item (`subscription.items.data[0].current_period_end`).
+ * Older API versions still surface it at the top level. Probe both shapes so
+ * we keep working across API version upgrades.
+ *
+ * Returns Unix seconds, or null if neither shape carries the field.
+ */
+function periodEndUnixFromSubscription(sub: Stripe.Subscription): number | null {
+  const topLevel =
+    (sub as unknown as { current_period_end?: number }).current_period_end;
+  if (typeof topLevel === "number" && topLevel > 0) return topLevel;
+  const item = sub.items?.data?.[0] as
+    | { current_period_end?: number }
+    | undefined;
+  if (typeof item?.current_period_end === "number" && item.current_period_end > 0) {
+    return item.current_period_end;
+  }
+  return null;
+}
+
 async function handleSubscriptionUpdate(sub: Stripe.Subscription): Promise<void> {
   const customerId =
     typeof sub.customer === "string" ? sub.customer : sub.customer.id;
@@ -127,8 +148,7 @@ async function handleSubscriptionUpdate(sub: Stripe.Subscription): Promise<void>
     );
     return;
   }
-  const periodEndUnix =
-    (sub as unknown as { current_period_end?: number }).current_period_end ?? 0;
+  const periodEndUnix = periodEndUnixFromSubscription(sub);
   await upsertUserSubscription({
     userId,
     stripeCustomerId: customerId,
