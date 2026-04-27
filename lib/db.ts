@@ -1,5 +1,5 @@
 import { sql, db } from "@vercel/postgres";
-import { createHash, randomBytes, randomUUID } from "node:crypto";
+import { createHash, createHmac, randomBytes, randomUUID } from "node:crypto";
 import { encrypt, decrypt } from "./encryption";
 
 export { sql };
@@ -865,6 +865,12 @@ export interface ApiKeyRow {
   created_at: string;
   last_used_at: string | null;
   revoked_at: string | null;
+  // 'user' (default, NULL) = user-minted via dashboard / CLI.
+  // 'oauth-bridge' = synthetic key minted by /api/mcp to bridge an OAuth
+  // access token through to the existing /api/v1/* API key auth path.
+  // Bridge keys are hidden from findApiKeysByUserId so they don't show up
+  // in the user's "My Keys" dashboard.
+  source: string | null;
 }
 
 let apiKeysTableReady: Promise<void> | null = null;
@@ -890,6 +896,9 @@ async function ensureApiKeysTable(): Promise<void> {
       // Forward-compat: add user_id to pre-existing tables created before
       // self-serve dashboard. NULL = legacy B-end / org-minted key.
       await sql`ALTER TABLE api_keys ADD COLUMN IF NOT EXISTS user_id TEXT`;
+      // Forward-compat: tag synthetic OAuth bridge keys so the user's "My Keys"
+      // dashboard hides them. NULL / 'user' = real user-minted key.
+      await sql`ALTER TABLE api_keys ADD COLUMN IF NOT EXISTS source TEXT`;
       await sql`CREATE INDEX IF NOT EXISTS api_keys_hash_active_idx ON api_keys (key_hash) WHERE is_active = TRUE`;
       await sql`CREATE INDEX IF NOT EXISTS api_keys_org_idx ON api_keys (organization_name)`;
       await sql`CREATE INDEX IF NOT EXISTS api_keys_user_active_idx ON api_keys (user_id) WHERE user_id IS NOT NULL AND is_active = TRUE`;
@@ -961,6 +970,7 @@ export async function findApiKeysByUserId(userId: string): Promise<ApiKeyRow[]> 
   const result = await sql<ApiKeyRow>`
     SELECT * FROM api_keys
     WHERE user_id = ${userId}
+      AND (source IS NULL OR source = 'user')
     ORDER BY created_at DESC
   `;
   return result.rows;
@@ -979,6 +989,66 @@ export async function findApiKeyById(keyId: string): Promise<ApiKeyRow | null> {
 export async function updateApiKeyLastUsed(keyId: string): Promise<void> {
   await ensureApiKeysTable();
   await sql`UPDATE api_keys SET last_used_at = NOW() WHERE id = ${keyId}`;
+}
+
+/**
+ * Find-or-create the synthetic API key that bridges an OAuth access token
+ * through to the /api/v1/* API key auth path. Used by /api/mcp when a
+ * non-`ogk_*` Bearer token authenticates against /oauth/token's access_token.
+ *
+ * Plaintext is HMAC-derived from the user_id so we don't need a plaintext
+ * cache: every OAuth request re-derives the same value. We persist only
+ * sha256(plaintext) plus a `source='oauth-bridge'` tag so findApiKeysByUserId
+ * hides these from the user's "My Keys" dashboard.
+ *
+ * Requires OAUTH_BRIDGE_HMAC_SECRET (32+ chars) — same secret across all
+ * Vercel instances. Rotate by changing the env and accepting a one-time
+ * orphaning of every existing bridge key (downstream effect: next OAuth
+ * call mints a fresh bridge key — no user-visible breakage).
+ */
+export async function findOrCreateOAuthBridgeApiKey(
+  userId: string,
+): Promise<{ plaintextKey: string; row: ApiKeyRow }> {
+  await ensureApiKeysTable();
+  const secret = process.env.OAUTH_BRIDGE_HMAC_SECRET;
+  if (!secret || secret.length < 32) {
+    throw new Error(
+      "OAUTH_BRIDGE_HMAC_SECRET env var is required (32+ chars). " +
+        "Generate with: node -e \"console.log(require('crypto').randomBytes(32).toString('base64url'))\"",
+    );
+  }
+  const derived = createHmac("sha256", secret)
+    .update(`oauth-bridge:${userId}`)
+    .digest("base64url");
+  const plaintextKey = `ogk_live_${derived.slice(0, 32)}`;
+  const keyHash = createHash("sha256").update(plaintextKey).digest("hex");
+
+  await sql`
+    INSERT INTO api_keys (id, key_hash, key_prefix, organization_name, user_id, source)
+    VALUES (
+      ${randomUUID()},
+      ${keyHash},
+      'ogk_live',
+      ${`OAuth bridge: ${userId}`},
+      ${userId},
+      'oauth-bridge'
+    )
+    ON CONFLICT (key_hash) DO NOTHING
+  `;
+
+  const result = await sql<ApiKeyRow>`
+    SELECT * FROM api_keys WHERE key_hash = ${keyHash} LIMIT 1
+  `;
+  const row = result.rows[0];
+  if (!row) {
+    throw new Error("Failed to find or create OAuth bridge api_key row");
+  }
+  if (!row.is_active) {
+    throw new Error(
+      `OAuth bridge key for user ${userId} is inactive (admin-revoked). Re-activate the row in api_keys to allow MCP access.`,
+    );
+  }
+  return { plaintextKey, row };
 }
 
 /** Soft-revoke: is_active = FALSE + revoked_at. The row stays for audit. */
