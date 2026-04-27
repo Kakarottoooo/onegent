@@ -1281,9 +1281,14 @@ export async function validateAccessToken(
 /**
  * Exchange a refresh token for a new access token (and rotate the refresh
  * token). Used by POST /oauth/token with grant_type=refresh_token.
+ *
+ * expectedClientId scopes the lookup so client A can't redeem client B's
+ * refresh token. Mismatched/expired/revoked tokens return null without
+ * any state change (the WHERE clause filters them out atomically).
  */
 export async function rotateRefreshToken(
   plaintextRefresh: string,
+  expectedClientId: string,
 ): Promise<{
   accessToken: string;
   refreshToken: string;
@@ -1292,11 +1297,14 @@ export async function rotateRefreshToken(
   await ensureOAuthTables();
   const refreshHash = createHash("sha256").update(plaintextRefresh).digest("hex");
 
-  // Atomically revoke the old refresh token and capture its claims
+  // Atomically revoke the old refresh token and capture its claims.
+  // client_id is in the WHERE clause so a token from another client
+  // matches 0 rows — no revoke, no rotation, returns null.
   const oldResult = await sql<OAuthRefreshTokenRow>`
     UPDATE oauth_refresh_tokens
     SET revoked = TRUE
     WHERE token_hash = ${refreshHash}
+      AND client_id = ${expectedClientId}
       AND revoked = FALSE
       AND expires_at > NOW()
     RETURNING *
