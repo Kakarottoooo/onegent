@@ -8,6 +8,7 @@ import { useAuth } from "@/app/hooks/useAuth";
 import { CARD, CTA, PAGE } from "@/app/_ui/tokens";
 import GlobalNav from "@/components/GlobalNav";
 import AirportAutocomplete from "@/components/AirportAutocomplete";
+import { EditorialHero } from "@/app/_shared/editorial";
 
 interface Contact {
   contact_user_id: string;
@@ -65,7 +66,7 @@ const INPUT_LG =
   "placeholder:text-[var(--text-muted)] " +
   "focus:outline-none focus:border-[var(--gold)]";
 
-const LABEL = "text-xs font-medium text-[var(--text-secondary)] block mb-2";
+const LABEL = "text-sm font-medium text-[var(--ink-7)] block mb-2";
 
 // Selectable option button (active / inactive / disabled).
 const OPTION_ACTIVE =
@@ -288,24 +289,26 @@ export default function NewRoomPage() {
   return (
     <div className={PAGE}>
       <GlobalNav active="rooms" />
-      <div className="max-w-md md:max-w-xl lg:max-w-2xl mx-auto px-5 md:px-6 py-8">
+      <div className="max-w-md md:max-w-xl lg:max-w-2xl mx-auto px-5 md:px-6 py-12">
         <button
           onClick={() => router.back()}
-          className="text-xs text-[var(--text-muted)] hover:text-[var(--text-primary)] mb-4"
+          className="text-xs text-[var(--text-muted)] hover:text-[var(--text-primary)] mb-6"
+          style={{ letterSpacing: "0.02em" }}
         >
           ← Back
         </button>
 
-        <h1 className="text-xl font-semibold text-[var(--text-primary)] mb-1">
-          Start a Decision Room
-        </h1>
-        <p className="text-sm text-[var(--text-secondary)] mb-6">
-          Invite friends or a group. Everyone adds constraints. Agent proposes. You approve. Then it books.
-        </p>
+        <EditorialHero
+          eyebrow="New room"
+          title="Start a Decision Room."
+          subtitle="Invite friends or a group. Everyone adds constraints. The agent proposes. You approve. Then it books."
+          align="left"
+          size="page"
+        />
 
         {/* Type */}
         <label className={LABEL}>What are you deciding?</label>
-        <div className="grid grid-cols-2 gap-2 mb-5">
+        <div className="grid grid-cols-2 gap-3 mb-6">
           {ALLOWED_TYPES.map((t) => {
             const disabled = t.phase !== 1;
             const active = type === t.id;
@@ -315,13 +318,14 @@ export default function NewRoomPage() {
                 type="button"
                 disabled={disabled}
                 onClick={() => setType(t.id)}
-                className={`rounded-xl border p-3 text-left transition-colors ${
+                className={`rounded-2xl border p-4 text-left transition-all ${
                   active ? OPTION_ACTIVE : disabled ? OPTION_DISABLED : OPTION_IDLE
                 }`}
+                style={{ minHeight: 88 }}
               >
-                <div className="text-lg mb-1">{t.emoji}</div>
-                <div className="text-sm font-medium">{t.label}</div>
-                {disabled && <div className="text-[10px] mt-0.5 opacity-70">Coming soon</div>}
+                <div className="text-2xl mb-2">{t.emoji}</div>
+                <div className="text-base font-medium" style={{ letterSpacing: "-0.005em" }}>{t.label}</div>
+                {disabled && <div className="text-[11px] mt-1 opacity-70">Coming soon</div>}
               </button>
             );
           })}
