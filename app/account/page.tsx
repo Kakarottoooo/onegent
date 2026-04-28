@@ -321,7 +321,7 @@ function AccountPageInner() {
           style={{
             display: "flex",
             borderBottom: "0.5px solid var(--border, #e5e7eb)",
-            marginBottom: 24,
+            marginBottom: "var(--space-8)",
             gap: 0,
           }}
         >
@@ -331,7 +331,7 @@ function AccountPageInner() {
               onClick={() => setActiveTab(tab.id)}
               style={{
                 flex: 1,
-                padding: "10px 4px",
+                padding: "14px 6px",
                 background: "none",
                 border: "none",
                 borderBottom:
@@ -339,13 +339,16 @@ function AccountPageInner() {
                     ? "2px solid var(--gold, #C9A84C)"
                     : "2px solid transparent",
                 fontFamily: "var(--font-dm-sans)",
-                fontSize: 13,
-                fontWeight: activeTab === tab.id ? 700 : 400,
+                fontSize: 15,
+                fontWeight: activeTab === tab.id ? 600 : 400,
+                letterSpacing: activeTab === tab.id ? "-0.005em" : "0",
                 color:
                   activeTab === tab.id
                     ? "var(--gold, #C9A84C)"
-                    : "var(--text-muted, #aaa)",
+                    : "var(--ink-6)",
                 cursor: "pointer",
+                transition:
+                  "color 160ms ease, border-color 160ms ease",
               }}
             >
               {tab.label}

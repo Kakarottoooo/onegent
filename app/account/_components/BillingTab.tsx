@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { EyebrowLabel } from "@/app/_shared/editorial";
 
 type BillingState = {
   tier: "free" | "pro";
@@ -80,16 +81,16 @@ export function BillingTab() {
   if (loading) {
     return (
       <>
-        <SectionLabel>Billing</SectionLabel>
-        <p style={mutedTextStyle}>Loading…</p>
+        <EyebrowLabel>Billing</EyebrowLabel>
+        <p style={leadTextStyle}>Loading…</p>
       </>
     );
   }
   if (error || !state) {
     return (
       <>
-        <SectionLabel>Billing</SectionLabel>
-        <p style={{ ...mutedTextStyle, color: "var(--danger, #dc2626)" }}>
+        <EyebrowLabel>Billing</EyebrowLabel>
+        <p style={{ ...leadTextStyle, color: "var(--danger, #dc2626)" }}>
           {error ?? "Couldn't load billing state."}
         </p>
         <button onClick={load} style={ghostButtonStyle}>
@@ -104,18 +105,34 @@ export function BillingTab() {
     ? new Date(state.subscription.current_period_end)
     : null;
 
+  // Stripe stores the interval as "month" / "year" — make it grammatical
+  // English for end-user copy ("billed monthly" not "billed month").
+  const planIntervalAdverb =
+    state.subscription?.plan_interval === "year"
+      ? "annually"
+      : state.subscription?.plan_interval === "month"
+      ? "monthly"
+      : "monthly";
+
   return (
     <>
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 14 }}>
-        <SectionLabel>Billing</SectionLabel>
+      <header
+        style={{
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+          marginBottom: "var(--space-4)",
+        }}
+      >
+        <EyebrowLabel>Billing</EyebrowLabel>
         <span
           style={{
             fontFamily: "var(--font-dm-sans)",
             fontSize: 11,
             fontWeight: 700,
-            letterSpacing: "0.08em",
+            letterSpacing: "0.12em",
             textTransform: "uppercase",
-            padding: "4px 10px",
+            padding: "5px 12px",
             borderRadius: 999,
             color: isPro ? "var(--gold-text, #5A4416)" : "var(--text-secondary, #666)",
             background: isPro ? "var(--gold-soft, #F5E9C8)" : "var(--card-2, #f5f5f5)",
@@ -124,13 +141,15 @@ export function BillingTab() {
         >
           {isPro ? "Pro" : "Free"}
         </span>
-      </div>
+      </header>
 
       {/* ── Pro state ──────────────────────────────────────────────────── */}
       {isPro && (
         <>
-          <p style={primaryTextStyle}>
-            You're on Onegent Pro · unlimited bookings and Decision Rooms.
+          <h3 style={editorialHeadingStyle}>Onegent Pro.</h3>
+          <p style={leadTextStyle}>
+            Unlimited bookings, unlimited Decision Rooms, daily price re-checks,
+            priority autopilot queue.
           </p>
           {periodEnd && state.subscription?.cancel_at_period_end && (
             <p style={{ ...mutedTextStyle, color: "var(--warning, #b45309)" }}>
@@ -144,13 +163,13 @@ export function BillingTab() {
           )}
           {periodEnd && !state.subscription?.cancel_at_period_end && (
             <p style={mutedTextStyle}>
-              Next renewal{" "}
+              Renews{" "}
               {periodEnd.toLocaleDateString(undefined, {
                 year: "numeric",
                 month: "long",
                 day: "numeric",
               })}{" "}
-              · billed {state.subscription?.plan_interval ?? "monthly"}.
+              · billed {planIntervalAdverb}.
             </p>
           )}
           {state.subscription?.status === "past_due" && (
@@ -159,7 +178,7 @@ export function BillingTab() {
             </p>
           )}
 
-          <div style={{ marginTop: 18 }}>
+          <div style={{ marginTop: "var(--space-6)" }}>
             <button
               onClick={openPortal}
               disabled={actionPending}
@@ -174,22 +193,25 @@ export function BillingTab() {
       {/* ── Free state — show usage progress + upgrade CTA ────────────── */}
       {!isPro && (
         <>
-          <p style={primaryTextStyle}>
-            You're on the Free plan. Quotas reset on the 1st of every month.
+          <h3 style={editorialHeadingStyle}>On the Free plan.</h3>
+          <p style={leadTextStyle}>
+            Three bookings a month, one Decision Room. Quotas reset on the 1st.
           </p>
 
-          <UsageBar
-            label="Bookings this month"
-            used={state.bookings.used}
-            limit={state.bookings.limit ?? 0}
-          />
-          <UsageBar
-            label="Decision Rooms this month"
-            used={state.rooms.used}
-            limit={state.rooms.limit ?? 0}
-          />
+          <div style={{ marginTop: "var(--space-6)", display: "flex", flexDirection: "column", gap: "var(--space-5)" }}>
+            <UsageBar
+              label="Bookings this month"
+              used={state.bookings.used}
+              limit={state.bookings.limit ?? 0}
+            />
+            <UsageBar
+              label="Decision Rooms this month"
+              used={state.rooms.used}
+              limit={state.rooms.limit ?? 0}
+            />
+          </div>
 
-          <div style={{ display: "flex", gap: 10, marginTop: 18, flexWrap: "wrap" }}>
+          <div style={{ display: "flex", gap: "var(--space-3)", marginTop: "var(--space-6)", flexWrap: "wrap" }}>
             <a
               href="/pricing"
               style={{ ...primaryButtonStyle, textDecoration: "none", display: "inline-block" }}
@@ -218,20 +240,20 @@ function UsageBar({
   const pct = limit > 0 ? Math.min(100, Math.round((used / limit) * 100)) : 0;
   const exceeded = used >= limit && limit > 0;
   return (
-    <div style={{ marginTop: 14 }}>
+    <div>
       <div
         style={{
           display: "flex",
           justifyContent: "space-between",
           alignItems: "baseline",
-          marginBottom: 6,
+          marginBottom: "var(--space-2)",
         }}
       >
         <span
           style={{
             fontFamily: "var(--font-dm-sans)",
-            fontSize: 13,
-            color: "var(--text-primary, #111)",
+            fontSize: 15,
+            color: "var(--ink-8)",
             fontWeight: 500,
           }}
         >
@@ -240,8 +262,8 @@ function UsageBar({
         <span
           style={{
             fontFamily: "var(--font-dm-sans)",
-            fontSize: 12,
-            color: exceeded ? "var(--danger, #dc2626)" : "var(--text-secondary, #666)",
+            fontSize: 14,
+            color: exceeded ? "var(--danger, #dc2626)" : "var(--ink-5)",
             fontVariantNumeric: "tabular-nums",
           }}
         >
@@ -250,9 +272,9 @@ function UsageBar({
       </div>
       <div
         style={{
-          height: 6,
+          height: 8,
           borderRadius: 999,
-          background: "var(--card-2, #f1ece2)",
+          background: "var(--ink-2)",
           overflow: "hidden",
         }}
       >
@@ -270,40 +292,37 @@ function UsageBar({
 }
 
 // ── Style fragments (parent /account wraps in EditorialCard for chrome) ─
+// Hierarchy mirrors /pricing: Playfair serif for primary heading + 17px lead
+// + 14px muted secondary, so the card content reads as same product family
+// as the page hero rather than a separate functional widget.
 
-function SectionLabel({ children }: { children: React.ReactNode }) {
-  return (
-    <p
-      style={{
-        fontFamily: "var(--font-dm-sans)",
-        fontSize: 11,
-        fontWeight: 700,
-        textTransform: "uppercase",
-        letterSpacing: "0.08em",
-        color: "var(--text-muted, #aaa)",
-        marginBottom: 0,
-      }}
-    >
-      {children}
-    </p>
-  );
-}
+const editorialHeadingStyle: React.CSSProperties = {
+  fontFamily: "var(--font-playfair), Georgia, serif",
+  fontSize: "28px",
+  fontWeight: 600,
+  lineHeight: 1.1,
+  letterSpacing: "-0.02em",
+  color: "var(--ink-9)",
+  margin: 0,
+};
 
-const primaryTextStyle: React.CSSProperties = {
+const leadTextStyle: React.CSSProperties = {
   fontFamily: "var(--font-dm-sans)",
-  fontSize: 13,
-  color: "var(--text-primary, #111)",
-  lineHeight: 1.7,
-  marginTop: 12,
-  marginBottom: 8,
+  fontSize: 17,
+  color: "var(--ink-7)",
+  lineHeight: 1.55,
+  marginTop: "var(--space-3)",
+  marginBottom: 0,
+  maxWidth: "52ch",
 };
 
 const mutedTextStyle: React.CSSProperties = {
   fontFamily: "var(--font-dm-sans)",
-  fontSize: 12,
-  color: "var(--text-secondary, #666)",
-  lineHeight: 1.7,
+  fontSize: 14,
+  color: "var(--ink-5)",
+  lineHeight: 1.6,
   margin: 0,
+  marginTop: "var(--space-3)",
 };
 
 const primaryButtonStyle: React.CSSProperties = {
@@ -311,8 +330,8 @@ const primaryButtonStyle: React.CSSProperties = {
   border: "none",
   fontFamily: "var(--font-dm-sans)",
   fontWeight: 500,
-  fontSize: 13,
-  padding: "10px 18px",
+  fontSize: 15,
+  padding: "12px 22px",
   borderRadius: 999,
   background: "var(--ink-9, #1A150D)",
   color: "var(--ink-1, #FBF8F2)",
@@ -323,11 +342,11 @@ const ghostButtonStyle: React.CSSProperties = {
   appearance: "none",
   fontFamily: "var(--font-dm-sans)",
   fontWeight: 500,
-  fontSize: 13,
-  padding: "10px 18px",
+  fontSize: 15,
+  padding: "12px 22px",
   borderRadius: 999,
   background: "transparent",
-  color: "var(--text-primary, #111)",
-  border: "1px solid var(--border, #d4d4d8)",
+  color: "var(--ink-8)",
+  border: "1px solid var(--ink-3)",
   cursor: "pointer",
 };
