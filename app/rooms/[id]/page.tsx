@@ -19,6 +19,7 @@ import type {
 import type { RecommendationCard, FlightRecommendationCard, ActivityRecommendationCard } from "@/lib/types";
 import { extractOptions, resolveAcceptedOption, tallyVotes } from "@/lib/rooms/proposal-shape";
 import { CARD, CARD_MUTED, CTA, CTA_GHOST, PAGE } from "@/app/_ui/tokens";
+import { EyebrowLabel } from "@/app/_shared/editorial";
 import GlobalNav from "@/components/GlobalNav";
 import PhotoCarousel from "@/components/PhotoCarousel";
 import FlightCard from "@/components/FlightCard";
@@ -567,18 +568,41 @@ function HeaderBar({
     <>
       <button
         onClick={() => router.push("/rooms")}
-        className="relative mb-4 inline-flex items-center gap-1.5 rounded-xl border border-[var(--gold)]/35 bg-[var(--gold)]/5 px-3 py-1.5 text-sm font-medium text-transparent transition-colors hover:border-[var(--gold)]/60 hover:bg-[var(--gold)]/10"
+        className="mb-6 inline-flex items-center gap-1.5 rounded-full border px-3.5 py-1.5 text-sm font-medium transition-colors"
+        style={{
+          borderColor: "var(--gold)",
+          background: "transparent",
+          color: "var(--gold)",
+        }}
+        onMouseEnter={(e) => {
+          e.currentTarget.style.background = "rgba(201,168,76,0.08)";
+        }}
+        onMouseLeave={(e) => {
+          e.currentTarget.style.background = "transparent";
+        }}
       >
-        <span aria-hidden className="text-[var(--gold)]">←</span>
-        <span className="text-[var(--gold)]">Back to rooms</span>
-        ← All rooms
+        <span aria-hidden>←</span>
+        <span>Back to rooms</span>
       </button>
-      <div className="flex items-start justify-between gap-3 mb-2">
+      <div className="flex items-start justify-between gap-4 mb-3">
         <div className="min-w-0 flex-1">
-          <p className="mb-1 text-[11px] uppercase tracking-[0.14em] text-[var(--text-muted)]">Room</p>
-          <h1 className="text-2xl font-semibold text-[var(--text-primary)] leading-tight">{title}</h1>
+          <EyebrowLabel variant="filled">Room</EyebrowLabel>
+          <h1
+            className="leading-tight mt-3"
+            style={{
+              fontFamily: "var(--font-playfair), Georgia, serif",
+              fontSize: "clamp(28px, 4vw, 44px)",
+              fontWeight: 600,
+              color: "var(--ink-9)",
+              letterSpacing: "-0.02em",
+              lineHeight: 1.1,
+              margin: 0,
+            }}
+          >
+            {title}
+          </h1>
         </div>
-        <span className={`text-[10px] font-medium px-2 py-0.5 rounded-full whitespace-nowrap mt-1 ${s.tone}`}>
+        <span className={`text-[10px] font-medium px-2 py-0.5 rounded-full whitespace-nowrap mt-2 ${s.tone}`}>
           {s.text}
         </span>
       </div>
