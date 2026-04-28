@@ -79,15 +79,15 @@ export function BillingTab() {
 
   if (loading) {
     return (
-      <Card>
+      <>
         <SectionLabel>Billing</SectionLabel>
         <p style={mutedTextStyle}>Loading…</p>
-      </Card>
+      </>
     );
   }
   if (error || !state) {
     return (
-      <Card>
+      <>
         <SectionLabel>Billing</SectionLabel>
         <p style={{ ...mutedTextStyle, color: "var(--danger, #dc2626)" }}>
           {error ?? "Couldn't load billing state."}
@@ -95,7 +95,7 @@ export function BillingTab() {
         <button onClick={load} style={ghostButtonStyle}>
           Retry
         </button>
-      </Card>
+      </>
     );
   }
 
@@ -105,7 +105,7 @@ export function BillingTab() {
     : null;
 
   return (
-    <Card>
+    <>
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 14 }}>
         <SectionLabel>Billing</SectionLabel>
         <span
@@ -202,7 +202,7 @@ export function BillingTab() {
           </div>
         </>
       )}
-    </Card>
+    </>
   );
 }
 
@@ -269,21 +269,7 @@ function UsageBar({
   );
 }
 
-// ── Style fragments (consistent with neighboring tabs in /account) ──────
-function Card({ children }: { children: React.ReactNode }) {
-  return (
-    <div
-      style={{
-        borderRadius: 18,
-        border: "0.5px solid var(--border, #e5e7eb)",
-        background: "var(--card, #fff)",
-        padding: "18px 18px 20px",
-      }}
-    >
-      {children}
-    </div>
-  );
-}
+// ── Style fragments (parent /account wraps in EditorialCard for chrome) ─
 
 function SectionLabel({ children }: { children: React.ReactNode }) {
   return (

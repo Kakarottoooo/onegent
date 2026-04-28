@@ -1,6 +1,11 @@
 import type { Metadata } from "next";
 import GlobalNav from "@/components/GlobalNav";
 import { UpgradeButton } from "./_components/UpgradeButton";
+import {
+  EditorialCard,
+  EditorialHero,
+  EyebrowLabel,
+} from "@/app/_shared/editorial";
 
 export const metadata: Metadata = {
   title: "Pricing — Onegent",
@@ -62,58 +67,16 @@ export default function PricingPage() {
         {/* ── Hero ─────────────────────────────────────────────────────── */}
         <section
           style={{
-            maxWidth: "880px",
-            margin: "0 auto",
             padding: "var(--space-20) var(--space-6) var(--space-12)",
-            textAlign: "center",
           }}
         >
-          <span
-            style={{
-              display: "inline-block",
-              fontSize: "11px",
-              fontWeight: 600,
-              letterSpacing: "0.18em",
-              textTransform: "uppercase",
-              color: "var(--gold-text)",
-              background: "var(--gold-soft)",
-              padding: "6px 14px",
-              borderRadius: "var(--radius-pill)",
-              marginBottom: "var(--space-8)",
-            }}
-          >
-            Pricing
-          </span>
-          <h1
-            style={{
-              fontFamily: "var(--font-playfair), Georgia, serif",
-              fontSize: "clamp(40px, 7vw, 72px)",
-              fontWeight: 600,
-              lineHeight: 1.05,
-              letterSpacing: "-0.025em",
-              margin: 0,
-              color: "var(--ink-9)",
-              maxWidth: "16ch",
-              marginInline: "auto",
-            }}
-          >
-            Free for casual use. Pro when you want more.
-          </h1>
-          <p
-            style={{
-              marginTop: "var(--space-8)",
-              fontSize: "19px",
-              lineHeight: 1.6,
-              color: "var(--ink-6)",
-              maxWidth: "52ch",
-              marginInline: "auto",
-            }}
-          >
-            Three bookings a month is plenty if you're planning a date night
-            now and a weekend trip later. Pro lifts every limit and adds
-            priority queue, daily price re-checks, and same-day email
-            support.
-          </p>
+          <EditorialHero
+            eyebrow="Pricing"
+            title="Free for casual use. Pro when you want more."
+            subtitle="Three bookings a month is plenty if you're planning a date night now and a weekend trip later. Pro lifts every limit and adds priority queue, daily price re-checks, and same-day email support."
+            align="center"
+            size="marketing"
+          />
         </section>
 
         {/* ── Tier cards ───────────────────────────────────────────────── */}
@@ -128,12 +91,10 @@ export default function PricingPage() {
           }}
         >
           {/* Free card */}
-          <article
+          <EditorialCard
+            variant="flat"
+            padding="spacious"
             style={{
-              background: "var(--card)",
-              border: "1px solid var(--ink-3)",
-              borderRadius: "var(--radius-2xl)",
-              padding: "var(--space-10) var(--space-8) var(--space-8)",
               display: "flex",
               flexDirection: "column",
               gap: "var(--space-6)",
@@ -211,20 +172,17 @@ export default function PricingPage() {
             >
               You're on Free
             </button>
-          </article>
+          </EditorialCard>
 
           {/* Pro card */}
-          <article
+          <EditorialCard
+            variant="highlight"
+            padding="spacious"
             style={{
-              background: "linear-gradient(180deg, var(--card) 0%, var(--gold-soft) 100%)",
-              border: "1px solid var(--gold)",
-              borderRadius: "var(--radius-2xl)",
-              padding: "var(--space-10) var(--space-8) var(--space-8)",
               display: "flex",
               flexDirection: "column",
               gap: "var(--space-6)",
               position: "relative",
-              boxShadow: "var(--shadow-3)",
             }}
           >
             <span
@@ -321,7 +279,7 @@ export default function PricingPage() {
                 Or pay yearly · $79
               </UpgradeButton>
             </div>
-          </article>
+          </EditorialCard>
         </section>
 
         {/* ── Comparison ───────────────────────────────────────────────── */}

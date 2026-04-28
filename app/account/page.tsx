@@ -10,6 +10,10 @@ import {
   ControlsSettingsTab,
 } from "@/app/permissions/page";
 import { BillingTab } from "./_components/BillingTab";
+import {
+  EditorialCard,
+  EditorialHero,
+} from "@/app/_shared/editorial";
 
 type AccountTab =
   | "identity"
@@ -304,32 +308,14 @@ function AccountPageInner() {
     <div style={{ minHeight: "100vh", backgroundColor: "var(--bg, #fafaf9)" }}>
       <GlobalNav active="other" />
 
-      <main style={{ maxWidth: 900, margin: "0 auto", padding: "32px 20px 88px" }}>
-        <div style={{ marginBottom: 28 }}>
-          <h1
-            style={{
-              fontFamily: "var(--font-playfair, serif)",
-              fontSize: 34,
-              fontWeight: 700,
-              color: "var(--text-primary, #111)",
-              marginBottom: 8,
-              letterSpacing: "-0.02em",
-            }}
-          >
-            Account
-          </h1>
-          <p
-            style={{
-              fontFamily: "var(--font-dm-sans)",
-              fontSize: 14,
-              color: "var(--text-secondary, #666)",
-              lineHeight: 1.7,
-              maxWidth: 640,
-            }}
-          >
-            Identity, personas, control defaults, model routing, and billing live here.
-          </p>
-        </div>
+      <main style={{ maxWidth: 900, margin: "0 auto", padding: "var(--space-16) var(--space-6) var(--space-24)" }}>
+        <EditorialHero
+          eyebrow="Account"
+          title="Your settings."
+          subtitle="Identity, personas, control defaults, model routing, and billing live here."
+          align="left"
+          size="page"
+        />
 
         <div
           style={{
@@ -368,13 +354,11 @@ function AccountPageInner() {
         </div>
 
         {activeTab === "identity" && (
-          <section
+          <EditorialCard
+            variant="premium"
+            as="section"
             style={{
-              borderRadius: 24,
-              border: "0.5px solid rgba(201,168,76,0.22)",
-              background:
-                "linear-gradient(180deg, rgba(42,38,33,0.96) 0%, rgba(31,28,25,0.98) 100%)",
-              boxShadow: "0 24px 60px rgba(0,0,0,0.16)",
+              padding: 0,
               overflow: "hidden",
               marginBottom: 28,
             }}
@@ -893,16 +877,32 @@ function AccountPageInner() {
               )}
             </div>
           </div>
-          </section>
+          </EditorialCard>
         )}
 
-        {activeTab === "profiles" && <BookingProfileTab />}
+        {activeTab === "profiles" && (
+          <EditorialCard variant="flat" padding="default">
+            <BookingProfileTab />
+          </EditorialCard>
+        )}
 
-        {activeTab === "controls" && <ControlsSettingsTab />}
+        {activeTab === "controls" && (
+          <EditorialCard variant="flat" padding="default">
+            <ControlsSettingsTab />
+          </EditorialCard>
+        )}
 
-        {activeTab === "models" && <AgentModelTab />}
+        {activeTab === "models" && (
+          <EditorialCard variant="flat" padding="default">
+            <AgentModelTab />
+          </EditorialCard>
+        )}
 
-        {activeTab === "billing" && <BillingTab />}
+        {activeTab === "billing" && (
+          <EditorialCard variant="flat" padding="default">
+            <BillingTab />
+          </EditorialCard>
+        )}
       </main>
     </div>
   );
