@@ -241,9 +241,39 @@ export default function RoomsListPage() {
           <div className="lg:grid lg:grid-cols-[264px_minmax(0,1fr)]">
             <aside className="hidden lg:block">
               <div className="sticky top-20 px-7 py-7">
-                <p className="text-[11px] uppercase tracking-[0.16em] text-[var(--text-muted)] mb-2">Rooms</p>
-                <h1 className="text-xl font-semibold text-[var(--text-primary)] leading-tight">Decision workspace</h1>
-                <p className="text-sm text-[var(--text-secondary)] mt-2 leading-6">
+                <span
+                  className="inline-flex items-center text-[11px] font-semibold uppercase mb-4 tracking-[0.18em]"
+                  style={{
+                    color: "var(--gold-text)",
+                    background: "var(--gold-soft)",
+                    padding: "5px 12px",
+                    borderRadius: "var(--radius-pill)",
+                  }}
+                >
+                  Rooms
+                </span>
+                <h1
+                  className="leading-tight"
+                  style={{
+                    fontFamily: "var(--font-playfair), Georgia, serif",
+                    fontSize: "clamp(28px, 3vw, 36px)",
+                    fontWeight: 600,
+                    color: "var(--ink-9)",
+                    letterSpacing: "-0.02em",
+                    lineHeight: 1.1,
+                    margin: 0,
+                  }}
+                >
+                  Decision workspace.
+                </h1>
+                <p
+                  className="mt-3 leading-6"
+                  style={{
+                    fontSize: "15px",
+                    color: "var(--ink-6)",
+                    maxWidth: "32ch",
+                  }}
+                >
                   Shared decisions for dining, hotels, flights, and activities.
                 </p>
 
@@ -285,7 +315,18 @@ export default function RoomsListPage() {
 
             <main className="min-w-0 border-t border-[var(--border)] lg:border-t-0 lg:border-l px-5 py-6 md:px-7 md:py-7">
             <div className="lg:hidden flex items-baseline justify-between mb-6">
-              <h1 className="text-xl font-semibold text-[var(--text-primary)]">Decision Rooms</h1>
+              <h1
+                style={{
+                  fontFamily: "var(--font-playfair), Georgia, serif",
+                  fontSize: "26px",
+                  fontWeight: 600,
+                  color: "var(--ink-9)",
+                  letterSpacing: "-0.02em",
+                  margin: 0,
+                }}
+              >
+                Decision Rooms.
+              </h1>
               <div className="flex items-center gap-3">
                 <Link
                   href="/contacts"
@@ -324,11 +365,38 @@ export default function RoomsListPage() {
               </div>
             )}
 
-            <div className="mb-6 flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
+            <div className="mb-8 flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
               <div>
-                <p className="text-[11px] uppercase tracking-[0.14em] text-[var(--text-muted)]">Workspace</p>
-                <p className="mt-1 text-2xl lg:text-3xl font-semibold text-[var(--text-primary)]">Current rooms</p>
-                <p className="text-sm text-[var(--text-secondary)] mt-1">
+                <span
+                  className="inline-flex items-center text-[11px] font-semibold uppercase tracking-[0.18em]"
+                  style={{
+                    color: "var(--ink-5)",
+                    marginBottom: "var(--space-3)",
+                  }}
+                >
+                  Workspace
+                </span>
+                <p
+                  style={{
+                    fontFamily: "var(--font-playfair), Georgia, serif",
+                    fontSize: "clamp(28px, 3.5vw, 40px)",
+                    fontWeight: 600,
+                    color: "var(--ink-9)",
+                    letterSpacing: "-0.02em",
+                    lineHeight: 1.1,
+                    margin: 0,
+                  }}
+                >
+                  Current rooms.
+                </p>
+                <p
+                  className="mt-2"
+                  style={{
+                    fontSize: "16px",
+                    color: "var(--ink-6)",
+                    lineHeight: 1.55,
+                  }}
+                >
                   {rooms === null
                     ? "Refreshing your rooms."
                     : rooms.length
