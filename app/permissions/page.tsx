@@ -13,6 +13,7 @@
 import { Suspense, useState, useEffect, useCallback } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import GlobalNav from "@/components/GlobalNav";
+import { SectionIntro } from "@/app/_shared/editorial";
 import { useLanguage } from "@/app/hooks/useLanguage";
 import { usePreferences } from "@/app/hooks/usePreferences";
 import type { RelationshipProfile, RelationshipType } from "@/lib/memory";
@@ -573,31 +574,27 @@ export function BookingProfileTab() {
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 0 }}>
-      {/* Header */}
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 16 }}>
-        <div>
-          <p style={{ fontFamily: "var(--font-dm-sans)", fontSize: 13, fontWeight: 700, color: "var(--text-primary, #111)" }}>
-            My Profiles
-          </p>
-          <p style={{ fontFamily: "var(--font-dm-sans)", fontSize: 11, color: "var(--text-muted, #aaa)" }}>
-            Card numbers encrypted on our servers. CVV never stored.
-          </p>
-        </div>
-        {!addingNew && (
-          <button onClick={startAddNew} style={btnStyle(true)}>+ Add</button>
-        )}
-      </div>
+      <SectionIntro
+        eyebrow="Profiles"
+        title="Booking profiles."
+        description="Identity, contact, payment, and travel docs the agent uses to fill forms during a booking. Card numbers are AES-256 encrypted on our servers. CVV is never stored."
+        trailing={
+          !addingNew ? (
+            <button onClick={startAddNew} style={btnStyle(true)}>+ Add</button>
+          ) : undefined
+        }
+      />
 
       {/* Profile list */}
       {profiles.length === 0 && !addingNew && (
         <div style={{
-          textAlign: "center", padding: "32px 20px", borderRadius: 14,
+          textAlign: "center", padding: "40px 24px", borderRadius: 14,
           border: "0.5px dashed var(--border, #e5e7eb)", marginBottom: 20,
         }}>
-          <p style={{ fontFamily: "var(--font-dm-sans)", fontSize: 13, color: "var(--text-secondary, #666)" }}>
+          <p style={{ fontFamily: "var(--font-dm-sans)", fontSize: 16, fontWeight: 500, color: "var(--ink-8)" }}>
             No profiles yet
           </p>
-          <p style={{ fontFamily: "var(--font-dm-sans)", fontSize: 11, color: "var(--text-muted, #aaa)", marginTop: 4 }}>
+          <p style={{ fontFamily: "var(--font-dm-sans)", fontSize: 14, color: "var(--ink-5)", marginTop: 6 }}>
             Add a profile to enable auto-fill during booking
           </p>
         </div>
@@ -610,30 +607,31 @@ export function BookingProfileTab() {
             onClick={() => openProfile(p)}
             style={{
               display: "flex", alignItems: "center", justifyContent: "space-between",
-              padding: "12px 14px", borderRadius: expandedId === p.id ? "12px 12px 0 0" : 12,
+              padding: "16px 18px", borderRadius: expandedId === p.id ? "14px 14px 0 0" : 14,
               cursor: "pointer", userSelect: "none",
               border: `0.5px solid ${p.is_default ? "var(--gold, #C9A84C)" : "var(--border, #e5e7eb)"}`,
               backgroundColor: p.is_default ? "rgba(201,168,76,0.06)" : "var(--card, #fff)",
+              transition: "border-color 160ms ease, background-color 160ms ease",
             }}
           >
-            <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-              <span style={{ fontSize: 18 }}>👤</span>
+            <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+              <span style={{ fontSize: 20 }}>👤</span>
               <div>
-                <p style={{ fontFamily: "var(--font-dm-sans)", fontSize: 13, fontWeight: 600, color: "var(--text-primary, #111)" }}>
+                <p style={{ fontFamily: "var(--font-dm-sans)", fontSize: 16, fontWeight: 600, color: "var(--ink-9)", letterSpacing: "-0.005em" }}>
                   {p.label}
                   {p.is_default && (
-                    <span style={{ marginLeft: 8, fontSize: 10, fontWeight: 700, color: "var(--gold, #C9A84C)", backgroundColor: "rgba(201,168,76,0.1)", padding: "1px 7px", borderRadius: 20 }}>
+                    <span style={{ marginLeft: 10, fontSize: 11, fontWeight: 600, letterSpacing: "0.06em", textTransform: "uppercase", color: "var(--gold-text)", backgroundColor: "var(--gold-soft)", padding: "2px 9px", borderRadius: 999 }}>
                       Default
                     </span>
                   )}
                 </p>
-                <p style={{ fontFamily: "var(--font-dm-sans)", fontSize: 11, color: "var(--text-muted, #aaa)" }}>
+                <p style={{ fontFamily: "var(--font-dm-sans)", fontSize: 14, color: "var(--ink-5)", marginTop: 2 }}>
                   {[p.first_name, p.last_name].filter(Boolean).join(" ") || "No name"}
                   {p.card_number_masked && ` · ${p.card_number_masked}`}
                 </p>
               </div>
             </div>
-            <span style={{ color: "var(--text-muted, #aaa)", fontSize: 12 }}>{expandedId === p.id ? "▲" : "▼"}</span>
+            <span style={{ color: "var(--ink-5)", fontSize: 13 }}>{expandedId === p.id ? "▲" : "▼"}</span>
           </div>
 
           {/* Expanded edit form */}
@@ -691,7 +689,7 @@ export function BookingProfileTab() {
         </div>
       )}
 
-      <p style={{ fontFamily: "var(--font-dm-sans)", fontSize: 11, color: "var(--text-muted, #aaa)", marginTop: 20, lineHeight: 1.6 }}>
+      <p style={{ fontFamily: "var(--font-dm-sans)", fontSize: 14, color: "var(--ink-5)", marginTop: 24, lineHeight: 1.6 }}>
         🔒 Card numbers are AES-256 encrypted and stored securely. CVV is never saved anywhere. Final payment always requires your action.
       </p>
     </div>
@@ -931,21 +929,26 @@ export function AgentModelTab() {
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 0 }}>
+      <SectionIntro
+        eyebrow="Models"
+        title="Agent models."
+        description="Each agent layer (conversational chat, browser automation, reasoning, ranking) can run on a different backend. Bring your own API keys per provider — Onegent never proxies them through our servers."
+      />
 
       {/* Status banner — summarises both active layers */}
       <div style={{
-        display: "flex", alignItems: "center", gap: 10,
-        padding: "12px 14px", borderRadius: 12, marginBottom: 24,
+        display: "flex", alignItems: "center", gap: 12,
+        padding: "14px 18px", borderRadius: 14, marginBottom: 28,
         backgroundColor: "rgba(201,168,76,0.08)",
         border: "0.5px solid var(--gold, #C9A84C)",
       }}>
-        <span style={{ fontSize: 20 }}>🧩</span>
+        <span style={{ fontSize: 22 }}>🧩</span>
         <div>
-          <p style={{ fontFamily: "var(--font-dm-sans)", fontSize: 13, fontWeight: 600, color: "var(--text-primary, #111)" }}>
-            Layered models — each agent layer can use a different backend
+          <p style={{ fontFamily: "var(--font-dm-sans)", fontSize: 15, fontWeight: 600, color: "var(--ink-9)", letterSpacing: "-0.005em" }}>
+            Active layers
           </p>
-          <p style={{ fontFamily: "var(--font-dm-sans)", fontSize: 11, color: "var(--text-muted, #aaa)" }}>
-            Conversational: {convLabel} · Browser: {browserLabel}
+          <p style={{ fontFamily: "var(--font-dm-sans)", fontSize: 14, color: "var(--ink-6)", marginTop: 2 }}>
+            Conversational: <strong style={{ color: "var(--ink-8)" }}>{convLabel}</strong> · Browser: <strong style={{ color: "var(--ink-8)" }}>{browserLabel}</strong>
           </p>
         </div>
       </div>
@@ -1623,6 +1626,12 @@ function PermissionsTab({ settings, update, tp }: {
 
   return (
     <div>
+      <SectionIntro
+        eyebrow="Controls"
+        title="Agent autonomy."
+        description="How much initiative the booking agent has when first-choice options aren't available — time slots, venues, budget tolerance, and hard limits per scenario."
+      />
+
       {/* Autopilot Level */}
       <SectionLabel>{tp.autopilotLabel}</SectionLabel>
       <div style={{ display: "flex", gap: 10 }}>

@@ -149,6 +149,86 @@ export function EyebrowLabel({
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
+// SectionIntro
+// ═══════════════════════════════════════════════════════════════════════════
+//
+// One step down from EditorialHero — the in-card section header for tab
+// content (e.g. "Booking profiles." inside the Profiles tab in /account).
+//
+// Same Playfair + lead structure but smaller (24-32px serif, 16-17px lead),
+// so a card containing it feels like a child of the page hero rather than a
+// peer. Without this, tab content reads as a "settings panel" disconnected
+// from the editorial hero — the gap that prompted this primitive.
+//
+// Used by: /account Profiles / Models / Controls tabs. Future: any
+// EditorialCard that needs a labeled section heading.
+
+export type SectionIntroProps = {
+  eyebrow?: string;
+  title: ReactNode;
+  description?: ReactNode;
+  trailing?: ReactNode; // e.g. an Add / Settings button on the right
+};
+
+export function SectionIntro({
+  eyebrow,
+  title,
+  description,
+  trailing,
+}: SectionIntroProps) {
+  return (
+    <header
+      style={{
+        display: "flex",
+        alignItems: "flex-start",
+        justifyContent: "space-between",
+        gap: "var(--space-4)",
+        flexWrap: "wrap",
+        marginBottom: "var(--space-6)",
+      }}
+    >
+      <div
+        style={{
+          display: "flex",
+          flexDirection: "column",
+          gap: "var(--space-3)",
+          minWidth: 0,
+        }}
+      >
+        {eyebrow ? <EyebrowLabel variant="filled">{eyebrow}</EyebrowLabel> : null}
+        <h2
+          style={{
+            fontFamily: "var(--font-playfair), Georgia, serif",
+            fontSize: "clamp(24px, 3vw, 32px)",
+            fontWeight: 600,
+            lineHeight: 1.15,
+            letterSpacing: "-0.02em",
+            color: "var(--ink-9)",
+            margin: 0,
+          }}
+        >
+          {title}
+        </h2>
+        {description ? (
+          <p
+            style={{
+              fontSize: "16px",
+              lineHeight: 1.6,
+              color: "var(--ink-6)",
+              maxWidth: "60ch",
+              margin: 0,
+            }}
+          >
+            {description}
+          </p>
+        ) : null}
+      </div>
+      {trailing ? <div style={{ flexShrink: 0 }}>{trailing}</div> : null}
+    </header>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
 // EditorialCard
 // ═══════════════════════════════════════════════════════════════════════════
 //
