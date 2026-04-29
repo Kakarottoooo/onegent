@@ -12,6 +12,7 @@ import {
 import GlobalNav from "@/components/GlobalNav";
 import { EditorialHero, EyebrowLabel } from "@/app/_shared/editorial";
 import ForkAsDrButton from "./ForkAsDrButton";
+import SocialFooter from "./SocialFooter";
 
 type Params = { params: Promise<{ slug: string }> };
 
@@ -204,6 +205,10 @@ export default async function ShareSlugPage({ params }: Params) {
               </p>
             )}
           </div>
+
+          {artifact.visibility === "public" && (
+            <SocialFooter slug={slug} isSignedIn={!!userId} currentUserId={userId ?? null} />
+          )}
 
           <PlanYoursFooter />
         </main>

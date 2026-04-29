@@ -950,6 +950,195 @@ export async function softDeleteSharedArtifact(id: string, ownerId: string): Pro
   return (result.rowCount ?? 0) > 0;
 }
 
+// ═══════════════════════════════════════════════════════════════════════════
+// Reactions + Comments on shared artifacts (P6 — social feedback loop).
+//
+// Why a thin reactions table instead of a JSONB column on shared_artifacts:
+// per-user toggling needs row-level uniqueness, and the table makes
+// "did *I* react?" + counts cheap with a single user-scoped lookup.
+// ═══════════════════════════════════════════════════════════════════════════
+
+let sharedArtifactReactionsTableReady: Promise<void> | null = null;
+let sharedArtifactCommentsTableReady: Promise<void> | null = null;
+
+export async function ensureSharedArtifactReactionsTable(): Promise<void> {
+  if (!sharedArtifactReactionsTableReady) {
+    sharedArtifactReactionsTableReady = (async () => {
+      await sql`
+        CREATE TABLE IF NOT EXISTS shared_artifact_reactions (
+          artifact_id  TEXT NOT NULL,
+          user_id      TEXT NOT NULL,
+          kind         TEXT NOT NULL DEFAULT 'heart',
+          created_at   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          PRIMARY KEY (artifact_id, user_id, kind)
+        )
+      `;
+      await sql`CREATE INDEX IF NOT EXISTS sar_artifact_idx ON shared_artifact_reactions (artifact_id)`;
+    })().catch((err) => {
+      sharedArtifactReactionsTableReady = null;
+      throw err;
+    });
+  }
+  await sharedArtifactReactionsTableReady;
+}
+
+export async function ensureSharedArtifactCommentsTable(): Promise<void> {
+  if (!sharedArtifactCommentsTableReady) {
+    sharedArtifactCommentsTableReady = (async () => {
+      await sql`
+        CREATE TABLE IF NOT EXISTS shared_artifact_comments (
+          id           TEXT PRIMARY KEY,
+          artifact_id  TEXT NOT NULL,
+          user_id      TEXT NOT NULL,
+          body         TEXT NOT NULL,
+          created_at   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          deleted_at   TIMESTAMPTZ
+        )
+      `;
+      await sql`CREATE INDEX IF NOT EXISTS sac_artifact_idx ON shared_artifact_comments (artifact_id) WHERE deleted_at IS NULL`;
+    })().catch((err) => {
+      sharedArtifactCommentsTableReady = null;
+      throw err;
+    });
+  }
+  await sharedArtifactCommentsTableReady;
+}
+
+export interface ReactionRow {
+  artifact_id: string;
+  user_id: string;
+  kind: string;
+  created_at: string;
+}
+
+export interface CommentRow {
+  id: string;
+  artifact_id: string;
+  user_id: string;
+  body: string;
+  created_at: string;
+  deleted_at: string | null;
+}
+
+export interface CommentWithProfile extends CommentRow {
+  display_name: string | null;
+  avatar_url: string | null;
+  profile_code: string | null;
+  username: string | null;
+}
+
+/**
+ * Toggle a reaction. Returns `{ active: true }` if the row was created,
+ * `{ active: false }` if the existing row was removed. Race-safe via
+ * primary key conflict.
+ */
+export async function toggleReaction(
+  artifactId: string,
+  userId: string,
+  kind = "heart",
+): Promise<{ active: boolean }> {
+  await ensureSharedArtifactReactionsTable();
+  const existing = await sql`
+    SELECT 1 FROM shared_artifact_reactions
+    WHERE artifact_id = ${artifactId} AND user_id = ${userId} AND kind = ${kind}
+    LIMIT 1
+  `;
+  if (existing.rows.length > 0) {
+    await sql`
+      DELETE FROM shared_artifact_reactions
+      WHERE artifact_id = ${artifactId} AND user_id = ${userId} AND kind = ${kind}
+    `;
+    return { active: false };
+  }
+  await sql`
+    INSERT INTO shared_artifact_reactions (artifact_id, user_id, kind)
+    VALUES (${artifactId}, ${userId}, ${kind})
+    ON CONFLICT DO NOTHING
+  `;
+  return { active: true };
+}
+
+/** Counts grouped by kind, plus whether the calling user reacted. */
+export async function getReactionState(
+  artifactId: string,
+  userId: string | null,
+): Promise<{ counts: Record<string, number>; mine: Record<string, boolean> }> {
+  await ensureSharedArtifactReactionsTable();
+  const counts = await sql<{ kind: string; n: number }>`
+    SELECT kind, COUNT(*)::int AS n
+    FROM shared_artifact_reactions
+    WHERE artifact_id = ${artifactId}
+    GROUP BY kind
+  `;
+  const countsMap: Record<string, number> = {};
+  for (const r of counts.rows) countsMap[r.kind] = r.n;
+  let mine: Record<string, boolean> = {};
+  if (userId) {
+    const my = await sql<{ kind: string }>`
+      SELECT kind FROM shared_artifact_reactions
+      WHERE artifact_id = ${artifactId} AND user_id = ${userId}
+    `;
+    mine = Object.fromEntries(my.rows.map((r) => [r.kind, true]));
+  }
+  return { counts: countsMap, mine };
+}
+
+export async function createComment(
+  artifactId: string,
+  userId: string,
+  body: string,
+): Promise<CommentRow> {
+  await ensureSharedArtifactCommentsTable();
+  const id = `cm_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 10)}`;
+  const trimmed = body.trim().slice(0, 280);
+  const result = await sql<CommentRow>`
+    INSERT INTO shared_artifact_comments (id, artifact_id, user_id, body)
+    VALUES (${id}, ${artifactId}, ${userId}, ${trimmed})
+    RETURNING *
+  `;
+  return result.rows[0];
+}
+
+export async function listCommentsByArtifact(
+  artifactId: string,
+  limit = 100,
+): Promise<CommentWithProfile[]> {
+  await Promise.all([ensureSharedArtifactCommentsTable(), ensureUserProfilesTable()]);
+  const result = await sql<CommentWithProfile>`
+    SELECT c.id, c.artifact_id, c.user_id, c.body, c.created_at, c.deleted_at,
+           p.display_name, p.avatar_url, p.profile_code, p.username
+    FROM shared_artifact_comments c
+    LEFT JOIN user_profiles p ON p.user_id = c.user_id
+    WHERE c.artifact_id = ${artifactId} AND c.deleted_at IS NULL
+    ORDER BY c.created_at ASC
+    LIMIT ${limit}
+  `;
+  return result.rows;
+}
+
+/**
+ * Comment soft-delete. Allowed if caller is the comment author OR the
+ * artifact owner. Returns true on success, false if neither matched (or
+ * the row is already gone).
+ */
+export async function softDeleteComment(
+  commentId: string,
+  callerId: string,
+): Promise<boolean> {
+  await Promise.all([ensureSharedArtifactCommentsTable(), ensureSharedArtifactsTable()]);
+  const result = await sql<{ id: string }>`
+    UPDATE shared_artifact_comments c
+    SET deleted_at = NOW()
+    FROM shared_artifacts a
+    WHERE c.artifact_id = a.id
+      AND c.id = ${commentId}
+      AND c.deleted_at IS NULL
+      AND (c.user_id = ${callerId} OR a.owner_id = ${callerId})
+    RETURNING c.id
+  `;
+  return result.rows.length > 0;
+}
+
 // ─── G-4: Venue quality degradation tracking ──────────────────────────────────
 
 let venueBaselinesTableReady: Promise<void> | null = null;
