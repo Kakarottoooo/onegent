@@ -10,6 +10,7 @@ import {
   setMemberConstraints,
   setMemberVotes,
   setMemberFeedback,
+  createNotification,
   type DecisionSessionMember,
 } from "@/lib/db";
 import { runAgentForTwoParty } from "@/lib/agent/two-party";
@@ -340,6 +341,27 @@ export async function PATCH(req: NextRequest, { params }: Params) {
           status: "decided",
           decided_card_id: decidedCardId,
         });
+        // Notify every member except the one who cast the deciding vote
+        // (they already see the decision land on their own screen).
+        try {
+          await Promise.all(
+            members
+              .filter((m) => m.user_id !== userId)
+              .map((m) =>
+                createNotification({
+                  userId: m.user_id,
+                  kind: "dr_decided",
+                  title: "Your group room reached a decision",
+                  body: null,
+                  linkUrl: `/decide/${id}`,
+                  metadata: { session_id: id, decided_card_id: decidedCardId },
+                  dedupeKey: `dr_decided:${id}:${m.user_id}`,
+                }),
+              ),
+          );
+        } catch {
+          /* non-fatal */
+        }
       }
       const updated = await getDecisionSession(id);
       return NextResponse.json({ session: updated });
@@ -371,6 +393,24 @@ export async function PATCH(req: NextRequest, { params }: Params) {
         status: "decided",
         decided_card_id: decidedCard.card_id,
       });
+      // Notify the *other* party in the 2-party DR — same shape as the
+      // group path, just one recipient instead of N.
+      try {
+        const otherUserId =
+          callerRole === "initiator" ? session.invitee_user_id : session.initiator_user_id;
+        if (otherUserId) {
+          await createNotification({
+            userId: otherUserId,
+            kind: "dr_decided",
+            title: "Your decision room reached a decision",
+            linkUrl: `/decide/${id}`,
+            metadata: { session_id: id, decided_card_id: decidedCard.card_id },
+            dedupeKey: `dr_decided:${id}:${otherUserId}`,
+          });
+        }
+      } catch {
+        /* non-fatal */
+      }
     }
 
     const updated = await getDecisionSession(id);

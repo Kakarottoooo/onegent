@@ -9,6 +9,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useLanguage, LANGUAGES } from "@/app/hooks/useLanguage";
 import { useAuth } from "@/app/hooks/useAuth";
+import NotificationBell from "./NotificationBell";
 
 type Page = "home" | "tasks" | "insights" | "metrics" | "rooms" | "calendar" | "contacts" | "other";
 
@@ -241,7 +242,9 @@ export default function GlobalNav({ active }: Props) {
           </div>
         </div>
 
-        <div style={{ position: "relative", flexShrink: 0 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 10, flexShrink: 0 }}>
+          {auth.isSignedIn && <NotificationBell />}
+          <div style={{ position: "relative" }}>
           {auth.isSignedIn ? (
             <>
               <button
@@ -630,6 +633,7 @@ export default function GlobalNav({ active }: Props) {
               </div>
             </div>
           )}
+          </div>
         </div>
       </div>
     </nav>

@@ -3,6 +3,8 @@ import { auth } from "@clerk/nextjs/server";
 import {
   getSharedArtifactBySlug,
   createComment,
+  createNotification,
+  getUserProfile,
   listCommentsByArtifact,
 } from "@/lib/db";
 
@@ -53,5 +55,29 @@ export async function POST(req: NextRequest, { params }: Params) {
   }
 
   const comment = await createComment(artifact.id, userId, text);
+
+  // Notify the artifact owner — but never self-notify (owner commenting
+  // on their own thing).
+  if (artifact.owner_id !== userId) {
+    try {
+      const fromProfile = await getUserProfile(userId);
+      const fromLabel =
+        fromProfile?.display_name ??
+        (fromProfile?.username
+          ? `@${fromProfile.username}`
+          : `@${fromProfile?.profile_code ?? "someone"}`);
+      await createNotification({
+        userId: artifact.owner_id,
+        kind: "comment_received",
+        title: `${fromLabel} commented on your share`,
+        body: text.slice(0, 140),
+        linkUrl: `/s/${slug}`,
+        metadata: { artifact_id: artifact.id, slug, from_user_id: userId, comment_id: comment.id },
+      });
+    } catch {
+      /* non-fatal */
+    }
+  }
+
   return NextResponse.json({ comment, artifact_owner_id: artifact.owner_id });
 }

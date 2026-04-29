@@ -1,6 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import { nanoid } from "nanoid";
-import { createDecisionSession, addDecisionSessionMember } from "@/lib/db";
+import {
+  createDecisionSession,
+  addDecisionSessionMember,
+  createNotification,
+  getUserProfile,
+} from "@/lib/db";
 import { auth } from "@clerk/nextjs/server";
 
 export async function POST(req: NextRequest) {
@@ -81,6 +86,35 @@ export async function POST(req: NextRequest) {
       await setMemberConstraints(sessionId, userId, initiatorConstraints.trim());
       for (const inviteeId of cleanedInvitees) {
         await addDecisionSessionMember(sessionId, inviteeId, false);
+      }
+    }
+
+    // Producer hook: notify each invitee they were pulled into a DR.
+    // For 2-party DRs we still notify the single invitee when bound by ID.
+    if (cleanedInvitees.length > 0 && userId) {
+      try {
+        const inviterProfile = await getUserProfile(userId);
+        const inviterLabel =
+          inviterProfile?.display_name ??
+          (inviterProfile?.username
+            ? `@${inviterProfile.username}`
+            : `@${inviterProfile?.profile_code ?? "someone"}`);
+        const groupSuffix = isGroup ? ` (${cleanedInvitees.length + 1}-person group)` : "";
+        await Promise.all(
+          cleanedInvitees.map((inviteeId) =>
+            createNotification({
+              userId: inviteeId,
+              kind: "dr_invite",
+              title: `${inviterLabel} invited you to a Decision Room${groupSuffix}`,
+              body: initiatorConstraints.trim().slice(0, 140),
+              linkUrl: `/decide/${sessionId}`,
+              metadata: { session_id: sessionId, inviter_id: userId },
+              dedupeKey: `dr_invite:${sessionId}:${inviteeId}`,
+            }),
+          ),
+        );
+      } catch {
+        /* swallow */
       }
     }
 

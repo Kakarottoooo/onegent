@@ -3,6 +3,8 @@ import { auth } from "@clerk/nextjs/server";
 import {
   canSendContactRequest,
   createContactRequest,
+  createNotification,
+  getUserProfile,
   getUserProfileByCode,
   getUserProfileByUsername,
   listContactsWithProfiles,
@@ -51,6 +53,27 @@ export async function POST(req: NextRequest) {
   }
 
   const row = await createContactRequest(userId, profile.user_id, note);
+
+  // Producer hook: notify the recipient. Best-effort; createNotification
+  // never throws into this request path.
+  try {
+    const fromProfile = await getUserProfile(userId);
+    const fromLabel =
+      fromProfile?.display_name ??
+      (fromProfile?.username ? `@${fromProfile.username}` : `@${fromProfile?.profile_code ?? "someone"}`);
+    await createNotification({
+      userId: profile.user_id,
+      kind: "contact_request",
+      title: `${fromLabel} wants to add you`,
+      body: note ?? null,
+      linkUrl: "/contacts",
+      metadata: { from_user_id: userId, request_id: row.id },
+      dedupeKey: `contact_request:${userId}->${profile.user_id}`,
+    });
+  } catch {
+    /* non-fatal */
+  }
+
   return NextResponse.json({
     request: {
       id: row.id,

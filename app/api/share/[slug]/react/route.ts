@@ -4,6 +4,8 @@ import {
   getSharedArtifactBySlug,
   toggleReaction,
   getReactionState,
+  createNotification,
+  getUserProfile,
 } from "@/lib/db";
 
 type Params = { params: Promise<{ slug: string }> };
@@ -56,6 +58,31 @@ export async function POST(req: NextRequest, { params }: Params) {
   }
 
   const toggled = await toggleReaction(artifact.id, userId, rawKind);
+
+  // Only notify on the *adding* edge, never on un-react. Dedupe per
+  // (reactor, artifact) so a flapping toggle doesn't spam the owner.
+  if (toggled.active && artifact.owner_id !== userId) {
+    try {
+      const fromProfile = await getUserProfile(userId);
+      const fromLabel =
+        fromProfile?.display_name ??
+        (fromProfile?.username
+          ? `@${fromProfile.username}`
+          : `@${fromProfile?.profile_code ?? "someone"}`);
+      await createNotification({
+        userId: artifact.owner_id,
+        kind: "reaction_received",
+        title: `${fromLabel} hearted your share`,
+        body: null,
+        linkUrl: `/s/${slug}`,
+        metadata: { artifact_id: artifact.id, slug, from_user_id: userId, kind: rawKind },
+        dedupeKey: `reaction:${artifact.id}:${userId}:${rawKind}`,
+      });
+    } catch {
+      /* non-fatal */
+    }
+  }
+
   const state = await getReactionState(artifact.id, userId);
   return NextResponse.json({ ...toggled, ...state });
 }

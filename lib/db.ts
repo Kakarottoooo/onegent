@@ -1116,6 +1116,162 @@ export async function listCommentsByArtifact(
   return result.rows;
 }
 
+// ═══════════════════════════════════════════════════════════════════════════
+// Notifications (P7 — unified inbox).
+//
+// One row per (recipient, event). The producer side fires-and-forgets via
+// createNotification; the bell icon polls unreadCount cheaply via a single
+// indexed query. Read state is local time on the row, not boolean, so
+// future analytics ("how fast do users notice new follows") works for free.
+// ═══════════════════════════════════════════════════════════════════════════
+
+let notificationsTableReady: Promise<void> | null = null;
+
+export async function ensureNotificationsTable(): Promise<void> {
+  if (!notificationsTableReady) {
+    notificationsTableReady = (async () => {
+      await sql`
+        CREATE TABLE IF NOT EXISTS notifications (
+          id          TEXT PRIMARY KEY,
+          user_id     TEXT NOT NULL,
+          kind        TEXT NOT NULL,
+          title       TEXT NOT NULL,
+          body        TEXT,
+          link_url    TEXT,
+          metadata    JSONB NOT NULL DEFAULT '{}',
+          read_at     TIMESTAMPTZ,
+          created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        )
+      `;
+      await sql`CREATE INDEX IF NOT EXISTS notifications_unread_idx ON notifications (user_id, created_at DESC) WHERE read_at IS NULL`;
+      await sql`CREATE INDEX IF NOT EXISTS notifications_user_idx ON notifications (user_id, created_at DESC)`;
+    })().catch((err) => {
+      notificationsTableReady = null;
+      throw err;
+    });
+  }
+  await notificationsTableReady;
+}
+
+export interface NotificationRow {
+  id: string;
+  user_id: string;
+  kind: string;
+  title: string;
+  body: string | null;
+  link_url: string | null;
+  metadata: Record<string, unknown>;
+  read_at: string | null;
+  created_at: string;
+}
+
+export type NotificationKind =
+  | "contact_request"
+  | "contact_accepted"
+  | "dr_invite"
+  | "dr_decided"
+  | "comment_received"
+  | "reaction_received";
+
+/**
+ * Best-effort: never throws into the calling request path. The producer
+ * side fires this and moves on; if the DB is momentarily unhappy, the user
+ * just doesn't get the bell ping.
+ */
+export async function createNotification(params: {
+  userId: string;
+  kind: NotificationKind;
+  title: string;
+  body?: string | null;
+  linkUrl?: string | null;
+  metadata?: Record<string, unknown>;
+  /** Optional dedupe key — if provided, suppress identical unread notifications. */
+  dedupeKey?: string;
+}): Promise<void> {
+  try {
+    await ensureNotificationsTable();
+    if (params.dedupeKey) {
+      const existing = await sql`
+        SELECT 1 FROM notifications
+        WHERE user_id = ${params.userId}
+          AND kind = ${params.kind}
+          AND metadata->>'dedupe_key' = ${params.dedupeKey}
+          AND read_at IS NULL
+        LIMIT 1
+      `;
+      if (existing.rows.length > 0) return;
+    }
+    const id = `nf_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 10)}`;
+    const meta = params.dedupeKey
+      ? { ...(params.metadata ?? {}), dedupe_key: params.dedupeKey }
+      : (params.metadata ?? {});
+    await sql`
+      INSERT INTO notifications (id, user_id, kind, title, body, link_url, metadata)
+      VALUES (
+        ${id},
+        ${params.userId},
+        ${params.kind},
+        ${params.title},
+        ${params.body ?? null},
+        ${params.linkUrl ?? null},
+        ${JSON.stringify(meta)}::jsonb
+      )
+    `;
+  } catch (err) {
+    console.error("[createNotification] swallowed", err);
+  }
+}
+
+export async function listNotifications(
+  userId: string,
+  opts: { unreadOnly?: boolean; limit?: number } = {},
+): Promise<NotificationRow[]> {
+  await ensureNotificationsTable();
+  const limit = opts.limit ?? 30;
+  if (opts.unreadOnly) {
+    const result = await sql<NotificationRow>`
+      SELECT * FROM notifications
+      WHERE user_id = ${userId} AND read_at IS NULL
+      ORDER BY created_at DESC
+      LIMIT ${limit}
+    `;
+    return result.rows;
+  }
+  const result = await sql<NotificationRow>`
+    SELECT * FROM notifications
+    WHERE user_id = ${userId}
+    ORDER BY created_at DESC
+    LIMIT ${limit}
+  `;
+  return result.rows;
+}
+
+export async function getUnreadNotificationCount(userId: string): Promise<number> {
+  await ensureNotificationsTable();
+  const result = await sql<{ n: number }>`
+    SELECT COUNT(*)::int AS n FROM notifications
+    WHERE user_id = ${userId} AND read_at IS NULL
+  `;
+  return result.rows[0]?.n ?? 0;
+}
+
+export async function markNotificationRead(id: string, userId: string): Promise<boolean> {
+  await ensureNotificationsTable();
+  const result = await sql`
+    UPDATE notifications SET read_at = NOW()
+    WHERE id = ${id} AND user_id = ${userId} AND read_at IS NULL
+  `;
+  return (result.rowCount ?? 0) > 0;
+}
+
+export async function markAllNotificationsRead(userId: string): Promise<void> {
+  await ensureNotificationsTable();
+  await sql`
+    UPDATE notifications SET read_at = NOW()
+    WHERE user_id = ${userId} AND read_at IS NULL
+  `;
+}
+
 /**
  * Comment soft-delete. Allowed if caller is the comment author OR the
  * artifact owner. Returns true on success, false if neither matched (or
