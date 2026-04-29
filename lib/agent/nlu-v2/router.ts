@@ -49,6 +49,48 @@ export function routeIntent(state: IntentState): RouterAction {
     };
   }
 
+  // Ambiguous party mode: user signaled multi-person with relationship words
+  // ("我和朋友 / 我和家人 / me and my friend / we") but didn't name a specific
+  // co-decider. Two ways to interpret:
+  //   (a) "I'm booking, party_size=2 — friend just comes along" (create_plan)
+  //   (b) "I want my friend to weigh in too" (create_room → Decision Room)
+  // Defaulting to (a) loses the multi-person product loop; defaulting to (b)
+  // creates a DR for casual "dinner with my friend" that the user didn't
+  // want. So we ASK before either path commits. Quick picks so it's a tap.
+  //
+  // Detection signal: extractor sets party_type=multi when relationship
+  // co-decider words appear, but member_names stays empty because no proper
+  // name was given. That combo is the unambiguous "we don't know which
+  // bucket this belongs to" case.
+  if (
+    state.party_type === "multi" &&
+    state.member_names.length === 0 &&
+    state.intent === "create_plan"
+  ) {
+    return {
+      type: "ask_clarification",
+      missing: ["party_mode"],
+      suggested_quick_picks: [
+        { label: "我自己定就行", value: "我自己定，按 2 人位预订" },
+        { label: "拉 ta 进 Decision Room", value: "想拉朋友进 Decision Room 决定" },
+      ],
+    };
+  }
+
+  // create_room without a named co-decider: agent doesn't know who to invite.
+  // Ask for a contact name. Without this, the commit route's
+  // resolveContactsByNames returns [] and the room gets created with no
+  // invites — a useless single-member DR.
+  //
+  // This typically follows the "拉 ta 进 Decision Room" quick pick above,
+  // where user said they want a DR but hasn't named the friend yet.
+  if (state.intent === "create_room" && state.member_names.length === 0) {
+    return {
+      type: "ask_clarification",
+      missing: ["member_names"],
+    };
+  }
+
   const missing = getMissingForScenario(state);
   if (missing.length > 0) {
     return {

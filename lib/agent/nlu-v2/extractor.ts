@@ -249,11 +249,21 @@ WORKED EXAMPLES — use these to calibrate before answering:
    - "refine_existing" when the user adjusts a previously returned plan
      ("换一个酒店", "cheaper").
    - "unknown" if the message is too ambiguous.
-7. party_type (separate from intent — this describes TRAVELERS, not deciders):
-   - "multi" whenever OTHER PEOPLE are named or plural pronouns appear
-     referring to the deciders. NOT for traveler count alone.
-   - "solo" otherwise. A "for 2 people" trip can still be party_type=solo
-     if only one user is deciding.
+7. party_type (separate from intent — this describes whether OTHER PEOPLE
+   are involved at all, named or not):
+   - "multi" whenever ANY of these signals appear:
+        · Named co-deciders ("我和李明", "me and Alice")
+        · Plural pronouns referring to deciders ("we", "我们")
+        · Relationship co-decider words ("朋友 / 家人 / 同事 / 老婆 / 老公 /
+          friend / family / coworker / wife / husband / spouse / partner /
+          team / 同学 / classmate / colleague")
+     This is broader than create_room — "我和朋友" sets party_type=multi
+     even though intent stays create_plan (no NAMED co-decider). The
+     downstream router uses (party_type=multi, member_names=[]) as the
+     "ambiguous — should ask solo-vs-DR" signal.
+   - "solo" only when the user is clearly the only person involved
+     ("book ME a flight", "找个 hotel 给我自己住"). A "for 2 people" trip
+     stays solo unless the second person is mentioned.
 8. Member_names: only non-creator people explicitly named as CO-DECIDERS
    (not "my wife" / "my family" — those are relationships not deciding members).
 8a. proxy_member_constraints — when the user reports a taste/budget preference

@@ -200,6 +200,24 @@ REPLY GUIDANCE:
          missing=[origin, departure_date] → "From where, and what day?"
          missing=[time]                   → "今晚几点？(下面有时间选项)"
 
+       SPECIAL — missing=[party_mode] (the user signaled multi-person with
+       a relationship word like "朋友 / 家人 / we / me and my..." but didn't
+       name a specific co-decider). In this case ask the meta question:
+         · Chinese:  "你是要自己帮大家定，还是想拉 ta 进 Decision Room
+                     一起选？" — quick picks below let them tap.
+         · English:  "Are you booking for everyone yourself, or do you want
+                     to invite them to a Decision Room to decide together?"
+       Don't ask follow-up scenario fields (cuisine / time / party_size)
+       until the user picks one of those two paths — solo vs DR.
+
+       SPECIAL — missing=[member_names] (user said "create a Decision Room"
+       or "拉朋友进 Decision Room" but hasn't named who). Ask for a name:
+         · Chinese:  "@谁一起？把 ta 的名字告诉我，比如「@ziweiB」或
+                     「我朋友 Alice」"
+         · English:  "Who are you inviting? Give me their name or @username."
+       Names from contacts get resolved automatically; unrecognized names
+       become a share-link prompt later in the flow.
+
     3) state.scenario is NULL and intent="chitchat" with NO out_of_scope tag:
        → Reply naturally to whatever they said (greeting / small talk /
          casual question). You can gently steer toward booking if relevant.
