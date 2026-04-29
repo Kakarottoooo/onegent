@@ -91,6 +91,32 @@ export function routeIntent(state: IntentState): RouterAction {
     };
   }
 
+  // create_room (non-trip) with at least one member named → ready for the
+  // ConfirmCard. The legacy "fill all required fields then confirm" path
+  // doesn't fit Decision Rooms: the initiator's seed (city/date from the
+  // first turn) is enough context to create the room; cuisine/time/party_
+  // size etc. get gathered as each member chats privately with the agent
+  // INSIDE the room. Forcing the initiator to fill them up front turns
+  // the DR into a one-person form-fill again — which is exactly what
+  // Plan A removed.
+  //
+  // Trip rooms still require getMissingForScenario to pass before
+  // confirming because their planner does cross-category synthesis up
+  // front (buildTripPackage needs the full trip seed). That path falls
+  // through to the missing-check below.
+  if (
+    state.intent === "create_room" &&
+    state.scenario &&
+    state.scenario !== "trip" &&
+    state.member_names.length > 0
+  ) {
+    return {
+      type: "show_confirm_card",
+      kind: "room",
+      state,
+    };
+  }
+
   const missing = getMissingForScenario(state);
   if (missing.length > 0) {
     return {

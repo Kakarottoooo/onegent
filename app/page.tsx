@@ -146,6 +146,16 @@ export default function Home() {
   // Titles for the context ribbon so the user can tell "which room" / "which
   // chat" they're in without looking at the sidebar.
   const [activeRoomTitle, setActiveRoomTitle] = useState<string | null>(null);
+  // Member roster for the active room ribbon — shows avatar chips so the
+  // user can SEE who's in the DR rather than trusting the agent's reply.
+  const [activeRoomMembers, setActiveRoomMembers] = useState<Array<{
+    user_id: string;
+    status: string;
+    is_creator: boolean;
+    display_name: string | null;
+    username: string | null;
+    avatar_url: string | null;
+  }>>([]);
   const [activeSessionTitle, setActiveSessionTitle] = useState<string | null>(null);
   // Bump to trigger a sidebar refetch (after creating a room / new session).
   const [sidebarReloadTick, setSidebarReloadTick] = useState(0);
@@ -233,6 +243,7 @@ export default function Home() {
   useEffect(() => {
     if (!activeRoomId) {
       setActiveRoomTitle(null);
+      setActiveRoomMembers([]);
       setActiveProposalId(null);
       return;
     }
@@ -256,10 +267,23 @@ export default function Home() {
           return;
         }
         if (!res.ok) return;
-        const data = (await res.json()) as { room?: { title?: string } };
+        const data = (await res.json()) as {
+          room?: { title?: string };
+          members?: Array<{
+            user_id: string;
+            status: string;
+            is_creator: boolean;
+            display_name: string | null;
+            username: string | null;
+            avatar_url: string | null;
+          }>;
+        };
         if (!cancelled && data.room?.title) {
           roomTitleCacheRef.current.set(activeRoomId, data.room.title);
           setActiveRoomTitle(data.room.title);
+        }
+        if (!cancelled && Array.isArray(data.members)) {
+          setActiveRoomMembers(data.members);
         }
       } catch {
         // non-fatal
@@ -2249,8 +2273,53 @@ export default function Home() {
             <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
               <strong style={{ color: "var(--gold, #C9A84C)" }}>Decision Room</strong>
               {activeRoomTitle ? <> · {activeRoomTitle}</> : null}
-              <span style={{ opacity: 0.7 }}> · each turn syncs to everyone</span>
             </span>
+            {/* Member avatar pills — visible proof of who's in the room.
+                Replaces the "...syncs to everyone" tagline so the user has
+                concrete confirmation rather than trusting the agent's
+                reply that "X 已加入". status="invited" gets a hatched ring
+                to mark "still pending". */}
+            {activeRoomMembers.length > 0 && (
+              <div style={{ display: "flex", alignItems: "center", gap: 4, flexShrink: 0, marginLeft: 4 }}>
+                {activeRoomMembers.slice(0, 5).map((m) => {
+                  const label = m.display_name || m.username || "?";
+                  const initial = label.slice(0, 1).toUpperCase();
+                  const pending = m.status === "invited";
+                  return (
+                    <div
+                      key={m.user_id}
+                      title={`${label}${pending ? " (邀请中)" : m.is_creator ? " (创建者)" : ""}`}
+                      style={{
+                        width: 22,
+                        height: 22,
+                        borderRadius: "50%",
+                        background: m.avatar_url ? "transparent" : "rgba(201,168,76,0.85)",
+                        backgroundImage: m.avatar_url ? `url(${m.avatar_url})` : undefined,
+                        backgroundSize: "cover",
+                        backgroundPosition: "center",
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        color: "white",
+                        fontSize: 10,
+                        fontWeight: 600,
+                        border: pending
+                          ? "1.5px dashed rgba(201,168,76,0.7)"
+                          : "1.5px solid rgba(201,168,76,0.5)",
+                        opacity: pending ? 0.65 : 1,
+                      }}
+                    >
+                      {!m.avatar_url ? initial : null}
+                    </div>
+                  );
+                })}
+                {activeRoomMembers.length > 5 && (
+                  <span style={{ fontSize: 10, opacity: 0.7, marginLeft: 2 }}>
+                    +{activeRoomMembers.length - 5}
+                  </span>
+                )}
+              </div>
+            )}
           </div>
           <div style={{ display: "flex", gap: 8, flexShrink: 0 }}>
             <button

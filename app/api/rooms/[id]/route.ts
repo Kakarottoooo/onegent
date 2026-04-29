@@ -25,7 +25,25 @@ export async function GET(_req: Request, { params }: Params) {
     return NextResponse.json({ error: "Not a member of this room" }, { status: 403 });
   }
 
-  return NextResponse.json({ room });
+  // Include members + their profiles so the homepage room ribbon can render
+  // avatars / counts without a second round-trip. Cheap join — bounded by
+  // room size (typically 2-8 members).
+  const members = await listRoomMembersWithInvited(id);
+  const profiles = await Promise.all(
+    members.map(async (m) => {
+      const p = await getUserProfile(m.user_id).catch(() => null);
+      return {
+        user_id: m.user_id,
+        status: m.status,
+        is_creator: m.user_id === room.creator_id,
+        display_name: p?.display_name ?? null,
+        username: p?.username ?? null,
+        avatar_url: p?.avatar_url ?? null,
+      };
+    }),
+  );
+
+  return NextResponse.json({ room, members: profiles });
 }
 
 /**
