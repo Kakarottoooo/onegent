@@ -123,7 +123,9 @@ export async function POST(req: NextRequest) {
   });
 
   const base = process.env.NEXT_PUBLIC_APP_URL ?? "";
-  const url = `${base}/share/${artifact.slug}`;
+  // Public landing lives at /s/[slug] — short for sharing, and avoids the
+  // legacy /share/[token] base64 flow still wired into the home page.
+  const url = `${base}/s/${artifact.slug}`;
 
   return NextResponse.json({ artifact, url });
 }
