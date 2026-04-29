@@ -4611,10 +4611,18 @@ export async function updateContactNickname(
   return result.rows[0] ?? null;
 }
 
+/**
+ * Remove a contact pair *bilaterally*. user_contacts is bidirectional —
+ * accepting a request inserts both (a, b) and (b, a). If we only delete
+ * one direction, the un-removed side keeps seeing the other in their list
+ * and can still DM into a black hole. Always delete both.
+ */
 export async function removeContact(ownerId: string, contactUserId: string): Promise<boolean> {
   await ensureUserContactsTable();
   const result = await sql`
-    DELETE FROM user_contacts WHERE owner_id = ${ownerId} AND contact_user_id = ${contactUserId}
+    DELETE FROM user_contacts
+    WHERE (owner_id = ${ownerId} AND contact_user_id = ${contactUserId})
+       OR (owner_id = ${contactUserId} AND contact_user_id = ${ownerId})
   `;
   return (result.rowCount ?? 0) > 0;
 }

@@ -66,7 +66,14 @@ export default function ShareTripModal({
         return;
       }
       const data = (await res.json()) as { url: string };
-      setShareUrl(data.url);
+      // Server may return a relative URL when NEXT_PUBLIC_APP_URL is unset
+      // (typical in dev). Always present an absolute URL to the user since
+      // copy-and-paste destinations like iMessage / WhatsApp need a real
+      // host to render a preview.
+      const absolute = data.url.startsWith("http")
+        ? data.url
+        : `${window.location.origin}${data.url.startsWith("/") ? "" : "/"}${data.url}`;
+      setShareUrl(absolute);
     } catch {
       setError("Network error.");
     } finally {

@@ -65,6 +65,8 @@ export default function DecidePage() {
   const [shareOpen, setShareOpen] = useState(false);
   const [ownShare, setOwnShare] = useState<{ slug: string; view_count: number; visibility: string } | null>(null);
   const [members, setMembers] = useState<MemberRow[]>([]);
+  const [booking, setBooking] = useState(false);
+  const [bookError, setBookError] = useState<string | null>(null);
 
   const isGroup = members.length > 0;
   const myMembership = useMemo(
@@ -181,10 +183,38 @@ export default function DecidePage() {
     }).catch(() => {});
   }
 
+  /** Direct-book the decided restaurant. Creates a booking_job and
+   *  bounces the user to /tasks for the actual autopilot run.
+   *  Closes the "we agreed but how do we book" gap that made share-link
+   *  feel like the only forward action. */
+  async function bookDecided() {
+    if (!sessionId) return;
+    setBooking(true);
+    setBookError(null);
+    try {
+      const res = await fetch(`/api/decision-session/${sessionId}/book`, {
+        method: "POST",
+      });
+      if (!res.ok) {
+        const data = (await res.json().catch(() => null)) as { error?: string } | null;
+        setBookError(data?.error ?? "Couldn't start booking. Try the share link instead.");
+        return;
+      }
+      const data = (await res.json()) as { redirectTo?: string };
+      if (data.redirectTo) {
+        window.location.href = data.redirectTo;
+      }
+    } catch {
+      setBookError("Network error.");
+    } finally {
+      setBooking(false);
+    }
+  }
+
   if (loading) {
     return (
       <div className="min-h-screen flex items-center justify-center" style={{ fontFamily: "var(--font-dm-sans, system-ui)" }}>
-        <p className="text-sm text-gray-400">Loading…</p>
+        <p className="text-sm text-[var(--text-muted)]">Loading…</p>
       </div>
     );
   }
@@ -193,8 +223,8 @@ export default function DecidePage() {
     return (
       <div className="min-h-screen flex items-center justify-center px-4" style={{ fontFamily: "var(--font-dm-sans, system-ui)" }}>
         <div className="text-center max-w-sm">
-          <p className="text-sm text-gray-500 mb-4">{error}</p>
-          <a href="/" className="text-sm font-medium text-gray-900 underline">Start a new search</a>
+          <p className="text-sm text-[var(--text-muted)] mb-4">{error}</p>
+          <a href="/" className="text-sm font-medium text-[var(--text-primary)] underline">Start a new search</a>
         </div>
       </div>
     );
@@ -210,20 +240,20 @@ export default function DecidePage() {
     : null;
 
   return (
-    <div className="min-h-screen bg-gray-50" style={{ fontFamily: "var(--font-dm-sans, system-ui)" }}>
+    <div className="min-h-screen bg-[var(--bg)]" style={{ fontFamily: "var(--font-dm-sans, system-ui)" }}>
       <div className="max-w-md mx-auto px-4 pt-10 pb-20">
 
         {/* Header */}
         <div className="flex items-center gap-2 mb-6">
           <div
-            className="w-7 h-7 rounded-full border-2 border-gray-900 bg-gray-900 flex items-center justify-center text-white text-xs font-bold"
+            className="w-7 h-7 rounded-full border-2 border-[var(--text-primary)] bg-[var(--text-primary)] flex items-center justify-center text-white text-xs font-bold"
           >
             {role === "initiator" ? "You" : "P"}
           </div>
-          <div className="w-7 h-7 rounded-full border-2 border-gray-300 bg-gray-100 flex items-center justify-center text-gray-500 text-xs">
+          <div className="w-7 h-7 rounded-full border-2 border-[var(--border)] bg-[var(--card-2)] flex items-center justify-center text-[var(--text-muted)] text-xs">
             {role === "initiator" ? "P" : "A"}
           </div>
-          <span className="text-xs text-gray-400 ml-1">Decision Room</span>
+          <span className="text-xs text-[var(--text-muted)] ml-1">Decision Room</span>
         </div>
 
         {/* "Invited by X" banner — shows when an authenticated initiator
@@ -262,14 +292,14 @@ export default function DecidePage() {
               >
                 Invited you
               </p>
-              <p className="text-sm font-medium text-gray-900 truncate">
+              <p className="text-sm font-medium text-[var(--text-primary)] truncate">
                 {initiatorProfile.display_name ??
                   `@${initiatorProfile.username ?? initiatorProfile.profile_code ?? "user"}`}
               </p>
               {currentUserId &&
                 session?.invitee_user_id &&
                 session.invitee_user_id === currentUserId && (
-                  <p className="text-[11px] text-gray-600 mt-0.5">
+                  <p className="text-[11px] text-[var(--text-secondary)] mt-0.5">
                     They picked you from their contacts.
                   </p>
                 )}
@@ -308,44 +338,62 @@ export default function DecidePage() {
 
             <div className="flex items-center gap-2 mb-2">
               <span className="text-lg">🎉</span>
-              <h1 className="text-base font-semibold text-gray-900">
+              <h1 className="text-base font-semibold text-[var(--text-primary)]">
                 {isGroup ? `All ${members.length} agreed` : "You both agreed"}
               </h1>
             </div>
-            <div className="bg-white rounded-2xl border border-gray-200 p-4 mb-4 shadow-sm">
-              <p className="text-base font-semibold text-gray-900 mb-1">{decidedCard.restaurant?.name}</p>
-              <p className="text-xs text-gray-500 mb-1">
+            <div className="bg-[var(--card)] rounded-2xl border border-[var(--border)] p-4 mb-4 shadow-sm">
+              <p className="text-base font-semibold text-[var(--text-primary)] mb-1">{decidedCard.restaurant?.name}</p>
+              <p className="text-xs text-[var(--text-muted)] mb-1">
                 {decidedCard.restaurant?.cuisine} ·{" "}
                 {decidedCard.restaurant?.price} ·{" "}
                 {decidedCard.restaurant?.address?.split(",")[0]}
               </p>
               {decidedCard.why_recommended && (
-                <p className="text-xs text-gray-600 leading-relaxed mt-2">{decidedCard.why_recommended}</p>
+                <p className="text-xs text-[var(--text-secondary)] leading-relaxed mt-2">{decidedCard.why_recommended}</p>
               )}
             </div>
 
-            <div className="bg-gray-900 rounded-2xl p-4 text-white text-center mb-4">
+            <div className="bg-[var(--text-primary)] rounded-2xl p-4 text-white text-center mb-4">
               <p className="font-semibold text-sm">You&apos;re going here</p>
               {decidedCard.restaurant?.address && (
-                <p className="text-xs text-gray-300 mt-1">{decidedCard.restaurant.address}</p>
+                <p className="text-xs text-[var(--text-muted)] mt-1">{decidedCard.restaurant.address}</p>
               )}
             </div>
 
-            {/* Save & share — only the initiator sees this CTA. The decision
-                is theirs to publish; partner can still get the link from them.
-                Once shared, flips to a view-count link. */}
+            {/* Primary CTA: Book this restaurant directly inside Onegent.
+                Previously the only forward action was a share link, which
+                forced the user out to a third-party app — a UX dead-end. */}
+            {isSignedIn && (
+              <button
+                type="button"
+                onClick={bookDecided}
+                disabled={booking}
+                className="w-full py-3 rounded-2xl text-sm font-semibold mb-3 transition-colors"
+                style={{
+                  background: "var(--gold, #C9A84C)",
+                  color: "white",
+                  border: "none",
+                  cursor: booking ? "default" : "pointer",
+                  opacity: booking ? 0.6 : 1,
+                }}
+              >
+                {booking ? "Setting up booking…" : "Book this on Onegent →"}
+              </button>
+            )}
+            {bookError && (
+              <p className="text-xs text-red-600 mb-3">{bookError}</p>
+            )}
+
+            {/* Secondary: show this off via a public/private share link.
+                Reframed as proud-share, not as the partner-handoff. */}
             {isSignedIn && role === "initiator" && ownShare ? (
               <a
                 href={`/s/${ownShare.slug}`}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="block w-full py-2.5 rounded-2xl text-sm font-medium mb-6 text-center transition-colors"
-                style={{
-                  background: "var(--gold-soft, #F5E9C8)",
-                  color: "var(--gold-text, #5A4416)",
-                  border: "1px solid var(--gold, #C9A84C)",
-                  textDecoration: "none",
-                }}
+                className="block w-full py-2 text-xs text-center transition-colors mb-5"
+                style={{ color: "var(--gold-text, #5A4416)" }}
               >
                 ↗ Shared · {ownShare.view_count}{" "}
                 {ownShare.view_count === 1 ? "view" : "views"} · Open public page
@@ -354,27 +402,23 @@ export default function DecidePage() {
               <button
                 type="button"
                 onClick={() => setShareOpen(true)}
-                className="w-full py-2.5 rounded-2xl text-sm font-medium mb-6 transition-colors"
-                style={{
-                  background: "var(--gold-soft, #F5E9C8)",
-                  color: "var(--gold-text, #5A4416)",
-                  border: "1px solid var(--gold, #C9A84C)",
-                }}
+                className="w-full py-2 text-xs transition-colors mb-5"
+                style={{ color: "var(--text-muted)", background: "transparent", border: "none" }}
               >
-                ↗ Save & share this decision
+                ↗ Show this off — share a link
               </button>
             ) : null}
 
             {/* Feedback */}
             {!feedbackSent ? (
               <div>
-                <p className="text-xs text-gray-500 text-center mb-3">How was it? (takes 5 seconds)</p>
+                <p className="text-xs text-[var(--text-muted)] text-center mb-3">How was it? (takes 5 seconds)</p>
                 <div className="flex gap-2">
                   {(["loved", "fine", "never"] as const).map((f) => (
                     <button
                       key={f}
                       onClick={() => submitFeedback(f)}
-                      className="flex-1 py-2.5 rounded-xl border border-gray-200 text-sm text-gray-700 hover:bg-gray-50"
+                      className="flex-1 py-2.5 rounded-xl border border-[var(--border)] text-sm text-[var(--text-primary)] hover:bg-[var(--bg)]"
                     >
                       {f === "loved" ? "❤️ Loved it" : f === "fine" ? "😐 Fine" : "❌ Never again"}
                     </button>
@@ -382,11 +426,11 @@ export default function DecidePage() {
                 </div>
               </div>
             ) : (
-              <p className="text-xs text-gray-400 text-center">Thanks for the feedback!</p>
+              <p className="text-xs text-[var(--text-muted)] text-center">Thanks for the feedback!</p>
             )}
 
             <div className="mt-6 text-center">
-              <a href="/" className="text-sm text-gray-400 hover:text-gray-600">
+              <a href="/" className="text-sm text-[var(--text-muted)] hover:text-[var(--text-secondary)]">
                 Start a new decision →
               </a>
             </div>
@@ -401,15 +445,15 @@ export default function DecidePage() {
         {/* ── SCREEN: Group member needs to submit constraints ── */}
         {isGroup && session.status === "waiting_partner" && myMembership && !myMembership.has_submitted && !myMembership.is_initiator && (
           <div>
-            <h1 className="text-base font-semibold text-gray-900 mb-1">
+            <h1 className="text-base font-semibold text-[var(--text-primary)] mb-1">
               You&apos;re in a group decision
             </h1>
-            <p className="text-sm text-gray-500 mb-5">
+            <p className="text-sm text-[var(--text-muted)] mb-5">
               Initiator&apos;s request:{" "}
-              <span className="text-gray-700 font-medium">&ldquo;{session.initiator_constraints}&rdquo;</span>
+              <span className="text-[var(--text-primary)] font-medium">&ldquo;{session.initiator_constraints}&rdquo;</span>
             </p>
             <div className="mb-4">
-              <label className="text-xs font-medium text-gray-600 block mb-2">
+              <label className="text-xs font-medium text-[var(--text-secondary)] block mb-2">
                 Add your constraints
               </label>
               <textarea
@@ -417,17 +461,17 @@ export default function DecidePage() {
                 onChange={(e) => setPartnerInput(e.target.value)}
                 placeholder="e.g. no raw fish, quieter than last time, under $50"
                 rows={3}
-                className="w-full border border-gray-200 rounded-xl p-3 text-sm text-gray-900 resize-none focus:outline-none focus:border-gray-400"
+                className="w-full border border-[var(--border)] rounded-xl p-3 text-sm text-[var(--text-primary)] resize-none focus:outline-none focus:border-[var(--gold)]"
               />
             </div>
             <button
               onClick={submitPartnerConstraints}
               disabled={!partnerInput.trim() || submitting}
-              className="w-full py-3 rounded-xl bg-gray-900 text-white text-sm font-medium disabled:opacity-40"
+              className="w-full py-3 rounded-xl bg-[var(--text-primary)] text-white text-sm font-medium disabled:opacity-40"
             >
               {submitting ? "Saving…" : "Submit my constraints →"}
             </button>
-            <p className="text-xs text-gray-400 mt-3 text-center">
+            <p className="text-xs text-[var(--text-muted)] mt-3 text-center">
               Voting starts when everyone has submitted.
             </p>
           </div>
@@ -437,10 +481,10 @@ export default function DecidePage() {
         {isGroup && session.status === "waiting_partner" && myMembership?.has_submitted && (
           <div className="text-center py-10">
             <div className="text-3xl mb-4">⏳</div>
-            <h1 className="text-base font-semibold text-gray-900 mb-2">
+            <h1 className="text-base font-semibold text-[var(--text-primary)] mb-2">
               Waiting on the group
             </h1>
-            <p className="text-sm text-gray-500">
+            <p className="text-sm text-[var(--text-muted)]">
               {`${members.filter((m) => !m.has_submitted).length} of ${members.length} still need to submit constraints.`}
             </p>
           </div>
@@ -449,10 +493,10 @@ export default function DecidePage() {
         {/* ── SCREEN: Group viewer not invited ── */}
         {isGroup && session.status === "waiting_partner" && currentUserId && !myMembership && (
           <div className="text-center py-10">
-            <h1 className="text-base font-semibold text-gray-900 mb-2">
+            <h1 className="text-base font-semibold text-[var(--text-primary)] mb-2">
               You weren&apos;t invited to this group
             </h1>
-            <p className="text-sm text-gray-500">
+            <p className="text-sm text-[var(--text-muted)]">
               Ask the initiator to send you the link from a group with you in it.
             </p>
           </div>
@@ -461,15 +505,15 @@ export default function DecidePage() {
         {/* ── SCREEN: Group viewer not signed in ── */}
         {isGroup && session.status === "waiting_partner" && !currentUserId && (
           <div className="text-center py-10">
-            <h1 className="text-base font-semibold text-gray-900 mb-2">
+            <h1 className="text-base font-semibold text-[var(--text-primary)] mb-2">
               Sign in to join this group decision
             </h1>
-            <p className="text-sm text-gray-500 mb-4">
+            <p className="text-sm text-[var(--text-muted)] mb-4">
               Group rooms need everyone signed in so we can keep votes straight.
             </p>
             <a
               href="/"
-              className="inline-block py-2.5 px-5 rounded-xl bg-gray-900 text-white text-sm font-medium"
+              className="inline-block py-2.5 px-5 rounded-xl bg-[var(--text-primary)] text-white text-sm font-medium"
             >
               Sign in →
             </a>
@@ -479,16 +523,16 @@ export default function DecidePage() {
         {/* ── SCREEN: Partner adds constraints (legacy 2-party only) ── */}
         {!isGroup && role === "partner" && session.status === "waiting_partner" && (
           <div>
-            <h1 className="text-base font-semibold text-gray-900 mb-1">
+            <h1 className="text-base font-semibold text-[var(--text-primary)] mb-1">
               You&apos;ve been invited to decide together
             </h1>
-            <p className="text-sm text-gray-500 mb-5">
+            <p className="text-sm text-[var(--text-muted)] mb-5">
               Their request:{" "}
-              <span className="text-gray-700 font-medium">&ldquo;{session.initiator_constraints}&rdquo;</span>
+              <span className="text-[var(--text-primary)] font-medium">&ldquo;{session.initiator_constraints}&rdquo;</span>
             </p>
 
             <div className="mb-4">
-              <label className="text-xs font-medium text-gray-600 block mb-2">
+              <label className="text-xs font-medium text-[var(--text-secondary)] block mb-2">
                 Add your constraints
               </label>
               <textarea
@@ -496,14 +540,14 @@ export default function DecidePage() {
                 onChange={(e) => setPartnerInput(e.target.value)}
                 placeholder="e.g. no raw fish, quieter than last time, under $50"
                 rows={3}
-                className="w-full border border-gray-200 rounded-xl p-3 text-sm text-gray-900 resize-none focus:outline-none focus:border-gray-400"
+                className="w-full border border-[var(--border)] rounded-xl p-3 text-sm text-[var(--text-primary)] resize-none focus:outline-none focus:border-[var(--gold)]"
               />
             </div>
 
             <button
               onClick={submitPartnerConstraints}
               disabled={!partnerInput.trim() || submitting}
-              className="w-full py-3 rounded-xl bg-gray-900 text-white text-sm font-medium disabled:opacity-40"
+              className="w-full py-3 rounded-xl bg-[var(--text-primary)] text-white text-sm font-medium disabled:opacity-40"
             >
               {submitting ? "Finding options for both of you…" : "Find options for both of us →"}
             </button>
@@ -514,8 +558,8 @@ export default function DecidePage() {
         {!isGroup && role === "initiator" && session.status === "waiting_partner" && (
           <div className="text-center py-12">
             <div className="text-3xl mb-4">⏳</div>
-            <h1 className="text-base font-semibold text-gray-900 mb-2">Waiting for your partner</h1>
-            <p className="text-sm text-gray-500">
+            <h1 className="text-base font-semibold text-[var(--text-primary)] mb-2">Waiting for your partner</h1>
+            <p className="text-sm text-[var(--text-muted)]">
               Once they add their constraints, you&apos;ll both see options here.
             </p>
           </div>
@@ -540,10 +584,10 @@ export default function DecidePage() {
           <div>
             {session.status === "voting" && (
               <>
-                <h1 className="text-base font-semibold text-gray-900 mb-1">
+                <h1 className="text-base font-semibold text-[var(--text-primary)] mb-1">
                   {cards.length} option{cards.length !== 1 ? "s" : ""} you&apos;ll both like
                 </h1>
-                <p className="text-sm text-gray-500 mb-5">
+                <p className="text-sm text-[var(--text-muted)] mb-5">
                   Tap &ldquo;Works for me&rdquo; on any that work. First mutual yes = done.
                 </p>
               </>
@@ -562,15 +606,15 @@ export default function DecidePage() {
                 return (
                   <div
                     key={cardId}
-                    className="bg-white rounded-2xl border border-gray-200 p-4 shadow-sm"
+                    className="bg-[var(--card)] rounded-2xl border border-[var(--border)] p-4 shadow-sm"
                   >
-                    <p className="text-sm font-semibold text-gray-900 mb-0.5">{card.restaurant?.name}</p>
-                    <p className="text-xs text-gray-500 mb-2">
+                    <p className="text-sm font-semibold text-[var(--text-primary)] mb-0.5">{card.restaurant?.name}</p>
+                    <p className="text-xs text-[var(--text-muted)] mb-2">
                       {card.restaurant?.cuisine} · {card.restaurant?.price} ·{" "}
                       {card.restaurant?.address?.split(",")[0]}
                     </p>
                     {card.why_recommended && (
-                      <p className="text-xs text-gray-500 leading-relaxed mb-3 line-clamp-2">
+                      <p className="text-xs text-[var(--text-muted)] leading-relaxed mb-3 line-clamp-2">
                         {card.why_recommended}
                       </p>
                     )}
@@ -580,8 +624,8 @@ export default function DecidePage() {
                         onClick={() => vote(cardId, true)}
                         className={`flex-1 py-2 rounded-xl border text-sm font-medium transition-colors ${
                           approved
-                            ? "border-gray-900 bg-gray-900 text-white"
-                            : "border-gray-200 text-gray-700 hover:bg-gray-50"
+                            ? "border-[var(--text-primary)] bg-[var(--text-primary)] text-white"
+                            : "border-[var(--border)] text-[var(--text-primary)] hover:bg-[var(--bg)]"
                         }`}
                       >
                         Works for me
@@ -590,8 +634,8 @@ export default function DecidePage() {
                         onClick={() => vote(cardId, false)}
                         className={`flex-1 py-2 rounded-xl border text-sm transition-colors ${
                           voted && !approved
-                            ? "border-gray-300 text-gray-400 bg-gray-50"
-                            : "border-gray-200 text-gray-400 hover:bg-gray-50"
+                            ? "border-[var(--border)] text-[var(--text-muted)] bg-[var(--bg)]"
+                            : "border-[var(--border)] text-[var(--text-muted)] hover:bg-[var(--bg)]"
                         }`}
                       >
                         Pass
@@ -606,7 +650,7 @@ export default function DecidePage() {
                         currentUserId={currentUserId ?? null}
                       />
                     ) : (
-                      <p className="text-xs text-gray-400 mt-2">
+                      <p className="text-xs text-[var(--text-muted)] mt-2">
                         {approved ? "You ✓" : voted ? "You ✗" : "You haven't voted"} ·{" "}
                         {theyApproved === true ? "Partner ✓" : theyApproved === false ? "Partner ✗" : "Waiting for partner"}
                       </p>
@@ -621,7 +665,7 @@ export default function DecidePage() {
         {/* ── SCREEN: Processing (partner just submitted constraints) ── */}
         {session.status === "waiting_partner" && role === "partner" && session.partner_constraints && (
           <div className="text-center py-8 mt-4">
-            <p className="text-sm text-gray-400">Finding options for both of you…</p>
+            <p className="text-sm text-[var(--text-muted)]">Finding options for both of you…</p>
           </div>
         )}
       </div>
@@ -700,7 +744,7 @@ function GroupVoteStatus({
           );
         })}
       </div>
-      <span className="text-[11px] text-gray-500">
+      <span className="text-[11px] text-[var(--text-muted)]">
         {approveCount} of {totalCount} ✓
       </span>
     </div>
