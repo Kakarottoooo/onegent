@@ -562,6 +562,156 @@ export async function updateDecisionSession(
   return result.rows[0] ?? null;
 }
 
+// ═══════════════════════════════════════════════════════════════════════════
+// Shared Artifacts — Phase 2 of the multi-user product loop.
+//
+// One table, many kinds. A booking, a DR outcome, an itinerary, a taste
+// profile — anything a user might want to share with friends or publish goes
+// here. Visibility decides who can resolve the slug; options carry per-kind
+// rendering hints (showPrice / showTime toggles, etc.).
+//
+// Why one table instead of one per kind: every kind needs the same access
+// model (private/public), the same slug + view_count + lifecycle, and the
+// same SSR /share/[slug] route. Splitting per kind would copy that 4 times.
+// ═══════════════════════════════════════════════════════════════════════════
+
+let sharedArtifactsTableReady: Promise<void> | null = null;
+
+export async function ensureSharedArtifactsTable(): Promise<void> {
+  if (!sharedArtifactsTableReady) {
+    sharedArtifactsTableReady = (async () => {
+      await sql`
+        CREATE TABLE IF NOT EXISTS shared_artifacts (
+          id          TEXT PRIMARY KEY,
+          owner_id    TEXT NOT NULL,
+          kind        TEXT NOT NULL,
+          ref_id      TEXT NOT NULL,
+          visibility  TEXT NOT NULL DEFAULT 'private',
+          slug        TEXT NOT NULL UNIQUE,
+          options     JSONB NOT NULL DEFAULT '{}'::jsonb,
+          view_count  INT NOT NULL DEFAULT 0,
+          created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          deleted_at  TIMESTAMPTZ,
+          CHECK (kind IN ('booking','dr_outcome','trip','taste_profile')),
+          CHECK (visibility IN ('private','contacts','specific','public'))
+        )
+      `;
+      await sql`CREATE INDEX IF NOT EXISTS shared_artifacts_owner_idx ON shared_artifacts (owner_id) WHERE deleted_at IS NULL`;
+      await sql`CREATE INDEX IF NOT EXISTS shared_artifacts_ref_idx ON shared_artifacts (kind, ref_id) WHERE deleted_at IS NULL`;
+    })().catch((err) => {
+      sharedArtifactsTableReady = null;
+      throw err;
+    });
+  }
+  await sharedArtifactsTableReady;
+}
+
+export type SharedArtifactKind = "booking" | "dr_outcome" | "trip" | "taste_profile";
+export type SharedArtifactVisibility = "private" | "contacts" | "specific" | "public";
+
+export interface SharedArtifactOptions {
+  /** Show exact price; OFF falls back to a band ($, $$, $$$). Default true. */
+  showPrice?: boolean;
+  /** Show exact time; OFF shows date only. For future bookings the UI flips
+   *  the default to false to avoid leaking precise location-at-time signals. */
+  showTime?: boolean;
+  /** When visibility = 'specific', this carries the allowed user_ids. */
+  allowedUserIds?: string[];
+}
+
+export interface SharedArtifact {
+  id: string;
+  owner_id: string;
+  kind: SharedArtifactKind;
+  ref_id: string;
+  visibility: SharedArtifactVisibility;
+  slug: string;
+  options: SharedArtifactOptions;
+  view_count: number;
+  created_at: string;
+  deleted_at: string | null;
+}
+
+/** Generate a URL-safe 8-char slug — opaque so /share/[slug] is unguessable
+ *  even before access controls kick in. */
+function generateSharedArtifactSlug(): string {
+  const alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789";
+  let out = "";
+  for (let i = 0; i < 8; i++) {
+    out += alphabet[Math.floor(Math.random() * alphabet.length)];
+  }
+  return out;
+}
+
+export async function createSharedArtifact(params: {
+  ownerId: string;
+  kind: SharedArtifactKind;
+  refId: string;
+  visibility?: SharedArtifactVisibility;
+  options?: SharedArtifactOptions;
+}): Promise<SharedArtifact> {
+  await ensureSharedArtifactsTable();
+  const id = `sa_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 10)}`;
+  // Retry on slug collision — astronomically rare with 8 chars from 56 alphabet
+  // (2.4e13 keyspace), but cheap to defend against.
+  let slug = generateSharedArtifactSlug();
+  for (let attempt = 0; attempt < 5; attempt++) {
+    const exists = await sql`SELECT 1 FROM shared_artifacts WHERE slug = ${slug} LIMIT 1`;
+    if (exists.rows.length === 0) break;
+    slug = generateSharedArtifactSlug();
+  }
+  const result = await sql<SharedArtifact>`
+    INSERT INTO shared_artifacts (id, owner_id, kind, ref_id, visibility, slug, options)
+    VALUES (
+      ${id},
+      ${params.ownerId},
+      ${params.kind},
+      ${params.refId},
+      ${params.visibility ?? "private"},
+      ${slug},
+      ${JSON.stringify(params.options ?? {})}::jsonb
+    )
+    RETURNING *
+  `;
+  return result.rows[0];
+}
+
+export async function getSharedArtifactBySlug(slug: string): Promise<SharedArtifact | null> {
+  await ensureSharedArtifactsTable();
+  const result = await sql<SharedArtifact>`
+    SELECT * FROM shared_artifacts WHERE slug = ${slug} AND deleted_at IS NULL
+  `;
+  return result.rows[0] ?? null;
+}
+
+export async function listSharedArtifactsByOwner(ownerId: string): Promise<SharedArtifact[]> {
+  await ensureSharedArtifactsTable();
+  const result = await sql<SharedArtifact>`
+    SELECT * FROM shared_artifacts
+    WHERE owner_id = ${ownerId} AND deleted_at IS NULL
+    ORDER BY created_at DESC
+  `;
+  return result.rows;
+}
+
+export async function incrementSharedArtifactViews(slug: string): Promise<void> {
+  await ensureSharedArtifactsTable();
+  await sql`
+    UPDATE shared_artifacts SET view_count = view_count + 1
+    WHERE slug = ${slug} AND deleted_at IS NULL
+  `;
+}
+
+/** Soft-delete; the slug becomes unresolvable but ref_id stays for audit. */
+export async function softDeleteSharedArtifact(id: string, ownerId: string): Promise<boolean> {
+  await ensureSharedArtifactsTable();
+  const result = await sql`
+    UPDATE shared_artifacts SET deleted_at = NOW()
+    WHERE id = ${id} AND owner_id = ${ownerId} AND deleted_at IS NULL
+  `;
+  return (result.rowCount ?? 0) > 0;
+}
+
 // ─── G-4: Venue quality degradation tracking ──────────────────────────────────
 
 let venueBaselinesTableReady: Promise<void> | null = null;

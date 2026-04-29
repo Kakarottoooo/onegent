@@ -16,6 +16,7 @@ import GlobalNav from "@/components/GlobalNav";
 import TripItineraryCalendar from "@/components/TripItineraryCalendar";
 import RestaurantStepCard from "@/components/booking/RestaurantStepCard";
 import BrowserLiveView from "@/components/BrowserLiveView";
+import ShareTripModal from "@/components/ShareTripModal";
 import { getBrowserModelForStagehand } from "@/lib/agent-model-config";
 import "./tasks.css";
 
@@ -1132,6 +1133,7 @@ function JobCard({ job, onRefresh, sessionId, onOpenLive }: { job: BookingJob; o
   const [expanded, setExpanded] = useState(job.status !== "pending");
   const [deleting, setDeleting] = useState(false);
   const [resetting, setResetting] = useState(false);
+  const [shareOpen, setShareOpen] = useState(false);
   const prevStatusRef = useRef(job.status);
 
   // Auto-open live panel when job transitions to "running" or "done".
@@ -1262,6 +1264,15 @@ function JobCard({ job, onRefresh, sessionId, onOpenLive }: { job: BookingJob; o
             Open all →
           </button>
         )}
+        {job.status === "done" && (
+          <button
+            onClick={(e) => { e.stopPropagation(); setShareOpen(true); }}
+            className="job-card__cta job-card__cta--open-all"
+            title="Share this trip"
+          >
+            ↗ Share
+          </button>
+        )}
         {isStuck && (
           <button
             onClick={handleResetStuck}
@@ -1323,6 +1334,14 @@ function JobCard({ job, onRefresh, sessionId, onOpenLive }: { job: BookingJob; o
         </>
       )}
 
+      {/* Share modal — mounted at JobCard level so the open state lives next
+          to the trigger button up in the action row. */}
+      <ShareTripModal
+        isOpen={shareOpen}
+        onClose={() => setShareOpen(false)}
+        kind="booking"
+        refId={job.id}
+      />
     </div>
   );
 }

@@ -4,6 +4,7 @@ import { useEffect, useState, useCallback, useMemo } from "react";
 import { useParams } from "next/navigation";
 import { useAuth } from "@/app/hooks/useAuth";
 import AddContactPrompt from "@/components/AddContactPrompt";
+import ShareTripModal from "@/components/ShareTripModal";
 import type { DecisionSession } from "@/lib/db";
 import type { RecommendationCard } from "@/lib/types";
 
@@ -52,6 +53,7 @@ export default function DecidePage() {
   const [submitting, setSubmitting] = useState(false);
   const [myVotes, setMyVotes] = useState<Record<string, boolean>>({});
   const [feedbackSent, setFeedbackSent] = useState(false);
+  const [shareOpen, setShareOpen] = useState(false);
 
   const role = useMemo(
     () => resolveRole(session, currentUserId ?? null),
@@ -297,12 +299,29 @@ export default function DecidePage() {
               )}
             </div>
 
-            <div className="bg-gray-900 rounded-2xl p-4 text-white text-center mb-6">
+            <div className="bg-gray-900 rounded-2xl p-4 text-white text-center mb-4">
               <p className="font-semibold text-sm">You&apos;re going here</p>
               {decidedCard.restaurant?.address && (
                 <p className="text-xs text-gray-300 mt-1">{decidedCard.restaurant.address}</p>
               )}
             </div>
+
+            {/* Save & share — only the initiator sees this CTA. The decision
+                is theirs to publish; partner can still get the link from them. */}
+            {isSignedIn && role === "initiator" && (
+              <button
+                type="button"
+                onClick={() => setShareOpen(true)}
+                className="w-full py-2.5 rounded-2xl text-sm font-medium mb-6 transition-colors"
+                style={{
+                  background: "var(--gold-soft, #F5E9C8)",
+                  color: "var(--gold-text, #5A4416)",
+                  border: "1px solid var(--gold, #C9A84C)",
+                }}
+              >
+                ↗ Save & share this decision
+              </button>
+            )}
 
             {/* Feedback */}
             {!feedbackSent ? (
@@ -473,6 +492,15 @@ export default function DecidePage() {
           </div>
         )}
       </div>
+
+      {/* Share modal — initiator-only, mounted at page level so it floats
+          above all decision screens. */}
+      <ShareTripModal
+        isOpen={shareOpen}
+        onClose={() => setShareOpen(false)}
+        kind="dr_outcome"
+        refId={String(sessionId ?? "")}
+      />
     </div>
   );
 }
