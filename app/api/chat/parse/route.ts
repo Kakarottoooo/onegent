@@ -140,8 +140,12 @@ export async function POST(req: NextRequest) {
       pinned_target_id,
       prev_state: prevNluState as Parameters<typeof analyzeConversationalV2>[0]["prev_state"],
     });
+    const oosTags = (result.__v2_state?.planning_assumptions ?? []).filter(
+      (a: unknown): a is string =>
+        typeof a === "string" && a.toLowerCase().startsWith("out_of_scope:"),
+    );
     console.log(
-      `[chat/parse] v2 — scenario=${result.scenario} intent=${result.intent} confirm_ready=${result.confirm_ready}${roomId ? ` room=${roomId}` : ""}`,
+      `[chat/parse] v2 — scenario=${result.scenario} intent=${result.intent} confirm_ready=${result.confirm_ready}${roomId ? ` room=${roomId}` : ""}${oosTags.length ? ` oos=[${oosTags.join("|")}]` : ""}`,
     );
 
     // In-trip-room synthesize trigger: when the user's in a trip room and

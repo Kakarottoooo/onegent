@@ -73,3 +73,63 @@ describe.skipIf(!hasApiKey)("Golden out-of-scope cases · extractor tags non-tra
     TIMEOUT_MS,
   );
 });
+
+function assertInScope(
+  state: Awaited<ReturnType<typeof extractState>>,
+  expectedScenario: "restaurant" | "hotel" | "flight" | "activity" | "trip",
+) {
+  expect(state.scenario).toBe(expectedScenario);
+  const hasOutOfScopeTag = state.planning_assumptions.some(
+    (entry) => typeof entry === "string" && entry.toLowerCase().startsWith("out_of_scope:"),
+  );
+  expect(hasOutOfScopeTag).toBe(false);
+}
+
+describe.skipIf(!hasApiKey)("Golden in-scope guard · casual phrasings must NOT be flagged out_of_scope", () => {
+  it(
+    "I1. Casual Chinese restaurant request → scenario=restaurant, no out_of_scope tag",
+    async () => {
+      const state = await extractState({
+        prev_state: null,
+        new_user_message: "今晚帮我找个 nashville 好吃的餐厅",
+      });
+      assertInScope(state, "restaurant");
+    },
+    TIMEOUT_MS,
+  );
+
+  it(
+    "I2. Casual Chinese hotel request → scenario=hotel, no out_of_scope tag",
+    async () => {
+      const state = await extractState({
+        prev_state: null,
+        new_user_message: "帮我订个东京的酒店",
+      });
+      assertInScope(state, "hotel");
+    },
+    TIMEOUT_MS,
+  );
+
+  it(
+    "I3. Stale out_of_scope from prev turn must be scrubbed when scenario clarifies",
+    async () => {
+      const prev = {
+        confidence: 0.5,
+        turn_count: 1,
+        updated_at: new Date().toISOString(),
+        intent: "chitchat" as const,
+        scenario: null,
+        party_type: "solo" as const,
+        member_names: [],
+        refined_target_id: null,
+        planning_assumptions: ["out_of_scope: gift ideas"],
+      };
+      const state = await extractState({
+        prev_state: prev,
+        new_user_message: "actually, can you book me a table at Carbone NYC tomorrow 7pm for 2",
+      });
+      assertInScope(state, "restaurant");
+    },
+    TIMEOUT_MS,
+  );
+});

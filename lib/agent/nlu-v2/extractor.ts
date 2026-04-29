@@ -211,6 +211,13 @@ CRITICAL — OUT-OF-SCOPE DETECTION (check this BEFORE applying rules 5-6 below)
    NOT put it in a different field. All other IntentState fields should be left at
    their defaults (no scenario sub-object).
 
+   MUTUAL EXCLUSION: out_of_scope and a non-null scenario are MUTUALLY EXCLUSIVE.
+   If you decide scenario = "restaurant" / "hotel" / "flight" / "activity" / "trip",
+   you MUST NOT add ANY "out_of_scope:" entry to planning_assumptions. The two
+   states cannot coexist. If a previous turn emitted "out_of_scope:" and the
+   current turn clarifies to a real booking, DROP the old tag — do not carry it
+   forward in planning_assumptions.
+
 5. Scenario selection:
    - "trip" when the user wants MULTIPLE categories bundled (flight + hotel at minimum, optionally restaurants / activities). Cues: "plan a trip to X", "go to X for N days", "帮我安排X旅行".
    - "restaurant" / "hotel" / "flight" / "activity" when the user wants a SINGLE category — even if multiple people are co-deciding. "我和李明想吃日料" is scenario="restaurant", NOT "trip". The presence of a co-decider does NOT change the scenario.
@@ -467,9 +474,18 @@ function coerceIntentState(raw: Record<string, unknown>, prev: IntentState | nul
       ? raw.refined_target_id
       : null;
 
-  const planning_assumptions = Array.isArray(raw.planning_assumptions)
+  const rawPlanningAssumptions = Array.isArray(raw.planning_assumptions)
     ? raw.planning_assumptions.filter((x): x is string => typeof x === "string")
     : prev?.planning_assumptions ?? [];
+  // Self-consistency: if scenario is set, the message is in-scope by definition.
+  // Strip any stray "out_of_scope:" tags the model emitted alongside a scenario
+  // (and any inherited from a prev OOS turn that was clarified to a real
+  // booking scenario in the next turn). The chat layer keys off out_of_scope:
+  // to decline, so leaving stale tags here causes the user to be told "I only
+  // do travel" right after they typed a perfectly good restaurant request.
+  const planning_assumptions = scenario
+    ? rawPlanningAssumptions.filter((a) => !a.trim().toLowerCase().startsWith("out_of_scope:"))
+    : rawPlanningAssumptions;
 
   const proxy_member_constraints = coerceProxyMemberConstraints(
     raw.proxy_member_constraints,
