@@ -14,6 +14,7 @@
 import { useState, useEffect, useCallback, useMemo } from "react";
 import { useRouter } from "next/navigation";
 import GlobalNav from "@/components/GlobalNav";
+import { EditorialHero } from "@/app/_shared/editorial";
 import MonthCalendar from "@/components/MonthCalendar";
 import { buildCalendarGrid } from "@/lib/calendar-grid";
 import type { BookingJob } from "@/lib/db";
@@ -100,45 +101,16 @@ export default function CalendarPage() {
         style={{
           maxWidth: 1280,
           margin: "0 auto",
-          padding: "28px 20px 80px",
+          padding: "var(--space-16) var(--space-6) var(--space-24)",
         }}
       >
-        <div style={{ marginBottom: 18 }}>
-          <div
-            style={{
-              fontFamily: "var(--font-dm-sans)",
-              fontSize: 11,
-              fontWeight: 600,
-              letterSpacing: "0.1em",
-              textTransform: "uppercase",
-              color: "var(--text-muted, #888)",
-              marginBottom: 6,
-            }}
-          >
-            Calendar
-          </div>
-          <div
-            style={{
-              fontFamily: "var(--font-playfair, serif)",
-              fontSize: 32,
-              fontWeight: 700,
-              color: "var(--text-primary, #111)",
-              lineHeight: 1.15,
-              marginBottom: 6,
-            }}
-          >
-            Your trips, on one page
-          </div>
-          <div
-            style={{
-              fontFamily: "var(--font-dm-sans)",
-              fontSize: 13,
-              color: "var(--text-secondary, #666)",
-            }}
-          >
-            Every booking — flights, hotels, restaurants, tickets — placed on the day it happens. Click any block to jump to its task.
-          </div>
-        </div>
+        <EditorialHero
+          eyebrow="Calendar"
+          title="Your trips on one page."
+          subtitle="Every booking — flights, hotels, restaurants, tickets — placed on the day it happens. Click any block to jump to its task."
+          align="left"
+          size="page"
+        />
 
         {loading ? (
           <div
