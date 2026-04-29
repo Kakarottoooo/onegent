@@ -44,6 +44,12 @@ import type {
 } from "@/lib/agent/nlu-v2";
 import type { ChatMessage } from "@/lib/llm-client";
 import { loadAgentModelConfig } from "@/lib/agent-model-config";
+import {
+  buildRoomReplaySnapshot,
+  buildSessionReplaySnapshot,
+  type RoomReplaySnapshot,
+  type SessionReplaySnapshot,
+} from "@/lib/chat-replay";
 import { useRouter } from "next/navigation";
 import "@/components/chat.css";
 
@@ -144,6 +150,9 @@ export default function Home() {
   const [activeSessionTitle, setActiveSessionTitle] = useState<string | null>(null);
   // Bump to trigger a sidebar refetch (after creating a room / new session).
   const [sidebarReloadTick, setSidebarReloadTick] = useState(0);
+  const roomReplayCacheRef = useRef<Map<string, RoomReplaySnapshot>>(new Map());
+  const sessionReplayCacheRef = useRef<Map<string, SessionReplaySnapshot>>(new Map());
+  const roomTitleCacheRef = useRef<Map<string, string>>(new Map());
   // Read query params fresh on every render — `useSearchParams` needs a
   // Suspense boundary during SSG and plain `useEffect([])` only runs on mount
   // so same-route nav (sidebar click → new ?session_id) keeps stale state.
@@ -228,7 +237,8 @@ export default function Home() {
       setActiveProposalId(null);
       return;
     }
-    setActiveRoomTitle(null);
+    const cachedTitle = roomTitleCacheRef.current.get(activeRoomId) ?? null;
+    setActiveRoomTitle(cachedTitle);
     setActiveProposalId(null);
     let cancelled = false;
     (async () => {
@@ -248,7 +258,10 @@ export default function Home() {
         }
         if (!res.ok) return;
         const data = (await res.json()) as { room?: { title?: string } };
-        if (!cancelled && data.room?.title) setActiveRoomTitle(data.room.title);
+        if (!cancelled && data.room?.title) {
+          roomTitleCacheRef.current.set(activeRoomId, data.room.title);
+          setActiveRoomTitle(data.room.title);
+        }
       } catch {
         // non-fatal
       }
@@ -278,6 +291,16 @@ export default function Home() {
     if (replayedSessionIds.current.has(activeSessionId)) return;
     let cancelled = false;
     (async () => {
+      const cached = sessionReplayCacheRef.current.get(activeSessionId);
+      if (cached) {
+        if (cancelled) return;
+        replayedSessionIds.current.add(activeSessionId);
+        chat.replaceMessages(cached.messages);
+        setActiveSessionTitle(cached.title);
+        nluHistoryRef.current = cached.nluHistory;
+        lastNluStateRef.current = cached.lastNluState;
+        return;
+      }
       try {
         console.log(`[session-replay] fetching /api/chat/sessions/${activeSessionId}/messages`);
         const res = await fetch(`/api/chat/sessions/${activeSessionId}/messages`);
@@ -297,30 +320,20 @@ export default function Home() {
         };
         console.log(`[session-replay] got ${data.messages?.length ?? 0} messages for ${activeSessionId}`);
         if (cancelled) return;
-        if (data.session?.title) setActiveSessionTitle(data.session.title);
+        const snapshot = buildSessionReplaySnapshot(data);
+        sessionReplayCacheRef.current.set(activeSessionId, snapshot);
         // Mark replayed even on empty — otherwise we'd keep re-fetching.
         replayedSessionIds.current.add(activeSessionId);
-        if (!data.messages || data.messages.length === 0) return;
-        for (const m of data.messages) {
-          if (m.role === "user") chat.injectUserMessage(m.content);
-          else chat.injectAssistantMessage(m.content);
-        }
+        setActiveSessionTitle(snapshot.title);
+        chat.replaceMessages(snapshot.messages);
         // Rehydrate the NLU history so the extractor sees the prior turns
         // on the next /api/chat/parse call — otherwise the agent acts
         // amnesiac after a refresh (sees only the new message).
-        nluHistoryRef.current = data.messages
-          .slice(-20)
-          .map((m) => ({ role: m.role, content: m.content }));
+        nluHistoryRef.current = snapshot.nluHistory;
         // Hydrate prev_nlu_state from the latest assistant turn that has one.
         // Walk backwards so a session that ended on a user turn still finds the
         // prior assistant state.
-        for (let i = data.messages.length - 1; i >= 0; i--) {
-          const m = data.messages[i];
-          if (m.role === "assistant" && m.nlu_state) {
-            lastNluStateRef.current = m.nlu_state;
-            break;
-          }
-        }
+        lastNluStateRef.current = snapshot.lastNluState;
       } catch (err) {
         console.warn("[session-replay] error", err);
       }
@@ -336,6 +349,15 @@ export default function Home() {
     if (replayedRoomIds.current.has(activeRoomId)) return;
     let cancelled = false;
     (async () => {
+      const cached = roomReplayCacheRef.current.get(activeRoomId);
+      if (cached) {
+        if (cancelled) return;
+        replayedRoomIds.current.add(activeRoomId);
+        chat.replaceMessages(cached.messages);
+        setActiveProposalId(cached.proposalId);
+        nluHistoryRef.current = cached.nluHistory;
+        return;
+      }
       try {
         const res = await fetch(`/api/rooms/${activeRoomId}/private-messages`);
         if (!res.ok) return;
@@ -349,10 +371,10 @@ export default function Home() {
           }>;
         };
         if (cancelled) return;
-        // Mark replayed BEFORE injecting so any side-effect re-render doesn't loop.
-        // We mark even on empty so the effect doesn't refetch on every render.
+        const snapshot = buildRoomReplaySnapshot(data.messages);
+        roomReplayCacheRef.current.set(activeRoomId, snapshot);
         replayedRoomIds.current.add(activeRoomId);
-        if (!data.messages || data.messages.length === 0) return;
+        chat.replaceMessages(snapshot.messages);
         // Fresh context — the context-switch effect already cleared chat on
         // a real switch. Inject each persisted message so the user sees the
         // full thread that the server seeded (pre-confirm history + welcome
@@ -362,27 +384,11 @@ export default function Home() {
         // activeProposalId state instead. Keep the LAST such proposal_id so
         // we always show the most recent proposal (force re-synthesis creates
         // a new marker message after the old one).
-        let latestProposalId: string | null = null;
-        for (const m of data.messages) {
-          if (m.meta_json?.kind === "trip_proposal_card" && m.meta_json?.proposal_id) {
-            latestProposalId = m.meta_json.proposal_id;
-            continue;
-          }
-          if (m.role === "user") chat.injectUserMessage(m.content);
-          else chat.injectAssistantMessage(m.content);
-        }
-        setActiveProposalId(latestProposalId);
+        setActiveProposalId(snapshot.proposalId);
         // Rehydrate NLU history (same rationale as session replay below).
         // Skip system-role messages + marker messages — only user/assistant
         // text feeds the extractor.
-        nluHistoryRef.current = data.messages
-          .filter(
-            (m) =>
-              (m.role === "user" || m.role === "assistant") &&
-              m.meta_json?.kind !== "trip_proposal_card",
-          )
-          .slice(-20)
-          .map((m) => ({ role: m.role as "user" | "assistant", content: m.content }));
+        nluHistoryRef.current = snapshot.nluHistory;
       } catch {
         // Network failure here is non-fatal — user can still chat fresh.
       }
@@ -1114,7 +1120,20 @@ export default function Home() {
       const query = payload.search_query ?? "";
       if (query) {
         learnFromSearch(query);
-        chat.sendMessage(query, undefined, { skipUserPush: true });
+        // Pin the scenario forward to /api/chat. Without this, runAgent
+        // re-classifies the conversation history with its own LLM, and
+        // when the latest user message is a quick-pick value like "2"
+        // (party_size) the classifier has been observed picking
+        // category="smartphone" off vague history — surfacing a
+        // hallucinated electronics shopping reply right after the user
+        // confirmed a restaurant booking. The v2 NLU has already
+        // determined the scenario; treat it as ground truth.
+        const validHints = ["restaurant", "hotel", "flight", "activity"] as const;
+        const hint = validHints.find((s) => s === payload.scenario);
+        chat.sendMessage(query, undefined, {
+          skipUserPush: true,
+          ...(hint ? { categoryHint: hint } : {}),
+        });
       }
     }
     if (payload.kind === "direct_booking") {
