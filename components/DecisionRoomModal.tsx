@@ -27,8 +27,11 @@ export default function DecisionRoomModal({
   const [tab, setTab] = useState<Tab>(preselectedContact ? "contacts" : "contacts");
   const [shareUrl, setShareUrl] = useState<string | null>(null);
   const [sessionId, setSessionId] = useState<string | null>(null);
-  const [selectedContact, setSelectedContact] = useState<PickerContact | null>(
-    preselectedContact ?? null,
+  const [selectedContacts, setSelectedContacts] = useState<PickerContact[]>(
+    preselectedContact ? [preselectedContact] : [],
+  );
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(
+    new Set(preselectedContact ? [preselectedContact.contact_user_id] : []),
   );
   const [copied, setCopied] = useState<"imessage" | "whatsapp" | "copy" | null>(null);
   const [loading, setLoading] = useState(false);
@@ -42,7 +45,8 @@ export default function DecisionRoomModal({
       setStep("tabs");
       setShareUrl(null);
       setSessionId(null);
-      setSelectedContact(preselectedContact ?? null);
+      setSelectedContacts(preselectedContact ? [preselectedContact] : []);
+      setSelectedIds(new Set(preselectedContact ? [preselectedContact.contact_user_id] : []));
       setCopied(null);
       setError(null);
       setInviteSent(false);
@@ -71,7 +75,7 @@ export default function DecisionRoomModal({
   }, [step, sessionId, shareUrl]);
 
   /** Create a DR session lazily — only when user takes an action. */
-  async function ensureSession(inviteeUserId?: string | null): Promise<{
+  async function ensureSession(inviteeUserIds?: string[] | null): Promise<{
     sessionId: string;
     shareUrl: string;
   } | null> {
@@ -79,13 +83,17 @@ export default function DecisionRoomModal({
     setLoading(true);
     setError(null);
     try {
+      const ids = inviteeUserIds ?? [];
       const res = await fetch("/api/decision-session", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           initiatorConstraints: initiatorQuery,
           cityId,
-          inviteeUserId: inviteeUserId ?? undefined,
+          // Pass both shapes for back-compat: server prefers inviteeUserIds[]
+          // when present, falls back to inviteeUserId for legacy 2-party.
+          inviteeUserIds: ids.length > 0 ? ids : undefined,
+          inviteeUserId: ids.length === 1 ? ids[0] : undefined,
         }),
       });
       if (!res.ok) throw new Error("Failed to create session");
@@ -101,16 +109,16 @@ export default function DecisionRoomModal({
     }
   }
 
-  async function handleSendInviteToContact() {
-    if (!selectedContact) return;
-    const created = await ensureSession(selectedContact.contact_user_id);
+  async function handleSendInviteToContacts() {
+    if (selectedContacts.length === 0) return;
+    const created = await ensureSession(selectedContacts.map((c) => c.contact_user_id));
     if (!created) return;
     setInviteSent(true);
     setStep("waiting");
   }
 
   async function handleShareLink(via: "imessage" | "whatsapp" | "copy") {
-    const created = await ensureSession(null);
+    const created = await ensureSession([]);
     if (!created) return;
     const text = `Let's decide where to eat tonight — add your preferences: ${created.shareUrl}`;
     if (via === "imessage") {
@@ -223,24 +231,34 @@ export default function DecisionRoomModal({
             {tab === "contacts" && (
               <>
                 <ContactPicker
-                  selectedId={selectedContact?.contact_user_id ?? null}
-                  onSelect={(c) => setSelectedContact(c)}
+                  mode="multi"
+                  selectedIds={selectedIds}
+                  maxSelected={7}
+                  onChange={(next, contact, isAdding) => {
+                    setSelectedIds(next);
+                    setSelectedContacts((prev) => {
+                      if (isAdding) return [...prev, contact];
+                      return prev.filter((c) => c.contact_user_id !== contact.contact_user_id);
+                    });
+                  }}
                 />
                 <button
                   type="button"
-                  onClick={handleSendInviteToContact}
-                  disabled={!selectedContact || loading}
+                  onClick={handleSendInviteToContacts}
+                  disabled={selectedContacts.length === 0 || loading}
                   className="w-full mt-4 py-2.5 rounded-xl bg-gray-900 text-white text-sm font-medium disabled:opacity-40 hover:bg-gray-800 transition-colors"
                 >
                   {loading
-                    ? "Sending…"
-                    : selectedContact
-                      ? `Send invite to ${selectedContact.nickname ?? selectedContact.display_name ?? `@${selectedContact.profile_code}`}`
-                      : "Pick someone to invite"}
+                    ? "Creating room…"
+                    : selectedContacts.length === 0
+                      ? "Pick people to invite"
+                      : selectedContacts.length === 1
+                        ? `Send invite to ${selectedContacts[0].nickname ?? selectedContacts[0].display_name ?? `@${selectedContacts[0].profile_code}`}`
+                        : `Start group room with ${selectedContacts.length} people`}
                 </button>
                 <p className="text-[10px] text-gray-400 text-center mt-3">
-                  They&apos;ll get a link to add their constraints. The link is
-                  bound to their account when they sign in.
+                  Group rooms wait for everyone to add their constraints before
+                  showing options. Up to 8 people total (you + 7).
                 </p>
               </>
             )}
@@ -248,8 +266,8 @@ export default function DecisionRoomModal({
             {tab === "link" && (
               <>
                 <p className="text-xs text-gray-500 mb-3">
-                  Send the link to your partner — they&apos;ll add their
-                  constraints, then you&apos;ll both vote on options.
+                  Send the link to whoever you&apos;re deciding with — they&apos;ll add their
+                  constraints, then you&apos;ll all vote together.
                 </p>
                 <div className="flex gap-2 mb-3">
                   <button
@@ -275,7 +293,8 @@ export default function DecisionRoomModal({
                   {loading ? "…" : copied === "copy" ? "Copied!" : "Copy link"}
                 </button>
                 <p className="text-[10px] text-gray-400 text-center mt-3">
-                  Link expires in 24 hours · No sign-up needed for your partner
+                  Link expires in 24 hours · 2-party links work without sign-up;
+                  group rooms (3+) need everyone signed in.
                 </p>
               </>
             )}
@@ -313,12 +332,16 @@ export default function DecisionRoomModal({
                 lineHeight: 1.15,
               }}
             >
-              Waiting for your partner.
+              {selectedContacts.length > 1
+                ? "Waiting for your group."
+                : "Waiting for your partner."}
             </h2>
             <p className="text-sm text-gray-500 mb-5 leading-relaxed">
-              {inviteSent && selectedContact
-                ? `${selectedContact.nickname ?? selectedContact.display_name ?? `@${selectedContact.profile_code}`} will be taken straight to the constraints screen when they open it.`
-                : "Once they add their constraints, you'll both be taken to a voting screen to pick something you'll both like."}
+              {inviteSent && selectedContacts.length > 0
+                ? selectedContacts.length === 1
+                  ? `${selectedContacts[0].nickname ?? selectedContacts[0].display_name ?? `@${selectedContacts[0].profile_code}`} will be taken straight to the constraints screen when they open it.`
+                  : `${selectedContacts.length} people invited. Voting unlocks when everyone has added their constraints.`
+                : "Once they add their constraints, you'll all be taken to a voting screen to pick something everyone agrees on."}
             </p>
 
             <div className="bg-gray-50 rounded-xl p-3 mb-4">

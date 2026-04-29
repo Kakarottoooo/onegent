@@ -3,8 +3,14 @@ import {
   getDecisionSession,
   updateDecisionSession,
   getUserProfile,
+  getUserProfilesByIds,
   setDecisionSessionInvitee,
   getSharedArtifactByRef,
+  listDecisionSessionMembers,
+  setMemberConstraints,
+  setMemberVotes,
+  setMemberFeedback,
+  type DecisionSessionMember,
 } from "@/lib/db";
 import { runAgentForTwoParty } from "@/lib/agent/two-party";
 import { auth } from "@clerk/nextjs/server";
@@ -70,10 +76,47 @@ export async function GET(_req: NextRequest, { params }: Params) {
       return null;
     }
   }
-  const [initiator_profile, invitee_profile] = await Promise.all([
+  const [initiator_profile, invitee_profile, members] = await Promise.all([
     loadSlim(session.initiator_user_id),
     loadSlim(session.invitee_user_id),
+    listDecisionSessionMembers(id),
   ]);
+
+  // For 3+-party DRs we attach a hydrated members[] array so the /decide
+  // page can render the participants panel without a second round-trip.
+  // 2-party DRs return [] here — frontend falls back to initiator_profile +
+  // invitee_profile in that case.
+  let hydratedMembers: Array<{
+    user_id: string;
+    is_initiator: boolean;
+    has_submitted: boolean;
+    has_voted: boolean;
+    votes: { card_id: string; approved: boolean }[];
+    profile: ProfileSlim | null;
+  }> = [];
+  if (members.length > 0) {
+    const profileMap = await getUserProfilesByIds(members.map((m) => m.user_id));
+    hydratedMembers = members.map((m) => {
+      const p = profileMap[m.user_id] ?? null;
+      const votes = Array.isArray(m.votes) ? m.votes : [];
+      return {
+        user_id: m.user_id,
+        is_initiator: m.is_initiator,
+        has_submitted: !!m.submitted_at,
+        has_voted: votes.length > 0,
+        votes,
+        profile: p
+          ? {
+              user_id: p.user_id,
+              display_name: p.display_name,
+              avatar_url: p.avatar_url,
+              profile_code: p.profile_code,
+              username: p.username,
+            }
+          : null,
+      };
+    });
+  }
 
   // Attach own_share when the *caller* (auth) created an artifact for this
   // session. This lets the decided screen flip "Save & share" to "Shared ·
@@ -96,7 +139,13 @@ export async function GET(_req: NextRequest, { params }: Params) {
     }
   }
 
-  return NextResponse.json({ session, initiator_profile, invitee_profile, own_share });
+  return NextResponse.json({
+    session,
+    initiator_profile,
+    invitee_profile,
+    own_share,
+    members: hydratedMembers,
+  });
 }
 
 export async function PATCH(req: NextRequest, { params }: Params) {
@@ -121,6 +170,12 @@ export async function PATCH(req: NextRequest, { params }: Params) {
   const { userId } = await auth();
   const callerRole = deriveRole(req, session, userId ?? null);
 
+  // Group mode is detected by presence of decision_session_members rows.
+  // 2-party DRs continue working off initiator_*/partner_* columns; group
+  // DRs use the members table for everything (constraints, votes, feedback).
+  const members = await listDecisionSessionMembers(id);
+  const isGroup = members.length > 0;
+
   // ── Action: partner submits their constraints ──────────────────────────────
   if (body.action === "submit_partner_constraints") {
     if (session.status !== "waiting_partner") {
@@ -133,6 +188,80 @@ export async function PATCH(req: NextRequest, { params }: Params) {
       return NextResponse.json({ error: "partnerConstraints is required" }, { status: 400 });
     }
 
+    // ── Group path ───────────────────────────────────────────────────────
+    if (isGroup) {
+      if (!userId) {
+        return NextResponse.json(
+          { error: "Group rooms require sign-in to submit constraints." },
+          { status: 401 },
+        );
+      }
+      const meAsMember = members.find((m) => m.user_id === userId);
+      if (!meAsMember) {
+        return NextResponse.json(
+          { error: "You're not a member of this room." },
+          { status: 403 },
+        );
+      }
+      // Save this member's constraints; merge only triggers when *all* members
+      // have submitted (otherwise late joiners get excluded from the search).
+      await setMemberConstraints(id, userId, body.partnerConstraints.trim());
+      const refreshed = await listDecisionSessionMembers(id);
+      const allSubmitted = refreshed.every((m) => !!m.submitted_at);
+      if (!allSubmitted) {
+        const updated = await getDecisionSession(id);
+        return NextResponse.json({
+          session: updated,
+          waiting_for: refreshed.filter((m) => !m.submitted_at).length,
+        });
+      }
+      // All in — build combined partner_constraints by joining every
+      // non-initiator member's text. Hack until the merge prompt is
+      // rewritten to natively accept N-party input.
+      const initiatorMember = refreshed.find((m) => m.is_initiator);
+      const others = refreshed.filter((m) => !m.is_initiator);
+      const initiatorConstraints =
+        initiatorMember?.constraints ?? session.initiator_constraints;
+      const combinedPartner = others
+        .map((m, i) => `Person ${i + 2}: ${m.constraints ?? ""}`)
+        .join("\n\n");
+      const agentTimeout = new Promise<never>((_, reject) =>
+        setTimeout(() => reject(new Error("Group agent timed out")), 55_000),
+      );
+      let mergeResult;
+      try {
+        mergeResult = await Promise.race([
+          runAgentForTwoParty(initiatorConstraints, combinedPartner, session.city_id),
+          agentTimeout,
+        ]);
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : "Agent timed out";
+        return NextResponse.json(
+          { error: `Search timed out — please try again. (${msg})` },
+          { status: 504 },
+        );
+      }
+      if (mergeResult.conflict) {
+        await updateDecisionSession(id, {
+          partner_constraints: combinedPartner,
+          conflict: true,
+          conflict_reason:
+            mergeResult.conflictReason ?? "Group constraints are mutually exclusive",
+          merged_options: mergeResult.options,
+          status: "conflict",
+        });
+      } else {
+        await updateDecisionSession(id, {
+          partner_constraints: combinedPartner,
+          merged_options: mergeResult.options,
+          status: "voting",
+        });
+      }
+      const updated = await getDecisionSession(id);
+      return NextResponse.json({ session: updated });
+    }
+
+    // ── Legacy 2-party path ──────────────────────────────────────────────
     // If partner is logged in and the session has no invitee bound yet,
     // backfill so post-decision "Add as contact" works for anon-link flows.
     if (callerRole === "partner" && userId && !session.invitee_user_id && userId !== session.initiator_user_id) {
@@ -187,7 +316,36 @@ export async function PATCH(req: NextRequest, { params }: Params) {
       return NextResponse.json({ error: "Session is not in voting state" }, { status: 409 });
     }
 
-    // Role is derived server-side — not trusted from client body
+    // ── Group path: write to members.votes; decided when ALL members have
+    //    approved the same card (unanimity). ───────────────────────────────
+    if (isGroup) {
+      if (!userId) {
+        return NextResponse.json({ error: "Sign-in required to vote in group rooms." }, { status: 401 });
+      }
+      const me = members.find((m) => m.user_id === userId);
+      if (!me) {
+        return NextResponse.json({ error: "You're not a member of this room." }, { status: 403 });
+      }
+      const existing = Array.isArray(me.votes) ? me.votes : [];
+      const newVotes = [
+        ...existing.filter((v) => v.card_id !== body.cardId),
+        { card_id: body.cardId, approved: body.approved },
+      ];
+      await setMemberVotes(id, userId, newVotes);
+      const refreshed = await listDecisionSessionMembers(id);
+      // Decided iff *every* member has an approved vote for the same card_id.
+      const decidedCardId = pickUnanimousApproval(refreshed, body.cardId);
+      if (decidedCardId) {
+        await updateDecisionSession(id, {
+          status: "decided",
+          decided_card_id: decidedCardId,
+        });
+      }
+      const updated = await getDecisionSession(id);
+      return NextResponse.json({ session: updated });
+    }
+
+    // ── Legacy 2-party path ────────────────────────────────────────────────
     const voteField = callerRole === "initiator" ? "initiator_vote" : "partner_vote";
     const existingVotes: { card_id: string; approved: boolean }[] =
       (session[voteField] as { card_id: string; approved: boolean }[]) ?? [];
@@ -221,8 +379,21 @@ export async function PATCH(req: NextRequest, { params }: Params) {
 
   // ── Action: submit post-decision feedback ──────────────────────────────────
   if (body.action === "feedback") {
-    if (!body.feedback || !body.feedbackRole) {
-      return NextResponse.json({ error: "feedback and feedbackRole are required" }, { status: 400 });
+    if (!body.feedback) {
+      return NextResponse.json({ error: "feedback is required" }, { status: 400 });
+    }
+
+    if (isGroup) {
+      if (!userId) {
+        return NextResponse.json({ error: "Sign-in required for feedback." }, { status: 401 });
+      }
+      await setMemberFeedback(id, userId, body.feedback);
+      const updated = await getDecisionSession(id);
+      return NextResponse.json({ session: updated });
+    }
+
+    if (!body.feedbackRole) {
+      return NextResponse.json({ error: "feedbackRole is required" }, { status: 400 });
     }
     const field = body.feedbackRole === "initiator" ? "feedback_initiator" : "feedback_partner";
     await updateDecisionSession(id, { [field]: body.feedback });
@@ -231,4 +402,23 @@ export async function PATCH(req: NextRequest, { params }: Params) {
   }
 
   return NextResponse.json({ error: "Unknown action" }, { status: 400 });
+}
+
+/**
+ * If a card_id is approved by every member, return that card_id; otherwise
+ * null. The candidate is the card that was just voted on — checking it
+ * narrowly avoids scanning the whole vote space when only one new vote
+ * could have flipped unanimity.
+ */
+function pickUnanimousApproval(
+  members: DecisionSessionMember[],
+  candidateCardId: string,
+): string | null {
+  if (members.length === 0) return null;
+  for (const m of members) {
+    const votes = Array.isArray(m.votes) ? m.votes : [];
+    const v = votes.find((x) => x.card_id === candidateCardId);
+    if (!v || !v.approved) return null;
+  }
+  return candidateCardId;
 }

@@ -2595,7 +2595,7 @@ export default function Home() {
                         Decision Rooms
                       </p>
                       <p style={{ margin: "2px 0 0", fontFamily: "var(--font-dm-sans)", fontSize: 12, color: "var(--text-secondary)" }}>
-                        Decide together — dinner, hotel, trips
+                        Decide together — dinner, weekend trips, group plans
                       </p>
                     </div>
                     <span style={{ fontFamily: "var(--font-dm-sans)", fontSize: 12, color: "var(--gold)", flexShrink: 0 }}>

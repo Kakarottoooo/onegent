@@ -505,6 +505,146 @@ export async function getDecisionSession(id: string): Promise<DecisionSession | 
   return result.rows[0] ?? null;
 }
 
+// ═══════════════════════════════════════════════════════════════════════════
+// Decision Session Members (P5: 3+ party Decision Rooms)
+//
+// Why a new table instead of repeating partner_*: 2-party DRs already work
+// off the initiator_*/partner_* columns and do NOT need this table. New
+// 3+-party DRs write rows here; backwards compat is decided by checking
+// "does this session have any rows in decision_session_members?".
+//
+// is_initiator on the row, not just initiator_user_id on the parent, so
+// the same row carries everyone's constraints + votes uniformly. Lookup by
+// session+user is fast via composite primary key.
+// ═══════════════════════════════════════════════════════════════════════════
+
+let decisionSessionMembersTableReady: Promise<void> | null = null;
+
+export async function ensureDecisionSessionMembersTable(): Promise<void> {
+  if (!decisionSessionMembersTableReady) {
+    decisionSessionMembersTableReady = (async () => {
+      await sql`
+        CREATE TABLE IF NOT EXISTS decision_session_members (
+          session_id    TEXT NOT NULL,
+          user_id       TEXT NOT NULL,
+          is_initiator  BOOLEAN NOT NULL DEFAULT FALSE,
+          constraints   TEXT,
+          votes         JSONB NOT NULL DEFAULT '[]',
+          feedback      TEXT,
+          joined_at     TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          submitted_at  TIMESTAMPTZ,
+          PRIMARY KEY (session_id, user_id)
+        )
+      `;
+      await sql`CREATE INDEX IF NOT EXISTS dsm_session_idx ON decision_session_members (session_id)`;
+      await sql`CREATE INDEX IF NOT EXISTS dsm_user_idx ON decision_session_members (user_id)`;
+    })().catch((err) => {
+      decisionSessionMembersTableReady = null;
+      throw err;
+    });
+  }
+  await decisionSessionMembersTableReady;
+}
+
+export interface DecisionSessionMember {
+  session_id: string;
+  user_id: string;
+  is_initiator: boolean;
+  constraints: string | null;
+  votes: { card_id: string; approved: boolean }[];
+  feedback: "loved" | "fine" | "never" | null;
+  joined_at: string;
+  submitted_at: string | null;
+}
+
+/**
+ * Add a member to a session if not already present. is_initiator forced
+ * idempotent — first INSERT wins so subsequent re-adds don't reset roles.
+ */
+export async function addDecisionSessionMember(
+  sessionId: string,
+  userId: string,
+  isInitiator = false,
+): Promise<DecisionSessionMember> {
+  await ensureDecisionSessionMembersTable();
+  const result = await sql<DecisionSessionMember>`
+    INSERT INTO decision_session_members (session_id, user_id, is_initiator)
+    VALUES (${sessionId}, ${userId}, ${isInitiator})
+    ON CONFLICT (session_id, user_id) DO UPDATE
+      SET is_initiator = decision_session_members.is_initiator OR EXCLUDED.is_initiator
+    RETURNING *
+  `;
+  return result.rows[0];
+}
+
+export async function listDecisionSessionMembers(
+  sessionId: string,
+): Promise<DecisionSessionMember[]> {
+  await ensureDecisionSessionMembersTable();
+  const result = await sql<DecisionSessionMember>`
+    SELECT * FROM decision_session_members
+    WHERE session_id = ${sessionId}
+    ORDER BY joined_at ASC
+  `;
+  return result.rows;
+}
+
+export async function getDecisionSessionMember(
+  sessionId: string,
+  userId: string,
+): Promise<DecisionSessionMember | null> {
+  await ensureDecisionSessionMembersTable();
+  const result = await sql<DecisionSessionMember>`
+    SELECT * FROM decision_session_members
+    WHERE session_id = ${sessionId} AND user_id = ${userId}
+    LIMIT 1
+  `;
+  return result.rows[0] ?? null;
+}
+
+export async function setMemberConstraints(
+  sessionId: string,
+  userId: string,
+  constraints: string,
+): Promise<DecisionSessionMember | null> {
+  await ensureDecisionSessionMembersTable();
+  const result = await sql<DecisionSessionMember>`
+    UPDATE decision_session_members
+    SET constraints = ${constraints}, submitted_at = NOW()
+    WHERE session_id = ${sessionId} AND user_id = ${userId}
+    RETURNING *
+  `;
+  return result.rows[0] ?? null;
+}
+
+export async function setMemberVotes(
+  sessionId: string,
+  userId: string,
+  votes: { card_id: string; approved: boolean }[],
+): Promise<DecisionSessionMember | null> {
+  await ensureDecisionSessionMembersTable();
+  const result = await sql<DecisionSessionMember>`
+    UPDATE decision_session_members
+    SET votes = ${JSON.stringify(votes)}::jsonb
+    WHERE session_id = ${sessionId} AND user_id = ${userId}
+    RETURNING *
+  `;
+  return result.rows[0] ?? null;
+}
+
+export async function setMemberFeedback(
+  sessionId: string,
+  userId: string,
+  feedback: "loved" | "fine" | "never",
+): Promise<void> {
+  await ensureDecisionSessionMembersTable();
+  await sql`
+    UPDATE decision_session_members
+    SET feedback = ${feedback}
+    WHERE session_id = ${sessionId} AND user_id = ${userId}
+  `;
+}
+
 /**
  * Bind invitee_user_id once when a logged-in partner first opens the link.
  * Idempotent and only sets when currently NULL — initiator can pre-bind via

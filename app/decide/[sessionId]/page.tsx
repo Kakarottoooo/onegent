@@ -19,6 +19,15 @@ interface PeerProfile {
 }
 type InitiatorProfile = PeerProfile;
 
+interface MemberRow {
+  user_id: string;
+  is_initiator: boolean;
+  has_submitted: boolean;
+  has_voted: boolean;
+  votes: { card_id: string; approved: boolean }[];
+  profile: PeerProfile | null;
+}
+
 /**
  * Resolve role with priority:
  *   1. logged-in user matches session.initiator_user_id → initiator
@@ -55,6 +64,13 @@ export default function DecidePage() {
   const [feedbackSent, setFeedbackSent] = useState(false);
   const [shareOpen, setShareOpen] = useState(false);
   const [ownShare, setOwnShare] = useState<{ slug: string; view_count: number; visibility: string } | null>(null);
+  const [members, setMembers] = useState<MemberRow[]>([]);
+
+  const isGroup = members.length > 0;
+  const myMembership = useMemo(
+    () => (currentUserId ? members.find((m) => m.user_id === currentUserId) ?? null : null),
+    [members, currentUserId],
+  );
 
   const role = useMemo(
     () => resolveRole(session, currentUserId ?? null),
@@ -82,6 +98,7 @@ export default function DecidePage() {
         initiator_profile?: InitiatorProfile | null;
         invitee_profile?: PeerProfile | null;
         own_share?: { slug: string; view_count: number; visibility: string } | null;
+        members?: MemberRow[];
       };
       setSession(data.session);
       if (data.initiator_profile !== undefined) {
@@ -93,6 +110,7 @@ export default function DecidePage() {
       if (data.own_share !== undefined) {
         setOwnShare(data.own_share);
       }
+      setMembers(data.members ?? []);
     } catch {
       setError("Network error. Please check your connection.");
     } finally {
@@ -290,7 +308,9 @@ export default function DecidePage() {
 
             <div className="flex items-center gap-2 mb-2">
               <span className="text-lg">🎉</span>
-              <h1 className="text-base font-semibold text-gray-900">You both agreed</h1>
+              <h1 className="text-base font-semibold text-gray-900">
+                {isGroup ? `All ${members.length} agreed` : "You both agreed"}
+              </h1>
             </div>
             <div className="bg-white rounded-2xl border border-gray-200 p-4 mb-4 shadow-sm">
               <p className="text-base font-semibold text-gray-900 mb-1">{decidedCard.restaurant?.name}</p>
@@ -373,8 +393,91 @@ export default function DecidePage() {
           </div>
         )}
 
-        {/* ── SCREEN: Partner adds constraints ── */}
-        {role === "partner" && session.status === "waiting_partner" && (
+        {/* ── PANEL: Group members status (multi-party DRs only) ── */}
+        {isGroup && session.status === "waiting_partner" && (
+          <GroupMembersPanel members={members} currentUserId={currentUserId} />
+        )}
+
+        {/* ── SCREEN: Group member needs to submit constraints ── */}
+        {isGroup && session.status === "waiting_partner" && myMembership && !myMembership.has_submitted && !myMembership.is_initiator && (
+          <div>
+            <h1 className="text-base font-semibold text-gray-900 mb-1">
+              You&apos;re in a group decision
+            </h1>
+            <p className="text-sm text-gray-500 mb-5">
+              Initiator&apos;s request:{" "}
+              <span className="text-gray-700 font-medium">&ldquo;{session.initiator_constraints}&rdquo;</span>
+            </p>
+            <div className="mb-4">
+              <label className="text-xs font-medium text-gray-600 block mb-2">
+                Add your constraints
+              </label>
+              <textarea
+                value={partnerInput}
+                onChange={(e) => setPartnerInput(e.target.value)}
+                placeholder="e.g. no raw fish, quieter than last time, under $50"
+                rows={3}
+                className="w-full border border-gray-200 rounded-xl p-3 text-sm text-gray-900 resize-none focus:outline-none focus:border-gray-400"
+              />
+            </div>
+            <button
+              onClick={submitPartnerConstraints}
+              disabled={!partnerInput.trim() || submitting}
+              className="w-full py-3 rounded-xl bg-gray-900 text-white text-sm font-medium disabled:opacity-40"
+            >
+              {submitting ? "Saving…" : "Submit my constraints →"}
+            </button>
+            <p className="text-xs text-gray-400 mt-3 text-center">
+              Voting starts when everyone has submitted.
+            </p>
+          </div>
+        )}
+
+        {/* ── SCREEN: Group member already submitted, waiting on others ── */}
+        {isGroup && session.status === "waiting_partner" && myMembership?.has_submitted && (
+          <div className="text-center py-10">
+            <div className="text-3xl mb-4">⏳</div>
+            <h1 className="text-base font-semibold text-gray-900 mb-2">
+              Waiting on the group
+            </h1>
+            <p className="text-sm text-gray-500">
+              {`${members.filter((m) => !m.has_submitted).length} of ${members.length} still need to submit constraints.`}
+            </p>
+          </div>
+        )}
+
+        {/* ── SCREEN: Group viewer not invited ── */}
+        {isGroup && session.status === "waiting_partner" && currentUserId && !myMembership && (
+          <div className="text-center py-10">
+            <h1 className="text-base font-semibold text-gray-900 mb-2">
+              You weren&apos;t invited to this group
+            </h1>
+            <p className="text-sm text-gray-500">
+              Ask the initiator to send you the link from a group with you in it.
+            </p>
+          </div>
+        )}
+
+        {/* ── SCREEN: Group viewer not signed in ── */}
+        {isGroup && session.status === "waiting_partner" && !currentUserId && (
+          <div className="text-center py-10">
+            <h1 className="text-base font-semibold text-gray-900 mb-2">
+              Sign in to join this group decision
+            </h1>
+            <p className="text-sm text-gray-500 mb-4">
+              Group rooms need everyone signed in so we can keep votes straight.
+            </p>
+            <a
+              href="/"
+              className="inline-block py-2.5 px-5 rounded-xl bg-gray-900 text-white text-sm font-medium"
+            >
+              Sign in →
+            </a>
+          </div>
+        )}
+
+        {/* ── SCREEN: Partner adds constraints (legacy 2-party only) ── */}
+        {!isGroup && role === "partner" && session.status === "waiting_partner" && (
           <div>
             <h1 className="text-base font-semibold text-gray-900 mb-1">
               You&apos;ve been invited to decide together
@@ -407,8 +510,8 @@ export default function DecidePage() {
           </div>
         )}
 
-        {/* ── SCREEN: Initiator waiting for partner ── */}
-        {role === "initiator" && session.status === "waiting_partner" && (
+        {/* ── SCREEN: Initiator waiting for partner (legacy 2-party only) ── */}
+        {!isGroup && role === "initiator" && session.status === "waiting_partner" && (
           <div className="text-center py-12">
             <div className="text-3xl mb-4">⏳</div>
             <h1 className="text-base font-semibold text-gray-900 mb-2">Waiting for your partner</h1>
@@ -496,10 +599,18 @@ export default function DecidePage() {
                     </div>
 
                     {/* Vote status indicators */}
-                    <p className="text-xs text-gray-400 mt-2">
-                      {approved ? "You ✓" : voted ? "You ✗" : "You haven't voted"} ·{" "}
-                      {theyApproved === true ? "Partner ✓" : theyApproved === false ? "Partner ✗" : "Waiting for partner"}
-                    </p>
+                    {isGroup ? (
+                      <GroupVoteStatus
+                        members={members}
+                        cardId={cardId}
+                        currentUserId={currentUserId ?? null}
+                      />
+                    ) : (
+                      <p className="text-xs text-gray-400 mt-2">
+                        {approved ? "You ✓" : voted ? "You ✗" : "You haven't voted"} ·{" "}
+                        {theyApproved === true ? "Partner ✓" : theyApproved === false ? "Partner ✗" : "Waiting for partner"}
+                      </p>
+                    )}
                   </div>
                 );
               })}
@@ -523,6 +634,161 @@ export default function DecidePage() {
         kind="dr_outcome"
         refId={String(sessionId ?? "")}
       />
+    </div>
+  );
+}
+
+/**
+ * Per-card vote pips for group rooms — one initial-circle per member with
+ * color-coded state (gold = ✓, gray-strike = ✗, hollow = waiting).
+ */
+function GroupVoteStatus({
+  members,
+  cardId,
+  currentUserId,
+}: {
+  members: MemberRow[];
+  cardId: string;
+  currentUserId: string | null;
+}) {
+  const approveCount = members.filter((m) => m.votes.find((v) => v.card_id === cardId && v.approved)).length;
+  const totalCount = members.length;
+  return (
+    <div className="mt-2 flex items-center gap-2 flex-wrap">
+      <div className="flex items-center" style={{ marginLeft: 2 }}>
+        {members.map((m, idx) => {
+          const v = m.votes.find((vt) => vt.card_id === cardId);
+          const state: "approved" | "passed" | "waiting" =
+            v?.approved === true ? "approved" : v?.approved === false ? "passed" : "waiting";
+          const label =
+            m.profile?.display_name ?? m.profile?.username ?? m.profile?.profile_code ?? "?";
+          const initial = label.slice(0, 1).toUpperCase();
+          const isMe = currentUserId && m.user_id === currentUserId;
+          const bg =
+            state === "approved"
+              ? "var(--gold, #C9A84C)"
+              : state === "passed"
+                ? "#d1d5db"
+                : "transparent";
+          const color = state === "waiting" ? "var(--text-muted)" : "white";
+          const border =
+            state === "waiting" ? "2px dashed #d1d5db" : "2px solid transparent";
+          return (
+            <div
+              key={m.user_id}
+              title={`${label}${isMe ? " (you)" : ""} · ${state}`}
+              style={{
+                width: 22,
+                height: 22,
+                marginLeft: idx === 0 ? 0 : -6,
+                borderRadius: "50%",
+                background: bg,
+                border,
+                color,
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                fontSize: 10,
+                fontWeight: 600,
+                fontFamily: "var(--font-dm-sans)",
+                position: "relative",
+                zIndex: 8 - idx,
+              }}
+            >
+              {initial}
+            </div>
+          );
+        })}
+      </div>
+      <span className="text-[11px] text-gray-500">
+        {approveCount} of {totalCount} ✓
+      </span>
+    </div>
+  );
+}
+
+/**
+ * Compact members panel: avatar row with submitted/voted state pips.
+ * Used at the top of the constraint phase so each viewer sees the group's
+ * progress at a glance.
+ */
+function GroupMembersPanel({
+  members,
+  currentUserId,
+}: {
+  members: MemberRow[];
+  currentUserId: string | null | undefined;
+}) {
+  const submittedCount = members.filter((m) => m.has_submitted).length;
+  return (
+    <div
+      className="flex items-center gap-3 p-3 mb-5 rounded-2xl border"
+      style={{
+        borderColor: "var(--border, #e5e7eb)",
+        background: "white",
+      }}
+    >
+      <div className="flex items-center" style={{ marginLeft: 4 }}>
+        {members.slice(0, 8).map((m, idx) => {
+          const label = m.profile?.display_name ?? m.profile?.username ?? m.profile?.profile_code ?? "?";
+          const initial = label.slice(0, 1).toUpperCase();
+          const isMe = currentUserId && m.user_id === currentUserId;
+          return (
+            <div
+              key={m.user_id}
+              title={`${label}${isMe ? " (you)" : ""}${m.has_submitted ? " · submitted" : " · waiting"}`}
+              style={{
+                width: 32,
+                height: 32,
+                marginLeft: idx === 0 ? 0 : -8,
+                borderRadius: "50%",
+                border: m.has_submitted
+                  ? "2px solid var(--gold, #C9A84C)"
+                  : "2px solid #d1d5db",
+                background: m.profile?.avatar_url
+                  ? `center / cover no-repeat url(${m.profile.avatar_url})`
+                  : "linear-gradient(135deg, #C9A84C 0%, #5A4416 100%)",
+                color: "white",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                fontSize: 12,
+                fontWeight: 600,
+                fontFamily: "var(--font-dm-sans)",
+                position: "relative",
+                zIndex: 8 - idx,
+              }}
+            >
+              {!m.profile?.avatar_url && initial}
+            </div>
+          );
+        })}
+      </div>
+      <div className="flex-1 min-w-0">
+        <p
+          style={{
+            fontFamily: "var(--font-dm-sans)",
+            fontSize: 11,
+            fontWeight: 600,
+            letterSpacing: "0.14em",
+            textTransform: "uppercase",
+            color: "var(--text-muted)",
+            margin: 0,
+          }}
+        >
+          Group room · {members.length} {members.length === 1 ? "person" : "people"}
+        </p>
+        <p
+          style={{
+            margin: "2px 0 0",
+            fontFamily: "var(--font-dm-sans)",
+            fontSize: 13,
+            color: "var(--text-primary)",
+          }}
+        >
+          {submittedCount} of {members.length} submitted constraints
+        </p>
+      </div>
     </div>
   );
 }

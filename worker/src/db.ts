@@ -437,6 +437,24 @@ export async function ensureDecisionSessionsTable(): Promise<void> {
       await sql`CREATE INDEX IF NOT EXISTS decision_sessions_initiator_idx ON decision_sessions (initiator_user_id) WHERE initiator_user_id IS NOT NULL`;
       await sql`CREATE INDEX IF NOT EXISTS decision_sessions_invitee_idx ON decision_sessions (invitee_user_id) WHERE invitee_user_id IS NOT NULL`;
       await sql`CREATE INDEX IF NOT EXISTS decision_sessions_expires_idx ON decision_sessions (expires_at)`;
+      // P5: 3+ party members. Mirrored from lib/db.ts so the worker's
+      // ensureDecisionSessionsTable() leaves the schema fully usable even
+      // when only the worker boots first against a fresh DB.
+      await sql`
+        CREATE TABLE IF NOT EXISTS decision_session_members (
+          session_id    TEXT NOT NULL,
+          user_id       TEXT NOT NULL,
+          is_initiator  BOOLEAN NOT NULL DEFAULT FALSE,
+          constraints   TEXT,
+          votes         JSONB NOT NULL DEFAULT '[]',
+          feedback      TEXT,
+          joined_at     TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          submitted_at  TIMESTAMPTZ,
+          PRIMARY KEY (session_id, user_id)
+        )
+      `;
+      await sql`CREATE INDEX IF NOT EXISTS dsm_session_idx ON decision_session_members (session_id)`;
+      await sql`CREATE INDEX IF NOT EXISTS dsm_user_idx ON decision_session_members (user_id)`;
     })().catch((err) => {
       decisionSessionsTableReady = null;
       throw err;
