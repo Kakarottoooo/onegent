@@ -113,8 +113,36 @@ export default function DecisionRoomModal({
 
         {step === "share" && (
           <>
-            <h2 className="text-base font-semibold text-gray-900 mb-1">
-              Plan this together
+            <span
+              style={{
+                display: "inline-flex",
+                alignItems: "center",
+                fontSize: "10px",
+                fontWeight: 600,
+                letterSpacing: "0.18em",
+                textTransform: "uppercase",
+                fontFamily: "var(--font-dm-sans)",
+                color: "var(--gold-text, #5A4416)",
+                background: "var(--gold-soft, #F5E9C8)",
+                padding: "4px 10px",
+                borderRadius: 999,
+                marginBottom: 10,
+              }}
+            >
+              Decision Room
+            </span>
+            <h2
+              style={{
+                fontFamily: "var(--font-playfair), Georgia, serif",
+                fontSize: 24,
+                fontWeight: 600,
+                letterSpacing: "-0.02em",
+                color: "#0a0a0a",
+                marginBottom: 6,
+                lineHeight: 1.15,
+              }}
+            >
+              Plan this together.
             </h2>
             <p className="text-sm text-gray-500 mb-5 leading-relaxed">
               Your search:{" "}
@@ -164,8 +192,36 @@ export default function DecisionRoomModal({
 
         {step === "waiting" && shareUrl && (
           <>
-            <h2 className="text-base font-semibold text-gray-900 mb-1">
-              Waiting for your partner
+            <span
+              style={{
+                display: "inline-flex",
+                alignItems: "center",
+                fontSize: "10px",
+                fontWeight: 600,
+                letterSpacing: "0.18em",
+                textTransform: "uppercase",
+                fontFamily: "var(--font-dm-sans)",
+                color: "var(--gold-text, #5A4416)",
+                background: "var(--gold-soft, #F5E9C8)",
+                padding: "4px 10px",
+                borderRadius: 999,
+                marginBottom: 10,
+              }}
+            >
+              Decision Room
+            </span>
+            <h2
+              style={{
+                fontFamily: "var(--font-playfair), Georgia, serif",
+                fontSize: 24,
+                fontWeight: 600,
+                letterSpacing: "-0.02em",
+                color: "#0a0a0a",
+                marginBottom: 6,
+                lineHeight: 1.15,
+              }}
+            >
+              Waiting for your partner.
             </h2>
             <p className="text-sm text-gray-500 mb-5 leading-relaxed">
               Once they add their constraints, you&apos;ll both be taken to a voting screen to pick

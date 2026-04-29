@@ -1691,18 +1691,38 @@ export default function Home() {
               }}
             >
               <div>
+                <span
+                  style={{
+                    display: "inline-flex",
+                    alignItems: "center",
+                    fontSize: "10px",
+                    fontWeight: 600,
+                    letterSpacing: "0.18em",
+                    textTransform: "uppercase",
+                    fontFamily: "var(--font-dm-sans)",
+                    color: "var(--gold-text)",
+                    background: "var(--gold-soft)",
+                    padding: "4px 10px",
+                    borderRadius: "var(--radius-pill)",
+                    marginBottom: "8px",
+                  }}
+                >
+                  Memory
+                </span>
                 <h2
                   style={{
                     fontFamily: "var(--font-playfair)",
-                    fontSize: "20px",
+                    fontSize: "24px",
                     fontWeight: 600,
-                    color: "var(--text-primary)",
-                    marginBottom: "2px",
+                    letterSpacing: "-0.02em",
+                    color: "var(--ink-9)",
+                    marginBottom: "4px",
+                    lineHeight: 1.15,
                   }}
                 >
-                  Taste Profile
+                  Taste profile.
                 </h2>
-                <p style={{ fontFamily: "var(--font-dm-sans)", fontSize: "11px", color: "var(--text-muted)" }}>
+                <p style={{ fontFamily: "var(--font-dm-sans)", fontSize: "13px", color: "var(--ink-5)", lineHeight: 1.5 }}>
                   {(profile.discovered ?? []).length > 0
                     ? `${(profile.discovered ?? []).length} signals discovered from your conversations`
                     : "Discovered automatically as you chat"}
@@ -1958,17 +1978,40 @@ export default function Home() {
               padding: "20px 16px",
             }}
           >
-            <div className="flex items-center justify-between mb-4">
-              <h3
-                style={{
-                  fontFamily: "var(--font-playfair)",
-                  fontSize: "18px",
-                  fontWeight: 600,
-                  color: "var(--text-primary)",
-                }}
-              >
-                Compare
-              </h3>
+            <div className="flex items-start justify-between mb-5">
+              <div>
+                <span
+                  style={{
+                    display: "inline-flex",
+                    alignItems: "center",
+                    fontSize: "10px",
+                    fontWeight: 600,
+                    letterSpacing: "0.18em",
+                    textTransform: "uppercase",
+                    fontFamily: "var(--font-dm-sans)",
+                    color: "var(--gold-text)",
+                    background: "var(--gold-soft)",
+                    padding: "4px 10px",
+                    borderRadius: "var(--radius-pill)",
+                    marginBottom: "8px",
+                  }}
+                >
+                  Side by side
+                </span>
+                <h3
+                  style={{
+                    fontFamily: "var(--font-playfair)",
+                    fontSize: "22px",
+                    fontWeight: 600,
+                    letterSpacing: "-0.02em",
+                    color: "var(--ink-9)",
+                    margin: 0,
+                    lineHeight: 1.15,
+                  }}
+                >
+                  Compare options.
+                </h3>
+              </div>
               <button
                 onClick={() => setCompareOpen(false)}
                 style={{
@@ -1978,6 +2021,7 @@ export default function Home() {
                   color: "var(--text-secondary)",
                   fontSize: "20px",
                   lineHeight: 1,
+                  flexShrink: 0,
                 }}
               >
                 ×
@@ -2299,16 +2343,42 @@ export default function Home() {
             {!hasMessages ? (
               /* Welcome / Hero State */
               <div className="flex flex-col items-center justify-center min-h-[60vh] text-center">
+                {/* Eyebrow — matches the gold-soft pill used on every other
+                    main-nav page (/pricing, /account, /rooms, /tasks etc) so
+                    the homepage feels like the same product family rather
+                    than a separate chat surface. */}
+                <span
+                  style={{
+                    display: "inline-flex",
+                    alignItems: "center",
+                    fontSize: "11px",
+                    fontWeight: 600,
+                    letterSpacing: "0.18em",
+                    textTransform: "uppercase",
+                    fontFamily: "var(--font-dm-sans), system-ui, sans-serif",
+                    color: "var(--gold-text)",
+                    background: "var(--gold-soft)",
+                    padding: "5px 14px",
+                    borderRadius: "var(--radius-pill)",
+                    marginBottom: 24,
+                    opacity: heroVisible ? 1 : 0,
+                    transform: heroVisible ? "translateY(0)" : "translateY(-6px)",
+                    transition: "opacity 0.5s ease, transform 0.5s ease",
+                  }}
+                >
+                  Onegent
+                </span>
                 {/* City name embedded in headline */}
                 <div style={{ position: "relative", marginBottom: 16 }}>
                   <h2
                     style={{
                       fontFamily: "var(--font-playfair)",
-                      fontSize: "clamp(28px, 5vw, 42px)",
-                      fontWeight: 700,
-                      color: "var(--text-primary)",
-                      lineHeight: 1.15,
-                      marginBottom: 12,
+                      fontSize: "clamp(32px, 5.5vw, 52px)",
+                      fontWeight: 600,
+                      letterSpacing: "-0.025em",
+                      color: "var(--ink-9)",
+                      lineHeight: 1.1,
+                      marginBottom: 14,
                       opacity: heroVisible ? 1 : 0,
                       transform: heroVisible ? "translateY(0)" : "translateY(-10px)",
                       transition: "opacity 0.5s ease, transform 0.5s ease",
