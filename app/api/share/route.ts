@@ -4,6 +4,7 @@ import {
   createSharedArtifact,
   getBookingJob,
   getDecisionSession,
+  getItinerary,
   type SharedArtifactKind,
   type SharedArtifactVisibility,
   type SharedArtifactOptions,
@@ -64,10 +65,10 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "kind and refId required" }, { status: 400 });
   }
 
-  // v1 only allows these two share targets — taste_profile / itinerary kinds
-  // come later. The DB CHECK constraint accepts the other values for forward
-  // compat but the API gates them so we don't ship half-built UIs.
-  if (kind !== "booking" && kind !== "dr_outcome") {
+  // v1 share kinds: booking, dr_outcome, trip. taste_profile remains
+  // future work. The DB CHECK constraint already accepts all four; the
+  // API gates kind so we don't ship surfaces without backing UI.
+  if (kind !== "booking" && kind !== "dr_outcome" && kind !== "trip") {
     return NextResponse.json({ error: `kind '${kind}' not yet supported` }, { status: 400 });
   }
 
@@ -80,7 +81,7 @@ export async function POST(req: NextRequest) {
     if (job.user_id !== userId) {
       return NextResponse.json({ error: "Not your booking" }, { status: 403 });
     }
-  } else {
+  } else if (kind === "dr_outcome") {
     const session = await getDecisionSession(refId);
     if (!session) {
       return NextResponse.json({ error: "Decision session not found" }, { status: 404 });
@@ -95,6 +96,15 @@ export async function POST(req: NextRequest) {
         { error: "Decision room must be decided before sharing" },
         { status: 409 },
       );
+    }
+  } else {
+    // trip
+    const itinerary = await getItinerary(refId);
+    if (!itinerary) {
+      return NextResponse.json({ error: "Trip not found" }, { status: 404 });
+    }
+    if (itinerary.owner_id !== userId) {
+      return NextResponse.json({ error: "Not your trip" }, { status: 403 });
     }
   }
 

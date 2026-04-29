@@ -951,6 +951,237 @@ export async function softDeleteSharedArtifact(id: string, ownerId: string): Pro
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
+// Itineraries (P8 — multi-booking trip aggregation).
+//
+// User-curated bundles of bookings + DR outcomes that share dates/destination.
+// E.g. "Tokyo May 2026" wraps a flight booking, 3 hotel candidates from a
+// hotel DR, and 5 restaurant DRs into one shareable trip.
+//
+// itinerary_items is intentionally polymorphic: item_kind = 'booking_job' |
+// 'dr_outcome' (matches shared_artifacts.kind shape). Position is for
+// user-curated ordering on the manage page.
+// ═══════════════════════════════════════════════════════════════════════════
+
+let itinerariesTableReady: Promise<void> | null = null;
+let itineraryItemsTableReady: Promise<void> | null = null;
+
+export async function ensureItinerariesTable(): Promise<void> {
+  if (!itinerariesTableReady) {
+    itinerariesTableReady = (async () => {
+      await sql`
+        CREATE TABLE IF NOT EXISTS itineraries (
+          id           TEXT PRIMARY KEY,
+          owner_id     TEXT NOT NULL,
+          title        TEXT NOT NULL,
+          city         TEXT,
+          start_date   DATE,
+          end_date     DATE,
+          cover_emoji  TEXT,
+          created_at   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          updated_at   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          deleted_at   TIMESTAMPTZ
+        )
+      `;
+      await sql`CREATE INDEX IF NOT EXISTS itineraries_owner_idx ON itineraries (owner_id) WHERE deleted_at IS NULL`;
+    })().catch((err) => {
+      itinerariesTableReady = null;
+      throw err;
+    });
+  }
+  await itinerariesTableReady;
+}
+
+export async function ensureItineraryItemsTable(): Promise<void> {
+  if (!itineraryItemsTableReady) {
+    itineraryItemsTableReady = (async () => {
+      await sql`
+        CREATE TABLE IF NOT EXISTS itinerary_items (
+          itinerary_id  TEXT NOT NULL,
+          item_kind     TEXT NOT NULL,
+          item_id       TEXT NOT NULL,
+          position      INT NOT NULL DEFAULT 0,
+          added_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          PRIMARY KEY (itinerary_id, item_kind, item_id)
+        )
+      `;
+      await sql`CREATE INDEX IF NOT EXISTS itin_items_itinerary_idx ON itinerary_items (itinerary_id, position)`;
+    })().catch((err) => {
+      itineraryItemsTableReady = null;
+      throw err;
+    });
+  }
+  await itineraryItemsTableReady;
+}
+
+export interface Itinerary {
+  id: string;
+  owner_id: string;
+  title: string;
+  city: string | null;
+  start_date: string | null;
+  end_date: string | null;
+  cover_emoji: string | null;
+  created_at: string;
+  updated_at: string;
+  deleted_at: string | null;
+}
+
+export interface ItineraryItem {
+  itinerary_id: string;
+  item_kind: "booking_job" | "dr_outcome";
+  item_id: string;
+  position: number;
+  added_at: string;
+}
+
+export async function createItinerary(params: {
+  ownerId: string;
+  title: string;
+  city?: string | null;
+  startDate?: string | null;
+  endDate?: string | null;
+  coverEmoji?: string | null;
+}): Promise<Itinerary> {
+  await ensureItinerariesTable();
+  const id = `it_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 10)}`;
+  const result = await sql<Itinerary>`
+    INSERT INTO itineraries (id, owner_id, title, city, start_date, end_date, cover_emoji)
+    VALUES (
+      ${id},
+      ${params.ownerId},
+      ${params.title.trim().slice(0, 200)},
+      ${params.city ?? null},
+      ${params.startDate ?? null},
+      ${params.endDate ?? null},
+      ${params.coverEmoji ?? null}
+    )
+    RETURNING *
+  `;
+  return result.rows[0];
+}
+
+export async function getItinerary(id: string): Promise<Itinerary | null> {
+  await ensureItinerariesTable();
+  const result = await sql<Itinerary>`
+    SELECT * FROM itineraries WHERE id = ${id} AND deleted_at IS NULL
+  `;
+  return result.rows[0] ?? null;
+}
+
+export async function listItinerariesByOwner(ownerId: string): Promise<Itinerary[]> {
+  await ensureItinerariesTable();
+  const result = await sql<Itinerary>`
+    SELECT * FROM itineraries
+    WHERE owner_id = ${ownerId} AND deleted_at IS NULL
+    ORDER BY COALESCE(start_date, created_at::date) DESC, created_at DESC
+  `;
+  return result.rows;
+}
+
+export async function updateItinerary(
+  id: string,
+  ownerId: string,
+  patch: {
+    title?: string;
+    city?: string | null;
+    startDate?: string | null;
+    endDate?: string | null;
+    coverEmoji?: string | null;
+  },
+): Promise<Itinerary | null> {
+  await ensureItinerariesTable();
+  const setClauses: string[] = [];
+  const values: unknown[] = [];
+  let p = 1;
+  if (patch.title !== undefined) {
+    setClauses.push(`title = $${p++}`);
+    values.push(patch.title.trim().slice(0, 200));
+  }
+  if (patch.city !== undefined) {
+    setClauses.push(`city = $${p++}`);
+    values.push(patch.city);
+  }
+  if (patch.startDate !== undefined) {
+    setClauses.push(`start_date = $${p++}`);
+    values.push(patch.startDate);
+  }
+  if (patch.endDate !== undefined) {
+    setClauses.push(`end_date = $${p++}`);
+    values.push(patch.endDate);
+  }
+  if (patch.coverEmoji !== undefined) {
+    setClauses.push(`cover_emoji = $${p++}`);
+    values.push(patch.coverEmoji);
+  }
+  if (setClauses.length === 0) return getItinerary(id);
+  setClauses.push(`updated_at = NOW()`);
+  values.push(id);
+  values.push(ownerId);
+  const query = `UPDATE itineraries SET ${setClauses.join(", ")} WHERE id = $${p++} AND owner_id = $${p++} AND deleted_at IS NULL RETURNING *`;
+  const result = await db.query<Itinerary>(query, values as string[]);
+  return result.rows[0] ?? null;
+}
+
+export async function softDeleteItinerary(id: string, ownerId: string): Promise<boolean> {
+  await ensureItinerariesTable();
+  const result = await sql`
+    UPDATE itineraries SET deleted_at = NOW()
+    WHERE id = ${id} AND owner_id = ${ownerId} AND deleted_at IS NULL
+  `;
+  return (result.rowCount ?? 0) > 0;
+}
+
+export async function addItineraryItem(params: {
+  itineraryId: string;
+  itemKind: "booking_job" | "dr_outcome";
+  itemId: string;
+  position?: number;
+}): Promise<ItineraryItem> {
+  await ensureItineraryItemsTable();
+  const result = await sql<ItineraryItem>`
+    INSERT INTO itinerary_items (itinerary_id, item_kind, item_id, position)
+    VALUES (${params.itineraryId}, ${params.itemKind}, ${params.itemId}, ${params.position ?? 0})
+    ON CONFLICT (itinerary_id, item_kind, item_id) DO NOTHING
+    RETURNING *
+  `;
+  if (result.rows[0]) return result.rows[0];
+  // Already there — fetch the existing row.
+  const existing = await sql<ItineraryItem>`
+    SELECT * FROM itinerary_items
+    WHERE itinerary_id = ${params.itineraryId}
+      AND item_kind = ${params.itemKind}
+      AND item_id = ${params.itemId}
+    LIMIT 1
+  `;
+  return existing.rows[0];
+}
+
+export async function removeItineraryItem(
+  itineraryId: string,
+  itemKind: "booking_job" | "dr_outcome",
+  itemId: string,
+): Promise<boolean> {
+  await ensureItineraryItemsTable();
+  const result = await sql`
+    DELETE FROM itinerary_items
+    WHERE itinerary_id = ${itineraryId}
+      AND item_kind = ${itemKind}
+      AND item_id = ${itemId}
+  `;
+  return (result.rowCount ?? 0) > 0;
+}
+
+export async function listItineraryItems(itineraryId: string): Promise<ItineraryItem[]> {
+  await ensureItineraryItemsTable();
+  const result = await sql<ItineraryItem>`
+    SELECT * FROM itinerary_items
+    WHERE itinerary_id = ${itineraryId}
+    ORDER BY position ASC, added_at ASC
+  `;
+  return result.rows;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
 // Reactions + Comments on shared artifacts (P6 — social feedback loop).
 //
 // Why a thin reactions table instead of a JSONB column on shared_artifacts:

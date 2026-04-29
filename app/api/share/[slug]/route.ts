@@ -5,6 +5,8 @@ import {
   incrementSharedArtifactViews,
   getBookingJob,
   getDecisionSession,
+  getItinerary,
+  listItineraryItems,
   getUserProfile,
   type SharedArtifact,
 } from "@/lib/db";
@@ -60,6 +62,24 @@ interface DrOutcomeContent {
   city_id: string;
 }
 
+interface TripChild {
+  item_kind: "booking_job" | "dr_outcome";
+  item_id: string;
+  title: string;
+  subtitle: string | null;
+  emoji: string | null;
+}
+
+interface TripContent {
+  itinerary_id: string;
+  title: string;
+  city: string | null;
+  start_date: string | null;
+  end_date: string | null;
+  cover_emoji: string | null;
+  children: TripChild[];
+}
+
 /**
  * Resolve a booking_job into a privacy-aware shape for /share rendering.
  * Strips raw `body` payloads (which can contain restaurant IDs etc.) and
@@ -86,6 +106,63 @@ function resolveBookingContent(
     status: job.status,
     steps,
     completed_at: job.completed_at,
+  };
+}
+
+/** Resolve a trip artifact: itinerary metadata + display-safe child list. */
+async function resolveTripContent(
+  itinerary: NonNullable<Awaited<ReturnType<typeof getItinerary>>>,
+): Promise<TripContent> {
+  const items = await listItineraryItems(itinerary.id);
+  const children: TripChild[] = await Promise.all(
+    items.map(async (it) => {
+      const base: TripChild = {
+        item_kind: it.item_kind,
+        item_id: it.item_id,
+        title: "Removed",
+        subtitle: null,
+        emoji: null,
+      };
+      try {
+        if (it.item_kind === "booking_job") {
+          const job = await getBookingJob(it.item_id);
+          if (job) {
+            return {
+              ...base,
+              title: job.trip_label,
+              subtitle: job.steps?.[0]?.label ?? null,
+              emoji: job.steps?.[0]?.emoji ?? "🧳",
+            };
+          }
+        } else {
+          const session = await getDecisionSession(it.item_id);
+          if (session) {
+            const cards = (session.merged_options ?? []) as Array<{
+              restaurant?: { id?: string; name?: string; cuisine?: string };
+            }>;
+            const decided = cards.find((c) => c.restaurant?.id === session.decided_card_id);
+            return {
+              ...base,
+              title: decided?.restaurant?.name ?? "Decision Room",
+              subtitle: decided?.restaurant?.cuisine ?? null,
+              emoji: "🗳️",
+            };
+          }
+        }
+      } catch {
+        /* leave defaults */
+      }
+      return base;
+    }),
+  );
+  return {
+    itinerary_id: itinerary.id,
+    title: itinerary.title,
+    city: itinerary.city,
+    start_date: itinerary.start_date,
+    end_date: itinerary.end_date,
+    cover_emoji: itinerary.cover_emoji,
+    children,
   };
 }
 
@@ -148,7 +225,7 @@ export async function GET(_req: NextRequest, { params }: Params) {
 
   const owner = await loadOwnerSlim(artifact.owner_id);
 
-  let content: BookingContent | DrOutcomeContent | null = null;
+  let content: BookingContent | DrOutcomeContent | TripContent | null = null;
   if (artifact.kind === "booking") {
     const job = await getBookingJob(artifact.ref_id);
     if (!job) {
@@ -171,6 +248,16 @@ export async function GET(_req: NextRequest, { params }: Params) {
       });
     }
     content = await resolveDrOutcomeContent(session);
+  } else if (artifact.kind === "trip") {
+    const itinerary = await getItinerary(artifact.ref_id);
+    if (!itinerary) {
+      return NextResponse.json({
+        artifact: { ...artifact, deleted_ref: true },
+        owner,
+        content: null,
+      });
+    }
+    content = await resolveTripContent(itinerary);
   }
 
   // View count: track real reach, not the owner staring at their own page.

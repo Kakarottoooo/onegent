@@ -4,6 +4,8 @@ import {
   getSharedArtifactBySlug,
   getBookingJob,
   getDecisionSession,
+  getItinerary,
+  listItineraryItems,
   getUserProfile,
 } from "@/lib/db";
 
@@ -48,6 +50,21 @@ export async function GET(_req: Request, { params }: Params) {
       title = job.trip_label || "A trip on Onegent";
       const firstDoneStep = job.steps?.find((s) => s.status === "done");
       if (firstDoneStep) subtitle = firstDoneStep.label;
+    }
+  } else if (artifact.kind === "trip") {
+    const itinerary = await getItinerary(artifact.ref_id);
+    if (itinerary) {
+      eyebrow = "Trip";
+      title = itinerary.title || "A trip on Onegent";
+      try {
+        const items = await listItineraryItems(itinerary.id);
+        const itemCount = items.length;
+        const stopsPart = `${itemCount} ${itemCount === 1 ? "stop" : "stops"}`;
+        subtitle = [itinerary.city ?? null, stopsPart].filter(Boolean).join(" · ");
+      } catch {
+        subtitle = itinerary.city ?? null;
+      }
+      if (itinerary.city) cityLabel = itinerary.city;
     }
   } else if (artifact.kind === "dr_outcome") {
     const session = await getDecisionSession(artifact.ref_id);

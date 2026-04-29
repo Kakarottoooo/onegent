@@ -6,6 +6,8 @@ import {
   getSharedArtifactBySlug,
   getBookingJob,
   getDecisionSession,
+  getItinerary,
+  listItineraryItems,
   getUserProfile,
   incrementSharedArtifactViews,
 } from "@/lib/db";
@@ -43,6 +45,12 @@ export async function generateMetadata({ params }: Params): Promise<Metadata> {
     if (job) {
       title = job.trip_label;
       description = `${job.trip_label} — booked on Onegent. Plan yours.`;
+    }
+  } else if (artifact.kind === "trip") {
+    const itinerary = await getItinerary(artifact.ref_id);
+    if (itinerary) {
+      title = itinerary.title;
+      description = [itinerary.city, "Trip planned on Onegent."].filter(Boolean).join(" · ");
     }
   } else if (artifact.kind === "dr_outcome") {
     const session = await getDecisionSession(artifact.ref_id);
@@ -91,10 +99,11 @@ export default async function ShareSlugPage({ params }: Params) {
   }
 
   // Resolve content + owner profile in parallel.
-  const [owner, jobOrNull, sessionOrNull] = await Promise.all([
+  const [owner, jobOrNull, sessionOrNull, itineraryOrNull] = await Promise.all([
     getUserProfile(artifact.owner_id),
     artifact.kind === "booking" ? getBookingJob(artifact.ref_id) : Promise.resolve(null),
     artifact.kind === "dr_outcome" ? getDecisionSession(artifact.ref_id) : Promise.resolve(null),
+    artifact.kind === "trip" ? getItinerary(artifact.ref_id) : Promise.resolve(null),
   ]);
 
   // Fire-and-forget view increment for non-owner reads. Done at render time
@@ -205,6 +214,146 @@ export default async function ShareSlugPage({ params }: Params) {
               </p>
             )}
           </div>
+
+          {artifact.visibility === "public" && (
+            <SocialFooter slug={slug} isSignedIn={!!userId} currentUserId={userId ?? null} />
+          )}
+
+          <PlanYoursFooter />
+        </main>
+      </div>
+    );
+  }
+
+  // ── Trip (itinerary) content ──────────────────────────────────────────────
+  if (artifact.kind === "trip") {
+    if (!itineraryOrNull) {
+      return <DeletedRefShell ownerName={ownerName} />;
+    }
+    const itinerary = itineraryOrNull;
+    const items = await listItineraryItems(itinerary.id);
+    const children = await Promise.all(
+      items.map(async (it) => {
+        let title = "Removed";
+        let subtitle: string | null = null;
+        let emoji: string | null = null;
+        try {
+          if (it.item_kind === "booking_job") {
+            const j = await getBookingJob(it.item_id);
+            if (j) {
+              title = j.trip_label;
+              subtitle = j.steps?.[0]?.label ?? null;
+              emoji = j.steps?.[0]?.emoji ?? "🧳";
+            }
+          } else {
+            const s = await getDecisionSession(it.item_id);
+            if (s) {
+              const cards = (s.merged_options ?? []) as Array<{
+                restaurant?: { id?: string; name?: string; cuisine?: string };
+              }>;
+              const decided = cards.find((c) => c.restaurant?.id === s.decided_card_id);
+              title = decided?.restaurant?.name ?? "Decision Room";
+              subtitle = decided?.restaurant?.cuisine ?? null;
+              emoji = "🗳️";
+            }
+          }
+        } catch {
+          /* keep defaults */
+        }
+        return { kind: it.item_kind, id: it.item_id, title, subtitle, emoji };
+      }),
+    );
+    const dateRange = formatRange(itinerary.start_date, itinerary.end_date);
+    return (
+      <div style={{ minHeight: "100vh", backgroundColor: "var(--bg, #fafaf9)" }}>
+        <GlobalNav active="other" />
+        <main style={{ maxWidth: 760, margin: "0 auto", padding: "var(--space-16) var(--space-6) var(--space-24)" }}>
+          <EditorialHero
+            eyebrow={`${ownerName} planned · ${itinerary.cover_emoji ?? "🧳"}`}
+            title={itinerary.title}
+            subtitle={[itinerary.city, dateRange].filter(Boolean).join(" · ") || "On Onegent"}
+            size="page"
+            align="left"
+          />
+
+          <OwnerProfileLink handle={ownerHandle} />
+
+          <p
+            style={{
+              marginTop: 22,
+              fontFamily: "var(--font-dm-sans)",
+              fontSize: 11,
+              fontWeight: 600,
+              letterSpacing: "0.18em",
+              textTransform: "uppercase",
+              color: "var(--text-muted)",
+            }}
+          >
+            {children.length === 0
+              ? "Empty trip"
+              : `${children.length} ${children.length === 1 ? "stop" : "stops"}`}
+          </p>
+
+          {children.length > 0 && (
+            <div style={{ marginTop: 12, display: "flex", flexDirection: "column", gap: 10 }}>
+              {children.map((c) => (
+                <div
+                  key={`${c.kind}:${c.id}`}
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 14,
+                    padding: 16,
+                    borderRadius: 14,
+                    background: "var(--card)",
+                    border: "1px solid var(--border)",
+                  }}
+                >
+                  <span style={{ fontSize: 22 }}>{c.emoji ?? "•"}</span>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <p
+                      style={{
+                        margin: 0,
+                        fontFamily: "var(--font-playfair), Georgia, serif",
+                        fontSize: 16,
+                        fontWeight: 600,
+                        color: "var(--text-primary)",
+                      }}
+                    >
+                      {c.title}
+                    </p>
+                    {c.subtitle && (
+                      <p
+                        style={{
+                          margin: "2px 0 0",
+                          fontFamily: "var(--font-dm-sans)",
+                          fontSize: 12,
+                          color: "var(--text-muted)",
+                        }}
+                      >
+                        {c.subtitle}
+                      </p>
+                    )}
+                  </div>
+                  <span
+                    style={{
+                      fontFamily: "var(--font-dm-sans)",
+                      fontSize: 10,
+                      fontWeight: 600,
+                      letterSpacing: "0.16em",
+                      textTransform: "uppercase",
+                      color: "var(--gold-text, #5A4416)",
+                      background: "var(--gold-soft, #F5E9C8)",
+                      padding: "3px 8px",
+                      borderRadius: 999,
+                    }}
+                  >
+                    {c.kind === "dr_outcome" ? "Decided" : "Booked"}
+                  </span>
+                </div>
+              ))}
+            </div>
+          )}
 
           {artifact.visibility === "public" && (
             <SocialFooter slug={slug} isSignedIn={!!userId} currentUserId={userId ?? null} />
@@ -404,4 +553,10 @@ function formatDate(iso: string): string {
   } catch {
     return iso;
   }
+}
+
+function formatRange(start: string | null, end: string | null): string {
+  if (!start && !end) return "";
+  if (start && end) return `${formatDate(start)} — ${formatDate(end)}`;
+  return formatDate(start ?? end ?? "");
 }

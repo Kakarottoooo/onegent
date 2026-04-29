@@ -17,6 +17,7 @@ import TripItineraryCalendar from "@/components/TripItineraryCalendar";
 import RestaurantStepCard from "@/components/booking/RestaurantStepCard";
 import BrowserLiveView from "@/components/BrowserLiveView";
 import ShareTripModal from "@/components/ShareTripModal";
+import AddToTripModal from "@/components/AddToTripModal";
 import { getBrowserModelForStagehand } from "@/lib/agent-model-config";
 import "./tasks.css";
 
@@ -1134,6 +1135,7 @@ function JobCard({ job, onRefresh, sessionId, onOpenLive }: { job: BookingJob; o
   const [deleting, setDeleting] = useState(false);
   const [resetting, setResetting] = useState(false);
   const [shareOpen, setShareOpen] = useState(false);
+  const [addToTripOpen, setAddToTripOpen] = useState(false);
   const prevStatusRef = useRef(job.status);
 
   // Auto-open live panel when job transitions to "running" or "done".
@@ -1297,6 +1299,15 @@ function JobCard({ job, onRefresh, sessionId, onOpenLive }: { job: BookingJob; o
             </button>
           );
         })()}
+        {job.status === "done" && (
+          <button
+            onClick={(e) => { e.stopPropagation(); setAddToTripOpen(true); }}
+            className="job-card__cta job-card__cta--open-all"
+            title="Group this booking into a trip"
+          >
+            🧳 Add to trip
+          </button>
+        )}
         {isStuck && (
           <button
             onClick={handleResetStuck}
@@ -1365,6 +1376,13 @@ function JobCard({ job, onRefresh, sessionId, onOpenLive }: { job: BookingJob; o
         onClose={() => setShareOpen(false)}
         kind="booking"
         refId={job.id}
+      />
+      <AddToTripModal
+        isOpen={addToTripOpen}
+        onClose={() => setAddToTripOpen(false)}
+        itemKind="booking_job"
+        itemId={job.id}
+        fallbackNewTitle={job.trip_label}
       />
     </div>
   );

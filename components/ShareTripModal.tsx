@@ -21,7 +21,7 @@ import { useState } from "react";
 interface Props {
   isOpen: boolean;
   onClose: () => void;
-  kind: "booking" | "dr_outcome";
+  kind: "booking" | "dr_outcome" | "trip";
   refId: string;
   /** When the underlying booking/DR is in the future. Flips showTime default. */
   isFutureEvent?: boolean;
@@ -90,7 +90,9 @@ export default function ShareTripModal({
     const text =
       kind === "dr_outcome"
         ? `Just decided on this with Onegent — fork it for yourself: ${shareUrl}`
-        : `Just booked this trip with Onegent — see it here: ${shareUrl}`;
+        : kind === "trip"
+          ? `Here's my trip on Onegent: ${shareUrl}`
+          : `Just booked this trip with Onegent — see it here: ${shareUrl}`;
     if (channel === "imessage") {
       window.location.href = `sms:&body=${encodeURIComponent(text)}`;
     } else if (channel === "whatsapp") {
@@ -154,7 +156,9 @@ export default function ShareTripModal({
             ? "Your share link is ready."
             : kind === "dr_outcome"
               ? "Save & share this decision."
-              : "Save & share this trip."}
+              : kind === "trip"
+                ? "Share this trip."
+                : "Save & share this booking."}
         </h2>
         <p className="text-sm text-gray-500 mb-5 leading-relaxed">
           {shareUrl
