@@ -15,6 +15,7 @@ import GlobalNav from "@/components/GlobalNav";
 import { EditorialHero } from "@/app/_shared/editorial";
 import AddContactCTA from "./AddContactCTA";
 import EditBioInline from "./EditBioInline";
+import CompareTasteLauncher from "./CompareTasteLauncher";
 
 type Params = { params: Promise<{ username: string }> };
 
@@ -203,13 +204,19 @@ export default async function PublicProfilePage({ params }: Params) {
           </div>
 
           {!isSelf && (
-            <div style={{ flexShrink: 0, marginTop: 16 }}>
+            <div style={{ flexShrink: 0, marginTop: 16, display: "flex", flexDirection: "column", gap: 8, alignItems: "flex-end" }}>
               <AddContactCTA
                 peerHandle={handle}
                 alreadyContact={alreadyContact}
                 isSelf={false}
                 isSignedIn={!!userId}
               />
+              {!!userId && (
+                <CompareTasteLauncher
+                  peerHandle={handle}
+                  peerDisplayName={profile.display_name}
+                />
+              )}
             </div>
           )}
         </div>

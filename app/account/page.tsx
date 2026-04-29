@@ -28,6 +28,7 @@ type UserProfile = {
   username: string | null;
   display_name: string | null;
   avatar_url: string | null;
+  bio: string | null;
 };
 
 type IdentityForm = {
@@ -113,6 +114,11 @@ function AccountPageInner() {
   const [processingAvatar, setProcessingAvatar] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
+  const [bioDraft, setBioDraft] = useState<string>("");
+  const [bioSaving, setBioSaving] = useState(false);
+  const [bioError, setBioError] = useState<string | null>(null);
+  const [bioSavedToast, setBioSavedToast] = useState(false);
+  const [profileUrlCopied, setProfileUrlCopied] = useState(false);
 
   useEffect(() => {
     const requestedTab = searchParams.get("tab");
@@ -138,6 +144,7 @@ function AccountPageInner() {
           username: data.profile.username ?? "",
           avatar_url: data.profile.avatar_url ?? auth.userAvatar ?? null,
         });
+        setBioDraft(data.profile.bio ?? "");
       } catch (loadError) {
         if (cancelled) return;
         const message =
@@ -261,6 +268,52 @@ function AccountPageInner() {
       setError(message);
     } finally {
       setSavingIdentity(false);
+    }
+  }
+
+  async function saveBio() {
+    setBioSaving(true);
+    setBioError(null);
+    setBioSavedToast(false);
+    try {
+      const trimmed = bioDraft.trim();
+      const response = await fetch("/api/users/me/bio", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ bio: trimmed.length === 0 ? null : trimmed }),
+      });
+      const data = (await response.json().catch(() => ({}))) as {
+        error?: string;
+        profile?: UserProfile;
+      };
+      if (!response.ok || !data.profile) {
+        throw new Error(data.error ?? "Failed to save bio");
+      }
+      setProfile(data.profile);
+      setBioDraft(data.profile.bio ?? "");
+      setBioSavedToast(true);
+      setTimeout(() => setBioSavedToast(false), 1800);
+    } catch (saveError) {
+      setBioError(
+        saveError instanceof Error ? saveError.message : "Failed to save bio",
+      );
+    } finally {
+      setBioSaving(false);
+    }
+  }
+
+  async function copyProfileUrl() {
+    const handle = profile?.username ?? profile?.profile_code;
+    if (!handle) return;
+    const base =
+      typeof window !== "undefined" ? window.location.origin : "https://onegent.one";
+    const url = `${base}/u/${handle}`;
+    try {
+      await navigator.clipboard.writeText(url);
+      setProfileUrlCopied(true);
+      setTimeout(() => setProfileUrlCopied(false), 1800);
+    } catch {
+      /* clipboard blocked — user can long-press to copy */
     }
   }
 
@@ -820,6 +873,198 @@ function AccountPageInner() {
                   People can add you from Contacts using your handle first. If you do not set one,
                   they can still find you with your backup code.
                 </div>
+              </div>
+
+              {/* Public profile — surfaces the /u/[handle] URL + bio editor.
+                  Username editing remains in the Identity row above; this card
+                  is purely about the public surface (URL, bio, view link). */}
+              <div
+                style={{
+                  borderRadius: 18,
+                  border: "0.5px solid rgba(201,168,76,0.16)",
+                  background: "rgba(255,255,255,0.025)",
+                  padding: 16,
+                }}
+              >
+                <div
+                  style={{
+                    display: "flex",
+                    justifyContent: "space-between",
+                    alignItems: "baseline",
+                    gap: 12,
+                    marginBottom: 10,
+                  }}
+                >
+                  <div
+                    style={{
+                      fontFamily: "var(--font-dm-sans)",
+                      fontSize: 11,
+                      fontWeight: 700,
+                      letterSpacing: "0.09em",
+                      textTransform: "uppercase",
+                      color: "rgba(244,231,200,0.46)",
+                    }}
+                  >
+                    Public profile
+                  </div>
+                  {(profile?.username || profile?.profile_code) && (
+                    <a
+                      href={`/u/${profile.username ?? profile.profile_code}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      style={{
+                        fontFamily: "var(--font-dm-sans)",
+                        fontSize: 12,
+                        fontWeight: 600,
+                        color: "var(--gold, #C9A84C)",
+                        textDecoration: "none",
+                      }}
+                    >
+                      View →
+                    </a>
+                  )}
+                </div>
+
+                <div
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 8,
+                    borderRadius: 12,
+                    border: "0.5px solid rgba(201,168,76,0.14)",
+                    background: "rgba(255,255,255,0.02)",
+                    padding: "10px 12px",
+                    marginBottom: 12,
+                  }}
+                >
+                  <span
+                    style={{
+                      fontFamily: "var(--font-dm-sans)",
+                      fontSize: 13,
+                      color: "rgba(244,231,200,0.78)",
+                      flex: 1,
+                      wordBreak: "break-all",
+                    }}
+                  >
+                    {profile?.username || profile?.profile_code
+                      ? `onegent.one/u/${profile.username ?? profile.profile_code}`
+                      : "Set a handle above to claim a vanity URL."}
+                  </span>
+                  {(profile?.username || profile?.profile_code) && (
+                    <button
+                      type="button"
+                      onClick={copyProfileUrl}
+                      style={{
+                        padding: "6px 12px",
+                        borderRadius: 10,
+                        border: "0.5px solid rgba(201,168,76,0.22)",
+                        background: profileUrlCopied
+                          ? "var(--gold, #C9A84C)"
+                          : "rgba(255,255,255,0.05)",
+                        color: profileUrlCopied ? "#1B1712" : "#F8F2E7",
+                        fontFamily: "var(--font-dm-sans)",
+                        fontSize: 11,
+                        fontWeight: 600,
+                        cursor: "pointer",
+                        flexShrink: 0,
+                      }}
+                    >
+                      {profileUrlCopied ? "Copied" : "Copy"}
+                    </button>
+                  )}
+                </div>
+
+                <div
+                  style={{
+                    fontFamily: "var(--font-dm-sans)",
+                    fontSize: 11,
+                    fontWeight: 600,
+                    letterSpacing: "0.06em",
+                    textTransform: "uppercase",
+                    color: "rgba(244,231,200,0.42)",
+                    marginBottom: 6,
+                  }}
+                >
+                  Bio
+                </div>
+                <textarea
+                  value={bioDraft}
+                  onChange={(event) => setBioDraft(event.target.value.slice(0, 500))}
+                  placeholder="A line that shows on your public profile. e.g. “Mostly chasing dumplings in Brooklyn.”"
+                  rows={3}
+                  style={{
+                    width: "100%",
+                    borderRadius: 12,
+                    border: "0.5px solid rgba(201,168,76,0.14)",
+                    background: "rgba(255,255,255,0.02)",
+                    padding: 12,
+                    color: "#F8F2E7",
+                    fontFamily: "var(--font-dm-sans)",
+                    fontSize: 13,
+                    lineHeight: 1.55,
+                    resize: "vertical",
+                    outline: "none",
+                  }}
+                />
+                <div
+                  style={{
+                    display: "flex",
+                    justifyContent: "space-between",
+                    alignItems: "center",
+                    marginTop: 8,
+                  }}
+                >
+                  <span
+                    style={{
+                      fontFamily: "var(--font-dm-sans)",
+                      fontSize: 11,
+                      color: "rgba(244,231,200,0.46)",
+                    }}
+                  >
+                    {bioDraft.length} / 500
+                    {bioSavedToast && (
+                      <span style={{ marginLeft: 10, color: "var(--gold, #C9A84C)" }}>
+                        Saved ✓
+                      </span>
+                    )}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={saveBio}
+                    disabled={bioSaving || (profile?.bio ?? "") === bioDraft.trim()}
+                    style={{
+                      padding: "8px 14px",
+                      borderRadius: 10,
+                      border: "none",
+                      background:
+                        bioSaving || (profile?.bio ?? "") === bioDraft.trim()
+                          ? "rgba(201,168,76,0.22)"
+                          : "var(--gold, #C9A84C)",
+                      color: "#1B1712",
+                      fontFamily: "var(--font-dm-sans)",
+                      fontSize: 12,
+                      fontWeight: 700,
+                      cursor:
+                        bioSaving || (profile?.bio ?? "") === bioDraft.trim()
+                          ? "default"
+                          : "pointer",
+                    }}
+                  >
+                    {bioSaving ? "Saving…" : "Save bio"}
+                  </button>
+                </div>
+                {bioError && (
+                  <p
+                    style={{
+                      margin: "8px 0 0",
+                      fontFamily: "var(--font-dm-sans)",
+                      fontSize: 12,
+                      color: "#FCA5A5",
+                    }}
+                  >
+                    {bioError}
+                  </p>
+                )}
               </div>
 
               <div

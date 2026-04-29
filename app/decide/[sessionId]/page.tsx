@@ -54,6 +54,7 @@ export default function DecidePage() {
   const [myVotes, setMyVotes] = useState<Record<string, boolean>>({});
   const [feedbackSent, setFeedbackSent] = useState(false);
   const [shareOpen, setShareOpen] = useState(false);
+  const [ownShare, setOwnShare] = useState<{ slug: string; view_count: number; visibility: string } | null>(null);
 
   const role = useMemo(
     () => resolveRole(session, currentUserId ?? null),
@@ -80,6 +81,7 @@ export default function DecidePage() {
         session: DecisionSession;
         initiator_profile?: InitiatorProfile | null;
         invitee_profile?: PeerProfile | null;
+        own_share?: { slug: string; view_count: number; visibility: string } | null;
       };
       setSession(data.session);
       if (data.initiator_profile !== undefined) {
@@ -87,6 +89,9 @@ export default function DecidePage() {
       }
       if (data.invitee_profile !== undefined) {
         setInviteeProfile(data.invitee_profile);
+      }
+      if (data.own_share !== undefined) {
+        setOwnShare(data.own_share);
       }
     } catch {
       setError("Network error. Please check your connection.");
@@ -307,8 +312,25 @@ export default function DecidePage() {
             </div>
 
             {/* Save & share — only the initiator sees this CTA. The decision
-                is theirs to publish; partner can still get the link from them. */}
-            {isSignedIn && role === "initiator" && (
+                is theirs to publish; partner can still get the link from them.
+                Once shared, flips to a view-count link. */}
+            {isSignedIn && role === "initiator" && ownShare ? (
+              <a
+                href={`/s/${ownShare.slug}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="block w-full py-2.5 rounded-2xl text-sm font-medium mb-6 text-center transition-colors"
+                style={{
+                  background: "var(--gold-soft, #F5E9C8)",
+                  color: "var(--gold-text, #5A4416)",
+                  border: "1px solid var(--gold, #C9A84C)",
+                  textDecoration: "none",
+                }}
+              >
+                ↗ Shared · {ownShare.view_count}{" "}
+                {ownShare.view_count === 1 ? "view" : "views"} · Open public page
+              </a>
+            ) : isSignedIn && role === "initiator" ? (
               <button
                 type="button"
                 onClick={() => setShareOpen(true)}
@@ -321,7 +343,7 @@ export default function DecidePage() {
               >
                 ↗ Save & share this decision
               </button>
-            )}
+            ) : null}
 
             {/* Feedback */}
             {!feedbackSent ? (

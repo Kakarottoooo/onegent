@@ -1264,15 +1264,39 @@ function JobCard({ job, onRefresh, sessionId, onOpenLive }: { job: BookingJob; o
             Open all →
           </button>
         )}
-        {job.status === "done" && (
-          <button
-            onClick={(e) => { e.stopPropagation(); setShareOpen(true); }}
-            className="job-card__cta job-card__cta--open-all"
-            title="Share this trip"
-          >
-            ↗ Share
-          </button>
-        )}
+        {job.status === "done" && (() => {
+          // own_share is attached server-side in /api/booking-jobs when the
+          // signed-in user owns this job. Type isn't on BookingJob since
+          // the shape comes from the API layer; pull it via a local cast.
+          const ownShare = (job as BookingJob & {
+            own_share?: { slug: string; view_count: number; visibility: string } | null;
+          }).own_share;
+          if (ownShare) {
+            return (
+              <a
+                href={`/s/${ownShare.slug}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                onClick={(e) => e.stopPropagation()}
+                className="job-card__cta job-card__cta--open-all"
+                title="Open public share page"
+                style={{ color: "var(--gold-text, #5A4416)" }}
+              >
+                ↗ Shared · {ownShare.view_count}{" "}
+                {ownShare.view_count === 1 ? "view" : "views"}
+              </a>
+            );
+          }
+          return (
+            <button
+              onClick={(e) => { e.stopPropagation(); setShareOpen(true); }}
+              className="job-card__cta job-card__cta--open-all"
+              title="Share this trip"
+            >
+              ↗ Share
+            </button>
+          );
+        })()}
         {isStuck && (
           <button
             onClick={handleResetStuck}

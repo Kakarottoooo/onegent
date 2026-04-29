@@ -6,6 +6,8 @@ import {
   deleteBookingJob,
   deleteMonitorsByJobId,
   clearDecisionRoomBookingJobsByIds,
+  getSharedArtifactsByRefs,
+  type SharedArtifact,
 } from "@/lib/db";
 import type { BookingJob, BookingJobStep } from "@/lib/db";
 import type { AgentAutonomySettings } from "@/lib/autonomy";
@@ -99,7 +101,31 @@ export async function GET(req: NextRequest) {
     (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
   );
 
-  return NextResponse.json({ jobs });
+  // Attach `own_share` for the signed-in owner so /tasks can show
+  // "Shared · X views" instead of a Share button when an artifact already
+  // exists. Only owner-created shares — never leak someone else's slug.
+  let shareMap: Record<string, SharedArtifact> = {};
+  if (userId) {
+    const ownedJobIds = jobs.filter((j) => j.user_id === userId).map((j) => j.id);
+    if (ownedJobIds.length > 0) {
+      shareMap = await getSharedArtifactsByRefs(userId, "booking", ownedJobIds);
+    }
+  }
+  const enriched = jobs.map((j) => {
+    const share = shareMap[j.id];
+    return {
+      ...j,
+      own_share: share
+        ? {
+            slug: share.slug,
+            view_count: share.view_count,
+            visibility: share.visibility,
+          }
+        : null,
+    };
+  });
+
+  return NextResponse.json({ jobs: enriched });
 }
 
 /**

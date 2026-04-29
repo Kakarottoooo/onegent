@@ -4,6 +4,7 @@ import {
   updateDecisionSession,
   getUserProfile,
   setDecisionSessionInvitee,
+  getSharedArtifactByRef,
 } from "@/lib/db";
 import { runAgentForTwoParty } from "@/lib/agent/two-party";
 import { auth } from "@clerk/nextjs/server";
@@ -73,7 +74,29 @@ export async function GET(_req: NextRequest, { params }: Params) {
     loadSlim(session.initiator_user_id),
     loadSlim(session.invitee_user_id),
   ]);
-  return NextResponse.json({ session, initiator_profile, invitee_profile });
+
+  // Attach own_share when the *caller* (auth) created an artifact for this
+  // session. This lets the decided screen flip "Save & share" to "Shared ·
+  // X views" without a second round trip. Only fetched for authed users
+  // since shares are owner-scoped.
+  const { userId: callerId } = await auth();
+  let own_share: { slug: string; view_count: number; visibility: string } | null = null;
+  if (callerId) {
+    try {
+      const art = await getSharedArtifactByRef(callerId, "dr_outcome", session.id);
+      if (art) {
+        own_share = {
+          slug: art.slug,
+          view_count: art.view_count,
+          visibility: art.visibility,
+        };
+      }
+    } catch {
+      /* swallow — UI gracefully shows the Share button as fallback */
+    }
+  }
+
+  return NextResponse.json({ session, initiator_profile, invitee_profile, own_share });
 }
 
 export async function PATCH(req: NextRequest, { params }: Params) {

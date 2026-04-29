@@ -98,14 +98,29 @@ export default function ContactsPage() {
   const [blocksOpen, setBlocksOpen] = useState(false);
   const [busyReq, setBusyReq] = useState<string | null>(null);
 
+  // Suggestions — DR partners not yet contacts. Locally dismissable so an
+  // ignored suggestion stays gone for this session without persisting state.
+  interface Suggestion {
+    user_id: string;
+    display_name: string | null;
+    avatar_url: string | null;
+    profile_code: string | null;
+    username: string | null;
+    last_dr_at: string;
+  }
+  const [suggestions, setSuggestions] = useState<Suggestion[]>([]);
+  const [suggestionBusy, setSuggestionBusy] = useState<string | null>(null);
+  const [dismissedIds, setDismissedIds] = useState<Set<string>>(new Set());
+
   const loadAll = useCallback(async () => {
-    const [profRes, contactsRes, groupsRes, incRes, outRes, blkRes] = await Promise.all([
+    const [profRes, contactsRes, groupsRes, incRes, outRes, blkRes, sugRes] = await Promise.all([
       fetch("/api/users/me"),
       fetch("/api/contacts"),
       fetch("/api/groups"),
       fetch("/api/contacts/requests/incoming"),
       fetch("/api/contacts/requests/outgoing"),
       fetch("/api/contacts/blocks"),
+      fetch("/api/contacts/suggestions"),
     ]);
     if (profRes.ok) {
       const data = await profRes.json() as { profile: MyProfile };
@@ -131,7 +146,35 @@ export default function ContactsPage() {
       const data = await blkRes.json() as { blocks: BlockedUser[] };
       setBlocks(data.blocks);
     }
+    if (sugRes.ok) {
+      const data = await sugRes.json() as { suggestions: Suggestion[] };
+      setSuggestions(data.suggestions ?? []);
+    }
   }, []);
+
+  async function addSuggestion(s: Suggestion) {
+    const handle = s.username ?? s.profile_code;
+    if (!handle) return;
+    setSuggestionBusy(s.user_id);
+    try {
+      const res = await fetch("/api/contacts", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ code: handle }),
+      });
+      if (res.ok || res.status === 409) {
+        // 409 = already-contact / already-pending — collapse silently
+        setDismissedIds((prev) => new Set(prev).add(s.user_id));
+        await loadAll();
+      }
+    } finally {
+      setSuggestionBusy(null);
+    }
+  }
+
+  function dismissSuggestion(userId: string) {
+    setDismissedIds((prev) => new Set(prev).add(userId));
+  }
 
   async function loadGroupMembers(groupId: string) {
     const res = await fetch(`/api/groups/${groupId}/members`);
@@ -530,6 +573,75 @@ export default function ContactsPage() {
             </div>
           )}
         </div>
+
+        {/* Suggested contacts — DR partners not yet saved. Hidden when empty
+            or all have been dismissed/added in this session. */}
+        {(() => {
+          const visible = suggestions.filter((s) => !dismissedIds.has(s.user_id));
+          if (visible.length === 0) return null;
+          return (
+            <div className={`${CARD} p-4 mb-5`}>
+              <div className="flex items-baseline justify-between mb-2">
+                <p className="text-sm font-semibold text-[var(--text-primary)]">
+                  Suggested
+                </p>
+                <span className="text-[11px] text-[var(--text-muted)]">
+                  Decided with you recently
+                </span>
+              </div>
+              <div className="flex flex-col gap-2">
+                {visible.map((s) => {
+                  const handle = s.username ?? s.profile_code ?? "user";
+                  const label = s.display_name ?? `@${handle}`;
+                  return (
+                    <div
+                      key={s.user_id}
+                      className="flex items-center gap-3 p-2 rounded-xl bg-[var(--card-2)] border border-[var(--border)]"
+                    >
+                      {s.avatar_url ? (
+                        // eslint-disable-next-line @next/next/no-img-element
+                        <img
+                          src={s.avatar_url}
+                          alt=""
+                          className="w-9 h-9 rounded-full flex-shrink-0"
+                        />
+                      ) : (
+                        <div className="w-9 h-9 rounded-full bg-[var(--card)] border border-[var(--border)] flex items-center justify-center text-xs text-[var(--text-secondary)] flex-shrink-0">
+                          {label.slice(0, 1).toUpperCase()}
+                        </div>
+                      )}
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm font-medium text-[var(--text-primary)] truncate">
+                          {label}
+                        </p>
+                        <p className="text-[11px] text-[var(--text-muted)] font-mono truncate">
+                          @{handle}
+                        </p>
+                      </div>
+                      <div className="flex flex-col gap-1 items-end">
+                        <button
+                          type="button"
+                          onClick={() => addSuggestion(s)}
+                          disabled={suggestionBusy === s.user_id}
+                          className="px-2.5 py-1 rounded-lg bg-[var(--gold)] text-white text-[11px] font-medium disabled:opacity-40 hover:opacity-90"
+                        >
+                          {suggestionBusy === s.user_id ? "…" : "Add"}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => dismissSuggestion(s.user_id)}
+                          className="text-[10px] text-[var(--text-muted)] hover:text-[var(--text-primary)]"
+                        >
+                          Dismiss
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          );
+        })()}
 
         {/* Outgoing pending requests — compact list */}
         {outgoing && outgoing.length > 0 && (

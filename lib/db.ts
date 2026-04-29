@@ -727,6 +727,59 @@ export async function listPublicProfileOwnerIds(): Promise<string[]> {
   return result.rows.map((r) => r.owner_id);
 }
 
+/**
+ * Look up the most recent artifact this owner created for a given (kind,
+ * ref_id). Used to surface "you've already shared this" + view-count on
+ * /tasks and the DR decided screen.
+ */
+export async function getSharedArtifactByRef(
+  ownerId: string,
+  kind: SharedArtifactKind,
+  refId: string,
+): Promise<SharedArtifact | null> {
+  await ensureSharedArtifactsTable();
+  const result = await sql<SharedArtifact>`
+    SELECT * FROM shared_artifacts
+    WHERE owner_id = ${ownerId}
+      AND kind = ${kind}
+      AND ref_id = ${refId}
+      AND deleted_at IS NULL
+    ORDER BY created_at DESC
+    LIMIT 1
+  `;
+  return result.rows[0] ?? null;
+}
+
+/**
+ * Batch variant of getSharedArtifactByRef — keyed by ref_id, only the
+ * most-recent artifact per ref. Used by /api/booking-jobs to avoid N+1
+ * when attaching `own_share` to every job in the list.
+ */
+export async function getSharedArtifactsByRefs(
+  ownerId: string,
+  kind: SharedArtifactKind,
+  refIds: string[],
+): Promise<Record<string, SharedArtifact>> {
+  if (refIds.length === 0) return {};
+  await ensureSharedArtifactsTable();
+  const placeholders = refIds.map((_, i) => `$${i + 3}`).join(", ");
+  const result = await db.query<SharedArtifact>(
+    `SELECT DISTINCT ON (ref_id) *
+     FROM shared_artifacts
+     WHERE owner_id = $1
+       AND kind = $2
+       AND ref_id IN (${placeholders})
+       AND deleted_at IS NULL
+     ORDER BY ref_id, created_at DESC`,
+    [ownerId, kind, ...refIds],
+  );
+  const out: Record<string, SharedArtifact> = {};
+  for (const row of result.rows) {
+    out[row.ref_id] = row;
+  }
+  return out;
+}
+
 /** All public slugs — feeds the sitemap so each /s/[slug] is indexable. */
 export async function listAllPublicSlugs(): Promise<{ slug: string; created_at: string }[]> {
   await ensureSharedArtifactsTable();
@@ -3737,6 +3790,46 @@ export async function getUserProfileByUsername(username: string): Promise<UserPr
 }
 
 /**
+ * Update a user's username. Returns null if the row doesn't exist; throws a
+ * tagged error on collision so the route can return 409. Empty string clears
+ * the username (allowed — but they lose their /u/[username] URL).
+ *
+ * Format validation lives in the route layer; this just trusts and stores.
+ */
+export class UsernameTakenError extends Error {
+  constructor() {
+    super("username_taken");
+  }
+}
+export async function updateUsername(
+  userId: string,
+  username: string | null,
+): Promise<UserProfile | null> {
+  await ensureUserProfilesTable();
+  const normalized = username == null ? null : username.trim();
+  // Pre-check collision so we can throw a typed error rather than catch a
+  // generic unique-violation. Lower-case match because the index is on
+  // LOWER(username).
+  if (normalized) {
+    const existing = await sql<{ user_id: string }>`
+      SELECT user_id FROM user_profiles
+      WHERE LOWER(username) = LOWER(${normalized}) AND user_id <> ${userId}
+      LIMIT 1
+    `;
+    if (existing.rows.length > 0) {
+      throw new UsernameTakenError();
+    }
+  }
+  const result = await sql<UserProfile>`
+    UPDATE user_profiles
+    SET username = ${normalized}, updated_at = NOW()
+    WHERE user_id = ${userId}
+    RETURNING *
+  `;
+  return result.rows[0] ?? null;
+}
+
+/**
  * Update a user's bio (the public-profile tagline). Empty string → null so
  * the field clears properly on "delete bio" UX.
  */
@@ -3816,6 +3909,86 @@ export async function isContact(ownerId: string, contactUserId: string): Promise
     SELECT 1 FROM user_contacts WHERE owner_id = ${ownerId} AND contact_user_id = ${contactUserId} LIMIT 1
   `;
   return result.rows.length > 0;
+}
+
+/**
+ * People you've shared a Decision Room with but haven't added as contacts.
+ *
+ * Powers the /contacts "Suggested" row — closes the loop where a DR partner
+ * was a one-shot stranger but should naturally graduate to a saved contact.
+ *
+ *   - last 30 days only (older DRs are stale; relationships go cold)
+ *   - excludes anyone the user is already a contact with (either direction)
+ *   - excludes anyone the user blocked OR who blocked them
+ *   - excludes self
+ *   - ranked by most-recent DR; capped at 5
+ */
+export async function listSuggestedContacts(
+  ownerId: string,
+  limit = 5,
+): Promise<Array<{
+  user_id: string;
+  display_name: string | null;
+  avatar_url: string | null;
+  profile_code: string | null;
+  username: string | null;
+  last_dr_at: string;
+}>> {
+  await Promise.all([
+    ensureUserContactsTable(),
+    ensureUserProfilesTable(),
+    ensureDecisionSessionsTable(),
+    ensureContactBlocksTable(),
+  ]);
+  const result = await sql<{
+    user_id: string;
+    display_name: string | null;
+    avatar_url: string | null;
+    profile_code: string | null;
+    username: string | null;
+    last_dr_at: string;
+  }>`
+    WITH dr_partners AS (
+      SELECT
+        CASE
+          WHEN ds.initiator_user_id = ${ownerId} THEN ds.invitee_user_id
+          ELSE ds.initiator_user_id
+        END AS partner_id,
+        MAX(ds.created_at) AS last_dr_at
+      FROM decision_sessions ds
+      WHERE ds.deleted_at IS NULL
+        AND ds.created_at > NOW() - INTERVAL '30 days'
+        AND (
+          (ds.initiator_user_id = ${ownerId} AND ds.invitee_user_id IS NOT NULL)
+          OR (ds.invitee_user_id = ${ownerId} AND ds.initiator_user_id IS NOT NULL)
+        )
+      GROUP BY partner_id
+    )
+    SELECT
+      p.user_id,
+      p.display_name,
+      p.avatar_url,
+      p.profile_code,
+      p.username,
+      dp.last_dr_at::text AS last_dr_at
+    FROM dr_partners dp
+    JOIN user_profiles p ON p.user_id = dp.partner_id
+    WHERE dp.partner_id IS NOT NULL
+      AND dp.partner_id <> ${ownerId}
+      AND NOT EXISTS (
+        SELECT 1 FROM user_contacts uc
+        WHERE (uc.owner_id = ${ownerId} AND uc.contact_user_id = dp.partner_id)
+           OR (uc.owner_id = dp.partner_id AND uc.contact_user_id = ${ownerId})
+      )
+      AND NOT EXISTS (
+        SELECT 1 FROM contact_blocks cb
+        WHERE (cb.blocker_id = ${ownerId} AND cb.blocked_id = dp.partner_id)
+           OR (cb.blocker_id = dp.partner_id AND cb.blocked_id = ${ownerId})
+      )
+    ORDER BY dp.last_dr_at DESC
+    LIMIT ${limit}
+  `;
+  return result.rows;
 }
 
 /**
