@@ -694,6 +694,51 @@ export async function listSharedArtifactsByOwner(ownerId: string): Promise<Share
   return result.rows;
 }
 
+/**
+ * Public-only listing for owners — what the /u/[username] profile page
+ * renders. We expose count + recent items separately so the SSR page can
+ * render an editorial header ("3 trips shared") plus a list without two
+ * round trips.
+ */
+export async function listPublicArtifactsByOwner(
+  ownerId: string,
+  limit = 20,
+): Promise<SharedArtifact[]> {
+  await ensureSharedArtifactsTable();
+  const result = await sql<SharedArtifact>`
+    SELECT * FROM shared_artifacts
+    WHERE owner_id = ${ownerId}
+      AND visibility = 'public'
+      AND deleted_at IS NULL
+    ORDER BY created_at DESC
+    LIMIT ${limit}
+  `;
+  return result.rows;
+}
+
+/** Distinct owner_ids that have at least one public artifact. Used by the
+ *  sitemap generator to enumerate /u/[username] URLs worth indexing. */
+export async function listPublicProfileOwnerIds(): Promise<string[]> {
+  await ensureSharedArtifactsTable();
+  const result = await sql<{ owner_id: string }>`
+    SELECT DISTINCT owner_id FROM shared_artifacts
+    WHERE visibility = 'public' AND deleted_at IS NULL
+  `;
+  return result.rows.map((r) => r.owner_id);
+}
+
+/** All public slugs — feeds the sitemap so each /s/[slug] is indexable. */
+export async function listAllPublicSlugs(): Promise<{ slug: string; created_at: string }[]> {
+  await ensureSharedArtifactsTable();
+  const result = await sql<{ slug: string; created_at: string }>`
+    SELECT slug, created_at FROM shared_artifacts
+    WHERE visibility = 'public' AND deleted_at IS NULL
+    ORDER BY created_at DESC
+    LIMIT 5000
+  `;
+  return result.rows;
+}
+
 export async function incrementSharedArtifactViews(slug: string): Promise<void> {
   await ensureSharedArtifactsTable();
   await sql`
@@ -3557,6 +3602,10 @@ export async function ensureUserProfilesTable(): Promise<void> {
         ON user_profiles (LOWER(username))
         WHERE username IS NOT NULL
       `;
+      // Bio — short freeform tagline shown on the public /u/[username] page.
+      // Capped at 500 chars at the API layer; nullable so existing rows are
+      // unaffected.
+      await sql`ALTER TABLE user_profiles ADD COLUMN IF NOT EXISTS bio TEXT`;
     })().catch((err) => {
       userProfilesTableReady = null;
       throw err;
@@ -3593,6 +3642,8 @@ export interface UserProfile {
   avatar_url: string | null;
   /** Clerk-sourced handle (e.g. "ziweib"). Nullable for legacy rows. */
   username: string | null;
+  /** Short tagline rendered on the public profile page. Owner-editable. */
+  bio: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -3681,6 +3732,21 @@ export async function getUserProfileByUsername(username: string): Promise<UserPr
   await ensureUserProfilesTable();
   const result = await sql<UserProfile>`
     SELECT * FROM user_profiles WHERE LOWER(username) = LOWER(${username}) LIMIT 1
+  `;
+  return result.rows[0] ?? null;
+}
+
+/**
+ * Update a user's bio (the public-profile tagline). Empty string → null so
+ * the field clears properly on "delete bio" UX.
+ */
+export async function updateUserBio(userId: string, bio: string | null): Promise<UserProfile | null> {
+  await ensureUserProfilesTable();
+  const normalized = bio == null ? null : bio.trim().length === 0 ? null : bio.trim().slice(0, 500);
+  const result = await sql<UserProfile>`
+    UPDATE user_profiles SET bio = ${normalized}, updated_at = NOW()
+    WHERE user_id = ${userId}
+    RETURNING *
   `;
   return result.rows[0] ?? null;
 }

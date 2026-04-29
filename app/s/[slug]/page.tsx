@@ -108,6 +108,7 @@ export default async function ShareSlugPage({ params }: Params) {
   const ownerName =
     owner?.display_name ??
     (owner?.username ? `@${owner.username}` : owner?.profile_code ? `@${owner.profile_code}` : "Someone");
+  const ownerHandle = owner?.username ?? owner?.profile_code ?? null;
 
   // ── Booking content ───────────────────────────────────────────────────────
   if (artifact.kind === "booking") {
@@ -126,6 +127,8 @@ export default async function ShareSlugPage({ params }: Params) {
             size="page"
             align="left"
           />
+
+          <OwnerProfileLink handle={ownerHandle} />
 
           <div
             style={{
@@ -236,6 +239,8 @@ export default async function ShareSlugPage({ params }: Params) {
           align="left"
         />
 
+        <OwnerProfileLink handle={ownerHandle} />
+
         {decided?.why_recommended && (
           <div
             style={{
@@ -290,6 +295,27 @@ export default async function ShareSlugPage({ params }: Params) {
 }
 
 // ─── Sub-components ──────────────────────────────────────────────────────────
+
+function OwnerProfileLink({ handle }: { handle: string | null }) {
+  if (!handle) return null;
+  return (
+    <div style={{ marginTop: 8, marginBottom: 4 }}>
+      <Link
+        href={`/u/${encodeURIComponent(handle)}`}
+        style={{
+          fontFamily: "var(--font-dm-sans)",
+          fontSize: 13,
+          fontWeight: 500,
+          color: "var(--gold-text, #5A4416)",
+          textDecoration: "none",
+          borderBottom: "1px solid transparent",
+        }}
+      >
+        View @{handle}&apos;s profile →
+      </Link>
+    </div>
+  );
+}
 
 function ConstraintCard({ label, body }: { label: string; body: string }) {
   return (
