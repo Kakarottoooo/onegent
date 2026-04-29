@@ -271,8 +271,31 @@ function RoomView({
           <aside className="hidden lg:block">
             <div className="sticky top-20 space-y-4">
               <div className={`${CARD} p-5`}>
-                <p className="text-[11px] uppercase tracking-[0.14em] text-[var(--text-muted)] mb-2">Room</p>
-                <p className="text-xl font-semibold text-[var(--text-primary)] leading-tight">{room.title}</p>
+                <span
+                  className="inline-flex items-center text-[11px] font-semibold uppercase mb-3 tracking-[0.18em]"
+                  style={{
+                    color: "var(--gold-text)",
+                    background: "var(--gold-soft)",
+                    padding: "5px 12px",
+                    borderRadius: "var(--radius-pill)",
+                  }}
+                >
+                  Room
+                </span>
+                <p
+                  className="leading-tight"
+                  style={{
+                    fontFamily: "var(--font-playfair), Georgia, serif",
+                    fontSize: "clamp(22px, 2.5vw, 28px)",
+                    fontWeight: 600,
+                    color: "var(--ink-9)",
+                    letterSpacing: "-0.02em",
+                    lineHeight: 1.15,
+                    margin: 0,
+                  }}
+                >
+                  {room.title}
+                </p>
                 <div className="mt-3 flex items-center gap-2 flex-wrap">
                   <span className={`text-[10px] font-medium px-2 py-0.5 rounded-full whitespace-nowrap ${roomStatus.tone}`}>
                     {roomStatus.text}
@@ -1133,7 +1156,7 @@ function RestaurantConstraintForm({
         onClick={() => setOpen((v) => !v)}
         className="w-full flex items-center justify-between mb-3 text-left"
       >
-        <p className="text-sm font-semibold text-[var(--text-primary)]">Your constraints</p>
+        <p className="text-base font-semibold text-[var(--ink-9)]" style={{ letterSpacing: "-0.005em" }}>Your constraints</p>
         <div className="flex items-center gap-2">
           {submitted && (
             <span className="text-[10px] font-medium px-2 py-0.5 rounded-full bg-emerald-500/15 text-emerald-600 border border-emerald-500/30">
@@ -1322,7 +1345,7 @@ function HotelConstraintForm({
         onClick={() => setOpen((v) => !v)}
         className="w-full flex items-center justify-between mb-3 text-left"
       >
-        <p className="text-sm font-semibold text-[var(--text-primary)]">Your hotel preferences</p>
+        <p className="text-base font-semibold text-[var(--ink-9)]" style={{ letterSpacing: "-0.005em" }}>Your hotel preferences</p>
         <div className="flex items-center gap-2">
           {submitted && (
             <span className="text-[10px] font-medium px-2 py-0.5 rounded-full bg-emerald-500/15 text-emerald-600 border border-emerald-500/30">
@@ -1519,7 +1542,7 @@ function FlightConstraintForm({
         onClick={() => setOpen((v) => !v)}
         className="w-full flex items-center justify-between mb-3 text-left"
       >
-        <p className="text-sm font-semibold text-[var(--text-primary)]">Your flight preferences</p>
+        <p className="text-base font-semibold text-[var(--ink-9)]" style={{ letterSpacing: "-0.005em" }}>Your flight preferences</p>
         <div className="flex items-center gap-2">
           {submitted && (
             <span className="text-[10px] font-medium px-2 py-0.5 rounded-full bg-emerald-500/15 text-emerald-600 border border-emerald-500/30">
@@ -1740,7 +1763,7 @@ function ActivityConstraintForm({
         onClick={() => setOpen((v) => !v)}
         className="w-full flex items-center justify-between mb-3 text-left"
       >
-        <p className="text-sm font-semibold text-[var(--text-primary)]">Your event preferences</p>
+        <p className="text-base font-semibold text-[var(--ink-9)]" style={{ letterSpacing: "-0.005em" }}>Your event preferences</p>
         <div className="flex items-center gap-2">
           {submitted && (
             <span className="text-[10px] font-medium px-2 py-0.5 rounded-full bg-emerald-500/15 text-emerald-600 border border-emerald-500/30">
