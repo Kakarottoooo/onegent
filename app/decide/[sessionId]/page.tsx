@@ -241,7 +241,19 @@ export default function DecidePage() {
 
   return (
     <div className="min-h-screen bg-[var(--bg)]" style={{ fontFamily: "var(--font-dm-sans, system-ui)" }}>
-      <div className="max-w-md mx-auto px-4 pt-10 pb-20">
+      <div className="max-w-md mx-auto px-4 pt-6 pb-20">
+
+        {/* Back link — every state of /decide should have an escape hatch.
+            Without this, the Waiting screen ("hourglass + Once they add
+            their constraints") stranded users with no nav. */}
+        <a
+          href="/"
+          className="inline-flex items-center gap-1 text-xs mb-4 transition-colors"
+          style={{ color: "var(--text-muted)" }}
+        >
+          <span>←</span>
+          <span>返回首页</span>
+        </a>
 
         {/* Header */}
         <div className="flex items-center gap-2 mb-6">

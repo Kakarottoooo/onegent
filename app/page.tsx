@@ -25,7 +25,6 @@ import { useVoiceInput } from "@/app/hooks/useVoiceInput";
 import { useAuth } from "@/app/hooks/useAuth";
 import { PlanAction, PlanLinkAction, RecommendationCard as CardType, PostExperienceFeedback, FeedbackRecord } from "@/lib/types";
 import type { FeedbackPromptItem } from "@/app/api/feedback-prompts/route";
-import DecisionRoomModal from "@/components/DecisionRoomModal";
 import ConfirmCard, { type CommitResponse } from "@/components/ConfirmCard";
 import TripPackageCard from "@/components/TripPackageCard";
 import TripProposalChatCard from "@/components/TripProposalChatCard";
@@ -276,6 +275,34 @@ export default function Home() {
     if (!activeSessionId) setActiveSessionTitle(null);
   }, [activeSessionId]);
 
+  useEffect(() => {
+    if (activeRoomId) {
+      if (activeRoomTitle) roomTitleCacheRef.current.set(activeRoomId, activeRoomTitle);
+      if (chat.messages.length === 0 && !activeProposalId) return;
+      roomReplayCacheRef.current.set(activeRoomId, {
+        messages: chat.messages,
+        nluHistory: nluHistoryRef.current,
+        proposalId: activeProposalId,
+      });
+      return;
+    }
+    if (!activeSessionId) return;
+    if (chat.messages.length === 0 && !lastNluStateRef.current) return;
+    sessionReplayCacheRef.current.set(activeSessionId, {
+      title: activeSessionTitle,
+      messages: chat.messages,
+      nluHistory: nluHistoryRef.current,
+      lastNluState: lastNluStateRef.current,
+    });
+  }, [
+    activeProposalId,
+    activeRoomId,
+    activeRoomTitle,
+    activeSessionId,
+    activeSessionTitle,
+    chat.messages,
+  ]);
+
   const replayedRoomIds = useRef<Set<string>>(new Set());
   const replayedSessionIds = useRef<Set<string>>(new Set());
   // Session history replay — parallel to the room one below. Fires only when
@@ -497,15 +524,6 @@ export default function Home() {
   // Hero tagline rotation (start at 0 for SSR, randomize on mount to avoid hydration mismatch)
   const [heroIdx, setHeroIdx] = useState(0);
   const [heroVisible, setHeroVisible] = useState(true);
-  const [decisionRoomOpen, setDecisionRoomOpen] = useState(false);
-  const [decisionRoomQuery, setDecisionRoomQuery] = useState("");
-  const [decisionRoomPreselected, setDecisionRoomPreselected] = useState<{
-    contact_user_id: string;
-    nickname: string | null;
-    profile_code: string;
-    display_name: string | null;
-    avatar_url: string | null;
-  } | null>(null);
   const [recentContacts, setRecentContacts] = useState<{
     contact_user_id: string;
     nickname: string | null;
@@ -2650,11 +2668,24 @@ export default function Home() {
                             key={c.contact_user_id}
                             type="button"
                             onClick={() => {
-                              setDecisionRoomPreselected(c);
-                              setDecisionRoomQuery(
-                                lastUserQuery || "Let's decide together",
+                              // Plan A: instead of opening the legacy
+                              // DecisionRoomModal (form-based), pre-fill the
+                              // chat input so the user can finish the prompt
+                              // naturally. NLU picks up the named co-decider
+                              // and routes to a chat-flow Decision Room.
+                              const handle = c.nickname ?? c.display_name ?? `@${c.profile_code}`;
+                              const prefill = `我和 ${handle} 一起决定 `;
+                              chat.setInput(prefill);
+                              chatInputRef.current = prefill;
+                              const el = document.querySelector<HTMLTextAreaElement | HTMLInputElement>(
+                                "[data-chat-input]",
                               );
-                              setDecisionRoomOpen(true);
+                              if (el) {
+                                el.focus();
+                                if (typeof el.setSelectionRange === "function") {
+                                  el.setSelectionRange(prefill.length, prefill.length);
+                                }
+                              }
                             }}
                             style={{
                               display: "inline-flex",
@@ -2906,36 +2937,6 @@ export default function Home() {
                                 />
                               ))}
                             </div>
-                            <button
-                              onClick={() => {
-                                setDecisionRoomQuery(
-                                  lastUserQuery ||
-                                    msg.cards?.[0]?.restaurant?.name ||
-                                    "dinner tonight"
-                                );
-                                setDecisionRoomOpen(true);
-                              }}
-                              style={{
-                                display: "flex",
-                                alignItems: "center",
-                                gap: "6px",
-                                marginTop: "4px",
-                                padding: "9px 16px",
-                                borderRadius: "12px",
-                                border: "1.5px solid #e5e7eb",
-                                background: "#fff",
-                                color: "#374151",
-                                fontSize: "13px",
-                                fontWeight: 500,
-                                cursor: "pointer",
-                                width: "100%",
-                                justifyContent: "center",
-                                fontFamily: "var(--font-dm-sans, system-ui)",
-                              }}
-                            >
-                              <span style={{ fontSize: "15px" }}>🤝</span>
-                              Plan this with someone
-                            </button>
                           </>
                         )}
                       </div>
@@ -3368,6 +3369,7 @@ export default function Home() {
           )}
           <input
             type="text"
+            data-chat-input
             value={isListening ? "" : chat.input}
             onChange={(e) => updateChatInput(e.target.value)}
             onCompositionStart={() => {
@@ -3441,20 +3443,12 @@ export default function Home() {
         />
       )}
 
-      {/* Decision Room Modal */}
-      {decisionRoomOpen && (
-        <DecisionRoomModal
-          isOpen={decisionRoomOpen}
-          onClose={() => {
-            setDecisionRoomOpen(false);
-            setDecisionRoomPreselected(null);
-          }}
-          initiatorQuery={decisionRoomQuery}
-          cityId={location.cityId ?? "losangeles"}
-          userId={auth.userId}
-          preselectedContact={decisionRoomPreselected}
-        />
-      )}
+      {/* Plan A: DecisionRoomModal removed. Multi-decider intent now
+          flows through the homepage chat — user types "我和X..." and
+          the NLU's create_room intent routes to the chat-flow DR via
+          /api/chat/commit (see commit route's create_room branch). The
+          legacy /decide/[sessionId] form path is no longer reachable
+          from this page. */}
       </main>
     </div>
   );
