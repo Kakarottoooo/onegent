@@ -349,6 +349,136 @@ function buildCreatorConstraintSeed(
   return null;
 }
 
+/**
+ * Per-scenario wording bits the chat-flow room seeds into welcome / invite
+ * messages. Centralized so all 5 scenarios share the same template.
+ */
+function scenarioLabels(type: DecisionRoomType): {
+  /** Singular noun used in welcome — "聚餐" / "酒店预订" / etc. */
+  roomNoun: string;
+  /** What appears in the agent DM ("invited you to a trip" / "to dinner"). */
+  inviteSubject: string;
+  /** Hint string listing what the user should mention in chat. */
+  creatorPromptHints: string;
+  /** Verb ending of "agent will [verb] options" in the welcome. */
+  outputAction: string;
+} {
+  switch (type) {
+    case "restaurant":
+      return {
+        roomNoun: "聚餐",
+        inviteSubject: "dinner",
+        creatorPromptHints: "想吃什么、几点、几个人、预算、忌口",
+        outputAction: "找几家都喜欢的餐厅",
+      };
+    case "hotel":
+      return {
+        roomNoun: "酒店预订",
+        inviteSubject: "a hotel stay",
+        creatorPromptHints: "城市、入住时间、几晚、预算、住哪区",
+        outputAction: "找几家都满意的酒店",
+      };
+    case "flight":
+      return {
+        roomNoun: "航班",
+        inviteSubject: "a flight",
+        creatorPromptHints: "出发地、目的地、出发时间、舱位、是否往返",
+        outputAction: "找几个都合适的航班",
+      };
+    case "activity":
+      return {
+        roomNoun: "活动",
+        inviteSubject: "an event",
+        creatorPromptHints: "活动名、城市、时间、几张票、座位偏好",
+        outputAction: "找合适的票",
+      };
+    case "trip":
+      return {
+        roomNoun: "Trip",
+        inviteSubject: "a trip",
+        creatorPromptHints: "预算、住哪区、想吃什么、想玩啥",
+        outputAction: "出完整方案",
+      };
+  }
+}
+
+/**
+ * Convert the v1-flat constraints bag (from /api/chat/parse → commit) into
+ * the v2 IntentState scenario sub-object shape. Used to seed
+ * member_intent_state[creator] so synthesis can read it later.
+ *
+ * Only emits keys that are populated — leaves the rest undefined to match
+ * the v2 IntentState convention (omit, don't emit "").
+ */
+function buildScenarioSubObject(
+  type: DecisionRoomType,
+  constraints: Record<string, unknown>,
+): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  if (type === "restaurant") {
+    const city = readString(constraints, "city", "city_id");
+    const date = readString(constraints, "date", "date_from");
+    const time = readString(constraints, "time", "time_hint");
+    const partySize = readNumber(constraints, "party_size", "covers", "guests");
+    const cuisine = readString(constraints, "cuisine", "cuisine_hint");
+    const budget = readNumber(constraints, "budget_per_person", "budget_per_person_hint", "budget");
+    const neighborhood = readString(constraints, "neighborhood", "area");
+    const vibe = readString(constraints, "vibe", "ambience");
+    if (city) out.city = city;
+    if (date) out.date = date;
+    if (time) out.time = time;
+    if (partySize) out.party_size = partySize;
+    if (cuisine) out.cuisine = cuisine;
+    if (budget) out.budget_per_person = budget;
+    if (neighborhood) out.neighborhood = neighborhood;
+    if (vibe) out.vibe = vibe;
+  } else if (type === "hotel") {
+    const city = readString(constraints, "city", "hotel_city");
+    const checkIn = readString(constraints, "check_in", "date_from", "date");
+    const checkOut = readString(constraints, "check_out", "date_to");
+    const nights = readNumber(constraints, "nights");
+    const guests = readNumber(constraints, "guests", "travelers", "party_size");
+    const stars = readNumber(constraints, "stars", "min_stars", "star_rating");
+    const neighborhood = readString(constraints, "neighborhood", "area");
+    const budgetMax = readNumber(constraints, "budget_max_per_night", "budget_per_night", "budget");
+    if (city) out.city = city;
+    if (checkIn) out.check_in = checkIn;
+    if (checkOut) out.check_out = checkOut;
+    if (nights) out.nights = nights;
+    if (guests) out.guests = guests;
+    if (stars) out.star_rating = stars;
+    if (neighborhood) out.neighborhood = neighborhood;
+    if (budgetMax) out.budget_max_per_night = budgetMax;
+  } else if (type === "flight") {
+    const origin = readString(constraints, "departure_city", "origin");
+    const dest = readString(constraints, "arrival_city", "dest", "destination");
+    const date = readString(constraints, "departure_date", "date", "date_from");
+    const returnDate = readString(constraints, "return_date", "date_to");
+    const isRoundTrip = readBool(constraints, "is_round_trip", "round_trip");
+    const passengers = readNumber(constraints, "passengers", "party_size");
+    const cabinClass = readString(constraints, "cabin_class", "cabin");
+    if (origin) out.origin = origin;
+    if (dest) out.dest = dest;
+    if (date) out.date = date;
+    if (returnDate) out.return_date = returnDate;
+    if (isRoundTrip !== null) out.is_round_trip = isRoundTrip;
+    if (passengers) out.passengers = passengers;
+    if (cabinClass) out.cabin_class = cabinClass;
+  } else if (type === "activity") {
+    const eventName = readString(constraints, "event_name", "activity_name", "title");
+    const eventType = readString(constraints, "event_type", "genre");
+    const city = readString(constraints, "city");
+    const eventDate = readString(constraints, "event_date", "date");
+    const numTickets = readNumber(constraints, "num_tickets", "tickets", "party_size");
+    if (eventName) out.event_name = eventName;
+    if (eventType) out.event_type = eventType;
+    if (city) out.city = city;
+    if (eventDate) out.event_date = eventDate;
+    if (numTickets) out.num_tickets = numTickets;
+  }
+  return out;
+}
+
 function buildRoomTitle(
   type: DecisionRoomType,
   constraints: Record<string, unknown>,
@@ -689,8 +819,14 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: `unsupported room type ${roomType}` }, { status: 400 });
     }
 
+    // Plan A: ALL Decision Rooms now use chat-flow (was trip-only). Both
+    // creator and invitees enter the homepage chat scoped via ?room_id=
+    // and talk to the agent privately. The legacy form-based /rooms/[id]
+    // is no longer the entry point for new rooms — see also rooms/join,
+    // which redirects flow="chat" rooms to the homepage.
     const context = buildRoomContext(roomType, constraints, memberNames);
     const title = buildRoomTitle(roomType, constraints, memberNames, originalMessage);
+    const labels = scenarioLabels(roomType);
 
     const approvalRule: ApprovalRule =
       typeof b.approval_rule === "string" && ALLOWED_RULES.includes(b.approval_rule as ApprovalRule)
@@ -706,19 +842,148 @@ export async function POST(req: NextRequest) {
       payerId: userId,
       contextJson: context,
       approvalRule,
+      flow: "chat",
+      categories: [roomType] as DecisionRoomCategory[],
     });
 
-    // P1-09: seed the creator's personal constraint row with whatever taste
-    // hints the NLU captured (cuisine likes, budget, vibe, ...). Left as
-    // submitted=false so the creator still clicks "Submit" on the room page —
-    // this way the seed is an aid, not a stealth auto-submit.
-    const seed = buildCreatorConstraintSeed(roomType, constraints);
-    if (seed) {
+    // Seed creator's IntentState for synthesis. Single-scenario rooms only
+    // need the matching scenario sub-object filled (restaurant/hotel/flight/
+    // activity). Synthesis (lib/agent/scenario-synthesis.ts) reads these
+    // across all members and merges into a single search query.
+    try {
+      const intentStateJson: Record<string, unknown> = {
+        intent: "create_room",
+        scenario: roomType,
+        party_type: "multi",
+        member_names: memberNames,
+        refined_target_id: null,
+        planning_assumptions: [],
+        confidence: 0.9,
+        turn_count: 1,
+        updated_at: new Date().toISOString(),
+        [roomType]: buildScenarioSubObject(roomType, constraints),
+      };
+      await upsertMemberIntentState({
+        roomId: room.id,
+        userId,
+        intentStateJson,
+      });
+    } catch (err) {
+      console.warn("[chat/commit] seed creator intent_state failed", err);
+    }
+
+    // Persist pre-creation chat history into the creator's private channel.
+    // Without this, the creator refreshes after creating the room and sees
+    // an empty chat — syncRoomContext only fires for turns AFTER room exists.
+    const rawHistory = Array.isArray(b.history) ? (b.history as unknown[]) : [];
+    for (const entry of rawHistory) {
+      if (!entry || typeof entry !== "object") continue;
+      const e = entry as Record<string, unknown>;
+      const role = e.role;
+      const content = e.content;
+      if ((role !== "user" && role !== "assistant") || typeof content !== "string" || !content.trim()) continue;
       try {
-        await upsertRoomConstraint(room.id, userId, seed, false);
+        await insertPrivateMessage({ roomId: room.id, userId, role, content });
       } catch (err) {
-        // Non-fatal: the user can still fill in the editor manually.
-        console.warn("[chat/commit] seed creator constraint failed", err);
+        console.warn("[chat/commit] seed pre-creation history msg failed", err);
+      }
+    }
+    if (originalMessage.trim()) {
+      try {
+        await insertPrivateMessage({
+          roomId: room.id,
+          userId,
+          role: "user",
+          content: originalMessage,
+        });
+      } catch (err) {
+        console.warn("[chat/commit] seed final user msg failed", err);
+      }
+    }
+
+    // Resolve named members → invite + agent-DM. Same flow as trip rooms.
+    const resolved = await resolveContactsByNames(userId, memberNames).catch(() => []);
+    const invitedUserIds: string[] = [];
+    const unresolvedNames: string[] = [];
+    const creatorProfile = await getUserProfile(userId).catch(() => null);
+    const creatorLabel =
+      creatorProfile?.display_name ||
+      creatorProfile?.username ||
+      "A contact";
+    for (const r of resolved) {
+      if (r.contact_user_id && r.contact_user_id !== userId) {
+        try {
+          await inviteToDecisionRoom(room.id, r.contact_user_id);
+          invitedUserIds.push(r.contact_user_id);
+        } catch (err) {
+          console.warn(`[chat/commit] inviteToDecisionRoom failed for ${r.contact_user_id}`, err);
+          unresolvedNames.push(r.name);
+          continue;
+        }
+        try {
+          await sendDirectMessage({
+            fromUserId: userId,
+            toUserId: r.contact_user_id,
+            role: "agent",
+            content: `${creatorLabel} just invited you to ${labels.inviteSubject}: "${title}". Open Rooms to accept.`,
+            metaJson: {
+              kind: `${roomType}_invite`,
+              room_id: room.id,
+              room_short_code: room.short_code,
+              accept_path: "/rooms",
+            },
+          });
+        } catch (err) {
+          console.warn(`[chat/commit] agent DM failed for ${r.contact_user_id}`, err);
+        }
+      } else {
+        unresolvedNames.push(r.name);
+      }
+    }
+
+    const incomingSessionId =
+      typeof b.session_id === "string" && b.session_id.trim() ? b.session_id.trim() : null;
+    if (incomingSessionId) {
+      try {
+        await markSessionUpgraded(incomingSessionId, userId, room.id);
+      } catch (err) {
+        console.warn(`[chat/commit] markSessionUpgraded failed for session=${incomingSessionId}`, err);
+      }
+    }
+
+    // Seed welcome assistant messages.
+    const inviteLineForCreator = room.short_code
+      ? `\n邀请链接（发给同行的人）：/rooms/join/${room.short_code}`
+      : "";
+    const whoList = memberNames.length > 0 ? memberNames.join("、") : "";
+    const creatorWelcome =
+      `${labels.roomNoun}「${room.title}」已建好！${whoList ? `已邀请 ${whoList}。` : ""}${inviteLineForCreator}\n\n` +
+      `继续和我聊具体偏好（${labels.creatorPromptHints}），我会综合你们每个人的想法${labels.outputAction}。`;
+    try {
+      await insertPrivateMessage({
+        roomId: room.id,
+        userId,
+        role: "assistant",
+        content: creatorWelcome,
+      });
+    } catch (err) {
+      console.warn("[chat/commit] seed creator welcome failed", err);
+    }
+
+    const invitedWelcome =
+      `${creatorLabel} 邀请你一起决定 ${labels.roomNoun}「${room.title}」。\n\n` +
+      `告诉我你对这次的偏好（${labels.creatorPromptHints}），` +
+      `我会把你们每个人的想法综合起来${labels.outputAction}。你说的内容只有你自己能看到，我只会把汇总后的方案发到群里。`;
+    for (const invitedId of invitedUserIds) {
+      try {
+        await insertPrivateMessage({
+          roomId: room.id,
+          userId: invitedId,
+          role: "assistant",
+          content: invitedWelcome,
+        });
+      } catch (err) {
+        console.warn(`[chat/commit] seed invited welcome failed for ${invitedId}`, err);
       }
     }
 
@@ -727,9 +992,14 @@ export async function POST(req: NextRequest) {
       kind: "room",
       id: room.id,
       short_code: room.short_code,
-      url: `/rooms/${room.id}`,
+      url: `/?room_id=${room.id}`,
       invite_url: room.short_code ? `/rooms/join/${room.short_code}` : null,
       title: room.title,
+      room_type: roomType,
+      flow: "chat",
+      categories: room.categories,
+      invited_user_ids: invitedUserIds,
+      unresolved_names: unresolvedNames,
     });
   }
 
