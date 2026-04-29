@@ -229,6 +229,25 @@ function getDefaultQuickPicksFor(
       { label: "5+ 人", value: "5" },
     ];
   }
+  // Restaurant time picks — dinner-window defaults. Common-case prefill:
+  // user says "tonight / 今晚" → date filled, time blank → these surface
+  // so they don't have to type "7pm".
+  if (scenario === "restaurant" && m === "time") {
+    return [
+      { label: "6:00 pm", value: "18:00" },
+      { label: "7:00 pm", value: "19:00" },
+      { label: "8:00 pm", value: "20:00" },
+      { label: "9:00 pm", value: "21:00" },
+    ];
+  }
+  // Restaurant date — when user said "餐厅" without a date cue.
+  if (scenario === "restaurant" && m === "date") {
+    return [
+      { label: "今晚", value: "tonight" },
+      { label: "明晚", value: "tomorrow" },
+      { label: "本周末", value: "this weekend" },
+    ];
+  }
   if (scenario === "flight" && m === "cabin_class") {
     return [
       { label: "经济舱", value: "economy" },
