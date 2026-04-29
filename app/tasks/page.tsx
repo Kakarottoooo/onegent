@@ -3101,9 +3101,39 @@ function TripsPageInner() {
           <div className="lg:grid lg:grid-cols-[264px_minmax(0,1fr)]">
             <aside className="hidden lg:block">
               <div className="sticky top-20 px-7 py-7">
-                <p className="text-[11px] uppercase tracking-[0.14em] text-[var(--text-muted,#999)] mb-2">Tasks</p>
-                <p className="text-xl font-semibold text-[var(--text-primary,#111)]">Tasks workspace</p>
-                <p className="mt-2 text-sm text-[var(--text-secondary,#666)] leading-6">
+                <span
+                  className="inline-flex items-center text-[11px] font-semibold uppercase mb-4 tracking-[0.18em]"
+                  style={{
+                    color: "var(--gold-text)",
+                    background: "var(--gold-soft)",
+                    padding: "5px 12px",
+                    borderRadius: "var(--radius-pill)",
+                  }}
+                >
+                  Tasks
+                </span>
+                <h1
+                  className="leading-tight"
+                  style={{
+                    fontFamily: "var(--font-playfair), Georgia, serif",
+                    fontSize: "clamp(28px, 3vw, 36px)",
+                    fontWeight: 600,
+                    color: "var(--ink-9)",
+                    letterSpacing: "-0.02em",
+                    lineHeight: 1.1,
+                    margin: 0,
+                  }}
+                >
+                  Tasks workspace.
+                </h1>
+                <p
+                  className="mt-3 leading-6"
+                  style={{
+                    fontSize: "15px",
+                    color: "var(--ink-6)",
+                    maxWidth: "32ch",
+                  }}
+                >
                   Background jobs, live monitoring, and follow-ups live here.
                 </p>
                 <div className="mt-5 flex flex-col gap-2">
