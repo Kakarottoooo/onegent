@@ -14,7 +14,10 @@ import {
  * would compromise both. Same fallback fonts (system) as /api/og/share.
  */
 
-export const runtime = "edge";
+// Was edge runtime, but lib/db.ts imports node:crypto — Node.js runtime
+// is required. Cached aggressively at the CDN so the slight cold-start
+// cost is paid once per profile.
+export const runtime = "nodejs";
 export const contentType = "image/png";
 export const size = { width: 1200, height: 630 };
 

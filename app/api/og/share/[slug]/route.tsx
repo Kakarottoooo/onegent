@@ -19,7 +19,10 @@ import {
  * v1 — Playfair via @vercel/og fetch can come later.
  */
 
-export const runtime = "edge";
+// Was edge runtime, but lib/db.ts imports node:crypto for ID generation
+// — Node.js runtime is required. The OG image is small + cached, so the
+// slight cold-start cost beats refactoring the DB layer.
+export const runtime = "nodejs";
 export const contentType = "image/png";
 export const size = { width: 1200, height: 630 };
 
