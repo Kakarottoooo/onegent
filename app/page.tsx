@@ -999,15 +999,50 @@ export default function Home() {
             }
             const data = (await res.json().catch(() => ({}))) as {
               ok?: boolean;
+              room_type?: string;
               reason?: string;
               missing?: string[];
               contributor_count?: number | null;
               member_count?: number | null;
+              query?: string | null;
             };
             if (!res.ok || !data.ok) {
               chat.injectAssistantMessage("方案生成失败了，先稍等再试一下。");
               return;
             }
+
+            // Plan A: non-trip rooms get a search query back; we kick the
+            // legacy /api/chat recommendation pipeline with it + categoryHint
+            // so the cards render inline like a solo flow. The agent's reply
+            // already announced "好的，我把大家的偏好综合一下..." via parse,
+            // so we go straight to the search.
+            const nonTripTypes = ["restaurant", "hotel", "flight", "activity"];
+            if (data.room_type && nonTripTypes.includes(data.room_type)) {
+              if (data.reason === "ok" && data.query) {
+                chat.sendMessage(data.query, undefined, {
+                  skipUserPush: true,
+                  categoryHint: data.room_type as "restaurant" | "hotel" | "flight" | "activity",
+                });
+                return;
+              }
+              if (data.reason === "waiting_for_members") {
+                const need = (data.member_count ?? 0) - (data.contributor_count ?? 0);
+                chat.injectAssistantMessage(
+                  `还在等 ${need} 位成员说偏好。他们都聊过一轮后我会自动综合。如果你想现在就看选项，说「先看选项」。`,
+                );
+                return;
+              }
+              if (data.reason === "no_joined_members") {
+                chat.injectAssistantMessage(
+                  "房间还没有成员加入。等大家接受邀请后再说「出方案」。",
+                );
+                return;
+              }
+              chat.injectAssistantMessage(`方案状态: ${data.reason ?? "unknown"}`);
+              return;
+            }
+
+            // Trip rooms — existing TripPackage proposal flow.
             if (data.reason === "ok") {
               chat.injectAssistantMessage(
                 "✅ 方案已出！在下方卡片里选择你的偏好，实时看大家的共识进度。",

@@ -190,6 +190,21 @@ export async function POST(req: NextRequest) {
           // ("方案已出" / "还在等 N 位成员" / "信息不足缺 X") in a second bubble.
           result.assistant_reply = "好的，我去综合大家的偏好，出一套方案。";
         }
+      } else if (room && (room.type === "restaurant" || room.type === "hotel" || room.type === "flight" || room.type === "activity")) {
+        // Plan A: non-trip chat-flow rooms also recognize the synthesis
+        // trigger. The override mirrors the trip path — set
+        // intent=create_room + confirm_ready=true so the client sees
+        // "we're ready" and calls /api/rooms/[id]/synthesize, which
+        // returns the merged search query. The client then posts that
+        // query to /api/chat with categoryHint=room.type to render
+        // recommendation cards inline.
+        console.log(
+          `[chat/parse] scenario synthesis trigger matched for room=${roomId} type=${room.type}`,
+        );
+        result.intent = "create_room";
+        result.scenario = room.type;
+        result.confirm_ready = true;
+        result.assistant_reply = `好的，我把大家的偏好综合一下，找一些都喜欢的${room.type === "restaurant" ? "餐厅" : room.type === "hotel" ? "酒店" : room.type === "flight" ? "航班" : "活动"}。`;
       }
     }
 
