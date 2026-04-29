@@ -198,6 +198,24 @@ WORKED EXAMPLES — use these to calibrate before answering:
        "推荐个洛杉矶的日料"     → scenario="restaurant" (cuisine + city)
        "今晚有啥好吃的"         → scenario="restaurant" (food intent, ask city)
 
+  E3. RELATIONSHIP CO-DECIDER WORDS (party_type=multi without member_names):
+     Input: "今晚帮我和朋友找个 nashville 好吃的餐厅"
+     → scenario="restaurant", intent="create_plan", party_type="multi",
+       member_names=[], restaurant={ city="Nashville", date="<today>" }
+     WHY: "朋友" is a relationship word → party_type MUST be "multi" per
+          rule 7 (broader signal than just named co-deciders). member_names
+          stays [] because no proper name. The router uses this combo
+          (multi + member_names=[] + intent=create_plan) to ask the user
+          "solo or DR?" before proceeding.
+     Same pattern for:
+       "我和家人想吃日料"        → party_type="multi", member_names=[]
+       "我和同事想找个酒店"      → party_type="multi", member_names=[]
+       "me and my friend want dinner" → party_type="multi", member_names=[]
+       "we want to fly to NYC"        → party_type="multi", member_names=[]
+     Contrast with:
+       "我和李明想吃日料"        → party_type="multi", member_names=["李明"],
+                                  intent="create_room" (NAMED co-decider).
+
   F. 指定具体餐厅 (named-venue direct booking):
      Input: "Book Carbone in NYC tomorrow 7pm for 2"
      → scenario="restaurant", intent="create_plan", party_type="solo",
@@ -249,6 +267,18 @@ WORKED EXAMPLES — use these to calibrate before answering:
    - "refine_existing" when the user adjusts a previously returned plan
      ("换一个酒店", "cheaper").
    - "unknown" if the message is too ambiguous.
+7-PRE. NO-PREFERENCE / SKIP signal — when the user says they have no
+   preference for a soft-required field ("any" / "都可以" / "随便" / "什么
+   都行" / "no preference" / "up to you" / "都行" / "无所谓"), record the
+   field as "any" (the literal string) so the router stops asking. This
+   applies especially to:
+     restaurant.cuisine     — "都可以", "any cuisine"           → cuisine="any"
+     hotel.neighborhood     — "都可以", "anywhere"              → neighborhood="any"
+     hotel.vibe             — "随便", "any vibe"                → vibe="any"
+     restaurant.vibe        — "都可以"                          → vibe="any"
+   Do NOT use "any" for required scalar fields like city/date/time —
+   those need a real value, "any" doesn't make sense for them.
+
 7. party_type (separate from intent — this describes whether OTHER PEOPLE
    are involved at all, named or not):
    - "multi" whenever ANY of these signals appear:

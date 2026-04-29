@@ -207,6 +207,11 @@ function missingRestaurant(state: IntentState): string[] {
   const r = state.restaurant ?? {};
   const missing: string[] = [];
   if (!truthy(r.city)) missing.push("city");
+  // cuisine is soft-required: not strictly needed (the agent can still
+  // recommend mixed cuisines), but asking surfaces a quick-pick row of
+  // common cuisines so the user taps instead of types. The first quick
+  // pick option is "都可以" which sets cuisine="any" to skip.
+  if (!truthy(r.cuisine)) missing.push("cuisine");
   if (!truthy(r.date)) missing.push("date");
   if (!truthy(r.time)) missing.push("time");
   if (!(typeof r.party_size === "number" && r.party_size > 0)) missing.push("party_size");
@@ -269,6 +274,18 @@ function getDefaultQuickPicksFor(
       { label: "3 人", value: "3" },
       { label: "4 人", value: "4" },
       { label: "5+ 人", value: "5" },
+    ];
+  }
+  // Restaurant cuisine picks — common cuisines + a "skip" option so the
+  // user can bypass the question if they don't have a preference.
+  if (scenario === "restaurant" && m === "cuisine") {
+    return [
+      { label: "都可以", value: "any" },
+      { label: "日料", value: "Japanese" },
+      { label: "意大利菜", value: "Italian" },
+      { label: "中餐", value: "Chinese" },
+      { label: "泰餐", value: "Thai" },
+      { label: "墨西哥菜", value: "Mexican" },
     ];
   }
   // Restaurant time picks — dinner-window defaults. Common-case prefill:
