@@ -1,21 +1,26 @@
 /**
- * NLU v2 — Layer 2 state extractor.
+ * NLU v2 — extractor prompt + state-coercion helpers.
  *
- * Given the conversation so far, produces a fully-formed IntentState as
- * strict JSON. Uses OpenAI gpt-4o-mini (with response_format: json_object)
- * because it's cheap, fast, and already paid for by the Stagehand setup.
+ * The async public path that called the LLM lived here under
+ * `extractState()`; that call is now part of the unified turn (see
+ * `unified.ts`) so this file is just the prompt builder + parsing /
+ * coercion / scrub helpers that the unified path consumes.
  *
- * Design invariants:
+ * Why split: a unified call avoids the cross-layer inconsistency the
+ * old extractor + chat split had (model could emit
+ * `scenario="restaurant"` AND `out_of_scope:` simultaneously, and chat
+ * would decline). Keeping the helpers exported here lets `unified.ts`
+ * reuse the same prompt + state coercion pipeline without duplicating
+ * 600 lines of rules.
+ *
+ * Design invariants the helpers preserve:
  *   - Idempotent: same inputs → same output (enables replay testing)
  *   - Merge, don't replace: newer info augments prev_state, doesn't wipe it
  *   - Resolve relative dates at extraction time ("next weekend" → ISO date)
  *   - Only populate the single scenario sub-object that matches `scenario`
  *   - If a required slot wasn't mentioned, omit the field (don't emit "")
- *
- * See NLU_REFACTOR_PLAN_C.md section 3 for the full design rationale.
  */
 
-import { openaiChat } from "../../openai";
 import { resolveDateHint } from "../trip-intent-state";
 import type { IntentState, NluIntent, NluScenario, PartyType, ProxyConstraints } from "./types";
 
@@ -23,85 +28,6 @@ import type { IntentState, NluIntent, NluScenario, PartyType, ProxyConstraints }
 export interface Turn {
   role: "user" | "assistant";
   content: string;
-}
-
-export interface ExtractStateInput {
-  /** Previous IntentState, or null for the first turn of a conversation. */
-  prev_state: IntentState | null;
-  /** The user's latest message (this turn). */
-  new_user_message: string;
-  /** The assistant's latest reply (from Layer 1). Optional — helps the
-   *  extractor disambiguate when the user's answer was a quick-pick click. */
-  new_assistant_reply?: string;
-  /** Full conversation history so far (user + assistant alternating).
-   *  Used as context; the extractor can resolve "the date we talked about"
-   *  type references. */
-  history?: Turn[];
-  /** Override model; falls back to gpt-4o-mini when absent. */
-  model?: string;
-  /** Optional override API key (for BYOK users). */
-  apiKey?: string;
-}
-
-// ─── Public API ──────────────────────────────────────────────────────────
-
-export async function extractState(input: ExtractStateInput): Promise<IntentState> {
-  const now = new Date();
-  // Use the SERVER'S LOCAL timezone, not UTC. A dev server in CDT at
-  // 23:40 Wed reads UTC=04:40 Thu, which would anchor the calendar one day
-  // off from what the user sees — "tomorrow" would then resolve to two
-  // days ahead in local time. For prod we'll want the client's TZ plumbed
-  // through; for dev, server-local is a correct default.
-  const pad = (n: number) => String(n).padStart(2, "0");
-  const today = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
-  const todayDayOfWeek = now.toLocaleDateString("en-US", { weekday: "long" });
-  const nowHHMM = `${pad(now.getHours())}:${pad(now.getMinutes())}`;
-  // Pre-computed 14-day calendar. Lets the LLM look up "this Friday" / "next
-  // Saturday" instead of computing offsets — gpt-4o-mini is unreliable at
-  // day-of-week arithmetic even when the anchor is given.
-  const weekdayLookup = buildWeekdayLookup(now);
-  const prevSummary = input.prev_state ? formatPrevState(input.prev_state) : "(none — this is the first turn)";
-  const historyBlock = formatHistory(input.history ?? []);
-
-  const systemPrompt = buildExtractorSystemPrompt(today, todayDayOfWeek, nowHHMM, weekdayLookup);
-  const userPrompt = buildExtractorUserPrompt({
-    prevSummary,
-    historyBlock,
-    newUser: input.new_user_message,
-    newAssistant: input.new_assistant_reply ?? "",
-  });
-
-  const raw = await openaiChat({
-    system: systemPrompt,
-    messages: [{ role: "user", content: userPrompt }],
-    max_tokens: 1200,
-    timeout_ms: 20_000,
-    model: input.model,
-    response_format: { type: "json_object" },
-  });
-
-  const parsed = parseAndValidate(raw, input.prev_state);
-  // Defensive merge: if the extractor dropped a previously-known slot (model
-  // drift happens), prefer the previously-known value. This keeps the state
-  // monotonic across turns — a key invariant for multi-turn UX.
-  const merged = mergePrevIntoNew(input.prev_state, parsed);
-  // Belt-and-suspenders: catch the "next month → whole month" trap even if the
-  // model ignored prompt rule #4 (extractor_prompt.md). See scrubWholeMonthAssumption below.
-  const scrubbed = scrubWholeMonthAssumption(merged, input.history ?? [], input.new_user_message);
-  // For create_room restaurant with named members, infer party_size = members + creator
-  // so the router doesn't ask "how many people?" when the user already said "me and 李明".
-  const partyFilled = fillCreateRoomPartySize(scrubbed);
-  // Safety net: if the model extracted named co-deciders ("我和 ziweiB") AND tagged
-  // party_type=multi, but failed to upgrade intent from create_plan → create_room
-  // (observed on ambiguous English usernames), force the upgrade here. Mirror of
-  // prompt rule #6 — named co-deciders always implies create_room.
-  const upgraded = upgradeMultiPartyToRoom(partyFilled);
-  // Second safety net: downgrade a spurious `refine_existing` on fresh turns.
-  // Observed on trip requests with concrete preferences ("想看百老汇狮子王,
-  // 自由女神像, 想住希尔顿") — the model reads the comma list as "adjustments"
-  // and labels it refine_existing, but there's nothing to refine. Router then
-  // short-circuits to continue_chat and no ConfirmCard appears.
-  return downgradeSpuriousRefine(upgraded, input.history ?? []);
 }
 
 // ─── Prompt construction ─────────────────────────────────────────────────
@@ -139,7 +65,7 @@ IntentState schema:
 }
 `;
 
-function buildExtractorSystemPrompt(
+export function buildExtractorSystemPrompt(
   today: string,
   todayDayOfWeek: string,
   nowHHMM: string,
@@ -360,14 +286,14 @@ ${SCHEMA_REFERENCE}
 `;
 }
 
-interface UserPromptArgs {
+export interface UserPromptArgs {
   prevSummary: string;
   historyBlock: string;
   newUser: string;
   newAssistant: string;
 }
 
-function buildExtractorUserPrompt({ prevSummary, historyBlock, newUser, newAssistant }: UserPromptArgs): string {
+export function buildExtractorUserPrompt({ prevSummary, historyBlock, newUser, newAssistant }: UserPromptArgs): string {
   return `Previous state:
 ${prevSummary}
 
@@ -414,7 +340,7 @@ export function buildWeekdayLookup(anchor: Date): string {
   return rows.join("\n");
 }
 
-function formatPrevState(s: IntentState): string {
+export function formatPrevState(s: IntentState): string {
   const copy: Partial<IntentState> = { ...s };
   // Strip meta to keep the prompt focused — extractor will regenerate these.
   delete (copy as { confidence?: number }).confidence;
@@ -423,7 +349,7 @@ function formatPrevState(s: IntentState): string {
   return JSON.stringify(copy, null, 2);
 }
 
-function formatHistory(turns: Turn[]): string {
+export function formatHistory(turns: Turn[]): string {
   if (turns.length === 0) return "";
   return turns
     .slice(-12) // last 12 turns is plenty for most conversations
@@ -431,28 +357,14 @@ function formatHistory(turns: Turn[]): string {
     .join("\n");
 }
 
-// ─── Parsing + validation ───────────────────────────────────────────────
-
-function parseAndValidate(raw: string, prev: IntentState | null): IntentState {
-  let obj: unknown;
-  try {
-    obj = JSON.parse(raw);
-  } catch (err) {
-    console.warn("[nlu-v2 extractor] JSON parse failed, using fallback state. raw:", raw.slice(0, 200));
-    throw new Error(`Extractor returned non-JSON: ${(err as Error).message}`);
-  }
-  if (!obj || typeof obj !== "object") {
-    throw new Error("Extractor returned non-object");
-  }
-  return coerceIntentState(obj as Record<string, unknown>, prev);
-}
+// ─── Coercion ───────────────────────────────────────────────────────────
 
 /**
  * Defensive coercion: tolerate small shape drift from the model (wrong
  * enum casing, missing optional arrays, numeric-as-string). Anything too
  * corrupt is patched from `prev` so the state never regresses.
  */
-function coerceIntentState(raw: Record<string, unknown>, prev: IntentState | null): IntentState {
+export function coerceIntentState(raw: Record<string, unknown>, prev: IntentState | null): IntentState {
   const now = new Date().toISOString();
 
   const intent = coerceEnum<NluIntent>(raw.intent, [
@@ -801,7 +713,7 @@ function isoDateOrUndef(v: unknown): string | undefined {
 // over. This is a safety net — the prompt already tells the model to merge,
 // but belt-and-suspenders.
 
-function mergePrevIntoNew(prev: IntentState | null, next: IntentState): IntentState {
+export function mergePrevIntoNew(prev: IntentState | null, next: IntentState): IntentState {
   if (!prev) return next;
   if (prev.scenario !== next.scenario) return next; // scenario changed — don't carry over stale sub-state
 
@@ -900,7 +812,7 @@ export function scrubWholeMonthAssumption(
  * Only applies when party_size is genuinely missing — never overwrites an
  * explicit value the user gave.
  */
-function fillCreateRoomPartySize(state: IntentState): IntentState {
+export function fillCreateRoomPartySize(state: IntentState): IntentState {
   // Restaurant: party_size = members + creator.
   if (
     state.intent === "create_room" &&
@@ -956,7 +868,7 @@ function fillCreateRoomPartySize(state: IntentState): IntentState {
  * "book for me and my wife" — "老婆" is relationship, not name; member_names
  * stays empty; this function no-ops).
  */
-function upgradeMultiPartyToRoom(state: IntentState): IntentState {
+export function upgradeMultiPartyToRoom(state: IntentState): IntentState {
   if (state.intent !== "create_plan") return state;
   if (state.party_type !== "multi") return state;
   if (state.member_names.length === 0) return state;
@@ -984,7 +896,7 @@ function upgradeMultiPartyToRoom(state: IntentState): IntentState {
  * Downgrade target chosen by member_names: named co-deciders → create_room,
  * otherwise create_plan. Same rule upgradeMultiPartyToRoom uses.
  */
-function downgradeSpuriousRefine(state: IntentState, history: Turn[]): IntentState {
+export function downgradeSpuriousRefine(state: IntentState, history: Turn[]): IntentState {
   if (state.intent !== "refine_existing") return state;
   // Keep refine_existing when the extractor found a target id OR when there
   // was a real multi-turn conversation before this one. Threshold kept loose

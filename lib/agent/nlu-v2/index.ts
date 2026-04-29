@@ -1,14 +1,15 @@
 /**
  * NLU v2 — public API barrel.
  *
- * Use `analyzeConversationalV2()` as the top-level entry. It orchestrates
- * all three layers (extractor → router → chat) and returns a v1-shape
- * response so `/api/chat/parse`'s callers don't need to change.
+ * Use `analyzeConversationalV2()` as the top-level entry. It now runs a
+ * UNIFIED LLM call (state + reply in one shot) followed by a pure
+ * routeIntent() pass for UI dispatch. The old extractor/chat split has
+ * been collapsed — see lib/agent/nlu-v2/unified.ts for the rationale.
  */
 
-import { extractState, type Turn } from "./extractor";
-import { routeIntent, buildStateSummary } from "./router";
-import { chatTurn } from "./chat";
+import { unifiedTurn } from "./unified";
+import type { Turn } from "./extractor";
+import { routeIntent } from "./router";
 import type {
   IntentState,
   RouterAction,
@@ -16,9 +17,9 @@ import type {
 } from "./types";
 
 // Re-exports so callers can `import { ... } from "@/lib/agent/nlu-v2"`.
-export { extractState, type Turn } from "./extractor";
+export { unifiedTurn } from "./unified";
+export type { Turn } from "./extractor";
 export { routeIntent, getMissingForScenario, buildStateSummary } from "./router";
-export { chatTurn } from "./chat";
 export type {
   IntentState,
   RouterAction,
@@ -80,11 +81,14 @@ export interface AnalyzeV2Input {
   message: string;
   history: Turn[];
   prev_state?: IntentState | null;
-  /** Optional per-layer model overrides (from AgentModelConfig). */
-  model?: {
-    chat?: string;       // Layer 1
-    extractor?: string;  // Layer 2
-  };
+  /**
+   * Optional model override. Single field now — the unified call does
+   * both jobs (state + reply) so there's no separate extractor/chat
+   * model to override. The legacy { chat?, extractor? } shape is still
+   * accepted (we read the chat field as the unified override since reply
+   * quality is the more user-visible failure mode).
+   */
+  model?: string | { chat?: string; extractor?: string };
   apiKey?: string;
   /**
    * Id of a Plan or Room the user is editing, if any. Plumbed through to
@@ -95,48 +99,37 @@ export interface AnalyzeV2Input {
 }
 
 /**
- * Orchestrates all three layers and returns a v1-compatible
- * NluV2ParseResult. Call order:
- *   1. Extractor (Layer 2) builds the new IntentState from history + this turn.
- *   2. Router (Layer 3) decides the RouterAction.
- *   3. Chat (Layer 1) generates the assistant_reply text.
- *
- * Step 3 could run in parallel with step 2, but we serialize so the chat
- * model sees the router's decision (via buildStateSummary) and can phrase
- * its reply accordingly.
+ * Runs the unified turn (state + reply in one LLM call) and the pure
+ * router pass, then projects the result into the v1-compatible
+ * NluV2ParseResult shape /api/chat/parse callers expect.
  */
 export async function analyzeConversationalV2(
   input: AnalyzeV2Input,
 ): Promise<NluV2ParseResult> {
-  // Layer 2: extract state
-  const state = await extractState({
+  const modelOverride =
+    typeof input.model === "string"
+      ? input.model
+      : input.model?.chat ?? input.model?.extractor;
+
+  // Single LLM call: returns both state and reply.
+  const { state, reply } = await unifiedTurn({
     prev_state: input.prev_state ?? null,
     new_user_message: input.message,
     history: input.history,
-    model: input.model?.extractor,
+    model: modelOverride,
     apiKey: input.apiKey,
   });
 
-  // Plumb pinned_target_id through. v1 trusted this signal to escalate
-  // ambiguous edits to intent=refine_existing; v2's extractor doesn't see
-  // this param (it's out-of-band from the user message), so we inject here.
+  // Plumb pinned_target_id through. The unified prompt doesn't see this
+  // param (it's out-of-band from the user message), so we inject after.
   if (input.pinned_target_id) {
     state.refined_target_id = input.pinned_target_id;
   }
 
-  // Layer 3: decide action (pure function)
+  // Pure-function router decides the UI action (continue_chat /
+  // ask_clarification / show_confirm_card). Independent of the model's
+  // reply phrasing — confirm-card visibility stays deterministic.
   const action = routeIntent(state);
-
-  // Layer 1: generate natural reply
-  const stateSummary = buildStateSummary(state);
-  const { reply } = await chatTurn({
-    history: input.history,
-    new_user_message: input.message,
-    state_summary: stateSummary,
-    action,
-    model: input.model?.chat,
-    apiKey: input.apiKey,
-  });
 
   return toV1CompatShape(state, action, reply);
 }
