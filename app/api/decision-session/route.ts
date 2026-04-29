@@ -6,10 +6,11 @@ import { auth } from "@clerk/nextjs/server";
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
-    const { initiatorConstraints, cityId, decisionType } = body as {
+    const { initiatorConstraints, cityId, decisionType, inviteeUserId } = body as {
       initiatorConstraints: string;
       cityId?: string;
       decisionType?: string;
+      inviteeUserId?: string | null;
     };
 
     if (!initiatorConstraints?.trim()) {
@@ -21,9 +22,20 @@ export async function POST(req: NextRequest) {
     const initiatorToken = nanoid(24); // server-side initiator identity token
     const partnerToken = nanoid(24);
 
+    // Guardrails: inviteeUserId must be a string and != initiator (we don't
+    // verify mutual-contact here — UI already filters; resolveContactsByNames
+    // is the trust boundary if abused).
+    const safeInviteeId =
+      typeof inviteeUserId === "string" &&
+      inviteeUserId.trim().length > 0 &&
+      inviteeUserId !== userId
+        ? inviteeUserId.trim()
+        : null;
+
     await createDecisionSession({
       id: sessionId,
       initiatorUserId: userId ?? null,
+      inviteeUserId: safeInviteeId,
       initiatorSessionToken: initiatorToken,
       partnerSessionToken: partnerToken,
       initiatorConstraints: initiatorConstraints.trim(),

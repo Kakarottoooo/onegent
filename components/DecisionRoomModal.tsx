@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useRef } from "react";
+import ContactPicker, { type PickerContact } from "./ContactPicker";
 
 interface DecisionRoomModalProps {
   isOpen: boolean;
@@ -8,88 +9,127 @@ interface DecisionRoomModalProps {
   initiatorQuery: string;
   cityId: string;
   userId?: string | null;
+  /** Optional pre-selected contact (e.g. user clicked a Recent chip on home). */
+  preselectedContact?: PickerContact | null;
 }
+
+type Step = "tabs" | "waiting";
+type Tab = "contacts" | "link";
 
 export default function DecisionRoomModal({
   isOpen,
   onClose,
   initiatorQuery,
   cityId,
-  userId,
+  preselectedContact,
 }: DecisionRoomModalProps) {
-  const [step, setStep] = useState<"share" | "waiting">("share");
+  const [step, setStep] = useState<Step>("tabs");
+  const [tab, setTab] = useState<Tab>(preselectedContact ? "contacts" : "contacts");
   const [shareUrl, setShareUrl] = useState<string | null>(null);
   const [sessionId, setSessionId] = useState<string | null>(null);
+  const [selectedContact, setSelectedContact] = useState<PickerContact | null>(
+    preselectedContact ?? null,
+  );
   const [copied, setCopied] = useState<"imessage" | "whatsapp" | "copy" | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [inviteSent, setInviteSent] = useState(false);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
-  // Poll when on "waiting" step — auto-navigate when partner joins
+  // Reset when modal closes
+  useEffect(() => {
+    if (!isOpen) {
+      setStep("tabs");
+      setShareUrl(null);
+      setSessionId(null);
+      setSelectedContact(preselectedContact ?? null);
+      setCopied(null);
+      setError(null);
+      setInviteSent(false);
+    }
+  }, [isOpen, preselectedContact]);
+
+  // Poll when waiting — auto-navigate when partner joins
   useEffect(() => {
     if (step !== "waiting" || !sessionId) return;
     pollRef.current = setInterval(async () => {
       try {
         const res = await fetch(`/api/decision-session/${sessionId}`);
         if (!res.ok) return;
-        const data = await res.json() as { session: { status: string } };
+        const data = (await res.json()) as { session: { status: string } };
         if (data.session.status !== "waiting_partner") {
-          clearInterval(pollRef.current!);
+          if (pollRef.current) clearInterval(pollRef.current);
           window.location.href = `${shareUrl}?role=initiator`;
         }
-      } catch { /* ignore network errors */ }
+      } catch {
+        /* ignore network errors */
+      }
     }, 4000);
-    return () => { if (pollRef.current) clearInterval(pollRef.current); };
+    return () => {
+      if (pollRef.current) clearInterval(pollRef.current);
+    };
   }, [step, sessionId, shareUrl]);
 
-  async function createSession() {
-    if (shareUrl) return; // Already created
+  /** Create a DR session lazily — only when user takes an action. */
+  async function ensureSession(inviteeUserId?: string | null): Promise<{
+    sessionId: string;
+    shareUrl: string;
+  } | null> {
+    if (sessionId && shareUrl) return { sessionId, shareUrl };
     setLoading(true);
     setError(null);
     try {
       const res = await fetch("/api/decision-session", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ initiatorConstraints: initiatorQuery, cityId }),
+        body: JSON.stringify({
+          initiatorConstraints: initiatorQuery,
+          cityId,
+          inviteeUserId: inviteeUserId ?? undefined,
+        }),
       });
       if (!res.ok) throw new Error("Failed to create session");
       const data = (await res.json()) as { sessionId: string; shareUrl: string };
       setSessionId(data.sessionId);
       setShareUrl(data.shareUrl);
+      return { sessionId: data.sessionId, shareUrl: data.shareUrl };
     } catch {
       setError("Couldn't create a session. Try again.");
+      return null;
     } finally {
       setLoading(false);
     }
   }
 
-  function handleOpen() {
-    createSession();
+  async function handleSendInviteToContact() {
+    if (!selectedContact) return;
+    const created = await ensureSession(selectedContact.contact_user_id);
+    if (!created) return;
+    setInviteSent(true);
+    setStep("waiting");
   }
 
-  function handleShare(via: "imessage" | "whatsapp" | "copy") {
-    if (!shareUrl) return;
-    const text = `Let's decide where to eat tonight — add your preferences: ${shareUrl}`;
+  async function handleShareLink(via: "imessage" | "whatsapp" | "copy") {
+    const created = await ensureSession(null);
+    if (!created) return;
+    const text = `Let's decide where to eat tonight — add your preferences: ${created.shareUrl}`;
     if (via === "imessage") {
       window.location.href = `sms:&body=${encodeURIComponent(text)}`;
     } else if (via === "whatsapp") {
       window.open(`https://wa.me/?text=${encodeURIComponent(text)}`, "_blank");
     } else {
-      navigator.clipboard.writeText(shareUrl).then(() => {
-        setCopied("copy");
-        setTimeout(() => setCopied(null), 2000);
-      });
+      try {
+        await navigator.clipboard.writeText(created.shareUrl);
+      } catch {
+        /* noop */
+      }
     }
     setCopied(via);
+    if (via === "copy") setTimeout(() => setCopied(null), 2000);
     setStep("waiting");
   }
 
   if (!isOpen) return null;
-
-  // Trigger session creation when modal opens
-  if (!shareUrl && !loading && !error) {
-    handleOpen();
-  }
 
   return (
     <div
@@ -102,7 +142,6 @@ export default function DecisionRoomModal({
         onClick={(e) => e.stopPropagation()}
         style={{ fontFamily: "var(--font-dm-sans, system-ui)" }}
       >
-        {/* Close */}
         <button
           onClick={onClose}
           className="absolute top-4 right-4 text-gray-400 hover:text-gray-600 text-xl leading-none"
@@ -111,7 +150,7 @@ export default function DecisionRoomModal({
           ×
         </button>
 
-        {step === "share" && (
+        {step === "tabs" && (
           <>
             <span
               style={{
@@ -147,42 +186,95 @@ export default function DecisionRoomModal({
             <p className="text-sm text-gray-500 mb-5 leading-relaxed">
               Your search:{" "}
               <span className="text-gray-700 font-medium">&ldquo;{initiatorQuery}&rdquo;</span>
-              <br />
-              Send the link to your partner — they&apos;ll add their constraints, then you&apos;ll
-              both vote on options that work for both of you.
             </p>
 
-            {loading && (
-              <div className="text-sm text-gray-400 text-center py-4">Creating your session…</div>
-            )}
+            {/* Tab strip */}
+            <div className="flex gap-1 mb-4 p-1 rounded-xl bg-gray-100">
+              <button
+                type="button"
+                onClick={() => setTab("contacts")}
+                className={
+                  "flex-1 py-2 rounded-lg text-sm font-medium transition-colors " +
+                  (tab === "contacts"
+                    ? "bg-white text-gray-900 shadow-sm"
+                    : "text-gray-500 hover:text-gray-700")
+                }
+              >
+                From contacts
+              </button>
+              <button
+                type="button"
+                onClick={() => setTab("link")}
+                className={
+                  "flex-1 py-2 rounded-lg text-sm font-medium transition-colors " +
+                  (tab === "link"
+                    ? "bg-white text-gray-900 shadow-sm"
+                    : "text-gray-500 hover:text-gray-700")
+                }
+              >
+                Share link
+              </button>
+            </div>
+
             {error && (
-              <div className="text-sm text-red-500 text-center py-2">{error}</div>
+              <div className="text-sm text-red-500 text-center py-2 mb-2">{error}</div>
             )}
 
-            {shareUrl && (
+            {tab === "contacts" && (
               <>
+                <ContactPicker
+                  selectedId={selectedContact?.contact_user_id ?? null}
+                  onSelect={(c) => setSelectedContact(c)}
+                />
+                <button
+                  type="button"
+                  onClick={handleSendInviteToContact}
+                  disabled={!selectedContact || loading}
+                  className="w-full mt-4 py-2.5 rounded-xl bg-gray-900 text-white text-sm font-medium disabled:opacity-40 hover:bg-gray-800 transition-colors"
+                >
+                  {loading
+                    ? "Sending…"
+                    : selectedContact
+                      ? `Send invite to ${selectedContact.nickname ?? selectedContact.display_name ?? `@${selectedContact.profile_code}`}`
+                      : "Pick someone to invite"}
+                </button>
+                <p className="text-[10px] text-gray-400 text-center mt-3">
+                  They&apos;ll get a link to add their constraints. The link is
+                  bound to their account when they sign in.
+                </p>
+              </>
+            )}
+
+            {tab === "link" && (
+              <>
+                <p className="text-xs text-gray-500 mb-3">
+                  Send the link to your partner — they&apos;ll add their
+                  constraints, then you&apos;ll both vote on options.
+                </p>
                 <div className="flex gap-2 mb-3">
                   <button
-                    onClick={() => handleShare("imessage")}
-                    className="flex-1 py-2.5 rounded-xl border border-gray-200 text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors"
+                    onClick={() => handleShareLink("imessage")}
+                    disabled={loading}
+                    className="flex-1 py-2.5 rounded-xl border border-gray-200 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-40 transition-colors"
                   >
                     iMessage
                   </button>
                   <button
-                    onClick={() => handleShare("whatsapp")}
-                    className="flex-1 py-2.5 rounded-xl border border-gray-200 text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors"
+                    onClick={() => handleShareLink("whatsapp")}
+                    disabled={loading}
+                    className="flex-1 py-2.5 rounded-xl border border-gray-200 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-40 transition-colors"
                   >
                     WhatsApp
                   </button>
                 </div>
                 <button
-                  onClick={() => handleShare("copy")}
-                  className="w-full py-2.5 rounded-xl border border-gray-900 text-sm font-medium text-gray-900 hover:bg-gray-50 transition-colors"
+                  onClick={() => handleShareLink("copy")}
+                  disabled={loading}
+                  className="w-full py-2.5 rounded-xl border border-gray-900 text-sm font-medium text-gray-900 hover:bg-gray-50 disabled:opacity-40 transition-colors"
                 >
-                  {copied === "copy" ? "Copied!" : "Copy link"}
+                  {loading ? "…" : copied === "copy" ? "Copied!" : "Copy link"}
                 </button>
-
-                <p className="text-xs text-gray-400 text-center mt-4">
+                <p className="text-[10px] text-gray-400 text-center mt-3">
                   Link expires in 24 hours · No sign-up needed for your partner
                 </p>
               </>
@@ -224,8 +316,9 @@ export default function DecisionRoomModal({
               Waiting for your partner.
             </h2>
             <p className="text-sm text-gray-500 mb-5 leading-relaxed">
-              Once they add their constraints, you&apos;ll both be taken to a voting screen to pick
-              something you&apos;ll both like.
+              {inviteSent && selectedContact
+                ? `${selectedContact.nickname ?? selectedContact.display_name ?? `@${selectedContact.profile_code}`} will be taken straight to the constraints screen when they open it.`
+                : "Once they add their constraints, you'll both be taken to a voting screen to pick something you'll both like."}
             </p>
 
             <div className="bg-gray-50 rounded-xl p-3 mb-4">
@@ -241,7 +334,10 @@ export default function DecisionRoomModal({
             </a>
 
             <button
-              onClick={() => { setCopied(null); setStep("share"); }}
+              onClick={() => {
+                setCopied(null);
+                setStep("tabs");
+              }}
               className="w-full py-2 text-sm text-gray-400 hover:text-gray-600 mt-2"
             >
               Send to someone else

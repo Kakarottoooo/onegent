@@ -415,6 +415,7 @@ export async function ensureDecisionSessionsTable(): Promise<void> {
         CREATE TABLE IF NOT EXISTS decision_sessions (
           id                      TEXT PRIMARY KEY,
           initiator_user_id       TEXT,
+          invitee_user_id         TEXT,
           initiator_session_token TEXT NOT NULL,
           partner_session_token   TEXT NOT NULL,
           initiator_constraints   TEXT NOT NULL,
@@ -436,7 +437,9 @@ export async function ensureDecisionSessionsTable(): Promise<void> {
           deleted_at            TIMESTAMPTZ
         )
       `;
+      await sql`ALTER TABLE decision_sessions ADD COLUMN IF NOT EXISTS invitee_user_id TEXT`;
       await sql`CREATE INDEX IF NOT EXISTS decision_sessions_initiator_idx ON decision_sessions (initiator_user_id) WHERE initiator_user_id IS NOT NULL`;
+      await sql`CREATE INDEX IF NOT EXISTS decision_sessions_invitee_idx ON decision_sessions (invitee_user_id) WHERE invitee_user_id IS NOT NULL`;
       await sql`CREATE INDEX IF NOT EXISTS decision_sessions_expires_idx ON decision_sessions (expires_at)`;
     })().catch((err) => {
       decisionSessionsTableReady = null;
@@ -449,6 +452,7 @@ export async function ensureDecisionSessionsTable(): Promise<void> {
 export interface DecisionSession {
   id: string;
   initiator_user_id: string | null;
+  invitee_user_id: string | null;
   initiator_session_token: string;
   partner_session_token: string;
   initiator_constraints: string;
@@ -473,6 +477,7 @@ export interface DecisionSession {
 export async function createDecisionSession(params: {
   id: string;
   initiatorUserId: string | null;
+  inviteeUserId?: string | null;
   initiatorSessionToken: string;
   partnerSessionToken: string;
   initiatorConstraints: string;
@@ -483,9 +488,9 @@ export async function createDecisionSession(params: {
   const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
   const result = await sql<DecisionSession>`
     INSERT INTO decision_sessions
-      (id, initiator_user_id, initiator_session_token, partner_session_token, initiator_constraints, city_id, decision_type, expires_at)
+      (id, initiator_user_id, invitee_user_id, initiator_session_token, partner_session_token, initiator_constraints, city_id, decision_type, expires_at)
     VALUES
-      (${params.id}, ${params.initiatorUserId}, ${params.initiatorSessionToken}, ${params.partnerSessionToken},
+      (${params.id}, ${params.initiatorUserId}, ${params.inviteeUserId ?? null}, ${params.initiatorSessionToken}, ${params.partnerSessionToken},
        ${params.initiatorConstraints}, ${params.cityId}, ${params.decisionType ?? "dinner_tonight"}, ${expiresAt})
     RETURNING *
   `;
@@ -498,6 +503,23 @@ export async function getDecisionSession(id: string): Promise<DecisionSession | 
     SELECT * FROM decision_sessions WHERE id = ${id} AND deleted_at IS NULL
   `;
   return result.rows[0] ?? null;
+}
+
+/**
+ * Bind invitee_user_id once when a logged-in partner first opens the link.
+ * Idempotent and only sets when currently NULL — initiator can pre-bind via
+ * createDecisionSession; this is the fallback for anonymous-link flows.
+ */
+export async function setDecisionSessionInvitee(
+  id: string,
+  inviteeUserId: string,
+): Promise<void> {
+  await ensureDecisionSessionsTable();
+  await sql`
+    UPDATE decision_sessions
+    SET invitee_user_id = ${inviteeUserId}
+    WHERE id = ${id} AND invitee_user_id IS NULL AND deleted_at IS NULL
+  `;
 }
 
 export async function updateDecisionSession(
@@ -3578,6 +3600,54 @@ export async function isContact(ownerId: string, contactUserId: string): Promise
     SELECT 1 FROM user_contacts WHERE owner_id = ${ownerId} AND contact_user_id = ${contactUserId} LIMIT 1
   `;
   return result.rows.length > 0;
+}
+
+/**
+ * Recent contacts ranked by most-recent shared Decision Room.
+ *
+ * Used by the homepage "Recent" chip row so the most active partners surface
+ * one tap away. Falls back to most-recently-added contacts when no DR history
+ * exists — better than an empty row for new users.
+ */
+export async function listRecentContacts(
+  ownerId: string,
+  limit = 5,
+): Promise<ContactWithProfile[]> {
+  await Promise.all([ensureUserContactsTable(), ensureUserProfilesTable(), ensureDecisionSessionsTable()]);
+  await backfillBidirectionalContactsOnce();
+  const result = await sql<{
+    contact_user_id: string;
+    nickname: string | null;
+    created_at: string;
+    profile_code: string | null;
+    display_name: string | null;
+    avatar_url: string | null;
+  }>`
+    SELECT c.contact_user_id, c.nickname, c.created_at,
+           p.profile_code, p.display_name, p.avatar_url
+    FROM user_contacts c
+    LEFT JOIN user_profiles p ON p.user_id = c.contact_user_id
+    LEFT JOIN LATERAL (
+      SELECT MAX(ds.created_at) AS last_dr_at
+      FROM decision_sessions ds
+      WHERE ds.deleted_at IS NULL
+        AND (
+          (ds.initiator_user_id = ${ownerId} AND ds.invitee_user_id = c.contact_user_id)
+          OR (ds.initiator_user_id = c.contact_user_id AND ds.invitee_user_id = ${ownerId})
+        )
+    ) recent ON TRUE
+    WHERE c.owner_id = ${ownerId}
+    ORDER BY recent.last_dr_at DESC NULLS LAST, c.created_at DESC
+    LIMIT ${limit}
+  `;
+  return result.rows.map((r) => ({
+    contact_user_id: r.contact_user_id,
+    nickname: r.nickname,
+    profile_code: r.profile_code ?? "",
+    display_name: r.display_name,
+    avatar_url: r.avatar_url,
+    added_at: r.created_at,
+  }));
 }
 
 /** List my contacts joined with their profile data — ready for rendering. */

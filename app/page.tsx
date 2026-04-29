@@ -493,6 +493,20 @@ export default function Home() {
   const [heroVisible, setHeroVisible] = useState(true);
   const [decisionRoomOpen, setDecisionRoomOpen] = useState(false);
   const [decisionRoomQuery, setDecisionRoomQuery] = useState("");
+  const [decisionRoomPreselected, setDecisionRoomPreselected] = useState<{
+    contact_user_id: string;
+    nickname: string | null;
+    profile_code: string;
+    display_name: string | null;
+    avatar_url: string | null;
+  } | null>(null);
+  const [recentContacts, setRecentContacts] = useState<{
+    contact_user_id: string;
+    nickname: string | null;
+    profile_code: string;
+    display_name: string | null;
+    avatar_url: string | null;
+  }[]>([]);
   const [recentJobs, setRecentJobs] = useState<{ id: string; trip_label: string; status: string; created_at: string }[]>([]);
   // Inline booking task cards rendered below results
   const [inlineItems, setInlineItems] = useState<{ type: "job"; jobId: string }[]>([]);
@@ -526,6 +540,19 @@ export default function Home() {
     learnWeightsFromFeedback();
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // Recent DR partners for the welcome hero "Decide with…" chip row.
+  // Quietly empty when signed-out or contacts list is empty — never shown
+  // as a placeholder/empty state.
+  useEffect(() => {
+    if (!auth.isSignedIn) { setRecentContacts([]); return; }
+    fetch("/api/contacts/recent")
+      .then((r) => (r.ok ? r.json() : { contacts: [] }))
+      .then((d: { contacts?: typeof recentContacts }) => {
+        setRecentContacts(d.contacts ?? []);
+      })
+      .catch(() => setRecentContacts([]));
+  }, [auth.isSignedIn]);
 
   // Phase 3.3c: Feedback loop — called when user rates a restaurant card
   function handleCardFeedback(record: FeedbackRecord) {
@@ -2577,6 +2604,101 @@ export default function Home() {
                   </Link>
                 </div>
 
+                {/* Recent DR partners — one-tap entry into a new Decision Room
+                    with someone you've decided with before. Hidden when signed
+                    out or no co-DR history (gracefully empty, never a stub). */}
+                {recentContacts.length > 0 && (
+                  <div style={{ width: "100%", maxWidth: 440, marginTop: 18 }}>
+                    <p
+                      style={{
+                        fontFamily: "var(--font-dm-sans)",
+                        fontSize: 11,
+                        fontWeight: 600,
+                        textTransform: "uppercase",
+                        letterSpacing: "0.14em",
+                        color: "var(--text-muted)",
+                        margin: "0 0 10px 2px",
+                      }}
+                    >
+                      Decide with
+                    </p>
+                    <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                      {recentContacts.map((c) => {
+                        const label = c.nickname ?? c.display_name ?? `@${c.profile_code}`;
+                        const initial = label.slice(0, 1).toUpperCase();
+                        return (
+                          <button
+                            key={c.contact_user_id}
+                            type="button"
+                            onClick={() => {
+                              setDecisionRoomPreselected(c);
+                              setDecisionRoomQuery(
+                                lastUserQuery || "Let's decide together",
+                              );
+                              setDecisionRoomOpen(true);
+                            }}
+                            style={{
+                              display: "inline-flex",
+                              alignItems: "center",
+                              gap: 8,
+                              padding: "6px 12px 6px 6px",
+                              borderRadius: 999,
+                              border: "1px solid var(--border)",
+                              background: "var(--card)",
+                              cursor: "pointer",
+                              fontFamily: "var(--font-dm-sans)",
+                              fontSize: 13,
+                              color: "var(--text-primary)",
+                              transition: "border-color 120ms",
+                            }}
+                            onMouseEnter={(e) => {
+                              (e.currentTarget as HTMLElement).style.borderColor = "var(--gold)";
+                            }}
+                            onMouseLeave={(e) => {
+                              (e.currentTarget as HTMLElement).style.borderColor = "var(--border)";
+                            }}
+                          >
+                            {c.avatar_url ? (
+                              // eslint-disable-next-line @next/next/no-img-element
+                              <img
+                                src={c.avatar_url}
+                                alt=""
+                                style={{
+                                  width: 24,
+                                  height: 24,
+                                  borderRadius: "50%",
+                                  flexShrink: 0,
+                                }}
+                              />
+                            ) : (
+                              <span
+                                style={{
+                                  width: 24,
+                                  height: 24,
+                                  borderRadius: "50%",
+                                  background: "var(--gold)",
+                                  color: "white",
+                                  display: "inline-flex",
+                                  alignItems: "center",
+                                  justifyContent: "center",
+                                  fontSize: 11,
+                                  fontWeight: 600,
+                                  flexShrink: 0,
+                                }}
+                              >
+                                {initial}
+                              </span>
+                            )}
+                            <span style={{ maxWidth: 160, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                              {label}
+                            </span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+
                 {/* Recent tasks strip */}
                 {recentJobs.length > 0 && (
                   <div style={{ width: "100%", maxWidth: 440, marginTop: 28 }}>
@@ -3304,10 +3426,14 @@ export default function Home() {
       {decisionRoomOpen && (
         <DecisionRoomModal
           isOpen={decisionRoomOpen}
-          onClose={() => setDecisionRoomOpen(false)}
+          onClose={() => {
+            setDecisionRoomOpen(false);
+            setDecisionRoomPreselected(null);
+          }}
           initiatorQuery={decisionRoomQuery}
           cityId={location.cityId ?? "losangeles"}
           userId={auth.userId}
+          preselectedContact={decisionRoomPreselected}
         />
       )}
       </main>

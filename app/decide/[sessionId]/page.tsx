@@ -1,26 +1,51 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useMemo } from "react";
 import { useParams } from "next/navigation";
+import { useAuth } from "@/app/hooks/useAuth";
+import AddContactPrompt from "@/components/AddContactPrompt";
 import type { DecisionSession } from "@/lib/db";
 import type { RecommendationCard } from "@/lib/types";
 
 type Role = "initiator" | "partner";
 
-// Detect role: initiator opened the voting page from their own result view.
-// Partner arrives via share link. We use a query param `?role=initiator` for
-// the initiator link (set by the modal); everyone else is treated as partner.
-function useRole(): Role {
-  if (typeof window === "undefined") return "partner";
-  const params = new URLSearchParams(window.location.search);
-  return params.get("role") === "initiator" ? "initiator" : "partner";
+interface PeerProfile {
+  user_id?: string;
+  display_name: string | null;
+  avatar_url: string | null;
+  profile_code: string | null;
+  username: string | null;
+}
+type InitiatorProfile = PeerProfile;
+
+/**
+ * Resolve role with priority:
+ *   1. logged-in user matches session.initiator_user_id → initiator
+ *   2. logged-in user matches session.invitee_user_id   → partner
+ *   3. ?role=initiator query param (legacy behavior)    → initiator
+ *   4. default                                          → partner
+ */
+function resolveRole(
+  session: DecisionSession | null,
+  currentUserId: string | null,
+): Role {
+  if (!session) return "partner";
+  if (currentUserId && session.initiator_user_id === currentUserId) return "initiator";
+  if (currentUserId && session.invitee_user_id === currentUserId) return "partner";
+  if (typeof window !== "undefined") {
+    const params = new URLSearchParams(window.location.search);
+    if (params.get("role") === "initiator") return "initiator";
+  }
+  return "partner";
 }
 
 export default function DecidePage() {
   const { sessionId } = useParams<{ sessionId: string }>();
-  const role = useRole();
+  const { isSignedIn, userId: currentUserId } = useAuth();
 
   const [session, setSession] = useState<DecisionSession | null>(null);
+  const [initiatorProfile, setInitiatorProfile] = useState<InitiatorProfile | null>(null);
+  const [inviteeProfile, setInviteeProfile] = useState<PeerProfile | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [partnerInput, setPartnerInput] = useState("");
@@ -28,14 +53,39 @@ export default function DecidePage() {
   const [myVotes, setMyVotes] = useState<Record<string, boolean>>({});
   const [feedbackSent, setFeedbackSent] = useState(false);
 
+  const role = useMemo(
+    () => resolveRole(session, currentUserId ?? null),
+    [session, currentUserId],
+  );
+
+  // Show "Invited by X" banner only when:
+  //  - this user is the partner (and not the initiator themselves)
+  //  - session has an initiator_user_id (legacy anonymous DRs don't)
+  //  - we have a profile to render
+  const showInviteBanner =
+    role === "partner" &&
+    !!session?.initiator_user_id &&
+    session?.status === "waiting_partner" &&
+    !!initiatorProfile;
+
   const fetchSession = useCallback(async () => {
     try {
       const res = await fetch(`/api/decision-session/${sessionId}`);
       if (res.status === 404) { setError("This session doesn't exist or has expired."); return; }
       if (res.status === 410) { setError("This session has expired. Ask the initiator to start a new one."); return; }
       if (!res.ok) { setError("Something went wrong. Please try refreshing."); return; }
-      const data = await res.json() as { session: DecisionSession };
+      const data = await res.json() as {
+        session: DecisionSession;
+        initiator_profile?: InitiatorProfile | null;
+        invitee_profile?: PeerProfile | null;
+      };
       setSession(data.session);
+      if (data.initiator_profile !== undefined) {
+        setInitiatorProfile(data.initiator_profile);
+      }
+      if (data.invitee_profile !== undefined) {
+        setInviteeProfile(data.invitee_profile);
+      }
     } catch {
       setError("Network error. Please check your connection.");
     } finally {
@@ -151,9 +201,86 @@ export default function DecidePage() {
           <span className="text-xs text-gray-400 ml-1">Decision Room</span>
         </div>
 
+        {/* "Invited by X" banner — shows when an authenticated initiator
+            specifically invited this account, or a logged-out user opens a
+            link from a known initiator. Helps the partner know who they're
+            deciding with rather than meeting an anonymous magic link. */}
+        {showInviteBanner && initiatorProfile && (
+          <div
+            className="flex items-center gap-3 p-3 mb-5 rounded-2xl border"
+            style={{
+              borderColor: "var(--gold, #C9A84C)",
+              background: "var(--gold-soft, #F5E9C8)",
+            }}
+          >
+            {initiatorProfile.avatar_url ? (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img
+                src={initiatorProfile.avatar_url}
+                alt=""
+                className="w-10 h-10 rounded-full flex-shrink-0"
+              />
+            ) : (
+              <div
+                className="w-10 h-10 rounded-full flex items-center justify-center text-sm font-semibold flex-shrink-0"
+                style={{ background: "var(--gold, #C9A84C)", color: "white" }}
+              >
+                {(initiatorProfile.display_name ?? initiatorProfile.username ?? initiatorProfile.profile_code ?? "?")
+                  .slice(0, 1)
+                  .toUpperCase()}
+              </div>
+            )}
+            <div className="flex-1 min-w-0">
+              <p
+                className="text-xs font-semibold tracking-wide uppercase mb-0.5"
+                style={{ color: "var(--gold-text, #5A4416)", letterSpacing: "0.12em" }}
+              >
+                Invited you
+              </p>
+              <p className="text-sm font-medium text-gray-900 truncate">
+                {initiatorProfile.display_name ??
+                  `@${initiatorProfile.username ?? initiatorProfile.profile_code ?? "user"}`}
+              </p>
+              {currentUserId &&
+                session?.invitee_user_id &&
+                session.invitee_user_id === currentUserId && (
+                  <p className="text-[11px] text-gray-600 mt-0.5">
+                    They picked you from their contacts.
+                  </p>
+                )}
+            </div>
+            {!isSignedIn && (
+              <a
+                href="/"
+                className="text-xs font-medium px-2.5 py-1.5 rounded-lg flex-shrink-0"
+                style={{ background: "var(--gold, #C9A84C)", color: "white" }}
+              >
+                Sign in
+              </a>
+            )}
+          </div>
+        )}
+
         {/* ── SCREEN: Decided ── */}
         {session.status === "decided" && decidedCard && (
           <div>
+            {/* "Add as contact" nudge — render only when both sides are known
+                accounts and the viewer is logged in. The other side's profile
+                depends on viewer role. */}
+            {isSignedIn && currentUserId && (() => {
+              const peer = role === "initiator" ? inviteeProfile : initiatorProfile;
+              const peerIsMe =
+                peer?.user_id != null && peer.user_id === currentUserId;
+              if (!peer || peerIsMe) return null;
+              return (
+                <AddContactPrompt
+                  peerDisplayName={peer.display_name}
+                  peerCode={peer.username ?? peer.profile_code}
+                  peerAvatarUrl={peer.avatar_url}
+                />
+              );
+            })()}
+
             <div className="flex items-center gap-2 mb-2">
               <span className="text-lg">🎉</span>
               <h1 className="text-base font-semibold text-gray-900">You both agreed</h1>

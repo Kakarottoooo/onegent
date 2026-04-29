@@ -411,6 +411,7 @@ export async function ensureDecisionSessionsTable(): Promise<void> {
         CREATE TABLE IF NOT EXISTS decision_sessions (
           id                      TEXT PRIMARY KEY,
           initiator_user_id       TEXT,
+          invitee_user_id         TEXT,
           initiator_session_token TEXT NOT NULL,
           partner_session_token   TEXT NOT NULL,
           initiator_constraints   TEXT NOT NULL,
@@ -432,7 +433,9 @@ export async function ensureDecisionSessionsTable(): Promise<void> {
           deleted_at            TIMESTAMPTZ
         )
       `;
+      await sql`ALTER TABLE decision_sessions ADD COLUMN IF NOT EXISTS invitee_user_id TEXT`;
       await sql`CREATE INDEX IF NOT EXISTS decision_sessions_initiator_idx ON decision_sessions (initiator_user_id) WHERE initiator_user_id IS NOT NULL`;
+      await sql`CREATE INDEX IF NOT EXISTS decision_sessions_invitee_idx ON decision_sessions (invitee_user_id) WHERE invitee_user_id IS NOT NULL`;
       await sql`CREATE INDEX IF NOT EXISTS decision_sessions_expires_idx ON decision_sessions (expires_at)`;
     })().catch((err) => {
       decisionSessionsTableReady = null;
@@ -445,6 +448,7 @@ export async function ensureDecisionSessionsTable(): Promise<void> {
 export interface DecisionSession {
   id: string;
   initiator_user_id: string | null;
+  invitee_user_id: string | null;
   initiator_session_token: string;
   partner_session_token: string;
   initiator_constraints: string;

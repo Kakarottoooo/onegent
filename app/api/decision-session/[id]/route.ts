@@ -1,5 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getDecisionSession, updateDecisionSession } from "@/lib/db";
+import {
+  getDecisionSession,
+  updateDecisionSession,
+  getUserProfile,
+  setDecisionSessionInvitee,
+} from "@/lib/db";
 import { runAgentForTwoParty } from "@/lib/agent/two-party";
 import { auth } from "@clerk/nextjs/server";
 import type { DecisionSession } from "@/lib/db";
@@ -38,7 +43,37 @@ export async function GET(_req: NextRequest, { params }: Params) {
     await updateDecisionSession(id, { status: "expired" });
     return NextResponse.json({ error: "Session expired" }, { status: 410 });
   }
-  return NextResponse.json({ session });
+  // Inline both initiator + invitee profiles so the partner's landing page
+  // and the post-decision "Add as contact" prompt don't need a second
+  // round-trip. Best-effort — failures fall back to the magic-link UI.
+  type ProfileSlim = {
+    user_id: string;
+    display_name: string | null;
+    avatar_url: string | null;
+    profile_code: string | null;
+    username: string | null;
+  };
+  async function loadSlim(uid: string | null): Promise<ProfileSlim | null> {
+    if (!uid) return null;
+    try {
+      const p = await getUserProfile(uid);
+      if (!p) return null;
+      return {
+        user_id: p.user_id,
+        display_name: p.display_name,
+        avatar_url: p.avatar_url,
+        profile_code: p.profile_code,
+        username: p.username,
+      };
+    } catch {
+      return null;
+    }
+  }
+  const [initiator_profile, invitee_profile] = await Promise.all([
+    loadSlim(session.initiator_user_id),
+    loadSlim(session.invitee_user_id),
+  ]);
+  return NextResponse.json({ session, initiator_profile, invitee_profile });
 }
 
 export async function PATCH(req: NextRequest, { params }: Params) {
@@ -73,6 +108,16 @@ export async function PATCH(req: NextRequest, { params }: Params) {
     }
     if (!body.partnerConstraints?.trim()) {
       return NextResponse.json({ error: "partnerConstraints is required" }, { status: 400 });
+    }
+
+    // If partner is logged in and the session has no invitee bound yet,
+    // backfill so post-decision "Add as contact" works for anon-link flows.
+    if (callerRole === "partner" && userId && !session.invitee_user_id && userId !== session.initiator_user_id) {
+      try {
+        await setDecisionSessionInvitee(id, userId);
+      } catch {
+        /* non-fatal — user can still complete the DR */
+      }
     }
 
     // Run the two-party agent to get merged options (hard 45s cap)
