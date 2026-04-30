@@ -1165,7 +1165,7 @@ The user will enter CVV and confirm payment themselves.`,
           // and vice versa. Each is independent and worth attempting.
           if (sgProvider?.fillGuestForm) {
             try {
-              await sgProvider.fillGuestForm(checkoutPage, effectiveProfile, { stagehand, rawPage: checkoutPage }, trace);
+              await sgProvider.fillGuestForm(checkoutPage, effectiveProfile, { stagehand, rawPage: checkoutPage, autonomy: input.autonomySettings }, trace);
             } catch (fillErr) {
               trace(`[sg-rpa] fillGuestForm error: ${(fillErr as Error).message?.slice(0, 120)}`);
               fillSummary = "SeatGeek checkout reached, but billing auto-fill hit an error. Review details and enter card number + CVC to complete payment.";
@@ -4803,7 +4803,7 @@ The user will enter CVV and confirm payment themselves.`,
           // Expedia/Hotels.com use this to avoid browser autocomplete mis-filling fields.
           if (provider.fillGuestForm) {
             trace("[RPA] Provider has fillGuestForm override — using programmatic fill instead of AI.");
-            const enrichedHelpers = { ...bookingComHelpers, stagehand, rawPage: raw };
+            const enrichedHelpers = { ...bookingComHelpers, stagehand, rawPage: raw, autonomy: input.autonomySettings };
             await provider.fillGuestForm(raw, p, enrichedHelpers, trace);
             await new Promise(r => setTimeout(r, 600));
           } else {
@@ -4982,7 +4982,7 @@ The user will enter CVV and confirm payment themselves.`,
           } // end else (AI fill — no provider.fillGuestForm override)
         } else {
           trace("[RPA] Provider guest form — running programmatic field fill (overrides account pre-fill).");
-          await provider?.fillGuestForm?.(raw, p, bookingComHelpers, trace);
+          await provider?.fillGuestForm?.(raw, p, { ...bookingComHelpers, autonomy: input.autonomySettings }, trace);
           await new Promise(r => setTimeout(r, 600));
         }
       }
@@ -5135,7 +5135,7 @@ The user will enter CVV and confirm payment themselves.`,
       trace(`[${activeProvider?.id}] reservation form detected — filling guest info`);
       reachedGuestForm = true;
       if (activeProvider?.fillGuestForm) {
-        await activeProvider.fillGuestForm(raw, p, bookingComHelpers, trace);
+        await activeProvider.fillGuestForm(raw, p, { ...bookingComHelpers, autonomy: input.autonomySettings }, trace);
       }
       await new Promise(r => setTimeout(r, 800));
 

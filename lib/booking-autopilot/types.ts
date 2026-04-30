@@ -99,6 +99,17 @@ export interface BrowserTaskInput {
   targetDepartureTime?: string;
   /** For Expedia flight booking: target flight number to match when available */
   targetFlightNumber?: string;
+  /**
+   * Autonomy / safety knobs that flow through to the executor and providers.
+   * For now this carries `benchmark_dry_run` — providers consult it before
+   * the final reservation-committing click and abort if set.
+   * Full AgentAutonomySettings shape is stored on booking_jobs.autonomy_settings;
+   * the executor only needs the sub-keys that affect browser-level behaviour.
+   */
+  autonomySettings?: {
+    benchmark_dry_run?: boolean;
+    [key: string]: unknown;
+  };
 }
 
 export type BrowserTaskStatus =

@@ -396,6 +396,7 @@ async function runUniversalStep(
   onProgress: (s: BookingJobStep) => Promise<void>,
   bookingJobId: string,
   jobUserId?: string | null,
+  autonomy?: AgentAutonomySettings,
 ): Promise<BookingJobStep> {
   console.log("[start] runUniversalStep invoked", {
     jobId: bookingJobId,
@@ -707,6 +708,10 @@ async function runUniversalStep(
       targetAirline: resolvedBody.targetAirline as string | undefined,
       targetPrice: resolvedBody.targetPrice as number | undefined,
       targetDepartureTime: resolvedBody.targetDepartureTime as string | undefined,
+      // Autonomy / dry_run boundary signal for the provider layer
+      autonomySettings: autonomy
+        ? { benchmark_dry_run: autonomy.benchmark_dry_run === true }
+        : undefined,
     };
 
     // Call runBrowserTask directly — avoids the self-HTTP fetch that fails when
@@ -1196,7 +1201,7 @@ export async function POST(_req: NextRequest, { params }: Params) {
         steps[i].type === "flight" ||
         steps[i].type === "activity"
       ) {
-        steps[i] = await runUniversalStep(steps[i], onProgress, id, job.user_id);
+        steps[i] = await runUniversalStep(steps[i], onProgress, id, job.user_id, autonomy);
       } else {
         steps[i] = await runStepWithRecovery(steps[i], autonomy, policy, onProgress);
       }

@@ -66,6 +66,13 @@ export interface AgentAutonomySettings {
   hotel: HotelAutonomy;
   flight: FlightAutonomy;
   activity: ActivityAutonomy;
+  /**
+   * Internal benchmark flag. When true, providers honour the dry_run boundary
+   * and stop before the final reservation-committing click. Set only by the
+   * benchmark runner (lib/benchmark/run-restaurant-benchmark.ts) — never
+   * surfaced in the user-facing autonomy UI.
+   */
+  benchmark_dry_run?: boolean;
 }
 
 // ── Defaults ───────────────────────────────────────────────────────────────

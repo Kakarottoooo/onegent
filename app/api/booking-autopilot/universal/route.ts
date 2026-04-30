@@ -81,6 +81,7 @@ export async function POST(req: NextRequest) {
     jobId: body.jobId ?? "manual",
     stepIndex: body.stepIndex ?? 0,
     agentModel: body.agentModel,
+    autonomySettings: body.autonomySettings,
   };
 
   const result = await runBrowserTask(input);
