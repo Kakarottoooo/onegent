@@ -6381,3 +6381,62 @@ export async function incrementUsageCounter(
     `;
   }
 }
+
+// ─── Benchmark (internal — measures real success rate of automation) ────────
+// Source of truth for case definitions lives in lib/benchmark/restaurant-cases.ts.
+// This layer only persists run instances + per-attempt outcomes for stats.
+
+let benchmarkTablesReady: Promise<void> | null = null;
+
+export async function ensureBenchmarkTables(): Promise<void> {
+  if (!benchmarkTablesReady) {
+    benchmarkTablesReady = (async () => {
+      await sql`
+        CREATE TABLE IF NOT EXISTS benchmark_runs (
+          id             TEXT PRIMARY KEY,
+          name           TEXT NOT NULL,
+          city           TEXT NOT NULL,
+          scenario       TEXT NOT NULL,
+          mode           TEXT NOT NULL DEFAULT 'dry_run',
+          total_cases    INT  NOT NULL DEFAULT 0,
+          success_cases  INT  NOT NULL DEFAULT 0,
+          status         TEXT NOT NULL DEFAULT 'pending',
+          notes          TEXT,
+          created_at     TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          completed_at   TIMESTAMPTZ
+        )
+      `;
+      await sql`
+        CREATE TABLE IF NOT EXISTS benchmark_cases (
+          id                       TEXT PRIMARY KEY,
+          run_id                   TEXT NOT NULL REFERENCES benchmark_runs(id) ON DELETE CASCADE,
+          case_id                  TEXT NOT NULL,
+          task_payload             JSONB NOT NULL,
+          mode                     TEXT NOT NULL DEFAULT 'dry_run',
+          booking_job_id           TEXT,
+          provider                 TEXT,
+          executor                 TEXT,
+          status                   TEXT NOT NULL DEFAULT 'pending',
+          success                  BOOLEAN NOT NULL DEFAULT FALSE,
+          failure_reason           TEXT,
+          fallback_attempted       BOOLEAN NOT NULL DEFAULT FALSE,
+          fallback_success         BOOLEAN NOT NULL DEFAULT FALSE,
+          payment_stop_triggered   BOOLEAN NOT NULL DEFAULT FALSE,
+          human_handoff_required   BOOLEAN NOT NULL DEFAULT FALSE,
+          duration_seconds         INT,
+          audit                    JSONB,
+          created_at               TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          completed_at             TIMESTAMPTZ
+        )
+      `;
+      await sql`CREATE INDEX IF NOT EXISTS benchmark_cases_run_idx ON benchmark_cases (run_id)`;
+      await sql`CREATE INDEX IF NOT EXISTS benchmark_cases_status_idx ON benchmark_cases (status)`;
+      await sql`CREATE INDEX IF NOT EXISTS benchmark_cases_failure_idx ON benchmark_cases (failure_reason) WHERE failure_reason IS NOT NULL`;
+      await sql`CREATE INDEX IF NOT EXISTS benchmark_cases_job_idx ON benchmark_cases (booking_job_id) WHERE booking_job_id IS NOT NULL`;
+    })().catch((err) => {
+      benchmarkTablesReady = null;
+      throw err;
+    });
+  }
+  await benchmarkTablesReady;
+}
