@@ -561,9 +561,16 @@ function HomeInner() {
   // moment the server creates the proposal. Also surfaces is_synthesizing
   // so B gets the progress card during the 5-15s wait.
   const [remoteSynthesizing, setRemoteSynthesizing] = useState(false);
+  // Drives the synth-spinner chips: 'trip' shows 4 pipelines (Hotel/
+  // Flight/Shows/Food); single-category rooms show their one chip.
+  // Mirrors poll's scenario_category so spinner copy matches the room.
+  const [synthesizingCategory, setSynthesizingCategory] = useState<
+    "restaurant" | "hotel" | "flight" | "activity" | "trip" | null
+  >(null);
   useEffect(() => {
     if (!activeRoomId) {
       setRemoteSynthesizing(false);
+      setSynthesizingCategory(null);
       return;
     }
     let cancelled = false;
@@ -574,6 +581,7 @@ function HomeInner() {
         const data = (await res.json()) as {
           proposal?: { id?: string } | null;
           scenario_proposal_id?: string | null;
+          scenario_category?: string | null;
           is_synthesizing?: boolean;
         };
         if (cancelled) return;
@@ -591,6 +599,16 @@ function HomeInner() {
           setRemoteSynthesizing(false);
         } else {
           setRemoteSynthesizing(!!data.is_synthesizing);
+          // scenario_category is null for trip rooms; leave it as 'trip'
+          // sentinel so the spinner falls back to 4-chip mode.
+          if (data.is_synthesizing) {
+            const cat = data.scenario_category;
+            if (cat === "restaurant" || cat === "hotel" || cat === "flight" || cat === "activity") {
+              setSynthesizingCategory(cat);
+            } else {
+              setSynthesizingCategory("trip");
+            }
+          }
         }
       } catch {
         // Non-fatal; keep polling.
@@ -1283,6 +1301,17 @@ function HomeInner() {
               proposal_id?: string | null;
               already_exists?: boolean;
             };
+            // Sync the spinner's chip set to the actual room type so a
+            // restaurant DR shows just 🍽 instead of the 4-pipeline trip
+            // chips. Set as soon as the response lands so the visual
+            // matches reality (vs stale 4-chip default during the brief
+            // network round-trip after setSynthesizing(true) above).
+            const _rt = data.room_type;
+            if (_rt === "restaurant" || _rt === "hotel" || _rt === "flight" || _rt === "activity") {
+              setSynthesizingCategory(_rt);
+            } else if (_rt === "trip") {
+              setSynthesizingCategory("trip");
+            }
             if (!res.ok || !data.ok) {
               chat.injectAssistantMessage("方案生成失败了，先稍等再试一下。");
               return;
@@ -1371,6 +1400,7 @@ function HomeInner() {
             chat.injectAssistantMessage("方案生成出错了，稍后再试。");
           } finally {
             setSynthesizing(false);
+            setSynthesizingCategory(null);
           }
         })();
         return;
@@ -3427,12 +3457,21 @@ function HomeInner() {
                       🤖 正在为你们综合方案…
                     </div>
                     <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 10 }}>
-                      {[
-                        { emoji: "🏨", label: "Hotel", cls: "synth-chip-1" },
-                        { emoji: "✈", label: "Flight", cls: "synth-chip-2" },
-                        { emoji: "🎟", label: "Shows", cls: "synth-chip-3" },
-                        { emoji: "🍽", label: "Food", cls: "synth-chip-4" },
-                      ].map((c) => (
+                      {(synthesizingCategory === "restaurant"
+                        ? [{ emoji: "🍽", label: "Restaurants", cls: "synth-chip-1" }]
+                        : synthesizingCategory === "hotel"
+                          ? [{ emoji: "🏨", label: "Hotels", cls: "synth-chip-1" }]
+                          : synthesizingCategory === "flight"
+                            ? [{ emoji: "✈", label: "Flights", cls: "synth-chip-1" }]
+                            : synthesizingCategory === "activity"
+                              ? [{ emoji: "🎟", label: "Activities", cls: "synth-chip-1" }]
+                              : [
+                                  { emoji: "🏨", label: "Hotel", cls: "synth-chip-1" },
+                                  { emoji: "✈", label: "Flight", cls: "synth-chip-2" },
+                                  { emoji: "🎟", label: "Shows", cls: "synth-chip-3" },
+                                  { emoji: "🍽", label: "Food", cls: "synth-chip-4" },
+                                ]
+                      ).map((c) => (
                         <span
                           key={c.label}
                           className={`synth-chip ${c.cls}`}
@@ -3473,7 +3512,9 @@ function HomeInner() {
                       />
                     </div>
                     <div style={{ fontSize: 11, color: "var(--text-muted, #888)", marginTop: 8 }}>
-                      并行跑 4 条品类 pipeline，通常 5-15 秒。
+                      {synthesizingCategory && synthesizingCategory !== "trip"
+                        ? "综合大家的偏好做一次搜索，通常 5-15 秒。"
+                        : "并行跑 4 条品类 pipeline，通常 5-15 秒。"}
                     </div>
                   </div>
                 )}

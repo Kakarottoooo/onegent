@@ -85,15 +85,38 @@ export async function GET(_req: Request, { params }: Params) {
         p.content_json !== null &&
         (p.content_json as Record<string, unknown>).kind === "scenario_search_cards",
     );
+
+    // is_synthesizing for non-trip rooms: same heuristic as the trip
+    // branch below, mirrored so member B (who didn't fire synthesize)
+    // sees a progress indicator during the ~10s server-side LLM window
+    // instead of staring at the "等其他成员聊完" message — which is
+    // misleading because the OTHER member already finished and
+    // synthesis is actively running.
+    let nonTripSynthesizing = false;
+    if (!scenarioProposal) {
+      const members = await listRoomMembers(roomId);
+      const intents = await listMemberIntentStates(roomId).catch(() => []);
+      const contributorIds = new Set(intents.map((i) => i.user_id));
+      const joinedIds = members
+        .filter((m) => m.status === "joined")
+        .map((m) => m.user_id);
+      const pendingInviteCount = members.filter((m) => m.status === "invited").length;
+      nonTripSynthesizing =
+        pendingInviteCount === 0 &&
+        joinedIds.length >= 2 &&
+        joinedIds.every((id) => contributorIds.has(id));
+    }
+
     return NextResponse.json({
       ok: true,
       proposal: null,
       scenario_proposal_id: scenarioProposal?.id ?? null,
+      scenario_category: room.type,
       my_selection: null,
       my_vote: null,
       vote_tally: { approve: 0, decline: 0, request_changes: 0, voters: [] },
       aggregate: emptyAggregate(0),
-      is_synthesizing: false,
+      is_synthesizing: nonTripSynthesizing,
       room: {
         creator_id: room.creator_id,
         payer_id: room.payer_id ?? room.creator_id,
