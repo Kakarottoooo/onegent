@@ -22,6 +22,7 @@ import {
   listActiveProposals,
   listMemberIntentStates,
   listRoomMembers,
+  updateDecisionRoomApprovalRule,
   type DecisionRoomType,
 } from "@/lib/db";
 import { runAgent } from "@/lib/agent";
@@ -409,6 +410,24 @@ function pickCards(
   return [];
 }
 
+/** Extract a stable id from a card so vote.option_id can reference it. */
+function extractCardId(card: unknown, type: DecisionRoomType, fallbackIdx: number): string {
+  if (!card || typeof card !== "object") return `opt_${fallbackIdx}`;
+  const c = card as Record<string, Record<string, unknown> | undefined>;
+  const inner =
+    type === "restaurant"
+      ? c.restaurant
+      : type === "hotel"
+        ? c.hotel
+        : type === "flight"
+          ? c.flight
+          : type === "activity"
+            ? c.activity
+            : undefined;
+  const id = inner && typeof inner.id === "string" ? inner.id : null;
+  return id ?? `opt_${fallbackIdx}`;
+}
+
 /**
  * End-to-end synthesis for a non-trip DR: merge constraints → run search
  * server-side → land the cards in a single shared proposal row → seed a
@@ -474,11 +493,22 @@ export async function synthesizeAndCreateScenarioProposal(
     return { status: "ok", proposalId: post.id, alreadyExists: true, result: synth.result };
   }
 
+  // Pack as { options: [{id, card}] } — the SAME shape extractOptions()
+  // already understands, so the existing /vote endpoint works for
+  // scenario proposals without any server-side changes there. The id is
+  // pulled from the card's natural primary key (restaurant.id / hotel.id
+  // / flight.id / activity.id) so client and server agree on what
+  // "vote for option X" means.
+  const options = cards.map((card, i) => ({
+    id: extractCardId(card, room.type, i),
+    card,
+  }));
+
   const proposalId = randomUUID();
   const contentJson: Record<string, unknown> = {
     kind: "scenario_search_cards",
     category: room.type,
-    cards,
+    options,
     query: synth.result.query,
     output_language: agentResult.output_language,
     contributor_count: synth.result.contributorCount,
@@ -499,6 +529,16 @@ export async function synthesizeAndCreateScenarioProposal(
     console.warn(`[scenario-synthesis] createRoomProposal failed`, err);
     return { status: "search_failed", result: synth.result };
   }
+
+  // Default to majority approval for non-trip DRs (the user's chosen
+  // voting model). 2-member rooms still fall back to unanimous server-
+  // side via the joined.length<3 guard in vote/route.ts — that's correct
+  // (2 of 2 is unanimous and majority simultaneously). For 3+ members,
+  // majority lets a 2/3 split accept the winner without forcing the
+  // odd-one-out to switch.
+  await updateDecisionRoomApprovalRule(roomId, "majority").catch((err) => {
+    console.warn(`[scenario-synthesis] approval-rule update failed`, err);
+  });
 
   // Seed the inline-card marker into every joined member's private
   // channel — same pattern as trip-synthesis. The client's replay code
