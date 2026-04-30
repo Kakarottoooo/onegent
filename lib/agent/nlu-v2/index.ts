@@ -145,11 +145,23 @@ export async function analyzeConversationalV2(
   // pointing at people is unambiguous; the LLM doesn't get to disagree.
   // Without this, mini regularly returns party_type=solo even when the
   // input says "我和 ziweiB...".
+  //
+  // Label priority is username > display_name when display_name looks like
+  // an email (Clerk's fallback when a user hasn't set fullName). Without
+  // this, a contact whose Clerk profile lacks a fullName surfaces as
+  // "guoziwei2019@126.com" in the ConfirmCard "with X" pill — which is
+  // the email, not their handle the user actually thinks of them by.
   if (input.mentioned_members && input.mentioned_members.length > 0) {
     state.party_type = "multi";
-    state.member_names = input.mentioned_members.map(
-      (m) => m.display_name ?? m.username ?? "(unknown)",
-    );
+    state.member_names = input.mentioned_members.map((m) => {
+      const username = m.username?.trim();
+      const display = m.display_name?.trim();
+      const isEmailFallback = display
+        ? /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(display)
+        : false;
+      if (isEmailFallback && username) return username;
+      return display || username || "(unknown)";
+    });
     if (state.intent === "create_plan") state.intent = "create_room";
   }
 

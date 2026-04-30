@@ -33,6 +33,7 @@ import {
   listMemberIntentStates,
   getUserProfile,
   resolveContactsByNamesFuzzy,
+  pickPreferredContactLabel,
   type FuzzyContactResolution,
 } from "@/lib/db";
 import { triggerSynthesis } from "@/lib/agent/trip-synthesis";
@@ -207,19 +208,13 @@ export async function POST(req: NextRequest) {
           await resolveContactsByNamesFuzzy(userId, memberNamesFromNlu);
         const everyResolved = resolutions.every((r) => !!r.contact_user_id);
         if (everyResolved) {
-          // Replace the user-typed tokens with each contact's canonical
-          // display_name so /api/chat/commit's exact-match resolveContactsByNames
-          // hits without a second fuzzy pass. Fallback chain matches the
-          // commit-side label rendering: display_name → username → profile_code.
-          const canonicalNames = resolutions.map((r) => {
-            const m = r.matched;
-            return (
-              m?.display_name?.trim() ||
-              m?.username?.trim() ||
-              m?.profile_code ||
-              r.name
-            );
-          });
+          // Replace the user-typed tokens with each contact's preferred label.
+          // pickPreferredContactLabel demotes Clerk-email-fallback display_name
+          // below username so a contact whose Clerk profile lacks a fullName
+          // doesn't show as "guoziwei2019@126.com" in the ConfirmCard pill.
+          const canonicalNames = resolutions.map((r) =>
+            (r.matched && pickPreferredContactLabel(r.matched)) || r.name,
+          );
           result.member_names = canonicalNames;
           if (result.__v2_state) {
             result.__v2_state.member_names = canonicalNames;
@@ -250,11 +245,7 @@ export async function POST(req: NextRequest) {
             } else {
               lines.push(`「${r.name}」是下面哪一位？`);
               for (const c of r.candidates) {
-                const label =
-                  c.display_name?.trim() ||
-                  c.username?.trim() ||
-                  c.profile_code ||
-                  "(unnamed)";
+                const label = pickPreferredContactLabel(c) ?? "(unnamed)";
                 if (seenLabels.has(label)) continue;
                 seenLabels.add(label);
                 picks.push({ label, value: label });

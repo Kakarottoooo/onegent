@@ -4133,6 +4133,54 @@ export interface FuzzyContactResolution {
  * pick rather than guessing.
  */
 /**
+ * Heuristic: did Clerk fall back to the user's email when their fullName was
+ * empty? (See app/contexts/ClerkSync.tsx — `displayName = user.fullName ??
+ * user.primaryEmailAddress?.emailAddress ?? null`.) In that case display_name
+ * looks like an email and *should not* be the user-facing label when a real
+ * username exists. Conservative regex so a literal full name "李 明@example"
+ * is not misclassified.
+ */
+function looksLikeEmail(s: string | null | undefined): boolean {
+  if (!s) return false;
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(s.trim());
+}
+
+/**
+ * Pick the most human-friendly label for a contact. Priority:
+ *   1. nickname (owner-defined; highest signal — they renamed this person)
+ *   2. display_name iff it's a real name (Clerk falls back to email when
+ *      fullName is empty; email is technically a "display_name" in DB but
+ *      the user thinks of the person by their handle, not their email)
+ *   3. username (Clerk handle, e.g. "ziweic")
+ *   4. display_name even if email-fallback (better than the bare profile_code)
+ *   5. profile_code
+ *   6. null when literally nothing is set (shouldn't happen for a real account)
+ *
+ * Used by:
+ *   - resolveContactsByNamesFuzzy (canonical name fed back into NLU)
+ *   - /api/chat/parse (auto-resolved member_names substitution)
+ *   - lib/agent/nlu-v2 mention override (member_names from @-picker)
+ *   - any UI that wants to render a contact / mention chip
+ */
+export function pickPreferredContactLabel(profile: {
+  nickname?: string | null;
+  username?: string | null;
+  display_name?: string | null;
+  profile_code?: string | null;
+}): string | null {
+  const nick = profile.nickname?.trim();
+  if (nick) return nick;
+  const display = profile.display_name?.trim();
+  if (display && !looksLikeEmail(display)) return display;
+  const username = profile.username?.trim();
+  if (username) return username;
+  if (display) return display; // email-shaped fallback — still a label
+  const code = profile.profile_code?.trim();
+  if (code) return code;
+  return null;
+}
+
+/**
  * Pure matching kernel for resolveContactsByNamesFuzzy. Exported so unit
  * tests can exercise the priority tiers and length guards without touching
  * the database. Production callers should use resolveContactsByNamesFuzzy,
@@ -4165,9 +4213,14 @@ export function matchContactsFuzzy(
     // matches against the same caller are extremely unlikely and we'd rather
     // commit than block the user with "which 李明?" when the data already
     // disambiguated.
+    //
+    // username MUST be in this set. When Clerk falls back to email for
+    // display_name (no fullName set), the only "ziweic"-shaped field is
+    // username — omitting it makes the resolver miss real contacts.
     const exact = contacts.find(
       (c) =>
         norm(c.nickname) === target ||
+        norm(c.username) === target ||
         norm(c.display_name) === target ||
         norm(c.profile_code) === target,
     );
@@ -4190,28 +4243,35 @@ export function matchContactsFuzzy(
       if (!matchedSet.has(c.contact_user_id)) matchedSet.set(c.contact_user_id, c);
     };
 
-    // Tier 2: profile_code substring (handles "@ziwei" inside "@ziwei_c").
+    // Tier 2: profile_code / username substring (covers "@ziwei" inside
+    // "@ziwei_c" and "ziwei" inside "ziwei_c" username).
     for (const c of contacts) {
       const pc = norm(c.profile_code);
+      const un = norm(c.username);
       if (pc.length >= target.length && pc.includes(target)) remember(c);
+      if (un.length >= target.length && un.includes(target)) remember(c);
     }
-    // Tier 3: nickname / display_name prefix.
+    // Tier 3: nickname / username / display_name prefix.
     for (const c of contacts) {
       const nick = norm(c.nickname);
+      const un = norm(c.username);
       const disp = norm(c.display_name);
       if (
         (nick.length >= target.length && nick.startsWith(target)) ||
+        (un.length >= target.length && un.startsWith(target)) ||
         (disp.length >= target.length && disp.startsWith(target))
       ) {
         remember(c);
       }
     }
-    // Tier 4: nickname / display_name substring.
+    // Tier 4: nickname / username / display_name substring.
     for (const c of contacts) {
       const nick = norm(c.nickname);
+      const un = norm(c.username);
       const disp = norm(c.display_name);
       if (
         (nick.length >= target.length && nick.includes(target)) ||
+        (un.length >= target.length && un.includes(target)) ||
         (disp.length >= target.length && disp.includes(target))
       ) {
         remember(c);

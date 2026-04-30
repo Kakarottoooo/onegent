@@ -1,5 +1,9 @@
 import { describe, it, expect } from "vitest";
-import { matchContactsFuzzy, type ContactWithProfile } from "../db";
+import {
+  matchContactsFuzzy,
+  pickPreferredContactLabel,
+  type ContactWithProfile,
+} from "../db";
 
 function contact(opts: Partial<ContactWithProfile> & { contact_user_id: string }): ContactWithProfile {
   return {
@@ -147,5 +151,98 @@ describe("matchContactsFuzzy", () => {
     const out = matchContactsFuzzy(contacts, ["ziwei"]);
     expect(out[0].contact_user_id).toBe("u1");
     expect(out[0].matched?.display_name).toBe("Ziwei Bao");
+  });
+
+  it("Tier 1: exact match on Clerk username (regression for email-as-display_name)", () => {
+    // ziweiC's Clerk profile has no fullName, so display_name fell back to
+    // their email. The only "ziweic"-shaped field is username. The resolver
+    // must hit username, not just display_name / nickname / profile_code.
+    const contacts = [
+      contact({
+        contact_user_id: "u1",
+        username: "ziweic",
+        display_name: "guoziwei2019@126.com",
+        profile_code: "@xY5pQ2",
+        nickname: null,
+      }),
+    ];
+    const out = matchContactsFuzzy(contacts, ["ziweic"]);
+    expect(out[0].contact_user_id).toBe("u1");
+  });
+
+  it("Tier 3: prefix-match on username when fullName missing", () => {
+    const contacts = [
+      contact({
+        contact_user_id: "u1",
+        username: "ziwei_main",
+        display_name: "guoziwei2019@126.com",
+      }),
+    ];
+    // "ziwei" is prefix of "ziwei_main" (norm strips _ → "ziweimain").
+    const out = matchContactsFuzzy(contacts, ["ziwei"]);
+    expect(out[0].contact_user_id).toBe("u1");
+  });
+});
+
+describe("pickPreferredContactLabel", () => {
+  it("prefers nickname over everything", () => {
+    const label = pickPreferredContactLabel({
+      nickname: "老李",
+      username: "li_ming",
+      display_name: "Li Ming",
+      profile_code: "@xyz",
+    });
+    expect(label).toBe("老李");
+  });
+
+  it("prefers username when display_name is an email fallback", () => {
+    const label = pickPreferredContactLabel({
+      nickname: null,
+      username: "ziweic",
+      display_name: "guoziwei2019@126.com",
+      profile_code: "@xy123",
+    });
+    expect(label).toBe("ziweic");
+  });
+
+  it("uses display_name when it's a real name (not email)", () => {
+    const label = pickPreferredContactLabel({
+      nickname: null,
+      username: "li_ming",
+      display_name: "李明",
+      profile_code: "@xyz",
+    });
+    expect(label).toBe("李明");
+  });
+
+  it("falls back to email-shaped display_name when username missing", () => {
+    const label = pickPreferredContactLabel({
+      nickname: null,
+      username: null,
+      display_name: "alice@example.com",
+      profile_code: "@xyz",
+    });
+    expect(label).toBe("alice@example.com");
+  });
+
+  it("falls back to profile_code when nothing else is set", () => {
+    const label = pickPreferredContactLabel({
+      nickname: null,
+      username: null,
+      display_name: null,
+      profile_code: "@xyz",
+    });
+    expect(label).toBe("@xyz");
+  });
+
+  it("returns null only when literally nothing is set", () => {
+    expect(
+      pickPreferredContactLabel({
+        nickname: null,
+        username: null,
+        display_name: null,
+        profile_code: null,
+      }),
+    ).toBeNull();
   });
 });
