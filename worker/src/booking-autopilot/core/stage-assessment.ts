@@ -466,6 +466,25 @@ export async function assessBookingStage(params: {
   } else if (listingSignals && !bookingProgressSignals) {
     stage = "listing";
     reason = "The page still looks like a listing/search flow without booking progress.";
+  } else if (
+    /opentable\.com\/r\//i.test(currentUrl) &&
+    !visibleCheckoutFields &&
+    !hitPaymentUrl
+  ) {
+    // OpenTable /r/<slug> detail pages: booking widget on the right is where
+    // users select time → listing-stage handler drives the time picker. Pin
+    // explicitly so we don't depend on flaky AI confidence (>=0.75 gate below)
+    // for routing into the OT detail-page programmatic flow.
+    stage = "listing";
+    reason = "OpenTable detail page URL is active; booking widget is in listing stage.";
+  } else if (
+    /resy\.com\/cities\/.+\/venues\//i.test(currentUrl) &&
+    !visibleCheckoutFields &&
+    !hitPaymentUrl
+  ) {
+    // Resy venue detail pages: same rationale as OpenTable above.
+    stage = "listing";
+    reason = "Resy venue detail page URL is active; booking widget is in listing stage.";
   }
 
   // ── Phase 2: AI-assisted stage detection (gated by AI_LOOP_STAGE_DETECT=true) ──
