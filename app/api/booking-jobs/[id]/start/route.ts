@@ -46,6 +46,10 @@ import {
   computeReplan,
   applyReplan,
 } from "@/lib/replan";
+import {
+  buildFlightInventoryDriftManualMessage,
+  isFlightInventoryDriftError,
+} from "@/lib/booking-errors";
 import { buildAutoMonitors } from "@/lib/monitors";
 import { createBookingMonitor } from "@/lib/db";
 import { sendPushNotification } from "@/lib/push";
@@ -1001,6 +1005,9 @@ async function runUniversalStep(
       ? { ...(step.body as Record<string, unknown>), availableSlots: data.availableSlots }
       : step.body;
     const manualHandoffUrl = data.handoffUrl ?? step.fallbackUrl;
+    const actionMessage = isFlightInventoryDriftError(data.error ?? data.summary)
+      ? buildFlightInventoryDriftManualMessage()
+      : "Auto-booking failed. Tap to complete manually:";
     log.push({ ts: now(), type: "failed", message: data.error ?? data.summary, outcome: "Failed" });
     return {
       ...step,
@@ -1008,7 +1015,7 @@ async function runUniversalStep(
       status: "error",
       error: data.error ?? data.summary,
       handoff_url: manualHandoffUrl,
-      actionItem: { message: "Auto-booking failed. Tap to complete manually:", options: [{ label: step.label, url: manualHandoffUrl }] },
+      actionItem: { message: actionMessage, options: [{ label: step.label, url: manualHandoffUrl }] },
       decisionLog: log,
     };
   } catch (err) {

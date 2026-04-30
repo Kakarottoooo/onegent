@@ -3,6 +3,10 @@
 import { Suspense, useState, useEffect, useCallback, useRef } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import type { BookingJob, BookingJobStep, DecisionLogEntry, AgentFeedbackStats } from "@/lib/db";
+import {
+  buildFlightInventoryDriftManualMessage,
+  isFlightInventoryDriftError,
+} from "@/lib/booking-errors";
 import type { PolicyBias, UserPreferenceProfile } from "@/lib/policy";
 import type { BookingMonitor } from "@/lib/monitors";
 import type { ScenarioMemory, PatternMemory, RelationshipProfile, RelationshipType } from "@/lib/memory";
@@ -146,6 +150,7 @@ function stepStatusLabel(step: BookingJobStep): string {
     if (err.includes("not found on opentable")) return "Not found on OpenTable";
     return "No availability found";
   }
+  if (step.status === "error" && isFlightInventoryDriftError(step.error)) return "Fare changed or disappeared";
   if (step.status === "error") return "Failed";
   return "Waiting";
 }
@@ -271,6 +276,13 @@ function diagnoseFail(step: BookingJobStep): { reason: string; suggestion: strin
   const lastLog = step.decisionLog?.filter(e => e.type === "failed" || e.type === "skipped").at(-1);
   const logMsg = (lastLog?.message ?? "").toLowerCase();
 
+  if (isFlightInventoryDriftError(step.error) || isFlightInventoryDriftError(lastLog?.message)) {
+    return {
+      reason: "The agent found a flight earlier, but Expedia no longer showed that exact fare during checkout.",
+      suggestion: "Retry to fetch fresh live inventory, or open the current results and choose the closest option manually.",
+      chatPrompt: `The exact fare for ${step.label} disappeared or changed on Expedia during checkout. Can you refresh the live options and pick the closest current match?`,
+    };
+  }
   if (err.includes("captcha") || err.includes("cloudflare") || err.includes("blocked") || logMsg.includes("blocked")) {
     return {
       reason: "The booking site blocked the agent (bot protection).",
@@ -324,8 +336,14 @@ function shouldUseStaticHelp(step: BookingJobStep): boolean {
 }
 
 function getStaticHelpMessage(step: BookingJobStep): string {
+  if (isFlightInventoryDriftError(step.error)) {
+    const diagnosis = diagnoseFail(step);
+    return `${diagnosis.reason} ${diagnosis.suggestion}`;
+  }
+
   const actionMessage = step.actionItem?.message?.trim();
-  if (actionMessage) return actionMessage;
+  if (actionMessage && actionMessage !== "Auto-booking failed. Tap to complete manually:") return actionMessage;
+  if (actionMessage === buildFlightInventoryDriftManualMessage()) return actionMessage;
 
   const diagnosis = diagnoseFail(step);
   return `${diagnosis.reason} ${diagnosis.suggestion}`;
