@@ -69,8 +69,8 @@ async function buildItemPreview(it: ItineraryItem) {
     item_id: it.item_id,
     position: it.position,
     added_at: it.added_at,
-    title: "Removed",
-    subtitle: null as string | null,
+    title: it.snapshot_title ?? "Removed",
+    subtitle: it.snapshot_subtitle ?? null as string | null,
     href: null as string | null,
   };
   try {

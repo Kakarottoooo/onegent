@@ -843,8 +843,23 @@ export async function listSharedArtifactsByOwner(ownerId: string): Promise<Share
 export async function listPublicArtifactsByOwner(
   ownerId: string,
   limit = 20,
+  kinds?: SharedArtifactKind[],
 ): Promise<SharedArtifact[]> {
   await ensureSharedArtifactsTable();
+  if (kinds && kinds.length > 0) {
+    const placeholders = kinds.map((_, i) => `$${i + 3}`).join(", ");
+    const result = await db.query<SharedArtifact>(
+      `SELECT * FROM shared_artifacts
+       WHERE owner_id = $1
+         AND visibility = 'public'
+         AND deleted_at IS NULL
+         AND kind IN (${placeholders})
+       ORDER BY created_at DESC
+       LIMIT $2`,
+      [ownerId, limit, ...kinds],
+    );
+    return result.rows;
+  }
   const result = await sql<SharedArtifact>`
     SELECT * FROM shared_artifacts
     WHERE owner_id = ${ownerId}
@@ -1000,10 +1015,16 @@ export async function ensureItineraryItemsTable(): Promise<void> {
           item_kind     TEXT NOT NULL,
           item_id       TEXT NOT NULL,
           position      INT NOT NULL DEFAULT 0,
+          snapshot_title TEXT,
+          snapshot_subtitle TEXT,
+          snapshot_emoji TEXT,
           added_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
           PRIMARY KEY (itinerary_id, item_kind, item_id)
         )
       `;
+      await sql`ALTER TABLE itinerary_items ADD COLUMN IF NOT EXISTS snapshot_title TEXT`;
+      await sql`ALTER TABLE itinerary_items ADD COLUMN IF NOT EXISTS snapshot_subtitle TEXT`;
+      await sql`ALTER TABLE itinerary_items ADD COLUMN IF NOT EXISTS snapshot_emoji TEXT`;
       await sql`CREATE INDEX IF NOT EXISTS itin_items_itinerary_idx ON itinerary_items (itinerary_id, position)`;
     })().catch((err) => {
       itineraryItemsTableReady = null;
@@ -1031,6 +1052,9 @@ export interface ItineraryItem {
   item_kind: "booking_job" | "dr_outcome";
   item_id: string;
   position: number;
+  snapshot_title: string | null;
+  snapshot_subtitle: string | null;
+  snapshot_emoji: string | null;
   added_at: string;
 }
 
@@ -1138,10 +1162,31 @@ export async function addItineraryItem(params: {
   position?: number;
 }): Promise<ItineraryItem> {
   await ensureItineraryItemsTable();
+  const snapshot = await buildItineraryItemSnapshot(params.itemKind, params.itemId);
   const result = await sql<ItineraryItem>`
-    INSERT INTO itinerary_items (itinerary_id, item_kind, item_id, position)
-    VALUES (${params.itineraryId}, ${params.itemKind}, ${params.itemId}, ${params.position ?? 0})
-    ON CONFLICT (itinerary_id, item_kind, item_id) DO NOTHING
+    INSERT INTO itinerary_items (
+      itinerary_id,
+      item_kind,
+      item_id,
+      position,
+      snapshot_title,
+      snapshot_subtitle,
+      snapshot_emoji
+    )
+    VALUES (
+      ${params.itineraryId},
+      ${params.itemKind},
+      ${params.itemId},
+      ${params.position ?? 0},
+      ${snapshot.title},
+      ${snapshot.subtitle},
+      ${snapshot.emoji}
+    )
+    ON CONFLICT (itinerary_id, item_kind, item_id) DO UPDATE
+    SET
+      snapshot_title = COALESCE(itinerary_items.snapshot_title, EXCLUDED.snapshot_title),
+      snapshot_subtitle = COALESCE(itinerary_items.snapshot_subtitle, EXCLUDED.snapshot_subtitle),
+      snapshot_emoji = COALESCE(itinerary_items.snapshot_emoji, EXCLUDED.snapshot_emoji)
     RETURNING *
   `;
   if (result.rows[0]) return result.rows[0];
@@ -1179,6 +1224,44 @@ export async function listItineraryItems(itineraryId: string): Promise<Itinerary
     ORDER BY position ASC, added_at ASC
   `;
   return result.rows;
+}
+
+async function buildItineraryItemSnapshot(
+  itemKind: ItineraryItem["item_kind"],
+  itemId: string,
+): Promise<{ title: string | null; subtitle: string | null; emoji: string | null }> {
+  try {
+    if (itemKind === "booking_job") {
+      const job = await getBookingJob(itemId);
+      if (job) {
+        return {
+          title: job.trip_label,
+          subtitle: job.steps?.[0] ? `${job.steps[0].emoji} ${job.steps[0].label}` : null,
+          emoji: job.steps?.[0]?.emoji ?? "🧳",
+        };
+      }
+    } else {
+      const session = await getDecisionSession(itemId);
+      if (session) {
+        const cards = (session.merged_options ?? []) as Array<{
+          restaurant?: { id?: string; name?: string; cuisine?: string };
+        }>;
+        const decided = cards.find((c) => c.restaurant?.id === session.decided_card_id);
+        return {
+          title: decided?.restaurant?.name ?? "Decision Room",
+          subtitle: decided?.restaurant?.cuisine ?? null,
+          emoji: "🗳️",
+        };
+      }
+    }
+  } catch {
+    /* fallback below */
+  }
+  return {
+    title: null,
+    subtitle: null,
+    emoji: null,
+  };
 }
 
 // ═══════════════════════════════════════════════════════════════════════════

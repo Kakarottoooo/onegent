@@ -494,7 +494,7 @@ export default function DecidePage() {
           <div className="text-center py-10">
             <div className="text-3xl mb-4">⏳</div>
             <h1 className="text-base font-semibold text-[var(--text-primary)] mb-2">
-              Waiting on the group
+              Waiting for your group
             </h1>
             <p className="text-sm text-[var(--text-muted)]">
               {`${members.filter((m) => !m.has_submitted).length} of ${members.length} still need to submit constraints.`}
@@ -800,7 +800,7 @@ function GroupMembersPanel({
                 borderRadius: "50%",
                 border: m.has_submitted
                   ? "2px solid var(--gold, #C9A84C)"
-                  : "2px solid #d1d5db",
+                  : "2px dashed #d1d5db",
                 background: m.profile?.avatar_url
                   ? `center / cover no-repeat url(${m.profile.avatar_url})`
                   : "linear-gradient(135deg, #C9A84C 0%, #5A4416 100%)",
@@ -842,7 +842,7 @@ function GroupMembersPanel({
             color: "var(--text-primary)",
           }}
         >
-          {submittedCount} of {members.length} submitted constraints
+          {submittedCount} of {members.length} submitted
         </p>
       </div>
     </div>

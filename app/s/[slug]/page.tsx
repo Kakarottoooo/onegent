@@ -234,9 +234,9 @@ export default async function ShareSlugPage({ params }: Params) {
     const items = await listItineraryItems(itinerary.id);
     const children = await Promise.all(
       items.map(async (it) => {
-        let title = "Removed";
-        let subtitle: string | null = null;
-        let emoji: string | null = null;
+        let title = it.snapshot_title ?? "Removed";
+        let subtitle: string | null = it.snapshot_subtitle ?? null;
+        let emoji: string | null = it.snapshot_emoji ?? null;
         try {
           if (it.item_kind === "booking_job") {
             const j = await getBookingJob(it.item_id);

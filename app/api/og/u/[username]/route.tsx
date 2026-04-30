@@ -38,7 +38,7 @@ export async function GET(_req: Request, { params }: Params) {
   // is more interesting than just a name.
   let tripCount = 0;
   try {
-    const artifacts = await listPublicArtifactsByOwner(profile.user_id, 100);
+    const artifacts = await listPublicArtifactsByOwner(profile.user_id, 100, ["trip"]);
     tripCount = artifacts.length;
   } catch {
     /* fine — we can render without the count */

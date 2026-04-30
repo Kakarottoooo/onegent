@@ -9,6 +9,7 @@ import {
   isContact,
   getBookingJob,
   getDecisionSession,
+  getItinerary,
   type SharedArtifact,
 } from "@/lib/db";
 import GlobalNav from "@/components/GlobalNav";
@@ -90,6 +91,15 @@ async function buildPreviews(artifacts: SharedArtifact[]): Promise<PreviewItem[]
             const firstStep = job.steps?.[0];
             subtitle = firstStep ? `${firstStep.emoji} ${firstStep.label}` : null;
           }
+        } else if (a.kind === "trip") {
+          const itinerary = await getItinerary(a.ref_id);
+          if (itinerary) {
+            title = itinerary.title;
+            subtitle =
+              [itinerary.city, formatTripRange(itinerary.start_date, itinerary.end_date)]
+                .filter(Boolean)
+                .join(" · ") || null;
+          }
         } else if (a.kind === "dr_outcome") {
           const session = await getDecisionSession(a.ref_id);
           if (session) {
@@ -129,8 +139,9 @@ export default async function PublicProfilePage({ params }: Params) {
   // `username` for nice URLs; fallback to `profile_code` for legacy.
   const handle = profile.username ?? profile.profile_code;
 
-  const [artifacts, { userId }] = await Promise.all([
-    listPublicArtifactsByOwner(profile.user_id, 20),
+  const [tripArtifacts, otherArtifacts, { userId }] = await Promise.all([
+    listPublicArtifactsByOwner(profile.user_id, 20, ["trip"]),
+    listPublicArtifactsByOwner(profile.user_id, 12, ["booking", "dr_outcome"]),
     auth(),
   ]);
 
@@ -139,8 +150,11 @@ export default async function PublicProfilePage({ params }: Params) {
     ? await isContact(userId, profile.user_id)
     : false;
 
-  const previews = await buildPreviews(artifacts);
-  const tripCount = previews.length;
+  const [tripPreviews, otherPreviews] = await Promise.all([
+    buildPreviews(tripArtifacts),
+    buildPreviews(otherArtifacts),
+  ]);
+  const tripCount = tripPreviews.length;
   const labelInitial =
     (profile.display_name ?? profile.username ?? profile.profile_code ?? "?")
       .slice(0, 1)
@@ -260,10 +274,14 @@ export default async function PublicProfilePage({ params }: Params) {
         </div>
 
         {tripCount === 0 ? (
-          <EmptyTripsState isSelf={isSelf} displayName={profile.display_name ?? `@${handle}`} />
+          <EmptyTripsState
+            isSelf={isSelf}
+            displayName={profile.display_name ?? `@${handle}`}
+            hasOtherShares={otherPreviews.length > 0}
+          />
         ) : (
           <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-            {previews.map((p) => (
+            {tripPreviews.map((p) => (
               <Link
                 key={p.slug}
                 href={`/s/${p.slug}`}
@@ -304,7 +322,7 @@ export default async function PublicProfilePage({ params }: Params) {
                       flexShrink: 0,
                     }}
                   >
-                    {p.kind === "dr_outcome" ? "Decided" : "Booked"}
+                    {p.kind === "trip" ? "Trip" : p.kind === "dr_outcome" ? "Decided" : "Booked"}
                   </span>
                 </div>
                 {p.subtitle && (
@@ -335,6 +353,97 @@ export default async function PublicProfilePage({ params }: Params) {
           </div>
         )}
 
+        {otherPreviews.length > 0 && (
+          <div style={{ marginTop: tripCount > 0 ? 32 : 24 }}>
+            <div style={{ display: "flex", alignItems: "baseline", gap: 12, marginBottom: 14 }}>
+              <p
+                style={{
+                  fontFamily: "var(--font-dm-sans)",
+                  fontSize: 11,
+                  fontWeight: 600,
+                  letterSpacing: "0.18em",
+                  textTransform: "uppercase",
+                  color: "var(--text-muted)",
+                  margin: 0,
+                }}
+              >
+                Recent shares
+              </p>
+            </div>
+            <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+              {otherPreviews.map((p) => (
+                <Link
+                  key={p.slug}
+                  href={`/s/${p.slug}`}
+                  style={{
+                    display: "block",
+                    padding: 18,
+                    borderRadius: 16,
+                    background: "var(--card)",
+                    border: "1px solid var(--border)",
+                    textDecoration: "none",
+                    transition: "border-color 120ms",
+                  }}
+                >
+                  <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 12 }}>
+                    <p
+                      style={{
+                        margin: 0,
+                        fontFamily: "var(--font-playfair), Georgia, serif",
+                        fontSize: 18,
+                        fontWeight: 600,
+                        color: "var(--text-primary)",
+                        letterSpacing: "-0.01em",
+                      }}
+                    >
+                      {p.title}
+                    </p>
+                    <span
+                      style={{
+                        fontFamily: "var(--font-dm-sans)",
+                        fontSize: 10,
+                        fontWeight: 600,
+                        letterSpacing: "0.16em",
+                        textTransform: "uppercase",
+                        color: "var(--gold-text, #5A4416)",
+                        background: "var(--gold-soft, #F5E9C8)",
+                        padding: "3px 8px",
+                        borderRadius: 999,
+                        flexShrink: 0,
+                      }}
+                    >
+                      {p.kind === "dr_outcome" ? "Decided" : "Booked"}
+                    </span>
+                  </div>
+                  {p.subtitle && (
+                    <p
+                      style={{
+                        margin: "6px 0 0",
+                        fontFamily: "var(--font-dm-sans)",
+                        fontSize: 13,
+                        color: "var(--text-secondary)",
+                      }}
+                    >
+                      {p.subtitle}
+                    </p>
+                  )}
+                  <p
+                    style={{
+                      margin: "10px 0 0",
+                      fontFamily: "var(--font-dm-sans)",
+                      fontSize: 11,
+                      color: "var(--text-muted)",
+                    }}
+                  >
+                    {formatDate(p.created_at)}
+                    {p.view_count > 0 ? ` · ${p.view_count} ${p.view_count === 1 ? "view" : "views"}` : ""}
+                  </p>
+                </Link>
+              ))}
+            </div>
+          </div>
+        )}
+
         <div style={{ marginTop: 36, textAlign: "center", padding: "20px 0" }}>
           <Link
             href="/"
@@ -354,7 +463,15 @@ export default async function PublicProfilePage({ params }: Params) {
   );
 }
 
-function EmptyTripsState({ isSelf, displayName }: { isSelf: boolean; displayName: string }) {
+function EmptyTripsState({
+  isSelf,
+  displayName,
+  hasOtherShares,
+}: {
+  isSelf: boolean;
+  displayName: string;
+  hasOtherShares: boolean;
+}) {
   return (
     <div
       style={{
@@ -374,8 +491,10 @@ function EmptyTripsState({ isSelf, displayName }: { isSelf: boolean; displayName
         }}
       >
         {isSelf
-          ? "Share a booking or decision and it will show up here."
-          : `${displayName} hasn't shared any public trips yet.`}
+          ? "Share a trip and it will show up here."
+          : hasOtherShares
+            ? `${displayName} hasn't shared any public trips yet.`
+            : `${displayName} hasn't shared any public trips yet.`}
       </p>
       {isSelf && (
         <Link
@@ -395,6 +514,22 @@ function EmptyTripsState({ isSelf, displayName }: { isSelf: boolean; displayName
       )}
     </div>
   );
+}
+
+function formatTripRange(start: string | null, end: string | null): string | null {
+  if (!start && !end) return null;
+  try {
+    const startLabel = start
+      ? new Date(start).toLocaleDateString(undefined, { month: "short", day: "numeric" })
+      : null;
+    const endLabel = end
+      ? new Date(end).toLocaleDateString(undefined, { month: "short", day: "numeric" })
+      : null;
+    if (startLabel && endLabel) return `${startLabel} – ${endLabel}`;
+    return startLabel ?? endLabel;
+  } catch {
+    return [start, end].filter(Boolean).join(" – ") || null;
+  }
 }
 
 function formatDate(iso: string): string {

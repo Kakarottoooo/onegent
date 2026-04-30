@@ -16,7 +16,7 @@
  *     hides exact time so we don't leak "I'll be at X at 8pm Sat".)
  */
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 interface Props {
   isOpen: boolean;
@@ -28,6 +28,28 @@ interface Props {
 }
 
 type Visibility = "private" | "public";
+type NativeMessageShareKind = "imessage" | "sms" | "none";
+
+function detectNativeMessageShareKind(): NativeMessageShareKind {
+  if (typeof navigator === "undefined") return "none";
+
+  const ua = navigator.userAgent.toLowerCase();
+  const platform = (
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    ((navigator as any).userAgentData?.platform as string | undefined) ??
+    navigator.platform ??
+    ""
+  ).toLowerCase();
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const mobileHint = (navigator as any).userAgentData?.mobile;
+  const isApple = /iphone|ipad|ipod|mac/.test(platform) || /iphone|ipad|ipod|mac os x/.test(ua);
+  if (isApple) return "imessage";
+
+  const isMobile = typeof mobileHint === "boolean"
+    ? mobileHint
+    : /android|iphone|ipad|ipod|mobile/.test(ua);
+  return isMobile ? "sms" : "none";
+}
 
 export default function ShareTripModal({
   isOpen,
@@ -43,8 +65,13 @@ export default function ShareTripModal({
   const [error, setError] = useState<string | null>(null);
   const [shareUrl, setShareUrl] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
+  const [nativeMessageShareKind, setNativeMessageShareKind] = useState<NativeMessageShareKind>("none");
 
   if (!isOpen) return null;
+
+  useEffect(() => {
+    setNativeMessageShareKind(detectNativeMessageShareKind());
+  }, []);
 
   async function save() {
     setBusy(true);
@@ -92,7 +119,7 @@ export default function ShareTripModal({
     }
   }
 
-  function shareVia(channel: "imessage" | "whatsapp" | "x") {
+  function shareVia(channel: "message" | "whatsapp" | "x") {
     if (!shareUrl) return;
     const text =
       kind === "dr_outcome"
@@ -100,8 +127,9 @@ export default function ShareTripModal({
         : kind === "trip"
           ? `Here's my trip on Onegent: ${shareUrl}`
           : `Just booked this trip with Onegent — see it here: ${shareUrl}`;
-    if (channel === "imessage") {
-      window.location.href = `sms:&body=${encodeURIComponent(text)}`;
+    if (channel === "message") {
+      if (nativeMessageShareKind === "none") return;
+      window.location.href = `sms:?&body=${encodeURIComponent(text)}`;
     } else if (channel === "whatsapp") {
       window.open(`https://wa.me/?text=${encodeURIComponent(text)}`, "_blank");
     } else {
@@ -257,13 +285,15 @@ export default function ShareTripModal({
             </button>
 
             <div className="flex gap-2 mb-2">
-              <button
-                type="button"
-                onClick={() => shareVia("imessage")}
-                className="flex-1 py-2.5 rounded-xl border border-gray-200 text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors"
-              >
-                iMessage
-              </button>
+              {nativeMessageShareKind !== "none" && (
+                <button
+                  type="button"
+                  onClick={() => shareVia("message")}
+                  className="flex-1 py-2.5 rounded-xl border border-gray-200 text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors"
+                >
+                  {nativeMessageShareKind === "imessage" ? "iMessage" : "SMS"}
+                </button>
+              )}
               <button
                 type="button"
                 onClick={() => shareVia("whatsapp")}
