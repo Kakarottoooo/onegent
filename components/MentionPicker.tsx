@@ -125,8 +125,13 @@ function deriveMentionedUserIds(
   const ids: string[] = [];
   for (const t of tokens) {
     const lower = t.handle.toLowerCase();
+    // Match by username first, then profile_code as fallback. Contacts that
+    // were added via /api/contacts/requests with profile_code only (no Clerk
+    // username yet) are taggable via @<6-char-code> instead.
     const direct = contacts.find(
-      (c) => (c.username ?? "").toLowerCase() === lower,
+      (c) =>
+        (c.username ?? "").toLowerCase() === lower ||
+        (c.profile_code ?? "").toLowerCase() === lower,
     );
     let id: string | undefined = direct?.user_id;
     if (!id && pendingInvites[lower]) id = pendingInvites[lower];
@@ -143,9 +148,11 @@ function fuzzyMatch(c: MentionContact, query: string): number {
   const q = query.toLowerCase();
   const u = (c.username ?? "").toLowerCase();
   const d = (c.display_name ?? "").toLowerCase();
+  const code = (c.profile_code ?? "").toLowerCase();
   if (u.startsWith(q)) return 3;
   if (d.startsWith(q)) return 2;
-  if (u.includes(q) || d.includes(q)) return 1;
+  if (code.startsWith(q)) return 2;
+  if (u.includes(q) || d.includes(q) || code.includes(q)) return 1;
   return 0;
 }
 
@@ -305,7 +312,11 @@ const MentionPicker = forwardRef<HTMLInputElement, MentionPickerProps>(
                 e.preventDefault();
                 if (highlight < filtered.length) {
                   const c = filtered[highlight];
-                  if (c.username) commitMention(c.username);
+                  // Prefer username for the @-tag; fall back to profile_code
+                  // when the contact has no Clerk username (e.g. added via
+                  // request-by-code without a username yet).
+                  const handle = c.username || c.profile_code || null;
+                  if (handle) commitMention(handle);
                 } else if (showLookupRow) {
                   void handleLookup();
                 }
@@ -356,7 +367,8 @@ const MentionPicker = forwardRef<HTMLInputElement, MentionPickerProps>(
                   aria-selected={active}
                   onMouseDown={(e) => {
                     e.preventDefault();
-                    if (c.username) commitMention(c.username);
+                    const handle = c.username || c.profile_code || null;
+                    if (handle) commitMention(handle);
                   }}
                   onMouseEnter={() => setHighlight(idx)}
                   style={{
@@ -370,7 +382,12 @@ const MentionPicker = forwardRef<HTMLInputElement, MentionPickerProps>(
                     background: active ? "var(--gold-soft, #f7eed8)" : "transparent",
                     cursor: "pointer",
                     textAlign: "left",
-                    color: "var(--text-primary, #111)",
+                    // Active row uses gold-text (dark brown) so it contrasts
+                    // with the cream gold-soft background — particularly
+                    // important in dark mode where text-primary is light.
+                    color: active
+                      ? "var(--gold-text, #5A4416)"
+                      : "var(--text-primary, #111)",
                     fontFamily: "var(--font-dm-sans)",
                     fontSize: 13,
                   }}
@@ -389,11 +406,19 @@ const MentionPicker = forwardRef<HTMLInputElement, MentionPickerProps>(
                   />
                   <div style={{ display: "flex", flexDirection: "column", minWidth: 0 }}>
                     <span style={{ fontWeight: 600, lineHeight: 1.2 }}>
-                      {c.display_name ?? c.username ?? "(no name)"}
+                      {c.display_name ?? c.username ?? c.profile_code ?? "(no name)"}
                     </span>
-                    {c.username ? (
-                      <span style={{ color: "var(--text-secondary, #666)", fontSize: 11 }}>
-                        @{c.username}
+                    {(c.username || c.profile_code) ? (
+                      <span
+                        style={{
+                          color: active
+                            ? "var(--gold-text, #5A4416)"
+                            : "var(--text-secondary, #666)",
+                          fontSize: 11,
+                          opacity: active ? 0.85 : 1,
+                        }}
+                      >
+                        @{c.username ?? c.profile_code}
                       </span>
                     ) : null}
                   </div>
@@ -430,7 +455,10 @@ const MentionPicker = forwardRef<HTMLInputElement, MentionPickerProps>(
                       : "transparent",
                   cursor: lookingUp ? "wait" : "pointer",
                   textAlign: "left",
-                  color: "var(--text-primary, #111)",
+                  color:
+                    highlight === filtered.length
+                      ? "var(--gold-text, #5A4416)"
+                      : "var(--text-primary, #111)",
                   fontFamily: "var(--font-dm-sans)",
                   fontSize: 13,
                   opacity: lookingUp ? 0.6 : 1,
@@ -443,7 +471,16 @@ const MentionPicker = forwardRef<HTMLInputElement, MentionPickerProps>(
                       ? `Looking up @${token?.query ?? ""}…`
                       : `Look up @${token?.query ?? ""}`}
                   </span>
-                  <span style={{ color: "var(--text-secondary, #666)", fontSize: 11 }}>
+                  <span
+                    style={{
+                      color:
+                        highlight === filtered.length
+                          ? "var(--gold-text, #5A4416)"
+                          : "var(--text-secondary, #666)",
+                      fontSize: 11,
+                      opacity: highlight === filtered.length ? 0.85 : 1,
+                    }}
+                  >
                     {lookupError ?? "Find them by handle and send a contact request"}
                   </span>
                 </div>
