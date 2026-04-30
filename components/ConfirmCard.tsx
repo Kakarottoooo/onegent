@@ -13,6 +13,7 @@
 import { useEffect, useState } from "react";
 import type { ConversationalNLUResult } from "@/lib/agent/nlu-v2";
 import type { TripIntentState } from "@/lib/agent/trip-intent-state";
+import { matchContactsFuzzy } from "@/lib/contacts-match";
 import "./chat.css";
 
 export type ConfirmCardKind = "room" | "plan" | "trip";
@@ -137,6 +138,19 @@ export default function ConfirmCard(props: ConfirmCardProps) {
       setUnresolvedNames(null);
       return;
     }
+    // Short-circuit: if the parent already supplied resolved user_ids
+    // (explicit @-picker OR /api/chat/parse's auto_mentioned_user_ids merged
+    // them in), the names are by definition reachable. Without this guard we
+    // would re-run the inline /api/contacts match — which used to silently
+    // miss username-only contacts and surfaced a misleading "ziweic 还不在
+    //你的联系人里" warning even though @ziweic had just been picked.
+    if (
+      props.mentionedUserIds &&
+      props.mentionedUserIds.length >= memberNames.length
+    ) {
+      setUnresolvedNames([]);
+      return;
+    }
     let cancelled = false;
     (async () => {
       try {
@@ -146,24 +160,27 @@ export default function ConfirmCard(props: ConfirmCardProps) {
           contacts: Array<{
             contact_user_id: string;
             nickname: string | null;
+            username: string | null;
             display_name: string | null;
             profile_code: string;
           }>;
         };
-        const norm = (s: string | null | undefined) => (s ?? "").trim().toLowerCase();
-        const unresolved: string[] = [];
-        for (const name of memberNames) {
-          const target = norm(name);
-          if (!target) continue;
-          const hit = (data.contacts ?? []).find(
-            (c) =>
-              norm(c.nickname) === target ||
-              norm(c.display_name) === target ||
-              norm(c.profile_code) === target ||
-              norm(c.profile_code).replace(/^@/, "") === target.replace(/^@/, ""),
-          );
-          if (!hit) unresolved.push(name);
-        }
+        // Use the same fuzzy + email-fallback matcher the server uses so a
+        // contact whose Clerk profile lacks fullName (display_name = email)
+        // still resolves on its username — which is what the user thinks of
+        // them by ("ziweic"), and the only "ziweic"-shaped field on that
+        // contact's profile.
+        const candidates = (data.contacts ?? []).map((c) => ({
+          user_id: c.contact_user_id,
+          nickname: c.nickname,
+          username: c.username,
+          display_name: c.display_name,
+          profile_code: c.profile_code,
+        }));
+        const resolutions = matchContactsFuzzy(candidates, memberNames);
+        const unresolved = resolutions
+          .filter((r) => !r.contact_user_id)
+          .map((r) => r.name);
         if (!cancelled) setUnresolvedNames(unresolved);
       } catch {
         if (!cancelled) setUnresolvedNames(null);
@@ -172,7 +189,7 @@ export default function ConfirmCard(props: ConfirmCardProps) {
     return () => {
       cancelled = true;
     };
-  }, [props.kind, memberNames]);
+  }, [props.kind, memberNames, props.mentionedUserIds]);
 
   async function handleConfirm() {
     if (submitting) return;
