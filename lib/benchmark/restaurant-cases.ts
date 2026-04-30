@@ -13,12 +13,12 @@
 import type { RestaurantBenchmarkCase } from "./types";
 
 export const RESTAURANT_BENCHMARK_CASES_NYC: RestaurantBenchmarkCase[] = [
-  // ─── OpenTable: large mainstream venue, fixed time ───────────────────────
+  // ─── OpenTable: detail page exists but venue not on booking network ──────
   {
     case_id: "nyc_restaurant_001",
     city: "New York",
-    restaurant_name: "Boucherie West Village",
-    restaurant_url: "https://www.opentable.com/r/boucherie-west-village-new-york",
+    restaurant_name: "L'Artusi",
+    restaurant_url: "https://www.opentable.com/r/lartusi-new-york",
     expected_provider: "OpenTable",
     date: "2026-05-12",
     time: "19:00",
@@ -26,7 +26,7 @@ export const RESTAURANT_BENCHMARK_CASES_NYC: RestaurantBenchmarkCase[] = [
     occasion: "date_night",
     preferences: {
       atmosphere: "romantic",
-      cuisine: "french",
+      cuisine: "italian",
     },
     fallback_policy: {
       time_window_minutes: 0,
@@ -35,7 +35,7 @@ export const RESTAURANT_BENCHMARK_CASES_NYC: RestaurantBenchmarkCase[] = [
       require_user_approval_before_booking: false,
     },
     notes:
-      "Baseline: large French brasserie in West Village, stable on OpenTable with regular weekday availability. Tests the happy path.",
+      "Negative case (NO_AVAILABILITY_SIGNALS regression test): L'Artusi detail page exists but renders 'Not available on OpenTable'. Should classify as no_availability in <15s, NOT executor_error after 30s+.",
   },
 
   // ─── OpenTable: popular date-night spot, allow time fallback ─────────────
@@ -59,12 +59,12 @@ export const RESTAURANT_BENCHMARK_CASES_NYC: RestaurantBenchmarkCase[] = [
       "Mid-demand mainstream Asian-fusion spot. Stable presence on OpenTable; 19:30 prime-time may exercise the time-window fallback.",
   },
 
-  // ─── OpenTable: medium spot with party size 4 ───────────────────────────
+  // ─── OpenTable: detail page exists but venue permanently closed ──────────
   {
     case_id: "nyc_restaurant_003",
     city: "New York",
-    restaurant_name: "Buddakan",
-    restaurant_url: "https://www.opentable.com/r/buddakan-new-york",
+    restaurant_name: "Carbone",
+    restaurant_url: "https://www.opentable.com/r/carbone-new-york",
     expected_provider: "OpenTable",
     date: "2026-05-13",
     time: "20:00",
@@ -77,7 +77,7 @@ export const RESTAURANT_BENCHMARK_CASES_NYC: RestaurantBenchmarkCase[] = [
       require_user_approval_before_booking: false,
     },
     notes:
-      "Tests party_size > 2 + later time slot. Buddakan is a large modern-Asian venue with multi-room capacity, reliably bookable on OpenTable.",
+      "Negative case (NO_AVAILABILITY_SIGNALS regression test, party_size=4 path): Carbone detail page exists but renders 'Permanently Closed'. Should classify as no_availability in <15s.",
   },
 
   // ─── Resy: established Resy venue, fixed time ───────────────────────────
