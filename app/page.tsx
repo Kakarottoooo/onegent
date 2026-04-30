@@ -577,7 +577,24 @@ function HomeInner() {
     const tick = async () => {
       try {
         const res = await fetch(`/api/rooms/${activeRoomId}/trip-proposal`);
-        if (!res.ok || cancelled) return;
+        if (cancelled) return;
+        // Room dissolved by creator (404) or membership revoked (403): clear
+        // the active room, kick back to /, and surface a toast so the user
+        // understands why their view changed. Without this the banner +
+        // proposal card stay mounted on a zombie roomId and the user is
+        // stuck staring at "无法加载方案".
+        if (res.status === 404 || res.status === 403) {
+          const goneId = activeRoomId;
+          setActiveRoomId(null);
+          setActiveProposalId(null);
+          setActiveProposalKind(null);
+          replayedRoomIds.current.delete(goneId);
+          router.replace("/");
+          setRoomGoneToast("房间已被创建人解散");
+          setTimeout(() => setRoomGoneToast(null), 3500);
+          return;
+        }
+        if (!res.ok) return;
         const data = (await res.json()) as {
           proposal?: { id?: string } | null;
           scenario_proposal_id?: string | null;
@@ -702,6 +719,11 @@ function HomeInner() {
   // mentions for handles that aren't yet in allContacts.
   const [pendingInvites, setPendingInvites] = useState<Record<string, string>>({});
   const [mentionToast, setMentionToast] = useState<string | null>(null);
+  // Banner toast shown when the active room gets deleted by its creator while
+  // a non-creator member has the URL open. Wired to the trip-proposal poller
+  // (404/403 → room is gone). Three seconds is enough to read and matches
+  // the mentionToast cadence so the UI feels coherent.
+  const [roomGoneToast, setRoomGoneToast] = useState<string | null>(null);
   const [recentJobs, setRecentJobs] = useState<{ id: string; trip_label: string; status: string; created_at: string }[]>([]);
   // Inline booking task cards rendered below results
   const [inlineItems, setInlineItems] = useState<{ type: "job"; jobId: string }[]>([]);
@@ -2059,6 +2081,23 @@ function HomeInner() {
           }}
         >
           {location.gpsError}
+        </div>
+      )}
+
+      {/* Room-dissolved toast (creator deleted the room while a member had
+          the URL open). Reuses the GPS-toast styling so the page has one
+          visual language for transient banners. */}
+      {roomGoneToast && (
+        <div
+          className="fixed top-4 left-1/2 -translate-x-1/2 z-50 px-4 py-2.5 rounded-xl text-sm shadow-lg"
+          style={{
+            backgroundColor: "#FDF6EC",
+            border: "1px solid #E8A020",
+            color: "#8B5E14",
+            fontFamily: "var(--font-dm-sans)",
+          }}
+        >
+          {roomGoneToast}
         </div>
       )}
 
