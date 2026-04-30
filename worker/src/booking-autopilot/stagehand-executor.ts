@@ -3543,11 +3543,31 @@ The user will enter CVV and confirm payment themselves.`,
               // never works for /r/<slug> because anchors lack role="button".
               const isDetailUrl = /opentable\.com\/r\//i.test(raw.url());
               if (isDetailUrl) {
-                // Step 1: pick the option closest to requested time, then drive
-                // the <select> via Playwright locator.selectOption(). Playwright
-                // simulates a real user gesture so OT's React state + AJAX
-                // refetch chain fires reliably. Native setter+dispatch was
-                // unreliable because OT's overlay <div> doesn't watch <select>.
+                // Step 0: navigate to detail URL with dateTime+covers query
+                // params if missing. OT widget honors these on SSR — without
+                // them, the widget defaults to today and the wrong party size.
+                // Last benchmark (96834ada) showed widget date stuck at "Apr 30"
+                // even though case date was "May 14" because we never set it.
+                const taskDateMatch = input.task.match(/\bon\s+(20\d{2}-\d{2}-\d{2})\b/);
+                const taskCoversMatch = input.task.match(/\bfor\s+(\d+)\s+people\b/i);
+                if (taskDateMatch) {
+                  const hh = String(Math.floor(requestedMinutes / 60)).padStart(2, "0");
+                  const mm = String(requestedMinutes % 60).padStart(2, "0");
+                  const covers = taskCoversMatch ? taskCoversMatch[1] : "2";
+                  const u = new URL(raw.url());
+                  const desiredDateTime = `${taskDateMatch[1]}T${hh}:${mm}`;
+                  if (u.searchParams.get("dateTime") !== desiredDateTime || u.searchParams.get("covers") !== covers) {
+                    u.searchParams.set("dateTime", desiredDateTime);
+                    u.searchParams.set("covers", covers);
+                    trace(`[opentable] detail-page navigate w/ params: dateTime=${desiredDateTime}&covers=${covers}`);
+                    await raw.goto(u.toString(), { waitUntil: "domcontentloaded", timeout: 15000 }).catch(() => {});
+                    await new Promise((r) => setTimeout(r, 2000));
+                  }
+                }
+
+                // Step 1: as a backup, drive the <select> via Playwright
+                // selectOption. Some OT variants need this to finalize state
+                // even when query params set the initial render.
                 const optionInfo = await raw.evaluate(
                   ({ reqMins }: { reqMins: number }) => {
                     const parseT = (text: string): number | null => {
@@ -3571,8 +3591,6 @@ The user will enter CVV and confirm payment themselves.`,
 
                 let setOk = false;
                 if (optionInfo) {
-                  // selectOption uses Playwright's user-gesture path so React
-                  // state + OT's AJAX refetch fire correctly.
                   setOk = await raw
                     .locator('[data-test="time-picker"]')
                     .selectOption(optionInfo.value)
@@ -3583,9 +3601,7 @@ The user will enter CVV and confirm payment themselves.`,
 
                 // Step 2: wait for AJAX-rendered <ul data-test="time-slots">
                 // (extend to 8s — OT can take 5+ seconds when peak load)
-                if (setOk) {
-                  await raw.waitForSelector('[data-test="time-slots"] a, [data-test="time-slots"] button', { timeout: 8000 }).catch(() => null);
-                }
+                await raw.waitForSelector('[data-test="time-slots"] a, [data-test="time-slots"] button', { timeout: 8000 }).catch(() => null);
 
                 // Step 3: scope to time-slots container, click closest anchor
                 const detailSlot = await raw.evaluate(
