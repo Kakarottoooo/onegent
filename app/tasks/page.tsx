@@ -22,6 +22,7 @@ import RestaurantStepCard from "@/components/booking/RestaurantStepCard";
 import BrowserLiveView from "@/components/BrowserLiveView";
 import ShareTripModal from "@/components/ShareTripModal";
 import AddToTripModal from "@/components/AddToTripModal";
+import { ModifyTaskButton } from "@/components/ModifyTaskButton";
 import { getBrowserModelForStagehand } from "@/lib/agent-model-config";
 import "./tasks.css";
 
@@ -1336,6 +1337,9 @@ function JobCard({ job, onRefresh, sessionId, onOpenLive }: { job: BookingJob; o
             {resetting ? "Starting…" : "↺ Reset & Retry"}
           </button>
         )}
+        <span style={{ position: "relative" }}>
+          <ModifyTaskButton job={job} onRefresh={onRefresh} />
+        </span>
         <span className="job-card__expand">{expanded ? "▲" : "▼"}</span>
         <button
           onClick={handleDelete}

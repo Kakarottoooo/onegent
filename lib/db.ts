@@ -1668,14 +1668,26 @@ export async function ensureBookingJobsTable(): Promise<void> {
           status            TEXT NOT NULL DEFAULT 'pending',
           steps             JSONB NOT NULL DEFAULT '[]',
           autonomy_settings JSONB,
+          plan_version      INT NOT NULL DEFAULT 1,
+          constraints       JSONB,
+          policy            JSONB,
           created_at        TIMESTAMPTZ DEFAULT NOW(),
           updated_at        TIMESTAMPTZ DEFAULT NOW(),
           completed_at      TIMESTAMPTZ
         )
       `;
-      // Migrate existing tables that pre-date this column
+      // Migrate existing tables that pre-date these columns
       await sql`
         ALTER TABLE booking_jobs ADD COLUMN IF NOT EXISTS autonomy_settings JSONB
+      `.catch(() => {});
+      await sql`
+        ALTER TABLE booking_jobs ADD COLUMN IF NOT EXISTS plan_version INT NOT NULL DEFAULT 1
+      `.catch(() => {});
+      await sql`
+        ALTER TABLE booking_jobs ADD COLUMN IF NOT EXISTS constraints JSONB
+      `.catch(() => {});
+      await sql`
+        ALTER TABLE booking_jobs ADD COLUMN IF NOT EXISTS policy JSONB
       `.catch(() => {});
       await sql`CREATE INDEX IF NOT EXISTS booking_jobs_session_idx ON booking_jobs (session_id)`;
       await sql`CREATE INDEX IF NOT EXISTS booking_jobs_user_idx ON booking_jobs (user_id) WHERE user_id IS NOT NULL`;
@@ -1718,7 +1730,8 @@ export interface DecisionLogEntry {
     | "succeeded"      // terminal success
     | "failed"         // terminal failure for this option
     | "skipped"        // no_availability — not retried
-    | "scene_replan";  // cascaded change from another step's outcome
+    | "scene_replan"   // cascaded change from another step's outcome
+    | "task_modified"; // user mutated constraints/policy via modify API (Phase 1)
   message: string;     // human-readable, e.g. "Tried Le Bernardin at 7:00pm"
   outcome?: string;    // e.g. "No availability", "Network error", "Booked ✓"
 }
@@ -1779,6 +1792,15 @@ export interface BookingJob {
   steps: BookingJobStep[];
   /** User-configured autonomy settings at the time this job was created. */
   autonomy_settings: import("./autonomy").AgentAutonomySettings | null;
+  /**
+   * Mutable-task fields (Phase 1). plan_version increments every time
+   * applyJobModification mutates the job. constraints holds the canonical
+   * task definition (city, time, party_size, etc); policy holds the
+   * fallback / approval knobs the agent may consult.
+   */
+  plan_version: number;
+  constraints: import("./booking-jobs/types").JobConstraints | null;
+  policy: import("./booking-jobs/types").JobPolicy | null;
   created_at: string;
   updated_at: string;
   completed_at: string | null;
@@ -1909,6 +1931,41 @@ export async function updateBookingJobSteps(id: string, steps: BookingJobStep[])
     SET steps = ${stepsJson}::jsonb, updated_at = NOW()
     WHERE id = ${id}
   `;
+}
+
+/**
+ * Atomically apply a Phase-1 modification to a booking_job:
+ *   - bumps plan_version by 1
+ *   - replaces constraints / policy / steps with the supplied values
+ *   - resets status to 'pending' (per the "full reset" decision A)
+ *   - clears completed_at so the job is eligible for /start again
+ *
+ * Returns the updated row so callers can echo plan_version back to the client.
+ */
+export async function applyBookingJobModification(params: {
+  id: string;
+  constraints: import("./booking-jobs/types").JobConstraints;
+  policy: import("./booking-jobs/types").JobPolicy;
+  steps: BookingJobStep[];
+}): Promise<BookingJob | null> {
+  await ensureBookingJobsTable();
+  const stepsJson = JSON.stringify(params.steps);
+  const constraintsJson = JSON.stringify(params.constraints);
+  const policyJson = JSON.stringify(params.policy);
+  const result = await sql<BookingJob>`
+    UPDATE booking_jobs
+    SET
+      plan_version = plan_version + 1,
+      constraints  = ${constraintsJson}::jsonb,
+      policy       = ${policyJson}::jsonb,
+      steps        = ${stepsJson}::jsonb,
+      status       = 'pending',
+      completed_at = NULL,
+      updated_at   = NOW()
+    WHERE id = ${params.id}
+    RETURNING *
+  `;
+  return result.rows[0] ?? null;
 }
 
 export async function deleteBookingJob(id: string): Promise<void> {

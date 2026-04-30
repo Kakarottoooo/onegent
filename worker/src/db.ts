@@ -617,14 +617,26 @@ export async function ensureBookingJobsTable(): Promise<void> {
           status            TEXT NOT NULL DEFAULT 'pending',
           steps             JSONB NOT NULL DEFAULT '[]',
           autonomy_settings JSONB,
+          plan_version      INT NOT NULL DEFAULT 1,
+          constraints       JSONB,
+          policy            JSONB,
           created_at        TIMESTAMPTZ DEFAULT NOW(),
           updated_at        TIMESTAMPTZ DEFAULT NOW(),
           completed_at      TIMESTAMPTZ
         )
       `;
-      // Migrate existing tables that pre-date this column
+      // Migrate existing tables that pre-date these columns
       await sql`
         ALTER TABLE booking_jobs ADD COLUMN IF NOT EXISTS autonomy_settings JSONB
+      `.catch(() => {});
+      await sql`
+        ALTER TABLE booking_jobs ADD COLUMN IF NOT EXISTS plan_version INT NOT NULL DEFAULT 1
+      `.catch(() => {});
+      await sql`
+        ALTER TABLE booking_jobs ADD COLUMN IF NOT EXISTS constraints JSONB
+      `.catch(() => {});
+      await sql`
+        ALTER TABLE booking_jobs ADD COLUMN IF NOT EXISTS policy JSONB
       `.catch(() => {});
       await sql`CREATE INDEX IF NOT EXISTS booking_jobs_session_idx ON booking_jobs (session_id)`;
       await sql`CREATE INDEX IF NOT EXISTS booking_jobs_user_idx ON booking_jobs (user_id) WHERE user_id IS NOT NULL`;
@@ -667,7 +679,8 @@ export interface DecisionLogEntry {
     | "succeeded"      // terminal success
     | "failed"         // terminal failure for this option
     | "skipped"        // no_availability — not retried
-    | "scene_replan";  // cascaded change from another step's outcome
+    | "scene_replan"   // cascaded change from another step's outcome
+    | "task_modified"; // user mutated constraints/policy via modify API (Phase 1)
   message: string;     // human-readable, e.g. "Tried Le Bernardin at 7:00pm"
   outcome?: string;    // e.g. "No availability", "Network error", "Booked ✓"
 }
@@ -728,6 +741,10 @@ export interface BookingJob {
   steps: BookingJobStep[];
   /** User-configured autonomy settings at the time this job was created. */
   autonomy_settings: import("./autonomy").AgentAutonomySettings | null;
+  /** Phase 1 mutable-task fields. See lib/booking-jobs/types.ts. */
+  plan_version: number;
+  constraints: Record<string, unknown> | null;
+  policy: Record<string, unknown> | null;
   created_at: string;
   updated_at: string;
   completed_at: string | null;
