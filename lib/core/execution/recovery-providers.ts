@@ -7,8 +7,7 @@
  * lib/booking-autopilot/providers/), and flight uses Expedia alone.
  *
  * Restaurant chain:
- *   Yelp (primary, already tried by recovery.Phase 1)
- *     → OpenTable
+ *   OpenTable (primary, already tried by recovery.Phase 1)
  *     → Resy
  *     → Google Places lookup → navigate official website for reservation link
  *     → return no_availability with manual-handoff URL
@@ -19,7 +18,7 @@
  *   - Uses runBrowserTask directly (not runExecutionJob) because the
  *     provider here is NOT the primary for this scenario — we have to
  *     construct the URL / task ourselves; runExecutionJob would route
- *     right back to Yelp.
+ *     right back to OpenTable.
  *
  * Called by recovery.ts Phase 3 after Phase 1 or Phase 2 fails.
  */
@@ -45,7 +44,7 @@ import type {
 // ─── Public API ──────────────────────────────────────────────────────────────
 
 /**
- * Try alternate providers after the primary (Yelp for restaurant) fails.
+ * Try alternate providers after the primary (OpenTable for restaurant) fails.
  * Returns a successful ExecutionJobResult when any provider books, or a
  * handoff-style "no_availability" result pointing at the venue's own
  * reservation page (website fallback). Returns null only when no
@@ -65,35 +64,7 @@ export async function tryProviderFallbackChain(
   const profile = await resolveProfile(request, ctx.userId ?? null);
   let attempts = attemptsBefore;
 
-  // ── Step 1: OpenTable ──
-  const openTableCheck = validateConsent(policy, {
-    type: "use_provider",
-    providerId: "opentable-com",
-  });
-  if (openTableCheck.allowed) {
-    await writeAudit({
-      jobId: ctx.jobId,
-      type: "provider_fallback",
-      stepIndex: ctx.stepIndex,
-      message: "Trying OpenTable after Yelp miss",
-      details: { fromProvider: "yelp-com", toProvider: "opentable-com" },
-    });
-
-    attempts++;
-    const openTableResult = await tryOpenTable(request, ctx, profile);
-    if (openTableResult) {
-      return bookedResult(openTableResult, ctx.jobId, attempts);
-    }
-  } else {
-    await writeAudit({
-      jobId: ctx.jobId,
-      type: "action_denied",
-      stepIndex: ctx.stepIndex,
-      message: `OpenTable blocked by consent policy: ${openTableCheck.reason}`,
-    });
-  }
-
-  // ── Step 2: Resy ──
+  // ── Step 1: Resy ──
   const resyCheck = validateConsent(policy, {
     type: "use_provider",
     providerId: "resy-com",
@@ -121,7 +92,7 @@ export async function tryProviderFallbackChain(
     });
   }
 
-  // ── Step 3: Google Places → official website ──
+  // ── Step 2: Google Places → official website ──
   const websiteCheck = validateConsent(policy, {
     type: "use_provider",
     providerId: "website-generic",
@@ -157,50 +128,6 @@ export async function tryProviderFallbackChain(
 }
 
 // ─── Provider attempts ───────────────────────────────────────────────────────
-
-/**
- * Build an OpenTable search URL and run a browser task. Same shape as
- * tryResy — mirrors what was buildRestaurantContext's startUrl before
- * Yelp took over as primary. covers + dateTime in the URL bias OpenTable's
- * default party-size / time selectors so the agent doesn't have to set them
- * from the search page.
- */
-async function tryOpenTable(
-  request: ExecutionJobRequest,
-  ctx: ExecutionContext,
-  profile: BookingProfile,
-): Promise<BrowserTaskResult | null> {
-  if (request.request.scenario !== "restaurant") return null;
-  const p = request.request.params;
-
-  const termRaw = p.city ? `${p.restaurant_name} ${p.city}` : p.restaurant_name;
-  const openTableUrl = `https://www.opentable.com/s?term=${encodeURIComponent(termRaw)}&covers=${p.covers}&dateTime=${p.date}T${p.time}:00`;
-
-  const { task } = buildRestaurantTask({
-    restaurantName: p.restaurant_name,
-    city: p.city,
-    date: p.date,
-    time: p.time,
-    covers: p.covers,
-    profile,
-  });
-
-  const input: BrowserTaskInput = {
-    startUrl: openTableUrl,
-    task,
-    profile,
-    jobId: ctx.jobId,
-    stepIndex: ctx.stepIndex ?? 0,
-    profileId: request.profileId,
-  };
-
-  try {
-    const result = await runBrowserTask(input);
-    return isGenuineBooking(result, openTableUrl) ? result : null;
-  } catch {
-    return null;
-  }
-}
 
 /**
  * Build a Resy search URL and run a browser task against it. Returns the
