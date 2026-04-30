@@ -4,6 +4,7 @@ import type { BrowserProvider, ProviderStageSignals } from "./types";
 import { fillGuestFormWithAI, auditAndRefillEmptyFields } from "../ai-loop/fill-form";
 import { buildEffectiveProfile } from "../core/profile";
 import type { BookingProfile } from "../types";
+import { shouldStopForDryRun, DRY_RUN_BOUNDARY_MARKER } from "../dry-run";
 
 interface ResyProfile {
   first_name?: string;
@@ -189,6 +190,14 @@ export const resyProvider: BrowserProvider = {
 
     // Submit the reservation form
     await new Promise(r => setTimeout(r, 800));
+
+    // Benchmark dry_run boundary: if the caller flagged this run as dry_run,
+    // stop before the reservation-committing click.
+    if (shouldStopForDryRun(helpers)) {
+      trace(`[resy] ${DRY_RUN_BOUNDARY_MARKER} - submit click skipped (benchmark_dry_run=true)`);
+      return;
+    }
+
     const submitted = await page.evaluate(() => {
       const isVisible = (el: Element) => {
         const r = (el as HTMLElement).getBoundingClientRect();

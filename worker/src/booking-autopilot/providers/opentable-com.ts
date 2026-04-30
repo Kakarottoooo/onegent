@@ -4,6 +4,7 @@ import type { BrowserProvider, PaymentFillResult, ProviderStageSignals } from ".
 import { fillGuestFormWithAI, auditAndRefillEmptyFields } from "../ai-loop/fill-form";
 import { buildEffectiveProfile } from "../core/profile";
 import type { BookingProfile } from "../types";
+import { shouldStopForDryRun, DRY_RUN_BOUNDARY_MARKER } from "../dry-run";
 
 interface OpenTableProfile {
   first_name?: string;
@@ -353,6 +354,15 @@ export const openTableProvider: BrowserProvider = {
     const ccRequired = await hasCreditCardSection(page);
     if (ccRequired) {
       trace('[opentable] credit card section detected - skipping submit click (payment stage will handle it)');
+      return;
+    }
+
+    // Benchmark dry_run boundary: if the caller flagged this run as dry_run,
+    // stop before the reservation-committing click. Form is filled, button is
+    // visible, but we never click — proves the full pipeline up to submit
+    // without producing a real reservation.
+    if (shouldStopForDryRun(helpers)) {
+      trace(`[opentable] ${DRY_RUN_BOUNDARY_MARKER} - submit click skipped (benchmark_dry_run=true)`);
       return;
     }
 
