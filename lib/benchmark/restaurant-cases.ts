@@ -13,12 +13,12 @@
 import type { RestaurantBenchmarkCase } from "./types";
 
 export const RESTAURANT_BENCHMARK_CASES_NYC: RestaurantBenchmarkCase[] = [
-  // ─── OpenTable: classic mid-popularity spot, fixed time ──────────────────
+  // ─── OpenTable: large mainstream venue, fixed time ───────────────────────
   {
     case_id: "nyc_restaurant_001",
     city: "New York",
-    restaurant_name: "L'Artusi",
-    restaurant_url: "https://www.opentable.com/lartusi",
+    restaurant_name: "Boucherie West Village",
+    restaurant_url: "https://www.opentable.com/r/boucherie-west-village-new-york",
     expected_provider: "OpenTable",
     date: "2026-05-12",
     time: "19:00",
@@ -26,7 +26,7 @@ export const RESTAURANT_BENCHMARK_CASES_NYC: RestaurantBenchmarkCase[] = [
     occasion: "date_night",
     preferences: {
       atmosphere: "romantic",
-      cuisine: "italian",
+      cuisine: "french",
     },
     fallback_policy: {
       time_window_minutes: 0,
@@ -35,15 +35,15 @@ export const RESTAURANT_BENCHMARK_CASES_NYC: RestaurantBenchmarkCase[] = [
       require_user_approval_before_booking: false,
     },
     notes:
-      "Baseline: well-known West Village Italian on OpenTable, popular but not impossible. Tests the happy path.",
+      "Baseline: large French brasserie in West Village, stable on OpenTable with regular weekday availability. Tests the happy path.",
   },
 
-  // ─── OpenTable: high-demand spot, allow time fallback ───────────────────
+  // ─── OpenTable: popular date-night spot, allow time fallback ─────────────
   {
     case_id: "nyc_restaurant_002",
     city: "New York",
-    restaurant_name: "Carbone",
-    restaurant_url: "https://www.opentable.com/r/carbone-new-york",
+    restaurant_name: "Tao Downtown",
+    restaurant_url: "https://www.opentable.com/r/tao-downtown-new-york",
     expected_provider: "OpenTable",
     date: "2026-05-14",
     time: "19:30",
@@ -56,15 +56,15 @@ export const RESTAURANT_BENCHMARK_CASES_NYC: RestaurantBenchmarkCase[] = [
       require_user_approval_before_booking: false,
     },
     notes:
-      "Carbone is famously hard to book. Expected outcome: no_availability at 19:30 → time fallback exercises the time-window logic.",
+      "Mid-demand mainstream Asian-fusion spot. Stable presence on OpenTable; 19:30 prime-time may exercise the time-window fallback.",
   },
 
   // ─── OpenTable: medium spot with party size 4 ───────────────────────────
   {
     case_id: "nyc_restaurant_003",
     city: "New York",
-    restaurant_name: "Via Carota",
-    restaurant_url: "https://www.opentable.com/via-carota",
+    restaurant_name: "Buddakan",
+    restaurant_url: "https://www.opentable.com/r/buddakan-new-york",
     expected_provider: "OpenTable",
     date: "2026-05-13",
     time: "20:00",
@@ -77,15 +77,15 @@ export const RESTAURANT_BENCHMARK_CASES_NYC: RestaurantBenchmarkCase[] = [
       require_user_approval_before_booking: false,
     },
     notes:
-      "Tests party_size > 2 + later time slot. Via Carota is walk-in heavy on OpenTable, useful for measuring availability accuracy.",
+      "Tests party_size > 2 + later time slot. Buddakan is a large modern-Asian venue with multi-room capacity, reliably bookable on OpenTable.",
   },
 
-  // ─── Resy: trendy reservation, fixed time ───────────────────────────────
+  // ─── Resy: established Resy venue, fixed time ───────────────────────────
   {
     case_id: "nyc_restaurant_004",
     city: "New York",
-    restaurant_name: "Don Angie",
-    restaurant_url: "https://resy.com/cities/ny/don-angie",
+    restaurant_name: "Lilia",
+    restaurant_url: "https://resy.com/cities/ny/lilia",
     expected_provider: "Resy",
     date: "2026-05-15",
     time: "19:00",
@@ -98,7 +98,7 @@ export const RESTAURANT_BENCHMARK_CASES_NYC: RestaurantBenchmarkCase[] = [
       require_user_approval_before_booking: false,
     },
     notes:
-      "Resy baseline: West Village popular spot, no time fallback. Probes Resy login/cookie flow.",
+      "Resy baseline: long-running Williamsburg Italian, reliably listed on Resy. Probes Resy login/cookie flow + the cities/ny/<slug> → cities/new-york-ny/venues/<slug> redirect.",
   },
 
   // ─── Resy: ultra-popular, allow time + platform fallback ────────────────

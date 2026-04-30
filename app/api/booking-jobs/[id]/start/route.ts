@@ -928,7 +928,22 @@ async function runUniversalStep(
               }
               if (resyData.availableSlots?.length) {
                 const bodyWithSlots = { ...body, availableSlots: resyData.availableSlots, platformsTried: [...platformsTried, "resy"] };
-                return { ...step, body: bodyWithSlots, status: "no_availability", error: resyData.summary, decisionLog: log };
+                // Phase 2: deep-link override so the user lands on Resy with
+                // their date / party / time pre-filled and can pick a slot.
+                const stepWithSlots = { ...step, body: bodyWithSlots };
+                const deepLinkEnrich = buildDeepLinkEnrichmentForStep(
+                  stepWithSlots,
+                  "No exact match — tap to pick a different time:",
+                );
+                return {
+                  ...step,
+                  body: bodyWithSlots,
+                  status: "no_availability",
+                  error: resyData.summary,
+                  handoff_url: deepLinkEnrich?.handoff_url,
+                  actionItem: deepLinkEnrich?.actionItem,
+                  decisionLog: log,
+                };
               }
               log.push({ ts: now(), type: "attempt", message: `Not found on Resy — looking up official website via Google Places`, outcome: "Retrying" });
             } catch { /* fall through to Google Places lookup */ }
@@ -1027,7 +1042,24 @@ async function runUniversalStep(
       const bodyWithSlots = data.availableSlots?.length
         ? { ...(step.body as Record<string, unknown>), availableSlots: data.availableSlots }
         : step.body;
-      return { ...step, body: bodyWithSlots, status: "no_availability", error: data.summary, decisionLog: log };
+      // Phase 2: deep-link override for restaurant steps so the user lands on
+      // OT/Resy with their constraints pre-filled even when our agent couldn't
+      // find a slot. Returns null for non-restaurant steps → existing
+      // behaviour preserved.
+      const stepWithSlots = { ...step, body: bodyWithSlots };
+      const deepLinkEnrich = buildDeepLinkEnrichmentForStep(
+        stepWithSlots,
+        "No exact match — tap to pick a different time:",
+      );
+      return {
+        ...step,
+        body: bodyWithSlots,
+        status: "no_availability",
+        error: data.summary,
+        handoff_url: deepLinkEnrich?.handoff_url,
+        actionItem: deepLinkEnrich?.actionItem,
+        decisionLog: log,
+      };
     }
 
     // error path — also capture available slots for restaurants
