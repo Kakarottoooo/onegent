@@ -1165,6 +1165,11 @@ function HomeInner() {
              *  this client should auto-fire /api/rooms/[id]/synthesize and
              *  surface the merged-search cards. */
             scenario_synthesis_ready?: boolean;
+            /** Contact ids the server matched against the caller's contacts
+             *  via natural-language member_names (no @-picker required).
+             *  Merged into capturedMentionIds below so the eventual
+             *  ConfirmCard commit treats them identically to explicit @s. */
+            auto_mentioned_user_ids?: string[];
           }
         | null;
 
@@ -1177,6 +1182,17 @@ function HomeInner() {
       }
 
       const nlu = data.result;
+
+      // Merge server-resolved contact ids (from natural-language
+      // member_names) into the captured mention list so downstream
+      // setPendingConfirm calls treat them identically to explicit @-picker
+      // mentions. Dedupe by Set in case the user both @-tagged and named
+      // the same person in free text.
+      const mergedMentionIds = (() => {
+        const auto = data.auto_mentioned_user_ids ?? [];
+        if (auto.length === 0) return capturedMentionIds;
+        return Array.from(new Set([...capturedMentionIds, ...auto]));
+      })();
 
       // Sessions: if the server just auto-created a session (no incoming
       // session_id), it echoes the new id back. Adopt it so next turn syncs
@@ -1228,7 +1244,7 @@ function HomeInner() {
       // the DR IS the plan, the user is just refining their preferences.
       if (nlu.intent === "create_plan" && nlu.confirm_ready && nlu.scenario === "trip" && !activeRoomId) {
         if (nlu.assistant_reply) chat.injectAssistantMessage(nlu.assistant_reply);
-        setPendingConfirm({ nlu, message: text, kind: "trip", mentioned_user_ids: capturedMentionIds });
+        setPendingConfirm({ nlu, message: text, kind: "trip", mentioned_user_ids: mergedMentionIds });
         return;
       }
 
@@ -1253,7 +1269,7 @@ function HomeInner() {
       // multi-party merge gets bypassed entirely.
       if (nlu.intent === "create_plan" && nlu.confirm_ready && !activeRoomId) {
         if (nlu.assistant_reply) chat.injectAssistantMessage(nlu.assistant_reply);
-        setPendingConfirm({ nlu, message: text, kind: "plan", mentioned_user_ids: capturedMentionIds });
+        setPendingConfirm({ nlu, message: text, kind: "plan", mentioned_user_ids: mergedMentionIds });
         return;
       }
 
@@ -1429,10 +1445,10 @@ function HomeInner() {
       }
 
       if (nlu.intent === "create_room" && nlu.confirm_ready) {
-        setPendingConfirm({ nlu, message: text, kind: "room", mentioned_user_ids: capturedMentionIds });
+        setPendingConfirm({ nlu, message: text, kind: "room", mentioned_user_ids: mergedMentionIds });
       } else if (nlu.intent === "create_plan" && nlu.confirm_ready) {
         // Safety net — shouldn't reach here given the early return above.
-        setPendingConfirm({ nlu, message: text, kind: "plan", mentioned_user_ids: capturedMentionIds });
+        setPendingConfirm({ nlu, message: text, kind: "plan", mentioned_user_ids: mergedMentionIds });
       } else if (nlu.suggested_quick_picks && nlu.suggested_quick_picks.length > 0) {
         setPendingQuickPicks(nlu.suggested_quick_picks);
       } else if (looksLikeRecommendationAsk(text)) {

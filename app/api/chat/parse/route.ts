@@ -32,6 +32,8 @@ import {
   listRoomMembers,
   listMemberIntentStates,
   getUserProfile,
+  resolveContactsByNamesFuzzy,
+  type FuzzyContactResolution,
 } from "@/lib/db";
 import { triggerSynthesis } from "@/lib/agent/trip-synthesis";
 import type { ChatMessage } from "@/lib/llm-client";
@@ -176,6 +178,122 @@ export async function POST(req: NextRequest) {
     console.log(
       `[chat/parse] v2 — scenario=${result.scenario} intent=${result.intent} confirm_ready=${result.confirm_ready}${roomId ? ` room=${roomId}` : ""}${oosTags.length ? ` oos=[${oosTags.join("|")}]` : ""}`,
     );
+
+    // Auto-resolve member_names against the caller's contacts so the user can
+    // type natural language ("和朋友 ziweiC 找餐厅") instead of being forced
+    // through the @-picker UI. Strategy = (i) blocking: if any name fails to
+    // resolve unanimously, override the result to ask_clarification with the
+    // candidates as quick picks. Never silently drop a name and downgrade to
+    // solo — that's the failure mode the user explicitly called out.
+    //
+    // Skipped when:
+    //   - no userId (logged-out caller, can't read their contacts anyway)
+    //   - explicit @-picker already supplied mentioned_members (ground truth)
+    //   - user is already in a roomId (members of an existing DR are not
+    //     looked up against the personal contact graph; @-mentions inside a
+    //     DR have a different code path)
+    const memberNamesFromNlu = (result.__v2_state?.member_names ?? []).filter(
+      (s: unknown): s is string => typeof s === "string" && s.trim().length > 0,
+    );
+    const autoResolvedMentionedIds: string[] = [];
+    if (
+      userId &&
+      !roomId &&
+      mentionedMembers.length === 0 &&
+      memberNamesFromNlu.length > 0
+    ) {
+      try {
+        const resolutions: FuzzyContactResolution[] =
+          await resolveContactsByNamesFuzzy(userId, memberNamesFromNlu);
+        const everyResolved = resolutions.every((r) => !!r.contact_user_id);
+        if (everyResolved) {
+          // Replace the user-typed tokens with each contact's canonical
+          // display_name so /api/chat/commit's exact-match resolveContactsByNames
+          // hits without a second fuzzy pass. Fallback chain matches the
+          // commit-side label rendering: display_name → username → profile_code.
+          const canonicalNames = resolutions.map((r) => {
+            const m = r.matched;
+            return (
+              m?.display_name?.trim() ||
+              m?.username?.trim() ||
+              m?.profile_code ||
+              r.name
+            );
+          });
+          result.member_names = canonicalNames;
+          if (result.__v2_state) {
+            result.__v2_state.member_names = canonicalNames;
+            result.__v2_state.party_type = "multi";
+            if (result.__v2_state.intent === "create_plan") {
+              result.__v2_state.intent = "create_room";
+            }
+          }
+          result.party_type = "multi";
+          if (result.intent === "create_plan") result.intent = "create_room";
+          for (const r of resolutions) {
+            if (r.contact_user_id) autoResolvedMentionedIds.push(r.contact_user_id);
+          }
+          console.log(
+            `[chat/parse] auto-resolved ${resolutions.length} member name(s) → ${autoResolvedMentionedIds.length} contact(s)`,
+          );
+        } else {
+          // Block: build a single ask_clarification turn covering every name
+          // that couldn't pin down to one contact. The user picks the right
+          // contact (or invites) and the next parse cycle re-tries.
+          const lines: string[] = [];
+          const picks: Array<{ label: string; value: string }> = [];
+          const seenLabels = new Set<string>();
+          for (const r of resolutions) {
+            if (r.contact_user_id) continue;
+            if (r.candidates.length === 0) {
+              lines.push(`联系人里没找到「${r.name}」。`);
+            } else {
+              lines.push(`「${r.name}」是下面哪一位？`);
+              for (const c of r.candidates) {
+                const label =
+                  c.display_name?.trim() ||
+                  c.username?.trim() ||
+                  c.profile_code ||
+                  "(unnamed)";
+                if (seenLabels.has(label)) continue;
+                seenLabels.add(label);
+                picks.push({ label, value: label });
+              }
+            }
+          }
+          // Always offer escape hatches so the user is never trapped:
+          //   - 单人继续 → "_solo_" sentinel; client treats as "drop the
+          //     co-decider claim and proceed solo"
+          //   - 邀请新成员 → "_invite_" sentinel; client opens the existing
+          //     lookup-and-invite flow
+          picks.push({ label: "邀请新成员", value: "邀请新成员" });
+          picks.push({ label: "我自己来就行", value: "我自己来就行" });
+          const reply =
+            lines.join("\n\n") ||
+            "等一下让我先确认一下你说的是哪位朋友。";
+          result.assistant_reply = reply;
+          result.suggested_clarify_question = reply;
+          result.suggested_quick_picks = picks;
+          result.confirm_ready = false;
+          result.missing_fields = ["co_decider"];
+          if (result.__v2_action) {
+            result.__v2_action = {
+              type: "ask_clarification",
+              missing: ["co_decider"],
+              suggested_quick_picks: picks,
+            };
+          }
+          console.log(
+            `[chat/parse] contact-resolver blocked: ${resolutions
+              .filter((r) => !r.contact_user_id)
+              .map((r) => `${r.name}=${r.candidates.length}cand`)
+              .join(", ")}`,
+          );
+        }
+      } catch (err) {
+        console.warn("[chat/parse] contact resolver failed:", err);
+      }
+    }
 
     // In-trip-room synthesize trigger: when the user's in a trip room and
     // clearly asks for the plan ("给我方案", "synthesize"), override the
@@ -387,6 +505,11 @@ export async function POST(req: NextRequest) {
       nlu_version: "v2",
       session_id: resolvedSessionId,
       scenario_synthesis_ready: drSynthesisReady,
+      // Contact IDs the auto-resolver matched against the caller's contact
+      // graph from natural-language member_names. The client merges these
+      // with explicit @-picker ids so /api/chat/commit's mentioned_user_ids
+      // path lights up exactly the same way regardless of input modality.
+      auto_mentioned_user_ids: autoResolvedMentionedIds,
     });
   } catch (err) {
     console.warn(

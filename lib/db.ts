@@ -4074,6 +4074,172 @@ export async function resolveContactsByNames(
   });
 }
 
+export interface ContactCandidate {
+  user_id: string;
+  display_name: string | null;
+  username: string | null;
+  profile_code: string;
+  nickname: string | null;
+}
+
+export interface FuzzyContactResolution {
+  /** The original name token from NLU member_names. */
+  name: string;
+  /**
+   * Set when there is exactly one match (precise OR a single fuzzy candidate).
+   * Caller treats this as "definitely this person."
+   */
+  contact_user_id: string | null;
+  /**
+   * Display info for the matched contact when contact_user_id is set.
+   * Lets the caller substitute the user-typed token (which may have been
+   * fuzzy, abbreviated, or a profile_code) with the canonical display_name
+   * so downstream code (commit's resolveContactsByNames exact-match resolver,
+   * proposal cards, audit logs) sees a consistent label.
+   */
+  matched: ContactCandidate | null;
+  /**
+   * Populated whenever the resolver couldn't pick a single answer:
+   *   - 0 candidates → caller must ask "no one matches, invite?"
+   *   - 2+ candidates → caller must ask "which one?"
+   * Empty array when contact_user_id is non-null (precise hit needs no
+   * disambiguation). Each candidate carries display fields the UI needs.
+   */
+  candidates: ContactCandidate[];
+}
+
+/**
+ * Same as resolveContactsByNames but adds fuzzy fallback so naturally-typed /
+ * voice-transcribed names can resolve without requiring an exact match.
+ *
+ * Match priority (first wins):
+ *   1. Exact (nickname / display_name / profile_code, case-insensitive,
+ *      with @ stripped from profile_code on both sides)
+ *   2. Substring on profile_code with @ stripped — covers "ziwei" matching
+ *      "@ziwei_b" when there is exactly one such contact
+ *   3. Prefix on nickname / display_name (target length ≥ 3, candidate
+ *      length ≥ target length) — covers "ziwei" → "ZiweiC"
+ *   4. Substring on nickname / display_name (target length ≥ 3) — covers
+ *      "李" → "李明" only if it's the unique match
+ *
+ * Fuzzy steps require length ≥ 3 to avoid pathological short-prefix collisions
+ * (e.g. "AB" matching half the contact list). Underscores, hyphens, and
+ * whitespace are stripped from BOTH sides before comparison so "ziwei_b",
+ * "ziwei-b", and "ziwei b" collapse to the same key.
+ *
+ * Returns one entry per input name, in input order. When fuzzy produces
+ * multiple candidates, contact_user_id stays null and `candidates` is
+ * populated — the caller (NLU parse) blocks with an ask_clarification quick
+ * pick rather than guessing.
+ */
+/**
+ * Pure matching kernel for resolveContactsByNamesFuzzy. Exported so unit
+ * tests can exercise the priority tiers and length guards without touching
+ * the database. Production callers should use resolveContactsByNamesFuzzy,
+ * which wraps this with the listContactsWithProfiles fetch.
+ */
+export function matchContactsFuzzy(
+  contacts: ContactWithProfile[],
+  names: string[],
+): FuzzyContactResolution[] {
+  if (names.length === 0) return [];
+
+  const collapseSeparators = (s: string) =>
+    s.toLowerCase().replace(/[\s_-]+/g, "").replace(/^@/, "");
+  const norm = (s: string | null | undefined) =>
+    s == null ? "" : collapseSeparators(s.trim());
+
+  const toCandidate = (c: ContactWithProfile): ContactCandidate => ({
+    user_id: c.contact_user_id,
+    display_name: c.display_name,
+    username: c.username,
+    profile_code: c.profile_code,
+    nickname: c.nickname,
+  });
+
+  return names.map((name) => {
+    const target = norm(name);
+    if (!target) return { name, contact_user_id: null, matched: null, candidates: [] };
+
+    // Tier 1: precise. As soon as we hit one, we're done — multiple precise
+    // matches against the same caller are extremely unlikely and we'd rather
+    // commit than block the user with "which 李明?" when the data already
+    // disambiguated.
+    const exact = contacts.find(
+      (c) =>
+        norm(c.nickname) === target ||
+        norm(c.display_name) === target ||
+        norm(c.profile_code) === target,
+    );
+    if (exact) {
+      return {
+        name,
+        contact_user_id: exact.contact_user_id,
+        matched: toCandidate(exact),
+        candidates: [],
+      };
+    }
+
+    // Tiers 2-4: fuzzy. Require ≥ 3 chars to keep short tokens from sweeping.
+    if (target.length < 3) {
+      return { name, contact_user_id: null, matched: null, candidates: [] };
+    }
+
+    const matchedSet = new Map<string, ContactWithProfile>();
+    const remember = (c: ContactWithProfile) => {
+      if (!matchedSet.has(c.contact_user_id)) matchedSet.set(c.contact_user_id, c);
+    };
+
+    // Tier 2: profile_code substring (handles "@ziwei" inside "@ziwei_c").
+    for (const c of contacts) {
+      const pc = norm(c.profile_code);
+      if (pc.length >= target.length && pc.includes(target)) remember(c);
+    }
+    // Tier 3: nickname / display_name prefix.
+    for (const c of contacts) {
+      const nick = norm(c.nickname);
+      const disp = norm(c.display_name);
+      if (
+        (nick.length >= target.length && nick.startsWith(target)) ||
+        (disp.length >= target.length && disp.startsWith(target))
+      ) {
+        remember(c);
+      }
+    }
+    // Tier 4: nickname / display_name substring.
+    for (const c of contacts) {
+      const nick = norm(c.nickname);
+      const disp = norm(c.display_name);
+      if (
+        (nick.length >= target.length && nick.includes(target)) ||
+        (disp.length >= target.length && disp.includes(target))
+      ) {
+        remember(c);
+      }
+    }
+
+    const candidates = Array.from(matchedSet.values()).map(toCandidate);
+    if (candidates.length === 1) {
+      return {
+        name,
+        contact_user_id: candidates[0].user_id,
+        matched: candidates[0],
+        candidates: [],
+      };
+    }
+    return { name, contact_user_id: null, matched: null, candidates };
+  });
+}
+
+export async function resolveContactsByNamesFuzzy(
+  ownerId: string,
+  names: string[],
+): Promise<FuzzyContactResolution[]> {
+  if (names.length === 0) return [];
+  const contacts = await listContactsWithProfiles(ownerId);
+  return matchContactsFuzzy(contacts, names);
+}
+
 export async function listRoomMembers(roomId: string): Promise<DecisionRoomMember[]> {
   await ensureDecisionRoomTables();
   const result = await sql<DecisionRoomMember>`
