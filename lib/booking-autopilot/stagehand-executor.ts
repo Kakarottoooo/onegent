@@ -3535,13 +3535,54 @@ The user will enter CVV and confirm payment themselves.`,
               };
 
               // ── OT detail-page widget: programmatic time-slot select ────────────
-              // /r/<slug> detail pages render time slots as <a> (no role="button")
-              // inside <ul data-test="time-slots">. Listing-card selector below
-              // misses them because it requires role="button". Scope to the
-              // official data-test container so we don't drag in unrelated <a>
-              // links from elsewhere on the page (Hours, Menu, etc).
+              // /r/<slug> detail pages render the booking widget in two states:
+              //   (a) initial: only <select data-test="time-picker"> shown
+              //   (b) post-select: <ul data-test="time-slots"> with <a> anchors
+              // We must drive the <select> first, wait for AJAX to render slots,
+              // then click the closest anchor. Listing-card selector below
+              // never works for /r/<slug> because anchors lack role="button".
               const isDetailUrl = /opentable\.com\/r\//i.test(raw.url());
               if (isDetailUrl) {
+                // Step 1: set the time-picker <select> to the option closest
+                // to the requested time. Use native setter + change event so
+                // React state hooks pick it up.
+                const setResult = await raw.evaluate(
+                  ({ reqMins }: { reqMins: number }) => {
+                    const parseT = (text: string): number | null => {
+                      const m = text.match(/(\d{1,2}):(\d{2})\s*(AM|PM)/i);
+                      if (!m) return null;
+                      let h = parseInt(m[1], 10);
+                      if (m[3].toUpperCase() === "PM" && h < 12) h += 12;
+                      if (m[3].toUpperCase() === "AM" && h === 12) h = 0;
+                      return h * 60 + parseInt(m[2], 10);
+                    };
+                    const select = document.querySelector<HTMLSelectElement>('[data-test="time-picker"]');
+                    if (!select) return { ok: false, reason: "no time-picker select" };
+                    const sorted = Array.from(select.options)
+                      .map((o) => ({ o, t: parseT(o.text) }))
+                      .filter((x): x is { o: HTMLOptionElement; t: number } => x.t !== null)
+                      .sort((a, b) => Math.abs(a.t - reqMins) - Math.abs(b.t - reqMins));
+                    if (sorted.length === 0) return { ok: false, reason: "no parseable options" };
+                    const target = sorted[0];
+                    const proto = Object.getPrototypeOf(select) as object;
+                    const setter = Object.getOwnPropertyDescriptor(proto, "value")?.set;
+                    if (setter) setter.call(select, target.o.value);
+                    else select.value = target.o.value;
+                    select.dispatchEvent(new Event("input", { bubbles: true }));
+                    select.dispatchEvent(new Event("change", { bubbles: true }));
+                    return { ok: true, picked: target.o.text, diff: Math.abs(target.t - reqMins) };
+                  },
+                  { reqMins: requestedMinutes },
+                ).catch((err: Error) => ({ ok: false, reason: err.message?.slice(0, 60) }));
+
+                trace(`[opentable] detail-page time-picker drive: ${JSON.stringify(setResult)}`);
+
+                // Step 2: wait briefly for AJAX-rendered <ul data-test="time-slots">
+                if (setResult.ok) {
+                  await raw.waitForSelector('[data-test="time-slots"] a, [data-test="time-slots"] button', { timeout: 5000 }).catch(() => null);
+                }
+
+                // Step 3: scope to time-slots container, click closest anchor
                 const detailSlot = await raw.evaluate(
                   ({ reqMins, maxDiffMins }: { reqMins: number; maxDiffMins: number }) => {
                     const parseT = (text: string): number | null => {
