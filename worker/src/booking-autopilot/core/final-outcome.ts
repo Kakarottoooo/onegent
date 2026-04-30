@@ -23,6 +23,20 @@ export const NO_AVAILABILITY_SIGNALS = [
   "there are no results",
   "no results for your search",
   "no available properties",
+  // Restaurant providers (OpenTable / Resy) — venue exists but is not bookable.
+  // Without these, the listing-stage classifier treats them as generic "stuck"
+  // and returns status=error after a 30s+ timeout instead of an immediate
+  // no_availability. Confirmed against L'Artusi (not on OT network), Carbone NY
+  // (permanently closed), Via Carota (404 page), Don Angie (Resy 404 page).
+  "not available on opentable",
+  "not on the opentable booking network",
+  "permanently closed",
+  "this restaurant is permanently closed",
+  "find similar restaurants",
+  // 404 / page-not-found pages on OT/Resy (octopus + "embarrassing" copy).
+  "well, this is embarrassing",
+  "we weren't able to find the page",
+  "we can't find that page",
   "没有可用",
   "找不到任何",
 ];
