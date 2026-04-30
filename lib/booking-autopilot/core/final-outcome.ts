@@ -174,14 +174,24 @@ export function determineFinalOutcome(
     };
   }
 
-  if (assessment.blocked) {
+  // Two independent block detectors feed this branch:
+  //   1. assessment.blocked — substring match on a fixed English-language
+  //      bot-detection word list ("cloudflare" / "access denied" / etc.)
+  //   2. assessment.stage === "blocked" — the AI stage classifier's own
+  //      verdict (handles non-English challenge pages, e.g. Yelp's Chinese
+  //      device-verification screen, where the keyword list doesn't fire)
+  //
+  // Without (2) the executor used to fall all the way through to
+  // paused_payment, telling the user "Ready for payment — enter CVC"
+  // even though the agent was stuck on a CAPTCHA and had filled nothing.
+  if (assessment.blocked || assessment.stage === "blocked") {
     trace("Final state check detected bot protection / blocking signals.");
     return {
       status: "captcha",
       screenshotBase64,
       handoffUrl: startUrl,
       sessionUrl,
-      summary: "The hotel's website blocked the automated browser. Open the link to book directly in your browser - it will work normally there.",
+      summary: "The site is showing a CAPTCHA / device-verification screen. Open the live view to solve it manually, then the agent can continue.",
       error: "Site blocked the cloud browser (bot protection). Manual booking required.",
       debugTrace,
     };

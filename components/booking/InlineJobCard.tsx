@@ -51,7 +51,25 @@ function stepStatusLabel(step: BookingJobStep): string {
   if (step.status === "awaiting_confirmation") return "Ready for payment — enter CVC";
   if (step.status === "loading") return "Agent working…";
   if (step.status === "no_availability") return "No availability found";
-  if (step.status === "error") return "Failed";
+  if (step.status === "error") {
+    // Worker maps both "captcha" and "needs_login" → step.status="error", but
+    // those are recoverable via the live view (user solves the challenge,
+    // logs in). Surface that distinction so the card doesn't read as a
+    // dead-end "Failed" when it's actually "needs you for 30 seconds".
+    const err = (step.error ?? "").toLowerCase();
+    if (
+      err.includes("captcha") ||
+      err.includes("verification") ||
+      err.includes("bot protection") ||
+      err.includes("challenge")
+    ) {
+      return "Needs verification — open live view";
+    }
+    if (err.includes("sign in") || err.includes("log in") || err.includes("login")) {
+      return "Needs sign-in — open live view";
+    }
+    return "Failed";
+  }
   return "Waiting";
 }
 
