@@ -6,6 +6,10 @@ import "./opentable-com";
 import "./resy-com";
 import "./seatgeek-com";
 import "./ticketmaster-com";
-// yelp-com kept for potential future use but not in active fallback chain
+// Yelp is now the PRIMARY restaurant entry — broader venue coverage than
+// OpenTable, and Yelp's "Make a Reservation" button auto-redirects to the
+// underlying booking platform (OpenTable / Resy / venue widget). The
+// downstream provider takes over once the redirect lands.
+import "./yelp-com";
 
 export { getProvider, requireProvider } from "./registry";

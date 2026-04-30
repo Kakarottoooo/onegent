@@ -314,10 +314,21 @@ function buildRestaurantContext(
   p: RestaurantBookingParams,
   profile: BookingProfile,
 ): { startUrl: string; task: string } {
-  // Mirrors route.ts:343-370. term=restaurantName+city biases OpenTable's
-  // search to the right metro regardless of prior session cookie.
-  const termRaw = p.city ? `${p.restaurant_name} ${p.city}` : p.restaurant_name;
-  const startUrl = `https://www.opentable.com/s?term=${encodeURIComponent(termRaw)}&covers=${p.covers}&dateTime=${p.date}T${p.time}:00`;
+  // Yelp-first: Yelp has near-universal restaurant coverage (way better
+  // than OpenTable's catalog) and its "Make a Reservation" button on the
+  // biz page auto-redirects to whichever platform the venue actually
+  // uses (OpenTable / Resy / Tock / SevenRooms / venue widget). Yelp
+  // provider clicks the redirect; the destination provider takes over
+  // form-fill from there.
+  //
+  // Falls back to OpenTable then Resy via tryProviderFallbackChain when
+  // Yelp can't find the venue or its Reserve button doesn't appear.
+  //
+  // find_desc=name+city scopes search to the right metro and biases
+  // toward the specific restaurant, not generic listings.
+  const findDesc = p.city ? `${p.restaurant_name} ${p.city}` : p.restaurant_name;
+  const findLoc = p.city || "";
+  const startUrl = `https://www.yelp.com/search?find_desc=${encodeURIComponent(findDesc)}${findLoc ? `&find_loc=${encodeURIComponent(findLoc)}` : ""}`;
   const { task } = buildRestaurantTask({
     restaurantName: p.restaurant_name,
     city: p.city,
