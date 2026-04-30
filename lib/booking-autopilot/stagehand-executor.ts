@@ -1293,6 +1293,34 @@ The user will enter CVV and confirm payment themselves.`,
     } else {
       trace("No specific room preference found in task — will select cheapest available.");
     }
+    // ── Pre-AI fast path: cheap text-signal check for not-bookable pages ──
+    // Skip the AI stage detector entirely when the page is unambiguously a
+    // not-bookable surface (OT 'Not available on OpenTable', 'Permanently
+    // Closed', OT/Resy 404). Without this fast path we still classify these
+    // correctly, but we burn 30-60s on Anthropic vision calls + queueing
+    // first. Catches the same signals as the listing-stage classifier at
+    // line ~4753 — runs first so we never hit the slow path for these pages.
+    try {
+      const earlyText = await raw.evaluate(() => (document.body?.innerText ?? "").toLowerCase());
+      if (NO_AVAILABILITY_SIGNALS.some((sig) => earlyText.includes(sig))) {
+        const matchedSignal = NO_AVAILABILITY_SIGNALS.find((sig) => earlyText.includes(sig));
+        trace(`Pre-AI fast path: page text matched NO_AVAILABILITY_SIGNALS ("${matchedSignal}") — early no_availability without AI assessment.`);
+        const ssBuf = await raw.screenshot({ type: "png" }).catch(() => null);
+        const ss = ssBuf ? `data:image/png;base64,${ssBuf.toString("base64")}` : undefined;
+        const venueLabel = targetHotelName ?? "This venue";
+        return {
+          status: "no_availability" as const,
+          screenshotBase64: ss,
+          handoffUrl: raw.url(),
+          sessionUrl,
+          summary: `${venueLabel} is not available for booking on this platform. The detail page exists but the booking widget is not present.`,
+          debugTrace,
+        };
+      }
+    } catch (err) {
+      trace(`Pre-AI fast path skipped (${(err as Error).message?.slice(0, 60)})`);
+    }
+
     let assessment = await assessBookingStage({
       rawPage: raw,
       stagehand,
