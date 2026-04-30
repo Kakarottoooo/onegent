@@ -4717,6 +4717,26 @@ The user will enter CVV and confirm payment themselves.`,
       trace(`Post-continuation stage: ${assessment.stage} —?${assessment.reason}`);
     }
 
+    // ── AI directly classified the page as no_availability ────────────────
+    // The AI stage-detector emits "no_availability" when it sees pages like
+    // OpenTable's "Permanently Closed" panel where it can't even tell whether
+    // a listing exists. mapAIStageToRPA forwards this through (was: dropped to
+    // unknown). Early-exit instead of running a continuation pass — the venue
+    // is definitively not bookable and continuing wastes 20+ seconds.
+    if (assessment.stage === "no_availability") {
+      trace("Stage assessment determined the venue is not bookable — early exit.");
+      const screenshotBase64 = `data:image/png;base64,${(await page.screenshot({ type: "png" })).toString("base64")}`;
+      return {
+        status: "no_availability",
+        screenshotBase64,
+        handoffUrl: currentUrl,
+        sessionUrl,
+        summary: assessment.reason,
+        debugTrace,
+        ...(capturedAvailableSlots.length > 0 ? { availableSlots: capturedAvailableSlots } : {}),
+      };
+    }
+
     // 鈹€鈹€ Detect stuck at listing/search page 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
     // Signs that we are still on the hotel listing / search page and never
     // reached a real booking or checkout step.

@@ -8,6 +8,7 @@ export type BookingStage =
   | "intermediate_gate"
   | "checkout_form"
   | "payment_gate"
+  | "no_availability"
   | "unknown";
 
 export type BookingStageAssessment = {

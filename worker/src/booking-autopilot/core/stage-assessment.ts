@@ -524,7 +524,7 @@ export async function assessBookingStage(params: {
  * Maps AI loop stage names (generic) to the existing RPA BookingStage enum.
  * AI stages are site-agnostic; RPA stages are Booking.com-centric.
  */
-function mapAIStageToRPA(aiStage: AIBookingStage): BookingStage {
+export function mapAIStageToRPA(aiStage: AIBookingStage): BookingStage {
   switch (aiStage) {
     case "listing":      return "listing";
     case "hotel_detail": return "room_selection";  // Detail page = where you pick rooms
@@ -533,7 +533,8 @@ function mapAIStageToRPA(aiStage: AIBookingStage): BookingStage {
     case "payment_form": return "payment_gate";
     case "paused_payment": return "payment_gate";
     case "captcha":      return "blocked";
-    // confirmation / no_availability / unknown → keep as unknown (no RPA equivalent)
+    case "no_availability": return "no_availability";
+    // confirmation / unknown → keep as unknown (no RPA equivalent)
     default:             return "unknown";
   }
 }
