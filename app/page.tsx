@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useEffect, useState, Suspense } from "react";
+import { useRef, useEffect, useState, useCallback, Suspense } from "react";
 import { useSearchParams } from "next/navigation";
 import dynamic from "next/dynamic";
 import Link from "next/link";
@@ -24,7 +24,7 @@ import { useFavorites } from "@/app/hooks/useFavorites";
 import { usePreferences, formatProfileForPrompt } from "@/app/hooks/usePreferences";
 import { useVoiceInput } from "@/app/hooks/useVoiceInput";
 import { useAuth } from "@/app/hooks/useAuth";
-import { PlanAction, PlanLinkAction, RecommendationCard as CardType, PostExperienceFeedback, FeedbackRecord } from "@/lib/types";
+import { PlanAction, PlanLinkAction, RecommendationCard as CardType, PostExperienceFeedback, FeedbackRecord, Message } from "@/lib/types";
 import type { FeedbackPromptItem } from "@/app/api/feedback-prompts/route";
 import ConfirmCard, { type CommitResponse } from "@/components/ConfirmCard";
 import TripPackageCard from "@/components/TripPackageCard";
@@ -107,6 +107,47 @@ function HomeInner() {
 
   const location = useLocation();
   const subs = useSubscriptions();
+  // Refs so the persist callback reads the latest active context. useChat's
+  // emitCardsResult also goes through a ref, so the closure stays correct
+  // when the user switches rooms/sessions mid-stream. Synced from state
+  // below once we declare activeRoomId/activeSessionId.
+  const activeRoomIdRef = useRef<string | null>(null);
+  const activeSessionIdRef = useRef<string | null>(null);
+  const persistCardsResult = useCallback((msg: Message) => {
+    // Build a payload narrow to A1 scope: restaurant/hotel/flight/activity
+    // cards. Other result modes (scenario_plan, credit_card, etc) are
+    // out of scope and persist nothing — those will be added in A2.
+    const hasRestaurantCards = (msg.cards?.length ?? 0) > 0;
+    const hasHotelCards = (msg.hotelCards?.length ?? 0) > 0;
+    const hasFlightCards = (msg.flightCards?.length ?? 0) > 0;
+    const hasActivityCards = (msg.activityCards?.length ?? 0) > 0;
+    if (!hasRestaurantCards && !hasHotelCards && !hasFlightCards && !hasActivityCards) {
+      return;
+    }
+    const meta_json: Record<string, unknown> = { kind: "search_cards" };
+    if (hasRestaurantCards) meta_json.cards = msg.cards;
+    if (hasHotelCards) meta_json.hotelCards = msg.hotelCards;
+    if (hasFlightCards) meta_json.flightCards = msg.flightCards;
+    if (hasActivityCards) meta_json.activityCards = msg.activityCards;
+    if (msg.category) meta_json.category = msg.category;
+    if (msg.output_language) meta_json.output_language = msg.output_language;
+
+    const roomId = activeRoomIdRef.current;
+    const sessionId = activeSessionIdRef.current;
+    const body = JSON.stringify({
+      role: "assistant",
+      content: msg.content,
+      meta_json,
+    });
+    const headers = { "Content-Type": "application/json" };
+    if (roomId) {
+      // Room context wins — same precedence as the rest of the page.
+      void fetch(`/api/rooms/${roomId}/private-messages`, { method: "POST", headers, body }).catch(() => {});
+    } else if (sessionId) {
+      void fetch(`/api/chat/sessions/${sessionId}/messages`, { method: "POST", headers, body }).catch(() => {});
+    }
+  }, []);
+
   const chat = useChat({
     cityId: location.cityId,
     gpsCoords: location.gpsCoords,
@@ -124,6 +165,7 @@ function HomeInner() {
     onAgentResponse: (requirements, userMessage) => {
       learnFromAgentResponse(requirements, userMessage);
     },
+    onCardsResult: persistCardsResult,
   });
   const { favorites, toggleFavorite } = useFavorites(learnFromFavorite);
   const router = useRouter();
@@ -137,6 +179,13 @@ function HomeInner() {
   // this homepage mount continue that thread. First user message in a fresh
   // session creates one on the server, and we update the URL then.
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
+  // Keep the persist-cards callback's refs in sync with state.
+  useEffect(() => {
+    activeRoomIdRef.current = activeRoomId;
+  }, [activeRoomId]);
+  useEffect(() => {
+    activeSessionIdRef.current = activeSessionId;
+  }, [activeSessionId]);
   // Stage 2 · T11: when a trip room has an active proposal, render
   // <TripProposalChatCard> inline in the chat stream. The id comes from the
   // most recent private_message with meta_json.kind='trip_proposal_card'.
@@ -410,6 +459,7 @@ function HomeInner() {
             role: "user" | "assistant";
             content: string;
             nlu_state?: unknown | null;
+            meta_json?: Record<string, unknown> | null;
             created_at: string;
           }>;
         };

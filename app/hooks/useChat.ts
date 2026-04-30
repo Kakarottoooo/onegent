@@ -40,6 +40,11 @@ interface UseChatParams {
   onSubscriptionIntent?: (intent: SubscriptionIntent) => void;
   // Called after every complete agent response with the parsed intent/requirements
   onAgentResponse?: (requirements: Record<string, unknown>, userMessage: string) => void;
+  /** Called after each card-bearing assistant message lands so the host
+   *  page can persist the result to the active room or chat session.
+   *  Without this, recommendation cards live only in client state and
+   *  vanish on sidebar navigation. See A1 fix in chat-replay.ts. */
+  onCardsResult?: (msg: Message) => void;
   userId?: string | null;
 }
 
@@ -53,8 +58,24 @@ export function useChat({
   learnedWeights,
   onSubscriptionIntent,
   onAgentResponse,
+  onCardsResult,
   userId,
 }: UseChatParams) {
+  // Pull onCardsResult through a ref so card-result branches don't need
+  // it in their dependency closure — the caller can swap context (active
+  // room/session) without re-rendering the hook each switch.
+  const onCardsResultRef = useRef<UseChatParams["onCardsResult"]>(onCardsResult);
+  useEffect(() => {
+    onCardsResultRef.current = onCardsResult;
+  }, [onCardsResult]);
+  const emitCardsResult = useCallback((msg: Message) => {
+    try {
+      onCardsResultRef.current?.(msg);
+    } catch {
+      // Persistence is best-effort — never fail the chat flow because the
+      // host's persist callback errored.
+    }
+  }, []);
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
@@ -579,6 +600,7 @@ export function useChat({
                     };
                     setMessages((prev) => [...prev, assistantMessage]);
                     setAllFlightCards(flightRecs);
+                    emitCardsResult(assistantMessage);
                   }
                 } else if (category === "hotel") {
                   const hotelRecs: HotelRecommendationCard[] = event.hotelRecommendations ?? [];
@@ -610,6 +632,7 @@ export function useChat({
                     };
                     setMessages((prev) => [...prev, assistantMessage]);
                     setAllHotelCards(hotelRecs);
+                    emitCardsResult(assistantMessage);
                   }
                 } else if (category === "laptop") {
                   const laptopRecs: LaptopRecommendationCard[] = event.laptopRecommendations ?? [];
@@ -736,6 +759,7 @@ export function useChat({
                     };
                     setMessages((prev) => [...prev, assistantMessage]);
                     setAllActivityCards(activityRecs);
+                    emitCardsResult(assistantMessage);
                   }
                 } else if (category === "subscription") {
                   const intent = event.subscriptionIntent as SubscriptionIntent | null;
@@ -789,6 +813,7 @@ export function useChat({
                     };
                     setMessages((prev) => [...prev, assistantMessage]);
                     setAllCards(recommendations);
+                    emitCardsResult(assistantMessage);
 
                     // Animate cards in
                     setVisibleCards([]);

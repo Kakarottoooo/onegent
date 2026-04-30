@@ -88,4 +88,73 @@ describe("chat replay snapshots", () => {
     ]);
     expect(snapshot.proposalId).toBe("prop_123");
   });
+
+  it("rebuilds search-card payloads from meta_json on room replay (A1)", () => {
+    // Card payloads are stubbed minimally — we only assert the snapshot
+    // re-attaches them to the corresponding Message, not that the full
+    // RecommendationCard shape is constructed.
+    const stubCards = [
+      { restaurant: { id: "r1", name: "Carbone" } },
+      { restaurant: { id: "r2", name: "Don Angie" } },
+    ] as unknown as Parameters<typeof buildRoomReplaySnapshot>[0] extends infer _ ? never : never;
+
+    const snapshot = buildRoomReplaySnapshot([
+      {
+        id: "1",
+        role: "user",
+        content: "Italian in NYC",
+        meta_json: null,
+        created_at: "2026-04-29T00:00:00Z",
+      },
+      {
+        id: "2",
+        role: "assistant",
+        content: "Found 2 restaurants for you.",
+        // Cast to avoid pulling in the full RecommendationCard shape just for the test fixture.
+        meta_json: {
+          kind: "search_cards",
+          cards: stubCards as unknown as never[],
+          category: "restaurant",
+          output_language: "en",
+        } as unknown as { kind?: string; proposal_id?: string },
+        created_at: "2026-04-29T00:00:01Z",
+      },
+    ]);
+
+    expect(snapshot.messages).toHaveLength(2);
+    expect(snapshot.messages[1].cards).toBeDefined();
+    expect(snapshot.messages[1].cards).toHaveLength(2);
+    expect(snapshot.messages[1].category).toBe("restaurant");
+    expect(snapshot.messages[1].output_language).toBe("en");
+  });
+
+  it("rebuilds search-card payloads from meta_json on session replay (A1)", () => {
+    const snapshot = buildSessionReplaySnapshot({
+      session: { title: "Hotels in Tokyo" },
+      messages: [
+        {
+          id: "1",
+          role: "user",
+          content: "4-star in Shibuya",
+          created_at: "2026-04-29T00:00:00Z",
+        },
+        {
+          id: "2",
+          role: "assistant",
+          content: "Found 3 hotels for you.",
+          // Casting the raw JSON shape in lieu of the full HotelRecommendationCard.
+          meta_json: {
+            kind: "search_cards",
+            hotelCards: [{ id: "h1" }, { id: "h2" }, { id: "h3" }],
+            category: "hotel",
+          } as unknown as Record<string, unknown>,
+          created_at: "2026-04-29T00:00:01Z",
+        },
+      ],
+    });
+
+    expect(snapshot.messages).toHaveLength(2);
+    expect(snapshot.messages[1].hotelCards).toHaveLength(3);
+    expect(snapshot.messages[1].category).toBe("hotel");
+  });
 });

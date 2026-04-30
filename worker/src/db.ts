@@ -4093,6 +4093,11 @@ export interface ChatSessionMessageRow {
    *  parse call so the extractor sees prior constraints/scenario after
    *  page refresh or sidebar switch. JSONB column. */
   nlu_state: unknown | null;
+  /** Optional structured payload for inline rendering on replay — e.g.
+   *  `{ kind: 'search_cards', cards: [...], hotelCards: [...] }` so that
+   *  recommendation results survive page reloads / sidebar switches.
+   *  See lib/chat-replay.ts for the producer / consumer contract. */
+  meta_json: Record<string, unknown> | null;
   created_at: string;
 }
 
@@ -4146,6 +4151,9 @@ export async function ensureChatSessionMessagesTable(): Promise<void> {
       // Add nlu_state column to legacy tables that pre-date NLU hydration.
       // No-op when the column already exists.
       await sql`ALTER TABLE chat_session_messages ADD COLUMN IF NOT EXISTS nlu_state JSONB`;
+      // Add meta_json for replay payloads (search_cards etc) — A1 fix so
+      // recommendation cards survive sidebar navigation.
+      await sql`ALTER TABLE chat_session_messages ADD COLUMN IF NOT EXISTS meta_json JSONB`;
       await sql`CREATE INDEX IF NOT EXISTS chat_session_messages_session_idx ON chat_session_messages (session_id, id)`;
     })().catch((err) => {
       chatSessionMessagesTableReady = null;
@@ -4308,21 +4316,28 @@ export async function deleteChatSession(sessionId: string, userId: string): Prom
 
 /** Append a message to a session's thread. Touches the session's updated_at
  *  so the sidebar reflects activity. The optional `nluState` snapshot is
- *  persisted on assistant rows so the next turn can hydrate prev_state. */
+ *  persisted on assistant rows so the next turn can hydrate prev_state.
+ *  The optional `metaJson` carries replay payloads (search_cards, etc) so
+ *  recommendation results survive sidebar navigation. */
 export async function insertChatSessionMessage(params: {
   sessionId: string;
   role: "user" | "assistant";
   content: string;
   nluState?: unknown;
+  metaJson?: Record<string, unknown> | null;
 }): Promise<void> {
   await ensureChatSessionMessagesTable();
   const nluStateJson =
     params.nluState !== undefined && params.nluState !== null
       ? JSON.stringify(params.nluState)
       : null;
+  const metaJsonPayload =
+    params.metaJson !== undefined && params.metaJson !== null
+      ? JSON.stringify(params.metaJson)
+      : null;
   await sql`
-    INSERT INTO chat_session_messages (session_id, role, content, nlu_state)
-    VALUES (${params.sessionId}, ${params.role}, ${params.content}, ${nluStateJson}::jsonb)
+    INSERT INTO chat_session_messages (session_id, role, content, nlu_state, meta_json)
+    VALUES (${params.sessionId}, ${params.role}, ${params.content}, ${nluStateJson}::jsonb, ${metaJsonPayload}::jsonb)
   `;
   // Bump the session's updated_at so it rises to the top of the sidebar.
   await sql`
@@ -4340,7 +4355,7 @@ export async function listChatSessionMessages(
   const session = await getChatSession(sessionId, userId);
   if (!session) return [];
   const result = await sql<ChatSessionMessageRow>`
-    SELECT id::text AS id, role, content, nlu_state, created_at
+    SELECT id::text AS id, role, content, nlu_state, meta_json, created_at
     FROM chat_session_messages
     WHERE session_id = ${sessionId}
     ORDER BY id ASC
