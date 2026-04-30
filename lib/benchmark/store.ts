@@ -138,6 +138,23 @@ export async function getBenchmarkRun(
   return toRunRow(result.rows[0] as Record<string, unknown>);
 }
 
+/**
+ * List recent benchmark runs, newest first. Used by the internal dashboard.
+ * Default cap of 50 — bumps higher are deliberate (the table grows fast).
+ */
+export async function listBenchmarkRuns(
+  limit = 50,
+): Promise<BenchmarkRunRow[]> {
+  await ensureBenchmarkTables();
+  const safeLimit = Math.max(1, Math.min(200, Math.floor(limit)));
+  const result = await sql`
+    SELECT * FROM benchmark_runs
+    ORDER BY created_at DESC
+    LIMIT ${safeLimit}
+  `;
+  return (result.rows as Record<string, unknown>[]).map(toRunRow);
+}
+
 // ─── Case lifecycle ─────────────────────────────────────────────────────────
 
 export interface CreateBenchmarkCaseInput {
