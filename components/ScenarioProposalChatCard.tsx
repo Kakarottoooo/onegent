@@ -231,6 +231,10 @@ function renderCardByCategory(
   card: unknown,
   index: number,
 ) {
+  // Booking actions stay hidden everywhere — DR cards must wait for the
+  // vote winner + payer confirm before any booking fires. (Phase 4 will
+  // surface a single "为大家预订" button to the payer once the room
+  // accepts a winning option.)
   if (category === "restaurant") {
     const c = card as RestaurantRecommendationCard;
     return (
@@ -239,11 +243,18 @@ function renderCardByCategory(
         index={index}
         isFavorite={false}
         onToggleFavorite={() => {}}
+        hideBookingActions
       />
     );
   }
   if (category === "hotel") {
-    return <HotelCard card={card as HotelRecommendationCard} index={index} />;
+    return (
+      <HotelCard
+        card={card as HotelRecommendationCard}
+        index={index}
+        hideBookingActions
+      />
+    );
   }
   if (category === "flight") {
     return (
@@ -323,18 +334,23 @@ function CardOptionWrapper({
           onClick={onVote}
           disabled={disabled}
           style={{
-            padding: "6px 14px",
+            padding: "8px 18px",
             borderRadius: 999,
-            border: iVoted ? "1px solid #c9a84c" : "1px solid rgba(0,0,0,0.12)",
-            background: iVoted ? "#c9a84c" : "#fff",
-            color: iVoted ? "#fff" : "var(--text-primary, #111)",
+            border: iVoted ? "1px solid #1a1a1a" : "1px solid #c9a84c",
+            background: iVoted ? "#1a1a1a" : "#c9a84c",
+            color: "#fff",
             fontSize: 13,
-            fontWeight: 500,
+            fontWeight: 600,
+            letterSpacing: 0.2,
             cursor: disabled ? "not-allowed" : "pointer",
             opacity: busy ? 0.6 : 1,
+            transition: "background-color 200ms ease, border-color 200ms ease",
+            boxShadow: iVoted
+              ? "0 1px 2px rgba(0,0,0,0.18)"
+              : "0 1px 2px rgba(201,168,76,0.35)",
           }}
         >
-          {iVoted ? "已选" : "我选这个"}
+          {iVoted ? "✓ 已选" : "我选这个"}
         </button>
       </div>
     </div>

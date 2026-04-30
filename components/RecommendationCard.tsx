@@ -18,6 +18,11 @@ interface Props {
   onCompare?: () => void;
   isComparing?: boolean;
   onFeedback?: (record: FeedbackRecord) => void;
+  /** Hide the "Reserve with Agent" booking CTA. Used inside multi-party
+   *  proposal cards where booking has to wait for the group's vote winner
+   *  + payer-only confirmation. Aligns with FlightCard/ActivityCard
+   *  which already expose this prop. */
+  hideBookingActions?: boolean;
 }
 
 const NOISE_ICON: Record<string, string> = {
@@ -75,6 +80,7 @@ export default function RecommendationCard({
   onCompare,
   isComparing,
   onFeedback,
+  hideBookingActions = false,
 }: Props) {
   const router = useRouter();
   const [booking, setBooking] = useState(false);
@@ -647,23 +653,25 @@ export default function RecommendationCard({
                   Map
                 </a>
               )}
-              <button
-                onClick={handleReserve}
-                disabled={booking}
-                style={{
-                  fontFamily: "var(--font-dm-sans)",
-                  fontSize: "13px",
-                  color: "#fff",
-                  backgroundColor: booking ? "var(--border)" : "var(--gold)",
-                  borderRadius: "8px",
-                  padding: "7px 14px",
-                  border: "none",
-                  cursor: booking ? "default" : "pointer",
-                  transition: "background-color 0.2s",
-                }}
-              >
-                {booking ? "Starting agent…" : "Reserve with Agent →"}
-              </button>
+              {!hideBookingActions && (
+                <button
+                  onClick={handleReserve}
+                  disabled={booking}
+                  style={{
+                    fontFamily: "var(--font-dm-sans)",
+                    fontSize: "13px",
+                    color: "#fff",
+                    backgroundColor: booking ? "var(--border)" : "var(--gold)",
+                    borderRadius: "8px",
+                    padding: "7px 14px",
+                    border: "none",
+                    cursor: booking ? "default" : "pointer",
+                    transition: "background-color 0.2s",
+                  }}
+                >
+                  {booking ? "Starting agent…" : "Reserve with Agent →"}
+                </button>
+              )}
             </div>
           </div>
 

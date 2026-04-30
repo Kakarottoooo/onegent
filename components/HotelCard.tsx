@@ -21,9 +21,13 @@ interface HotelCardProps {
   guests?: number;
   /** Called after a booking job is created — inject inline task card */
   onJobCreated?: (jobId: string) => void;
+  /** Hide the "Book with Agent" booking CTA. Used inside multi-party
+   *  proposal cards where booking has to wait for the vote winner +
+   *  payer-only confirmation. Aligns with FlightCard/ActivityCard. */
+  hideBookingActions?: boolean;
 }
 
-export default function HotelCard({ card, index, checkIn, checkOut, guests, onJobCreated }: HotelCardProps) {
+export default function HotelCard({ card, index, checkIn, checkOut, guests, onJobCreated, hideBookingActions = false }: HotelCardProps) {
   const { hotel } = card;
   const [booking, setBooking] = useState(false);
   const [noProfile, setNoProfile] = useState(false);
@@ -323,13 +327,15 @@ export default function HotelCard({ card, index, checkIn, checkOut, guests, onJo
           >
             Map
           </a>
-          <button
-            onClick={handleBook}
-            disabled={booking}
-            className="hotel-card__cta-primary"
-          >
-            {booking ? "Starting agent…" : "Book with Agent →"}
-          </button>
+          {!hideBookingActions && (
+            <button
+              onClick={handleBook}
+              disabled={booking}
+              className="hotel-card__cta-primary"
+            >
+              {booking ? "Starting agent…" : "Book with Agent →"}
+            </button>
+          )}
         </div>
       </div>
     </div>
