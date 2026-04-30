@@ -56,6 +56,7 @@ import { sendPushNotification } from "@/lib/push";
 import type { PushSubscription } from "web-push";
 import type { AutopilotResult, BrowserTaskResult, BrowserTaskInput } from "@/lib/booking-autopilot/types";
 import { runBrowserTask } from "@/lib/booking-autopilot/stagehand-executor";
+import { buildDeepLinkEnrichmentForStep } from "@/lib/booking-autopilot/executors/enrich-failed-step";
 import { liveLogClose, liveLogGet } from "@/lib/live-log-store";
 import { buildPreferenceProfile } from "@/lib/policy";
 
@@ -793,17 +794,30 @@ async function runUniversalStep(
         message: terminalError.message,
         outcome: "Error",
       });
+      // Phase 2: try a deep-link override so the user lands on the booking
+      // page with date / time / party-size pre-filled instead of a bare
+      // search URL. Falls back to the legacy fallbackUrl for non-restaurant
+      // steps or when constraint fields are missing.
+      const stepWithBody = { ...step, body: resolvedBody };
+      const deepLinkEnrich = buildDeepLinkEnrichmentForStep(
+        stepWithBody,
+        "Auto-booking stalled. Tap to continue manually:",
+      );
       return {
         ...step,
         status: "error",
         error: terminalError.message,
-        handoff_url: typeof resolvedBody.startUrl === "string" ? resolvedBody.startUrl : step.fallbackUrl,
-        actionItem: step.fallbackUrl
-          ? {
-              message: "Auto-booking stalled. Tap to continue manually:",
-              options: [{ label: step.label, url: step.fallbackUrl }],
-            }
-          : undefined,
+        handoff_url:
+          deepLinkEnrich?.handoff_url ??
+          (typeof resolvedBody.startUrl === "string" ? resolvedBody.startUrl : step.fallbackUrl),
+        actionItem:
+          deepLinkEnrich?.actionItem ??
+          (step.fallbackUrl
+            ? {
+                message: "Auto-booking stalled. Tap to continue manually:",
+                options: [{ label: step.label, url: step.fallbackUrl }],
+              }
+            : undefined),
         decisionLog: log,
       };
     }
@@ -1014,13 +1028,24 @@ async function runUniversalStep(
       ? buildFlightInventoryDriftManualMessage()
       : "Auto-booking failed. Tap to complete manually:";
     log.push({ ts: now(), type: "failed", message: data.error ?? data.summary, outcome: "Failed" });
+
+    // Phase 2: deep-link override for restaurant steps so the user lands
+    // pre-filled. Skipped when flight-inventory drift is detected — that
+    // error message has its own opinionated guidance.
+    const stepWithBody = { ...step, body: bodyWithSlots };
+    const deepLinkEnrich = isFlightInventoryDriftError(data.error ?? data.summary)
+      ? null
+      : buildDeepLinkEnrichmentForStep(stepWithBody, actionMessage);
+
     return {
       ...step,
       body: bodyWithSlots,
       status: "error",
       error: data.error ?? data.summary,
-      handoff_url: manualHandoffUrl,
-      actionItem: { message: actionMessage, options: [{ label: step.label, url: manualHandoffUrl }] },
+      handoff_url: deepLinkEnrich?.handoff_url ?? manualHandoffUrl,
+      actionItem:
+        deepLinkEnrich?.actionItem ??
+        { message: actionMessage, options: [{ label: step.label, url: manualHandoffUrl }] },
       decisionLog: log,
     };
   } catch (err) {
