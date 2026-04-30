@@ -275,6 +275,7 @@ const MentionPicker = forwardRef<HTMLInputElement, MentionPickerProps>(
           ref={setRef}
           type="text"
           {...(inputDataAttributes ?? {})}
+          style={{ width: "100%", boxSizing: "border-box" }}
           value={value}
           onChange={(e) => {
             onChange(e.target.value);
