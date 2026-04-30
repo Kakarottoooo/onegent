@@ -3507,67 +3507,6 @@ The user will enter CVV and confirm payment themselves.`,
                 return false; // signals no_availability; the outer loop captures available slots
               }
 
-              // ── INSTRUMENTATION: dump OT detail-page widget DOM ───────────
-              // One-shot diagnostic. Triggers only on /r/<slug> URLs so search
-              // results pages (which already work) aren't slowed down. Used to
-              // diagnose why Tao Downtown widget time-slot selectors return 0.
-              const isDetailUrlForDump = /opentable\.com\/r\//i.test(raw.url());
-              if (isDetailUrlForDump) {
-                const dump = await raw.evaluate(() => {
-                  const out: Record<string, unknown> = {};
-                  out.url = location.href.slice(0, 120);
-                  out.title = document.title.slice(0, 80);
-                  const selects = Array.from(document.querySelectorAll<HTMLSelectElement>("select"))
-                    .filter(el => el.offsetParent !== null)
-                    .slice(0, 5)
-                    .map(el => ({
-                      n: el.name || el.id || el.getAttribute("aria-label") || "",
-                      dt: el.getAttribute("data-test") || el.getAttribute("data-testid") || "",
-                      opts: Array.from(el.options).slice(0, 8).map(o => o.text),
-                    }));
-                  out.selects = selects;
-                  const submitBtns = Array.from(document.querySelectorAll<HTMLElement>("button, [role='button']"))
-                    .filter(el => {
-                      const r = (el as HTMLElement).getBoundingClientRect();
-                      if (r.width === 0 || r.height === 0) return false;
-                      const t = (el.textContent ?? "").trim().toLowerCase();
-                      return /find a time|find times|reserve|search|book now|next available/i.test(t);
-                    })
-                    .slice(0, 10)
-                    .map(el => ({
-                      t: (el.textContent ?? "").trim().slice(0, 40),
-                      dt: el.getAttribute("data-test") || el.getAttribute("data-testid") || "",
-                      ty: el.getAttribute("type") || "",
-                    }));
-                  out.submitBtns = submitBtns;
-                  const timeBtns = Array.from(document.querySelectorAll<HTMLElement>("button, [role='button'], a[role='button']"))
-                    .filter(el => {
-                      const r = (el as HTMLElement).getBoundingClientRect();
-                      if (r.width === 0 || r.height === 0) return false;
-                      const t = (el.textContent ?? "").trim();
-                      return /\d+:\d{2}\s*(AM|PM)/i.test(t) && t.length < 30;
-                    })
-                    .slice(0, 10)
-                    .map(el => ({ t: (el.textContent ?? "").trim().slice(0, 30), g: el.tagName }));
-                  out.timeBtns = timeBtns;
-                  const taggedEls = Array.from(document.querySelectorAll<HTMLElement>("[data-test], [data-testid]"))
-                    .filter(el => {
-                      const t = (el.getAttribute("data-test") || el.getAttribute("data-testid") || "").toLowerCase();
-                      return /time|slot|reservation|party|covers|date|find|search|book/.test(t);
-                    })
-                    .slice(0, 15)
-                    .map(el => ({
-                      g: el.tagName,
-                      a: el.getAttribute("data-test") || el.getAttribute("data-testid") || "",
-                      t: (el.textContent ?? "").trim().slice(0, 30),
-                    }));
-                  out.taggedEls = taggedEls;
-                  return out;
-                }).catch((err: Error) => ({ error: err.message?.slice(0, 100) }));
-                trace(`[opentable] DETAIL_PAGE_DUMP: ${JSON.stringify(dump).slice(0, 2500)}`);
-              }
-              // ── END INSTRUMENTATION ───────────────────────────────────────
-
               // Extract requested time from task string (HH:MM 24h or "H:MM PM" 12h)
               const timeMatch = input.task.match(/\b(\d{1,2}):(\d{2})\s*(AM|PM)?\b/i);
               let requestedMinutes = 19 * 60; // default 7 PM
@@ -3594,6 +3533,68 @@ The user will enter CVV and confirm payment themselves.`,
                 if (m24) return parseInt(m24[1], 10) * 60 + parseInt(m24[2], 10);
                 return null;
               };
+
+              // ── OT detail-page widget: programmatic time-slot select ────────────
+              // /r/<slug> detail pages render time slots as <a> (no role="button")
+              // inside <ul data-test="time-slots">. Listing-card selector below
+              // misses them because it requires role="button". Scope to the
+              // official data-test container so we don't drag in unrelated <a>
+              // links from elsewhere on the page (Hours, Menu, etc).
+              const isDetailUrl = /opentable\.com\/r\//i.test(raw.url());
+              if (isDetailUrl) {
+                const detailSlot = await raw.evaluate(
+                  ({ reqMins, maxDiffMins }: { reqMins: number; maxDiffMins: number }) => {
+                    const parseT = (text: string): number | null => {
+                      const m = text.match(/(\d{1,2}):(\d{2})\s*(AM|PM)/i);
+                      if (!m) return null;
+                      let h = parseInt(m[1], 10);
+                      if (m[3].toUpperCase() === "PM" && h < 12) h += 12;
+                      if (m[3].toUpperCase() === "AM" && h === 12) h = 0;
+                      return h * 60 + parseInt(m[2], 10);
+                    };
+                    const isVisible = (el: Element) => {
+                      const r = (el as HTMLElement).getBoundingClientRect();
+                      return r.width > 0 && r.height > 0;
+                    };
+                    const container = document.querySelector<HTMLElement>('[data-test="time-slots"]');
+                    if (!container) return null;
+                    const candidates = Array.from(container.querySelectorAll<HTMLElement>("a, button"))
+                      .map((el) => {
+                        const t = parseT((el.textContent ?? "").trim());
+                        return t === null || !isVisible(el) ? null : { el, t };
+                      })
+                      .filter((x): x is { el: HTMLElement; t: number } => x !== null && Math.abs(x.t - reqMins) <= maxDiffMins);
+                    if (candidates.length === 0) return null;
+                    candidates.sort((a, b) => Math.abs(a.t - reqMins) - Math.abs(b.t - reqMins));
+                    const best = candidates[0].el;
+                    best.scrollIntoView({ block: "center" });
+                    const r = best.getBoundingClientRect();
+                    return {
+                      x: Math.round(r.left + r.width / 2),
+                      y: Math.round(r.top + r.height / 2),
+                      text: (best.textContent ?? "").trim().slice(0, 30),
+                    };
+                  },
+                  { reqMins: requestedMinutes, maxDiffMins: 90 },
+                ).catch(() => null);
+
+                if (detailSlot && detailSlot.x > 0) {
+                  trace(`[opentable] detail-page time slot match: "${detailSlot.text}" — clicking via CDP`);
+                  const clicked = await sh(raw)
+                    .click(detailSlot.x, detailSlot.y)
+                    .then(() => true)
+                    .catch(() => false);
+                  if (clicked) {
+                    await new Promise((r) => setTimeout(r, 2500));
+                    trace("[opentable] detail-page slot clicked — yielding to stage reassessment");
+                    return true;
+                  }
+                  trace("[opentable] detail-page slot click failed — falling through to listing logic");
+                } else {
+                  trace("[opentable] detail-page widget has no time slots in ±90 min — falling through");
+                }
+              }
+              // ── END detail-page early path ────────────────────────────────────
 
               // Find the best time slot button WITHIN the target restaurant's card.
               // IMPORTANT: OpenTable search results show multiple restaurants. We must
