@@ -59,8 +59,13 @@ interface ProposalWithVotes {
 }
 
 interface RoomStateResponse {
+  room?: {
+    creator_id: string;
+    payer_id: string | null;
+  };
   proposals?: ProposalWithVotes[];
   members?: Array<{ user_id: string; status: string }>;
+  member_profiles?: Record<string, { display_name?: string | null; username?: string | null }>;
 }
 
 function isScenarioProposal(content: unknown): content is ScenarioProposalContent {
@@ -87,6 +92,8 @@ export default function ScenarioProposalChatCard({
 }: ScenarioProposalChatCardProps) {
   const [proposal, setProposal] = useState<ProposalWithVotes | null>(null);
   const [joinedCount, setJoinedCount] = useState(0);
+  const [payerId, setPayerId] = useState<string | null>(null);
+  const [payerLabel, setPayerLabel] = useState<string>("payer");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [busyOptionId, setBusyOptionId] = useState<string | null>(null);
@@ -109,6 +116,14 @@ export default function ScenarioProposalChatCard({
       setProposal(p);
       const joined = (body.members ?? []).filter((m) => m.status === "joined").length;
       setJoinedCount(joined);
+      // Resolve payer (defaults to creator when payer_id is null) so the
+      // post-consensus banner can show the right name + the booking CTA
+      // unlocks for the right user.
+      const resolvedPayer = body.room?.payer_id ?? body.room?.creator_id ?? null;
+      setPayerId(resolvedPayer);
+      const profile = resolvedPayer ? body.member_profiles?.[resolvedPayer] : null;
+      const label = profile?.display_name?.trim() || profile?.username?.trim() || null;
+      setPayerLabel(label ?? "付款人");
       setError(null);
       setLoading(false);
     } catch {
@@ -200,13 +215,48 @@ export default function ScenarioProposalChatCard({
     );
   }
 
+  // Phase 4: once vote endpoint flips proposal.status to 'accepted', the
+  // group has consensus. Show a clear banner + unlock the booking CTA on
+  // the winning card — but ONLY for the payer. Other members see a
+  // "waiting on @payer" hint instead.
+  const consensusReached = proposal?.status === "accepted" && winnerId !== null;
+  const iAmPayer = !!userId && !!payerId && userId === payerId;
+
   return (
     <div className="flex flex-col gap-3">
+      {consensusReached && (
+        <div
+          style={{
+            padding: "12px 14px",
+            borderRadius: 12,
+            border: "1px solid rgba(201,168,76,0.6)",
+            background: "rgba(201,168,76,0.08)",
+            fontFamily: "var(--font-dm-sans)",
+            fontSize: 13,
+            lineHeight: 1.5,
+            color: "var(--text-primary, #111)",
+          }}
+        >
+          {iAmPayer ? (
+            <>
+              🎉 大家选定了方案。点下方金边卡片里的预订按钮就能开始下单。
+            </>
+          ) : (
+            <>
+              🎉 共识达成。等 <b>@{payerLabel}</b> 在他/她那边点预订就行。
+            </>
+          )}
+        </div>
+      )}
       {content.options.map((opt, i) => {
         const voters = tally.get(opt.id) ?? new Set<string>();
         const voteCount = voters.size;
         const iVoted = myVote === opt.id;
         const isWinner = winnerId === opt.id;
+        // Unlock booking actions ONLY on the winner card AND only for
+        // the payer. Solo flow (homepage) is unaffected — that path
+        // doesn't pass hideBookingActions through this component.
+        const enableBooking = consensusReached && isWinner && iAmPayer;
         return (
           <CardOptionWrapper
             key={opt.id}
@@ -218,7 +268,7 @@ export default function ScenarioProposalChatCard({
             onVote={() => handleVote(opt.id)}
             joinedCount={joinedCount}
           >
-            {renderCardByCategory(content.category, opt.card, i)}
+            {renderCardByCategory(content.category, opt.card, i, !enableBooking)}
           </CardOptionWrapper>
         );
       })}
@@ -230,11 +280,11 @@ function renderCardByCategory(
   category: ScenarioProposalContent["category"],
   card: unknown,
   index: number,
+  hideBooking: boolean,
 ) {
-  // Booking actions stay hidden everywhere — DR cards must wait for the
-  // vote winner + payer confirm before any booking fires. (Phase 4 will
-  // surface a single "为大家预订" button to the payer once the room
-  // accepts a winning option.)
+  // hideBooking flips false ONLY on the winner card for the payer (see
+  // caller). All other rendering paths stay locked so non-payers can't
+  // start a solo booking before consensus.
   if (category === "restaurant") {
     const c = card as RestaurantRecommendationCard;
     return (
@@ -243,7 +293,7 @@ function renderCardByCategory(
         index={index}
         isFavorite={false}
         onToggleFavorite={() => {}}
-        hideBookingActions
+        hideBookingActions={hideBooking}
       />
     );
   }
@@ -252,7 +302,7 @@ function renderCardByCategory(
       <HotelCard
         card={card as HotelRecommendationCard}
         index={index}
-        hideBookingActions
+        hideBookingActions={hideBooking}
       />
     );
   }
@@ -261,7 +311,7 @@ function renderCardByCategory(
       <FlightCard
         card={card as FlightRecommendationCard}
         index={index}
-        hideBookingActions
+        hideBookingActions={hideBooking}
       />
     );
   }
@@ -270,7 +320,7 @@ function renderCardByCategory(
       <ActivityCard
         card={card as ActivityRecommendationCard}
         index={index}
-        hideBookingActions
+        hideBookingActions={hideBooking}
       />
     );
   }
