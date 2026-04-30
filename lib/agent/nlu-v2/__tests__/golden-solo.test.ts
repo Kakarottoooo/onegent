@@ -16,18 +16,27 @@ import type { IntentState } from "../types";
 
 // ─── Base state builder ─────────────────────────────────────────────────
 
-const baseState = (overrides: Partial<IntentState> = {}): IntentState => ({
-  confidence: 0.9,
-  turn_count: 1,
-  updated_at: "2026-04-22T00:00:00Z",
-  intent: "create_plan",
-  scenario: null,
-  party_type: "solo",
-  member_names: [],
-  refined_target_id: null,
-  planning_assumptions: [],
-  ...overrides,
-});
+const baseState = (overrides: Partial<IntentState> = {}): IntentState => {
+  const base: IntentState = {
+    confidence: 0.9,
+    turn_count: 1,
+    updated_at: "2026-04-22T00:00:00Z",
+    intent: "create_plan",
+    scenario: null,
+    categories: [],
+    party_type: "solo",
+    member_names: [],
+    refined_target_id: null,
+    planning_assumptions: [],
+  };
+  const merged = { ...base, ...overrides };
+  if (merged.categories.length === 0 && merged.scenario) {
+    merged.categories = merged.scenario === "trip"
+      ? ["hotel", "flight", "restaurant", "activity"]
+      : [merged.scenario];
+  }
+  return merged;
+};
 
 // ─── Restaurant ─────────────────────────────────────────────────────────
 
@@ -67,7 +76,12 @@ describe("Golden restaurant cases · solo create_plan", () => {
   it("R3. Missing party_size → quick picks surface 2/3/4/5+", () => {
     const state = baseState({
       scenario: "restaurant",
-      restaurant: { city: "NYC", date: "2026-05-02", time: "19:00" },
+      restaurant: {
+        city: "NYC",
+        date: "2026-05-02",
+        time: "19:00",
+        cuisine: "Italian",
+      },
     });
     const action = routeIntent(state);
     if (action.type === "ask_clarification") {
@@ -78,10 +92,10 @@ describe("Golden restaurant cases · solo create_plan", () => {
     }
   });
 
-  it("R4. Only scenario known → all 4 required fields missing", () => {
+  it("R4. Only scenario known → all required fields missing (incl. soft-required cuisine)", () => {
     const state = baseState({ scenario: "restaurant", restaurant: {} });
     const missing = getMissingForScenario(state);
-    expect(missing).toEqual(["city", "date", "time", "party_size"]);
+    expect(missing).toEqual(["city", "cuisine", "date", "time", "party_size"]);
   });
 
   it("R5. flattenScenarioFields passes keys through unchanged (no renames for restaurant)", () => {
@@ -455,12 +469,14 @@ describe("Cross-cutting routing behavior", () => {
     expect(action.type).toBe("continue_chat");
   });
 
-  it("null scenario → ask_clarification for scenario itself", () => {
+  it("null scenario → ask_clarification for categories (composite migration)", () => {
+    // Pre-categories[] this asked for "scenario"; the new conservative router
+    // asks "想订什么？" via the categories slot + 5-option quick picks.
     const state = baseState({ intent: "create_plan", scenario: null });
     const action = routeIntent(state);
     expect(action.type).toBe("ask_clarification");
     if (action.type === "ask_clarification") {
-      expect(action.missing).toEqual(["scenario"]);
+      expect(action.missing).toEqual(["categories"]);
     }
   });
 });

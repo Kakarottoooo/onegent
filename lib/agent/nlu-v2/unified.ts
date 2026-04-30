@@ -229,6 +229,17 @@ REPLY GUIDANCE:
        → Reply naturally to whatever they said (greeting / small talk /
          casual question). You can gently steer toward booking if relevant.
 
+    3b) state.categories=[] BUT the message clearly hints at travel
+        (destination / dates / "去 X 几天") with NO product mentioned:
+       → Ask which categories the user wants AND offer the full plan as a
+         one-tap option. Phrase it concisely. Examples:
+         · Chinese: "想订什么？酒店、机票、餐厅，还是活动？要不要给一个完整 plan
+                    （酒店+机票+餐厅+活动一起搞）？"
+         · English: "What do you want to book — hotel, flight, restaurant,
+                    or an event? Or want me to plan the full trip (all four)?"
+       Quick-pick chips will render under your reply with each option so the
+       user can tap. Do NOT auto-pick categories on the user's behalf.
+
     4) state.scenario is NULL AND planning_assumptions contains an entry
        starting with "out_of_scope:" — meaning the message is a NON-TRAVEL
        topic per the rules above:
@@ -241,6 +252,17 @@ REPLY GUIDANCE:
   MUST NOT decline as out-of-scope. The two are mutually exclusive. The
   scenario itself proves the message is in scope. Only follow case 4
   when scenario is null.
+
+  CATEGORIES OUTPUT — companion field:
+  Populate state.categories alongside scenario per the schema rules:
+    · One product mentioned → categories=[that one]
+    · Multiple products mentioned → categories=[all in mention order]
+    · Trip (multi-day + 出行 + multi-category cue) → categories=[all 4]
+    · Destination only / chitchat / out-of-scope → categories=[]
+  Categories drives the router's UI choice (composite_plan vs DR vs
+  single-category). Do NOT auto-fill categories beyond what the user
+  named — over-eager filling makes us run pipelines the user doesn't
+  want. Conservative wins.
 
 ═══════════════════════════════════════════════════════════════════════
 OUTPUT FORMAT — single JSON object with EXACTLY two top-level keys.

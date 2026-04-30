@@ -22,7 +22,51 @@
  */
 
 import { resolveDateHint } from "../trip-intent-state";
-import type { IntentState, NluIntent, NluScenario, PartyType, ProxyConstraints } from "./types";
+import type {
+  IntentState,
+  NluCategory,
+  NluIntent,
+  NluScenario,
+  PartyType,
+  ProxyConstraints,
+} from "./types";
+
+const CATEGORY_VALUES: NluCategory[] = ["restaurant", "hotel", "flight", "activity"];
+
+/**
+ * Backward-compat derivation: if the model emitted a legacy `scenario` value
+ * but no `categories` array (or vice versa), fill in the missing side.
+ *   - scenario="trip" expands to all 4 categories (the historical trip
+ *     definition: hotel + flight + restaurant + activity bundled).
+ *   - scenario in {restaurant,hotel,flight,activity} expands to a 1-element
+ *     categories array.
+ *   - scenario=null + non-empty categories[] derives scenario=categories[0].
+ *   - scenario=null + empty categories[] stays empty (the "no product
+ *     identified yet" state — router will ask "想订什么？").
+ */
+export function reconcileCategoriesAndScenario(
+  scenario: NluScenario | null,
+  categories: NluCategory[],
+): { scenario: NluScenario | null; categories: NluCategory[] } {
+  if (categories.length > 0) {
+    // Trust categories. Derive scenario as categories[0] unless all 4 are
+    // present, in which case the legacy "trip" label still applies for any
+    // v1 consumer still switching on scenario.
+    const allFour = CATEGORY_VALUES.every((c) => categories.includes(c));
+    return {
+      scenario: allFour ? "trip" : categories[0],
+      categories,
+    };
+  }
+  if (scenario === "trip") {
+    return { scenario, categories: [...CATEGORY_VALUES] };
+  }
+  if (scenario) {
+    // scenario is one of restaurant/hotel/flight/activity by exclusion
+    return { scenario, categories: [scenario as NluCategory] };
+  }
+  return { scenario: null, categories: [] };
+}
 
 // Re-exported for callers (matches v1's ChatMessage shape).
 export interface Turn {
@@ -40,6 +84,7 @@ IntentState schema:
   "updated_at": string,                 // ISO timestamp — use "$NOW" to fill
   "intent": "chitchat" | "create_plan" | "create_room" | "refine_existing" | "unknown",
   "scenario": "restaurant" | "hotel" | "flight" | "activity" | "trip" | null,
+  "categories": ("restaurant" | "hotel" | "flight" | "activity")[],
   "party_type": "solo" | "multi",
   "member_names": string[],             // other people mentioned by name
   "refined_target_id": string | null,
@@ -144,10 +189,54 @@ CRITICAL — OUT-OF-SCOPE DETECTION (check this BEFORE applying rules 5-6 below)
    current turn clarifies to a real booking, DROP the old tag — do not carry it
    forward in planning_assumptions.
 
-5. Scenario selection:
-   - "trip" when the user wants MULTIPLE categories bundled (flight + hotel at minimum, optionally restaurants / activities). Cues: "plan a trip to X", "go to X for N days", "帮我安排X旅行".
-   - "restaurant" / "hotel" / "flight" / "activity" when the user wants a SINGLE category — even if multiple people are co-deciding. "我和李明想吃日料" is scenario="restaurant", NOT "trip". The presence of a co-decider does NOT change the scenario.
-   - null ONLY when the category truly cannot be inferred (e.g. pure chitchat, pure greeting).
+5. Scenario + categories selection (BOTH must agree):
+
+   "categories" is the NEW canonical field — an ordered list of the products
+   the user explicitly mentioned wanting. "scenario" is a legacy single-
+   value field kept for backward compat. Always emit BOTH consistently per
+   these rules:
+
+   a) ONE category mentioned (餐厅 OR 酒店 OR 机票 OR 活动):
+      → scenario = that one ("restaurant" / "hotel" / "flight" / "activity")
+        categories = [that one]
+      Examples:
+        "我和朋友想吃日料" → scenario="restaurant", categories=["restaurant"]
+        "帮我订个 hotel"   → scenario="hotel",      categories=["hotel"]
+        "5月19号飞 NYC"    → scenario="flight",     categories=["flight"]
+        "周五看 Hamilton"  → scenario="activity",   categories=["activity"]
+
+   b) MULTIPLE categories explicitly mentioned (e.g. "吃饭+看电影",
+      "订机酒"):
+      → scenario = the FIRST mentioned (categories[0])
+        categories = [all mentioned, in mention order]
+      Examples:
+        "今晚 NYC 吃饭+看电影" → scenario="restaurant",
+                                  categories=["restaurant","activity"]
+        "订个机票 + 酒店"      → scenario="flight",
+                                  categories=["flight","hotel"]
+      ALSO populate the corresponding sub-objects for EVERY category in
+      the list — restaurant{} AND activity{} both get filled, sharing
+      the date/city the user specified.
+
+   c) ALL FOUR categories mentioned OR a clear "trip" cue:
+      ("plan a trip to X", "去 X 玩 N 天", "帮我安排 X 旅行" + multi-day +
+      out-of-town cue):
+      → scenario = "trip"
+        categories = ["hotel","flight","restaurant","activity"]
+        Also populate the trip{} sub-object as before.
+
+   d) NO product mentioned yet (e.g. "去 NYC 三天" with no hotel/flight/
+      restaurant/activity hint, just a destination):
+      → scenario = null
+        categories = []
+        DO NOT auto-fill all 4 categories. Leave it empty so the router
+        asks the user "想订什么？要不要完整 plan？". Conservative is
+        correct here — we don't want to spend pipeline budget on
+        categories the user didn't ask for.
+
+   e) Pure chitchat / greeting / out-of-scope:
+      → scenario = null
+        categories = []
 
 WORKED EXAMPLES — use these to calibrate before answering:
 
@@ -200,13 +289,44 @@ WORKED EXAMPLES — use these to calibrate before answering:
 
   E3. RELATIONSHIP CO-DECIDER WORDS (party_type=multi without member_names):
      Input: "今晚帮我和朋友找个 nashville 好吃的餐厅"
-     → scenario="restaurant", intent="create_plan", party_type="multi",
-       member_names=[], restaurant={ city="Nashville", date="<today>" }
+     → scenario="restaurant", categories=["restaurant"], intent="create_plan",
+       party_type="multi", member_names=[],
+       restaurant={ city="Nashville", date="<today>" }
      WHY: "朋友" is a relationship word → party_type MUST be "multi" per
           rule 7 (broader signal than just named co-deciders). member_names
           stays [] because no proper name. The router uses this combo
           (multi + member_names=[] + intent=create_plan) to ask the user
           "solo or DR?" before proceeding.
+
+  E4. MULTI-CATEGORY SOLO (composite plan):
+     Input: "今晚 NYC 想吃饭+看个 show"
+     → scenario="restaurant", categories=["restaurant","activity"],
+       intent="create_plan", party_type="solo",
+       restaurant={ city="New York", date="<today>" },
+       activity={ city="New York", event_date="<today>" }
+     WHY: 2 categories explicitly mentioned (餐厅 + show=活动). Populate
+          BOTH sub-objects sharing date+city. scenario stays as the first
+          (restaurant) for v1 backward-compat. Router will see
+          categories.length=2 + party_type=solo and route to a "composite_plan"
+          confirm card (multi-column horizontal, no vote).
+
+  E5. DESTINATION ONLY — NO PRODUCT MENTIONED YET:
+     Input: "想去纽约三天"
+     → scenario=null, categories=[], intent="create_plan", party_type="solo"
+       (no sub-objects populated)
+     WHY: User named a destination + duration but did NOT name any product
+          (no 餐厅/酒店/机票/活动 keyword). DO NOT auto-fill all 4
+          categories. Router will reply "想订什么？酒店/机票/餐厅/活动？
+          要不要给一个完整 plan？" so the user picks. Conservative.
+
+  E6. EXPLICIT TRIP CUE (full composite is appropriate):
+     Input: "我和爸妈国庆从上海飞东京住5晚顺便逛一下"
+     → scenario="trip", categories=["hotel","flight","restaurant","activity"],
+       intent="create_room", party_type="multi",
+       trip={ destination_city="Tokyo", departure_city="Shanghai",
+              nights=5, travelers=3, ... }
+     WHY: Explicit "飞 + 住 + 逛" = 3 categories explicitly + "trip" intent.
+          Promote to full 4-category trip per rule 5c.
      Same pattern for:
        "我和家人想吃日料"        → party_type="multi", member_names=[]
        "我和同事想找个酒店"      → party_type="multi", member_names=[]
@@ -411,9 +531,30 @@ export function coerceIntentState(raw: Record<string, unknown>, prev: IntentStat
     "chitchat", "create_plan", "create_room", "refine_existing", "unknown",
   ], prev?.intent ?? "unknown");
 
-  const scenario = coerceEnumOrNull<NluScenario>(raw.scenario, [
+  const scenarioRaw = coerceEnumOrNull<NluScenario>(raw.scenario, [
     "restaurant", "hotel", "flight", "activity", "trip",
   ], prev?.scenario ?? null);
+
+  const categoriesRaw = Array.isArray(raw.categories)
+    ? raw.categories.filter((x): x is NluCategory =>
+        typeof x === "string" && CATEGORY_VALUES.includes(x as NluCategory),
+      )
+    : prev?.categories ?? [];
+  // Dedupe while preserving order — model occasionally emits ["restaurant","restaurant"].
+  const seenCat = new Set<string>();
+  const dedupedCategories: NluCategory[] = [];
+  for (const c of categoriesRaw) {
+    if (!seenCat.has(c)) {
+      seenCat.add(c);
+      dedupedCategories.push(c);
+    }
+  }
+  // Reconcile scenario <-> categories so they're never inconsistent. Model
+  // sometimes forgets one or the other; we derive the missing side rather
+  // than ship an inconsistent state.
+  const reconciled = reconcileCategoriesAndScenario(scenarioRaw, dedupedCategories);
+  const scenario = reconciled.scenario;
+  const categories = reconciled.categories;
 
   const party_type = coerceEnum<PartyType>(raw.party_type, ["solo", "multi"], prev?.party_type ?? "solo");
 
@@ -451,6 +592,7 @@ export function coerceIntentState(raw: Record<string, unknown>, prev: IntentStat
     updated_at: typeof raw.updated_at === "string" ? raw.updated_at : now,
     intent,
     scenario,
+    categories,
     party_type,
     member_names,
     refined_target_id,
@@ -458,17 +600,25 @@ export function coerceIntentState(raw: Record<string, unknown>, prev: IntentStat
     ...(proxy_member_constraints ? { proxy_member_constraints } : {}),
   };
 
-  // Attach the scenario-specific sub-object. Run a pass that normalizes
-  // dates (the extractor is instructed to emit ISO, but we validate).
-  if (scenario === "restaurant") {
+  // Attach a sub-object for EVERY category in the list (composite-aware).
+  // Multi-category turns ("吃饭+看 show") populate restaurant{} AND
+  // activity{} simultaneously, sharing the date/city the user mentioned.
+  if (categories.includes("restaurant")) {
     state.restaurant = coerceRestaurant(raw.restaurant, prev?.restaurant);
-  } else if (scenario === "hotel") {
+  }
+  if (categories.includes("hotel")) {
     state.hotel = coerceHotel(raw.hotel, prev?.hotel);
-  } else if (scenario === "flight") {
+  }
+  if (categories.includes("flight")) {
     state.flight = coerceFlight(raw.flight, prev?.flight);
-  } else if (scenario === "activity") {
+  }
+  if (categories.includes("activity")) {
     state.activity = coerceActivity(raw.activity, prev?.activity);
-  } else if (scenario === "trip") {
+  }
+  // Trip sub-object is only populated when scenario==="trip" (legacy).
+  // Composites with categories=["hotel","flight","restaurant","activity"]
+  // get mapped to scenario="trip" by reconcile, so this still triggers.
+  if (scenario === "trip") {
     state.trip = coerceTrip(raw.trip, prev?.trip);
   }
 
@@ -755,18 +905,52 @@ function isoDateOrUndef(v: unknown): string | undefined {
 
 export function mergePrevIntoNew(prev: IntentState | null, next: IntentState): IntentState {
   if (!prev) return next;
-  if (prev.scenario !== next.scenario) return next; // scenario changed — don't carry over stale sub-state
 
   const merged: IntentState = { ...next };
-  if (next.scenario === "restaurant" && prev.restaurant && next.restaurant) {
-    merged.restaurant = { ...prev.restaurant, ...stripUndef(next.restaurant) };
-  } else if (next.scenario === "hotel" && prev.hotel && next.hotel) {
-    merged.hotel = { ...prev.hotel, ...stripUndef(next.hotel) };
-  } else if (next.scenario === "flight" && prev.flight && next.flight) {
-    merged.flight = { ...prev.flight, ...stripUndef(next.flight) };
-  } else if (next.scenario === "activity" && prev.activity && next.activity) {
-    merged.activity = { ...prev.activity, ...stripUndef(next.activity) };
-  } else if (next.scenario === "trip" && prev.trip && next.trip) {
+
+  // Categories union (preserving order). If user mentioned a new category
+  // ("吃饭" turn 1, "+ 看个 show" turn 2), we want categories to grow rather
+  // than oscillate. Drop only when next explicitly reduces (e.g. user
+  // changed mind to single-category — model should signal that explicitly).
+  if (prev.categories.length > 0 && next.categories.length > 0) {
+    const seen = new Set(next.categories);
+    const union: NluCategory[] = [...next.categories];
+    for (const c of prev.categories) {
+      if (!seen.has(c)) {
+        seen.add(c);
+        union.push(c);
+      }
+    }
+    merged.categories = union;
+  }
+
+  // Merge each sub-object in the categories list with the prev sub-object
+  // (when present). Unlike v1, scenario change is no longer a barrier —
+  // a multi-category turn populates multiple sub-objects, and each merges
+  // independently with its prev counterpart.
+  if (merged.categories.includes("restaurant") && prev.restaurant) {
+    merged.restaurant = next.restaurant
+      ? { ...prev.restaurant, ...stripUndef(next.restaurant) }
+      : prev.restaurant;
+  }
+  if (merged.categories.includes("hotel") && prev.hotel) {
+    merged.hotel = next.hotel
+      ? { ...prev.hotel, ...stripUndef(next.hotel) }
+      : prev.hotel;
+  }
+  if (merged.categories.includes("flight") && prev.flight) {
+    merged.flight = next.flight
+      ? { ...prev.flight, ...stripUndef(next.flight) }
+      : prev.flight;
+  }
+  if (merged.categories.includes("activity") && prev.activity) {
+    merged.activity = next.activity
+      ? { ...prev.activity, ...stripUndef(next.activity) }
+      : prev.activity;
+  }
+  // Trip sub-state is the legacy "all 4" composite — keep merge logic
+  // unchanged so old trip flows still work.
+  if (next.scenario === "trip" && prev.trip && next.trip) {
     merged.trip = {
       ...prev.trip,
       ...stripUndef(next.trip),

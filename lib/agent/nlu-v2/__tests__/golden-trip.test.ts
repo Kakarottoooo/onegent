@@ -23,6 +23,7 @@ const baseState = (overrides: Partial<IntentState> = {}): IntentState => ({
   updated_at: "2026-04-23T00:00:00Z",
   intent: "create_plan",
   scenario: "trip",
+  categories: ["hotel", "flight", "restaurant", "activity"],
   party_type: "solo",
   member_names: [],
   refined_target_id: null,

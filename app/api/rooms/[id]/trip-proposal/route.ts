@@ -82,11 +82,20 @@ export async function GET(_req: Request, { params }: Params) {
     // is either running right now or about to. Lets clients that DIDN'T
     // trigger the synthesize call themselves (the other members) still render
     // a progress indicator while they wait for the plan to land.
+    //
+    // Pending-invite guard: same fix as trip-synthesis.ts — never report
+    // is_synthesizing while invitees haven't joined yet, otherwise the
+    // spinner shows during the period when synthesis SHOULDN'T fire (and
+    // the gate doesn't fire it). Without this, clients see a permanent
+    // spinner that never resolves.
+    const pendingInviteCount = members.filter((m) => m.status === "invited").length;
     const intents = await listMemberIntentStates(roomId).catch(() => []);
     const contributorIds = new Set(intents.map((i) => i.user_id));
     const joinedIds = members.filter((m) => m.status === "joined").map((m) => m.user_id);
     const isSynthesizing =
-      joinedIds.length > 0 && joinedIds.every((id) => contributorIds.has(id));
+      pendingInviteCount === 0 &&
+      joinedIds.length > 0 &&
+      joinedIds.every((id) => contributorIds.has(id));
     return NextResponse.json({
       ok: true,
       proposal: null,

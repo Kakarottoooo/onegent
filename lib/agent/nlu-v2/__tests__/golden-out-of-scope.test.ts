@@ -124,6 +124,7 @@ describe.skipIf(!hasApiKey)("Golden in-scope guard · casual phrasings must NOT 
         updated_at: new Date().toISOString(),
         intent: "chitchat",
         scenario: null,
+        categories: [],
         party_type: "solo",
         member_names: [],
         refined_target_id: null,

@@ -4,18 +4,30 @@ import type { IntentState } from "../types";
 
 // ─── Fixtures ────────────────────────────────────────────────────────────
 
-const emptyState = (overrides: Partial<IntentState> = {}): IntentState => ({
-  confidence: 0.9,
-  turn_count: 1,
-  updated_at: "2026-04-23T00:00:00Z",
-  intent: "unknown",
-  scenario: null,
-  party_type: "solo",
-  member_names: [],
-  refined_target_id: null,
-  planning_assumptions: [],
-  ...overrides,
-});
+const emptyState = (overrides: Partial<IntentState> = {}): IntentState => {
+  const base: IntentState = {
+    confidence: 0.9,
+    turn_count: 1,
+    updated_at: "2026-04-23T00:00:00Z",
+    intent: "unknown",
+    scenario: null,
+    categories: [],
+    party_type: "solo",
+    member_names: [],
+    refined_target_id: null,
+    planning_assumptions: [],
+  };
+  const merged = { ...base, ...overrides };
+  // Auto-derive categories from scenario when fixtures only set scenario
+  // (cuts test fixture noise — pre-composite tests didn't have to think
+  // about categories).
+  if (merged.categories.length === 0 && merged.scenario) {
+    merged.categories = merged.scenario === "trip"
+      ? ["hotel", "flight", "restaurant", "activity"]
+      : [merged.scenario];
+  }
+  return merged;
+};
 
 // ─── routeIntent — top-level dispatch ────────────────────────────────────
 
@@ -35,12 +47,14 @@ describe("routeIntent — top-level dispatch", () => {
     expect(routeIntent(s)).toEqual({ type: "continue_chat" });
   });
 
-  it("create_plan + missing scenario → ask_clarification for scenario", () => {
+  it("create_plan + no categories → ask_clarification for categories", () => {
+    // Composite migration: scenario==null implies categories=[] (router
+    // asks "想订什么？" via the new `categories` slot, not the old `scenario`).
     const s = emptyState({ intent: "create_plan", scenario: null });
     const action = routeIntent(s);
     expect(action.type).toBe("ask_clarification");
     if (action.type === "ask_clarification") {
-      expect(action.missing).toEqual(["scenario"]);
+      expect(action.missing).toEqual(["categories"]);
     }
   });
 });
@@ -54,6 +68,7 @@ describe("routeIntent — restaurant", () => {
       scenario: "restaurant",
       restaurant: {
         city: "New York",
+        cuisine: "Italian",
         date: "2026-05-02",
         time: "19:00",
         party_size: 2,
@@ -70,7 +85,7 @@ describe("routeIntent — restaurant", () => {
     const s = emptyState({
       intent: "create_plan",
       scenario: "restaurant",
-      restaurant: { city: "New York", date: "2026-05-02", time: "19:00" },
+      restaurant: { city: "New York", cuisine: "Italian", date: "2026-05-02", time: "19:00" },
     });
     const action = routeIntent(s);
     expect(action.type).toBe("ask_clarification");
@@ -81,9 +96,9 @@ describe("routeIntent — restaurant", () => {
     }
   });
 
-  it("empty restaurant state → all 4 fields missing", () => {
+  it("empty restaurant state → all required fields missing", () => {
     const s = emptyState({ intent: "create_plan", scenario: "restaurant" });
-    expect(getMissingForScenario(s)).toEqual(["city", "date", "time", "party_size"]);
+    expect(getMissingForScenario(s)).toEqual(["city", "cuisine", "date", "time", "party_size"]);
   });
 
   it("multi-party restaurant → show_confirm_card room", () => {
@@ -94,6 +109,7 @@ describe("routeIntent — restaurant", () => {
       member_names: ["李明"],
       restaurant: {
         city: "New York",
+        cuisine: "Italian",
         date: "2026-05-02",
         time: "19:00",
         party_size: 2,

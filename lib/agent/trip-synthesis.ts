@@ -351,6 +351,16 @@ export async function triggerSynthesis(
       listRoomMembers(roomId),
       listMemberIntentStates(roomId),
     ]);
+    // Pending-invite block: the gate previously only checked joined members'
+    // contributions, so a creator-only room with one pending invitee would
+    // pass (joined=[creator], creator.contributed → allContributed=true) and
+    // fire synthesis without ever waiting for the invitee. Block while any
+    // member is still in "invited" state — synthesis should wait for them
+    // to either join + contribute or be removed.
+    const pendingInviteCount = members.filter((m) => m.status === "invited").length;
+    if (pendingInviteCount > 0) {
+      return { triggered: false, reason: "waiting_for_members", result: null };
+    }
     const joined = members.filter((m) => m.status === "joined");
     if (joined.length === 0) {
       return { triggered: false, reason: "no_joined_members", result: null };

@@ -22,6 +22,16 @@ import type {
 } from "./types";
 import { getMissingFields as getMissingTripFields } from "../trip-intent-state";
 
+// Quick-pick options for the categories=[] question. The user taps one of
+// the 4 specific products OR taps "完整 plan" for a 4-category trip.
+const CATEGORIES_QUICK_PICKS: QuickPick[] = [
+  { label: "餐厅", value: "我想订个餐厅" },
+  { label: "酒店", value: "我想订个酒店" },
+  { label: "机票", value: "我想订个机票" },
+  { label: "活动", value: "我想买个演出/活动票" },
+  { label: "完整 plan", value: "给我一个完整的 plan：酒店、机票、餐厅、活动一起" },
+];
+
 // ─── Public API ───────────────────────────────────────────────────────────
 
 /**
@@ -41,11 +51,26 @@ export function routeIntent(state: IntentState): RouterAction {
     return { type: "continue_chat" };
   }
 
-  // Without a scenario we can't route anywhere. Ask for clarification.
+  // No category yet — user mentioned travel intent (destination/dates) but
+  // didn't name a product. Ask "想订什么？" + offer "完整 plan" as one tap.
+  // This is the conservative path: we don't auto-fill all 4 categories on
+  // the user's behalf because it wastes pipeline budget on what they
+  // didn't ask for.
+  if (state.categories.length === 0) {
+    return {
+      type: "ask_clarification",
+      missing: ["categories"],
+      suggested_quick_picks: CATEGORIES_QUICK_PICKS,
+    };
+  }
+  // After the categories pick, scenario is derived as categories[0]. If
+  // the model somehow left it null while categories is non-empty (race
+  // condition between state passes), still ask for clarification.
   if (!state.scenario) {
     return {
       type: "ask_clarification",
-      missing: ["scenario"],
+      missing: ["categories"],
+      suggested_quick_picks: CATEGORIES_QUICK_PICKS,
     };
   }
 
@@ -78,45 +103,103 @@ export function routeIntent(state: IntentState): RouterAction {
   }
 
   // create_room without a named co-decider: agent doesn't know who to invite.
-  // Ask for a contact name. Without this, the commit route's
-  // resolveContactsByNames returns [] and the room gets created with no
-  // invites — a useless single-member DR.
-  //
-  // This typically follows the "拉 ta 进 Decision Room" quick pick above,
-  // where user said they want a DR but hasn't named the friend yet.
+  // Ask for a contact name UNLESS the seed has an explicit numeric multi
+  // signal (party_size/guests/passengers/num_tickets/travelers ≥ 2). When
+  // the user said "我和老婆 2 人" the relationship word IS the implicit
+  // co-decider — they'll add the actual contact at room-creation time.
+  // Without an explicit count, "拉 ta 进 DR" with no name is genuinely
+  // ambiguous and asking is the right move.
   if (state.intent === "create_room" && state.member_names.length === 0) {
-    return {
-      type: "ask_clarification",
-      missing: ["member_names"],
-    };
+    const hasNumericMultiSignal =
+      (state.restaurant?.party_size ?? 1) >= 2 ||
+      (state.hotel?.guests ?? 1) >= 2 ||
+      (state.flight?.passengers ?? 1) >= 2 ||
+      (state.activity?.num_tickets ?? 1) >= 2 ||
+      (state.trip?.travelers ?? 1) >= 2;
+    if (!hasNumericMultiSignal) {
+      return {
+        type: "ask_clarification",
+        missing: ["member_names"],
+      };
+    }
   }
 
-  // create_room (non-trip) with at least one member named → ready for the
-  // ConfirmCard. The legacy "fill all required fields then confirm" path
-  // doesn't fit Decision Rooms: the initiator's seed (city/date from the
-  // first turn) is enough context to create the room; cuisine/time/party_
-  // size etc. get gathered as each member chats privately with the agent
-  // INSIDE the room. Forcing the initiator to fill them up front turns
-  // the DR into a one-person form-fill again — which is exactly what
-  // Plan A removed.
+  // ─── 4-quadrant dispatch (party_type × categories.length) ─────────────
   //
-  // Trip rooms still require getMissingForScenario to pass before
-  // confirming because their planner does cross-category synthesis up
-  // front (buildTripPackage needs the full trip seed). That path falls
-  // through to the missing-check below.
-  if (
-    state.intent === "create_room" &&
-    state.scenario &&
-    state.scenario !== "trip" &&
-    state.member_names.length > 0
-  ) {
-    return {
-      type: "show_confirm_card",
-      kind: "room",
-      state,
-    };
+  //                        N=1 category               N>=2 categories
+  //   ──────────────────────────────────────────────────────────────────
+  //   solo  (create_plan)  kind="plan"               kind="composite_plan"
+  //                        single-card list flow     vertical-stack flow
+  //   multi (create_room)  kind="room" (1 column)    kind="room" (N columns,
+  //                                                  or kind="trip" when N=4
+  //                                                  for legacy compat)
+  //
+  // Decision Rooms (multi) skip the per-category missing-fields gate —
+  // initiator's seed is enough to create; details gather inside the room
+  // as each member chats. Solo flows still need their fields before
+  // confirm because they fire pipelines immediately.
+
+  // Anything that reached here with intent=create_room is a multi-DR.
+  // (The empty-member_names case was either filtered above by the
+  // ask-for-name gate, or admitted because the seed has a numeric multi
+  // signal like passengers=3 / travelers=4.)
+  const isMultiDR = state.intent === "create_room";
+
+  if (isMultiDR) {
+    // Trip-style 4-category DR: legacy "trip" kind kept so the existing
+    // TripPackageCard / TripProposalChatCard renderers don't need to
+    // change for this case. Phase 2 collapses this into kind="room".
+    if (state.scenario === "trip" && state.categories.length === 4) {
+      // Trip DR still gates on the full trip seed because synthesis
+      // happens up-front before members get their first reply.
+      const missing = getMissingForScenario(state);
+      if (missing.length > 0) {
+        return {
+          type: "ask_clarification",
+          missing,
+          suggested_quick_picks: getDefaultQuickPicksFor(state.scenario, missing),
+        };
+      }
+      return { type: "show_confirm_card", kind: "trip", state };
+    }
+    // Single-category or partial-composite DR: confirm immediately, fill
+    // category-specific fields inside the room.
+    return { type: "show_confirm_card", kind: "room", state };
   }
 
+  // Solo paths from here down.
+  // Legacy solo trip planner (scenario=="trip", all 4 cats) — kept on the
+  // existing kind="trip" path so the Stage 1 buildTripPackage flow doesn't
+  // regress. Phase 2 collapses this into composite_plan once that handler
+  // can substitute for the trip planner.
+  if (state.scenario === "trip") {
+    const missing = getMissingForScenario(state);
+    if (missing.length > 0) {
+      return {
+        type: "ask_clarification",
+        missing,
+        suggested_quick_picks: getDefaultQuickPicksFor(state.scenario, missing),
+      };
+    }
+    return { type: "show_confirm_card", kind: "trip", state };
+  }
+
+  // Solo + 2+ categories (partial composite — e.g. restaurant+activity) →
+  // composite plan (multi-column horizontal). Gate on FIRST category's
+  // required fields; the others share the same city/date seed.
+  if (state.categories.length >= 2) {
+    const missing = getMissingForScenario(state);
+    if (missing.length > 0) {
+      return {
+        type: "ask_clarification",
+        missing,
+        suggested_quick_picks: getDefaultQuickPicksFor(state.scenario, missing),
+      };
+    }
+    return { type: "show_confirm_card", kind: "composite_plan", state };
+  }
+
+  // Solo + 1 category → existing per-scenario plan path.
   const missing = getMissingForScenario(state);
   if (missing.length > 0) {
     return {
@@ -126,26 +209,15 @@ export function routeIntent(state: IntentState): RouterAction {
     };
   }
 
-  // All required fields present — advance to confirm card.
-  const kind: "plan" | "room" | "trip" =
-    state.scenario === "trip"
-      ? "trip"
-      : state.intent === "create_room"
-      ? "room"
-      : "plan";
-
-  // Direct-booking shortcut: user named one specific venue.
-  // Solo flow only — Decision Rooms (multi-decider) keep going through the
-  // recommendation/voting flow even when the creator names a venue, because
-  // the other members haven't said they want THAT venue specifically.
+  // Direct-booking shortcut: user named one specific venue (solo only —
+  // Decision Rooms keep voting flow even when initiator names a venue).
   const directBooking =
-    kind === "plan" &&
-    ((state.scenario === "restaurant" && truthy(state.restaurant?.restaurant_name)) ||
-      (state.scenario === "hotel" && truthy(state.hotel?.hotel_name)));
+    (state.scenario === "restaurant" && truthy(state.restaurant?.restaurant_name)) ||
+    (state.scenario === "hotel" && truthy(state.hotel?.hotel_name));
 
   return {
     type: "show_confirm_card",
-    kind,
+    kind: "plan",
     state,
     ...(directBooking ? { directBooking: true } : {}),
   };
@@ -237,7 +309,9 @@ function missingRestaurant(state: IntentState): string[] {
   // recommend mixed cuisines), but asking surfaces a quick-pick row of
   // common cuisines so the user taps instead of types. The first quick
   // pick option is "都可以" which sets cuisine="any" to skip.
-  if (!truthy(r.cuisine)) missing.push("cuisine");
+  // Skipped when the user named a specific venue — cuisine is moot for
+  // direct booking (Carbone is Italian whether you specified or not).
+  if (!truthy(r.cuisine) && !truthy(r.restaurant_name)) missing.push("cuisine");
   if (!truthy(r.date)) missing.push("date");
   if (!truthy(r.time)) missing.push("time");
   if (!(typeof r.party_size === "number" && r.party_size > 0)) missing.push("party_size");

@@ -14,24 +14,35 @@ import { describe, it, expect } from "vitest";
 import { routeIntent } from "../router";
 import type { IntentState } from "../types";
 
-const baseState = (overrides: Partial<IntentState> = {}): IntentState => ({
-  confidence: 0.9,
-  turn_count: 1,
-  updated_at: "2026-04-23T00:00:00Z",
-  intent: "create_plan",
-  scenario: null,
-  party_type: "solo",
-  member_names: [],
-  refined_target_id: null,
-  planning_assumptions: [],
-  ...overrides,
-});
+const baseState = (overrides: Partial<IntentState> = {}): IntentState => {
+  const base: IntentState = {
+    confidence: 0.9,
+    turn_count: 1,
+    updated_at: "2026-04-23T00:00:00Z",
+    intent: "create_plan",
+    scenario: null,
+    categories: [],
+    party_type: "solo",
+    member_names: [],
+    refined_target_id: null,
+    planning_assumptions: [],
+  };
+  const merged = { ...base, ...overrides };
+  if (merged.categories.length === 0 && merged.scenario) {
+    merged.categories = merged.scenario === "trip"
+      ? ["hotel", "flight", "restaurant", "activity"]
+      : [merged.scenario];
+  }
+  return merged;
+};
 
 // ─── M1-M4 — one happy-path per scenario ────────────────────────────────
 
 describe("Create-room golden cases · by scenario", () => {
-  it("M1. Restaurant with a named co-decider → create_room + multi", () => {
+  it("M1. Restaurant with a named co-decider → show_confirm_card kind=room", () => {
     // "我和李明想周五晚上吃日料"
+    // Phase-1 design: multi-DR with named member confirms immediately;
+    // city/party_size get filled inside the room as members chat.
     const state = baseState({
       intent: "create_room",
       scenario: "restaurant",
@@ -44,15 +55,17 @@ describe("Create-room golden cases · by scenario", () => {
       },
     });
     const action = routeIntent(state);
-    expect(action.type).toBe("ask_clarification");
-    if (action.type === "ask_clarification") {
-      expect(action.missing).toContain("city");
-      expect(action.missing).toContain("party_size");
+    expect(action.type).toBe("show_confirm_card");
+    if (action.type === "show_confirm_card") {
+      expect(action.kind).toBe("room");
     }
   });
 
   it("M2. Hotel with spouse signal → multi, member_names empty ('老婆' is relationship)", () => {
     // "我和老婆下周去纽约住 3 晚，四星以上"
+    // Extractor implies guests=2 from "和老婆" — that's the numeric multi
+    // signal that lets the router skip the "ask for member name" gate.
+    // The actual contact email is collected at room-creation time.
     const state = baseState({
       intent: "create_room",
       scenario: "hotel",
@@ -63,6 +76,7 @@ describe("Create-room golden cases · by scenario", () => {
         check_in: "2026-04-30",
         nights: 3,
         star_rating: 4,
+        guests: 2,
       },
     });
     const action = routeIntent(state);
@@ -125,6 +139,8 @@ describe("Create-room golden cases · by scenario", () => {
 describe("Create-room · proxy constraints + implicit headcount", () => {
   it("M5. Per-named-member constraints captured in proxy_member_constraints", () => {
     // "我和李明想吃日料，李明不吃生鱼片、预算人均 $80"
+    // Phase-1: named member → multi-DR confirms; proxy_member_constraints
+    // ride along on state for the room-side merge in commit.
     const state = baseState({
       intent: "create_room",
       scenario: "restaurant",
@@ -140,11 +156,12 @@ describe("Create-room · proxy constraints + implicit headcount", () => {
         },
       },
     });
-    // State is what the extractor SHOULD produce. Router just needs to surface
-    // the clarification — the proxy_member_constraints ride along in the
-    // state unchanged.
     const action = routeIntent(state);
-    expect(action.type).toBe("ask_clarification");
+    expect(action.type).toBe("show_confirm_card");
+    if (action.type === "show_confirm_card") {
+      expect(action.kind).toBe("room");
+    }
+    // proxy_member_constraints rides along on state regardless of action.
     expect(state.proxy_member_constraints).toBeDefined();
     expect(state.proxy_member_constraints?.["李明"]).toMatchObject({
       dietary: ["no raw fish"],
@@ -152,8 +169,9 @@ describe("Create-room · proxy constraints + implicit headcount", () => {
     });
   });
 
-  it("M6. 'a few friends' → multi, empty member_names, party_size missing", () => {
-    // "几个朋友周末聚餐"
+  it("M6. 'a few friends' → ask for member_names (no name + no numeric count)", () => {
+    // "几个朋友周末聚餐" — no specific contact named, no party_size given.
+    // Router asks "who specifically?" before creating an empty DR.
     const state = baseState({
       intent: "create_room",
       scenario: "restaurant",
@@ -166,9 +184,7 @@ describe("Create-room · proxy constraints + implicit headcount", () => {
     const action = routeIntent(state);
     expect(action.type).toBe("ask_clarification");
     if (action.type === "ask_clarification") {
-      expect(action.missing).toContain("city");
-      expect(action.missing).toContain("time");
-      expect(action.missing).toContain("party_size");
+      expect(action.missing).toEqual(["member_names"]);
     }
   });
 });
@@ -183,6 +199,7 @@ describe("Create-room · negative tests (don't over-detect multi)", () => {
       party_type: "solo",
       restaurant: {
         city: "San Francisco",
+        cuisine: "French",
         date: "2026-04-25",
         time: "19:00",
         party_size: 1,
@@ -204,6 +221,7 @@ describe("Create-room · negative tests (don't over-detect multi)", () => {
       party_type: "solo",
       restaurant: {
         city: "NYC",
+        cuisine: "Italian",
         date: "2026-04-25",
         time: "19:00",
         party_size: 2,

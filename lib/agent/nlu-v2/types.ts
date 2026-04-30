@@ -33,6 +33,19 @@ export type NluScenario =
   | "activity"
   | "trip";
 
+/**
+ * Composite categories — the new vocabulary. A user request maps to an
+ * ordered list of NluCategory values (e.g. "和朋友吃饭+看电影 NYC" →
+ * ["restaurant", "activity"]). The legacy `scenario` is derived as
+ * categories[0] ?? null during the migration; new code should consume
+ * `categories` directly.
+ *
+ * Note: "trip" is NOT a category — it's a UX label for a composite that
+ * happens to include all four (hotel + flight + restaurant + activity).
+ * The router decides UI based on categories.length, not a "trip" flag.
+ */
+export type NluCategory = "restaurant" | "hotel" | "flight" | "activity";
+
 export type PartyType = "solo" | "multi";
 
 /** Kept shape-compatible with v1's QuickPick for backward compat. */
@@ -152,7 +165,20 @@ export interface IntentState {
 
   // Classification
   intent: NluIntent;
+  /**
+   * @deprecated derived from categories[0] (or "trip" when categories.length===4).
+   * Kept on the type during the v1→composite migration so consumers
+   * (commit/parse routes, ConfirmCard) compile unchanged. Phase 2 deletes this.
+   */
   scenario: NluScenario | null;
+  /**
+   * Ordered list of categories the user explicitly wants. Empty list means
+   * the user hasn't named any product yet — the router should ask
+   * "想订什么？" + offer "完整 plan" as a one-tap upgrade. Multi-category
+   * requests ("吃饭+电影") populate this with the union; the trip-style
+   * full package is just `["hotel", "flight", "restaurant", "activity"]`.
+   */
+  categories: NluCategory[];
   party_type: PartyType;
   /** Names of non-creator members mentioned in conversation. */
   member_names: string[];
@@ -213,7 +239,17 @@ export type RouterAction =
    */
   | {
       type: "show_confirm_card";
-      kind: "plan" | "room" | "trip";
+      /**
+       * "plan"           — solo + 1 category (existing single-cat plan path)
+       * "composite_plan" — solo + 2+ categories (multi-column horizontal,
+       *                    no vote actions)
+       * "room"           — multi-party DR with N>=1 categories (multi-column
+       *                    horizontal, vote actions; N=1 renders 1 column)
+       * "trip"           — @deprecated alias for kind="room" with all 4
+       *                    categories. Kept for the migration; emit "room"
+       *                    going forward.
+       */
+      kind: "plan" | "composite_plan" | "room" | "trip";
       state: IntentState;
       directBooking?: boolean;
     };
@@ -226,7 +262,13 @@ export type RouterAction =
 
 export interface NluV2ParseResult {
   intent: NluIntent;
+  /**
+   * @deprecated derived from categories[0]; kept for backward-compat with v1 callers.
+   * Use `categories` instead.
+   */
   scenario: NluScenario | null;
+  /** New canonical field. Empty list = user hasn't picked any category yet. */
+  categories: NluCategory[];
   party_type: PartyType;
   member_names: string[];
   collected_constraints: Record<string, unknown>;

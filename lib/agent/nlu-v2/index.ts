@@ -60,6 +60,7 @@ export function buildFallbackResult(message: string): import("./types").NluV2Par
   return {
     intent: "chitchat",
     scenario: null,
+    categories: [],
     party_type: "solo",
     member_names: [],
     collected_constraints: {},
@@ -194,6 +195,7 @@ function toV1CompatShape(
   return {
     intent: effectiveIntent,
     scenario: state.scenario,
+    categories: state.categories,
     party_type: state.party_type,
     member_names: state.member_names,
     collected_constraints: collected,
