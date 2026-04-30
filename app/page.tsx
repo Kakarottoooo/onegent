@@ -182,10 +182,14 @@ function HomeInner() {
   }, [urlRoomId, urlSessionId]);
 
   // When the user actively SWITCHES between existing threads (sidebar click,
-  // back button, etc.) wipe the in-memory chat column so the new thread
-  // replays from DB cleanly. Do NOT clear when a brand-new session is
-  // created mid-turn (from "none" → "session:X") — the user just typed a
-  // message and got a reply; those must stay on screen.
+  // back button, etc.) we want the new thread's content to appear in a SINGLE
+  // render — no flash of the empty homepage between clearChat and the
+  // replay effect's repopulation. So this effect handles the switch
+  // synchronously when the new context is already cached, and only
+  // falls back to clear-then-fetch when there's nothing to restore from.
+  // Do NOT clear when a brand-new session is created mid-turn (from
+  // "none" → "session:X") — the user just typed a message and got a
+  // reply; those must stay on screen.
   const lastContextRef = useRef<string>("");
   useEffect(() => {
     const ctx = activeRoomId
@@ -199,26 +203,52 @@ function HomeInner() {
       prev !== ctx &&
       prev !== "none"; // "none → session:X" is session creation, not a switch
     if (isRealSwitch) {
-      // Clear on every real context switch — including session→room upgrade.
-      // The room replay effect below re-fetches the (server-seeded) private
-      // channel right after, so the user sees the full conversation restored
-      // from DB. Relying on in-memory messages surviving upgrade was fragile
-      // (Strict Mode, React render timing, etc.) — DB is the source of truth.
-      chat.clearChat();
-      // CRITICAL: also evict the prev thread from the replayed-set guards.
-      // Without this, switching A → B → A leaves A's chat blank — the replay
-      // effect sees has(A)===true and skips the re-fetch even though we just
-      // cleared the in-memory messages. Encoded prev as "room:X" / "session:X"
-      // above; parse it back.
+      // Evict the previous thread first so its replay-set flag doesn't
+      // wedge a future return-visit. (Switching A→B→A would leave A
+      // blank if its flag stayed set.) Encoded prev as "room:X" /
+      // "session:X" above; parse it back.
       if (prev.startsWith("session:")) {
         replayedSessionIds.current.delete(prev.slice("session:".length));
       } else if (prev.startsWith("room:")) {
         replayedRoomIds.current.delete(prev.slice("room:".length));
       }
-      // Wipe NLU memory too — the prev thread's IntentState/history would
-      // otherwise leak into the next thread's first parse call.
-      nluHistoryRef.current = [];
-      lastNluStateRef.current = null;
+
+      // Try the SYNCHRONOUS cached path first. If we have a snapshot
+      // for the new context, replaceMessages directly — the render
+      // commits with the new content in one shot, no empty-state flash.
+      // The replay effect below sees the flag set and bails, so nothing
+      // double-fires.
+      let restored = false;
+      if (activeSessionId) {
+        const cached = sessionReplayCacheRef.current.get(activeSessionId);
+        if (cached) {
+          chat.replaceMessages(cached.messages);
+          setActiveSessionTitle(cached.title);
+          nluHistoryRef.current = cached.nluHistory;
+          lastNluStateRef.current = cached.lastNluState;
+          replayedSessionIds.current.add(activeSessionId);
+          restored = true;
+        }
+      } else if (activeRoomId) {
+        const cached = roomReplayCacheRef.current.get(activeRoomId);
+        if (cached) {
+          chat.replaceMessages(cached.messages);
+          setActiveProposalId(cached.proposalId);
+          nluHistoryRef.current = cached.nluHistory;
+          replayedRoomIds.current.add(activeRoomId);
+          restored = true;
+        }
+      }
+
+      if (!restored) {
+        // Cold cache: clear and let the replay effect fetch from DB.
+        // First-visit flash is unavoidable until we wire a loading
+        // state, but switches BACK to a previously-visited thread are
+        // now flash-free thanks to the cached path above.
+        chat.clearChat();
+        nluHistoryRef.current = [];
+        lastNluStateRef.current = null;
+      }
     }
     lastContextRef.current = ctx;
     // eslint-disable-next-line react-hooks/exhaustive-deps
