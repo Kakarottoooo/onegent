@@ -12,6 +12,7 @@
  */
 
 import type { CalendarGrid, CalendarEvent, CalendarDay, WeekSpanSegment } from "@/lib/calendar-grid";
+import type { ExternalCalendarEvent } from "@/lib/calendar-availability";
 import type { BookingJobStep } from "@/lib/db";
 
 export interface MonthCalendarProps {
@@ -20,6 +21,8 @@ export interface MonthCalendarProps {
   onNextMonth: () => void;
   onToday: () => void;
   onEventClick?: (jobId: string) => void;
+  externalBusyCounts?: Record<string, number>;
+  externalEventsByDay?: Record<string, ExternalCalendarEvent[]>;
 }
 
 // ─── Status color map (mirrors TripItineraryCalendar) ───────────────────
@@ -136,6 +139,22 @@ const SINGLE_EVENT_BAR: React.CSSProperties = {
   overflow: "hidden",
 };
 
+const EXTERNAL_EVENT_BAR: React.CSSProperties = {
+  display: "flex",
+  alignItems: "center",
+  gap: 5,
+  padding: "3px 6px",
+  borderRadius: 6,
+  borderLeft: "3px solid #60a5fa",
+  background: "rgba(96, 165, 250, 0.14)",
+  color: "#dbeafe",
+  fontFamily: "var(--font-dm-sans)",
+  fontSize: 11,
+  lineHeight: "14px",
+  overflow: "hidden",
+  textDecoration: "none",
+};
+
 const SPAN_BAR: React.CSSProperties = {
   position: "absolute",
   boxSizing: "border-box",
@@ -171,7 +190,15 @@ const EVENT_LABEL: React.CSSProperties = {
 // ─── Main component ──────────────────────────────────────────────────────
 
 export default function MonthCalendar(props: MonthCalendarProps) {
-  const { grid, onPrevMonth, onNextMonth, onToday, onEventClick } = props;
+  const {
+    grid,
+    onPrevMonth,
+    onNextMonth,
+    onToday,
+    onEventClick,
+    externalBusyCounts,
+    externalEventsByDay,
+  } = props;
 
   return (
     <div style={WRAPPER}>
@@ -222,6 +249,8 @@ export default function MonthCalendar(props: MonthCalendarProps) {
                 isLastCol={di === 6}
                 contentTopPad={cellTopPad}
                 onEventClick={onEventClick}
+                busyCount={externalBusyCounts?.[day.date] ?? 0}
+                externalEvents={externalEventsByDay?.[day.date] ?? []}
               />
             ))}
             {/* Span bars overlay — placed AFTER cells so they stack visually on top */}
@@ -246,11 +275,15 @@ function DayCell({
   isLastCol,
   contentTopPad,
   onEventClick,
+  busyCount,
+  externalEvents,
 }: {
   day: CalendarDay;
   isLastCol: boolean;
   contentTopPad: number;
   onEventClick?: (jobId: string) => void;
+  busyCount: number;
+  externalEvents: ExternalCalendarEvent[];
 }) {
   const dayNumberStyle: React.CSSProperties = {
     ...DAY_NUMBER,
@@ -272,8 +305,41 @@ function DayCell({
       }}
     >
       <span style={dayNumberStyle}>{day.dayOfMonth}</span>
+      {busyCount > 0 && externalEvents.length === 0 ? (
+        <div
+          style={{
+            alignSelf: "flex-start",
+            marginBottom: 2,
+            padding: "2px 6px",
+            borderRadius: 999,
+            background: "rgba(201,168,76,0.14)",
+            border: "1px solid rgba(201,168,76,0.28)",
+            fontFamily: "var(--font-dm-sans)",
+            fontSize: 10,
+            color: "var(--gold, #C9A84C)",
+          }}
+          title={`Google Calendar busy blocks: ${busyCount}`}
+        >
+          Busy{busyCount > 1 ? ` ${busyCount}` : ""}
+        </div>
+      ) : null}
       {/* Reserve vertical space for span lanes sitting on top of this cell. */}
       <div style={{ height: contentTopPad - DAY_NUMBER_HEIGHT, flexShrink: 0 }} />
+      {externalEvents.slice(0, 3).map((event) => (
+        <ExternalEventBar key={event.id} event={event} />
+      ))}
+      {externalEvents.length > 3 ? (
+        <div
+          style={{
+            fontFamily: "var(--font-dm-sans)",
+            fontSize: 10,
+            color: "var(--text-muted, #888)",
+            paddingLeft: 2,
+          }}
+        >
+          +{externalEvents.length - 3} more
+        </div>
+      ) : null}
       {day.events.map((ce, idx) => (
         <SingleEventBar
           key={`${ce.jobId}-${ce.event.stepIndex}-${ce.event.slot}-${idx}`}
@@ -281,6 +347,40 @@ function DayCell({
           onClick={onEventClick}
         />
       ))}
+    </div>
+  );
+}
+
+function ExternalEventBar({ event }: { event: ExternalCalendarEvent }) {
+  const style: React.CSSProperties = {
+    ...EXTERNAL_EVENT_BAR,
+    borderLeftColor: event.colorHex ?? "#60a5fa",
+    background: event.colorHex ? `${event.colorHex}22` : EXTERNAL_EVENT_BAR.background,
+  };
+  const content = (
+    <>
+      <span style={EVENT_TIME}>{event.timeLabel}</span>
+      <span style={EVENT_LABEL}>{event.title}</span>
+    </>
+  );
+
+  if (event.eventUrl) {
+    return (
+      <a
+        href={event.eventUrl}
+        target="_blank"
+        rel="noreferrer"
+        style={style}
+        title={`${event.title}${event.calendarName ? ` · ${event.calendarName}` : ""}`}
+      >
+        {content}
+      </a>
+    );
+  }
+
+  return (
+    <div style={style} title={`${event.title}${event.calendarName ? ` · ${event.calendarName}` : ""}`}>
+      {content}
     </div>
   );
 }

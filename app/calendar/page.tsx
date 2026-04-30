@@ -12,11 +12,13 @@
  */
 
 import { useState, useEffect, useCallback, useMemo } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
+import { useAuth } from "@clerk/nextjs";
 import GlobalNav from "@/components/GlobalNav";
 import { EditorialHero } from "@/app/_shared/editorial";
 import MonthCalendar from "@/components/MonthCalendar";
 import { buildCalendarGrid } from "@/lib/calendar-grid";
+import type { ExternalCalendarEventsByDay } from "@/lib/calendar-availability";
 import type { BookingJob } from "@/lib/db";
 
 function getSessionId(): string {
@@ -31,8 +33,17 @@ function getSessionId(): string {
 
 export default function CalendarPage() {
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const auth = useAuth();
   const [jobs, setJobs] = useState<BookingJob[]>([]);
   const [loading, setLoading] = useState(true);
+  const [googleConnected, setGoogleConnected] = useState(false);
+  const [googleEmail, setGoogleEmail] = useState<string | null>(null);
+  const [googleBusyCounts, setGoogleBusyCounts] = useState<Record<string, number>>({});
+  const [googleEventsByDay, setGoogleEventsByDay] = useState<ExternalCalendarEventsByDay>({});
+  const [googleEventCount, setGoogleEventCount] = useState(0);
+  const [googleSyncing, setGoogleSyncing] = useState(false);
+  const [googleError, setGoogleError] = useState<string | null>(null);
 
   // Anchor = first day of the viewed month. Use local-TZ constructor so the
   // grid matches the user's wall clock rather than UTC.
@@ -72,12 +83,84 @@ export default function CalendarPage() {
     return () => clearInterval(timer);
   }, [jobs, loadJobs]);
 
+  const loadGoogleMonth = useCallback(async () => {
+    if (!auth.isLoaded) return;
+    if (!auth.isSignedIn) {
+      setGoogleConnected(false);
+      setGoogleEmail(null);
+      setGoogleBusyCounts({});
+      setGoogleEventsByDay({});
+      setGoogleEventCount(0);
+      setGoogleError(null);
+      return;
+    }
+
+    setGoogleSyncing(true);
+    setGoogleError(null);
+    try {
+      const statusRes = await fetch("/api/calendar/google/status", { cache: "no-store" });
+      const status = (await statusRes.json().catch(() => ({}))) as {
+        connected?: boolean;
+        account_email?: string | null;
+      };
+      if (!statusRes.ok || !status.connected) {
+        setGoogleConnected(false);
+        setGoogleEmail(null);
+        setGoogleBusyCounts({});
+        setGoogleEventsByDay({});
+        setGoogleEventCount(0);
+        return;
+      }
+
+      const res = await fetch(
+        `/api/calendar/google/month?year=${anchor.getFullYear()}&month=${anchor.getMonth()}`,
+        { cache: "no-store" },
+      );
+      const data = (await res.json().catch(() => ({}))) as {
+        connected?: boolean;
+        busy_counts?: Record<string, number>;
+        events_by_day?: ExternalCalendarEventsByDay;
+        event_count?: number;
+        account_email?: string | null;
+        error?: string;
+      };
+      if (!res.ok) {
+        throw new Error(data.error ?? "Couldn't sync Google Calendar.");
+      }
+
+      setGoogleConnected(!!data.connected);
+      setGoogleEmail(data.account_email ?? status.account_email ?? null);
+      setGoogleBusyCounts(data.busy_counts ?? {});
+      setGoogleEventsByDay(data.events_by_day ?? {});
+      setGoogleEventCount(data.event_count ?? 0);
+    } catch (error) {
+      setGoogleError(error instanceof Error ? error.message : "Couldn't sync Google Calendar.");
+    } finally {
+      setGoogleSyncing(false);
+    }
+  }, [anchor, auth.isLoaded, auth.isSignedIn]);
+
+  useEffect(() => {
+    void loadGoogleMonth();
+  }, [loadGoogleMonth]);
+
   const grid = useMemo(
     () => buildCalendarGrid(jobs, anchor.getFullYear(), anchor.getMonth()),
     [jobs, anchor],
   );
 
-  const hasAnyEvent = useMemo(() => grid.weeks.some((w) => w.some((d) => d.events.length > 0)), [grid]);
+  const hasAnyEvent = useMemo(
+    () =>
+      grid.weeks.some((w) => w.some((d) => d.events.length > 0)) ||
+      googleEventCount > 0,
+    [googleEventCount, grid],
+  );
+  const googleBusyDayCount = useMemo(
+    () => Object.keys(googleBusyCounts).filter((date) => googleBusyCounts[date] > 0).length,
+    [googleBusyCounts],
+  );
+  const googleCalendarStatus = searchParams.get("google_calendar");
+  const googleCalendarErrorDetail = searchParams.get("google_calendar_error_detail");
 
   function prevMonth() {
     setAnchor((a) => new Date(a.getFullYear(), a.getMonth() - 1, 1));
@@ -92,6 +175,26 @@ export default function CalendarPage() {
 
   function handleEventClick(jobId: string) {
     router.push(`/tasks?focus=${encodeURIComponent(jobId)}&view=live`);
+  }
+
+  async function disconnectGoogleCalendar() {
+    setGoogleSyncing(true);
+    setGoogleError(null);
+    try {
+      const res = await fetch("/api/calendar/google/disconnect", { method: "POST" });
+      if (!res.ok) {
+        throw new Error("Couldn't disconnect Google Calendar.");
+      }
+      setGoogleConnected(false);
+      setGoogleEmail(null);
+      setGoogleBusyCounts({});
+      setGoogleEventsByDay({});
+      setGoogleEventCount(0);
+    } catch (error) {
+      setGoogleError(error instanceof Error ? error.message : "Couldn't disconnect Google Calendar.");
+    } finally {
+      setGoogleSyncing(false);
+    }
   }
 
   return (
@@ -111,6 +214,136 @@ export default function CalendarPage() {
           align="left"
           size="page"
         />
+
+        <section
+          style={{
+            marginBottom: 18,
+            padding: 18,
+            borderRadius: 16,
+            border: "1px solid var(--border, #e5e7eb)",
+            background: "var(--card, #fff)",
+            display: "flex",
+            justifyContent: "space-between",
+            alignItems: "center",
+            gap: 16,
+            flexWrap: "wrap",
+          }}
+        >
+          <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+            <div
+              style={{
+                fontFamily: "var(--font-dm-sans)",
+                fontSize: 14,
+                fontWeight: 600,
+                color: "var(--text-primary, #111)",
+              }}
+            >
+              Google Calendar
+            </div>
+            <div
+              style={{
+                fontFamily: "var(--font-dm-sans)",
+                fontSize: 12,
+                color: "var(--text-secondary, #555)",
+              }}
+            >
+              {googleCalendarStatus === "error"
+                ? "Google Calendar connect failed on the callback step. Check the dev server log for the exact error."
+                : googleCalendarStatus === "invalid_state"
+                ? "Google Calendar connect failed because the OAuth state did not match. Try again in the same browser tab."
+                : googleCalendarStatus === "signin"
+                ? "Sign in first, then connect Google Calendar."
+                : googleCalendarStatus === "denied"
+                ? "Google Calendar access was denied."
+                : googleConnected
+                ? `${googleCalendarStatus === "connected" ? "Google Calendar connected successfully. " : ""}Connected${googleEmail ? ` as ${googleEmail}` : ""}. ${googleEventCount} synced event${googleEventCount === 1 ? "" : "s"} and ${googleBusyDayCount} busy day${googleBusyDayCount === 1 ? "" : "s"} in ${grid.monthLabel}.`
+                : "Connect Google Calendar so trip planning can avoid your existing schedule."}
+            </div>
+            {googleError ? (
+              <div
+                style={{
+                  fontFamily: "var(--font-dm-sans)",
+                  fontSize: 12,
+                  color: "#b42318",
+                }}
+              >
+                {googleError}
+              </div>
+            ) : null}
+            {!googleError && googleCalendarStatus === "error" && googleCalendarErrorDetail ? (
+              <div
+                style={{
+                  fontFamily: "var(--font-dm-sans)",
+                  fontSize: 12,
+                  color: "#b42318",
+                }}
+              >
+                {googleCalendarErrorDetail}
+              </div>
+            ) : null}
+          </div>
+
+          <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+            {!googleConnected ? (
+              <a
+                href="/api/calendar/google/connect"
+                style={{
+                  padding: "10px 14px",
+                  borderRadius: 999,
+                  background: "var(--gold, #C9A84C)",
+                  color: "#fff",
+                  fontFamily: "var(--font-dm-sans)",
+                  fontSize: 12,
+                  fontWeight: 600,
+                  textDecoration: "none",
+                }}
+              >
+                Connect Google Calendar
+              </a>
+            ) : (
+              <>
+                <button
+                  type="button"
+                  onClick={() => void loadGoogleMonth()}
+                  disabled={googleSyncing}
+                  style={{
+                    padding: "9px 14px",
+                    borderRadius: 999,
+                    border: "1px solid var(--border, #e5e7eb)",
+                    background: "transparent",
+                    color: "var(--text-primary, #111)",
+                    fontFamily: "var(--font-dm-sans)",
+                    fontSize: 12,
+                    fontWeight: 600,
+                    cursor: googleSyncing ? "not-allowed" : "pointer",
+                    opacity: googleSyncing ? 0.6 : 1,
+                  }}
+                >
+                  {googleSyncing ? "Syncing..." : "Sync now"}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => void disconnectGoogleCalendar()}
+                  disabled={googleSyncing}
+                  style={{
+                    padding: "9px 14px",
+                    borderRadius: 999,
+                    border: "1px solid rgba(180, 35, 24, 0.24)",
+                    background: "transparent",
+                    color: "#b42318",
+                    fontFamily: "var(--font-dm-sans)",
+                    fontSize: 12,
+                    fontWeight: 600,
+                    cursor: googleSyncing ? "not-allowed" : "pointer",
+                    opacity: googleSyncing ? 0.6 : 1,
+                  }}
+                >
+                  Disconnect
+                </button>
+              </>
+            )}
+          </div>
+        </section>
 
         {loading ? (
           <div
@@ -132,6 +365,8 @@ export default function CalendarPage() {
               onNextMonth={nextMonth}
               onToday={today}
               onEventClick={handleEventClick}
+              externalBusyCounts={googleBusyCounts}
+              externalEventsByDay={googleEventsByDay}
             />
             {!hasAnyEvent && (
               <div

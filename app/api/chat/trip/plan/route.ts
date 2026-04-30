@@ -18,6 +18,9 @@ import {
   type TripIntentState,
   type TripVibe,
 } from "@/lib/agent/trip-intent-state";
+import { summarizeTripConflicts, suggestNextFreeWindow } from "@/lib/calendar-availability";
+import { getCalendarConnection } from "@/lib/calendar-db";
+import { syncGoogleBusySlots } from "@/lib/calendar-service";
 
 // Planner fires hotel + flight pipelines in parallel; each can take 15-30s
 // (SerpAPI search + MiniMax ranking). 60s gives headroom; in dev mode Next
@@ -43,7 +46,10 @@ export async function POST(req: NextRequest) {
   if (!rawState || typeof rawState !== "object") {
     return NextResponse.json({ error: "trip_state required" }, { status: 400 });
   }
-  const state = coerceTripState(rawState as Record<string, unknown>);
+  const state = await enrichTripStateWithCalendar(
+    userId,
+    coerceTripState(rawState as Record<string, unknown>),
+  );
 
   const missing = getMissingFields(state);
   if (missing.length > 0) {
@@ -159,4 +165,55 @@ function coerceTripState(raw: Record<string, unknown>): TripIntentState {
   }
 
   return state;
+}
+
+async function enrichTripStateWithCalendar(
+  userId: string,
+  state: TripIntentState,
+): Promise<TripIntentState> {
+  const startDate = resolveDateHint(state.start_date);
+  const endDate = resolveDateHint(state.end_date);
+  if (!startDate || !endDate) return state;
+
+  const connection = await getCalendarConnection(userId, "google");
+  if (!connection) return state;
+
+  try {
+    const syncStart = new Date(`${startDate}T00:00:00Z`);
+    syncStart.setUTCDate(syncStart.getUTCDate() - 7);
+    const syncEnd = new Date(`${endDate}T00:00:00Z`);
+    syncEnd.setUTCDate(syncEnd.getUTCDate() + 30);
+
+    const synced = await syncGoogleBusySlots({
+      userId,
+      rangeStart: syncStart.toISOString().slice(0, 10),
+      rangeEnd: syncEnd.toISOString().slice(0, 10),
+    });
+    const summary = summarizeTripConflicts(synced.slots, startDate, endDate);
+    const assumptions = [...state.planning_assumptions];
+
+    if (summary.conflictCount === 0) {
+      assumptions.push(`Google Calendar looks clear for ${startDate} to ${endDate}.`);
+      return { ...state, planning_assumptions: assumptions };
+    }
+
+    assumptions.push(
+      `Google Calendar shows ${summary.conflictCount} busy block${summary.conflictCount === 1 ? "" : "s"} across ${summary.busyDays} day${summary.busyDays === 1 ? "" : "s"} in ${startDate} to ${endDate}.`,
+    );
+
+    const suggestion = suggestNextFreeWindow({
+      slots: synced.slots,
+      startDate,
+      nights: state.nights ?? 2,
+      searchDays: 45,
+    });
+    if (suggestion && suggestion.from !== startDate) {
+      assumptions.push(`Nearest free window found: ${suggestion.from} to ${suggestion.to}.`);
+    }
+
+    return { ...state, planning_assumptions: assumptions };
+  } catch (error) {
+    console.warn("[trip/plan] calendar enrichment failed", error);
+    return state;
+  }
 }

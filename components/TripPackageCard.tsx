@@ -430,6 +430,26 @@ export default function TripPackageCard(props: TripPackageCardProps) {
         </div>
       </div>
 
+      {pkg.planning_assumptions && pkg.planning_assumptions.length > 0 ? (
+        <div
+          style={{
+            padding: "12px 16px",
+            borderBottom: "1px solid var(--border, #e5e7eb)",
+            background: "rgba(201, 168, 76, 0.08)",
+            fontFamily: "var(--font-dm-sans)",
+            fontSize: 12,
+            color: "var(--text-secondary, #555)",
+            display: "flex",
+            flexDirection: "column",
+            gap: 6,
+          }}
+        >
+          {pkg.planning_assumptions.map((item, idx) => (
+            <div key={`${item}-${idx}`}>• {item}</div>
+          ))}
+        </div>
+      ) : null}
+
       {/* 4-column grid (collapses via <style> above on narrow screens) */}
       <div style={GRID} data-trip-grid>
         {/* Hotel column */}

@@ -10,6 +10,7 @@ import { detectScenarioFromMessage, parseScenarioIntent, runScenarioPlanner, run
 import { minimaxChat } from "./minimax";
 import { analyzeMultilingualQuery, resolveLocationHint } from "./nlu";
 import { getUserPreferences, sql } from "./db";
+import { loadCalendarRecommendationContext } from "./calendar-recommendation-context";
 
 // Sub-module imports
 export { DEFAULT_WEIGHTS, HOTEL_DEFAULT_WEIGHTS, computeWeightedScore, extractRefinements } from "./agent/composer/scoring";
@@ -416,7 +417,7 @@ export async function runAgent(
 
   if (detectedScenario === "concert_event") {
     const concertIntent = parseConcertEventIntent(userMessage, queryContext);
-    const decisionPlan = await runConcertEventPlanner({
+    let decisionPlan = await runConcertEventPlanner({
       intent: concertIntent,
       outputLanguage: queryContext.output_language,
     });
@@ -431,6 +432,19 @@ export async function runAgent(
         scenarioIntent: noResults,
         result_mode: "followup_refinement",
       });
+    }
+
+    const concertCalendarContext = await loadCalendarRecommendationContext({
+      userId,
+      dateText: concertIntent.event_date ?? null,
+      timeHint: null,
+      durationMinutes: 180,
+    });
+    if (concertCalendarContext) {
+      decisionPlan = {
+        ...decisionPlan,
+        risks: [concertCalendarContext.noteForUser, ...decisionPlan.risks],
+      };
     }
 
     return buildBaseResult(concertIntent, "trip", {
@@ -484,9 +498,16 @@ export async function runAgent(
   // Route to activity pipeline (SeatGeek direct-card path for solo ticketed events)
   if (intent.category === "activity") {
     const { activityRecommendations, missing_fields } = await runActivityPipeline(intent);
+    const activityCalendarContext = await loadCalendarRecommendationContext({
+      userId,
+      dateText: intent.date_from ?? intent.date_to ?? null,
+      timeHint: queryContext.time_hint ?? null,
+      durationMinutes: 180,
+    });
     return buildBaseResult(intent, "activity", {
       activityRecommendations,
       missing_activity_fields: missing_fields,
+      suggested_refinements: activityCalendarContext ? [activityCalendarContext.noteForUser] : [],
     });
   }
 
@@ -519,6 +540,22 @@ export async function runAgent(
       scenario_hint: queryContext?.scenario_hint,
     });
   }
+
+  const restaurantCalendarContext = await loadCalendarRecommendationContext({
+    userId,
+    dateText:
+      scenarioIntent?.scenario === "date_night"
+        ? scenarioIntent.detected_date_text ?? queryContext.date_text_hint ?? null
+        : queryContext.date_text_hint ?? null,
+    timeHint:
+      scenarioIntent?.scenario === "date_night"
+        ? scenarioIntent.time_hint ?? queryContext.time_hint ?? null
+        : queryContext.time_hint ?? null,
+    durationMinutes: scenarioIntent?.scenario === "date_night" ? 120 : 90,
+  });
+  const restaurantConversationHistory = restaurantCalendarContext
+    ? [...conversationHistory, { role: "assistant" as const, content: restaurantCalendarContext.noteForAgent }]
+    : conversationHistory;
 
   // Layer 2+3: Gather candidates (parallel search)
   const { restaurants, semanticSignals, tavilyQuery, searchCityLabel } = await gatherCandidates(
@@ -567,7 +604,7 @@ export async function runAgent(
     requirements,
     candidatesWithSignals,
     semanticSignals,
-    conversationHistory,
+    restaurantConversationHistory,
     restaurantCityLabel,
     sessionPreferences,
     profileContext,
@@ -618,12 +655,21 @@ export async function runAgent(
         afterDinnerOption,
       })
     : null;
+  const decisionPlanWithCalendarRisk =
+    decisionPlan && restaurantCalendarContext
+      ? {
+          ...decisionPlan,
+          risks: [restaurantCalendarContext.noteForUser, ...decisionPlan.risks],
+        }
+      : decisionPlan;
 
   return buildBaseResult(requirements, "restaurant", {
     recommendations: withOpenTable,
-    suggested_refinements,
+    suggested_refinements: restaurantCalendarContext
+      ? [restaurantCalendarContext.noteForUser, ...suggested_refinements]
+      : suggested_refinements,
     scenarioIntent,
-    decisionPlan,
-    result_mode: decisionPlan ? "scenario_plan" : "category_cards",
+    decisionPlan: decisionPlanWithCalendarRisk,
+    result_mode: decisionPlanWithCalendarRisk ? "scenario_plan" : "category_cards",
   });
 }

@@ -1052,6 +1052,10 @@ export function useChat({
     setMessages((prev) => [...prev, { role: "user", content }]);
   }
 
+  function replaceMessages(nextMessages: Message[]) {
+    setMessages(nextMessages);
+  }
+
   return {
     messages,
     input,
@@ -1089,6 +1093,7 @@ export function useChat({
     addBookingJobMessage,
     injectAssistantMessage,
     injectUserMessage,
+    replaceMessages,
     shareResults,
     sessionPreferences,
     isStreaming,
