@@ -6497,3 +6497,47 @@ export async function ensureBenchmarkTables(): Promise<void> {
   }
   await benchmarkTablesReady;
 }
+
+// ─── Site Skill Registry (Phase 4) ──────────────────────────────────────────
+// Aggregates per-(provider, task_type) statistics from benchmark_cases +
+// booking_jobs so we can answer "which provider has the highest restaurant
+// success rate?" / "which failure_reason is trending up on Resy?" without
+// re-scanning every job.
+//
+// recovery_strategies is intentionally absent from this batch — the
+// hand-curated knowledge-base layer comes after we have enough data to
+// notice patterns. Today's columns are 100% derivable from existing data.
+
+let providerSkillsTableReady: Promise<void> | null = null;
+
+export async function ensureProviderSkillsTable(): Promise<void> {
+  if (!providerSkillsTableReady) {
+    providerSkillsTableReady = (async () => {
+      await sql`
+        CREATE TABLE IF NOT EXISTS provider_skills (
+          provider          TEXT NOT NULL,
+          task_type         TEXT NOT NULL,
+          /** Count of benchmark + production attempts feeding the row. */
+          sample_count      INT NOT NULL DEFAULT 0,
+          /** sample_count where benchmark.success = true OR step.status = 'done'. */
+          success_count     INT NOT NULL DEFAULT 0,
+          /** Aggregate count by failure_reason — bucketed JSON object. */
+          failure_buckets   JSONB NOT NULL DEFAULT '{}',
+          /** Avg duration in seconds across attempts that have a duration. */
+          avg_duration_s    NUMERIC,
+          /** Most recent attempt timestamp seen for this row. */
+          last_seen_at      TIMESTAMPTZ,
+          /** When the aggregator last refreshed this row. */
+          updated_at        TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          PRIMARY KEY (provider, task_type)
+        )
+      `;
+      await sql`CREATE INDEX IF NOT EXISTS provider_skills_updated_idx ON provider_skills (updated_at DESC)`;
+      await sql`CREATE INDEX IF NOT EXISTS provider_skills_task_idx ON provider_skills (task_type)`;
+    })().catch((err) => {
+      providerSkillsTableReady = null;
+      throw err;
+    });
+  }
+  await providerSkillsTableReady;
+}
