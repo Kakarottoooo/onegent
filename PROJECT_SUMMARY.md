@@ -64,6 +64,42 @@ Current State Snapshot · 2026-04-30
 - @onegent/mcp-server 加 tool annotations 后 npm 重发（~5min）
 - Live Stripe key 切换（等真有付费意愿用户）
 
+【Browserbase Infra 演进路线图（2026-04-30 决定）】
+关键决策：现在不升 Browserbase Pro，按用户增长曲线分阶段决定 infra
+策略。10000 用户规模时 Browserbase ≈ $6000/月，毛利率会被压到 33%；
+长期必须有自建 farm 路径。但**不做 premature optimization**，先验证
+PMF。
+
+| 阶段   | 用户数   | 方案                             | 理由                                |
+|--------|----------|----------------------------------|-------------------------------------|
+| 现在   | 0-100    | Free Browserbase + 本地 chromium | 不烧钱，验证 PMF                    |
+| 早期   | 100-500  | $99 Pro + 本地 chromium 混合     | 12+ 付费用户回本，hotel/flight 解锁 |
+| 成长期 | 500-2000 | $99 Pro + Browserbase 超额       | 毛利薄但增长优先                    |
+| 规模化 | 2000+    | 启动路 B 自建 browser farm       | 毛利从 33% → 95%，工程投入回报清晰  |
+| 企业级 | 10000+   | 路 B + Browserbase 灾备双跑      | 抗单点故障                          |
+
+路 B 自建 farm 组成（规模化阶段才动手，预估 6-8 周工程）：
+- Hetzner / Railway 跑 N 个 chromium 容器（~$80/月）
+- Bright Data / Oxylabs residential proxy 池（~$400/月）
+- 2Captcha / Anti-Captcha CAPTCHA solver（~$5/月，按调用计费）
+- playwright-stealth + 自实现 fingerprint masking + bezier 鼠标轨迹
+- session pool + 失败重试 + 监控（成本最大头是工程时间）
+- 总成本 ~$485/月跑 32k booking，对比 Browserbase $6000，省 92%
+
+触发自建 farm 的硬信号（满足任一就开始 spec）：
+1. 有 ≥500 个付费 Pro 用户
+2. Browserbase 月账单 ≥ $1500
+3. 经历过一次 Browserbase 涨价或服务中断
+4. 拿到种子轮，有专人做 infra
+
+哲学锚点：
+- DHH "Buy when you can, build when you must" — 早期付钱给 Browserbase
+  是对的
+- patio11 "Stop being scared about scale" — 0 付费用户时担心 10k 用户
+  的 vendor lock-in 是 luxury problem
+- Linus "Premature optimization is the root of all evil" — 6 周自建
+  在没验证 PMF 前是负 ROI
+
 详细历史 release notes：本文档时间倒序，最近 ~5 天保留全文；
 2026-04-25 (cont.13) 及更早（Stage 2 / Week 2-6 / lib/core 抽象 /
 B 端基础设施 / Phase 0 UI / Positioning Shift 等）已归档至
