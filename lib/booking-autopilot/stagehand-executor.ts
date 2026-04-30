@@ -3543,10 +3543,12 @@ The user will enter CVV and confirm payment themselves.`,
               // never works for /r/<slug> because anchors lack role="button".
               const isDetailUrl = /opentable\.com\/r\//i.test(raw.url());
               if (isDetailUrl) {
-                // Step 1: set the time-picker <select> to the option closest
-                // to the requested time. Use native setter + change event so
-                // React state hooks pick it up.
-                const setResult = await raw.evaluate(
+                // Step 1: pick the option closest to requested time, then drive
+                // the <select> via Playwright locator.selectOption(). Playwright
+                // simulates a real user gesture so OT's React state + AJAX
+                // refetch chain fires reliably. Native setter+dispatch was
+                // unreliable because OT's overlay <div> doesn't watch <select>.
+                const optionInfo = await raw.evaluate(
                   ({ reqMins }: { reqMins: number }) => {
                     const parseT = (text: string): number | null => {
                       const m = text.match(/(\d{1,2}):(\d{2})\s*(AM|PM)/i);
@@ -3557,29 +3559,32 @@ The user will enter CVV and confirm payment themselves.`,
                       return h * 60 + parseInt(m[2], 10);
                     };
                     const select = document.querySelector<HTMLSelectElement>('[data-test="time-picker"]');
-                    if (!select) return { ok: false, reason: "no time-picker select" };
+                    if (!select) return null;
                     const sorted = Array.from(select.options)
-                      .map((o) => ({ o, t: parseT(o.text) }))
-                      .filter((x): x is { o: HTMLOptionElement; t: number } => x.t !== null)
+                      .map((o) => ({ value: o.value, label: o.text, t: parseT(o.text) }))
+                      .filter((x): x is { value: string; label: string; t: number } => x.t !== null)
                       .sort((a, b) => Math.abs(a.t - reqMins) - Math.abs(b.t - reqMins));
-                    if (sorted.length === 0) return { ok: false, reason: "no parseable options" };
-                    const target = sorted[0];
-                    const proto = Object.getPrototypeOf(select) as object;
-                    const setter = Object.getOwnPropertyDescriptor(proto, "value")?.set;
-                    if (setter) setter.call(select, target.o.value);
-                    else select.value = target.o.value;
-                    select.dispatchEvent(new Event("input", { bubbles: true }));
-                    select.dispatchEvent(new Event("change", { bubbles: true }));
-                    return { ok: true, picked: target.o.text, diff: Math.abs(target.t - reqMins) };
+                    return sorted[0] ?? null;
                   },
                   { reqMins: requestedMinutes },
-                ).catch((err: Error) => ({ ok: false, reason: err.message?.slice(0, 60) }));
+                ).catch(() => null);
 
-                trace(`[opentable] detail-page time-picker drive: ${JSON.stringify(setResult)}`);
+                let setOk = false;
+                if (optionInfo) {
+                  // selectOption uses Playwright's user-gesture path so React
+                  // state + OT's AJAX refetch fire correctly.
+                  setOk = await raw
+                    .locator('[data-test="time-picker"]')
+                    .selectOption(optionInfo.value)
+                    .then(() => true)
+                    .catch(() => false);
+                }
+                trace(`[opentable] detail-page time-picker drive: ${JSON.stringify({ ok: setOk, picked: optionInfo?.label, diff: optionInfo ? Math.abs(optionInfo.t - requestedMinutes) : null })}`);
 
-                // Step 2: wait briefly for AJAX-rendered <ul data-test="time-slots">
-                if (setResult.ok) {
-                  await raw.waitForSelector('[data-test="time-slots"] a, [data-test="time-slots"] button', { timeout: 5000 }).catch(() => null);
+                // Step 2: wait for AJAX-rendered <ul data-test="time-slots">
+                // (extend to 8s — OT can take 5+ seconds when peak load)
+                if (setOk) {
+                  await raw.waitForSelector('[data-test="time-slots"] a, [data-test="time-slots"] button', { timeout: 8000 }).catch(() => null);
                 }
 
                 // Step 3: scope to time-slots container, click closest anchor
