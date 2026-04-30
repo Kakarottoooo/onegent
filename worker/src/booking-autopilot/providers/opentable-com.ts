@@ -354,6 +354,13 @@ export const openTableProvider: BrowserProvider = {
     const ccRequired = await hasCreditCardSection(page);
     if (ccRequired) {
       trace('[opentable] credit card section detected - skipping submit click (payment stage will handle it)');
+      // For benchmark dry_run, also emit the boundary marker so the
+      // classifier counts this as the dry_run end state (succeeded /
+      // payment_stop), not executor_error. The payment stage will hand
+      // off to the user regardless of dry_run flag.
+      if (shouldStopForDryRun(helpers)) {
+        trace(`[opentable] ${DRY_RUN_BOUNDARY_MARKER} - cc section reached, deposit-hold venue (benchmark_dry_run=true)`);
+      }
       return;
     }
 
