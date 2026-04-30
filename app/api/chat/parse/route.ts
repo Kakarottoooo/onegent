@@ -29,6 +29,8 @@ import {
   updateChatSessionMeta,
   getDecisionRoomById,
   listActiveProposals,
+  listRoomMembers,
+  listMemberIntentStates,
   getUserProfile,
 } from "@/lib/db";
 import { triggerSynthesis } from "@/lib/agent/trip-synthesis";
@@ -235,6 +237,20 @@ export async function POST(req: NextRequest) {
       }
     }
 
+    // DR private-chat guard: when the user is inside a Decision Room and the
+    // utterance is NOT a synthesis trigger, suppress confirm_ready. The DR
+    // is the plan — individual member chat turns must NOT pop a "Confirm to
+    // create a new plan / search now" card, because doing so fires
+    // /api/chat with that single member's preferences, bypasses the
+    // multi-party merge, and surfaces single-user search results in
+    // everyone's view. Synthesis fires either auto (3b below) or via the
+    // explicit "出方案" trigger above (which set confirm_ready=true with
+    // intent=create_room — that path is unchanged).
+    let drSynthesisReady = false;
+    if (roomId && !isSynthesisTrigger(message)) {
+      result.confirm_ready = false;
+    }
+
     // Sessions (ChatGPT-style solo thread): when not in a room context,
     // mirror the turn into chat_session_messages. Auto-create a session on
     // first message. `resolvedSessionId` is returned in the response so the
@@ -287,6 +303,56 @@ export async function POST(req: NextRequest) {
           console.warn("[chat/parse] background synthesis failed:", err);
         }
       });
+
+      // Non-trip DR: compute "ready for scenario synthesis" gate so the
+      // client can auto-trigger /api/rooms/[id]/synthesize once the last
+      // member has contributed. Mirrors the trip auto-synthesis logic but
+      // returns a flag instead of writing a proposal row, since non-trip
+      // synthesis just produces a search query the client must execute.
+      const room = await getDecisionRoomById(roomId).catch(() => null);
+      if (
+        room &&
+        (room.type === "restaurant" || room.type === "hotel" || room.type === "flight" || room.type === "activity")
+      ) {
+        try {
+          const [members, intentRows] = await Promise.all([
+            listRoomMembers(roomId),
+            listMemberIntentStates(roomId),
+          ]);
+          const pendingInviteCount = members.filter((m) => m.status === "invited").length;
+          const joined = members.filter((m) => m.status === "joined");
+          const contributorIds = new Set(intentRows.map((r) => r.user_id));
+          const allContributed =
+            joined.length > 0 && joined.every((m) => contributorIds.has(m.user_id));
+          const proposals = await listActiveProposals(roomId).catch(() => []);
+          const hasLiveProposal = proposals.some(
+            (p) => p.status === "active" || p.status === "accepted",
+          );
+
+          if (pendingInviteCount === 0 && allContributed && !hasLiveProposal) {
+            // Last contributor's turn — flip the response so their client
+            // auto-fires the synthesize endpoint. Other members will see
+            // the synthesis result on their next chat turn / replay.
+            drSynthesisReady = true;
+            result.assistant_reply =
+              "好了，每位成员的偏好都收到了。我现在把大家的想法综合起来，找几个都喜欢的选项。";
+          } else if (pendingInviteCount > 0) {
+            // DR has invitees still pending — make the reply explicit so
+            // the user knows synthesis is waiting on the invite acceptance.
+            const baseReply = result.assistant_reply ?? "";
+            const note = `（你的偏好已记下。还在等 ${pendingInviteCount} 位被邀请的朋友加入，等他们也聊完我会自动综合方案。）`;
+            result.assistant_reply = baseReply ? `${baseReply}\n\n${note}` : note;
+          } else if (joined.length > 1 && !allContributed) {
+            // Multiple members joined, but not everyone has chatted yet.
+            const stillNeed = joined.length - intentRows.length;
+            const baseReply = result.assistant_reply ?? "";
+            const note = `（已记下你的偏好。等其他 ${stillNeed} 位成员聊完，我自动综合方案。）`;
+            result.assistant_reply = baseReply ? `${baseReply}\n\n${note}` : note;
+          }
+        } catch (err) {
+          console.warn("[chat/parse] DR synthesis-ready gate check failed:", err);
+        }
+      }
     }
 
     return NextResponse.json({
@@ -295,6 +361,7 @@ export async function POST(req: NextRequest) {
       user_id: userId ?? null,
       nlu_version: "v2",
       session_id: resolvedSessionId,
+      scenario_synthesis_ready: drSynthesisReady,
     });
   } catch (err) {
     console.warn(

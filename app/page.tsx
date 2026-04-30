@@ -1094,7 +1094,16 @@ function HomeInner() {
         }),
       });
       const data = (await res.json().catch(() => null)) as
-        | { ok: boolean; result: ConversationalNLUResult; session_id?: string | null }
+        | {
+            ok: boolean;
+            result: ConversationalNLUResult;
+            session_id?: string | null;
+            /** Server flag: every joined member of this DR has contributed
+             *  intent state, no invitees pending, no live proposal yet — so
+             *  this client should auto-fire /api/rooms/[id]/synthesize and
+             *  surface the merged-search cards. */
+            scenario_synthesis_ready?: boolean;
+          }
         | null;
 
       // Network / NLU failure → fall back to the old restaurant search pipeline
@@ -1153,7 +1162,9 @@ function HomeInner() {
       // Trip scenario runs through a dedicated package planner (not the legacy
       // search). Surface a ConfirmCard so the user can review what we captured
       // before we spend 10-15s running hotel+flight pipelines in parallel.
-      if (nlu.intent === "create_plan" && nlu.confirm_ready && nlu.scenario === "trip") {
+      // !activeRoomId: inside a DR, "create new trip plan" makes no sense —
+      // the DR IS the plan, the user is just refining their preferences.
+      if (nlu.intent === "create_plan" && nlu.confirm_ready && nlu.scenario === "trip" && !activeRoomId) {
         if (nlu.assistant_reply) chat.injectAssistantMessage(nlu.assistant_reply);
         setPendingConfirm({ nlu, message: text, kind: "trip", mentioned_user_ids: capturedMentionIds });
         return;
@@ -1172,7 +1183,13 @@ function HomeInner() {
       //   3. The ConfirmCard commit is also what flags the session as Completed
       //      (markSessionUpgradedPlan / Trip). Without it, the sidebar's
       //      Completed section stayed perpetually empty for solo plans.
-      if (nlu.intent === "create_plan" && nlu.confirm_ready) {
+      // !activeRoomId: same reason as the trip branch above. Inside a DR a
+      // member's preference message is constraint-collection input, not a
+      // request to create a new individual plan. Without this guard each
+      // member's chat would pop a ConfirmCard, confirm-click would fire
+      // /api/chat with that single member's preferences, and the
+      // multi-party merge gets bypassed entirely.
+      if (nlu.intent === "create_plan" && nlu.confirm_ready && !activeRoomId) {
         if (nlu.assistant_reply) chat.injectAssistantMessage(nlu.assistant_reply);
         setPendingConfirm({ nlu, message: text, kind: "plan", mentioned_user_ids: capturedMentionIds });
         return;
@@ -1185,7 +1202,19 @@ function HomeInner() {
         chat.injectAssistantMessage(nlu.assistant_reply);
       }
 
-      if (nlu.intent === "create_room" && nlu.confirm_ready && activeRoomId) {
+      // Two ways to enter the synthesize flow inside an existing DR:
+      //   (a) User typed "出方案 / give me the plan" — extractor + parse
+      //       override flipped intent=create_room + confirm_ready=true.
+      //   (b) Server detected every joined member has contributed an intent
+      //       state and signalled scenario_synthesis_ready (auto-fire when
+      //       the LAST contributor finishes their turn).
+      // Both paths POST /api/rooms/[id]/synthesize and let the synthesizer
+      // figure out the rest (trip → TripPackage proposal; non-trip → merged
+      // search query the client posts to /api/chat).
+      const wantsSynthesize =
+        (nlu.intent === "create_room" && nlu.confirm_ready) ||
+        data.scenario_synthesis_ready === true;
+      if (wantsSynthesize && activeRoomId) {
         // Already in a room — don't pop another ConfirmCard to create a
         // duplicate. Interpret the user's intent as "synthesize the plan for
         // THIS room now" and kick off the trip-synthesis pipeline. Chat bubble
