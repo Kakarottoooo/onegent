@@ -57,6 +57,10 @@ export interface RoomReplaySnapshot {
   messages: Message[];
   nluHistory: ChatMessage[];
   proposalId: string | null;
+  /** Which kind of proposal lives at proposalId — drives which inline card
+   *  component the page renders (TripProposalChatCard vs
+   *  ScenarioProposalChatCard). null when no proposal marker was seen. */
+  proposalKind: "trip" | "scenario" | null;
 }
 
 /** Type guard — narrows an arbitrary meta_json blob to the
@@ -120,16 +124,26 @@ export function buildRoomReplaySnapshot(rows?: RoomReplayRow[] | null): RoomRepl
   const messages: Message[] = [];
   const nluHistory: ChatMessage[] = [];
   let proposalId: string | null = null;
+  let proposalKind: "trip" | "scenario" | null = null;
 
   for (const row of rows ?? []) {
     const meta = row.meta_json ?? null;
+    const kind =
+      meta && typeof meta === "object"
+        ? (meta as { kind?: unknown }).kind
+        : null;
+    const pid =
+      meta && typeof meta === "object"
+        ? (meta as { proposal_id?: unknown }).proposal_id
+        : null;
     if (
-      meta &&
-      typeof meta === "object" &&
-      (meta as { kind?: unknown }).kind === "trip_proposal_card" &&
-      typeof (meta as { proposal_id?: unknown }).proposal_id === "string"
+      (kind === "trip_proposal_card" || kind === "scenario_proposal_card") &&
+      typeof pid === "string"
     ) {
-      proposalId = (meta as { proposal_id: string }).proposal_id;
+      // Last marker wins — force re-synthesis appends a newer marker after
+      // the older one, and we want the most recent proposal on screen.
+      proposalId = pid;
+      proposalKind = kind === "trip_proposal_card" ? "trip" : "scenario";
       continue;
     }
 
@@ -145,5 +159,6 @@ export function buildRoomReplaySnapshot(rows?: RoomReplayRow[] | null): RoomRepl
     messages,
     nluHistory: nluHistory.slice(-20),
     proposalId,
+    proposalKind,
   };
 }

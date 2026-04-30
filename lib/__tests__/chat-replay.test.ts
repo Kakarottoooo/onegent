@@ -87,6 +87,38 @@ describe("chat replay snapshots", () => {
       { role: "assistant", content: "I found a few options" },
     ]);
     expect(snapshot.proposalId).toBe("prop_123");
+    expect(snapshot.proposalKind).toBe("trip");
+  });
+
+  it("captures scenario_proposal_card markers as scenario kind", () => {
+    const snapshot = buildRoomReplaySnapshot([
+      {
+        id: "1",
+        role: "user",
+        content: "Italian for 4 in Nashville",
+        meta_json: null,
+        created_at: "2026-04-29T00:00:00Z",
+      },
+      {
+        id: "2",
+        role: "assistant",
+        content: "✅ 方案已出！下方卡片选你的偏好。",
+        meta_json: {
+          kind: "scenario_proposal_card",
+          proposal_id: "scenario_prop_456",
+          category: "restaurant",
+        } as unknown as { kind?: string; proposal_id?: string },
+        created_at: "2026-04-29T00:00:01Z",
+      },
+    ]);
+
+    // Marker row is skipped from the message stream — the page renders cards
+    // via <ScenarioProposalChatCard /> using proposalId state.
+    expect(snapshot.messages).toEqual([
+      { role: "user", content: "Italian for 4 in Nashville" },
+    ]);
+    expect(snapshot.proposalId).toBe("scenario_prop_456");
+    expect(snapshot.proposalKind).toBe("scenario");
   });
 
   it("rebuilds search-card payloads from meta_json on room replay (A1)", () => {

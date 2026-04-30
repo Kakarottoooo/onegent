@@ -25,6 +25,7 @@ import { auth } from "@clerk/nextjs/server";
 import {
   getDecisionRoomById,
   isRoomMember,
+  listActiveProposals,
   listRoomMembers,
   listTripSelections,
   getMyTripSelection,
@@ -67,6 +68,40 @@ export async function GET(_req: Request, { params }: Params) {
   if (!room) return NextResponse.json({ error: "Room not found" }, { status: 404 });
   if (!(await isRoomMember(roomId, userId))) {
     return NextResponse.json({ error: "Not a member of this room" }, { status: 403 });
+  }
+
+  // Non-trip DRs use scenario_search_cards proposals rendered via
+  // <ScenarioProposalChatCard />. We still want this endpoint to surface
+  // their proposal id so member B's poller (who didn't fire synthesize)
+  // sees the new proposal land without a page refresh — same UX as the
+  // trip-room poller. The trip-shaped fields stay null/empty so the trip
+  // card UI never mounts for non-trip rooms.
+  if (room.type !== "trip") {
+    const proposals = await listActiveProposals(roomId).catch(() => []);
+    const scenarioProposal = proposals.find(
+      (p) =>
+        (p.status === "active" || p.status === "accepted") &&
+        typeof p.content_json === "object" &&
+        p.content_json !== null &&
+        (p.content_json as Record<string, unknown>).kind === "scenario_search_cards",
+    );
+    return NextResponse.json({
+      ok: true,
+      proposal: null,
+      scenario_proposal_id: scenarioProposal?.id ?? null,
+      my_selection: null,
+      my_vote: null,
+      vote_tally: { approve: 0, decline: 0, request_changes: 0, voters: [] },
+      aggregate: emptyAggregate(0),
+      is_synthesizing: false,
+      room: {
+        creator_id: room.creator_id,
+        payer_id: room.payer_id ?? room.creator_id,
+        approval_rule: room.approval_rule ?? "unanimous",
+        status: room.status,
+        booking_job_id: room.booking_job_id ?? null,
+      },
+    });
   }
 
   // Use the latest variant so accepted proposals (post full-approval but

@@ -29,6 +29,7 @@ import type { FeedbackPromptItem } from "@/app/api/feedback-prompts/route";
 import ConfirmCard, { type CommitResponse } from "@/components/ConfirmCard";
 import TripPackageCard from "@/components/TripPackageCard";
 import TripProposalChatCard from "@/components/TripProposalChatCard";
+import ScenarioProposalChatCard from "@/components/ScenarioProposalChatCard";
 import type { TripPackage } from "@/lib/types";
 import type { TripIntentState } from "@/lib/agent/trip-intent-state";
 import { useLanguage } from "@/app/hooks/useLanguage";
@@ -190,6 +191,11 @@ function HomeInner() {
   // <TripProposalChatCard> inline in the chat stream. The id comes from the
   // most recent private_message with meta_json.kind='trip_proposal_card'.
   const [activeProposalId, setActiveProposalId] = useState<string | null>(null);
+  // Companion to activeProposalId: which inline card component to render.
+  // 'trip' → <TripProposalChatCard>, 'scenario' → <ScenarioProposalChatCard>.
+  // Set from chat-replay's snapshot.proposalKind on room load and from the
+  // synthesize response's room_type on live fire.
+  const [activeProposalKind, setActiveProposalKind] = useState<"trip" | "scenario" | null>(null);
   // True while /api/rooms/[id]/synthesize is in-flight. Drives an inline
   // progress card below the chat so members see the 5-15s pipeline wait
   // as work-in-progress, not a stalled bot.
@@ -284,6 +290,7 @@ function HomeInner() {
         if (cached) {
           chat.replaceMessages(cached.messages);
           setActiveProposalId(cached.proposalId);
+          setActiveProposalKind(cached.proposalKind);
           nluHistoryRef.current = cached.nluHistory;
           replayedRoomIds.current.add(activeRoomId);
           restored = true;
@@ -325,11 +332,13 @@ function HomeInner() {
       setActiveRoomTitle(null);
       setActiveRoomMembers([]);
       setActiveProposalId(null);
+      setActiveProposalKind(null);
       return;
     }
     const cachedTitle = roomTitleCacheRef.current.get(activeRoomId) ?? null;
     setActiveRoomTitle(cachedTitle);
     setActiveProposalId(null);
+    setActiveProposalKind(null);
     let cancelled = false;
     (async () => {
       try {
@@ -394,6 +403,7 @@ function HomeInner() {
         messages: chat.messages,
         nluHistory: nluHistoryRef.current,
         proposalId: activeProposalId,
+        proposalKind: activeProposalKind,
       });
       return;
     }
@@ -500,6 +510,7 @@ function HomeInner() {
         replayedRoomIds.current.add(activeRoomId);
         chat.replaceMessages(cached.messages);
         setActiveProposalId(cached.proposalId);
+        setActiveProposalKind(cached.proposalKind);
         nluHistoryRef.current = cached.nluHistory;
         return;
       }
@@ -530,6 +541,7 @@ function HomeInner() {
         // we always show the most recent proposal (force re-synthesis creates
         // a new marker message after the old one).
         setActiveProposalId(snapshot.proposalId);
+        setActiveProposalKind(snapshot.proposalKind);
         // Rehydrate NLU history (same rationale as session replay below).
         // Skip system-role messages + marker messages — only user/assistant
         // text feeds the extractor.
@@ -561,11 +573,21 @@ function HomeInner() {
         if (!res.ok || cancelled) return;
         const data = (await res.json()) as {
           proposal?: { id?: string } | null;
+          scenario_proposal_id?: string | null;
           is_synthesizing?: boolean;
         };
         if (cancelled) return;
         if (data.proposal?.id) {
           setActiveProposalId((prev) => (prev === data.proposal!.id ? prev : data.proposal!.id!));
+          setActiveProposalKind("trip");
+          setRemoteSynthesizing(false);
+        } else if (data.scenario_proposal_id) {
+          // Non-trip DR — scenario synthesis just landed (or already had).
+          // Member B sees the card without refreshing.
+          setActiveProposalId((prev) =>
+            prev === data.scenario_proposal_id ? prev : data.scenario_proposal_id!,
+          );
+          setActiveProposalKind("scenario");
           setRemoteSynthesizing(false);
         } else {
           setRemoteSynthesizing(!!data.is_synthesizing);
@@ -1258,24 +1280,29 @@ function HomeInner() {
               contributor_count?: number | null;
               member_count?: number | null;
               query?: string | null;
+              proposal_id?: string | null;
+              already_exists?: boolean;
             };
             if (!res.ok || !data.ok) {
               chat.injectAssistantMessage("方案生成失败了，先稍等再试一下。");
               return;
             }
 
-            // Plan A: non-trip rooms get a search query back; we kick the
-            // legacy /api/chat recommendation pipeline with it + categoryHint
-            // so the cards render inline like a solo flow. The agent's reply
-            // already announced "好的，我把大家的偏好综合一下..." via parse,
-            // so we go straight to the search.
+            // Non-trip DRs (restaurant/hotel/flight/activity): server ran
+            // the LLM search ONCE and landed cards in a shared
+            // decision_room_proposals row. Mount <ScenarioProposalChatCard>
+            // via activeProposalId+Kind state — both members read the same
+            // row instead of independently calling /api/chat.
             const nonTripTypes = ["restaurant", "hotel", "flight", "activity"];
             if (data.room_type && nonTripTypes.includes(data.room_type)) {
-              if (data.reason === "ok" && data.query) {
-                chat.sendMessage(data.query, undefined, {
-                  skipUserPush: true,
-                  categoryHint: data.room_type as "restaurant" | "hotel" | "flight" | "activity",
-                });
+              if (data.reason === "ok" && data.proposal_id) {
+                if (!data.already_exists) {
+                  chat.injectAssistantMessage(
+                    "✅ 方案已出！下方卡片选你的偏好，看看大家投谁。",
+                  );
+                }
+                setActiveProposalId(data.proposal_id);
+                setActiveProposalKind("scenario");
                 return;
               }
               if (data.reason === "waiting_for_members") {
@@ -1288,6 +1315,12 @@ function HomeInner() {
               if (data.reason === "no_joined_members") {
                 chat.injectAssistantMessage(
                   "房间还没有成员加入。等大家接受邀请后再说「出方案」。",
+                );
+                return;
+              }
+              if (data.reason === "search_failed") {
+                chat.injectAssistantMessage(
+                  "搜索没找到合适的选项。能再补一些细节吗（例如具体地段或时间）？",
                 );
                 return;
               }
@@ -1312,6 +1345,7 @@ function HomeInner() {
                   };
                   if (propBody.proposal?.id) {
                     setActiveProposalId(propBody.proposal.id);
+                    setActiveProposalKind("trip");
                   }
                 }
               } catch {
@@ -3330,8 +3364,21 @@ function HomeInner() {
                     Mounts when synthesis has created a proposal (activeProposalId is
                     set via the private-messages replay or after a force-synthesize
                     click). 4-column picker + per-item vote badges + payer-only book. */}
-                {activeRoomId && activeProposalId && (
+                {activeRoomId && activeProposalId && activeProposalKind === "trip" && (
                   <TripProposalChatCard
+                    key={activeProposalId}
+                    roomId={activeRoomId}
+                    proposalId={activeProposalId}
+                    userId={userId ?? null}
+                  />
+                )}
+
+                {/* Phase 2: inline scenario proposal card for non-trip DRs
+                    (restaurant/hotel/flight/activity). Reads cards from a
+                    SHARED decision_room_proposals row so both members see
+                    the same list. Phase 3 layers on per-card voting. */}
+                {activeRoomId && activeProposalId && activeProposalKind === "scenario" && (
+                  <ScenarioProposalChatCard
                     key={activeProposalId}
                     roomId={activeRoomId}
                     proposalId={activeProposalId}
