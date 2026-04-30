@@ -325,8 +325,17 @@ export async function runRestaurantBenchmark(
   });
   await setBenchmarkRunStatus(run.id, "running");
 
+  // Stagger stagehand session startup. /start is fire-and-forget on the
+  // dispatcher side, but each /start spins up a Chrome/Browserbase session
+  // server-side; firing 5 in the same tick reproducibly hits
+  // "No Page found for target closed before CDP response" on 1-2 of them
+  // (chrome's CDP target init races). 500 ms between dispatches gives the
+  // previous session enough time to attach its target before the next
+  // one starts.
+  const STAGEHAND_STARTUP_STAGGER_MS = 500;
   let dispatched = 0;
-  for (const c of cases) {
+  for (let i = 0; i < cases.length; i += 1) {
+    const c = cases[i];
     const caseRow = await createBenchmarkCase({
       runId: run.id,
       caseId: c.case_id,
@@ -345,6 +354,9 @@ export async function runRestaurantBenchmark(
         audit: { reason: `dispatch failed: ${msg}` },
         finalize: true,
       });
+    }
+    if (i < cases.length - 1) {
+      await new Promise((r) => setTimeout(r, STAGEHAND_STARTUP_STAGGER_MS));
     }
   }
 
