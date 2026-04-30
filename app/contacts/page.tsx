@@ -394,31 +394,6 @@ export default function ContactsPage() {
         >
           ← Back
         </Link>
-        <span
-          className="inline-flex items-center text-[11px] font-semibold uppercase mb-3 tracking-[0.18em]"
-          style={{
-            color: "var(--gold-text)",
-            background: "var(--gold-soft)",
-            padding: "5px 12px",
-            borderRadius: "var(--radius-pill)",
-          }}
-        >
-          Contacts
-        </span>
-        <h1
-          style={{
-            fontFamily: "var(--font-playfair), Georgia, serif",
-            fontSize: "clamp(28px, 3.5vw, 40px)",
-            fontWeight: 600,
-            color: "var(--ink-9)",
-            letterSpacing: "-0.02em",
-            lineHeight: 1.1,
-            marginTop: 0,
-            marginBottom: "var(--space-6)",
-          }}
-        >
-          Your circle.
-        </h1>
 
         {/* My code card — warm dark brown gradient for hero/branding */}
         <div className="rounded-2xl p-5 mb-5 text-white" style={HERO_BG}>

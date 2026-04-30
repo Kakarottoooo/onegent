@@ -3,7 +3,6 @@
 import { Suspense, useEffect, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import GlobalNav from "@/components/GlobalNav";
-import { EditorialHero } from "@/app/_shared/editorial";
 import { LearnedSettingsTab } from "@/app/permissions/page";
 import { usePreferences } from "@/app/hooks/usePreferences";
 import type { DiscoveredPreference } from "@/lib/types";
@@ -320,14 +319,6 @@ function InsightsPageInner() {
       <GlobalNav active="insights" />
 
       <main style={{ maxWidth: 1160, margin: "0 auto", padding: "var(--space-16) var(--space-6) var(--space-24)" }}>
-        <EditorialHero
-          eyebrow="Memory"
-          title="Agent memory."
-          subtitle="The defaults the agent actively applies, the behavioral patterns it inferred, and the evidence explaining why it thinks that way."
-          align="left"
-          size="page"
-        />
-
         <div
           style={{
             ...memoryPanelStyle(),

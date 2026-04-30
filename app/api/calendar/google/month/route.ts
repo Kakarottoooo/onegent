@@ -1,7 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@clerk/nextjs/server";
 import { buildBusyCountsByDay, buildExternalEventsByDay } from "@/lib/calendar-availability";
-import { getCalendarConnection } from "@/lib/calendar-db";
+import {
+  getCalendarConnection,
+  listCalendarBusySlots,
+  listCalendarEvents,
+} from "@/lib/calendar-db";
 import { syncGoogleBusySlots, syncGoogleCalendarEvents } from "@/lib/calendar-service";
 
 export async function GET(req: NextRequest) {
@@ -10,6 +14,7 @@ export async function GET(req: NextRequest) {
 
   const year = Number(req.nextUrl.searchParams.get("year"));
   const month = Number(req.nextUrl.searchParams.get("month"));
+  const force = req.nextUrl.searchParams.get("force") === "1";
   if (!Number.isFinite(year) || !Number.isFinite(month)) {
     return NextResponse.json({ error: "year and month required" }, { status: 400 });
   }
@@ -26,28 +31,54 @@ export async function GET(req: NextRequest) {
   const syncEnd = new Date(rangeEnd);
   syncEnd.setUTCDate(syncEnd.getUTCDate() + 7);
 
-  const synced = await syncGoogleBusySlots({
+  const syncStartIso = new Date(`${syncStart.toISOString().slice(0, 10)}T00:00:00Z`).toISOString();
+  const syncEndIso = new Date(`${syncEnd.toISOString().slice(0, 10)}T23:59:59Z`).toISOString();
+
+  let calendarTimeZone: string | null = connection.calendar_timezone;
+  let lastSyncedAt: string | null = connection.last_synced_at;
+
+  // Fast path (default): read whatever is already in DB. No Google API.
+  // Force path: re-sync from Google first, then read.
+  if (force) {
+    const synced = await syncGoogleBusySlots({
+      userId,
+      rangeStart: syncStart.toISOString().slice(0, 10),
+      rangeEnd: syncEnd.toISOString().slice(0, 10),
+    });
+    const detailed = await syncGoogleCalendarEvents({
+      userId,
+      rangeStart: syncStart.toISOString().slice(0, 10),
+      rangeEnd: syncEnd.toISOString().slice(0, 10),
+    });
+    calendarTimeZone = detailed.calendarTimeZone ?? calendarTimeZone;
+    lastSyncedAt = detailed.syncedAt ?? synced.syncedAt ?? lastSyncedAt;
+  }
+
+  const busySlots = await listCalendarBusySlots({
     userId,
-    rangeStart: syncStart.toISOString().slice(0, 10),
-    rangeEnd: syncEnd.toISOString().slice(0, 10),
+    provider: "google",
+    rangeStart: syncStartIso,
+    rangeEnd: syncEndIso,
   });
-  const detailed = await syncGoogleCalendarEvents({
+  const events = await listCalendarEvents({
     userId,
-    rangeStart: syncStart.toISOString().slice(0, 10),
-    rangeEnd: syncEnd.toISOString().slice(0, 10),
+    provider: "google",
+    rangeStart: syncStartIso,
+    rangeEnd: syncEndIso,
   });
+
   const busyCounts = buildBusyCountsByDay(
-    synced.slots,
+    busySlots,
     rangeStart.toISOString().slice(0, 10),
     rangeEnd.toISOString().slice(0, 10),
   );
   const eventsByDay = buildExternalEventsByDay(
-    detailed.events,
+    events,
     rangeStart.toISOString().slice(0, 10),
     rangeEnd.toISOString().slice(0, 10),
-    detailed.calendarTimeZone ?? connection.calendar_timezone,
+    calendarTimeZone,
   );
-  const visibleEventCount = detailed.events.filter((event) => {
+  const visibleEventCount = events.filter((event) => {
     const startsBeforeMonthEnd = event.start_at < new Date(Date.UTC(year, month + 1, 1)).toISOString();
     const endsAfterMonthStart = event.end_at > rangeStart.toISOString();
     return startsBeforeMonthEnd && endsAfterMonthStart;
@@ -59,6 +90,6 @@ export async function GET(req: NextRequest) {
     events_by_day: eventsByDay,
     event_count: visibleEventCount,
     account_email: connection.external_account_email,
-    last_synced_at: detailed.syncedAt ?? synced.syncedAt ?? connection.last_synced_at,
+    last_synced_at: lastSyncedAt,
   });
 }

@@ -15,7 +15,6 @@ import { useState, useEffect, useCallback, useMemo } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useAuth } from "@clerk/nextjs";
 import GlobalNav from "@/components/GlobalNav";
-import { EditorialHero } from "@/app/_shared/editorial";
 import MonthCalendar from "@/components/MonthCalendar";
 import { buildCalendarGrid } from "@/lib/calendar-grid";
 import type { ExternalCalendarEventsByDay } from "@/lib/calendar-availability";
@@ -83,65 +82,71 @@ export default function CalendarPage() {
     return () => clearInterval(timer);
   }, [jobs, loadJobs]);
 
-  const loadGoogleMonth = useCallback(async () => {
-    if (!auth.isLoaded) return;
-    if (!auth.isSignedIn) {
-      setGoogleConnected(false);
-      setGoogleEmail(null);
-      setGoogleBusyCounts({});
-      setGoogleEventsByDay({});
-      setGoogleEventCount(0);
-      setGoogleError(null);
-      return;
-    }
-
-    setGoogleSyncing(true);
-    setGoogleError(null);
-    try {
-      const statusRes = await fetch("/api/calendar/google/status", { cache: "no-store" });
-      const status = (await statusRes.json().catch(() => ({}))) as {
-        connected?: boolean;
-        account_email?: string | null;
-      };
-      if (!statusRes.ok || !status.connected) {
+  // Fast path = read DB only (no Google API). Force = re-sync from Google first.
+  // The "Syncing..." spinner only shows during force calls (user clicks Sync now,
+  // or background revalidate on stale data) — initial reads should feel instant.
+  const loadGoogleMonth = useCallback(
+    async (opts: { force?: boolean } = {}): Promise<string | null> => {
+      if (!auth.isLoaded) return null;
+      if (!auth.isSignedIn) {
         setGoogleConnected(false);
         setGoogleEmail(null);
         setGoogleBusyCounts({});
         setGoogleEventsByDay({});
         setGoogleEventCount(0);
-        return;
+        setGoogleError(null);
+        return null;
       }
 
-      const res = await fetch(
-        `/api/calendar/google/month?year=${anchor.getFullYear()}&month=${anchor.getMonth()}`,
-        { cache: "no-store" },
-      );
-      const data = (await res.json().catch(() => ({}))) as {
-        connected?: boolean;
-        busy_counts?: Record<string, number>;
-        events_by_day?: ExternalCalendarEventsByDay;
-        event_count?: number;
-        account_email?: string | null;
-        error?: string;
-      };
-      if (!res.ok) {
-        throw new Error(data.error ?? "Couldn't sync Google Calendar.");
+      if (opts.force) setGoogleSyncing(true);
+      setGoogleError(null);
+      try {
+        const url = `/api/calendar/google/month?year=${anchor.getFullYear()}&month=${anchor.getMonth()}${opts.force ? "&force=1" : ""}`;
+        const res = await fetch(url, { cache: "no-store" });
+        const data = (await res.json().catch(() => ({}))) as {
+          connected?: boolean;
+          busy_counts?: Record<string, number>;
+          events_by_day?: ExternalCalendarEventsByDay;
+          event_count?: number;
+          account_email?: string | null;
+          last_synced_at?: string | null;
+          error?: string;
+        };
+        if (!res.ok) {
+          throw new Error(data.error ?? "Couldn't sync Google Calendar.");
+        }
+
+        setGoogleConnected(!!data.connected);
+        setGoogleEmail(data.account_email ?? null);
+        setGoogleBusyCounts(data.busy_counts ?? {});
+        setGoogleEventsByDay(data.events_by_day ?? {});
+        setGoogleEventCount(data.event_count ?? 0);
+        return data.last_synced_at ?? null;
+      } catch (error) {
+        setGoogleError(error instanceof Error ? error.message : "Couldn't sync Google Calendar.");
+        return null;
+      } finally {
+        if (opts.force) setGoogleSyncing(false);
       }
+    },
+    [anchor, auth.isLoaded, auth.isSignedIn],
+  );
 
-      setGoogleConnected(!!data.connected);
-      setGoogleEmail(data.account_email ?? status.account_email ?? null);
-      setGoogleBusyCounts(data.busy_counts ?? {});
-      setGoogleEventsByDay(data.events_by_day ?? {});
-      setGoogleEventCount(data.event_count ?? 0);
-    } catch (error) {
-      setGoogleError(error instanceof Error ? error.message : "Couldn't sync Google Calendar.");
-    } finally {
-      setGoogleSyncing(false);
-    }
-  }, [anchor, auth.isLoaded, auth.isSignedIn]);
-
+  // Stale-while-revalidate: render DB cache instantly, then refresh in background
+  // if last sync was >10min ago (or never).
   useEffect(() => {
-    void loadGoogleMonth();
+    let cancelled = false;
+    void (async () => {
+      const lastSyncedAt = await loadGoogleMonth();
+      if (cancelled) return;
+      const stale =
+        !lastSyncedAt ||
+        Date.now() - new Date(lastSyncedAt).getTime() > 10 * 60 * 1000;
+      if (stale) void loadGoogleMonth({ force: true });
+    })();
+    return () => {
+      cancelled = true;
+    };
   }, [loadGoogleMonth]);
 
   const grid = useMemo(
@@ -207,14 +212,6 @@ export default function CalendarPage() {
           padding: "var(--space-16) var(--space-6) var(--space-24)",
         }}
       >
-        <EditorialHero
-          eyebrow="Calendar"
-          title="Your trips on one page."
-          subtitle="Every booking — flights, hotels, restaurants, tickets — placed on the day it happens. Click any block to jump to its task."
-          align="left"
-          size="page"
-        />
-
         <section
           style={{
             marginBottom: 18,
@@ -304,7 +301,7 @@ export default function CalendarPage() {
               <>
                 <button
                   type="button"
-                  onClick={() => void loadGoogleMonth()}
+                  onClick={() => void loadGoogleMonth({ force: true })}
                   disabled={googleSyncing}
                   style={{
                     padding: "9px 14px",
