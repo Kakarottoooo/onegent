@@ -3603,7 +3603,15 @@ The user will enter CVV and confirm payment themselves.`,
                 // (extend to 8s — OT can take 5+ seconds when peak load)
                 await raw.waitForSelector('[data-test="time-slots"] a, [data-test="time-slots"] button', { timeout: 8000 }).catch(() => null);
 
-                // Step 3: scope to time-slots container, click closest anchor
+                // Step 3: find the closest matching time-slot anchor.
+                // OT renders <a href="/booking/...">7:30 PM</a> on detail pages
+                // — these have no role="button" so the listing-card selector
+                // misses them. Match by anchor href containing /booking/ as a
+                // strong filter (avoids picking up footer/menu links). Also
+                // include <button> as fallback for variant layouts. If the
+                // canonical [data-test="time-slots"] container exists, prefer
+                // it; otherwise fall back to a global scan with the booking
+                // href filter.
                 const detailSlot = await raw.evaluate(
                   ({ reqMins, maxDiffMins }: { reqMins: number; maxDiffMins: number }) => {
                     const parseT = (text: string): number | null => {
@@ -3618,20 +3626,59 @@ The user will enter CVV and confirm payment themselves.`,
                       const r = (el as HTMLElement).getBoundingClientRect();
                       return r.width > 0 && r.height > 0;
                     };
+
+                    // Collect candidates from two sources, then dedupe
+                    const collected: HTMLElement[] = [];
                     const container = document.querySelector<HTMLElement>('[data-test="time-slots"]');
-                    if (!container) return null;
-                    const candidates = Array.from(container.querySelectorAll<HTMLElement>("a, button"))
+                    if (container) {
+                      collected.push(...Array.from(container.querySelectorAll<HTMLElement>("a, button")));
+                    }
+                    // Global fallback: any anchor with /booking/ in href
+                    // (OT time-slot anchors deep-link to /booking/details?...)
+                    Array.from(document.querySelectorAll<HTMLAnchorElement>('a[href*="/booking/"]'))
+                      .forEach((el) => collected.push(el));
+                    // Plus any <button> with PM/AM-only short text
+                    Array.from(document.querySelectorAll<HTMLButtonElement>("button"))
+                      .filter((el) => {
+                        const t = (el.textContent ?? "").trim();
+                        return /^\d{1,2}:\d{2}\s*(AM|PM)$/i.test(t) && t.length < 12;
+                      })
+                      .forEach((el) => collected.push(el));
+
+                    const seen = new Set<HTMLElement>();
+                    const candidates = collected
+                      .filter((el) => {
+                        if (seen.has(el)) return false;
+                        seen.add(el);
+                        return isVisible(el);
+                      })
                       .map((el) => {
                         const t = parseT((el.textContent ?? "").trim());
-                        return t === null || !isVisible(el) ? null : { el, t };
+                        return t === null ? null : { el, t };
                       })
                       .filter((x): x is { el: HTMLElement; t: number } => x !== null && Math.abs(x.t - reqMins) <= maxDiffMins);
-                    if (candidates.length === 0) return null;
+
+                    if (candidates.length === 0) {
+                      // Diagnostic: show what we DID find with PM/AM text
+                      const debug = Array.from(document.querySelectorAll<HTMLElement>("a, button"))
+                        .filter((el) => {
+                          const t = (el.textContent ?? "").trim();
+                          return /\d{1,2}:\d{2}\s*(AM|PM)/i.test(t) && t.length < 30 && isVisible(el);
+                        })
+                        .slice(0, 8)
+                        .map((el) => ({
+                          tag: el.tagName,
+                          text: (el.textContent ?? "").trim().slice(0, 25),
+                          href: el.tagName === "A" ? (el as HTMLAnchorElement).getAttribute("href")?.slice(0, 60) || "" : "",
+                        }));
+                      return { _empty: true as const, debug };
+                    }
                     candidates.sort((a, b) => Math.abs(a.t - reqMins) - Math.abs(b.t - reqMins));
                     const best = candidates[0].el;
                     best.scrollIntoView({ block: "center" });
                     const r = best.getBoundingClientRect();
                     return {
+                      _empty: false as const,
                       x: Math.round(r.left + r.width / 2),
                       y: Math.round(r.top + r.height / 2),
                       text: (best.textContent ?? "").trim().slice(0, 30),
@@ -3640,7 +3687,11 @@ The user will enter CVV and confirm payment themselves.`,
                   { reqMins: requestedMinutes, maxDiffMins: 90 },
                 ).catch(() => null);
 
-                if (detailSlot && detailSlot.x > 0) {
+                if (detailSlot && detailSlot._empty) {
+                  trace(`[opentable] detail-page no candidates — debug seen: ${JSON.stringify(detailSlot.debug)}`);
+                }
+
+                if (detailSlot && !detailSlot._empty && detailSlot.x > 0) {
                   trace(`[opentable] detail-page time slot match: "${detailSlot.text}" — clicking via CDP`);
                   const clicked = await sh(raw)
                     .click(detailSlot.x, detailSlot.y)
@@ -3652,7 +3703,7 @@ The user will enter CVV and confirm payment themselves.`,
                     return true;
                   }
                   trace("[opentable] detail-page slot click failed — falling through to listing logic");
-                } else {
+                } else if (!detailSlot || detailSlot._empty) {
                   trace("[opentable] detail-page widget has no time slots in ±90 min — falling through");
                 }
               }
