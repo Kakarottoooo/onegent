@@ -1,5 +1,5 @@
 ================================================================
-Onegent · Travel Execution Layer for AI Agents · v0.2.56.0
+Onegent · Travel Execution Layer for AI Agents · v0.2.57.0
 ================================================================
 
 【一句话定位（2026-04-26 锁定）】
@@ -31,6 +31,157 @@ ChatGPT Apps + 第三方 agent builder via /api/v1）
 活动 / 多人 trip），非旅行品类（笔记本 / 手机 / 耳机 / 信用卡 /
 礼物 / 健身）已归档。详见本文档头部 "Recent Updates - 2026-04-24
 (cont. 2) · Positioning Shift"。
+
+================================================================
+Recent Updates - 2026-04-30 · DR Phase 4 闭环 + 联系人模糊匹配 + Profile portfolio + Expedia drift handling + Social Feed plan
+================================================================
+
+跨两天（2026-04-29 晚 ~ 2026-04-30 凌晨）一次性 push 了 30+ commits，从
+"DR 多人投票流" 一直推到 "公开 Profile 二段结构 + Social Feed 路线图"。
+重点是把 P3-P8 smoke 测试的所有阻塞 bug 全修了，用户 manual 跑下来基本
+都过了，剩下问题以后回归再修。Pricing/OAuth/Worker 三大 distribution 已
+经全部上线（cont.1-4 写过），这一轮属于"打磨 + 闭环 + 长期增长画布"。
+
+【今天（2026-04-30）4 个新 commit】
+
+1. ebe2683 — feat(booking): handle Expedia flight inventory drift gracefully
+   - 新 lib/booking-errors.ts 提供 isFlightInventoryDriftError() +
+     buildFlightInventoryDriftMessage/ManualMessage()
+   - Expedia provider Select-button 匹配从单层 strict 改成 3 层级联：
+     · Tier 1: 同航司 + 完全匹配（航班号 / 价格 / 时刻一致）
+     · Tier 2: 同航司 fallback（容差 ±2 小时 / ±$60）
+     · Tier 3: 跨航司 fallback（容差 ±3 小时 / ±$100）
+     避免 Expedia 在 search → checkout 之间价格/时刻轻微漂移就直接 bail
+   - app/api/booking-jobs/[id]/start/route.ts 在 runUniversalStep 失败
+     分支识别 drift error，写入针对性 actionItem.message："We found a
+     flight earlier, but Expedia no longer shows that exact fare."
+   - app/tasks/page.tsx stepStatusLabel 加 "Fare changed or disappeared"
+     状态 + diagnoseFail 加 drift 专用 reason/suggestion/chatPrompt
+   - 用户体感：之前 drift 直接显示 "Failed"，现在诚实告诉用户原因 +
+     给出"refresh / 手动选最近选项"两条出路
+
+2. c32e763 — feat(rooms): notification system for DR invites and reached-decision events
+   - 新 lib/room-notifications.ts 集中两个事件：
+     · notifyDecisionRoomInvite({ room, recipientUserId, creatorLabel,
+       totalMembers, requiresAccept }) — dr_invite kind，3+人加群组后缀
+       "(N-person group)"，dedupeKey=`dr_invite:${roomId}:${userId}`
+     · notifyDecisionRoomReachedDecision({ room, recipientUserIds,
+       totalMembers, winnerLabel, proposalId }) — dr_decided kind，
+       dedupeKey=`dr_decided:${roomId}:${proposalId}:${userId}`
+   - 4 个调用点接通：
+     · app/api/chat/commit/route.ts（kind=room 的两个分支，自然语言邀
+       请走的路径，requiresAccept=true → linkUrl=joinRoomLink）
+     · app/api/rooms/[id]/members/route.ts（直接 add member 路径，
+       requiresAccept=false → linkUrl=openRoomLink）
+     · app/api/rooms/[id]/proposals/[pid]/finalize/route.ts（创建者
+       finalize 时通知非创建者）
+     · app/api/rooms/[id]/proposals/[pid]/vote/route.ts（投票自动
+       finalize 时通知所有非当前用户）
+   - 全部 catch 成 non-fatal，不阻塞主流程
+   - 解锁 P7 通知系统验收
+
+3. ab72385 — feat(profile): split trips vs other shares + persist itinerary item snapshots
+   - 公开 Profile `/u/<handle>` 改成 portfolio 结构：
+     · listPublicArtifactsByOwner 加可选 kinds[] 过滤参数
+     · 主区域改成 "Trips"（kind=trip）独占
+     · 二段加 "Recent shares"（kind=booking + dr_outcome），副标题灰
+       色 eyebrow 区分主次
+     · OG 卡片 tripCount 只数 trip kind（不再混算 booking）
+     · 空状态文案对自己 vs 访客分别处理，hasOtherShares 时不慌
+   - itinerary_items 加 3 个 snapshot 列：snapshot_title / subtitle /
+     emoji，TEXT。addItineraryItem() 时 buildItineraryItemSnapshot()
+     从源 booking_job / decision_session 拍快照写入。
+   - app/s/[slug]/page.tsx + app/api/itineraries/[id]/route.ts 渲染
+     itinerary 子项时优先 it.snapshot_title，找不到子记录时不再显示
+     "Removed"，而是显示当时的真实标题。
+   - components/ShareTripModal.tsx 加 detectNativeMessageShareKind()
+     探测 platform：Apple → "iMessage"，移动 Android → "SMS"，桌面
+     非 Apple → 隐藏按钮（避免误导）。Channel 字段 imessage → message
+     统一处理。
+   - app/decide/[sessionId]/page.tsx 微调："Waiting on the group" →
+     "Waiting for your group"；submitted 个数副本简化；pending avatar
+     改为虚线边框（视觉上更"未到"）
+
+4. 6398303 — docs: social feed MVP plan + ignore dev.log~ and ralph last-branch
+   - 新 plan.md 把跟用户对齐的 8 条核心决策落定：
+     · Post 形态 = trip-anchored（必须挂 trip / booking）
+     · 关注模型 = 单向 follow（独立于 contacts，新增 follows 表）
+     · Profile 入口默认进 /feed（Following feed），不是自己主页
+     · 默认 visibility = public，单 post 可改 contacts-only
+     · MVP 不做 video / repost / bookmark / hashtag / discover
+     · Like + Comment（一级，无嵌套）+ @-mention 复用 picker
+     · Vercel Blob 存图（无新依赖）/ 无 websocket
+     · 5 张新表：posts / post_images / post_likes / post_comments /
+       follows + 完整 API routes / UI 页面 / 12 个组件 / 5 类通知 /
+       21 步 Phase 拆分 / 11 条 DoD / Out of Scope 明示
+   - .gitignore 加 dev.log~ + scripts/ralph/.last-branch（本地临时
+     状态文件，不该入库）
+   - 实施时机：等 P3-P8 smoke 全跑完再开工
+
+【昨天（2026-04-29）一并归档的核心 ship — DR 多人投票闭环 + 联系人增强】
+
+之前这些 commit 散落但都属于"DR 真正可用"的关键链路：
+
+· 9692af6 / fb6f2b1 / 7dbcc4a / d4e5f95 — DR Phase 1-3
+  Phase 1（服务端搜索 + 落 proposal）：把 DR 里 4 类场景的 LLM
+  search 结果落到 room_proposals 表，从原来的 client-side /api/chat
+  改成 server-side 一次跑，所有成员看到同一份候选。
+  Phase 2（客户端读 proposal + replay）：成员加入 DR 直接渲染共享
+  proposal cards，不再各跑各的搜索（消除"两人看到不同推荐"的根因）。
+  Phase 3（投票 wrapper + 多数派）：每张卡 vote button，达到多数
+  立刻自动 finalize，写 winner 到 decided_card_id。
+
+· 31c8a01 — DR Phase 4 闭环
+  Decided 屏顶部 consensus banner（"You all picked Carbone"），唯一
+  CTA 是 "Reserve now" 仅对 payer 可见（避免两人都点开浪费 quota）。
+  其他成员看到 "Waiting for [payer name] to confirm" 静态文案。
+
+· e41f75b — DR 投票按钮对比度 + 隐藏 solo CTA
+  scenario proposal cards 在 DR 内不该显示 solo "Book this" CTA
+  （DR 只走投票路径），且 vote button 在 dark mode 对比度修。
+
+· c551db0 / ebc21e8 — DR 早期保护：≥2 joined 才允许 synth + 双方
+  都看 spinner + scenario-aware chip set
+
+· 0bf894b — fix(rooms): kick non-creator members back to / when creator deletes
+  DR 房间被 owner 删除后，其他成员前端的 4-second poll 看到 404/403
+  → router.replace("/") + toast "Room dismissed"。之前会卡在僵尸 URL。
+
+· 5d5bbbc / 42e257d / 5e86a65 — 联系人 4-tier 模糊匹配链路
+  自然语言 "和 ziweiC 找..." 自动解析联系人：
+  · 新 lib/contacts-match.ts 公共匹配器（exact → username substring →
+    name prefix → name substring，≥3 char 阈值）
+  · pickPreferredContactLabel 优先级：nickname → 真实 display_name →
+    username → email-fallback display_name → profile_code（解决之前
+    显示 "guoziwei2019@126.com" 的问题）
+  · /api/chat/parse 后置 resolver pass：全 resolve → 自动 invite +
+    party_type=multi；任何 miss → block ask_clarification
+  · ConfirmCard 客户端复用同一匹配器（消除两边逻辑不一致）
+
+· 78c21cd — fix(booking): CAPTCHA misreported as "Ready for payment"
+  之前两套检测器 desync：assessment.blocked 只匹英文关键字，中文
+  CAPTCHA 只 trip 到 assessment.stage === "blocked"。改成 || 双判 +
+  InlineJobCard 加 "Needs verification — open live view" 标签。
+
+· 8264ed2 — Revert Yelp-first restaurant chain
+  16aff2c 试过把 Yelp 提到 OpenTable 之前做 primary，但 Yelp 在本地
+  Chromium 每次撞 CAPTCHA（free Browserbase 也撑不住），rollback。
+  餐厅链恢复 OpenTable → Resy → Google Places → website handoff 顺序。
+  Yelp provider 文件保留但不在 active fallback chain。
+
+【P3-P8 smoke status】
+用户 2026-04-30 manual 测试 P3 (公开 Profile) → P4 (Tier A polish) →
+P5 (3+ Group DR) → P6 (反应+评论) → P7 (通知系统) → P8 (Itinerary 聚合)
+全部基本通过。剩下回归再修。这意味着从 v0.2.49 开始的 6 周 smoke 套件
+正式收口，进入"public launch + social feed 长期增长"阶段。
+
+【未完成长尾】
+- Social feed MVP 实施（plan.md 已写，等正式开工）
+- Browserbase Pro $99/mo 升级（等付费用户敲门）
+- Worker 双份代码 cleanup（等 USE_WORKER_FOR 扩到 hotel/flight/activity）
+- ChatGPT Apps marketplace review 结果（被动等 OpenAI）
+- B2B Lane C cold outreach（4 客户类型 × 5 contacts）
+- Cofounder 搜索
 
 ================================================================
 Recent Updates - 2026-04-27 (cont. 4) · Pricing v0.1 — 第一个付费形态上线
