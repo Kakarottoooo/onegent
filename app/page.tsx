@@ -1,6 +1,7 @@
 "use client";
 
-import { useRef, useEffect, useState } from "react";
+import { useRef, useEffect, useState, Suspense } from "react";
+import { useSearchParams } from "next/navigation";
 import dynamic from "next/dynamic";
 import Link from "next/link";
 import RecommendationCard from "@/components/RecommendationCard";
@@ -94,7 +95,7 @@ const WEIGHT_LABELS: Record<string, string> = {
   preference_match: "Preference match",
 };
 
-export default function Home() {
+function HomeInner() {
   const { profile, updateProfile, learnFromFavorite, learnFromSearch, resetProfile, learnedWeights, learnWeightsFromFeedback, learnFromFeedback, learnFromAgentResponse, updateDiscoveredPreference, removeDiscoveredPreference } =
     usePreferences();
   const profileContext = formatProfileForPrompt(profile);
@@ -162,18 +163,17 @@ export default function Home() {
   const roomReplayCacheRef = useRef<Map<string, RoomReplaySnapshot>>(new Map());
   const sessionReplayCacheRef = useRef<Map<string, SessionReplaySnapshot>>(new Map());
   const roomTitleCacheRef = useRef<Map<string, string>>(new Map());
-  // Read query params fresh on every render — `useSearchParams` needs a
-  // Suspense boundary during SSG and plain `useEffect([])` only runs on mount
-  // so same-route nav (sidebar click → new ?session_id) keeps stale state.
-  // Direct window.location read + sync-to-state effect reacts correctly.
-  const urlRoomId =
-    typeof window !== "undefined"
-      ? new URLSearchParams(window.location.search).get("room_id")
-      : null;
-  const urlSessionId =
-    typeof window !== "undefined"
-      ? new URLSearchParams(window.location.search).get("session_id")
-      : null;
+  // Read query params via Next.js's React-aware hook so the component
+  // re-renders when `router.push("/?session_id=X")` (sidebar click) changes
+  // the URL. The previous implementation read `window.location.search`
+  // directly, which Next.js does NOT track — same-route nav with a
+  // changed query param wouldn't re-render this component, so clicking
+  // a different sidebar thread left the chat showing the old thread's
+  // messages. useSearchParams subscribes correctly. Suspense-wrapped at
+  // the export below so prerender doesn't choke.
+  const searchParams = useSearchParams();
+  const urlRoomId = searchParams.get("room_id");
+  const urlSessionId = searchParams.get("session_id");
   useEffect(() => {
     const r = urlRoomId && urlRoomId.trim() ? urlRoomId.trim() : null;
     const s = urlSessionId && urlSessionId.trim() ? urlSessionId.trim() : null;
@@ -3555,6 +3555,18 @@ export default function Home() {
           from this page. */}
       </main>
     </div>
+  );
+}
+
+// Suspense wrapper — required by Next.js because HomeInner uses
+// useSearchParams. Without this, prerender bails. Renders nothing while
+// the client picks up the URL on mount; in practice this is a single
+// frame so the user never sees the fallback.
+export default function Home() {
+  return (
+    <Suspense fallback={null}>
+      <HomeInner />
+    </Suspense>
   );
 }
 
