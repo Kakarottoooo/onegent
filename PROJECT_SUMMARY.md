@@ -1,5 +1,5 @@
 ================================================================
-Onegent · Travel Execution Layer for AI Agents · v0.2.57.0
+Onegent · Travel Execution Layer for AI Agents · v0.2.58.0
 ================================================================
 
 【一句话定位（2026-04-26 锁定）】
@@ -262,8 +262,142 @@ P5 (3+ Group DR) → P6 (反应+评论) → P7 (通知系统) → P8 (Itinerary 
 - Cofounder 搜索
 
 ================================================================
-Recent Updates - 2026-04-27 (cont. 4) · Pricing v0.1 — 第一个付费形态上线
+Recent Updates - 2026-04-30 (cont. 1) · Restaurant Benchmark Phase 0-4 闭环 + 真跑出来的 6 个 stagehand 分类 bug 全修
 ================================================================
+
+把"agent 真订得下来"的能力第一次有了**可量化、可复跑、自动化的回归
+测试**。从 Phase 0 schema 到 Phase 4 site-skill registry 全部 ship 到
+master，然后立刻在真实 NYC 餐厅上跑了 4 轮 benchmark，把 stagehand
+分类层、URL 同步、env 注入这些 hidden 路径上的 bug 一个个挖出来修了。
+
+最重磅的证据是 **Cosme 三轮一致跑到 `payment_stop` (1m+)** — 这是
+end-to-end RPA 链路在真实 Resy 站点（带 redirect、session cookies、
+checkout modal、cancellation policy）跑通到 dry_run 边界的第一个铁证。
+
+【今天 7 个新 commit（22bdf85 → e6a4ec2）】
+
+1. **22bdf85 — fix(start-route): build task NL independently of startUrl**
+   - 起因：Phase 0 benchmark 第一次 trigger 时 2s 内 crash with
+     "Cannot read properties of undefined (reading 'match')"
+   - 根因：runUniversalStep 把 task-build 嵌套在 startUrl-build
+     branch 里，当 caller 提供 startUrl 但没 task 时 task=undefined
+     传到 runBrowserTask → 内部 .match() 炸
+   - 修法：解耦两个 conditional，独立判断 startUrl / task synthesis
+   - 单测：现有 benchmark-runner.test 覆盖
+
+2. **a44b129 — fix(benchmark): refresh seeds + Phase 2 enrich on no_availability**
+   - 起因：第二轮 benchmark 5 cases 全失败，dashboard 显示 4 个
+     no_availability + 1 payment_stop。但所有 OT URL 实际是过时的：
+     L'Artusi/Carbone/Via Carota 都不在 OT 预订网络
+   - 修法：把过期 seed 换成 Boucherie/Tao Downtown/Buddakan 等已知
+     稳定 venue；把 Phase 2 deep-link enrichment 接到 start route
+     的 2 个 no_availability return path（之前只接 error path）
+   - 副作用：Boucherie 和 Buddakan 我选的 URL slug 后来证明也是 404
+     (commit 3e2bebd 修了)
+
+3. **445bfa4 — fix(stagehand): classify OT/Resy not-bookable pages as no_availability**
+   - 起因：第三轮 dev.log 实锤 Stagehand 在 L'Artusi 这种"detail 页
+     存在但餐厅不接受预订"的页面跑 30s+ 后报 executor_error，应该
+     是 no_availability
+   - 根因：`NO_AVAILABILITY_SIGNALS` 数组只有酒店关键词
+     ("sold out" / "fully booked")，餐厅 not-bookable 页面的 copy
+     ("Not available on OpenTable" / "Permanently Closed" /
+     "well, this is embarrassing" 404 页) 一条都不在
+   - 修法：加 8 条针对真实页面 copy 的关键词；lib + worker/src 双份
+     维护
+   - 单测：10 条 pinning test 覆盖每个新关键词
+
+4. **574daaa — fix(stagehand): forward AI no_availability to early-exit branch**
+   - 起因：dev.log 一行铁证 `[stage-detect] AI=no_availability(conf=0.99)
+     → mapped=unknown` — AI 给了 95% 置信的 no_availability 判定，
+     被 mapAIStageToRPA 主动丢成 unknown
+   - 根因：RPA 端 BookingStage 联合类型没 no_availability 成员，
+     mapAIStageToRPA 默认分支吞掉了；unknown 又触发 20-step
+     continuation pass 浪费时间
+   - 修法：BookingStage 加 "no_availability"；mapAIStageToRPA 直通；
+     stagehand-executor 在 listing 分支前加 early-exit 分支；lib +
+     worker/src 双份
+   - 单测：7 条 mapping test pinning 每个 AI stage
+
+5. **3e2bebd — fix(benchmark): swap unverified seeds for known-existing OT URLs**
+   - 起因：Boucherie/Buddakan 跑出来都是 OpenTable 404 页 — 我选 URL
+     时基于记忆没 HTTP verify。沙盒环境因为 OT 反爬挡 curl/PowerShell
+     无法离线 verify slug
+   - 修法：换成用户截图证明存在的 L'Artusi (`r/lartusi-new-york`,
+     not-on-network) + Carbone (`r/carbone-new-york`, permanently
+     closed)。这两个虽然 not-bookable，但**正好用来回归测试**关键词
+     修复在真实 not-bookable 页面上是否生效
+   - Tao Downtown / Lilia / Cosme 不变
+
+6. **63737e5 — perf(stagehand): pre-AI fast path for not-bookable pages**
+   - 起因：所有分类修复都验证 work，但 case duration 还是 2m+。Anthropic
+     vision API 调用 ~30-60s/次 + 5 case 并发 queue rate limit
+   - 修法：在第一次 assessBookingStage 之前加一个超便宜的
+     `page.evaluate(() => document.body.innerText)` + NO_AVAILABILITY_SIGNALS
+     scan。命中直接 return no_availability，**完全跳过 AI**
+   - 实际效果（dev.log 实锤）：L'Artusi 18s, Carbone 17.9s — 从 2m+
+     压到 18s，主要时间花在 page.goto + browser init，不是分类逻辑
+   - lib + worker/src 双份
+
+7. **e6a4ec2 — fix(benchmark): inject mock guest profile + cover Resy 'today full' copy**
+   - 起因 1：Tao Downtown 用 28s 才报 executor_error
+     "Unverified checkout field values"。dev.log: hasProfile=false。
+     Benchmark booking job 是 anonymous (userId=null)，profile loader
+     空 → stagehand reach guest form 没字段填 → executor 阻断
+   - 起因 2：Lilia 用 29s 报 "Stuck at listing page"。Resy 显示
+     "no online availability for Today, next is Tomorrow" — venue 在
+     线但今天满，不在已加的关键词里
+   - 修法：caseToBookingStep 直接 inline `BENCHMARK_PROFILE`（RFC 2606
+     .test TLD + 555-prefix phone）；NO_AVAILABILITY_SIGNALS 加
+     "no online availability for" / "next availability for" /
+     "there's no online availability"
+   - 预期下一轮 Tao Downtown reach payment_stop, Lilia 早停 ~3-5s
+
+【真实跑出来的发现 / 反模式】
+
+A. **HMR 不重载 module-level const 数组** — 改了
+   `NO_AVAILABILITY_SIGNALS` 但 dev server 没重启时一直读老数据。Next.js
+   16.1.7 + Turbopack 对这种 import 的 const 数组 hot-reload 不可靠。
+   Lesson: 改 lib/booking-autopilot/core 任何 module-level export 都
+   提示用户重启 dev server，别假设 HMR 能搞定
+
+B. **主 worktree 不会自动 fast-forward origin/master** — 我在
+   `.claude/worktrees/festive-pare-f27273` commit + push 到 origin/master
+   后，主 worktree (`~/onegent`) 的 HEAD 不会自动更新。每次 push 后
+   要主动 `git pull` 主 worktree 才能让 dev server 加载新代码
+
+C. **`(npm run dev) &` 子 shell 不继承父 shell env** — 用 `&` 启动
+   dev server 时，Anthropic SDK 拿不到 ANTHROPIC_API_KEY，AI stage
+   detect 全部 fallback to RPA。修法：先 `set -a && . ./.env.local
+   && set +a` 显式 export 再 `exec npm run dev`
+
+D. **dispatch profile 链路是手动维护的** — start route 的 profile
+   loader 走 jobUserId 查 DB；anonymous benchmark 没 userId 就只剩
+   step.body.profile 一条 inline 路径。如果 caller 不主动 inject 就
+   是空 profile
+
+【验证：Cosme 端到端 RPA 三轮稳定】
+
+| Run         | URL                                  | Stage 路径                                                                 | 终态                |
+|-------------|--------------------------------------|----------------------------------------------------------------------------|--------------------|
+| 1 (baseline)| resy.com/cities/ny/cosme             | redirect → listing → click 7:30 PM → checkout_form (5 reassess) → payment | payment_stop 57s ✓ |
+| 2 (post-fix)| 同上                                 | 同上 (reassess 简化)                                                       | payment_stop 1m4s ✓|
+| 3 (post-AI) | 同上                                 | listing → checkout_form (3 reassess) → payment                            | payment_stop 1m5s ✓|
+
+跨 3 轮、不同代码版本、不同 dev server 进程，Cosme 全部跑到 dry_run
+boundary 触发。这是 Phase 0 boundary helper 工作的硬证据。
+
+【已知 backlog（不阻塞，下一轮处理）】
+
+- **Dashboard duration 显示 bug**：L'Artusi step.status="no_availability"
+  但 dashboard 显示 "executor_error 1s"。实际 booking_job DB 行正确，
+  duration 计算或 race condition 把 createdAt - completedAt 算成 1s
+- **OpenTable URL HTTP verify**：sandbox 反爬挡得死死的，需要在 dev
+  server 内部跑 verify endpoint（local fetch 就不会被反爬）才能离线
+  确认 seed slug 是否 200/404
+- **AI stage assessment 慢（30-60s/call）**：5 case 并发互相 queue
+  Anthropic rate limit。Pre-AI fast path 已经把 not-bookable 路径救了，
+  bookable 路径仍然慢。考虑后台 prefetch / 并行度限流
 
 Onegent 第一次有了**真实可付费的产品形态**。Stripe sandbox 配置完整、
 prod E2E 跑通、user 走完 Checkout → webhook → Neon → /account/billing

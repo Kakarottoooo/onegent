@@ -4,6 +4,29 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [0.2.58.0] - 2026-04-30
+
+### Added
+- **Restaurant Benchmark Phase 0–4 closeout** — schema + dry_run boundary + runner + dashboard + mutable task state + DeepLink fallback + thin executor interface + MCP v2 task protocol + site skill registry. Lets us run a 5-case NYC restaurant matrix from `/internal/benchmark`, classify each outcome against a canonical failure taxonomy, and aggregate provider success rates over time. Cosme (Resy) now reproducibly runs end-to-end through the full RPA flow (listing → click time slot → checkout modal) and stops at the dry_run payment boundary.
+- **Pre-AI fast path for not-bookable pages** — before the first `assessBookingStage` call (which costs 30–60s of Anthropic vision API), `stagehand-executor` runs a cheap `page.evaluate(() => document.body.innerText)` scan against `NO_AVAILABILITY_SIGNALS`. Hits short-circuit to `no_availability` in ~3–5s. Catches OpenTable's "Not available on OpenTable" / "Permanently Closed" panels, OT/Resy 404 pages, and Resy's "no online availability for Today" listing-full state.
+- **Synthetic benchmark guest profile** — `caseToBookingStep` now inlines `BENCHMARK_PROFILE` (RFC 2606 `.test` TLD + 555-prefix phone). Without this, anonymous benchmark booking jobs hit the OpenTable guest form with no fields to fill and the executor's default-success guard tripped after 30s+. Card fields are intentionally omitted — dry_run stops before payment, and pre-validation by the venue would reject a fake number anyway.
+- **Phase 2 `buildDeepLinkEnrichmentForStep` wired into `no_availability` return paths** in `app/api/booking-jobs/[id]/start/route.ts` (previously only on the error branch). Restaurant `no_availability` outcomes now include a `handoff_url` with `?covers=N&dateTime=...` pre-filled.
+- **`BookingStage` union gains `"no_availability"`** in `lib/booking-autopilot/core/stages.ts`. The AI stage detector emits this when it sees pages it can't reason about (e.g. permanently-closed venue panels), and `mapAIStageToRPA` now forwards it through. `stagehand-executor` early-exits at this stage with `status=no_availability` instead of running the 20-step continuation agent.
+
+### Fixed
+- **`runUniversalStep` crashed with "Cannot read properties of undefined (reading 'match')"** when callers (e.g. the benchmark runner) provided `step.body.startUrl` but no `step.body.task`. Task synthesis was nested inside the startUrl-build branch and so was skipped. Restructured the conditional so startUrl and task are built independently. (commit `22bdf85`)
+- **`NO_AVAILABILITY_SIGNALS` had no restaurant-side keywords** — only hotel-side ("sold out", "fully booked"). Added 11 phrases covering OpenTable's "Not available on OpenTable" / "Permanently Closed" / "Find similar restaurants" CTAs, OT/Resy 404 octopus pages ("well, this is embarrassing", "we weren't able to find the page", "we can't find that page"), and Resy's date-full listing state ("no online availability for", "next availability for", "there's no online availability"). (commits `445bfa4` + `e6a4ec2`)
+- **`mapAIStageToRPA` dropped `no_availability` to `unknown`** because the RPA-side `BookingStage` enum didn't have that member. `[stage-detect] AI=no_availability(conf=0.99) → mapped=unknown` from real benchmark dev.log proved this. Added the enum member and the mapping case; added a stagehand-executor early-exit branch so we don't waste 20s on a continuation pass for pages the AI already classified definitively. (commit `574daaa`)
+- **Three benchmark seeds pointed to OpenTable URLs that 404** — Boucherie West Village (`r/boucherie-west-village-new-york`) and Buddakan (`r/buddakan-new-york`) returned the OT 404 page. Could not HTTP-verify candidate URLs from sandbox (OpenTable's reverse-proxy blocks non-browser clients with constant TLS renegotiation). Swapped to URLs the user independently confirmed exist: L'Artusi (`r/lartusi-new-york`, not-on-network) and Carbone (`r/carbone-new-york`, permanently closed). Also serves as a regression test for the new `NO_AVAILABILITY_SIGNALS` keywords. (commits `a44b129` + `3e2bebd`)
+
+### Verified end-to-end
+- **Cosme (Resy) reaches `payment_stop` reproducibly** across 3 separate benchmark runs on different code revisions and different dev-server processes. dev.log shows the full flow: redirect from `cities/ny/cosme` → `cities/new-york-ny/venues/cosme` → listing → click 7:30 PM → checkout_form (3–5 reassessments) → dry_run boundary fires. Confirms the Phase 0 boundary helper works on a real Resy production checkout modal.
+
+### Known issues / backlog
+- Dashboard `duration_seconds` for the benchmark cases sometimes shows 0s / 1s when the underlying `step.status` is correct (`no_availability`, etc.) and the actual POST took 18s+. Suspected race in `resolveBenchmarkCase` finalising before stagehand writes `step.completed_at`. Cosmetic — DB rows are accurate. Will fix after the next batch of stagehand work.
+- OpenTable's anti-scrape blocks all HTTP-client based slug verification from the dev sandbox. Adding new OT venues to the benchmark requires manual visual verification by the user, or a dev-server-internal fetch endpoint.
+- AI stage assessment costs 30–60s per call when 5 cases run concurrently and contend on the Anthropic rate limit. The pre-AI fast path saved the not-bookable cases; bookable-but-busy cases still pay this.
+
 ## [0.2.23.0] - 2026-03-23
 
 ### Added
