@@ -43,6 +43,12 @@ describe("NO_AVAILABILITY_SIGNALS — restaurant venue not-bookable", () => {
     const text = "Sorry, but we can't find that page. Please check that the address is correct or go back to the home page.";
     expect(matchesAnySignal(text)).toBe(true);
   });
+
+  it("matches Resy listing where today is full but venue is bookable later", () => {
+    // Real copy from resy.com/cities/new-york-ny/venues/lilia (2026-04-30)
+    const text = "At the moment, there's no online availability for Today. The next availability for 2 is Tomorrow.";
+    expect(matchesAnySignal(text)).toBe(true);
+  });
 });
 
 describe("NO_AVAILABILITY_SIGNALS — pre-existing hotel signals still match", () => {

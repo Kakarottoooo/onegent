@@ -37,6 +37,14 @@ export const NO_AVAILABILITY_SIGNALS = [
   "well, this is embarrassing",
   "we weren't able to find the page",
   "we can't find that page",
+  // Resy listing page when the requested date is fully booked (e.g. Lilia in
+  // Williamsburg routinely hits this — venue exists, today is full, next
+  // availability is days out). Without this signal Stagehand reads listing
+  // signals and runs the OT/Resy programmatic flow looking for a slot to
+  // click, then 60s+ later returns status=error "Stuck at listing page".
+  "no online availability for",
+  "next availability for",
+  "there's no online availability",
   "没有可用",
   "找不到任何",
 ];

@@ -86,6 +86,29 @@ export interface RunRestaurantBenchmarkResult {
  * into step.body; if the case carries an explicit restaurant_url we also
  * pass it as startUrl so the executor skips the search-by-term phase.
  */
+/**
+ * Synthetic guest profile injected into every benchmark booking job. Without
+ * this, anonymous benchmark jobs (userId=null) get an empty profile, the
+ * stagehand executor reaches the guest form with no fields to fill, and the
+ * "default success path" check blocks the run with status=error after 30s+.
+ *
+ * Card fields are intentionally omitted: dry_run mode stops at the payment
+ * boundary anyway, and providers that pre-validate cards would reject this
+ * fake number. The contact fields are realistic-but-clearly-test (RFC 2606
+ * .test TLD, 555-prefix phone), so any leakage to real venues is benign.
+ */
+const BENCHMARK_PROFILE = {
+  first_name: "Benchmark",
+  last_name: "User",
+  email: "benchmark@onegent.test",
+  phone: "+15555550100",
+  address_line1: "1 Test Street",
+  city: "New York",
+  state: "NY",
+  zip: "10001",
+  country: "US",
+};
+
 export function caseToBookingStep(c: RestaurantBenchmarkCase): BookingJobStep {
   const fallbackUrl =
     c.restaurant_url ??
@@ -97,6 +120,7 @@ export function caseToBookingStep(c: RestaurantBenchmarkCase): BookingJobStep {
     date: c.date,
     time: c.time,
     covers: c.party_size,
+    profile: BENCHMARK_PROFILE,
   };
   if (c.restaurant_url) body.startUrl = c.restaurant_url;
 
