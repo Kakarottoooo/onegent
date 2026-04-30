@@ -29,6 +29,7 @@ import {
   updateChatSessionMeta,
   getDecisionRoomById,
   listActiveProposals,
+  getUserProfile,
 } from "@/lib/db";
 import { triggerSynthesis } from "@/lib/agent/trip-synthesis";
 import type { ChatMessage } from "@/lib/llm-client";
@@ -133,12 +134,38 @@ export async function POST(req: NextRequest) {
   const prevNluState =
     b.prev_nlu_state && typeof b.prev_nlu_state === "object" ? b.prev_nlu_state : null;
 
+  // Client-resolved @-mentions. We look up the profiles server-side so the
+  // names are trustworthy (client could have stale display_name) and pass
+  // them through to the NLU as a hard override on party_type / member_names.
+  const rawMentionedIds = Array.isArray(b.mentioned_user_ids)
+    ? (b.mentioned_user_ids as unknown[]).filter(
+        (x): x is string => typeof x === "string" && x.length > 0,
+      )
+    : [];
+  const mentionedMembers = rawMentionedIds.length > 0
+    ? (
+        await Promise.all(
+          // Drop the caller's own id — they're not a "co-decider" of themselves.
+          rawMentionedIds
+            .filter((id) => id !== userId)
+            .slice(0, 8) // sanity cap
+            .map(async (id) => {
+              const p = await getUserProfile(id).catch(() => null);
+              return p
+                ? { user_id: id, display_name: p.display_name, username: p.username }
+                : null;
+            }),
+        )
+      ).filter((m): m is { user_id: string; display_name: string | null; username: string | null } => !!m)
+    : [];
+
   try {
     const result = await analyzeConversationalV2({
       message,
       history,
       pinned_target_id,
       prev_state: prevNluState as Parameters<typeof analyzeConversationalV2>[0]["prev_state"],
+      mentioned_members: mentionedMembers.length > 0 ? mentionedMembers : undefined,
     });
     const oosTags = (result.__v2_state?.planning_assumptions ?? []).filter(
       (a: unknown): a is string =>

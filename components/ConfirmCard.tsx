@@ -35,6 +35,13 @@ export interface ConfirmCardProps {
    * room is created — sidebar will then show only the room row, not both.
    */
   sessionId?: string | null;
+  /**
+   * Resolved @-mention user_ids captured at parse time (homepage MentionPicker).
+   * Forwarded to /api/chat/commit so create_room skips the LLM-name-resolution
+   * fallback and invites these users directly. Empty/undefined when the user
+   * didn't tag anyone — commit then falls back to NLU member_names as before.
+   */
+  mentionedUserIds?: string[];
   /** Called with the commit response (room_id + url, or plan hand-off payload). */
   onConfirmed: (payload: CommitResponse) => void;
   /** User clicked "edit" — put focus back on the input so they can keep chatting. */
@@ -185,6 +192,11 @@ export default function ConfirmCard(props: ConfirmCardProps) {
           // room, markSessionUpgraded flags the session so it's hidden from
           // the Sessions list (the Room row above represents it instead).
           ...(props.sessionId ? { session_id: props.sessionId } : {}),
+          // Resolved @-mentions from the homepage MentionPicker (P3). Server
+          // uses these to skip resolveContactsByNames in create_room.
+          ...(props.mentionedUserIds && props.mentionedUserIds.length > 0
+            ? { mentioned_user_ids: props.mentionedUserIds }
+            : {}),
         }),
       });
       const data = (await res.json().catch(() => ({}))) as CommitResponse;

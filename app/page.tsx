@@ -34,6 +34,7 @@ import type { TripIntentState } from "@/lib/agent/trip-intent-state";
 import { useLanguage } from "@/app/hooks/useLanguage";
 import GlobalNav from "@/components/GlobalNav";
 import Sidebar from "@/components/Sidebar";
+import MentionPicker, { type MentionContact } from "@/components/MentionPicker";
 import {
   looksLikeRecommendationAsk,
   getFallbackQuickPicks,
@@ -541,6 +542,8 @@ function HomeInner() {
     nlu: ConversationalNLUResult;
     message: string;
     kind: "room" | "plan" | "trip";
+    /** Captured at parse time — input may have been cleared by the time we commit. */
+    mentioned_user_ids?: string[];
   } | null>(null);
   const [pendingQuickPicks, setPendingQuickPicks] = useState<QuickPick[] | null>(null);
   // Phase 1-E: trip packaging result. "planning" while /api/chat/trip/plan runs
@@ -595,9 +598,20 @@ function HomeInner() {
     contact_user_id: string;
     nickname: string | null;
     profile_code: string;
+    username: string | null;
     display_name: string | null;
     avatar_url: string | null;
   }[]>([]);
+  // Full contacts list, for the @-mention picker on the chat input.
+  const [allContacts, setAllContacts] = useState<MentionContact[]>([]);
+  // user_ids currently @-mentioned in the input. Resolved live from text
+  // by MentionPicker; we just hold the latest value.
+  const [mentionedUserIds, setMentionedUserIds] = useState<string[]>([]);
+  // username (lowercase) → user_id, for users resolved via "Look up @xyz..."
+  // (sent contact request inline). MentionPicker uses this to attribute
+  // mentions for handles that aren't yet in allContacts.
+  const [pendingInvites, setPendingInvites] = useState<Record<string, string>>({});
+  const [mentionToast, setMentionToast] = useState<string | null>(null);
   const [recentJobs, setRecentJobs] = useState<{ id: string; trip_label: string; status: string; created_at: string }[]>([]);
   // Inline booking task cards rendered below results
   const [inlineItems, setInlineItems] = useState<{ type: "job"; jobId: string }[]>([]);
@@ -643,6 +657,32 @@ function HomeInner() {
         setRecentContacts(d.contacts ?? []);
       })
       .catch(() => setRecentContacts([]));
+  }, [auth.isSignedIn]);
+
+  // Full contacts list for the @-mention picker. Cheap (~one row per friend),
+  // fetched once per sign-in. The picker fuzzy-matches client-side.
+  useEffect(() => {
+    if (!auth.isSignedIn) { setAllContacts([]); return; }
+    fetch("/api/contacts")
+      .then((r) => (r.ok ? r.json() : { contacts: [] }))
+      .then((d: { contacts?: Array<{
+        contact_user_id: string;
+        nickname: string | null;
+        profile_code: string | null;
+        username?: string | null;
+        display_name: string | null;
+        avatar_url: string | null;
+      }> }) => {
+        const list: MentionContact[] = (d.contacts ?? []).map((c) => ({
+          user_id: c.contact_user_id,
+          username: c.username ?? null,
+          display_name: c.display_name ?? c.nickname ?? null,
+          avatar_url: c.avatar_url ?? null,
+          profile_code: c.profile_code ?? null,
+        }));
+        setAllContacts(list);
+      })
+      .catch(() => setAllContacts([]));
   }, [auth.isSignedIn]);
 
   // Phase 3.3c: Feedback loop — called when user rates a restaurant card
@@ -881,6 +921,64 @@ function HomeInner() {
     );
   }
 
+  // MentionPicker calls this when user picks "Look up @<handle>" — we resolve
+  // the handle via the public profile endpoint, immediately fire a contact
+  // request, and remember the user_id keyed by lowercase username so the
+  // mention bubbles up as a real user_id even though the request is still
+  // pending. Returns the canonical username so MentionPicker splices it back
+  // into the text (handles case-mismatch). Returns null on 404.
+  async function handleMentionLookup(rawHandle: string): Promise<{
+    user_id: string;
+    username: string;
+    display_name: string | null;
+  } | null> {
+    const handle = rawHandle.trim().replace(/^@/, "");
+    if (!handle) return null;
+    try {
+      const res = await fetch(`/api/users/by-code/${encodeURIComponent(handle)}`);
+      if (!res.ok) {
+        if (res.status === 404) {
+          setMentionToast(`@${handle} not found`);
+          setTimeout(() => setMentionToast(null), 3000);
+        } else {
+          setMentionToast("Lookup failed.");
+          setTimeout(() => setMentionToast(null), 3000);
+        }
+        return null;
+      }
+      const body = (await res.json()) as {
+        user: {
+          user_id: string;
+          username: string | null;
+          display_name: string | null;
+          profile_code: string;
+        };
+      };
+      const u = body.user;
+      const resolvedUsername = (u.username ?? handle).toLowerCase();
+      // Fire-and-forget contact request — server is idempotent (409 if already
+      // a contact, 429 if too soon since last request, both fine for our path).
+      void fetch("/api/contacts/requests", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ profile_code: u.profile_code }),
+      }).catch(() => {});
+      setPendingInvites((prev) => ({ ...prev, [resolvedUsername]: u.user_id }));
+      const label = u.display_name ?? u.username ?? handle;
+      setMentionToast(`Sent request to ${label} — added to chat`);
+      setTimeout(() => setMentionToast(null), 3000);
+      return {
+        user_id: u.user_id,
+        username: u.username ?? handle,
+        display_name: u.display_name,
+      };
+    } catch {
+      setMentionToast("Lookup failed.");
+      setTimeout(() => setMentionToast(null), 3000);
+      return null;
+    }
+  }
+
   async function sendCurrentInput() {
     const text = chatInputRef.current.trim();
     if (!text || chat.loading || isListening || nluPending) return;
@@ -910,6 +1008,11 @@ function HomeInner() {
     setPendingConfirm(null);
     setPendingQuickPicks(null);
 
+    // Snapshot @-mentions BEFORE clearing the input — MentionPicker will fire
+    // onMentionsChange([]) once chat.setInput("") propagates, but we still need
+    // the captured ids on the eventual ConfirmCard commit.
+    const capturedMentionIds = mentionedUserIds;
+
     // Echo user message immediately so the UX stays snappy during the NLU call.
     chat.injectUserMessage(text);
     setNluPending(true);
@@ -934,6 +1037,10 @@ function HomeInner() {
           // merge into existing constraints — keeps refresh / sidebar-switch
           // from feeling like the agent has amnesia.
           ...(lastNluStateRef.current ? { prev_nlu_state: lastNluStateRef.current } : {}),
+          // @-mentions resolved client-side (deterministic — no LLM guessing).
+          // Server uses these directly to set party_type=multi + skip name
+          // resolution entirely.
+          ...(mentionedUserIds.length > 0 ? { mentioned_user_ids: mentionedUserIds } : {}),
         }),
       });
       const data = (await res.json().catch(() => null)) as
@@ -998,7 +1105,7 @@ function HomeInner() {
       // before we spend 10-15s running hotel+flight pipelines in parallel.
       if (nlu.intent === "create_plan" && nlu.confirm_ready && nlu.scenario === "trip") {
         if (nlu.assistant_reply) chat.injectAssistantMessage(nlu.assistant_reply);
-        setPendingConfirm({ nlu, message: text, kind: "trip" });
+        setPendingConfirm({ nlu, message: text, kind: "trip", mentioned_user_ids: capturedMentionIds });
         return;
       }
 
@@ -1017,7 +1124,7 @@ function HomeInner() {
       //      Completed section stayed perpetually empty for solo plans.
       if (nlu.intent === "create_plan" && nlu.confirm_ready) {
         if (nlu.assistant_reply) chat.injectAssistantMessage(nlu.assistant_reply);
-        setPendingConfirm({ nlu, message: text, kind: "plan" });
+        setPendingConfirm({ nlu, message: text, kind: "plan", mentioned_user_ids: capturedMentionIds });
         return;
       }
 
@@ -1157,10 +1264,10 @@ function HomeInner() {
       }
 
       if (nlu.intent === "create_room" && nlu.confirm_ready) {
-        setPendingConfirm({ nlu, message: text, kind: "room" });
+        setPendingConfirm({ nlu, message: text, kind: "room", mentioned_user_ids: capturedMentionIds });
       } else if (nlu.intent === "create_plan" && nlu.confirm_ready) {
         // Safety net — shouldn't reach here given the early return above.
-        setPendingConfirm({ nlu, message: text, kind: "plan" });
+        setPendingConfirm({ nlu, message: text, kind: "plan", mentioned_user_ids: capturedMentionIds });
       } else if (nlu.suggested_quick_picks && nlu.suggested_quick_picks.length > 0) {
         setPendingQuickPicks(nlu.suggested_quick_picks);
       } else if (looksLikeRecommendationAsk(text)) {
@@ -2823,9 +2930,13 @@ function HomeInner() {
                               // Plan A: instead of opening the legacy
                               // DecisionRoomModal (form-based), pre-fill the
                               // chat input so the user can finish the prompt
-                              // naturally. NLU picks up the named co-decider
-                              // and routes to a chat-flow Decision Room.
-                              const handle = c.nickname ?? c.display_name ?? `@${c.profile_code}`;
+                              // naturally. v1 picker: prefer @username so the
+                              // mention auto-tags via MentionPicker (skips the
+                              // LLM name resolution); fall back to display
+                              // name when the contact has no username yet.
+                              const handle = c.username
+                                ? `@${c.username}`
+                                : (c.nickname ?? c.display_name ?? `@${c.profile_code}`);
                               const prefill = `我和 ${handle} 一起决定 `;
                               chat.setInput(prefill);
                               chatInputRef.current = prefill;
@@ -3130,6 +3241,7 @@ function HomeInner() {
                       .filter((m) => (m.role === "user" || m.role === "assistant") && typeof m.content === "string" && m.content.trim().length > 0)
                       .map((m) => ({ role: m.role as "user" | "assistant", content: m.content }))}
                     sessionId={activeSessionId}
+                    mentionedUserIds={pendingConfirm.mentioned_user_ids}
                     onConfirmed={handleConfirmCommitted}
                     onEdit={handleConfirmEdit}
                   />
@@ -3507,6 +3619,95 @@ function HomeInner() {
 
       {/* ─── Bottom Input Bar ─────────────────────────────────── */}
       <div className="chat-bottombar">
+        {/* P4: pills + toast above the input. Pills surface who's currently
+            tagged so the user can verify before sending; × strips the @username
+            token from the text (which auto-clears the user_id via
+            MentionPicker's derive). */}
+        {(mentionedUserIds.length > 0 || mentionToast) && (
+          <div
+            style={{
+              maxWidth: "56rem",
+              margin: "0 auto",
+              padding: "0 var(--space-2)",
+              display: "flex",
+              flexWrap: "wrap",
+              alignItems: "center",
+              gap: 6,
+              marginBottom: 6,
+            }}
+          >
+            {mentionedUserIds.map((uid) => {
+              const c = allContacts.find((x) => x.user_id === uid);
+              const usernameFromInvite = Object.entries(pendingInvites).find(
+                ([, id]) => id === uid,
+              )?.[0];
+              const username = c?.username ?? usernameFromInvite ?? null;
+              const label = c?.display_name ?? c?.username ?? username ?? "Unknown";
+              return (
+                <span
+                  key={uid}
+                  style={{
+                    display: "inline-flex",
+                    alignItems: "center",
+                    gap: 6,
+                    padding: "4px 10px",
+                    borderRadius: 999,
+                    background: "var(--gold-soft, #f7eed8)",
+                    color: "var(--gold-text, #7a5b1c)",
+                    fontFamily: "var(--font-dm-sans)",
+                    fontSize: 12,
+                    fontWeight: 600,
+                    border: "1px solid var(--gold, #C9A84C)",
+                  }}
+                >
+                  @{label}
+                  <button
+                    type="button"
+                    aria-label={`Remove ${label}`}
+                    onClick={() => {
+                      if (!username) return;
+                      const re = new RegExp(
+                        `(^|\\s)@${username}\\b\\s?`,
+                        "gi",
+                      );
+                      const next = chat.input
+                        .replace(re, " ")
+                        .replace(/\s+/g, " ")
+                        .trim();
+                      updateChatInput(next);
+                    }}
+                    style={{
+                      background: "transparent",
+                      border: "none",
+                      color: "inherit",
+                      cursor: "pointer",
+                      padding: 0,
+                      fontSize: 14,
+                      lineHeight: 1,
+                    }}
+                  >
+                    ×
+                  </button>
+                </span>
+              );
+            })}
+            {mentionToast && (
+              <span
+                style={{
+                  marginLeft: mentionedUserIds.length > 0 ? 8 : 0,
+                  padding: "4px 10px",
+                  borderRadius: 999,
+                  background: "rgba(0,0,0,0.04)",
+                  color: "var(--text-secondary, #555)",
+                  fontFamily: "var(--font-dm-sans)",
+                  fontSize: 12,
+                }}
+              >
+                {mentionToast}
+              </span>
+            )}
+          </div>
+        )}
         <div className="chat-bottombar__inner">
           {/* New chat button — only show when there's conversation history */}
           {hasMessages && (
@@ -3519,27 +3720,23 @@ function HomeInner() {
               ✕
             </button>
           )}
-          <input
-            type="text"
-            data-chat-input
+          <MentionPicker
             value={isListening ? "" : chat.input}
-            onChange={(e) => updateChatInput(e.target.value)}
+            onChange={updateChatInput}
+            onSubmit={() => {
+              chatInputRef.current = chat.input;
+              sendCurrentInput();
+            }}
+            contacts={allContacts}
+            pendingInvites={pendingInvites}
+            onMentionsChange={setMentionedUserIds}
+            onLookup={handleMentionLookup}
             onCompositionStart={() => {
               isComposingRef.current = true;
             }}
-            onCompositionEnd={(e) => {
+            onCompositionEnd={(value) => {
               isComposingRef.current = false;
-              updateChatInput(e.currentTarget.value);
-            }}
-            onKeyDown={(e) => {
-              if (e.key === "Enter") {
-                if (isComposingRef.current || e.nativeEvent.isComposing) {
-                  return;
-                }
-                chatInputRef.current = e.currentTarget.value;
-                e.preventDefault();
-                sendCurrentInput();
-              }
+              updateChatInput(value);
             }}
             placeholder={
               isListening
@@ -3548,11 +3745,13 @@ function HomeInner() {
                 ? "e.g. 2001-09-05, passport EJ2676174"
                 : hasMessages
                 ? "Refine: 'more quiet', 'cheaper options'..."
-                : "Describe what you're looking for..."
+                : "Describe what you're looking for... (type @ to tag a contact)"
             }
-            aria-label="Search for restaurants"
+            ariaLabel="Search for restaurants"
             className={`chat-input${isListening ? " chat-input--listening" : ""}`}
             disabled={chat.loading || isListening}
+            wrapperStyle={{ flex: 1, minWidth: 0 }}
+            inputDataAttributes={{ "data-chat-input": "true" }}
           />
           {/* Phase 5.2: Mic button — hidden when voice not supported */}
           {voiceSupported && (

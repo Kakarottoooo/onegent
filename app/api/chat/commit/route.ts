@@ -54,6 +54,31 @@ import {
 
 export const maxDuration = 30;
 
+/**
+ * Pick between explicit @-mention user_ids (deterministic) and the LLM-driven
+ * name-to-contact resolver. Returns the same shape resolveContactsByNames does
+ * so the existing invite loop doesn't care which path produced the list.
+ */
+async function resolveCoMembers(
+  callerId: string,
+  explicitMentionIds: string[],
+  memberNames: string[],
+): Promise<Array<{ name: string; contact_user_id: string | null }>> {
+  if (explicitMentionIds.length > 0) {
+    const ids = explicitMentionIds.filter((id) => id !== callerId);
+    return Promise.all(
+      ids.map(async (id) => {
+        const p = await getUserProfile(id).catch(() => null);
+        return {
+          name: p?.display_name ?? p?.username ?? id,
+          contact_user_id: p ? id : null,
+        };
+      }),
+    );
+  }
+  return resolveContactsByNames(callerId, memberNames).catch(() => []);
+}
+
 const ALLOWED_ROOM_TYPES: DecisionRoomType[] = ["restaurant", "hotel", "flight", "activity", "trip"];
 
 /**
@@ -539,6 +564,16 @@ export async function POST(req: NextRequest) {
   const memberNames = Array.isArray(nluRaw.member_names)
     ? nluRaw.member_names.filter((x): x is string => typeof x === "string")
     : [];
+  // Resolved @-mentions from MentionPicker. When non-empty, create_room
+  // skips the LLM-driven resolveContactsByNames fallback and invites these
+  // users directly — handles the "named someone who isn't a contact yet"
+  // case (we already sent them a contact request inline; the room invite
+  // lands in their /rooms list as `invited` either way).
+  const explicitMentionIds = Array.isArray(b.mentioned_user_ids)
+    ? (b.mentioned_user_ids as unknown[]).filter(
+        (x): x is string => typeof x === "string" && x.length > 0,
+      )
+    : [];
   const originalMessage = typeof b.message === "string" ? b.message : "";
 
   if (intent === "chitchat" || intent === "unknown") {
@@ -664,10 +699,11 @@ export async function POST(req: NextRequest) {
 
       // Stage 2 invite-UX: resolve named members to contacts + pre-invite.
       // Resolved contacts get added with status='invited'; they'll see the
-      // pending invitation in their /rooms list and accept to join. Names
-      // that don't match a contact (typos, non-contacts) are returned in
-      // the response so the UI can prompt the user to share the link instead.
-      const resolved = await resolveContactsByNames(userId, memberNames).catch(() => []);
+      // pending invitation in their /rooms list and accept to join. Explicit
+      // @-mentions short-circuit the name-resolution (deterministic by id),
+      // so a stranger the user just looked up via "Look up @handle..." gets
+      // invited even though they're not yet a contact.
+      const resolved = await resolveCoMembers(userId, explicitMentionIds, memberNames);
       const invitedUserIds: string[] = [];
       const unresolvedNames: string[] = [];
       // Resolve the creator's display name once so the DM reads naturally
@@ -902,7 +938,7 @@ export async function POST(req: NextRequest) {
     }
 
     // Resolve named members → invite + agent-DM. Same flow as trip rooms.
-    const resolved = await resolveContactsByNames(userId, memberNames).catch(() => []);
+    const resolved = await resolveCoMembers(userId, explicitMentionIds, memberNames);
     const invitedUserIds: string[] = [];
     const unresolvedNames: string[] = [];
     const creatorProfile = await getUserProfile(userId).catch(() => null);

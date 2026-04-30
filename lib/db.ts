@@ -4429,6 +4429,7 @@ export interface ContactWithProfile {
   contact_user_id: string;
   nickname: string | null;
   profile_code: string;
+  username: string | null;
   display_name: string | null;
   avatar_url: string | null;
   added_at: string;
@@ -4733,11 +4734,12 @@ export async function listRecentContacts(
     nickname: string | null;
     created_at: string;
     profile_code: string | null;
+    username: string | null;
     display_name: string | null;
     avatar_url: string | null;
   }>`
     SELECT c.contact_user_id, c.nickname, c.created_at,
-           p.profile_code, p.display_name, p.avatar_url
+           p.profile_code, p.username, p.display_name, p.avatar_url
     FROM user_contacts c
     LEFT JOIN user_profiles p ON p.user_id = c.contact_user_id
     LEFT JOIN LATERAL (
@@ -4757,6 +4759,7 @@ export async function listRecentContacts(
     contact_user_id: r.contact_user_id,
     nickname: r.nickname,
     profile_code: r.profile_code ?? "",
+    username: r.username,
     display_name: r.display_name,
     avatar_url: r.avatar_url,
     added_at: r.created_at,
@@ -4772,11 +4775,12 @@ export async function listContactsWithProfiles(ownerId: string): Promise<Contact
     nickname: string | null;
     created_at: string;
     profile_code: string | null;
+    username: string | null;
     display_name: string | null;
     avatar_url: string | null;
   }>`
     SELECT c.contact_user_id, c.nickname, c.created_at,
-           p.profile_code, p.display_name, p.avatar_url
+           p.profile_code, p.username, p.display_name, p.avatar_url
     FROM user_contacts c
     LEFT JOIN user_profiles p ON p.user_id = c.contact_user_id
     WHERE c.owner_id = ${ownerId}
@@ -4786,6 +4790,7 @@ export async function listContactsWithProfiles(ownerId: string): Promise<Contact
     contact_user_id: r.contact_user_id,
     nickname: r.nickname,
     profile_code: r.profile_code ?? "",
+    username: r.username,
     display_name: r.display_name,
     avatar_url: r.avatar_url,
     added_at: r.created_at,
@@ -5377,6 +5382,7 @@ export async function listGroupMembersWithProfiles(
     nickname: string | null;
     added_at: string;
     profile_code: string | null;
+    username: string | null;
     display_name: string | null;
     avatar_url: string | null;
   }>`
@@ -5384,6 +5390,7 @@ export async function listGroupMembersWithProfiles(
            c.nickname,
            gm.added_at,
            p.profile_code,
+           p.username,
            p.display_name,
            p.avatar_url
     FROM user_group_members gm
@@ -5398,6 +5405,7 @@ export async function listGroupMembersWithProfiles(
     contact_user_id: r.contact_user_id,
     nickname: r.nickname,
     profile_code: r.profile_code ?? "",
+    username: r.username,
     display_name: r.display_name,
     avatar_url: r.avatar_url,
     added_at: r.added_at,

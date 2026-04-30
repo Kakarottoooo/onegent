@@ -96,6 +96,20 @@ export interface AnalyzeV2Input {
    * is in scope. Mirror of v1's ConversationalNLUInput.pinned_target_id.
    */
   pinned_target_id?: string;
+  /**
+   * Resolved @-mentions from the homepage MentionPicker. When present, the
+   * user explicitly tagged these people as co-deciders → we override the
+   * extractor's guess: party_type=multi, member_names=these display names,
+   * and upgrade create_plan → create_room (since explicit tagging is an
+   * unambiguous multi-party signal). Skips the LLM's name disambiguation
+   * which is the most common source of "agent didn't recognize my friend"
+   * complaints.
+   */
+  mentioned_members?: Array<{
+    user_id: string;
+    display_name: string | null;
+    username: string | null;
+  }>;
 }
 
 /**
@@ -124,6 +138,18 @@ export async function analyzeConversationalV2(
   // param (it's out-of-band from the user message), so we inject after.
   if (input.pinned_target_id) {
     state.refined_target_id = input.pinned_target_id;
+  }
+
+  // Explicit @-mentions override the extractor's party guess. The user
+  // pointing at people is unambiguous; the LLM doesn't get to disagree.
+  // Without this, mini regularly returns party_type=solo even when the
+  // input says "我和 ziweiB...".
+  if (input.mentioned_members && input.mentioned_members.length > 0) {
+    state.party_type = "multi";
+    state.member_names = input.mentioned_members.map(
+      (m) => m.display_name ?? m.username ?? "(unknown)",
+    );
+    if (state.intent === "create_plan") state.intent = "create_room";
   }
 
   // Pure-function router decides the UI action (continue_chat /
