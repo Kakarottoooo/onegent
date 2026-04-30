@@ -3633,9 +3633,17 @@ The user will enter CVV and confirm payment themselves.`,
                     if (container) {
                       collected.push(...Array.from(container.querySelectorAll<HTMLElement>("a, button")));
                     }
-                    // Global fallback: any anchor with /booking/ in href
-                    // (OT time-slot anchors deep-link to /booking/details?...)
-                    Array.from(document.querySelectorAll<HTMLAnchorElement>('a[href*="/booking/"]'))
+                    // Global fallback: any anchor whose text is strictly a
+                    // PM/AM time slot (e.g. "7:30 PM"). OT detail-page time-
+                    // slot anchors render as <a> with NO href (onclick-driven
+                    // SPA nav), so we can't filter by href. The strict regex
+                    // avoids false positives from menu/footer links that
+                    // happen to contain time text.
+                    Array.from(document.querySelectorAll<HTMLAnchorElement>("a"))
+                      .filter((el) => {
+                        const t = (el.textContent ?? "").trim();
+                        return /^\d{1,2}:\d{2}\s*(AM|PM)$/i.test(t) && t.length < 12;
+                      })
                       .forEach((el) => collected.push(el));
                     // Plus any <button> with PM/AM-only short text
                     Array.from(document.querySelectorAll<HTMLButtonElement>("button"))
