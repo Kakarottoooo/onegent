@@ -51,6 +51,7 @@ import {
   type TripIntentState,
   type TripVibe,
 } from "@/lib/agent/trip-intent-state";
+import { notifyDecisionRoomInvite } from "@/lib/room-notifications";
 
 export const maxDuration = 30;
 
@@ -706,6 +707,8 @@ export async function POST(req: NextRequest) {
       const resolved = await resolveCoMembers(userId, explicitMentionIds, memberNames);
       const invitedUserIds: string[] = [];
       const unresolvedNames: string[] = [];
+      const targetMemberCount =
+        1 + resolved.filter((r) => r.contact_user_id && r.contact_user_id !== userId).length;
       // Resolve the creator's display name once so the DM reads naturally
       // ("🤖 Alice just invited you..." instead of "user_abc123 just...").
       const creatorProfile = await getUserProfile(userId).catch(() => null);
@@ -722,6 +725,17 @@ export async function POST(req: NextRequest) {
             console.warn(`[chat/commit] inviteToDecisionRoom failed for ${r.contact_user_id}`, err);
             unresolvedNames.push(r.name);
             continue;
+          }
+          try {
+            await notifyDecisionRoomInvite({
+              room,
+              recipientUserId: r.contact_user_id,
+              creatorLabel,
+              totalMembers: targetMemberCount,
+              requiresAccept: true,
+            });
+          } catch (err) {
+            console.warn(`[chat/commit] invite notification failed for ${r.contact_user_id}`, err);
           }
           // Agent-role DM to the invited contact so they see the invitation
           // in their Contacts thread + know who to say yes to. role='agent'
@@ -941,6 +955,8 @@ export async function POST(req: NextRequest) {
     const resolved = await resolveCoMembers(userId, explicitMentionIds, memberNames);
     const invitedUserIds: string[] = [];
     const unresolvedNames: string[] = [];
+    const targetMemberCount =
+      1 + resolved.filter((r) => r.contact_user_id && r.contact_user_id !== userId).length;
     const creatorProfile = await getUserProfile(userId).catch(() => null);
     const creatorLabel =
       creatorProfile?.display_name ||
@@ -955,6 +971,17 @@ export async function POST(req: NextRequest) {
           console.warn(`[chat/commit] inviteToDecisionRoom failed for ${r.contact_user_id}`, err);
           unresolvedNames.push(r.name);
           continue;
+        }
+        try {
+          await notifyDecisionRoomInvite({
+            room,
+            recipientUserId: r.contact_user_id,
+            creatorLabel,
+            totalMembers: targetMemberCount,
+            requiresAccept: true,
+          });
+        } catch (err) {
+          console.warn(`[chat/commit] invite notification failed for ${r.contact_user_id}`, err);
         }
         try {
           await sendDirectMessage({

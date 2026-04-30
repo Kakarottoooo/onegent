@@ -6,7 +6,9 @@ import {
   isRoomMember,
   joinDecisionRoom,
   getUserProfile,
+  listRoomMembersWithInvited,
 } from "@/lib/db";
+import { notifyDecisionRoomInvite } from "@/lib/room-notifications";
 
 type Params = { params: Promise<{ id: string }> };
 
@@ -43,6 +45,24 @@ export async function POST(req: NextRequest, { params }: Params) {
   }
 
   const member = await joinDecisionRoom(roomId, contactUserId);
-  const profile = await getUserProfile(contactUserId);
+  const [profile, creatorProfile, members] = await Promise.all([
+    getUserProfile(contactUserId),
+    getUserProfile(userId).catch(() => null),
+    listRoomMembersWithInvited(roomId).catch(() => []),
+  ]);
+  try {
+    await notifyDecisionRoomInvite({
+      room,
+      recipientUserId: contactUserId,
+      creatorLabel:
+        creatorProfile?.display_name ??
+        creatorProfile?.username ??
+        "A contact",
+      totalMembers: Math.max(2, members.length),
+      requiresAccept: false,
+    });
+  } catch {
+    /* non-fatal */
+  }
   return NextResponse.json({ member, profile });
 }

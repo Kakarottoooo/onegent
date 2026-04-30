@@ -20,6 +20,7 @@ import {
   tallyVotes,
 } from "@/lib/rooms/proposal-shape";
 import { recordRoomAcceptance } from "@/lib/rooms/learn";
+import { notifyDecisionRoomReachedDecision } from "@/lib/room-notifications";
 
 type Params = { params: Promise<{ id: string; pid: string }> };
 
@@ -193,6 +194,16 @@ export async function POST(req: NextRequest, { params }: Params) {
       constraints,
       roomTitle: room.title,
     }).catch((err) => console.error("recordRoomAcceptance failed:", err));
+
+    notifyDecisionRoomReachedDecision({
+      room,
+      recipientUserIds: joined.filter((m) => m.user_id !== userId).map((m) => m.user_id),
+      totalMembers: joined.length,
+      winnerLabel: winningCard?.restaurant?.name ?? null,
+      proposalId,
+    }).catch(() => {
+      /* non-fatal */
+    });
   }
 
   const counts = tallies.map((t) => ({
