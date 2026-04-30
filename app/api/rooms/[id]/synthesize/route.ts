@@ -30,7 +30,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@clerk/nextjs/server";
 import { getDecisionRoomById, isRoomMember } from "@/lib/db";
 import { triggerSynthesis } from "@/lib/agent/trip-synthesis";
-import { synthesizeScenarioRoom } from "@/lib/agent/scenario-synthesis";
+import { synthesizeAndCreateScenarioProposal } from "@/lib/agent/scenario-synthesis";
 
 export const maxDuration = 60;
 
@@ -67,17 +67,20 @@ export async function POST(req: NextRequest, { params }: Params) {
       });
     }
 
-    // restaurant / hotel / flight / activity — light-weight merge that
-    // returns a search query the client posts to /api/chat. No room.status
-    // transition, no proposal row, no synthesis_json lock — those stay
-    // trip-only for now (Plan A's MVP scope).
-    const outcome = await synthesizeScenarioRoom(roomId, { force });
+    // restaurant / hotel / flight / activity — server-side end-to-end
+    // synthesis: merge constraints → run search → land cards in a single
+    // shared decision_room_proposals row → seed marker into each member's
+    // private channel. Both members render the SAME card list (LLM only
+    // runs once). Idempotent — repeat calls return existing proposal.
+    const outcome = await synthesizeAndCreateScenarioProposal(roomId, { force });
     return NextResponse.json({
-      ok: true,
+      ok: outcome.status === "ok",
       room_type: room.type,
-      triggered: outcome.status === "ok",
+      triggered: outcome.status === "ok" && !outcome.alreadyExists,
       reason: outcome.status,
       status: outcome.status,
+      proposal_id: outcome.proposalId ?? null,
+      already_exists: outcome.alreadyExists ?? false,
       member_count: outcome.result?.memberCount ?? null,
       contributor_count: outcome.result?.contributorCount ?? null,
       query: outcome.result?.query ?? null,

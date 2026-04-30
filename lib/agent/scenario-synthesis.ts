@@ -14,12 +14,18 @@
  *     merge is "union, then trust the agent's recommendation pass" for now
  *   - Per-scenario specialised optimisation (e.g. flight cheapest-finder)
  */
+import { randomUUID } from "crypto";
 import {
+  createRoomProposal,
   getDecisionRoomById,
+  insertPrivateMessage,
+  listActiveProposals,
   listMemberIntentStates,
   listRoomMembers,
   type DecisionRoomType,
 } from "@/lib/db";
+import { runAgent } from "@/lib/agent";
+import type { CategoryType } from "@/lib/types";
 
 export interface ScenarioSynthesis {
   /** Free-text search query the legacy /api/chat agent will consume. */
@@ -349,4 +355,181 @@ function maxCabin(subs: Array<Record<string, unknown>>): string | null {
     if (i > bestIdx) bestIdx = i;
   }
   return bestIdx >= 0 ? order[bestIdx] : null;
+}
+
+// ─── Server-side end-to-end: search → proposal row ──────────────────────
+// Why this exists: previously each member's CLIENT independently posted
+// the merged query to /api/chat. The LLM is non-deterministic so two
+// users in the same DR saw DIFFERENT card lists (5 vs 3 restaurants),
+// and there was no shared row to vote on. Trip rooms already solved this
+// via decision_room_proposals (createRoomProposal in trip-synthesis.ts);
+// this is the parallel for restaurant/hotel/flight/activity DRs.
+
+export type ScenarioProposalStatus =
+  | "ok"
+  | "no_room"
+  | "wrong_type"
+  | "no_joined_members"
+  | "waiting_for_members"
+  | "search_failed";
+
+export interface ScenarioProposalOutcome {
+  status: ScenarioProposalStatus;
+  /** When status==='ok': id of the proposal row everyone reads. */
+  proposalId?: string;
+  /** True when an existing proposal was returned (race-loser or repeat call). */
+  alreadyExists?: boolean;
+  /** Synthesis stats — when present, surfaces "merged from N members" copy. */
+  result?: ScenarioSynthesis | null;
+}
+
+/** Return the active scenario_search_cards proposal for a room, or null. */
+async function findActiveScenarioProposal(roomId: string) {
+  const proposals = await listActiveProposals(roomId).catch(() => []);
+  return (
+    proposals.find(
+      (p) =>
+        (p.status === "active" || p.status === "accepted") &&
+        typeof p.content_json === "object" &&
+        p.content_json !== null &&
+        (p.content_json as Record<string, unknown>).kind === "scenario_search_cards",
+    ) ?? null
+  );
+}
+
+/** Pull the cards array out of runAgent's union return shape. */
+function pickCards(
+  type: DecisionRoomType,
+  agentResult: Awaited<ReturnType<typeof runAgent>>,
+): unknown[] {
+  if (type === "restaurant") return agentResult.recommendations;
+  if (type === "hotel") return agentResult.hotelRecommendations;
+  if (type === "flight") return agentResult.flightRecommendations;
+  if (type === "activity") return agentResult.activityRecommendations;
+  return [];
+}
+
+/**
+ * End-to-end synthesis for a non-trip DR: merge constraints → run search
+ * server-side → land the cards in a single shared proposal row → seed a
+ * marker into every joined member's private channel so their replay
+ * shows the same card list.
+ *
+ * Idempotent: if an active scenario_search_cards proposal already exists
+ * for the room, returns that row's id without re-running the LLM. Two
+ * concurrent callers race-protected via re-check after runAgent (small
+ * window — no advisory lock yet, fine for low-collision MVP).
+ */
+export async function synthesizeAndCreateScenarioProposal(
+  roomId: string,
+  opts: { force?: boolean } = {},
+): Promise<ScenarioProposalOutcome> {
+  // Idempotency check FIRST — repeat calls (page refresh, second member
+  // also auto-firing) just return the existing row.
+  const pre = await findActiveScenarioProposal(roomId);
+  if (pre) return { status: "ok", proposalId: pre.id, alreadyExists: true, result: null };
+
+  const synth = await synthesizeScenarioRoom(roomId, opts);
+  if (synth.status !== "ok" || !synth.result) {
+    return { status: synth.status, result: null };
+  }
+
+  const room = await getDecisionRoomById(roomId).catch(() => null);
+  if (!room) return { status: "no_room", result: null };
+
+  // Server-side LLM search. The categoryHint pin is critical — without it
+  // the agent re-classifies and may pick the wrong pipeline (e.g. a
+  // "flight from NYC" merged query in a restaurant room).
+  let agentResult: Awaited<ReturnType<typeof runAgent>>;
+  try {
+    agentResult = await runAgent(
+      synth.result.query,
+      [],
+      undefined,
+      null,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      room.type as CategoryType,
+    );
+  } catch (err) {
+    console.warn(`[scenario-synthesis] runAgent failed for ${roomId}:`, err);
+    return { status: "search_failed", result: synth.result };
+  }
+
+  const cards = pickCards(room.type, agentResult);
+  if (!cards || cards.length === 0) {
+    return { status: "search_failed", result: synth.result };
+  }
+
+  // Race re-check: another caller may have inserted while we were
+  // running runAgent (~10s window).
+  const post = await findActiveScenarioProposal(roomId);
+  if (post) {
+    return { status: "ok", proposalId: post.id, alreadyExists: true, result: synth.result };
+  }
+
+  const proposalId = randomUUID();
+  const contentJson: Record<string, unknown> = {
+    kind: "scenario_search_cards",
+    category: room.type,
+    cards,
+    query: synth.result.query,
+    output_language: agentResult.output_language,
+    contributor_count: synth.result.contributorCount,
+    member_count: synth.result.memberCount,
+  };
+
+  try {
+    await createRoomProposal({
+      id: proposalId,
+      roomId,
+      contentJson,
+      rationale: `Synthesized from ${synth.result.contributorCount} member${
+        synth.result.contributorCount === 1 ? "" : "s"
+      }' chat preferences`,
+      conflictsJson: null,
+    });
+  } catch (err) {
+    console.warn(`[scenario-synthesis] createRoomProposal failed`, err);
+    return { status: "search_failed", result: synth.result };
+  }
+
+  // Seed the inline-card marker into every joined member's private
+  // channel — same pattern as trip-synthesis. The client's replay code
+  // detects kind === 'scenario_proposal_card' and renders cards from the
+  // proposal row instead of a plain text bubble.
+  try {
+    const members = await listRoomMembers(roomId);
+    const cardContent = "✅ 方案已出！下方卡片选你的偏好，看看大家投谁。";
+    const cardMeta = {
+      kind: "scenario_proposal_card" as const,
+      proposal_id: proposalId,
+      room_id: roomId,
+      category: room.type,
+    };
+    for (const m of members) {
+      if (m.status !== "joined") continue;
+      try {
+        await insertPrivateMessage({
+          roomId,
+          userId: m.user_id,
+          role: "assistant",
+          content: cardContent,
+          metaJson: cardMeta,
+        });
+      } catch (err) {
+        console.warn(`[scenario-synthesis] seed marker for ${m.user_id} failed`, err);
+      }
+    }
+  } catch (err) {
+    console.warn(`[scenario-synthesis] marker-seed phase failed`, err);
+  }
+
+  return { status: "ok", proposalId, alreadyExists: false, result: synth.result };
 }
