@@ -2551,8 +2551,13 @@ function HomeInner() {
         >
           <div className="max-w-2xl md:max-w-3xl lg:max-w-4xl mx-auto w-full px-4 md:px-6 lg:px-8 py-6">
 
-            {!hasMessages ? (
-              /* Welcome / Hero State */
+            {!hasMessages && !activeSessionId && !activeRoomId ? (
+              /* Welcome / Hero State — only on the truly fresh "/" page,
+                 never during a sidebar switch transition. While messages
+                 are loading from cache or DB, hasMessages is briefly
+                 false; rendering the hero there would flash the
+                 homepage every switch. We just render nothing in that
+                 in-between frame instead. */
               <div className="flex flex-col items-center justify-center min-h-[60vh] text-center">
                 {/* Eyebrow — matches the gold-soft pill used on every other
                     main-nav page (/pricing, /account, /rooms, /tasks etc) so
