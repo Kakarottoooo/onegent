@@ -103,12 +103,15 @@ export interface ExecutionJobResult {
   jobId: string;
   status:
     | "queued"
+    | "pending"
     | "running"
+    | "completed"
     | "done"
     | "error"
     | "paused_payment"
     | "captcha"
-    | "needs_login";
+    | "needs_login"
+    | "no_availability";
   scenario: string;
   provider?: string;
   confirmationCode?: string;
@@ -217,6 +220,47 @@ async function request<T>(
   return parsed as T;
 }
 
+// ─── v2 task-protocol shapes ────────────────────────────────────────────────
+
+export interface ModifyTaskBody {
+  patch: {
+    constraints?: {
+      time?: string;
+      date?: string;
+      party_size?: number;
+      restaurant_name?: string;
+      city?: string;
+      [key: string]: unknown;
+    };
+    policy?: {
+      time_window_minutes?: 0 | 30 | 60 | 90;
+      allow_venue_switch?: boolean;
+      allow_platform_switch?: boolean;
+      [key: string]: unknown;
+    };
+    message?: string;
+  };
+}
+
+export interface ModifyTaskResponse {
+  jobId: string;
+  planVersion: number;
+  status: string;
+  summary: string;
+}
+
+export interface CancelTaskResponse {
+  jobId: string;
+  cancelled: true;
+  priorStatus: string;
+}
+
+export interface ContinueTaskResponse {
+  jobId: string;
+  triggered: true;
+  priorStatus: string;
+}
+
 export function createClient(cfg: OnegentClientConfig = loadConfig()) {
   return {
     config: cfg,
@@ -235,6 +279,33 @@ export function createClient(cfg: OnegentClientConfig = loadConfig()) {
         cfg,
         "GET",
         `/execution-jobs/${encodeURIComponent(jobId)}/audit${query}`,
+      );
+    },
+
+    // ── v2 task protocol ──────────────────────────────────────────────────
+
+    modifyTask(jobId: string, body: ModifyTaskBody): Promise<ModifyTaskResponse> {
+      return request<ModifyTaskResponse>(
+        cfg,
+        "POST",
+        `/execution-jobs/${encodeURIComponent(jobId)}/modify`,
+        body,
+      );
+    },
+
+    cancelTask(jobId: string): Promise<CancelTaskResponse> {
+      return request<CancelTaskResponse>(
+        cfg,
+        "POST",
+        `/execution-jobs/${encodeURIComponent(jobId)}/cancel`,
+      );
+    },
+
+    continueTask(jobId: string): Promise<ContinueTaskResponse> {
+      return request<ContinueTaskResponse>(
+        cfg,
+        "POST",
+        `/execution-jobs/${encodeURIComponent(jobId)}/continue`,
       );
     },
   };

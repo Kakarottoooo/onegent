@@ -1,7 +1,16 @@
 /**
- * Builds a configured MCP Server instance with all 6 tools wired up.
+ * Builds a configured MCP Server instance with all v1 + v2 tools wired up.
  * Shared between stdio mode (src/index.ts) and HTTP mode (src/http-server.ts)
  * so the tool surface is identical regardless of transport.
+ *
+ * v1 (single-action): book_restaurant / book_hotel / book_flight / book_activity
+ *                     + get_job_status / get_job_audit. Stable, single-call shape.
+ * v2 (task protocol): create_travel_task / modify_task / continue_task /
+ *                     cancel_task / get_task_status / get_task_audit. Designed
+ *                     for multi-turn conversations where the user adjusts a
+ *                     task mid-flight ("change to 8pm", "add a person").
+ *
+ * Both surfaces are additive — the LLM picks whichever fits the prompt.
  */
 
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
@@ -19,27 +28,48 @@ import { bookFlightTool } from "./tools/book-flight.js";
 import { bookActivityTool } from "./tools/book-activity.js";
 import { getJobStatusTool } from "./tools/get-job-status.js";
 import { getJobAuditTool } from "./tools/get-job-audit.js";
+// v2 task-protocol tools (Phase 3)
+import { createTravelTaskTool } from "./tools/create-travel-task.js";
+import { modifyTaskTool } from "./tools/modify-task.js";
+import { cancelTaskTool } from "./tools/cancel-task.js";
+import { continueTaskTool } from "./tools/continue-task.js";
+import { getTaskStatusTool } from "./tools/get-task-status.js";
+import { getTaskAuditTool } from "./tools/get-task-audit.js";
 
 export const SERVER_NAME = "onegent";
-export const SERVER_VERSION = "0.1.0";
+export const SERVER_VERSION = "0.2.0";
 
 export const TOOLS: ToolDefinition[] = [
+  // v1 — single-action surface (stable)
   bookRestaurantTool,
   bookHotelTool,
   bookFlightTool,
   bookActivityTool,
   getJobStatusTool,
   getJobAuditTool,
+  // v2 — task protocol (Phase 3)
+  createTravelTaskTool,
+  modifyTaskTool,
+  continueTaskTool,
+  cancelTaskTool,
+  getTaskStatusTool,
+  getTaskAuditTool,
 ];
 
 const SERVER_INSTRUCTIONS =
-  "Onegent — AI books your trip end-to-end. Use book_restaurant, book_hotel, " +
-  "book_flight, or book_activity to start a booking; each returns a jobId. " +
-  "Then call get_job_status every 15-60 seconds until the status is terminal " +
-  "(done, error, paused_payment, captcha, needs_login). If a booking errors, " +
-  "call get_job_audit for diagnostic context. The agent always stops before " +
-  "submitting credit card CVV — when status='paused_payment' the user must " +
-  "confirm the charge in Onegent's app before the booking finalizes.";
+  "Onegent — AI books your trip end-to-end. Two tool surfaces are available:\n\n" +
+  "v1 (single-action, stable): book_restaurant / book_hotel / book_flight / book_activity " +
+  "return a jobId immediately; poll get_job_status until terminal (done / error / " +
+  "paused_payment / captcha / needs_login); on error call get_job_audit for diagnosis.\n\n" +
+  "v2 (task protocol, recommended for multi-turn): create_travel_task starts a task. " +
+  "If the user asks to change the time / party size / fallback policy mid-flight, call " +
+  "modify_task (NOT a new create_travel_task) — it patches constraints in place and " +
+  "increments planVersion. After modify_task, call continue_task to re-execute. Use " +
+  "get_task_status to poll, get_task_audit to diagnose, cancel_task to abandon. " +
+  "modify_task is REJECTED with 409 while a task is 'running' — wait for the current " +
+  "run to finish first, or cancel_task and start over.\n\n" +
+  "The agent always stops before submitting credit-card CVV. When status='paused_payment' " +
+  "the user must confirm the charge in Onegent's app, then continue_task to finalise.";
 
 export interface CreateOnegentServerOptions {
   /**
