@@ -78,19 +78,22 @@ PMF。
 | 规模化 | 2000+    | 启动路 B 自建 browser farm       | 毛利从 33% → 95%，工程投入回报清晰  |
 | 企业级 | 10000+   | 路 B + Browserbase 灾备双跑      | 抗单点故障                          |
 
-路 B 自建 farm 组成（规模化阶段才动手，预估 6-8 周工程）：
-- Hetzner / Railway 跑 N 个 chromium 容器（~$80/月）
-- Bright Data / Oxylabs residential proxy 池（~$400/月）
-- 2Captcha / Anti-Captcha CAPTCHA solver（~$5/月，按调用计费）
-- playwright-stealth + 自实现 fingerprint masking + bezier 鼠标轨迹
-- session pool + 失败重试 + 监控（成本最大头是工程时间）
-- 总成本 ~$485/月跑 32k booking，对比 Browserbase $6000，省 92%
+路 B 自建 farm 完整 roadmap 已落地至
+[BROWSER_FARM_PLAN.md](./BROWSER_FARM_PLAN.md)，包含：
+- 4 个 Phase（Spec / 写代码 / 买基础设施 / 上线）
+- 服务器选型（推荐 Hetzner CCX23 起步 $18/月，Ashburn VA）
+- Residential proxy 选型（SmartProxy / Bright Data / Oxylabs / IPRoyal）
+- CAPTCHA solver（2Captcha / Anti-Captcha / CapSolver）
+- 三阶段成本表（500 / 2000 / 10000 用户对应 $103 / $510 / $1540 月成本）
+- 风险清单（技术 / 运维 / 商业 / 法律灰色地带）
+- 替代策略（先做缓存 / API 替换 / session 复用，能砍 50-65% 用量）
+- 启动 checklist（满足条件那天打开就能开工）
 
-触发自建 farm 的硬信号（满足任一就开始 spec）：
-1. 有 ≥500 个付费 Pro 用户
+触发自建 farm 的硬信号（满足任意 2 条就开始 spec）：
+1. 有 ≥ 500 个付费 Pro 用户
 2. Browserbase 月账单 ≥ $1500
-3. 经历过一次 Browserbase 涨价或服务中断
-4. 拿到种子轮，有专人做 infra
+3. 有 cofounder / engineer 可以分担运维
+4. 拿到种子轮，有真实预算
 
 哲学锚点：
 - DHH "Buy when you can, build when you must" — 早期付钱给 Browserbase
