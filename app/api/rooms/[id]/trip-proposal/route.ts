@@ -83,6 +83,13 @@ export async function GET(_req: Request, { params }: Params) {
     // trigger the synthesize call themselves (the other members) still render
     // a progress indicator while they wait for the plan to land.
     //
+    // Trip-only guard: single-category rooms (restaurant/hotel/flight/activity)
+    // never produce a TripPackage proposal — their synthesis path returns a
+    // merged search query that the client posts to /api/chat inline. Setting
+    // is_synthesizing=true for those rooms strands the 4-pipeline trip
+    // spinner forever. Only flag synthesis-in-progress when the room is
+    // actually building a trip package.
+    //
     // Pending-invite guard: same fix as trip-synthesis.ts — never report
     // is_synthesizing while invitees haven't joined yet, otherwise the
     // spinner shows during the period when synthesis SHOULDN'T fire (and
@@ -93,6 +100,7 @@ export async function GET(_req: Request, { params }: Params) {
     const contributorIds = new Set(intents.map((i) => i.user_id));
     const joinedIds = members.filter((m) => m.status === "joined").map((m) => m.user_id);
     const isSynthesizing =
+      room.type === "trip" &&
       pendingInviteCount === 0 &&
       joinedIds.length > 0 &&
       joinedIds.every((id) => contributorIds.has(id));

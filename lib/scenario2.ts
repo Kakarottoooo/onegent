@@ -130,15 +130,13 @@ export function detectScenario(
   if (DATE_NIGHT_REGEX.test(message.toLowerCase()) || DATE_NIGHT_ZH_REGEX.test(message)) {
     return "date_night";
   }
-  if (
-    intent.party_size === 2 &&
-    (intent.noise_level === "quiet" ||
-      (intent.atmosphere ?? []).some((item) =>
-        /romantic|intimate|quiet|cozy|约会|浪漫|安静/i.test(item)
-      ))
-  ) {
-    return "date_night";
-  }
+  // Removed: the old "party_size===2 + quiet/intimate" auto-upgrade to
+  // date_night. It read implicit romantic intent into any 2-person dinner
+  // with a quiet preference, which surfaced "Date-night decision package"
+  // copy for users who never said the word "date" — wrong by default.
+  // date_night now requires an EXPLICIT signal: keyword in the message,
+  // intent.purpose==="date" set upstream, or a downstream caller passes
+  // scenario_hint="date_night". "吃饭就是吃饭."
   return null;
 }
 

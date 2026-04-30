@@ -153,13 +153,17 @@ describe("detectScenario", () => {
     expect(detectScenario("romantic restaurant for two", intent)).toBe("date_night");
   });
 
-  it("returns date_night when party_size=2 + quiet atmosphere", () => {
+  it("returns null for party_size=2 + quiet/intimate atmosphere without explicit date signal", () => {
+    // Old behavior auto-upgraded any 2-person + quiet/intimate dinner into
+    // date_night; that surfaced "Date-night decision package" copy for users
+    // who never said the word "date". date_night now requires an explicit
+    // signal (keyword in message, or intent.purpose==="date").
     const intent: RestaurantIntent = {
       ...baseRestaurantIntent(),
       party_size: 2,
       atmosphere: ["romantic", "intimate"],
     };
-    expect(detectScenario("dinner for two", intent)).toBe("date_night");
+    expect(detectScenario("dinner for two", intent)).toBeNull();
   });
 
   it("returns null for non-restaurant category even with date words", () => {
@@ -397,14 +401,16 @@ describe("detectScenario", () => {
     expect(detectScenario("romantic dinner in Manhattan", intent)).toBe("date_night");
   });
 
-  it("returns date_night from party_size=2 + quiet atmosphere", () => {
+  it("returns null for party_size=2 + noise_level=quiet without explicit date signal", () => {
+    // Removed the implicit "couple-y dinner" upgrade — now any non-keyword
+    // restaurant dinner stays generic unless purpose=date is set upstream.
     const intent: RestaurantIntent = {
       category: "restaurant",
       cuisine: "French",
       party_size: 2,
       noise_level: "quiet",
     };
-    expect(detectScenario("dinner for two", intent)).toBe("date_night");
+    expect(detectScenario("dinner for two", intent)).toBeNull();
   });
 
   it("returns null for non-restaurant category even with romantic keywords", () => {
