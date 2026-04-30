@@ -322,17 +322,35 @@ export async function POST(req: NextRequest) {
           const pendingInviteCount = members.filter((m) => m.status === "invited").length;
           const joined = members.filter((m) => m.status === "joined");
           const contributorIds = new Set(intentRows.map((r) => r.user_id));
-          const allContributed =
+          const allJoinedContributed =
             joined.length > 0 && joined.every((m) => contributorIds.has(m.user_id));
           const proposals = await listActiveProposals(roomId).catch(() => []);
           const hasLiveProposal = proposals.some(
             (p) => p.status === "active" || p.status === "accepted",
           );
 
-          if (pendingInviteCount === 0 && allContributed && !hasLiveProposal) {
-            // Last contributor's turn — flip the response so their client
-            // auto-fires the synthesize endpoint. Other members will see
-            // the synthesis result on their next chat turn / replay.
+          // Auto-fire requires:
+          //   1. A real multi-party room — at least 2 joined members. A
+          //      1-member DR is a degenerate case (creator alone, invite
+          //      not landed yet, or solo accidental DR) and the user must
+          //      say "出方案" explicitly to trigger. Without this guard,
+          //      a creator's first preference message right after room
+          //      creation can fire synthesis before any partner has even
+          //      been added to the members table.
+          //   2. No invitees still pending — they need a chance to chat.
+          //   3. Every joined member has an IntentState row.
+          //   4. No active/accepted proposal already exists.
+          const isMultiPartyReady = joined.length >= 2;
+          console.log(
+            `[chat/parse] auto-synth gate room=${roomId} joined=${joined.length} pending=${pendingInviteCount} contributors=${intentRows.length} hasProposal=${hasLiveProposal} multiParty=${isMultiPartyReady} allContributed=${allJoinedContributed}`,
+          );
+
+          if (
+            isMultiPartyReady &&
+            pendingInviteCount === 0 &&
+            allJoinedContributed &&
+            !hasLiveProposal
+          ) {
             drSynthesisReady = true;
             result.assistant_reply =
               "好了，每位成员的偏好都收到了。我现在把大家的想法综合起来，找几个都喜欢的选项。";
@@ -342,11 +360,18 @@ export async function POST(req: NextRequest) {
             const baseReply = result.assistant_reply ?? "";
             const note = `（你的偏好已记下。还在等 ${pendingInviteCount} 位被邀请的朋友加入，等他们也聊完我会自动综合方案。）`;
             result.assistant_reply = baseReply ? `${baseReply}\n\n${note}` : note;
-          } else if (joined.length > 1 && !allContributed) {
+          } else if (joined.length > 1 && !allJoinedContributed) {
             // Multiple members joined, but not everyone has chatted yet.
             const stillNeed = joined.length - intentRows.length;
             const baseReply = result.assistant_reply ?? "";
             const note = `（已记下你的偏好。等其他 ${stillNeed} 位成员聊完，我自动综合方案。）`;
+            result.assistant_reply = baseReply ? `${baseReply}\n\n${note}` : note;
+          } else if (joined.length === 1 && pendingInviteCount === 0) {
+            // Single-member DR with no invitees — likely the partner didn't
+            // get added yet (or never will). Tell the user instead of
+            // silently auto-synthesising for one person.
+            const baseReply = result.assistant_reply ?? "";
+            const note = "（还没有同伴加入这个房间。等他们进来一起聊偏好，或者直接说「出方案」我帮你单独看看选项。）";
             result.assistant_reply = baseReply ? `${baseReply}\n\n${note}` : note;
           }
         } catch (err) {
