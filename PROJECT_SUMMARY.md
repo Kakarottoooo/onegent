@@ -376,19 +376,38 @@ D. **dispatch profile 链路是手动维护的** — start route 的 profile
    step.body.profile 一条 inline 路径。如果 caller 不主动 inject 就
    是空 profile
 
-【验证：Cosme 端到端 RPA 三轮稳定】
+【验证：Cosme 端到端 RPA 四轮稳定 + 5/5 final benchmark】
 
-| Run         | URL                                  | Stage 路径                                                                 | 终态                |
-|-------------|--------------------------------------|----------------------------------------------------------------------------|--------------------|
-| 1 (baseline)| resy.com/cities/ny/cosme             | redirect → listing → click 7:30 PM → checkout_form (5 reassess) → payment | payment_stop 57s ✓ |
-| 2 (post-fix)| 同上                                 | 同上 (reassess 简化)                                                       | payment_stop 1m4s ✓|
-| 3 (post-AI) | 同上                                 | listing → checkout_form (3 reassess) → payment                            | payment_stop 1m5s ✓|
+Cosme (Resy) 跨 4 轮、不同代码版本、不同 dev server 进程，全部跑到
+dry_run boundary 触发。这是 Phase 0 boundary helper 工作的硬证据。
 
-跨 3 轮、不同代码版本、不同 dev server 进程，Cosme 全部跑到 dry_run
-boundary 触发。这是 Phase 0 boundary helper 工作的硬证据。
+| Run | 代码版本 | Stage 路径 | 终态 |
+|---|---|---|---|
+| 1 (baseline)| 22bdf85 前 | redirect → listing → click 7:30 PM → checkout_form (5 reassess) → payment | payment_stop 57s ✓ |
+| 2 (post-fix)| 22bdf85    | 同上 (reassess 简化)                                                      | payment_stop 1m4s ✓ |
+| 3 (post-AI) | 574daaa    | listing → checkout_form (3 reassess) → payment                            | payment_stop 1m5s ✓ |
+| 4 (final)   | e6a4ec2    | listing → click → checkout_form → payment                                  | payment_stop 53s ✓ |
+
+5/5 final benchmark on master `e6a4ec2`（mock profile + Resy keywords ship 后）：
+
+| Case | URL | 修复前 | 修复后 | 验证 |
+|---|---|---|---|---|
+| L'Artusi (OT, not on network) | r/lartusi-new-york | 41s executor_error | **3s no_availability** ✓ | Pre-AI fast path 命中 "not available on opentable" |
+| Tao Downtown (OT, valid bookable) | r/tao-downtown-new-york | 0s/28s executor_error | 37s error | OT provider time-slot selector 没匹配 widget — 新 backlog |
+| Carbone (OT, permanently closed) | r/carbone-new-york | 22s/2m14s executor_error | **14s no_availability** ✓ | Pre-AI fast path 命中 "permanently closed" |
+| Lilia (Resy, today full) | cities/ny/lilia | 29s executor_error | **14s no_availability** ✓ | Pre-AI fast path 命中 "no online availability for" |
+| Cosme (Resy, valid bookable) | cities/ny/cosme | 1m4s payment_stop | **53s payment_stop** ✓ | dry_run boundary 一致触发 |
+
+Failure breakdown 干净：3 no_availability（设计就该这样）+ 1 payment_stop
+（happy path 证据）+ 1 executor_error（具体 OT widget 适配 bug，下一轮）。
 
 【已知 backlog（不阻塞，下一轮处理）】
 
+- **Tao Downtown OT widget time-slot selector**：dev.log 实锤
+  `[opentable] time slot diag: scope=card |` 空。Tao Downtown 用了不同
+  variant 的 OpenTable booking widget，现有 selector 没覆盖。修
+  `lib/booking-autopilot/providers/opentable-com.ts` 的 time-slot
+  detection。预计 30-60 分钟。Fix 上去 OT 也有 happy-path 证据
 - **Dashboard duration 显示 bug**：L'Artusi step.status="no_availability"
   但 dashboard 显示 "executor_error 1s"。实际 booking_job DB 行正确，
   duration 计算或 race condition 把 createdAt - completedAt 算成 1s
