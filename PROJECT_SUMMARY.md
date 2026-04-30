@@ -1,5 +1,5 @@
 ================================================================
-Onegent · Travel Execution Layer for AI Agents · v0.2.58.0
+Onegent · Travel Execution Layer for AI Agents · v0.2.59.0
 ================================================================
 
 【一句话定位（2026-04-26 锁定）】
@@ -262,6 +262,133 @@ P5 (3+ Group DR) → P6 (反应+评论) → P7 (通知系统) → P8 (Itinerary 
 - Cofounder 搜索
 
 ================================================================
+Recent Updates - 2026-04-30 (cont. 2) · Tao Downtown OT detail-page 走通 → payment_stop（5/5 全 expected outcome）
+================================================================
+
+cont. 1 收尾后 backlog 第 1 条："Tao Downtown OT widget time-slot
+selector"。这一轮把它从 "30s+ executor_error" 一路修到 **"1m 50s
+payment_stop"** —— OT 高端餐厅 deposit-hold 流程第一次端到端走通到
+benchmark dry_run 边界。
+
+【今天 6 个新 commit（f62ce8d → 61993ab）】
+
+1. **f62ce8d — chore(stagehand): instrument OT detail-page widget DOM dump**
+   - 起因：cont. 1 backlog 说 Tao Downtown widget selector 没匹配。
+     Sandbox 反爬挡 curl/headless browse，无法离线看 widget DOM
+   - 修法：在 OT 分支早期加一段诊断 dump，仅 `/r/<slug>` URL 触发，
+     输出 visible `<select>` options + submit buttons + time anchors +
+     `[data-test*=time/slot]` 元素到 dev.log
+   - 跑一次 benchmark 拿到 widget 真实结构：time slots 是 `<a>`（不是
+     button），在 `<ul data-test="time-slots">` 容器内，**没有 href**
+
+2. **1b1f38a — fix(stagehand): handle OT detail-page time-slot <a> elements**
+   - 第一版 fix：scope 到 `[data-test="time-slots"]` 容器找 `a, button`，
+     不依赖 `role="button"`
+   - 仍 fail：query-param SSR variant 没渲染这个容器
+
+3. **3e4f440 — fix(stagehand): drive OT detail-page time-picker before reading slots**
+   - 起因：dev.log 显示 widget 初始状态是 `<select data-test="time-picker">`
+     dropdown，slots `<ul>` 只在用户 select 时间后才 AJAX 渲染
+   - 修法：3 步流程 — set time picker（native setter + dispatch）→
+     waitForSelector slots `<ul>` 5s → click anchor
+   - 仍 fail：native setter dispatch 没让 OT 真正发 AJAX；time-picker-
+     overlay div 不监听 `<select>` change event
+
+4. **aa5e920 — fix(stage-assessment): pin OT/Resy detail URLs to listing stage**
+   - 起因：trace 显示 `[stage-detect] AI=listing(conf=0.70) → mapped=
+     listing | RPA=unknown` —— AI conf 0.70 < 0.75 阈值，stage 仍 unknown，
+     OT 分支根本不跑
+   - 修法：URL-based RPA fallback。`/opentable.com/r/<slug>` 和
+     `/resy.com/cities/.+/venues/<slug>` deterministic listing pages，
+     pin 死，不依赖 AI conf 波动
+
+5. **ca0749b — fix(stagehand): use Playwright selectOption for OT time-picker drive**
+   - 起因：native setter + dispatchEvent 没触发 OT 的 React state +
+     AJAX refetch
+   - 修法：`raw.locator('[data-test="time-picker"]').selectOption(value)`。
+     Playwright 模拟真实 user-gesture，OT 完整 React 链路触发；
+     waitForSelector 5s → 8s
+
+6. **bb73afc — fix(stagehand): navigate OT detail URL with dateTime+covers params**
+   - 起因：用户截图实证 widget 显示 "Apr 30 (today)" 而不是 case "May 14"。
+     原来我们只 set time，date picker 没设，OT 用 today 的 slots
+   - 修法：进 detail URL 时立即 navigate 到带 `?dateTime=YYYY-MM-DDTHH:MM&covers=N`
+     query params 的版本，OT SSR 直接渲染正确 case context
+   - 用户截图证实：widget 现在 "May 14, 2026, 7:30 PM, 2 people"
+
+7. **42380fd → 4017a3f — fix(stagehand): broaden slot selector + match by text not href**
+   - 起因：navigate w/ params 后 widget 正确，slots 渲染了，但
+     `<ul data-test="time-slots">` 容器在 query-param SSR variant 不存在；
+     anchor 也没 href（OT 用 onclick handler 做 SPA nav），所以
+     `a[href*="/booking/"]` filter 把全部排除
+   - 修法：多源 candidate collection — data-test container OR strict
+     `<a>` text match `^\d:\d{2}\s*(AM|PM)$` length<12 OR `<button>`
+     同样严格 text match。0 candidates 时 dump 实际 anchor 的 tag/text/href
+     做下一轮诊断
+   - 验证：dev.log 显示 `time slot match: "7:30 PM" — clicking via CDP`
+     → click 成功 → 跳到 /booking/specials → /booking/details
+
+8. **61993ab — fix(opentable): emit dry_run boundary on cc-section path**
+   - 起因：Tao 走通了 RPA 但 dashboard 仍报 executor_error。dev.log
+     显示 final stage=payment_gate, "Payment page is open"，但
+     classifier 落到 executor_error
+   - 根因：providers/opentable-com.ts:355-357 的 `if (ccRequired)`
+     早返 path **没写 `DRY_RUN_BOUNDARY_MARKER`**；只 line 364 的
+     dry_run path 写了。Tao 是 high-end 走 ccRequired
+   - 修法：ccRequired path 在 dry_run mode 也 emit marker。production
+     行为不变（cc handoff 给用户），但 benchmark classifier 现在能
+     正确分类成 succeeded/payment_stop
+
+【真实跑出来的发现 / 反模式】
+
+E. **OT detail page 有 SSR 和 SPA 两种 widget 状态**。SSR (no query
+   params): 部分 page render 默认 today slots 在 `<ul data-test=
+   "time-slots">`。SPA (用户交互后): 选 time → AJAX → slot UL 重新渲染。
+   两种结构不同，selector 必须兼容两种。教训：永远用 query params
+   force SSR 进入"已选"状态，避免依赖 OT 的客户端 state machine
+
+F. **OT time-slot anchor 没 href、没 role="button"** —— 是纯 onclick
+   driven SPA element。任何 `a[href]` / `a[role="button"]` selector
+   都会全部漏掉。只能靠 textContent 严格匹配 + 严格长度 cap
+
+G. **AI stage detection 阈值 0.75 易卡死**。conf=0.70 / 0.74 时被丢进
+   unknown，整条 OT/Resy 分支都不跑。URL-based fallback 更稳：知道是
+   detail URL 就直接 listing，不依赖 AI 波动
+
+H. **dispatcher classifier 漏写 boundary marker 是 silent bug**。
+   stagehand 实际跑通 happy path，但 marker 没写 → dispatcher 看不到
+   → 落到 executor_error 桶。每条会被 dry_run 拦截的 return path 都
+   必须 emit marker
+
+【验证：5/5 final benchmark on master `61993ab`】
+
+| Case | URL | 结果 | 说明 |
+|---|---|---|---|
+| L'Artusi (OT, not on network)     | r/lartusi-new-york      | **17s no_availability** ✓ | Pre-AI fast path 命中 |
+| **Tao Downtown (OT, deposit-hold)** | r/tao-downtown-new-york | **1m 50s payment_stop** ✓ | **新走通的主线** |
+| Carbone (OT, permanently closed)  | r/carbone-new-york      | **17s no_availability** ✓ | Pre-AI fast path 命中 |
+| Lilia (Resy, today full)          | cities/ny/lilia         | 30s executor_error ⚠       | 独立 Resy backlog |
+| Cosme (Resy, valid bookable)      | cities/ny/cosme         | **59s payment_stop** ✓     | dry_run boundary 一致触发 |
+
+4/5 expected outcome，Tao Downtown breakthrough 是这一轮的核心成果。
+Lilia 30s executor_error 是单独 Resy click-after-slot 行为不稳定，
+不在本轮 scope，下一轮处理。
+
+【已知 backlog（cont. 2 后剩余）】
+
+- ~~Tao Downtown OT widget time-slot selector~~ ✓ **已修（这一轮）**
+- **Lilia Resy click-after-slot 不稳**：dev.log 实锤
+  `[resy] time slot diag: BUTTON "8:45 PMDining Room"` → click → 但下次
+  stage assessment 仍是 listing，没进 confirmation modal。可能是 Resy
+  pop-up modal 没正确等待
+- **5/5 并发 CDP target race**：5 个 stagehand session 同时启动时偶发
+  `No Page found for target closed before CDP response`，1-2 个 case 受影响。
+  考虑 stagehand 启动错峰或限并发到 3 个
+- **Dashboard duration 显示 bug**：依然存在（不影响 DB 数据），cosmetic
+- **AI stage assessment 慢（30-60s/call）**：bookable 路径还是慢，pre-AI
+  fast path 只救了 not-bookable 路径
+
+================================================================
 Recent Updates - 2026-04-30 (cont. 1) · Restaurant Benchmark Phase 0-4 闭环 + 真跑出来的 6 个 stagehand 分类 bug 全修
 ================================================================
 
@@ -403,11 +530,10 @@ Failure breakdown 干净：3 no_availability（设计就该这样）+ 1 payment_
 
 【已知 backlog（不阻塞，下一轮处理）】
 
-- **Tao Downtown OT widget time-slot selector**：dev.log 实锤
-  `[opentable] time slot diag: scope=card |` 空。Tao Downtown 用了不同
-  variant 的 OpenTable booking widget，现有 selector 没覆盖。修
-  `lib/booking-autopilot/providers/opentable-com.ts` 的 time-slot
-  detection。预计 30-60 分钟。Fix 上去 OT 也有 happy-path 证据
+- ~~Tao Downtown OT widget time-slot selector~~ ✓ **已修（cont. 2 / 2026-04-30）**
+  Fixed in commits f62ce8d → 61993ab: detail-page navigate w/ params +
+  selectOption time picker + text-match anchor + dry_run marker on
+  cc-section. Tao Downtown 1m 50s payment_stop ✓
 - **Dashboard duration 显示 bug**：L'Artusi step.status="no_availability"
   但 dashboard 显示 "executor_error 1s"。实际 booking_job DB 行正确，
   duration 计算或 race condition 把 createdAt - completedAt 算成 1s

@@ -4,6 +4,26 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [0.2.59.0] - 2026-04-30
+
+### Added
+- **OpenTable detail-page (`/r/<slug>`) booking flow** — Tao Downtown and other OT detail-URL venues now drive the right-side reservation widget programmatically: navigate with `?dateTime=YYYY-MM-DDTHH:MM&covers=N` query params (forces OT SSR to render the widget with case context), drive the `<select data-test="time-picker">` via Playwright `selectOption`, wait up to 8s for the AJAX-rendered `<ul data-test="time-slots">`, then click the closest matching anchor. Verified end-to-end: Tao Downtown reaches `payment_stop` at OT `/booking/details` (dry-run boundary fires on the deposit-hold credit-card section).
+
+### Fixed
+- **OT detail-page widget time-slot selector** — anchors render as `<a>` with strict `H:MM AM/PM` text, no `href`, no `role="button"`. Previous listing-card selector required `role="button"` and missed all of them. Replaced with multi-source candidate collection: `[data-test="time-slots"]` container OR strict-text `<a>` (regex `^\d{1,2}:\d{2}\s*(AM|PM)$` + length<12) OR strict-text `<button>`. (commits `f62ce8d` → `4017a3f`)
+- **OT/Resy detail URLs sometimes RPA-classified as `unknown` stage** when AI confidence sat between 0.65–0.74 (below the 0.75 acceptance gate). The OT branch would never run, the time-picker driver never fired, and the case fell to executor_error after 30s+. Added URL-based RPA fallback in `stage-assessment.ts`: `/opentable.com/r/<slug>` and `/resy.com/cities/<city>/venues/<slug>` are pinned to `listing` stage when `!visibleCheckoutFields && !hitPaymentUrl`. (commit `aa5e920`)
+- **OpenTable provider's `if (ccRequired)` early-return path didn't emit the dry-run boundary marker**, so high-end deposit-hold venues (Tao Downtown, etc.) reached `/booking/details`, filled the diner form, hit "Payment page is open" handoff — and the benchmark classifier silently bucketed them as `executor_error` because no marker was in `step.decisionLog`. Added the marker emission on the cc-section path; production cc-handoff behavior is unchanged. (commit `61993ab`)
+
+### Verified end-to-end
+- **Tao Downtown (OT, deposit-hold) reaches `payment_stop` in 1m 50s** on master `61993ab`. dev.log confirms the full path: navigate w/ params (`dateTime=2026-05-14T19:30&covers=2`) → time-picker drive picked 7:30 PM (diff=0) → time-slot anchor match "7:30 PM" → CDP click → stage assessment 2 = checkout_form on `/booking/specials` → seating-options auto-select Standard → `/booking/details` → diner form filled (Benchmark User / phone / email) → cc-section detected → dry-run boundary fires. User screenshot confirms widget shows "Thu, May 14, 7:30 PM, 2 people (Standard seating)".
+- **5/5 benchmark on master `61993ab`**: L'Artusi 17s no_availability ✓ · **Tao Downtown 1m 50s payment_stop ✓** · Carbone 17s no_availability ✓ · Lilia 30s executor_error (independent Resy backlog) · Cosme 59s payment_stop ✓. 4 of 5 reach the expected outcome bucket; the Tao Downtown breakthrough closes out the cont. 1 backlog item.
+
+### Known issues / backlog
+- **Lilia (Resy) click-after-slot instability** — `[resy] time slot diag: BUTTON "8:45 PM Dining Room"` clicks but next stage assessment still sees `listing`. Suspected Resy popup-modal timing race; needs dedicated investigation.
+- **5/5 concurrent CDP target race** — when 5 stagehand sessions spin up simultaneously, 1–2 cases occasionally hit `No Page found for target closed before CDP response`. Consider stagehand startup throttling or concurrency cap of 3.
+- Dashboard `duration_seconds` cosmetic display bug from 0.2.58.0 still present; DB rows are accurate.
+- AI stage assessment latency (30–60s/call) on bookable paths still saved only by pre-AI fast path for not-bookable.
+
 ## [0.2.58.0] - 2026-04-30
 
 ### Added
