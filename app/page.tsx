@@ -303,6 +303,13 @@ function HomeInner() {
     if (activeRoomId) {
       if (activeRoomTitle) roomTitleCacheRef.current.set(activeRoomId, activeRoomTitle);
       if (chat.messages.length === 0 && !activeProposalId) return;
+      // Ownership gate: only save chat.messages to the room's cache once
+      // the room's replay effect has populated them. Without this gate, a
+      // sidebar switch B→A fires this effect with activeRoomId=A while
+      // chat.messages still holds B's messages (clearChat queued in
+      // isRealSwitch hasn't applied yet) — and we'd write B's messages
+      // into A's cache, corrupting it for the next visit.
+      if (!replayedRoomIds.current.has(activeRoomId)) return;
       roomReplayCacheRef.current.set(activeRoomId, {
         messages: chat.messages,
         nluHistory: nluHistoryRef.current,
@@ -312,6 +319,12 @@ function HomeInner() {
     }
     if (!activeSessionId) return;
     if (chat.messages.length === 0 && !lastNluStateRef.current) return;
+    // Same ownership gate as rooms above. This was the actual cause of
+    // "switching drafts doesn't update content until I refresh" — the
+    // session cache was getting overwritten with the OLD context's
+    // messages on every switch, then replay loaded that polluted cache
+    // back instead of the new session's real messages.
+    if (!replayedSessionIds.current.has(activeSessionId)) return;
     sessionReplayCacheRef.current.set(activeSessionId, {
       title: activeSessionTitle,
       messages: chat.messages,
