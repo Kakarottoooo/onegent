@@ -443,7 +443,14 @@ async function runUniversalStep(
   // ── Restaurant steps: build OpenTable startUrl + task if not already set ──
   // step.body for restaurant steps contains: restaurantName, date (YYYY-MM-DD),
   // time (HH:MM 24h), covers (number), and optionally city.
-  if (step.type === "restaurant" && !resolvedBody.startUrl) {
+  //
+  // startUrl and task are filled INDEPENDENTLY — a caller (e.g. the benchmark
+  // runner) may pre-supply startUrl pointing at a known restaurant detail
+  // page while leaving task for us to generate. Previously the task-build
+  // branch was nested under the startUrl-build branch, which left task
+  // undefined for those callers and crashed runBrowserTask downstream with
+  // `Cannot read properties of undefined (reading 'match')`.
+  if (step.type === "restaurant") {
     const rName = resolvedBody.restaurantName as string | undefined;
     const rDate = resolvedBody.date as string | undefined;
     const rTime = resolvedBody.time as string | undefined;
@@ -451,6 +458,7 @@ async function runUniversalStep(
     const rCity = (resolvedBody.city as string | undefined) ?? "";
 
     if (rName && rDate && rTime) {
+      // (1) Synthesize startUrl when missing.
       // Build OpenTable search URL: dateTime must be ISO format YYYY-MM-DDTHH:MM:00.
       //
       // Include the city in the `term` query so OpenTable's search isn't
@@ -461,10 +469,13 @@ async function runUniversalStep(
       //
       // `term=Restaurant+Name City+Name` reliably biases the match to the
       // right metro while still matching the restaurant by name.
-      const termRaw = rCity ? `${rName} ${rCity}` : rName;
-      const otUrl = `https://www.opentable.com/s?term=${encodeURIComponent(termRaw)}&covers=${rCovers}&dateTime=${rDate}T${rTime}:00`;
-      resolvedBody = { ...resolvedBody, startUrl: otUrl };
+      if (!resolvedBody.startUrl) {
+        const termRaw = rCity ? `${rName} ${rCity}` : rName;
+        const otUrl = `https://www.opentable.com/s?term=${encodeURIComponent(termRaw)}&covers=${rCovers}&dateTime=${rDate}T${rTime}:00`;
+        resolvedBody = { ...resolvedBody, startUrl: otUrl };
+      }
 
+      // (2) Synthesize task NL when missing — independent of startUrl.
       if (!resolvedBody.task) {
         const { buildRestaurantTask } = await import("@/lib/booking-autopilot/core/task-builders");
         const { task } = buildRestaurantTask({
