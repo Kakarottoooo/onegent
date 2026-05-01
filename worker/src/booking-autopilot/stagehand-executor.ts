@@ -67,6 +67,7 @@ import {
   setBookingComRoomQuantity as providerSetBookingComRoomQuantity,
 } from "./providers/booking-com";
 import { determineFinalOutcome, NO_AVAILABILITY_SIGNALS } from "./core/final-outcome";
+import { DRY_RUN_BOUNDARY_MARKER } from "./dry-run";
 import { fillGuestFormWithAI, fillFlightGuestFormWithAI, auditAndRefillEmptyFields } from "./ai-loop/fill-form";
 import { clickTargetListingAI, selectRoomAI } from "./ai-loop/find-listing";
 import { liveLogPush, liveLogClose, liveLogReset } from "../live-log-store";
@@ -5640,6 +5641,28 @@ The user will enter CVV and confirm payment themselves.`,
       if (finalOutcome.status === "paused_payment") {
         console.log("\n鉁?[stagehand] Payment page is open —?use OneAgent live view or the browser window to complete payment.\n");
       }
+    }
+
+    // Emit the dry-run boundary marker when the executor stops at a
+    // checkout / payment-like stage under dry_run mode but the provider's
+    // own boundary marker didn't fire. Happens for venues whose code path
+    // doesn't go through provider.fillGuestForm — e.g. Cosme on Resy
+    // reaches the "Reserve Now" modal without filling any fields (Resy
+    // displays the form already-populated from the venue session) so the
+    // Resy provider's marker emit at the submit-click guard is never
+    // reached. Without this, classifier logs failed/payment_stop instead
+    // of succeeded for cases that completed the executor's job in the
+    // dry_run sense (got to the final commit click).
+    const dryRunMode = input.autonomySettings?.benchmark_dry_run === true;
+    const dryRunStopStages = new Set(["checkout_form", "payment_gate"]);
+    if (
+      dryRunMode &&
+      finalOutcome.status === "paused_payment" &&
+      dryRunStopStages.has(assessment.stage)
+    ) {
+      // trace() pushes into the same debugTrace array that finalOutcome
+      // returns, so the classifier sees this marker via step.decisionLog.
+      trace(`[executor] ${DRY_RUN_BOUNDARY_MARKER} - reached ${assessment.stage} in dry_run mode (provider-level marker not fired)`);
     }
 
     return finalOutcome;
