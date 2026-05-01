@@ -37,12 +37,8 @@ loadDotenv();
 import { sql } from "../lib/db";
 
 const FOCUS_CASES = [
-  // Run 5 dig: 5-case smoke run
-  "nyc_restaurant_001", // L'Artusi — no_availability 22s (need to see if real or executor gave up too early)
-  "nyc_restaurant_002", // Tao Downtown — succeeded 1m50s (need to see if form really filled)
-  "nyc_restaurant_003", // Carbone — no_availability 17s
-  "nyc_restaurant_004", // Lilia — no_availability 16s (Resy)
-  "nyc_restaurant_005", // Cosme — succeeded payment_stop 1m0s (Resy "Complete Your Reservation" modal — user screenshot shows we stop BEFORE clicking consent + Reserve Now)
+  // Run 9 dig: post-round-3 (apostrophe fix + vanity URL fix)
+  "nyc_restaurant_001", // Fumo Soho — user screenshot confirms slots visible on /r/fumo-soho-new-york
 ];
 
 async function main() {

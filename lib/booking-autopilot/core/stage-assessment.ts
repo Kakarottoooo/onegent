@@ -523,15 +523,24 @@ export async function assessBookingStage(params: {
   } else if (hitPaymentUrl && !visibleCheckoutFields) {
     stage = "payment_gate";
     reason = "URL matches a payment/checkout pattern and no editable form fields found.";
-  } else if (effectiveStalledAtIntermediateBookNow && !visibleCheckoutFields) {
+  } else if (effectiveStalledAtIntermediateBookNow && !visibleCheckoutFields && !/opentable\.com|resy\.com/i.test(currentUrl)) {
     stage = "intermediate_gate";
     reason = stalledAtIntermediateBookNow
       ? "Review-and-pay gate is visible before real checkout fields."
       : "Agent message indicates an intermediate Book Now gate (DOM unreadable - cross-origin widget).";
-  } else if (stalledAtDateSelection) {
+  } else if (stalledAtDateSelection && !/opentable\.com|resy\.com/i.test(currentUrl)) {
     stage = "date_selection";
     reason = "Requested dates are selected, but the widget is still at the date picker step.";
-  } else if (stalledAtRoomSelection) {
+  } else if (stalledAtRoomSelection && !/opentable\.com|resy\.com/i.test(currentUrl)) {
+    // Run 9 dig: stalledAtRoomSelection is keyword-based (looksLikeRoomSelectionGate)
+    // and was firing on OpenTable detail pages — OT's booking widget text
+    // ("Make a reservation", "Select a time", "Booked X times today") looked
+    // like a hotel room-selection gate. Without the URL guard, every OT case
+    // got routed through the generic hotel room_selection branch (clicked
+    // a generic Reserve button that didn't exist), looped 2 iterations,
+    // RC F broke out — never reaching the OT detail-page time-slot picker
+    // 12 lines below this branch. URL guard restores correct routing for
+    // OT (case 001 Fumo Soho confirmed bookable, all 5 cases blocked here).
     stage = "room_selection";
     reason = "Room/rate selection content is visible and checkout has not been reached.";
   } else if (hitPaymentGate) {
