@@ -4076,19 +4076,28 @@ The user will enter CVV and confirm payment themselves.`,
                       // OpenTable booking pages show the restaurant name near the top,
                       // separate from the page's action heading (h1: "You're almost done!").
                       // Strategy: find a heading that is NOT a generic UI phrase.
-                      const genericUI = /you're almost done|complete your reservation|available seating|select seating|reservation details|almost done|booking|diner details/i;
+                      //
+                      // Run 8 dig: previous regex used ASCII apostrophe ('),
+                      // but OT renders typographic apostrophe (U+2019: '), so
+                      // "You're almost done!" never matched and was returned
+                      // as the venue name on EVERY case (5/5 false positives,
+                      // killing all OT happy-path runs). Normalise the text
+                      // first so all apostrophe variants collapse to ASCII '.
+                      const normaliseQuotes = (s: string): string =>
+                        s.replace(/[‘’‚‛`ʼ]/g, "'");
+                      const genericUI = /you're almost done|complete your reservation|available seating|select seating|reservation details|almost done|^booking$|diner details|^find a table$|^add your details$/i;
                       // Check all headings and prominent text nodes for a restaurant-like name
                       const candidates = Array.from(document.querySelectorAll<HTMLElement>(
                         'h1, h2, h3, [class*="restaurant" i], [class*="venue" i], [data-testid*="restaurant" i]'
                       ));
                       for (const el of candidates) {
-                        const text = (el.textContent ?? "").trim();
+                        const text = normaliseQuotes((el.textContent ?? "").trim());
                         if (text.length >= 3 && text.length <= 80 && !genericUI.test(text)) {
                           return text;
                         }
                       }
                       // Fallback: read page title (tab title often has restaurant name)
-                      return document.title.replace(/\s*[-|].*$/, "").trim().slice(0, 80);
+                      return normaliseQuotes(document.title.replace(/\s*[-|].*$/, "").trim()).slice(0, 80);
                     }).catch(() => "");
                     const normalize = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, " ").replace(/\s+/g, " ").trim();
                     const targetWords = normalize(targetHotelName).split(" ").filter(w => w.length > 3);

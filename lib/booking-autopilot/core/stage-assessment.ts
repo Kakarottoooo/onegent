@@ -541,12 +541,18 @@ export async function assessBookingStage(params: {
     stage = "listing";
     reason = "The page still looks like a listing/search flow without booking progress.";
   } else if (
-    /opentable\.com\/r\//i.test(currentUrl) &&
+    // OT canonical detail page (/r/<slug>) OR vanity detail URL (no /r/
+    // prefix — e.g. /wild-west-village, /the-clam). Both render the same
+    // booking widget. Run 8 dig: vanity URLs were falling through to the
+    // generic hotel room_selection branch because the regex only matched
+    // /r/ — case 002 Wild West Village + case 004 The Clam died here.
+    /opentable\.com\/(?:r\/[^/?#]+|[a-z0-9][a-z0-9-]*(?:\?|$|\/?$))/i.test(currentUrl) &&
+    !/opentable\.com\/(?:s\?|booking\/|restaurants\/|search\?|account\/|user\/|signup|login)/i.test(currentUrl) &&
     !visibleCheckoutFields &&
     !hitPaymentUrl
   ) {
-    // OpenTable /r/<slug> detail pages: booking widget on the right is where
-    // users select time → listing-stage handler drives the time picker. Pin
+    // OpenTable detail pages: booking widget on the right is where users
+    // select time → listing-stage handler drives the time picker. Pin
     // explicitly so we don't depend on flaky AI confidence (>=0.75 gate below)
     // for routing into the OT detail-page programmatic flow.
     stage = "listing";
