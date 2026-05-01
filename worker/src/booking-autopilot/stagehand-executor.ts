@@ -4046,7 +4046,20 @@ The user will enter CVV and confirm payment themselves.`,
               // We must drive the <select> first, wait for AJAX to render slots,
               // then click the closest anchor. Listing-card selector below
               // never works for /r/<slug> because anchors lack role="button".
-              const isDetailUrl = /opentable\.com\/r\//i.test(raw.url());
+              // Run 17 dig: vanity URLs (e.g. /wild-west-village, /the-clam)
+              // were excluded from this detail-page widget path because the
+              // regex only matched /r/<slug>. They fell through to the
+              // search-results card picker (line ~4225) which scans for a
+              // restaurant card containing the venue name — but on detail
+              // pages there's no card layout, just one venue widget. Result:
+              // "scope=card | " empty slots. Vanity URLs render the same
+              // booking widget as canonical /r/, so they should use the
+              // same [data-test="time-picker"] / [data-test="time-slots"]
+              // path. Match canonical /r/<slug> AND vanity single-segment
+              // URLs (with the same exclusion list as round 8).
+              const isDetailUrl =
+                /opentable\.com\/(?:r\/[^/?#]+|[a-z0-9][a-z0-9-]*(?:\?|$|\/?$))/i.test(raw.url()) &&
+                !/opentable\.com\/(?:s\?|booking\/|restaurants\/|search\?|account\/|user\/|signup|login)/i.test(raw.url());
               if (isDetailUrl) {
                 // Step 0: navigate to detail URL with dateTime+covers query
                 // params if missing. OT widget honors these on SSR — without
