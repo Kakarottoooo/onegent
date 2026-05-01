@@ -53,7 +53,7 @@ export interface RunRestaurantBenchmarkInput {
   name: string;
   /** dry_run = providers refuse the final submit click. full_commit not allowed. */
   mode: BenchmarkMode;
-  /** Optional override; defaults to all 5 NYC seed cases. */
+  /** Optional override; defaults to all NYC seed cases. */
   cases?: RestaurantBenchmarkCase[];
   /** Cap how many cases to dispatch (default 1 — safe smoke test). */
   maxCases?: number;
@@ -63,6 +63,9 @@ export interface RunRestaurantBenchmarkInput {
   baseUrl?: string;
   /** Inject a fetch fn (tests). Defaults to global fetch. */
   fetchFn?: FetchLike;
+  /** Max chromium sessions in-flight at any time. Defaults to 5
+   *  (empirically safe on a 16GB dev box). */
+  batchSize?: number;
 }
 
 export interface RunRestaurantBenchmarkResult {
@@ -373,6 +376,111 @@ export async function resolveBenchmarkRun(runId: string): Promise<{
 
 // ─── Top-level entry ────────────────────────────────────────────────────────
 
+/**
+ * Runs the dispatch loop in batches of BATCH_SIZE. Within each batch every
+ * case is fire-and-forget'd 500ms apart; the loop then polls until ALL the
+ * batch's cases are finalised (status ≠ pending/running) before dispatching
+ * the next batch. This caps in-flight chromium sessions at BATCH_SIZE so
+ * 50-case runs don't OOM the dev machine.
+ *
+ * Long-running — caller must NOT await it directly. runRestaurantBenchmark
+ * fires it via `void` and returns the run_id immediately so the dashboard
+ * can start polling.
+ */
+async function runBatchDispatcher(input: {
+  runId: string;
+  caseRows: BenchmarkCaseRow[];
+  mode: BenchmarkMode;
+  baseUrl: string;
+  fetchFn: FetchLike;
+  batchSize: number;
+}): Promise<void> {
+  const { runId, caseRows, mode, baseUrl, fetchFn, batchSize } = input;
+  const STAGEHAND_STARTUP_STAGGER_MS = 500;
+  const POLL_INTERVAL_MS = 10_000; // dashboard refreshes every 10s anyway
+  const MAX_BATCH_WAIT_MS = 8 * 60_000; // 8 min cap per batch — single case usually <2 min
+
+  const batchCount = Math.ceil(caseRows.length / batchSize);
+  for (let batchIdx = 0; batchIdx < batchCount; batchIdx += 1) {
+    const start = batchIdx * batchSize;
+    const batch = caseRows.slice(start, start + batchSize);
+
+    console.log(
+      `[benchmark] ${runId} batch ${batchIdx + 1}/${batchCount}: dispatching ${batch.length} cases`,
+    );
+
+    // ── Dispatch every case in this batch ───────────────────────────────
+    for (let j = 0; j < batch.length; j += 1) {
+      try {
+        await dispatchBenchmarkCase({ caseRow: batch[j], mode, baseUrl, fetchFn });
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        await updateBenchmarkCase(batch[j].id, {
+          status: "failed",
+          success: false,
+          failureReason: "executor_error",
+          audit: { reason: `dispatch failed: ${msg}` },
+          finalize: true,
+        });
+      }
+      if (j < batch.length - 1) {
+        await new Promise((r) => setTimeout(r, STAGEHAND_STARTUP_STAGGER_MS));
+      }
+    }
+
+    // ── Wait until every case in THIS batch is finalised ─────────────────
+    const batchIds = new Set(batch.map((b) => b.id));
+    const waitStart = Date.now();
+    while (true) {
+      await new Promise((r) => setTimeout(r, POLL_INTERVAL_MS));
+
+      // resolveBenchmarkRun finalises any case whose booking_job has
+      // reached a terminal state. Idempotent — safe to call repeatedly.
+      try {
+        await resolveBenchmarkRun(runId);
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        console.warn(`[benchmark] ${runId} resolveBenchmarkRun failed: ${msg}`);
+      }
+
+      const all = await getBenchmarkCases(runId);
+      const stillRunning = all.filter(
+        (c) =>
+          batchIds.has(c.id) && (c.status === "pending" || c.status === "running"),
+      );
+      if (stillRunning.length === 0) break;
+
+      if (Date.now() - waitStart > MAX_BATCH_WAIT_MS) {
+        // Force-finalise stuck cases as timeout so the next batch can start.
+        console.warn(
+          `[benchmark] ${runId} batch ${batchIdx + 1} exceeded ${MAX_BATCH_WAIT_MS}ms; finalising ${stillRunning.length} stuck case(s) as timed_out`,
+        );
+        for (const stuck of stillRunning) {
+          await updateBenchmarkCase(stuck.id, {
+            status: "timed_out",
+            success: false,
+            failureReason: "provider_timeout",
+            audit: {
+              ...((stuck.audit as Record<string, unknown>) ?? {}),
+              batch_wait_timeout_ms: MAX_BATCH_WAIT_MS,
+            },
+            finalize: true,
+          });
+        }
+        break;
+      }
+    }
+
+    console.log(
+      `[benchmark] ${runId} batch ${batchIdx + 1}/${batchCount} complete`,
+    );
+  }
+
+  // Mark run completed.
+  await setBenchmarkRunStatus(runId, "completed", { completed: true });
+  console.log(`[benchmark] ${runId} all ${caseRows.length} cases finalised`);
+}
+
 export async function runRestaurantBenchmark(
   input: RunRestaurantBenchmarkInput,
 ): Promise<RunRestaurantBenchmarkResult> {
@@ -403,52 +511,46 @@ export async function runRestaurantBenchmark(
   });
   await setBenchmarkRunStatus(run.id, "running");
 
-  // Stagger stagehand session startup. /start is fire-and-forget on the
-  // dispatcher side, but each /start spins up a Chrome/Browserbase session
-  // server-side; firing 5 in the same tick reproducibly hits
-  // "No Page found for target closed before CDP response" on 1-2 of them
-  // (chrome's CDP target init races). 500 ms between dispatches gives the
-  // previous session enough time to attach its target before the next
-  // one starts.
-  const STAGEHAND_STARTUP_STAGGER_MS = 500;
-  let dispatched = 0;
-  for (let i = 0; i < cases.length; i += 1) {
-    const c = cases[i];
+  // Phase 1 (sync): create every case row up front as 'pending'. This lets
+  // the dashboard show "50/50 cases queued, batch 1 dispatching" immediately
+  // instead of revealing rows one at a time as they dispatch.
+  const caseRows: BenchmarkCaseRow[] = [];
+  for (const c of cases) {
     const caseRow = await createBenchmarkCase({
       runId: run.id,
       caseId: c.case_id,
       payload: c,
       mode: input.mode,
     });
-    try {
-      await dispatchBenchmarkCase({ caseRow, mode: input.mode, baseUrl, fetchFn });
-      dispatched += 1;
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      await updateBenchmarkCase(caseRow.id, {
-        status: "failed",
-        success: false,
-        failureReason: "executor_error",
-        audit: { reason: `dispatch failed: ${msg}` },
-        finalize: true,
-      });
-    }
-    if (i < cases.length - 1) {
-      await new Promise((r) => setTimeout(r, STAGEHAND_STARTUP_STAGGER_MS));
-    }
+    caseRows.push(caseRow);
   }
 
-  const summary = await summarizeBenchmarkRun(run.id);
+  // Phase 2 (async, background): dispatch in batches of BATCH_SIZE so we
+  // never have more than BATCH_SIZE chromium sessions in flight at once.
+  // 5 was empirically validated as the safe ceiling on the dev box.
+  const BATCH_SIZE = input.batchSize ?? 5;
+  void runBatchDispatcher({
+    runId: run.id,
+    caseRows,
+    mode: input.mode,
+    baseUrl,
+    fetchFn,
+    batchSize: BATCH_SIZE,
+  }).catch((err) => {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error(`[benchmark] ${run.id} batch dispatcher crashed: ${msg}`);
+  });
 
+  const summary = await summarizeBenchmarkRun(run.id);
   return {
     run_id: run.id,
     total: cases.length,
-    dispatched,
+    dispatched: 0,
     status: "running",
     summary,
     message:
-      dispatched > 0
-        ? `Dispatched ${dispatched} case(s). Booking jobs are running asynchronously — poll GET /api/internal/benchmark/runs/${run.id} for resolution.`
-        : `No cases dispatched.`,
+      `Queued ${cases.length} cases. Dispatching in batches of ${BATCH_SIZE} ` +
+      `(only ${BATCH_SIZE} chromium sessions in-flight at any time). ` +
+      `Poll GET /api/internal/benchmark/runs/${run.id} for live progress.`,
   };
 }

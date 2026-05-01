@@ -31,6 +31,7 @@ interface SeedRequestBody {
   mode?: unknown;
   notes?: unknown;
   maxCases?: unknown;
+  batchSize?: unknown;
 }
 
 export async function POST(req: NextRequest) {
@@ -66,9 +67,16 @@ export async function POST(req: NextRequest) {
   if (typeof body.maxCases === "number" && Number.isFinite(body.maxCases)) {
     maxCases = Math.max(1, Math.min(100, Math.floor(body.maxCases)));
   }
+  // batchSize: how many chromium sessions can run in parallel. Default 5
+  // (empirically safe on a 16GB dev box). Cap at 10 — beyond that the
+  // local machine OOMs.
+  let batchSize: number | undefined;
+  if (typeof body.batchSize === "number" && Number.isFinite(body.batchSize)) {
+    batchSize = Math.max(1, Math.min(10, Math.floor(body.batchSize)));
+  }
 
   try {
-    const result = await runRestaurantBenchmark({ name, mode, notes, maxCases });
+    const result = await runRestaurantBenchmark({ name, mode, notes, maxCases, batchSize });
     return NextResponse.json(result);
   } catch (err) {
     const message = err instanceof Error ? err.message : "unknown error";
