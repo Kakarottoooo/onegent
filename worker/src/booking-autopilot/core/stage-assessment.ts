@@ -502,6 +502,18 @@ export async function assessBookingStage(params: {
     // forms on niche providers that don't follow OT/Booking.com URL patterns.
     stage = "checkout_form";
     reason = "Checkout form fields visible in DOM (email/phone/name inputs).";
+  } else if (
+    pageText.includes("mobile phone number to verify or create an account") ||
+    pageText.includes("please enter your mobile phone number to verify")
+  ) {
+    // Resy mobile-verify gate (anti-spam OTP). Modal-overlay state where
+    // the listing page is still in the DOM behind it — without this rule
+    // stage assessment sees listing signals and the executor re-clicks
+    // the time slot in an infinite loop until 7-min timeout. Treating it
+    // as checkout_form lets the executor's terminal path emit the
+    // dry-run boundary marker (cont. 6) and finalize as succeeded.
+    stage = "checkout_form";
+    reason = "Resy mobile-verify gate is open (phone OTP required to proceed).";
   }
 
   // ── Pre-AI fast path: skip vision call when RPA classified from a

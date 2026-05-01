@@ -4178,6 +4178,27 @@ The user will enter CVV and confirm payment themselves.`,
               if (resySlotClicked) {
                 trace(`[resy] clicked time slot "${resySlotClicked}" (requested: ${Math.floor(reqMins2 / 60)}:${String(reqMins2 % 60).padStart(2, "0")})`);
                 await new Promise(r => setTimeout(r, 2500));
+                // ── Post-click mobile-verify gate detection ───────────────
+                // Resy may pop a phone-OTP modal on top of the listing
+                // page after slot click (anti-spam guard for guest checkout).
+                // The modal doesn't change the URL but obscures the slot
+                // buttons. If we don't catch it here, the outer loop sees
+                // the slot buttons still rendered, reassesses listing, and
+                // re-clicks the same slot in an infinite loop until 7-min
+                // timeout (observed Cosme 4m 32s executor_error).
+                const resyVerifyGateText = await raw.evaluate(() => (document.body?.innerText ?? "").toLowerCase()).catch(() => "");
+                const RESY_VERIFY_GATE_PHRASES_POST = [
+                  "mobile phone number to verify or create an account",
+                  "please enter your mobile phone number to verify",
+                ];
+                if (RESY_VERIFY_GATE_PHRASES_POST.some((p) => resyVerifyGateText.includes(p))) {
+                  trace("[resy] post-click: mobile-verify gate appeared — outer loop will emit dry-run boundary marker");
+                  // Returning true tells outer to reassess; the executor-
+                  // level boundary marker emit at line ~5663 covers it.
+                  // Plus the Pre-AI verify-gate check on the next outer
+                  // pass will short-circuit to paused_payment cleanly.
+                  return true;
+                }
                 const resyNowUrl = raw.url();
                 if (!resyNowUrl.toLowerCase().includes("resy.com/cities") || resyNowUrl.toLowerCase().includes("/book")) {
                   trace(`[resy] navigated to booking page: ${resyNowUrl.slice(0, 80)}`);
