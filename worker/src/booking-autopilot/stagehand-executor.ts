@@ -1294,6 +1294,47 @@ The user will enter CVV and confirm payment themselves.`,
     } else {
       trace("No specific room preference found in task — will select cheapest available.");
     }
+    // ── Pre-AI navigate w/ case context ─────────────────────────────────
+    // Restaurant venue URLs default to today + 2 covers, NOT the case
+    // configuration. If we Pre-AI fast-path before navigating to the
+    // case date, we may match "no availability" on the wrong day (e.g.
+    // Cosme has slots on May 16 but is full today). Force the correct
+    // page state before the fast-path text scan. (Same fix the OT/Resy
+    // listing handlers already do further down — hoisted here so the
+    // fast path scans the right page.)
+    const taskDateMatch = input.task.match(/\bon\s+(20\d{2}-\d{2}-\d{2})\b/);
+    const taskCoversMatch = input.task.match(/\bfor\s+(\d+)\s+people\b/i);
+    const taskTimeMatch = input.task.match(/\bat\s+(\d{1,2}):(\d{2})\b/);
+    if (taskDateMatch) {
+      try {
+        const u = new URL(raw.url());
+        const isResy = /resy\.com\/cities\/.+\/venues\//i.test(u.toString());
+        const isOTDetail = /opentable\.com\/r\//i.test(u.toString());
+        if (isResy) {
+          const seats = taskCoversMatch ? taskCoversMatch[1] : "2";
+          if (u.searchParams.get("date") !== taskDateMatch[1] || u.searchParams.get("seats") !== seats) {
+            u.searchParams.set("date", taskDateMatch[1]);
+            u.searchParams.set("seats", seats);
+            trace(`[pre-ai] resy navigate w/ case context: date=${taskDateMatch[1]}&seats=${seats}`);
+            await raw.goto(u.toString(), { waitUntil: "domcontentloaded", timeout: 15000 }).catch(() => {});
+            await new Promise((r) => setTimeout(r, 2000));
+          }
+        } else if (isOTDetail && taskTimeMatch) {
+          const hh = taskTimeMatch[1].padStart(2, "0");
+          const mm = taskTimeMatch[2];
+          const covers = taskCoversMatch ? taskCoversMatch[1] : "2";
+          const desiredDateTime = `${taskDateMatch[1]}T${hh}:${mm}`;
+          if (u.searchParams.get("dateTime") !== desiredDateTime || u.searchParams.get("covers") !== covers) {
+            u.searchParams.set("dateTime", desiredDateTime);
+            u.searchParams.set("covers", covers);
+            trace(`[pre-ai] ot navigate w/ case context: dateTime=${desiredDateTime}&covers=${covers}`);
+            await raw.goto(u.toString(), { waitUntil: "domcontentloaded", timeout: 15000 }).catch(() => {});
+            await new Promise((r) => setTimeout(r, 2000));
+          }
+        }
+      } catch { /* leave URL unchanged on parse failure */ }
+    }
+
     // ── Pre-AI fast path: cheap text-signal check for not-bookable pages ──
     // Skip the AI stage detector entirely when the page is unambiguously a
     // not-bookable surface (OT 'Not available on OpenTable', 'Permanently
