@@ -724,6 +724,11 @@ async function runUniversalStep(
       autonomySettings: autonomy
         ? { benchmark_dry_run: autonomy.benchmark_dry_run === true }
         : undefined,
+      // Per-case fallback policy (e.g. restaurant time-window minutes).
+      // Threaded from caseToBookingStep through step.body so stagehand
+      // time-slot selectors can use case-specific limits instead of the
+      // hardcoded ±90 min default.
+      fallbackPolicy: resolvedBody.fallback_policy as BrowserTaskInput["fallbackPolicy"] | undefined,
     };
 
     // Call runBrowserTask directly — avoids the self-HTTP fetch that fails when

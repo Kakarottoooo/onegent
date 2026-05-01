@@ -121,6 +121,10 @@ export function caseToBookingStep(c: RestaurantBenchmarkCase): BookingJobStep {
     time: c.time,
     covers: c.party_size,
     profile: BENCHMARK_PROFILE,
+    // Forward fallback_policy to stagehand-executor so the time-slot
+    // matcher can honor case constraints (e.g. time_window_minutes=0
+    // means "exact time only — no closest-slot fallback").
+    fallback_policy: c.fallback_policy,
   };
   if (c.restaurant_url) body.startUrl = c.restaurant_url;
 

@@ -110,6 +110,19 @@ export interface BrowserTaskInput {
     benchmark_dry_run?: boolean;
     [key: string]: unknown;
   };
+  /**
+   * Per-case fallback rules from the benchmark / caller. Currently used by
+   * the restaurant time-slot selectors to constrain how far off the requested
+   * time the executor will accept a slot. When omitted, the time-slot logic
+   * defaults to ±90 min for backwards compatibility. `time_window_minutes=0`
+   * means "exact match only — no fallback".
+   */
+  fallbackPolicy?: {
+    time_window_minutes?: number;
+    allow_platform_switch?: boolean;
+    allow_venue_switch?: boolean;
+    require_user_approval_before_booking?: boolean;
+  };
 }
 
 export type BrowserTaskStatus =

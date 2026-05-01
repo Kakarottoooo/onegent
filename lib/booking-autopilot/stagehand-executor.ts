@@ -3519,6 +3519,12 @@ The user will enter CVV and confirm payment themselves.`,
                 requestedMinutes = h * 60 + m;
               }
 
+              // Time-window for slot fallback. Honors case fallback_policy
+              // when provided (e.g. benchmark cases), else defaults to ±90 min
+              // for backward compat with all the legacy hotel paths that don't
+              // set this. `time_window_minutes=0` means exact match only.
+              const timeWindowMins = input.fallbackPolicy?.time_window_minutes ?? 90;
+
               // Parse "7:00 PM" / "7:30 pm" / "19:00" to minutes since midnight
               const parseTimeText = (text: string): number | null => {
                 const m12 = text.match(/(\d{1,2}):(\d{2})\s*(AM|PM)/i);
@@ -3692,7 +3698,7 @@ The user will enter CVV and confirm payment themselves.`,
                       text: (best.textContent ?? "").trim().slice(0, 30),
                     };
                   },
-                  { reqMins: requestedMinutes, maxDiffMins: 90 },
+                  { reqMins: requestedMinutes, maxDiffMins: timeWindowMins },
                 ).catch(() => null);
 
                 if (detailSlot && detailSlot._empty) {
@@ -3712,7 +3718,7 @@ The user will enter CVV and confirm payment themselves.`,
                   }
                   trace("[opentable] detail-page slot click failed — falling through to listing logic");
                 } else if (!detailSlot || detailSlot._empty) {
-                  trace("[opentable] detail-page widget has no time slots in ±90 min — falling through");
+                  trace(`[opentable] detail-page widget has no time slots in ±${timeWindowMins} min — falling through`);
                 }
               }
               // ── END detail-page early path ────────────────────────────────────
@@ -3811,7 +3817,7 @@ The user will enter CVV and confirm payment themselves.`,
                     diag,
                   };
                 },
-                { reqMins: requestedMinutes, maxDiffMins: 90, restaurantName: targetHotelName ?? "" }
+                { reqMins: requestedMinutes, maxDiffMins: timeWindowMins, restaurantName: targetHotelName ?? "" }
               ).catch(() => null);
 
               if (slotCoords?.diag) {
@@ -3928,7 +3934,7 @@ The user will enter CVV and confirm payment themselves.`,
                 trace("[opentable] slot clicked but no URL/form change detected — yielding to stage reassessment");
                 return true;
               } else {
-                trace("[opentable] no time slots found in ±90 min — trying restaurant card click");
+                trace(`[opentable] no time slots found in ±${timeWindowMins} min — trying restaurant card click`);
                 // Fall back: click the restaurant card to navigate to detail page
                 const cardClicked = await raw.evaluate((restaurantName: string) => {
                   const normalize = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, "");
@@ -3980,7 +3986,7 @@ The user will enter CVV and confirm payment themselves.`,
                       const r = best.getBoundingClientRect();
                       return { x: Math.round(r.left + r.width / 2), y: Math.round(r.top + r.height / 2), text: (best.textContent ?? "").trim().slice(0, 20) };
                     },
-                    { reqMins: requestedMinutes, maxDiffMins: 90 }
+                    { reqMins: requestedMinutes, maxDiffMins: timeWindowMins }
                   ).catch(() => null);
 
                   const detailSlot = detailSlotCoords
@@ -4016,7 +4022,7 @@ The user will enter CVV and confirm payment themselves.`,
                     .filter(t => { if (seen.has(t)) return false; seen.add(t); return true; })
                     .slice(0, 12);
                 }).catch(() => []);
-                trace(`[opentable] no time slots found in ±90 min — captured ${capturedAvailableSlots.length} available slot(s): ${capturedAvailableSlots.slice(0, 5).join(", ")}`);
+                trace(`[opentable] no time slots found in ±${timeWindowMins} min — captured ${capturedAvailableSlots.length} available slot(s): ${capturedAvailableSlots.slice(0, 5).join(", ")}`);
                 return false; // signals no_availability to outer loop
               }
             }
@@ -4079,7 +4085,7 @@ The user will enter CVV and confirm payment themselves.`,
                 best.scrollIntoView({ block: "center" });
                 const r = best.getBoundingClientRect();
                 return { x: Math.round(r.left + r.width / 2), y: Math.round(r.top + r.height / 2), text: (best.textContent ?? '').trim().slice(0, 20), diag: best.tagName };
-              }, { reqMins: reqMins2, maxDiff: 90 }).catch(() => null);
+              }, { reqMins: reqMins2, maxDiff: timeWindowMins }).catch(() => null);
 
               if (resySlotCoords?.diag) trace(`[resy] time slot diag: ${resySlotCoords.diag} "${resySlotCoords.text}"`);
 
