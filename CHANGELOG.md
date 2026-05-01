@@ -4,6 +4,18 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [0.2.62.0] - 2026-04-30
+
+### Added
+- **Retry-on-transient in benchmark dispatcher** — `resolveBenchmarkCase` now detects infrastructure-level failures (Neon DB IPv6 connect timeout, Chrome CDP target init race, dispatcher 409 "Job already running" race, socket reset / ECONNRESET / ECONNREFUSED, generic fetch failed) and automatically re-dispatches the case once before finalising as `executor_error`. Tracks `attempt_count` + `retry_history` in `benchmark_cases.audit` jsonb (no schema migration). Max 1 retry (2 attempts total). `parse-decision-log.ts` exports `isTransientError()` + `TRANSIENT_ERROR_PATTERNS` for the gate. (commit `51cf2c4`)
+
+### Verified end-to-end
+- **5/5 still all-expected-outcome on master `51cf2c4`** — no transient flakes triggered the retry path this run, but Tao Downtown reached `succeeded ✓` (1m 21s) inside the concurrent 5/5 dispatch (previously only seen in single-case runs). 5/5 result: L'Artusi 17s no_availability · Tao Downtown 1m 21s succeeded · Carbone 15s no_availability · Lilia 14s no_availability · Cosme 1m 18s payment_stop.
+
+### Known issues / backlog
+- Cosme reaches the Resy reservation modal but classifier still returns `failed/payment_stop` instead of `succeeded`. The `fillGuestForm` path (Resy bookable venue) emits a different (or no) dry_run boundary marker than the `fillPaymentForm` cc-section path that Tao Downtown takes. Worth auditing all four return paths in OT/Resy providers.
+- `allow_platform_switch` in `fallback_policy` still ignored (carried over from 0.2.61.0). Needs venue mapping table or OT-search-by-name fallback handler.
+
 ## [0.2.61.0] - 2026-04-30
 
 ### Added

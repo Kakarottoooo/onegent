@@ -1,5 +1,5 @@
 ================================================================
-Onegent · Travel Execution Layer for AI Agents · v0.2.61.0
+Onegent · Travel Execution Layer for AI Agents · v0.2.62.0
 ================================================================
 
 【一句话定位（2026-04-26 锁定）】
@@ -260,6 +260,71 @@ P5 (3+ Group DR) → P6 (反应+评论) → P7 (通知系统) → P8 (Itinerary 
 - ChatGPT Apps marketplace review 结果（被动等 OpenAI）
 - B2B Lane C cold outreach（4 客户类型 × 5 contacts）
 - Cofounder 搜索
+
+================================================================
+Recent Updates - 2026-04-30 (cont. 5) · retry-on-transient + 5/5 全 expected outcome (含 Tao Downtown succeeded)
+================================================================
+
+Cont. 1-4 累计了 5 类 transient 基建偶发：Neon DB IPv6 connect timeout、
+Chrome CDP target init race、dispatcher 409 race、socket reset。这些不是
+executor 真决定 give up，是"再跑一次就好"。但都 finalize 成 executor_error
+污染 benchmark outcome buckets。
+
+这一轮加 retry-on-transient (1 commit)，max 1 retry，audit jsonb 记录
+retry_history。下次撞 transient 会自动救场，之前那种"重新触发整个 5/5"
+的 workaround 不再需要。
+
+【今天 1 个新 commit（51cf2c4）】
+
+1. **51cf2c4 — feat(benchmark): retry-once on transient infra failures**
+   - 修法：parse-decision-log.ts 加 `TRANSIENT_ERROR_PATTERNS` (9 个 regex)
+     + `isTransientError()`。run-restaurant-benchmark.ts `resolveBenchmarkCase`
+     在 finalize 之前检测：classifier=executor_error + transient pattern +
+     attempt_count<2 → 调 dispatchBenchmarkCase 创建新 booking_job (新 uuid)
+     fire /start，case row 仅 patch audit jsonb 记录 attempt_count + retry_history
+   - 所有状态在 audit jsonb 字段，**不需要 schema migration**
+   - dispatchBenchmarkCase 已经 update status=running + bookingJobId=newJobId，
+     retry path 只 patch audit field，不重复写
+
+【验证：5/5 全 expected outcome on master `51cf2c4`】
+
+| Case | Status | 时长 | 说明 |
+|---|---|---|---|
+| L'Artusi | no_availability ✓ | 17s | OT not on network |
+| **Tao Downtown** | **succeeded ✓** | **1m 21s** | **第一次在 5/5 跑里也 succeeded** |
+| Carbone | no_availability ✓ | 15s | OT permanently closed |
+| Lilia | no_availability ✓ | 14s | Resy May 15 prime time full (window=0) |
+| Cosme | payment_stop ✓ | 1m 18s | Resy bookable, 走 fillGuestForm path 不走 cc-section |
+
+注意 Tao 在 5/5 里也走 succeeded（cont. 4 单 case 跑里第一次看到的）。
+Cosme 仍是 failed/payment_stop 因为 走的是不同 dry_run boundary path
+（fillGuestForm 而不是 fillPaymentForm 的 cc-section path）—— 这是
+classifier 分类问题，不是 executor 问题。要让 Cosme 也 succeeded 需要
+review 整个 dry_run boundary marker 在 fillGuestForm 路径上的 emit。
+
+retry 这一轮 dev.log 0 触发 — 没 transient flake。代码 standby，下次
+基建偶发会自动救场。
+
+【这一轮的关键 lesson】
+
+M. **基建 flake 不该污染产品 outcome buckets**。Neon connect timeout 和
+   CDP race 跟 stagehand 决策无关，要把这种 noise 从分类信号里剥离 —
+   不是改 stagehand，是改 dispatcher 让它知道哪些是 retry-friendly
+
+N. **audit jsonb 字段是免迁移的好工具**。attempt_count + retry_history
+   都塞 jsonb 里，schema 不动，dashboard 想看时随时 parse。强 typed
+   migration 适合 query-by 字段，audit-only 字段没必要
+
+【已知 backlog（cont. 5 后剩余）】
+
+- ~~retry-on-transient~~ ✓ **已修（这一轮）**
+- **Cosme 在 5/5 里仍归类 failed/payment_stop，应是 succeeded** —
+  classifier 分类问题。Cosme 走 `fillGuestForm` path（无 cc section），
+  Resy provider 的 dry_run boundary marker 写在哪？需要 audit 哪条 path
+  和 marker emit point。下一步追查
+- **`allow_platform_switch` 未实现**（cont. 4 backlog 仍开放）— 需要
+  schema migration + 测试 case 调整
+- AI stage assessment 慢（30-60s/call）— bookable 路径占大头延迟
 
 ================================================================
 Recent Updates - 2026-04-30 (cont. 4) · fallback_policy 链路打通 + 第一次 status=succeeded
