@@ -4047,6 +4047,26 @@ The user will enter CVV and confirm payment themselves.`,
                 reqMins2 = h * 60 + m;
               }
 
+              // ── Navigate Resy venue URL with date+seats query params ────────
+              // Without these, Resy defaults to today + 2 covers (often wrong
+              // for the case). e.g. Lilia case=2026-05-15 19:00 but page
+              // showed Apr 30 (today), 19:00 was full → executor clicked
+              // 8:45 PM (75 min off) which the venue actually has → wrong-day
+              // booking. Force the case date so Resy renders the correct day.
+              const taskDateMatchResy = input.task.match(/\bon\s+(20\d{2}-\d{2}-\d{2})\b/);
+              const taskCoversMatchResy = input.task.match(/\bfor\s+(\d+)\s+people\b/i);
+              if (taskDateMatchResy && /resy\.com\/cities\/.+\/venues\//i.test(raw.url())) {
+                const seats = taskCoversMatchResy ? taskCoversMatchResy[1] : "2";
+                const u = new URL(raw.url());
+                if (u.searchParams.get("date") !== taskDateMatchResy[1] || u.searchParams.get("seats") !== seats) {
+                  u.searchParams.set("date", taskDateMatchResy[1]);
+                  u.searchParams.set("seats", seats);
+                  trace(`[resy] navigate w/ params: date=${taskDateMatchResy[1]}&seats=${seats}`);
+                  await raw.goto(u.toString(), { waitUntil: "domcontentloaded", timeout: 15000 }).catch(() => {});
+                  await new Promise((r) => setTimeout(r, 2000));
+                }
+              }
+
               const resySlotCoords = await raw.evaluate(({ reqMins, maxDiff }: { reqMins: number; maxDiff: number }) => {
                 const isVisible = (el: Element) => { const r = (el as HTMLElement).getBoundingClientRect(); return r.width > 0 && r.height > 0; };
                 const parseT = (text: string) => { const m = text.match(/(\d{1,2}):(\d{2})\s*(AM|PM)/i); if (!m) return null; let h = parseInt(m[1], 10); const min = parseInt(m[2], 10); if (m[3].toUpperCase() === "PM" && h < 12) h += 12; if (m[3].toUpperCase() === "AM" && h === 12) h = 0; return h * 60 + min; };
