@@ -27,45 +27,32 @@ import type { RestaurantBenchmarkCase } from "./types";
 
 export const RESTAURANT_BENCHMARK_CASES_NYC: RestaurantBenchmarkCase[] = [
   // ═══════════════════════════════════════════════════════════════════════
-  // EDGE — OT detail page exists but venue not bookable (3 cases here,
-  //        rest of the 8-case edge group is later in the file)
+  // FULLY-AUTOMATED FOCUS SET (cases 001-005, 2026-05-01)
+  //
+  // User curated these 5 OT-confirmed-bookable venues to stress-test the
+  // form-fill chain in isolation — without the no_availability cases
+  // diluting the signal. Each is expected to:
+  //   1. land on /r/<slug> detail page
+  //   2. find a slot at requested time (or ±60 min via C2 ladder)
+  //   3. transit through specials/seating-options preflight (B1)
+  //   4. hit /booking/details
+  //   5. fillGuestForm → firstName=true lastName=true email=true phone=true
+  //   6. emit dry_run boundary marker → fully_automated_success=true
+  //
+  // The 13 OT-happy / 11 Resy-happy / 9 fallback / 8 edge / 4 unsupported /
+  // 3 handoff / 2 verify-gate cases below remain unchanged for the v1
+  // baseline; only the first 5 slots got swapped to focus the signal.
   // ═══════════════════════════════════════════════════════════════════════
   {
     case_id: "nyc_restaurant_001",
     city: "New York",
-    restaurant_name: "L'Artusi",
-    restaurant_url: "https://www.opentable.com/r/lartusi-new-york",
+    restaurant_name: "Fumo Soho",
+    restaurant_url: "https://www.opentable.com/r/fumo-soho-new-york",
     expected_provider: "OpenTable",
-    date: "2026-05-12",
+    date: "2026-05-08",
     time: "19:00",
     party_size: 2,
-    occasion: "date_night",
-    preferences: { atmosphere: "romantic", cuisine: "italian" },
-    fallback_policy: {
-      time_window_minutes: 0,
-      allow_platform_switch: false,
-      allow_venue_switch: false,
-      require_user_approval_before_booking: false,
-    },
-    expected_outcome: "no_availability",
-    category: "edge_not_on_network",
-    notes:
-      "L'Artusi detail page exists but renders 'Not available on OpenTable'. Should classify as no_availability in <15s.",
-  },
-
-  // ═══════════════════════════════════════════════════════════════════════
-  // OT HAPPY PATH (13 cases)
-  // ═══════════════════════════════════════════════════════════════════════
-  {
-    case_id: "nyc_restaurant_002",
-    city: "New York",
-    restaurant_name: "Tao Downtown",
-    restaurant_url: "https://www.opentable.com/r/tao-downtown-new-york",
-    expected_provider: "OpenTable",
-    date: "2026-05-14",
-    time: "19:30",
-    party_size: 2,
-    occasion: "anniversary",
+    occasion: "casual_dinner",
     fallback_policy: {
       time_window_minutes: 60,
       allow_platform_switch: false,
@@ -74,7 +61,87 @@ export const RESTAURANT_BENCHMARK_CASES_NYC: RestaurantBenchmarkCase[] = [
     },
     expected_outcome: "fully_automated",
     category: "ot_happy",
-    notes: "Mid-demand mainstream Asian-fusion. Stable on OpenTable.",
+    notes: "Italian, Soho. User-confirmed bookable on OpenTable 2026-05-01.",
+  },
+  {
+    case_id: "nyc_restaurant_002",
+    city: "New York",
+    restaurant_name: "Wild West Village",
+    restaurant_url: "https://www.opentable.com/wild-west-village",
+    expected_provider: "OpenTable",
+    date: "2026-05-08",
+    time: "19:30",
+    party_size: 2,
+    occasion: "casual_dinner",
+    fallback_policy: {
+      time_window_minutes: 60,
+      allow_platform_switch: false,
+      allow_venue_switch: false,
+      require_user_approval_before_booking: false,
+    },
+    expected_outcome: "fully_automated",
+    category: "ot_happy",
+    notes: "OT vanity URL (no /r/ prefix); should redirect. User-confirmed bookable on OpenTable 2026-05-01.",
+  },
+  {
+    case_id: "nyc_restaurant_003",
+    city: "New York",
+    restaurant_name: "FOOD",
+    restaurant_url: "https://www.opentable.com/r/food-new-york",
+    expected_provider: "OpenTable",
+    date: "2026-05-09",
+    time: "19:00",
+    party_size: 2,
+    occasion: "casual_dinner",
+    fallback_policy: {
+      time_window_minutes: 60,
+      allow_platform_switch: false,
+      allow_venue_switch: false,
+      require_user_approval_before_booking: false,
+    },
+    expected_outcome: "fully_automated",
+    category: "ot_happy",
+    notes: "User-confirmed bookable on OpenTable 2026-05-01.",
+  },
+  {
+    case_id: "nyc_restaurant_004",
+    city: "New York",
+    restaurant_name: "The Clam",
+    restaurant_url: "https://www.opentable.com/the-clam",
+    expected_provider: "OpenTable",
+    date: "2026-05-09",
+    time: "19:30",
+    party_size: 2,
+    occasion: "casual_dinner",
+    fallback_policy: {
+      time_window_minutes: 60,
+      allow_platform_switch: false,
+      allow_venue_switch: false,
+      require_user_approval_before_booking: false,
+    },
+    expected_outcome: "fully_automated",
+    category: "ot_happy",
+    notes: "OT vanity URL (no /r/ prefix); should redirect. User-confirmed bookable on OpenTable 2026-05-01.",
+  },
+  {
+    case_id: "nyc_restaurant_005",
+    city: "New York",
+    restaurant_name: "Mezze on the River",
+    restaurant_url: "https://www.opentable.com/r/mezze-on-the-river-new-york",
+    expected_provider: "OpenTable",
+    date: "2026-05-08",
+    time: "19:00",
+    party_size: 2,
+    occasion: "casual_dinner",
+    fallback_policy: {
+      time_window_minutes: 60,
+      allow_platform_switch: false,
+      allow_venue_switch: false,
+      require_user_approval_before_booking: false,
+    },
+    expected_outcome: "fully_automated",
+    category: "ot_happy",
+    notes: "User-confirmed bookable on OpenTable 2026-05-01.",
   },
   {
     case_id: "nyc_restaurant_003",
