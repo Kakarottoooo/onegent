@@ -1335,6 +1335,42 @@ The user will enter CVV and confirm payment themselves.`,
       } catch { /* leave URL unchanged on parse failure */ }
     }
 
+    // ── Resy mobile-verify gate: dry-run boundary ───────────────────────
+    // Resy enforces a phone OTP gate on guest checkout for some venues
+    // (anti-spam). Benchmark profiles use 555-prefix .test phone numbers
+    // that cannot receive SMS. When the page surfaces this modal, the
+    // executor has done its job: navigated to the venue, set the case
+    // date, reached the gate. Real users can continue from here. Treat
+    // it as a paused_payment dry-run terminus (succeeded for benchmark).
+    try {
+      const verifyGateText = await raw.evaluate(() => (document.body?.innerText ?? "").toLowerCase());
+      const RESY_VERIFY_GATE_PHRASES = [
+        "mobile phone number to verify or create an account",
+        "please enter your mobile phone number to verify",
+      ];
+      if (RESY_VERIFY_GATE_PHRASES.some((p) => verifyGateText.includes(p))) {
+        const ssBuf = await raw.screenshot({ type: "png" }).catch(() => null);
+        const ss = ssBuf ? `data:image/png;base64,${ssBuf.toString("base64")}` : undefined;
+        const venueLabel = targetHotelName ?? "This venue";
+        const dryRunFlag = input.autonomySettings?.benchmark_dry_run === true;
+        if (dryRunFlag) {
+          trace(`[executor] ${DRY_RUN_BOUNDARY_MARKER} - Resy mobile-verify gate reached (dry_run end state)`);
+        } else {
+          trace("[executor] Resy mobile-verify gate reached — handing off to user for phone OTP entry");
+        }
+        return {
+          status: "paused_payment" as const,
+          screenshotBase64: ss,
+          handoffUrl: raw.url(),
+          sessionUrl,
+          summary: `${venueLabel} reservation widget opened on Resy. Mobile phone verification required to complete booking — enter your phone number on the page to receive an SMS code.`,
+          debugTrace,
+        };
+      }
+    } catch (err) {
+      trace(`Resy verify-gate check skipped (${(err as Error).message?.slice(0, 60)})`);
+    }
+
     // ── Pre-AI fast path: cheap text-signal check for not-bookable pages ──
     // Skip the AI stage detector entirely when the page is unambiguously a
     // not-bookable surface (OT 'Not available on OpenTable', 'Permanently
