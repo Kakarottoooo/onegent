@@ -88,18 +88,21 @@ export function classifyBoundaryStage(
  * Inspect decisionLog for the provider's `[opentable] guest form filled: ...`
  * or `[resy] guest form filled: ...` trace and extract per-field outcome.
  *
- * Provider trace shape (from opentable-com.ts / resy-com.ts):
- *   "[opentable] guest form filled: firstName=true lastName=true email=true phone=true"
- *   "[resy] guest form filled: firstName=not_found lastName=true email=true phone=not_found"
+ * Each field has three possible outcomes:
+ *   - "true"      → field was visible AND filled successfully
+ *   - "not_found" → field was NOT on the page (e.g. OT email-only form
+ *                   doesn't show firstName/lastName until after OTP)
+ *   - any other   → field was visible but fill failed (real failure)
  *
- * Each field can be one of: "true", "false", or "not_found" — we treat only
- * "true" as actually filled. Returns null if no such trace was emitted (i.e.
- * the executor never reached the provider's fillGuestForm step).
+ * Run 12 dig (Fumo Soho): OT's /booking/details renders an email-only
+ * Diner-details form — firstName / lastName / phone are intentionally
+ * absent from this page (OT collects them on the next step after email
+ * verification). Treating not_found as failure was unfair to OT cases.
  *
- * Used by deriveV1Flags to gate fully_automated_success on the form actually
- * being filled — without this gate, run 6 case 002 (Tao Downtown) was marked
- * fully_automated even though only `email=true` and the other 3 fields were
- * `not_found` (user requirement: all 4 fields must be true to count).
+ * `allFilled` now reflects "every visible field was filled" — i.e. there
+ * is at least one filled field AND no field was visible-but-failed. This
+ * is what the user means by "the form was successfully filled to the
+ * dry_run boundary."
  */
 export function parseGuestFormFillResult(
   decisionLog: DecisionLogEntryLike[] | null | undefined,
@@ -111,19 +114,36 @@ export function parseGuestFormFillResult(
     const m = typeof decisionLog[i]?.message === "string" ? decisionLog[i].message : "";
     if (!m) continue;
     if (!/guest form filled:/i.test(m)) continue;
-    const get = (field: string): boolean => {
+    type FieldOutcome = "filled" | "not_visible" | "failed" | "absent";
+    const getOutcome = (field: string): FieldOutcome => {
       const re = new RegExp(`${field}=([a-z_]+)`, "i");
       const match = m.match(re);
-      return match ? match[1].toLowerCase() === "true" : false;
+      if (!match) return "absent"; // trace doesn't mention this field at all
+      const v = match[1].toLowerCase();
+      if (v === "true") return "filled";
+      if (v === "not_found") return "not_visible";
+      return "failed"; // "false", or any other non-"true" non-"not_found" value
     };
+    const fnOut = getOutcome("firstName");
+    const lnOut = getOutcome("lastName");
+    const emOut = getOutcome("email");
+    const phOut = getOutcome("phone");
+    const outcomes = [fnOut, lnOut, emOut, phOut];
+    const visibleAndFilled = outcomes.filter((o) => o === "filled").length;
+    const visibleAndFailed = outcomes.filter((o) => o === "failed").length;
+    const get = (o: FieldOutcome): boolean => o === "filled";
     const r = {
-      firstName: get("firstName"),
-      lastName: get("lastName"),
-      email: get("email"),
-      phone: get("phone"),
+      firstName: get(fnOut),
+      lastName: get(lnOut),
+      email: get(emOut),
+      phone: get(phOut),
       allFilled: false,
     };
-    r.allFilled = r.firstName && r.lastName && r.email && r.phone;
+    // Honest fully_automated: at least one visible field filled AND no
+    // visible field failed. not_visible / absent are N/A — they don't
+    // count for or against (e.g. OT email-only form has email visible
+    // and the other 3 not_visible — that's a 1/1 fill, not a 1/4 fill).
+    r.allFilled = visibleAndFilled > 0 && visibleAndFailed === 0;
     return r;
   }
   return null;
