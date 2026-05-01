@@ -102,7 +102,54 @@ export async function hasVisibleCheckoutFields(
     categoryKeys.has("card_expiry") ||
     categoryKeys.has("cardholder");
 
-  return categoryKeys.size >= 2 && (hasGuestIdentity || hasPaymentFields);
+  if (categoryKeys.size >= 2 && (hasGuestIdentity || hasPaymentFields)) {
+    return true;
+  }
+
+  // ── RC C-2 fallback ───────────────────────────────────────────────────
+  // Playwright's locator-based scan (deps.getVisibleFieldCategoryKeys via
+  // getVisibleEditableFields/isEditable) misses inputs inside fixed-position
+  // modals on some sites — most notably OpenTable's reservation modal,
+  // which renders as a full-screen <div role="dialog" position:fixed> on
+  // top of the /r/<slug> page. Playwright's auto-wait + scope filtering
+  // returned empty, but a raw page.evaluate finds the inputs reliably.
+  // This fallback uses the same modal-friendly visibility check we use
+  // in opentable-com / resy-com providers (see RC C fix).
+  return await rawPage.evaluate(() => {
+    const isShown = (el: HTMLElement): boolean => {
+      if (el.hidden || !el.isConnected) return false;
+      const rect = el.getBoundingClientRect();
+      if (rect.width === 0 || rect.height === 0) return false;
+      const style = window.getComputedStyle(el);
+      return style.display !== "none" && style.visibility !== "hidden" && style.opacity !== "0";
+    };
+    const inputs = Array.from(document.querySelectorAll<HTMLInputElement>("input"))
+      .filter((el) => el.type !== "hidden" && !el.disabled && isShown(el));
+    if (inputs.length < 2) return false;
+    let guestCount = 0;
+    let paymentCount = 0;
+    for (const el of inputs) {
+      const text = (
+        (el.placeholder ?? "") + " " +
+        (el.getAttribute("aria-label") ?? "") + " " +
+        (el.name ?? "") + " " +
+        (el.id ?? "") + " " +
+        (el.autocomplete ?? "")
+      ).toLowerCase();
+      const isGuest =
+        text.includes("first") || text.includes("last") || text.includes("full name") ||
+        text.includes("email") || text.includes("phone") || text.includes("mobile") ||
+        el.type === "email" || el.type === "tel";
+      const isPayment =
+        text.includes("card number") || text.includes("cardnumber") || text.includes("cc-number") ||
+        text.includes("cvc") || text.includes("cvv") || text.includes("security code") ||
+        text.includes("expir") || text.includes("mm/yy") || text.includes("name on card");
+      if (isGuest) guestCount += 1;
+      if (isPayment) paymentCount += 1;
+    }
+    // Need ≥2 distinct guest/payment fields total to call this a checkout form.
+    return guestCount + paymentCount >= 2;
+  }).catch(() => false);
 }
 
 async function hasVisibleAdvanceButton(

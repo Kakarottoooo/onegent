@@ -4921,6 +4921,16 @@ The user will enter CVV and confirm payment themselves.`,
       }
     };
 
+    // ── RC F: progress detection ──────────────────────────────────────
+    // The recovery loop runs up to 8 iterations × ~50s each = ~7 min, which
+    // hits the executor's hard 7-min cap and produces a provider_timeout.
+    // If two consecutive iterations show the same URL + same stage, the
+    // executor is spinning (e.g. clicking Reserve repeatedly with no DOM
+    // change) and should bail out instead of timing out at 7 min.
+    let prevUrlForProgress = currentUrl;
+    let prevStageForProgress: string = assessment.stage;
+    let stagnantIterations = 0;
+
     for (let attempt = 0; attempt < 8; attempt += 1) {
       trace(`Stage assessment ${attempt + 1}: ${assessment.stage} —?${assessment.reason}`);
 
@@ -5057,6 +5067,26 @@ The user will enter CVV and confirm payment themselves.`,
       });
       pageText = assessment.pageText;
       currentUrl = assessment.currentUrl;
+
+      // ── RC F progress detection ─────────────────────────────────────
+      // After re-assessment, check whether anything actually changed. If
+      // URL + stage are identical to the previous iteration, the click
+      // we just did had no effect. Two consecutive no-progress iterations
+      // → break out so the executor falls through to terminal state with
+      // current stage, instead of spinning until the 7-min hard cap.
+      if (currentUrl === prevUrlForProgress && assessment.stage === prevStageForProgress) {
+        stagnantIterations += 1;
+        if (stagnantIterations >= 2) {
+          trace(
+            `[recovery] no progress for 2 iterations (URL + stage unchanged at ${assessment.stage}) — breaking out to avoid 7-min timeout`,
+          );
+          break;
+        }
+      } else {
+        stagnantIterations = 0;
+        prevUrlForProgress = currentUrl;
+        prevStageForProgress = assessment.stage;
+      }
     }
 
     // Post-loop drift guard: the for-loop may have exited (attempt limit or !acted) while the

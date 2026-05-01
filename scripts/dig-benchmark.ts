@@ -37,14 +37,15 @@ loadDotenv();
 import { sql } from "../lib/db";
 
 const FOCUS_CASES = [
-  "nyc_restaurant_005", // Cosme — verify-gate / Reserve Now not clicked
-  "nyc_restaurant_009", // Gramercy Tavern — guest form blank
-  "nyc_restaurant_011", // Nobu — seating-options stuck
-  "nyc_restaurant_014", // The Modern — 0s fail
-  "nyc_restaurant_016", // The Modern — false success (expected no_availability)
-  "nyc_restaurant_017", // Tao Downtown — 0s fail
-  "nyc_restaurant_028", // Le Bernardin — succeeded (expected no_availability)
-  "nyc_restaurant_037", // Tao party=20 — succeeded (expected no_availability)
+  // Run 3 dig: focus on provider_timeout (5 new cases) + verify RC C fix
+  "nyc_restaurant_005", // Cosme — succeeded payment_stop 1m3s (was 3m36s)
+  "nyc_restaurant_009", // Gramercy Tavern — succeeded payment_stop 2m56s
+  "nyc_restaurant_010", // Gramercy Tavern — provider_timeout 6m59s (NEW)
+  "nyc_restaurant_011", // Nobu — succeeded payment_stop 5m54s
+  "nyc_restaurant_014", // The Modern — provider_timeout 6m59s (NEW)
+  "nyc_restaurant_017", // Tao Downtown — provider_timeout 6m59s (NEW)
+  "nyc_restaurant_018", // Don Angie — provider_timeout 7m1s (NEW)
+  "nyc_restaurant_020", // Daniel — executor_error 5m57s
 ];
 
 async function main() {
@@ -98,10 +99,10 @@ async function main() {
       console.log(`step.error = ${step.error.slice(0, 300)}`);
     }
     const log = step.decisionLog ?? [];
-    console.log(`decisionLog has ${log.length} entries; last 12:`);
-    for (const entry of log.slice(-12)) {
+    console.log(`decisionLog has ${log.length} entries; last 18:`);
+    for (const entry of log.slice(-18)) {
       const t = entry.type ?? "—";
-      const m = (entry.message ?? "").slice(0, 200);
+      const m = (entry.message ?? "").slice(0, 220);
       console.log(`  [${t}] ${m}`);
     }
     console.log();
