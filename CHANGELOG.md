@@ -20,8 +20,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ### Known issues / backlog
 - **Lilia (Resy) click-after-slot instability** — `[resy] time slot diag: BUTTON "8:45 PM Dining Room"` clicks but next stage assessment still sees `listing`. Suspected Resy popup-modal timing race; needs dedicated investigation.
-- **5/5 concurrent CDP target race** — when 5 stagehand sessions spin up simultaneously, 1–2 cases occasionally hit `No Page found for target closed before CDP response`. Consider stagehand startup throttling or concurrency cap of 3.
-- Dashboard `duration_seconds` cosmetic display bug from 0.2.58.0 still present; DB rows are accurate.
+- ~~5/5 concurrent CDP target race~~ ✓ **fixed in `48f5908`** — dispatcher now sleeps 500 ms between case dispatches in `runRestaurantBenchmark`. Verified: 0 CDP races on the next 5/5 run, all cases got real runtimes (12s/13s/27s/52s/1m 38s). Adds 2 s to a full 5-case run.
+- Dashboard `duration_seconds` cosmetic display bug noted in 0.2.58.0 was actually masking the CDP race — when stagehand crashed in 1 s, the duration was correctly 1 s. With the race fixed, no false short durations seen.
 - AI stage assessment latency (30–60s/call) on bookable paths still saved only by pre-AI fast path for not-bookable.
 
 ## [0.2.58.0] - 2026-04-30

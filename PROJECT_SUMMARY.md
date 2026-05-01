@@ -381,9 +381,10 @@ Lilia 30s executor_error 是单独 Resy click-after-slot 行为不稳定，
   `[resy] time slot diag: BUTTON "8:45 PMDining Room"` → click → 但下次
   stage assessment 仍是 listing，没进 confirmation modal。可能是 Resy
   pop-up modal 没正确等待
-- **5/5 并发 CDP target race**：5 个 stagehand session 同时启动时偶发
-  `No Page found for target closed before CDP response`，1-2 个 case 受影响。
-  考虑 stagehand 启动错峰或限并发到 3 个
+- ~~5/5 并发 CDP target race~~ ✓ **已修（commit 48f5908 / 2026-04-30）**
+  Fix: dispatcher loop 在每个 dispatch 后 sleep 500ms 错峰 chrome 启动。
+  Verified: 5/5 跑完 0 个 CDP race，所有 case 跑真实时长 (12-100s)。
+  代价 +2s on full 5-case run（acceptable 在 60-120s 总时长上）
 - **Dashboard duration 显示 bug**：依然存在（不影响 DB 数据），cosmetic
 - **AI stage assessment 慢（30-60s/call）**：bookable 路径还是慢，pre-AI
   fast path 只救了 not-bookable 路径
