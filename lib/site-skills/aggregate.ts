@@ -164,6 +164,12 @@ export async function refreshProviderSkills(): Promise<RefreshResult> {
     human_handoff_required: Boolean(r.human_handoff_required),
     duration_seconds: r.duration_seconds == null ? null : Number(r.duration_seconds),
     audit: (r.audit as Record<string, unknown> | null) ?? null,
+    safe_outcome: Boolean(r.safe_outcome),
+    fully_automated_success: Boolean(r.fully_automated_success),
+    verify_gate_triggered: Boolean(r.verify_gate_triggered),
+    deep_link_handoff_triggered: Boolean(r.deep_link_handoff_triggered),
+    wrong_action_taken: Boolean(r.wrong_action_taken),
+    unsupported_platform_detected: Boolean(r.unsupported_platform_detected),
     created_at:
       r.created_at instanceof Date ? r.created_at.toISOString() : String(r.created_at),
     completed_at:

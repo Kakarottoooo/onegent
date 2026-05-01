@@ -316,6 +316,12 @@ export async function resolveBenchmarkCase(
     failureReason: classification.failure_reason,
     paymentStopTriggered: classification.payment_stop_triggered,
     humanHandoffRequired: classification.human_handoff_required,
+    safeOutcome: classification.safe_outcome,
+    fullyAutomatedSuccess: classification.fully_automated_success,
+    verifyGateTriggered: classification.verify_gate_triggered,
+    deepLinkHandoffTriggered: classification.deep_link_handoff_triggered,
+    wrongActionTaken: classification.wrong_action_taken,
+    unsupportedPlatformDetected: classification.unsupported_platform_detected,
     durationSeconds,
     audit: {
       ...previousAudit,

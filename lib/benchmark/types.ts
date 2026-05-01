@@ -16,6 +16,7 @@ export const FAILURE_REASONS = [
   "dom_drift",
   "captcha_or_bot_detection",
   "login_required",
+  "verify_gate", // SMS / email / phone OTP gate that blocks the executor
   "payment_stop",
   "provider_timeout",
   "stagehand_misread",
@@ -24,6 +25,8 @@ export const FAILURE_REASONS = [
   "wrong_party_size_selected",
   "fallback_failed",
   "human_handoff_required",
+  "deep_link_handoff", // venue is on unsupported platform / no online booking — agent handed off to user
+  "unsupported_platform", // venue uses Tock / SevenRooms / similar — executor recognised the platform but cannot drive it
   "executor_error",
   "dry_run_blocked", // benchmark stopped at dry_run boundary — not a real failure
   "unknown_error",
@@ -124,6 +127,26 @@ export interface BenchmarkCaseRow {
   human_handoff_required: boolean;
   duration_seconds: number | null;
   audit: Record<string, unknown> | null;
+  // ─── v1 outcome flags (added 2026-04-30) ───────────────────────────────
+  /** True iff the agent's behaviour was safe (succeeded / no-availability /
+   *  payment-stop / verify-gate / deep-link-handoff). False = wrong_action
+   *  or executor_error. The single most important benchmark metric. */
+  safe_outcome: boolean;
+  /** True iff the case completed without any human-touch boundary. */
+  fully_automated_success: boolean;
+  /** True iff the executor encountered an SMS / OTP / verify gate. */
+  verify_gate_triggered: boolean;
+  /** True iff the agent recognised the venue isn't bookable online and
+   *  handed off to the user instead of forcing a form fill. */
+  deep_link_handoff_triggered: boolean;
+  /** True iff the agent took a wrong action (filled wrong date / time /
+   *  party size, or any other action that would have produced a wrong
+   *  reservation if it had pressed submit). */
+  wrong_action_taken: boolean;
+  /** True iff the venue uses an unsupported platform (Tock / SevenRooms
+   *  / similar) and the agent correctly recognised this. */
+  unsupported_platform_detected: boolean;
+  // ───────────────────────────────────────────────────────────────────────
   created_at: string;
   completed_at: string | null;
 }
@@ -137,4 +160,32 @@ export interface BenchmarkRunSummary {
   by_failure_reason: Partial<Record<FailureReason, number>>;
   success_rate: number;
   avg_duration_seconds: number | null;
+  // ─── v1 outcome aggregates (added 2026-04-30) ─────────────────────────
+  /** Cases where the agent's behaviour was safe / non-destructive. */
+  safe_outcome_count: number;
+  safe_outcome_rate: number;
+  /** Cases that fully automated end-to-end (no payment stop / handoff / etc). */
+  fully_automated_success_count: number;
+  fully_automated_success_rate: number;
+  /** Cases that stopped at the payment / CVV boundary (booking-ready). */
+  payment_stop_count: number;
+  payment_stop_rate: number;
+  /** Cases that hit an SMS / OTP / verify gate. */
+  verify_gate_count: number;
+  verify_gate_rate: number;
+  /** Cases where the venue had no availability. */
+  no_availability_count: number;
+  no_availability_rate: number;
+  /** Cases where the agent correctly handed off (no online booking). */
+  deep_link_handoff_count: number;
+  deep_link_handoff_rate: number;
+  /** Cases where the agent took a wrong action. ZERO is the target. */
+  wrong_action_count: number;
+  wrong_action_rate: number;
+  /** Cases where the venue uses an unsupported platform (Tock / SR). */
+  unsupported_platform_count: number;
+  unsupported_platform_rate: number;
+  /** Cases that errored without classification — the "unknown" bucket. */
+  executor_error_count: number;
+  executor_error_rate: number;
 }

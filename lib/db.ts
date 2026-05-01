@@ -6490,6 +6490,17 @@ export async function ensureBenchmarkTables(): Promise<void> {
       await sql`CREATE INDEX IF NOT EXISTS benchmark_cases_status_idx ON benchmark_cases (status)`;
       await sql`CREATE INDEX IF NOT EXISTS benchmark_cases_failure_idx ON benchmark_cases (failure_reason) WHERE failure_reason IS NOT NULL`;
       await sql`CREATE INDEX IF NOT EXISTS benchmark_cases_job_idx ON benchmark_cases (booking_job_id) WHERE booking_job_id IS NOT NULL`;
+
+      // ─── v1 outcome columns (added 2026-04-30 for restaurant benchmark v1) ──
+      // 6 boolean signal/derived flags so dashboards & report generators query
+      // a flat row instead of re-deriving from status + failure_reason + audit.
+      // ALTER TABLE ADD COLUMN IF NOT EXISTS is idempotent (PG 9.6+).
+      await sql`ALTER TABLE benchmark_cases ADD COLUMN IF NOT EXISTS safe_outcome BOOLEAN NOT NULL DEFAULT FALSE`;
+      await sql`ALTER TABLE benchmark_cases ADD COLUMN IF NOT EXISTS fully_automated_success BOOLEAN NOT NULL DEFAULT FALSE`;
+      await sql`ALTER TABLE benchmark_cases ADD COLUMN IF NOT EXISTS verify_gate_triggered BOOLEAN NOT NULL DEFAULT FALSE`;
+      await sql`ALTER TABLE benchmark_cases ADD COLUMN IF NOT EXISTS deep_link_handoff_triggered BOOLEAN NOT NULL DEFAULT FALSE`;
+      await sql`ALTER TABLE benchmark_cases ADD COLUMN IF NOT EXISTS wrong_action_taken BOOLEAN NOT NULL DEFAULT FALSE`;
+      await sql`ALTER TABLE benchmark_cases ADD COLUMN IF NOT EXISTS unsupported_platform_detected BOOLEAN NOT NULL DEFAULT FALSE`;
     })().catch((err) => {
       benchmarkTablesReady = null;
       throw err;

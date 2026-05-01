@@ -28,6 +28,21 @@ export interface ClassifiedCaseResult {
   failure_reason: FailureReason | null;
   payment_stop_triggered: boolean;
   human_handoff_required: boolean;
+  // ─── v1 outcome flags (added 2026-04-30) ─────────────────────────────
+  /** Safe = success OR (no_availability / payment_stop / verify_gate /
+   *  deep_link_handoff / unsupported_platform). Wrong action = false. */
+  safe_outcome: boolean;
+  /** Boundary hit AND no human-touch boundary (no payment_stop, handoff,
+   *  or verify_gate). The "true full automation" rate. */
+  fully_automated_success: boolean;
+  /** Executor encountered an SMS / OTP / email verify gate. */
+  verify_gate_triggered: boolean;
+  /** Executor recognised venue isn't online-bookable and handed off. */
+  deep_link_handoff_triggered: boolean;
+  /** Executor took a wrong action (wrong date / time / party size). */
+  wrong_action_taken: boolean;
+  /** Venue uses Tock / SevenRooms / similar unsupported platform. */
+  unsupported_platform_detected: boolean;
 }
 
 /**
@@ -43,6 +58,109 @@ export function decisionLogHitDryRunBoundary(
       typeof entry?.message === "string" &&
       entry.message.includes(DRY_RUN_BOUNDARY_MARKER),
   );
+}
+
+/** Scan decisionLog for verify-gate signals. */
+export function decisionLogHitVerifyGate(
+  decisionLog: DecisionLogEntryLike[] | null | undefined,
+): boolean {
+  if (!decisionLog || decisionLog.length === 0) return false;
+  return decisionLog.some((entry) => {
+    const m = typeof entry?.message === "string" ? entry.message.toLowerCase() : "";
+    return (
+      m.includes("verify-gate") ||
+      m.includes("verify gate") ||
+      m.includes("mobile-verify") ||
+      m.includes("mobile verify") ||
+      m.includes("phone otp") ||
+      m.includes("sms verify") ||
+      m.includes("sms-verify")
+    );
+  });
+}
+
+/** Scan decisionLog for deep-link handoff signals. */
+export function decisionLogHitDeepLinkHandoff(
+  decisionLog: DecisionLogEntryLike[] | null | undefined,
+): boolean {
+  if (!decisionLog || decisionLog.length === 0) return false;
+  return decisionLog.some((entry) => {
+    const m = typeof entry?.message === "string" ? entry.message.toLowerCase() : "";
+    return (
+      m.includes("deep_link_handoff") ||
+      m.includes("deep-link handoff") ||
+      m.includes("no online booking") ||
+      m.includes("not bookable online") ||
+      m.includes("handing off to user")
+    );
+  });
+}
+
+/** Scan decisionLog for unsupported-platform signals. */
+export function decisionLogHitUnsupportedPlatform(
+  decisionLog: DecisionLogEntryLike[] | null | undefined,
+): boolean {
+  if (!decisionLog || decisionLog.length === 0) return false;
+  return decisionLog.some((entry) => {
+    const m = typeof entry?.message === "string" ? entry.message.toLowerCase() : "";
+    return (
+      m.includes("unsupported_platform") ||
+      m.includes("unsupported platform") ||
+      m.includes("platform not supported")
+    );
+  });
+}
+
+const WRONG_ACTION_REASONS = new Set<FailureReason>([
+  "wrong_date_selected",
+  "wrong_time_selected",
+  "wrong_party_size_selected",
+]);
+
+const SAFE_OUTCOME_REASONS = new Set<FailureReason>([
+  "no_availability",
+  "payment_stop",
+  "verify_gate",
+  "deep_link_handoff",
+  "unsupported_platform",
+  "dry_run_blocked",
+]);
+
+/** Compute the v1 derived outcome flags from a base classification. */
+function deriveV1Flags(
+  base: Pick<
+    ClassifiedCaseResult,
+    "success" | "failure_reason" | "payment_stop_triggered" | "human_handoff_required"
+  >,
+  signals: {
+    verify_gate: boolean;
+    deep_link_handoff: boolean;
+    unsupported_platform: boolean;
+  },
+): {
+  safe_outcome: boolean;
+  fully_automated_success: boolean;
+  wrong_action_taken: boolean;
+} {
+  const wrongAction =
+    base.failure_reason !== null && WRONG_ACTION_REASONS.has(base.failure_reason);
+  const reasonSafe =
+    base.failure_reason === null ||
+    SAFE_OUTCOME_REASONS.has(base.failure_reason);
+  const safe =
+    !wrongAction &&
+    (base.success || reasonSafe || signals.verify_gate || signals.deep_link_handoff);
+  const fully =
+    base.success &&
+    !base.payment_stop_triggered &&
+    !base.human_handoff_required &&
+    !signals.verify_gate &&
+    !signals.deep_link_handoff;
+  return {
+    safe_outcome: safe,
+    fully_automated_success: fully,
+    wrong_action_taken: wrongAction,
+  };
 }
 
 /**
@@ -67,63 +185,133 @@ export function classifyStepResult(
   step: BenchmarkBookingStep,
 ): ClassifiedCaseResult {
   const boundaryHit = decisionLogHitDryRunBoundary(step.decisionLog);
+  const verifyGate = decisionLogHitVerifyGate(step.decisionLog);
+  const handoff = decisionLogHitDeepLinkHandoff(step.decisionLog);
+  const unsupported = decisionLogHitUnsupportedPlatform(step.decisionLog);
 
-  if (boundaryHit) {
-    return {
-      status: "succeeded",
-      success: true,
-      failure_reason: null,
-      payment_stop_triggered: false,
-      human_handoff_required: false,
-    };
-  }
+  // Build the base classification (status / success / failure_reason /
+  // payment_stop / human_handoff). v1 derived flags get layered on at the
+  // end so every return path picks them up uniformly.
+  const base = (() => {
+    if (boundaryHit) {
+      // Verify gate hit before payment → succeeded but classifier should
+      // surface verify_gate as the reason (success + verify_gate is a valid
+      // safe outcome, not a "real" full-automation success).
+      if (verifyGate) {
+        return {
+          status: "succeeded" as BenchmarkCaseStatus,
+          success: true,
+          failure_reason: "verify_gate" as FailureReason,
+          payment_stop_triggered: false,
+          human_handoff_required: true,
+        };
+      }
+      if (handoff) {
+        return {
+          status: "succeeded" as BenchmarkCaseStatus,
+          success: true,
+          failure_reason: "deep_link_handoff" as FailureReason,
+          payment_stop_triggered: false,
+          human_handoff_required: true,
+        };
+      }
+      return {
+        status: "succeeded" as BenchmarkCaseStatus,
+        success: true,
+        failure_reason: null,
+        payment_stop_triggered: false,
+        human_handoff_required: false,
+      };
+    }
 
-  switch (step.status) {
-    case "no_availability":
-      return {
-        status: "failed",
-        success: false,
-        failure_reason: "no_availability",
-        payment_stop_triggered: false,
-        human_handoff_required: false,
-      };
-    case "awaiting_confirmation":
-      // Reached the payment / confirmation page but boundary marker didn't
-      // fire. Means the provider either doesn't have a boundary yet, or the
-      // executor reached payment via a non-fillGuestForm path. Either way
-      // payment-stop is a sensible classification for benchmark purposes.
-      return {
-        status: "failed",
-        success: false,
-        failure_reason: "payment_stop",
-        payment_stop_triggered: true,
-        human_handoff_required: true,
-      };
-    case "error":
-      return {
-        status: "failed",
-        success: false,
-        failure_reason: classifyError(step.error ?? ""),
-        payment_stop_triggered: false,
-        human_handoff_required: false,
-      };
-    case "done":
-      return {
-        status: "failed",
-        success: false,
-        failure_reason: "executor_error",
-        payment_stop_triggered: false,
-        human_handoff_required: false,
-      };
-    default:
-      return {
-        status: "failed",
-        success: false,
-        failure_reason: "unknown_error",
-        payment_stop_triggered: false,
-        human_handoff_required: false,
-      };
-  }
+    switch (step.status) {
+      case "no_availability":
+        return {
+          status: "failed" as BenchmarkCaseStatus,
+          success: false,
+          failure_reason: "no_availability" as FailureReason,
+          payment_stop_triggered: false,
+          human_handoff_required: false,
+        };
+      case "awaiting_confirmation":
+        return {
+          status: "failed" as BenchmarkCaseStatus,
+          success: false,
+          failure_reason: "payment_stop" as FailureReason,
+          payment_stop_triggered: true,
+          human_handoff_required: true,
+        };
+      case "error":
+        // verify-gate / handoff / unsupported can all surface as 'error'
+        // status with no boundary marker (e.g. timeout because executor
+        // got stuck on the gate). Promote those signals over generic
+        // executor_error.
+        if (verifyGate) {
+          return {
+            status: "failed" as BenchmarkCaseStatus,
+            success: false,
+            failure_reason: "verify_gate" as FailureReason,
+            payment_stop_triggered: false,
+            human_handoff_required: true,
+          };
+        }
+        if (handoff) {
+          return {
+            status: "failed" as BenchmarkCaseStatus,
+            success: false,
+            failure_reason: "deep_link_handoff" as FailureReason,
+            payment_stop_triggered: false,
+            human_handoff_required: true,
+          };
+        }
+        if (unsupported) {
+          return {
+            status: "failed" as BenchmarkCaseStatus,
+            success: false,
+            failure_reason: "unsupported_platform" as FailureReason,
+            payment_stop_triggered: false,
+            human_handoff_required: true,
+          };
+        }
+        return {
+          status: "failed" as BenchmarkCaseStatus,
+          success: false,
+          failure_reason: classifyError(step.error ?? ""),
+          payment_stop_triggered: false,
+          human_handoff_required: false,
+        };
+      case "done":
+        return {
+          status: "failed" as BenchmarkCaseStatus,
+          success: false,
+          failure_reason: "executor_error" as FailureReason,
+          payment_stop_triggered: false,
+          human_handoff_required: false,
+        };
+      default:
+        return {
+          status: "failed" as BenchmarkCaseStatus,
+          success: false,
+          failure_reason: "unknown_error" as FailureReason,
+          payment_stop_triggered: false,
+          human_handoff_required: false,
+        };
+    }
+  })();
+
+  const derived = deriveV1Flags(base, {
+    verify_gate: verifyGate,
+    deep_link_handoff: handoff,
+    unsupported_platform: unsupported,
+  });
+
+  return {
+    ...base,
+    ...derived,
+    verify_gate_triggered: verifyGate,
+    deep_link_handoff_triggered: handoff,
+    unsupported_platform_detected: unsupported,
+  };
 }
 
 /**

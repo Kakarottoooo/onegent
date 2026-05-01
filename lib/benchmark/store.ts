@@ -64,6 +64,12 @@ function toCaseRow(r: Record<string, unknown>): BenchmarkCaseRow {
     human_handoff_required: Boolean(r.human_handoff_required),
     duration_seconds: r.duration_seconds == null ? null : Number(r.duration_seconds),
     audit: (r.audit as Record<string, unknown> | null) ?? null,
+    safe_outcome: Boolean(r.safe_outcome),
+    fully_automated_success: Boolean(r.fully_automated_success),
+    verify_gate_triggered: Boolean(r.verify_gate_triggered),
+    deep_link_handoff_triggered: Boolean(r.deep_link_handoff_triggered),
+    wrong_action_taken: Boolean(r.wrong_action_taken),
+    unsupported_platform_detected: Boolean(r.unsupported_platform_detected),
     created_at:
       r.created_at instanceof Date
         ? r.created_at.toISOString()
@@ -203,6 +209,14 @@ export interface UpdateBenchmarkCaseInput {
   humanHandoffRequired?: boolean;
   durationSeconds?: number | null;
   audit?: Record<string, unknown> | null;
+  // ─── v1 outcome flags — set by classifier on case finalize ────────────
+  safeOutcome?: boolean;
+  fullyAutomatedSuccess?: boolean;
+  verifyGateTriggered?: boolean;
+  deepLinkHandoffTriggered?: boolean;
+  wrongActionTaken?: boolean;
+  unsupportedPlatformDetected?: boolean;
+  // ──────────────────────────────────────────────────────────────────────
   /** When true, sets completed_at = NOW() and bumps run.success_cases if success. */
   finalize?: boolean;
 }
@@ -252,6 +266,17 @@ export async function updateBenchmarkCase(
     values.push(patch.audit == null ? null : JSON.stringify(patch.audit));
     sets.push(`audit = $${values.length}::jsonb`);
   }
+  if (patch.safeOutcome !== undefined) push("safe_outcome", patch.safeOutcome);
+  if (patch.fullyAutomatedSuccess !== undefined)
+    push("fully_automated_success", patch.fullyAutomatedSuccess);
+  if (patch.verifyGateTriggered !== undefined)
+    push("verify_gate_triggered", patch.verifyGateTriggered);
+  if (patch.deepLinkHandoffTriggered !== undefined)
+    push("deep_link_handoff_triggered", patch.deepLinkHandoffTriggered);
+  if (patch.wrongActionTaken !== undefined)
+    push("wrong_action_taken", patch.wrongActionTaken);
+  if (patch.unsupportedPlatformDetected !== undefined)
+    push("unsupported_platform_detected", patch.unsupportedPlatformDetected);
   if (patch.finalize) {
     sets.push(`completed_at = NOW()`);
   }
@@ -318,6 +343,16 @@ export async function summarizeBenchmarkRun(
   let durationCount = 0;
   let successCount = 0;
 
+  let safe = 0;
+  let fully = 0;
+  let paymentStop = 0;
+  let verifyGate = 0;
+  let noAvail = 0;
+  let handoff = 0;
+  let wrongAction = 0;
+  let unsupported = 0;
+  let executorErr = 0;
+
   for (const c of cases) {
     by_status[c.status] = (by_status[c.status] ?? 0) + 1;
     if (c.failure_reason) {
@@ -329,8 +364,19 @@ export async function summarizeBenchmarkRun(
       durationSum += c.duration_seconds;
       durationCount += 1;
     }
+    if (c.safe_outcome) safe += 1;
+    if (c.fully_automated_success) fully += 1;
+    if (c.payment_stop_triggered) paymentStop += 1;
+    if (c.verify_gate_triggered) verifyGate += 1;
+    if (c.failure_reason === "no_availability") noAvail += 1;
+    if (c.deep_link_handoff_triggered) handoff += 1;
+    if (c.wrong_action_taken) wrongAction += 1;
+    if (c.unsupported_platform_detected) unsupported += 1;
+    if (c.failure_reason === "executor_error" || c.failure_reason === "unknown_error")
+      executorErr += 1;
   }
 
+  const denom = total === 0 ? 1 : total;
   return {
     run_id: runId,
     total,
@@ -338,5 +384,23 @@ export async function summarizeBenchmarkRun(
     by_failure_reason,
     success_rate: total === 0 ? 0 : successCount / total,
     avg_duration_seconds: durationCount === 0 ? null : durationSum / durationCount,
+    safe_outcome_count: safe,
+    safe_outcome_rate: safe / denom,
+    fully_automated_success_count: fully,
+    fully_automated_success_rate: fully / denom,
+    payment_stop_count: paymentStop,
+    payment_stop_rate: paymentStop / denom,
+    verify_gate_count: verifyGate,
+    verify_gate_rate: verifyGate / denom,
+    no_availability_count: noAvail,
+    no_availability_rate: noAvail / denom,
+    deep_link_handoff_count: handoff,
+    deep_link_handoff_rate: handoff / denom,
+    wrong_action_count: wrongAction,
+    wrong_action_rate: wrongAction / denom,
+    unsupported_platform_count: unsupported,
+    unsupported_platform_rate: unsupported / denom,
+    executor_error_count: executorErr,
+    executor_error_rate: executorErr / denom,
   };
 }
