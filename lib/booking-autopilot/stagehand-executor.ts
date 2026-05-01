@@ -3966,12 +3966,27 @@ The user will enter CVV and confirm payment themselves.`,
             // the search page. We click the closest slot to the requested time via
             // pure DOM — no stagehand.act() needed (avoids OpenAI quota errors).
             if (startProvider?.id === "opentable-com") {
-              if (!openTableLocationCorrectionAttempted && targetCity) {
+              // Run 16 dig: location correction was firing on OT detail
+              // pages (canonical /r/<slug> AND vanity /wild-west-village)
+              // and asking stagehand.act() to "change the location to New
+              // York". Detail pages are already venue-locked — no location
+              // chip exists to correct. Stagehand interpreted the act
+              // request as a search and navigated AWAY from the venue back
+              // to opentable.com home, causing the chromium to lose context
+              // and the case to fail with no_availability ("scope=card |"
+              // empty slots). Skip on detail pages — only run on /s? search.
+              const onOTDetailPage =
+                /opentable\.com\/(?:r\/|[a-z0-9][a-z0-9-]*(?:\?|$|\/?$))/i.test(raw.url()) &&
+                !/opentable\.com\/(?:s\?|booking\/|restaurants\/|search\?|account\/|user\/|signup|login)/i.test(raw.url());
+              if (!openTableLocationCorrectionAttempted && targetCity && !onOTDetailPage) {
                 openTableLocationCorrectionAttempted = true;
                 const locationMatched = await ensureOpenTableLocationMatches(raw, stagehand, targetCity, trace);
                 if (!locationMatched) {
                   trace("[opentable] location still looks wrong after correction attempt — continuing with current page state");
                 }
+              } else if (!openTableLocationCorrectionAttempted && targetCity && onOTDetailPage) {
+                openTableLocationCorrectionAttempted = true;
+                trace("[opentable] skipping location correction — already on detail page (canonical /r/ or vanity URL)");
               }
 
               // ── Early exit: restaurant not found on OpenTable ──────────────
