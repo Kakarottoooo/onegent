@@ -1,13 +1,13 @@
 /**
- * Seed benchmark cases for NYC restaurant booking — v2 (2026-05-01).
+ * Seed benchmark cases for NYC restaurant booking — v2.1 (2026-05-01).
  *
- * 25 cases across 25 unique NYC venues — strict 1-per-restaurant.
+ * 30 cases across 30 unique NYC venues — strict 1-per-restaurant.
  * Distribution by outcome category:
- *   10 OT happy / fallback
- *    5 Resy happy / fallback
+ *   13 OT happy / fallback (incl. Balthazar, Ci Siamo)
+ *    7 Resy happy / fallback (incl. Frenchette, Cote)
  *    1 verify-gate (Resy OTP)
  *    2 OT edge (closed / not_on_network)
- *    1 deep-link handoff (no online booking)
+ *    2 deep-link handoff (no online booking — Rao's, Lucali)
  *    4 unsupported platform (Tock x3, SevenRooms x1)
  *
  * v2 trim history: v1 had 50 cases with 4 Don Angie / 3 Nobu / 3 Modern /
@@ -459,6 +459,81 @@ export const RESTAURANT_BENCHMARK_CASES_NYC: RestaurantBenchmarkCase[] = [
     category: "unsupported_sevenrooms",
     notes:
       "Marea Italian seafood (Michelin 1*, Altamarea Group). SevenRooms — only restaurant in this dataset on SR. Tests that the executor recognises a different unsupported platform, not just Tock.",
+  },
+
+  // ═══════════════════════════════════════════════════════════════════════
+  // ROUND 13 EXTENSION (cases 026-030) — 5 more unique restaurants
+  // ═══════════════════════════════════════════════════════════════════════
+  {
+    case_id: "nyc_restaurant_026",
+    city: "New York",
+    restaurant_name: "Balthazar",
+    restaurant_url: "https://www.opentable.com/r/balthazar-new-york",
+    expected_provider: "OpenTable",
+    date: "2026-05-13",
+    time: "19:30",
+    party_size: 2,
+    occasion: "date_night",
+    fallback_policy: { time_window_minutes: 30 },
+    expected_outcome: ["fully_automated", "no_availability"],
+    category: "ot_happy",
+    notes: "Balthazar (Keith McNally, Soho French brasserie since 1997). OT-primary, peak-time popular. ±30 + peak-time = inventory uncertain.",
+  },
+  {
+    case_id: "nyc_restaurant_027",
+    city: "New York",
+    restaurant_name: "Ci Siamo",
+    restaurant_url: "https://www.opentable.com/r/ci-siamo-new-york",
+    expected_provider: "OpenTable",
+    date: "2026-05-20",
+    time: "19:00",
+    party_size: 2,
+    fallback_policy: { time_window_minutes: 30 },
+    expected_outcome: ["fully_automated", "no_availability"],
+    category: "ot_happy",
+    notes: "Ci Siamo (USHG Italian, Hudson Yards, opened 2021). USHG family like Gramercy / The Modern.",
+  },
+  {
+    case_id: "nyc_restaurant_028",
+    city: "New York",
+    restaurant_name: "Frenchette",
+    restaurant_url: "https://resy.com/cities/new-york-ny/venues/frenchette",
+    expected_provider: "Resy",
+    date: "2026-05-19",
+    time: "19:00",
+    party_size: 2,
+    fallback_policy: { time_window_minutes: 60 },
+    expected_outcome: "no_availability",
+    category: "resy_happy",
+    notes: "Frenchette (modern French, Tribeca). Resy-primary, very popular — no_availability is the realistic outcome at peak prime.",
+  },
+  {
+    case_id: "nyc_restaurant_029",
+    city: "New York",
+    restaurant_name: "Cote",
+    restaurant_url: "https://resy.com/cities/new-york-ny/venues/cote-new-york",
+    expected_provider: "Resy",
+    date: "2026-05-22",
+    time: "19:30",
+    party_size: 2,
+    occasion: "celebration",
+    fallback_policy: { time_window_minutes: 60 },
+    expected_outcome: "no_availability",
+    category: "resy_happy",
+    notes: "Cote (Korean BBQ, Michelin 1*, Flatiron). Resy-primary, prime-time near impossible — no_availability is the realistic outcome.",
+  },
+  {
+    case_id: "nyc_restaurant_030",
+    city: "New York",
+    restaurant_name: "Lucali",
+    expected_provider: "no_online",
+    date: "2026-05-15",
+    time: "19:00",
+    party_size: 4,
+    fallback_policy: { time_window_minutes: 0 },
+    expected_outcome: "deep_link_handoff",
+    category: "handoff_no_online",
+    notes: "Lucali (Brooklyn pizza, Carroll Gardens). No online booking — call ahead or walk-in only. Tests deep_link_handoff on a different cuisine type than Rao's.",
   },
 ];
 
