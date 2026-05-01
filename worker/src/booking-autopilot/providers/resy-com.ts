@@ -89,8 +89,15 @@ export const resyProvider: BrowserProvider = {
     // Booking form: /book in URL OR reservation form visible (name/email/phone inputs)
     const isBookingUrl = lowerUrl.includes("/book") || lowerUrl.includes("/reservation");
     const hasReservationForm = await page.evaluate(() => {
+      const isShown = (el: HTMLElement): boolean => {
+        if (el.hidden || !el.isConnected) return false;
+        const rect = el.getBoundingClientRect();
+        if (rect.width === 0 || rect.height === 0) return false;
+        const style = window.getComputedStyle(el);
+        return style.display !== "none" && style.visibility !== "hidden" && style.opacity !== "0";
+      };
       const inputs = Array.from(document.querySelectorAll<HTMLInputElement>("input"))
-        .filter(el => el.type !== "hidden" && !el.disabled && el.offsetParent !== null);
+        .filter(el => el.type !== "hidden" && !el.disabled && isShown(el));
       return inputs.some(el => {
         const ph = (el.placeholder || "").toLowerCase();
         const lbl = (el.getAttribute("aria-label") || "").toLowerCase();
@@ -133,8 +140,15 @@ export const resyProvider: BrowserProvider = {
           return el.value === val;
         };
 
+        const isShown = (el: HTMLElement): boolean => {
+          if (el.hidden || !el.isConnected) return false;
+          const rect = el.getBoundingClientRect();
+          if (rect.width === 0 || rect.height === 0) return false;
+          const style = window.getComputedStyle(el);
+          return style.display !== "none" && style.visibility !== "hidden" && style.opacity !== "0";
+        };
         const inputs = Array.from(document.querySelectorAll<HTMLInputElement>("input"))
-          .filter(el => el.type !== "hidden" && el.type !== "checkbox" && el.type !== "radio" && !el.disabled && el.offsetParent !== null);
+          .filter(el => el.type !== "hidden" && el.type !== "checkbox" && el.type !== "radio" && !el.disabled && isShown(el));
         const res: Record<string, boolean | string> = {};
 
         const firstEl = inputs.find(el => {

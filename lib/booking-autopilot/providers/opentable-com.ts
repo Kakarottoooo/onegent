@@ -27,7 +27,20 @@ interface OpenTableProfile {
 async function hasCreditCardSection(page: Page): Promise<boolean> {
   return await page.evaluate(() => {
     const inputs = Array.from(document.querySelectorAll<HTMLInputElement>("input"))
-      .filter(el => el.type !== "hidden" && !el.disabled && el.offsetParent !== null);
+      .filter(el => {
+        if (el.type === "hidden" || el.disabled) return false;
+        // RC C fix: don't use offsetParent — it's null for fixed-position
+        // modal inputs (OT renders the reservation modal with position:fixed,
+        // so offsetParent-based visibility checks rejected every form field
+        // and benchmark runs walked past payment_gate without filling
+        // anything). Use bounding-rect + computed-style instead, which works
+        // for modals AND normal flow.
+        if (!el.isConnected || el.hidden) return false;
+        const rect = el.getBoundingClientRect();
+        if (rect.width === 0 || rect.height === 0) return false;
+        const style = window.getComputedStyle(el);
+        return style.display !== "none" && style.visibility !== "hidden" && style.opacity !== "0";
+      });
     const hasCardField = inputs.some(el => {
       const ph = (el.placeholder || "").toLowerCase();
       const lbl = (el.getAttribute("aria-label") || "").toLowerCase();
@@ -163,9 +176,17 @@ export const openTableProvider: BrowserProvider = {
     const isBookingDetailsUrl = lowerUrl.includes("/booking/details") || lowerUrl.includes("/booking/seating-options");
     const hasReservationForm = await page.evaluate(() => {
       const inputs = Array.from(document.querySelectorAll<HTMLInputElement>("input"));
-      const visible = inputs.filter(
-        (el) => el.type !== "hidden" && !el.disabled && el.offsetParent !== null
-      );
+      const visible = inputs.filter((el) => {
+        if (el.type === "hidden" || el.disabled) return false;
+        // Same RC C visibility fix as hasCreditCardSection: modal inputs
+        // have offsetParent === null because they're position:fixed inside
+        // a portal/dialog. Use rect + computed style so we actually find them.
+        if (!el.isConnected || el.hidden) return false;
+        const rect = el.getBoundingClientRect();
+        if (rect.width === 0 || rect.height === 0) return false;
+        const style = window.getComputedStyle(el);
+        return style.display !== "none" && style.visibility !== "hidden" && style.opacity !== "0";
+      });
       return visible.some((el) => {
         const ph = (el.placeholder || "").toLowerCase();
         const lbl = (el.getAttribute("aria-label") || "").toLowerCase();
@@ -327,7 +348,20 @@ export const openTableProvider: BrowserProvider = {
     // Clicking "Use email instead" reveals the full name/email form.
     const formType = await page.evaluate(() => {
       const inputs = Array.from(document.querySelectorAll<HTMLInputElement>("input"))
-        .filter(el => el.type !== "hidden" && !el.disabled && el.offsetParent !== null);
+        .filter(el => {
+        if (el.type === "hidden" || el.disabled) return false;
+        // RC C fix: don't use offsetParent — it's null for fixed-position
+        // modal inputs (OT renders the reservation modal with position:fixed,
+        // so offsetParent-based visibility checks rejected every form field
+        // and benchmark runs walked past payment_gate without filling
+        // anything). Use bounding-rect + computed-style instead, which works
+        // for modals AND normal flow.
+        if (!el.isConnected || el.hidden) return false;
+        const rect = el.getBoundingClientRect();
+        if (rect.width === 0 || rect.height === 0) return false;
+        const style = window.getComputedStyle(el);
+        return style.display !== "none" && style.visibility !== "hidden" && style.opacity !== "0";
+      });
       const hasPhone = inputs.some(el =>
         (el.placeholder || "").toLowerCase().includes("phone") ||
         (el.getAttribute("aria-label") || "").toLowerCase().includes("phone") ||
@@ -373,8 +407,15 @@ export const openTableProvider: BrowserProvider = {
           el.blur();
           return el.value.replace(/\D/g, "").length > 0;
         };
+        const isShown = (el: HTMLElement): boolean => {
+          if (el.hidden || !el.isConnected) return false;
+          const rect = el.getBoundingClientRect();
+          if (rect.width === 0 || rect.height === 0) return false;
+          const style = window.getComputedStyle(el);
+          return style.display !== "none" && style.visibility !== "hidden" && style.opacity !== "0";
+        };
         const phoneEl = Array.from(document.querySelectorAll<HTMLInputElement>("input"))
-          .filter(el => el.type !== "hidden" && !el.disabled && el.offsetParent !== null)
+          .filter(el => el.type !== "hidden" && !el.disabled && isShown(el))
           .find(el =>
             (el.placeholder || "").toLowerCase().includes("phone") ||
             (el.getAttribute("aria-label") || "").toLowerCase().includes("phone") ||
@@ -398,9 +439,16 @@ export const openTableProvider: BrowserProvider = {
           el.blur();
           return el.value === val;
         };
+        const isShown = (el: HTMLElement): boolean => {
+          if (el.hidden || !el.isConnected) return false;
+          const rect = el.getBoundingClientRect();
+          if (rect.width === 0 || rect.height === 0) return false;
+          const style = window.getComputedStyle(el);
+          return style.display !== "none" && style.visibility !== "hidden" && style.opacity !== "0";
+        };
 
         const inputs = Array.from(document.querySelectorAll<HTMLInputElement>("input"))
-          .filter(el => el.type !== "hidden" && el.type !== "checkbox" && el.type !== "radio" && !el.disabled && el.offsetParent !== null);
+          .filter(el => el.type !== "hidden" && el.type !== "checkbox" && el.type !== "radio" && !el.disabled && isShown(el));
         const res: Record<string, boolean | string> = {};
 
         const firstEl = inputs.find(el => {
@@ -553,9 +601,16 @@ export const openTableProvider: BrowserProvider = {
           el.blur();
           return el.value.replace(/\s+/g, "").length > 0;
         };
+        const isShown = (el: HTMLElement): boolean => {
+          if (el.hidden || !el.isConnected) return false;
+          const rect = el.getBoundingClientRect();
+          if (rect.width === 0 || rect.height === 0) return false;
+          const style = window.getComputedStyle(el);
+          return style.display !== "none" && style.visibility !== "hidden" && style.opacity !== "0";
+        };
 
         const inputs = Array.from(document.querySelectorAll<HTMLInputElement>("input"))
-          .filter(el => el.type !== "hidden" && el.type !== "checkbox" && el.type !== "radio" && !el.disabled && el.offsetParent !== null);
+          .filter(el => el.type !== "hidden" && el.type !== "checkbox" && el.type !== "radio" && !el.disabled && isShown(el));
 
         const match = (el: HTMLInputElement, needles: string[]): boolean => {
           const ph = (el.placeholder || "").toLowerCase();
