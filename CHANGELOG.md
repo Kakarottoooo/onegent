@@ -4,6 +4,24 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [0.2.60.0] - 2026-04-30
+
+### Added
+- **Resy venue URL navigate-with-params** — when stagehand enters `/cities/<city>/venues/<slug>` it now parses the case date + covers from `input.task` and navigates to the URL with `?date=YYYY-MM-DD&seats=N` appended. Mirrors the OT detail-page fix from 0.2.59.0. Without this, Resy defaulted the page to today + 2 covers, which made the executor click whatever slot the venue had today (often a +1-day-off mismatch). (commit `1162aa8`)
+- **Benchmark dispatcher startup stagger** — `runRestaurantBenchmark` now sleeps 500 ms between each `dispatchBenchmarkCase` call. Each `/start` is fire-and-forget on the dispatcher side but spins up its own Chrome/Browserbase session server-side; firing 5 in the same tick reproducibly lost 1–2 cases to "No Page found for target closed before CDP response" CDP target init races. Adds 2 s to a full 5-case run; verified to eliminate the race. (commit `48f5908`)
+
+### Verified end-to-end
+- **5/5 expected outcome on master `1162aa8`** — first time the full NYC restaurant matrix produces only the buckets we want:
+  - L'Artusi (OT not on network) → 16s `no_availability` ✓
+  - Tao Downtown (OT deposit-hold) → 1m 41s `payment_stop` ✓
+  - Carbone (OT permanently closed) → 9s `no_availability` ✓
+  - Lilia (Resy May 15 prime time full) → 12s `no_availability` ✓
+  - Cosme (Resy May 16 bookable) → 1m 11s `payment_stop` ✓
+
+### Known issues / backlog
+- Stagehand still uses hardcoded `maxDiff=90` for time-slot matching, doesn't read `fallback_policy.time_window_minutes` from the case. Lilia's `time_window_minutes=0` should mean "exact match only" but the code would accept any slot within ±90 min. Currently masked by the navigate-with-params fix (Resy renders the right day, prime-time really is full → no_availability fires correctly), but this is coincidental. Next step: thread `fallback_policy` from `step.body` through to stagehand-executor and use it to set `maxDiff`.
+- Resy's no-availability detection still leans on the pre-AI fast path matching specific copy phrases; if Resy changes the wording the fast path stops firing. Worth adding a structural detector (e.g. `[data-test="no-results"]` if such an attribute exists).
+
 ## [0.2.59.0] - 2026-04-30
 
 ### Added

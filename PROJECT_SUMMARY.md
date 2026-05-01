@@ -1,5 +1,5 @@
 ================================================================
-Onegent · Travel Execution Layer for AI Agents · v0.2.59.0
+Onegent · Travel Execution Layer for AI Agents · v0.2.60.0
 ================================================================
 
 【一句话定位（2026-04-26 锁定）】
@@ -260,6 +260,71 @@ P5 (3+ Group DR) → P6 (反应+评论) → P7 (通知系统) → P8 (Itinerary 
 - ChatGPT Apps marketplace review 结果（被动等 OpenAI）
 - B2B Lane C cold outreach（4 客户类型 × 5 contacts）
 - Cofounder 搜索
+
+================================================================
+Recent Updates - 2026-04-30 (cont. 3) · 5/5 全 expected outcome 第一次实现
+================================================================
+
+cont. 2 把 Tao Downtown 走通了，5/5 是 4 expected + 1 Lilia executor_error
++ 偶发 CDP race。这一轮 2 个 commit 把剩下两个独立 backlog 都修了，**第一次
+拿到 5/5 全 expected outcome**：
+
+| Case | Status | 时长 |
+|---|---|---|
+| L'Artusi | no_availability ✓ | 16s |
+| Tao Downtown | payment_stop ✓ | 1m 41s |
+| Carbone | no_availability ✓ | 9s |
+| Lilia | no_availability ✓ | 12s |
+| Cosme | payment_stop ✓ | 1m 11s |
+
+【今天 2 个新 commit（48f5908 → 1162aa8）】
+
+1. **48f5908 — fix(benchmark): stagger stagehand startups 500ms to avoid CDP race**
+   - 起因：5/5 并发跑 1-2 个 case 偶发 1s 内 fail with
+     "No Page found for target closed before CDP response"
+   - 根因：`dispatchBenchmarkCase` 是 fire-and-forget /start，5 个
+     chrome session 同时争 CDP target init
+   - 修法：dispatcher loop 每个 dispatch 后 sleep 500ms。代价 +2s on
+     full 5-case run，回报 0 race
+   - 副发现：cont. 2 PROJECT_SUMMARY 里说"dashboard duration 显示 1s
+     bug"实际是这个 race 造成的真实快 fail，dashboard 显示是对的
+
+2. **1162aa8 — fix(stagehand): navigate Resy venue URL with date+seats params**
+   - 起因：Lilia (case=2026-05-15 19:00) 27s executor_error。dev.log
+     trace AI 看到 page 是 "April 30, 2026" (today)，不是 case date。
+     19:00 today 满 → executor click 8:45 PM (75 min off, 不该接受
+     fallback policy=0) → confirmation modal 渲染异常 → 27s timeout
+   - 根因：Resy URL 没带 `?date=&seats=` query params 时默认用 today。
+     跟 OT detail-page 同样的"widget 默认 today"问题（cont. 2 commit
+     bb73afc 修过 OT side）
+   - 修法：Resy 进 `/cities/<city>/venues/<slug>` 时 parse case
+     date+covers from `input.task`，重 navigate 到带 query params 的
+     URL。Mirrors OT 的 navigate-with-params 修复
+   - 验证：Lilia May 15 19:00 真的没空 → 12s no_availability ✓
+     （Pre-AI fast path 命中 Resy "no online availability for"）
+
+【这一轮的关键 lesson】
+
+I. **OT 和 Resy 都默认 today + 默认 covers**。做 venue detail-page
+   automation 时要永远显式 navigate w/ case context，别依赖网站默认。
+   两个 platform 都用 query params 接受 hint：OT 用
+   `?dateTime=YYYY-MM-DDTHH:MM&covers=N`，Resy 用 `?date=YYYY-MM-DD&seats=N`
+
+J. **Fire-and-forget concurrency 在 chrome resource-bound 上有 cap**。
+   不是所有 fire-and-forget 都能无限平行，启动新 chrome session 是
+   resource race。startup stagger 是稳定多并发的标配模式
+
+【已知 backlog（cont. 3 后剩余）】
+
+- ~~Lilia Resy click-after-slot 不稳~~ ✓ **已修（这一轮 1162aa8）**
+  Fixed by navigate-with-date-seats — Lilia 现在 12s no_availability
+- ~~5/5 并发 CDP target race~~ ✓ **已修（这一轮 48f5908）**
+- **stagehand fallback_policy 不感知**：当前 maxDiff=90 hardcoded，
+  不读 case `fallback_policy.time_window_minutes`。Lilia case=0 应该
+  严格匹配，但代码会接受 ±90 min 内任何 slot。当前因为 navigate-w/-params
+  让 May 15 19:00 真没空 + Pre-AI fast path 命中 Resy no-availability
+  copy → 仍正确分类，但这是巧合。下一步把 fallback_policy 从 step.body
+  传到 stagehand-executor，让 maxDiff 跟随 case 配置
 
 ================================================================
 Recent Updates - 2026-04-30 (cont. 2) · Tao Downtown OT detail-page 走通 → payment_stop（5/5 全 expected outcome）
