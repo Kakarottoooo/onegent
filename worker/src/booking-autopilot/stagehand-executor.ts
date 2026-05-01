@@ -1440,18 +1440,50 @@ The user will enter CVV and confirm payment themselves.`,
       const earlyText = await raw.evaluate(() => (document.body?.innerText ?? "").toLowerCase());
       if (NO_AVAILABILITY_SIGNALS.some((sig) => earlyText.includes(sig))) {
         const matchedSignal = NO_AVAILABILITY_SIGNALS.find((sig) => earlyText.includes(sig));
-        trace(`Pre-AI fast path: page text matched NO_AVAILABILITY_SIGNALS ("${matchedSignal}") — early no_availability without AI assessment.`);
-        const ssBuf = await raw.screenshot({ type: "png" }).catch(() => null);
-        const ss = ssBuf ? `data:image/png;base64,${ssBuf.toString("base64")}` : undefined;
-        const venueLabel = targetHotelName ?? "This venue";
-        return {
-          status: "no_availability" as const,
-          screenshotBase64: ss,
-          handoffUrl: raw.url(),
-          sessionUrl,
-          summary: `${venueLabel} is not available for booking on this platform. The detail page exists but the booking widget is not present.`,
-          debugTrace,
-        };
+
+        // ── D1 disambiguator ──────────────────────────────────────────────
+        // Run 5 case 003 (Carbone) and case 001 (L'Artusi) hit this fast
+        // path even though the venues weren't actually closed/unbookable —
+        // the matched phrase appeared somewhere in cancellation policy
+        // / footer / unrelated marketing copy. Confirmed false positives:
+        //   - Carbone NY: "permanently closed" embedded in legal copy
+        //   - L'Artusi:  "not available on opentable" in cross-promo strip
+        // Before declaring no_availability, double-check that the booking
+        // widget really has no clickable time slots. If we can find any
+        // OT/Resy time-slot button, the page IS bookable and the matched
+        // phrase is a footer/sidebar artifact — let the slow path proceed.
+        const hasTimeSlots = await raw.evaluate(() => {
+          const isShown = (el: HTMLElement) => {
+            if (el.hidden || !el.isConnected) return false;
+            const r = el.getBoundingClientRect();
+            if (r.width === 0 || r.height === 0) return false;
+            const s = window.getComputedStyle(el);
+            return s.display !== "none" && s.visibility !== "hidden" && s.opacity !== "0";
+          };
+          // OT slots: button text matches "7:30 PM", "12:15 AM" etc.
+          // Resy slots: button containing time + service label ("7:15 PM Bar").
+          const slotPattern = /\b\d{1,2}:\d{2}\s*(am|pm)\b/i;
+          return Array.from(document.querySelectorAll<HTMLButtonElement>("button, a[role='button']"))
+            .filter(b => isShown(b))
+            .some(b => slotPattern.test((b.textContent ?? "").trim()));
+        }).catch(() => false);
+
+        if (hasTimeSlots) {
+          trace(`Pre-AI fast path: matched "${matchedSignal}" but visible time-slot buttons exist — false positive, continuing.`);
+        } else {
+          trace(`Pre-AI fast path: page text matched NO_AVAILABILITY_SIGNALS ("${matchedSignal}") + no time-slot buttons — early no_availability without AI assessment.`);
+          const ssBuf = await raw.screenshot({ type: "png" }).catch(() => null);
+          const ss = ssBuf ? `data:image/png;base64,${ssBuf.toString("base64")}` : undefined;
+          const venueLabel = targetHotelName ?? "This venue";
+          return {
+            status: "no_availability" as const,
+            screenshotBase64: ss,
+            handoffUrl: raw.url(),
+            sessionUrl,
+            summary: `${venueLabel} is not available for booking on this platform. The detail page exists but the booking widget is not present.`,
+            debugTrace,
+          };
+        }
       }
     } catch (err) {
       trace(`Pre-AI fast path skipped (${(err as Error).message?.slice(0, 60)})`);

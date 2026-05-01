@@ -884,6 +884,126 @@ async function runUniversalStep(
         summary.toLowerCase().includes("not found on opentable") ||
         summary.toLowerCase().includes("not found on resy");
 
+      // ── C2: time fallback ladder (restaurant) ─────────────────────────────
+      // Before bailing to multi-platform / handoff, try ±15/30/60 min around
+      // the requested time on the SAME platform. Reasoning: the most common
+      // no_availability is "no slot at exactly 7:30 PM" — the venue often has
+      // a slot 15-60 min later. Skipped for not-found errors (no point — the
+      // venue doesn't exist on this platform) and for non-restaurant steps.
+      if (
+        step.type === "restaurant" &&
+        !isNotFoundError(data.summary) &&
+        typeof resolvedBody.startUrl === "string"
+      ) {
+        const body = step.body as Record<string, unknown>;
+        const rDate = body.date as string | undefined;
+        const rTime = body.time as string | undefined;
+        const rCovers = (body.covers as number | undefined) ?? 2;
+        const rName = body.restaurantName as string | undefined;
+
+        if (rDate && rTime && rName && /^\d{2}:\d{2}$/.test(rTime)) {
+          const startMinutes = parseInt(rTime.slice(0, 2), 10) * 60 + parseInt(rTime.slice(3, 5), 10);
+          // Ladder ordered by likelihood of success: small forward offsets
+          // first (most slot-pickers fill in 15-min increments), then larger,
+          // then symmetric backward.
+          const offsets = [15, 30, 60, -30, -60];
+
+          const ladderInput: import("@/lib/booking-autopilot/types").BrowserTaskInput = { ...input };
+          let ladderHit = false;
+
+          for (const offsetMin of offsets) {
+            const altMinutes = startMinutes + offsetMin;
+            if (altMinutes < 0 || altMinutes >= 24 * 60) continue;
+            const altHH = Math.floor(altMinutes / 60).toString().padStart(2, "0");
+            const altMM = (altMinutes % 60).toString().padStart(2, "0");
+            const altTime = `${altHH}:${altMM}`;
+
+            const sign = offsetMin > 0 ? "+" : "";
+            log.push({
+              ts: now(),
+              type: "time_adjusted",
+              message: `No availability at ${rTime} — trying ${altTime} (${sign}${offsetMin} min)`,
+            });
+            await onProgress({ ...step, status: "loading", decisionLog: [...log] });
+
+            // Build alt startUrl: OT carries dateTime in the query string;
+            // Resy doesn't carry time in the URL (slot is clicked on the
+            // listing) — but the executor's listing-stage time picker uses
+            // body.time as the target slot, so we re-run runBrowserTask with
+            // an updated input.task that mentions the new time too.
+            const currentStart = resolvedBody.startUrl as string;
+            let altStartUrl = currentStart;
+            if (/opentable\.com/i.test(currentStart)) {
+              const newDateTimeQuery = `dateTime=${rDate}T${altTime}:00`;
+              if (currentStart.includes("dateTime=")) {
+                altStartUrl = currentStart.replace(/dateTime=[^&]+/, newDateTimeQuery);
+              } else {
+                altStartUrl =
+                  currentStart + (currentStart.includes("?") ? "&" : "?") +
+                  `${newDateTimeQuery}&covers=${rCovers}`;
+              }
+            }
+            const altTask = typeof input.task === "string" && input.task.includes(rTime)
+              ? input.task.replace(rTime, altTime)
+              : input.task;
+
+            try {
+              const altData = await Promise.race([
+                runBrowserTask({ ...ladderInput, startUrl: altStartUrl, task: altTask }),
+                new Promise<never>((_, reject) =>
+                  setTimeout(() => reject(new Error("Time-fallback attempt timed out after 4 min")), 4 * 60 * 1000),
+                ),
+              ]);
+              liveLogClose(input.jobId);
+
+              for (const e of altData.debugTrace ?? []) {
+                log.push({ ts: now(), type: "attempt", message: e, outcome: "Executor trace (time-fallback)" });
+              }
+
+              if (altData.status === "completed" || altData.status === "paused_payment") {
+                log.push({
+                  ts: now(),
+                  type: "succeeded",
+                  message: `Booked at ${altTime} (${sign}${offsetMin} min): ${altData.summary}`,
+                  outcome: "Done ✓",
+                });
+                ladderHit = true;
+                return {
+                  ...step,
+                  status: altData.status === "paused_payment" ? "awaiting_confirmation" : "done",
+                  handoff_url: altData.handoffUrl,
+                  timeAdjusted: true,
+                  decisionLog: log,
+                };
+              }
+              log.push({
+                ts: now(),
+                type: "skipped",
+                message: `${altTime}: ${altData.error ?? altData.summary?.slice(0, 80) ?? altData.status}`,
+                outcome: "No availability",
+              });
+            } catch (err) {
+              const errMsg = err instanceof Error ? err.message : String(err);
+              log.push({
+                ts: now(),
+                type: "skipped",
+                message: `${altTime}: ${errMsg.slice(0, 80)}`,
+                outcome: "Error",
+              });
+            }
+          }
+
+          if (!ladderHit) {
+            log.push({
+              ts: now(),
+              type: "failed",
+              message: `Time-fallback exhausted — no availability at ±15/30/60 min around ${rTime}`,
+              outcome: "All times no_availability",
+            });
+          }
+        }
+      }
+
       if (step.type === "restaurant" && isNotFoundError(data.summary)) {
         const body = step.body as Record<string, unknown>;
         const rName = body.restaurantName as string | undefined;
