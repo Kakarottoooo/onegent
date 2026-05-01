@@ -3,6 +3,7 @@ import { notFound } from "next/navigation";
 import { requireInternalAnalyticsAccess } from "@/lib/scenarioEvents";
 import { listBenchmarkRuns } from "@/lib/benchmark/store";
 import { TriggerRunButton } from "./TriggerRunButton";
+import { ClearHistoryButton } from "./ClearHistoryButton";
 
 export const dynamic = "force-dynamic";
 
@@ -67,11 +68,14 @@ export default async function BenchmarkListPage() {
 
         {/* Runs table */}
         <section className="rounded-[28px] border border-[var(--border)] bg-[var(--card)] shadow-[0_18px_48px_rgba(44,36,22,0.06)]">
-          <header className="flex items-center justify-between border-b border-[var(--border)] px-6 py-4">
-            <h2 className="font-serif text-2xl">Recent runs</h2>
-            <span className="text-xs text-[var(--text-secondary)]">
-              {runs.length} run{runs.length === 1 ? "" : "s"}
-            </span>
+          <header className="flex items-center justify-between gap-4 border-b border-[var(--border)] px-6 py-4">
+            <div className="flex items-baseline gap-3">
+              <h2 className="font-serif text-2xl">Recent runs</h2>
+              <span className="text-xs text-[var(--text-secondary)]">
+                {runs.length} run{runs.length === 1 ? "" : "s"}
+              </span>
+            </div>
+            {runs.length > 0 && <ClearHistoryButton />}
           </header>
 
           {runs.length === 0 ? (

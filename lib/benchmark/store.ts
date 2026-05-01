@@ -145,6 +145,45 @@ export async function getBenchmarkRun(
 }
 
 /**
+ * Delete benchmark runs (and their cases via FK cascade). Used by the
+ * dashboard "Clear history" button. Refuses to delete runs that are still
+ * pending or running — those are either dispatching or have a Chrome
+ * session in flight, and dropping them mid-flight leaks orphaned booking
+ * jobs.
+ *
+ * Returns number of run rows deleted.
+ */
+export async function clearBenchmarkHistory(options?: {
+  /** When true, also delete runs whose status is 'pending' or 'running'.
+   *  Default false — we never delete in-flight runs without an opt-in. */
+  includeInFlight?: boolean;
+}): Promise<{ deleted_runs: number; deleted_cases: number }> {
+  await ensureBenchmarkTables();
+  // Count first so we can tell the caller how much was wiped.
+  const countQ = options?.includeInFlight
+    ? await sql`SELECT
+        (SELECT COUNT(*)::int FROM benchmark_runs) AS run_count,
+        (SELECT COUNT(*)::int FROM benchmark_cases) AS case_count`
+    : await sql`SELECT
+        (SELECT COUNT(*)::int FROM benchmark_runs WHERE status NOT IN ('pending','running')) AS run_count,
+        (SELECT COUNT(*)::int FROM benchmark_cases bc
+          WHERE EXISTS (
+            SELECT 1 FROM benchmark_runs br
+            WHERE br.id = bc.run_id AND br.status NOT IN ('pending','running')
+          )) AS case_count`;
+  const counts = countQ.rows[0] as { run_count: number; case_count: number };
+  if (options?.includeInFlight) {
+    await sql`DELETE FROM benchmark_runs`;
+  } else {
+    await sql`DELETE FROM benchmark_runs WHERE status NOT IN ('pending','running')`;
+  }
+  return {
+    deleted_runs: counts.run_count,
+    deleted_cases: counts.case_count,
+  };
+}
+
+/**
  * List recent benchmark runs, newest first. Used by the internal dashboard.
  * Default cap of 50 — bumps higher are deliberate (the table grows fast).
  */
