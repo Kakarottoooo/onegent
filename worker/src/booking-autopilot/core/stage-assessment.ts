@@ -443,6 +443,21 @@ export async function assessBookingStage(params: {
     // executor's terminal path emit the dry-run boundary marker.
     stage = "checkout_form";
     reason = "Resy mobile-verify gate is open (phone OTP required to proceed).";
+  } else if (
+    /resy\.com/i.test(currentUrl) &&
+    pageText.includes("complete your reservation") &&
+    (pageText.includes("reserve now") || pageText.includes("cancellation policy"))
+  ) {
+    // Resy "Complete Your Reservation" modal — the post-slot-click final
+    // confirmation modal. Reaching this state means slot was selected and
+    // Resy is waiting for the user's final commit click. For dry_run this
+    // IS the boundary; force payment_gate so the executor's terminal path
+    // emits the dry-run marker instead of looping in intermediate_gate
+    // recovery (which can't drive the modal because the underlying page
+    // still has slot buttons and "book now" text).
+    stage = "payment_gate";
+    reason =
+      "Resy Complete-Your-Reservation modal is open — booking-ready (dry-run boundary).";
   } else if (bookingComSearchResults && (listingSignals || !bookingProgressSignals)) {
     stage = "listing";
     reason = "Booking.com search results are visible and booking has not started yet.";
