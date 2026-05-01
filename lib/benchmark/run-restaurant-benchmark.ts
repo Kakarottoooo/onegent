@@ -34,6 +34,7 @@ import {
 } from "./store";
 import { getRestaurantBenchmarkCases } from "./restaurant-cases";
 import { classifyStepResult, isTransientError } from "./parse-decision-log";
+import { markStepForCore, isCoreSupported } from "@/lib/core/cend-adapter";
 import type {
   BenchmarkMode,
   BenchmarkRunSummary,
@@ -168,7 +169,13 @@ export async function dispatchBenchmarkCase(input: DispatchInput): Promise<strin
   const { caseRow, mode, baseUrl, fetchFn } = input;
   const c = caseRow.task_payload;
 
-  const step = caseToBookingStep(c);
+  const rawStep = caseToBookingStep(c);
+  // Stamp __source="lib/core/execution" + canonicalise body shape so the
+  // job routes through the worker (USE_WORKER_FOR + SQL filter). Without
+  // this stamp, benchmark steps fall through to the legacy in-process
+  // path and keep racing against any local worker instance — see B+B2
+  // refactor (2026-05-01).
+  const step = isCoreSupported(rawStep.type) ? markStepForCore(rawStep) : rawStep;
   const jobId = randomUUID();
 
   const autonomy: AgentAutonomySettings = {

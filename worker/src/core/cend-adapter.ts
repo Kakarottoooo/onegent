@@ -76,6 +76,22 @@ export function markStepForCore(step: BookingJobStep): BookingJobStep {
   const profileId = typeof body.profileId === "number" ? body.profileId : undefined;
   const profile = body.profile;
 
+  // Preserve out-of-band fields that the executor still needs to honor:
+  //   - fallback_policy: per-case ±X-min time tolerance + platform-switch
+  //     intent; benchmark cases set this and stagehand-executor reads it
+  //     as `input.fallbackPolicy` (line 3962). Without this passthrough,
+  //     ±0 strict cases like Don Angie 006 would fall back to default
+  //     ±90 and lose signal.
+  //   - startUrl: explicit booking-platform URL (canonical /r/<slug> or
+  //     vanity URL for OT, /cities/.../venues/<slug> for Resy). Without
+  //     this passthrough, the executor would always rebuild a generic OT
+  //     search URL via buildRestaurantContext, defeating the per-case
+  //     URL choice (run 13 case 022-025 hit this — Tock URLs got
+  //     overwritten to OT search).
+  const fallbackPolicy = body.fallback_policy as unknown;
+  const startUrl = typeof body.startUrl === "string" ? body.startUrl : undefined;
+  const consent = body.consent as unknown;
+
   return {
     ...step,
     body: {
@@ -83,6 +99,9 @@ export function markStepForCore(step: BookingJobStep): BookingJobStep {
       params,
       ...(profileId !== undefined ? { profileId } : {}),
       ...(profile ? { profile } : {}),
+      ...(fallbackPolicy !== undefined ? { fallback_policy: fallbackPolicy } : {}),
+      ...(startUrl !== undefined ? { startUrl } : {}),
+      ...(consent !== undefined ? { consent } : {}),
       // Marker that runUniversalStep watches for dual-gate dispatch.
       __source: "lib/core/execution",
     },

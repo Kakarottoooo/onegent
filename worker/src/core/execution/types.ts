@@ -64,6 +64,28 @@ export interface RestaurantBookingParams {
   neighborhood?: string;
   /** Upper budget bound per person, in USD. */
   budget_per_person?: number;
+
+  // ── Advanced directives (benchmark + power-user paths) ──
+  /**
+   * Explicit booking-platform URL — canonical /r/<slug>, vanity URL, or
+   * Resy /cities/.../venues/<slug>. When set, overrides the executor's
+   * default OT-search-by-name URL (which can mis-disambiguate venues with
+   * common names). Used heavily by the benchmark dataset to point each
+   * case at a specific venue page.
+   */
+  startUrl?: string;
+  /**
+   * Per-case fallback policy. `time_window_minutes` controls the ±X-min
+   * tolerance the time-slot picker accepts (0 = strict exact-time, 90 =
+   * default loose). Set by benchmark cases to test specific tolerance
+   * regimes; chat-commit jobs leave it undefined → default ±90.
+   */
+  fallback_policy?: {
+    time_window_minutes?: number;
+    allow_platform_switch?: boolean;
+    allow_venue_switch?: boolean;
+    require_user_approval_before_booking?: boolean;
+  };
 }
 
 export interface HotelBookingParams {

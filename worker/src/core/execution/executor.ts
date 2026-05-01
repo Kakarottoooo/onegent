@@ -21,7 +21,10 @@ import {
   buildRestaurantTask,
   buildHotelTask,
 } from "@/lib/booking-autopilot/core/task-builders";
-import { buildBookingComUrl } from "@/lib/agent/planners/booking-links";
+import {
+  buildBookingComUrl,
+  shouldUseCanonicalRestaurantSearchUrl,
+} from "@/lib/agent/planners/booking-links";
 import { getBookingProfileById, getDefaultBookingProfile } from "@/lib/db";
 import type { DecisionLogEntry } from "@/lib/db";
 
@@ -129,6 +132,16 @@ export async function runExecutionJob(
     return errorResult(ctx.jobId, message, createdAt);
   }
 
+  // Forward restaurant-specific fallback_policy (±X-min slot tolerance,
+  // platform/venue switch flags). Without this passthrough, benchmark
+  // ±0 strict cases would silently fall back to default ±90 and lose
+  // signal — Don Angie 006 / Nobu 011 etc. would always succeed via
+  // adjacent slots instead of correctly hitting no_availability.
+  const restaurantFallbackPolicy =
+    request.request.scenario === "restaurant"
+      ? request.request.params.fallback_policy
+      : undefined;
+
   const input: BrowserTaskInput = {
     startUrl,
     task,
@@ -136,6 +149,7 @@ export async function runExecutionJob(
     jobId: ctx.jobId,
     stepIndex,
     profileId: request.profileId,
+    ...(restaurantFallbackPolicy ? { fallbackPolicy: restaurantFallbackPolicy } : {}),
     // Forward flight-specific hints so the Stagehand executor can target
     // the right flight card on the Expedia search results page.
     ...(isFlight(request.request)
@@ -314,10 +328,19 @@ function buildRestaurantContext(
   p: RestaurantBookingParams,
   profile: BookingProfile,
 ): { startUrl: string; task: string } {
-  // Mirrors route.ts:343-370. term=restaurantName+city biases OpenTable's
-  // search to the right metro regardless of prior session cookie.
+  // term=restaurantName+city biases OpenTable's search to the right metro
+  // regardless of prior session cookie.
   const termRaw = p.city ? `${p.restaurant_name} ${p.city}` : p.restaurant_name;
-  const startUrl = `https://www.opentable.com/s?term=${encodeURIComponent(termRaw)}&covers=${p.covers}&dateTime=${p.date}T${p.time}:00`;
+  const fallbackSearchUrl = `https://www.opentable.com/s?term=${encodeURIComponent(termRaw)}&covers=${p.covers}&dateTime=${p.date}T${p.time}:00`;
+  // Honor caller-provided startUrl when it points at a known booking
+  // platform (OpenTable canonical /r/, vanity URL, Resy venue page,
+  // exploretock, sevenrooms, benchmark:// sentinel). Falls back to the
+  // OT search URL when the supplied URL is a venue marketing site that
+  // would 404 / drop the date.
+  const startUrl =
+    p.startUrl && !shouldUseCanonicalRestaurantSearchUrl(p.startUrl)
+      ? p.startUrl
+      : fallbackSearchUrl;
   const { task } = buildRestaurantTask({
     restaurantName: p.restaurant_name,
     city: p.city,

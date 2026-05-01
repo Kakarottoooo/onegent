@@ -454,3 +454,36 @@ export function buildOpenTableUrl(opts: OpenTableOpts): string {
   if (term) params.term = term;
   return `https://www.opentable.com/s?${new URLSearchParams(params).toString()}`;
 }
+
+// ─── Restaurant URL canonicalisation ─────────────────────────────────────────
+// Mirrors lib/agent/planners/booking-links.ts. Decides whether the executor
+// should override a caller-supplied startUrl with a canonical OT search URL.
+// Returns false (= don't override) when the URL is on a known booking
+// platform OR is a benchmark sentinel scheme.
+
+const RESTAURANT_BOOKING_HOSTS = [
+  "opentable.com",
+  "resy.com",
+  "yelp.com",
+  // Unsupported platforms — preserve URL so the executor's
+  // unsupported_platform early-return fires instead of rewriting to OT
+  // search and ending up on a listing page that doesn't match the venue.
+  "exploretock.com",
+  "sevenrooms.com",
+] as const;
+
+export function shouldUseCanonicalRestaurantSearchUrl(startUrl?: string): boolean {
+  if (!startUrl) return true;
+  // Benchmark sentinel scheme (e.g. `benchmark://no_online?venue=Rao%27s`)
+  // — must reach the executor unmodified so the deep_link_handoff
+  // early-return fires.
+  if (/^benchmark:\/\//i.test(startUrl)) return false;
+  try {
+    const host = new URL(startUrl).hostname.toLowerCase();
+    return !RESTAURANT_BOOKING_HOSTS.some(
+      (allowedHost) => host === allowedHost || host.endsWith(`.${allowedHost}`),
+    );
+  } catch {
+    return true;
+  }
+}
