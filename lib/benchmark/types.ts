@@ -70,8 +70,16 @@ export interface RestaurantBenchmarkCase {
   restaurant_name: string;
   /** Direct booking page if known — speeds up provider routing. */
   restaurant_url?: string;
-  /** Provider hint; runner still verifies via existing routing. */
-  expected_provider: "OpenTable" | "Resy" | "official_website";
+  /** Provider hint; runner still verifies via existing routing.
+   *  Tock / SevenRooms / no_online → expected_outcome should be
+   *  "unsupported_platform" or "deep_link_handoff" respectively. */
+  expected_provider:
+    | "OpenTable"
+    | "Resy"
+    | "Tock"
+    | "SevenRooms"
+    | "official_website"
+    | "no_online";
   /** Reservation date in YYYY-MM-DD. Use a date >= today's date. */
   date: string;
   /** Reservation time in HH:MM (24h). */
@@ -89,6 +97,32 @@ export interface RestaurantBenchmarkCase {
   };
   /** Free-form notes about why this case exists (date-night vs solo etc). */
   notes?: string;
+  // ─── v1 dataset metadata (added 2026-04-30) ───────────────────────────
+  /** What outcome the agent should produce for this case to count as
+   *  correct. Reporter compares actual vs expected per case. */
+  expected_outcome?:
+    | "fully_automated"        // boundary hit, no payment-stop / handoff
+    | "payment_stop"           // booking-ready stop at payment / CVV
+    | "no_availability"        // venue full / closed / not on network
+    | "verify_gate"            // SMS / OTP / email gate, safe stop
+    | "deep_link_handoff"      // venue not bookable online, agent hands off
+    | "unsupported_platform";  // Tock / SevenRooms — agent can't drive UI
+  /** Coarse category for dashboard grouping. */
+  category?:
+    | "ot_happy"
+    | "resy_happy"
+    | "ot_fallback"
+    | "resy_fallback"
+    | "edge_not_on_network"
+    | "edge_closed"
+    | "edge_platform_moved"
+    | "edge_party_too_large"
+    | "edge_date_too_close"
+    | "edge_date_too_far"
+    | "handoff_no_online"
+    | "verify_gate"
+    | "unsupported_tock"
+    | "unsupported_sevenrooms";
 }
 
 // ─── Run / case rows persisted to DB ────────────────────────────────────────
