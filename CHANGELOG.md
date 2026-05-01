@@ -4,6 +4,23 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [0.2.63.0] - 2026-04-30
+
+### Added
+- **Executor-level dry-run boundary marker** — generic safety-net for benchmark classifier. After `determineFinalOutcome` returns `paused_payment` AND `assessment.stage` is `checkout_form` or `payment_gate` AND `benchmark_dry_run=true`, stagehand-executor now emits the `DRY_RUN_BOUNDARY_MARKER` via `trace()` regardless of which provider was driving. The marker flows through `debugTrace → step.decisionLog → classifyStepResult` and the case finalizes as `succeeded` instead of `failed/payment_stop`. (commit `64456d5`)
+
+### Verified end-to-end
+- **5/5 fully clean on master `64456d5`** — first run with **zero `failed` outcome buckets containing `executor_error`/`payment_stop`/`unknown_error`**:
+  - L'Artusi 16s `no_availability` ✓ (OT not on network)
+  - **Tao Downtown 1m 52s `succeeded ✓`** (OT cc-section provider marker)
+  - Carbone 17s `no_availability` ✓ (OT permanently closed)
+  - Lilia 16s `no_availability` ✓ (Resy May 15 prime time full, `time_window_minutes=0`)
+  - **Cosme 1m 15s `succeeded ✓`** (Resy modal → executor-level marker, this release)
+
+### Known issues / backlog
+- `allow_platform_switch` in `fallback_policy` still ignored. Requires either a venue cross-platform mapping table or an OT-search-by-name dispatcher fallback. 3-4 hours.
+- AI stage assessment (Anthropic vision API) is the dominant latency on bookable cases — Tao 1m 52s + Cosme 1m 15s are mostly stage-detection wall time. Consider stage caching, batching, or fewer vision calls per run.
+
 ## [0.2.62.0] - 2026-04-30
 
 ### Added

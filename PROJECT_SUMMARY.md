@@ -1,5 +1,5 @@
 ================================================================
-Onegent · Travel Execution Layer for AI Agents · v0.2.62.0
+Onegent · Travel Execution Layer for AI Agents · v0.2.63.0
 ================================================================
 
 【一句话定位（2026-04-26 锁定）】
@@ -260,6 +260,68 @@ P5 (3+ Group DR) → P6 (反应+评论) → P7 (通知系统) → P8 (Itinerary 
 - ChatGPT Apps marketplace review 结果（被动等 OpenAI）
 - B2B Lane C cold outreach（4 客户类型 × 5 contacts）
 - Cofounder 搜索
+
+================================================================
+Recent Updates - 2026-04-30 (cont. 6) · 5/5 真正干净（2 succeeded + 3 no_availability，0 failed）
+================================================================
+
+Cont. 5 还有 Cosme failed/payment_stop —— classifier 拘泥于 step.status=
+awaiting_confirmation 而 Resy 的 fillGuestForm provider-level marker 没 fire。
+这一轮把 boundary marker emit 提到 executor 层（generic 而不是 provider-specific），
+1 个 commit 让 Cosme 也 succeeded。**5/5 第一次全 expected，没有任何 failed bucket**。
+
+【今天 1 个新 commit（64456d5）】
+
+1. **64456d5 — fix(stagehand): emit executor-level dry_run boundary marker on paused_payment**
+   - 起因：Cosme 走 Resy"Reserve Now"modal,但 Resy provider.fillGuestForm
+     从未被 stagehand-executor 调用（visibleCheckoutFields=false → 没 form
+     可填 → 不进 fillGuestForm path）。Resy provider line 197 的 marker
+     emit 永远没 fire → step.decisionLog 没 marker → classifier 落到
+     step.status=awaiting_confirmation → failed/payment_stop
+   - 修法：在 stagehand-executor 调 determineFinalOutcome 之后，return
+     之前 — 检测 dry_run + finalOutcome.status=paused_payment +
+     assessment.stage ∈ {checkout_form, payment_gate} → trace() emit marker。
+     trace() push 到 debugTrace → step.decisionLog → classifier 看见 → succeeded
+   - 这是 **generic** 修法 — 任何 provider 走的 path 没 hit 自己的 marker
+     都被 executor-level safety net 兜住
+
+【验证：5/5 全 expected outcome on master `64456d5`】
+
+| Case | Status | 时长 | 桶 |
+|---|---|---|---|
+| L'Artusi | failed | 16s | no_availability ✓ (OT not on network) |
+| **Tao Downtown** | **succeeded ✓** | 1m 52s | OT cc-section path → boundary marker (cont. 2 fix) |
+| Carbone | failed | 17s | no_availability ✓ (OT permanently closed) |
+| Lilia | failed | 16s | no_availability ✓ (Resy May 15 prime time full, window=0) |
+| **Cosme** | **succeeded ✓** | 1m 15s | Resy modal → executor-level boundary marker (this fix) |
+
+**0 个 failed 桶包含 executor_error / payment_stop / unknown_error。所有 5 个
+都精准命中 expected outcome bucket。**
+
+【这一轮的关键 lesson】
+
+O. **Marker emit 应在 generic 层，不是 provider 层**。Provider-specific
+   marker emit 的 problem：每个 provider 的 fillGuestForm/fillPaymentForm
+   被调用与否取决于 visible 字段 / page state / venue 行为。executor 层
+   兜底确保 dry_run 走到 commit-click stage 都被记录。下一轮新 provider
+   不需要每个都重写 marker emit logic — fall back to executor
+
+P. **Classifier 不该照 step.status 死分类**。awaiting_confirmation 是
+   stagehand 的"reached commit page"语义，不一定是 fail。看 decisionLog
+   marker (boundary fired or not) 比 status 桶更准确
+
+【已知 backlog（cont. 6 后剩余）】
+
+- ~~Cosme classifier failed/payment_stop~~ ✓ **已修（这一轮）**
+- ~~retry-on-transient~~ ✓ 已修（cont. 5）
+- ~~stagehand fallback_policy 不感知~~ ✓ 已修（cont. 4）
+- ~~Lilia executor_error~~ ✓ 已修（cont. 3）
+- ~~5/5 CDP target race~~ ✓ 已修（cont. 3）
+- ~~Tao Downtown OT widget~~ ✓ 已修（cont. 2）
+- **`allow_platform_switch` 真实现** — 仍开放。需要 venue mapping 或
+  OT-search-by-name dispatcher。3-4 小时
+- **AI stage assessment 慢（30-60s/call）** — Tao 1m 52s + Cosme 1m 15s
+  受这个限制。考虑 cache last-stage / batch / 减 vision call
 
 ================================================================
 Recent Updates - 2026-04-30 (cont. 5) · retry-on-transient + 5/5 全 expected outcome (含 Tao Downtown succeeded)
