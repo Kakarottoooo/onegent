@@ -19,6 +19,112 @@ interface OpenTableProfile {
 }
 
 /**
+ * Auto-advance OpenTable's `/booking/seating-options` and `/booking/specials`
+ * intermediate pages to the real `/booking/details` guest-form page.
+ *
+ * Used by:
+ *   - fillGuestForm (legacy entry — kept for callers that arrive directly)
+ *   - stagehand-executor's recovery-loop intermediate_gate hook (so the
+ *     executor can advance OT intermediates even when stage-assessment
+ *     never routes into fillGuestForm — see B1 fix in stage-assessment.ts).
+ *
+ * Returns advanced=true when the URL has left both intermediate paths.
+ * Caller is expected to re-run stage assessment after a true return.
+ */
+export async function runOpenTableIntermediatePreflight(
+  rawPage: Page,
+  trace: (msg: string) => void
+): Promise<{ advanced: boolean; finalUrl: string; reason: string }> {
+  for (let preflightStep = 0; preflightStep < 2; preflightStep += 1) {
+    const url = (rawPage.url() ?? "").toLowerCase();
+    if (url.includes("/booking/seating-options")) {
+      trace(`[opentable] preflight ${preflightStep + 1}: seating-options page — auto-selecting Standard`);
+      const picked = await rawPage.evaluate(() => {
+        const isVisible = (el: Element) => {
+          const r = (el as HTMLElement).getBoundingClientRect();
+          return r.width > 0 && r.height > 0;
+        };
+        const selectBtns = Array.from(document.querySelectorAll<HTMLButtonElement>("button"))
+          .filter((b) => isVisible(b) && /^\s*select\s*$/i.test((b.textContent ?? "").trim()));
+        for (const b of selectBtns) {
+          const section = b.closest("section, [class*='section'], div, li");
+          const sectionText = (section?.textContent ?? "").toLowerCase();
+          if (sectionText.includes("standard")) {
+            b.click();
+            return "Standard";
+          }
+        }
+        if (selectBtns[0]) {
+          selectBtns[0].click();
+          const section = selectBtns[0].closest("section, [class*='section'], div, li");
+          const label =
+            section?.querySelector("h3, h4, p, span, strong")?.textContent?.trim().slice(0, 30) ?? "first option";
+          return label;
+        }
+        return null;
+      }).catch(() => null);
+      if (picked) {
+        trace(`[opentable] preflight: clicked seating "${picked}" — waiting for navigation`);
+        await rawPage.waitForLoadState("domcontentloaded", { timeout: 10_000 }).catch(() => null);
+        await new Promise((r) => setTimeout(r, 1500));
+        continue;
+      }
+      trace(`[opentable] preflight: no Select button found on seating-options page`);
+      break;
+    }
+    if (url.includes("/booking/specials")) {
+      trace(`[opentable] preflight ${preflightStep + 1}: specials page — looking for skip/standard/continue`);
+      const picked = await rawPage.evaluate(() => {
+        const isVisible = (el: Element) => {
+          const r = (el as HTMLElement).getBoundingClientRect();
+          return r.width > 0 && r.height > 0;
+        };
+        const skipPatterns =
+          /no\s*thanks|skip|continue\s*without|maybe\s*later|standard\s*reservation/i;
+        const skipEl = Array.from(document.querySelectorAll<HTMLElement>("a, button, span"))
+          .filter((b) => isVisible(b))
+          .find((b) => skipPatterns.test((b.textContent ?? "").trim()));
+        if (skipEl) {
+          skipEl.click();
+          return `skip:${(skipEl.textContent ?? "").trim().slice(0, 40)}`;
+        }
+        const selectBtns = Array.from(document.querySelectorAll<HTMLButtonElement>("button"))
+          .filter((b) => isVisible(b) && /^\s*select\s*$/i.test((b.textContent ?? "").trim()));
+        for (const b of selectBtns) {
+          const section = b.closest("section, [class*='section'], div, li");
+          const text = (section?.textContent ?? "").toLowerCase();
+          if (
+            /standard reservation|no add-?on|no special|free|complimentary/i.test(text) &&
+            !/\$\d/.test(text)
+          ) {
+            b.click();
+            return `standard-select`;
+          }
+        }
+        return null;
+      }).catch(() => null);
+      if (picked) {
+        trace(`[opentable] preflight: handled specials via "${picked}" — waiting for navigation`);
+        await rawPage.waitForLoadState("domcontentloaded", { timeout: 10_000 }).catch(() => null);
+        await new Promise((r) => setTimeout(r, 1500));
+        continue;
+      }
+      trace(`[opentable] preflight: specials page has only paid add-ons — leaving for boundary`);
+      break;
+    }
+    break;
+  }
+  const finalUrl = (rawPage.url() ?? "").toLowerCase();
+  if (
+    finalUrl.includes("/booking/seating-options") ||
+    finalUrl.includes("/booking/specials")
+  ) {
+    return { advanced: false, finalUrl, reason: "still on intermediate page" };
+  }
+  return { advanced: true, finalUrl, reason: "advanced past intermediate page" };
+}
+
+/**
  * True when OpenTable's reservation form shows the "Credit card required"
  * section (high-end restaurants that ask for a deposit or guarantee card).
  * Detected by visible card-number / CVC / Zip / "Name on card" inputs, or
@@ -227,120 +333,13 @@ export const openTableProvider: BrowserProvider = {
     const stagehand = h?.stagehand;
     const rawPage = h?.rawPage ?? page;
 
-    // ── Preflight: handle /booking/seating-options + /booking/specials ────
-    // After the user clicks a time slot on /r/<slug>, OT may show one of
-    // these intermediate pages BEFORE the real guest form (/booking/details).
-    // Without this preflight, fillGuestForm proceeds against a page with no
-    // form fields, all matchers return not_found, the dry-run boundary
-    // marker fires anyway → false success in the benchmark.
-    //
-    // Loop up to 2 times so a chain like seating-options → specials → details
-    // is handled in one fillGuestForm call.
-    for (let preflightStep = 0; preflightStep < 2; preflightStep += 1) {
-      const url = (rawPage.url() ?? "").toLowerCase();
-      if (url.includes("/booking/seating-options")) {
-        trace(`[opentable] preflight ${preflightStep + 1}: seating-options page — auto-selecting Standard`);
-        const picked = await rawPage.evaluate(() => {
-          const isVisible = (el: Element) => {
-            const r = (el as HTMLElement).getBoundingClientRect();
-            return r.width > 0 && r.height > 0;
-          };
-          const selectBtns = Array.from(document.querySelectorAll<HTMLButtonElement>("button"))
-            .filter((b) => isVisible(b) && /^\s*select\s*$/i.test((b.textContent ?? "").trim()));
-          // Prefer the row whose label/section text contains "Standard".
-          for (const b of selectBtns) {
-            const section = b.closest("section, [class*='section'], div, li");
-            const sectionText = (section?.textContent ?? "").toLowerCase();
-            if (sectionText.includes("standard")) {
-              b.click();
-              return "Standard";
-            }
-          }
-          // Fallback: first visible Select button (free seating type).
-          if (selectBtns[0]) {
-            selectBtns[0].click();
-            const section = selectBtns[0].closest("section, [class*='section'], div, li");
-            const label =
-              section?.querySelector("h3, h4, p, span, strong")?.textContent?.trim().slice(0, 30) ?? "first option";
-            return label;
-          }
-          return null;
-        }).catch(() => null);
-        if (picked) {
-          trace(`[opentable] preflight: clicked seating "${picked}" — waiting for navigation`);
-          await rawPage.waitForLoadState("domcontentloaded", { timeout: 10_000 }).catch(() => null);
-          await new Promise((r) => setTimeout(r, 1500));
-          continue; // Re-read URL — may have navigated to /specials or /details
-        }
-        trace(`[opentable] preflight: no Select button found on seating-options page`);
-        break;
-      }
-      if (url.includes("/booking/specials")) {
-        trace(`[opentable] preflight ${preflightStep + 1}: specials page — looking for skip/standard/continue`);
-        const picked = await rawPage.evaluate(() => {
-          const isVisible = (el: Element) => {
-            const r = (el as HTMLElement).getBoundingClientRect();
-            return r.width > 0 && r.height > 0;
-          };
-          // Order of preference: skip-like text, "standard" Select, generic "continue".
-          // Crucial: do NOT auto-click a paid Select that has no skip option —
-          // that would commit the user to a paid add-on. Stay on page in that
-          // case and let the executor emit a boundary marker.
-          const skipPatterns =
-            /no\s*thanks|skip|continue\s*without|maybe\s*later|standard\s*reservation/i;
-          const skipEl = Array.from(document.querySelectorAll<HTMLElement>("a, button, span"))
-            .filter((b) => isVisible(b))
-            .find((b) => skipPatterns.test((b.textContent ?? "").trim()));
-          if (skipEl) {
-            skipEl.click();
-            return `skip:${(skipEl.textContent ?? "").trim().slice(0, 40)}`;
-          }
-          const selectBtns = Array.from(document.querySelectorAll<HTMLButtonElement>("button"))
-            .filter((b) => isVisible(b) && /^\s*select\s*$/i.test((b.textContent ?? "").trim()));
-          for (const b of selectBtns) {
-            const section = b.closest("section, [class*='section'], div, li");
-            const text = (section?.textContent ?? "").toLowerCase();
-            // Only auto-pick a Select when the row is explicitly the standard /
-            // free-of-charge option. Avoid paid add-ons.
-            if (
-              /standard reservation|no add-?on|no special|free|complimentary/i.test(text) &&
-              !/\$\d/.test(text)
-            ) {
-              b.click();
-              return `standard-select`;
-            }
-          }
-          return null;
-        }).catch(() => null);
-        if (picked) {
-          trace(`[opentable] preflight: handled specials via "${picked}" — waiting for navigation`);
-          await rawPage.waitForLoadState("domcontentloaded", { timeout: 10_000 }).catch(() => null);
-          await new Promise((r) => setTimeout(r, 1500));
-          continue;
-        }
-        trace(`[opentable] preflight: specials page has only paid add-ons — leaving for boundary`);
-        break;
-      }
-      // Not a preflight URL — fall through to the real guest form handler.
-      break;
-    }
-
-    // After preflight: if we're STILL on an intermediate page, abort instead
-    // of running form-fill against a page with no guest fields (which would
-    // emit a fake dry_run boundary marker). The caller will see the throw
-    // and finalise the case as executor_error — accurate signal for "we
-    // don't know how to skip these specials" instead of a fake success.
-    {
-      const finalUrl = (rawPage.url() ?? "").toLowerCase();
-      if (
-        finalUrl.includes("/booking/seating-options") ||
-        finalUrl.includes("/booking/specials")
-      ) {
-        trace(
-          `[opentable] preflight: still on intermediate page after auto-pick attempts — aborting fillGuestForm`,
-        );
-        throw new Error("opentable_intermediate_page_unhandled");
-      }
+    // Preflight intermediate pages (seating-options / specials). Extracted
+    // to runOpenTableIntermediatePreflight so the stagehand-executor's
+    // intermediate_gate hook can call it too — see B1 fix.
+    const preflight = await runOpenTableIntermediatePreflight(rawPage, trace);
+    if (!preflight.advanced) {
+      trace(`[opentable] preflight: still on intermediate page (${preflight.finalUrl.slice(0, 80)}) — aborting fillGuestForm`);
+      throw new Error("opentable_intermediate_page_unhandled");
     }
 
     // Step 1: detect which form type is showing.

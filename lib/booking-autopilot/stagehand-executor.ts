@@ -4934,6 +4934,71 @@ The user will enter CVV and confirm payment themselves.`,
     for (let attempt = 0; attempt < 8; attempt += 1) {
       trace(`Stage assessment ${attempt + 1}: ${assessment.stage} —?${assessment.reason}`);
 
+      // ── A3: Resy "Complete Your Reservation" intermediate modal hook ──────
+      // RC B's stage_assessment marks this modal as `payment_gate` because it
+      // has no input fields. Without this hook the loop would break out at the
+      // 5029 guard (payment_gate not in retry list) and the executor would
+      // emit the dry_run boundary marker WITHOUT ever reaching fillGuestForm
+      // (root cause of fully_automated_success=0% on Resy in run 5).
+      //
+      // The modal is a confirmation gate BEFORE the real form-fill modal:
+      // clicking "Reserve Now" advances to the modal that contains the
+      // first/last/email/phone inputs.
+      if (
+        assessment.stage === "payment_gate" &&
+        /resy\.com/i.test(currentUrl) &&
+        pageText.toLowerCase().includes("complete your reservation")
+      ) {
+        const { clickResyConfirmationModal } = await import("./providers/resy-com");
+        const result = await clickResyConfirmationModal(raw, trace);
+        if (result.clicked) {
+          assessment = await assessBookingStage({
+            rawPage: raw,
+            stagehand,
+            startUrl: input.startUrl,
+            requestedDates,
+            agentMessage,
+          });
+          pageText = assessment.pageText;
+          currentUrl = assessment.currentUrl;
+          trace(`[resy] post-confirmation-modal reassessment: stage=${assessment.stage}`);
+          continue;
+        }
+        trace(`[resy] confirmation modal click skipped: ${result.reason}`);
+      }
+
+      // ── B1: OT seating-options / specials intermediate-page hook ──────────
+      // stage_assessment now classifies these URLs as `intermediate_gate`
+      // (was `checkout_form` until B1). The generic intermediate_gate handler
+      // (at case "intermediate_gate" below) only knows how to click
+      // privacy checkboxes + Booking.com-style "Reserve" buttons — it has no
+      // idea how to pick a Standard seating row or skip a specials add-on
+      // page. So short-circuit the OT case here, run the provider's
+      // preflight, and re-assess. After the preflight advances to
+      // /booking/details, stage will become `checkout_form` and the loop
+      // breaks out into the real fillGuestForm dispatcher (line ~5582).
+      if (
+        assessment.stage === "intermediate_gate" &&
+        /opentable\.com\/booking\/(specials|seating-options)\b/i.test(currentUrl)
+      ) {
+        const { runOpenTableIntermediatePreflight } = await import("./providers/opentable-com");
+        const preflight = await runOpenTableIntermediatePreflight(raw, trace);
+        if (preflight.advanced) {
+          assessment = await assessBookingStage({
+            rawPage: raw,
+            stagehand,
+            startUrl: input.startUrl,
+            requestedDates,
+            agentMessage,
+          });
+          pageText = assessment.pageText;
+          currentUrl = assessment.currentUrl;
+          trace(`[opentable] post-preflight reassessment: stage=${assessment.stage}`);
+          continue;
+        }
+        trace(`[opentable] preflight could not advance — finalUrl=${preflight.finalUrl.slice(0, 80)}`);
+      }
+
       // ── Restaurant platforms: no-results early exit ──────────────────────────
       // Runs regardless of stage (even "unknown") so we catch "didn't find" pages.
       const isRestaurantPlatform = startProvider?.id === "opentable-com" || startProvider?.id === "resy-com" || startProvider?.id === "yelp-com";

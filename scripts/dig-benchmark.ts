@@ -37,14 +37,12 @@ loadDotenv();
 import { sql } from "../lib/db";
 
 const FOCUS_CASES = [
-  // Run 4 dig: RC F over-correction + Don Angie executor_error pattern
-  "nyc_restaurant_001", // L'Artusi — was no_availability, now executor_error 34s (RC F fail-fast bit it)
-  "nyc_restaurant_003", // Carbone — same pattern, executor_error 32s
-  "nyc_restaurant_006", // Don Angie — executor_error 1m19s
-  "nyc_restaurant_007", // Don Angie — verify_gate?? 1m20s
-  "nyc_restaurant_008", // Don Angie OLD Resy URL — executor_error 1m20s
-  "nyc_restaurant_009", // Gramercy Tavern — executor_error 3m56s
-  "nyc_restaurant_010", // Gramercy Tavern — running (still going)
+  // Run 5 dig: 5-case smoke run
+  "nyc_restaurant_001", // L'Artusi — no_availability 22s (need to see if real or executor gave up too early)
+  "nyc_restaurant_002", // Tao Downtown — succeeded 1m50s (need to see if form really filled)
+  "nyc_restaurant_003", // Carbone — no_availability 17s
+  "nyc_restaurant_004", // Lilia — no_availability 16s (Resy)
+  "nyc_restaurant_005", // Cosme — succeeded payment_stop 1m0s (Resy "Complete Your Reservation" modal — user screenshot shows we stop BEFORE clicking consent + Reserve Now)
 ];
 
 async function main() {

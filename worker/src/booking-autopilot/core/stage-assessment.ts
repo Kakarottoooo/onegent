@@ -559,16 +559,27 @@ export async function assessBookingStage(params: {
     // Resy venue detail pages: same rationale as OpenTable above.
     stage = "listing";
     reason = "Resy venue detail page URL is active; booking widget is in listing stage.";
-  } else if (
-    /opentable\.com\/booking\/(details|specials|seating-options)\b/i.test(currentUrl)
-  ) {
-    // OpenTable booking-flow URLs are deterministic checkout pages.
-    // After the user clicks a time slot on /r/<slug>, OT navigates to one
-    // of these three URLs in order: seating-options → specials → details.
-    // All represent "executor reached commit page" — equivalent to
-    // checkout_form stage. Pin so we skip the AI vision call below.
+  } else if (/opentable\.com\/booking\/details\b/i.test(currentUrl)) {
+    // OpenTable's `/booking/details` is the FINAL guest-form page (name /
+    // email / phone / cc inputs). Pin to checkout_form so the executor
+    // breaks out of the recovery loop and dispatches fillGuestForm.
     stage = "checkout_form";
-    reason = "OpenTable booking-flow URL is active (details / specials / seating-options).";
+    reason = "OpenTable /booking/details URL is active — guest-form page.";
+  } else if (
+    /opentable\.com\/booking\/(specials|seating-options)\b/i.test(currentUrl)
+  ) {
+    // B1 fix: /booking/specials and /booking/seating-options are PRE-form
+    // intermediate pages (pick a special offer / pick seating). Previously
+    // these were lumped with /booking/details as `checkout_form` which
+    // caused the executor to break the recovery loop and emit dry_run
+    // boundary WITHOUT running OT provider's RC A preflight. fully_automated
+    // = false because guest form was never reached (case 002 Tao Downtown).
+    //
+    // Mark as `intermediate_gate` so the recovery-loop handler runs OT's
+    // RC A preflight to auto-pick "Standard Reservation" / "Skip" before
+    // re-assessing into checkout_form.
+    stage = "intermediate_gate";
+    reason = "OpenTable booking-flow intermediate URL (specials / seating-options) — needs preflight to advance.";
   } else if (visibleCheckoutFields && !hitPaymentUrl) {
     // Generic DOM signal: any page with visible checkout fields (name +
     // email + phone or similar) is a checkout form regardless of URL.

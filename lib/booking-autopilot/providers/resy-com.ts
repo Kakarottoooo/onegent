@@ -60,6 +60,112 @@ export function cityToResySlug(city: string): string {
   return lower.split(/[\s,]+/)[0] ?? "nyc";
 }
 
+/**
+ * Click through Resy's "Complete Your Reservation" intermediate modal.
+ *
+ * After a user clicks a time slot on the venue listing page, Resy opens a
+ * modal with cancellation policy + a marketing-consent toggle + a "Reserve
+ * Now" button. This modal has NO input fields — it's a confirmation gate
+ * BEFORE the actual guest-form modal (which collects first/last/email/phone).
+ *
+ * RC B (commit 2bf2995) used to mis-classify this modal as `payment_gate`
+ * which caused the executor to emit the dry-run boundary marker and exit
+ * WITHOUT ever filling the guest form. fully_automated_success was
+ * permanently 0% on Resy as a result.
+ *
+ * Strategy: programmatic click on "Reserve Now". Marketing-consent toggle
+ * is intentionally left at default (off) — privacy-preserving, and the
+ * Reserve Now button works regardless of toggle state.
+ *
+ * Returns clicked=true once the next modal containing input fields appears.
+ */
+export async function clickResyConfirmationModal(
+  page: Page,
+  trace: (msg: string) => void
+): Promise<{ clicked: boolean; reason: string }> {
+  const detection = await page.evaluate(() => {
+    const isShown = (el: HTMLElement): boolean => {
+      if (el.hidden || !el.isConnected) return false;
+      const r = el.getBoundingClientRect();
+      if (r.width === 0 || r.height === 0) return false;
+      const s = window.getComputedStyle(el);
+      return s.display !== "none" && s.visibility !== "hidden" && s.opacity !== "0";
+    };
+    const text = (document.body?.innerText ?? "").toLowerCase();
+    const hasModalText = text.includes("complete your reservation");
+    const hasReserveButton = Array.from(document.querySelectorAll<HTMLElement>("button"))
+      .some(b => isShown(b) && /^\s*reserve now\s*$/i.test((b.textContent ?? "").trim()));
+    const hasNameInputs = Array.from(document.querySelectorAll<HTMLInputElement>("input"))
+      .filter(el => el.type !== "hidden" && el.type !== "checkbox" && !el.disabled && isShown(el))
+      .some(el => {
+        const ph = (el.placeholder || "").toLowerCase();
+        const lbl = (el.getAttribute("aria-label") || "").toLowerCase();
+        return ph.includes("first") || ph.includes("last") || el.type === "email" ||
+               lbl.includes("first") || lbl.includes("last") || lbl.includes("email");
+      });
+    return { hasModalText, hasReserveButton, hasNameInputs };
+  }).catch(() => ({ hasModalText: false, hasReserveButton: false, hasNameInputs: true }));
+
+  if (!detection.hasModalText || detection.hasNameInputs || !detection.hasReserveButton) {
+    return {
+      clicked: false,
+      reason: `not on confirmation modal (modalText=${detection.hasModalText} hasNameInputs=${detection.hasNameInputs} hasReserveButton=${detection.hasReserveButton})`,
+    };
+  }
+
+  const clicked = await page.evaluate(() => {
+    const isShown = (el: HTMLElement): boolean => {
+      if (el.hidden || !el.isConnected) return false;
+      const r = el.getBoundingClientRect();
+      if (r.width === 0 || r.height === 0) return false;
+      const s = window.getComputedStyle(el);
+      return s.display !== "none" && s.visibility !== "hidden" && s.opacity !== "0";
+    };
+    const btn = Array.from(document.querySelectorAll<HTMLButtonElement>("button"))
+      .find(b => isShown(b) && /^\s*reserve now\s*$/i.test((b.textContent ?? "").trim()));
+    if (!btn) return false;
+    btn.scrollIntoView({ block: "center" });
+    btn.click();
+    return true;
+  }).catch(() => false);
+
+  if (!clicked) {
+    trace("[resy] clickResyConfirmationModal: Reserve Now button click failed");
+    return { clicked: false, reason: "click failed" };
+  }
+
+  trace("[resy] clickResyConfirmationModal: clicked Reserve Now — waiting for guest-form modal");
+
+  // Poll for the form-fill modal (must contain visible name/email input)
+  for (let i = 0; i < 20; i += 1) {
+    await new Promise(r => setTimeout(r, 500));
+    const formAppeared = await page.evaluate(() => {
+      const isShown = (el: HTMLElement): boolean => {
+        if (el.hidden || !el.isConnected) return false;
+        const r = el.getBoundingClientRect();
+        if (r.width === 0 || r.height === 0) return false;
+        const s = window.getComputedStyle(el);
+        return s.display !== "none" && s.visibility !== "hidden" && s.opacity !== "0";
+      };
+      return Array.from(document.querySelectorAll<HTMLInputElement>("input"))
+        .filter(el => el.type !== "hidden" && el.type !== "checkbox" && !el.disabled && isShown(el))
+        .some(el => {
+          const ph = (el.placeholder || "").toLowerCase();
+          const lbl = (el.getAttribute("aria-label") || "").toLowerCase();
+          return ph.includes("first") || ph.includes("last") || el.type === "email" ||
+                 lbl.includes("first") || lbl.includes("last") || lbl.includes("email");
+        });
+    }).catch(() => false);
+    if (formAppeared) {
+      trace(`[resy] clickResyConfirmationModal: guest-form modal appeared after ${(i + 1) * 500}ms`);
+      return { clicked: true, reason: "form-modal-visible" };
+    }
+  }
+
+  trace("[resy] clickResyConfirmationModal: clicked but form modal did not appear within 10s");
+  return { clicked: true, reason: "form-modal-timeout" };
+}
+
 export const resyProvider: BrowserProvider = {
   id: "resy-com",
 
