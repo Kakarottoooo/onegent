@@ -23,6 +23,8 @@ import {
 } from "@/lib/booking-autopilot/core/task-builders";
 import {
   buildBookingComUrl,
+  buildOpenTableCanonicalUrl,
+  buildOpenTableUrl,
   shouldUseCanonicalRestaurantSearchUrl,
 } from "@/lib/agent/planners/booking-links";
 import { getBookingProfileById, getDefaultBookingProfile } from "@/lib/db";
@@ -328,19 +330,34 @@ function buildRestaurantContext(
   p: RestaurantBookingParams,
   profile: BookingProfile,
 ): { startUrl: string; task: string } {
-  // term=restaurantName+city biases OpenTable's search to the right metro
-  // regardless of prior session cookie.
-  const termRaw = p.city ? `${p.restaurant_name} ${p.city}` : p.restaurant_name;
-  const fallbackSearchUrl = `https://www.opentable.com/s?term=${encodeURIComponent(termRaw)}&covers=${p.covers}&dateTime=${p.date}T${p.time}:00`;
+  // Prefer the canonical /r/<slug> URL when we have name+city — this skips
+  // OT search entirely and lands on the venue's detail page directly.
+  // Avoids the Nashville-sticky-dropdown bug: OT's `?term=` search filters
+  // by the location dropdown (cookie / IP), not by anything in the term.
+  // A term="Tao Downtown New York" submitted from a Nashville-sticky session
+  // returns 185 unrelated Nashville results — `metroId` scoping (now baked
+  // into buildOpenTableUrl) overrides the dropdown when search runs.
+  // If the slug guess is wrong (404), the executor's listing-page detection
+  // triggers the recovery loop and the term-based search runs as backup.
+  const canonicalUrl = p.city
+    ? buildOpenTableCanonicalUrl(p.restaurant_name, p.city)
+    : null;
+  const fallbackSearchUrl = buildOpenTableUrl({
+    restaurantName: p.city ? `${p.restaurant_name} ${p.city}` : p.restaurant_name,
+    city: p.city,
+    date: p.date,
+    time: p.time,
+    covers: p.covers,
+  });
   // Honor caller-provided startUrl when it points at a known booking
   // platform (OpenTable canonical /r/, vanity URL, Resy venue page,
   // exploretock, sevenrooms, benchmark:// sentinel). Falls back to the
-  // OT search URL when the supplied URL is a venue marketing site that
-  // would 404 / drop the date.
+  // canonical-then-search chain when the supplied URL is a venue marketing
+  // site that would 404 / drop the date.
   const startUrl =
     p.startUrl && !shouldUseCanonicalRestaurantSearchUrl(p.startUrl)
       ? p.startUrl
-      : fallbackSearchUrl;
+      : (canonicalUrl ?? fallbackSearchUrl);
   const { task } = buildRestaurantTask({
     restaurantName: p.restaurant_name,
     city: p.city,

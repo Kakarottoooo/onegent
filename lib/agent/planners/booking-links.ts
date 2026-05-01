@@ -453,8 +453,90 @@ const RESTAURANT_BOOKING_HOSTS = [
 ] as const;
 
 /**
+ * OT metroId scoping table.
+ *
+ * Why we need this: OpenTable's `/s?term=...` search filters by the location
+ * dropdown (sticky cookie / IP geolocation), NOT by anything in the term
+ * string. A term like "Tao Downtown New York" submitted from a session whose
+ * dropdown is sticky on Nashville returns 185 unrelated Nashville results.
+ *
+ * Adding `&metroId=8` overrides the sticky dropdown and forces the search
+ * to scope to the specified metro. Without it, the user-visible bug (chat
+ * → "Tao Downtown New York" → OT search lands in Nashville) reproduces every
+ * time the executor's chromium profile picks up a non-NYC location.
+ *
+ * IDs sourced from `opentable.com/m/{slug}-restaurants` URL-segment metroId
+ * cookie inspection. Add more cities here as benchmark / chat traffic
+ * uncovers new metros — only the ones below are covered today.
+ */
+const CITY_TO_METRO_ID: Record<string, string> = {
+  "new york": "8",
+  "san francisco": "4",
+  "los angeles": "72",
+  "chicago": "1",
+  "boston": "11",
+  "washington": "29",
+  "miami": "27",
+  "seattle": "31",
+};
+
+function normalizeCityForMetro(city: string): string {
+  // Strip neighborhood prefix ("West Village, New York" → "New York"), trim,
+  // lowercase. We only consume the last comma-segment when present so that
+  // "Brooklyn, NY" still resolves to NYC's metroId.
+  const last = city.split(",").pop() ?? city;
+  return last
+    .toLowerCase()
+    .replace(/\s+ny$|\s+ca$|\s+il$|\s+ma$|\s+wa$|\s+fl$|\s+dc$/, "")
+    .trim();
+}
+
+/**
+ * Slugify name+city the way OpenTable formats canonical /r/<slug> URLs.
+ * E.g. ("Tao Downtown", "New York") → "tao-downtown-new-york".
+ */
+function slugifyForOpenTable(restaurantName: string, city?: string): string {
+  const slugify = (s: string) =>
+    s
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-+|-+$/g, "");
+  const namePart = slugify(restaurantName);
+  if (!city) return namePart;
+  const cityPart = slugify(city.split(",").pop() ?? city);
+  if (!cityPart) return namePart;
+  return `${namePart}-${cityPart}`;
+}
+
+/**
+ * Best-effort guess at OpenTable's canonical detail URL for a venue.
+ *
+ * Prefer this over `buildOpenTableUrl` when starting from a known venue +
+ * city — landing directly on `/r/<slug>` skips the search step entirely
+ * (which is what got us into the Nashville-dropdown bug in the first place)
+ * and goes straight to the date/time/covers picker.
+ *
+ * Returns the constructed URL (no HEAD verification — that would burn an
+ * HTTP request per chat turn and risk Akamai rate-limiting). When the slug
+ * guess is wrong, the stagehand executor's own listing-page detection
+ * triggers the recovery loop, and the search-URL fallback path kicks in.
+ */
+export function buildOpenTableCanonicalUrl(
+  restaurantName: string,
+  city?: string,
+): string {
+  const slug = slugifyForOpenTable(restaurantName, city);
+  return `https://www.opentable.com/r/${slug}`;
+}
+
+/**
  * Build an OpenTable search URL pre-filled with date, time, covers, and
  * restaurant or city as a search term.
+ *
+ * IMPORTANT: also injects `metroId` when `opts.city` resolves to a known
+ * metro. Without this, OT's sticky location dropdown (e.g. "Nashville") wins
+ * and the search ignores any city information embedded in the term string.
+ * See CITY_TO_METRO_ID above for the rationale.
  */
 export function buildOpenTableUrl(opts: OpenTableOpts): string {
   const params: Record<string, string> = {};
@@ -465,6 +547,10 @@ export function buildOpenTableUrl(opts: OpenTableOpts): string {
   }
   const term = opts.restaurantName ?? opts.city ?? "";
   if (term) params.term = term;
+  if (opts.city) {
+    const metroId = CITY_TO_METRO_ID[normalizeCityForMetro(opts.city)];
+    if (metroId) params.metroId = metroId;
+  }
   return `https://www.opentable.com/s?${new URLSearchParams(params).toString()}`;
 }
 

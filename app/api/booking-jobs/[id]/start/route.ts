@@ -516,8 +516,11 @@ async function runUniversalStep(
       // right metro while still matching the restaurant by name.
       const existingStartUrl =
         typeof resolvedBody.startUrl === "string" ? resolvedBody.startUrl : "";
-      const { buildOpenTableUrl, shouldUseCanonicalRestaurantSearchUrl } =
-        await import("@/lib/agent/planners/booking-links");
+      const {
+        buildOpenTableUrl,
+        buildOpenTableCanonicalUrl,
+        shouldUseCanonicalRestaurantSearchUrl,
+      } = await import("@/lib/agent/planners/booking-links");
 
       // Official venue websites frequently drop the case date/time and can
       // bounce into unrelated OpenTable experience flows (e.g. brunch pages on
@@ -525,15 +528,27 @@ async function runUniversalStep(
       // booking surface unless the caller already supplied a real restaurant
       // booking URL (OpenTable / Resy / Yelp).
       if (shouldUseCanonicalRestaurantSearchUrl(existingStartUrl)) {
+        // Prefer the canonical /r/<slug> URL when we have name+city — this
+        // skips OT search entirely and lands directly on the venue's detail
+        // page. Avoids the Nashville-sticky-dropdown bug that the term-only
+        // search hits when the chromium profile picks up a non-NYC location.
+        // If the slug guess is wrong (404), the stagehand executor's
+        // listing-page detection triggers the recovery loop and the term-
+        // based search runs anyway — but with metroId scoping now baked in.
+        const canonicalUrl =
+          rName && rCity ? buildOpenTableCanonicalUrl(rName, rCity) : null;
         const termRaw = rCity ? `${rName} ${rCity}` : rName;
         resolvedBody = {
           ...resolvedBody,
-          startUrl: buildOpenTableUrl({
-            restaurantName: termRaw,
-            date: rDate,
-            time: rTime,
-            covers: rCovers,
-          }),
+          startUrl:
+            canonicalUrl ??
+            buildOpenTableUrl({
+              restaurantName: termRaw,
+              city: rCity,
+              date: rDate,
+              time: rTime,
+              covers: rCovers,
+            }),
         };
       }
 

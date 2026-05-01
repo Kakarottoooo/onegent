@@ -440,8 +440,64 @@ export interface OpenTableOpts {
 }
 
 /**
+ * OT metroId scoping table. Mirrors lib/agent/planners/booking-links.ts.
+ *
+ * OpenTable's `/s?term=...` filters by the location dropdown (sticky cookie /
+ * IP geolocation), NOT by anything in the term string. Without metroId
+ * scoping, term="Tao Downtown New York" submitted from a Nashville-sticky
+ * session returns 185 unrelated Nashville results. Adding `&metroId=8`
+ * forces the search into the right metro regardless of dropdown state.
+ */
+const CITY_TO_METRO_ID: Record<string, string> = {
+  "new york": "8",
+  "san francisco": "4",
+  "los angeles": "72",
+  "chicago": "1",
+  "boston": "11",
+  "washington": "29",
+  "miami": "27",
+  "seattle": "31",
+};
+
+function normalizeCityForMetro(city: string): string {
+  const last = city.split(",").pop() ?? city;
+  return last
+    .toLowerCase()
+    .replace(/\s+ny$|\s+ca$|\s+il$|\s+ma$|\s+wa$|\s+fl$|\s+dc$/, "")
+    .trim();
+}
+
+function slugifyForOpenTable(restaurantName: string, city?: string): string {
+  const slugify = (s: string) =>
+    s
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-+|-+$/g, "");
+  const namePart = slugify(restaurantName);
+  if (!city) return namePart;
+  const cityPart = slugify(city.split(",").pop() ?? city);
+  if (!cityPart) return namePart;
+  return `${namePart}-${cityPart}`;
+}
+
+/**
+ * Best-effort canonical OT detail URL for a venue. Skips the search step
+ * (which has the Nashville-dropdown bug) and goes straight to the venue's
+ * date/time/covers picker. If the slug guess is wrong, the executor's
+ * listing-page detection triggers the recovery loop.
+ */
+export function buildOpenTableCanonicalUrl(
+  restaurantName: string,
+  city?: string,
+): string {
+  const slug = slugifyForOpenTable(restaurantName, city);
+  return `https://www.opentable.com/r/${slug}`;
+}
+
+/**
  * Build an OpenTable search URL pre-filled with date, time, covers, and
- * restaurant or city as a search term.
+ * restaurant or city as a search term, plus metroId scoping when the city
+ * resolves to a known metro.
  */
 export function buildOpenTableUrl(opts: OpenTableOpts): string {
   const params: Record<string, string> = {};
@@ -452,6 +508,10 @@ export function buildOpenTableUrl(opts: OpenTableOpts): string {
   }
   const term = opts.restaurantName ?? opts.city ?? "";
   if (term) params.term = term;
+  if (opts.city) {
+    const metroId = CITY_TO_METRO_ID[normalizeCityForMetro(opts.city)];
+    if (metroId) params.metroId = metroId;
+  }
   return `https://www.opentable.com/s?${new URLSearchParams(params).toString()}`;
 }
 
