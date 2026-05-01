@@ -9,8 +9,13 @@
 const MAX_LINES = 2000;
 const CLEANUP_DELAY_MS = 5 * 60_000;
 
+export interface LiveLogLineEntry {
+  line: string;
+  ts: string;
+}
+
 interface LogEntry {
-  lines: string[];
+  lines: LiveLogLineEntry[];
   closedAt?: number;
   epoch: number; // increments on each liveLogReset — lets client detect a new run
 }
@@ -38,12 +43,12 @@ export function liveLogPush(jobId: string, line: string): void {
     store.set(jobId, entry);
   }
   if (entry.lines.length < MAX_LINES) {
-    entry.lines.push(line);
+    entry.lines.push({ line, ts: new Date().toISOString() });
   }
 }
 
 /** Returns all lines after the given index (exclusive). */
-export function liveLogGet(jobId: string, after = 0): string[] {
+export function liveLogGet(jobId: string, after = 0): LiveLogLineEntry[] {
   return (store.get(jobId)?.lines ?? []).slice(after);
 }
 

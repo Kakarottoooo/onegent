@@ -13,28 +13,47 @@ Always respond in Chinese. Never respond in Korean.
 
 ---
 
-## Booking-autopilot 架构 — worker 是唯一执行路径（B+B2，2026-05-01）
+## Booking-autopilot 架构 — 双份代码并存（B+B2，2026-05-01；修正 2026-05-01 PM）
 
-**单一执行源**：`worker/src/booking-autopilot/`。所有 booking job（restaurant /
-hotel / flight / activity）都通过 Railway/local worker 跑。lib/booking-autopilot
-是 deprecated dead code，运行时不会被调用。
+**事实校正（2026-05-01 audit）：之前说 lib/booking-autopilot 是 "deprecated dead code"
+是错的。** lib/booking-autopilot 仍被以下文件 import：
+- `app/api/booking-jobs/[id]/start/route.ts:58` —— `runBrowserTask`（M5 force-gate
+  之外的 fallback in-process path 还会调）
+- `lib/core/execution/executor.ts:19` —— `runBrowserTask` + 多个 task-builders
+  + `BrowserTaskInput` / `BookingProfile` 类型
 
-**路由**：`/api/booking-jobs/[id]/start` 检测 step 类型 → 自动 stamp
-`__source = "lib/core/execution"` marker → 留 status=pending → 返回 202。
-worker poll Neon `booking_jobs.status='pending' AND steps->0->'body'->>'__source'='lib/core/execution'`，
-通过 FOR UPDATE SKIP LOCKED 抢占，然后跑 stagehand。USE_WORKER_FOR 只是
-operator override（缩小 scenario 范围用于灰度）。
+所以 lib/booking-autopilot **目前不是 dead code，物理删除会编译失败**。
 
-### 改动规矩（B+B2 之后）
+**主执行路径**：worker/src/booking-autopilot/（Railway/local worker 跑）。
+M5 force-gate 让 `/api/booking-jobs/[id]/start` 把 restaurant/hotel/flight/activity
+都路由到 worker（自动 stamp `__source = "lib/core/execution"` marker → 202 返回）。
+worker poll Neon + FOR UPDATE SKIP LOCKED 抢占。USE_WORKER_FOR 是 operator
+override（缩小 scenario 范围用于灰度）。
+
+**Fallback 路径**：lib/booking-autopilot/ 仍是 Vercel in-process executor 的
+执行体（lib/core/execution/executor.ts → runBrowserTask）。这条路径仅在
+M5 gate 路由失败 / 非 worker scenario 时触发。
+
+### 改动规矩（双份共存期间）
 
 | 改动类型 | 改哪边 |
 |---|---|
-| 新增 provider / 新功能 / bug fix（任何 scenario） | **只改 `worker/src/booking-autopilot/`** |
-| `lib/booking-autopilot/` | **不要再动**。它是 deprecated；运行时不会被调用 |
-| `lib/db.ts` / schema 变化 | **两边都改**（同一个 Neon DB） |
-| `lib/core/cend-adapter.ts` / `lib/core/execution/types.ts` | 两边都改（worker/src/core 是 fork；这俩文件 vercel 端也用来 mark step） |
-| `lib/encryption.ts` / `lib/autonomy.ts` / `lib/agent/planners/booking-links.ts` | **两边都改**（worker/src 有 fork） |
+| 新增 provider / 新功能 / bug fix（实际 prod scenario） | **优先 `worker/src/booking-autopilot/`**；如果 lib/core/execution 也走这个 provider，**两边都改** |
+| 已有 provider 的 fallback / scoring / error 逻辑 | **两边都改**（lib 和 worker 必须功能对齐 —— 漂移=哪边跑出来不一样） |
+| `lib/db.ts` / schema | **两边都改**（同一个 Neon DB） |
+| `lib/core/cend-adapter.ts` / `lib/core/execution/types.ts` | **两边都改**（worker/src/core 是 fork；这俩文件 vercel 端也用来 mark step） |
+| `lib/encryption.ts` / `lib/autonomy.ts` / `lib/agent/planners/booking-links.ts` / `lib/booking-errors.ts` / `lib/live-log-store.ts` | **两边都改**（worker/src 有 fork） |
 | NLU / chat / UI / API routes | 只在 root（这些**不在** worker 里） |
+
+### Drift 检测（每次改 booking-autopilot 之后跑）
+
+```bash
+diff -rq lib/booking-autopilot worker/src/booking-autopilot
+diff -q lib/booking-errors.ts worker/src/booking-errors.ts
+diff -q lib/live-log-store.ts worker/src/live-log-store.ts
+```
+
+输出空才算同步完成。
 
 ### dev workflow
 
@@ -53,20 +72,26 @@ prod：worker **还没部署到 Railway**（之前 memory 里写的"Sprint 1 #1 
 false memory，Railway 上只有 `@onegent/mcp-server`）。prod booking 目前是死的，
 反正没付费用户。需要时把 worker 部署到 Railway 即可。
 
-### lib/booking-autopilot/ 物理删除（DEFERRED）
+### lib/booking-autopilot/ 物理删除（DEFERRED — 仍载货）
 
-物理删除涉及 ~1000 行 in-process fallback path 在
-`app/api/booking-jobs/[id]/start/route.ts` + `lib/core/execution/{executor,recovery,recovery-providers}.ts`
-+ `lib/booking-autopilot/` 本身。当前 deprecation header 已经标了，dead code 不
-影响 runtime。下次集中清理时做：
-- 删 `lib/booking-autopilot/` 整个目录
+**前提：先把所有 import lib/booking-autopilot 的地方迁移到 worker 路径或者
+inline 化。** 当前阻塞物理删除的 import：
+- `app/api/booking-jobs/[id]/start/route.ts:58` — `runBrowserTask`
+- `lib/core/execution/executor.ts:19` — `runBrowserTask` + task-builders + types
+
+物理删除步骤（仍未做）：
+- 删 `lib/core/execution/{executor,recovery,recovery-providers}.ts`（worker 有 fork，但
+  Vercel 也用，得先证明 M5 gate 永远 hit）
 - 删 `app/api/booking-jobs/[id]/start/route.ts` 的 `runStepWithRecovery` /
-  `runUniversalStep` / `runUniversalStepViaCore` in-process 段（保留 worker
-  dispatch gate + 202 enqueue）
-- 删 `lib/core/execution/{executor,recovery,recovery-providers}.ts`（worker 有 fork）
+  `runUniversalStep` / `runUniversalStepViaCore` in-process 段
 - `BookingProfile` type 从 `lib/booking-autopilot/types.ts` 移到 `lib/core/booking-types.ts`
+- 删 `lib/booking-autopilot/` 整个目录
 - 删 `vercel.json` 的 retry-jobs cron 条目 + `app/api/cron/retry-jobs/route.ts`
 - typecheck + smoke test 一遍才能 ship
+
+触发删除的真实条件（任一）：
+- M5 force-gate 在 prod 运行 N 天，0 次 fallback 触发，证明 in-process 路径无人走
+- Browserbase Pro 升级 → 所有 scenario 都通过 worker 跑，无需 Vercel 端 chromium
 
 ---
 
