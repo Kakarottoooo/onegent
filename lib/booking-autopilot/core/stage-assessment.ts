@@ -485,10 +485,51 @@ export async function assessBookingStage(params: {
     // Resy venue detail pages: same rationale as OpenTable above.
     stage = "listing";
     reason = "Resy venue detail page URL is active; booking widget is in listing stage.";
+  } else if (
+    /opentable\.com\/booking\/(details|specials|seating-options)\b/i.test(currentUrl)
+  ) {
+    // OpenTable booking-flow URLs are deterministic checkout pages.
+    // After the user clicks a time slot on /r/<slug>, OT navigates to one
+    // of these three URLs in order: seating-options → specials → details.
+    // All represent "executor reached commit page" — equivalent to
+    // checkout_form stage. Pin so we skip the AI vision call below.
+    stage = "checkout_form";
+    reason = "OpenTable booking-flow URL is active (details / specials / seating-options).";
+  } else if (visibleCheckoutFields && !hitPaymentUrl) {
+    // Generic DOM signal: any page with visible checkout fields (name +
+    // email + phone or similar) is a checkout form regardless of URL.
+    // Catches Resy's modal-style "Reserve Now" page and inline reservation
+    // forms on niche providers that don't follow OT/Booking.com URL patterns.
+    stage = "checkout_form";
+    reason = "Checkout form fields visible in DOM (email/phone/name inputs).";
+  }
+
+  // ── Pre-AI fast path: skip vision call when RPA classified from a
+  // deterministic URL pattern. Vision call is 30-60s, dominant cost on
+  // bookable cases. cont. 6 perf optimization. ─────────────────────
+  const isDeterministicUrlClassification =
+    stage !== "unknown" &&
+    (
+      /opentable\.com\/booking\/(details|specials|seating-options|search)\b/i.test(currentUrl) ||
+      /opentable\.com\/r\//i.test(currentUrl) ||
+      /resy\.com\/cities\/.+\/venues\//i.test(currentUrl) ||
+      hitPaymentUrl
+    );
+
+  if (
+    process.env.AI_LOOP_STAGE_DETECT === "true" &&
+    isDeterministicUrlClassification
+  ) {
+    console.log(
+      `[stage-detect] AI vision call SKIPPED — RPA classified from deterministic URL/DOM (stage=${stage})`,
+    );
   }
 
   // ── Phase 2: AI-assisted stage detection (gated by AI_LOOP_STAGE_DETECT=true) ──
-  if (process.env.AI_LOOP_STAGE_DETECT === "true") {
+  if (
+    process.env.AI_LOOP_STAGE_DETECT === "true" &&
+    !isDeterministicUrlClassification
+  ) {
     try {
       const aiPerception = await perceiveAndDecide(rawPage, {
         task: "identify the current booking stage",
