@@ -69,10 +69,12 @@ export const RESTAURANT_BENCHMARK_CASES_NYC: RestaurantBenchmarkCase[] = [
     restaurant_name: "Wild West Village",
     restaurant_url: "https://www.opentable.com/wild-west-village",
     expected_provider: "OpenTable",
-    date: "2026-05-08",
-    time: "19:30",
+    // 2026-05-09 23:00 — user screenshot 2026-05-01 confirmed
+    // 10:15/10:45/11:00 PM available on this exact date.
+    date: "2026-05-09",
+    time: "23:00",
     party_size: 2,
-    occasion: "casual_dinner",
+    occasion: "late_night",
     fallback_policy: {
       time_window_minutes: 60,
       allow_platform_switch: false,
@@ -81,7 +83,7 @@ export const RESTAURANT_BENCHMARK_CASES_NYC: RestaurantBenchmarkCase[] = [
     },
     expected_outcome: "fully_automated",
     category: "ot_happy",
-    notes: "OT vanity URL (no /r/ prefix); should redirect. User-confirmed bookable on OpenTable 2026-05-01.",
+    notes: "OT vanity URL (no /r/ prefix); should redirect. Date/time chosen from user screenshot confirming availability.",
   },
   {
     case_id: "nyc_restaurant_003",
@@ -109,10 +111,12 @@ export const RESTAURANT_BENCHMARK_CASES_NYC: RestaurantBenchmarkCase[] = [
     restaurant_name: "The Clam",
     restaurant_url: "https://www.opentable.com/the-clam",
     expected_provider: "OpenTable",
+    // Late-night Saturday slot to maximise availability — pairs with case
+    // 002 in stress-testing OT vanity-URL path on confirmed-bookable dates.
     date: "2026-05-09",
-    time: "19:30",
+    time: "22:00",
     party_size: 2,
-    occasion: "casual_dinner",
+    occasion: "late_night",
     fallback_policy: {
       time_window_minutes: 60,
       allow_platform_switch: false,
@@ -121,7 +125,7 @@ export const RESTAURANT_BENCHMARK_CASES_NYC: RestaurantBenchmarkCase[] = [
     },
     expected_outcome: "fully_automated",
     category: "ot_happy",
-    notes: "OT vanity URL (no /r/ prefix); should redirect. User-confirmed bookable on OpenTable 2026-05-01.",
+    notes: "OT vanity URL (no /r/ prefix); late-night Saturday slot for max availability.",
   },
   {
     case_id: "nyc_restaurant_005",
