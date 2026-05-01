@@ -351,7 +351,10 @@ export const openTableProvider: BrowserProvider = {
     // 1. URL is the booking details page (opentable.com/booking/details?...)
     // 2. URL is the seating options page (opentable.com/booking/seating-options?...)
     // 3. OR reservation form is visible (first-name OR phone-number input present)
-    const isBookingDetailsUrl = lowerUrl.includes("/booking/details") || lowerUrl.includes("/booking/seating-options");
+    const isBookingDetailsUrl =
+      lowerUrl.includes("/booking/details") ||
+      lowerUrl.includes("/booking/seating-options") ||
+      lowerUrl.includes("/booking/experiences-details");
     const hasReservationForm = await page.evaluate(() => {
       const inputs = Array.from(document.querySelectorAll<HTMLInputElement>("input"));
       const visible = inputs.filter((el) => {
@@ -399,7 +402,19 @@ export const openTableProvider: BrowserProvider = {
     trace: (msg: string) => void
   ): Promise<void> {
     const p = profile as OpenTableProfile;
-    const phoneDigits = (p.phone ?? "").replace(/\D/g, "");
+    // OT validates phone format strictly: plain "5555550100" gets rejected
+    // with "Your phone number format is invalid". 10-digit US numbers must
+    // be formatted as "(555) 555-0100". Strip to digits, drop a leading "1"
+    // (country code lives in a separate +1 dropdown), then format. Run 12
+    // case 016 (The Modern) hit this — guest form filled per our trace,
+    // but the form bombed on submit.
+    const rawDigits = (p.phone ?? "").replace(/\D/g, "");
+    const tenDigit = rawDigits.length === 11 && rawDigits.startsWith("1")
+      ? rawDigits.slice(1)
+      : rawDigits.slice(-10);
+    const phoneDigits = tenDigit.length === 10
+      ? `(${tenDigit.slice(0, 3)}) ${tenDigit.slice(3, 6)}-${tenDigit.slice(6)}`
+      : rawDigits; // non-US / unexpected length — fall back to raw digits
     // Extract stagehand + rawPage from helpers (injected by executor)
     const h = helpers as { stagehand?: { act: (s: string) => Promise<unknown> }; rawPage?: Page } | null;
     const stagehand = h?.stagehand;

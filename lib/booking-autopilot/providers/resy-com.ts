@@ -92,104 +92,69 @@ export async function clickResyConfirmationModal(
   page: Page,
   trace: (msg: string) => void
 ): Promise<{ clicked: boolean; reason: string; nextStage: ResyConfirmationNext }> {
-  const detection = await page.evaluate(() => {
-    const isShown = (el: HTMLElement): boolean => {
-      if (el.hidden || !el.isConnected) return false;
-      const r = el.getBoundingClientRect();
-      if (r.width === 0 || r.height === 0) return false;
-      const s = window.getComputedStyle(el);
-      return s.display !== "none" && s.visibility !== "hidden" && s.opacity !== "0";
-    };
-    const text = (document.body?.innerText ?? "").toLowerCase();
-    const hasModalText = text.includes("complete your reservation");
-    const hasReserveButton = Array.from(document.querySelectorAll<HTMLElement>("button"))
-      .some(b => isShown(b) && /^\s*reserve now\s*$/i.test((b.textContent ?? "").trim()));
-    const hasNameInputs = Array.from(document.querySelectorAll<HTMLInputElement>("input"))
-      .filter(el => el.type !== "hidden" && el.type !== "checkbox" && !el.disabled && isShown(el))
-      .some(el => {
-        const ph = (el.placeholder || "").toLowerCase();
-        const lbl = (el.getAttribute("aria-label") || "").toLowerCase();
-        return ph.includes("first") || ph.includes("last") || el.type === "email" ||
-               lbl.includes("first") || lbl.includes("last") || lbl.includes("email");
-      });
-    return { hasModalText, hasReserveButton, hasNameInputs };
-  }).catch(() => ({ hasModalText: false, hasReserveButton: false, hasNameInputs: true }));
+  // Locator API traverses frames + shadow DOM automatically — single
+  // `document.body.innerText` evaluate misses Resy's modal because the
+  // modal is rendered inside an iframe or React Portal target outside
+  // <body>. Stage assessment's `readCombinedText` succeeds because it
+  // walks `getInteractionScopes` (frames + main); our hook needs the
+  // same coverage. Run 11 case 005 (Cosme) hit this — modalText=false
+  // even though the modal was visibly open.
+  const modalHeading = page.locator(
+    "text=/^\\s*Complete Your Reservation\\s*$/i"
+  ).first();
+  const reserveBtn = page.locator(
+    'button:has-text("Reserve Now"), [role="button"]:has-text("Reserve Now")'
+  ).first();
+  const guestFormInput = page.locator(
+    'input[placeholder*="First" i], input[placeholder*="Last" i], input[type="email"], input[aria-label*="First" i], input[aria-label*="Last" i], input[aria-label*="Email" i]'
+  ).first();
 
-  if (!detection.hasModalText || detection.hasNameInputs || !detection.hasReserveButton) {
+  const hasModalHeading = await modalHeading.isVisible({ timeout: 1500 }).catch(() => false);
+  const hasReserveButton = await reserveBtn.isVisible({ timeout: 500 }).catch(() => false);
+  const hasNameInputs = await guestFormInput.isVisible({ timeout: 250 }).catch(() => false);
+
+  if (!hasModalHeading || hasNameInputs || !hasReserveButton) {
     return {
       clicked: false,
-      reason: `not on confirmation modal (modalText=${detection.hasModalText} hasNameInputs=${detection.hasNameInputs} hasReserveButton=${detection.hasReserveButton})`,
+      reason: `not on confirmation modal (modalHeading=${hasModalHeading} hasNameInputs=${hasNameInputs} hasReserveButton=${hasReserveButton})`,
       nextStage: "not_clicked",
     };
   }
 
-  const clicked = await page.evaluate(() => {
-    const isShown = (el: HTMLElement): boolean => {
-      if (el.hidden || !el.isConnected) return false;
-      const r = el.getBoundingClientRect();
-      if (r.width === 0 || r.height === 0) return false;
-      const s = window.getComputedStyle(el);
-      return s.display !== "none" && s.visibility !== "hidden" && s.opacity !== "0";
-    };
-    const btn = Array.from(document.querySelectorAll<HTMLButtonElement>("button"))
-      .find(b => isShown(b) && /^\s*reserve now\s*$/i.test((b.textContent ?? "").trim()));
-    if (!btn) return false;
-    btn.scrollIntoView({ block: "center" });
-    btn.click();
-    return true;
-  }).catch(() => false);
+  const clickOk = await reserveBtn
+    .scrollIntoViewIfNeeded({ timeout: 1500 })
+    .then(() => reserveBtn.click({ timeout: 3000 }))
+    .then(() => true)
+    .catch((e: Error) => {
+      trace(`[resy] clickResyConfirmationModal: Reserve Now click failed (${e.message?.slice(0, 60)})`);
+      return false;
+    });
 
-  if (!clicked) {
-    trace("[resy] clickResyConfirmationModal: Reserve Now button click failed");
+  if (!clickOk) {
     return { clicked: false, reason: "click failed", nextStage: "not_clicked" };
   }
 
   trace("[resy] clickResyConfirmationModal: clicked Reserve Now — waiting for next modal");
 
   // Poll for either the guest-form modal (name/email) OR the mobile-verify
-  // modal (phone OTP for anonymous users). Resy routes anonymous users to
-  // mobile-verify before exposing the guest form, so both shapes need to
-  // be recognised at this gate.
+  // modal (phone OTP for anonymous users). Locator API traverses frames /
+  // shadow DOM, so a single waitFor probe across both candidates is reliable.
+  const guestFormProbe = page.locator(
+    'input[placeholder*="First" i], input[placeholder*="Last" i], input[type="email"], input[aria-label*="First" i], input[aria-label*="Last" i], input[aria-label*="Email" i]'
+  ).first();
+  const mobileVerifyHeading = page.locator(
+    "text=/mobile phone number to verify/i"
+  ).first();
+
   for (let i = 0; i < 20; i += 1) {
     await new Promise(r => setTimeout(r, 500));
-    const probe = await page.evaluate(() => {
-      const isShown = (el: HTMLElement): boolean => {
-        if (el.hidden || !el.isConnected) return false;
-        const r = el.getBoundingClientRect();
-        if (r.width === 0 || r.height === 0) return false;
-        const s = window.getComputedStyle(el);
-        return s.display !== "none" && s.visibility !== "hidden" && s.opacity !== "0";
-      };
-      const inputs = Array.from(document.querySelectorAll<HTMLInputElement>("input"))
-        .filter(el => el.type !== "hidden" && el.type !== "checkbox" && !el.disabled && isShown(el));
-      const hasGuestForm = inputs.some(el => {
-        const ph = (el.placeholder || "").toLowerCase();
-        const lbl = (el.getAttribute("aria-label") || "").toLowerCase();
-        return ph.includes("first") || ph.includes("last") || el.type === "email" ||
-               lbl.includes("first") || lbl.includes("last") || lbl.includes("email");
-      });
-      // Mobile-verify modal: text "mobile phone number to verify" (or close
-      // variant) + a phone-shaped input (type=tel OR placeholder contains
-      // "mobile" / "phone").
-      const text = (document.body?.innerText ?? "").toLowerCase();
-      const verifyText =
-        text.includes("mobile phone number to verify") ||
-        text.includes("mobile phone number") && text.includes("verify or create");
-      const hasMobileInput = inputs.some(el => {
-        const ph = (el.placeholder || "").toLowerCase();
-        const lbl = (el.getAttribute("aria-label") || "").toLowerCase();
-        return el.type === "tel" || ph.includes("mobile") || ph.includes("phone") ||
-               lbl.includes("mobile") || lbl.includes("phone");
-      });
-      const hasMobileVerify = verifyText && hasMobileInput;
-      return { hasGuestForm, hasMobileVerify };
-    }).catch(() => ({ hasGuestForm: false, hasMobileVerify: false }));
-
-    if (probe.hasGuestForm) {
+    const guestVisible = await guestFormProbe.isVisible({ timeout: 200 }).catch(() => false);
+    const mobileVisible = await mobileVerifyHeading.isVisible({ timeout: 200 }).catch(() => false);
+    if (guestVisible) {
       trace(`[resy] clickResyConfirmationModal: guest-form modal appeared after ${(i + 1) * 500}ms`);
       return { clicked: true, reason: "form-modal-visible", nextStage: "guest_form" };
     }
-    if (probe.hasMobileVerify) {
+    if (mobileVisible) {
       trace(`[resy] clickResyConfirmationModal: mobile-verify modal appeared after ${(i + 1) * 500}ms`);
       return { clicked: true, reason: "mobile-verify-visible", nextStage: "mobile_verify" };
     }
