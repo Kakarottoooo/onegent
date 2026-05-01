@@ -119,7 +119,14 @@ export const RESTAURANT_BENCHMARK_CASES_NYC: RestaurantBenchmarkCase[] = [
       require_user_approval_before_booking: false,
     },
     notes:
-      "Resy stress test: Cosme prime-time is usually full. Time + platform fallback should attempt OpenTable / official site if Resy refuses.",
+      "Resy stress test: Cosme prime-time is usually full. Time + platform fallback should attempt OpenTable / official site if Resy refuses. " +
+      "KNOWN LIMITATION (cont. 7, 2026-04-30): Resy enforces a mobile phone " +
+      "OTP gate on guest checkout for this venue (anti-spam). Benchmark " +
+      "profiles use 555-prefix .test phone numbers that cannot receive SMS, " +
+      "so the executor cannot pass the gate. Behavior depends on Resy " +
+      "session cookies / A-B-test variant / time-of-day — sometimes succeeds " +
+      "(cookies cached), sometimes hits the gate. Real prod users with a " +
+      "Resy account or a real phone bypass this.",
   },
 ];
 

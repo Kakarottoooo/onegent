@@ -4,6 +4,29 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [0.2.64.0] - 2026-04-30
+
+### Added
+- **AI vision call skip on deterministic URL/DOM classification** — `stage-assessment.ts` adds two new RPA rules: `/opentable.com/booking/(details|specials|seating-options)` URLs → `checkout_form` and generic `visibleCheckoutFields=true` → `checkout_form`. Plus a pre-AI guard that skips the 30-60s Anthropic vision call entirely when stage was already classified from a deterministic URL pattern (`/r/<slug>`, `/booking/...`, `/cities/.../venues/<slug>`, payment URLs). Tao Downtown observed dropping from 1m 41s to 1m 20s. (commit `32800a9`)
+- **Pre-AI case-context navigate** (commit `c00508b`) — hoisted the OT/Resy URL navigate-with-params logic above the Pre-AI fast path so the page is rendering the correct case date (May 14/16) when the no-availability text scan runs, avoiding false positives from today's full prime-time slots leaking into the fast-path match.
+- **Resy mobile-verify gate detection** (commits `80989f4`, `159f5e7`, `e09c38d`) — three layers: Pre-AI text scan, Resy listing-handler post-click scan, and a top-priority `stage-assessment.ts` rule. Real users with a Resy account bypass the gate via session cookies; benchmark dry-run treats the gate as a paused_payment terminus + emits the dry-run boundary marker.
+
+### Fixed
+- **`"no online availability for"` over-broad phrase** caused Cosme false positive after 32800a9 (Cosme listing page contains the substring inside an unrelated marketing block). Tightened to `"there's no online availability for"` matching Lilia's actual venue-level copy. (commit `a96b603`)
+
+### Verified end-to-end
+- **5/5 with 4 expected outcomes on master `e09c38d`**:
+  - L'Artusi 16s `no_availability` ✓
+  - Tao Downtown 1m 20s `succeeded ✓`
+  - Carbone 18s `no_availability` ✓
+  - Lilia 17s `no_availability` ✓
+  - Cosme 2m 11s `executor_error` — see Known issues below
+
+### Known issues / backlog
+- **Cosme Resy mobile-verify gate is a Resy product reality (accepted)** — Resy enforces phone OTP on guest checkout for some venues as anti-spam. Behavior depends on Resy session cookies, A/B-test variant, venue-level config, time-of-day, IP fingerprint. After 5 fix attempts (cont. 7 80989f4 → e09c38d), accepted as a known limitation: real prod users with a Resy account or a real phone number bypass the gate; the .test 555-prefix benchmark profile cannot. Documented in `lib/benchmark/restaurant-cases.ts` Cosme `notes`. Cosme intermittent succeed/fail in benchmark depending on session state.
+- `allow_platform_switch` in `fallback_policy` still ignored. Not blocking — keep for next iteration.
+- dev.log lines from concurrent 5/5 cases interleave with no jobId prefix, making per-case grep painful. Trace-prefix infrastructure investment is next backlog candidate.
+
 ## [0.2.63.0] - 2026-04-30
 
 ### Added

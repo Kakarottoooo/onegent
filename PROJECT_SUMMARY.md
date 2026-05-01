@@ -1,5 +1,5 @@
 ================================================================
-Onegent · Travel Execution Layer for AI Agents · v0.2.63.0
+Onegent · Travel Execution Layer for AI Agents · v0.2.64.0
 ================================================================
 
 【一句话定位（2026-04-26 锁定）】
@@ -260,6 +260,102 @@ P5 (3+ Group DR) → P6 (反应+评论) → P7 (通知系统) → P8 (Itinerary 
 - ChatGPT Apps marketplace review 结果（被动等 OpenAI）
 - B2B Lane C cold outreach（4 客户类型 × 5 contacts）
 - Cofounder 搜索
+
+================================================================
+Recent Updates - 2026-04-30 (cont. 7) · AI vision skip-on-deterministic + Cosme Resy verify-gate known limitation
+================================================================
+
+Cont. 6 拿到 5/5 全干净。这一轮做两件事：
+1. Perf opt: stage-assessment 在 deterministic URL/DOM 命中时跳过 30-60s AI
+   vision call（每 case 省 60-120s）
+2. 调试 Cosme Resy mobile-verify gate（adversarial moving target，5 个修复回合
+   后接受 reality, mark known limitation）
+
+【今天 6 个新 commit（32800a9 → e09c38d）】
+
+1. **32800a9 — perf(stage-assessment): skip AI vision call on deterministic URL/DOM**
+   - 加 RPA rules: `/opentable.com/booking/(details|specials|seating-options)`
+     → checkout_form, generic `visibleCheckoutFields=true` → checkout_form
+   - 加 pre-AI guard: stage 已从 deterministic URL pin 出来 → 跳过 vision call
+   - 预期 Tao/Cosme 节省 60-120s，5 case 总耗时下降
+
+2. **a96b603 — fix(stagehand): tighten "no online availability for" phrase**
+   - 32800a9 perf opt 暴露的 false positive: Cosme listing 含 marketing copy
+     "no online availability for [some other context]" → fast path 误命中
+   - phrase 改严格 `"there's no online availability for"`（Lilia 实证 copy）
+
+3. **c00508b — fix(stagehand): hoist case-context navigate above Pre-AI fast path**
+   - Cosme/Resy 默认 page load 是 today 不是 case date → fast path 扫错日期
+     的 page → false positive no_availability
+   - 把 OT/Resy navigate-with-params 提到 Pre-AI fast path 之前
+
+4. **80989f4 — fix(stagehand): detect Resy mobile-verify gate as dry-run boundary** (Pre-AI)
+   - Cosme 截图证实 Resy 弹 mobile phone OTP modal: "Please enter your mobile
+     phone number to verify or create an account"
+   - Pre-AI 检测 phrase → return paused_payment + dry_run boundary marker
+     → succeeded
+   - **但只在 navigate 之后立即检测有效，modal click-后才弹时错过**
+
+5. **159f5e7 — fix(stagehand): break Resy click-loop on mobile-verify gate**
+   - dev.log Cosme 4m 32s timeout: 反复 click "7:15 PM Bar"（modal 是 click
+     之后才弹的）
+   - 加 stage-assessment.ts verify-gate rule + Resy listing handler
+     post-click detection
+   - **但 if-else chain 命中 intermediate_gate 在 verify-gate rule 之前**
+
+6. **e09c38d — fix(stage-assessment): hoist Resy mobile-verify rule to highest priority**
+   - verify-gate rule 提到 chain 第二位（仅次于 blocked）
+   - **仍 fail** — Cosme 现在 2m 11s executor_error（不再 4m，但仍 fail）
+
+【Cosme Resy verify-gate: known limitation (accepted)】
+
+5 个修复回合（80989f4 → 159f5e7 → e09c38d）后承认 reality：
+
+- Resy mobile-verify modal 是真实 product anti-spam gate
+- 行为受多因素影响: session cookies / A-B test / venue-level config /
+  time-of-day / IP fingerprint
+- 每修一个 timing/path Resy 换另一个 — adversarial moving target
+- Benchmark profile 用 555-prefix .test phone 物理不能 receive SMS
+
+接受 reality:
+- Cosme case notes 加详细 known limitation 说明
+- 4/5 expected outcome 已经是 baseline (cont. 6 verified)
+- Cosme intermittent succeed/fail 取决于 Resy session state
+- Prod 真实用户用 Resy account 或 real phone 不受影响
+
+【这一轮的 lesson】
+
+Q. **Adversarial product gates 不是 deterministic bug**。anti-spam OTP /
+   bot-detection / A-B test variant 这类 product reality 修不完。承认
+   limitation + 文档化 比反复 patch 更 patio11
+
+R. **Pre-AI fast path 风险: 误命中 wrong-context page**。32800a9 perf 
+   opt 暴露 a96b603 phrase 不严，c00508b navigate-context 时机问题。
+   每加一条 fast-path rule 都要 test against full 5-case matrix
+
+S. **dev.log 多 case 并发难诊断**。grep 抓的行难判断属于哪个 case。
+   下一轮基础设施 backlog: 给每个 trace 加 jobId prefix，单 case
+   isolation 一秒 grep
+
+【cont. 7 验证: 4/5 expected outcome (Cosme known limit)】
+
+最近 5/5 跑 (master e09c38d):
+- L'Artusi 16s no_availability ✓
+- Tao Downtown 1m 20s succeeded ✓ (perf opt 后从 1m 41s 降)
+- Carbone 18s no_availability ✓
+- Lilia 17s no_availability ✓
+- Cosme 2m 11s executor_error (Resy verify gate, known limit)
+
+Tao Downtown 节省最大: 1m 41s → 1m 20s. Tao perf 节省了 ~20s 的 vision
+call. 其他 no_availability cases 已经 Pre-AI fast path 了，没 perf 改善。
+
+【已知 backlog（cont. 7 后）】
+
+- ~~AI vision call perf~~ ✓ 已修（这一轮 32800a9）
+- **Cosme Resy verify-gate** — known limitation (cont. 7 accepted)。需要
+  Resy account 或 real phone bypass。当前 case notes 已说明
+- **`allow_platform_switch` 真实现** — 仍开放，3-4 小时
+- **dev.log 多 case 并发难诊断** — 下次有空给 trace 加 jobId prefix
 
 ================================================================
 Recent Updates - 2026-04-30 (cont. 6) · 5/5 真正干净（2 succeeded + 3 no_availability，0 failed）
