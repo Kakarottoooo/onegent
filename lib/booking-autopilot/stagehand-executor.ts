@@ -1,12 +1,19 @@
 ﻿/**
  * stagehand-executor.ts
  *
- * Universal AI-driven browser executor.
- * Uses Stagehand + Claude vision to navigate any booking website and fill forms.
- * Replaces the hardcoded opentable.ts / booking-com.ts / kayak-flights.ts scripts.
+ * @deprecated B+B2 architecture (2026-05-01) — booking automation now runs
+ * exclusively in the worker (worker/src/booking-autopilot/stagehand-executor.ts).
+ * The Vercel route (/api/booking-jobs/[id]/start) auto-stamps the lib/core
+ * marker on every restaurant/hotel/flight/activity step and returns 202;
+ * the worker claims via FOR UPDATE SKIP LOCKED and runs its own copy.
  *
- * Production: runs on Browserbase (cloud browser, bot evasion, no Vercel timeout).
- * Development: runs on local Playwright (no API key required).
+ * This file is left in place because deleting it would force a ~1000-line
+ * concurrent rewrite of the in-process fallback path and lib/core/execution.
+ * Do NOT add new code here — all booking changes go to worker/src/.
+ *
+ * Universal AI-driven browser executor (legacy): Stagehand + Claude vision
+ * to navigate any booking website and fill forms. Mirrors what the worker
+ * runs but is no longer invoked at runtime.
  */
 
 import { Stagehand } from "@browserbasehq/stagehand";

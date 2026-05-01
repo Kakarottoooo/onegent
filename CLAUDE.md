@@ -13,41 +13,60 @@ Always respond in Chinese. Never respond in Korean.
 
 ---
 
-## Booking-autopilot 双份代码规则（DELETE_WHEN: hotel/flight/activity 全部切到 worker 后）
+## Booking-autopilot 架构 — worker 是唯一执行路径（B+B2，2026-05-01）
 
-`lib/booking-autopilot/` 和 `worker/src/booking-autopilot/` 现在是**故意复制的两份**（Worker D1 把 lib 整个 fork 到了 worker/src）。Vercel 老路径用 lib，Railway worker 用 worker/src。两边对哪些 scenario 谁跑由 Vercel 的 `USE_WORKER_FOR` env var 决定（当前 prod 仅 `restaurant`）。
+**单一执行源**：`worker/src/booking-autopilot/`。所有 booking job（restaurant /
+hotel / flight / activity）都通过 Railway/local worker 跑。lib/booking-autopilot
+是 deprecated dead code，运行时不会被调用。
 
-> **2026-04-27 决策更新**：原 30 天 deadline (2026-05-26) 已解除。理由：
-> 1. 删 lib 的真实前提是 hotel/flight/activity 全部切到 worker —— 这又依赖 **Browserbase Pro $99/mo 升级** 或验证本地 chromium 在 Booking/Expedia 上抗反检测，**两个条件都还没到位**
-> 2. fork 至今 byte-identical（`diff -rq` 输出空），双份维护**实际成本为 0**
-> 3. 没付费用户 → 不该烧钱解决"还没真实压力"的问题（PG / patio11 视角）
->
-> 触发删除的条件（满足任一即可）：
-> - 升 Browserbase Pro，把 `USE_WORKER_FOR` 扩到 `restaurant,hotel,flight,activity`
-> - 验证 hotel/flight 在 worker 容器的本地 chromium 跑通，扩 `USE_REAL_CHROME_FOR`
-> - 出现需要在 worker/src 而 lib 不动（或反之）的 hotfix，导致两边真的开始 diverge
+**路由**：`/api/booking-jobs/[id]/start` 检测 step 类型 → 自动 stamp
+`__source = "lib/core/execution"` marker → 留 status=pending → 返回 202。
+worker poll Neon `booking_jobs.status='pending' AND steps->0->'body'->>'__source'='lib/core/execution'`，
+通过 FOR UPDATE SKIP LOCKED 抢占，然后跑 stagehand。USE_WORKER_FOR 只是
+operator override（缩小 scenario 范围用于灰度）。
 
-### 改动规矩（双份共存期间）
+### 改动规矩（B+B2 之后）
 
 | 改动类型 | 改哪边 |
 |---|---|
-| 新增 provider / 新功能 | **优先只动 `worker/src/booking-autopilot/`**；lib 那边除非真有 Vercel scenario 在用，否则别同步（反正删除条件触发时 lib 整个删） |
-| Bug fix（USE_WORKER_FOR 覆盖的 scenario，当前仅 restaurant） | 只改 `worker/src/booking-autopilot/` |
-| Bug fix（USE_WORKER_FOR 没覆盖的 scenario，hotel/flight/activity） | 改 `lib/booking-autopilot/`（这些还在 Vercel in-process 跑） |
+| 新增 provider / 新功能 / bug fix（任何 scenario） | **只改 `worker/src/booking-autopilot/`** |
+| `lib/booking-autopilot/` | **不要再动**。它是 deprecated；运行时不会被调用 |
 | `lib/db.ts` / schema 变化 | **两边都改**（同一个 Neon DB） |
-| `lib/core/` 改动 | 两边都改（worker/src/core 是 lib/core 的 fork） |
-| `lib/encryption.ts` / `lib/autonomy.ts` / `lib/agent/planners/booking-links.ts` 改动 | **两边都改** |
+| `lib/core/cend-adapter.ts` / `lib/core/execution/types.ts` | 两边都改（worker/src/core 是 fork；这俩文件 vercel 端也用来 mark step） |
+| `lib/encryption.ts` / `lib/autonomy.ts` / `lib/agent/planners/booking-links.ts` | **两边都改**（worker/src 有 fork） |
 | NLU / chat / UI / API routes | 只在 root（这些**不在** worker 里） |
 
-### 删除条件触发后的清理清单
+### dev workflow
 
-满足上面任一触发条件后，一次性清理：
+dev 必须**同时**起两个进程：
+```bash
+# 终端 1：Next.js dev
+cd /c/Users/Gzw19/onegent && npm run dev > ./dev.log 2>&1
+
+# 终端 2：worker (tsx watch，改 worker/src/* 自动 reload)
+cd /c/Users/Gzw19/onegent/worker && npm run dev > ../worker.log 2>&1
+```
+
+两个进程都连同一个 Neon DB；POSTGRES_URL 从 `.env.local` 读。
+
+prod：worker **还没部署到 Railway**（之前 memory 里写的"Sprint 1 #1 shipped"是
+false memory，Railway 上只有 `@onegent/mcp-server`）。prod booking 目前是死的，
+反正没付费用户。需要时把 worker 部署到 Railway 即可。
+
+### lib/booking-autopilot/ 物理删除（DEFERRED）
+
+物理删除涉及 ~1000 行 in-process fallback path 在
+`app/api/booking-jobs/[id]/start/route.ts` + `lib/core/execution/{executor,recovery,recovery-providers}.ts`
++ `lib/booking-autopilot/` 本身。当前 deprecation header 已经标了，dead code 不
+影响 runtime。下次集中清理时做：
 - 删 `lib/booking-autopilot/` 整个目录
-- 删 `app/api/booking-jobs/[id]/start/route.ts` 的 `runStepWithRecovery` / `runUniversalStep` 老 in-process 执行段（保留 USE_WORKER_FOR 分流门 + 202 enqueue 路径）
-- 删 `vercel.json` 的 retry-jobs cron 条目
-- 删 `app/api/cron/retry-jobs/route.ts`
-- 修复 21+ `/lib/**` 文件对 `lib/booking-autopilot/*` 的 import（lib/core/ → 改成调 worker 队列；lib/itinerary、lib/agent/planners/booking-links.ts 等同理）
-- typecheck + smoke test 一遍后才能 ship
+- 删 `app/api/booking-jobs/[id]/start/route.ts` 的 `runStepWithRecovery` /
+  `runUniversalStep` / `runUniversalStepViaCore` in-process 段（保留 worker
+  dispatch gate + 202 enqueue）
+- 删 `lib/core/execution/{executor,recovery,recovery-providers}.ts`（worker 有 fork）
+- `BookingProfile` type 从 `lib/booking-autopilot/types.ts` 移到 `lib/core/booking-types.ts`
+- 删 `vercel.json` 的 retry-jobs cron 条目 + `app/api/cron/retry-jobs/route.ts`
+- typecheck + smoke test 一遍才能 ship
 
 ---
 
