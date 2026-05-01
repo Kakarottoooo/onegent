@@ -1,7 +1,7 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 function loadDotenv() {
-  const ps = ["C:\Users\Gzw19\onegent\.env.local"];
+  const ps = [path.resolve(process.cwd(), ".env.local")];
   for (const p of ps) { if (!fs.existsSync(p)) continue;
     for (const line of fs.readFileSync(p,"utf8").split(/\r?\n/)) {
       const m = line.match(/^([A-Z_][A-Z0-9_]*)=(.*)$/); if (m && !process.env[m[1]]) process.env[m[1]]=m[2].replace(/^"(.*)"$/,"$1");
