@@ -42,9 +42,15 @@ export const NO_AVAILABILITY_SIGNALS = [
   // availability is days out). Without this signal Stagehand reads listing
   // signals and runs the OT/Resy programmatic flow looking for a slot to
   // click, then 60s+ later returns status=error "Stuck at listing page".
-  "no online availability for",
+  // NOTE: keep these phrases tight. Earlier loose match "no online availability
+  // for" caused a Cosme regression after the Pre-AI fast path was extended
+  // (commit 32800a9 — Cosme listing page contained the substring inside an
+  // unrelated marketing block, fast path fired prematurely → no_availability
+  // instead of succeeded). Match the venue-level no-availability copy only:
+  //   "At the moment, there's no online availability for Today."
+  //   "The next availability for 2 is Tomorrow."
+  "there's no online availability for",
   "next availability for",
-  "there's no online availability",
   "没有可用",
   "找不到任何",
 ];
