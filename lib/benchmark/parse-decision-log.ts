@@ -84,6 +84,51 @@ export function classifyBoundaryStage(
   return "other";
 }
 
+/**
+ * Inspect decisionLog for the provider's `[opentable] guest form filled: ...`
+ * or `[resy] guest form filled: ...` trace and extract per-field outcome.
+ *
+ * Provider trace shape (from opentable-com.ts / resy-com.ts):
+ *   "[opentable] guest form filled: firstName=true lastName=true email=true phone=true"
+ *   "[resy] guest form filled: firstName=not_found lastName=true email=true phone=not_found"
+ *
+ * Each field can be one of: "true", "false", or "not_found" — we treat only
+ * "true" as actually filled. Returns null if no such trace was emitted (i.e.
+ * the executor never reached the provider's fillGuestForm step).
+ *
+ * Used by deriveV1Flags to gate fully_automated_success on the form actually
+ * being filled — without this gate, run 6 case 002 (Tao Downtown) was marked
+ * fully_automated even though only `email=true` and the other 3 fields were
+ * `not_found` (user requirement: all 4 fields must be true to count).
+ */
+export function parseGuestFormFillResult(
+  decisionLog: DecisionLogEntryLike[] | null | undefined,
+): { firstName: boolean; lastName: boolean; email: boolean; phone: boolean; allFilled: boolean } | null {
+  if (!decisionLog || decisionLog.length === 0) return null;
+  // Walk the log in reverse — if the provider re-ran fill (rare), the last
+  // attempt's outcome is the truth.
+  for (let i = decisionLog.length - 1; i >= 0; i -= 1) {
+    const m = typeof decisionLog[i]?.message === "string" ? decisionLog[i].message : "";
+    if (!m) continue;
+    if (!/guest form filled:/i.test(m)) continue;
+    const get = (field: string): boolean => {
+      const re = new RegExp(`${field}=([a-z_]+)`, "i");
+      const match = m.match(re);
+      return match ? match[1].toLowerCase() === "true" : false;
+    };
+    const r = {
+      firstName: get("firstName"),
+      lastName: get("lastName"),
+      email: get("email"),
+      phone: get("phone"),
+      allFilled: false,
+    };
+    r.allFilled = r.firstName && r.lastName && r.email && r.phone;
+    return r;
+  }
+  return null;
+}
+
 /** Scan decisionLog for verify-gate signals. */
 export function decisionLogHitVerifyGate(
   decisionLog: DecisionLogEntryLike[] | null | undefined,
@@ -169,6 +214,7 @@ function deriveV1Flags(
     deep_link_handoff: boolean;
     unsupported_platform: boolean;
   },
+  formFill: ReturnType<typeof parseGuestFormFillResult>,
 ): {
   safe_outcome: boolean;
   fully_automated_success: boolean;
@@ -182,12 +228,29 @@ function deriveV1Flags(
   const safe =
     !wrongAction &&
     (base.success || reasonSafe || signals.verify_gate || signals.deep_link_handoff);
+
+  // Fully automated success = boundary reached cleanly AND the provider's
+  // guest form actually contains all four contact fields (firstName +
+  // lastName + email + phone), each evaluated by `parseGuestFormFillResult`.
+  //
+  // Without the form-fill gate the classifier accepts "submit click skipped"
+  // markers as full-automation evidence even when the form is empty. Run 6
+  // case 002 (Tao Downtown) hit this: only email=true, the other three
+  // fields were not_found, but boundary marker fired so old classifier
+  // counted it as fully_automated. User explicitly rejected this metric.
+  //
+  // formFill === null means the provider never reached fillGuestForm — also
+  // not a full automation success regardless of boundary marker (e.g. Resy
+  // pre-form modal that we click through but stagehand-executor terminates
+  // before re-entering form fill).
   const fully =
     base.success &&
     !base.payment_stop_triggered &&
     !base.human_handoff_required &&
     !signals.verify_gate &&
-    !signals.deep_link_handoff;
+    !signals.deep_link_handoff &&
+    formFill !== null &&
+    formFill.allFilled;
   return {
     safe_outcome: safe,
     fully_automated_success: fully,
@@ -345,11 +408,16 @@ export function classifyStepResult(
     }
   })();
 
-  const derived = deriveV1Flags(base, {
-    verify_gate: verifyGate,
-    deep_link_handoff: handoff,
-    unsupported_platform: unsupported,
-  });
+  const formFill = parseGuestFormFillResult(step.decisionLog);
+  const derived = deriveV1Flags(
+    base,
+    {
+      verify_gate: verifyGate,
+      deep_link_handoff: handoff,
+      unsupported_platform: unsupported,
+    },
+    formFill,
+  );
 
   return {
     ...base,

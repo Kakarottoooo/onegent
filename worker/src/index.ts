@@ -87,12 +87,23 @@ function sleep(ms: number): Promise<void> {
 // queue pattern. Each worker (and each in-process concurrent claim) gets
 // exactly one row; no double-execution races even with N instances.
 async function claimOne(): Promise<BookingJob | null> {
+  // Filter to jobs whose first step carries the lib/core/execution marker —
+  // the worker only knows how to execute lib/core-shape jobs. Without this
+  // filter the worker would race the in-process Vercel path (which polls
+  // booking_jobs[id]/start) on benchmark/legacy jobs that lack the marker
+  // and immediately fail them with "Worker received legacy-shape step"
+  // (run 6 case 003 Carbone hit this — 0s executor_error in 5-case run).
+  //
+  // jsonb path: steps->0->'body'->>'__source' = 'lib/core/execution'
+  // Falls through to NULL for legacy-shape steps and is excluded by the =
+  // comparison.
   const result = await sql<BookingJob>`
     UPDATE booking_jobs
     SET status = 'running', updated_at = NOW()
     WHERE id = (
       SELECT id FROM booking_jobs
       WHERE status = 'pending'
+        AND (steps->0->'body'->>'__source') = 'lib/core/execution'
       ORDER BY created_at ASC
       LIMIT 1
       FOR UPDATE SKIP LOCKED

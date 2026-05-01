@@ -1,7 +1,39 @@
 import type { BrowserTaskResult } from "../types";
 import type { BookingComVerificationResult } from "../providers/booking-com";
 
-export const NO_AVAILABILITY_SIGNALS = [
+/**
+ * Signals that the venue is NOT on this booking platform at all (or the page
+ * is a 404 / "permanently closed" panel). Hitting one of these means it's
+ * pointless to retry on the same platform — the runUniversalStep
+ * multi-platform fallback chain (OT → Resy → Google Places official-site
+ * lookup) should kick in instead.
+ *
+ * Fast-path return summary MUST contain one of "not found on opentable" /
+ * "not found on resy" so isNotFoundError() in start/route.ts triggers the
+ * fallback chain. Time-ladder retries are skipped for this category.
+ */
+export const VENUE_NOT_ON_PLATFORM_SIGNALS = [
+  // OpenTable: "Not available on OpenTable. Unfortunately, this restaurant
+  // is not on the OpenTable booking network."
+  "not available on opentable",
+  "not on the opentable booking network",
+  // Permanently closed panels (any provider).
+  "permanently closed",
+  "this restaurant is permanently closed",
+  "find similar restaurants",
+  // 404 / page-not-found pages on OT/Resy (octopus + "embarrassing" copy).
+  "well, this is embarrassing",
+  "we weren't able to find the page",
+  "we can't find that page",
+];
+
+/**
+ * Signals that the venue IS on this platform but has no slots at the
+ * requested date/time. Fast-path summary should encode "no availability"
+ * so the time-ladder (±15/30/60 min) kicks in to retry alternative slots
+ * on the SAME platform before giving up.
+ */
+export const NO_SLOTS_AT_TIME_SIGNALS = [
   "no availability",
   "no rooms available",
   "no rates available",
@@ -23,36 +55,31 @@ export const NO_AVAILABILITY_SIGNALS = [
   "there are no results",
   "no results for your search",
   "no available properties",
-  // Restaurant providers (OpenTable / Resy) — venue exists but is not bookable.
-  // Without these, the listing-stage classifier treats them as generic "stuck"
-  // and returns status=error after a 30s+ timeout instead of an immediate
-  // no_availability. Confirmed against L'Artusi (not on OT network), Carbone NY
-  // (permanently closed), Via Carota (404 page), Don Angie (Resy 404 page).
-  "not available on opentable",
-  "not on the opentable booking network",
-  "permanently closed",
-  "this restaurant is permanently closed",
-  "find similar restaurants",
-  // 404 / page-not-found pages on OT/Resy (octopus + "embarrassing" copy).
-  "well, this is embarrassing",
-  "we weren't able to find the page",
-  "we can't find that page",
-  // Resy listing page when the requested date is fully booked (e.g. Lilia in
-  // Williamsburg routinely hits this — venue exists, today is full, next
-  // availability is days out). Without this signal Stagehand reads listing
-  // signals and runs the OT/Resy programmatic flow looking for a slot to
-  // click, then 60s+ later returns status=error "Stuck at listing page".
-  // NOTE: keep these phrases tight. Earlier loose match "no online availability
-  // for" caused a Cosme regression after the Pre-AI fast path was extended
-  // (commit 32800a9 — Cosme listing page contained the substring inside an
-  // unrelated marketing block, fast path fired prematurely → no_availability
-  // instead of succeeded). Match the venue-level no-availability copy only:
+  // Resy listing page when the requested date is fully booked (e.g. Lilia
+  // in Williamsburg routinely hits this — venue exists, today is full,
+  // next availability is days out).
+  // NOTE: keep these phrases tight. Earlier loose match "no online
+  // availability for" caused a Cosme regression after the Pre-AI fast path
+  // was extended (commit 32800a9). Match the venue-level no-availability
+  // copy only:
   //   "At the moment, there's no online availability for Today."
   //   "The next availability for 2 is Tomorrow."
   "there's no online availability for",
   "next availability for",
   "没有可用",
   "找不到任何",
+];
+
+/**
+ * Union of both categories — kept for backwards compatibility with callers
+ * that only need to know "page is not bookable, regardless of why". New
+ * callers should use the specific arrays above so they can branch on cause
+ * (venue-not-on-platform → multi-platform fallback; no-slots-at-time →
+ * time-ladder retry).
+ */
+export const NO_AVAILABILITY_SIGNALS = [
+  ...VENUE_NOT_ON_PLATFORM_SIGNALS,
+  ...NO_SLOTS_AT_TIME_SIGNALS,
 ];
 
 export interface FinalOutcomeAssessment {

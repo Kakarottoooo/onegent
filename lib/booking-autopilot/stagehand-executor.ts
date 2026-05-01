@@ -66,7 +66,11 @@ import {
   revealBookingComRoomSelection as providerRevealBookingComRoomSelection,
   setBookingComRoomQuantity as providerSetBookingComRoomQuantity,
 } from "./providers/booking-com";
-import { determineFinalOutcome, NO_AVAILABILITY_SIGNALS } from "./core/final-outcome";
+import {
+  determineFinalOutcome,
+  NO_AVAILABILITY_SIGNALS,
+  VENUE_NOT_ON_PLATFORM_SIGNALS,
+} from "./core/final-outcome";
 import { DRY_RUN_BOUNDARY_MARKER } from "./dry-run";
 import { fillGuestFormWithAI, fillFlightGuestFormWithAI, auditAndRefillEmptyFields } from "./ai-loop/fill-form";
 import { clickTargetListingAI, selectRoomAI } from "./ai-loop/find-listing";
@@ -1471,16 +1475,40 @@ The user will enter CVV and confirm payment themselves.`,
         if (hasTimeSlots) {
           trace(`Pre-AI fast path: matched "${matchedSignal}" but visible time-slot buttons exist — false positive, continuing.`);
         } else {
-          trace(`Pre-AI fast path: page text matched NO_AVAILABILITY_SIGNALS ("${matchedSignal}") + no time-slot buttons — early no_availability without AI assessment.`);
+          // ── User insight (run 6 dig): "Not available on OpenTable" pages
+          // should NOT just return no_availability — the venue may exist on
+          // Resy or the restaurant's own website, and benchmark currently
+          // dead-ends without trying. Distinguish two flavours:
+          //   - VENUE_NOT_ON_PLATFORM: "not available on opentable",
+          //     "permanently closed", "we can't find that page" — venue is
+          //     simply not bookable here. Encode "not found on opentable" /
+          //     "not found on resy" in summary so isNotFoundError() in
+          //     start/route.ts triggers the multi-platform fallback chain
+          //     (OT → Resy → Google Places official site lookup).
+          //   - NO_SLOTS_AT_TIME: "fully booked", "next availability for"
+          //     etc. — venue is bookable but no slots at requested time.
+          //     C2 time ladder (±15/30/60 min) is the right fallback.
+          const isVenueNotOnPlatform = VENUE_NOT_ON_PLATFORM_SIGNALS.some((sig) => earlyText.includes(sig));
+          const venueLabel = targetHotelName ?? "This venue";
+          const platformLabel = /resy\.com/i.test(raw.url()) ? "Resy" : "OpenTable";
+          let summary: string;
+          if (isVenueNotOnPlatform) {
+            summary = /resy\.com/i.test(raw.url())
+              ? `"${venueLabel}" not found on Resy. The restaurant may not accept reservations through Resy.`
+              : `"${venueLabel}" not found on OpenTable. The restaurant may not be on the OpenTable booking network.`;
+            trace(`Pre-AI fast path: matched VENUE_NOT_ON_PLATFORM signal "${matchedSignal}" — encoding "not found on ${platformLabel.toLowerCase()}" so multi-platform fallback triggers.`);
+          } else {
+            summary = `${venueLabel} has no availability at the requested time on ${platformLabel}.`;
+            trace(`Pre-AI fast path: matched NO_SLOTS_AT_TIME signal "${matchedSignal}" — time-ladder retry should kick in.`);
+          }
           const ssBuf = await raw.screenshot({ type: "png" }).catch(() => null);
           const ss = ssBuf ? `data:image/png;base64,${ssBuf.toString("base64")}` : undefined;
-          const venueLabel = targetHotelName ?? "This venue";
           return {
             status: "no_availability" as const,
             screenshotBase64: ss,
             handoffUrl: raw.url(),
             sessionUrl,
-            summary: `${venueLabel} is not available for booking on this platform. The detail page exists but the booking widget is not present.`,
+            summary,
             debugTrace,
           };
         }

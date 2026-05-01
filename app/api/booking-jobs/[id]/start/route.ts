@@ -888,11 +888,28 @@ async function runUniversalStep(
       // Before bailing to multi-platform / handoff, try ±15/30/60 min around
       // the requested time on the SAME platform. Reasoning: the most common
       // no_availability is "no slot at exactly 7:30 PM" — the venue often has
-      // a slot 15-60 min later. Skipped for not-found errors (no point — the
-      // venue doesn't exist on this platform) and for non-restaurant steps.
+      // a slot 15-60 min later. Skipped for:
+      //   1. not-found errors (venue doesn't exist on this platform — let
+      //      multi-platform fallback handle it)
+      //   2. non-restaurant steps
+      //   3. summaries indicating the venue itself is not bookable
+      //      ("not on the booking network", "permanently closed", etc).
+      //      Run 6 case 001 L'Artusi proved this: fast path returned
+      //      "not available on opentable", ladder retried 5× same fast path,
+      //      wasted 1m+. The same summaries in `data.summary` are the
+      //      VENUE_NOT_ON_PLATFORM signals we just refactored — let
+      //      multi-platform fallback handle these.
+      const dataSummaryLower = (data.summary ?? "").toLowerCase();
+      const isVenueNotOnPlatform =
+        dataSummaryLower.includes("not on the opentable booking network") ||
+        dataSummaryLower.includes("not available on opentable") ||
+        dataSummaryLower.includes("permanently closed") ||
+        dataSummaryLower.includes("may not be on the opentable") ||
+        dataSummaryLower.includes("may not accept reservations through resy");
       if (
         step.type === "restaurant" &&
         !isNotFoundError(data.summary) &&
+        !isVenueNotOnPlatform &&
         typeof resolvedBody.startUrl === "string"
       ) {
         const body = step.body as Record<string, unknown>;
