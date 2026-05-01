@@ -1,5 +1,5 @@
 ================================================================
-Onegent · Travel Execution Layer for AI Agents · v0.2.60.0
+Onegent · Travel Execution Layer for AI Agents · v0.2.61.0
 ================================================================
 
 【一句话定位（2026-04-26 锁定）】
@@ -260,6 +260,90 @@ P5 (3+ Group DR) → P6 (反应+评论) → P7 (通知系统) → P8 (Itinerary 
 - ChatGPT Apps marketplace review 结果（被动等 OpenAI）
 - B2B Lane C cold outreach（4 客户类型 × 5 contacts）
 - Cofounder 搜索
+
+================================================================
+Recent Updates - 2026-04-30 (cont. 4) · fallback_policy 链路打通 + 第一次 status=succeeded
+================================================================
+
+cont. 3 让 5/5 全 expected outcome，但 stagehand 还 hardcoded `maxDiff=90`
+不读 case `fallback_policy.time_window_minutes`。Lilia case=0 ("严格只要
+19:00") 凑巧分类对（page 真没空 + Pre-AI fast path 命中）—— 但是 luck。
+这一轮把 fallback_policy 整条链路打通，stagehand 时间窗口跟随 case 配置。
+
+并且**第一次 dashboard status 显示 `succeeded ✓`** —— Tao Downtown OT 高端
+deposit-hold 流程走完 + dispatcher classifier 看到 dry_run boundary marker
+后正确分类成 succeeded（cont. 2 已 ship marker fix，cont. 3 底层是对的，
+cont. 4 单 case 验证显示 succeeded）。
+
+【今天 2 个新 commit（335b633 → e78c3fd）】
+
+1. **335b633 — feat(stagehand): thread fallback_policy from case to time-slot matcher**
+   - 起因：cont. 3 背后的 deeper bug — stagehand 用 hardcoded ±90 min 接受
+     最近 slot，不感知 case `fallback_policy.time_window_minutes`
+   - 修法：4 层 thread:
+     - `BrowserTaskInput` 加 `fallbackPolicy?` field (lib + worker types.ts)
+     - `caseToBookingStep` 把 `c.fallback_policy` 注入 step.body
+     - `start/route.ts` `runUniversalStep` forward 进 BrowserTaskInput
+     - `stagehand-executor.ts` 用 `input.fallbackPolicy?.time_window_minutes ?? 90`
+       替换 4 个 hardcoded 90 (OT listing / OT detail-page / OT
+       restaurant-card-click / Resy)
+   - 默认 ±90 保留给 legacy hotel/flight 路径（不传 fallbackPolicy）
+
+2. **e78c3fd — fix(stagehand): hoist timeWindowMins above OT/Resy branches**
+   - 起因：335b633 跑第一次 5/5，Cosme 26s executor_error。dev.log:
+     `Executor threw an unexpected error: timeWindowMins is not defined`
+   - 根因：`const timeWindowMins` 写在 OpenTable 分支里，但 Resy 分支也
+     引用它（line 4082 `maxDiff: timeWindowMins`）。两个 if 是 sibling
+     branches，不嵌套，scope 不互通
+   - 修法：把 const 提到两个分支的外层 scope（listing handler 顶层）。
+     OT 分支内的 inner 定义改成 comment 指向 outer
+
+【验证：单 Tao Downtown 跑 status=succeeded ✓】
+
+```
+Case          Provider   Status        Duration   Booking job
+Tao Downtown  OpenTable  succeeded ✓   1m 5s      390bd728
+```
+
+第一次 dashboard 显示 `succeeded ✓` 而不是 `failed/payment_stop`。
+classifier path："dry_run boundary marker hit" → `status=succeeded`
+（cont. 2 commit 61993ab marker emit 在 cc-section path 后正式打通）。
+
+5/5 跑（cont. 4 fix 之前）的代理验证：
+- L'Artusi 15s no_availability ✓ (window=0 严格)
+- Tao Downtown 1m 37s payment_stop ✓ (window=60 内 7:30 PM 命中)
+- Carbone 10s no_availability ✓ (window=30，permanently closed)
+- Lilia 12s no_availability ✓ (window=0，page 真没空)
+- Cosme 1m 11s payment_stop ✓ (window=90，bookable)
+
+cont. 4 fix 之后 + 单 Tao Downtown 跑：1m 5s succeeded ✓
+
+【这一轮的关键 lesson】
+
+K. **JS scope 是 lexical**。`const X` 在 if branch A 里不能被 sibling
+   if branch B 看到。Refactor 时如果想"hoist"成共享值要主动提到外层
+   scope，别假设 next-block 看得到。基本知识但容易忘 — runtime 一报
+   `not defined` 才发现
+
+L. **fallback_policy threading 需要 4 层 sync**：types → caseToBookingStep
+   → start route → stagehand-executor。用 grep `maxDiffMins: 90` 确保
+   所有 hardcoded 90 都被 input.fallbackPolicy 替换。漏掉一个就成
+   "部分修复"
+
+【已知 backlog（cont. 4 后剩余）】
+
+- ~~stagehand fallback_policy 不感知~~ ✓ **已修（这一轮）**
+- ~~Lilia executor_error~~ ✓ 已修（cont. 3 navigate-w/-params）
+- ~~5/5 CDP target race~~ ✓ 已修（cont. 3 stagger）
+- ~~Tao Downtown OT widget~~ ✓ 已修（cont. 2）
+- **Resy fallback：Lilia/Cosme `allow_platform_switch` 未实现** —
+  case 配置允许 platform fallback (Resy fail → OT)，stagehand 不会主动
+  跨平台。下一步：dispatcher 看到 no_availability + allow_platform_switch
+  → 重 dispatch 到对方 platform
+- **Anonymous benchmark booking_jobs 偶发"Job already running" 409** —
+  cont. 4 发现 1 次。可能 dispatcher 端 race（POST /start fire-and-forget
+  连续触发）。Workaround：重新触发 dispatcher 创建新 jobId。下一步可加
+  idempotency key 或 createBookingJob 后短 wait
 
 ================================================================
 Recent Updates - 2026-04-30 (cont. 3) · 5/5 全 expected outcome 第一次实现

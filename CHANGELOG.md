@@ -4,6 +4,21 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [0.2.61.0] - 2026-04-30
+
+### Added
+- **`fallbackPolicy` threaded from benchmark case to stagehand time-slot matcher** — `BrowserTaskInput` gains `fallbackPolicy?: { time_window_minutes?: number; allow_platform_switch?, allow_venue_switch?, require_user_approval_before_booking? }`. `caseToBookingStep` now forwards `c.fallback_policy` into `step.body`. `runUniversalStep` forwards into `BrowserTaskInput`. `stagehand-executor` reads `input.fallbackPolicy?.time_window_minutes ?? 90` at all 4 restaurant time-slot selector call-sites (OT listing, OT detail-page, OT restaurant-card-click fallback, Resy). `time_window_minutes=0` now means "exact-match only — no closest-slot fallback". (commits `335b633`, `e78c3fd`)
+
+### Fixed
+- **`timeWindowMins is not defined` ReferenceError** — the const introduced in 335b633 was scoped inside the OpenTable branch but referenced from the Resy branch (sibling, not nested). Caught immediately on the next 5/5 run (Cosme 26s executor_error). Hoisted the const to the listing-handler outer scope. (commit `e78c3fd`)
+
+### Verified end-to-end
+- **First `succeeded ✓` outcome** — Tao Downtown 1m 5s `succeeded` (not `failed/payment_stop`) on master `e78c3fd` single-case run. Classifier path: cc-section dry-run boundary marker (cont. 2 commit 61993ab) → step.decisionLog hit → `classifyStepResult` returns `status=succeeded`. Dashboard now shows the venue's first proper happy-path classification.
+
+### Known issues / backlog
+- **Anonymous benchmark booking_jobs occasionally hit 409 "Job already running"** — observed once in cont. 4. Suspected dispatcher-side race when `POST /api/booking-jobs/[id]/start` fires immediately after `createBookingJob`. Workaround: re-trigger the dispatcher to create a fresh jobId. Worth investigating an idempotency key or short delay between create and start.
+- `allow_platform_switch` in `fallback_policy` is still ignored — when a Resy case fails the executor doesn't try OpenTable. Next backlog item.
+
 ## [0.2.60.0] - 2026-04-30
 
 ### Added
