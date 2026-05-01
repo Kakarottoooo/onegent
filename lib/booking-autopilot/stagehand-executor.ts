@@ -1,21 +1,15 @@
 ﻿/**
- * stagehand-executor.ts — Vercel in-process executor (B+B2 fallback path)
+ * stagehand-executor.ts — Universal AI-driven browser executor.
  *
- * The primary execution path is worker/src/booking-autopilot/ (Railway/local
- * worker). M5 force-gate in /api/booking-jobs/[id]/start auto-stamps every
- * restaurant/hotel/flight/activity step with the lib/core marker and returns
- * 202 — the worker then claims via FOR UPDATE SKIP LOCKED.
+ * Uses Stagehand + Claude vision to navigate any booking website and fill
+ * forms. Two locations run this same file:
+ *   - lib/booking-autopilot/stagehand-executor.ts (Vercel in-process path,
+ *     fallback for non-M5-routable scenarios + B-端 v1 API)
+ *   - worker/src/booking-autopilot/stagehand-executor.ts (Railway/local
+ *     worker, primary path for restaurant/hotel/flight/activity)
  *
- * This file is the FALLBACK that runs when:
- *  - The M5 gate misses (e.g. step.type isn't in effectiveWorkerScenarios)
- *  - lib/core/execution/executor.ts dispatches via /api/v1/execution-jobs
- *    (B-端 caller) — that path imports runBrowserTask from this file
- *
- * Therefore lib/booking-autopilot is NOT dead code. Functional changes
- * (provider scoring, fallback logic, error handling) MUST be mirrored to
- * worker/src/booking-autopilot/ — drift = behaviour diverges depending on
- * which path the request takes. See CLAUDE.md "Drift 检测" for the diff
- * commands to run after every change.
+ * The two MUST stay byte-identical — drift = behaviour diverges depending
+ * on which path runs. See CLAUDE.md "Drift 检测" + scripts/check-drift.ts.
  */
 
 import { Stagehand } from "@browserbasehq/stagehand";

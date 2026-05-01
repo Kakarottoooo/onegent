@@ -129,12 +129,19 @@ function convertBodyToParams(
 }
 
 function convertRestaurant(body: Record<string, unknown>): RestaurantBookingParams {
+  const startUrl = typeof body.startUrl === "string" ? body.startUrl : undefined;
+  const fallbackPolicyRaw = body.fallback_policy;
+  const fallbackPolicy = (fallbackPolicyRaw && typeof fallbackPolicyRaw === "object")
+    ? (fallbackPolicyRaw as RestaurantBookingParams["fallback_policy"])
+    : undefined;
   return {
     restaurant_name: expectString(body, "restaurantName"),
     city: expectString(body, "city"),
     date: expectString(body, "date"),
     time: expectString(body, "time"),
     covers: expectNumber(body, "covers"),
+    ...(startUrl !== undefined ? { startUrl } : {}),
+    ...(fallbackPolicy !== undefined ? { fallback_policy: fallbackPolicy } : {}),
   };
 }
 

@@ -45,15 +45,21 @@ M5 gate 路由失败 / 非 worker scenario 时触发。
 | `lib/encryption.ts` / `lib/autonomy.ts` / `lib/agent/planners/booking-links.ts` / `lib/booking-errors.ts` / `lib/live-log-store.ts` | **两边都改**（worker/src 有 fork） |
 | NLU / chat / UI / API routes | 只在 root（这些**不在** worker 里） |
 
-### Drift 检测（每次改 booking-autopilot 之后跑）
+### Drift 检测（自动化）
+
+每次改完 booking-autopilot / booking-errors / live-log-store / encryption /
+autonomy / types / browser-session-store / monitors / memory / lib/core 之后跑：
 
 ```bash
-diff -rq lib/booking-autopilot worker/src/booking-autopilot
-diff -q lib/booking-errors.ts worker/src/booking-errors.ts
-diff -q lib/live-log-store.ts worker/src/live-log-store.ts
+npm run check-drift
 ```
 
-输出空才算同步完成。
+脚本：`scripts/check-drift.ts` —— 跑 `diff -rq` 一组指定的 lib ↔ worker 配对，
+任何 byte-level 差异都会 fail 退出 1。CI 也会跑（`.github/workflows/check-drift.yml`，
+push to master + PR 触发），漏 drift 的 PR 进不去 master。
+
+修复 drift 的标准动作：选定 canonical 一边，`cp <canonical> <other>`，再跑
+`npm run check-drift` 直到通过。
 
 ### dev workflow
 

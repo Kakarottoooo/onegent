@@ -1,10 +1,15 @@
 /**
  * dry_run boundary for the benchmark layer.
  *
- * Mirrored from lib/booking-autopilot/dry-run.ts per the dual-package rule
- * documented in CLAUDE.md (Booking-autopilot 双份代码规则). Keep the two
- * files byte-identical until USE_WORKER_FOR is expanded; any divergence
- * here means the dual-fork has actually started splitting.
+ * When a booking_job is dispatched in dry_run mode, the benchmark runner
+ * sets `autonomy.benchmark_dry_run = true` on the helpers passed into a
+ * provider's fillGuestForm. Providers consult `shouldStopForDryRun(helpers)`
+ * immediately BEFORE the final-submit click and abort that one operation.
+ * Everything earlier (navigation, form fill, AI audit) still runs — only
+ * the side-effecting submit is gated.
+ *
+ * Why a separate file: lets us test the gate in isolation, and lets the
+ * mirror copy in worker/src import from a parallel path.
  */
 
 export interface DryRunAutonomy {
