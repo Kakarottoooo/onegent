@@ -1365,40 +1365,61 @@ export async function POST(_req: NextRequest, { params }: Params) {
     await updateBookingJobStatus(id, "pending");
   }
 
-  // ── USE_WORKER_FOR feature flag (Worker D2) ────────────────────────────
-  // When every step.type is in USE_WORKER_FOR AND every step body carries
-  // the lib/core "__source" marker, hand off to the Railway worker by
-  // leaving status='pending' and returning 202. The worker polls
-  // booking_jobs.status='pending' and claims via FOR UPDATE SKIP LOCKED.
+  // ── Worker dispatch (B+B2) ─────────────────────────────────────────────
+  // Booking automation runs in the worker (worker/src/) — Vercel's role
+  // is to enqueue. Leave booking_jobs.status='pending', return 202, and
+  // the worker claims via FOR UPDATE SKIP LOCKED on its next poll.
   //
-  // The double check (env list + per-step marker) is intentional: the env
-  // gate is the operator's risk control, the marker check is the technical
-  // precondition (worker only knows how to execute lib/core-shape jobs).
-  // Mismatched jobs fall through to the legacy in-process path below.
+  // Auto-stamps the lib/core "__source" marker on any restaurant /
+  // hotel / flight / activity step that's missing it (older callers
+  // that didn't go through markStepForCore). The worker's SQL claim
+  // filter requires the marker, so without auto-stamp those jobs
+  // would sit pending indefinitely.
+  //
+  // USE_WORKER_FOR is still honored as an operator override: setting
+  // it narrows which scenarios reach the worker (useful for staged
+  // rollouts). Empty list = all four supported scenarios.
   const workerScenarios = (process.env.USE_WORKER_FOR ?? "")
     .split(",")
     .map((s) => s.trim())
     .filter(Boolean);
-  if (workerScenarios.length > 0) {
-    const allRoutable = job.steps.every((step) => {
-      if (!workerScenarios.includes(step.type)) return false;
+  const effectiveWorkerScenarios = workerScenarios.length > 0
+    ? workerScenarios
+    : ["restaurant", "hotel", "flight", "activity"];
+  const allRoutable = job.steps.every((step) =>
+    effectiveWorkerScenarios.includes(step.type),
+  );
+  if (allRoutable) {
+    const { markStepForCore, isCoreSupported: _isCoreSupported } = await import(
+      "@/lib/core/cend-adapter"
+    );
+    let stampedCount = 0;
+    const stampedSteps = job.steps.map((step) => {
       const body = step.body as Record<string, unknown> | undefined;
-      return body?.__source === "lib/core/execution";
+      if (body?.__source === "lib/core/execution") return step;
+      if (!_isCoreSupported(step.type)) return step;
+      try {
+        stampedCount += 1;
+        return markStepForCore(step);
+      } catch {
+        return step;
+      }
     });
-    if (allRoutable) {
-      console.log(
-        `[start] ${id} routed to Railway worker (USE_WORKER_FOR=${workerScenarios.join(",")})`,
-      );
-      return NextResponse.json(
-        {
-          jobId: id,
-          status: "pending",
-          steps: job.steps,
-          routedToWorker: true,
-        },
-        { status: 202 },
-      );
+    if (stampedCount > 0) {
+      await updateBookingJobSteps(id, stampedSteps);
     }
+    console.log(
+      `[start] ${id} routed to worker (auto-stamped ${stampedCount}/${job.steps.length})`,
+    );
+    return NextResponse.json(
+      {
+        jobId: id,
+        status: "pending",
+        steps: stampedSteps,
+        routedToWorker: true,
+      },
+      { status: 202 },
+    );
   }
 
   // Use the autonomy settings saved at job-creation time, fall back to defaults
