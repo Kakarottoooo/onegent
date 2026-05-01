@@ -91,6 +91,14 @@ export function decisionLogHitVerifyGate(
   if (!decisionLog || decisionLog.length === 0) return false;
   return decisionLog.some((entry) => {
     const m = typeof entry?.message === "string" ? entry.message.toLowerCase() : "";
+    // Exclude pre-flight diagnostic skips (e.g.
+    // "Resy verify-gate check skipped (-32000 Cannot find context...)")
+    // — those are race conditions in the early-return probe, not actual
+    // verify gates encountered during booking. Without this, case 007
+    // Don Angie was misclassified as verify_gate.
+    if (m.includes("verify-gate check skipped") || m.includes("verify gate check skipped")) {
+      return false;
+    }
     return (
       m.includes("verify-gate") ||
       m.includes("verify gate") ||
@@ -370,7 +378,20 @@ export function classifyError(errorText: string): FailureReason {
   if (lower.includes("timeout") || lower.includes("timed out")) {
     return "provider_timeout";
   }
-  if (lower.includes("no availability") || lower.includes("no slots") || lower.includes("not available")) {
+  // "unavailable" / "dates unavailable" / "stuck at listing page" all mean
+  // the venue's time-picker returned no slots for the requested window.
+  // Classifier was missing these phrases and falling through to
+  // executor_error — incorrect labeling (4 cases in v1 baseline run 4).
+  if (
+    lower.includes("no availability") ||
+    lower.includes("no slots") ||
+    lower.includes("not available") ||
+    lower.includes("unavailable") ||
+    lower.includes("dates unavailable") ||
+    lower.includes("stuck at listing page") ||
+    lower.includes("stuck at listing/date") ||
+    lower.includes("stalled at listing")
+  ) {
     return "no_availability";
   }
   return "executor_error";

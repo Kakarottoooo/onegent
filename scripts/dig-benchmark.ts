@@ -37,15 +37,14 @@ loadDotenv();
 import { sql } from "../lib/db";
 
 const FOCUS_CASES = [
-  // Run 3 dig: focus on provider_timeout (5 new cases) + verify RC C fix
-  "nyc_restaurant_005", // Cosme — succeeded payment_stop 1m3s (was 3m36s)
-  "nyc_restaurant_009", // Gramercy Tavern — succeeded payment_stop 2m56s
-  "nyc_restaurant_010", // Gramercy Tavern — provider_timeout 6m59s (NEW)
-  "nyc_restaurant_011", // Nobu — succeeded payment_stop 5m54s
-  "nyc_restaurant_014", // The Modern — provider_timeout 6m59s (NEW)
-  "nyc_restaurant_017", // Tao Downtown — provider_timeout 6m59s (NEW)
-  "nyc_restaurant_018", // Don Angie — provider_timeout 7m1s (NEW)
-  "nyc_restaurant_020", // Daniel — executor_error 5m57s
+  // Run 4 dig: RC F over-correction + Don Angie executor_error pattern
+  "nyc_restaurant_001", // L'Artusi — was no_availability, now executor_error 34s (RC F fail-fast bit it)
+  "nyc_restaurant_003", // Carbone — same pattern, executor_error 32s
+  "nyc_restaurant_006", // Don Angie — executor_error 1m19s
+  "nyc_restaurant_007", // Don Angie — verify_gate?? 1m20s
+  "nyc_restaurant_008", // Don Angie OLD Resy URL — executor_error 1m20s
+  "nyc_restaurant_009", // Gramercy Tavern — executor_error 3m56s
+  "nyc_restaurant_010", // Gramercy Tavern — running (still going)
 ];
 
 async function main() {
