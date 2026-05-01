@@ -241,7 +241,8 @@ async function tryWebsiteHandoff(
     if (
       websiteData.handoffUrl &&
       websiteData.handoffUrl !== officialWebsite &&
-      websiteData.handoffUrl.startsWith("http")
+      websiteData.handoffUrl.startsWith("http") &&
+      !isDeliveryPlatform(websiteData.handoffUrl)
     ) {
       reservationUrl = websiteData.handoffUrl;
     }
@@ -301,6 +302,40 @@ async function tryWebsiteHandoff(
     attemptCount: 1, // overwritten by caller
     usedFallback: true,
   };
+}
+
+// ─── Delivery-platform filter ────────────────────────────────────────────────
+// When the agent navigates a venue's official website looking for a
+// "Reservations" link, it sometimes lands on a delivery / pickup platform
+// instead — UberEats / DoorDash / Grubhub / Seamless / Postmates / Caviar.
+// Run 13 case 030 (Lucali) exposed this: lucali.com → "Order Online" link
+// → ubereats.com/feed?diningMode=PICKUP, which is NOT a reservation page.
+//
+// These hosts always deal in food delivery or pickup, never table booking.
+// Reject them as candidate reservationUrls so we fall back to the venue's
+// homepage (with copy that tells the user to call instead).
+const DELIVERY_PLATFORM_HOSTS: readonly string[] = [
+  "ubereats.com",
+  "doordash.com",
+  "grubhub.com",
+  "seamless.com",
+  "postmates.com",
+  "trycaviar.com",
+  "caviar.com",
+  "chownow.com",
+  "toasttab.com",
+  "slicelife.com",
+];
+
+function isDeliveryPlatform(url: string): boolean {
+  try {
+    const host = new URL(url).hostname.toLowerCase();
+    return DELIVERY_PLATFORM_HOSTS.some(
+      (deliveryHost) => host === deliveryHost || host.endsWith(`.${deliveryHost}`),
+    );
+  } catch {
+    return false;
+  }
 }
 
 // ─── Vendor classification (US-W5 Bug B) ─────────────────────────────────────

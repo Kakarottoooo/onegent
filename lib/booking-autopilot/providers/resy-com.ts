@@ -99,8 +99,16 @@ export async function clickResyConfirmationModal(
   // walks `getInteractionScopes` (frames + main); our hook needs the
   // same coverage. Run 11 case 005 (Cosme) hit this — modalText=false
   // even though the modal was visibly open.
+  //
+  // Run 13 case 018 (Cosme) hit a follow-up: the strict `^...$` anchored
+  // regex required the entire matched text node to be exactly "Complete
+  // Your Reservation", but Resy variants wrap the heading in a div with
+  // additional surrounding whitespace / sibling spans. Use substring
+  // match (`text=...`) — Playwright treats this as case-insensitive
+  // substring containment by default in newer versions, so it tolerates
+  // surrounding text without false-matching unrelated copy.
   const modalHeading = page.locator(
-    "text=/^\\s*Complete Your Reservation\\s*$/i"
+    "text=/complete your reservation/i"
   ).first();
   const reserveBtn = page.locator(
     'button:has-text("Reserve Now"), [role="button"]:has-text("Reserve Now")'

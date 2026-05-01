@@ -439,6 +439,19 @@ export interface OpenTableOpts {
   covers?: number;
 }
 
+const RESTAURANT_BOOKING_HOSTS = [
+  "opentable.com",
+  "resy.com",
+  "yelp.com",
+  // Unsupported platforms — preserve URL so the executor's
+  // unsupported_platform early-return at stagehand-executor.ts:687 fires
+  // instead of rewriting the URL into an OT search and ending up on a
+  // listing page that doesn't match the venue (run 13 case 022-025 hit
+  // this — Per Se / Atomix / Aquavit / Marea all rewrote to OT search).
+  "exploretock.com",
+  "sevenrooms.com",
+] as const;
+
 /**
  * Build an OpenTable search URL pre-filled with date, time, covers, and
  * restaurant or city as a search term.
@@ -453,4 +466,28 @@ export function buildOpenTableUrl(opts: OpenTableOpts): string {
   const term = opts.restaurantName ?? opts.city ?? "";
   if (term) params.term = term;
   return `https://www.opentable.com/s?${new URLSearchParams(params).toString()}`;
+}
+
+/**
+ * Structured restaurant tasks should generally begin from a canonical booking
+ * surface (OpenTable search, Resy venue page, Yelp biz page), not an official
+ * marketing site that drops the case date/time and can deep-link into the
+ * wrong experience flow.
+ */
+export function shouldUseCanonicalRestaurantSearchUrl(startUrl?: string): boolean {
+  if (!startUrl) return true;
+  // Benchmark sentinel scheme (e.g. `benchmark://no_online?venue=Rao%27s`) —
+  // must reach the executor unmodified so the deep_link_handoff early-return
+  // at stagehand-executor.ts:717 fires. Without this guard, URL parse fails,
+  // catch returns true, and the dispatcher rewrites it to an OT search,
+  // breaking Rao's / Lucali handoff coverage (run 13 cases 021/030).
+  if (/^benchmark:\/\//i.test(startUrl)) return false;
+  try {
+    const host = new URL(startUrl).hostname.toLowerCase();
+    return !RESTAURANT_BOOKING_HOSTS.some(
+      (allowedHost) => host === allowedHost || host.endsWith(`.${allowedHost}`),
+    );
+  } catch {
+    return true;
+  }
 }
