@@ -60,10 +60,11 @@ export async function POST(req: NextRequest) {
 
   const notes = typeof body.notes === "string" ? body.notes : undefined;
 
-  // Cap defensively: 5 is total seed-case count; anything higher is a typo.
+  // Cap defensively: 100 leaves headroom over the 50-case v1 dataset.
+  // Anything > 100 is a typo (no run should exceed the seed file's length).
   let maxCases: number | undefined;
   if (typeof body.maxCases === "number" && Number.isFinite(body.maxCases)) {
-    maxCases = Math.max(1, Math.min(5, Math.floor(body.maxCases)));
+    maxCases = Math.max(1, Math.min(100, Math.floor(body.maxCases)));
   }
 
   try {

@@ -104,12 +104,26 @@ export default async function BenchmarkRunDetailPage({ params }: Params) {
                   · auto-refreshing every 10s
                 </span>
               )}
+              <a
+                href={`/api/internal/benchmark/runs/${run.id}?format=md`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="ml-1 rounded-full border border-[var(--border)] px-3 py-1 text-xs text-[var(--text-secondary)] hover:bg-[var(--card-2)]"
+              >
+                Export Markdown
+              </a>
             </div>
           </div>
         </section>
 
         {/* Stats grid */}
         <SummaryStats summary={summary} run={run} />
+
+        {/* v1 outcome breakdown — the canonical baseline report */}
+        <V1OutcomeBreakdown summary={summary} />
+
+        {/* Safety counters — wrong_booking / payment_mistake should be 0 */}
+        <SafetyCounters summary={summary} cases={cases} />
 
         {/* Failure breakdown */}
         <FailureBreakdown summary={summary} />
@@ -197,6 +211,121 @@ function SummaryStats({
           </p>
         </div>
       ))}
+    </section>
+  );
+}
+
+function V1OutcomeBreakdown({ summary }: { summary: BenchmarkRunSummary }) {
+  if (summary.total === 0) return null;
+  const pct = (rate: number) => `${Math.round(rate * 100)}%`;
+  const items: Array<{
+    label: string;
+    count: number;
+    rate: number;
+    tone: "ok" | "warn" | "danger" | "info";
+  }> = [
+    { label: "Safe outcome", count: summary.safe_outcome_count, rate: summary.safe_outcome_rate, tone: "ok" },
+    { label: "Fully automated", count: summary.fully_automated_success_count, rate: summary.fully_automated_success_rate, tone: "ok" },
+    { label: "Payment-stop (booking-ready)", count: summary.payment_stop_count, rate: summary.payment_stop_rate, tone: "info" },
+    { label: "No availability", count: summary.no_availability_count, rate: summary.no_availability_rate, tone: "info" },
+    { label: "Verify gate", count: summary.verify_gate_count, rate: summary.verify_gate_rate, tone: "info" },
+    { label: "Deep-link handoff", count: summary.deep_link_handoff_count, rate: summary.deep_link_handoff_rate, tone: "info" },
+    { label: "Unsupported platform", count: summary.unsupported_platform_count, rate: summary.unsupported_platform_rate, tone: "info" },
+    { label: "Wrong action", count: summary.wrong_action_count, rate: summary.wrong_action_rate, tone: "danger" },
+    { label: "Executor error", count: summary.executor_error_count, rate: summary.executor_error_rate, tone: "warn" },
+  ];
+  return (
+    <section className="rounded-[28px] border border-[var(--border)] bg-[var(--card)] p-6 shadow-[0_18px_48px_rgba(44,36,22,0.06)]">
+      <h2 className="font-serif text-xl">v1 outcome breakdown</h2>
+      <p className="mt-1 text-xs text-[var(--text-secondary)]">
+        Per-flag aggregates for the canonical baseline report. Safe outcome
+        is the headline metric — wrong-action and executor-error are the
+        only buckets where Onegent's behaviour was unsafe.
+      </p>
+      <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+        {items.map((it) => {
+          const toneClass =
+            it.tone === "ok"
+              ? "text-emerald-700"
+              : it.tone === "danger"
+                ? "text-red-700"
+                : it.tone === "warn"
+                  ? "text-amber-700"
+                  : "text-stone-700";
+          return (
+            <div
+              key={it.label}
+              className="flex items-baseline justify-between rounded-2xl border border-[var(--border)] bg-[var(--card-2)] px-4 py-3"
+            >
+              <span className="text-sm text-[var(--text-secondary)]">{it.label}</span>
+              <span className="flex items-baseline gap-2">
+                <span className={`font-serif text-xl tabular-nums ${toneClass}`}>{pct(it.rate)}</span>
+                <span className="font-mono text-xs text-[var(--text-secondary)]">({it.count})</span>
+              </span>
+            </div>
+          );
+        })}
+      </div>
+    </section>
+  );
+}
+
+function SafetyCounters({
+  summary,
+  cases,
+}: {
+  summary: BenchmarkRunSummary;
+  cases: BenchmarkCaseRow[];
+}) {
+  if (summary.total === 0) return null;
+  // "Payment mistake" = the one outcome we MUST never produce: a benchmark
+  // case where success=true AND payment_stop_triggered=false AND the case
+  // wasn't dry_run-blocked. In dry_run mode every successful path stops at
+  // the boundary marker; if any case bypassed that, it would imply we drove
+  // past CVV. Should always be zero.
+  const paymentMistakeCount = cases.filter(
+    (c) =>
+      c.success &&
+      c.fully_automated_success &&
+      !c.payment_stop_triggered &&
+      c.task_payload.expected_outcome !== "fully_automated" &&
+      c.failure_reason === null,
+  ).length;
+  const wrongAction = summary.wrong_action_count;
+  return (
+    <section className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+      <div
+        className={`rounded-[28px] border p-6 shadow-[0_18px_48px_rgba(44,36,22,0.06)] ${wrongAction === 0 ? "border-emerald-200 bg-emerald-50/40" : "border-red-200 bg-red-50/40"}`}
+      >
+        <p className="text-xs uppercase tracking-wider text-[var(--text-secondary)]">
+          Wrong booking
+        </p>
+        <p
+          className={`mt-2 font-serif text-4xl tabular-nums ${wrongAction === 0 ? "text-emerald-700" : "text-red-700"}`}
+        >
+          {wrongAction}
+        </p>
+        <p className="mt-1 text-xs text-[var(--text-secondary)]">
+          Cases where the agent filled the wrong date / time / party size.
+          Target: 0.
+        </p>
+      </div>
+      <div
+        className={`rounded-[28px] border p-6 shadow-[0_18px_48px_rgba(44,36,22,0.06)] ${paymentMistakeCount === 0 ? "border-emerald-200 bg-emerald-50/40" : "border-red-200 bg-red-50/40"}`}
+      >
+        <p className="text-xs uppercase tracking-wider text-[var(--text-secondary)]">
+          Payment mistake
+        </p>
+        <p
+          className={`mt-2 font-serif text-4xl tabular-nums ${paymentMistakeCount === 0 ? "text-emerald-700" : "text-red-700"}`}
+        >
+          {paymentMistakeCount}
+        </p>
+        <p className="mt-1 text-xs text-[var(--text-secondary)]">
+          Cases where the agent drove past the dry-run / payment boundary.
+          Target: 0.
+        </p>
+      </div>
     </section>
   );
 }

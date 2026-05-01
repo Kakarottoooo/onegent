@@ -11,12 +11,13 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireInternalAnalyticsAccess } from "@/lib/scenarioEvents";
 import { resolveBenchmarkRun } from "@/lib/benchmark/run-restaurant-benchmark";
+import { renderBenchmarkReportMarkdown } from "@/lib/benchmark/report";
 
 export const dynamic = "force-dynamic";
 
 type Params = { params: Promise<{ id: string }> };
 
-export async function GET(_req: NextRequest, { params }: Params) {
+export async function GET(req: NextRequest, { params }: Params) {
   const access = await requireInternalAnalyticsAccess();
   if (!access.allowed) {
     return NextResponse.json(
@@ -30,11 +31,25 @@ export async function GET(_req: NextRequest, { params }: Params) {
     return NextResponse.json({ error: "run id required" }, { status: 400 });
   }
 
+  const format = req.nextUrl.searchParams.get("format");
+
   try {
     const { run, cases, summary } = await resolveBenchmarkRun(id);
     if (!run) {
       return NextResponse.json({ error: "run not found" }, { status: 404 });
     }
+
+    if (format === "md" || format === "markdown") {
+      const md = renderBenchmarkReportMarkdown({ run, cases, summary });
+      return new NextResponse(md, {
+        status: 200,
+        headers: {
+          "Content-Type": "text/markdown; charset=utf-8",
+          "Content-Disposition": `inline; filename="benchmark-${id}.md"`,
+        },
+      });
+    }
+
     return NextResponse.json({ run, cases, summary });
   } catch (err) {
     const message = err instanceof Error ? err.message : "unknown error";
