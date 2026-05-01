@@ -1628,6 +1628,14 @@ The user will enter CVV and confirm payment themselves.`,
         const u = new URL(raw.url());
         const isResy = /resy\.com\/cities\/.+\/venues\//i.test(u.toString());
         const isOTDetail = /opentable\.com\/r\//i.test(u.toString());
+        // OT vanity detail URL (run 14 dig: case 002 Wild West Village
+        // /wild-west-village + case 004 The Clam /the-clam): single-segment
+        // URL without /r/ prefix. OT renders the same booking widget but
+        // uses ?sd=YYYY-MM-DDTHH:MM:SS&p=N (NOT dateTime/covers). Confirmed
+        // by user screenshot showing OT redirecting with sd/p query params.
+        const isOTVanityDetail =
+          /opentable\.com\/[a-z0-9][a-z0-9-]*(?:\?|$|\/?$)/i.test(u.toString()) &&
+          !/opentable\.com\/(?:r\/|s\?|booking\/|restaurants\/|search\?|account\/|user\/|signup|login)/i.test(u.toString());
         if (isResy) {
           const seats = taskCoversMatch ? taskCoversMatch[1] : "2";
           if (u.searchParams.get("date") !== taskDateMatch[1] || u.searchParams.get("seats") !== seats) {
@@ -1646,6 +1654,18 @@ The user will enter CVV and confirm payment themselves.`,
             u.searchParams.set("dateTime", desiredDateTime);
             u.searchParams.set("covers", covers);
             trace(`[pre-ai] ot navigate w/ case context: dateTime=${desiredDateTime}&covers=${covers}`);
+            await raw.goto(u.toString(), { waitUntil: "domcontentloaded", timeout: 15000 }).catch(() => {});
+            await new Promise((r) => setTimeout(r, 2000));
+          }
+        } else if (isOTVanityDetail && taskTimeMatch) {
+          const hh = taskTimeMatch[1].padStart(2, "0");
+          const mm = taskTimeMatch[2];
+          const partySize = taskCoversMatch ? taskCoversMatch[1] : "2";
+          const desiredSd = `${taskDateMatch[1]}T${hh}:${mm}:00`;
+          if (u.searchParams.get("sd") !== desiredSd || u.searchParams.get("p") !== partySize) {
+            u.searchParams.set("sd", desiredSd);
+            u.searchParams.set("p", partySize);
+            trace(`[pre-ai] ot vanity navigate w/ case context: sd=${desiredSd}&p=${partySize}`);
             await raw.goto(u.toString(), { waitUntil: "domcontentloaded", timeout: 15000 }).catch(() => {});
             await new Promise((r) => setTimeout(r, 2000));
           }
