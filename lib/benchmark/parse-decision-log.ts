@@ -149,3 +149,30 @@ export function classifyError(errorText: string): FailureReason {
   }
   return "executor_error";
 }
+
+/**
+ * Patterns that indicate the failure was infrastructure / race condition,
+ * not a real "executor decided to give up" outcome. Worth retrying once.
+ *
+ * Observed in real benchmark dev.log:
+ *   - Neon DB IPv6 connect timeouts (UND_ERR_CONNECT_TIMEOUT)
+ *   - Chrome CDP target init races when 5 sessions spin up at once
+ *   - Booking job 409 "Job already running" race with dispatcher
+ *   - Various socket-level resets when stagehand initialises
+ */
+const TRANSIENT_ERROR_PATTERNS = [
+  /Connect Timeout Error/i,
+  /UND_ERR_CONNECT_TIMEOUT/i,
+  /target closed before CDP response/i,
+  /No Page found for target/i,
+  /Job already running/i,
+  /socket hang up/i,
+  /ECONNRESET/i,
+  /ECONNREFUSED/i,
+  /fetch failed/i,
+];
+
+export function isTransientError(errorText: string | null | undefined): boolean {
+  if (!errorText) return false;
+  return TRANSIENT_ERROR_PATTERNS.some((p) => p.test(errorText));
+}

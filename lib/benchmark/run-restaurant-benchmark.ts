@@ -33,7 +33,7 @@ import {
   getBenchmarkRun,
 } from "./store";
 import { getRestaurantBenchmarkCases } from "./restaurant-cases";
-import { classifyStepResult } from "./parse-decision-log";
+import { classifyStepResult, isTransientError } from "./parse-decision-log";
 import type {
   BenchmarkMode,
   BenchmarkRunSummary,
@@ -249,6 +249,63 @@ export async function resolveBenchmarkCase(
     decisionLog: step.decisionLog ?? null,
   });
 
+  // ── Retry on transient infra failures ──────────────────────────────────
+  // Neon DB connect timeouts, Chrome CDP target races, dispatcher 409,
+  // socket resets — these are infra hiccups, not real "the executor decided
+  // to give up" outcomes. Retry once before finalising as executor_error.
+  // Track attempt_count in audit (jsonb) — no schema migration needed.
+  const previousAudit = (caseRow.audit ?? {}) as {
+    attempt_count?: number;
+    retry_history?: Array<{ booking_job_id: string; error: string | null; retried_at: string }>;
+  };
+  const attemptCount = previousAudit.attempt_count ?? 1;
+  const MAX_TRANSIENT_RETRIES = 1; // 2 attempts total
+
+  if (
+    classification.failure_reason === "executor_error" &&
+    isTransientError(step.error) &&
+    attemptCount < 1 + MAX_TRANSIENT_RETRIES
+  ) {
+    const baseUrl = DEFAULT_BASE_URL;
+    const fetchFn: FetchLike = (url, init) => fetch(url, init);
+    try {
+      // Re-dispatch: createBookingJob with new uuid, fire /start, repoint
+      // the case row to the new job. Next polling tick will resolve it.
+      const newJobId = await dispatchBenchmarkCase({
+        caseRow,
+        mode: caseRow.mode,
+        baseUrl,
+        fetchFn,
+      });
+      console.log(
+        `[benchmark] case ${caseRow.case_id} hit transient error (attempt ${attemptCount}); re-dispatched as ${newJobId}: ${(step.error ?? "").slice(0, 80)}`,
+      );
+      // dispatchBenchmarkCase already set status='running' + bookingJobId=newJobId.
+      // We just patch audit with the retry history.
+      return updateBenchmarkCase(caseRow.id, {
+        audit: {
+          ...previousAudit,
+          attempt_count: attemptCount + 1,
+          retry_history: [
+            ...(previousAudit.retry_history ?? []),
+            {
+              booking_job_id: caseRow.booking_job_id ?? "",
+              error: step.error ?? null,
+              retried_at: new Date().toISOString(),
+            },
+          ],
+        },
+        finalize: false,
+      });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.warn(
+        `[benchmark] retry dispatch failed for case ${caseRow.case_id}: ${msg}; finalising as executor_error`,
+      );
+      // Fall through to normal finalise with the original error.
+    }
+  }
+
   const createdAt = new Date(job.created_at).getTime();
   const completedAt = job.completed_at ? new Date(job.completed_at).getTime() : Date.now();
   const durationSeconds = Math.max(0, Math.round((completedAt - createdAt) / 1000));
@@ -261,6 +318,8 @@ export async function resolveBenchmarkCase(
     humanHandoffRequired: classification.human_handoff_required,
     durationSeconds,
     audit: {
+      ...previousAudit,
+      attempt_count: attemptCount,
       job_status: job.status,
       step_status: step.status,
       step_error: step.error ?? null,
