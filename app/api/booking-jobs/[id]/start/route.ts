@@ -78,6 +78,48 @@ const inFlightJobStarts = new Set<string>();
 function now() { return new Date().toISOString(); }
 function sleep(ms: number) { return new Promise<void>((r) => setTimeout(r, ms)); }
 
+function looksLikeSyntheticProfileValue(field: string, value: string | undefined): boolean {
+  if (!value) return false;
+  const normalized = value.trim().toLowerCase();
+  if (!normalized) return false;
+
+  if (field === "email") {
+    return (
+      normalized.endsWith("@onegent.test") ||
+      normalized.endsWith("@example.com") ||
+      normalized.includes("benchmark")
+    );
+  }
+
+  if (field === "phone") {
+    const digits = normalized.replace(/\D/g, "");
+    return (
+      digits === "1234567890" ||
+      digits === "15555550100" ||
+      digits === "5555550100" ||
+      /^555\d{7}$/.test(digits)
+    );
+  }
+
+  if (field === "first_name" || field === "last_name") {
+    return normalized === "benchmark" || normalized === "user" || normalized === "john" || normalized === "doe";
+  }
+
+  return false;
+}
+
+function preferInlineProfileValue(
+  field: string,
+  inlineValue: string | undefined,
+  dbValue: string | undefined,
+  allowSyntheticInline: boolean,
+): string | undefined {
+  if (inlineValue && (!looksLikeSyntheticProfileValue(field, inlineValue) || allowSyntheticInline)) {
+    return inlineValue;
+  }
+  return dbValue;
+}
+
 async function callEndpoint(
   endpoint: string,
   body: Record<string, unknown>
@@ -352,6 +394,9 @@ async function runUniversalStepViaCore(
       params: body.params,
     } as ExecutionParams,
     profileId: typeof body.profileId === "number" ? body.profileId : undefined,
+    // Inline profile passthrough — required by anonymous benchmark cases
+    // (userId=null + no profileId, only an inline profile in body).
+    profile: body.profile as ExecutionJobRequest["profile"],
     consent: body.consent as ConsentPolicy | undefined,
   };
 
@@ -469,10 +514,27 @@ async function runUniversalStep(
       //
       // `term=Restaurant+Name City+Name` reliably biases the match to the
       // right metro while still matching the restaurant by name.
-      if (!resolvedBody.startUrl) {
+      const existingStartUrl =
+        typeof resolvedBody.startUrl === "string" ? resolvedBody.startUrl : "";
+      const { buildOpenTableUrl, shouldUseCanonicalRestaurantSearchUrl } =
+        await import("@/lib/agent/planners/booking-links");
+
+      // Official venue websites frequently drop the case date/time and can
+      // bounce into unrelated OpenTable experience flows (e.g. brunch pages on
+      // the wrong day). For structured restaurant bookings, prefer a canonical
+      // booking surface unless the caller already supplied a real restaurant
+      // booking URL (OpenTable / Resy / Yelp).
+      if (shouldUseCanonicalRestaurantSearchUrl(existingStartUrl)) {
         const termRaw = rCity ? `${rName} ${rCity}` : rName;
-        const otUrl = `https://www.opentable.com/s?term=${encodeURIComponent(termRaw)}&covers=${rCovers}&dateTime=${rDate}T${rTime}:00`;
-        resolvedBody = { ...resolvedBody, startUrl: otUrl };
+        resolvedBody = {
+          ...resolvedBody,
+          startUrl: buildOpenTableUrl({
+            restaurantName: termRaw,
+            date: rDate,
+            time: rTime,
+            covers: rCovers,
+          }),
+        };
       }
 
       // (2) Synthesize task NL when missing — independent of startUrl.
@@ -608,13 +670,14 @@ async function runUniversalStep(
         // Prefer inline profile for contact info (always up-to-date from picker),
         // but add card data + travel docs from DB (sensitive fields never stored inline).
         const inline = (resolvedBody.profile ?? {}) as Record<string, string | undefined>;
+        const allowSyntheticInline = resolvedBody.benchmark_dry_run === true;
         resolvedBody = {
           ...resolvedBody,
           profile: {
-            first_name: inline.first_name || dbProfile.first_name,
-            last_name: inline.last_name || dbProfile.last_name,
-            email: inline.email || dbProfile.email,
-            phone: inline.phone || dbProfile.phone,
+            first_name: preferInlineProfileValue("first_name", inline.first_name, dbProfile.first_name, allowSyntheticInline),
+            last_name: preferInlineProfileValue("last_name", inline.last_name, dbProfile.last_name, allowSyntheticInline),
+            email: preferInlineProfileValue("email", inline.email, dbProfile.email, allowSyntheticInline),
+            phone: preferInlineProfileValue("phone", inline.phone, dbProfile.phone, allowSyntheticInline),
             address_line1: inline.address_line1 || dbProfile.address_line1,
             city: inline.city || dbProfile.city,
             state: inline.state || dbProfile.state,
@@ -800,7 +863,7 @@ async function runUniversalStep(
         log.push({
           ts: now(),
           type: "attempt",
-          message: entry,
+          message: entry.line,
           outcome: "Executor trace",
         });
       }

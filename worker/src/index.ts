@@ -145,6 +145,12 @@ async function runStep(
       params: body.params,
     } as ExecutionParams,
     profileId: typeof body.profileId === "number" ? body.profileId : undefined,
+    // Inline profile path — used by anonymous benchmark dispatcher
+    // (userId=null + no DB profile row). Without this passthrough the
+    // executor's resolveProfile throws "Cannot resolve profile: no
+    // inline profile, no profileId, no userId" and every benchmark case
+    // fails in 7-15s before opening Chromium.
+    profile: body.profile as ExecutionJobRequest["profile"],
     consent: body.consent as ConsentPolicy | undefined,
   };
 
