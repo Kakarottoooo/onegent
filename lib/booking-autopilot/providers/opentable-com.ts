@@ -37,6 +37,67 @@ export async function runOpenTableIntermediatePreflight(
 ): Promise<{ advanced: boolean; finalUrl: string; reason: string }> {
   for (let preflightStep = 0; preflightStep < 2; preflightStep += 1) {
     const url = (rawPage.url() ?? "").toLowerCase();
+
+    // ── DOM-based seating-options detection (URL-independent) ──────────────
+    // OT now sometimes renders the seating-options modal inline on the
+    // venue detail page (vanity URLs like /wild-west-village) WITHOUT
+    // navigating to /booking/seating-options. Without DOM detection the
+    // URL-only check below misses this case entirely and the executor
+    // loops on listing → reserve click → no progress. User screenshot
+    // (run 10 case 002): "Available seating options" modal with Standard/
+    // Outdoor Select buttons on /wild-west-village.
+    const seatingModalAdvanced = await rawPage.evaluate(() => {
+      const isVisible = (el: Element): boolean => {
+        if (!(el as HTMLElement).isConnected) return false;
+        const r = (el as HTMLElement).getBoundingClientRect();
+        if (r.width === 0 || r.height === 0) return false;
+        const s = window.getComputedStyle(el as HTMLElement);
+        return s.display !== "none" && s.visibility !== "hidden" && s.opacity !== "0";
+      };
+      // Locate the seating-options heading. Match anchored phrase to avoid
+      // false positives in cancellation policy / footer copy.
+      const headings = Array.from(document.querySelectorAll<HTMLElement>("h1, h2, h3, h4, [role='heading']"))
+        .filter((el) => isVisible(el));
+      const seatingHeading = headings.find((h) =>
+        /^\s*available seating options?\s*$/i.test((h.textContent ?? "").trim())
+      );
+      if (!seatingHeading) return null;
+      // Within the modal/section containing this heading, find Select buttons
+      // adjacent to a "Standard" label (preferred) — fall back to first.
+      const modal = seatingHeading.closest(
+        "[role='dialog'], [class*='modal' i], [class*='Modal'], section, div"
+      ) ?? document;
+      const selectBtns = Array.from(modal.querySelectorAll<HTMLButtonElement>("button"))
+        .filter((b) => isVisible(b) && /^\s*select\s*$/i.test((b.textContent ?? "").trim()));
+      // Iterate select buttons and prefer the row whose nearest text ancestor
+      // contains "standard"; never auto-pick a row containing "$" (paid).
+      for (const b of selectBtns) {
+        const row = b.closest("li, tr, [class*='row' i], [class*='option' i], div") ?? b.parentElement;
+        const rowText = (row?.textContent ?? "").toLowerCase();
+        if (/\$\d/.test(rowText)) continue;
+        if (rowText.includes("standard")) {
+          b.click();
+          return "Standard (DOM modal)";
+        }
+      }
+      // Fallback: first non-paid Select.
+      for (const b of selectBtns) {
+        const row = b.closest("li, tr, [class*='row' i], [class*='option' i], div") ?? b.parentElement;
+        const rowText = (row?.textContent ?? "").toLowerCase();
+        if (/\$\d/.test(rowText)) continue;
+        b.click();
+        const label = row?.querySelector("h3, h4, p, strong, span")?.textContent?.trim().slice(0, 30) ?? "first option";
+        return `${label} (DOM modal)`;
+      }
+      return null;
+    }).catch(() => null);
+    if (seatingModalAdvanced) {
+      trace(`[opentable] preflight ${preflightStep + 1}: DOM modal handled — clicked "${seatingModalAdvanced}"`);
+      await rawPage.waitForLoadState("domcontentloaded", { timeout: 10_000 }).catch(() => null);
+      await new Promise((r) => setTimeout(r, 1500));
+      continue; // re-check on the next iteration (URL may now be /booking/details)
+    }
+
     if (url.includes("/booking/seating-options")) {
       trace(`[opentable] preflight ${preflightStep + 1}: seating-options page — auto-selecting Standard`);
       const picked = await rawPage.evaluate(() => {
@@ -115,13 +176,24 @@ export async function runOpenTableIntermediatePreflight(
     break;
   }
   const finalUrl = (rawPage.url() ?? "").toLowerCase();
+  // Still stuck on a /booking/{seating-options,specials} URL → not advanced.
   if (
     finalUrl.includes("/booking/seating-options") ||
     finalUrl.includes("/booking/specials")
   ) {
-    return { advanced: false, finalUrl, reason: "still on intermediate page" };
+    return { advanced: false, finalUrl, reason: "still on intermediate URL" };
   }
-  return { advanced: true, finalUrl, reason: "advanced past intermediate page" };
+  // Modal might still be open on a vanity URL (URL didn't navigate).
+  // If the "Available seating options" modal text is still visible we
+  // haven't actually advanced — the click missed or got intercepted.
+  const modalStillOpen = await rawPage.evaluate(() => {
+    const text = document.body?.innerText ?? "";
+    return /available seating options?/i.test(text);
+  }).catch(() => false);
+  if (modalStillOpen) {
+    return { advanced: false, finalUrl, reason: "seating-options modal still visible after click" };
+  }
+  return { advanced: true, finalUrl, reason: "advanced past intermediate gate" };
 }
 
 /**

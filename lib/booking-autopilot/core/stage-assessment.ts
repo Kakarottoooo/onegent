@@ -550,6 +550,20 @@ export async function assessBookingStage(params: {
     stage = "listing";
     reason = "The page still looks like a listing/search flow without booking progress.";
   } else if (
+    // OT inline seating-options modal (URL did NOT navigate to /booking/
+    // seating-options — common on vanity URLs like /wild-west-village).
+    // User screenshot (run 10 case 002): "Available seating options" modal
+    // with Standard / Outdoor Select buttons. Without this branch the
+    // page text triggers stalledAtRoomSelection / listing repeatedly and
+    // the executor loops without ever invoking preflight.
+    /opentable\.com/i.test(currentUrl) &&
+    /available seating options?/i.test(pageText) &&
+    !/\/booking\//i.test(currentUrl) &&
+    !visibleCheckoutFields
+  ) {
+    stage = "intermediate_gate";
+    reason = "OpenTable 'Available seating options' modal is open on venue page (URL unchanged).";
+  } else if (
     // OT canonical detail page (/r/<slug>) OR vanity detail URL (no /r/
     // prefix — e.g. /wild-west-village, /the-clam). Both render the same
     // booking widget. Run 8 dig: vanity URLs were falling through to the

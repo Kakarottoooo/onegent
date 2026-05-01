@@ -37,8 +37,11 @@ loadDotenv();
 import { sql } from "../lib/db";
 
 const FOCUS_CASES = [
-  // Run 9 dig: post-round-3 (apostrophe fix + vanity URL fix)
-  "nyc_restaurant_001", // Fumo Soho — user screenshot confirms slots visible on /r/fumo-soho-new-york
+  "nyc_restaurant_001", // Fumo Soho
+  "nyc_restaurant_002", // WILD - West Village (user screenshot: stuck on Available seating options modal on vanity URL, URL did NOT change to /booking/seating-options)
+  "nyc_restaurant_003", // FOOD
+  "nyc_restaurant_004", // The Clam
+  "nyc_restaurant_005", // Mezze on the River
 ];
 
 async function main() {

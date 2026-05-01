@@ -5037,18 +5037,18 @@ The user will enter CVV and confirm payment themselves.`,
       }
 
       // ── B1: OT seating-options / specials intermediate-page hook ──────────
-      // stage_assessment now classifies these URLs as `intermediate_gate`
-      // (was `checkout_form` until B1). The generic intermediate_gate handler
-      // (at case "intermediate_gate" below) only knows how to click
-      // privacy checkboxes + Booking.com-style "Reserve" buttons — it has no
-      // idea how to pick a Standard seating row or skip a specials add-on
-      // page. So short-circuit the OT case here, run the provider's
-      // preflight, and re-assess. After the preflight advances to
-      // /booking/details, stage will become `checkout_form` and the loop
-      // breaks out into the real fillGuestForm dispatcher (line ~5582).
+      // Trigger when stage_assessment marked the page as `intermediate_gate`
+      // AND we're on any OpenTable URL. The preflight function checks for:
+      //   1. URL match `/booking/seating-options` (canonical navigation)
+      //   2. URL match `/booking/specials`
+      //   3. DOM-detected inline "Available seating options" modal on the
+      //      venue page (vanity URLs like /wild-west-village where OT
+      //      doesn't navigate, just opens an inline modal — confirmed by
+      //      user screenshot run 10 case 002).
+      // Each of those is handled inside runOpenTableIntermediatePreflight.
       if (
         assessment.stage === "intermediate_gate" &&
-        /opentable\.com\/booking\/(specials|seating-options)\b/i.test(currentUrl)
+        /opentable\.com/i.test(currentUrl)
       ) {
         const { runOpenTableIntermediatePreflight } = await import("./providers/opentable-com");
         const preflight = await runOpenTableIntermediatePreflight(raw, trace);
