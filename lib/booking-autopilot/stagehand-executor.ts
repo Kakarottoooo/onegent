@@ -28,6 +28,7 @@ import {
 } from "./core/recovery";
 import {
   buildEffectiveProfile,
+  extractTargetCity,
   extractTargetHotelName,
   extractTargetHotelNameFromUrl,
 } from "./core/profile";
@@ -118,6 +119,256 @@ type AgentExecutionResult = {
 
 function getRawPage(stagehandPage: unknown): Page {
   return (((stagehandPage as { page?: Page }).page ?? stagehandPage) as Page);
+}
+
+function normalizeCityLabel(value: string | undefined): string {
+  return (value ?? "")
+    .toLowerCase()
+    .replace(/\b(new york city|nyc)\b/g, "new york")
+    .replace(/\bst\.\b/g, "saint")
+    .replace(/[^a-z0-9]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function citiesLooselyMatch(current: string | undefined, desired: string | undefined): boolean {
+  const currentNorm = normalizeCityLabel(current);
+  const desiredNorm = normalizeCityLabel(desired);
+  if (!currentNorm || !desiredNorm) return false;
+  return currentNorm === desiredNorm || currentNorm.includes(desiredNorm) || desiredNorm.includes(currentNorm);
+}
+
+async function readOpenTableLocationChip(page: Page): Promise<string | undefined> {
+  return await page.evaluate(() => {
+    const isVisible = (el: Element | null): el is HTMLElement => {
+      if (!(el instanceof HTMLElement)) return false;
+      const rect = el.getBoundingClientRect();
+      if (rect.width < 24 || rect.height < 18) return false;
+      const style = window.getComputedStyle(el);
+      return style.display !== "none" && style.visibility !== "hidden" && style.opacity !== "0";
+    };
+    const normalize = (value: string) => value.replace(/\s+/g, " ").trim();
+    const noise = /^(mobile|for businesses|faqs|join rewards|sign in|featured|romantic|italian|brunch|mexican|pizza|seafood|american|fun|japanese|en|find a table)$/i;
+
+    const candidates = Array.from(document.querySelectorAll<HTMLElement>("button, a, span, div"))
+      .filter((el) => {
+        if (!isVisible(el)) return false;
+        const rect = el.getBoundingClientRect();
+        if (rect.top < 0 || rect.top > 170 || rect.left < 0 || rect.left > 420) return false;
+        const text = normalize(el.textContent ?? "");
+        if (text.length < 2 || text.length > 40) return false;
+        if (noise.test(text)) return false;
+        if (/\d/.test(text)) return false;
+        if (!/[a-z]/i.test(text)) return false;
+        return true;
+      })
+      .map((el) => {
+        const rect = el.getBoundingClientRect();
+        const text = normalize(el.textContent ?? "");
+        const score =
+          (rect.left < 240 ? 90 : 0) +
+          (rect.top < 120 ? 70 : 0) +
+          (/^[A-Z][a-z]+(?:\s+[A-Z][a-z]+){0,3}$/.test(text) ? 50 : 0) +
+          (text.length <= 18 ? 20 : 0);
+        return { text, score };
+      })
+      .sort((a, b) => b.score - a.score);
+
+    return candidates[0]?.text || undefined;
+  }).catch(() => undefined);
+}
+
+async function ensureOpenTableLocationMatches(
+  page: Page,
+  stagehand: Stagehand,
+  desiredCity: string | undefined,
+  trace: (msg: string) => void,
+): Promise<boolean> {
+  if (!desiredCity) return true;
+
+  const before = await readOpenTableLocationChip(page);
+  if (citiesLooselyMatch(before, desiredCity)) {
+    trace(`[opentable] location already matches target city: "${before}"`);
+    return true;
+  }
+
+  trace(
+    `[opentable] location mismatch: current="${before ?? "unknown"}" desired="${desiredCity}" — attempting correction`,
+  );
+
+  try {
+    await stagehand.act(
+      `You are on an OpenTable search results page. Change only the location or metro selector to "${desiredCity}". Keep the restaurant query, date, time, and party size exactly as they are. Wait until the results refresh after the location change.`,
+    );
+  } catch (error) {
+    trace(`[opentable] location correction action failed: ${(error as Error).message?.slice(0, 120)}`);
+    return false;
+  }
+
+  await new Promise((resolve) => setTimeout(resolve, 2200));
+  const after = await readOpenTableLocationChip(page);
+  const matched = citiesLooselyMatch(after, desiredCity);
+  trace(
+    `[opentable] location correction result: now="${after ?? "unknown"}" desired="${desiredCity}" matched=${matched}`,
+  );
+  return matched;
+}
+
+function parseRequestedRestaurantTimeMinutes(task: string): number | null {
+  const timeMatch = task.match(/\b(\d{1,2}):(\d{2})\s*(AM|PM)?\b/i);
+  if (!timeMatch) return null;
+  let h = parseInt(timeMatch[1], 10);
+  const m = parseInt(timeMatch[2], 10);
+  const meridiem = (timeMatch[3] ?? "").toUpperCase();
+  if (meridiem === "PM" && h < 12) h += 12;
+  if (meridiem === "AM" && h === 12) h = 0;
+  return h * 60 + m;
+}
+
+function parseDisplayedTimeMinutes(value: string | undefined): number | null {
+  if (!value) return null;
+  const timeMatch = value.match(/(\d{1,2}):(\d{2})\s*(AM|PM)/i);
+  if (!timeMatch) return null;
+  let h = parseInt(timeMatch[1], 10);
+  const m = parseInt(timeMatch[2], 10);
+  const meridiem = timeMatch[3].toUpperCase();
+  if (meridiem === "PM" && h < 12) h += 12;
+  if (meridiem === "AM" && h === 12) h = 0;
+  return h * 60 + m;
+}
+
+function formatMonthDayFromIsoDate(isoDate: string): string {
+  const parsed = new Date(`${isoDate}T12:00:00Z`);
+  return new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric", timeZone: "UTC" }).format(parsed).toLowerCase();
+}
+
+async function readOpenTableBookingSummary(page: Page): Promise<{
+  restaurant: string;
+  dateText: string;
+  timeText: string;
+  coversText: string;
+  experienceText: string;
+  currentUrl: string;
+}> {
+  return await page.evaluate(() => {
+    // Run 11 dig: this function feeds validateOpenTableBookingTarget — the
+    // verification path that actually fires on real OT booking flows. Two
+    // bugs killed every OT case here:
+    //   1. document.querySelector("h1") on /booking/details returns OT's
+    //      action heading "You're almost done!" (typographic apostrophe).
+    //      That string was returned as the venue name, never matched the
+    //      target restaurant → "booking target mismatch" → abort.
+    //   2. The stale fallback didn't even try the second/third heading.
+    // Fix: normalise typographic quotes, walk h1/h2/h3 skipping known OT
+    // generic UI phrases, then fall back to extracting the venue name from
+    // <title> ("Fumo Soho — New York City").
+    const normaliseQuotes = (s: string): string =>
+      s.replace(/[‘’‚‛`ʼ]/g, "'");
+    const normalize = (value: string | null | undefined) =>
+      normaliseQuotes((value ?? "").replace(/\s+/g, " ").trim());
+    const genericUI = /^(you're almost done|complete your reservation|available seating options?|select seating|reservation details|almost done|booking|diner details|find a table|add your details|sign in|log in)!?$/i;
+    const candidates = Array.from(document.querySelectorAll<HTMLElement>("h1, h2, h3"));
+    let header = "";
+    for (const el of candidates) {
+      const text = normalize(el.textContent);
+      if (text.length >= 2 && text.length <= 80 && !genericUI.test(text)) {
+        header = text;
+        break;
+      }
+    }
+    if (!header) {
+      header = normalize(document.title)
+        .replace(/\s*[—–-].*$/, "")
+        .trim()
+        .slice(0, 80);
+    }
+    const bodyText = document.body?.innerText ?? "";
+    const lines = bodyText
+      .split("\n")
+      .map((line) => normalize(line))
+      .filter(Boolean);
+    const dateLine = lines.find((line) => /^(sun|mon|tue|wed|thu|fri|sat),?\s+[a-z]{3,9}\s+\d{1,2}/i.test(line)) ?? "";
+    const timeLine = lines.find((line) => /\b\d{1,2}:\d{2}\s*(AM|PM)\b/i.test(line)) ?? "";
+    const coversLine = lines.find((line) => /\b\d+\s+people?\b/i.test(line)) ?? "";
+    const experienceIndex = lines.findIndex((line) => /^reservation summary$/i.test(line));
+    const experienceText =
+      experienceIndex >= 0
+        ? normalize(lines[experienceIndex + 2] ?? "")
+        : normalize(lines.find((line) => /experience/i.test(line)) ?? "");
+    return {
+      restaurant: header,
+      dateText: dateLine,
+      timeText: timeLine,
+      coversText: coversLine,
+      experienceText,
+      currentUrl: window.location.href,
+    };
+  }).catch(() => ({
+    restaurant: "",
+    dateText: "",
+    timeText: "",
+    coversText: "",
+    experienceText: "",
+    currentUrl: "",
+  }));
+}
+
+async function validateOpenTableBookingTarget(
+  page: Page,
+  task: string,
+  targetRestaurant: string | undefined,
+  trace: (msg: string) => void,
+): Promise<{ ok: true } | { ok: false; reason: string }> {
+  const currentUrl = page.url().toLowerCase();
+  if (!currentUrl.includes("opentable.com/booking/")) {
+    return { ok: true };
+  }
+
+  const summary = await readOpenTableBookingSummary(page);
+  const reasons: string[] = [];
+  const normalizedRestaurant = normalizeLooseText(targetRestaurant ?? "");
+  const normalizedSeenRestaurant = normalizeLooseText(summary.restaurant);
+  if (targetRestaurant && normalizedSeenRestaurant && !normalizedSeenRestaurant.includes(normalizedRestaurant.slice(0, Math.min(normalizedRestaurant.length, 12)))) {
+    reasons.push(`restaurant="${summary.restaurant || "unknown"}"`);
+  }
+
+  const requestedDateMatch = task.match(/\bon\s+(20\d{2}-\d{2}-\d{2})\b/);
+  if (requestedDateMatch) {
+    const expectedMonthDay = formatMonthDayFromIsoDate(requestedDateMatch[1]);
+    if (!summary.dateText.toLowerCase().includes(expectedMonthDay)) {
+      reasons.push(`date="${summary.dateText || "unknown"}"`);
+    }
+  }
+
+  const requestedTime = parseRequestedRestaurantTimeMinutes(task);
+  const shownTime = parseDisplayedTimeMinutes(summary.timeText);
+  if (requestedTime !== null && shownTime !== null && Math.abs(shownTime - requestedTime) > 90) {
+    reasons.push(`time="${summary.timeText || "unknown"}"`);
+  }
+
+  const coversMatch = task.match(/\bfor\s+(\d+)\s+people\b/i);
+  if (coversMatch) {
+    const expectedCovers = parseInt(coversMatch[1], 10);
+    const shownCoversMatch = summary.coversText.match(/(\d+)\s+people?/i);
+    const shownCovers = shownCoversMatch ? parseInt(shownCoversMatch[1], 10) : null;
+    if (shownCovers !== null && shownCovers !== expectedCovers) {
+      reasons.push(`covers="${summary.coversText}"`);
+    }
+  }
+
+  if (summary.experienceText && /brunch/i.test(summary.experienceText) && requestedTime !== null && requestedTime >= 17 * 60) {
+    reasons.push(`experience="${summary.experienceText}"`);
+  }
+
+  if (reasons.length === 0) return { ok: true };
+
+  trace(
+    `[opentable] booking target mismatch: ${reasons.join(", ")} on ${summary.currentUrl || currentUrl}`,
+  );
+  return {
+    ok: false,
+    reason: `OpenTable opened the wrong reservation target (${reasons.join(", ")}).`,
+  };
 }
 
 /**
@@ -393,6 +644,7 @@ export async function runBrowserTask(
 
   // For OpenTable no_availability: captured time slots the user can choose from instead.
   let capturedAvailableSlots: string[] = [];
+  let openTableLocationCorrectionAttempted = false;
 
   // AI_LOOP_FULL=true activates all AI sub-flags simultaneously.
   // RPA code is never removed — each flag independently falls back to RPA on failure.
@@ -1309,6 +1561,7 @@ The user will enter CVV and confirm payment themselves.`,
     const targetHotelFromTask = extractTargetHotelName(input.task);
     const targetHotelFromStartUrl = extractTargetHotelNameFromUrl(input.startUrl);
     const targetHotelFromCurrentUrl = extractTargetHotelNameFromUrl(currentUrl);
+    const targetCity = extractTargetCity(input.task);
     const targetHotelName =
       targetHotelFromTask ||
       targetHotelFromStartUrl ||
@@ -1322,6 +1575,9 @@ The user will enter CVV and confirm payment themselves.`,
       `Target hotel: ${targetHotelName ?? "unknown"} ` +
       `(source=${targetHotelSource}, startUrl=${input.startUrl.slice(0, 140)})`
     );
+    if (targetCity) {
+      trace(`Target city: ${targetCity}`);
+    }
 
     // Extract room type preference from the task text.
     // buildHotelTask() embeds it as "Prefer a <pref> room type if available."
@@ -3690,6 +3946,14 @@ The user will enter CVV and confirm payment themselves.`,
             // the search page. We click the closest slot to the requested time via
             // pure DOM — no stagehand.act() needed (avoids OpenAI quota errors).
             if (startProvider?.id === "opentable-com") {
+              if (!openTableLocationCorrectionAttempted && targetCity) {
+                openTableLocationCorrectionAttempted = true;
+                const locationMatched = await ensureOpenTableLocationMatches(raw, stagehand, targetCity, trace);
+                if (!locationMatched) {
+                  trace("[opentable] location still looks wrong after correction attempt — continuing with current page state");
+                }
+              }
+
               // ── Early exit: restaurant not found on OpenTable ──────────────
               // OpenTable shows "We didn't find a match" when the restaurant doesn't exist.
               // Return no_availability so the user gets a clear message instead of a
@@ -5245,13 +5509,45 @@ The user will enter CVV and confirm payment themselves.`,
       }
     }
 
+    const isRestaurantStartProvider =
+      startProvider?.id === "opentable-com" ||
+      startProvider?.id === "resy-com" ||
+      startProvider?.id === "yelp-com";
+    const isRestaurantTask =
+      isRestaurantStartProvider ||
+      /\brestaurant\b/i.test(input.task) ||
+      /\bbook a table\b/i.test(input.task) ||
+      /\breservation at\b/i.test(input.task) ||
+      /\bmake a reservation\b/i.test(input.task);
+
+    if (currentUrl.toLowerCase().includes("opentable.com/booking/")) {
+      const otTargetCheck = await validateOpenTableBookingTarget(raw, input.task, targetHotelName, trace);
+      if (!otTargetCheck.ok) {
+        const screenshotBase64 = `data:image/png;base64,${(await page.screenshot({ type: "png" })).toString("base64")}`;
+        return {
+          status: "error",
+          screenshotBase64,
+          handoffUrl: currentUrl,
+          sessionUrl,
+          summary: otTargetCheck.reason,
+          error: "OpenTable landed on the wrong experience or reservation details.",
+          debugTrace,
+        };
+      }
+    }
+
     // 鈹€鈹€ Unknown stage: agent may have stopped mid-flow (maxSteps exhausted) 鈹€鈹€
     // If the stage is unknown after the main run (no recognisable page signals),
     // run one more agent pass to continue from wherever it left off.
-    // EXCEPTION: Never run continuation agent on Booking.com —?it always types in
-    // the search bar and navigates to the wrong hotel.
+    // EXCEPTIONS:
+    //   • Never run continuation agent on Booking.com — it types in the
+    //     search bar and navigates to the wrong hotel.
+    //   • Never run the generic HOTEL continuation pass for restaurant tasks —
+    //     it can click marketing-site reservation links and land on the wrong
+    //     OpenTable experience (e.g. brunch instead of dinner).
     if (
       assessment.stage === "unknown" &&
+      !isRestaurantTask &&
       !(getProvider(currentUrl) ?? getProvider(raw.url()) ?? (bookingComPageOpen ? getProvider(input.startUrl) : null))
     ) {
       trace("Stage is unknown after main run —?running a continuation pass (maxSteps=20).");
@@ -5712,8 +6008,9 @@ The user will enter CVV and confirm payment themselves.`,
     // We intentionally ignore !bookingComFinalPaymentDomState here — otherwise a
     // restaurant that requires a credit card would fall through to the 4889 branch,
     // which assumes guest details were filled on an earlier page and skips diner fill.
-    const isRestaurantProvider = activeProvider?.id === "opentable-com" || activeProvider?.id === "resy-com";
-    if (bookingComGuestDetailsDomState && isRestaurantProvider) {
+    const isRestaurantActiveProvider =
+      activeProvider?.id === "opentable-com" || activeProvider?.id === "resy-com";
+    if (bookingComGuestDetailsDomState && isRestaurantActiveProvider) {
       trace(`[${activeProvider?.id}] reservation form detected — filling guest info`);
       reachedGuestForm = true;
       if (activeProvider?.fillGuestForm) {
@@ -6049,19 +6346,35 @@ The user will enter CVV and confirm payment themselves.`,
         };
       }
 
-      // Generic 402 —?try to name the provider
-      const isBrowserbase = rawError.toLowerCase().includes("browserbase") ||
-        rawError.toLowerCase().includes("session") ||
-        rawError.toLowerCase().includes("concurren");
-      const isModelApi = rawError.toLowerCase().includes("openai") ||
-        rawError.toLowerCase().includes("anthropic") ||
-        rawError.toLowerCase().includes("google") ||
-        rawError.toLowerCase().includes("gemini");
+      // Generic 402 — try to name the provider more helpfully than
+      // "unknown provider", even when the upstream only surfaced a generic
+      // Stagehand transport error.
+      const rawLower = rawError.toLowerCase();
+      const modelLower = modelName.toLowerCase();
+      const modelProvider =
+        modelLower.startsWith("openai/") ? "OpenAI" :
+        modelLower.startsWith("anthropic/") ? "Anthropic" :
+        modelLower.startsWith("google/") || modelLower.startsWith("gemini/") ? "Google Gemini" :
+        modelLower.startsWith("minimax/") ? "MiniMax" :
+        null;
+      const isStagehandRuntime = rawLower.includes("stagehandhttperror") || rawLower.includes("stagehand");
+      const isBrowserbase = rawLower.includes("browserbase") ||
+        rawLower.includes("session") ||
+        rawLower.includes("concurren");
+      const isModelApi = rawLower.includes("openai") ||
+        rawLower.includes("anthropic") ||
+        rawLower.includes("google") ||
+        rawLower.includes("gemini") ||
+        !!modelProvider;
       const providerHint = isBrowserbase
         ? "Browserbase"
+        : isStagehandRuntime && modelProvider
+        ? `Stagehand runtime / ${modelProvider}`
+        : isStagehandRuntime
+        ? "Stagehand runtime"
         : isModelApi
-        ? `Model API (${modelName})`
-        : `unknown provider —?model: ${modelName}`;
+        ? `${modelProvider ?? "Model API"} (${modelName})`
+        : `automation provider (${modelName})`;
 
       return {
         status: "error",
