@@ -3481,6 +3481,14 @@ The user will enter CVV and confirm payment themselves.`,
               }
             }
 
+            // Time-window for slot fallback. Honors case fallback_policy
+            // when provided (e.g. benchmark cases), else defaults to ±90 min
+            // for backward compat with all the legacy hotel paths that don't
+            // set this. `time_window_minutes=0` means exact match only.
+            // Defined at this scope so both the OpenTable and Resy branches
+            // below can reference it (they are sibling branches, not nested).
+            const timeWindowMins = input.fallbackPolicy?.time_window_minutes ?? 90;
+
             // ── OpenTable: programmatic time-slot selection ──────────────────────
             // OpenTable search results show available time-slot buttons directly on
             // the search page. We click the closest slot to the requested time via
@@ -3518,12 +3526,8 @@ The user will enter CVV and confirm payment themselves.`,
                 if (meridiem === "AM" && h === 12) h = 0;
                 requestedMinutes = h * 60 + m;
               }
-
-              // Time-window for slot fallback. Honors case fallback_policy
-              // when provided (e.g. benchmark cases), else defaults to ±90 min
-              // for backward compat with all the legacy hotel paths that don't
-              // set this. `time_window_minutes=0` means exact match only.
-              const timeWindowMins = input.fallbackPolicy?.time_window_minutes ?? 90;
+              // timeWindowMins is hoisted to the outer scope above the
+              // OpenTable / Resy branches.
 
               // Parse "7:00 PM" / "7:30 pm" / "19:00" to minutes since midnight
               const parseTimeText = (text: string): number | null => {
