@@ -11,6 +11,7 @@ import type {
   BenchmarkRunRow,
   BenchmarkRunSummary,
 } from "./types";
+import { outcomeMatchesExpected } from "./parse-decision-log";
 
 function pct(rate: number): string {
   return `${(rate * 100).toFixed(1)}%`;
@@ -129,17 +130,47 @@ export function renderBenchmarkReportMarkdown(input: {
   }
   lines.push(``);
 
+  // Aggregate dataset-aware pass/fail (dataset declares expected_outcome
+  // per case — a peak-time fallback that legitimately hits no_availability
+  // counts as PASS, not FAIL).
+  let datasetPass = 0;
+  let datasetFail = 0;
+  let datasetNoExpect = 0;
+  for (const c of cases) {
+    const m = outcomeMatchesExpected(c, c.task_payload.expected_outcome);
+    if (m === true) datasetPass += 1;
+    else if (m === false) datasetFail += 1;
+    else datasetNoExpect += 1;
+  }
+  lines.push(`## Dataset-aware pass rate`);
+  lines.push(``);
+  lines.push(`Cases counted PASS when actual outcome matches the dataset's \`expected_outcome\` (e.g. a peak-time fallback expecting \`no_availability\` counts as PASS).`);
+  lines.push(``);
+  lines.push(`| Bucket | Count | Rate |`);
+  lines.push(`| --- | ---: | ---: |`);
+  const datasetTotal = datasetPass + datasetFail;
+  const datasetRate = datasetTotal === 0 ? 0 : datasetPass / datasetTotal;
+  lines.push(`| **Dataset PASS** | ${datasetPass} | **${pct(datasetRate)}** |`);
+  lines.push(`| Dataset FAIL | ${datasetFail} | ${pct(datasetTotal === 0 ? 0 : datasetFail / datasetTotal)} |`);
+  if (datasetNoExpect > 0) {
+    lines.push(`| (no expected_outcome on case) | ${datasetNoExpect} | — |`);
+  }
+  lines.push(``);
+
   lines.push(`## Per-case results`);
   lines.push(``);
-  lines.push(`| # | Case | Restaurant | Provider | Status | Reason | Duration |`);
-  lines.push(`| --- | --- | --- | --- | --- | --- | ---: |`);
+  lines.push(`| # | Case | Restaurant | Provider | Status | Reason | Expected | Match | Duration |`);
+  lines.push(`| --- | --- | --- | --- | --- | --- | --- | :---: | ---: |`);
   for (const c of cases) {
     const reason = c.failure_reason ?? "—";
     const status =
       c.status === "succeeded" && c.success ? "succeeded ✓" : c.status;
     const provider = c.provider ?? c.task_payload.expected_provider;
+    const expected = c.task_payload.expected_outcome ?? "—";
+    const matchVal = outcomeMatchesExpected(c, c.task_payload.expected_outcome);
+    const match = matchVal === true ? "✅" : matchVal === false ? "❌" : "—";
     lines.push(
-      `| ${c.case_id.replace("nyc_restaurant_", "")} | \`${c.case_id}\` | ${c.task_payload.restaurant_name} | ${provider} | ${status} | \`${reason}\` | ${fmtDuration(c.duration_seconds)} |`,
+      `| ${c.case_id.replace("nyc_restaurant_", "")} | \`${c.case_id}\` | ${c.task_payload.restaurant_name} | ${provider} | ${status} | \`${reason}\` | \`${expected}\` | ${match} | ${fmtDuration(c.duration_seconds)} |`,
     );
   }
   lines.push(``);

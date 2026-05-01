@@ -37,11 +37,16 @@ loadDotenv();
 import { sql } from "../lib/db";
 
 const FOCUS_CASES = [
-  "nyc_restaurant_001", // Fumo Soho
-  "nyc_restaurant_002", // WILD - West Village (user screenshot: stuck on Available seating options modal on vanity URL, URL did NOT change to /booking/seating-options)
-  "nyc_restaurant_003", // FOOD
-  "nyc_restaurant_004", // The Clam
-  "nyc_restaurant_005", // Mezze on the River
+  // Round 2: Nobu succeeded comparators (vs 011 failed)
+  "nyc_restaurant_011", // Nobu Downtown — 54s failed (picker said picked=7:00 PM but seen=[6:30,6:45,7:15,9:00])
+  "nyc_restaurant_012", // Nobu Downtown — 1m40s succeeded ✓
+  "nyc_restaurant_013", // Nobu Downtown — 2m5s succeeded ✓
+  // Round 2: Gramercy both failed — real dead or render race?
+  "nyc_restaurant_009", // Gramercy Tavern — 53s failed
+  "nyc_restaurant_010", // Gramercy Tavern — 52s failed
+  // Round 2: Don Angie OT (006/007 failed) vs legacy Resy 008 (also failed)
+  "nyc_restaurant_006", // Don Angie OT — 1m12s failed
+  "nyc_restaurant_007", // Don Angie OT — 1m11s failed
 ];
 
 async function main() {
@@ -95,10 +100,10 @@ async function main() {
       console.log(`step.error = ${step.error.slice(0, 300)}`);
     }
     const log = step.decisionLog ?? [];
-    console.log(`decisionLog has ${log.length} entries; last 18:`);
-    for (const entry of log.slice(-18)) {
+    console.log(`decisionLog has ${log.length} entries; last 30:`);
+    for (const entry of log.slice(-30)) {
       const t = entry.type ?? "—";
-      const m = (entry.message ?? "").slice(0, 220);
+      const m = (entry.message ?? "").slice(0, 260);
       console.log(`  [${t}] ${m}`);
     }
     console.log();

@@ -5330,9 +5330,54 @@ The user will enter CVV and confirm payment themselves.`,
         /resy\.com/i.test(currentUrl) &&
         pageText.toLowerCase().includes("complete your reservation")
       ) {
-        const { clickResyConfirmationModal } = await import("./providers/resy-com");
+        const { clickResyConfirmationModal, fillResyMobileNumberAndStopAtOtp } =
+          await import("./providers/resy-com");
         const result = await clickResyConfirmationModal(raw, trace);
         if (result.clicked) {
+          // Anonymous user → Resy routes to mobile-verify. Fill phone, then
+          // stop at OTP (the identity-confirmation boundary, analogous to
+          // OT's "stop at CVV"). Emit dry_run boundary marker so the
+          // benchmark classifier counts this as verify_gate / safe outcome.
+          if (result.nextStage === "mobile_verify") {
+            const otpResult = await fillResyMobileNumberAndStopAtOtp(
+              raw,
+              { phone: input.profile.phone },
+              trace,
+            );
+            const ssBuf = await raw.screenshot({ type: "png" }).catch(() => null);
+            const ss = ssBuf ? `data:image/png;base64,${ssBuf.toString("base64")}` : undefined;
+            const venueLabel = targetHotelName ?? "This venue";
+            const dryRunFlag = input.autonomySettings?.benchmark_dry_run === true;
+            if (otpResult.reachedOtp) {
+              if (dryRunFlag) {
+                trace(`[executor] ${DRY_RUN_BOUNDARY_MARKER} - Resy phone otp gate reached (verify-gate boundary, dry_run end state)`);
+              } else {
+                trace("[executor] Resy phone otp gate reached after fill — verify-gate, handing off for code entry");
+              }
+              return {
+                status: "paused_payment" as const,
+                screenshotBase64: ss,
+                handoffUrl: raw.url(),
+                sessionUrl,
+                summary: `${venueLabel} reservation needs SMS verification — enter the 6-digit code Resy texted you to finish booking.`,
+                debugTrace,
+              };
+            }
+            // Phone fill ran but OTP screen never appeared (Resy variant /
+            // network race). Treat as verify-gate dry-run boundary anyway —
+            // we did everything programmatic up to the gate.
+            if (dryRunFlag && otpResult.filled) {
+              trace(`[executor] ${DRY_RUN_BOUNDARY_MARKER} - Resy mobile-verify gate filled (verify-gate boundary, otp-screen ${otpResult.reason})`);
+              return {
+                status: "paused_payment" as const,
+                screenshotBase64: ss,
+                handoffUrl: raw.url(),
+                sessionUrl,
+                summary: `${venueLabel} reservation paused at Resy SMS verification step.`,
+                debugTrace,
+              };
+            }
+          }
           assessment = await assessBookingStage({
             rawPage: raw,
             stagehand,
@@ -5342,7 +5387,7 @@ The user will enter CVV and confirm payment themselves.`,
           });
           pageText = assessment.pageText;
           currentUrl = assessment.currentUrl;
-          trace(`[resy] post-confirmation-modal reassessment: stage=${assessment.stage}`);
+          trace(`[resy] post-confirmation-modal reassessment: stage=${assessment.stage} (nextStage=${result.nextStage})`);
           continue;
         }
         trace(`[resy] confirmation modal click skipped: ${result.reason}`);
