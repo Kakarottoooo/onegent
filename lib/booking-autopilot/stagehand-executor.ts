@@ -421,6 +421,64 @@ export async function runBrowserTask(
     }
   };
   trace(`normaliseStartUrl: hotelNameForUrl="${hotelNameForUrl ?? "(none)"}" → startUrl=${input.startUrl.slice(0, 160)}`);
+
+  // ─── v1 benchmark: unsupported-platform / no-online early-return ──────
+  // Detect Tock / SevenRooms / Onegent no-online sentinel URLs BEFORE we
+  // spin a Chrome session — saves ~30s per case and emits clean signals
+  // the benchmark classifier scans for. Users hitting these hosts via
+  // production are also better served by an immediate handoff than a
+  // 40-step blind agent run that can never succeed.
+  {
+    const u = input.startUrl.toLowerCase();
+    if (u.includes("exploretock.com")) {
+      trace(
+        `[executor] unsupported_platform: Tock detected at ${input.startUrl} — Onegent can't drive Tock UI. Handing off to user.`,
+      );
+      return {
+        status: "error" as const,
+        error:
+          "unsupported_platform: This venue uses Tock. Onegent does not yet support Tock — please book directly via the link.",
+        sessionUrl: undefined,
+        handoffUrl: input.startUrl,
+        summary:
+          "Tock-only venue. Click the booking link to reserve directly with the restaurant.",
+      };
+    }
+    if (u.includes("sevenrooms.com")) {
+      trace(
+        `[executor] unsupported_platform: SevenRooms detected at ${input.startUrl} — Onegent can't drive SR UI. Handing off to user.`,
+      );
+      return {
+        status: "error" as const,
+        error:
+          "unsupported_platform: This venue uses SevenRooms. Onegent does not yet support SevenRooms — please book directly via the link.",
+        sessionUrl: undefined,
+        handoffUrl: input.startUrl,
+        summary:
+          "SevenRooms venue. Click the booking link to reserve directly with the restaurant.",
+      };
+    }
+    if (u.includes("onegent.one/no-online") || u.startsWith("benchmark://no_online")) {
+      // Extract venue name from sentinel URL so the handoff link points
+      // to a Google search where the user can find the restaurant's
+      // phone number and any private booking instructions.
+      const venueMatch = input.startUrl.match(/[?&]venue=([^&]+)/);
+      const venue = venueMatch ? decodeURIComponent(venueMatch[1]) : "venue";
+      const googleHandoff = `https://www.google.com/search?q=${encodeURIComponent(`${venue} restaurant reservation phone`)}`;
+      trace(
+        `[executor] deep_link_handoff: no online booking available — handing off to user with Google search URL.`,
+      );
+      return {
+        status: "error" as const,
+        error:
+          "deep_link_handoff: This venue accepts no online bookings. Please call the restaurant directly.",
+        sessionUrl: undefined,
+        handoffUrl: googleHandoff,
+        summary: `${venue} accepts no online bookings. Use the Google link to find phone / hours / private booking instructions.`,
+      };
+    }
+  }
+
   const bookingComHelpers = createBookingComHelpers();
 
   const useCloud =

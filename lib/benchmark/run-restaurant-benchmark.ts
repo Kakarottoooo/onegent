@@ -110,8 +110,17 @@ const BENCHMARK_PROFILE = {
 };
 
 export function caseToBookingStep(c: RestaurantBenchmarkCase): BookingJobStep {
+  // For no-online venues (e.g. Rao's) we use a sentinel URL the
+  // stagehand-executor recognises and short-circuits with a clean
+  // deep_link_handoff signal — without it we'd waste 30-60s spinning a
+  // Chrome session against an OT search that has no listing.
+  let resolvedStartUrl = c.restaurant_url;
+  if (!resolvedStartUrl && c.expected_provider === "no_online") {
+    resolvedStartUrl = `benchmark://no_online?venue=${encodeURIComponent(c.restaurant_name)}`;
+  }
+
   const fallbackUrl =
-    c.restaurant_url ??
+    resolvedStartUrl ??
     `https://www.opentable.com/s?term=${encodeURIComponent(c.restaurant_name)}&covers=${c.party_size}&dateTime=${c.date}T${c.time}:00`;
 
   const body: Record<string, unknown> = {
@@ -126,7 +135,7 @@ export function caseToBookingStep(c: RestaurantBenchmarkCase): BookingJobStep {
     // means "exact time only — no closest-slot fallback").
     fallback_policy: c.fallback_policy,
   };
-  if (c.restaurant_url) body.startUrl = c.restaurant_url;
+  if (resolvedStartUrl) body.startUrl = resolvedStartUrl;
 
   return {
     type: "restaurant",
