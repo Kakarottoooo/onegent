@@ -24,6 +24,8 @@ export type {
   ExecutionJobStatus,
   ExecutionParams,
   ExecutionScenario,
+  NeedsProfileDataPayload,
+  ProfileFieldId,
   RestaurantBookingParams,
   HotelBookingParams,
   FlightBookingParams,

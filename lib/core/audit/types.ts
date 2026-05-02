@@ -37,6 +37,7 @@ export type AuditEventType =
   | "step_started"
   | "job_paused_payment"
   | "job_needs_otp"
+  | "job_needs_profile_data"
   | "job_ready_for_confirmation"
   | "job_completed"
   | "job_failed"

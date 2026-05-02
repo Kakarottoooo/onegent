@@ -274,14 +274,15 @@ export function buildTaskTimelineEvents(
       events.push(decisionLogToEvent(entry, step, stepIndex, index));
     }
     if (step.status === "awaiting_confirmation") {
+      const profileGap = getStepProfileGap(step);
       events.push({
         id: `step-awaiting-${stepIndex}`,
         ts: job.updated_at,
         level: "step",
-        kind: "payment_required",
+        kind: profileGap ? "user_attention" : "payment_required",
         status: "warning",
         title: step.label,
-        detail: "Agent reached the final payment gate and is waiting for you.",
+        detail: profileGap?.message ?? "Agent reached the final payment gate and is waiting for you.",
         stepIndex,
         source: "job",
       });
@@ -342,10 +343,11 @@ export function buildTaskTimelineSummary(job: BookingJob): TaskTimelineSummary {
   const readyCount = job.steps.filter((step) => step.status === "done").length;
 
   if (paymentStep) {
+    const profileGap = getStepProfileGap(paymentStep);
     return {
       eyebrow: "Needs you",
-      title: "Waiting for payment approval",
-      detail: `${paymentStep.label} is at the final gate. ${fallbackCount > 0 ? `${fallbackCount} agent adjustment${fallbackCount > 1 ? "s" : ""} used.` : "Everything else is ready."}`,
+      title: profileGap ? "Booking profile required" : "Waiting for payment approval",
+      detail: profileGap?.message ?? `${paymentStep.label} is at the final gate. ${fallbackCount > 0 ? `${fallbackCount} agent adjustment${fallbackCount > 1 ? "s" : ""} used.` : "Everything else is ready."}`,
       tone: "warning",
     };
   }
@@ -394,4 +396,12 @@ export function buildTaskTimelineSummary(job: BookingJob): TaskTimelineSummary {
     detail: "The task has been created and is waiting for the executor.",
     tone: "info",
   };
+}
+
+function getStepProfileGap(step: BookingJobStep): { message?: string } | null {
+  const value = step.body?.profileGap;
+  if (!value || typeof value !== "object") return null;
+  const profileGap = value as { kind?: unknown; message?: unknown };
+  if (profileGap.kind !== "needs_profile_data") return null;
+  return typeof profileGap.message === "string" ? { message: profileGap.message } : {};
 }

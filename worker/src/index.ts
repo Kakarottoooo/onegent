@@ -193,6 +193,7 @@ async function runStep(
   const stepStatus: BookingJobStep["status"] =
     result.status === "paused_payment" ||
     result.status === "needs_otp" ||
+    result.status === "needs_profile_data" ||
     result.status === "ready_for_confirmation"
       ? "awaiting_confirmation"
       : result.status === "completed"
@@ -204,9 +205,12 @@ async function runStep(
   return {
     ...step,
     status: stepStatus,
+    body: result.profileGap
+      ? { ...step.body, profileGap: result.profileGap, __lastExecutionStatus: result.status }
+      : { ...step.body, __lastExecutionStatus: result.status },
     handoff_url: result.handoffUrl ?? step.handoff_url,
     session_url: result.sessionUrl ?? step.session_url,
-    error: result.error ?? step.error,
+    error: result.error ?? result.profileGap?.message ?? step.error,
     attemptCount: result.attemptCount ?? step.attemptCount,
     usedFallback: result.usedFallback ?? step.usedFallback,
     decisionLog: result.decisionLog ?? step.decisionLog,
@@ -256,7 +260,9 @@ async function runJob(job: BookingJob): Promise<void> {
     const isTerminalSuccess =
       updatedSteps[i].status === "done" ||
       updatedSteps[i].status === "awaiting_confirmation";
-    if (!wasTerminalSuccess && isTerminalSuccess && job.user_id) {
+    const pausedForProfileData =
+      updatedSteps[i].body?.__lastExecutionStatus === "needs_profile_data";
+    if (!wasTerminalSuccess && isTerminalSuccess && !pausedForProfileData && job.user_id) {
       try {
         await incrementUsageCounter(job.user_id, "booking");
       } catch (err) {

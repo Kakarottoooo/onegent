@@ -229,11 +229,34 @@ export type ExecutionJobStatus =
   | "paused_payment"     // Reached payment page — handoffUrl ready for user
   | "completed"          // Fully booked (rare — only sites without a card gate)
   | "needs_otp"          // Site sent a one-time code; user/connector must provide it
+  | "needs_profile_data" // User must add required booking-profile fields
   | "ready_for_confirmation" // Final non-payment confirmation is ready for user review
   | "no_availability"    // Confirmed: nothing available matching params
   | "needs_login"        // Site requires login the executor can't bypass
   | "captcha"            // Hard-blocked by CAPTCHA
   | "error";             // Unexpected failure
+
+export type ProfileFieldId =
+  | "first_name"
+  | "last_name"
+  | "email"
+  | "phone"
+  | "address_line1"
+  | "city"
+  | "state"
+  | "zip"
+  | "country"
+  | "date_of_birth"
+  | "passport_number"
+  | "passport_expiry"
+  | "passport_country";
+
+export interface NeedsProfileDataPayload {
+  kind: "needs_profile_data";
+  scenario: ExecutionScenario;
+  missing: ProfileFieldId[];
+  message: string;
+}
 
 export interface ExecutionJobResult {
   /** Internal job ID — also the row ID in the booking_jobs table. */
@@ -258,6 +281,9 @@ export interface ExecutionJobResult {
 
   /** Error detail when status === "error". */
   error?: string;
+
+  /** Structured profile gap the UI can render inline in chat/tasks. */
+  profileGap?: NeedsProfileDataPayload;
 
   /**
    * For restaurant `no_availability`: alternate time slots the executor found

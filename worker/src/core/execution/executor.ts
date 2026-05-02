@@ -33,11 +33,13 @@ import type { AuditEventType } from "@/lib/core/audit/types";
 import { DEFAULT_CONSENT_POLICY } from "@/lib/core/consent/default-policy";
 import type { ConsentPolicy } from "@/lib/core/consent/types";
 import { runBookingExecutor } from "@/lib/execution-v2";
+import { buildProfileGap } from "./profile-requirements";
 import type {
   ExecutionJobRequest,
   ExecutionJobResult,
   ExecutionJobStatus,
   ExecutionParams,
+  NeedsProfileDataPayload,
   ActivityBookingParams,
   FlightBookingParams,
   HotelBookingParams,
@@ -88,33 +90,37 @@ export async function runExecutionJob(
     profile = await resolveProfile(request, ctx.userId ?? null);
   } catch (err) {
     const message = err instanceof Error ? err.message : "Profile resolution failed";
+    const profileGap = buildProfileGap(request.request, emptyProfile());
     await writeAudit({
       jobId: ctx.jobId,
-      type: "job_failed",
+      type: "job_needs_profile_data",
       stepIndex,
-      message: `Profile resolution failed: ${message}`,
+      message: profileGap?.message ?? `Profile resolution failed: ${message}`,
+      details: { profileGap, resolutionError: message },
     });
-    return errorResult(ctx.jobId, message, createdAt);
+    return profileGapResult(
+      ctx.jobId,
+      profileGap ?? {
+        kind: "needs_profile_data",
+        scenario: request.request.scenario,
+        missing: ["first_name", "last_name", "email", "phone"],
+        message: "I need your booking profile details before I can continue.",
+      },
+      createdAt,
+    );
   }
 
-  // ── Flight-specific precondition: passport required ──
-  // Mirrors route.ts:519-530. Without passport_number the Stagehand agent
-  // will trundle through the search + fare + review pages only to fail at
-  // the passenger-info form with a confusing error. Better to short-circuit
-  // here with a clear actionable message the caller can surface to their user.
-  if (request.request.scenario === "flight" && !profile.passport_number) {
-    const missingDocs: string[] = [];
-    if (!profile.passport_number) missingDocs.push("passport number");
-    if (!profile.date_of_birth) missingDocs.push("date of birth");
-    const missingMsg = `Missing travel documents: ${missingDocs.join(", ")} required for flight booking. Please add these in Settings → My Profile → Travel Documents, then try booking again.`;
+  // Stop before opening a browser when the profile is missing required fields.
+  const profileGap = buildProfileGap(request.request, profile);
+  if (profileGap) {
     await writeAudit({
       jobId: ctx.jobId,
-      type: "job_failed",
+      type: "job_needs_profile_data",
       stepIndex,
-      message: `Flight booking blocked: missing ${missingDocs.join(", ")}`,
-      details: { missingDocs },
+      message: profileGap.message,
+      details: { profileGap },
     });
-    return errorResult(ctx.jobId, missingMsg, createdAt);
+    return profileGapResult(ctx.jobId, profileGap, createdAt);
   }
 
   // ── Build startUrl + task from declarative params ──
@@ -188,6 +194,7 @@ export async function runExecutionJob(
     details: {
       status: jobStatus,
       ...(result.error ? { error: result.error } : {}),
+      ...(result.profileGap ? { profileGap: result.profileGap } : {}),
       ...(result.availableSlots?.length ? { availableSlots: result.availableSlots } : {}),
     },
   });
@@ -486,6 +493,8 @@ function mapJobStatusToAuditEvent(s: ExecutionJobStatus): AuditEventType {
       return "job_paused_payment";
     case "needs_otp":
       return "job_needs_otp";
+    case "needs_profile_data":
+      return "job_needs_profile_data";
     case "ready_for_confirmation":
       return "job_ready_for_confirmation";
     case "completed":
@@ -515,6 +524,42 @@ function shortHost(url: string): string {
   } catch {
     return url.slice(0, 60);
   }
+}
+
+function emptyProfile(): BookingProfile {
+  return {
+    first_name: "",
+    last_name: "",
+    email: "",
+    phone: "",
+  };
+}
+
+function profileGapResult(
+  jobId: string,
+  profileGap: NeedsProfileDataPayload,
+  createdAt: string,
+): ExecutionJobResult {
+  return {
+    jobId,
+    status: "needs_profile_data",
+    summary: profileGap.message,
+    decisionLog: [
+      {
+        ts: createdAt,
+        type: "info",
+        message: profileGap.message,
+        outcome: "needs_profile_data",
+      },
+    ],
+    error: profileGap.message,
+    profileGap,
+    createdAt,
+    updatedAt: createdAt,
+    completedAt: createdAt,
+    attemptCount: 1,
+    usedFallback: false,
+  };
 }
 
 function errorResult(

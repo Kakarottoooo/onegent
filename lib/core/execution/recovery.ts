@@ -410,10 +410,16 @@ function formatMinutesToTime(total: number): string {
 
 function isSuccessStatus(
   s: ExecutionJobResult["status"],
-): s is "paused_payment" | "needs_otp" | "ready_for_confirmation" | "completed" {
+): s is
+  | "paused_payment"
+  | "needs_otp"
+  | "needs_profile_data"
+  | "ready_for_confirmation"
+  | "completed" {
   return (
     s === "paused_payment" ||
     s === "needs_otp" ||
+    s === "needs_profile_data" ||
     s === "ready_for_confirmation" ||
     s === "completed"
   );

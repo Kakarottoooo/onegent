@@ -113,9 +113,12 @@ export async function completeJob(
   const updatedStep: BookingJobStep = {
     ...step,
     status: mapJobStatusToStepStatus(result.status),
+    body: result.profileGap
+      ? { ...step.body, profileGap: result.profileGap, __lastExecutionStatus: result.status }
+      : { ...step.body, __lastExecutionStatus: result.status },
     handoff_url: result.handoffUrl ?? step.handoff_url,
     session_url: result.sessionUrl ?? step.session_url,
-    error: result.error ?? step.error,
+    error: result.error ?? result.profileGap?.message ?? step.error,
     attemptCount: result.attemptCount ?? step.attemptCount,
     usedFallback: result.usedFallback ?? step.usedFallback,
     decisionLog: result.decisionLog.length > 0 ? result.decisionLog : step.decisionLog,
@@ -192,6 +195,7 @@ function mapJobStatusToStepStatus(
   switch (s) {
     case "paused_payment":
     case "needs_otp":
+    case "needs_profile_data":
     case "ready_for_confirmation":
       return "awaiting_confirmation";
     case "completed":
@@ -216,6 +220,7 @@ function mapJobStatusToBookingJobStatus(
     // autopilot has finished its work; user payment is a separate flow.
     case "paused_payment":
     case "needs_otp":
+    case "needs_profile_data":
     case "ready_for_confirmation":
     case "completed":
       return "done";
