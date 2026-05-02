@@ -191,7 +191,7 @@ export default function TaskTimelinePanel({
         {loadState === "error" && (
           <IdleState message={liveData.errorMessage ?? "Could not load this run."} />
         )}
-        {loadState === "empty" && !demo && <IdleState />}
+        {loadState === "empty" && <IdleState />}
         {(loadState === "ready" || (demo && events.length > 0)) && (
           <div className="task-timeline__columns">
             <section className="task-timeline__column task-timeline__column--events">
