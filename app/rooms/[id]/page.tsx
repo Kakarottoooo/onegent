@@ -24,6 +24,11 @@ import GlobalNav from "@/components/GlobalNav";
 import PhotoCarousel from "@/components/PhotoCarousel";
 import FlightCard from "@/components/FlightCard";
 import ActivityCard from "@/components/ActivityCard";
+import {
+  DRTimelineList,
+  deriveDREventsFromSnapshot,
+  type DRTimelineInputs,
+} from "@/components/dr-timeline";
 
 // Leaflet pulls in `window` — force client-only so the room detail page (a
 // server component by default) doesn't choke during SSR.
@@ -189,6 +194,53 @@ function RoomView({
   const isPayer = userId === payerId;
   const isCreator = userId === room.creator_id;
 
+  // ── DR Activity Timeline ──────────────────────────────────────────────────
+  // Derive a chronological event feed from the existing snapshot. No new API
+  // calls — feeds entirely off room / members / constraints / proposals data
+  // we already fetch via useRoomState. Updates each refresh tick automatically.
+  const drTimelineEvents = useMemo(() => {
+    const member_names: Record<string, string> = {};
+    for (const [uid, profile] of Object.entries(member_profiles)) {
+      member_names[uid] = profile.display_name ?? `@${profile.profile_code ?? uid.slice(-6)}`;
+    }
+    const inputs: DRTimelineInputs = {
+      room: {
+        id: room.id,
+        title: room.title,
+        status: room.status,
+        creator_id: room.creator_id,
+        created_at: room.created_at,
+        updated_at: room.updated_at,
+        booking_job_id: room.booking_job_id,
+        approval_rule: room.approval_rule ?? "unanimous",
+      },
+      members: members.map((m) => ({
+        user_id: m.user_id,
+        role: m.role,
+        status: m.status,
+        joined_at: m.joined_at,
+      })),
+      constraints: constraints.map((c) => ({
+        user_id: c.user_id,
+        submitted: c.submitted,
+        updated_at: c.updated_at,
+      })),
+      proposals: proposals.map((p) => ({
+        id: p.id,
+        status: p.status,
+        created_at: p.created_at,
+        venue: extractProposalVenue(p),
+        votes: p.votes.map((v) => ({
+          user_id: v.user_id,
+          vote: v.vote,
+          voted_at: v.voted_at,
+        })),
+      })),
+      member_names,
+    };
+    return deriveDREventsFromSnapshot(inputs);
+  }, [room, members, member_profiles, constraints, proposals]);
+
   const submittedCount = constraints.filter((c) => c.submitted).length;
   const roomStatusMeta: Record<string, { text: string; tone: string }> = {
     collecting: { text: "Collecting", tone: "bg-[var(--card-2)] text-[var(--text-secondary)] border border-[var(--border)]" },
@@ -340,6 +392,7 @@ function RoomView({
                   {(acceptedProposal || room.status === "executing" || room.status === "done") && (
                     <a href="#room-booking" className="px-3 py-2 rounded-xl text-sm text-[var(--text-secondary)] hover:bg-[var(--card-2)] hover:text-[var(--text-primary)] transition-colors">Booking</a>
                   )}
+                  <a href="#room-activity" className="px-3 py-2 rounded-xl text-sm text-[var(--text-secondary)] hover:bg-[var(--card-2)] hover:text-[var(--text-primary)] transition-colors">Activity</a>
                   <a href="#room-chat" className="px-3 py-2 rounded-xl text-sm text-[var(--text-secondary)] hover:bg-[var(--card-2)] hover:text-[var(--text-primary)] transition-colors">Chat</a>
                 </div>
               </div>
@@ -495,6 +548,15 @@ function RoomView({
             <p className="text-sm text-[var(--text-secondary)]">This room was abandoned.</p>
           </div>
         )}
+        </div>
+
+        {/* Activity timeline — chronological event feed derived from snapshot */}
+        <div id="room-activity" className="scroll-mt-24 mb-4">
+        <DRTimelineList
+          events={drTimelineEvents}
+          subtitle={`${drTimelineEvents.length} ${drTimelineEvents.length === 1 ? "event" : "events"}`}
+          emptyMessage="Room just created"
+        />
         </div>
 
         {/* Chat */}
@@ -882,6 +944,33 @@ function RoomActionsMenu({
 
 function memberDisplayName(userId: string, profiles: Record<string, UserProfile>): string {
   return profiles[userId]?.display_name ?? `@${profiles[userId]?.profile_code ?? userId.slice(-6)}`;
+}
+
+/**
+ * Best-effort label extractor for a proposal's primary option. Used by the
+ * DR Activity Timeline to surface "accepted: Carbone" instead of "accepted".
+ * Tolerates the multi-shape content_json (options[].card vs legacy single-
+ * card) — returns undefined when nothing useful is found.
+ */
+function extractProposalVenue(proposal: { content_json: Record<string, unknown> | null }): string | undefined {
+  const content = proposal.content_json;
+  if (!content || typeof content !== "object") return undefined;
+  // Prefer .options[0].card.{name,title,airline} when present.
+  const options = (content as { options?: unknown }).options;
+  if (Array.isArray(options) && options[0] && typeof options[0] === "object") {
+    const card = (options[0] as { card?: unknown }).card;
+    if (card && typeof card === "object") {
+      const c = card as { name?: unknown; title?: unknown; airline?: unknown };
+      if (typeof c.name === "string" && c.name) return c.name;
+      if (typeof c.title === "string" && c.title) return c.title;
+      if (typeof c.airline === "string" && c.airline) return c.airline;
+    }
+  }
+  // Fall back to top-level fields on legacy single-card proposals.
+  const c = content as { name?: unknown; title?: unknown };
+  if (typeof c.name === "string" && c.name) return c.name;
+  if (typeof c.title === "string" && c.title) return c.title;
+  return undefined;
 }
 
 function MembersStrip({
