@@ -58,6 +58,7 @@ next-env.d.ts
 # Dev artifacts
 .next-dev.log
 .playwright-cli/
+benchmark/runs/*.json
 .claude/worktrees/
 .context/
 .debug-screenshots/

@@ -1,6 +1,12 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { randomUUID } from "node:crypto";
+import {
+  PHASE0_REPORT_KIND,
+  PHASE0_REPORT_SCHEMA_VERSION,
+  phase0TaskSnapshotsUrl,
+  phase0TaskTimelineUrl,
+} from "../lib/benchmark/phase0-report";
 
 type Flags = Record<string, string | boolean>;
 
@@ -105,6 +111,8 @@ interface CaseResult {
   expectedOutcomeMatched: boolean;
   taxonomyAccepted: boolean;
   durationMs: number;
+  timelineUrl?: string | null;
+  snapshotsUrl?: string | null;
   error?: string;
 }
 
@@ -565,6 +573,8 @@ function finishResult(
     expectedOutcomeMatched: testCase.expectedOutcomes.includes(params.outcome),
     taxonomyAccepted,
     durationMs: params.durationMs,
+    timelineUrl: phase0TaskTimelineUrl(params.task?.id),
+    snapshotsUrl: phase0TaskSnapshotsUrl(params.task?.id),
     error: params.error,
   };
 }
@@ -729,6 +739,8 @@ async function main(): Promise<void> {
 
   const metrics = summarize(suite, results);
   const report = {
+    schemaVersion: PHASE0_REPORT_SCHEMA_VERSION,
+    reportKind: PHASE0_REPORT_KIND,
     runId,
     suiteId: suite.suiteId,
     suiteVersion: suite.version,
