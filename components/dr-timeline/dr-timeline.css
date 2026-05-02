@@ -1,0 +1,212 @@
+/*
+ * DR Activity Timeline — light-theme card-inline event feed.
+ *
+ * Lives inside a Decision Room page (light surface), so styles use
+ * project light tokens (--card / --ink-*) rather than the dark theme
+ * the Task Timeline panel uses.
+ *
+ * Rendered above or beside ChatPanel; sized to fit comfortably in
+ * the existing room layout's main column.
+ */
+
+.dr-timeline {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: var(--space-4);
+  font-family: var(--font-dm-sans);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+/* ── Header ─────────────────────────────────────────────────────────── */
+
+.dr-timeline__header {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.dr-timeline__eyebrow {
+  margin: 0;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+}
+
+.dr-timeline__subtitle {
+  margin: 0;
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+/* ── List ───────────────────────────────────────────────────────────── */
+
+.dr-timeline__list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.dr-timeline__row {
+  display: flex;
+  gap: 12px;
+  padding: 4px 0 14px 0;
+  position: relative;
+}
+
+.dr-timeline__row--last {
+  padding-bottom: 0;
+}
+
+/* ── Rail (icon + connecting line) ──────────────────────────────────── */
+
+.dr-timeline__rail {
+  flex-shrink: 0;
+  width: 24px;
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.dr-timeline__glyph {
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  background: var(--card-2);
+  border: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 11px;
+  flex-shrink: 0;
+  position: relative;
+  z-index: 1;
+  line-height: 1;
+}
+
+.dr-timeline__row--success .dr-timeline__glyph {
+  background: rgba(34, 197, 94, 0.1);
+  border-color: rgba(34, 197, 94, 0.3);
+}
+
+.dr-timeline__row--progress .dr-timeline__glyph {
+  background: rgba(59, 130, 246, 0.08);
+  border-color: rgba(59, 130, 246, 0.28);
+}
+
+.dr-timeline__row--warning .dr-timeline__glyph {
+  background: rgba(245, 158, 11, 0.1);
+  border-color: rgba(245, 158, 11, 0.3);
+}
+
+.dr-timeline__row--error .dr-timeline__glyph {
+  background: rgba(220, 38, 38, 0.08);
+  border-color: rgba(220, 38, 38, 0.3);
+}
+
+.dr-timeline__line {
+  position: absolute;
+  top: 24px;
+  bottom: -10px;
+  width: 1px;
+  background: var(--border);
+}
+
+/* ── Body (label + timestamp) ───────────────────────────────────────── */
+
+.dr-timeline__body {
+  flex: 1;
+  min-width: 0;
+  padding-top: 2px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.dr-timeline__label {
+  margin: 0;
+  font-size: 13px;
+  color: var(--text-primary);
+  line-height: 1.4;
+}
+
+.dr-timeline__ts {
+  font-size: 11px;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ── Empty state ────────────────────────────────────────────────────── */
+
+.dr-timeline__empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  padding: 32px 16px;
+  gap: 6px;
+}
+
+.dr-timeline__empty-glyph {
+  margin: 0 0 4px 0;
+  font-size: 28px;
+  opacity: 0.45;
+  line-height: 1;
+}
+
+.dr-timeline__empty-title {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.dr-timeline__empty-body {
+  margin: 0;
+  max-width: 320px;
+  font-size: 12px;
+  color: var(--text-muted);
+  line-height: 1.5;
+}
+
+/* ── Loading skeleton ───────────────────────────────────────────────── */
+
+.dr-timeline__skeleton {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 8px 0;
+}
+
+.dr-timeline__skeleton-row {
+  height: 18px;
+  border-radius: 6px;
+  background: linear-gradient(
+    90deg,
+    var(--card-2) 0%,
+    rgba(0, 0, 0, 0.04) 50%,
+    var(--card-2) 100%
+  );
+  background-size: 200% 100%;
+  animation: dr-timeline-shimmer 1.4s ease infinite;
+}
+
+.dr-timeline__skeleton-row:nth-child(2) {
+  width: 80%;
+}
+
+.dr-timeline__skeleton-row:nth-child(3) {
+  width: 60%;
+}
+
+@keyframes dr-timeline-shimmer {
+  0% { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
