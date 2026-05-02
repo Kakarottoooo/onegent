@@ -42,7 +42,6 @@
  * 3. Re-run this script; commit when it passes.
  */
 
-import { spawnSync } from "node:child_process";
 import * as fs from "node:fs";
 import * as path from "node:path";
 
@@ -75,17 +74,62 @@ interface Drift {
 }
 
 function runDiff(left: string, right: string, recursive: boolean): string {
-  const args = recursive ? ["-rq", left, right] : ["-q", left, right];
-  const result = spawnSync("diff", args, {
-    cwd: ROOT,
-    encoding: "utf8",
-  });
-  // diff exits 0 when identical, 1 when differs, 2+ on error
-  if (result.status === 0) return "";
-  if (result.status === 1) return result.stdout.trim();
-  // Pair missing on one side or exec error
-  const stderr = (result.stderr ?? "").trim();
-  return stderr || `diff exited with status ${result.status}`;
+  const leftAbs = path.join(ROOT, left);
+  const rightAbs = path.join(ROOT, right);
+  return recursive
+    ? compareDirs(leftAbs, rightAbs, left, right).join("\n")
+    : compareFiles(leftAbs, rightAbs, left, right);
+}
+
+function compareDirs(
+  leftAbs: string,
+  rightAbs: string,
+  leftRel: string,
+  rightRel: string,
+): string[] {
+  const leftFiles = listFiles(leftAbs);
+  const rightFiles = listFiles(rightAbs);
+  const keys = new Set([...leftFiles.keys(), ...rightFiles.keys()]);
+  const details: string[] = [];
+
+  for (const key of [...keys].sort()) {
+    const leftFile = leftFiles.get(key);
+    const rightFile = rightFiles.get(key);
+    if (!leftFile) {
+      details.push(`Only in ${rightRel}: ${key}`);
+      continue;
+    }
+    if (!rightFile) {
+      details.push(`Only in ${leftRel}: ${key}`);
+      continue;
+    }
+    const diff = compareFiles(leftFile, rightFile, path.join(leftRel, key), path.join(rightRel, key));
+    if (diff) details.push(diff);
+  }
+
+  return details;
+}
+
+function listFiles(dir: string): Map<string, string> {
+  const files = new Map<string, string>();
+  const walk = (current: string): void => {
+    for (const entry of fs.readdirSync(current, { withFileTypes: true })) {
+      const full = path.join(current, entry.name);
+      if (entry.isDirectory()) {
+        walk(full);
+      } else if (entry.isFile()) {
+        files.set(path.relative(dir, full), full);
+      }
+    }
+  };
+  walk(dir);
+  return files;
+}
+
+function compareFiles(leftAbs: string, rightAbs: string, leftRel: string, rightRel: string): string {
+  const leftBuffer = fs.readFileSync(leftAbs);
+  const rightBuffer = fs.readFileSync(rightAbs);
+  return leftBuffer.equals(rightBuffer) ? "" : `Files ${leftRel} and ${rightRel} differ`;
 }
 
 function checkPair(pair: Pair): Drift | null {

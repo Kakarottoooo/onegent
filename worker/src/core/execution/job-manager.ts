@@ -28,6 +28,7 @@ import {
   type BookingJob,
   type BookingJobStep,
 } from "@/lib/db";
+import { CORE_EXECUTION_SOURCE } from "@/lib/core/cend-adapter";
 import type { AgentAutonomySettings } from "@/lib/autonomy";
 import type {
   ExecutionJobRequest,
@@ -162,7 +163,7 @@ function buildStepFromRequest(request: ExecutionJobRequest): BookingJobStep {
       consent: request.consent,
       // Marker so recovery.ts can detect "this job was created via lib/core"
       // and route to the new adapter instead of the legacy runUniversalStep.
-      __source: "lib/core/execution",
+      __source: CORE_EXECUTION_SOURCE,
     },
     fallbackUrl: "",
     status: "pending",
@@ -190,6 +191,8 @@ function mapJobStatusToStepStatus(
 ): BookingJobStep["status"] {
   switch (s) {
     case "paused_payment":
+    case "needs_otp":
+    case "ready_for_confirmation":
       return "awaiting_confirmation";
     case "completed":
       return "done";
@@ -212,6 +215,8 @@ function mapJobStatusToBookingJobStatus(
     // paused_payment is "done" from the BookingJob perspective — the
     // autopilot has finished its work; user payment is a separate flow.
     case "paused_payment":
+    case "needs_otp":
+    case "ready_for_confirmation":
     case "completed":
       return "done";
     case "error":

@@ -415,7 +415,9 @@ async function runUniversalStepViaCore(
   // inline here to avoid pulling that internal helper onto route.ts's
   // import surface.
   const stepStatus: BookingJobStep["status"] =
-    result.status === "paused_payment"
+    result.status === "paused_payment" ||
+    result.status === "needs_otp" ||
+    result.status === "ready_for_confirmation"
       ? "awaiting_confirmation"
       : result.status === "completed"
       ? "done"

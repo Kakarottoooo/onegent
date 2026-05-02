@@ -228,6 +228,8 @@ export type ExecutionJobStatus =
   | "running"            // Executor is working on it
   | "paused_payment"     // Reached payment page — handoffUrl ready for user
   | "completed"          // Fully booked (rare — only sites without a card gate)
+  | "needs_otp"          // Site sent a one-time code; user/connector must provide it
+  | "ready_for_confirmation" // Final non-payment confirmation is ready for user review
   | "no_availability"    // Confirmed: nothing available matching params
   | "needs_login"        // Site requires login the executor can't bypass
   | "captcha"            // Hard-blocked by CAPTCHA

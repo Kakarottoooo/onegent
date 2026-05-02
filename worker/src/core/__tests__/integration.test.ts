@@ -390,4 +390,24 @@ describe("runExecutionJobWithRecovery · integration", () => {
     expect(result.status).toBe("error");
     expect(result.usedFallback).toBe(false);
   });
+
+  it("does not retry provider quota/billing failures even when retry policy allows it", async () => {
+    mockedRunBrowserTask.mockResolvedValueOnce(
+      makeTaskResult({
+        status: "error",
+        summary: "The automation provider rejected this run before the booking flow could finish.",
+        error:
+          "Provider quota/billing issue (HTTP 402) from OpenAI (openai/gpt-4o-mini) via Stagehand.",
+      }),
+    );
+
+    const result = await runExecutionJobWithRecovery(
+      { ...RESTAURANT_REQUEST, consent: { maxRetries: 3 } },
+      { jobId: "test-provider-quota-no-retry", userId: null, stepIndex: 0 },
+    );
+
+    expect(mockedRunBrowserTask).toHaveBeenCalledTimes(1);
+    expect(result.status).toBe("error");
+    expect(result.attemptCount).toBe(1);
+  });
 });

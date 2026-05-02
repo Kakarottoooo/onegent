@@ -15,8 +15,7 @@
  * signature change.
  */
 
-import type { BrowserTaskInput, BookingProfile, BrowserTaskStatus } from "@/lib/booking-autopilot/types";
-import { runBrowserTask } from "@/lib/booking-autopilot/stagehand-executor";
+import type { BrowserTaskInput, BookingProfile } from "@/lib/booking-autopilot/types";
 import {
   buildRestaurantTask,
   buildHotelTask,
@@ -28,12 +27,12 @@ import {
   shouldUseCanonicalRestaurantSearchUrl,
 } from "@/lib/agent/planners/booking-links";
 import { getBookingProfileById, getDefaultBookingProfile } from "@/lib/db";
-import type { DecisionLogEntry } from "@/lib/db";
 
 import { writeAudit } from "@/lib/core/audit/audit-log";
 import type { AuditEventType } from "@/lib/core/audit/types";
 import { DEFAULT_CONSENT_POLICY } from "@/lib/core/consent/default-policy";
 import type { ConsentPolicy } from "@/lib/core/consent/types";
+import { runBookingExecutor } from "@/lib/execution-v2";
 import type {
   ExecutionJobRequest,
   ExecutionJobResult,
@@ -173,37 +172,23 @@ export async function runExecutionJob(
   });
 
   // ── Run the browser task ──
-  const taskResult = await runBrowserTask(input);
-  const jobStatus = mapTaskStatusToJobStatus(taskResult.status);
-
-  const result: ExecutionJobResult = {
-    jobId: ctx.jobId,
-    status: jobStatus,
-    handoffUrl: taskResult.handoffUrl,
-    sessionUrl: taskResult.sessionUrl,
-    summary: taskResult.summary,
-    screenshotBase64: taskResult.screenshotBase64,
-    decisionLog: buildSummaryLog(taskResult.debugTrace, createdAt),
-    error: taskResult.error,
-    availableSlots: taskResult.availableSlots,
+  const result = await runBookingExecutor({
+    request,
+    ctx: { jobId: ctx.jobId, userId: ctx.userId, stepIndex },
+    browserTask: input,
     createdAt,
-    updatedAt: new Date().toISOString(),
-    completedAt: isTerminalStatus(jobStatus) ? new Date().toISOString() : undefined,
-    // Single-attempt adapter — US-007 recovery.ts overrides these
-    // when it wraps runExecutionJob in a retry/fallback loop.
-    attemptCount: 1,
-    usedFallback: false,
-  };
+  });
+  const jobStatus = result.status;
 
   await writeAudit({
     jobId: ctx.jobId,
     type: mapJobStatusToAuditEvent(jobStatus),
     stepIndex,
-    message: taskResult.summary,
+    message: result.summary,
     details: {
       status: jobStatus,
-      ...(taskResult.error ? { error: taskResult.error } : {}),
-      ...(taskResult.availableSlots?.length ? { availableSlots: taskResult.availableSlots } : {}),
+      ...(result.error ? { error: result.error } : {}),
+      ...(result.availableSlots?.length ? { availableSlots: result.availableSlots } : {}),
     },
   });
 
@@ -495,27 +480,14 @@ function buildActivityContext(
 
 // ─── Status mapping ──────────────────────────────────────────────────────────
 
-function mapTaskStatusToJobStatus(s: BrowserTaskStatus): ExecutionJobStatus {
-  switch (s) {
-    case "completed":
-      return "completed";
-    case "paused_payment":
-      return "paused_payment";
-    case "needs_login":
-      return "needs_login";
-    case "captcha":
-      return "captcha";
-    case "no_availability":
-      return "no_availability";
-    case "error":
-      return "error";
-  }
-}
-
 function mapJobStatusToAuditEvent(s: ExecutionJobStatus): AuditEventType {
   switch (s) {
     case "paused_payment":
       return "job_paused_payment";
+    case "needs_otp":
+      return "job_needs_otp";
+    case "ready_for_confirmation":
+      return "job_ready_for_confirmation";
     case "completed":
       return "job_completed";
     case "pending":
@@ -527,17 +499,6 @@ function mapJobStatusToAuditEvent(s: ExecutionJobStatus): AuditEventType {
     case "error":
       return "job_failed";
   }
-}
-
-function isTerminalStatus(s: ExecutionJobStatus): boolean {
-  return (
-    s === "paused_payment" ||
-    s === "completed" ||
-    s === "no_availability" ||
-    s === "error" ||
-    s === "needs_login" ||
-    s === "captcha"
-  );
 }
 
 // ─── Small utilities ─────────────────────────────────────────────────────────
@@ -554,18 +515,6 @@ function shortHost(url: string): string {
   } catch {
     return url.slice(0, 60);
   }
-}
-
-function buildSummaryLog(trace: string[] | undefined, createdAt: string): DecisionLogEntry[] {
-  if (!trace?.length) return [];
-  return [
-    {
-      ts: createdAt,
-      type: "info",
-      message: `Executor trace (${trace.length} entries)`,
-      outcome: trace[trace.length - 1]?.slice(0, 120),
-    },
-  ];
 }
 
 function errorResult(

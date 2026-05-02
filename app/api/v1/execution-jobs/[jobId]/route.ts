@@ -125,6 +125,10 @@ function deriveSummary(
       return `Executing: ${step.label}`;
     case "paused_payment":
       return `Paused at payment gate for ${step.label}. Open handoffUrl to complete.`;
+    case "needs_otp":
+      return `Waiting for one-time verification code for ${step.label}.`;
+    case "ready_for_confirmation":
+      return `Ready for user confirmation for ${step.label}.`;
     case "completed":
       return `Completed: ${step.label}`;
     case "no_availability":

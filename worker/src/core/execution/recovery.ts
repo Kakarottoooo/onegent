@@ -95,6 +95,7 @@ export async function runExecutionJobWithRecovery(
   // infra failures (HTTP 402 quota / bot block / page load failed) so we
   // don't burn 2-3 min on a Resy run that has no chance of success.
   if (
+    phase1.result.status === "no_availability" ||
     shouldTryProviderFallback({
       scenario: request.request.scenario,
       status: phase1.result.status,
@@ -117,9 +118,10 @@ export async function runExecutionJobWithRecovery(
     // (visible to the user as Chrome flickering open/close 5-7 times) and
     // never produces a hit. Skip the time ladder and jump straight to the
     // provider fallback chain in this case.
+    const noAvailabilityText = `${phase1.result.summary ?? ""} ${phase1.result.error ?? ""}`;
     const isWindowFullySoldOut =
       isNoAvailability &&
-      /no online availability within/i.test(phase1.result.summary);
+      /no online availability within|within the requested time window/i.test(noAvailabilityText);
     const phase2Eligible = isNoAvailability && !isNotFound && !isWindowFullySoldOut;
 
     let attemptsAfter = phase1.attemptCount;
@@ -137,6 +139,14 @@ export async function runExecutionJobWithRecovery(
       // of candidate times attempted. For Phase 3 counting we use a simple
       // lower bound — Phase 3 increments from here.
       attemptsAfter = phase1.attemptCount + 1;
+    } else if (isWindowFullySoldOut) {
+      await writeAudit({
+        jobId: ctx.jobId,
+        type: "provider_fallback",
+        stepIndex: ctx.stepIndex,
+        message: "Skipping nearby time retries because the provider reported the whole requested window unavailable",
+        details: { summary: phase1.result.summary },
+      });
     }
 
     // ── Phase 3: provider fallback chain (Resy → Google Places website) ──
@@ -228,8 +238,22 @@ async function tryPrimary(
     if (
       lastResult.status === "no_availability" ||
       lastResult.status === "captcha" ||
-      lastResult.status === "needs_login"
+      lastResult.status === "needs_login" ||
+      isProviderAuthOrBillingFailure(lastResult)
     ) {
+      if (isProviderAuthOrBillingFailure(lastResult)) {
+        await writeAudit({
+          jobId: ctx.jobId,
+          type: "action_denied",
+          stepIndex: ctx.stepIndex,
+          message: "Not retrying provider quota/billing failure",
+          details: {
+            status: lastResult.status,
+            summary: lastResult.summary,
+            error: lastResult.error,
+          },
+        });
+      }
       break;
     }
 
@@ -386,8 +410,29 @@ function formatMinutesToTime(total: number): string {
 
 function isSuccessStatus(
   s: ExecutionJobResult["status"],
-): s is "paused_payment" | "completed" {
-  return s === "paused_payment" || s === "completed";
+): s is "paused_payment" | "needs_otp" | "ready_for_confirmation" | "completed" {
+  return (
+    s === "paused_payment" ||
+    s === "needs_otp" ||
+    s === "ready_for_confirmation" ||
+    s === "completed"
+  );
+}
+
+function isProviderAuthOrBillingFailure(result: ExecutionJobResult): boolean {
+  if (result.status !== "error") return false;
+  const text = `${result.summary ?? ""} ${result.error ?? ""}`.toLowerCase();
+  return (
+    text.includes("http 402") ||
+    text.includes("payment required") ||
+    text.includes("quota/billing") ||
+    text.includes("quota") ||
+    text.includes("billing") ||
+    text.includes("credits") ||
+    text.includes("insufficient_quota") ||
+    text.includes("invalid api key") ||
+    text.includes("invalid_api_key")
+  );
 }
 
 function sleep(ms: number): Promise<void> {

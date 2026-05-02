@@ -191,7 +191,9 @@ async function runStep(
   ]);
 
   const stepStatus: BookingJobStep["status"] =
-    result.status === "paused_payment"
+    result.status === "paused_payment" ||
+    result.status === "needs_otp" ||
+    result.status === "ready_for_confirmation"
       ? "awaiting_confirmation"
       : result.status === "completed"
       ? "done"
