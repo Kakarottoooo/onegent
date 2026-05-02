@@ -56,7 +56,10 @@ export async function GET(req: NextRequest) {
     });
 
     await updateBookingJobSteps(job.id, updatedSteps);
-    await updateBookingJobStatus(job.id, "pending");
+    // Round-3 phantom isolation: re-enqueue with PENDING_QUEUE_STATUS so
+    // phantom's `WHERE status='pending'` cannot see the retry row.
+    const { PENDING_QUEUE_STATUS } = await import("@/lib/core/cend-adapter");
+    await updateBookingJobStatus(job.id, PENDING_QUEUE_STATUS as "pending");
 
     // Fire-and-forget — don't await so cron doesn't time out
     fetch(`${BASE_URL}/api/booking-jobs/${job.id}/start`, { method: "POST" }).catch(

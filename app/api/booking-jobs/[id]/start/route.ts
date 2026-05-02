@@ -447,7 +447,7 @@ async function runUniversalStep(
   console.log("[start] runUniversalStep invoked", {
     jobId: bookingJobId,
     stepType: step.type,
-    hasCoreMarker: (step.body as Record<string, unknown>)?.__source === "lib/core/execution",
+    hasCoreMarker: false,
     useCoreFlag: process.env.USE_CORE_EXECUTOR === "true",
   });
   // ── US-009: Dispatch to lib/core new path when flag + marker match ──
@@ -460,9 +460,15 @@ async function runUniversalStep(
   // synthesis) which don't write the marker always continue on the old
   // path regardless of the flag. Zero-regression by construction.
   const bodyAny = step.body as Record<string, unknown>;
+  const { isCoreExecutionSource } = await import("@/lib/core/cend-adapter");
+  console.log("[start] runUniversalStep marker", {
+    jobId: bookingJobId,
+    source: bodyAny.__source,
+    hasCoreMarker: isCoreExecutionSource(bodyAny.__source),
+  });
   if (
     process.env.USE_CORE_EXECUTOR === "true" &&
-    bodyAny.__source === "lib/core/execution"
+    isCoreExecutionSource(bodyAny.__source)
   ) {
     console.log("[start] dual-gate HIT — routing via lib/core.runExecutionJobWithRecovery", {
       jobId: bookingJobId,
@@ -1376,8 +1382,11 @@ export async function POST(_req: NextRequest, { params }: Params) {
     if (!isStuck) {
       return NextResponse.json({ error: "Job already running" }, { status: 409 });
     }
-    // Reset stuck job so the run below can proceed
-    await updateBookingJobStatus(id, "pending");
+    // Reset stuck job so the run below can proceed.
+    // Round-3 phantom isolation: use PENDING_QUEUE_STATUS in dev so the
+    // reset row is invisible to phantom's `WHERE status='pending'` filter.
+    const { PENDING_QUEUE_STATUS: _ps } = await import("@/lib/core/cend-adapter");
+    await updateBookingJobStatus(id, _ps as "pending");
   }
 
   // ── Worker dispatch (B+B2) ─────────────────────────────────────────────
@@ -1391,9 +1400,9 @@ export async function POST(_req: NextRequest, { params }: Params) {
   // filter requires the marker, so without auto-stamp those jobs
   // would sit pending indefinitely.
   //
-  // USE_WORKER_FOR is still honored as an operator override: setting
-  // it narrows which scenarios reach the worker (useful for staged
-  // rollouts). Empty list = all four supported scenarios.
+  // USE_WORKER_FOR is still honored for legacy unstamped jobs. Once a job
+  // already carries the lib/core marker, never fall back to the old in-process
+  // executor: the worker claim SQL and timeline code both expect that path.
   const workerScenarios = (process.env.USE_WORKER_FOR ?? "")
     .split(",")
     .map((s) => s.trim())
@@ -1401,17 +1410,52 @@ export async function POST(_req: NextRequest, { params }: Params) {
   const effectiveWorkerScenarios = workerScenarios.length > 0
     ? workerScenarios
     : ["restaurant", "hotel", "flight", "activity"];
-  const allRoutable = job.steps.every((step) =>
-    effectiveWorkerScenarios.includes(step.type),
+  const {
+    CORE_EXECUTION_SOURCE,
+    isCoreExecutionSource,
+    markStepForCore,
+    isCoreSupported: _isCoreSupported,
+    PENDING_QUEUE_STATUS,
+  } = await import(
+    "@/lib/core/cend-adapter"
   );
-  if (allRoutable) {
-    const { markStepForCore, isCoreSupported: _isCoreSupported } = await import(
-      "@/lib/core/cend-adapter"
-    );
+  const routeDecision = job.steps.map((step) => {
+    const body = step.body as Record<string, unknown> | undefined;
+    return {
+      type: step.type,
+      source: body?.__source,
+      supported: _isCoreSupported(step.type),
+      workerEnabled: effectiveWorkerScenarios.includes(step.type),
+    };
+  });
+  const allCoreMarked = job.steps.length > 0 && routeDecision.every((step) =>
+    isCoreExecutionSource(step.source),
+  );
+  const allRoutable = job.steps.length > 0 && routeDecision.every((step) =>
+    step.supported && step.workerEnabled,
+  );
+  console.log(`[start] ${id} worker route decision`, {
+    status: job.status,
+    effectiveWorkerScenarios,
+    allCoreMarked,
+    allRoutable,
+    steps: routeDecision,
+  });
+  if (allCoreMarked || allRoutable) {
     let stampedCount = 0;
     const stampedSteps = job.steps.map((step) => {
       const body = step.body as Record<string, unknown> | undefined;
-      if (body?.__source === "lib/core/execution") return step;
+      if (isCoreExecutionSource(body?.__source)) {
+        if (body?.__source === CORE_EXECUTION_SOURCE) return step;
+        stampedCount += 1;
+        return {
+          ...step,
+          body: {
+            ...body,
+            __source: CORE_EXECUTION_SOURCE,
+          },
+        };
+      }
       if (!_isCoreSupported(step.type)) return step;
       try {
         stampedCount += 1;
@@ -1423,13 +1467,19 @@ export async function POST(_req: NextRequest, { params }: Params) {
     if (stampedCount > 0) {
       await updateBookingJobSteps(id, stampedSteps);
     }
+    // Round-3 phantom isolation: enqueue with `pending_local` (in dev) so
+    // phantom's hardcoded `WHERE status='pending'` claimOne SQL cannot
+    // see this row. Local worker filters on PENDING_QUEUE_STATUS.
+    if (job.status !== PENDING_QUEUE_STATUS) {
+      await updateBookingJobStatus(id, PENDING_QUEUE_STATUS as "pending");
+    }
     console.log(
-      `[start] ${id} routed to worker (auto-stamped ${stampedCount}/${job.steps.length})`,
+      `[start] ${id} routed to worker (auto-stamped ${stampedCount}/${job.steps.length}, status=${PENDING_QUEUE_STATUS})`,
     );
     return NextResponse.json(
       {
         jobId: id,
-        status: "pending",
+        status: PENDING_QUEUE_STATUS,
         steps: stampedSteps,
         routedToWorker: true,
       },

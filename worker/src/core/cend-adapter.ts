@@ -27,6 +27,8 @@
  */
 
 import type { BookingJobStep } from "@/lib/db";
+import { createHash } from "node:crypto";
+import { hostname } from "node:os";
 import type {
   ExecutionParams,
   ExecutionScenario,
@@ -73,24 +75,11 @@ export const CORE_SUPPORTED_SCENARIOS: ReadonlyArray<ExecutionScenario> = [
 // Removal trigger: when the phantom container is found and stopped, flip
 // this back to a single constant `"lib/core/execution"` everywhere.
 function deriveDevMarker(): string {
-  // Lazy import — keeps this file usable in environments without `os`
-  // (we don't expect any, but the dynamic require is cheap and isolates
-  // the failure mode if any bundler chokes on the module).
-  try {
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
-    const { hostname } = require("node:os") as typeof import("node:os");
-    const h = hostname();
-    // Strip non-ASCII chars (Chinese hostname like "牛婆蛋蛋的电脑" stays
-    // unique-per-machine but Postgres jsonb path comparisons work better
-    // with ASCII-only literals). Take a stable hash slice so the marker
-    // is short and predictable.
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
-    const { createHash } = require("node:crypto") as typeof import("node:crypto");
-    const hash = createHash("sha256").update(h).digest("hex").slice(0, 10);
-    return `lib/core/execution-local-${hash}`;
-  } catch {
-    return "lib/core/execution-local";
-  }
+  // Static imports are intentional. The worker runs under ESM/tsx where
+  // `require` is undefined; a dynamic-require fallback silently produced the
+  // legacy marker and let phantom workers keep stealing local jobs.
+  const hash = createHash("sha256").update(hostname()).digest("hex").slice(0, 10);
+  return `lib/core/execution-local-${hash}`;
 }
 
 export const CORE_EXECUTION_SOURCE =
@@ -110,6 +99,36 @@ export function isCoreExecutionSource(value: unknown): value is string {
     value.startsWith("lib/core/execution-local-")
   );
 }
+
+// 2026-05-02 (round 3): Job e6543ee3 proved phantom doesn't filter
+// __source at all — phantom's claimOne does plain `WHERE status='pending'`
+// and grabs anything that's pending, regardless of marker. Round-2's
+// hostname-scoped __source is therefore not enough.
+//
+// Round-3 partition: change the STATUS STRING in dev so phantom's
+// hardcoded `WHERE status='pending'` literal cannot match. Phantom's
+// code is fixed; we control which strings the local route writes. By
+// writing `pending_local` in dev (instead of `pending`), phantom's
+// SELECT cannot match the row at all — it remains queue-invisible.
+//
+// Production stays on `pending` so the Railway worker (when it ships
+// hotel/flight/activity) and the existing prod queue keep working
+// unchanged.
+//
+// Worker's claimOne SQL must use this same constant so dev rows are
+// claimed by local. The route's auto-stamp + retry paths must also
+// write this value for new rows.
+export const PENDING_QUEUE_STATUS =
+  process.env.NODE_ENV === "production" ? "pending" : "pending_local";
+
+// Backward-compat: a worker should ALSO drain rows that are stuck in
+// plain "pending" (e.g. legacy in-flight rows, or a dev shell that
+// briefly ran without the env). The list is ordered by preference —
+// local worker prefers PENDING_QUEUE_STATUS, then falls back. In dev
+// mode we deliberately do NOT fall back to "pending" because phantom
+// will already have claimed those — we leave them alone.
+export const CLAIMABLE_PENDING_STATUSES: readonly string[] =
+  PENDING_QUEUE_STATUS === "pending" ? ["pending"] : ["pending_local"];
 
 export function isCoreSupported(stepType: BookingJobStep["type"]): boolean {
   return (CORE_SUPPORTED_SCENARIOS as readonly string[]).includes(stepType);
