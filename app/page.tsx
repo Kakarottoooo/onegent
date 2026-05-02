@@ -7,6 +7,7 @@ import Link from "next/link";
 import RecommendationCard from "@/components/RecommendationCard";
 import HotelCard from "@/components/HotelCard";
 import FlightCard from "@/components/FlightCard";
+import InlineBookingProfileGate from "@/components/booking/InlineBookingProfileGate";
 import InlineJobCard, { type TravelDocRequest } from "@/components/booking/InlineJobCard";
 import ActivityCard from "@/components/ActivityCard";
 import ScenarioPlanView from "@/components/ScenarioPlanView";
@@ -49,11 +50,40 @@ import { loadAgentModelConfig } from "@/lib/agent-model-config";
 import {
   buildRoomReplaySnapshot,
   buildSessionReplaySnapshot,
+  type InlineBookingProfileSnapshot,
+  type PendingConfirmSnapshot,
+  type PersistedDirectBookingPayload,
   type RoomReplaySnapshot,
   type SessionReplaySnapshot,
 } from "@/lib/chat-replay";
 import { useRouter } from "next/navigation";
 import "@/components/chat.css";
+
+type MinimalBookingProfile = {
+  id: number;
+  first_name: string;
+  last_name: string;
+  email: string;
+  phone: string;
+};
+
+type MinimalBookingProfileDraft = {
+  first_name: string;
+  last_name: string;
+  email: string;
+  phone: string;
+};
+
+type InlineBookingProfileState = {
+  id: number | null;
+  venueName: string;
+  payload: CommitResponse;
+  first_name: string;
+  last_name: string;
+  email: string;
+  phone: string;
+  missing: string[];
+};
 
 // Leaflet is not SSR-compatible
 const MapView = dynamic(() => import("@/components/MapView"), { ssr: false });
@@ -101,7 +131,7 @@ function HomeInner() {
   const { profile, updateProfile, learnFromFavorite, learnFromSearch, resetProfile, learnedWeights, learnWeightsFromFeedback, learnFromFeedback, learnFromAgentResponse, updateDiscoveredPreference, removeDiscoveredPreference } =
     usePreferences();
   const profileContext = formatProfileForPrompt(profile);
-  const { userId } = useAuth();
+  const { userId, userDisplayName, userEmail, isSignedIn } = useAuth();
   const { aiInstruction: languageInstruction, t } = useLanguage();
   const th = t.home;
   const tn = t.nav;
@@ -148,6 +178,87 @@ function HomeInner() {
       void fetch(`/api/chat/sessions/${sessionId}/messages`, { method: "POST", headers, body }).catch(() => {});
     }
   }, []);
+  const persistThreadMessage = useCallback(async (params: {
+    role: "user" | "assistant";
+    content: string;
+    meta_json?: Record<string, unknown> | null;
+  }) => {
+    if (!params.content.trim()) return;
+    const roomId = activeRoomIdRef.current;
+    const sessionId = activeSessionIdRef.current;
+    const body = JSON.stringify({
+      role: params.role,
+      content: params.content,
+      meta_json: params.meta_json ?? null,
+    });
+    const headers = { "Content-Type": "application/json" };
+    try {
+      if (roomId) {
+        await fetch(`/api/rooms/${roomId}/private-messages`, { method: "POST", headers, body });
+      } else if (sessionId) {
+        await fetch(`/api/chat/sessions/${sessionId}/messages`, { method: "POST", headers, body });
+      }
+    } catch {
+      // best-effort persistence only
+    }
+  }, []);
+  const restorePendingConfirmState = useCallback((next: PendingConfirmSnapshot | null) => {
+    setPendingConfirm(next);
+  }, []);
+  const restoreInlineBookingProfileState = useCallback((next: InlineBookingProfileSnapshot | null) => {
+    if (!next) {
+      setInlineBookingProfile(null);
+      return;
+    }
+    setInlineBookingProfile({
+      id: next.id,
+      venueName: next.venueName,
+      payload: next.payload as unknown as CommitResponse,
+      first_name: next.first_name,
+      last_name: next.last_name,
+      email: next.email,
+      phone: next.phone,
+      missing: next.missing,
+    });
+  }, []);
+  const persistPendingConfirmState = useCallback((next: PendingConfirmSnapshot | null) => {
+    void persistThreadMessage({
+      role: "assistant",
+      content: "__pending_confirm_state__",
+      meta_json: {
+        kind: "pending_confirm_state",
+        state: next ? "open" : "closed",
+        confirm: next,
+      },
+    });
+  }, [persistThreadMessage]);
+  const persistInlineBookingProfileState = useCallback((next: InlineBookingProfileState | null) => {
+    const gate = next
+      ? {
+          id: next.id,
+          venueName: next.venueName,
+          payload: {
+            kind: "direct_booking",
+            venue_name: next.payload.venue_name ?? next.venueName,
+            booking_step: next.payload.booking_step!,
+          } as PersistedDirectBookingPayload,
+          first_name: next.first_name,
+          last_name: next.last_name,
+          email: next.email,
+          phone: next.phone,
+          missing: next.missing,
+        }
+      : null;
+    void persistThreadMessage({
+      role: "assistant",
+      content: "__inline_booking_profile_state__",
+      meta_json: {
+        kind: "inline_booking_profile_state",
+        state: gate ? "open" : "closed",
+        gate,
+      },
+    });
+  }, [persistThreadMessage]);
 
   const chat = useChat({
     cityId: location.cityId,
@@ -216,6 +327,22 @@ function HomeInner() {
   const [activeSessionTitle, setActiveSessionTitle] = useState<string | null>(null);
   // Bump to trigger a sidebar refetch (after creating a room / new session).
   const [sidebarReloadTick, setSidebarReloadTick] = useState(0);
+  const [pendingConfirm, setPendingConfirm] = useState<PendingConfirmSnapshot | null>(null);
+  const [pendingQuickPicks, setPendingQuickPicks] = useState<QuickPick[] | null>(null);
+  const [tripFlow, setTripFlow] = useState<
+    | { phase: "planning" }
+    | {
+        phase: "ready";
+        pkg: TripPackage;
+        errors?: { hotel?: string | null; flight?: string | null; restaurant?: string | null; activity?: string | null };
+      }
+    | { phase: "error"; message: string }
+    | null
+  >(null);
+  const [nluPending, setNluPending] = useState(false);
+  const [inlineBookingProfile, setInlineBookingProfile] = useState<InlineBookingProfileState | null>(null);
+  const [inlineBookingProfileSaving, setInlineBookingProfileSaving] = useState(false);
+  const [inlineBookingProfileError, setInlineBookingProfileError] = useState<string | null>(null);
   const roomReplayCacheRef = useRef<Map<string, RoomReplaySnapshot>>(new Map());
   const sessionReplayCacheRef = useRef<Map<string, SessionReplaySnapshot>>(new Map());
   const roomTitleCacheRef = useRef<Map<string, string>>(new Map());
@@ -280,6 +407,8 @@ function HomeInner() {
         if (cached) {
           chat.replaceMessages(cached.messages);
           setActiveSessionTitle(cached.title);
+          restorePendingConfirmState(cached.pendingConfirm);
+          restoreInlineBookingProfileState(cached.inlineBookingProfile);
           nluHistoryRef.current = cached.nluHistory;
           lastNluStateRef.current = cached.lastNluState;
           replayedSessionIds.current.add(activeSessionId);
@@ -289,6 +418,8 @@ function HomeInner() {
         const cached = roomReplayCacheRef.current.get(activeRoomId);
         if (cached) {
           chat.replaceMessages(cached.messages);
+          restorePendingConfirmState(null);
+          restoreInlineBookingProfileState(null);
           setActiveProposalId(cached.proposalId);
           setActiveProposalKind(cached.proposalKind);
           nluHistoryRef.current = cached.nluHistory;
@@ -303,6 +434,8 @@ function HomeInner() {
         // state, but switches BACK to a previously-visited thread are
         // now flash-free thanks to the cached path above.
         chat.clearChat();
+        restorePendingConfirmState(null);
+        restoreInlineBookingProfileState(null);
         nluHistoryRef.current = [];
         lastNluStateRef.current = null;
       }
@@ -420,6 +553,23 @@ function HomeInner() {
       messages: chat.messages,
       nluHistory: nluHistoryRef.current,
       lastNluState: lastNluStateRef.current,
+      pendingConfirm,
+      inlineBookingProfile: inlineBookingProfile
+        ? {
+            id: inlineBookingProfile.id,
+            venueName: inlineBookingProfile.venueName,
+            payload: {
+              kind: "direct_booking",
+              venue_name: inlineBookingProfile.payload.venue_name ?? inlineBookingProfile.venueName,
+              booking_step: inlineBookingProfile.payload.booking_step!,
+            },
+            first_name: inlineBookingProfile.first_name,
+            last_name: inlineBookingProfile.last_name,
+            email: inlineBookingProfile.email,
+            phone: inlineBookingProfile.phone,
+            missing: inlineBookingProfile.missing,
+          }
+        : null,
     });
   }, [
     activeProposalId,
@@ -428,6 +578,8 @@ function HomeInner() {
     activeSessionId,
     activeSessionTitle,
     chat.messages,
+    inlineBookingProfile,
+    pendingConfirm,
   ]);
 
   const replayedRoomIds = useRef<Set<string>>(new Set());
@@ -451,6 +603,8 @@ function HomeInner() {
         replayedSessionIds.current.add(activeSessionId);
         chat.replaceMessages(cached.messages);
         setActiveSessionTitle(cached.title);
+        restorePendingConfirmState(cached.pendingConfirm);
+        restoreInlineBookingProfileState(cached.inlineBookingProfile);
         nluHistoryRef.current = cached.nluHistory;
         lastNluStateRef.current = cached.lastNluState;
         return;
@@ -481,6 +635,8 @@ function HomeInner() {
         replayedSessionIds.current.add(activeSessionId);
         setActiveSessionTitle(snapshot.title);
         chat.replaceMessages(snapshot.messages);
+        restorePendingConfirmState(snapshot.pendingConfirm);
+        restoreInlineBookingProfileState(snapshot.inlineBookingProfile);
         // Rehydrate the NLU history so the extractor sees the prior turns
         // on the next /api/chat/parse call — otherwise the agent acts
         // amnesiac after a refresh (sees only the new message).
@@ -509,6 +665,8 @@ function HomeInner() {
         if (cancelled) return;
         replayedRoomIds.current.add(activeRoomId);
         chat.replaceMessages(cached.messages);
+        restorePendingConfirmState(null);
+        restoreInlineBookingProfileState(null);
         setActiveProposalId(cached.proposalId);
         setActiveProposalKind(cached.proposalKind);
         nluHistoryRef.current = cached.nluHistory;
@@ -531,6 +689,8 @@ function HomeInner() {
         roomReplayCacheRef.current.set(activeRoomId, snapshot);
         replayedRoomIds.current.add(activeRoomId);
         chat.replaceMessages(snapshot.messages);
+        restorePendingConfirmState(null);
+        restoreInlineBookingProfileState(null);
         // Fresh context — the context-switch effect already cleared chat on
         // a real switch. Inject each persisted message so the user sees the
         // full thread that the server seeded (pre-confirm history + welcome
@@ -645,27 +805,6 @@ function HomeInner() {
 
   // P1-15 unified NLU routing state — sits alongside the old chat.messages
   // thread. Confirm card + quick picks render below the last assistant bubble.
-  const [pendingConfirm, setPendingConfirm] = useState<{
-    nlu: ConversationalNLUResult;
-    message: string;
-    kind: "room" | "plan" | "trip";
-    /** Captured at parse time — input may have been cleared by the time we commit. */
-    mentioned_user_ids?: string[];
-  } | null>(null);
-  const [pendingQuickPicks, setPendingQuickPicks] = useState<QuickPick[] | null>(null);
-  // Phase 1-E: trip packaging result. "planning" while /api/chat/trip/plan runs
-  // (10-15s for hotel+flight pipelines); "ready" once the TripPackage lands.
-  const [tripFlow, setTripFlow] = useState<
-    | { phase: "planning" }
-    | {
-        phase: "ready";
-        pkg: TripPackage;
-        errors?: { hotel?: string | null; flight?: string | null; restaurant?: string | null; activity?: string | null };
-      }
-    | { phase: "error"; message: string }
-    | null
-  >(null);
-  const [nluPending, setNluPending] = useState(false);
   // Tracks the plan ID that triggered a refine action, for parent_plan_id lineage
   const refinedFromPlanIdRef = useRef<string | null>(null);
   const [prefModalOpen, setPrefModalOpen] = useState(false);
@@ -1117,7 +1256,10 @@ function HomeInner() {
     // just show a conversational reply (chitchat / clarify).
     chatInputRef.current = "";
     chat.setInput("");
-    setPendingConfirm(null);
+    if (pendingConfirm) {
+      restorePendingConfirmState(null);
+      persistPendingConfirmState(null);
+    }
     setPendingQuickPicks(null);
 
     // Snapshot @-mentions BEFORE clearing the input — MentionPicker will fire
@@ -1244,7 +1386,9 @@ function HomeInner() {
       // the DR IS the plan, the user is just refining their preferences.
       if (nlu.intent === "create_plan" && nlu.confirm_ready && nlu.scenario === "trip" && !activeRoomId) {
         if (nlu.assistant_reply) chat.injectAssistantMessage(nlu.assistant_reply);
-        setPendingConfirm({ nlu, message: text, kind: "trip", mentioned_user_ids: mergedMentionIds });
+        const nextConfirm: PendingConfirmSnapshot = { nlu, message: text, kind: "trip", mentioned_user_ids: mergedMentionIds };
+        restorePendingConfirmState(nextConfirm);
+        persistPendingConfirmState(nextConfirm);
         return;
       }
 
@@ -1269,7 +1413,9 @@ function HomeInner() {
       // multi-party merge gets bypassed entirely.
       if (nlu.intent === "create_plan" && nlu.confirm_ready && !activeRoomId) {
         if (nlu.assistant_reply) chat.injectAssistantMessage(nlu.assistant_reply);
-        setPendingConfirm({ nlu, message: text, kind: "plan", mentioned_user_ids: mergedMentionIds });
+        const nextConfirm: PendingConfirmSnapshot = { nlu, message: text, kind: "plan", mentioned_user_ids: mergedMentionIds };
+        restorePendingConfirmState(nextConfirm);
+        persistPendingConfirmState(nextConfirm);
         return;
       }
 
@@ -1445,10 +1591,14 @@ function HomeInner() {
       }
 
       if (nlu.intent === "create_room" && nlu.confirm_ready) {
-        setPendingConfirm({ nlu, message: text, kind: "room", mentioned_user_ids: mergedMentionIds });
+        const nextConfirm: PendingConfirmSnapshot = { nlu, message: text, kind: "room", mentioned_user_ids: mergedMentionIds };
+        restorePendingConfirmState(nextConfirm);
+        persistPendingConfirmState(nextConfirm);
       } else if (nlu.intent === "create_plan" && nlu.confirm_ready) {
         // Safety net — shouldn't reach here given the early return above.
-        setPendingConfirm({ nlu, message: text, kind: "plan", mentioned_user_ids: mergedMentionIds });
+        const nextConfirm: PendingConfirmSnapshot = { nlu, message: text, kind: "plan", mentioned_user_ids: mergedMentionIds };
+        restorePendingConfirmState(nextConfirm);
+        persistPendingConfirmState(nextConfirm);
       } else if (nlu.suggested_quick_picks && nlu.suggested_quick_picks.length > 0) {
         setPendingQuickPicks(nlu.suggested_quick_picks);
       } else if (looksLikeRecommendationAsk(text)) {
@@ -1475,7 +1625,8 @@ function HomeInner() {
   }
 
   async function handleConfirmCommitted(payload: CommitResponse) {
-    setPendingConfirm(null);
+    restorePendingConfirmState(null);
+    persistPendingConfirmState(null);
     // Room created or plan dispatched — current NLU thread is finished; clear
     // the history so the next utterance starts a fresh conversation.
     nluHistoryRef.current = [];
@@ -1549,6 +1700,146 @@ function HomeInner() {
     }
   }
 
+  function deriveNameParts(displayName: string | null | undefined) {
+    const full = (displayName ?? "").trim();
+    if (!full) return { first_name: "", last_name: "" };
+    const parts = full.split(/\s+/).filter(Boolean);
+    return {
+      first_name: parts[0] ?? "",
+      last_name: parts.slice(1).join(" "),
+    };
+  }
+
+  function getMissingBookingFields(profile: Partial<MinimalBookingProfileDraft> | null | undefined) {
+    const missing: string[] = [];
+    if (!profile?.first_name?.trim()) missing.push("first_name");
+    if (!profile?.last_name?.trim()) missing.push("last_name");
+    if (!profile?.email?.trim()) missing.push("email");
+    if (!profile?.phone?.trim()) missing.push("phone");
+    return missing;
+  }
+
+  async function startDirectBookingWithProfile(
+    payload: CommitResponse,
+    profile: MinimalBookingProfile
+  ) {
+    const sessionId =
+      localStorage.getItem("session_id") ?? crypto.randomUUID();
+    if (!localStorage.getItem("session_id")) {
+      localStorage.setItem("session_id", sessionId);
+    }
+    localStorage.setItem("active_profile_id", String(profile.id));
+
+    const step = {
+      ...payload.booking_step,
+      body: {
+        ...payload.booking_step?.body,
+        profileId: profile.id,
+        profile: {
+          first_name: profile.first_name,
+          last_name: profile.last_name,
+          email: profile.email,
+          phone: profile.phone,
+        },
+      },
+    };
+
+    const createRes = await fetch("/api/booking-jobs", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        session_id: sessionId,
+        trip_label: payload.venue_name,
+        steps: [step],
+      }),
+    });
+    if (!createRes.ok) {
+      const content = `Couldn't start the booking job — please try the Reserve button on a recommendation card instead.`;
+      chat.injectAssistantMessage(content);
+      void persistThreadMessage({ role: "assistant", content });
+      return;
+    }
+    const { jobId } = (await createRes.json()) as { jobId: string };
+    void fetch(`/api/booking-jobs/${jobId}/start`, { method: "POST" }).catch(
+      () => {}
+    );
+    // Land on the Live tab with this job focused so the user sees execution
+    // progress immediately. Without focus+view=live the page defaults to the
+    // Queue tab and the just-started run is hidden one click away.
+    router.push(`/tasks?view=live&focus=${encodeURIComponent(jobId)}`);
+  }
+
+  async function submitInlineBookingProfile() {
+    if (!inlineBookingProfile || inlineBookingProfileSaving) return;
+    const first_name = inlineBookingProfile.first_name.trim();
+    const last_name = inlineBookingProfile.last_name.trim();
+    const email = inlineBookingProfile.email.trim();
+    const phone = inlineBookingProfile.phone.trim();
+    const missing = getMissingBookingFields({ first_name, last_name, email, phone });
+
+    if (missing.length > 0) {
+      const nextGate = inlineBookingProfile
+        ? {
+            ...inlineBookingProfile,
+            first_name,
+            last_name,
+            email,
+            phone,
+            missing,
+          }
+        : null;
+      setInlineBookingProfile(nextGate);
+      persistInlineBookingProfileState(nextGate);
+      setInlineBookingProfileError("Please fill the missing contact details before I continue.");
+      return;
+    }
+
+    setInlineBookingProfileSaving(true);
+    setInlineBookingProfileError(null);
+    try {
+      const body = {
+        label: "Personal",
+        is_default: true,
+        first_name,
+        last_name,
+        email,
+        phone,
+      };
+      const res = await fetch(
+        inlineBookingProfile.id
+          ? `/api/user/booking-profiles/${inlineBookingProfile.id}`
+          : "/api/user/booking-profiles",
+        {
+          method: inlineBookingProfile.id ? "PUT" : "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body),
+        }
+      );
+      if (res.status === 401) {
+        setInlineBookingProfileError("Please sign in first so I can save your booking profile.");
+        return;
+      }
+      const data = (await res.json().catch(() => ({}))) as {
+        error?: string;
+        profile?: MinimalBookingProfile;
+      };
+      if (!res.ok || !data.profile) {
+        setInlineBookingProfileError(data.error ?? "I couldn't save your booking profile yet. Try again.");
+        return;
+      }
+      setInlineBookingProfile(null);
+      persistInlineBookingProfileState(null);
+      const content = "Thanks — I’ve saved your contact details and I’m continuing the booking now.";
+      chat.injectAssistantMessage(content);
+      void persistThreadMessage({ role: "assistant", content });
+      await startDirectBookingWithProfile(inlineBookingProfile.payload, data.profile);
+    } catch {
+      setInlineBookingProfileError("Network hiccup while saving your booking profile. Try again in a moment.");
+    } finally {
+      setInlineBookingProfileSaving(false);
+    }
+  }
+
   // US-W5: direct-booking shortcut. The user named one specific venue
   // ("Book Carbone..."); the commit route returned a pre-built BookingJobStep
   // pointing at that venue. Skip the recommendation pipeline and post
@@ -1560,70 +1851,64 @@ function HomeInner() {
     chat.injectAssistantMessage(
       `Booking ${payload.venue_name}…`
     );
+    void persistThreadMessage({
+      role: "assistant",
+      content: `Booking ${payload.venue_name}…`,
+    });
 
     try {
+      if (!isSignedIn) {
+        const content = "Please sign in first so I can save your booking profile and continue the reservation.";
+        chat.injectAssistantMessage(content);
+        void persistThreadMessage({ role: "assistant", content });
+        return;
+      }
       const profileRes = await fetch("/api/user/booking-profiles?default=true");
       const { profile } = (await profileRes.json().catch(() => ({}))) as {
-        profile?: {
-          id: number;
-          first_name: string;
-          last_name: string;
-          email: string;
-          phone: string;
+        profile?: MinimalBookingProfile;
+      };
+      const authName = deriveNameParts(userDisplayName);
+      const mergedProfile: (MinimalBookingProfile & MinimalBookingProfileDraft) | (MinimalBookingProfileDraft & { id: null }) = profile
+        ? {
+            ...profile,
+            first_name: profile.first_name?.trim() ? profile.first_name : authName.first_name,
+            last_name: profile.last_name?.trim() ? profile.last_name : authName.last_name,
+            email: profile.email?.trim() ? profile.email : userEmail ?? "",
+            phone: profile.phone ?? "",
+          }
+        : {
+            id: null,
+            first_name: authName.first_name,
+            last_name: authName.last_name,
+            email: userEmail ?? "",
+            phone: "",
+          };
+      const missing = getMissingBookingFields(mergedProfile);
+      if (!profile || missing.length > 0) {
+        const content = `I’m ready to book ${payload.venue_name}. I just need your contact details first.`;
+        chat.injectAssistantMessage(content);
+        void persistThreadMessage({ role: "assistant", content });
+        setInlineBookingProfileError(null);
+        const nextGate = {
+          id: profile?.id ?? null,
+          venueName: payload.venue_name,
+          payload,
+          first_name: mergedProfile.first_name,
+          last_name: mergedProfile.last_name,
+          email: mergedProfile.email,
+          phone: mergedProfile.phone,
+          missing,
         };
-      };
-      if (!profile) {
-        chat.injectAssistantMessage(
-          `I need your contact info to book — add a booking profile in Settings, then try again.`
-        );
+        setInlineBookingProfile(nextGate);
+        persistInlineBookingProfileState(nextGate);
         return;
       }
 
-      const sessionId =
-        localStorage.getItem("session_id") ?? crypto.randomUUID();
-      if (!localStorage.getItem("session_id")) {
-        localStorage.setItem("session_id", sessionId);
-      }
-      localStorage.setItem("active_profile_id", String(profile.id));
-
-      const step = {
-        ...payload.booking_step,
-        body: {
-          ...payload.booking_step.body,
-          profileId: profile.id,
-          profile: {
-            first_name: profile.first_name,
-            last_name: profile.last_name,
-            email: profile.email,
-            phone: profile.phone,
-          },
-        },
-      };
-
-      const createRes = await fetch("/api/booking-jobs", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          session_id: sessionId,
-          trip_label: payload.venue_name,
-          steps: [step],
-        }),
-      });
-      if (!createRes.ok) {
-        chat.injectAssistantMessage(
-          `Couldn't start the booking job — please try the Reserve button on a recommendation card instead.`
-        );
-        return;
-      }
-      const { jobId } = (await createRes.json()) as { jobId: string };
-      void fetch(`/api/booking-jobs/${jobId}/start`, { method: "POST" }).catch(
-        () => {}
-      );
-      router.push("/tasks");
+      await startDirectBookingWithProfile(payload, mergedProfile as MinimalBookingProfile);
     } catch {
-      chat.injectAssistantMessage(
-        `Network hiccup while starting the booking. Try again in a moment.`
-      );
+      const content = `Network hiccup while starting the booking. Try again in a moment.`;
+      chat.injectAssistantMessage(content);
+      void persistThreadMessage({ role: "assistant", content });
     }
   }
 
@@ -1669,7 +1954,8 @@ function HomeInner() {
   }
 
   function handleConfirmEdit() {
-    setPendingConfirm(null);
+    restorePendingConfirmState(null);
+    persistPendingConfirmState(null);
     chat.injectAssistantMessage("No problem — what would you like to change?");
   }
 
@@ -4001,6 +4287,46 @@ function HomeInner() {
           </button>
         </div>
       </div>
+
+      <InlineBookingProfileGate
+        open={!!inlineBookingProfile}
+        venueName={inlineBookingProfile?.venueName ?? "this place"}
+        values={{
+          first_name: inlineBookingProfile?.first_name ?? "",
+          last_name: inlineBookingProfile?.last_name ?? "",
+          email: inlineBookingProfile?.email ?? "",
+          phone: inlineBookingProfile?.phone ?? "",
+        }}
+        missingFields={inlineBookingProfile?.missing ?? []}
+        saving={inlineBookingProfileSaving}
+        error={inlineBookingProfileError}
+        onChange={(patch) => {
+          let nextGate: InlineBookingProfileState | null = null;
+          setInlineBookingProfile((prev) => {
+            nextGate = prev
+              ? {
+                  ...prev,
+                  ...patch,
+                  missing: getMissingBookingFields({
+                    first_name: patch.first_name ?? prev.first_name,
+                    last_name: patch.last_name ?? prev.last_name,
+                    email: patch.email ?? prev.email,
+                    phone: patch.phone ?? prev.phone,
+                  }),
+                }
+              : prev;
+            return nextGate;
+          });
+          if (nextGate) persistInlineBookingProfileState(nextGate);
+          if (inlineBookingProfileError) setInlineBookingProfileError(null);
+        }}
+        onClose={() => {
+          setInlineBookingProfile(null);
+          persistInlineBookingProfileState(null);
+          setInlineBookingProfileError(null);
+        }}
+        onSubmit={submitInlineBookingProfile}
+      />
 
       {/* Date Range Picker for hotel searches */}
       {datePickerOpen && (

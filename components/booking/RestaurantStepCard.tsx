@@ -116,7 +116,7 @@ export default function RestaurantStepCard({
       );
 
       onCreated?.(jobId);
-      router.push("/tasks");
+      router.push(`/tasks?view=live&focus=${encodeURIComponent(jobId)}`);
     } catch (err) {
       setError(
         err instanceof Error ? err.message : "Something went wrong. Try again."
