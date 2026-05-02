@@ -102,8 +102,15 @@ export function shouldTryProviderFallback(input: FallbackTriggerInput): boolean 
   // Hotel/flight/activity have different multi-provider strategies.
   if (input.scenario !== "restaurant") return false;
 
-  // Classic case: the primary explicitly reported "couldn't book here".
-  if (input.status === "no_availability") return true;
+  // Only switch providers when the venue is probably not in the current
+  // provider's catalog. A normal "no slots near this time" result should stay
+  // on the primary provider; jumping to Resy / the official site creates the
+  // browser-restart loop and can book the wrong inventory source.
+  if (input.status === "no_availability") {
+    const haystack = `${input.summary} ${input.error ?? ""}`;
+    if (/not found on (opentable|resy|yelp)/i.test(haystack)) return true;
+    return false;
+  }
 
   // Expanded case: status="error" but the failure shape suggests the venue
   // exists somewhere else. Whitelist-only — anything not matching defaults

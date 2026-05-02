@@ -101,6 +101,7 @@ function sleep(ms: number): Promise<void> {
 // queue pattern. Each worker (and each in-process concurrent claim) gets
 // exactly one row; no double-execution races even with N instances.
 async function claimOne(): Promise<BookingJob | null> {
+  const claimableStatuses = `{${CLAIMABLE_PENDING_STATUSES.join(",")}}`;
   // Filter to jobs whose first step carries the lib/core/execution marker —
   // the worker only knows how to execute lib/core-shape jobs. Without this
   // filter the worker would race the in-process Vercel path (which polls
@@ -123,7 +124,7 @@ async function claimOne(): Promise<BookingJob | null> {
     SET status = 'running', updated_at = NOW()
     WHERE id = (
       SELECT id FROM booking_jobs
-      WHERE status = ANY(${CLAIMABLE_PENDING_STATUSES as string[]}::text[])
+      WHERE status = ANY(${claimableStatuses}::text[])
         AND (steps->0->'body'->>'__source') = ${CORE_EXECUTION_SOURCE}
       ORDER BY created_at ASC
       LIMIT 1

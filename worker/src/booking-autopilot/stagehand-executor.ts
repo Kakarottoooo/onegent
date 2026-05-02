@@ -246,6 +246,17 @@ function formatMonthDayFromIsoDate(isoDate: string): string {
   return new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric", timeZone: "UTC" }).format(parsed).toLowerCase();
 }
 
+function extractOpenTableDateTextFromUrl(url: string): string {
+  try {
+    const parsed = new URL(url);
+    const dateTime = parsed.searchParams.get("datetime") ?? parsed.searchParams.get("dateTime");
+    const match = dateTime?.match(/\b(20\d{2}-\d{2}-\d{2})/);
+    return match ? formatMonthDayFromIsoDate(match[1]) : "";
+  } catch {
+    return "";
+  }
+}
+
 async function readOpenTableBookingSummary(page: Page): Promise<{
   restaurant: string;
   dateText: string;
@@ -339,7 +350,9 @@ async function validateOpenTableBookingTarget(
   const requestedDateMatch = task.match(/\bon\s+(20\d{2}-\d{2}-\d{2})\b/);
   if (requestedDateMatch) {
     const expectedMonthDay = formatMonthDayFromIsoDate(requestedDateMatch[1]);
-    if (!summary.dateText.toLowerCase().includes(expectedMonthDay)) {
+    const urlMonthDay = extractOpenTableDateTextFromUrl(summary.currentUrl || page.url());
+    const observedDateText = `${summary.dateText} ${urlMonthDay}`.toLowerCase();
+    if (!observedDateText.includes(expectedMonthDay)) {
       reasons.push(`date="${summary.dateText || "unknown"}"`);
     }
   }
@@ -4481,124 +4494,92 @@ The user will enter CVV and confirm payment themselves.`,
               // runs. Without this, evaluate fires before slots hydrate →
               // 0 candidates + StagehandEvalError + broad-scan finds 0
               // leaf time-text elements (the symptom from job 9e0ce939).
-              // We accept either:
-              //   - <li data-test^="time-slot-"> (canonical OT markup), or
-              //   - any visible HH:MM AM/PM text in document.body.
+              //
+              // Use waitForSelector (Stagehand proxies this; waitForFunction
+              // is NOT proxied — runtime error 8744dc8 retest).
+              // [data-test^="time-slot-"] is OT's stable per-slot marker
+              // verified from user-supplied DOM 2026-05-02 (TAO Downtown).
               // 12s ceiling matches OT peak-load AJAX latency.
               await raw
-                .waitForFunction(
-                  () => {
-                    if (document.querySelector('[data-test^="time-slot-"]')) return true;
-                    const text = document.body?.innerText ?? "";
-                    return /\d{1,2}:\d{2}\s*(AM|PM)/.test(text);
-                  },
-                  { timeout: 12000 },
-                )
+                .waitForSelector('[data-test^="time-slot-"]', { timeout: 12000 })
                 .catch(() => {
                   // soft-timeout — code below has its own broad-scan diag
-                  trace("[opentable] search-card waitForFunction timed out — slots may not have rendered yet, proceeding anyway");
+                  trace("[opentable] search-card waitForSelector timed out — slots may not have rendered yet, proceeding anyway");
                 });
 
-              // Find the best time slot button WITHIN the target restaurant's card.
-              // IMPORTANT: OpenTable search results show multiple restaurants. We must
-              // restrict the search to the card that contains the target restaurant name
-              // to avoid clicking slots from other restaurant cards (e.g. Firebirds).
-              const slotCoords = await raw.evaluate(
-                ({ reqMins, maxDiffMins, restaurantName }: { reqMins: number; maxDiffMins: number; restaurantName: string }) => {
-                  const isVisible = (el: Element) => {
-                    const r = (el as HTMLElement).getBoundingClientRect();
-                    return r.width > 0 && r.height > 0;
-                  };
-                  const parseT = (text: string): number | null => {
-                    const m12 = text.match(/(\d{1,2}):(\d{2})\s*(AM|PM)/i);
-                    if (m12) {
-                      let h = parseInt(m12[1], 10);
-                      const min = parseInt(m12[2], 10);
-                      if (m12[3].toUpperCase() === "PM" && h < 12) h += 12;
-                      if (m12[3].toUpperCase() === "AM" && h === 12) h = 0;
-                      return h * 60 + min;
-                    }
-                    return null;
-                  };
-                  // Exact time text pattern: "7:00 PM", "7:15 PM", etc. (with optional asterisk)
-                  const isTimeText = (text: string) => /^\d{1,2}:\d{2}\s*(AM|PM)\*?$/i.test(text.trim());
-
-                  // Find the restaurant card containing our target name.
-                  // OpenTable cards are typically <li>, <article>, or a div with the restaurant name.
-                  const normalize = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, '');
-                  const targetNorm = normalize(restaurantName);
-                  const targetWords = targetNorm.split('').length > 4 ? [targetNorm.slice(0, 6)] : [targetNorm];
-
-                  // Find a container element whose text contains the restaurant name
-                  // but is reasonably sized (a card, not the whole page).
-                  const allContainers = Array.from(document.querySelectorAll<HTMLElement>(
-                    'li, article, [class*="result" i], [class*="card" i], [class*="restaurant" i], [data-test*="result" i]'
-                  )).filter(el => {
-                    if (!isVisible(el)) return false;
-                    const r = el.getBoundingClientRect();
-                    if (r.width < 100 || r.height < 50) return false; // too small to be a card
-                    const text = normalize(el.textContent ?? '');
-                    return targetWords.every(w => text.includes(w));
+              // Find the best time slot button without page.evaluate().
+              // Stagehand/tsx can inject helpers into serialized functions, which
+              // caused StagehandEvalError before the DOM scan could run. Locator
+              // APIs keep this logic in Node and avoid the browser-function path.
+              type OpenTableSlotHit = {
+                text: string;
+                minutes: number;
+                scope: string;
+                click: () => Promise<unknown>;
+              };
+              const slotSelector = [
+                '[data-test^="time-slot-"] a',
+                '[data-test^="time-slot-"] button',
+                '[data-test^="time-slot-"] [role="button"]',
+                'a[role="button"]',
+                'button',
+              ].join(", ");
+              const isSlotText = (text: string) =>
+                /^\d{1,2}:\d{2}\s*(AM|PM)\*?$/i.test(text.trim());
+              const collectOpenTableSlots = async (
+                scopeLabel: string,
+                scope: { locator: typeof raw.locator },
+              ): Promise<OpenTableSlotHit[]> => {
+                const locator = scope.locator(slotSelector);
+                const count = await locator.count().catch(() => 0);
+                const hits: OpenTableSlotHit[] = [];
+                const seen = new Set<string>();
+                for (let i = 0; i < Math.min(count, 120); i += 1) {
+                  const candidate = locator.nth(i);
+                  const rawText = await candidate.innerText({ timeout: 500 }).catch(() => "");
+                  const text = rawText.trim().replace(/\s+/g, " ").replace(/\*$/, "");
+                  if (!isSlotText(text)) continue;
+                  const minutes = parseTimeText(text);
+                  if (minutes === null) continue;
+                  const key = `${scopeLabel}:${i}:${text}`;
+                  if (seen.has(key)) continue;
+                  seen.add(key);
+                  hits.push({
+                    text: text.slice(0, 20),
+                    minutes,
+                    scope: scopeLabel,
+                    click: () => candidate.click({ timeout: 5000 }),
                   });
+                }
+                return hits;
+              };
 
-                  // Sort by smallest area to find the most specific card (not entire page body)
-                  const targetCard = allContainers.sort((a, b) => {
-                    const ra = a.getBoundingClientRect();
-                    const rb = b.getBoundingClientRect();
-                    return (ra.width * ra.height) - (rb.width * rb.height);
-                  })[0];
+              // Stagehand's locator shim does not support Playwright's
+              // locator.filter({ hasText }) yet. Scan the OpenTable page-level
+              // slot controls and rely on the existing post-click booking target
+              // validation to reject a wrong restaurant if the search page
+              // returns unrelated cards.
+              const targetCardCount = 0;
+              const slotHits = await collectOpenTableSlots("page", raw);
 
-                  // Scan for time slots: prefer within target card, fall back to all page slots
-                  const searchRoot: Element = targetCard ?? document.body;
-                  const diagScope = targetCard ? 'card' : 'page (no matching card found)';
-
-                  // Broad scan within scope
-                  const allEls = Array.from(searchRoot.querySelectorAll<HTMLElement>(
-                    'a[href], button, [role="button"], [role="link"], [tabindex]'
-                  ));
-                  const leafTimeEls = Array.from(searchRoot.querySelectorAll<HTMLElement>('*'))
-                    .filter(el => isTimeText((el.textContent ?? '').trim()) && el.children.length === 0 && isVisible(el));
-
-                  const combined = [...new Set([...allEls, ...leafTimeEls])];
-
-                  // Diagnostics
-                  const diag = `scope=${diagScope} | ` + combined
-                    .filter(el => isVisible(el) && parseT((el.textContent ?? '').trim()) !== null)
-                    .slice(0, 5)
-                    .map(el => `${el.tagName}[${el.getAttribute('role') ?? ''}] "${(el.textContent ?? '').trim().slice(0, 15)}"`)
-                    .join(' | ');
-
-                  const candidates = combined.filter((el) => {
-                    if (!isVisible(el)) return false;
-                    // Strip asterisk (*) from slot text before parsing (OpenTable marks some slots with *)
-                    const t = parseT((el.textContent ?? "").trim().replace(/\*$/, ""));
-                    return t !== null && Math.abs(t - reqMins) <= maxDiffMins;
-                  });
-
-                  if (candidates.length === 0) return { x: -1, y: -1, text: '', diag };
-
-                  // Pick the closest slot
-                  const best = candidates.sort((a, b) => {
-                    const ta = parseT((a.textContent ?? "").trim().replace(/\*$/, "")) ?? Infinity;
-                    const tb = parseT((b.textContent ?? "").trim().replace(/\*$/, "")) ?? Infinity;
-                    return Math.abs(ta - reqMins) - Math.abs(tb - reqMins);
-                  })[0];
-
-                  best.scrollIntoView({ block: "center" });
-                  const r = best.getBoundingClientRect();
-                  return {
-                    x: Math.round(r.left + r.width / 2),
-                    y: Math.round(r.top + r.height / 2),
-                    text: (best.textContent ?? "").trim().slice(0, 20),
-                    diag,
+              const slotDiag = slotHits
+                .slice(0, 8)
+                .map((hit) => `${hit.scope} "${hit.text}"`)
+                .join(" | ");
+              const slotCandidate = slotHits
+                .filter((hit) => Math.abs(hit.minutes - requestedMinutes) <= timeWindowMins)
+                .sort((a, b) => Math.abs(a.minutes - requestedMinutes) - Math.abs(b.minutes - requestedMinutes))[0];
+              const slotCoords = slotCandidate
+                ? {
+                    text: slotCandidate.text,
+                    diag: `locator slots=${slotHits.length}, targetCards=${targetCardCount} | ${slotDiag}`,
+                    click: slotCandidate.click,
+                  }
+                : {
+                    text: "",
+                    diag: `locator slots=${slotHits.length}, targetCards=${targetCardCount} | ${slotDiag || "none"}`,
+                    click: null,
                   };
-                },
-                { reqMins: requestedMinutes, maxDiffMins: timeWindowMins, restaurantName: targetHotelName ?? "" }
-              ).catch((err) => {
-                trace(`[opentable] search-card evaluate threw: ${(err as Error)?.message?.slice(0, 200) ?? String(err).slice(0, 200)}`);
-                return null;
-              });
-
               if (slotCoords?.diag) {
                 trace(`[opentable] time slot diag: ${slotCoords.diag || "(none found)"}`);
               }
@@ -4609,45 +4590,21 @@ The user will enter CVV and confirm payment themselves.`,
               // 7:30 PM / 7:45 PM / 8:00 PM etc. on this exact page, but the
               // current strict <a>/<button> regex misses them — this trace
               // tells us the actual selector to update.
-              if (!slotCoords || slotCoords.x < 0) {
-                const broadScan = await raw.evaluate(() => {
-                  const isVisible = (el: Element) => {
-                    const r = (el as HTMLElement).getBoundingClientRect();
-                    return r.width > 0 && r.height > 0;
-                  };
-                  return Array.from(document.querySelectorAll<HTMLElement>("*"))
-                    .filter((el) => {
-                      if (!isVisible(el)) return false;
-                      const t = (el.textContent ?? "").trim();
-                      return /^\d{1,2}:\d{2}\s*(AM|PM)\*?$/i.test(t) && t.length < 15 && el.children.length === 0;
-                    })
-                    .slice(0, 10)
-                    .map((el) => ({
-                      tag: el.tagName,
-                      role: el.getAttribute("role") || "",
-                      cls: (el.getAttribute("class") || "").slice(0, 80),
-                      dt: el.getAttribute("data-test") || "",
-                      parentTag: el.parentElement?.tagName || "",
-                      parentRole: el.parentElement?.getAttribute("role") || "",
-                      parentCls: (el.parentElement?.getAttribute("class") || "").slice(0, 60),
-                      parentDt: el.parentElement?.getAttribute("data-test") || "",
-                      grandparentTag: el.parentElement?.parentElement?.tagName || "",
-                      grandparentDt: el.parentElement?.parentElement?.getAttribute("data-test") || "",
-                      text: (el.textContent ?? "").trim(),
-                    }));
-                }).catch(() => []);
-                if (broadScan.length > 0) {
-                  trace(`[opentable] search-page broad scan (${broadScan.length} leaf time-text elements): ${JSON.stringify(broadScan)}`);
+              if (!slotCoords || !slotCoords.click) {
+                if (slotHits.length > 0) {
+                  trace(`[opentable] search-page broad scan (${slotHits.length} locator time-slot elements): ${slotHits.slice(0, 10).map((hit) => `${hit.scope} "${hit.text}"`).join(" | ")}`);
                 } else {
-                  trace(`[opentable] search-page broad scan: 0 leaf time-text elements found — page may not have rendered slots yet, or OT is showing a captcha/empty state`);
+                  trace("[opentable] search-page broad scan: 0 locator time-slot elements found — page may not have rendered slots yet, or OT is showing a captcha/empty state");
                 }
               }
 
-              // Use CDP coordinate click (real mouse event that React can detect)
-              const slotClicked = slotCoords && slotCoords.x > 0
-                ? await sh(raw).click(slotCoords.x, slotCoords.y)
+              const slotClicked = slotCoords?.click
+                ? await slotCoords.click()
                     .then(() => slotCoords.text)
-                    .catch(() => null)
+                    .catch((err) => {
+                      trace(`[opentable] locator time-slot click failed: ${err instanceof Error ? err.message.slice(0, 180) : String(err).slice(0, 180)}`);
+                      return null;
+                    })
                 : null;
 
               if (slotClicked) {
