@@ -17,6 +17,7 @@ import type { Locator, Page } from "playwright";
 import type { BrowserTaskInput, BrowserTaskResult } from "./types";
 import { writeAgentLog } from "../db";
 import { browserSessionStore } from "../browser-session-store";
+import { saveBrowserSnapshot } from "../browser-snapshot-store";
 import {
   assessBookingStage as coreAssessBookingStage,
   dismissBlockingModals as coreDismissBlockingModals,
@@ -355,7 +356,11 @@ async function validateOpenTableBookingTarget(
     const shownCoversMatch = summary.coversText.match(/(\d+)\s+people?/i);
     const shownCovers = shownCoversMatch ? parseInt(shownCoversMatch[1], 10) : null;
     if (shownCovers !== null && shownCovers !== expectedCovers) {
+      if (expectedCovers === 1 && shownCovers === 2) {
+        trace("[opentable] booking target uses party-size fallback 1→2; accepting reservation target");
+      } else {
       reasons.push(`covers="${summary.coversText}"`);
+      }
     }
   }
 
@@ -655,6 +660,7 @@ export async function runBrowserTask(
   // surfaced into the summary so the user knows why their requested time failed.
   let capturedNoAvailabilityWindow: string | null = null;
   let openTableLocationCorrectionAttempted = false;
+  let openTablePartySizeFallbackCovers: string | null = null;
 
   // AI_LOOP_FULL=true activates all AI sub-flags simultaneously.
   // RPA code is never removed — each flag independently falls back to RPA on failure.
@@ -879,6 +885,33 @@ export async function runBrowserTask(
     if (input.jobId) activeStagehands.set(input.jobId, { close: () => stagehand.close() });
     // v3 API: get active page from context (resolvePage is private)
     const page = stagehand.context.activePage() ?? await stagehand.context.newPage();
+    const captureLocalSnapshot = async (
+      title: string,
+      detail?: string,
+      status: "info" | "live" | "success" | "warning" | "error" = "live",
+    ) => {
+      if (!input.jobId || useCloud) return;
+      try {
+        const activePage = stagehand.context.activePage() ?? page;
+        const rawSnapshotPage = getRawPage(activePage);
+        const buf = await rawSnapshotPage.screenshot({
+          type: "jpeg",
+          quality: 58,
+          timeout: 2500,
+        });
+        await saveBrowserSnapshot({
+          jobId: input.jobId,
+          ts: new Date().toISOString(),
+          title,
+          detail,
+          status,
+          imageBase64: buf.toString("base64"),
+          url: rawSnapshotPage.url(),
+        });
+      } catch (error) {
+        trace(`[snapshots] capture failed: ${(error as Error).message?.slice(0, 120)}`);
+      }
+    };
     // Register the page in the live-view store immediately so SSE stream can
     // take screenshots during the entire booking process (not just after payment).
     // Only in local mode — Browserbase sessions have their own live view URL.
@@ -904,6 +937,7 @@ export async function runBrowserTask(
 
     // Navigate to the starting URL
     await page.goto(input.startUrl, { waitUntil: "domcontentloaded", timeoutMs: 30_000 });
+    await captureLocalSnapshot("Loaded booking page", getRawPage(page).url(), "live");
 
     // For Booking.com search results (React SPA), wait for networkidle so JS can finish
     // fetching and rendering hotel listing cards before we check for them.
@@ -1768,8 +1802,14 @@ The user will enter CVV and confirm payment themselves.`,
             .some(b => slotPattern.test((b.textContent ?? "").trim()));
         }).catch(() => false);
 
+        const onOpenTableDetailPage =
+          /opentable\.com\/(?:r\/[^/?#]+|[a-z0-9][a-z0-9-]*(?:\?|$|\/?$))/i.test(raw.url()) &&
+          !/opentable\.com\/(?:s\?|booking\/|restaurants\/|search\?|account\/|user\/signup|login)/i.test(raw.url());
+
         if (hasTimeSlots) {
           trace(`Pre-AI fast path: matched "${matchedSignal}" but visible time-slot buttons exist — false positive, continuing.`);
+        } else if (onOpenTableDetailPage) {
+          trace(`Pre-AI fast path: matched "${matchedSignal}" on OpenTable detail page but no visible slots yet — letting detail-page slot picker scroll/probe before fallback.`);
         } else {
           // ── User insight (run 6 dig): "Not available on OpenTable" pages
           // should NOT just return no_availability — the venue may exist on
@@ -1844,11 +1884,20 @@ The user will enter CVV and confirm payment themselves.`,
             summary = `${venueLabel} has no online availability${windowPhrase} on ${platformLabel}. Next available is ${altDayCapture.nextAvailableLabel}: ${slotPreview}.`;
             trace(`Pre-AI fast path: matched "${matchedSignal}" + alt-day banner "${altDayCapture.nextAvailableLabel}" with ${altDayCapture.slots.length} slot(s).`);
           } else {
-            summary = `${venueLabel} has no availability at the requested time on ${platformLabel}.`;
-            trace(`Pre-AI fast path: matched NO_SLOTS_AT_TIME signal "${matchedSignal}" — time-ladder retry should kick in.`);
+            const isFullWindowNoAvailability =
+              matchedSignal?.includes("no online availability within") ?? false;
+            summary = isFullWindowNoAvailability
+              ? `${venueLabel} has no online availability within the requested time window on ${platformLabel}.`
+              : `${venueLabel} has no availability at the requested time on ${platformLabel}.`;
+            trace(
+              isFullWindowNoAvailability
+                ? `Pre-AI fast path: matched full-window no-availability signal "${matchedSignal}" — skipping nearby time retries.`
+                : `Pre-AI fast path: matched NO_SLOTS_AT_TIME signal "${matchedSignal}" — time-ladder retry should kick in.`,
+            );
           }
           const ssBuf = await raw.screenshot({ type: "png" }).catch(() => null);
           const ss = ssBuf ? `data:image/png;base64,${ssBuf.toString("base64")}` : undefined;
+          await captureLocalSnapshot("No availability found", summary, "warning");
           return {
             status: "no_availability" as const,
             screenshotBase64: ss,
@@ -4142,7 +4191,7 @@ The user will enter CVV and confirm payment themselves.`,
                 if (taskDateMatch) {
                   const hh = String(Math.floor(requestedMinutes / 60)).padStart(2, "0");
                   const mm = String(requestedMinutes % 60).padStart(2, "0");
-                  const covers = taskCoversMatch ? taskCoversMatch[1] : "2";
+                  const covers = openTablePartySizeFallbackCovers ?? (taskCoversMatch ? taskCoversMatch[1] : "2");
                   const u = new URL(raw.url());
                   const desiredDateTime = `${taskDateMatch[1]}T${hh}:${mm}`;
                   if (u.searchParams.get("dateTime") !== desiredDateTime || u.searchParams.get("covers") !== covers) {
@@ -4282,10 +4331,132 @@ The user will enter CVV and confirm payment themselves.`,
                     };
                   },
                   { reqMins: requestedMinutes, maxDiffMins: timeWindowMins },
-                ).catch(() => null);
+                ).catch((err) => {
+                  // Surface evaluate failures so we can see why the time-slot
+                  // selector returned nothing instead of silently degrading
+                  // to "0 slots". OT React DOM mutations get caught here.
+                  trace(`[opentable] detail-page evaluate threw: ${(err as Error)?.message?.slice(0, 200) ?? String(err).slice(0, 200)}`);
+                  return null;
+                });
 
                 if (detailSlot && detailSlot._empty) {
                   trace(`[opentable] detail-page no candidates — debug seen: ${JSON.stringify(detailSlot.debug)}`);
+                  // Log a broader DOM scan so we can see what tag/role OT is
+                  // actually using for time slots when the strict <a>/<button>
+                  // regex misses everything (React often renders as
+                  // [role="button"] or wraps timed text in a span).
+                  const broadScan = await raw.evaluate(() => {
+                    const isVisible = (el: Element) => {
+                      const r = (el as HTMLElement).getBoundingClientRect();
+                      return r.width > 0 && r.height > 0;
+                    };
+                    return Array.from(document.querySelectorAll<HTMLElement>("*"))
+                      .filter((el) => {
+                        if (!isVisible(el)) return false;
+                        const t = (el.textContent ?? "").trim();
+                        return /^\d{1,2}:\d{2}\s*(AM|PM)\*?$/i.test(t) && t.length < 15 && el.children.length === 0;
+                      })
+                      .slice(0, 8)
+                      .map((el) => ({
+                        tag: el.tagName,
+                        role: el.getAttribute("role") || "",
+                        cls: (el.getAttribute("class") || "").slice(0, 60),
+                        dt: el.getAttribute("data-test") || "",
+                        parentTag: el.parentElement?.tagName || "",
+                        parentRole: el.parentElement?.getAttribute("role") || "",
+                        parentDt: el.parentElement?.getAttribute("data-test") || "",
+                        text: (el.textContent ?? "").trim(),
+                      }));
+                  }).catch(() => []);
+                  if (broadScan.length > 0) {
+                    trace(`[opentable] broad scan (leaf time-text elements): ${JSON.stringify(broadScan)}`);
+                  } else {
+                    trace(`[opentable] broad scan: 0 leaf elements with HH:MM AM/PM text — page may not have rendered slots yet`);
+                  }
+                }
+
+                if (
+                  (!detailSlot || detailSlot._empty) &&
+                  !openTablePartySizeFallbackCovers &&
+                  taskCoversMatch?.[1] === "1"
+                ) {
+                  const retryWithTwo = await (async () => {
+                    try {
+                      const u = new URL(raw.url());
+                      const hh = String(Math.floor(requestedMinutes / 60)).padStart(2, "0");
+                      const mm = String(requestedMinutes % 60).padStart(2, "0");
+                      if (taskDateMatch) {
+                        u.searchParams.set("dateTime", `${taskDateMatch[1]}T${hh}:${mm}`);
+                        u.searchParams.set("covers", "2");
+                        u.searchParams.set("p", "2");
+                        u.searchParams.set("sd", `${taskDateMatch[1]}T${hh}:${mm}:00`);
+                      } else {
+                        u.searchParams.set("covers", "2");
+                        u.searchParams.set("p", "2");
+                      }
+                      trace("[opentable] no 1-person slot visible — probing 2-person availability before provider fallback");
+                      await raw.goto(u.toString(), { waitUntil: "domcontentloaded", timeout: 15000 }).catch(() => {});
+                      await new Promise((r) => setTimeout(r, 2500));
+                      const twoPersonSlot = await raw.evaluate(
+                        ({ reqMins, maxDiffMins }: { reqMins: number; maxDiffMins: number }) => {
+                          const parseT = (text: string): number | null => {
+                            const m = text.match(/(\d{1,2}):(\d{2})\s*(AM|PM)/i);
+                            if (!m) return null;
+                            let h = parseInt(m[1], 10);
+                            if (m[3].toUpperCase() === "PM" && h < 12) h += 12;
+                            if (m[3].toUpperCase() === "AM" && h === 12) h = 0;
+                            return h * 60 + parseInt(m[2], 10);
+                          };
+                          const isVisible = (el: Element) => {
+                            const r = (el as HTMLElement).getBoundingClientRect();
+                            return r.width > 0 && r.height > 0;
+                          };
+                          const candidates = Array.from(document.querySelectorAll<HTMLElement>("a, button"))
+                            .map((el) => {
+                              const text = (el.textContent ?? "").trim();
+                              const t = parseT(text);
+                              return t === null || !isVisible(el) || Math.abs(t - reqMins) > maxDiffMins
+                                ? null
+                                : { el, text, t };
+                            })
+                            .filter((x): x is { el: HTMLElement; text: string; t: number } => x !== null)
+                            .sort((a, b) => Math.abs(a.t - reqMins) - Math.abs(b.t - reqMins));
+                          const best = candidates[0];
+                          if (!best) return null;
+                          best.el.scrollIntoView({ block: "center" });
+                          const r = best.el.getBoundingClientRect();
+                          return {
+                            x: Math.round(r.left + r.width / 2),
+                            y: Math.round(r.top + r.height / 2),
+                            text: best.text.slice(0, 30),
+                          };
+                        },
+                        { reqMins: requestedMinutes, maxDiffMins: timeWindowMins },
+                      ).catch(() => null);
+                      if (!twoPersonSlot) {
+                        trace("[opentable] 2-person availability probe found no matching slot");
+                        return false;
+                      }
+                      openTablePartySizeFallbackCovers = "2";
+                      trace(`[opentable] party-size fallback 1→2 found slot "${twoPersonSlot.text}" — clicking`);
+                      const clicked = await sh(raw)
+                        .click(twoPersonSlot.x, twoPersonSlot.y)
+                        .then(() => true)
+                        .catch(() => false);
+                      if (clicked) {
+                        await new Promise((r) => setTimeout(r, 2500));
+                        return true;
+                      }
+                    } catch (error) {
+                      trace(`[opentable] 2-person availability probe failed: ${(error as Error).message?.slice(0, 120)}`);
+                    }
+                    return false;
+                  })();
+
+                  if (retryWithTwo) {
+                    trace("[opentable] party-size fallback slot clicked — yielding to stage reassessment");
+                    return true;
+                  }
                 }
 
                 if (detailSlot && !detailSlot._empty && detailSlot.x > 0) {
@@ -6584,19 +6755,19 @@ The user will enter CVV and confirm payment themselves.`,
         !!modelProvider;
       const providerHint = isBrowserbase
         ? "Browserbase"
-        : isStagehandRuntime && modelProvider
-        ? `Stagehand runtime / ${modelProvider}`
+        : modelProvider
+        ? `${modelProvider} (${modelName}) via Stagehand`
         : isStagehandRuntime
-        ? "Stagehand runtime"
+        ? `Stagehand runtime (model=${modelName})`
         : isModelApi
-        ? `${modelProvider ?? "Model API"} (${modelName})`
+        ? `Model API (${modelName})`
         : `automation provider (${modelName})`;
 
       return {
         status: "error",
         handoffUrl: input.startUrl,
         summary: "The automation provider rejected this run before the booking flow could finish.",
-        error: `Quota/billing issue (HTTP 402) from ${providerHint}. Check credits and retry.`,
+        error: `Provider quota/billing issue (HTTP 402) from ${providerHint}. Check that provider's key, billing project, and Stagehand auth are configured for this process.`,
         debugTrace,
       };
     }
