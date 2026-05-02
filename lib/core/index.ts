@@ -17,6 +17,15 @@
 export { runExecutionJob } from "./execution/executor";
 export { runExecutionJobWithRecovery } from "./execution/recovery";
 export { createJob, getJob, completeJob } from "./execution/job-manager";
+export {
+  appendTaskEvent,
+  createTravelTask,
+  ensureTravelTaskTables,
+  getTaskEvents,
+  getTravelTask,
+  listTravelTasks,
+  updateTravelTaskState,
+} from "./tasks/task-store";
 
 export type {
   ExecutionJobRequest,
@@ -34,6 +43,12 @@ export type {
 } from "./execution/types";
 export type { ExecutionContext } from "./execution/executor";
 export type { CreateJobMeta } from "./execution/job-manager";
+export type {
+  TravelTask,
+  TravelTaskEvent,
+  TravelTaskEventKind,
+  TravelTaskState,
+} from "./tasks/task-store";
 
 // ─── Consent ─────────────────────────────────────────────────────────────────
 

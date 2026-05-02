@@ -133,3 +133,15 @@ export const ExecutionJobRequestSchema = z
   });
 
 export type ExecutionJobRequestInput = z.input<typeof ExecutionJobRequestSchema>;
+
+export const TravelTaskOptionsSchema = z.object({
+  title: z.string().min(1).optional(),
+  policy: z.record(z.string(), z.unknown()).optional(),
+});
+
+export const TravelTaskCreateEnvelopeSchema = z.object({
+  execution: ExecutionJobRequestSchema,
+  task: TravelTaskOptionsSchema.optional(),
+});
+
+export type TravelTaskCreateEnvelopeInput = z.input<typeof TravelTaskCreateEnvelopeSchema>;
