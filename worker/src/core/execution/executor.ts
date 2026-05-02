@@ -340,7 +340,11 @@ function buildRestaurantContext(
   // If the slug guess is wrong (404), the executor's listing-page detection
   // triggers the recovery loop and the term-based search runs as backup.
   const canonicalUrl = p.city
-    ? buildOpenTableCanonicalUrl(p.restaurant_name, p.city)
+    ? buildOpenTableCanonicalUrl(p.restaurant_name, p.city, {
+        date: p.date,
+        time: p.time,
+        covers: p.covers,
+      })
     : null;
   const fallbackSearchUrl = buildOpenTableUrl({
     restaurantName: p.city ? `${p.restaurant_name} ${p.city}` : p.restaurant_name,
@@ -354,10 +358,21 @@ function buildRestaurantContext(
   // exploretock, sevenrooms, benchmark:// sentinel). Falls back to the
   // canonical-then-search chain when the supplied URL is a venue marketing
   // site that would 404 / drop the date.
+  // 2026-05-02: temporarily de-prefer canonicalUrl. Going to /r/<slug>
+  // directly lands on the detail page, but the in-page time-slot selectors
+  // (`[data-test="time-picker"]` / `[data-test="time-slots"]` / strict `<a>` /
+  // `<button>` regex scan) miss OT's current React DOM, so worker reports
+  // "0 time slots" even when the page visibly has 11:00 PM buttons. The
+  // metroId-scoped search URL still solves the Nashville-sticky bug, and the
+  // existing search-results-cards click path is verified to drive booking
+  // flow end-to-end. canonicalUrl is left in place so the next fix can flip
+  // this back to `(canonicalUrl ?? fallbackSearchUrl)` once the detail-page
+  // selectors are updated.
+  void canonicalUrl;
   const startUrl =
     p.startUrl && !shouldUseCanonicalRestaurantSearchUrl(p.startUrl)
       ? p.startUrl
-      : (canonicalUrl ?? fallbackSearchUrl);
+      : fallbackSearchUrl;
   const { task } = buildRestaurantTask({
     restaurantName: p.restaurant_name,
     city: p.city,
