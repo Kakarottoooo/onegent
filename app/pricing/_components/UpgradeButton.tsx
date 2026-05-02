@@ -58,10 +58,10 @@ export function UpgradeButton({
       if (body.url) {
         window.location.href = body.url;
       } else {
-        setError("Checkout response was malformed.");
+        setError("Something went wrong starting checkout. Please try again in a moment.");
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Network error");
+      setError(err instanceof Error ? err.message : "Connection problem. Check your network and try again.");
     } finally {
       setPending(false);
     }

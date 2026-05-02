@@ -102,7 +102,7 @@ export default function ShareTripModal({
         : `${window.location.origin}${data.url.startsWith("/") ? "" : "/"}${data.url}`;
       setShareUrl(absolute);
     } catch {
-      setError("Network error.");
+      setError("Connection problem. Check your network and try again.");
     } finally {
       setBusy(false);
     }

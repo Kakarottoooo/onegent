@@ -71,7 +71,7 @@ export default function AddToTripModal({
       }
       setSavedTitle(it.title);
     } catch {
-      setError("Network error.");
+      setError("Connection problem. Check your network and try again.");
     } finally {
       setBusy(false);
     }
@@ -99,13 +99,13 @@ export default function AddToTripModal({
         body: JSON.stringify({ item_kind: itemKind, item_id: itemId }),
       });
       if (!addRes.ok) {
-        setError("Trip created but couldn't add item.");
+        setError("We made the trip but couldn't add this item. Open the trip and add it manually.");
         return;
       }
       setSavedTitle(created.itinerary.title);
       await load();
     } catch {
-      setError("Network error.");
+      setError("Connection problem. Check your network and try again.");
     } finally {
       setBusy(false);
     }

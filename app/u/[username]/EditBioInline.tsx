@@ -40,7 +40,7 @@ export default function EditBioInline({ initialBio }: Props) {
       setCommitted(value.trim() ? value.trim() : null);
       setEditing(false);
     } catch {
-      setError("Network error.");
+      setError("Connection problem. Check your network and try again.");
     } finally {
       setSaving(false);
     }

@@ -135,7 +135,7 @@ function AccountPageInner() {
       setLoadingProfile(true);
       try {
         const response = await fetch("/api/users/me");
-        if (!response.ok) throw new Error("Failed to load account");
+        if (!response.ok) throw new Error("Couldn't load your account. Please refresh.");
         const data = (await response.json()) as { profile: UserProfile };
         if (cancelled) return;
         setProfile(data.profile);
@@ -204,13 +204,13 @@ function AccountPageInner() {
     setSuccess(null);
 
     if (!file.type.startsWith("image/")) {
-      setError("Choose an image file.");
+      setError("That doesn't look like an image file. Pick a JPG, PNG, or HEIC.");
       event.target.value = "";
       return;
     }
 
     if (file.size > 5 * 1024 * 1024) {
-      setError("Avatar must be smaller than 5MB.");
+      setError("That image is over 5MB. Pick a smaller one or compress it first.");
       event.target.value = "";
       return;
     }
@@ -220,7 +220,7 @@ function AccountPageInner() {
       const avatarUrl = await compressAvatar(file);
       setForm((current) => ({ ...current, avatar_url: avatarUrl }));
     } catch {
-      setError("Failed to process avatar.");
+      setError("Couldn't process that image. Try a different photo or a smaller file.");
     } finally {
       setProcessingAvatar(false);
       event.target.value = "";

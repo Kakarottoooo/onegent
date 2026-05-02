@@ -85,7 +85,7 @@ export default function TripsListPage() {
       setDraftEmoji("🧳");
       await load();
     } catch {
-      setError("Network error.");
+      setError("Connection problem. Check your network and try again.");
     } finally {
       setCreating(false);
     }

@@ -57,18 +57,18 @@ export default function TripDetailPage() {
     try {
       const res = await fetch(`/api/itineraries/${id}`);
       if (res.status === 404) {
-        setError("Trip not found.");
+        setError("This trip doesn't exist or has been removed.");
         return;
       }
       if (!res.ok) {
-        setError("Couldn't load trip.");
+        setError("We couldn't load this trip. Please refresh the page.");
         return;
       }
       const data = (await res.json()) as { itinerary: Itinerary; items: Item[] };
       setItinerary(data.itinerary);
       setItems(data.items ?? []);
     } catch {
-      setError("Network error.");
+      setError("Connection problem. Check your network and try again.");
     } finally {
       setLoading(false);
     }

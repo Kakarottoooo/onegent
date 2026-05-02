@@ -67,7 +67,7 @@ export default function CompareTasteModal({ isOpen, onClose, peerHandle, peerDis
           fetch(`/api/users/${encodeURIComponent(peerHandle)}/taste-snapshot`),
         ]);
         if (!mineRes.ok || !theirsRes.ok) {
-          setError("Couldn't load taste data.");
+          setError("We couldn't load taste data right now. Please try again later.");
           return;
         }
         const mineData = (await mineRes.json()) as Snapshot;
@@ -77,7 +77,7 @@ export default function CompareTasteModal({ isOpen, onClose, peerHandle, peerDis
           setTheirs(theirsData);
         }
       } catch {
-        if (!cancelled) setError("Network error.");
+        if (!cancelled) setError("Connection problem. Check your network and try again.");
       } finally {
         if (!cancelled) setLoading(false);
       }
