@@ -56,21 +56,59 @@ export const CORE_SUPPORTED_SCENARIOS: ReadonlyArray<ExecutionScenario> = [
 // running an older build of this repo, racing the local worker via
 // `FOR UPDATE SKIP LOCKED` against the same Neon DB.
 //
-// Since we can't yet shut that container down, we partition the queue at
-// the marker level: dev/local writes "...-local" so the phantom (which
-// reads "lib/core/execution") never sees those rows, and the local worker
-// (also reading "...-local") is the only consumer of them. Phantom's view
-// of the queue is now empty for chat-driven jobs.
+// 2026-05-02 (round 2): Job 811819ae proved phantom could STILL claim
+// "lib/core/execution-local" rows AND reject them with the legacy-shape
+// validator error in 1.8s — meaning phantom's deployment has the post-
+// 43fba56 CORE_EXECUTION_SOURCE export but an INCONSISTENT or older
+// isCoreExecutionSource. To lock phantom out completely we now suffix
+// the dev marker with the local machine's hostname. Phantom (running on
+// a Linux Docker container with a different hostname) computes a
+// different marker and filters the queue with that — its SQL `=` test
+// against my rows cannot match.
+//
+// Production path is unchanged: NODE_ENV === "production" → plain
+// "lib/core/execution". Railway worker (when shipped) and Vercel route
+// both observe "production" so the production queue stays single-marker.
 //
 // Removal trigger: when the phantom container is found and stopped, flip
 // this back to a single constant `"lib/core/execution"` everywhere.
+function deriveDevMarker(): string {
+  // Lazy import — keeps this file usable in environments without `os`
+  // (we don't expect any, but the dynamic require is cheap and isolates
+  // the failure mode if any bundler chokes on the module).
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { hostname } = require("node:os") as typeof import("node:os");
+    const h = hostname();
+    // Strip non-ASCII chars (Chinese hostname like "牛婆蛋蛋的电脑" stays
+    // unique-per-machine but Postgres jsonb path comparisons work better
+    // with ASCII-only literals). Take a stable hash slice so the marker
+    // is short and predictable.
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { createHash } = require("node:crypto") as typeof import("node:crypto");
+    const hash = createHash("sha256").update(h).digest("hex").slice(0, 10);
+    return `lib/core/execution-local-${hash}`;
+  } catch {
+    return "lib/core/execution-local";
+  }
+}
+
 export const CORE_EXECUTION_SOURCE =
   process.env.NODE_ENV === "production"
     ? "lib/core/execution"
-    : "lib/core/execution-local";
+    : deriveDevMarker();
 
+// Accept any of:
+//   - "lib/core/execution"           — production marker
+//   - "lib/core/execution-local"     — legacy dev marker (in-flight rows from before this commit)
+//   - "lib/core/execution-local-*"   — hostname-scoped dev marker (new)
 export function isCoreExecutionSource(value: unknown): value is string {
-  return value === "lib/core/execution" || value === "lib/core/execution-local";
+  if (typeof value !== "string") return false;
+  return (
+    value === "lib/core/execution" ||
+    value === "lib/core/execution-local" ||
+    value.startsWith("lib/core/execution-local-")
+  );
 }
 
 export function isCoreSupported(stepType: BookingJobStep["type"]): boolean {
