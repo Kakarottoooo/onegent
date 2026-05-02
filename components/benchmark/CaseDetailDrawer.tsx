@@ -10,7 +10,7 @@
  *   - `/tasks/:taskId` so we can inspect the live timeline UI
  */
 
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import {
   BUCKET_LABEL,
   BUCKET_TONE,
@@ -170,7 +170,7 @@ export default function CaseDetailDrawer({ caseResult, onClose }: Props) {
                 <>
                   <dt>Task ID</dt>
                   <dd>
-                    <code>{c.taskId}</code>
+                    <CopyableCode value={c.taskId} />
                   </dd>
                 </>
               )}
@@ -178,7 +178,7 @@ export default function CaseDetailDrawer({ caseResult, onClose }: Props) {
                 <>
                   <dt>Current job ID</dt>
                   <dd>
-                    <code>{c.currentJobId}</code>
+                    <CopyableCode value={c.currentJobId} />
                   </dd>
                 </>
               )}
@@ -192,18 +192,13 @@ export default function CaseDetailDrawer({ caseResult, onClose }: Props) {
             </section>
           )}
 
-          {/* Drill-down links */}
+          {/* Drill-down links — JSON only for now.
+              `/tasks/[taskId]` UI page doesn't exist yet; until codex
+              ships the cookie-auth proxy for /api/v1/travel-tasks/* we
+              can't render the timeline in-browser. JSON links open the
+              raw event/snapshot stream in a new tab so codex can grep
+              the run while debugging the real smoke case. */}
           <section className="benchmark-drawer__section benchmark-drawer__links">
-            {c.taskId && (
-              <a
-                className="benchmark-drawer__task-link"
-                href={`/tasks/${c.taskId}`}
-                target="_blank"
-                rel="noopener noreferrer"
-              >
-                Open /tasks/{c.taskId} ↗
-              </a>
-            )}
             {c.timelineUrl && (
               <a
                 className="benchmark-drawer__task-link"
@@ -211,7 +206,7 @@ export default function CaseDetailDrawer({ caseResult, onClose }: Props) {
                 target="_blank"
                 rel="noopener noreferrer"
               >
-                Timeline events JSON ↗
+                Timeline events ↗ (JSON)
               </a>
             )}
             {c.snapshotsUrl && (
@@ -221,12 +216,53 @@ export default function CaseDetailDrawer({ caseResult, onClose }: Props) {
                 target="_blank"
                 rel="noopener noreferrer"
               >
-                Snapshots JSON ↗
+                Snapshots ↗ (JSON)
               </a>
+            )}
+            {!c.timelineUrl && !c.snapshotsUrl && (
+              <p className="benchmark-drawer__hint">
+                No timeline / snapshot URLs in this report. Drill-down
+                requires <code>taskId</code> in the case result.
+              </p>
             )}
           </section>
         </div>
       </aside>
     </>
+  );
+}
+
+/* ─── CopyableCode ────────────────────────────────────────────────────
+ * Until /tasks/[taskId] exists or the cookie-auth proxy lands, we want
+ * codex to be able to copy a task/job ID with one click and paste it
+ * into the existing /tasks list search or dev console.
+ */
+
+function CopyableCode({ value }: { value: string }) {
+  const [copied, setCopied] = useState(false);
+
+  async function copy() {
+    try {
+      await navigator.clipboard.writeText(value);
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 1200);
+    } catch {
+      // Older browsers / non-secure contexts: silently no-op. The user
+      // can still triple-click the code and copy manually.
+    }
+  }
+
+  return (
+    <span className="benchmark-drawer__copyable">
+      <code>{value}</code>
+      <button
+        type="button"
+        className="benchmark-drawer__copy"
+        onClick={copy}
+        aria-label="Copy"
+      >
+        {copied ? "✓" : "📋"}
+      </button>
+    </span>
   );
 }
