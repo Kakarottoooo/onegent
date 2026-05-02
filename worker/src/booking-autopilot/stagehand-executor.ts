@@ -4572,10 +4572,53 @@ The user will enter CVV and confirm payment themselves.`,
                   };
                 },
                 { reqMins: requestedMinutes, maxDiffMins: timeWindowMins, restaurantName: targetHotelName ?? "" }
-              ).catch(() => null);
+              ).catch((err) => {
+                trace(`[opentable] search-card evaluate threw: ${(err as Error)?.message?.slice(0, 200) ?? String(err).slice(0, 200)}`);
+                return null;
+              });
 
               if (slotCoords?.diag) {
                 trace(`[opentable] time slot diag: ${slotCoords.diag || "(none found)"}`);
+              }
+              // When no candidates were found (slotCoords null or x<0), run a
+              // broader DOM scan so the next debugging pass sees what tag /
+              // role / class OT is actually using for the visible time-slot
+              // buttons. The user's chromium screenshot proves OT renders
+              // 7:30 PM / 7:45 PM / 8:00 PM etc. on this exact page, but the
+              // current strict <a>/<button> regex misses them — this trace
+              // tells us the actual selector to update.
+              if (!slotCoords || slotCoords.x < 0) {
+                const broadScan = await raw.evaluate(() => {
+                  const isVisible = (el: Element) => {
+                    const r = (el as HTMLElement).getBoundingClientRect();
+                    return r.width > 0 && r.height > 0;
+                  };
+                  return Array.from(document.querySelectorAll<HTMLElement>("*"))
+                    .filter((el) => {
+                      if (!isVisible(el)) return false;
+                      const t = (el.textContent ?? "").trim();
+                      return /^\d{1,2}:\d{2}\s*(AM|PM)\*?$/i.test(t) && t.length < 15 && el.children.length === 0;
+                    })
+                    .slice(0, 10)
+                    .map((el) => ({
+                      tag: el.tagName,
+                      role: el.getAttribute("role") || "",
+                      cls: (el.getAttribute("class") || "").slice(0, 80),
+                      dt: el.getAttribute("data-test") || "",
+                      parentTag: el.parentElement?.tagName || "",
+                      parentRole: el.parentElement?.getAttribute("role") || "",
+                      parentCls: (el.parentElement?.getAttribute("class") || "").slice(0, 60),
+                      parentDt: el.parentElement?.getAttribute("data-test") || "",
+                      grandparentTag: el.parentElement?.parentElement?.tagName || "",
+                      grandparentDt: el.parentElement?.parentElement?.getAttribute("data-test") || "",
+                      text: (el.textContent ?? "").trim(),
+                    }));
+                }).catch(() => []);
+                if (broadScan.length > 0) {
+                  trace(`[opentable] search-page broad scan (${broadScan.length} leaf time-text elements): ${JSON.stringify(broadScan)}`);
+                } else {
+                  trace(`[opentable] search-page broad scan: 0 leaf time-text elements found — page may not have rendered slots yet, or OT is showing a captcha/empty state`);
+                }
               }
 
               // Use CDP coordinate click (real mouse event that React can detect)
