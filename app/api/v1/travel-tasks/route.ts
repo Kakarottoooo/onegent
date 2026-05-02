@@ -133,6 +133,14 @@ export async function POST(req: NextRequest) {
   );
 }
 
+export async function runTravelTaskAttempt(params: {
+  taskId: string;
+  jobId: string;
+  execution: ExecutionJobRequest;
+}): Promise<void> {
+  await runAttemptForTask(params.taskId, params.jobId, params.execution);
+}
+
 function parseCreateBody(rawBody: unknown):
   | {
       ok: true;

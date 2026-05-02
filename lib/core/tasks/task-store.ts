@@ -209,6 +209,45 @@ export async function updateTravelTaskState(
   return task;
 }
 
+export async function updateTravelTaskRequest(params: {
+  taskId: string;
+  request: ExecutionJobRequest;
+  state?: TravelTaskState;
+  currentBookingJobId?: string | null;
+  eventData?: Record<string, unknown>;
+}): Promise<TravelTask | null> {
+  await ensureTravelTaskTables();
+  const requestJson = JSON.stringify(params.request);
+  const result = await sql<TravelTask>`
+    UPDATE travel_tasks
+    SET
+      request_json = ${requestJson}::jsonb,
+      state = COALESCE(${params.state ?? null}, state),
+      current_booking_job_id = COALESCE(${params.currentBookingJobId ?? null}, current_booking_job_id),
+      terminal_reason = NULL,
+      terminal_code = NULL,
+      updated_at = NOW()
+    WHERE id = ${params.taskId}
+    RETURNING *
+  `;
+  const task = result.rows[0] ?? null;
+  if (task) {
+    if (params.currentBookingJobId) {
+      await sql`
+        UPDATE booking_jobs
+        SET task_id = ${task.id}, updated_at = NOW()
+        WHERE id = ${params.currentBookingJobId}
+      `.catch(() => {});
+    }
+    await appendTaskEvent(task.id, "state_changed", {
+      state: task.state,
+      currentBookingJobId: task.current_booking_job_id,
+      ...params.eventData,
+    });
+  }
+  return task;
+}
+
 function stringOrNull(value: unknown): string | null {
   return typeof value === "string" && value.trim() ? value : null;
 }

@@ -24,6 +24,7 @@ export {
   getTaskEvents,
   getTravelTask,
   listTravelTasks,
+  updateTravelTaskRequest,
   updateTravelTaskState,
 } from "./tasks/task-store";
 
