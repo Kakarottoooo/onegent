@@ -588,6 +588,26 @@ export async function assessBookingStage(params: {
     // Resy venue detail pages: same rationale as OpenTable above.
     stage = "listing";
     reason = "Resy venue detail page URL is active; booking widget is in listing stage.";
+  } else if (
+    // OpenTable search results page (/s?term=...&metroId=...). The OT search
+    // URL renders a left-side venue cards column with inline time-slot
+    // buttons (e.g. 7:30 PM, 7:45 PM, 8:00 PM) per card, plus a right-side
+    // map. The autopilot's search-card click handler lives in
+    // stagehand-executor.ts:4442+ and expects stage='listing' to trigger.
+    //
+    // Without this case the URL fell through every deterministic branch
+    // (the canonical /r/ branch above explicitly excludes `/s?` via its
+    // negative lookahead) and stage stayed 'unknown' — which made the
+    // executor return no_availability before ever clicking a card,
+    // leaving the user staring at recovery's ±30/60/90-min time ladder
+    // even though the page visibly had bookable slots. Pin to listing so
+    // the search-card click handler runs.
+    /opentable\.com\/s\?[^#]*\bterm=/i.test(currentUrl) &&
+    !visibleCheckoutFields &&
+    !hitPaymentUrl
+  ) {
+    stage = "listing";
+    reason = "OpenTable search results URL (/s?term=) — listing stage with inline time-slot cards.";
   } else if (/opentable\.com\/booking\/details\b/i.test(currentUrl)) {
     // OpenTable's `/booking/details` is the FINAL guest-form page (name /
     // email / phone / cc inputs). Pin to checkout_form so the executor
@@ -626,6 +646,7 @@ export async function assessBookingStage(params: {
     (
       /opentable\.com\/booking\/(details|specials|seating-options|search)\b/i.test(currentUrl) ||
       /opentable\.com\/r\//i.test(currentUrl) ||
+      /opentable\.com\/s\?[^#]*\bterm=/i.test(currentUrl) ||
       /resy\.com\/cities\/.+\/venues\//i.test(currentUrl) ||
       hitPaymentUrl
     );
