@@ -46,10 +46,31 @@ export const CORE_SUPPORTED_SCENARIOS: ReadonlyArray<ExecutionScenario> = [
   "activity",
 ] as const;
 
-export const CORE_EXECUTION_SOURCE = "lib/core/execution";
+// 2026-05-02: re-introducing the dual-marker isolation that commit 4d0496f
+// had ripped out. The justification for the rip-out was "no phantom worker
+// exists" — but the next round of audit_logs showed a /app/src/... stack
+// trace with `usingCloud:true` and Browserbase 401 errors after the user
+// rotated the Browserbase key. That stack trace cannot come from this
+// machine (Windows path is C:\\Users\\Gzw19\\..., no BROWSERBASE_API_KEY in
+// .env.local). It is a real Linux Docker container we have not located,
+// running an older build of this repo, racing the local worker via
+// `FOR UPDATE SKIP LOCKED` against the same Neon DB.
+//
+// Since we can't yet shut that container down, we partition the queue at
+// the marker level: dev/local writes "...-local" so the phantom (which
+// reads "lib/core/execution") never sees those rows, and the local worker
+// (also reading "...-local") is the only consumer of them. Phantom's view
+// of the queue is now empty for chat-driven jobs.
+//
+// Removal trigger: when the phantom container is found and stopped, flip
+// this back to a single constant `"lib/core/execution"` everywhere.
+export const CORE_EXECUTION_SOURCE =
+  process.env.NODE_ENV === "production"
+    ? "lib/core/execution"
+    : "lib/core/execution-local";
 
 export function isCoreExecutionSource(value: unknown): value is string {
-  return value === "lib/core/execution";
+  return value === "lib/core/execution" || value === "lib/core/execution-local";
 }
 
 export function isCoreSupported(stepType: BookingJobStep["type"]): boolean {
