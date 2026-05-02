@@ -3415,60 +3415,120 @@ function ChatPanel({
   }
 
   return (
-    <div className={`${CARD} p-3 mb-4`}>
-      <p className="text-xs font-semibold text-[var(--text-secondary)] mb-2">Chat</p>
-      <div className="max-h-56 overflow-y-auto flex flex-col gap-1.5 mb-2">
+    <div className={`${CARD} p-4 mb-4`}>
+      {/* Header — eyebrow + member count */}
+      <div className="flex items-center justify-between mb-3">
+        <div>
+          <p className="text-[10px] font-semibold uppercase tracking-[0.08em] text-[var(--text-secondary)]">
+            Chat
+          </p>
+          <p className="text-[11px] text-[var(--text-muted)] mt-0.5">
+            {members.length} {members.length === 1 ? "member" : "members"}
+            {messages.length > 0 && (
+              <>
+                <span className="mx-1.5 opacity-40">·</span>
+                {messages.length} {messages.length === 1 ? "message" : "messages"}
+              </>
+            )}
+          </p>
+        </div>
+      </div>
+
+      {/* Messages — taller, breathable, with avatars */}
+      <div className="min-h-[280px] max-h-[60vh] overflow-y-auto flex flex-col gap-3 mb-3 pr-1 -mr-1">
         {messages.length === 0 && (
-          <p className="text-xs text-[var(--text-muted)] text-center py-4">No messages yet.</p>
+          <div className="flex-1 flex items-center justify-center py-8 text-center">
+            <div>
+              <p className="text-3xl opacity-25 mb-2">💬</p>
+              <p className="text-xs font-semibold text-[var(--text-secondary)]">
+                No messages yet
+              </p>
+              <p className="text-[11px] text-[var(--text-muted)] mt-1 max-w-[240px]">
+                Anyone in the room can chat here. The agent will narrate what it&apos;s doing too.
+              </p>
+            </div>
+          </div>
         )}
         {messages.map((m) => {
           const agent = m.sender_id === null;
           const mine = m.sender_id === userId;
           const time = new Date(m.created_at).toLocaleTimeString([], {
-            hour: "2-digit", minute: "2-digit",
+            hour: "numeric", minute: "2-digit", hour12: true,
           });
+          const otherName = agent
+            ? "Onegent"
+            : memberShort[m.sender_id ?? ""] ?? "Member";
+          const initial = otherName.charAt(0).toUpperCase();
           return (
             <div
               key={m.id}
-              className={`text-xs rounded-xl px-2.5 py-1.5 max-w-[85%] ${
-                agent
-                  ? "bg-blue-500/10 text-blue-600 border border-blue-500/20 self-start italic"
-                  : mine
-                    ? "bg-[var(--text-primary)] text-[var(--bg)] self-end"
-                    : "bg-[var(--card-2)] text-[var(--text-primary)] border border-[var(--border)] self-start"
-              }`}
-              title={time}
+              className={`flex gap-2 ${mine ? "flex-row-reverse" : "flex-row"} items-start`}
             >
-              {agent && <span className="mr-1">🤖</span>}
-              {!agent && !mine && (
-                <span className="block text-[10px] opacity-60 mb-0.5">
-                  {memberShort[m.sender_id ?? ""] ?? "user"} · {time}
+              {/* Avatar — agent / other (not shown for self) */}
+              {!mine && (
+                <div
+                  className={`mt-4 w-7 h-7 rounded-full flex items-center justify-center text-[11px] font-semibold flex-shrink-0 ${
+                    agent
+                      ? "bg-blue-500/15 border border-blue-500/30 text-blue-600"
+                      : "bg-[var(--card-2)] border border-[var(--border)] text-[var(--text-secondary)]"
+                  }`}
+                  aria-hidden
+                >
+                  {agent ? "🤖" : initial}
+                </div>
+              )}
+
+              {/* Bubble + meta column */}
+              <div className={`flex flex-col max-w-[78%] min-w-0 ${mine ? "items-end" : "items-start"}`}>
+                {!mine && (
+                  <span
+                    className={`text-[10px] font-semibold mb-1 px-1 ${
+                      agent
+                        ? "text-blue-600 uppercase tracking-[0.08em]"
+                        : "text-[var(--text-muted)]"
+                    }`}
+                  >
+                    {otherName}
+                  </span>
+                )}
+                <div
+                  className={`text-[13px] leading-relaxed rounded-2xl px-3.5 py-2 break-words ${
+                    agent
+                      ? "bg-blue-500/10 text-blue-700 border border-blue-500/15"
+                      : mine
+                        ? "bg-[var(--text-primary)] text-[var(--bg)]"
+                        : "bg-[var(--card-2)] text-[var(--text-primary)] border border-[var(--border)]"
+                  }`}
+                  title={new Date(m.created_at).toLocaleString()}
+                >
+                  {m.content}
+                </div>
+                <span className={`text-[10px] text-[var(--text-muted)] mt-1 px-1 ${mine ? "text-right" : ""}`}>
+                  {time}
                 </span>
-              )}
-              {m.content}
-              {mine && (
-                <span className="block text-[10px] opacity-60 mt-0.5 text-right">{time}</span>
-              )}
+              </div>
             </div>
           );
         })}
         <div ref={bottomRef} />
       </div>
-      <div className="flex gap-2">
+
+      {/* Composer */}
+      <div className="flex gap-2 items-stretch">
         <input
           value={text}
           onChange={(e) => setText(e.target.value)}
           onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(); } }}
-          placeholder="Say something…"
+          placeholder="Say something…  (Enter to send)"
           maxLength={2000}
           className={`flex-1 ${INPUT}`}
         />
         <button
           onClick={send}
           disabled={sending || !text.trim()}
-          className={`px-4 py-2 ${CTA}`}
+          className={`px-5 py-2 ${CTA}`}
         >
-          Send
+          {sending ? "Sending…" : "Send"}
         </button>
       </div>
     </div>
