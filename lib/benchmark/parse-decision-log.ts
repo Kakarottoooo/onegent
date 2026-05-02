@@ -6,7 +6,7 @@
  */
 
 import { DRY_RUN_BOUNDARY_MARKER } from "@/lib/booking-autopilot/dry-run";
-import type { FailureReason, BenchmarkCaseStatus } from "./types";
+import type { FailureReason, BenchmarkCaseStatus, RestaurantBenchmarkCase } from "./types";
 
 /** Minimal shape of step.decisionLog entry that matters to the classifier. */
 export interface DecisionLogEntryLike {
@@ -510,4 +510,85 @@ const TRANSIENT_ERROR_PATTERNS = [
 export function isTransientError(errorText: string | null | undefined): boolean {
   if (!errorText) return false;
   return TRANSIENT_ERROR_PATTERNS.some((p) => p.test(errorText));
+}
+
+/**
+ * Compare what the dataset expected with what the executor actually produced.
+ *
+ * Dataset cases declare `expected_outcome` (e.g. "fully_automated",
+ * "no_availability", "payment_stop", "verify_gate"). A peak-time fallback
+ * case might explicitly expect `no_availability` — actually getting
+ * no_availability is then a PASS, not a fail. Without this distinction the
+ * dashboard treats every "failed" status as bad, which masks correctly-
+ * functioning fallback paths and inflates the apparent failure rate.
+ *
+ * Returns:
+ *   - `true`  → actual outcome matches expected (PASS)
+ *   - `false` → actual outcome does NOT match expected (FAIL)
+ *   - `null`  → no expected_outcome set on the case (legacy data; caller
+ *               should fall back to raw classification)
+ */
+export function outcomeMatchesExpected(
+  classified: Pick<
+    ClassifiedCaseResult,
+    | "success"
+    | "failure_reason"
+    | "fully_automated_success"
+    | "payment_stop_triggered"
+    | "verify_gate_triggered"
+    | "deep_link_handoff_triggered"
+    | "unsupported_platform_detected"
+  >,
+  expected: RestaurantBenchmarkCase["expected_outcome"],
+): boolean | null {
+  if (!expected) return null;
+  // Array form: PASS if actual matches any of the listed outcomes. Used
+  // for ±0 happy cases where venue inventory is genuinely uncertain — both
+  // fully_automated (slot was open) and no_availability (slot full,
+  // correctly identified) count as the agent doing its job.
+  const list = Array.isArray(expected) ? expected : [expected];
+  for (const e of list) {
+    if (matchesSingleExpected(classified, e)) return true;
+  }
+  return false;
+}
+
+function matchesSingleExpected(
+  classified: Pick<
+    ClassifiedCaseResult,
+    | "success"
+    | "failure_reason"
+    | "fully_automated_success"
+    | "payment_stop_triggered"
+    | "verify_gate_triggered"
+    | "deep_link_handoff_triggered"
+    | "unsupported_platform_detected"
+  >,
+  expected: NonNullable<RestaurantBenchmarkCase["expected_outcome"]>,
+): boolean {
+  // Should never receive an array here — outcomeMatchesExpected wraps.
+  if (Array.isArray(expected)) return false;
+  switch (expected) {
+    case "fully_automated":
+      return classified.fully_automated_success === true;
+    case "payment_stop":
+      // Boundary reached at payment + payment_stop flagged. Note that some
+      // OT venues with credit-card hold reach the cc-section boundary which
+      // we classify as success+payment_stop_triggered=true; both shapes
+      // should count as a payment_stop pass.
+      return (
+        classified.payment_stop_triggered === true ||
+        classified.failure_reason === "payment_stop"
+      );
+    case "no_availability":
+      return classified.failure_reason === "no_availability";
+    case "verify_gate":
+      return classified.verify_gate_triggered === true;
+    case "deep_link_handoff":
+      return classified.deep_link_handoff_triggered === true;
+    case "unsupported_platform":
+      return classified.unsupported_platform_detected === true;
+    default:
+      return false;
+  }
 }

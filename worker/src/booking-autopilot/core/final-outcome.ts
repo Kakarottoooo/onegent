@@ -66,6 +66,16 @@ export const NO_SLOTS_AT_TIME_SIGNALS = [
   //   "The next availability for 2 is Tomorrow."
   "there's no online availability for",
   "next availability for",
+  // Venue is bookable but the requested time window is full. OT shows this
+  // copy on /r/<slug> when the date is open but no slots within ±3.5h of
+  // the picked time exist:
+  //   "At the moment, there's no online availability within 3.5 hours of 7:00 PM."
+  //   "Next available is Sun, May 10  [11:15 AM] [11:30 AM] ..."
+  // Without this signal the venue's no_availability page misclassifies as
+  // "stuck at listing" → generic "couldn't be selected" error → user gets
+  // no actionable next step (test case: TAO Downtown 5/8/2026 19:00).
+  "no online availability within",
+  "next available is",
   "没有可用",
   "找不到任何",
 ];

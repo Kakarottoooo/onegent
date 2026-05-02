@@ -1,0 +1,30 @@
+name: Check lib/worker drift
+
+# B+B2 architecture has two copies of the booking executor: lib/ (Vercel
+# in-process path) and worker/src/ (Railway/local worker). Real functional
+# drift between them = silent prod bugs depending on which path runs.
+#
+# This workflow runs `npm run check-drift` (scripts/check-drift.ts) on every
+# push to master and every pull request. It fails the build if any of the
+# strict-paired files differ. See scripts/check-drift.ts for the file list
+# and the fix recipe.
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+    branches: [master]
+
+jobs:
+  check-drift:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      # tsx is available via npx without npm install — fast CI.
+      - name: Run drift check
+        run: npx -y tsx@4 scripts/check-drift.ts

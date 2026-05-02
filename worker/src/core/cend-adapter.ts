@@ -27,6 +27,8 @@
  */
 
 import type { BookingJobStep } from "@/lib/db";
+import { createHash } from "node:crypto";
+import { hostname } from "node:os";
 import type {
   ExecutionParams,
   ExecutionScenario,
@@ -45,6 +47,88 @@ export const CORE_SUPPORTED_SCENARIOS: ReadonlyArray<ExecutionScenario> = [
   "flight",
   "activity",
 ] as const;
+
+// 2026-05-02: re-introducing the dual-marker isolation that commit 4d0496f
+// had ripped out. The justification for the rip-out was "no phantom worker
+// exists" — but the next round of audit_logs showed a /app/src/... stack
+// trace with `usingCloud:true` and Browserbase 401 errors after the user
+// rotated the Browserbase key. That stack trace cannot come from this
+// machine (Windows path is C:\\Users\\Gzw19\\..., no BROWSERBASE_API_KEY in
+// .env.local). It is a real Linux Docker container we have not located,
+// running an older build of this repo, racing the local worker via
+// `FOR UPDATE SKIP LOCKED` against the same Neon DB.
+//
+// 2026-05-02 (round 2): Job 811819ae proved phantom could STILL claim
+// "lib/core/execution-local" rows AND reject them with the legacy-shape
+// validator error in 1.8s — meaning phantom's deployment has the post-
+// 43fba56 CORE_EXECUTION_SOURCE export but an INCONSISTENT or older
+// isCoreExecutionSource. To lock phantom out completely we now suffix
+// the dev marker with the local machine's hostname. Phantom (running on
+// a Linux Docker container with a different hostname) computes a
+// different marker and filters the queue with that — its SQL `=` test
+// against my rows cannot match.
+//
+// Production path is unchanged: NODE_ENV === "production" → plain
+// "lib/core/execution". Railway worker (when shipped) and Vercel route
+// both observe "production" so the production queue stays single-marker.
+//
+// Removal trigger: when the phantom container is found and stopped, flip
+// this back to a single constant `"lib/core/execution"` everywhere.
+function deriveDevMarker(): string {
+  // Static imports are intentional. The worker runs under ESM/tsx where
+  // `require` is undefined; a dynamic-require fallback silently produced the
+  // legacy marker and let phantom workers keep stealing local jobs.
+  const hash = createHash("sha256").update(hostname()).digest("hex").slice(0, 10);
+  return `lib/core/execution-local-${hash}`;
+}
+
+export const CORE_EXECUTION_SOURCE =
+  process.env.NODE_ENV === "production"
+    ? "lib/core/execution"
+    : deriveDevMarker();
+
+// Accept any of:
+//   - "lib/core/execution"           — production marker
+//   - "lib/core/execution-local"     — legacy dev marker (in-flight rows from before this commit)
+//   - "lib/core/execution-local-*"   — hostname-scoped dev marker (new)
+export function isCoreExecutionSource(value: unknown): value is string {
+  if (typeof value !== "string") return false;
+  return (
+    value === "lib/core/execution" ||
+    value === "lib/core/execution-local" ||
+    value.startsWith("lib/core/execution-local-")
+  );
+}
+
+// 2026-05-02 (round 3): Job e6543ee3 proved phantom doesn't filter
+// __source at all — phantom's claimOne does plain `WHERE status='pending'`
+// and grabs anything that's pending, regardless of marker. Round-2's
+// hostname-scoped __source is therefore not enough.
+//
+// Round-3 partition: change the STATUS STRING in dev so phantom's
+// hardcoded `WHERE status='pending'` literal cannot match. Phantom's
+// code is fixed; we control which strings the local route writes. By
+// writing `pending_local` in dev (instead of `pending`), phantom's
+// SELECT cannot match the row at all — it remains queue-invisible.
+//
+// Production stays on `pending` so the Railway worker (when it ships
+// hotel/flight/activity) and the existing prod queue keep working
+// unchanged.
+//
+// Worker's claimOne SQL must use this same constant so dev rows are
+// claimed by local. The route's auto-stamp + retry paths must also
+// write this value for new rows.
+export const PENDING_QUEUE_STATUS =
+  process.env.NODE_ENV === "production" ? "pending" : "pending_local";
+
+// Backward-compat: a worker should ALSO drain rows that are stuck in
+// plain "pending" (e.g. legacy in-flight rows, or a dev shell that
+// briefly ran without the env). The list is ordered by preference —
+// local worker prefers PENDING_QUEUE_STATUS, then falls back. In dev
+// mode we deliberately do NOT fall back to "pending" because phantom
+// will already have claimed those — we leave them alone.
+export const CLAIMABLE_PENDING_STATUSES: readonly string[] =
+  PENDING_QUEUE_STATUS === "pending" ? ["pending"] : ["pending_local"];
 
 export function isCoreSupported(stepType: BookingJobStep["type"]): boolean {
   return (CORE_SUPPORTED_SCENARIOS as readonly string[]).includes(stepType);
@@ -76,6 +160,22 @@ export function markStepForCore(step: BookingJobStep): BookingJobStep {
   const profileId = typeof body.profileId === "number" ? body.profileId : undefined;
   const profile = body.profile;
 
+  // Preserve out-of-band fields that the executor still needs to honor:
+  //   - fallback_policy: per-case ±X-min time tolerance + platform-switch
+  //     intent; benchmark cases set this and stagehand-executor reads it
+  //     as `input.fallbackPolicy` (line 3962). Without this passthrough,
+  //     ±0 strict cases like Don Angie 006 would fall back to default
+  //     ±90 and lose signal.
+  //   - startUrl: explicit booking-platform URL (canonical /r/<slug> or
+  //     vanity URL for OT, /cities/.../venues/<slug> for Resy). Without
+  //     this passthrough, the executor would always rebuild a generic OT
+  //     search URL via buildRestaurantContext, defeating the per-case
+  //     URL choice (run 13 case 022-025 hit this — Tock URLs got
+  //     overwritten to OT search).
+  const fallbackPolicy = body.fallback_policy as unknown;
+  const startUrl = typeof body.startUrl === "string" ? body.startUrl : undefined;
+  const consent = body.consent as unknown;
+
   return {
     ...step,
     body: {
@@ -83,8 +183,11 @@ export function markStepForCore(step: BookingJobStep): BookingJobStep {
       params,
       ...(profileId !== undefined ? { profileId } : {}),
       ...(profile ? { profile } : {}),
+      ...(fallbackPolicy !== undefined ? { fallback_policy: fallbackPolicy } : {}),
+      ...(startUrl !== undefined ? { startUrl } : {}),
+      ...(consent !== undefined ? { consent } : {}),
       // Marker that runUniversalStep watches for dual-gate dispatch.
-      __source: "lib/core/execution",
+      __source: CORE_EXECUTION_SOURCE,
     },
   };
 }
@@ -110,12 +213,19 @@ function convertBodyToParams(
 }
 
 function convertRestaurant(body: Record<string, unknown>): RestaurantBookingParams {
+  const startUrl = typeof body.startUrl === "string" ? body.startUrl : undefined;
+  const fallbackPolicyRaw = body.fallback_policy;
+  const fallbackPolicy = (fallbackPolicyRaw && typeof fallbackPolicyRaw === "object")
+    ? (fallbackPolicyRaw as RestaurantBookingParams["fallback_policy"])
+    : undefined;
   return {
     restaurant_name: expectString(body, "restaurantName"),
     city: expectString(body, "city"),
     date: expectString(body, "date"),
     time: expectString(body, "time"),
     covers: expectNumber(body, "covers"),
+    ...(startUrl !== undefined ? { startUrl } : {}),
+    ...(fallbackPolicy !== undefined ? { fallback_policy: fallbackPolicy } : {}),
   };
 }
 

@@ -361,6 +361,26 @@ WORKED EXAMPLES — use these to calibrate before answering:
      WHY: Same pattern as F/G but for hotel. star_rating + neighborhood are
           implied by the named venue — leave them blank.
 
+  I. Multi-word venue with location modifier in the name (Downtown, Tribeca,
+     Midtown, Uptown, etc.) — DO NOT strip the modifier:
+     Input: "tao downtown new york 5月14号晚上7点 2人"
+     → restaurant={ restaurant_name="TAO Downtown", city="New York",
+                    date="2026-05-14", time="19:00", party_size=2 }
+     Input: "Book Nobu Downtown for 4 tomorrow 8pm"
+     → restaurant={ restaurant_name="Nobu Downtown", time="20:00", party_size=4 }
+     Input: "Carbone Greenwich Village 2026年5月10号 19:30 3人"
+     → restaurant={ restaurant_name="Carbone", neighborhood="Greenwich Village",
+                    date="2026-05-10", time="19:30", party_size=3 }
+     WHY: TAO has multiple NYC venues (TAO Uptown vs TAO Downtown). Stripping
+          "Downtown" routes the booking to the wrong venue. The modifier is
+          part of the proper noun. Heuristic: a known city name at the END
+          of the venue phrase ("New York", "NYC", "San Francisco", "LA") is
+          the city slot. Everything before that — including "Downtown",
+          "Uptown", "Tribeca", "Midtown" — stays in restaurant_name. A
+          neighborhood that is NOT part of the venue's official name (e.g.
+          "Greenwich Village" is a neighborhood, not a TAO/Nobu suffix) goes
+          into the neighborhood slot instead.
+
   CRITICAL — DO NOT populate restaurant_name / hotel_name speculatively:
      "Find me a romantic Italian place" → restaurant_name STAYS BLANK (the
      user is describing taste, not naming a venue). Only fill the slot when

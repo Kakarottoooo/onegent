@@ -11,6 +11,7 @@
 
 import { describe, it, expect } from "vitest";
 import {
+  CORE_EXECUTION_SOURCE,
   CORE_SUPPORTED_SCENARIOS,
   isCoreSupported,
   markStepForCore,
@@ -117,7 +118,7 @@ describe("markStepForCore — restaurant", () => {
     const marked = markStepForCore(restaurantStep());
     const body = marked.body as Record<string, unknown>;
     expect(body.scenario).toBe("restaurant");
-    expect(body.__source).toBe("lib/core/execution");
+    expect(body.__source).toBe(CORE_EXECUTION_SOURCE);
     expect(body.params).toEqual({
       restaurant_name: "Carbone",
       city: "New York",
@@ -144,7 +145,7 @@ describe("markStepForCore — restaurant", () => {
 
   it("throws on missing required field (covers as string, not number)", () => {
     expect(() => markStepForCore(restaurantStep({ covers: "two" }))).toThrow(
-      /missing required number field "covers"/,
+      /missing required number field "covers\|party_size"/,
     );
   });
 });
@@ -260,7 +261,7 @@ describe("markStepForCore — activity", () => {
     const marked = markStepForCore(activityStep());
     const body = marked.body as Record<string, unknown>;
     expect(body.scenario).toBe("activity");
-    expect(body.__source).toBe("lib/core/execution");
+    expect(body.__source).toBe(CORE_EXECUTION_SOURCE);
     expect(body.params).toEqual({
       event_name: "Hamilton",
       city: "New York",
@@ -332,10 +333,10 @@ describe("trip-level per-step gating (array.map pattern from create-trip route)"
 
     const sources = marked.map((s) => (s.body as Record<string, unknown>).__source);
     expect(sources).toEqual([
-      "lib/core/execution",
-      "lib/core/execution",
-      "lib/core/execution",
-      "lib/core/execution",
+      CORE_EXECUTION_SOURCE,
+      CORE_EXECUTION_SOURCE,
+      CORE_EXECUTION_SOURCE,
+      CORE_EXECUTION_SOURCE,
     ]);
     const scenarios = marked.map((s) => (s.body as Record<string, unknown>).scenario);
     expect(scenarios).toEqual(["hotel", "flight", "restaurant", "activity"]);
@@ -353,7 +354,7 @@ describe("trip-level per-step gating (array.map pattern from create-trip route)"
     };
     const trip: BookingJobStep[] = [restaurantStep(), unknownStep];
     const marked = trip.map((s) => (isCoreSupported(s.type) ? markStepForCore(s) : s));
-    expect((marked[0].body as Record<string, unknown>).__source).toBe("lib/core/execution");
+    expect((marked[0].body as Record<string, unknown>).__source).toBe(CORE_EXECUTION_SOURCE);
     expect(marked[1].body).toEqual(unknownStep.body);
   });
 });

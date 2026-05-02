@@ -15,25 +15,31 @@
  * signature change.
  */
 
-import type { BrowserTaskInput, BookingProfile, BrowserTaskStatus } from "@/lib/booking-autopilot/types";
-import { runBrowserTask } from "@/lib/booking-autopilot/stagehand-executor";
+import type { BrowserTaskInput, BookingProfile } from "@/lib/booking-autopilot/types";
 import {
   buildRestaurantTask,
   buildHotelTask,
 } from "@/lib/booking-autopilot/core/task-builders";
-import { buildBookingComUrl } from "@/lib/agent/planners/booking-links";
+import {
+  buildBookingComUrl,
+  buildOpenTableCanonicalUrl,
+  buildOpenTableUrl,
+  shouldUseCanonicalRestaurantSearchUrl,
+} from "@/lib/agent/planners/booking-links";
 import { getBookingProfileById, getDefaultBookingProfile } from "@/lib/db";
-import type { DecisionLogEntry } from "@/lib/db";
 
 import { writeAudit } from "@/lib/core/audit/audit-log";
 import type { AuditEventType } from "@/lib/core/audit/types";
 import { DEFAULT_CONSENT_POLICY } from "@/lib/core/consent/default-policy";
 import type { ConsentPolicy } from "@/lib/core/consent/types";
+import { runBookingExecutor } from "@/lib/execution-v2";
+import { buildProfileGap } from "./profile-requirements";
 import type {
   ExecutionJobRequest,
   ExecutionJobResult,
   ExecutionJobStatus,
   ExecutionParams,
+  NeedsProfileDataPayload,
   ActivityBookingParams,
   FlightBookingParams,
   HotelBookingParams,
@@ -84,31 +90,37 @@ export async function runExecutionJob(
     profile = await resolveProfile(request, ctx.userId ?? null);
   } catch (err) {
     const message = err instanceof Error ? err.message : "Profile resolution failed";
+    const profileGap = buildProfileGap(request.request, emptyProfile());
     await writeAudit({
       jobId: ctx.jobId,
-      type: "job_failed",
+      type: "job_needs_profile_data",
       stepIndex,
-      message: `Profile resolution failed: ${message}`,
+      message: profileGap?.message ?? `Profile resolution failed: ${message}`,
+      details: { profileGap, resolutionError: message },
     });
-    return errorResult(ctx.jobId, message, createdAt);
+    return profileGapResult(
+      ctx.jobId,
+      profileGap ?? {
+        kind: "needs_profile_data",
+        scenario: request.request.scenario,
+        missing: ["first_name", "last_name", "email", "phone"],
+        message: "I need your booking profile details before I can continue.",
+      },
+      createdAt,
+    );
   }
 
-  // ── Flight-specific precondition: DOB required ──
-  // Mirrors route.ts. DOB is universally required for both domestic and
-  // international flights. Passport is optional here — domestic US routes
-  // (e.g. JFK→LAX) don't require it; only international/some carriers do,
-  // and fillFlightGuestFormWithAI will handle missing passport gracefully
-  // when the form actually demands it.
-  if (request.request.scenario === "flight" && !profile.date_of_birth) {
-    const missingMsg = `Missing travel documents: date of birth required for flight booking. Please add it in Settings → My Profile → Travel Documents, then try booking again.`;
+  // Stop before opening a browser when the profile is missing required fields.
+  const profileGap = buildProfileGap(request.request, profile);
+  if (profileGap) {
     await writeAudit({
       jobId: ctx.jobId,
-      type: "job_failed",
+      type: "job_needs_profile_data",
       stepIndex,
-      message: `Flight booking blocked: missing date of birth`,
-      details: { missingDocs: ["date of birth"] },
+      message: profileGap.message,
+      details: { profileGap },
     });
-    return errorResult(ctx.jobId, missingMsg, createdAt);
+    return profileGapResult(ctx.jobId, profileGap, createdAt);
   }
 
   // ── Build startUrl + task from declarative params ──
@@ -127,6 +139,16 @@ export async function runExecutionJob(
     return errorResult(ctx.jobId, message, createdAt);
   }
 
+  // Forward restaurant-specific fallback_policy (±X-min slot tolerance,
+  // platform/venue switch flags). Without this passthrough, benchmark
+  // ±0 strict cases would silently fall back to default ±90 and lose
+  // signal — Don Angie 006 / Nobu 011 etc. would always succeed via
+  // adjacent slots instead of correctly hitting no_availability.
+  const restaurantFallbackPolicy =
+    request.request.scenario === "restaurant"
+      ? request.request.params.fallback_policy
+      : undefined;
+
   const input: BrowserTaskInput = {
     startUrl,
     task,
@@ -134,6 +156,7 @@ export async function runExecutionJob(
     jobId: ctx.jobId,
     stepIndex,
     profileId: request.profileId,
+    ...(restaurantFallbackPolicy ? { fallbackPolicy: restaurantFallbackPolicy } : {}),
     // Forward flight-specific hints so the Stagehand executor can target
     // the right flight card on the Expedia search results page.
     ...(isFlight(request.request)
@@ -155,37 +178,24 @@ export async function runExecutionJob(
   });
 
   // ── Run the browser task ──
-  const taskResult = await runBrowserTask(input);
-  const jobStatus = mapTaskStatusToJobStatus(taskResult.status);
-
-  const result: ExecutionJobResult = {
-    jobId: ctx.jobId,
-    status: jobStatus,
-    handoffUrl: taskResult.handoffUrl,
-    sessionUrl: taskResult.sessionUrl,
-    summary: taskResult.summary,
-    screenshotBase64: taskResult.screenshotBase64,
-    decisionLog: buildSummaryLog(taskResult.debugTrace, createdAt),
-    error: taskResult.error,
-    availableSlots: taskResult.availableSlots,
+  const result = await runBookingExecutor({
+    request,
+    ctx: { jobId: ctx.jobId, userId: ctx.userId, stepIndex },
+    browserTask: input,
     createdAt,
-    updatedAt: new Date().toISOString(),
-    completedAt: isTerminalStatus(jobStatus) ? new Date().toISOString() : undefined,
-    // Single-attempt adapter — US-007 recovery.ts overrides these
-    // when it wraps runExecutionJob in a retry/fallback loop.
-    attemptCount: 1,
-    usedFallback: false,
-  };
+  });
+  const jobStatus = result.status;
 
   await writeAudit({
     jobId: ctx.jobId,
     type: mapJobStatusToAuditEvent(jobStatus),
     stepIndex,
-    message: taskResult.summary,
+    message: result.summary,
     details: {
       status: jobStatus,
-      ...(taskResult.error ? { error: taskResult.error } : {}),
-      ...(taskResult.availableSlots?.length ? { availableSlots: taskResult.availableSlots } : {}),
+      ...(result.error ? { error: result.error } : {}),
+      ...(result.profileGap ? { profileGap: result.profileGap } : {}),
+      ...(result.availableSlots?.length ? { availableSlots: result.availableSlots } : {}),
     },
   });
 
@@ -312,10 +322,49 @@ function buildRestaurantContext(
   p: RestaurantBookingParams,
   profile: BookingProfile,
 ): { startUrl: string; task: string } {
-  // Mirrors route.ts:343-370. term=restaurantName+city biases OpenTable's
-  // search to the right metro regardless of prior session cookie.
-  const termRaw = p.city ? `${p.restaurant_name} ${p.city}` : p.restaurant_name;
-  const startUrl = `https://www.opentable.com/s?term=${encodeURIComponent(termRaw)}&covers=${p.covers}&dateTime=${p.date}T${p.time}:00`;
+  // Prefer the canonical /r/<slug> URL when we have name+city — this skips
+  // OT search entirely and lands on the venue's detail page directly.
+  // Avoids the Nashville-sticky-dropdown bug: OT's `?term=` search filters
+  // by the location dropdown (cookie / IP), not by anything in the term.
+  // A term="Tao Downtown New York" submitted from a Nashville-sticky session
+  // returns 185 unrelated Nashville results — `metroId` scoping (now baked
+  // into buildOpenTableUrl) overrides the dropdown when search runs.
+  // If the slug guess is wrong (404), the executor's listing-page detection
+  // triggers the recovery loop and the term-based search runs as backup.
+  const canonicalUrl = p.city
+    ? buildOpenTableCanonicalUrl(p.restaurant_name, p.city, {
+        date: p.date,
+        time: p.time,
+        covers: p.covers,
+      })
+    : null;
+  const fallbackSearchUrl = buildOpenTableUrl({
+    restaurantName: p.city ? `${p.restaurant_name} ${p.city}` : p.restaurant_name,
+    city: p.city,
+    date: p.date,
+    time: p.time,
+    covers: p.covers,
+  });
+  // Honor caller-provided startUrl when it points at a known booking
+  // platform (OpenTable canonical /r/, vanity URL, Resy venue page,
+  // exploretock, sevenrooms, benchmark:// sentinel). Falls back to the
+  // canonical-then-search chain when the supplied URL is a venue marketing
+  // site that would 404 / drop the date.
+  // 2026-05-02: temporarily de-prefer canonicalUrl. Going to /r/<slug>
+  // directly lands on the detail page, but the in-page time-slot selectors
+  // (`[data-test="time-picker"]` / `[data-test="time-slots"]` / strict `<a>` /
+  // `<button>` regex scan) miss OT's current React DOM, so worker reports
+  // "0 time slots" even when the page visibly has 11:00 PM buttons. The
+  // metroId-scoped search URL still solves the Nashville-sticky bug, and the
+  // existing search-results-cards click path is verified to drive booking
+  // flow end-to-end. canonicalUrl is left in place so the next fix can flip
+  // this back to `(canonicalUrl ?? fallbackSearchUrl)` once the detail-page
+  // selectors are updated.
+  void canonicalUrl;
+  const startUrl =
+    p.startUrl && !shouldUseCanonicalRestaurantSearchUrl(p.startUrl)
+      ? p.startUrl
+      : fallbackSearchUrl;
   const { task } = buildRestaurantTask({
     restaurantName: p.restaurant_name,
     city: p.city,
@@ -438,27 +487,16 @@ function buildActivityContext(
 
 // ─── Status mapping ──────────────────────────────────────────────────────────
 
-function mapTaskStatusToJobStatus(s: BrowserTaskStatus): ExecutionJobStatus {
-  switch (s) {
-    case "completed":
-      return "completed";
-    case "paused_payment":
-      return "paused_payment";
-    case "needs_login":
-      return "needs_login";
-    case "captcha":
-      return "captcha";
-    case "no_availability":
-      return "no_availability";
-    case "error":
-      return "error";
-  }
-}
-
 function mapJobStatusToAuditEvent(s: ExecutionJobStatus): AuditEventType {
   switch (s) {
     case "paused_payment":
       return "job_paused_payment";
+    case "needs_otp":
+      return "job_needs_otp";
+    case "needs_profile_data":
+      return "job_needs_profile_data";
+    case "ready_for_confirmation":
+      return "job_ready_for_confirmation";
     case "completed":
       return "job_completed";
     case "pending":
@@ -470,17 +508,6 @@ function mapJobStatusToAuditEvent(s: ExecutionJobStatus): AuditEventType {
     case "error":
       return "job_failed";
   }
-}
-
-function isTerminalStatus(s: ExecutionJobStatus): boolean {
-  return (
-    s === "paused_payment" ||
-    s === "completed" ||
-    s === "no_availability" ||
-    s === "error" ||
-    s === "needs_login" ||
-    s === "captcha"
-  );
 }
 
 // ─── Small utilities ─────────────────────────────────────────────────────────
@@ -499,16 +526,40 @@ function shortHost(url: string): string {
   }
 }
 
-function buildSummaryLog(trace: string[] | undefined, createdAt: string): DecisionLogEntry[] {
-  if (!trace?.length) return [];
-  return [
-    {
-      ts: createdAt,
-      type: "info",
-      message: `Executor trace (${trace.length} entries)`,
-      outcome: trace[trace.length - 1]?.slice(0, 120),
-    },
-  ];
+function emptyProfile(): BookingProfile {
+  return {
+    first_name: "",
+    last_name: "",
+    email: "",
+    phone: "",
+  };
+}
+
+function profileGapResult(
+  jobId: string,
+  profileGap: NeedsProfileDataPayload,
+  createdAt: string,
+): ExecutionJobResult {
+  return {
+    jobId,
+    status: "needs_profile_data",
+    summary: profileGap.message,
+    decisionLog: [
+      {
+        ts: createdAt,
+        type: "info",
+        message: profileGap.message,
+        outcome: "needs_profile_data",
+      },
+    ],
+    error: profileGap.message,
+    profileGap,
+    createdAt,
+    updatedAt: createdAt,
+    completedAt: createdAt,
+    attemptCount: 1,
+    usedFallback: false,
+  };
 }
 
 function errorResult(

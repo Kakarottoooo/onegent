@@ -78,6 +78,48 @@ const inFlightJobStarts = new Set<string>();
 function now() { return new Date().toISOString(); }
 function sleep(ms: number) { return new Promise<void>((r) => setTimeout(r, ms)); }
 
+function looksLikeSyntheticProfileValue(field: string, value: string | undefined): boolean {
+  if (!value) return false;
+  const normalized = value.trim().toLowerCase();
+  if (!normalized) return false;
+
+  if (field === "email") {
+    return (
+      normalized.endsWith("@onegent.test") ||
+      normalized.endsWith("@example.com") ||
+      normalized.includes("benchmark")
+    );
+  }
+
+  if (field === "phone") {
+    const digits = normalized.replace(/\D/g, "");
+    return (
+      digits === "1234567890" ||
+      digits === "15555550100" ||
+      digits === "5555550100" ||
+      /^555\d{7}$/.test(digits)
+    );
+  }
+
+  if (field === "first_name" || field === "last_name") {
+    return normalized === "benchmark" || normalized === "user" || normalized === "john" || normalized === "doe";
+  }
+
+  return false;
+}
+
+function preferInlineProfileValue(
+  field: string,
+  inlineValue: string | undefined,
+  dbValue: string | undefined,
+  allowSyntheticInline: boolean,
+): string | undefined {
+  if (inlineValue && (!looksLikeSyntheticProfileValue(field, inlineValue) || allowSyntheticInline)) {
+    return inlineValue;
+  }
+  return dbValue;
+}
+
 async function callEndpoint(
   endpoint: string,
   body: Record<string, unknown>
@@ -352,6 +394,9 @@ async function runUniversalStepViaCore(
       params: body.params,
     } as ExecutionParams,
     profileId: typeof body.profileId === "number" ? body.profileId : undefined,
+    // Inline profile passthrough — required by anonymous benchmark cases
+    // (userId=null + no profileId, only an inline profile in body).
+    profile: body.profile as ExecutionJobRequest["profile"],
     consent: body.consent as ConsentPolicy | undefined,
   };
 
@@ -370,7 +415,9 @@ async function runUniversalStepViaCore(
   // inline here to avoid pulling that internal helper onto route.ts's
   // import surface.
   const stepStatus: BookingJobStep["status"] =
-    result.status === "paused_payment"
+    result.status === "paused_payment" ||
+    result.status === "needs_otp" ||
+    result.status === "ready_for_confirmation"
       ? "awaiting_confirmation"
       : result.status === "completed"
       ? "done"
@@ -402,7 +449,7 @@ async function runUniversalStep(
   console.log("[start] runUniversalStep invoked", {
     jobId: bookingJobId,
     stepType: step.type,
-    hasCoreMarker: (step.body as Record<string, unknown>)?.__source === "lib/core/execution",
+    hasCoreMarker: false,
     useCoreFlag: process.env.USE_CORE_EXECUTOR === "true",
   });
   // ── US-009: Dispatch to lib/core new path when flag + marker match ──
@@ -415,9 +462,15 @@ async function runUniversalStep(
   // synthesis) which don't write the marker always continue on the old
   // path regardless of the flag. Zero-regression by construction.
   const bodyAny = step.body as Record<string, unknown>;
+  const { isCoreExecutionSource } = await import("@/lib/core/cend-adapter");
+  console.log("[start] runUniversalStep marker", {
+    jobId: bookingJobId,
+    source: bodyAny.__source,
+    hasCoreMarker: isCoreExecutionSource(bodyAny.__source),
+  });
   if (
     process.env.USE_CORE_EXECUTOR === "true" &&
-    bodyAny.__source === "lib/core/execution"
+    isCoreExecutionSource(bodyAny.__source)
   ) {
     console.log("[start] dual-gate HIT — routing via lib/core.runExecutionJobWithRecovery", {
       jobId: bookingJobId,
@@ -469,10 +522,42 @@ async function runUniversalStep(
       //
       // `term=Restaurant+Name City+Name` reliably biases the match to the
       // right metro while still matching the restaurant by name.
-      if (!resolvedBody.startUrl) {
+      const existingStartUrl =
+        typeof resolvedBody.startUrl === "string" ? resolvedBody.startUrl : "";
+      const {
+        buildOpenTableUrl,
+        buildOpenTableCanonicalUrl,
+        shouldUseCanonicalRestaurantSearchUrl,
+      } = await import("@/lib/agent/planners/booking-links");
+
+      // Official venue websites frequently drop the case date/time and can
+      // bounce into unrelated OpenTable experience flows (e.g. brunch pages on
+      // the wrong day). For structured restaurant bookings, prefer a canonical
+      // booking surface unless the caller already supplied a real restaurant
+      // booking URL (OpenTable / Resy / Yelp).
+      if (shouldUseCanonicalRestaurantSearchUrl(existingStartUrl)) {
+        // Prefer the canonical /r/<slug> URL when we have name+city — this
+        // skips OT search entirely and lands directly on the venue's detail
+        // page. Avoids the Nashville-sticky-dropdown bug that the term-only
+        // search hits when the chromium profile picks up a non-NYC location.
+        // If the slug guess is wrong (404), the stagehand executor's
+        // listing-page detection triggers the recovery loop and the term-
+        // based search runs anyway — but with metroId scoping now baked in.
+        const canonicalUrl =
+          rName && rCity ? buildOpenTableCanonicalUrl(rName, rCity) : null;
         const termRaw = rCity ? `${rName} ${rCity}` : rName;
-        const otUrl = `https://www.opentable.com/s?term=${encodeURIComponent(termRaw)}&covers=${rCovers}&dateTime=${rDate}T${rTime}:00`;
-        resolvedBody = { ...resolvedBody, startUrl: otUrl };
+        resolvedBody = {
+          ...resolvedBody,
+          startUrl:
+            canonicalUrl ??
+            buildOpenTableUrl({
+              restaurantName: termRaw,
+              city: rCity,
+              date: rDate,
+              time: rTime,
+              covers: rCovers,
+            }),
+        };
       }
 
       // (2) Synthesize task NL when missing — independent of startUrl.
@@ -608,13 +693,14 @@ async function runUniversalStep(
         // Prefer inline profile for contact info (always up-to-date from picker),
         // but add card data + travel docs from DB (sensitive fields never stored inline).
         const inline = (resolvedBody.profile ?? {}) as Record<string, string | undefined>;
+        const allowSyntheticInline = resolvedBody.benchmark_dry_run === true;
         resolvedBody = {
           ...resolvedBody,
           profile: {
-            first_name: inline.first_name || dbProfile.first_name,
-            last_name: inline.last_name || dbProfile.last_name,
-            email: inline.email || dbProfile.email,
-            phone: inline.phone || dbProfile.phone,
+            first_name: preferInlineProfileValue("first_name", inline.first_name, dbProfile.first_name, allowSyntheticInline),
+            last_name: preferInlineProfileValue("last_name", inline.last_name, dbProfile.last_name, allowSyntheticInline),
+            email: preferInlineProfileValue("email", inline.email, dbProfile.email, allowSyntheticInline),
+            phone: preferInlineProfileValue("phone", inline.phone, dbProfile.phone, allowSyntheticInline),
             address_line1: inline.address_line1 || dbProfile.address_line1,
             city: inline.city || dbProfile.city,
             state: inline.state || dbProfile.state,
@@ -801,7 +887,7 @@ async function runUniversalStep(
         log.push({
           ts: now(),
           type: "attempt",
-          message: entry,
+          message: entry.line,
           outcome: "Executor trace",
         });
       }
@@ -1299,44 +1385,109 @@ export async function POST(_req: NextRequest, { params }: Params) {
     if (!isStuck) {
       return NextResponse.json({ error: "Job already running" }, { status: 409 });
     }
-    // Reset stuck job so the run below can proceed
-    await updateBookingJobStatus(id, "pending");
+    // Reset stuck job so the run below can proceed.
+    // Round-3 phantom isolation: use PENDING_QUEUE_STATUS in dev so the
+    // reset row is invisible to phantom's `WHERE status='pending'` filter.
+    const { PENDING_QUEUE_STATUS: _ps } = await import("@/lib/core/cend-adapter");
+    await updateBookingJobStatus(id, _ps as "pending");
   }
 
-  // ── USE_WORKER_FOR feature flag (Worker D2) ────────────────────────────
-  // When every step.type is in USE_WORKER_FOR AND every step body carries
-  // the lib/core "__source" marker, hand off to the Railway worker by
-  // leaving status='pending' and returning 202. The worker polls
-  // booking_jobs.status='pending' and claims via FOR UPDATE SKIP LOCKED.
+  // ── Worker dispatch (B+B2) ─────────────────────────────────────────────
+  // Booking automation runs in the worker (worker/src/) — Vercel's role
+  // is to enqueue. Leave booking_jobs.status='pending', return 202, and
+  // the worker claims via FOR UPDATE SKIP LOCKED on its next poll.
   //
-  // The double check (env list + per-step marker) is intentional: the env
-  // gate is the operator's risk control, the marker check is the technical
-  // precondition (worker only knows how to execute lib/core-shape jobs).
-  // Mismatched jobs fall through to the legacy in-process path below.
+  // Auto-stamps the lib/core "__source" marker on any restaurant /
+  // hotel / flight / activity step that's missing it (older callers
+  // that didn't go through markStepForCore). The worker's SQL claim
+  // filter requires the marker, so without auto-stamp those jobs
+  // would sit pending indefinitely.
+  //
+  // USE_WORKER_FOR is still honored for legacy unstamped jobs. Once a job
+  // already carries the lib/core marker, never fall back to the old in-process
+  // executor: the worker claim SQL and timeline code both expect that path.
   const workerScenarios = (process.env.USE_WORKER_FOR ?? "")
     .split(",")
     .map((s) => s.trim())
     .filter(Boolean);
-  if (workerScenarios.length > 0) {
-    const allRoutable = job.steps.every((step) => {
-      if (!workerScenarios.includes(step.type)) return false;
+  const effectiveWorkerScenarios = workerScenarios.length > 0
+    ? workerScenarios
+    : ["restaurant", "hotel", "flight", "activity"];
+  const {
+    CORE_EXECUTION_SOURCE,
+    isCoreExecutionSource,
+    markStepForCore,
+    isCoreSupported: _isCoreSupported,
+    PENDING_QUEUE_STATUS,
+  } = await import(
+    "@/lib/core/cend-adapter"
+  );
+  const routeDecision = job.steps.map((step) => {
+    const body = step.body as Record<string, unknown> | undefined;
+    return {
+      type: step.type,
+      source: body?.__source,
+      supported: _isCoreSupported(step.type),
+      workerEnabled: effectiveWorkerScenarios.includes(step.type),
+    };
+  });
+  const allCoreMarked = job.steps.length > 0 && routeDecision.every((step) =>
+    isCoreExecutionSource(step.source),
+  );
+  const allRoutable = job.steps.length > 0 && routeDecision.every((step) =>
+    step.supported && step.workerEnabled,
+  );
+  console.log(`[start] ${id} worker route decision`, {
+    status: job.status,
+    effectiveWorkerScenarios,
+    allCoreMarked,
+    allRoutable,
+    steps: routeDecision,
+  });
+  if (allCoreMarked || allRoutable) {
+    let stampedCount = 0;
+    const stampedSteps = job.steps.map((step) => {
       const body = step.body as Record<string, unknown> | undefined;
-      return body?.__source === "lib/core/execution";
+      if (isCoreExecutionSource(body?.__source)) {
+        if (body?.__source === CORE_EXECUTION_SOURCE) return step;
+        stampedCount += 1;
+        return {
+          ...step,
+          body: {
+            ...body,
+            __source: CORE_EXECUTION_SOURCE,
+          },
+        };
+      }
+      if (!_isCoreSupported(step.type)) return step;
+      try {
+        stampedCount += 1;
+        return markStepForCore(step);
+      } catch {
+        return step;
+      }
     });
-    if (allRoutable) {
-      console.log(
-        `[start] ${id} routed to Railway worker (USE_WORKER_FOR=${workerScenarios.join(",")})`,
-      );
-      return NextResponse.json(
-        {
-          jobId: id,
-          status: "pending",
-          steps: job.steps,
-          routedToWorker: true,
-        },
-        { status: 202 },
-      );
+    if (stampedCount > 0) {
+      await updateBookingJobSteps(id, stampedSteps);
     }
+    // Round-3 phantom isolation: enqueue with `pending_local` (in dev) so
+    // phantom's hardcoded `WHERE status='pending'` claimOne SQL cannot
+    // see this row. Local worker filters on PENDING_QUEUE_STATUS.
+    if (job.status !== PENDING_QUEUE_STATUS) {
+      await updateBookingJobStatus(id, PENDING_QUEUE_STATUS as "pending");
+    }
+    console.log(
+      `[start] ${id} routed to worker (auto-stamped ${stampedCount}/${job.steps.length}, status=${PENDING_QUEUE_STATUS})`,
+    );
+    return NextResponse.json(
+      {
+        jobId: id,
+        status: PENDING_QUEUE_STATUS,
+        steps: stampedSteps,
+        routedToWorker: true,
+      },
+      { status: 202 },
+    );
   }
 
   // Use the autonomy settings saved at job-creation time, fall back to defaults

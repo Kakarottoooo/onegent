@@ -28,6 +28,7 @@ import {
   type BookingJob,
   type BookingJobStep,
 } from "@/lib/db";
+import { CORE_EXECUTION_SOURCE } from "@/lib/core/cend-adapter";
 import type { AgentAutonomySettings } from "@/lib/autonomy";
 import type {
   ExecutionJobRequest,
@@ -112,9 +113,12 @@ export async function completeJob(
   const updatedStep: BookingJobStep = {
     ...step,
     status: mapJobStatusToStepStatus(result.status),
+    body: result.profileGap
+      ? { ...step.body, profileGap: result.profileGap, __lastExecutionStatus: result.status }
+      : { ...step.body, __lastExecutionStatus: result.status },
     handoff_url: result.handoffUrl ?? step.handoff_url,
     session_url: result.sessionUrl ?? step.session_url,
-    error: result.error ?? step.error,
+    error: result.error ?? result.profileGap?.message ?? step.error,
     attemptCount: result.attemptCount ?? step.attemptCount,
     usedFallback: result.usedFallback ?? step.usedFallback,
     decisionLog: result.decisionLog.length > 0 ? result.decisionLog : step.decisionLog,
@@ -162,7 +166,7 @@ function buildStepFromRequest(request: ExecutionJobRequest): BookingJobStep {
       consent: request.consent,
       // Marker so recovery.ts can detect "this job was created via lib/core"
       // and route to the new adapter instead of the legacy runUniversalStep.
-      __source: "lib/core/execution",
+      __source: CORE_EXECUTION_SOURCE,
     },
     fallbackUrl: "",
     status: "pending",
@@ -190,6 +194,9 @@ function mapJobStatusToStepStatus(
 ): BookingJobStep["status"] {
   switch (s) {
     case "paused_payment":
+    case "needs_otp":
+    case "needs_profile_data":
+    case "ready_for_confirmation":
       return "awaiting_confirmation";
     case "completed":
       return "done";
@@ -212,6 +219,9 @@ function mapJobStatusToBookingJobStatus(
     // paused_payment is "done" from the BookingJob perspective — the
     // autopilot has finished its work; user payment is a separate flow.
     case "paused_payment":
+    case "needs_otp":
+    case "needs_profile_data":
+    case "ready_for_confirmation":
     case "completed":
       return "done";
     case "error":

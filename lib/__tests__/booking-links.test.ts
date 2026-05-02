@@ -5,6 +5,8 @@ import {
   buildGoogleFlightsUrl,
   buildKayakFlightsUrl,
   buildOpenTableUrl,
+  buildOpenTableCanonicalUrl,
+  shouldUseCanonicalRestaurantSearchUrl,
 } from "../agent/planners/booking-links";
 
 describe("buildGoogleHotelsUrl", () => {
@@ -199,5 +201,128 @@ describe("buildOpenTableUrl", () => {
   it("returns bare URL with no params when all opts are empty", () => {
     const url = buildOpenTableUrl({});
     expect(url).toBe("https://www.opentable.com/s?");
+  });
+
+  it("can bias the search term with restaurant + city together", () => {
+    const url = buildOpenTableUrl({
+      restaurantName: "Tao Downtown New York",
+      date: "2026-05-04",
+      time: "19:00",
+      covers: 1,
+    });
+    expect(url).toContain("term=Tao+Downtown+New+York");
+    expect(url).toContain("covers=1");
+    expect(url).toContain("dateTime=2026-05-04T19%3A00%3A00");
+  });
+});
+
+describe("shouldUseCanonicalRestaurantSearchUrl", () => {
+  it("prefers canonical booking search when no startUrl exists", () => {
+    expect(shouldUseCanonicalRestaurantSearchUrl()).toBe(true);
+  });
+
+  it("prefers canonical booking search when startUrl is an official marketing site", () => {
+    expect(
+      shouldUseCanonicalRestaurantSearchUrl("https://taogroup.com/venues/tao-downtown-new-york/"),
+    ).toBe(true);
+  });
+
+  it("keeps existing OpenTable booking URLs", () => {
+    expect(
+      shouldUseCanonicalRestaurantSearchUrl(
+        "https://www.opentable.com/s?term=Tao+Downtown&covers=1&dateTime=2026-05-04T19:00:00",
+      ),
+    ).toBe(false);
+  });
+
+  it("keeps existing Resy venue URLs", () => {
+    expect(
+      shouldUseCanonicalRestaurantSearchUrl(
+        "https://resy.com/cities/ny/venues/tao-downtown?date=2026-05-04&seats=1",
+      ),
+    ).toBe(false);
+  });
+
+  it("keeps existing Yelp biz URLs", () => {
+    expect(
+      shouldUseCanonicalRestaurantSearchUrl(
+        "https://www.yelp.com/biz/tao-downtown-restaurant-new-york",
+      ),
+    ).toBe(false);
+  });
+});
+
+describe("buildOpenTableCanonicalUrl", () => {
+  it("slugifies name + city into a /r/<slug> URL", () => {
+    expect(buildOpenTableCanonicalUrl("Tao Downtown", "New York")).toBe(
+      "https://www.opentable.com/r/tao-downtown-new-york",
+    );
+  });
+
+  it("strips neighborhood prefix from city", () => {
+    expect(buildOpenTableCanonicalUrl("Bistro X", "West Village, New York")).toBe(
+      "https://www.opentable.com/r/bistro-x-new-york",
+    );
+  });
+
+  it("falls back to name-only slug when city is omitted", () => {
+    expect(buildOpenTableCanonicalUrl("Don Angie")).toBe(
+      "https://www.opentable.com/r/don-angie",
+    );
+  });
+
+  it("collapses non-alphanumeric to single hyphen", () => {
+    // Apostrophes / spaces / punctuation all collapse the same way.
+    expect(buildOpenTableCanonicalUrl("L'Artusi", "New York")).toBe(
+      "https://www.opentable.com/r/l-artusi-new-york",
+    );
+  });
+});
+
+describe("buildOpenTableUrl metroId scoping", () => {
+  it("adds metroId=8 for New York", () => {
+    const url = buildOpenTableUrl({
+      restaurantName: "Tao Downtown",
+      city: "New York",
+      date: "2026-05-04",
+      time: "19:00",
+      covers: 1,
+    });
+    expect(url).toContain("metroId=8");
+    expect(url).toContain("term=Tao+Downtown");
+  });
+
+  it("strips neighborhood prefix when matching metro table", () => {
+    const url = buildOpenTableUrl({
+      restaurantName: "Bistro X",
+      city: "West Village, New York",
+      date: "2026-05-04",
+      time: "19:00",
+      covers: 2,
+    });
+    expect(url).toContain("metroId=8");
+  });
+
+  it("omits metroId when city is unknown to the metro table", () => {
+    const url = buildOpenTableUrl({
+      restaurantName: "Foo Bar",
+      city: "Tokyo",
+      date: "2026-05-04",
+      time: "19:00",
+      covers: 2,
+    });
+    expect(url).not.toContain("metroId");
+    // term should still be present so OT search has a fuzzy hint.
+    expect(url).toContain("term=Foo+Bar");
+  });
+
+  it("omits metroId when no city is provided", () => {
+    const url = buildOpenTableUrl({
+      restaurantName: "Don Angie",
+      date: "2026-05-04",
+      time: "19:00",
+      covers: 2,
+    });
+    expect(url).not.toContain("metroId");
   });
 });

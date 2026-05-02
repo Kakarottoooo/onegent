@@ -72,6 +72,7 @@ function toExecutionJobResult(job: BookingJob): ExecutionJobResult {
     attemptCount: step?.attemptCount,
     usedFallback: step?.usedFallback,
     error: step?.error,
+    profileGap: getProfileGap(step),
     availableSlots: undefined, // tracked in decisionLog entries, not a dedicated field
     createdAt: job.created_at,
     updatedAt: job.updated_at,
@@ -92,6 +93,7 @@ function mapToExecutionJobStatus(
   // job.status is "done" or "failed" — derive from step.status
   switch (step.status) {
     case "awaiting_confirmation":
+      if (getProfileGap(step)) return "needs_profile_data";
       return "paused_payment";
     case "done":
       return "completed";
@@ -125,6 +127,12 @@ function deriveSummary(
       return `Executing: ${step.label}`;
     case "paused_payment":
       return `Paused at payment gate for ${step.label}. Open handoffUrl to complete.`;
+    case "needs_otp":
+      return `Waiting for one-time verification code for ${step.label}.`;
+    case "needs_profile_data":
+      return getProfileGap(step)?.message ?? `Missing booking profile data for ${step.label}.`;
+    case "ready_for_confirmation":
+      return `Ready for user confirmation for ${step.label}.`;
     case "completed":
       return `Completed: ${step.label}`;
     case "no_availability":
@@ -136,4 +144,11 @@ function deriveSummary(
     case "error":
       return step.error ? `Error: ${step.error}` : `Error on ${step.label}`;
   }
+}
+
+function getProfileGap(step: BookingJobStep | undefined): ExecutionJobResult["profileGap"] {
+  const value = step?.body?.profileGap;
+  if (!value || typeof value !== "object") return undefined;
+  const profileGap = value as ExecutionJobResult["profileGap"];
+  return profileGap?.kind === "needs_profile_data" ? profileGap : undefined;
 }

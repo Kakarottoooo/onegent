@@ -228,7 +228,12 @@ export function AutopilotRunnerModal({ open, steps, tripLabel, onClose }: Props)
                 </p>
               </div>
               <button
-                onClick={() => { window.location.href = "/tasks"; }}
+                onClick={() => {
+                  const href = bgJobId
+                    ? `/tasks?view=live&focus=${encodeURIComponent(bgJobId)}`
+                    : "/tasks";
+                  window.location.href = href;
+                }}
                 style={{
                   width: "100%",
                   padding: "12px",

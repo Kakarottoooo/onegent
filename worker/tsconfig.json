@@ -21,12 +21,15 @@
       "@/lib/types": ["./src/types"],
       "@/lib/browser-session-store": ["./src/browser-session-store"],
       "@/lib/live-log-store": ["./src/live-log-store"],
+      "@/lib/booking-errors": ["./src/booking-errors"],
       "@/lib/monitors": ["./src/monitors"],
       "@/lib/memory": ["./src/memory"],
       "@/lib/booking-autopilot": ["./src/booking-autopilot"],
       "@/lib/booking-autopilot/*": ["./src/booking-autopilot/*"],
       "@/lib/core": ["./src/core"],
-      "@/lib/core/*": ["./src/core/*"]
+      "@/lib/core/*": ["./src/core/*"],
+      "@/lib/execution-v2": ["./src/execution-v2"],
+      "@/lib/execution-v2/*": ["./src/execution-v2/*"]
     }
   },
   "include": ["src/**/*.ts"],

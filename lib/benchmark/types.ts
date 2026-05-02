@@ -60,6 +60,16 @@ export type BenchmarkCaseStatus =
 
 export type BenchmarkMode = "dry_run" | "full_commit";
 
+// ─── Expected outcome (single value, optionally wrapped in array) ───────────
+
+export type ExpectedOutcome =
+  | "fully_automated"        // boundary hit, no payment-stop / handoff
+  | "payment_stop"           // booking-ready stop at payment / CVV
+  | "no_availability"        // venue full / closed / not on network
+  | "verify_gate"            // SMS / OTP / email gate, safe stop
+  | "deep_link_handoff"      // venue not bookable online, agent hands off
+  | "unsupported_platform";  // Tock / SevenRooms — agent can't drive UI
+
 // ─── Case definition (TS source of truth, lives in restaurant-cases.ts) ─────
 
 export interface RestaurantBenchmarkCase {
@@ -99,14 +109,14 @@ export interface RestaurantBenchmarkCase {
   notes?: string;
   // ─── v1 dataset metadata (added 2026-04-30) ───────────────────────────
   /** What outcome the agent should produce for this case to count as
-   *  correct. Reporter compares actual vs expected per case. */
-  expected_outcome?:
-    | "fully_automated"        // boundary hit, no payment-stop / handoff
-    | "payment_stop"           // booking-ready stop at payment / CVV
-    | "no_availability"        // venue full / closed / not on network
-    | "verify_gate"            // SMS / OTP / email gate, safe stop
-    | "deep_link_handoff"      // venue not bookable online, agent hands off
-    | "unsupported_platform";  // Tock / SevenRooms — agent can't drive UI
+   *  correct. Reporter compares actual vs expected per case.
+   *
+   *  Pass an array when the case has legitimately ambiguous outcomes —
+   *  e.g. a strict `time_window_minutes: 0` peak-time happy case where
+   *  the venue may or may not have an exact-time slot on a given day.
+   *  Both "fully_automated" (slot was open) and "no_availability"
+   *  (slot was full, agent correctly identified) are acceptable. */
+  expected_outcome?: ExpectedOutcome | ExpectedOutcome[];
   /** Coarse category for dashboard grouping. */
   category?:
     | "ot_happy"

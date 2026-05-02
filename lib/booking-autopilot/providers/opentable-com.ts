@@ -134,34 +134,73 @@ export async function runOpenTableIntermediatePreflight(
       break;
     }
     if (url.includes("/booking/specials")) {
-      trace(`[opentable] preflight ${preflightStep + 1}: specials page — looking for skip/standard/continue`);
+      trace(`[opentable] preflight ${preflightStep + 1}: specials page — looking for standard/skip/continue`);
       const picked = await rawPage.evaluate(() => {
         const isVisible = (el: Element) => {
           const r = (el as HTMLElement).getBoundingClientRect();
           return r.width > 0 && r.height > 0;
         };
-        const skipPatterns =
-          /no\s*thanks|skip|continue\s*without|maybe\s*later|standard\s*reservation/i;
-        const skipEl = Array.from(document.querySelectorAll<HTMLElement>("a, button, span"))
+
+        // ── Priority 1: "Standard Reservation" card → Select button ─────
+        // Tao Downtown / Le Bernardin / Carbone-tier venues offer 2-3 paid
+        // upgrade specials ("$98 Veuve Cliquot", "$60 Espresso Martini")
+        // alongside the free "Standard Reservation" option. Find the card
+        // whose heading text mentions "Standard Reservation" and click its
+        // own Select button. Run 14 case 010 (Tao) hit this — the agent
+        // looped on "Skip to main content" (a11y link, not a continue
+        // action) for 3+ minutes because the old skipPatterns regex
+        // matched "skip" first.
+        const allSelectBtns = Array.from(
+          document.querySelectorAll<HTMLButtonElement>("button"),
+        ).filter(
+          (b) => isVisible(b) && /^\s*select\s*$/i.test((b.textContent ?? "").trim()),
+        );
+        for (const btn of allSelectBtns) {
+          const card = btn.closest("section, article, [class*='card'], [class*='Section'], li, div");
+          if (!card) continue;
+          const cardText = (card.textContent ?? "").toLowerCase();
+          if (/standard\s+reservation/i.test(cardText)) {
+            btn.click();
+            return `standard-select`;
+          }
+        }
+        // Fallback: a Select button in a card that has no $-price (i.e. free
+        // / no add-on tier). Distinguishes from paid upgrade cards.
+        for (const btn of allSelectBtns) {
+          const card = btn.closest("section, article, [class*='card'], [class*='Section'], li, div");
+          if (!card) continue;
+          const cardText = (card.textContent ?? "").toLowerCase();
+          if (
+            /no add-?on|no special|free|complimentary/i.test(cardText) &&
+            !/\$\d/.test(cardText)
+          ) {
+            btn.click();
+            return `no-addon-select`;
+          }
+        }
+
+        // ── Priority 2: explicit "No thanks / Continue without / Maybe later" ──
+        // These are real continue-without-extras buttons. EXCLUDE "Skip to
+        // main content" — that's an a11y skip-link, not a flow action,
+        // clicking it does nothing for the booking step.
+        const explicitSkipPatterns =
+          /^(\s*no\s*thanks\s*|\s*continue\s*without[^$]*|\s*maybe\s*later\s*|\s*skip\s+(?:this|extras|add-?ons)\s*)$/i;
+        const skipEl = Array.from(document.querySelectorAll<HTMLElement>("a, button"))
           .filter((b) => isVisible(b))
-          .find((b) => skipPatterns.test((b.textContent ?? "").trim()));
+          .find((b) => {
+            const t = (b.textContent ?? "").trim();
+            // Hard-exclude the a11y skip-to-content link by exact text or
+            // common id/class patterns.
+            if (/skip\s+to\s+(main\s+)?content/i.test(t)) return false;
+            if (b.id?.toLowerCase().includes("skip-to-content")) return false;
+            if ((b.className?.toLowerCase() ?? "").includes("skip-link")) return false;
+            return explicitSkipPatterns.test(t);
+          });
         if (skipEl) {
           skipEl.click();
           return `skip:${(skipEl.textContent ?? "").trim().slice(0, 40)}`;
         }
-        const selectBtns = Array.from(document.querySelectorAll<HTMLButtonElement>("button"))
-          .filter((b) => isVisible(b) && /^\s*select\s*$/i.test((b.textContent ?? "").trim()));
-        for (const b of selectBtns) {
-          const section = b.closest("section, [class*='section'], div, li");
-          const text = (section?.textContent ?? "").toLowerCase();
-          if (
-            /standard reservation|no add-?on|no special|free|complimentary/i.test(text) &&
-            !/\$\d/.test(text)
-          ) {
-            b.click();
-            return `standard-select`;
-          }
-        }
+
         return null;
       }).catch(() => null);
       if (picked) {
@@ -351,7 +390,10 @@ export const openTableProvider: BrowserProvider = {
     // 1. URL is the booking details page (opentable.com/booking/details?...)
     // 2. URL is the seating options page (opentable.com/booking/seating-options?...)
     // 3. OR reservation form is visible (first-name OR phone-number input present)
-    const isBookingDetailsUrl = lowerUrl.includes("/booking/details") || lowerUrl.includes("/booking/seating-options");
+    const isBookingDetailsUrl =
+      lowerUrl.includes("/booking/details") ||
+      lowerUrl.includes("/booking/seating-options") ||
+      lowerUrl.includes("/booking/experiences-details");
     const hasReservationForm = await page.evaluate(() => {
       const inputs = Array.from(document.querySelectorAll<HTMLInputElement>("input"));
       const visible = inputs.filter((el) => {
@@ -399,7 +441,19 @@ export const openTableProvider: BrowserProvider = {
     trace: (msg: string) => void
   ): Promise<void> {
     const p = profile as OpenTableProfile;
-    const phoneDigits = (p.phone ?? "").replace(/\D/g, "");
+    // OT validates phone format strictly: plain "5555550100" gets rejected
+    // with "Your phone number format is invalid". 10-digit US numbers must
+    // be formatted as "(555) 555-0100". Strip to digits, drop a leading "1"
+    // (country code lives in a separate +1 dropdown), then format. Run 12
+    // case 016 (The Modern) hit this — guest form filled per our trace,
+    // but the form bombed on submit.
+    const rawDigits = (p.phone ?? "").replace(/\D/g, "");
+    const tenDigit = rawDigits.length === 11 && rawDigits.startsWith("1")
+      ? rawDigits.slice(1)
+      : rawDigits.slice(-10);
+    const phoneDigits = tenDigit.length === 10
+      ? `(${tenDigit.slice(0, 3)}) ${tenDigit.slice(3, 6)}-${tenDigit.slice(6)}`
+      : rawDigits; // non-US / unexpected length — fall back to raw digits
     // Extract stagehand + rawPage from helpers (injected by executor)
     const h = helpers as { stagehand?: { act: (s: string) => Promise<unknown> }; rawPage?: Page } | null;
     const stagehand = h?.stagehand;

@@ -36,10 +36,14 @@ export type AuditEventType =
   | "job_started"
   | "step_started"
   | "job_paused_payment"
+  | "job_needs_otp"
+  | "job_needs_profile_data"
+  | "job_ready_for_confirmation"
   | "job_completed"
   | "job_failed"
   | "job_aborted"           // executor stopped early (e.g. consent deadline hit)
   // ── Decision points ──
+  | "executor_selected"     // choosing legacy_stagehand / computer_use / manual executor
   | "step_attempt"          // entering a retry iteration; details.attemptNumber set
   | "action_allowed"        // consent validator approved a specific action
   | "action_denied"         // consent validator rejected a specific action

@@ -7,6 +7,7 @@ import type {
   BenchmarkRunRow,
   BenchmarkRunSummary,
 } from "@/lib/benchmark/types";
+import { outcomeMatchesExpected } from "@/lib/benchmark/parse-decision-log";
 import { AutoRefresh } from "./AutoRefresh";
 
 export const dynamic = "force-dynamic";
@@ -118,6 +119,11 @@ export default async function BenchmarkRunDetailPage({ params }: Params) {
 
         {/* Stats grid */}
         <SummaryStats summary={summary} run={run} />
+
+        {/* Dataset-aware pass rate — case PASSes when actual outcome matches
+            its declared expected_outcome (e.g. peak-time fallback expecting
+            no_availability counts PASS). */}
+        <DatasetAwarePassRate cases={cases} />
 
         {/* v1 outcome breakdown — the canonical baseline report */}
         <V1OutcomeBreakdown summary={summary} />
@@ -270,6 +276,56 @@ function V1OutcomeBreakdown({ summary }: { summary: BenchmarkRunSummary }) {
   );
 }
 
+function DatasetAwarePassRate({ cases }: { cases: BenchmarkCaseRow[] }) {
+  if (cases.length === 0) return null;
+  let pass = 0;
+  let fail = 0;
+  let noExpect = 0;
+  for (const c of cases) {
+    const m = outcomeMatchesExpected(c, c.task_payload.expected_outcome);
+    if (m === true) pass += 1;
+    else if (m === false) fail += 1;
+    else noExpect += 1;
+  }
+  const denom = pass + fail;
+  const rate = denom === 0 ? 0 : Math.round((pass / denom) * 100);
+  return (
+    <section className="rounded-[28px] border border-[var(--border)] bg-[var(--card)] p-6 shadow-[0_18px_48px_rgba(44,36,22,0.06)]">
+      <h2 className="font-serif text-xl">Dataset-aware pass rate</h2>
+      <p className="mt-1 text-xs text-[var(--text-secondary)]">
+        Cases PASS when the actual outcome matches the dataset&apos;s
+        declared <code className="mx-1">expected_outcome</code>. Peak-time
+        fallback cases that legitimately hit <code>no_availability</code>
+        count as PASS, not FAIL.
+      </p>
+      <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-3">
+        <div className="rounded-2xl border border-emerald-200 bg-emerald-50/40 px-4 py-3">
+          <p className="text-xs uppercase tracking-wider text-[var(--text-secondary)]">PASS</p>
+          <p className="mt-1 font-serif text-3xl tabular-nums text-emerald-700">
+            {pass}
+            <span className="ml-2 text-base text-[var(--text-secondary)]">/{denom}</span>
+          </p>
+          <p className="mt-1 text-xs text-emerald-700">{rate}%</p>
+        </div>
+        <div className={`rounded-2xl border px-4 py-3 ${fail === 0 ? "border-stone-200 bg-stone-50/40" : "border-red-200 bg-red-50/40"}`}>
+          <p className="text-xs uppercase tracking-wider text-[var(--text-secondary)]">FAIL</p>
+          <p className={`mt-1 font-serif text-3xl tabular-nums ${fail === 0 ? "text-stone-700" : "text-red-700"}`}>{fail}</p>
+          <p className="mt-1 text-xs text-[var(--text-secondary)]">
+            actual ≠ expected
+          </p>
+        </div>
+        <div className="rounded-2xl border border-[var(--border)] bg-[var(--card-2)] px-4 py-3">
+          <p className="text-xs uppercase tracking-wider text-[var(--text-secondary)]">No expectation</p>
+          <p className="mt-1 font-serif text-3xl tabular-nums text-stone-700">{noExpect}</p>
+          <p className="mt-1 text-xs text-[var(--text-secondary)]">
+            cases lacking <code>expected_outcome</code>
+          </p>
+        </div>
+      </div>
+    </section>
+  );
+}
+
 function SafetyCounters({
   summary,
   cases,
@@ -278,19 +334,25 @@ function SafetyCounters({
   cases: BenchmarkCaseRow[];
 }) {
   if (summary.total === 0) return null;
-  // "Payment mistake" = the one outcome we MUST never produce: a benchmark
-  // case where success=true AND payment_stop_triggered=false AND the case
-  // wasn't dry_run-blocked. In dry_run mode every successful path stops at
-  // the boundary marker; if any case bypassed that, it would imply we drove
-  // past CVV. Should always be zero.
-  const paymentMistakeCount = cases.filter(
-    (c) =>
+  // "Payment mistake" = the one outcome we MUST never produce: the agent
+  // drove past dry_run / payment boundary on a case that wasn't supposed
+  // to fully-automate. Handles both string and array forms of
+  // expected_outcome.
+  const paymentMistakeCount = cases.filter((c) => {
+    const expected = c.task_payload.expected_outcome;
+    const allowedFully = expected === undefined
+      ? false
+      : Array.isArray(expected)
+        ? expected.includes("fully_automated")
+        : expected === "fully_automated";
+    return (
       c.success &&
       c.fully_automated_success &&
       !c.payment_stop_triggered &&
-      c.task_payload.expected_outcome !== "fully_automated" &&
-      c.failure_reason === null,
-  ).length;
+      !allowedFully &&
+      c.failure_reason === null
+    );
+  }).length;
   const wrongAction = summary.wrong_action_count;
   return (
     <section className="grid grid-cols-1 gap-4 sm:grid-cols-2">
@@ -373,44 +435,72 @@ function CasesTable({ cases }: { cases: BenchmarkCaseRow[] }) {
               <th className="px-6 py-3 font-medium">Provider</th>
               <th className="px-6 py-3 font-medium">Status</th>
               <th className="px-6 py-3 font-medium">Failure reason</th>
+              <th className="px-6 py-3 font-medium">Expected</th>
+              <th className="px-6 py-3 text-center font-medium">Match</th>
               <th className="px-6 py-3 text-right font-medium">Duration</th>
               <th className="px-6 py-3 font-medium">Booking job</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-[var(--border)]">
-            {cases.map((c) => (
-              <tr key={c.id} className="transition hover:bg-[var(--card-2)]">
-                <td className="px-6 py-3">
-                  <p className="font-medium text-[var(--text-primary)]">
-                    {c.task_payload.restaurant_name}
-                  </p>
-                  <p className="mt-0.5 text-xs text-[var(--text-secondary)]">
-                    {c.case_id} · {c.task_payload.city}
-                  </p>
-                </td>
-                <td className="px-6 py-3 text-[var(--text-secondary)]">
-                  {c.provider ?? c.task_payload.expected_provider}
-                </td>
-                <td className="px-6 py-3">
-                  <StatusPill status={c.status} success={c.success} />
-                </td>
-                <td className="px-6 py-3">
-                  {c.failure_reason ? (
+            {cases.map((c) => {
+              const expected = c.task_payload.expected_outcome;
+              const expectedLabel = expected === undefined
+                ? "—"
+                : Array.isArray(expected)
+                  ? expected.join(" | ")
+                  : expected;
+              const match = outcomeMatchesExpected(c, expected);
+              return (
+                <tr
+                  key={c.id}
+                  className={`transition hover:bg-[var(--card-2)] ${match === true ? "bg-emerald-50/30" : match === false ? "bg-red-50/30" : ""}`}
+                >
+                  <td className="px-6 py-3">
+                    <p className="font-medium text-[var(--text-primary)]">
+                      {c.task_payload.restaurant_name}
+                    </p>
+                    <p className="mt-0.5 text-xs text-[var(--text-secondary)]">
+                      {c.case_id} · {c.task_payload.city}
+                    </p>
+                  </td>
+                  <td className="px-6 py-3 text-[var(--text-secondary)]">
+                    {c.provider ?? c.task_payload.expected_provider}
+                  </td>
+                  <td className="px-6 py-3">
+                    <StatusPill status={c.status} success={c.success} />
+                  </td>
+                  <td className="px-6 py-3">
+                    {c.failure_reason ? (
+                      <span className="font-mono text-xs text-[var(--text-secondary)]">
+                        {c.failure_reason}
+                      </span>
+                    ) : (
+                      <span className="text-xs text-[var(--text-secondary)]">—</span>
+                    )}
+                  </td>
+                  <td className="px-6 py-3">
                     <span className="font-mono text-xs text-[var(--text-secondary)]">
-                      {c.failure_reason}
+                      {expectedLabel}
                     </span>
-                  ) : (
-                    <span className="text-xs text-[var(--text-secondary)]">—</span>
-                  )}
-                </td>
-                <td className="px-6 py-3 text-right tabular-nums text-[var(--text-secondary)]">
-                  {formatDuration(c.duration_seconds)}
-                </td>
-                <td className="px-6 py-3 font-mono text-xs text-[var(--text-secondary)]">
-                  {c.booking_job_id ? c.booking_job_id.slice(0, 8) : "—"}
-                </td>
-              </tr>
-            ))}
+                  </td>
+                  <td className="px-6 py-3 text-center">
+                    {match === true ? (
+                      <span className="text-emerald-700">✅</span>
+                    ) : match === false ? (
+                      <span className="text-red-700">❌</span>
+                    ) : (
+                      <span className="text-[var(--text-secondary)]">—</span>
+                    )}
+                  </td>
+                  <td className="px-6 py-3 text-right tabular-nums text-[var(--text-secondary)]">
+                    {formatDuration(c.duration_seconds)}
+                  </td>
+                  <td className="px-6 py-3 font-mono text-xs text-[var(--text-secondary)]">
+                    {c.booking_job_id ? c.booking_job_id.slice(0, 8) : "—"}
+                  </td>
+                </tr>
+              );
+            })}
           </tbody>
         </table>
       </div>

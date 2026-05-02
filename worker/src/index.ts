@@ -17,16 +17,24 @@ import { sql } from "@vercel/postgres";
 import { hostname } from "node:os";
 import { existsSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
+import { createHash } from "node:crypto";
 
 // ── Local-dev convenience: hydrate process.env from ../.env.local ──────────
 // In Docker / Railway this file doesn't exist — we silently fall through to
-// whatever the container injected.
+// whatever the container injected. If it exists locally, it is the source of
+// truth: override inherited shell variables so Next dev and the worker point
+// at the same Neon database.
 const localEnvPath = resolve(process.cwd(), "..", ".env.local");
 if (existsSync(localEnvPath)) {
   for (const line of readFileSync(localEnvPath, "utf8").split(/\r?\n/)) {
     const m = line.match(/^\s*([A-Z][A-Z0-9_]*)\s*=\s*"?([^"\n]*)"?\s*$/);
-    if (m && process.env[m[1]] === undefined) process.env[m[1]] = m[2];
+    if (m) process.env[m[1]] = m[2];
   }
+}
+
+function envFingerprint(value: string | undefined): string {
+  if (!value) return "missing";
+  return createHash("sha256").update(value).digest("hex").slice(0, 10);
 }
 
 // Imports below this line — must come AFTER env hydration so any module-level
@@ -41,6 +49,12 @@ import {
   type DecisionLogEntry,
 } from "@/lib/db";
 import { runExecutionJobWithRecovery } from "@/lib/core/execution/recovery";
+import {
+  CORE_EXECUTION_SOURCE,
+  isCoreExecutionSource,
+  PENDING_QUEUE_STATUS,
+  CLAIMABLE_PENDING_STATUSES,
+} from "@/lib/core/cend-adapter";
 import type {
   ExecutionJobRequest,
   ExecutionParams,
@@ -87,6 +101,7 @@ function sleep(ms: number): Promise<void> {
 // queue pattern. Each worker (and each in-process concurrent claim) gets
 // exactly one row; no double-execution races even with N instances.
 async function claimOne(): Promise<BookingJob | null> {
+  const claimableStatuses = `{${CLAIMABLE_PENDING_STATUSES.join(",")}}`;
   // Filter to jobs whose first step carries the lib/core/execution marker —
   // the worker only knows how to execute lib/core-shape jobs. Without this
   // filter the worker would race the in-process Vercel path (which polls
@@ -94,16 +109,23 @@ async function claimOne(): Promise<BookingJob | null> {
   // and immediately fail them with "Worker received legacy-shape step"
   // (run 6 case 003 Carbone hit this — 0s executor_error in 5-case run).
   //
-  // jsonb path: steps->0->'body'->>'__source' = 'lib/core/execution'
+  // jsonb path: steps->0->'body'->>'__source' = CORE_EXECUTION_SOURCE.
   // Falls through to NULL for legacy-shape steps and is excluded by the =
   // comparison.
+  // Round-3 phantom isolation: filter on PENDING_QUEUE_STATUS instead of
+  // hardcoded 'pending'. In dev that value is 'pending_local'; phantom's
+  // `WHERE status='pending'` SELECT cannot match those rows. Production
+  // unchanged: NODE_ENV='production' → PENDING_QUEUE_STATUS='pending'.
+  // CLAIMABLE_PENDING_STATUSES allows accepting multiple values (today
+  // it's 1-element in both dev + prod, but kept as ANY for forward-compat
+  // when we may want a worker to drain stuck legacy 'pending' rows).
   const result = await sql<BookingJob>`
     UPDATE booking_jobs
     SET status = 'running', updated_at = NOW()
     WHERE id = (
       SELECT id FROM booking_jobs
-      WHERE status = 'pending'
-        AND (steps->0->'body'->>'__source') = 'lib/core/execution'
+      WHERE status = ANY(${claimableStatuses}::text[])
+        AND (steps->0->'body'->>'__source') = ${CORE_EXECUTION_SOURCE}
       ORDER BY created_at ASC
       LIMIT 1
       FOR UPDATE SKIP LOCKED
@@ -126,7 +148,7 @@ async function runStep(
 ): Promise<BookingJobStep> {
   const body = step.body as Record<string, unknown>;
 
-  if (body?.__source !== "lib/core/execution") {
+  if (!isCoreExecutionSource(body?.__source)) {
     // Vercel's gate should have kept this on the legacy path. Log loudly so
     // the misrouting is obvious — and fail-fast so the job goes to "failed"
     // rather than silently completing without execution.
@@ -145,6 +167,12 @@ async function runStep(
       params: body.params,
     } as ExecutionParams,
     profileId: typeof body.profileId === "number" ? body.profileId : undefined,
+    // Inline profile path — used by anonymous benchmark dispatcher
+    // (userId=null + no DB profile row). Without this passthrough the
+    // executor's resolveProfile throws "Cannot resolve profile: no
+    // inline profile, no profileId, no userId" and every benchmark case
+    // fails in 7-15s before opening Chromium.
+    profile: body.profile as ExecutionJobRequest["profile"],
     consent: body.consent as ConsentPolicy | undefined,
   };
 
@@ -163,7 +191,10 @@ async function runStep(
   ]);
 
   const stepStatus: BookingJobStep["status"] =
-    result.status === "paused_payment"
+    result.status === "paused_payment" ||
+    result.status === "needs_otp" ||
+    result.status === "needs_profile_data" ||
+    result.status === "ready_for_confirmation"
       ? "awaiting_confirmation"
       : result.status === "completed"
       ? "done"
@@ -174,9 +205,12 @@ async function runStep(
   return {
     ...step,
     status: stepStatus,
+    body: result.profileGap
+      ? { ...step.body, profileGap: result.profileGap, __lastExecutionStatus: result.status }
+      : { ...step.body, __lastExecutionStatus: result.status },
     handoff_url: result.handoffUrl ?? step.handoff_url,
     session_url: result.sessionUrl ?? step.session_url,
-    error: result.error ?? step.error,
+    error: result.error ?? result.profileGap?.message ?? step.error,
     attemptCount: result.attemptCount ?? step.attemptCount,
     usedFallback: result.usedFallback ?? step.usedFallback,
     decisionLog: result.decisionLog ?? step.decisionLog,
@@ -226,7 +260,9 @@ async function runJob(job: BookingJob): Promise<void> {
     const isTerminalSuccess =
       updatedSteps[i].status === "done" ||
       updatedSteps[i].status === "awaiting_confirmation";
-    if (!wasTerminalSuccess && isTerminalSuccess && job.user_id) {
+    const pausedForProfileData =
+      updatedSteps[i].body?.__lastExecutionStatus === "needs_profile_data";
+    if (!wasTerminalSuccess && isTerminalSuccess && !pausedForProfileData && job.user_id) {
       try {
         await incrementUsageCounter(job.user_id, "booking");
       } catch (err) {
@@ -319,7 +355,9 @@ async function processScheduledRetries(): Promise<void> {
 
     try {
       await updateBookingJobSteps(job.id, updatedSteps);
-      await updateBookingJobStatus(job.id, "pending");
+      // Round-3 phantom isolation: use PENDING_QUEUE_STATUS so the
+      // re-enqueued row stays invisible to phantom's `WHERE status='pending'`.
+      await updateBookingJobStatus(job.id, PENDING_QUEUE_STATUS as "pending");
     } catch (err) {
       logError(`retry reset failed for job ${job.id}`, err);
     }
@@ -344,6 +382,11 @@ async function main(): Promise<void> {
 
   await sql`SELECT 1 AS ping`;
   log(`postgres connected`);
+  log(
+    `env: POSTGRES_URL#${envFingerprint(process.env.POSTGRES_URL)} ` +
+      `STAGEHAND_DEFAULT_MODEL=${process.env.STAGEHAND_DEFAULT_MODEL ?? "(default)"} ` +
+      `CORE_EXECUTION_SOURCE=${CORE_EXECUTION_SOURCE}`,
+  );
 
   // Scheduled-retry scanner runs in its own setInterval — independent of
   // the main claim loop so a long-running browser task can't starve retries.
