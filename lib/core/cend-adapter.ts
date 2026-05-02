@@ -46,6 +46,12 @@ export const CORE_SUPPORTED_SCENARIOS: ReadonlyArray<ExecutionScenario> = [
   "activity",
 ] as const;
 
+export const CORE_EXECUTION_SOURCE = "lib/core/execution";
+
+export function isCoreExecutionSource(value: unknown): value is string {
+  return value === "lib/core/execution";
+}
+
 export function isCoreSupported(stepType: BookingJobStep["type"]): boolean {
   return (CORE_SUPPORTED_SCENARIOS as readonly string[]).includes(stepType);
 }
@@ -103,7 +109,7 @@ export function markStepForCore(step: BookingJobStep): BookingJobStep {
       ...(startUrl !== undefined ? { startUrl } : {}),
       ...(consent !== undefined ? { consent } : {}),
       // Marker that runUniversalStep watches for dual-gate dispatch.
-      __source: "lib/core/execution",
+      __source: CORE_EXECUTION_SOURCE,
     },
   };
 }
