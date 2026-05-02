@@ -19,7 +19,7 @@ import {
 import GlobalNav from "@/components/GlobalNav";
 import TripItineraryCalendar from "@/components/TripItineraryCalendar";
 import RestaurantStepCard from "@/components/booking/RestaurantStepCard";
-import BrowserLiveView from "@/components/BrowserLiveView";
+import { TaskTimelinePanel } from "@/components/task-timeline";
 import ShareTripModal from "@/components/ShareTripModal";
 import AddToTripModal from "@/components/AddToTripModal";
 import { ModifyTaskButton } from "@/components/ModifyTaskButton";
@@ -3530,54 +3530,34 @@ function TripsPageInner() {
             }} />
           </div>
 
-          {/* Live panel */}
+          {/* Live panel — Track B Stage 5 cutover (codex 8a2da14 contracts)
+              Replaces the legacy <BrowserLiveView /> canvas with the
+              high-level <TaskTimelinePanel />: left column = events derived
+              from /api/booking-jobs/:id/timeline-events SSE, right column =
+              vertical snapshot rail from /api/booking-jobs/:id/snapshots
+              with a click-to-zoom lightbox. The slide-over container keeps
+              its position/width/drag-resize chrome; the panel renders its
+              own header (with close), banner, footer. */}
           <div
             ref={livePanelRef}
             style={{
               position: "fixed",
               right: 0, top: 0, bottom: 0,
               width: `${rightPct}vw`,
-            zIndex: 9999,
-            background: "#111",
-            display: "flex", flexDirection: "column",
-            boxShadow: "-6px 0 32px rgba(0,0,0,0.45)",
-            borderLeft: "0.5px solid rgba(255,255,255,0.08)",
-          }}>
-            {/* Header */}
-            <div style={{
-              display: "flex", alignItems: "center", justifyContent: "space-between",
-              padding: "12px 16px", flexShrink: 0,
-              borderBottom: "0.5px solid rgba(255,255,255,0.1)",
-            }}>
-              <div style={{ minWidth: 0 }}>
-                <p style={{ fontFamily: "var(--font-dm-sans)", fontSize: 14, fontWeight: 700, color: "#fff", margin: 0 }}>
-                  🖥️ Agent browser
-                </p>
-                <p style={{ fontFamily: "var(--font-dm-sans)", fontSize: 11, color: "rgba(255,255,255,0.45)", margin: 0, marginTop: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                  {liveJob?.trip_label ?? ""}
-                </p>
-              </div>
-              <button onClick={() => { liveJobIdRef.current = null; setLiveJobId(null); }} style={{
-                flexShrink: 0, marginLeft: 12,
-                background: "rgba(255,255,255,0.1)", border: "none", borderRadius: 8,
-                color: "#fff", padding: "8px 16px", cursor: "pointer",
-                fontFamily: "var(--font-dm-sans)", fontSize: 13, fontWeight: 600,
-              }}>
-                Close ✕
-              </button>
-            </div>
-
-            {/* Browser view */}
-            <div style={{ flex: 1, overflow: "hidden", position: "relative" }}>
-              <BrowserLiveView key={liveViewKey} jobId={liveJobId} fullscreen />
-            </div>
-
-            {/* Footer */}
-            <div style={{ flexShrink: 0, padding: "8px 16px", textAlign: "center", borderTop: "0.5px solid rgba(255,255,255,0.1)" }}>
-              <p style={{ fontFamily: "var(--font-dm-sans)", fontSize: 11, color: "rgba(255,255,255,0.35)", margin: 0 }}>
-                Live view — read only · Drag handle to resize
-              </p>
-            </div>
+              zIndex: 9999,
+              background: "#111",
+              display: "flex", flexDirection: "column",
+              boxShadow: "-6px 0 32px rgba(0,0,0,0.45)",
+              borderLeft: "0.5px solid rgba(255,255,255,0.08)",
+            }}
+          >
+            <TaskTimelinePanel
+              key={liveViewKey}
+              jobId={liveJobId}
+              title={liveJob?.trip_label ? `🖥️ Agent — ${liveJob.trip_label}` : "🖥️ Agent"}
+              subtitle={liveJob?.trip_label ? undefined : "Live run"}
+              onClose={() => { liveJobIdRef.current = null; setLiveJobId(null); }}
+            />
           </div>
         </>
       )}

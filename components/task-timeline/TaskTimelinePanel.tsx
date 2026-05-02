@@ -6,98 +6,32 @@
  *
  * Drives:
  *   - Demo mode (`demo="needs_otp"` etc.) → renders fixtures
- *   - Live mode (jobId set) → polls /api/booking-jobs/{id} and derives
- *     TimelineEvent[] via derive-events.ts
+ *   - Live mode (jobId set) → SSE-driven event stream + canonical
+ *     snapshot endpoint, both from Track A's contracts (codex 8a2da14)
  *
- * Track A will eventually replace the polling adapter with structured SSE
- * events. When that lands, swap the data hook only — components below
- * stay the same.
+ * Data flow:
+ *   - useTimelineEvents(jobId) — SSE primary, polling fallback,
+ *     legacy job snapshot as ultimate fallback
+ *   - useSnapshots(jobId, {paused}) — canonical /snapshots endpoint
+ *     with /browser-live compat fallback; pauses polling once timeline
+ *     reports closed=true
  */
 
 import { useEffect, useMemo, useState } from "react";
-import { deriveEventsFromJob, latestEventKind } from "./derive-events";
+import { latestEventKind } from "./derive-events";
 import { statusFromLatestEvent } from "./event-vocabulary";
 import { FIXTURE_EVENTS, FIXTURE_PANEL_LABELS, FIXTURE_SNAPSHOTS } from "./__fixtures";
 import { ConnectingState, IdleState } from "./EmptyStates";
 import SnapshotStream from "./SnapshotStream";
 import StatusBanner from "./StatusBanner";
 import TimelineEventList from "./TimelineEventList";
+import { useTimelineEvents } from "./use-timeline-events";
+import { useSnapshots } from "./use-snapshots";
 import type {
-  ExecutionSnapshot,
   TaskTimelinePanelProps,
   TimelineEvent,
   TimelineStatus,
 } from "./types";
-
-/* ─── Hook: load + poll a real job (Stage 3 fallback) ───────────────────── */
-
-interface JobData {
-  events: TimelineEvent[];
-  snapshots: ExecutionSnapshot[];
-  /** Surface raw lifecycle so we can show ConnectingState vs IdleState. */
-  loadState: "loading" | "ready" | "error" | "empty";
-  errorMessage?: string;
-}
-
-const POLL_INTERVAL_MS = 2_500;
-
-function useJobTimelineData(jobId: string | null): JobData {
-  const [state, setState] = useState<JobData>({
-    events: [],
-    snapshots: [],
-    loadState: jobId ? "loading" : "empty",
-  });
-
-  useEffect(() => {
-    if (!jobId) {
-      setState({ events: [], snapshots: [], loadState: "empty" });
-      return;
-    }
-    let cancelled = false;
-    let timer: ReturnType<typeof setTimeout> | null = null;
-
-    async function fetchOnce() {
-      try {
-        const res = await fetch(`/api/booking-jobs/${jobId}`, {
-          headers: { Accept: "application/json" },
-        });
-        if (!res.ok) {
-          throw new Error(`HTTP ${res.status}`);
-        }
-        const job = await res.json();
-        if (cancelled) return;
-        const events = deriveEventsFromJob(job);
-        // No snapshot endpoint exists yet (Track A will add later). Use
-        // an empty list — SnapshotStream renders the "no snapshots yet"
-        // empty state, which is honest given the current data.
-        setState({
-          events,
-          snapshots: [],
-          loadState: events.length === 0 ? "empty" : "ready",
-        });
-      } catch (e) {
-        if (cancelled) return;
-        setState((prev) => ({
-          ...prev,
-          loadState: "error",
-          errorMessage: e instanceof Error ? e.message : "Could not load job",
-        }));
-      } finally {
-        if (!cancelled) {
-          timer = setTimeout(fetchOnce, POLL_INTERVAL_MS);
-        }
-      }
-    }
-
-    fetchOnce();
-    return () => {
-      cancelled = true;
-      if (timer) clearTimeout(timer);
-    };
-  }, [jobId]);
-
-  return state;
-}
 
 /* ─── Main component ───────────────────────────────────────────────────── */
 
@@ -118,9 +52,14 @@ export default function TaskTimelinePanel({
     return () => window.removeEventListener("keydown", handler);
   }, [onClose]);
 
-  // ── Pick data source: demo fixture or live polling ──
-  const liveData = useJobTimelineData(demo ? null : jobId);
-  const { events, snapshots, status, loadState } = useMemo(() => {
+  // ── Pick data source: demo fixture or live (SSE + snapshot endpoints) ──
+  const liveTimeline = useTimelineEvents(demo ? null : jobId);
+  // Pause snapshot polling once timeline says the run is closed — saves
+  // requests when the user lingers on a finished job.
+  const liveSnapshots = useSnapshots(demo ? null : jobId, {
+    paused: liveTimeline.closed,
+  });
+  const { events, snapshots, status, loadState, errorMessage } = useMemo(() => {
     if (demo) {
       const fxEvents = FIXTURE_EVENTS[demo];
       // Only attach snapshots when there are events to attach them to
@@ -133,15 +72,17 @@ export default function TaskTimelinePanel({
         snapshots: fxSnapshots,
         status: computed,
         loadState: fxEvents.length === 0 ? ("empty" as const) : ("ready" as const),
+        errorMessage: undefined,
       };
     }
     return {
-      events: liveData.events,
-      snapshots: liveData.snapshots,
-      status: statusFromLatestEvent(latestEventKind(liveData.events)) as TimelineStatus,
-      loadState: liveData.loadState,
+      events: liveTimeline.events,
+      snapshots: liveSnapshots.snapshots,
+      status: statusFromLatestEvent(latestEventKind(liveTimeline.events)) as TimelineStatus,
+      loadState: liveTimeline.loadState,
+      errorMessage: liveTimeline.errorMessage ?? liveSnapshots.errorMessage,
     };
-  }, [demo, liveData]);
+  }, [demo, liveTimeline, liveSnapshots]);
 
   // Cross-column linking: clicking a timeline event scrolls the snapshot
   // panel to the matching snapshot, and vice versa.
@@ -189,7 +130,7 @@ export default function TaskTimelinePanel({
       <div className="task-timeline__body">
         {loadState === "loading" && <ConnectingState />}
         {loadState === "error" && (
-          <IdleState message={liveData.errorMessage ?? "Could not load this run."} />
+          <IdleState message={errorMessage ?? "Could not load this run."} />
         )}
         {loadState === "empty" && <IdleState />}
         {(loadState === "ready" || (demo && events.length > 0)) && (
