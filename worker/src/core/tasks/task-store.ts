@@ -30,6 +30,9 @@ export interface TravelTask {
   request_json: ExecutionJobRequest;
   policy_json: Record<string, unknown>;
   current_booking_job_id: string | null;
+  decision_room_id: string | null;
+  terminal_reason: string | null;
+  terminal_code: string | null;
   created_by_key_id: string | null;
   created_by_org_name: string | null;
   created_at: string;
@@ -59,6 +62,9 @@ export async function ensureTravelTaskTables(): Promise<void> {
           request_json           JSONB NOT NULL,
           policy_json            JSONB NOT NULL DEFAULT '{}'::jsonb,
           current_booking_job_id TEXT,
+          decision_room_id        TEXT,
+          terminal_reason         TEXT,
+          terminal_code           TEXT,
           created_by_key_id      TEXT,
           created_by_org_name    TEXT,
           created_at             TIMESTAMPTZ NOT NULL DEFAULT NOW(),
@@ -74,9 +80,15 @@ export async function ensureTravelTaskTables(): Promise<void> {
           created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
         )
       `;
+      await sql`ALTER TABLE travel_tasks ADD COLUMN IF NOT EXISTS decision_room_id TEXT`.catch(() => {});
+      await sql`ALTER TABLE travel_tasks ADD COLUMN IF NOT EXISTS terminal_reason TEXT`.catch(() => {});
+      await sql`ALTER TABLE travel_tasks ADD COLUMN IF NOT EXISTS terminal_code TEXT`.catch(() => {});
+      await sql`ALTER TABLE booking_jobs ADD COLUMN IF NOT EXISTS task_id TEXT`.catch(() => {});
       await sql`CREATE INDEX IF NOT EXISTS travel_tasks_user_idx ON travel_tasks (user_id) WHERE user_id IS NOT NULL`;
       await sql`CREATE INDEX IF NOT EXISTS travel_tasks_state_idx ON travel_tasks (state)`;
       await sql`CREATE INDEX IF NOT EXISTS travel_tasks_current_job_idx ON travel_tasks (current_booking_job_id) WHERE current_booking_job_id IS NOT NULL`;
+      await sql`CREATE INDEX IF NOT EXISTS travel_tasks_decision_room_idx ON travel_tasks (decision_room_id) WHERE decision_room_id IS NOT NULL`;
+      await sql`CREATE INDEX IF NOT EXISTS booking_jobs_task_idx ON booking_jobs (task_id) WHERE task_id IS NOT NULL`.catch(() => {});
       await sql`CREATE INDEX IF NOT EXISTS task_events_task_idx ON task_events (task_id, created_at)`;
     })().catch((err) => {
       travelTaskTablesReady = null;
@@ -94,6 +106,7 @@ export async function createTravelTask(params: {
   request: ExecutionJobRequest;
   policy?: Record<string, unknown>;
   currentBookingJobId?: string | null;
+  decisionRoomId?: string | null;
   createdByKeyId?: string | null;
   createdByOrgName?: string | null;
 }): Promise<TravelTask> {
@@ -112,6 +125,7 @@ export async function createTravelTask(params: {
       request_json,
       policy_json,
       current_booking_job_id,
+      decision_room_id,
       created_by_key_id,
       created_by_org_name
     )
@@ -124,6 +138,7 @@ export async function createTravelTask(params: {
       ${requestJson}::jsonb,
       ${policyJson}::jsonb,
       ${params.currentBookingJobId ?? null},
+      ${params.decisionRoomId ?? null},
       ${params.createdByKeyId ?? null},
       ${params.createdByOrgName ?? null}
     )
@@ -137,6 +152,11 @@ export async function createTravelTask(params: {
     state: task.state,
   });
   if (task.current_booking_job_id) {
+    await sql`
+      UPDATE booking_jobs
+      SET task_id = ${task.id}, updated_at = NOW()
+      WHERE id = ${task.current_booking_job_id}
+    `.catch(() => {});
     await appendTaskEvent(task.id, "booking_job_created", {
       jobId: task.current_booking_job_id,
     });
@@ -171,7 +191,11 @@ export async function updateTravelTaskState(
   await ensureTravelTaskTables();
   const result = await sql<TravelTask>`
     UPDATE travel_tasks
-    SET state = ${state}, updated_at = NOW()
+    SET
+      state = ${state},
+      terminal_reason = COALESCE(${stringOrNull(data.terminalReason)}, terminal_reason),
+      terminal_code = COALESCE(${stringOrNull(data.terminalCode)}, terminal_code),
+      updated_at = NOW()
     WHERE id = ${taskId}
     RETURNING *
   `;
@@ -183,6 +207,10 @@ export async function updateTravelTaskState(
     });
   }
   return task;
+}
+
+function stringOrNull(value: unknown): string | null {
+  return typeof value === "string" && value.trim() ? value : null;
 }
 
 export async function appendTaskEvent(

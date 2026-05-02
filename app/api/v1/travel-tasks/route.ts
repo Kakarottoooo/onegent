@@ -101,6 +101,7 @@ export async function POST(req: NextRequest) {
       request: execution,
       policy: taskOptions?.policy,
       currentBookingJobId: job.id,
+      decisionRoomId: taskOptions?.decisionRoomId,
       createdByKeyId: context.keyId,
       createdByOrgName: context.organizationName,
     });
@@ -137,13 +138,19 @@ function parseCreateBody(rawBody: unknown):
       ok: true;
       value: {
         execution: ExecutionJobRequest;
-        task?: { title?: string; policy?: Record<string, unknown> };
+        task?: { title?: string; policy?: Record<string, unknown>; decisionRoomId?: string };
       };
     }
   | { ok: false; body: unknown } {
   const envelope = TravelTaskCreateEnvelopeSchema.safeParse(rawBody);
   if (envelope.success) {
-    return { ok: true, value: envelope.data as { execution: ExecutionJobRequest; task?: { title?: string; policy?: Record<string, unknown> } } };
+    return {
+      ok: true,
+      value: envelope.data as {
+        execution: ExecutionJobRequest;
+        task?: { title?: string; policy?: Record<string, unknown>; decisionRoomId?: string };
+      },
+    };
   }
 
   const legacy = ExecutionJobRequestSchema.safeParse(rawBody);
@@ -184,6 +191,7 @@ async function runAttemptForTask(
     await updateTravelTaskState(taskId, mapExecutionStatusToTaskState(result.status), {
       jobId,
       executionStatus: result.status,
+      ...terminalDataForResult(result),
     });
   } catch (err) {
     console.error(`[api/v1/travel-tasks] executor crashed for task ${taskId}`, err);
@@ -206,8 +214,32 @@ async function runAttemptForTask(
     await updateTravelTaskState(taskId, "failed", {
       jobId,
       executionStatus: "error",
+      terminalCode: "executor_crashed",
+      terminalReason: message,
       error: message,
     }).catch(() => {});
+  }
+}
+
+function terminalDataForResult(result: ExecutionJobResult): Record<string, unknown> {
+  switch (result.status) {
+    case "completed":
+      return { terminalCode: "completed", terminalReason: result.summary };
+    case "paused_payment":
+    case "ready_for_confirmation":
+      return { terminalCode: result.status, terminalReason: result.summary };
+    case "needs_profile_data":
+      return { terminalCode: "needs_profile_data", terminalReason: result.profileGap?.message ?? result.summary };
+    case "needs_login":
+    case "needs_otp":
+      return { terminalCode: result.status, terminalReason: result.summary };
+    case "captcha":
+    case "error":
+    case "no_availability":
+      return { terminalCode: result.status, terminalReason: result.error ?? result.summary };
+    case "pending":
+    case "running":
+      return {};
   }
 }
 
@@ -255,6 +287,9 @@ function toPublicTask(task: TravelTask) {
     title: task.title,
     state: task.state,
     currentBookingJobId: task.current_booking_job_id,
+    decisionRoomId: task.decision_room_id,
+    terminalReason: task.terminal_reason,
+    terminalCode: task.terminal_code,
     policy: task.policy_json,
     createdAt: task.created_at,
     updatedAt: task.updated_at,
