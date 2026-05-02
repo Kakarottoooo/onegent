@@ -110,7 +110,17 @@ export async function runExecutionJobWithRecovery(
     const isNotFound =
       isNoAvailability &&
       /not found on (opentable|resy)/i.test(phase1.result.summary);
-    const phase2Eligible = isNoAvailability && !isNotFound;
+    // OpenTable's "no online availability within X hours of Y" copy means
+    // the entire ±X-hour window around the requested time is sold out.
+    // Trying 19:30 / 18:30 / 20:00 etc. when OT just told us nothing's
+    // available within 3.5h of 19:00 burns a chromium session per attempt
+    // (visible to the user as Chrome flickering open/close 5-7 times) and
+    // never produces a hit. Skip the time ladder and jump straight to the
+    // provider fallback chain in this case.
+    const isWindowFullySoldOut =
+      isNoAvailability &&
+      /no online availability within/i.test(phase1.result.summary);
+    const phase2Eligible = isNoAvailability && !isNotFound && !isWindowFullySoldOut;
 
     let attemptsAfter = phase1.attemptCount;
 

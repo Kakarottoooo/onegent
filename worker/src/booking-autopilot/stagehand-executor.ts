@@ -1777,12 +1777,62 @@ The user will enter CVV and confirm payment themselves.`,
           const isVenueNotOnPlatform = VENUE_NOT_ON_PLATFORM_SIGNALS.some((sig) => earlyText.includes(sig));
           const venueLabel = targetHotelName ?? "This venue";
           const platformLabel = /resy\.com/i.test(raw.url()) ? "Resy" : "OpenTable";
+
+          // When OT renders the alt-day banner ("Next available is Sun, May 10
+          // [11:15 AM] [11:30 AM] ..."), pull it out so the summary can give
+          // the user a concrete next step instead of a dead-end. Mirrors the
+          // same regex pair used at the late slot-capture site (~line 4528) —
+          // keeping both paths in sync ensures users get the same info no
+          // matter which detection branch fires first.
+          const altDayCapture = await raw.evaluate(() => {
+            const isVisible = (el: Element) => {
+              const r = (el as HTMLElement).getBoundingClientRect();
+              return r.width > 0 && r.height > 0;
+            };
+            const parseT = (text: string): number | null => {
+              const m = text.match(/(\d{1,2}):(\d{2})\s*(AM|PM)/i);
+              if (!m) return null;
+              let h = parseInt(m[1], 10);
+              if (m[3].toUpperCase() === "PM" && h < 12) h += 12;
+              if (m[3].toUpperCase() === "AM" && h === 12) h = 0;
+              return h * 60 + parseInt(m[2], 10);
+            };
+            const seen = new Set<string>();
+            const slots = Array.from(document.querySelectorAll<HTMLElement>('button, a[role="button"]'))
+              .filter(el => isVisible(el) && parseT((el.textContent ?? "").trim()) !== null)
+              .map(el => (el.textContent ?? "").trim().replace(/\s+/g, " "))
+              .filter(t => { if (seen.has(t)) return false; seen.add(t); return true; })
+              .slice(0, 12);
+            const bodyText = (document.body?.innerText ?? "").replace(/\s+/g, " ");
+            const nextAvailMatch = bodyText.match(/next available is\s+([A-Z][a-z]+,?\s+[A-Z][a-z]+\s+\d{1,2}(?:,?\s+\d{4})?)/i);
+            const noAvailMatch = bodyText.match(/no online availability\s+within\s+([\d.]+\s+hours?\s+of\s+\d{1,2}:\d{2}\s*(?:AM|PM))/i);
+            return {
+              slots,
+              nextAvailableLabel: nextAvailMatch ? nextAvailMatch[1].trim() : null,
+              noAvailabilityWindow: noAvailMatch ? noAvailMatch[1].trim() : null,
+            };
+          }).catch(() => ({ slots: [] as string[], nextAvailableLabel: null as string | null, noAvailabilityWindow: null as string | null }));
+
+          // Cache the captured values at module scope so the late-path return
+          // sites can reuse them if for any reason this Pre-AI return is
+          // bypassed and we fall through to the slot-capture path.
+          capturedAvailableSlots = altDayCapture.slots;
+          capturedNextAvailableLabel = altDayCapture.nextAvailableLabel;
+          capturedNoAvailabilityWindow = altDayCapture.noAvailabilityWindow;
+
           let summary: string;
           if (isVenueNotOnPlatform) {
             summary = /resy\.com/i.test(raw.url())
               ? `"${venueLabel}" not found on Resy. The restaurant may not accept reservations through Resy.`
               : `"${venueLabel}" not found on OpenTable. The restaurant may not be on the OpenTable booking network.`;
             trace(`Pre-AI fast path: matched VENUE_NOT_ON_PLATFORM signal "${matchedSignal}" — encoding "not found on ${platformLabel.toLowerCase()}" so multi-platform fallback triggers.`);
+          } else if (altDayCapture.nextAvailableLabel && altDayCapture.slots.length > 0) {
+            const slotPreview = altDayCapture.slots.slice(0, 6).join(", ");
+            const windowPhrase = altDayCapture.noAvailabilityWindow
+              ? ` within ${altDayCapture.noAvailabilityWindow}`
+              : " at the requested time";
+            summary = `${venueLabel} has no online availability${windowPhrase} on ${platformLabel}. Next available is ${altDayCapture.nextAvailableLabel}: ${slotPreview}.`;
+            trace(`Pre-AI fast path: matched "${matchedSignal}" + alt-day banner "${altDayCapture.nextAvailableLabel}" with ${altDayCapture.slots.length} slot(s).`);
           } else {
             summary = `${venueLabel} has no availability at the requested time on ${platformLabel}.`;
             trace(`Pre-AI fast path: matched NO_SLOTS_AT_TIME signal "${matchedSignal}" — time-ladder retry should kick in.`);
@@ -1796,6 +1846,7 @@ The user will enter CVV and confirm payment themselves.`,
             sessionUrl,
             summary,
             debugTrace,
+            ...(altDayCapture.slots.length > 0 ? { availableSlots: altDayCapture.slots } : {}),
           };
         }
       }
