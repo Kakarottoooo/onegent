@@ -4477,6 +4477,28 @@ The user will enter CVV and confirm payment themselves.`,
               }
               // ── END detail-page early path ────────────────────────────────────
 
+              // Wait for OT React to render time-slot cards before evaluate
+              // runs. Without this, evaluate fires before slots hydrate →
+              // 0 candidates + StagehandEvalError + broad-scan finds 0
+              // leaf time-text elements (the symptom from job 9e0ce939).
+              // We accept either:
+              //   - <li data-test^="time-slot-"> (canonical OT markup), or
+              //   - any visible HH:MM AM/PM text in document.body.
+              // 12s ceiling matches OT peak-load AJAX latency.
+              await raw
+                .waitForFunction(
+                  () => {
+                    if (document.querySelector('[data-test^="time-slot-"]')) return true;
+                    const text = document.body?.innerText ?? "";
+                    return /\d{1,2}:\d{2}\s*(AM|PM)/.test(text);
+                  },
+                  { timeout: 12000 },
+                )
+                .catch(() => {
+                  // soft-timeout — code below has its own broad-scan diag
+                  trace("[opentable] search-card waitForFunction timed out — slots may not have rendered yet, proceeding anyway");
+                });
+
               // Find the best time slot button WITHIN the target restaurant's card.
               // IMPORTANT: OpenTable search results show multiple restaurants. We must
               // restrict the search to the card that contains the target restaurant name
