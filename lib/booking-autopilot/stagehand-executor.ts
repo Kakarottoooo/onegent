@@ -767,7 +767,17 @@ export async function runBrowserTask(
   }
 
   // Resolve model name —?Stagehand v3 uses "provider/model" format
-  const modelName = input.agentModel?.model ?? "openai/gpt-4o-mini";
+  // Model selection precedence:
+  //   1. caller-supplied input.agentModel.model (per-job override from chat-commit)
+  //   2. STAGEHAND_DEFAULT_MODEL env var (operator override; useful when the
+  //      default OpenAI key hits project-tier 402 — set
+  //      STAGEHAND_DEFAULT_MODEL=anthropic/claude-3-5-sonnet-latest in .env.local
+  //      and Anthropic credentials get used instead)
+  //   3. fallback to openai/gpt-4o-mini (cheapest for vision tasks)
+  const modelName =
+    input.agentModel?.model ??
+    process.env.STAGEHAND_DEFAULT_MODEL ??
+    "openai/gpt-4o-mini";
 
   // Resolve API key from user-supplied config or env fallback
   const modelApiKey = input.agentModel?.apiKey
