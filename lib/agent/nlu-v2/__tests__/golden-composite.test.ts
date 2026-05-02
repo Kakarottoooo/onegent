@@ -246,7 +246,7 @@ describe("Golden multi-DR routing · edge cases on category × scenario interact
         nights: 5,
         travelers: 2,
         activities: [],
-      } as IntentState["trip"],
+      } as unknown as IntentState["trip"],
     });
     const action = routeIntent(state);
     expect(action.type).toBe("show_confirm_card");
