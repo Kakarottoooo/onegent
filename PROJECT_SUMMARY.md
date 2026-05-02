@@ -20,13 +20,30 @@ ChatGPT Apps + 第三方 agent builder via /api/v1）
 产品地址：https://onegent.one/
 
 ================================================================
-Current State Snapshot · 2026-04-30
+Current State Snapshot · 2026-05-02
 ================================================================
+
+⚠ **Active pivot in progress**：browser execution layer 正在从 bespoke
+Stagehand 重构为 OpenAI Computer Use。详细计划 / 架构 / Track A&B 分工 /
+迁移清单全部记录在 [EXECUTOR_V2_PIVOT.md](./EXECUTOR_V2_PIVOT.md)。
 
 【架构现状】
 - C 端：Vercel-hosted Next.js (onegent.one)，Neon Postgres，Clerk auth
 - Worker：Railway long-process container 跑 booking-autopilot（restaurant
   scenario via USE_WORKER_FOR），其它 scenario 仍在 Vercel in-process
+- **Executor 层（2026-05-02 重构中）**：`lib/core/execution` + `worker/src/core/execution`
+  下面新增 `ExecutorV2 registry`，两个 adapter：
+  · `legacy_stagehand`（现状默认，包旧 stagehand-executor.ts，保留作 fallback）
+  · `computer_use`（新主路径，OpenAI Computer Use Responses API）
+  · 灰度开关：`ONEGENT_EXECUTOR_V2=computer_use` +
+    `ONEGENT_COMPUTER_USE_FOR=resy|restaurant|all`
+  · 统一事件模型：`opened_site / selected_slot / accepted_policy /
+    needs_otp / otp_submitted / ready_for_confirmation / failed`
+  · 统一状态：`needs_otp / needs_login / ready_for_user_confirmation /
+    no_availability / failed`（`needs_profile_data` 即将加入）
+- **观察体验层（2026-05-02 上线）**：`/api/booking-jobs/:id/timeline-events`
+  SSE + `/api/booking-jobs/:id/snapshots` canonical endpoint，给前端 UI
+  消费（Task Timeline + Snapshot rail + ProfileGapCard）
 - MCP：双轨发行
   · npm @onegent/mcp-server v0.1.0（stdio for Claude Desktop）
   · /api/mcp（Streamable HTTP for Claude.ai web / ChatGPT Apps / 第三方）
@@ -37,7 +54,10 @@ Current State Snapshot · 2026-04-30
   · Free: 3 bookings + 1 DR / 月，跨 surface 共享配额
   · Pro: $9/月 或 $79/年（年付省 27%）
 - 双份代码（lib/booking-autopilot ≡ worker/src/booking-autopilot）：
-  byte-identical，DELETE_WHEN trigger 未到（详见 CLAUDE.md）
+  byte-identical，作为 `legacy_stagehand` adapter 的实现保留。删除条件
+  已更新（见 [EXECUTOR_V2_PIVOT.md "Lib deletion criteria"](./EXECUTOR_V2_PIVOT.md)），
+  从"4 类切到 worker"改成"Computer Use 路径关 Resy Essex 闭环 +
+  `ONEGENT_COMPUTER_USE_FOR=all` 在 prod 跑稳 ≥ 3 类"。
 
 【已上线产品面（按时间倒序）】
 1. Social Feed 路线图（plan.md 已写，未实施）— 2026-04-30
@@ -52,13 +72,22 @@ Current State Snapshot · 2026-04-30
 10. 主页 chat Claude.ai 风格重构 + NLU state 持久化 — 2026-04-26
 
 【当前阻塞 / 等外部触发的事项（统一在此，下面 release notes 不重复）】
+- **Executor V2 pivot — Resy Essex Computer Use 闭环**（codex Track A 当前
+  主战场，详见 [EXECUTOR_V2_PIVOT.md](./EXECUTOR_V2_PIVOT.md)）
 - ChatGPT Apps marketplace review 结果（OpenAI 5-10 工作日，被动等）
-- Browserbase Pro $99/mo 升级（等付费用户敲门触发）
-- Worker 双份代码 cleanup（等 hotel/flight/activity 切到 worker）
+- Browserbase Pro $99/mo 升级（路径已变 — Computer Use 走 OpenAI
+  Responses API，Browserbase 升级时机改成"自建 farm 启动信号触发"，
+  详见 BROWSER_FARM_PLAN.md）
+- Worker 双份代码 cleanup（删除条件已更新 — 见 EXECUTOR_V2_PIVOT.md
+  "Lib deletion criteria"）
 - B2B Lane C cold outreach（4 客户类型 × 5 contacts 还没启动）
 - Cofounder / 早期合伙人搜索
 
 【Pending backlog（不阻塞，待动手）】
+- ProfileGapCard wiring（等 Track A 发 needs_profile_data 状态；前端
+  组件 + types 已 ready）
+- Task Timeline + Snapshot rail E2E 联调（master ↔ worktree 合并后验证
+  SSE / snapshot endpoint 真实数据流）
 - Social Feed MVP 实施（trip-anchored posts + 单向 follow + /feed 入口）
 - 公开发布（HN + X + PH + Reddit launch post）
 - @onegent/mcp-server 加 tool annotations 后 npm 重发（~5min）
@@ -109,6 +138,165 @@ B 端基础设施 / Phase 0 UI / Positioning Shift 等）已归档至
 [PROJECT_SUMMARY_ARCHIVE_2026Q1.md](./PROJECT_SUMMARY_ARCHIVE_2026Q1.md)。
 
 按钮 / 功能行为速查见 [FEATURE_MAP.md](./FEATURE_MAP.md)。
+
+================================================================
+Recent Updates - 2026-05-02 · Executor V2 pivot — Computer Use as new main path · Track A/B parallel build · Task Timeline + DR Activity Timeline ship + NLU coverage +63 tests + 1 bug fix
+================================================================
+
+跨大约一天（2026-05-02 全天）从"修第 11 轮 OpenTable bug"切到了**架构层
+重新选型**。详细计划见 [EXECUTOR_V2_PIVOT.md](./EXECUTOR_V2_PIVOT.md)。
+今天发生的事按时间顺序：
+
+【上午：触底反弹决策】
+连续 7 个 commit 修一个 OpenTable 餐厅预订（OT round 5→10），bug 列表
+没有尽头：phantom worker / require-undefined ESM / Stagehand wrapper
+proxy gaps / esbuild __name leak / extractTargetCity missing export /
+lib·worker fork drift…用户喊停：**"我们的技术路径是不是有问题"**。
+
+讨论结论：Stagehand 这一坨**结构性复杂度本身在产生 bug**。OpenAI Computer
+Use（Anthropic Computer Use API surface 同款）把 6 个 platform provider
++ 3-layer 逻辑 + Stagehand wrapper 全压成"截图 + 自然语言指令"。代价是
+单次预订成本上升（$0.1-0.5 → $1-5）+ 速度慢（10-20s → 30-90s），但**0
+平台代码 / 平台改版自适应 / 一个执行 loop**。
+
+战略锚点：**Computer Use is to Onegent what AWS S3 is to Dropbox** —
+基础设施变便宜让产品层（chat / NLU / DR / profile / queue / MCP / 信任
+边界 / domain knowledge）更繁荣，不是更萎缩。
+
+【下午：Track A / B 并行落地】
+分工：
+- **Track A（codex，master 分支）** — 后端执行引擎 + 数据契约
+- **Track B（Claude，claude/festive-pare-f27273 分支）** — UI + 观察体验 + 测试
+- 文件域显式划分（见 EXECUTOR_V2_PIVOT.md "Ownership matrix"），两边并行
+  施工 0 冲突
+
+【今日 13 个 commit · Track A 端（codex / master）】
+
+1. 49f9175 — feat(execution-v2): registry + legacy_stagehand + computer_use
+   - lib/execution-v2/** + worker/src/execution-v2/** 新建
+   - 统一事件 / 状态契约
+   - ONEGENT_EXECUTOR_V2 + ONEGENT_COMPUTER_USE_FOR 灰度开关
+   - 默认仍走 legacy_stagehand，零回归
+
+2. 8a2da14 — feat(tasks): expose timeline and snapshot endpoints
+   - GET /api/booking-jobs/:id/timeline-events SSE（也支持 ?format=json）
+   - GET /api/booking-jobs/:id/snapshots（canonical）
+   - GET /api/browser-live/:id/snapshots（compat）
+   - 修 worker boot：extractTargetCity 加到 lib/worker mirror profile.ts
+   - check-drift 改成 Node 原生比较，扩到 browser-snapshot-store
+   - 提交 browser-snapshot-store，删 task 时同步删截图
+
+【今日 11 个 commit · Track B 端（Claude / claude/festive-pare-f27273）】
+
+1. 5357f98 — fix(flight): require only DOB, not passport — 国内航班不需要
+   passport（codex 后续会 port 到 master 因为现在跟 49f9175 在
+   lib/core/execution/executor.ts 上有交集）
+
+2. cd4f2de + 07f4e4a — feat(task-timeline): components/task-timeline 组件
+   包 + /dev/timeline-demo
+   - 14 个 TimelineEventKind + 4 个保留位
+   - 左侧时间线 + 右侧截图流 + lightbox + StatusBanner + 5 demo states
+   - derive-events.ts 从现有 decisionLog 推断高层事件（Stage 3 fallback）
+
+3. a8e011f — feat(profile-gap): components/profile-gap 组件包 + /dev/profile-gap-demo
+   - 17 字段 × {label, inputType, helper, validator, sensitivity}
+   - 信用卡字段强制走 PaymentRedirect，不 inline 收（"止步 CVV"规则）
+   - 6 fixture state：flight_dob_only / flight_full_intl /
+     hotel_payment_only / hotel_address_and_payment / restaurant_basic /
+     generic_minimal
+
+4. ed5a5e4 — feat(dr): polish ChatPanel — bigger surface, avatars,
+   better hierarchy
+   - max-h-56(224px) → min-h-280px max-h-60vh
+   - text-xs(12px) → text-[13px]
+   - agent 不再斜体；左侧蓝色头像 + "ONEGENT" eyebrow
+   - 其他成员首字母圆头像
+   - empty 态 + Sending… 状态
+
+5. e127156 — feat(dr-timeline): components/dr-timeline 组件包 +
+   /dev/dr-timeline-demo
+   - 18 个 DREventKind 覆盖 DR 完整生命周期
+     （room_created / member_joined / constraint_submitted /
+     proposal_generated/regenerated/accepted/rejected/superseded /
+     vote_approve/decline/request_changes / booking_started/completed/failed）
+   - derive-events.ts 从 DecisionRoomSnapshot 推断（无新 API）
+
+6. d0172f5 — feat(dr): wire Activity Timeline into the room detail page
+   - app/rooms/[id]/page.tsx 加 #room-activity 区块在 ChatPanel 上面
+   - sidebar nav 加 "Activity" 链接
+   - useRoomState polling 自动驱动，4s 一次刷新
+   - extractProposalVenue helper 抽 venue label（"accepted — Carbone"）
+   - **真实数据已生效** — 不只是 demo route
+
+7. 210fd30 — test(nlu-v2): add 38 golden tests covering composite plans +
+   edge cases
+   - 之前 composite_plan 整个 branch 0 测试（router.ts:187-200）
+   - 新增 5 section 38 case：composite plan / multi-DR routing /
+     required-field 边界 / planning_assumptions / flatten 边界
+   - 88 → 126 passing，回归 0
+
+8. a2e5006 — fix(nlu-v2): blank/whitespace member_names must not pass
+   DR creation gate
+   - **probing tests 找到的真 bug**：member_names=[""] 或 ["  "] 之前
+     绕过了 DR 创建的 name-required gate，导致 Decision Room 被创建
+     但没有实际成员可以邀请
+   - router.ts 加 realMemberCount() helper（trim + filter blank +
+     防 non-array）
+   - routeIntent 2 个 gate + buildStateSummary "with X" 后缀都用上
+   - 25 probing case + 5 MN 案例固定修复后行为
+   - 总计 88 → 151 passing（+63 cases，+71%）
+
+9. 134aa43 — copy(ui): rewrite ~30 dev-tone error strings + add UI_ERR helper
+   - 全仓 grep 改写 dev 口吻字符串：
+     · "Network error." × 11 处 → "Connection problem. Check your network..."
+     · "Failed to process avatar." → "Couldn't process that image..."
+     · "Checkout response was malformed." → "Something went wrong starting..."
+     · "No plan to share/vote/watch/export" × 4 → "Nothing to share/...
+       yet — generate a plan first."
+     · "No booking profile found. Please set up..." → "Set up your booking
+       profile in Settings first — we need a name, email, and phone..."
+   - 16 个文件，30+ strings
+   - 新建 lib/ui-copy/errors.ts UI_ERR helper（network/generic/
+     notFound/forbidden/unauthenticated/loadFailed/saveFailed/serverError）
+     给未来 i18n 留单点替换口子
+
+10. efa0404 — feat(task-timeline): wire SSE + snapshot endpoints; cutover
+    /tasks page
+    - 新 components/task-timeline/use-timeline-events.ts（258 行）
+      三层 fallback：EventSource SSE → ?format=json polling → 老
+      /api/booking-jobs/:id + derive-events
+    - 新 components/task-timeline/use-snapshots.ts（157 行）
+      canonical /snapshots first / browser-live compat fallback /
+      paused 联动 timeline.closed
+    - TaskTimelinePanel 重构：删旧 polling hook，组合两个新 hook
+    - **app/tasks/page.tsx cutover** — slide-over 内容从
+      <BrowserLiveView fullscreen /> 替换成 <TaskTimelinePanel />
+      （slide-over 容器 + drag-resize 保留，TaskTimelinePanel 自带
+      header / banner / footer）
+    - export BrowserSnapshotRail alias（= SnapshotStream）跟 codex
+      vocabulary 对齐
+    - 防御性 normalizer：未知 event kind filter / snapshot 字段别名
+      容忍 → 后端加新东西 UI 不会炸
+
+【NLU 测试覆盖增量】
+- Pre-today: 88 passed / 6 skipped
+- Post-today: 151 passed / 6 skipped
+- 新文件：golden-composite.test.ts (38 cases) + golden-probing.test.ts (25 cases)
+- Bug 找到 / 修了：1 / 1（member_names blank validation gap）
+- 守护的 invariant：composite_plan 整个 branch 现在有 9 个 case 钉住，
+  trip-vs-room 路由优先级 4 个 case 钉住，refine_existing 4 个 case
+  钉住，buildStateSummary 防御性 5 个 case 钉住
+
+【还没完成的两件事】
+1. ProfileGapCard 接 chat：等 Track A 落地 needs_profile_data 结构化
+   状态。组件 + ProfileFieldId types 已经 ready。
+2. Resy Essex 用 Computer Use 闭环：Track A 当前主战场。
+
+【下一阶段产品 release 解锁条件】
+- Resy Essex Computer Use 跑到"最终确认前停下"且稳定 → 把
+  ONEGENT_COMPUTER_USE_FOR 从 resy → 扩到 restaurant 全套
+- 然后 hotel / flight / activity 一个一个迁
+- 4 类全过后才可以删 lib/booking-autopilot
 
 ================================================================
 Recent Updates - 2026-04-30 · DR Phase 4 闭环 + 联系人模糊匹配 + Profile portfolio + Expedia drift handling + Social Feed plan
