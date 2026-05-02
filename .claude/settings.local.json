@@ -54,7 +54,8 @@
       "Bash(cp /c/Users/Gzw19/restaurant-agent/.ralph-src/CLAUDE.md /c/Users/Gzw19/restaurant-agent/scripts/ralph/)",
       "Bash(chmod +x /c/Users/Gzw19/restaurant-agent/scripts/ralph/ralph.sh)",
       "Bash(mkdir -p /c/Users/Gzw19/.claude/skills)",
-      "Bash(npx:*)"
+      "Bash(npx:*)",
+      "Bash(echo \"EXIT=$?\")"
     ]
   }
 }
