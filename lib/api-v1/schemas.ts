@@ -34,6 +34,15 @@ const RestaurantParamsSchema = z.object({
   cuisine: z.string().optional(),
   neighborhood: z.string().optional(),
   budget_per_person: z.number().positive().optional(),
+  startUrl: z.string().url().optional(),
+  fallback_policy: z
+    .object({
+      time_window_minutes: z.number().nonnegative().optional(),
+      allow_platform_switch: z.boolean().optional(),
+      allow_venue_switch: z.boolean().optional(),
+      require_user_approval_before_booking: z.boolean().optional(),
+    })
+    .optional(),
 });
 
 const HotelParamsSchema = z.object({
