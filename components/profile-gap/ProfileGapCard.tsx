@@ -10,12 +10,28 @@
  *
  * Pure presentational + local form state. Network is the parent's job
  * (passed via props.onSave). Track B never invents an API surface.
+ *
+ * ─── onSave contract ──────────────────────────────────────────────
+ *
+ * `state.missing` is normalized through `normalizeMissingFields` before
+ * partition + render. That collapses the legacy `full_name` alias into
+ * `first_name + last_name` so the card always shows the canonical
+ * 13-field schema (see `CANONICAL_FIELD_IDS` in `./types.ts`).
+ *
+ * `payload.values` is keyed by canonical IDs only. Parent should POST:
+ *   POST /api/v1/travel-tasks/:id/continue
+ *   { profile: payload.values }
+ * — no key renaming required.
  */
 
 import { useMemo, useState } from "react";
 import FieldRow from "./FieldRow";
 import PaymentRedirect from "./PaymentRedirect";
-import { FIELD_DEFINITIONS, partitionMissing } from "./field-vocabulary";
+import {
+  FIELD_DEFINITIONS,
+  normalizeMissingFields,
+  partitionMissing,
+} from "./field-vocabulary";
 import type {
   GapFormValues,
   GapTrigger,
@@ -66,10 +82,13 @@ export default function ProfileGapCard({
   initialValues,
   demo,
 }: ProfileGapCardProps) {
-  const { inline, payment } = useMemo(
-    () => partitionMissing(state.missing),
-    [state.missing],
-  );
+  const { inline, payment } = useMemo(() => {
+    // Expand legacy `full_name` → first_name + last_name and de-dupe before
+    // splitting into inline / payment buckets. Backend sends canonical IDs
+    // already; this is purely a back-compat shim for older code paths.
+    const normalized = normalizeMissingFields(state.missing);
+    return partitionMissing(normalized);
+  }, [state.missing]);
 
   const [values, setValues] = useState<GapFormValues>(() => seedValues(inline, initialValues));
   const [errors, setErrors] = useState<Partial<Record<ProfileFieldId, string>>>({});

@@ -4,6 +4,12 @@
  *
  * Keep the map dense and the component dumb — no special-cases in
  * FieldRow.tsx. Adding a new field = adding one entry here.
+ *
+ * Field IDs match the canonical schema codex's Track A emits via
+ * `/api/v1/travel-tasks/:id/needs` (see `CANONICAL_FIELD_IDS` in
+ * `./types.ts`). The legacy `full_name` alias is normalized into
+ * `first_name` + `last_name` before render — see
+ * `normalizeMissingFields()` below.
  */
 
 import type { FieldSensitivity, ProfileFieldId } from "./types";
@@ -92,14 +98,23 @@ const countryOptions = COMMON_COUNTRIES.map((c) => ({ value: c, label: c }));
 
 export const FIELD_DEFINITIONS: Record<ProfileFieldId, FieldDefinition> = {
   // ── Personal ───────────────────────────────────────────────
-  full_name: {
-    id: "full_name",
-    label: "Full name",
+  first_name: {
+    id: "first_name",
+    label: "First name",
     inputType: "text",
     helper: "As it appears on your travel documents.",
-    placeholder: "Jane Doe",
+    placeholder: "Jane",
     sensitivity: "personal",
-    validate: required("Name"),
+    validate: required("First name"),
+  },
+  last_name: {
+    id: "last_name",
+    label: "Last name",
+    inputType: "text",
+    helper: "As it appears on your travel documents.",
+    placeholder: "Doe",
+    sensitivity: "personal",
+    validate: required("Last name"),
   },
   email: {
     id: "email",
@@ -155,6 +170,7 @@ export const FIELD_DEFINITIONS: Record<ProfileFieldId, FieldDefinition> = {
     validate: required("Country"),
   },
   ktn: {
+    // UI-only optional — backend never includes this in `missing[]`.
     id: "ktn",
     label: "TSA Known Traveler Number",
     inputType: "text",
@@ -173,6 +189,7 @@ export const FIELD_DEFINITIONS: Record<ProfileFieldId, FieldDefinition> = {
     validate: required("Address"),
   },
   address_line2: {
+    // UI-only optional — backend never includes this in `missing[]`.
     id: "address_line2",
     label: "Apt / suite",
     inputType: "text",
@@ -227,6 +244,19 @@ export const FIELD_DEFINITIONS: Record<ProfileFieldId, FieldDefinition> = {
     inputType: "text",
     sensitivity: "payment",
   },
+
+  // ── Legacy alias (kept for back-compat; expanded by normalizeMissingFields) ─
+  full_name: {
+    id: "full_name",
+    label: "Full name",
+    inputType: "text",
+    helper: "As it appears on your travel documents.",
+    placeholder: "Jane Doe",
+    sensitivity: "personal",
+    // No `validate` — `full_name` should never reach inline render after
+    // normalization. The entry only exists so demo fixtures and any
+    // legacy backend payload can still be displayed without crashing.
+  },
 };
 
 /* ─── Helpers ──────────────────────────────────────────────────────────── */
@@ -235,9 +265,45 @@ export function isPaymentField(id: ProfileFieldId): boolean {
   return FIELD_DEFINITIONS[id].sensitivity === "payment";
 }
 
-/** Partition missing fields into (inline-collectable, payment-redirect). */
+/**
+ * Normalize a backend-supplied `missing[]` array into the canonical render
+ * set:
+ *
+ *   1. Expand the legacy `full_name` alias into `first_name` + `last_name`
+ *      so older code paths keep rendering correctly.
+ *   2. De-duplicate while preserving order of first appearance — important
+ *      because the backend's order roughly follows "ask in the order the
+ *      provider's form asks".
+ *
+ * Pure function; safe to call inside `useMemo`.
+ */
+export function normalizeMissingFields(
+  missing: readonly ProfileFieldId[],
+): ProfileFieldId[] {
+  const out: ProfileFieldId[] = [];
+  const seen = new Set<ProfileFieldId>();
+  for (const id of missing) {
+    if (id === "full_name") {
+      for (const sub of ["first_name", "last_name"] as const) {
+        if (!seen.has(sub)) {
+          out.push(sub);
+          seen.add(sub);
+        }
+      }
+      continue;
+    }
+    if (!seen.has(id)) {
+      out.push(id);
+      seen.add(id);
+    }
+  }
+  return out;
+}
+
+/** Partition missing fields into (inline-collectable, payment-redirect).
+ *  Caller is expected to have already run `normalizeMissingFields`. */
 export function partitionMissing(
-  missing: ProfileFieldId[],
+  missing: readonly ProfileFieldId[],
 ): { inline: ProfileFieldId[]; payment: ProfileFieldId[] } {
   const inline: ProfileFieldId[] = [];
   const payment: ProfileFieldId[] = [];

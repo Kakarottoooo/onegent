@@ -1,9 +1,16 @@
 /**
  * Fixtures for /dev/profile-gap-demo.
  *
- * Each entry models a realistic missing-field combo. Stays internal (not
- * re-exported via index.ts) so production code paths can never accidentally
- * read fixture values.
+ * Each entry models a realistic missing-field combo that codex's Track A
+ * status response (`needs_profile_data` + `missing: ProfileFieldId[]`)
+ * could produce. Stays internal (not re-exported via index.ts) so
+ * production code paths can never accidentally read fixture values.
+ *
+ * Field names use the canonical 13-field schema (see `CANONICAL_FIELD_IDS`
+ * in `./types.ts`). One fixture (`restaurant_legacy_full_name`)
+ * deliberately uses the legacy `full_name` alias to verify
+ * `normalizeMissingFields` expands it to `first_name + last_name` at
+ * render time.
  */
 
 import type { ProfileGapState } from "./types";
@@ -56,8 +63,20 @@ export const FIXTURE_SCENARIOS: Record<string, { label: string; state: ProfileGa
     label: "Restaurant — name + phone missing",
     state: {
       trigger: "restaurant",
-      missing: ["full_name", "phone"],
+      // Canonical contract: codex sends first_name + last_name (not full_name).
+      missing: ["first_name", "last_name", "phone"],
       reason: "OpenTable needs a name and phone to confirm the reservation.",
+    },
+  },
+  restaurant_legacy_full_name: {
+    label: "Restaurant — legacy full_name (auto-expanded)",
+    state: {
+      trigger: "restaurant",
+      // Legacy contract: a stale Track A path (or a hand-crafted demo) might
+      // still emit `full_name`. `normalizeMissingFields` should expand it
+      // into first_name + last_name so the card renders the modern form.
+      missing: ["full_name", "phone"],
+      reason: "Legacy alias — should render as First name + Last name + Phone.",
     },
   },
   generic_minimal: {
@@ -73,6 +92,7 @@ export const FIXTURE_ORDER: (keyof typeof FIXTURE_SCENARIOS)[] = [
   "flight_dob_only",
   "flight_full_intl",
   "restaurant_basic",
+  "restaurant_legacy_full_name",
   "hotel_address_and_payment",
   "hotel_payment_only",
   "generic_minimal",

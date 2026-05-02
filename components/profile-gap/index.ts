@@ -15,11 +15,16 @@ export { default as PaymentRedirect } from "./PaymentRedirect";
 export {
   FIELD_DEFINITIONS,
   isPaymentField,
+  normalizeMissingFields,
   partitionMissing,
 } from "./field-vocabulary";
 export type { FieldDefinition } from "./field-vocabulary";
+export {
+  CANONICAL_FIELD_IDS,
+} from "./types";
 export type {
   ProfileFieldId,
+  CanonicalProfileFieldId,
   GapTrigger,
   FieldSensitivity,
   ProfileGapState,
