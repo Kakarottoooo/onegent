@@ -636,17 +636,18 @@ async function runUniversalStep(
         };
 
         // ── Flight travel doc check ─────────────────────────────────────────
-        // If this is a flight step and passport is missing, fail early with a clear message.
-        if (step.type === "flight" && !dbProfile.passport_number) {
-          const missingDocs: string[] = [];
-          if (!dbProfile.passport_number) missingDocs.push("passport number");
-          if (!dbProfile.date_of_birth) missingDocs.push("date of birth");
-          const missingMsg = `Missing travel documents: ${missingDocs.join(", ")} required for flight booking. Please add these in Settings → My Profile → Travel Documents, then try booking again.`;
+        // DOB is universally required (domestic + international). Passport is
+        // optional — domestic US routes (e.g. JFK→LAX) don't require it.
+        // Stagehand AI fills passport when the form requires it; if missing
+        // on an international route, the form-filling layer surfaces a clear
+        // error there.
+        if (step.type === "flight" && !dbProfile.date_of_birth) {
+          const missingMsg = `Missing travel documents: date of birth required for flight booking. Please add it in Settings → My Profile → Travel Documents, then try booking again.`;
           return {
             ...step,
             status: "error",
             error: missingMsg,
-            decisionLog: [...log, { type: "error" as const, message: `[travel-doc-check] Missing: ${missingDocs.join(", ")}` }],
+            decisionLog: [...log, { type: "error" as const, message: `[travel-doc-check] Missing: date of birth` }],
           } as unknown as BookingJobStep;
         }
 

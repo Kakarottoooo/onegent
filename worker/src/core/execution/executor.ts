@@ -93,22 +93,20 @@ export async function runExecutionJob(
     return errorResult(ctx.jobId, message, createdAt);
   }
 
-  // ── Flight-specific precondition: passport required ──
-  // Mirrors route.ts:519-530. Without passport_number the Stagehand agent
-  // will trundle through the search + fare + review pages only to fail at
-  // the passenger-info form with a confusing error. Better to short-circuit
-  // here with a clear actionable message the caller can surface to their user.
-  if (request.request.scenario === "flight" && !profile.passport_number) {
-    const missingDocs: string[] = [];
-    if (!profile.passport_number) missingDocs.push("passport number");
-    if (!profile.date_of_birth) missingDocs.push("date of birth");
-    const missingMsg = `Missing travel documents: ${missingDocs.join(", ")} required for flight booking. Please add these in Settings → My Profile → Travel Documents, then try booking again.`;
+  // ── Flight-specific precondition: DOB required ──
+  // Mirrors route.ts. DOB is universally required for both domestic and
+  // international flights. Passport is optional here — domestic US routes
+  // (e.g. JFK→LAX) don't require it; only international/some carriers do,
+  // and fillFlightGuestFormWithAI will handle missing passport gracefully
+  // when the form actually demands it.
+  if (request.request.scenario === "flight" && !profile.date_of_birth) {
+    const missingMsg = `Missing travel documents: date of birth required for flight booking. Please add it in Settings → My Profile → Travel Documents, then try booking again.`;
     await writeAudit({
       jobId: ctx.jobId,
       type: "job_failed",
       stepIndex,
-      message: `Flight booking blocked: missing ${missingDocs.join(", ")}`,
-      details: { missingDocs },
+      message: `Flight booking blocked: missing date of birth`,
+      details: { missingDocs: ["date of birth"] },
     });
     return errorResult(ctx.jobId, missingMsg, createdAt);
   }
