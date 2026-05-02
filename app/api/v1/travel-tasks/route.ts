@@ -125,6 +125,8 @@ export async function POST(req: NextRequest) {
       _links: {
         self: `/api/v1/travel-tasks/${task.id}`,
         events: `/api/v1/travel-tasks/${task.id}/events`,
+        timelineEvents: `/api/v1/travel-tasks/${task.id}/timeline-events`,
+        snapshots: `/api/v1/travel-tasks/${task.id}/snapshots`,
         currentJob: `/api/v1/execution-jobs/${job.id}`,
         currentJobAudit: `/api/v1/execution-jobs/${job.id}/audit`,
       },

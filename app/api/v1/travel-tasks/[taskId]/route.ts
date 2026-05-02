@@ -54,6 +54,8 @@ export async function GET(
       })),
       _links: {
         events: `/api/v1/travel-tasks/${task.id}/events`,
+        timelineEvents: `/api/v1/travel-tasks/${task.id}/timeline-events`,
+        snapshots: `/api/v1/travel-tasks/${task.id}/snapshots`,
         currentJob: task.current_booking_job_id
           ? `/api/v1/execution-jobs/${task.current_booking_job_id}`
           : null,

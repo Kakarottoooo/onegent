@@ -142,6 +142,8 @@ export async function POST(
       _links: {
         self: `/api/v1/travel-tasks/${updatedTask.id}`,
         events: `/api/v1/travel-tasks/${updatedTask.id}/events`,
+        timelineEvents: `/api/v1/travel-tasks/${updatedTask.id}/timeline-events`,
+        snapshots: `/api/v1/travel-tasks/${updatedTask.id}/snapshots`,
         currentJob: `/api/v1/execution-jobs/${job.id}`,
       },
     },
