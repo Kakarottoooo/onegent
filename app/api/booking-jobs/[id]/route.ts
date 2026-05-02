@@ -5,6 +5,7 @@ import {
   deleteMonitorsByJobId,
   clearDecisionRoomBookingJobByJobId,
 } from "@/lib/db";
+import { deleteBrowserSnapshots } from "@/lib/browser-snapshot-store";
 
 type Params = { params: Promise<{ id: string }> };
 
@@ -35,6 +36,7 @@ export async function DELETE(req: NextRequest, { params }: Params) {
   }
   await deleteMonitorsByJobId(id);
   await clearDecisionRoomBookingJobByJobId(id);
+  await deleteBrowserSnapshots(id);
   if (job) await deleteBookingJob(id);
   return NextResponse.json({ deleted: true, forced: force, stale: !job });
 }

@@ -63,6 +63,7 @@ const STRICT_PAIRS: Pair[] = [
   { lib: "lib/autonomy.ts", worker: "worker/src/autonomy.ts" },
   { lib: "lib/types.ts", worker: "worker/src/types.ts" },
   { lib: "lib/browser-session-store.ts", worker: "worker/src/browser-session-store.ts" },
+  { lib: "lib/browser-snapshot-store.ts", worker: "worker/src/browser-snapshot-store.ts" },
   { lib: "lib/monitors.ts", worker: "worker/src/monitors.ts" },
   { lib: "lib/memory.ts", worker: "worker/src/memory.ts" },
 ];

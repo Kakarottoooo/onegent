@@ -47,6 +47,35 @@ export function extractTargetHotelName(task: string): string | undefined {
   return undefined;
 }
 
+function normalizeTargetCity(value: string | undefined): string | undefined {
+  if (!value) return undefined;
+  const cleaned = value
+    .trim()
+    .replace(/^[,\s]+|[,\s.]+$/g, "")
+    .replace(/\s+/g, " ");
+  return cleaned || undefined;
+}
+
+export function extractTargetCity(task: string): string | undefined {
+  const explicitCity = normalizeTargetCity(extractTaskField(task, "City"));
+  if (explicitCity) return explicitCity;
+
+  const patterns = [
+    /restaurant\s+in\s+(.+?)\s+and\s+book/i,
+    /hotel\s+in\s+(.+?)\s+and\s+book/i,
+    /reservation\s+at\s+.+?\s+in\s+(.+?)(?:\.|,|$)/i,
+    /book\s+a\s+table\s+at\s+.+?\s+in\s+(.+?)(?:\.|,|for|$)/i,
+    /make\s+a\s+reservation\s+at\s+.+?\s+in\s+(.+?)(?:\.|,|$)/i,
+  ];
+
+  for (const pattern of patterns) {
+    const match = normalizeTargetCity(task.match(pattern)?.[1]);
+    if (match) return match;
+  }
+
+  return undefined;
+}
+
 export function extractTargetHotelNameFromUrl(url: string | undefined): string | undefined {
   if (!url) return undefined;
   try {
