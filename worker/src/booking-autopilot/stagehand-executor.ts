@@ -647,6 +647,13 @@ export async function runBrowserTask(
 
   // For OpenTable no_availability: captured time slots the user can choose from instead.
   let capturedAvailableSlots: string[] = [];
+  // Date that the captured slots fall on, parsed from the "Next available is X"
+  // copy OT shows when the requested date+time has no slots. e.g. "Sun, May 10".
+  // null when slots are for the requested day or no alt-day banner present.
+  let capturedNextAvailableLabel: string | null = null;
+  // Window phrase from OT's "no online availability within X hours of Y" banner,
+  // surfaced into the summary so the user knows why their requested time failed.
+  let capturedNoAvailabilityWindow: string | null = null;
   let openTableLocationCorrectionAttempted = false;
 
   // AI_LOOP_FULL=true activates all AI sub-flags simultaneously.
@@ -4525,8 +4532,12 @@ The user will enter CVV and confirm payment themselves.`,
                   }
                 }
 
-                // Capture ALL visible time slots so the UI can offer alternatives
-                capturedAvailableSlots = await raw.evaluate(() => {
+                // Capture ALL visible time slots so the UI can offer alternatives.
+                // Also extract OT's "Next available is X" alt-day banner + the
+                // "no online availability within X hours of Y" window phrase so
+                // the no_availability summary can give the user a concrete next
+                // step (e.g. "Next available is Sun, May 10 — 11:15 AM, 11:30 AM").
+                const captureResult = await raw.evaluate(() => {
                   const parseT = (text: string): number | null => {
                     const m = text.match(/(\d{1,2}):(\d{2})\s*(AM|PM)/i);
                     if (!m) return null;
@@ -4540,13 +4551,31 @@ The user will enter CVV and confirm payment themselves.`,
                     return r.width > 0 && r.height > 0;
                   };
                   const seen = new Set<string>();
-                  return Array.from(document.querySelectorAll<HTMLElement>('button, a[role="button"]'))
+                  const slots = Array.from(document.querySelectorAll<HTMLElement>('button, a[role="button"]'))
                     .filter(el => isVisible(el) && parseT((el.textContent ?? "").trim()) !== null)
                     .map(el => (el.textContent ?? "").trim().replace(/\s+/g, " "))
                     .filter(t => { if (seen.has(t)) return false; seen.add(t); return true; })
                     .slice(0, 12);
-                }).catch(() => []);
-                trace(`[opentable] no time slots found in ±${timeWindowMins} min — captured ${capturedAvailableSlots.length} available slot(s): ${capturedAvailableSlots.slice(0, 5).join(", ")}`);
+
+                  // OT renders the alt-day banner as "Next available is <weekday>, <month> <day>"
+                  // e.g. "Next available is Sun, May 10". Normalize to a single line so
+                  // downstream callers can quote it verbatim.
+                  const bodyText = (document.body?.innerText ?? "").replace(/\s+/g, " ");
+                  const nextAvailMatch = bodyText.match(/next available is\s+([A-Z][a-z]+,?\s+[A-Z][a-z]+\s+\d{1,2}(?:,?\s+\d{4})?)/i);
+                  const nextAvailableLabel = nextAvailMatch ? nextAvailMatch[1].trim() : null;
+
+                  // OT renders the failure window as "At the moment, there's no online
+                  // availability within X hours of Y:ZZ AM/PM."
+                  const noAvailMatch = bodyText.match(/no online availability\s+within\s+([\d.]+\s+hours?\s+of\s+\d{1,2}:\d{2}\s*(?:AM|PM))/i);
+                  const noAvailabilityWindow = noAvailMatch ? noAvailMatch[1].trim() : null;
+
+                  return { slots, nextAvailableLabel, noAvailabilityWindow };
+                }).catch(() => ({ slots: [] as string[], nextAvailableLabel: null as string | null, noAvailabilityWindow: null as string | null }));
+
+                capturedAvailableSlots = captureResult.slots;
+                capturedNextAvailableLabel = captureResult.nextAvailableLabel;
+                capturedNoAvailabilityWindow = captureResult.noAvailabilityWindow;
+                trace(`[opentable] no time slots found in ±${timeWindowMins} min — captured ${capturedAvailableSlots.length} available slot(s): ${capturedAvailableSlots.slice(0, 5).join(", ")}${capturedNextAvailableLabel ? ` (next available: ${capturedNextAvailableLabel})` : ""}`);
                 return false; // signals no_availability to outer loop
               }
             }
@@ -5680,12 +5709,26 @@ The user will enter CVV and confirm payment themselves.`,
     if (assessment.stage === "no_availability") {
       trace("Stage assessment determined the venue is not bookable — early exit.");
       const screenshotBase64 = `data:image/png;base64,${(await page.screenshot({ type: "png" })).toString("base64")}`;
+      // Same enrichment as the listing-stage no_availability branch below:
+      // when alt-day slots were captured, surface them in the summary so the
+      // user gets a concrete actionable next step.
+      const venueLabel = targetHotelName ?? "This venue";
+      let summary = assessment.reason;
+      if (capturedNextAvailableLabel && capturedAvailableSlots.length > 0) {
+        const slotPreview = capturedAvailableSlots.slice(0, 6).join(", ");
+        const windowPhrase = capturedNoAvailabilityWindow
+          ? ` within ${capturedNoAvailabilityWindow}`
+          : " on the requested date";
+        summary = `${venueLabel} has no online availability${windowPhrase}. Next available is ${capturedNextAvailableLabel}: ${slotPreview}.`;
+      } else if (capturedAvailableSlots.length > 0) {
+        summary = `${venueLabel} has no slots at the requested time. Available alternatives: ${capturedAvailableSlots.slice(0, 6).join(", ")}.`;
+      }
       return {
         status: "no_availability",
         screenshotBase64,
         handoffUrl: currentUrl,
         sessionUrl,
-        summary: assessment.reason,
+        summary,
         debugTrace,
         ...(capturedAvailableSlots.length > 0 ? { availableSlots: capturedAvailableSlots } : {}),
       };
@@ -5713,12 +5756,28 @@ The user will enter CVV and confirm payment themselves.`,
       if (noAvailabilityInText || hotelNotInResults) {
         const hotelLabel = targetHotelName ?? "This property";
         trace(`Listing failure classified as no_availability: noAvailabilityInText=${noAvailabilityInText}, hotelNotInResults=${hotelNotInResults}`);
+        // Build the user-facing summary. When the OT detail page surfaced an
+        // alt-day banner ("Next available is Sun, May 10") + alt-day slot
+        // buttons, weave them into the message so the user gets a concrete
+        // next step instead of a generic "sorry, sold out" dead-end.
+        let summary: string;
+        if (capturedNextAvailableLabel && capturedAvailableSlots.length > 0) {
+          const slotPreview = capturedAvailableSlots.slice(0, 6).join(", ");
+          const windowPhrase = capturedNoAvailabilityWindow
+            ? ` within ${capturedNoAvailabilityWindow}`
+            : " on the requested date";
+          summary = `${hotelLabel} has no online availability${windowPhrase}. Next available is ${capturedNextAvailableLabel}: ${slotPreview}.`;
+        } else if (capturedAvailableSlots.length > 0) {
+          summary = `${hotelLabel} has no slots at the requested time. Available alternatives: ${capturedAvailableSlots.slice(0, 6).join(", ")}.`;
+        } else {
+          summary = `${hotelLabel} was not found in Booking.com search results — the property may be unavailable or sold out for the requested dates.`;
+        }
         return {
           status: "no_availability",
           screenshotBase64,
           handoffUrl: currentUrl,
           sessionUrl,
-          summary: `${hotelLabel} was not found in Booking.com search results — the property may be unavailable or sold out for the requested dates.`,
+          summary,
           debugTrace,
           ...(capturedAvailableSlots.length > 0 ? { availableSlots: capturedAvailableSlots } : {}),
         };
