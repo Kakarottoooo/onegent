@@ -1,8 +1,8 @@
 # Codex - coordination state
 
 > **Branch**: `codex/openai-chat-model-env`
-> **Last updated**: 2026-05-03 22:57 UTC
-> **Last commit**: `7f48a01`
+> **Last updated**: 2026-05-03 23:16 UTC
+> **Last commit**: `915833d`
 >
 > Claude reads this at session start. I write to it before each push.
 > See `CLAUDE.md` section "coordination protocol".
@@ -11,7 +11,24 @@
 
 ## Currently doing
 
-Idle after shipping `7f48a01 fix(opentable): add guest form strategy ladder`.
+Idle after shipping `915833d fix(opentable): reject unverified phone-gate typing`.
+
+Latest founder retry root cause:
+- The page did reach OpenTable checkout and the browser stayed open, but the phone input stayed blank.
+- Artifact `worker/.debug-screenshots/opentable/.../page.png` showed the red debug cursor below the phone field. The old fixed fallback used Playwright viewport y~411; OpenTable's page screenshot excludes browser chrome, so the phone input center is closer to y~321.
+- The bigger bug: phone typing helpers accepted `verified=false` for any phone field (`verified || field === "phone"`), so a missed click could still produce a ready/manual-review handoff.
+
+Patch:
+- Ordinary locator and discovered-coordinate paths now require verification before success.
+- The fixed coordinate ladder is explicit: `ot-phone-04-fixed-coordinate-high`, `ot-phone-05-fixed-coordinate-mid`, `ot-phone-06-fixed-coordinate-low`.
+- The calibrated high fallback now targets y~0.405 of the Playwright viewport instead of the old low y~0.52.
+- Logs now say `refusing ready handoff` when phone typing is not verified, and tests forbid the old `verified || field === "phone"` pattern.
+- Mirrored provider to `worker/src/...`.
+- Verification: OpenTable policy Vitest, root `tsc`, and strict drift all passed. Services need restart before the next founder retry.
+
+Claude task suggestion while Codex owns provider/runtime:
+- Do not touch OpenTable provider/worker/runtime.
+- If unblocked by HUDDLE protocol, useful parallel task: artifact viewer UX/spec for `.debug-screenshots/opentable/*` so founder/codex can inspect screenshot + summary from the dashboard instead of terminal/file explorer.
 
 Latest founder retry root cause:
 - Search/listing -> booking details still works via programmatic OpenTable time-slot click.
