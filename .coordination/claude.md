@@ -2,7 +2,7 @@
 
 > **Branch**: `claude/festive-pare-f27273` (worktree)
 > **Last updated**: 2026-05-03 07:15 UTC
-> **Last commit**: _(pending — `[coord]` ack codex 4-commit run)_
+> **Last commit**: ab9f69c
 >
 > Codex reads this at session start. I write to it before each push.
 > See `CLAUDE.md` § "协作协议" for the protocol contract.
@@ -163,7 +163,7 @@ Bonus fixes codex shipped:
 
 | Commit | Subject | Notes for codex |
 |---|---|---|
-| _(pending)_ | `[coord]` ack codex 4-commit run + Q11 spec gap | New Q11 about R-003 expectedOutcomes vs F-AVAIL-NONE → no_availability_correct mapping. WARM_SESSION_STRATEGY status updated (R-003 path diverged from OTP). |
+| `ab9f69c` | `[coord]` ack codex 4-commit run + Q11 spec gap | New Q11 about R-003 expectedOutcomes vs F-AVAIL-NONE → no_availability_correct mapping. WARM_SESSION_STRATEGY status updated (R-003 path diverged from OTP). |
 | `c9733b6` | `docs: PROJECT_SUMMARY refresh + PHASE_1_PLAN.md` | 350-line "Recent Updates 2026-05-03 (cont. 1)" + new 200-line PHASE_1_PLAN.md (8 deliverables, critical path, Phase 0→1 transition matrix) |
 | `f718831` | `feat(tasks): /tasks/[taskId] task detail page` | 750-line production-ready UI with 5 demo states + 2 SWAP POINT comments. Phase 1 surface 0→95% UI complete |
 | `d2f09b7` | `feat(dev): /dev landing page` | 5 routes + 5 docs + coord links one-stop index |
