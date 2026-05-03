@@ -9,6 +9,8 @@ import HotelCard from "@/components/HotelCard";
 import FlightCard from "@/components/FlightCard";
 import InlineBookingProfileGate from "@/components/booking/InlineBookingProfileGate";
 import InlineJobCard, { type TravelDocRequest } from "@/components/booking/InlineJobCard";
+import { ProfileGapCard } from "@/components/profile-gap";
+import type { GapSavePayload, ProfileGapState } from "@/components/profile-gap/types";
 import ActivityCard from "@/components/ActivityCard";
 import ScenarioPlanView from "@/components/ScenarioPlanView";
 import FeedbackPromptCard from "@/components/FeedbackPromptCard";
@@ -1972,9 +1974,61 @@ function HomeInner() {
             email: userEmail ?? "",
             phone: "",
           };
-      const missing = getMissingBookingFields(mergedProfile);
-      if (!profile || missing.length > 0) {
-        const content = `I’m ready to book ${payload.venue_name}. I just need your contact details first.`;
+      // Phase 1 #7 path B — consume codex's `payload.profile_gap` (canonical
+      // 13-field, scenario-aware, emitted by backend `buildProfileGap` in
+      // `/api/chat/commit` direct_booking branch). Falls back to legacy
+      // 4-field client check ONLY when feature flag is off.
+      //
+      // Path B (default): inline ProfileGapCard rendered as a chat message,
+      // user fills in chat stream, save dispatches PATCH + resumes booking.
+      // Path B (legacy fallback): keeps the modal-style InlineBookingProfileGate.
+      //
+      // Toggle via NEXT_PUBLIC_PROFILE_GAP_INLINE env var. Default = "1" (ON).
+      // Set "0" to fall back to legacy gate while debugging.
+      const useInlineGate =
+        (process.env.NEXT_PUBLIC_PROFILE_GAP_INLINE ?? "1") !== "0";
+      const backendGap = payload.profile_gap;
+      const legacyMissing = getMissingBookingFields(mergedProfile);
+
+      // Decide which path:
+      //   - Backend says profile_gap is missing → use that (canonical, scenario-aware)
+      //   - No backend gap but legacy 4-field check finds something → fall back to legacy
+      //     (covers the case where backend somehow forgot to emit profile_gap)
+      //   - Both clean → proceed with direct booking
+      const needsProfile = backendGap || (!profile || legacyMissing.length > 0);
+
+      if (needsProfile && useInlineGate) {
+        // Path B inline: push a chat message with profileGapCard render hint.
+        // Build a ProfileGapState from backend payload (preferred) or
+        // fall back to legacy 4-field shape if backend didn't emit one.
+        const gapState: ProfileGapState = backendGap
+          ? {
+              trigger: backendGap.scenario,
+              missing: backendGap.missing,
+              reason: backendGap.message,
+            }
+          : {
+              trigger: (payload.scenario as ProfileGapState["trigger"]) ?? "generic",
+              missing: legacyMissing as ProfileGapState["missing"],
+              reason: `${payload.venue_name} needs a few details to confirm.`,
+            };
+        const cardId = `profile-gap-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+        const content = `I'm ready to book ${payload.venue_name}. I just need a few details first.`;
+        chat.injectAssistantMessage(content, {
+          profileGapCard: {
+            id: cardId,
+            state: gapState,
+            pendingPayload: payload,
+          },
+        });
+        void persistThreadMessage({ role: "assistant", content });
+        return;
+      }
+
+      if (needsProfile) {
+        // Legacy fallback: modal-style InlineBookingProfileGate.
+        // Only fires when NEXT_PUBLIC_PROFILE_GAP_INLINE=0.
+        const content = `I'm ready to book ${payload.venue_name}. I just need your contact details first.`;
         chat.injectAssistantMessage(content);
         void persistThreadMessage({ role: "assistant", content });
         setInlineBookingProfileError(null);
@@ -1986,7 +2040,7 @@ function HomeInner() {
           last_name: mergedProfile.last_name,
           email: mergedProfile.email,
           phone: mergedProfile.phone,
-          missing,
+          missing: legacyMissing,
         };
         setInlineBookingProfile(nextGate);
         persistInlineBookingProfileState(nextGate);
@@ -3701,6 +3755,54 @@ function HomeInner() {
                     ) : (
                       <div className="chat-msg--assistant-stack">
                         <p className="chat-msg chat-msg--assistant">{msg.content}</p>
+                        {/* Phase 1 #7 path B — inline ProfileGapCard.
+                            Triggered when /api/chat/commit direct_booking
+                            response includes profile_gap (canonical 13-field
+                            via backend buildProfileGap). User fills the form
+                            in chat, save dispatches PATCH + resumes booking. */}
+                        {msg.profileGapCard && (
+                          <div className="my-2">
+                            <ProfileGapCard
+                              key={msg.profileGapCard.id}
+                              state={msg.profileGapCard.state}
+                              onSave={async (saved: GapSavePayload) => {
+                                if (!msg.profileGapCard) return;
+                                // Step 1: PATCH the profile (reuses path A's
+                                // dispatcher pattern; idempotent + cookie-auth).
+                                await dispatchProfilePatch(saved.values);
+                                // Step 2: resume the pending booking. We refetch
+                                // the profile so startDirectBookingWithProfile
+                                // has the new server-truth fields rather than the
+                                // mid-flight in-memory copy.
+                                try {
+                                  const refetch = await fetch(
+                                    "/api/user/booking-profiles?default=true",
+                                    { credentials: "include" },
+                                  );
+                                  const { profile: freshProfile } = (await refetch
+                                    .json()
+                                    .catch(() => ({}))) as {
+                                    profile?: MinimalBookingProfile;
+                                  };
+                                  if (freshProfile) {
+                                    await startDirectBookingWithProfile(
+                                      msg.profileGapCard.pendingPayload,
+                                      freshProfile,
+                                    );
+                                  } else {
+                                    chat.injectAssistantMessage(
+                                      "Saved your profile, but I couldn't reload it to start the booking. Please try the booking again.",
+                                    );
+                                  }
+                                } catch {
+                                  chat.injectAssistantMessage(
+                                    "Saved your profile, but the booking step had a network hiccup. Please try the booking again.",
+                                  );
+                                }
+                              }}
+                            />
+                          </div>
+                        )}
                         {/* Inline hotel cards for this message */}
                         {msg.hotelCards && msg.hotelCards.length > 0 && (
                           <div className="flex flex-col gap-3">
