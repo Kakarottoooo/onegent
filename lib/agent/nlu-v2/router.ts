@@ -38,6 +38,23 @@ const CATEGORIES_QUICK_PICKS: QuickPick[] = [
  * Decide what to do next given the current conversation state.
  */
 export function routeIntent(state: IntentState): RouterAction {
+  // profile_edit takes precedence over the booking pipeline. User said
+  // "save my DOB 1995/05/15" mid-conversation → patch the profile, don't
+  // advance any booking flow. Extractor is responsible for preserving the
+  // ambient booking sub-state (restaurant{}, etc.) so the next turn picks
+  // up where the user left off.
+  //
+  // Defensive: if the extractor classified profile_edit but emitted no
+  // usable fields (or the coercion stripped them all), fall back to
+  // continue_chat so we don't ship an empty PATCH to the backend.
+  if (state.intent === "profile_edit") {
+    const patch = state.profile_patch ?? {};
+    if (Object.keys(patch).length === 0) {
+      return { type: "continue_chat" };
+    }
+    return { type: "apply_profile_patch", patch };
+  }
+
   // Chitchat / unknown → just keep chatting. Layer 1 already generated a
   // conversational reply; no structured action to take.
   if (state.intent === "chitchat" || state.intent === "unknown") {

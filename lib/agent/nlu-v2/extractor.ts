@@ -28,8 +28,11 @@ import type {
   NluIntent,
   NluScenario,
   PartyType,
+  ProfileEditField,
+  ProfilePatch,
   ProxyConstraints,
 } from "./types";
+import { PROFILE_EDIT_FIELDS } from "./types";
 
 const CATEGORY_VALUES: NluCategory[] = ["restaurant", "hotel", "flight", "activity"];
 
@@ -82,7 +85,7 @@ IntentState schema:
   "confidence": number,                 // 0-1, your self-assessed confidence
   "turn_count": integer,                // total turns folded in
   "updated_at": string,                 // ISO timestamp — use "$NOW" to fill
-  "intent": "chitchat" | "create_plan" | "create_room" | "refine_existing" | "unknown",
+  "intent": "chitchat" | "create_plan" | "create_room" | "refine_existing" | "profile_edit" | "unknown",
   "scenario": "restaurant" | "hotel" | "flight" | "activity" | "trip" | null,
   "categories": ("restaurant" | "hotel" | "flight" | "activity")[],
   "party_type": "solo" | "multi",
@@ -106,7 +109,26 @@ IntentState schema:
     budget_total?, planning_assumptions: string[]
   },
 
-  "planning_assumptions": string[]      // short notes about inferred values ("assumed dinner time = 7pm")
+  "planning_assumptions": string[],      // short notes about inferred values ("assumed dinner time = 7pm")
+
+  // ONLY populate when intent === "profile_edit". Keys are the canonical 13
+  // backend profile fields. Omit fields the user didn't mention. Empty object
+  // is invalid — omit the key entirely.
+  "profile_patch"?: {
+    "first_name"?: string,
+    "last_name"?: string,
+    "email"?: string,
+    "phone"?: string,
+    "date_of_birth"?: string,       // ISO YYYY-MM-DD ("May 15 1995" → "1995-05-15")
+    "passport_number"?: string,
+    "passport_expiry"?: string,     // ISO YYYY-MM-DD
+    "passport_country"?: string,    // 2-letter ISO code when recognizable, else raw text
+    "address_line1"?: string,
+    "city"?: string,
+    "state"?: string,
+    "zip"?: string,
+    "country"?: string              // 2-letter ISO code when recognizable
+  }
 }
 `;
 
@@ -381,6 +403,65 @@ WORKED EXAMPLES — use these to calibrate before answering:
           "Greenwich Village" is a neighborhood, not a TAO/Nobu suffix) goes
           into the neighborhood slot instead.
 
+  J. PROFILE EDIT — standalone (no booking in flight):
+     Input: "save my DOB 1995/05/15"
+     → intent="profile_edit", scenario=null, categories=[], party_type="solo",
+       member_names=[], profile_patch={ date_of_birth: "1995-05-15" }
+     WHY: explicit "save" verb + a profile field + a value. No booking
+          context. Router emits apply_profile_patch.
+
+  J2. PROFILE EDIT — Chinese, multiple fields at once:
+     Input: "把我的护照号 A1234567 和电话 +86 138 0000 0000 都存一下"
+     → intent="profile_edit", scenario=null, categories=[], profile_patch={
+         passport_number: "A1234567",
+         phone: "+86 138 0000 0000"
+       }
+     WHY: 中文"存一下" = save verb, 两个 profile 字段都给了具体值。phone 保留
+          用户的标点不强行 strip。
+
+  J3. PROFILE EDIT — full name split:
+     Input: "save my name as Jane Doe"
+     → intent="profile_edit", profile_patch={
+         first_name: "Jane",
+         last_name: "Doe"
+       }
+     WHY: 提供 full name 时拆成 first_name + last_name。do NOT emit
+          full_name (legacy alias only — backend canonical 13 不含此字段)。
+          单字符 / 单 token 名字进 first_name，last_name 留空。
+          中文姓名（"我叫张伟"）按"姓 + 名"拆: first_name="伟", last_name="张".
+
+  J4. PROFILE EDIT — mid-booking (preserve restaurant context):
+     Prev state: scenario="restaurant", restaurant={ city="New York",
+                 date="2026-05-14", time="19:00", party_size=2,
+                 cuisine="Italian" }, categories=["restaurant"]
+     Input: "实际我的 DOB 是 1995/5/15"
+     → intent="profile_edit", scenario="restaurant" (PRESERVED),
+       categories=["restaurant"] (PRESERVED),
+       restaurant={ ...prev (PRESERVED unchanged) },
+       profile_patch={ date_of_birth: "1995-05-15" }
+     WHY: 用户在订餐流程中插了一句 profile 信息。restaurant{} sub-object 必须
+          原样保留 — profile_edit 不消除 ambient booking。router 走
+          apply_profile_patch，下一轮用户继续订餐时 prev_state 完好。
+
+  J5. PROFILE EDIT — DOB date-format normalization:
+     Input: "my date of birth is May 15, 1995"
+     → intent="profile_edit", profile_patch={ date_of_birth: "1995-05-15" }
+     Input: "1995年5月15日"
+     → intent="profile_edit", profile_patch={ date_of_birth: "1995-05-15" }
+     Input: "1995-05-15"  → same canonical ISO output.
+     WHY: ISO YYYY-MM-DD 必须输出。模型自己解析格式 — 不要原样塞回 raw。
+
+  J6. ANTI-PATTERN — casual age mention is NOT profile_edit:
+     Input: "Book me a flight to Tokyo, I'll be 30 next month"
+     → intent="create_plan", scenario="flight",
+       flight={ dest="Tokyo" }, profile_patch=OMITTED
+     WHY: no save verb + no DOB + just a casual fact. Stays in booking flow.
+
+  J7. ANTI-PATTERN — asking what's saved is NOT profile_edit:
+     Input: "what's my email on file?"
+     → intent="chitchat", scenario=null, profile_patch=OMITTED
+     WHY: question, not assertion. Don't try to patch anything.
+
   CRITICAL — DO NOT populate restaurant_name / hotel_name speculatively:
      "Find me a romantic Italian place" → restaurant_name STAYS BLANK (the
      user is describing taste, not naming a venue). Only fill the slot when
@@ -406,6 +487,25 @@ WORKED EXAMPLES — use these to calibrate before answering:
      When unsure, prefer create_plan.
    - "refine_existing" when the user adjusts a previously returned plan
      ("换一个酒店", "cheaper").
+   - "profile_edit" when the user is SAVING / UPDATING personal profile
+     data (name, email, phone, DOB, passport, address) — not asking for a
+     booking. SIGNALS:
+       * Save / store / update verbs paired with a profile field:
+         "save my DOB", "store my passport", "update my email",
+         "保存我的护照号", "把我的电话存一下"
+       * "我的 X 是 ..." / "my X is ..." patterns where X is a profile field
+         AND the user is stating the value (not asking what it is)
+       * The user is patching info while a booking is mid-flight:
+         "实际我的 DOB 是 1995/5/15" / "Wait, save my passport A1234567 first"
+     IMPORTANT: a booking sub-state (restaurant{} etc.) the previous turn
+     established MUST be carried forward unchanged — profile_edit doesn't
+     wipe the ambient flow. The router routes to apply_profile_patch and
+     the next turn resumes the booking.
+     ANTI-PATTERNS (these are NOT profile_edit):
+       * "Book a flight, I'll be 30 next month" → just a casual age fact;
+         no save verb, no profile field; intent stays create_plan.
+       * "What's my email on file?" → asking, not saving; intent=chitchat.
+       * "for me / for myself / for 2 people" → traveler count, not profile.
    - "unknown" if the message is too ambiguous.
 7-PRE. NO-PREFERENCE / SKIP signal — when the user says they have no
    preference for a soft-required field ("any" / "都可以" / "随便" / "什么
@@ -548,7 +648,7 @@ export function coerceIntentState(raw: Record<string, unknown>, prev: IntentStat
   const now = new Date().toISOString();
 
   const intent = coerceEnum<NluIntent>(raw.intent, [
-    "chitchat", "create_plan", "create_room", "refine_existing", "unknown",
+    "chitchat", "create_plan", "create_room", "refine_existing", "profile_edit", "unknown",
   ], prev?.intent ?? "unknown");
 
   const scenarioRaw = coerceEnumOrNull<NluScenario>(raw.scenario, [
@@ -606,6 +706,8 @@ export function coerceIntentState(raw: Record<string, unknown>, prev: IntentStat
     member_names,
   );
 
+  const profile_patch = coerceProfilePatch(raw.profile_patch);
+
   const state: IntentState = {
     confidence: typeof raw.confidence === "number" ? clamp01(raw.confidence) : 0.5,
     turn_count: typeof raw.turn_count === "number" ? raw.turn_count : (prev?.turn_count ?? 0) + 1,
@@ -618,6 +720,7 @@ export function coerceIntentState(raw: Record<string, unknown>, prev: IntentStat
     refined_target_id,
     planning_assumptions,
     ...(proxy_member_constraints ? { proxy_member_constraints } : {}),
+    ...(profile_patch ? { profile_patch } : {}),
   };
 
   // Attach a sub-object for EVERY category in the list (composite-aware).
@@ -683,6 +786,40 @@ function coerceProxyMemberConstraints(
     if (!allowed.has(name)) delete merged[name];
   }
   return Object.keys(merged).length > 0 ? merged : undefined;
+}
+
+/**
+ * Validate raw `profile_patch` from the extractor.
+ *
+ *   - Drops keys that aren't in `PROFILE_EDIT_FIELDS` (defends against LLM
+ *     hallucinating "ssn" / "credit_card" / etc.).
+ *   - Drops blank or whitespace-only values.
+ *   - Normalizes ISO date fields (date_of_birth, passport_expiry) using
+ *     `isoDateOrUndef` so "May 15 1995" / "1995/05/15" / "1995-05-15" all
+ *     converge to "1995-05-15".
+ *   - Returns undefined when nothing usable remains, so the caller can
+ *     spread-skip the field on IntentState.
+ *
+ * Intentionally does NOT merge with prev state. Each turn carries the
+ * fresh patch the user is mentioning right now; the frontend issues the
+ * PATCH and the next turn's prev_state shouldn't redundantly include it.
+ */
+export function coerceProfilePatch(raw: unknown): ProfilePatch | undefined {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return undefined;
+  const allowed = new Set<ProfileEditField>(PROFILE_EDIT_FIELDS);
+  const out: ProfilePatch = {};
+  for (const [key, val] of Object.entries(raw as Record<string, unknown>)) {
+    if (!allowed.has(key as ProfileEditField)) continue;
+    const s = strOrUndef(val);
+    if (!s) continue;
+    if (key === "date_of_birth" || key === "passport_expiry") {
+      const iso = isoDateOrUndef(s);
+      if (iso) out[key as ProfileEditField] = iso;
+      continue;
+    }
+    out[key as ProfileEditField] = s;
+  }
+  return Object.keys(out).length > 0 ? out : undefined;
 }
 
 function parseProxyRecord(raw: unknown): Record<string, ProxyConstraints> {

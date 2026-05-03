@@ -24,7 +24,55 @@ export type NluIntent =
   | "create_plan"        // solo user wants a recommendation or booking
   | "create_room"        // multi-party — create a Decision Room
   | "refine_existing"    // adjust a previously returned plan/proposal
+  | "profile_edit"       // user is saving / updating personal profile data
+                         //   ("save my DOB 1995/05/15", "我的 passport 是 A1234567")
+                         //   — bypasses booking flow; router emits apply_profile_patch
   | "unknown";           // couldn't classify — treat as chitchat + ask
+
+/**
+ * Canonical profile fields the extractor may patch on `IntentState.profile_patch`.
+ *
+ * MIRRORED from codex's backend canonical schema (see
+ * `components/profile-gap/types.ts:CANONICAL_FIELD_IDS`). The two lists must
+ * stay in lockstep — if codex adds / removes a field, update both this and
+ * `field-vocabulary.ts`. We don't import from components/ to avoid the
+ * lib → components dependency direction; the profile-gap unit tests pin the
+ * canonical set, and the golden-profile-edit tests pin this side.
+ *
+ * Why duplicate: NLU runs server-side and shouldn't import client React code;
+ * components/profile-gap is a "use client" package. A shared schema module
+ * would also work but is overkill for 13 strings.
+ */
+export const PROFILE_EDIT_FIELDS = [
+  "first_name",
+  "last_name",
+  "email",
+  "phone",
+  "date_of_birth",
+  "passport_number",
+  "passport_expiry",
+  "passport_country",
+  "address_line1",
+  "city",
+  "state",
+  "zip",
+  "country",
+] as const;
+
+export type ProfileEditField = (typeof PROFILE_EDIT_FIELDS)[number];
+
+/**
+ * Partial canonical profile values the user mentioned in the latest turn.
+ * The router hands this to the frontend as the body of a
+ * `PATCH /api/v1/users/me/profile` request (path TBD with codex).
+ *
+ * All values are pre-normalized strings:
+ *   - dates are ISO YYYY-MM-DD (extractor resolves "May 15 1995" → "1995-05-15")
+ *   - phone keeps the user's punctuation
+ *   - country is the 2-letter ISO code when the extractor recognized it,
+ *     otherwise the raw user text
+ */
+export type ProfilePatch = Partial<Record<ProfileEditField, string>>;
 
 export type NluScenario =
   | "restaurant"
@@ -201,6 +249,17 @@ export interface IntentState {
   // seafood"). Consumed downstream to seed that member's Decision Room row.
   proxy_member_constraints?: Record<string, ProxyConstraints>;
 
+  /**
+   * Profile-edit payload populated when `intent === "profile_edit"`. The
+   * router uses this to emit `apply_profile_patch` so the frontend can
+   * `PATCH /api/v1/users/me/profile` without going through the booking
+   * pipeline. Omit when no profile fields were mentioned this turn.
+   *
+   * Empty object is invalid — extractor must omit the field entirely if
+   * no fields were captured. Coercion enforces this.
+   */
+  profile_patch?: ProfilePatch;
+
   // Human-readable caveats the LLM inferred (e.g. "user didn't specify
   // time — assuming dinner"). Surfaced back in the UI.
   planning_assumptions: string[];
@@ -216,6 +275,20 @@ export interface IntentState {
 export type RouterAction =
   /** Show the assistant reply as a regular chat bubble and wait for more input. */
   | { type: "continue_chat" }
+  /**
+   * User is saving / updating personal profile fields. Frontend should
+   * PATCH the user's profile with `patch` (canonical-keyed; see
+   * `ProfilePatch`) and surface a confirmation reply. Does NOT advance any
+   * booking pipeline; if a booking was in flight, its IntentState is
+   * preserved unchanged so the next turn picks up where the user left off.
+   *
+   * `patch` is non-empty by contract — coercion drops the action if the
+   * extractor classified profile_edit but emitted no usable fields.
+   */
+  | {
+      type: "apply_profile_patch";
+      patch: ProfilePatch;
+    }
   /**
    * One or more REQUIRED fields still missing. Show the assistant reply
    * (which should be asking for the missing info) plus optional quick-pick
