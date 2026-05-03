@@ -417,6 +417,7 @@ async function runUniversalStepViaCore(
   const stepStatus: BookingJobStep["status"] =
     result.status === "paused_payment" ||
     result.status === "needs_otp" ||
+    result.status === "needs_profile_data" ||
     result.status === "ready_for_confirmation"
       ? "awaiting_confirmation"
       : result.status === "completed"
@@ -425,12 +426,21 @@ async function runUniversalStepViaCore(
       ? "no_availability"
       : "error";
 
+  const stepError =
+    result.status === "error" ||
+    result.status === "captcha" ||
+    result.status === "needs_login"
+      ? result.error ?? step.error
+      : result.status === "needs_profile_data"
+      ? result.profileGap?.message ?? result.error
+      : undefined;
+
   return {
     ...step,
     status: stepStatus,
     handoff_url: result.handoffUrl ?? step.handoff_url,
     session_url: result.sessionUrl ?? step.session_url,
-    error: result.error ?? step.error,
+    error: stepError,
     attemptCount: result.attemptCount ?? step.attemptCount,
     usedFallback: result.usedFallback ?? step.usedFallback,
     decisionLog: result.decisionLog,

@@ -202,6 +202,15 @@ async function runStep(
       ? "no_availability"
       : "error";
 
+  const stepError =
+    result.status === "error" ||
+    result.status === "captcha" ||
+    result.status === "needs_login"
+      ? result.error ?? step.error
+      : result.status === "needs_profile_data"
+      ? result.profileGap?.message ?? result.error
+      : undefined;
+
   return {
     ...step,
     status: stepStatus,
@@ -210,7 +219,7 @@ async function runStep(
       : { ...step.body, __lastExecutionStatus: result.status },
     handoff_url: result.handoffUrl ?? step.handoff_url,
     session_url: result.sessionUrl ?? step.session_url,
-    error: result.error ?? result.profileGap?.message ?? step.error,
+    error: stepError,
     attemptCount: result.attemptCount ?? step.attemptCount,
     usedFallback: result.usedFallback ?? step.usedFallback,
     decisionLog: result.decisionLog ?? step.decisionLog,

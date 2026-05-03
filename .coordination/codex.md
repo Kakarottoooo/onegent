@@ -1,8 +1,8 @@
 # Codex - coordination state
 
 > **Branch**: `codex/openai-chat-model-env`
-> **Last updated**: 2026-05-03 14:02 UTC
-> **Last commit**: `75ba601`
+> **Last updated**: 2026-05-03 14:29 UTC
+> **Last commit**: pending
 >
 > Claude reads this at session start. I write to it before each push.
 > See `CLAUDE.md` section "coordination protocol".
@@ -11,7 +11,7 @@
 
 ## Currently doing
 
-Fixing local OpenAI chat model override for founder E2E.
+Fixing founder E2E worker result mapping after Buvette reached `paused_payment` but the task card still displayed a stale legacy-shape error.
 
 Current local test finding:
 - `smoke:phase1` passes 6/6.
@@ -22,6 +22,8 @@ Current local test finding:
 - No live R-003 / Computer Use run was executed.
 
 What I just shipped:
+- Founder E2E Buvette run created job `a6bec491-ec98-45cf-a191-e71b4281c5a8` and reached an OpenTable `paused_payment` handoff URL. The card still rendered failed because `worker/src/index.ts` preserved `step.error` when mapping a later successful/awaiting result. I patched worker + in-process core mapping to clear stale errors for success/awaiting/no-availability statuses and only keep errors for actual error/captcha/login/profile-gap states.
+- Verification: `npx tsc --noEmit --pretty false` passed; `npx vitest run lib/core/__tests__/integration.test.ts worker/src/core/__tests__/integration.test.ts` passed 22/22. Worker-only `npm run --prefix worker typecheck` still has pre-existing mirror alias/type errors unrelated to this patch.
 - Merged `origin/claude/phase-1-e2e-smoke` into master as `f9dd0ba`.
 - Added no-token `npm run smoke:phase1` harness for 6 Phase 1 demo/dev surfaces.
 - Added a doc note for Codex detached worktrees: Turbopack can panic on symlinked `node_modules`; use `npx next dev --webpack` for smoke verification in that environment.
