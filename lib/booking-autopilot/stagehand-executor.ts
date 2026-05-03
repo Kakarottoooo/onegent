@@ -7004,11 +7004,14 @@ The user will enter CVV and confirm payment themselves.`,
 
     trace(`Executor threw an unexpected error: ${error}`);
     const guestFormIncomplete = error.toLowerCase().includes("opentable_guest_form_incomplete");
+    const isOpenTableGuestFormError =
+      input.startUrl?.toLowerCase().includes("opentable.com") ||
+      debugTrace.some((entry) => entry.toLowerCase().includes("[opentable]"));
 
     // If the guest/payment form was already filled before the throw, don't
     // mark the whole step as hard-error — the user can visually review the
     // browser (kept open by the safety net) and submit manually.
-    if (reachedGuestForm && !guestFormIncomplete) {
+    if (reachedGuestForm && !guestFormIncomplete && !isOpenTableGuestFormError) {
       trace("reachedGuestForm=true at throw — returning paused_payment so UI treats this as awaiting manual confirmation.");
       return {
         status: "paused_payment",
@@ -7017,6 +7020,9 @@ The user will enter CVV and confirm payment themselves.`,
         error,
         debugTrace,
       };
+    }
+    if (reachedGuestForm && isOpenTableGuestFormError) {
+      trace("OpenTable guest-form error occurred after reaching the form — not returning paused_payment.");
     }
     return {
       status: "error",

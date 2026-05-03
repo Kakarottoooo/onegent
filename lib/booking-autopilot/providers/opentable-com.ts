@@ -1,4 +1,4 @@
-import type { Locator, Page } from "playwright";
+import type { Page } from "playwright";
 import { registerProvider } from "./registry";
 import type { BrowserProvider, PaymentFillResult, ProviderStageSignals } from "./types";
 import { fillGuestFormWithAI, auditAndRefillEmptyFields } from "../ai-loop/fill-form";
@@ -29,60 +29,79 @@ interface OpenTableDinerFormState {
   submitVisible: boolean;
 }
 
-async function fillFirstVisible(locator: Locator, value: string): Promise<boolean> {
-  if (!value) return false;
-  const count = await locator.count().catch(() => 0);
-  for (let i = 0; i < Math.min(count, 5); i += 1) {
-    const candidate = locator.nth(i);
-    const visible = await candidate.isVisible().catch(() => false);
-    if (!visible) continue;
-    await candidate.fill(value, { timeout: 1500 }).catch(() => undefined);
-    const actual = await candidate.inputValue({ timeout: 500 }).catch(() => "");
-    if (actual.trim().length > 0) return true;
-  }
-  return false;
-}
-
 async function fillOpenTableFieldFallback(
   page: Page,
   field: OpenTableDinerField,
   value: string,
 ): Promise<boolean> {
   if (!value) return false;
-  const candidates: Locator[] = (() => {
-    switch (field) {
-      case "firstName":
-        return [
-          page.getByPlaceholder(/first/i),
-          page.getByLabel(/first name/i),
-          page.locator('input[autocomplete="given-name"], input[name*="first" i], input[id*="first" i]'),
-        ];
-      case "lastName":
-        return [
-          page.getByPlaceholder(/last/i),
-          page.getByLabel(/last name/i),
-          page.locator('input[autocomplete="family-name"], input[name*="last" i], input[id*="last" i]'),
-        ];
-      case "email":
-        return [
-          page.locator('input[type="email"]'),
-          page.getByPlaceholder(/email/i),
-          page.getByLabel(/email/i),
-          page.locator('input[autocomplete="email"], input[name*="email" i], input[id*="email" i]'),
-        ];
-      case "phone":
-        return [
-          page.locator('input[type="tel"]'),
-          page.getByPlaceholder(/phone/i),
-          page.getByLabel(/phone/i),
-          page.locator('input[autocomplete="tel"], input[name*="phone" i], input[id*="phone" i]'),
-        ];
-    }
-  })();
-  for (const locator of candidates) {
-    if (await fillFirstVisible(locator, value)) return true;
-  }
-  return false;
+  return page.evaluate(
+    ({ field, value }: { field: OpenTableDinerField; value: string }) => {
+      const nativeFill = (el: HTMLInputElement, val: string): boolean => {
+        const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set;
+        el.scrollIntoView({ block: "center", inline: "center" });
+        el.focus();
+        if (setter) {
+          setter.call(el, "");
+          el.dispatchEvent(new Event("input", { bubbles: true }));
+          setter.call(el, val);
+        } else {
+          el.value = "";
+          el.dispatchEvent(new Event("input", { bubbles: true }));
+          el.value = val;
+        }
+        el.dispatchEvent(new InputEvent("input", { bubbles: true, inputType: "insertText", data: val }));
+        el.dispatchEvent(new Event("change", { bubbles: true }));
+        el.dispatchEvent(new FocusEvent("blur", { bubbles: true }));
+        el.blur();
+        const actual = el.value.trim();
+        return field === "phone" ? actual.replace(/\D/g, "").length >= 10 : actual.length > 0;
+      };
+      const isShown = (el: HTMLElement): boolean => {
+        if (el.hidden || !el.isConnected) return false;
+        const rect = el.getBoundingClientRect();
+        if (rect.width === 0 || rect.height === 0) return false;
+        const style = window.getComputedStyle(el);
+        return style.display !== "none" && style.visibility !== "hidden" && style.opacity !== "0";
+      };
+      const labelText = (el: HTMLInputElement): string => {
+        const labels = Array.from(el.labels ?? []).map((label) => label.textContent ?? "");
+        const closestText = el.closest("label, div, li, section")?.textContent ?? "";
+        return [...labels, closestText].join(" ");
+      };
+      const classify = (el: HTMLInputElement): OpenTableDinerField | null => {
+        const haystack = [
+          el.type,
+          el.placeholder,
+          el.getAttribute("aria-label"),
+          el.id,
+          el.name,
+          el.autocomplete,
+          el.getAttribute("inputmode"),
+          labelText(el),
+        ].join(" ").toLowerCase();
+        if (haystack.includes("country") || haystack.includes("code")) return null;
+        if (haystack.includes("first") || haystack.includes("given-name")) return "firstName";
+        if (haystack.includes("last") || haystack.includes("family-name")) return "lastName";
+        if (el.type === "email" || haystack.includes("email")) return "email";
+        if (
+          el.type === "tel" ||
+          haystack.includes("phone") ||
+          haystack.includes("mobile") ||
+          haystack.includes("telephone") ||
+          haystack.includes("tel")
+        ) {
+          return "phone";
+        }
+        return null;
+      };
+      const inputs = Array.from(document.querySelectorAll<HTMLInputElement>("input"))
+        .filter((el) => el.type !== "hidden" && el.type !== "checkbox" && el.type !== "radio" && !el.disabled && isShown(el));
+      const target = inputs.find((el) => classify(el) === field);
+      return target ? nativeFill(target, value) : false;
+    },
+    { field, value },
+  ).catch(() => false);
 }
 
 async function readOpenTableDinerFormState(page: Page): Promise<OpenTableDinerFormState> {
