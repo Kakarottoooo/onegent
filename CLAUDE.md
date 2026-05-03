@@ -56,10 +56,11 @@ cat .coordination/claude.md 2>/dev/null || echo "(claude.md 还不存在)"
 
 ### 必须保留的章节（schema 契约）
 
-`.coordination/claude.md` 必须有这 5 个 section（H2）。codex.md 镜像。
+`.coordination/claude.md` 必须有这 7 个 section（H2）。codex.md 镜像。
 
 ```
 🟢 Currently doing             # 当前任务一句话；空闲时写 "Idle"
+📍 Strategic decisions locked  # 锁定的产品/架构方向决策；指针 + 1 行总结
 ⏳ Blocking on codex           # 我在等对方什么；空时写 "(none)"
 📦 Recently shipped            # 最近 5-10 个 commit 表，含给对方的备注
 🤝 Open questions for codex    # 给对方的问题；空时写 "(none)"
@@ -73,6 +74,47 @@ cat .coordination/claude.md 2>/dev/null || echo "(claude.md 还不存在)"
 > Last updated: YYYY-MM-DD HH:MM UTC
 > Last commit: <short-sha>
 ```
+
+### Strategic decisions section 用法
+
+`📍 Strategic decisions locked` 是协议的 long-term memory layer。任何
+跨 phase 影响或定方向的决策，**必须**在这里加 1 行 + 指向 canonical doc
+的指针。这样下次对方 session-start 读 `.coordination/<peer>.md` 就能
+立刻看到"这些方向已经锁了，不重新讨论"。
+
+哪些算"strategic decision"（任一即记入）：
+- "Phase X 主线之一" / "Phase X 显式不做" 类决策
+- 架构选择（warm session vs Gmail OTP / Browserbase Pro vs 本地 / 等）
+- 产品定位（消费 vs 基础设施 vs 混合）
+- 重大 spec 改动（如 BENCHMARK_RESTAURANT_100 § 7.5 OTP transitional）
+- 第三方工具评估结论（如"不引入 MultiOn/Skyvern/browser-use"）
+- 移植清单 lock（如 PointsYeah 移植清单 cont. 3）
+- 研发节奏决策（如"先 R-003 后 suite"）
+
+格式：
+```
+- [YYYY-MM-DD] [一句话决策标题] · [phase 归属] · doc: `<path>` § <section>
+```
+
+例：
+```
+- 2026-05-03 Phase 0 OTP transitional rule (safe_handoff + F-PROVIDER-OTP
+  per-case acceptable, 4-metric gate stays strict) · Phase 0 · doc:
+  `BENCHMARK_RESTAURANT_100.md` § 7.5
+```
+
+指针格式严格：`<path>` § <section>，让对方一秒定位。
+
+### Strategic decisions 的对方义务
+
+任何长期工作（非当前 phase 的 in-flight task）开始前，对方必须读
+`.coordination/<peer>.md` § 📍 Strategic decisions locked，验证：
+- 这个工作方向有没有被 lock 过？
+- 决策标记是否跟自己即将写的代码冲突？
+- 如果冲突，先 [coord] 协商再动代码，不绕过决策默默改
+
+短期 in-flight work（当前 phase 内的 ticket）不强制读这一段。但接到
+跨 phase 工作（如"我开始做 Phase 4 数据飞轮"）必读。
 
 ### Commit message tag 约定（C — 强信号补充）
 

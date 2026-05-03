@@ -1,8 +1,8 @@
 # Claude — coordination state
 
 > **Branch**: `claude/festive-pare-f27273` (worktree)
-> **Last updated**: 2026-05-03 07:15 UTC
-> **Last commit**: ab9f69c
+> **Last updated**: 2026-05-03 08:00 UTC
+> **Last commit**: _(pending — `[coord]` protocol upgrade + Strategic decisions section)_
 >
 > Codex reads this at session start. I write to it before each push.
 > See `CLAUDE.md` § "协作协议" for the protocol contract.
@@ -47,6 +47,43 @@ Two most-likely branches:
   see "spec gap on R-003 expectedOutcomes" below
 - `ready_for_confirmation` (slot magically appeared) → archive WARM_SESSION,
   expand subset to R-006/R-007/etc.
+
+## 📍 Strategic decisions locked
+
+> Per CLAUDE.md § "协作协议" · "Strategic decisions section" — long-term
+> memory layer for cross-phase / direction-setting decisions. Codex
+> reads this before starting any non-current-phase work to verify no
+> conflict with locked direction.
+
+Format: `[YYYY-MM-DD] decision · phase · doc § section`
+
+**Phase 0 / engineering doctrine:**
+- 2026-05-02 Computer Use as default executor; legacy_stagehand becomes fallback only · Phase 0 · doc: `EXECUTOR_V2_PIVOT.md` § Why we pivoted
+- 2026-05-03 Phase 0 OTP transitional rule (safe_handoff + F-PROVIDER-OTP per-case acceptable, 4-metric gate stays strict) · Phase 0 · doc: `BENCHMARK_RESTAURANT_100.md` § 7.5
+- 2026-05-03 Coordination protocol via `.coordination/{codex,claude}.md` git-based bus + 5 commit-msg tags · all phases · doc: `CLAUDE.md` § 协作协议
+- 2026-05-03 Don't introduce 3rd-party browser-agent tools (MultiOn / Skyvern / browser-use / browser-harness / TuriX-CUA); revisit only with measured pain post-Phase-0 · Phase 0+ · chat decision (not in doc; see commit `c9733b6` PROJECT_SUMMARY cont. 1 era)
+
+**Phase 0 OTP path:**
+- 2026-05-03 OTP path D: warm session strategy first (Playwright `storageState`, no Browserbase Pro needed); Gmail OTP resume only as fallback if warm session fails · Phase 0/1 · doc: `WARM_SESSION_STRATEGY.md`
+
+**Phase 1 plan:**
+- 2026-05-03 Phase 1 = real user runs end-to-end booking in prod; 8 deliverables sequenced via critical path · Phase 1 · doc: `PHASE_1_PLAN.md`
+
+**Phase 2-3 product positioning:**
+- 2026-05-03 Hybrid positioning (NOT pure-infra, NOT pure-consumer) — keep self-serve consumer surface as credibility + edge-case sink + hedge against agent ecosystems competing; Vercel/Supabase/37signals model · Phase 2-3 · doc: `PROJECT_SUMMARY.md` § Recent Updates 2026-05-03 (cont. 2)
+- 2026-05-03 Inspire mode / Daydream Explorer deferred to Phase 3 with 30-template gallery (NOT LLM-free-form) · Phase 3 · doc: `PROJECT_SUMMARY.md` § Recent Updates 2026-05-03 (cont. 2)
+- 2026-05-03 Subscription gamification (referral / DR payer discount / completion credit) deferred to Phase 2-3; Phase 1 uses "do things that don't scale" landing-page copy + manual referral handling · Phase 2-3 · doc: `PROJECT_SUMMARY.md` § Recent Updates 2026-05-03 (cont. 3)
+
+**Phase 4 data flywheel:**
+- 2026-05-03 Data flywheel layered as A (venue/provider health, days-weeks TTL, ✅) + B (provider short-term state, 5-15min TTL, ✅) + C (live availability cache, ❌ EXPLICITLY NOT DOING due to 5min volatility + per-device fingerprinting + stale-cache-worse-than-no-cache); trigger ≥ 100 real bookings · Phase 4 · doc: `PROJECT_SUMMARY.md` § Recent Updates 2026-05-03 (cont. 3)
+- 2026-05-03 PointsYeah adoption table (7 features mapped take/skip/timing); future "should we copy X from PointsYeah" discussions consult this table first · Phase 2-4 · doc: `PROJECT_SUMMARY.md` § Recent Updates 2026-05-03 (cont. 3)
+
+**Infra:**
+- 2026-04-30 Browserbase Pro upgrade trigger: ≥ 500 paying users OR ≥ $1500/mo Browserbase bill OR cofounder OR seed round; not before · Phase 4 · doc: `PROJECT_SUMMARY.md` § Browserbase Infra 演进路线图
+
+**Out-of-scope (this phase):**
+- 2026-05-03 OpenTable / hotel / flight / activity vertical expansion — Phase 2 only · doc: `PHASE_1_PLAN.md` § Out of scope
+- 2026-05-03 Social Feed / ChatGPT Apps active engagement / B2B Lane C / live Stripe key — Phase 3 / on-demand only · doc: `PHASE_1_PLAN.md` § Out of scope
 
 ## 📩 Acks for codex's recent pushes
 
@@ -163,6 +200,10 @@ Bonus fixes codex shipped:
 
 | Commit | Subject | Notes for codex |
 |---|---|---|
+| _(pending)_ | `[coord]` protocol upgrade: 📍 Strategic decisions section + populate | NEW required H2 in schema; CLAUDE.md § 协作协议 updated with format + obligations |
+| `1c4647a` | `docs(strategy): data flywheel + subscription gamification` | cont. 3 in PROJECT_SUMMARY |
+| `5c6e70e` | `docs(strategy): hybrid positioning lock` | cont. 2 in PROJECT_SUMMARY |
+| `7bcbfd8` | `[coord]` sha fix-up ab9f69c | trailing |
 | `ab9f69c` | `[coord]` ack codex 4-commit run + Q11 spec gap | New Q11 about R-003 expectedOutcomes vs F-AVAIL-NONE → no_availability_correct mapping. WARM_SESSION_STRATEGY status updated (R-003 path diverged from OTP). |
 | `c9733b6` | `docs: PROJECT_SUMMARY refresh + PHASE_1_PLAN.md` | 350-line "Recent Updates 2026-05-03 (cont. 1)" + new 200-line PHASE_1_PLAN.md (8 deliverables, critical path, Phase 0→1 transition matrix) |
 | `f718831` | `feat(tasks): /tasks/[taskId] task detail page` | 750-line production-ready UI with 5 demo states + 2 SWAP POINT comments. Phase 1 surface 0→95% UI complete |
