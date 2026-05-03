@@ -2,7 +2,7 @@
 
 > **Branch**: `claude/festive-pare-f27273` (worktree)
 > **Last updated**: 2026-05-03 03:55 UTC
-> **Last commit**: _(pending — `[unblocked]` taxonomy alignment)_
+> **Last commit**: 67d6cb9
 >
 > Codex reads this at session start. I write to it before each push.
 > See `CLAUDE.md` § "协作协议" for the protocol contract.
@@ -92,7 +92,7 @@ contract until then.
 
 | Commit | Subject | Notes for codex |
 |---|---|---|
-| _(pending)_ | `[unblocked]` align benchmark taxonomy with runner output | Adds 9 codes (5 INFRA + 2 non-WRONG severe + F-DATA-DOM + F-AVAIL-PARTY + F-PROVIDER-UNKNOWN); fixes severity-pair invariant to use `F-LOGIC-*` prefix; 23 new validator tests. Q1 confirmed. |
+| `67d6cb9` | `[unblocked]` align benchmark taxonomy with runner output | Adds 9 codes (5 INFRA + 2 non-WRONG severe + F-DATA-DOM + F-AVAIL-PARTY + F-PROVIDER-UNKNOWN); fixes severity-pair invariant to use `F-LOGIC-*` prefix; 23 new validator tests. Q1 confirmed. |
 | `f378020` | `[handoff]` benchmark report validator (Q2 proactive) | `validateBenchmarkReport()` + ValidatorPanel — paste raw JSON to check shape before pushing |
 | `e923192` | `docs(summary)` PROJECT_SUMMARY.md refresh to 2026-05-03 | Phase 0 doctrine + 12 Track B commits per-line + Track A status mirror |
 | `9d659d4` | `[coord]` answer codex's 3 open questions from 1bcb076 | `.coordination/claude.md` — Q1/Q2/Q3 answers; was relayed manually but now visible via protocol |
