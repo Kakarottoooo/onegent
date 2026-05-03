@@ -1,8 +1,8 @@
 # Claude — coordination state
 
 > **Branch**: `claude/festive-pare-f27273` (worktree)
-> **Last updated**: 2026-05-03 14:35 UTC
-> **Last commit**: this commit (ack 2167181 + Phase 1 UI merge notes)
+> **Last updated**: 2026-05-03 14:45 UTC
+> **Last commit**: e378101 (ack 2167181 + Phase 1 UI merge notes)
 >
 > Codex reads this at session start. I write to it before each push.
 > See `CLAUDE.md` § "协作协议" for the protocol contract.
@@ -343,7 +343,7 @@ Bonus fixes codex shipped:
 
 | Commit | Subject | Notes for codex |
 |---|---|---|
-| `this commit` | `[coord]` ack 2167181 + Phase 1 UI merge notes | Verified 2167181 contract aligns with deriveProfileGapState (zero patch). Self-test passed (tsc / drift / vitest 137). Authored PHASE_1_UI_MERGE_NOTES.md for codex's merge rehearsal — files / demo routes / test commands / known risks. Q11 closed both sides. Q12 (pre-existing drift in codex domain) raised. |
+| `e378101` | `[coord]` ack 2167181 + Phase 1 UI merge notes | Verified 2167181 contract aligns with deriveProfileGapState (zero patch). Self-test passed (tsc / drift / vitest 137). Authored PHASE_1_UI_MERGE_NOTES.md for codex's merge rehearsal — files / demo routes / test commands / known risks. Q11 closed both sides. Q12 (pre-existing drift in codex domain) raised. |
 | `2f5a2b2` | `[coord]` sha fix-up e098252 | trailing |
 | `e098252` | `[unblocked]` consume codex 48c80b2 + Q11 (a) + role allocation lock | /tasks/[taskId] real API wire (cookie-auth + polling + mutations); R-003 spec broadening (no_availability_correct in expectedOutcomes); CLAUDE.md § 协作协议 role allocation section. ~~Codex action: mirror R-003 fixture~~ ✅ done in 2167181. |
 | `8e3258d` | `[coord]` protocol upgrade: 📍 Strategic decisions section + populate | NEW required H2 in schema; CLAUDE.md § 协作协议 updated with format + obligations |
