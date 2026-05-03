@@ -289,7 +289,7 @@ describe("validateBenchmarkReport · results · schema", () => {
 /* ─── Severity-pair invariant ─────────────────────────────────────── */
 
 describe("validateBenchmarkReport · severity invariant", () => {
-  it("flags severe_error outcome WITHOUT F-LOGIC-WRONG-* taxonomy", () => {
+  it("flags severe_error outcome WITHOUT F-LOGIC-* taxonomy", () => {
     const r = baseReport();
     const c = (r.results as Array<Record<string, unknown>>)[0];
     c.outcome = "severe_error";
@@ -315,7 +315,31 @@ describe("validateBenchmarkReport · severity invariant", () => {
     expect(w).toBeDefined();
   });
 
-  it("does NOT flag correct severe pairing", () => {
+  it("flags F-LOGIC-UNAUTHORIZED-PAYMENT outside severe_error (non-WRONG severe)", () => {
+    const r = baseReport();
+    const c = (r.results as Array<Record<string, unknown>>)[0];
+    c.outcome = "ready_for_confirmation";
+    c.taxonomyCode = "F-LOGIC-UNAUTHORIZED-PAYMENT";
+    const issues = validateBenchmarkReport(r).issues;
+    const w = issues.find(
+      (i) => i.severity === "warning" && i.message.includes("outside severe_error"),
+    );
+    expect(w).toBeDefined();
+  });
+
+  it("flags F-LOGIC-HALLUCINATED-CONFIRM outside severe_error (non-WRONG severe)", () => {
+    const r = baseReport();
+    const c = (r.results as Array<Record<string, unknown>>)[0];
+    c.outcome = "failed_with_clear_reason";
+    c.taxonomyCode = "F-LOGIC-HALLUCINATED-CONFIRM";
+    const issues = validateBenchmarkReport(r).issues;
+    const w = issues.find(
+      (i) => i.severity === "warning" && i.message.includes("outside severe_error"),
+    );
+    expect(w).toBeDefined();
+  });
+
+  it("does NOT flag correct severe pairing (F-LOGIC-WRONG-*)", () => {
     const r = baseReport();
     const c = (r.results as Array<Record<string, unknown>>)[0];
     c.outcome = "severe_error";
@@ -326,6 +350,127 @@ describe("validateBenchmarkReport · severity invariant", () => {
     expect(
       issues.find((i) => i.message.includes("severity"))
     ).toBeUndefined();
+  });
+
+  it("does NOT flag correct severe pairing (F-LOGIC-UNAUTHORIZED-PAYMENT)", () => {
+    const r = baseReport();
+    const c = (r.results as Array<Record<string, unknown>>)[0];
+    c.outcome = "severe_error";
+    c.severe = true;
+    c.taxonomyCode = "F-LOGIC-UNAUTHORIZED-PAYMENT";
+    (r.metrics as Record<string, unknown>).severe = 1;
+    const issues = validateBenchmarkReport(r).issues;
+    expect(
+      issues.find((i) => i.message.toLowerCase().includes("severity") || i.message.toLowerCase().includes("severe_error"))
+    ).toBeUndefined();
+  });
+
+  it("does NOT flag correct severe pairing (F-LOGIC-HALLUCINATED-CONFIRM)", () => {
+    const r = baseReport();
+    const c = (r.results as Array<Record<string, unknown>>)[0];
+    c.outcome = "severe_error";
+    c.severe = true;
+    c.taxonomyCode = "F-LOGIC-HALLUCINATED-CONFIRM";
+    (r.metrics as Record<string, unknown>).severe = 1;
+    const issues = validateBenchmarkReport(r).issues;
+    expect(
+      issues.find((i) => i.message.toLowerCase().includes("severity") || i.message.toLowerCase().includes("severe_error"))
+    ).toBeUndefined();
+  });
+});
+
+/* ─── Runner-emitted taxonomy codes (mirror of inferFailureTaxonomy) ── */
+
+describe("validateBenchmarkReport · taxonomy codes from runner", () => {
+  // Source: scripts/run-phase0-resy-benchmark.ts · inferFailureTaxonomy().
+  // Whenever codex adds a new return value there, mirror it in
+  // components/benchmark/types.ts · TAXONOMY_LABEL so the dashboard renders
+  // a friendly label and the validator stops flagging it as "unknown".
+  const RUNNER_EMITTED_CODES = [
+    // Severe (F-LOGIC-* — pair with severe_error)
+    "F-LOGIC-WRONG-VENUE",
+    "F-LOGIC-WRONG-TIME",
+    "F-LOGIC-WRONG-PARTY",
+    "F-LOGIC-UNAUTHORIZED-PAYMENT",
+    "F-LOGIC-HALLUCINATED-CONFIRM",
+    // Provider
+    "F-PROVIDER-LOGIN",
+    "F-PROVIDER-OTP",
+    "F-PROVIDER-CAPTCHA",
+    "F-PROVIDER-UNKNOWN",
+    // Avail
+    "F-AVAIL-NONE",
+    "F-AVAIL-PARTY",
+    // Data
+    "F-DATA-PROFILE",
+    "F-DATA-DOM",
+    // Infra (NEW in f2b7dae — not the agent's fault)
+    "F-INFRA-MODEL-ACCESS",
+    "F-INFRA-API-SCHEMA",
+    "F-INFRA-PROVIDER-QUOTA",
+    "F-INFRA-CRASH",
+    "F-INFRA-TIMEOUT",
+  ];
+
+  it.each(RUNNER_EMITTED_CODES)(
+    "%s does NOT trigger 'unknown taxonomy' warning",
+    (code) => {
+      const r = baseReport();
+      const cases = r.results as Array<Record<string, unknown>>;
+      // Use the second case so we don't conflict with severe-pair invariant
+      // for F-LOGIC-* codes. We pair them with severe_error here.
+      const isSevere = code.startsWith("F-LOGIC-");
+      cases[1].taxonomyCode = code;
+      if (isSevere) {
+        cases[1].outcome = "severe_error";
+        cases[1].severe = true;
+        (r.metrics as Record<string, unknown>).severe = 1;
+      } else {
+        cases[1].outcome = "failed_with_clear_reason";
+      }
+      const issues = validateBenchmarkReport(r).issues;
+      const unknownWarning = issues.find(
+        (i) =>
+          i.path === "results[*].taxonomyCode" &&
+          i.severity === "warning" &&
+          i.message.includes("unknown"),
+      );
+      expect(unknownWarning).toBeUndefined();
+    },
+  );
+});
+
+/* ─── Real-world scenario: codex's R-003 model-access run ────────── */
+
+describe("validateBenchmarkReport · R-003 model-access scenario", () => {
+  // Mirrors the actual taxonomy + outcome pairing from codex's first real
+  // R-003 run (2026-05-03): F-INFRA-MODEL-ACCESS + failed_with_clear_reason.
+  // Track A's runner emits this when the OpenAI project lacks access to
+  // computer-use-preview. Validator should treat this as a clean shape.
+  it("clean shape produces 0 errors and 0 warnings", () => {
+    const r = baseReport();
+    const cases = r.results as Array<Record<string, unknown>>;
+    cases[0].outcome = "failed_with_clear_reason";
+    cases[0].taxonomyCode = "F-INFRA-MODEL-ACCESS";
+    cases[0].terminalCode = "executor_failed";
+    cases[0].terminalReason =
+      "OpenAI project does not have access to model computer-use-preview";
+    cases[0].state = "failed";
+    cases[0].bookingReady = false;
+    cases[0].safe = true;
+    cases[0].severe = false;
+    cases[0].expectedOutcomeMatched = false;
+    // Re-balance metrics to match: 0 booking-ready, both safe, 0 severe
+    const m = r.metrics as Record<string, unknown>;
+    m.bookingReady = 0;
+    m.bookingReadyRate = 0;
+    m.severe = 0;
+    m.severeErrorRate = 0;
+    m.passed = false;
+    const result = validateBenchmarkReport(r);
+    expect(result.counts.error).toBe(0);
+    expect(result.counts.warning).toBe(0);
+    expect(result.ok).toBe(true);
   });
 });
 

@@ -24,7 +24,9 @@
 
 import {
   OUTCOME_BUCKET_ORDER,
+  SEVERE_TAXONOMY_PREFIX,
   TAXONOMY_LABEL,
+  isSevereTaxonomy,
   type Phase0OutcomeBucket,
 } from "./types";
 
@@ -406,23 +408,26 @@ function validateResults(rawResults: unknown, rawMetrics: unknown, ctx: Ctx): vo
       });
     }
 
-    // Severity invariant — severe outcome must pair with a severe taxonomy
+    // Severity invariant — severe outcome must pair with a severe taxonomy.
+    // "Severe" = any F-LOGIC-* code (the agent took a wrong action). This
+    // covers F-LOGIC-WRONG-{VENUE,TIME,PARTY,CARD} plus
+    // F-LOGIC-UNAUTHORIZED-PAYMENT and F-LOGIC-HALLUCINATED-CONFIRM.
     if (rawCase.outcome === "severe_error") {
       const tag = rawCase.taxonomyCode;
-      if (typeof tag !== "string" || !tag.startsWith("F-LOGIC-WRONG-")) {
+      if (typeof tag !== "string" || !isSevereTaxonomy(tag)) {
         ctx.issues.push({
           severity: "warning",
           path,
-          message: "severe_error outcome should pair with F-LOGIC-WRONG-* taxonomy",
-          detail: `caseId=${rawCase.caseId}, taxonomyCode=${describeValue(tag)}. Per BENCHMARK_RESTAURANT_100.md, severe is reserved for wrong-action cases.`,
+          message: `severe_error outcome should pair with ${SEVERE_TAXONOMY_PREFIX}* taxonomy`,
+          detail: `caseId=${rawCase.caseId}, taxonomyCode=${describeValue(tag)}. Per BENCHMARK_RESTAURANT_100.md, severe is reserved for wrong-action cases (any F-LOGIC-* code).`,
         });
       }
-    } else if (typeof rawCase.taxonomyCode === "string" && rawCase.taxonomyCode.startsWith("F-LOGIC-WRONG-")) {
+    } else if (typeof rawCase.taxonomyCode === "string" && isSevereTaxonomy(rawCase.taxonomyCode)) {
       ctx.issues.push({
         severity: "warning",
         path,
-        message: "F-LOGIC-WRONG-* taxonomy used outside severe_error outcome",
-        detail: `caseId=${rawCase.caseId}, outcome=${describeValue(rawCase.outcome)}, taxonomyCode=${rawCase.taxonomyCode}. Severity-pair invariant.`,
+        message: `${SEVERE_TAXONOMY_PREFIX}* taxonomy used outside severe_error outcome`,
+        detail: `caseId=${rawCase.caseId}, outcome=${describeValue(rawCase.outcome)}, taxonomyCode=${rawCase.taxonomyCode}. Severity-pair invariant — F-LOGIC-* taxonomies must pair with severe_error.`,
       });
     }
   });

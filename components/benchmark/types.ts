@@ -79,28 +79,66 @@ export const BUCKET_TONE: Record<
 /** Sentinel used when `result.taxonomyCode` is missing. */
 export const UNCATEGORIZED_TAXONOMY = "uncategorized" as const;
 
-/** Best-effort human label per known taxonomy code. Unknown codes pass through. */
+/**
+ * Best-effort human label per known taxonomy code. Unknown codes pass through.
+ *
+ * Source of truth for which codes the runner emits: `inferFailureTaxonomy()`
+ * in `scripts/run-phase0-resy-benchmark.ts` (codex-owned). Whenever codex
+ * adds a new code there, mirror it here so the dashboard shows a label and
+ * the validator stops flagging it as "unknown".
+ *
+ * Categories (all `F-` prefixed):
+ *   - `F-AVAIL-*`     — venue / time slot availability
+ *   - `F-PROVIDER-*`  — Resy/OpenTable platform-side issues (CAPTCHA, OTP, login)
+ *   - `F-DATA-*`      — input data issues (missing profile, malformed DOM)
+ *   - `F-LOGIC-*`     — agent took a wrong action (severe; pairs with `severe_error`)
+ *   - `F-INFRA-*`     — infra/model/quota issues (not the agent's fault)
+ *   - `F-NETWORK`     — generic network failure
+ *   - `F-INTERNAL`    — fallback / unrecognized internal error
+ */
 export const TAXONOMY_LABEL: Record<string, string> = {
+  // Availability
   "F-AVAIL-NONE": "No availability",
   "F-AVAIL-OFFSET": "Availability offset",
+  "F-AVAIL-PARTY": "Wrong party size",
+  // Provider (platform side)
   "F-PROVIDER-CAPTCHA": "Captcha",
   "F-PROVIDER-OTP": "OTP",
   "F-PROVIDER-LOGIN": "Login required",
   "F-PROVIDER-TIMEOUT": "Provider timeout",
-  "F-PROVIDER-DOM": "DOM mismatch",
+  "F-PROVIDER-UNKNOWN": "Provider unknown",
+  // Data (input / DOM)
   "F-DATA-PROFILE": "Profile gap",
   "F-DATA-PAYMENT": "Payment gap",
+  "F-DATA-DOM": "DOM mismatch",
+  // Logic (severe — agent did the wrong thing)
   "F-LOGIC-WRONG-VENUE": "Wrong venue",
   "F-LOGIC-WRONG-TIME": "Wrong time",
   "F-LOGIC-WRONG-PARTY": "Wrong party",
   "F-LOGIC-WRONG-CARD": "Wrong card",
+  "F-LOGIC-UNAUTHORIZED-PAYMENT": "Unauthorized payment",
+  "F-LOGIC-HALLUCINATED-CONFIRM": "Hallucinated confirmation",
+  // Infra (not the agent's fault — model / quota / API schema)
+  "F-INFRA-MODEL-ACCESS": "Model access",
+  "F-INFRA-API-SCHEMA": "API schema",
+  "F-INFRA-PROVIDER-QUOTA": "Provider quota",
+  "F-INFRA-CRASH": "Executor crash",
+  "F-INFRA-TIMEOUT": "Infra timeout",
+  // Misc
   "F-NETWORK": "Network",
   "F-INTERNAL": "Internal error",
   uncategorized: "Uncategorized",
 };
 
-/** Severe codes that pair with `outcome: "severe_error"`. UI flags only. */
-export const SEVERE_TAXONOMY_PREFIX = "F-LOGIC-WRONG-" as const;
+/**
+ * Severe codes that pair with `outcome: "severe_error"`. UI flags only.
+ *
+ * All `F-LOGIC-*` codes are severe — the agent took a wrong action that
+ * either booked at the wrong venue/time/party, charged without consent,
+ * or hallucinated a confirmation. This is the **only** taxonomy family
+ * that should ever pair with the `severe_error` outcome bucket.
+ */
+export const SEVERE_TAXONOMY_PREFIX = "F-LOGIC-" as const;
 
 export function isSevereTaxonomy(code: string): boolean {
   return code.startsWith(SEVERE_TAXONOMY_PREFIX);
