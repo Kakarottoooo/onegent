@@ -1069,8 +1069,14 @@ export function useChat({
     ]);
   }
 
-  function injectAssistantMessage(content: string) {
-    setMessages((prev) => [...prev, { role: "assistant", content }]);
+  function injectAssistantMessage(
+    content: string,
+    extras?: Omit<Message, "role" | "content">,
+  ) {
+    setMessages((prev) => [
+      ...prev,
+      { role: "assistant", content, ...(extras ?? {}) },
+    ]);
   }
 
   function injectUserMessage(content: string) {

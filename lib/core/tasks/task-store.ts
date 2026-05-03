@@ -172,6 +172,17 @@ export async function getTravelTask(taskId: string): Promise<TravelTask | null> 
   return result.rows[0] ?? null;
 }
 
+export async function getTravelTaskByBookingJobId(jobId: string): Promise<TravelTask | null> {
+  await ensureTravelTaskTables();
+  const result = await sql<TravelTask>`
+    SELECT * FROM travel_tasks
+    WHERE current_booking_job_id = ${jobId}
+    ORDER BY updated_at DESC
+    LIMIT 1
+  `;
+  return result.rows[0] ?? null;
+}
+
 export async function listTravelTasks(limit = 25): Promise<TravelTask[]> {
   await ensureTravelTaskTables();
   const boundedLimit = Math.min(Math.max(limit, 1), 100);

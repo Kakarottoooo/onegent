@@ -177,6 +177,30 @@ export interface Message {
   output_language?: OutputLanguage;
   /** When set, renders an inline booking job card instead of plain text */
   bookingJobId?: string;
+  /**
+   * Phase 1 #7 path B: when set, renders an inline ProfileGapCard
+   * underneath the assistant message. Triggered when the backend's
+   * direct_booking commit response includes `profile_gap` (i.e. the
+   * user's profile lacks scenario-required fields per `buildProfileGap`).
+   *
+   * The card's onSave handler is wired in app/page.tsx to (a) PATCH the
+   * profile via the apply_profile_patch dispatcher, then (b) resume the
+   * pending booking via `startDirectBookingWithProfile`. The pending
+   * commit payload is carried in `pendingPayload` so the resume is
+   * idempotent across chat-replay reloads.
+   */
+  profileGapCard?: {
+    /** Stable id so we can replace/remove the card after the user saves. */
+    id: string;
+    /** Canonical 13-field gap state from `buildProfileGap` (server-side). */
+    state: import("@/components/profile-gap/types").ProfileGapState;
+    /**
+     * The original commit response so the pending booking can resume
+     * after the profile is patched. Persisted via chat-replay so a
+     * page refresh mid-flow doesn't drop the booking.
+     */
+    pendingPayload: import("@/components/ConfirmCard").CommitResponse;
+  };
 }
 
 export type ResultMode =

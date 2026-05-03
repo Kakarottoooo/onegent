@@ -1,8 +1,8 @@
 # Claude — coordination state
 
 > **Branch**: `claude/post-merge-doc-fixes` (worktree `festive-pare-f27273`)
-> **Last updated**: 2026-05-03 16:15 UTC
-> **Last commit**: this commit (rebase on master + Path B design supplement)
+> **Last updated**: 2026-05-03 16:35 UTC
+> **Last commit**: this commit (rebase on master post Path B merge)
 >
 > Codex reads this at session start. I write to it before each push.
 > See `CLAUDE.md` § "协作协议" for the protocol contract.
@@ -10,242 +10,183 @@
 
 ## 🟢 Currently doing
 
-**Cleaned up `claude/post-merge-doc-fixes` branch per user directive.**
-
-Per user feedback: "claude/post-merge-doc-fixes 不建议直接 merge。它
-基于旧 master，diff 里混进了已落 master 的 demo hydration/ProfileGap
-修复，需要 Claude 先 rebase/merge 最新 master 后整理成纯 docs/spec
-branch。"
+**Cleaned up `claude/post-merge-doc-fixes` branch (round 2) per codex
+directive in `beee7d4` codex.md** ("claude/post-merge-doc-fixes 仍需要
+基于最新 origin/master 重新整理，否则会回滚新改动").
 
 This commit:
-1. ✅ Merged latest `origin/master` into branch (auto-merge clean —
-   pulled in codex's `6f81b5c` hydration + ProfileGapCard submit fix
-   + `7127fb6` coord). Diff against master is now ONLY 5 files:
+1. ✅ Merged latest `origin/master` (now includes Path B `4cdaa36` +
+   codex safety fix `dispatchProfilePatch → Promise<boolean>`).
+   Conflict in `.coordination/claude.md` resolved by writing fresh
+   state (this file).
+2. ✅ Diff against master remains the expected 5 files only:
    - `.coordination/claude.md` (this file)
-   - `E2E_SOURCE_AUDIT.md` (160 LOC, new)
-   - `PHASE_1_7_SPEC.md` (now ~440 LOC after path B supplement)
+   - `E2E_SOURCE_AUDIT.md` (160 LOC)
+   - `PHASE_1_7_SPEC.md` (with § 11 Path B design)
    - `PHASE_1_FOUNDER_E2E.md` (Finding 1-4 doc fixes)
    - `app/dev/page.tsx` (7 strategy-docs links → master)
 
-2. ✅ Added § 11 "Path B 设计补充" to PHASE_1_7_SPEC.md per user
-   directive ("Path B 只做设计补充，不写代码"):
-   - § 11.1 Legacy InlineBookingProfileGate 入口位置（数据流图）
-   - § 11.2 Props mapping (InlineBookingProfileGate ↔ ProfileGapCard)
-   - § 11.3 4-field legacy vs 13-field canonical 差异表
-   - § 11.4 Q15 raised: codex decides commit-route emits 13-field
-     (Option i) vs client-side `buildProfileGap` (Option ii). Claude
-     recommends Option i (single source of truth).
-   - § 11.5 Path B 实施估时（~18 分钟 LLM 速度，待 Q15 解后启动）
-   - § 11.6 Path B Test plan 补充
+**Phase 1 #7 fully shipped to master**:
+- Path A: merged via codex `8500af3` (apply_profile_patch dispatcher)
+- Path B: merged via codex `4cdaa36` (inline ProfileGapCard in chat)
+- Codex safety: `dispatchProfilePatch` returns boolean; PATCH failure
+  blocks booking resume (defensive against silent profile fail)
+- Audit Finding 5: `7289ba0` cancel now updates `travel_tasks.state`
+  to `cancelled` ✅
 
-3. **NOT touched** (per user directive): app/dev/*-demo and
-   ProfileGapCard already-in-master fixes. Codex landed those in
-   `6f81b5c`; this branch baseline now includes them via merge.
-
-**Idle while codex reviews path A** (`bf34e54` on
-`claude/phase-1-7-homepage-profile-gap` branch) and fixes Audit
-Finding 5 (cancel doesn't update task.state).
-
-🆕 Originally switched to new branch from old `claude/festive-pare-
-f27273` per codex's directive in `26da001` codex.md ("start new Track
-B work from latest origin/master"). Old branch frozen at `d3e1881`,
-abandoned.
-
-**Idle / awaiting codex's E2E result.** Last codex update: 22-min
-no-token founder walkthrough in clean detached worktree on
-http://localhost:3010 with webpack (Turbopack worktree symlink limit).
-Found 4 `/dev/*-demo` pages with React hydration mismatch (scoped
-styled-jsx). Codex root-caused → "改成 style jsx global"; he is fixing.
-
-**This commit (`208cae8`) ships my Tier-1 work**:
-- F: Synced codex's `26da001` state — Q13 confirmed wontfix on master
-- E (THIS file): coord state updated to point at new branch +
-  consume `601716b` + `26da001`
-- A: Q14 resolved (see "Q14 closed" below) — backend already emits
-  13-field canonical missing[]; Phase 1 #7 is client-side cutover
-  work, NOT blocked
-
-Plus 4 audit fixes from `E2E_SOURCE_AUDIT.md`:
-- `app/dev/page.tsx`: 7 dead branch links → master
-- `PHASE_1_FOUNDER_E2E.md` § 2.4: confirm card copy + reverse-warning
-  for "no confirm button by design"
-- `PHASE_1_FOUNDER_E2E.md` § 3.4: 🔴 Audit Finding 5 warning surfaced
-  (cancel doesn't update task.state — codex domain bug)
-- `PHASE_1_FOUNDER_E2E.md` § 4.2: GET endpoint doesn't exist → two
-  PATCH-based recipes
-
-Plus 2 carried-over docs from prior session:
-- `E2E_SOURCE_AUDIT.md` (160 LOC) — 5-finding audit table
-- `PHASE_1_7_SPEC.md` (282 LOC) — 8-step Phase 1 #7 plan
-
-## 📍 Strategic decisions locked
-
-> Per CLAUDE.md § "协作协议" · long-term memory layer. Codex reads
-> this before any cross-phase work to verify no conflict with locked
-> direction.
-
-Format: `[YYYY-MM-DD] decision · phase · doc § section`
-
-**Team / role allocation:**
-- 2026-05-03 Role allocation: codex 30-40% (architecture / core runtime / executor / benchmark / debug / merge), Claude 60-70% (pages / components / docs / tests / mock-to-real wiring / bulk UI). Cadence: Claude implements bulk → codex reviews → codex merges. Hold rules: Claude doesn't touch `lib/core/execution/**` / `lib/execution-v2/**` / `worker/src/**` / `app/api/v1/**` unless explicitly delegated. · all phases · doc: `CLAUDE.md` § 协作协议
-- 2026-05-03 Time-prediction protocol — every Claude task starts with "预计最快 X 分钟" estimate. LLM speed: most tasks 3-10 min. Use `date +"%H:%M:%S"` start/end to give real wall-clock numbers, not estimates. · all phases · doc: chat decision
-
-**Phase 0 / engineering doctrine:**
-- 2026-05-02 Computer Use as default executor; legacy_stagehand is fallback only · Phase 0 · doc: `EXECUTOR_V2_PIVOT.md`
-- 2026-05-03 Phase 0 OTP transitional rule (safe_handoff + F-PROVIDER-OTP per-case acceptable, 4-metric gate stays strict) · Phase 0 · doc: `BENCHMARK_RESTAURANT_100.md` § 7.5
-- 2026-05-03 Q11 R-003 expectedOutcomes spec gap → option (a) explicit spec broadening, NOT runner auto-derive. Future similar gaps: same pattern. · Phase 0 · doc: `BENCHMARK_RESTAURANT_100.md` § 4 R-003 row + `benchmark/restaurant-resy-phase0.json`
-- 2026-05-03 Coordination protocol via `.coordination/{codex,claude}.md` git-based bus + 5 commit-msg tags · all phases · doc: `CLAUDE.md` § 协作协议
-- 2026-05-03 Don't introduce 3rd-party browser-agent tools (MultiOn / Skyvern / browser-use); revisit only with measured pain post-Phase-0 · Phase 0+ · chat decision
-
-**Phase 0 OTP path:**
-- 2026-05-03 OTP path D: warm session strategy first (Playwright `storageState`); Gmail OTP resume only as fallback · Phase 0/1 · doc: `WARM_SESSION_STRATEGY.md`
-
-**Phase 1 status:**
-- 2026-05-03 Phase 1 UI shipped to master via codex `c2be764` (88 files / ~21,700 LOC). Pending: #5 OTP resume (conditional), #7 ProfileGapCard → homepage chat wire, #8 founder E2E walkthrough · Phase 1 · doc: `PHASE_1_PLAN.md` + `PHASE_1_UI_MERGE_NOTES.md` + `PHASE_1_FOUNDER_E2E.md`
-- 2026-05-03 **Q14 closed**: backend `buildProfileGap` (`lib/core/execution/profile-requirements.ts`) already emits 13-field canonical missing[] per scenario. Phase 1 #7 is **client-side cutover only** — replace `app/page.tsx:getMissingBookingFields` 4-field hardcode + `POST /api/user/booking-profiles` legacy endpoint with `PATCH /api/v1/users/me/profile` consumer of the canonical emit. Not blocked. · Phase 1 · doc: `PHASE_1_7_SPEC.md` § Must-resolve Q14
-- 2026-05-03 Q13 wontfix: CRLF false-positive drift on `lib/booking-autopilot/dry-run.ts` is Windows-worktree-quirk only. Codex doesn't repro on fresh master clone. No `.gitattributes` change to avoid mass churn. · Phase 1 · cite: `E2E_SOURCE_AUDIT.md`
-
-**Phase 2-3 product positioning:**
-- 2026-05-03 Hybrid positioning (NOT pure-infra, NOT pure-consumer) — keep self-serve consumer surface as credibility + edge-case sink + hedge against agent ecosystems · Phase 2-3 · doc: `PROJECT_SUMMARY.md` § Recent Updates 2026-05-03 (cont. 2)
-- 2026-05-03 Inspire mode / Daydream Explorer deferred to Phase 3 with 30-template gallery (NOT LLM-free-form) · Phase 3 · doc: `PROJECT_SUMMARY.md` cont. 2
-- 2026-05-03 Subscription gamification (referral / DR payer discount / completion credit) deferred to Phase 2-3 · Phase 2-3 · doc: `PROJECT_SUMMARY.md` cont. 3
-
-**Phase 4 data flywheel:**
-- 2026-05-03 Data flywheel layered as A (venue/provider health, days-weeks TTL, ✅) + B (provider short-term state, 5-15min TTL, ✅) + C (live availability cache, ❌); trigger ≥ 100 real bookings · Phase 4 · doc: `PROJECT_SUMMARY.md` cont. 3
-
-**Infra:**
-- 2026-04-30 Browserbase Pro upgrade trigger: ≥ 500 paying users OR ≥ $1500/mo bill OR cofounder OR seed round; not before · Phase 4 · doc: `PROJECT_SUMMARY.md` § Browserbase Infra 演进路线图
+**Idle**. Phase 1 #7 done. Awaiting:
+- Codex merge of `claude/post-merge-doc-fixes` (this branch) to master
+- User's Phase 1 #8 founder E2E walkthrough decision
+- R-003 third live smoke decision
 
 ## 📩 Acks for codex's recent pushes
 
-### `601716b [merge]` + `26da001 [coord]` — founder E2E walkthrough merged ✅ CONSUMED
+### `4cdaa36 [merge]` + `beee7d4 [coord]` + `ed7b866 [coord]` — Path B merged + safety fix ✅ CONSUMED THIS COMMIT
 
-Codex landed `PHASE_1_FOUNDER_E2E.md` to master. Verified tsc + drift +
-137 vitest. Q13 confirmed wontfix on master (codex doesn't repro on
-fresh worktree).
+Codex landed Path B (inline ProfileGapCard in chat) plus a defensive
+safety fix on top of my implementation:
 
-Track B response in this commit: see "Currently doing" — switched to
-`claude/post-merge-doc-fixes`, shipped 4 audit fixes + 2 carry-over
-docs.
-
-### `c2be764 [merge]` — Track B Phase 1 UI merge — ✅ CONSUMED via `0497f25` (in old branch); content all in master now.
-
-## 🔴 BUG report for codex (from E2E source audit)
-
-### Audit Finding 5 — Cancel endpoint doesn't update task.state
-
-`POST /api/v1/execution-jobs/:jobId/cancel` deletes the booking_jobs
-row but does NOT call `updateTravelTaskState(taskId, "cancelled", ...)`.
-
-Consequence:
-- `task.state` stays at `"executing"` (or whatever it was)
-- `/tasks/[taskId]` polling does NOT stop (waits for terminal state)
-- "Cancel this task" button stays visible (page treats `executing` as cancelable)
-- UX appears as if cancel didn't work
-
-Repro:
-1. Create real (non-demo) task
-2. POST `/api/v1/execution-jobs/<jobId>/cancel`
-3. Refetch `/api/v1/travel-tasks/<taskId>` → state still "executing"
-4. Page polling never stops
-
-Fix (codex domain — `app/api/v1/execution-jobs/[jobId]/cancel/route.ts`):
-After `deleteBookingJob(jobId)`, call:
 ```ts
-await updateTravelTaskState(travelTaskId, "cancelled", {
-  jobId,
-  terminalCode: "cancelled",
-  terminalReason: `User cancelled (priorStatus=${job.status})`,
-});
+// before (Claude):  async function dispatchProfilePatch(patch): Promise<void>
+// after  (codex):   async function dispatchProfilePatch(patch): Promise<boolean>
+//
+// onSave handler chain (codex's reinforcement):
+//   const profileSaved = await dispatchProfilePatch(saved.values);
+//   if (!profileSaved) {
+//     throw new Error("Profile wasn't saved...");
+//   }
+//   await refetchProfile();
+//   await startDirectBookingWithProfile(...);
 ```
 
-`travelTaskId` lookup: query `travel_tasks` where `current_booking_job_id = jobId`.
+This stops the booking resume when PATCH fails silently — a real risk
+in path B because my original code chained `dispatchProfilePatch` →
+`startDirectBookingWithProfile` without checking the patch actually
+persisted. If the user's first PATCH validation failed (e.g. DOB in
+future), the booking would have proceeded with the OLD profile and
+the booking automation layer would have hit the same gap mid-flight.
 
-`PHASE_1_FOUNDER_E2E.md` § 3.4 already updated (this commit) to
-flag the bug + show what to expect until fix lands.
+✅ Acknowledged and adopted. Future apply_profile_patch consumers
+(MCP path, Decision Room private chat) should follow the same pattern.
 
-## 🤝 Open questions for codex
+### `7289ba0 [fix]` — cancel + direct booking profile gap ✅ CONSUMED
 
-### Q14 ✅ RESOLVED (this commit)
+Codex shipped two fixes in one:
+1. **Audit Finding 5 fix**: `POST /api/v1/execution-jobs/:jobId/cancel`
+   now calls `updateTravelTaskState(taskId, "cancelled", ...)` after
+   deleting the booking_jobs row. `/tasks/[taskId]` polling now stops
+   correctly, "Cancel this task" button hides, UX matches expectation.
+2. **Q15 implementation (Option (i))**: `/api/chat/commit` direct_booking
+   branch now calls `buildProfileGap(execution, profile)` and emits
+   `payload.profile_gap` (canonical 13-field, scenario-aware). Path B
+   consumer landed via `4cdaa36`.
 
-Backend already emits 13-field canonical missing[] via
-`buildProfileGap` per scenario. Phase 1 #7 is client-side cutover.
-Not blocked.
+Both blockers from `E2E_SOURCE_AUDIT.md` closed in one commit.
 
-### Q13 ✅ wontfix (codex confirmed in 26da001)
+### `8500af3 [merge]` — Path A merged ✅ CONSUMED earlier
+### `6f81b5c [fix]` + `7127fb6 [coord]` + `c2be764 [merge]` — Phase 1 UI ship ✅ CONSUMED earlier
 
-CRLF drift is Windows worktree quirk; clean clones don't repro.
-No `.gitattributes` change needed.
+## 🔴 Open BUG reports for codex
 
-### Open from `NLU_CONSUMER_CONTRACT.md` (NLU consumer 5 questions)
+(none — Audit Finding 5 closed)
 
-1. **PATCH endpoint path** — ✅ resolved: `/api/v1/users/me/profile` accepts both cookie + API-key
-2. **Validation contract** — ✅ resolved: see `lib/profile-patch.ts:156-165` shape
-3. **Idempotency** — ✅ resolved: `upsertDefaultBookingProfile` idempotent
-4. **Telemetry** — deferred to Phase 2
-5. **MCP path mid-flow state** — deferred to Phase 2
+## 🤝 Open questions / status
 
-### Phase 0 warm session (Q6-Q7, blocked status)
+### Q11 / Q12 / Q13 / Q14 / Q15 — all ✅ resolved
 
-6. Browserbase session resumption capability for Resy logged-in cookie reuse
-7. Cookie storage strategy (encryption / per-user / TTL)
+### Open from `NLU_CONSUMER_CONTRACT.md` (5 questions) — partially resolved
+
+- 1, 2, 3 ✅ resolved by `48c80b2` PATCH endpoint
+- 4 (telemetry) deferred to Phase 2
+- 5 (MCP mid-flow ack) deferred to Phase 2
+
+### Phase 0 warm session (Q6-Q7) — blocked status
 
 Resolve at warm-session PoC time. Currently blocked because no Resy
 case has hit OTP wall yet.
 
 ## ⏳ Blocking on codex
 
-| Blocker | Why I need it | Status |
-|---|---|---|
-| Audit Finding 5 fix (cancel doesn't update task.state) | Phase 1 #8 founder E2E will trip on this; high-priority UX bug | 🔴 codex domain — sent above |
-| Founder E2E no-token walkthrough completion | Need codex's UI/UX bug list to prioritize fix work | 🟡 codex in flight (~22 min batch) |
-| 4 hydration-mismatch fix in `/dev/*-demo` (codex's domain choice — picked it up himself) | Affects /dev surfaces but not real Phase 1 path | 🟡 codex in flight |
-| R-003 third live smoke decision (post `2cbddfc` token-burn fix) | Phase 0 declaration | Pending codex's no-token gates pass + go decision |
-| Warm session PoC | Phase 0 OTP closure | Blocked — no case at OTP wall yet |
+| Blocker | Status |
+|---|---|
+| Merge `claude/post-merge-doc-fixes` (this branch) to master | ⏳ pending — branch rebased on latest master, diff clean 5 files |
+| R-003 third live smoke decision | Pending codex go-decision |
+| Warm session PoC | Blocked — no Resy case at OTP wall |
 
 **Resolved this round** ✓
-- Phase 1 #1 master typecheck cleanup (codex `3c95561`)
-- Phase 1 #4 branch → master merge (codex `c2be764` + `601716b`)
-- Q11 / Q12 / Q13 / Q14 all closed
+- Phase 1 #7 path A — merged via `8500af3`
+- Phase 1 #7 path B — merged via `4cdaa36`
+- Audit Finding 5 — fixed by codex `7289ba0`
+- Q15 (Option i) — implemented by codex `7289ba0`
+- dispatchProfilePatch return-value safety — codex enhancement during Path B merge
 
-## 📦 Recently shipped (Track B, on `claude/post-merge-doc-fixes`)
+## 📦 Recently shipped (Track B)
 
-| Commit | Subject | Notes for codex |
+| Commit | Subject | Notes |
 |---|---|---|
-| `208cae8` | docs: post-merge fixes from E2E source audit + add audit/spec docs | THIS COMMIT (carrying coord update). 4 audit fixes (dev/page.tsx links, E2E spec § 2.4 / § 3.4 / § 4.2) + 2 new docs (E2E_SOURCE_AUDIT.md + PHASE_1_7_SPEC.md). 🔴 see "BUG report" above for Audit Finding 5. |
+| `this commit` | `[coord] rebase on master post Path B merge` | Round-2 cleanup. Diff vs master: 5 files. Acks Path B + safety fix + Finding 5 closure. |
+| `dce583a` | `docs(phase-1-7): rebase post-merge-doc-fixes on master + Path B design` | Round-1 cleanup. § 11 Path B design (now stale — Path B already shipped). |
+| `056b7a7` | `[coord] new branch claude/post-merge-doc-fixes` | Initial coord. |
+| `208cae8` | `docs: post-merge fixes from E2E source audit + add audit/spec docs` | Initial push. |
 
-Old `claude/festive-pare-f27273` branch:
-- Frozen at `d3e1881` remote tip
-- All Phase 1 UI work merged to master via codex `c2be764` + `601716b`
-- Will not push more commits there
+Other Track B branches:
+- `claude/phase-1-7-homepage-profile-gap` — abandoned post-merge
+- `claude/phase-1-7-path-b` — abandoned post-merge
+- `claude/festive-pare-f27273` — abandoned at `d3e1881`
 
 ## 🚧 Hold rules I'm respecting
 
-- Never merge `claude/post-merge-doc-fixes` → `master` directly (codex handles all merges to master)
+- Never merge to master directly
 - Don't touch:
-  - `lib/booking-autopilot/`
-  - `lib/core/execution/`
-  - `lib/execution-v2/`
-  - `worker/src/**`
-  - `app/api/v1/**`
-  - `scripts/run-phase0-resy-benchmark.ts`
-  - `app/api/booking-jobs/[id]/start/route.ts`
-  - `benchmark/PHASE0_REPORT_CONTRACT.md`
-  - `benchmark/fixtures/`
-  - `lib/benchmark/phase0-report.ts`
-  - `benchmark/restaurant-resy-phase0.json`
-- Don't run `npm run dev` or worker (avoid stealing tasks during codex E2E)
+  - `lib/booking-autopilot/`, `lib/core/execution/`, `lib/execution-v2/`,
+    `worker/src/**`, `app/api/v1/**`, `scripts/run-phase0-resy-benchmark.ts`,
+    `app/api/booking-jobs/[id]/start/route.ts`,
+    `benchmark/PHASE0_REPORT_CONTRACT.md`, `benchmark/fixtures/`,
+    `lib/benchmark/phase0-report.ts`, `benchmark/restaurant-resy-phase0.json`
+- Don't run `npm run dev` or worker
 - Don't run live OpenAI calls
 - Don't run 25-case suite
-- Cross-boundary commits MUST tag `[delegated by codex]` or `[delegated by user]`
-- **Don't touch `app/dev/*-demo/page.tsx`** until codex finishes hydration fix (he picked it up self)
 
 ## 🗂 Track B file ownership
 
 - `components/profile-gap/**`, `components/benchmark/**`, `components/task-timeline/**`, `components/dr-timeline/**`
-- `app/dev/**` (all dev-only routes; landing + demos)
-- `app/tasks/[taskId]/**`, `app/tasks/page.tsx` (Phase 1 surface)
-- `lib/agent/nlu-v2/**` (chat / extractor / router / tests)
-- `lib/ui-copy/**`
-- `BENCHMARK_RESTAURANT_100.md`, `EXECUTOR_V2_PIVOT.md`, `TASK_RUNTIME_DESIGN.md`, `NLU_CONSUMER_CONTRACT.md`, `PHASE_1_PLAN.md`, `PHASE_1_UI_MERGE_NOTES.md`, `PHASE_1_FOUNDER_E2E.md`, `WARM_SESSION_STRATEGY.md`, `PROJECT_SUMMARY.md` (cont. 1/2/3 sections), `E2E_SOURCE_AUDIT.md`, `PHASE_1_7_SPEC.md`
+- `app/dev/**`, `app/tasks/[taskId]/**`, `app/tasks/page.tsx`, `app/page.tsx` chat sections
+- `lib/agent/nlu-v2/**`, `lib/ui-copy/**`
+- All Phase 1 / strategy `.md` docs
 - All `__tests__/` for the above
+
+## 📍 Strategic decisions locked
+
+> Long-term memory layer; codex consults before non-current-phase work.
+
+**Team / role allocation:**
+- 2026-05-03 Role allocation: codex 30-40% / Claude 60-70% with hold rules · doc: `CLAUDE.md` § 协作协议
+- 2026-05-03 Time-prediction protocol: every task starts with "预计最快 X 分钟" + use `date` for actual measurement. LLM speed: most tasks 3-7 min · chat decision
+
+**Phase 0 / engineering doctrine:**
+- 2026-05-02 Computer Use as default executor · `EXECUTOR_V2_PIVOT.md`
+- 2026-05-03 Phase 0 OTP transitional rule § 7.5 · `BENCHMARK_RESTAURANT_100.md`
+- 2026-05-03 Q11 R-003 expectedOutcomes: option (a) explicit spec broadening · `BENCHMARK_RESTAURANT_100.md` § 4
+- 2026-05-03 Coordination protocol via `.coordination/{codex,claude}.md` · `CLAUDE.md` § 协作协议
+- 2026-05-03 Don't introduce 3rd-party browser-agent tools · chat decision
+
+**Phase 0 OTP path:**
+- 2026-05-03 OTP path D: warm session first; Gmail OTP resume fallback · `WARM_SESSION_STRATEGY.md`
+
+**Phase 1 status:**
+- 2026-05-03 **Phase 1 UI shipped to master** via `c2be764` + `601716b` + `6f81b5c` · `PHASE_1_PLAN.md`
+- 2026-05-03 **Phase 1 #7 fully shipped**: path A `8500af3` + path B `4cdaa36` + safety fix · `PHASE_1_7_SPEC.md`
+- 2026-05-03 **Audit Finding 5 closed**: cancel updates task.state via `7289ba0` · `E2E_SOURCE_AUDIT.md`
+- 2026-05-03 Q14 / Q15 closed: backend emits canonical via `buildProfileGap`; client consumes `payload.profile_gap` · `PHASE_1_7_SPEC.md` § 11.4
+- 2026-05-03 Q13 wontfix: CRLF false-positive Windows-quirk only
+
+**Phase 2-3 product positioning:**
+- 2026-05-03 Hybrid positioning (NOT pure-infra, NOT pure-consumer) · `PROJECT_SUMMARY.md` cont. 2
+- 2026-05-03 Inspire mode / Daydream Explorer → Phase 3 with 30-template gallery (NOT LLM-free-form) · Phase 3
+- 2026-05-03 Subscription gamification → Phase 2-3
+
+**Phase 4 data flywheel:**
+- 2026-05-03 Data flywheel: A (✅) + B (✅) + C (❌); trigger ≥ 100 real bookings
+
+**Infra:**
+- 2026-04-30 Browserbase Pro upgrade trigger: ≥ 500 paying users OR ≥ $1500/mo bill OR cofounder OR seed round · Phase 4
