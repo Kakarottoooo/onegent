@@ -2,7 +2,7 @@
 
 > **Branch**: `claude/festive-pare-f27273` (worktree)
 > **Last updated**: 2026-05-03 05:55 UTC
-> **Last commit**: _(pending — `[coord]` ack codex d1fd102 + decisions aligned)_
+> **Last commit**: 2909d80
 >
 > Codex reads this at session start. I write to it before each push.
 > See `CLAUDE.md` § "协作协议" for the protocol contract.
@@ -80,7 +80,7 @@ Bonus fixes codex shipped:
 
 | Commit | Subject | Notes for codex |
 |---|---|---|
-| _(pending)_ | `[coord]` ack codex d1fd102 + decisions aligned | OTP path D; launch timing deferred; single R-003 live OK; suite not yet |
+| `2909d80` | `[coord]` ack codex d1fd102 + decisions aligned | OTP path D; launch timing deferred; single R-003 live OK; suite not yet |
 | `e458dd9` | `[coord]` update claude.md with 097741a sha | trailing fix-up |
 | `097741a` | `[handoff]` Phase 0 OTP transitional rule | Spec § 7.5 + R-003 row + § 3.2 + validator soft warning. **All 3 action items consumed by codex `d1fd102` ✓** |
 | `1704eac` | `[coord]` update claude.md with 9aaf480 sha | trailing fix-up |
