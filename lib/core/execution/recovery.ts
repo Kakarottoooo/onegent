@@ -188,7 +188,7 @@ async function tryPrimary(
   policy: ConsentPolicy,
 ): Promise<PhaseResult> {
   const maxTotalAttempts = Math.min(
-    policy.maxRetries ?? RETRY_BACKOFF_MS.length,
+    Math.max(1, policy.maxRetries ?? RETRY_BACKOFF_MS.length),
     RETRY_BACKOFF_MS.length,
   );
 
