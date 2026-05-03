@@ -159,12 +159,14 @@ URL: http://localhost:3000/tasks/demo-ready-for-confirmation
 **预期看到**：
 - 标题: "TAO Downtown tomorrow 7pm 2 people for date night"
 - 状态徽章: **"Ready to confirm"**（绿色 / "done" 色调）
-- 主区: 大型确认卡片 — "Reservation form is filled. One tap from confirmed."
-- 一个 prominent 的 "Confirm reservation" 按钮（这是用户的最后一击）
+- 主区: 大型确认卡片 — "Reservation form is filled. Onegent has paused before the final confirm tap — review the latest snapshot and confirm in your own browser when you're ready."
+- **没有 confirm 按钮** — **这是设计意图**：让用户在自己浏览器里确认，避免 Onegent 代为最后一击导致幻觉确认 / 法律风险
+- 卡片下方有 snapshot 链接（`data._links.snapshots`）方便用户去看 agent 填了什么
 
 **警惕**：
 - ❌ 确认卡片视觉权重不够（按 UI quality bar，应该是页面焦点）
-- ❌ 没有"看一下 agent 填了什么"的展开链接（可选，但好的产品有）
+- ❌ 卡片里**多了**一个 confirm 按钮（**反设计**：Onegent 永远不替用户做最后确认）
+- ❌ 没有 snapshot 链接 / 链接死掉
 
 ### 2.5 `demo-failed`（失败）
 
@@ -240,9 +242,7 @@ URL: http://localhost:3000
 - ❌ NLU extractor 把 scenario 识别错（restaurant 识别成 hotel）
 - ❌ Confirm card 显示的日期跟用户输入对不上
 - ❌ Console 报 NLU JSON parse error
-- ⚠️ **homepage chat 还在用 LEGACY `InlineBookingProfileGate`**，不是新的
-  ProfileGapCard。Phase 1 #7 还没做。所以缺 profile 字段时，会看到旧 gate
-  UI（不是橙色 ProfileGapCard）— 这是预期行为，**不是 bug**。
+- ✅ **Phase 1 #7 已 ship**：缺 profile 字段时**应该看到 inline ProfileGapCard**（橙色卡片渲染在 chat 流里），不是 modal `InlineBookingProfileGate`。如果看到 modal，说明 `NEXT_PUBLIC_PROFILE_GAP_INLINE=0` 或 backend 漏 emit `payload.profile_gap`（fallback path）。
 
 ### 3.3 跳到 /tasks/[taskId] 看真实状态
 
@@ -270,14 +270,15 @@ URL: http://localhost:3000
 **预期看到**：
 - ✅ DevTools Network tab 看到 `POST /api/v1/execution-jobs/<jobId>/cancel`
 - ✅ 请求带 cookie，无 body
-- ✅ 响应 200 / 204
-- ✅ Page refetch 后 task 状态变成 "Cancelled"
-- ✅ "Cancel task" 按钮消失（terminal state）
+- ✅ 响应 200 with `{ jobId, cancelled: true, priorStatus }`
+- ✅ Booking job row 从 DB 删除（cancel endpoint 直接删行）
+- ✅ **Refetch 后 task.state 变 `cancelled`**（codex `7289ba0` fix）
+- ✅ Polling 自动停（terminal state）
+- ✅ "Cancel this task" 按钮消失
 
 **警惕**：
-- ❌ Cancel endpoint 401 / 403 — 这是 codex `48c80b2` 的另一个 fix
-- ❌ Cancel 后 polling 没停（应该自动停在 terminal state）
-- ❌ Cancel 后 worker 还在跑（race condition，需要 codex 看）
+- ❌ Cancel endpoint 401 / 403 — 这是 codex `48c80b2` 的 fix 应该 work
+- ❌ task.state 没变 cancelled / polling 不停（codex `7289ba0` 已修，如果回归请 flag）
 
 ### 3.5 测试 ownership 边界
 
@@ -309,17 +310,37 @@ URL: http://localhost:3000
 # 复制完整 cookie 值
 ```
 
-### 4.2 GET 当前 profile
+### 4.2 验证当前 profile（PATCH 自反射法）
+
+> ⚠️ `GET /api/v1/users/me/profile` 不存在 — 端点只实现了 PATCH（见
+> `app/api/v1/users/me/profile/route.ts`）。要验证当前 profile，发一个
+> 空 PATCH 让它 echo 回当前状态。
 
 ```bash
-curl http://localhost:3000/api/v1/users/me/profile \
+# 发空 patch 强制 400 — 错误响应里包含端点活着的证明
+curl -X PATCH http://localhost:3000/api/v1/users/me/profile \
   -H "Cookie: __session=<paste-here>" \
-  | jq
+  -H "Content-Type: application/json" \
+  -d '{}' \
+  -w "\nHTTP_STATUS=%{http_code}\n"
 ```
 
 **预期看到**：
-- ✅ JSON 含 first_name / last_name / email / phone（至少这几个）
-- ✅ 不包含 card_number 或任何 payment 字段（payment 永远不在 profile API 上）
+- ✅ HTTP 400 + `{ "error": { "code": "empty_profile_patch", ... } }` — 证明端点活着 + 校验工作
+- ❌ HTTP 401 → cookie 没生效
+- ❌ HTTP 404 → endpoint 没注册（codex 域问题）
+
+或者直接跑 PATCH 一个无副作用字段（比如 label）然后看响应里 `profile` 字段：
+
+```bash
+curl -X PATCH http://localhost:3000/api/v1/users/me/profile \
+  -H "Cookie: __session=<paste-here>" \
+  -H "Content-Type: application/json" \
+  -d '{"label": "Personal"}' \
+  | jq '.profile'
+```
+
+返回的 `profile` 对象就是用户当前 profile 的完整快照（含 first_name / last_name / email / phone 等，但 **不含** card 字段 — payment 永远不走 profile API）。
 
 ### 4.3 PATCH 一个字段
 
@@ -509,7 +530,7 @@ URL: http://localhost:3000
 
 | 现象 | 状态 |
 |---|---|
-| Homepage chat 缺 profile 时弹的是**旧 InlineBookingProfileGate**，不是新 ProfileGapCard | Phase 1 #7 待做 (~4h Claude) |
+| ~~Homepage chat 缺 profile 时弹的是 InlineBookingProfileGate~~ | ✅ **已修**：Phase 1 #7 path B shipped (`4cdaa36`)。现在缺字段直接 inline ProfileGapCard 在 chat 里 |
 | 任何 hotel / flight / activity 场景的真实预订 | Phase 2 |
 | Inspire mode / Daydream Explorer 入口 | Phase 3，30-template gallery |
 | 推荐 / referral / payer discount / completion credit | Phase 2-3 |
