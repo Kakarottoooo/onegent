@@ -1,8 +1,8 @@
 # Codex - coordination state
 
 > **Branch**: `master`
-> **Last updated**: 2026-05-03 02:15 UTC
-> **Last commit**: `2d71625`
+> **Last updated**: 2026-05-03 03:33 UTC
+> **Last commit**: `pending`
 >
 > Claude reads this at session start. I write to it before each push.
 > See `CLAUDE.md` section "coordination protocol".
@@ -11,33 +11,44 @@
 
 ## Currently doing
 
-Investigating Phase 0 OTP boundary after the user switched `.env.local` to
-a rotated OpenAI project key with GA Computer Use (`gpt-5.5`) access.
+Idle after shipping the Phase 0 runner/facade hardening and live OpenAI spend
+guard.
 
-Phase 0 R-003 now gets past OpenAI model access and reaches Resy's OTP
-boundary. This is a real product/state-machine blocker, not an infra/model
-blocker and not a Resy DOM-click blocker.
+Consumed Claude `097741a`:
+- R-003 fixture now accepts `safe_handoff` + `F-PROVIDER-OTP`.
+- Runner maps `task.state === "awaiting_otp"` to `safe_handoff`.
+- Resy Phase 0 universally accepts `safe_handoff` + `F-PROVIDER-OTP`.
 
-Current local R-003 report:
-`benchmark/runs/phase0-resy-2026-05-03T02-09-19-595Z.json`
+Also fixed a v1 runtime race discovered during R-003: `/api/v1/travel-tasks`
+and `/api/v1/execution-jobs` create an in-process fire-and-forget job, but the
+row was inserted as `pending`, so the local worker could claim/fail the same
+row before the in-process executor finished. `createJob` now supports
+`initialStatus`, and both v1 in-process callers create rows as `running`.
+
+Added a cost guard to `scripts/run-phase0-resy-benchmark.ts`: live benchmark
+runs now require `--live-openai` or `ONEGENT_ALLOW_LIVE_OPENAI=1`. `--dry-run`
+remains free and was verified. This prevents accidental Computer Use spend
+while we harden code locally.
+
+No live OpenAI call was run after adding the guard. Verification:
+- `npx tsc --noEmit --pretty false` passed.
+- `npm run check-drift` passed.
+- `npx tsx scripts/run-phase0-resy-benchmark.ts --case R-003 --dry-run`
+  passed and did not call the API.
+- `npx tsx scripts/run-phase0-resy-benchmark.ts --case R-003 --allow-failures`
+  refused to run live without `--live-openai`.
+
+Latest local R-003 after the race fix:
+`benchmark/runs/phase0-resy-2026-05-03T03-25-03-604Z.json`
 
 Result summary:
-- task: `48484541-d7f4-4093-bfa5-ede48d92f1ac`
-- job: `5cb83c68-6425-446b-9a2b-dfc08d0cb0b2`
-- outcome: `failed_with_clear_reason`
-- taxonomy: `F-PROVIDER-OTP`
-- task state: `awaiting_otp`
-- terminal reason: `The booking flow is waiting for a one-time verification code.`
-- model-list check: current `.env.local` key now sees `gpt-5.5*`
-- Gmail connector check: failed with `token_expired` (401), so Codex cannot
-  currently read the Resy code through the connector
-
-Next Track A step after this commit:
-- Decide whether Phase 0 treats Resy OTP as acceptable `safe_handoff`, or
-  implement OTP resume: read Gmail OTP, pass it into the paused task, and
-  continue to `ready_for_confirmation`.
-- Current code has `awaiting_otp` state and `continue` endpoint, but it does
-  not persist/resume the same browser session with an OTP code.
+- task: `4c08a2a5-7a1a-42aa-a2e6-373a13520ebf`
+- job: `8b94d30c-ba21-4676-84b8-a4116f5697d5`
+- worker race: fixed (job source is local core marker; no legacy-shape fail)
+- current blocker: OpenAI Responses API 429 `insufficient_quota`
+- taxonomy: `F-INFRA-PROVIDER-QUOTA`
+- note for user: project model access is now present, but billing/quota is
+  still blocking Computer Use calls
 
 ## Blocking on Claude
 
@@ -47,7 +58,8 @@ Next Track A step after this commit:
 
 | Commit | Subject | Notes for Claude |
 |---|---|---|
-| `pending` | `[coord] update codex state after R-003 reaches OTP` | Records that GA Computer Use/model access is unblocked. R-003 now reaches `awaiting_otp` / `F-PROVIDER-OTP`; Gmail connector token is expired. |
+| `pending` | `[handoff] fix(phase0): align R-003 OTP handoff and prevent worker race` | Mirrors Claude `097741a` runner/fixture rule; creates v1 in-process jobs as `running` to keep worker from stealing them; adds `--live-openai` spend guard; R-003 now blocked only by OpenAI 429 insufficient_quota. |
+| `bd72f56` | `[coord] update codex state after R-003 reaches OTP` | Records that GA Computer Use/model access is unblocked. R-003 reached `awaiting_otp` / `F-PROVIDER-OTP`; Gmail connector token was expired at that time. |
 | `620444a` | `[handoff] fix(executor): migrate Computer Use adapter to GA gpt-5.5 tool` | Replaces deprecated `computer-use-preview` tool shape with GA `gpt-5.5` + `type: "computer"` in lib/worker mirrors. |
 | `38558db` | `[coord] update codex state after claude benchmark validator` | Records Claude's validator/taxonomy alignment and keeps Phase 0 blocked on OpenAI project model access. |
 | `f2b7dae` | `[handoff] feat(benchmark): route phase0 resy through computer use` | Adds `clientMetadata.preferredExecutor`, makes R-003 auto-mint a local benchmark API key, aligns OpenAI Computer Use request shape with official Responses API docs, and fixes benchmark taxonomy for model/API access failures. R-003 now reports `F-INFRA-MODEL-ACCESS`. |

@@ -82,6 +82,7 @@ export async function POST(req: NextRequest) {
       userId: null,
       sessionId: execution.clientMetadata?.sessionId,
       tripLabel: taskOptions?.title,
+      initialStatus: "running",
     });
   } catch (err) {
     console.error("[api/v1/travel-tasks] createJob failed", err);

@@ -130,7 +130,21 @@ async function runComputerUse(input: BookingExecutorInput): Promise<ExecutionJob
         });
       }
 
-      const observed = await classifyPage(page);
+      const observed = await classifyPage(page, "", input);
+      if (observed.status === "error" && /mismatch|wrong/i.test(observed.summary)) {
+        await writeAudit({
+          jobId,
+          stepIndex,
+          type: "job_failed",
+          message: observed.summary,
+          details: { executor: "computer_use", url: await safeUrl(page) },
+        });
+        return result(input, observed.status, observed.summary, createdAt, {
+          handoffUrl: await safeUrl(page),
+          screenshotBase64: finalScreenshot,
+          error: observed.summary,
+        });
+      }
       if (observed.status === "needs_otp" || observed.status === "ready_for_confirmation") {
         finalText = observed.summary;
         await writeAudit({
@@ -156,7 +170,7 @@ async function runComputerUse(input: BookingExecutorInput): Promise<ExecutionJob
     }
 
     finalScreenshot = await capture(page, input, "Final visual state", await safeUrl(page), "info");
-    const observed = await classifyPage(page, finalText);
+    const observed = await classifyPage(page, finalText, input);
     await writeAudit({
       jobId,
       stepIndex,
@@ -213,6 +227,7 @@ function buildComputerUsePrompt(input: BookingExecutorInput): string {
     "Do not enter CVV. Do not submit payment.",
     "If a button says Confirm, Reserve Now, Complete reservation, Purchase, Pay, or Book, only click it when it is clearly an intermediate step before login/OTP/payment. Stop before the final action that commits the reservation.",
     "When you stop, include exactly one handoff token in your response: ONEGENT_NEEDS_OTP, ONEGENT_NEEDS_LOGIN, ONEGENT_PAUSED_PAYMENT, ONEGENT_READY_FOR_CONFIRMATION, ONEGENT_NO_AVAILABILITY, ONEGENT_COMPLETED, or ONEGENT_FAILED.",
+    ...targetConstraintLines(input),
     `Task: ${input.browserTask.task}`,
     `Start URL: ${input.browserTask.startUrl}`,
     `Contact profile: ${profile.first_name} ${profile.last_name}, email ${profile.email}, phone ${profile.phone}.`,
@@ -253,7 +268,7 @@ async function executeComputerAction(page: Page, action: OpenAIComputerAction): 
       return;
     case "keypress":
       for (const key of action.keys ?? []) {
-        await page.keyboard.press(key);
+        await page.keyboard.press(normalizeKey(key));
       }
       return;
     case "type":
@@ -311,8 +326,13 @@ async function capture(
 async function classifyPage(
   page: Page,
   modelText = "",
+  input?: BookingExecutorInput,
 ): Promise<{ status: ExecutionJobStatus; summary: string }> {
   const text = `${modelText}\n${await page.locator("body").innerText({ timeout: 2500 }).catch(() => "")}`;
+  const reservationMismatch = input ? validateReservationSummary(text, input) : null;
+  if (reservationMismatch) {
+    return { status: "error", summary: reservationMismatch };
+  }
 
   if (text.includes("ONEGENT_NEEDS_OTP")) {
     return { status: "needs_otp", summary: "The booking flow is waiting for a one-time verification code." };
@@ -342,8 +362,14 @@ async function classifyPage(
   if (/check your email|confirmation code|one[- ]?time code|one[- ]?time passcode|verification code/i.test(text)) {
     return { status: "needs_otp", summary: "The booking flow is waiting for a one-time verification code." };
   }
-  if (/log in|required to sign in|please log in|mobile number to verify/i.test(text)) {
+  if (isLoginGate(text)) {
     return { status: "needs_login", summary: "The booking site requires account login or identity verification." };
+  }
+  if (/complete your reservation/i.test(text) && /reserve now/i.test(text)) {
+    return {
+      status: "ready_for_confirmation",
+      summary: "The booking flow reached the final user confirmation gate.",
+    };
   }
   if (/no availability|not available|can't accommodate|sold out|no times/i.test(text)) {
     return { status: "no_availability", summary: "No matching availability was found for the requested booking." };
@@ -358,6 +384,115 @@ async function classifyPage(
     status: "error",
     summary: modelText || "Computer Use stopped without reaching a known handoff state.",
   };
+}
+
+function targetConstraintLines(input: BookingExecutorInput): string[] {
+  const req = input.request.request;
+  if (req.scenario !== "restaurant") return [];
+
+  const windowMinutes = req.params.fallback_policy?.time_window_minutes ?? 60;
+  return [
+    "Target constraints:",
+    `- Restaurant: ${req.params.restaurant_name}`,
+    `- City: ${req.params.city}`,
+    `- Date: ${req.params.date}`,
+    `- Time: ${req.params.time} (24-hour). Accept only within +/- ${windowMinutes} minutes unless the page proves no matching time exists.`,
+    `- Party size: ${req.params.covers}`,
+    "- Never select AM when the target is PM, or PM when the target is AM.",
+    "- If no slot matches the target constraints, stop with ONEGENT_NO_AVAILABILITY instead of choosing a wrong slot.",
+  ];
+}
+
+function validateReservationSummary(text: string, input: BookingExecutorInput): string | null {
+  const req = input.request.request;
+  if (req.scenario !== "restaurant") return null;
+  if (!/complete your reservation/i.test(text)) return null;
+
+  const normalized = text.replace(/\s+/g, " ");
+  const requestedMinutes = parseTimeToMinutes(req.params.time);
+  const visibleTime = extractVisibleReservationTime(normalized);
+  if (requestedMinutes !== null && visibleTime !== null) {
+    const windowMinutes = req.params.fallback_policy?.time_window_minutes ?? 60;
+    const delta = circularMinuteDistance(requestedMinutes, visibleTime.minutes);
+    if (delta > windowMinutes) {
+      return `Wrong time selected: reservation summary shows ${visibleTime.label}, but target time is ${req.params.time}.`;
+    }
+  }
+
+  const visibleGuests = extractVisibleGuestCount(normalized);
+  if (visibleGuests !== null && visibleGuests !== req.params.covers) {
+    return `Wrong party size selected: reservation summary shows ${visibleGuests} guests, but target party size is ${req.params.covers}.`;
+  }
+
+  const visibleDate = extractVisibleDate(normalized);
+  if (visibleDate && !visibleDateMatchesTarget(visibleDate, req.params.date)) {
+    return `Wrong date selected: reservation summary shows ${visibleDate}, but target date is ${req.params.date}.`;
+  }
+
+  return null;
+}
+
+function isLoginGate(text: string): boolean {
+  if (/please log in:|log in with email|email address\*|mobile number\*|verify or create an account/i.test(text)) {
+    return true;
+  }
+  if (/required to sign in|please sign in|sign in to continue/i.test(text)) {
+    return true;
+  }
+  return false;
+}
+
+function extractVisibleReservationTime(text: string): { label: string; minutes: number } | null {
+  const matches = [...text.matchAll(/\b(\d{1,2}):(\d{2})\s*(AM|PM)\b/gi)];
+  for (const match of matches) {
+    const label = match[0];
+    const minutes = parseMeridiemTime(label);
+    if (minutes !== null) return { label, minutes };
+  }
+  return null;
+}
+
+function extractVisibleGuestCount(text: string): number | null {
+  const match = text.match(/\b(\d+)\s+Guests?\b/i);
+  return match ? Number.parseInt(match[1], 10) : null;
+}
+
+function extractVisibleDate(text: string): string | null {
+  const match = text.match(/\b(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun),\s+[A-Z][a-z]{2}\s+\d{1,2},\s+\d{4}\b/);
+  return match?.[0] ?? null;
+}
+
+function visibleDateMatchesTarget(visibleDate: string, targetDate: string): boolean {
+  const parsed = Date.parse(`${visibleDate} 12:00:00 GMT`);
+  if (Number.isNaN(parsed)) return true;
+  const iso = new Date(parsed).toISOString().slice(0, 10);
+  return iso === targetDate;
+}
+
+function parseTimeToMinutes(value: string): number | null {
+  const [hourRaw, minuteRaw] = value.split(":");
+  const hour = Number.parseInt(hourRaw, 10);
+  const minute = Number.parseInt(minuteRaw, 10);
+  if (!Number.isFinite(hour) || !Number.isFinite(minute)) return null;
+  if (hour < 0 || hour > 23 || minute < 0 || minute > 59) return null;
+  return hour * 60 + minute;
+}
+
+function parseMeridiemTime(value: string): number | null {
+  const match = value.match(/\b(\d{1,2}):(\d{2})\s*(AM|PM)\b/i);
+  if (!match) return null;
+  let hour = Number.parseInt(match[1], 10);
+  const minute = Number.parseInt(match[2], 10);
+  const meridiem = match[3].toUpperCase();
+  if (hour < 1 || hour > 12 || minute < 0 || minute > 59) return null;
+  if (hour === 12) hour = 0;
+  if (meridiem === "PM") hour += 12;
+  return hour * 60 + minute;
+}
+
+function circularMinuteDistance(a: number, b: number): number {
+  const diff = Math.abs(a - b);
+  return Math.min(diff, 1440 - diff);
 }
 
 function getComputerCalls(response: OpenAIResponse): OpenAIComputerCall[] {
@@ -448,6 +583,41 @@ function lastPointerAction(actions: OpenAIComputerAction[]): OpenAIComputerActio
 
 function normalizeButton(button: string | undefined): "left" | "right" | "middle" {
   return button === "right" || button === "middle" ? button : "left";
+}
+
+function normalizeKey(key: string): string {
+  const aliases: Record<string, string> = {
+    ENTER: "Enter",
+    RETURN: "Enter",
+    CTRL: "Control",
+    CONTROL: "Control",
+    CMD: "Meta",
+    COMMAND: "Meta",
+    META: "Meta",
+    OPTION: "Alt",
+    ALT: "Alt",
+    SHIFT: "Shift",
+    ESC: "Escape",
+    ESCAPE: "Escape",
+    BACKSPACE: "Backspace",
+    DELETE: "Delete",
+    DEL: "Delete",
+    TAB: "Tab",
+    SPACE: "Space",
+    ARROWUP: "ArrowUp",
+    ARROWDOWN: "ArrowDown",
+    ARROWLEFT: "ArrowLeft",
+    ARROWRIGHT: "ArrowRight",
+    UP: "ArrowUp",
+    DOWN: "ArrowDown",
+    LEFT: "ArrowLeft",
+    RIGHT: "ArrowRight",
+    PAGEUP: "PageUp",
+    PAGEDOWN: "PageDown",
+    HOME: "Home",
+    END: "End",
+  };
+  return aliases[key.toUpperCase()] ?? key;
 }
 
 async function safeUrl(page: Page): Promise<string> {

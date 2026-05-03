@@ -60,6 +60,12 @@ export interface CreateJobMeta {
    * minted an id (e.g. idempotent retry on a known id). Normally omit.
    */
   jobId?: string;
+  /**
+   * Initial booking_jobs.status. Queue-backed callers should omit this and
+   * keep the default "pending"; in-process fire-and-forget callers should
+   * pass "running" so the worker poller cannot claim the same row.
+   */
+  initialStatus?: BookingJob["status"] | "pending_local";
 }
 
 /**
@@ -83,6 +89,7 @@ export async function createJob(
     tripLabel,
     steps: [step],
     autonomySettings: meta.autonomySettings ?? null,
+    status: meta.initialStatus,
   });
 }
 
