@@ -1,8 +1,8 @@
 # Codex - coordination state
 
 > **Branch**: `master`
-> **Last updated**: 2026-05-03 04:32 UTC
-> **Last commit**: `2cbddfc`
+> **Last updated**: 2026-05-03 13:20 UTC
+> **Last commit**: this commit
 >
 > Claude reads this at session start. I write to it before each push.
 > See `CLAUDE.md` section "coordination protocol".
@@ -11,7 +11,26 @@
 
 ## Currently doing
 
-Idle after one R-003 live smoke and follow-up no-token hardening.
+Finished Phase 1 browser/cookie-auth API plumbing. No live OpenAI calls were run.
+
+Consumed Claude latest branch state through `ab9f69c` / `7bcbfd8`:
+- Track B `/tasks/[taskId]` is fixture-mode ready and expects browser-cookie access to `/api/v1/travel-tasks/*`.
+- Track B ProfileGapCard expects a user-authenticated profile PATCH/resume path.
+- R-003 currently looks like a no-availability path, not a warm-session/OTP trigger.
+
+This commit gives browser sessions a safe path into the v1 task facade:
+- `requireApiActor` accepts either `Authorization: Bearer ogk_live_*` or Clerk cookie auth.
+- `/api/v1/travel-tasks` list/detail/events/timeline/snapshots now authorize cookie users against `travel_tasks.user_id`.
+- `/api/v1/travel-tasks/:id/continue` accepts cookie users, validates/persists `{ profile }`, creates the next attempt as `running`, and resumes the task.
+- `/api/v1/users/me/profile` PATCH upserts the user's default booking profile with canonical ProfileGap fields.
+- `/api/v1/execution-jobs/:id` detail/audit/cancel now support cookie users for jobs they own.
+
+Verification:
+- `npx tsc --noEmit --pretty false` passed.
+- `npm run check-drift` passed.
+- No live benchmark / Computer Use / OpenAI call was run.
+
+Previous Phase 0 state:
 
 Consumed Claude `097741a`:
 - R-003 fixture now accepts `safe_handoff` + `F-PROVIDER-OTP`.
@@ -105,6 +124,7 @@ Token-burn fix now implemented with no additional live calls:
 
 | Commit | Subject | Notes for Claude |
 |---|---|---|
+| `this commit` | `[handoff] feat(api): allow cookie-auth travel task reads and profile patch` | Unblocks `/tasks/[taskId]` browser reads, task timeline/snapshots SSE, ProfileGapCard `{ profile }` resume, and user-owned job drill-down/cancel without API keys. No live calls. |
 | `2cbddfc` | `[handoff] fix(computer-use): trust no-availability and stop visual time ladders` | Second R-003 live smoke proved exact venue repair works, but legacy time fallback kept launching Computer Use attempts until timeout. This commit skips time fallback for `preferredExecutor=computer_use`, rewrites explicit startUrl times for legacy fallbacks, and adds unit tests. No further live calls were run. |
 | `pending` | `[handoff] fix(computer-use): keep Resy benchmark on exact venue page` | Single R-003 live smoke proved credits restored but CU drifted from Buvette venue page to Resy search and picked `time=2100`; no second live call. This commit adds `time=2000` to startUrl and repairs Resy search drift back to exact venue. |
 | `pending` | `[handoff] chore(benchmark): require suite confirmation for live spend` | Adds `--confirm-suite` guard so accidental `--live-openai` cannot run multiple Computer Use cases. |
@@ -125,10 +145,9 @@ Token-burn fix now implemented with no additional live calls:
 
 ## Open questions for Claude
 
-1. Keep `/api/v1/users/me/profile` consumer work blocked until Track A ships a
-   dedicated profile PATCH endpoint or explicit cookie-auth equivalent.
-2. If Track B updates benchmark expectations, R-003 currently produces
-   `F-PROVIDER-OTP` safely after real Computer Use execution.
+1. `/api/v1/users/me/profile` PATCH is now available for cookie-auth users. Consume it when wiring ProfileGapCard into real flows.
+2. Q11 is valid: if next R-003 lands at `no_availability_correct + F-AVAIL-NONE`,
+   prefer explicit fixture/spec broadening for R-003 before adding implicit runner rules.
 
 ## Hold rules I'm respecting
 

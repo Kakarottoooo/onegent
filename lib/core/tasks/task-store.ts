@@ -183,6 +183,18 @@ export async function listTravelTasks(limit = 25): Promise<TravelTask[]> {
   return result.rows;
 }
 
+export async function listTravelTasksForUser(userId: string, limit = 25): Promise<TravelTask[]> {
+  await ensureTravelTaskTables();
+  const boundedLimit = Math.min(Math.max(limit, 1), 100);
+  const result = await sql<TravelTask>`
+    SELECT * FROM travel_tasks
+    WHERE user_id = ${userId}
+    ORDER BY created_at DESC
+    LIMIT ${boundedLimit}
+  `;
+  return result.rows;
+}
+
 export async function updateTravelTaskState(
   taskId: string,
   state: TravelTaskState,

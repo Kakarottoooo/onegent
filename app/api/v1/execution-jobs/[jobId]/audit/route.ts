@@ -16,7 +16,11 @@
  */
 
 import { NextResponse, type NextRequest } from "next/server";
-import { requireApiKey } from "@/lib/api-auth/require-api-key";
+import {
+  actorCanAccessJobUser,
+  notFoundResponse,
+  requireApiActor,
+} from "@/lib/api-auth/require-api-actor";
 import { getJob, queryAudit } from "@/lib/core";
 
 export const runtime = "nodejs";
@@ -26,8 +30,9 @@ export async function GET(
   req: NextRequest,
   ctx: { params: Promise<{ jobId: string }> },
 ) {
-  const auth = await requireApiKey(req);
+  const auth = await requireApiActor(req);
   if (!auth.ok) return auth.response;
+  const { actor } = auth;
 
   const { jobId } = await ctx.params;
   if (!jobId) {
@@ -40,11 +45,8 @@ export async function GET(
   // 404 only when the job itself is unknown. Empty audit on a real job
   // is a legitimate 200 (e.g. job was created before audit logging existed).
   const job = await getJob(jobId);
-  if (!job) {
-    return NextResponse.json(
-      { error: { code: "job_not_found", message: `No job with id "${jobId}".` } },
-      { status: 404 },
-    );
+  if (!job || !actorCanAccessJobUser(actor, job.user_id)) {
+    return notFoundResponse("job_not_found", `No job with id "${jobId}".`);
   }
 
   const limitParam = req.nextUrl.searchParams.get("limit");

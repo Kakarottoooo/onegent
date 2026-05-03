@@ -14,7 +14,11 @@
  */
 
 import { NextResponse, type NextRequest } from "next/server";
-import { requireApiKey } from "@/lib/api-auth/require-api-key";
+import {
+  actorCanAccessJobUser,
+  notFoundResponse,
+  requireApiActor,
+} from "@/lib/api-auth/require-api-actor";
 import { getJob, type ExecutionJobResult, type ExecutionJobStatus } from "@/lib/core";
 import type { BookingJob, BookingJobStep } from "@/lib/db";
 
@@ -25,8 +29,9 @@ export async function GET(
   req: NextRequest,
   ctx: { params: Promise<{ jobId: string }> },
 ) {
-  const auth = await requireApiKey(req);
+  const auth = await requireApiActor(req);
   if (!auth.ok) return auth.response;
+  const { actor } = auth;
 
   const { jobId } = await ctx.params;
   if (!jobId) {
@@ -37,11 +42,8 @@ export async function GET(
   }
 
   const job = await getJob(jobId);
-  if (!job) {
-    return NextResponse.json(
-      { error: { code: "job_not_found", message: `No job with id "${jobId}".` } },
-      { status: 404 },
-    );
+  if (!job || !actorCanAccessJobUser(actor, job.user_id)) {
+    return notFoundResponse("job_not_found", `No job with id "${jobId}".`);
   }
 
   return NextResponse.json(toExecutionJobResult(job), { status: 200 });
