@@ -6618,6 +6618,57 @@ The user will enter CVV and confirm payment themselves.`,
       }
 
       await new Promise(r => setTimeout(r, 700));
+      const openTableBlockingDinerFields = activeProvider?.id === "opentable-com"
+        ? await raw.evaluate(() => {
+            const isShown = (el: HTMLElement): boolean => {
+              if (el.hidden || !el.isConnected) return false;
+              const rect = el.getBoundingClientRect();
+              if (rect.width === 0 || rect.height === 0) return false;
+              const style = window.getComputedStyle(el);
+              return style.display !== "none" && style.visibility !== "hidden" && style.opacity !== "0";
+            };
+            const classify = (input: HTMLInputElement): string | null => {
+              const haystack = [
+                input.type,
+                input.placeholder,
+                input.getAttribute("aria-label"),
+                input.id,
+                input.name,
+                input.autocomplete,
+              ].join(" ").toLowerCase();
+              if (haystack.includes("country") || haystack.includes("code")) return null;
+              if (haystack.includes("first") || haystack.includes("given-name")) return "first name";
+              if (haystack.includes("last") || haystack.includes("family-name")) return "last name";
+              if (input.type === "email" || haystack.includes("email")) return "email";
+              if (input.type === "tel" || haystack.includes("phone") || haystack.includes("tel")) return "phone";
+              return null;
+            };
+            return Array.from(document.querySelectorAll<HTMLInputElement>("input"))
+              .filter((input) => input.type !== "hidden" && input.type !== "checkbox" && input.type !== "radio" && !input.disabled && isShown(input))
+              .map((input) => ({ field: classify(input), value: input.value.trim() }))
+              .filter((entry): entry is { field: string; value: string } => !!entry.field)
+              .filter((entry) => entry.value.length === 0)
+              .map((entry) => entry.field);
+          }).catch(() => [] as string[])
+        : [];
+      if (openTableBlockingDinerFields.length > 0) {
+        const uniqueFields = Array.from(new Set(openTableBlockingDinerFields));
+        trace(`[opentable] blocking ready handoff: visible diner field(s) still empty: ${uniqueFields.join(", ")}`);
+        const screenshotBase64 = `data:image/png;base64,${(await page.screenshot({ type: "png" })).toString("base64")}`;
+        const afterUrl = raw.url();
+        holdBrowserOpenForManualReview(
+          `Local mode: OpenTable still needs diner details (${uniqueFields.join(", ")}) — keeping browser open for ${Math.round(BROWSER_KEEP_OPEN_MS / 60000)} minutes for manual completion.`
+        );
+        return {
+          status: "error",
+          screenshotBase64,
+          handoffUrl: afterUrl,
+          sessionUrl,
+          summary: `OpenTable still needs diner details (${uniqueFields.join(", ")}). Fill them manually on the open page, then complete the reservation.`,
+          error: `OpenTable diner form incomplete: ${uniqueFields.join(", ")}`,
+          debugTrace,
+        };
+      }
       const screenshotBase64 = `data:image/png;base64,${(await page.screenshot({ type: "png" })).toString("base64")}`;
       const afterUrl = raw.url();
       // Check if form was submitted successfully (URL changed to confirmation)

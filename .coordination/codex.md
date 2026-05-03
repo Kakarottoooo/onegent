@@ -1,8 +1,8 @@
 # Codex - coordination state
 
 > **Branch**: `codex/openai-chat-model-env`
-> **Last updated**: 2026-05-03 15:31 UTC
-> **Last commit**: `521fbc3`
+> **Last updated**: 2026-05-03 15:47 UTC
+> **Last commit**: pending
 >
 > Claude reads this at session start. I write to it before each push.
 > See `CLAUDE.md` section "coordination protocol".
@@ -11,7 +11,7 @@
 
 ## Currently doing
 
-Fixing an OpenTable false-positive ready state from the Sirrah founder E2E run.
+Fixing a second OpenTable false-positive ready state from the Sirrah founder E2E run.
 
 Current local test finding:
 - A fresh Buvette task reached OpenTable, but OpenTable returned a visible `Sirrah` result because the review text mentioned Buvette. The worker clicked the 8:00 PM slot and landed on `Sirrah` booking details. This is a severe wrong-venue risk.
@@ -36,6 +36,8 @@ Current local fix:
   - throw `opentable_guest_form_incomplete:<fields>` when any visible diner field remains empty.
 - Patched the executor catch path so `opentable_guest_form_incomplete` is not converted into `paused_payment`.
 - Verification: `npx tsc --noEmit --pretty false` passed; `npx tsx scripts/check-drift.ts` passed. No live retry from Codex yet.
+- Second guard: user still saw blank email while task reported `Ready for payment`. Added executor-level OpenTable ready-handoff blocker immediately before the restaurant branch returns. It scans visible diner inputs on `/booking/details`; if email/phone/name fields are empty, it returns `error` with manual instructions and keeps the browser open instead of `paused_payment`.
+- Verification after second guard: `npx tsc --noEmit --pretty false` passed; `npx tsx scripts/check-drift.ts` passed. No live retry from Codex yet.
 
 Previous local test context:
 
@@ -94,6 +96,7 @@ What I just merged from Claude:
 
 | Commit | Subject | Notes for Claude |
 |---|---|---|
+| pending | `fix(opentable): block ready status when diner fields are blank` | Adds an executor-level OpenTable guard before restaurant checkout returns. Visible empty diner fields now force manual/error handoff and keep the browser open, preventing false `Ready for payment` when email/phone are blank. Verified tsc + drift. |
 | `521fbc3` | `fix(opentable): verify diner fields before ready handoff` | Founder E2E found Sirrah checkout showed blank phone/email but UI reported ready. OpenTable now locator-fallback fills visible diner fields and throws `opentable_guest_form_incomplete` if any remain empty; executor no longer converts that error to paused_payment. Verified tsc + drift. |
 | `85c90e3` | `fix(timeline): render local snapshot image payloads` | Snapshot endpoint returns page `url` plus screenshot `imageBase64`; UI was using `url` as image src. Now prefers base64 data URL and uses `title` for label. Verified tsc + drift. |
 | `6956a43` | `fix(opentable): refuse unrelated search-result slots` | Founder E2E found Buvette -> Sirrah wrong-venue risk. OpenTable now title-scopes restaurant result cards before slot clicks and reuses the restaurant target for booking-details validation. Verified tsc + drift. No live retry from Codex. |
