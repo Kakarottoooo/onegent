@@ -440,6 +440,56 @@ describe("validateBenchmarkReport · taxonomy codes from runner", () => {
   );
 });
 
+/* ─── Phase 0 OTP transitional rule (§ 7.5) ──────────────────────── */
+
+describe("validateBenchmarkReport · Phase 0 OTP rule", () => {
+  // Per BENCHMARK_RESTAURANT_100 § 3.2 and § 7.5, F-PROVIDER-OTP cases
+  // should land in `safe_handoff` bucket — the agent stopped at an external
+  // auth wall, not a failure. Validator surfaces a soft warning when the
+  // runner emits the bucket as `failed_with_clear_reason` instead, so the
+  // contract drift is visible without forcing codex to re-run anything.
+  it("flags F-PROVIDER-OTP + failed_with_clear_reason as warning", () => {
+    const r = baseReport();
+    const c = (r.results as Array<Record<string, unknown>>)[1];
+    c.outcome = "failed_with_clear_reason";
+    c.taxonomyCode = "F-PROVIDER-OTP";
+    c.state = "awaiting_otp";
+    const issues = validateBenchmarkReport(r).issues;
+    const w = issues.find(
+      (i) =>
+        i.severity === "warning" &&
+        i.message.includes("F-PROVIDER-OTP should pair with `safe_handoff`"),
+    );
+    expect(w).toBeDefined();
+    expect(w?.detail).toContain("§ 7.5");
+    expect(w?.detail).toContain("awaiting_otp");
+  });
+
+  it("does NOT flag F-PROVIDER-OTP + safe_handoff (canonical shape)", () => {
+    const r = baseReport();
+    const c = (r.results as Array<Record<string, unknown>>)[1];
+    c.outcome = "safe_handoff";
+    c.taxonomyCode = "F-PROVIDER-OTP";
+    c.state = "awaiting_otp";
+    const issues = validateBenchmarkReport(r).issues;
+    const w = issues.find((i) => i.message.includes("F-PROVIDER-OTP"));
+    expect(w).toBeUndefined();
+  });
+
+  it("does NOT flag other F-PROVIDER-* with failed_with_clear_reason", () => {
+    // Only F-PROVIDER-OTP gets the soft handoff treatment per § 3.2.
+    // F-PROVIDER-DOWN / F-PROVIDER-TIMEOUT etc. legitimately produce
+    // failed_with_clear_reason.
+    const r = baseReport();
+    const c = (r.results as Array<Record<string, unknown>>)[1];
+    c.outcome = "failed_with_clear_reason";
+    c.taxonomyCode = "F-PROVIDER-CAPTCHA";
+    const issues = validateBenchmarkReport(r).issues;
+    const w = issues.find((i) => i.message.includes("safe_handoff"));
+    expect(w).toBeUndefined();
+  });
+});
+
 /* ─── Real-world scenario: codex's R-003 model-access run ────────── */
 
 describe("validateBenchmarkReport · R-003 model-access scenario", () => {

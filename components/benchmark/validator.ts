@@ -430,6 +430,23 @@ function validateResults(rawResults: unknown, rawMetrics: unknown, ctx: Ctx): vo
         detail: `caseId=${rawCase.caseId}, outcome=${describeValue(rawCase.outcome)}, taxonomyCode=${rawCase.taxonomyCode}. Severity-pair invariant — F-LOGIC-* taxonomies must pair with severe_error.`,
       });
     }
+
+    // Phase 0 OTP transitional rule (BENCHMARK_RESTAURANT_100 § 3.2 + § 7.5).
+    // F-PROVIDER-OTP cases should land in `safe_handoff` bucket. Cases shaped
+    // as `failed_with_clear_reason` + F-PROVIDER-OTP almost certainly reflect
+    // a runner-side bucketing bug — the agent did the right thing (reached
+    // OTP wall, surfaced it cleanly), so the bucket should be `safe_handoff`.
+    if (
+      rawCase.taxonomyCode === "F-PROVIDER-OTP" &&
+      rawCase.outcome === "failed_with_clear_reason"
+    ) {
+      ctx.issues.push({
+        severity: "warning",
+        path,
+        message: "F-PROVIDER-OTP should pair with `safe_handoff` outcome (Phase 0 § 7.5)",
+        detail: `caseId=${rawCase.caseId}. Per BENCHMARK_RESTAURANT_100.md § 3.2 and § 7.5, OTP-blocked cases are clean handoffs (the agent stopped at an external auth wall, not a failure). The runner should emit \`outcome: "safe_handoff"\` whenever \`task.state === "awaiting_otp"\`.`,
+      });
+    }
   });
 
   // Aggregate: empty taxonomy strings (Q2)

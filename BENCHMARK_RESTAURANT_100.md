@@ -155,7 +155,7 @@ Codes: `F-{CLASS}-{DETAIL}`. 4 classes × ~3-4 details each = 15 codes.
 |---|---|---|
 | F-PROVIDER-CAPTCHA | Anti-bot challenge blocked the agent | `safe_handoff` (open in browser) |
 | F-PROVIDER-LOGIN | Mid-flow login required, agent can't fulfill | `safe_handoff` |
-| F-PROVIDER-OTP | OTP verification required, no Gmail auto-fetch yet | `awaiting_otp` (Phase 1 task state) → `safe_handoff` after timeout |
+| F-PROVIDER-OTP | OTP verification required, no Gmail auto-fetch yet | **Phase 0**: outcome bucket `safe_handoff` with task state `awaiting_otp`. **Phase 1**: Gmail OTP auto-resume continues the same browser session past OTP, target outcome becomes `ready_for_confirmation`. See § 7.5 for the Phase 0 transitional rule. |
 | F-PROVIDER-PAYMENT | Hit payment / CVV gate (the trust boundary) | `ready_for_confirmation` (this is our SUCCESS bucket, not failure) |
 | F-PROVIDER-DOWN | Site returned 5xx / unreachable | `failed_with_clear_reason` |
 
@@ -260,7 +260,7 @@ Compact format, 7 groups. Each row: `id | class | stability | provider | prompt 
 |---|---|---|---|---|---|---|
 | R-001 | solo / specific / 2wk | stable | OT | "Book Lure Fishbar Soho Friday 2 weeks from now 7pm 1 person" | `ready_for_confirmation` | F-AVAIL-NONE |
 | R-002 | solo / specific / 2wk | stable | OT | "Reserve a seat at Gramercy Tavern next Saturday 6:30pm for 1" | `ready_for_confirmation` | F-AVAIL-NONE |
-| R-003 | solo / specific / 2wk | stable | Resy | "Book me Buvette in West Village next Thursday 8pm solo dinner" | `ready_for_confirmation` | F-AVAIL-NONE |
+| R-003 | solo / specific / 2wk | stable | Resy | "Book me Buvette in West Village next Thursday 8pm solo dinner" | `ready_for_confirmation > safe_handoff` | F-AVAIL-NONE / F-PROVIDER-OTP |
 | R-004 | solo / specific / tmrw | stable | OT | "Tomorrow night 7pm, ABC Kitchen, 1 person" | `ready_for_confirmation` | F-AVAIL-NONE |
 | R-005 | solo / specific / 2wk | stable | OT | "I want to eat at Babbo two weeks from Tuesday at 7:30pm by myself" | `ready_for_confirmation` | F-AVAIL-NONE |
 | R-006 | solo / specific / weekend | stable | OT | "Boucherie Soho Saturday next week 6pm just me" | `ready_for_confirmation` | F-AVAIL-NONE |
@@ -904,6 +904,43 @@ For Phase 0 declaration:
 5. Compute the 4 metrics
 6. If all pass: declare Phase 0 closed, proceed to Phase 1 backend cutover (which is already done — 8b7e3dd)
 7. If any fail: investigate, file fix, re-run that subset
+
+### 7.5 Phase 0 OTP transitional acceptance
+
+Resy gates new browser sessions behind a one-time email/SMS verification code.
+Until Phase 1 ships Gmail OTP auto-resume, the agent navigates the full booking
+flow up to the OTP wall, then surfaces the wall as a clean handoff to the user.
+This is treated as a **passing per-case outcome** for Phase 0 declaration.
+
+Canonical shape:
+- Outcome bucket: `safe_handoff` (NOT `failed_with_clear_reason`)
+- Taxonomy: `F-PROVIDER-OTP`
+- Task state: `awaiting_otp`
+- Severity: NOT severe (the agent took the right action; auth wall is external)
+
+**Runner expectation**: `scripts/run-phase0-resy-benchmark.ts` should emit
+`outcome: safe_handoff` whenever `task.state === "awaiting_otp"`, even when
+the underlying job is in a failed state. The current bucket-classification
+that emits `failed_with_clear_reason` for OTP cases violates § 3.2 and § 7.5;
+runner fix tracked in coordination protocol handoff.
+
+**Spec-level taxonomy acceptance**: per-case rows in § 4 (the 100 cases)
+do not need to repeat `F-PROVIDER-OTP` in their `acceptableFailureTaxonomy`
+list. The runner should treat F-PROVIDER-OTP as universally acceptable for
+any Resy case (primary or fallback) for Phase 0 only. Once Phase 1 lands,
+this section is revised to remove the universal acceptance.
+
+**Why not bucket 6 (`failed_with_clear_reason`)?** Bucket 6 implies "we tried
+and the agent's path ran out". OTP is upstream of where the agent's path runs
+out: the agent did its job, and stopped because the user owes the system one
+piece of cooperation (the code from their inbox). That's a `safe_handoff`,
+not a failure with a reason — same as F-PROVIDER-CAPTCHA and F-PROVIDER-LOGIN
+in § 3.2.
+
+**Phase 0 gate impact**: A run that's 100% OTP-blocked still cannot declare —
+booking-ready ≥ 80% requires actual reservations to clear the OTP wall via
+Phase 1. This rule only affects per-case "did we hit an expected outcome?"
+matching, not the 4-metric headline gate.
 
 ---
 
