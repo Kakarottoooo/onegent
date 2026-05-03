@@ -13,6 +13,7 @@
 import { useEffect, useState } from "react";
 import type { ConversationalNLUResult } from "@/lib/agent/nlu-v2";
 import type { TripIntentState } from "@/lib/agent/trip-intent-state";
+import type { NeedsProfileDataPayload } from "@/lib/core";
 import { matchContactsFuzzy } from "@/lib/contacts-match";
 import "./chat.css";
 
@@ -78,6 +79,7 @@ export interface CommitResponse {
   error?: string;
   // US-W5 direct-booking fields (kind="direct_booking"):
   venue_name?: string;
+  profile_gap?: NeedsProfileDataPayload;
   booking_step?: {
     type: "restaurant" | "hotel";
     emoji: string;

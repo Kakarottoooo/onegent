@@ -21,6 +21,7 @@ export {
   appendTaskEvent,
   createTravelTask,
   ensureTravelTaskTables,
+  getTravelTaskByBookingJobId,
   getTaskEvents,
   getTravelTask,
   listTravelTasks,

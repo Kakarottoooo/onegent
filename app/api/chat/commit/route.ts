@@ -25,6 +25,7 @@ import {
   insertPrivateMessage,
   sendDirectMessage,
   getUserProfile,
+  getDefaultBookingProfile,
   markSessionUpgraded,
   markSessionUpgradedPlan,
   markSessionUpgradedTrip,
@@ -52,6 +53,9 @@ import {
   type TripVibe,
 } from "@/lib/agent/trip-intent-state";
 import { notifyDecisionRoomInvite } from "@/lib/room-notifications";
+import { buildProfileGap } from "@/lib/core/execution/profile-requirements";
+import type { ExecutionParams, NeedsProfileDataPayload } from "@/lib/core";
+import type { BookingProfile } from "@/lib/booking-autopilot/types";
 
 export const maxDuration = 30;
 
@@ -1089,7 +1093,7 @@ export async function POST(req: NextRequest) {
         ? Boolean((nluRaw as { direct_booking?: boolean }).direct_booking)
         : false;
     if (directBookingFlag) {
-      const directPayload = buildDirectBookingPayload(scenario, constraints);
+      const directPayload = await buildDirectBookingPayload(userId, scenario, constraints);
       if (directPayload) return NextResponse.json(directPayload);
       // Fall through if we couldn't build the step (e.g. flag set but no
       // restaurant_name in constraints — defensive guard, shouldn't happen).
@@ -1124,15 +1128,17 @@ export async function POST(req: NextRequest) {
 
 // ── US-W5: direct-booking payload builder ────────────────────────────────
 // Mirrors the BookingJobStep shape that RecommendationCard.handleReserve
-// posts to /api/booking-jobs. The client fills in profileId + profile from
-// /api/user/booking-profiles?default=true before posting (we don't have
-// the user's profile here on the server side of /api/chat/commit anyway).
+// posts to /api/booking-jobs. The client still fills in profileId + profile
+// from /api/user/booking-profiles?default=true before posting; this response
+// also includes a canonical profile_gap so every surface uses the same
+// scenario-aware missing-field requirements.
 
 interface DirectBookingPayload {
   ok: true;
   kind: "direct_booking";
   scenario: "restaurant" | "hotel";
   venue_name: string;
+  profile_gap?: NeedsProfileDataPayload;
   booking_step: {
     type: "restaurant" | "hotel";
     emoji: string;
@@ -1143,10 +1149,11 @@ interface DirectBookingPayload {
   };
 }
 
-function buildDirectBookingPayload(
+async function buildDirectBookingPayload(
+  userId: string,
   scenario: ConversationalScenario,
   constraints: Record<string, unknown>,
-): DirectBookingPayload | null {
+): Promise<DirectBookingPayload | null> {
   if (scenario === "restaurant") {
     const name = readString(constraints, "restaurant_name");
     if (!name) return null;
@@ -1161,11 +1168,22 @@ function buildDirectBookingPayload(
     };
     if (date) body.date = date;
     if (time) body.time = time;
+    const execution: ExecutionParams = {
+      scenario: "restaurant",
+      params: {
+        restaurant_name: name,
+        city,
+        date: date ?? "",
+        time: time ?? "",
+        covers,
+      },
+    };
     return {
       ok: true,
       kind: "direct_booking",
       scenario: "restaurant",
       venue_name: name,
+      profile_gap: await buildDirectBookingProfileGap(userId, execution),
       booking_step: {
         type: "restaurant",
         emoji: "\u{1F37D}️",
@@ -1190,11 +1208,22 @@ function buildDirectBookingPayload(
     };
     if (checkIn) body.checkIn = checkIn;
     if (checkOut) body.checkOut = checkOut;
+    const execution: ExecutionParams = {
+      scenario: "hotel",
+      params: {
+        hotel_name: name,
+        city,
+        checkin: checkIn ?? "",
+        checkout: checkOut ?? "",
+        adults: guests,
+      },
+    };
     return {
       ok: true,
       kind: "direct_booking",
       scenario: "hotel",
       venue_name: name,
+      profile_gap: await buildDirectBookingProfileGap(userId, execution),
       booking_step: {
         type: "hotel",
         emoji: "\u{1F3E8}",
@@ -1206,6 +1235,36 @@ function buildDirectBookingPayload(
     };
   }
   return null;
+}
+
+async function buildDirectBookingProfileGap(
+  userId: string,
+  execution: ExecutionParams,
+): Promise<NeedsProfileDataPayload | undefined> {
+  const profile = await getDefaultBookingProfile(userId).catch(() => null);
+  return buildProfileGap(execution, profileToBookingProfile(profile)) ?? undefined;
+}
+
+function profileToBookingProfile(
+  profile: Awaited<ReturnType<typeof getDefaultBookingProfile>>,
+): BookingProfile {
+  return {
+    first_name: profile?.first_name ?? "",
+    last_name: profile?.last_name ?? "",
+    email: profile?.email ?? "",
+    phone: profile?.phone ?? "",
+    address_line1: profile?.address_line1 ?? "",
+    city: profile?.city ?? "",
+    state: profile?.state ?? "",
+    zip: profile?.zip ?? "",
+    country: profile?.country ?? "",
+    date_of_birth: profile?.date_of_birth ?? "",
+    nationality: profile?.nationality ?? "",
+    passport_number: profile?.passport_number ?? "",
+    passport_expiry: profile?.passport_expiry ?? "",
+    passport_country: profile?.passport_country ?? "",
+    known_traveler_number: profile?.known_traveler_number ?? "",
+  };
 }
 
 /**

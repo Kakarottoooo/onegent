@@ -23,6 +23,10 @@ import {
   deleteMonitorsByJobId,
   clearDecisionRoomBookingJobByJobId,
 } from "@/lib/db";
+import {
+  getTravelTaskByBookingJobId,
+  updateTravelTaskState,
+} from "@/lib/core";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -48,14 +52,29 @@ export async function POST(
     return notFoundResponse("job_not_found", `No job with id "${jobId}".`);
   }
 
+  const jobWithTask = job as typeof job & { task_id?: unknown };
+  const linkedTaskId =
+    typeof jobWithTask.task_id === "string"
+      ? jobWithTask.task_id
+      : (await getTravelTaskByBookingJobId(jobId))?.id ?? null;
+
   // Cascade-clean monitors + decision-room links so stale UI cards don't
   // linger after the cancel. Mirrors DELETE /api/booking-jobs/[id].
   await deleteMonitorsByJobId(jobId);
   await clearDecisionRoomBookingJobByJobId(jobId);
   await deleteBookingJob(jobId);
 
+  if (linkedTaskId) {
+    await updateTravelTaskState(linkedTaskId, "cancelled", {
+      jobId,
+      priorStatus: job.status,
+      terminalCode: "cancelled",
+      terminalReason: "Task cancelled by user.",
+    });
+  }
+
   return NextResponse.json(
-    { jobId, cancelled: true, priorStatus: job.status },
+    { jobId, cancelled: true, priorStatus: job.status, taskId: linkedTaskId },
     { status: 200 },
   );
 }
