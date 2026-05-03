@@ -505,6 +505,7 @@ function slugifyForOpenTable(restaurantName: string, city?: string): string {
   if (!city) return namePart;
   const cityPart = slugify(city.split(",").pop() ?? city);
   if (!cityPart) return namePart;
+  if (namePart === cityPart || namePart.endsWith(`-${cityPart}`)) return namePart;
   return `${namePart}-${cityPart}`;
 }
 
@@ -524,9 +525,16 @@ function slugifyForOpenTable(restaurantName: string, city?: string): string {
 export function buildOpenTableCanonicalUrl(
   restaurantName: string,
   city?: string,
+  opts?: Pick<OpenTableOpts, "date" | "time" | "covers">,
 ): string {
   const slug = slugifyForOpenTable(restaurantName, city);
-  return `https://www.opentable.com/r/${slug}`;
+  const url = new URL(`https://www.opentable.com/r/${slug}`);
+  if (opts?.covers) url.searchParams.set("p", String(opts.covers));
+  if (opts?.date) {
+    const timeStr = opts.time ?? "19:00";
+    url.searchParams.set("sd", `${opts.date}T${timeStr}:00`);
+  }
+  return url.toString();
 }
 
 /**

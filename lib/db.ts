@@ -1813,13 +1813,15 @@ export async function createBookingJob(params: {
   tripLabel: string;
   steps: BookingJobStep[];
   autonomySettings?: import("./autonomy").AgentAutonomySettings | null;
+  status?: BookingJob["status"] | "pending_local";
 }): Promise<BookingJob> {
   await ensureBookingJobsTable();
   const stepsJson = JSON.stringify(params.steps);
   const autonomyJson = params.autonomySettings ? JSON.stringify(params.autonomySettings) : null;
+  const status = params.status ?? "pending";
   const result = await sql<BookingJob>`
     INSERT INTO booking_jobs (id, session_id, user_id, trip_label, status, steps, autonomy_settings)
-    VALUES (${params.id}, ${params.sessionId}, ${params.userId ?? null}, ${params.tripLabel}, 'pending', ${stepsJson}::jsonb, ${autonomyJson}::jsonb)
+    VALUES (${params.id}, ${params.sessionId}, ${params.userId ?? null}, ${params.tripLabel}, ${status}, ${stepsJson}::jsonb, ${autonomyJson}::jsonb)
     RETURNING *
   `;
   return result.rows[0];
