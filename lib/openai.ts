@@ -17,6 +17,10 @@ const OPENAI_API_URL = "https://api.openai.com/v1/chat/completions";
 const DEFAULT_MODEL = process.env.OPENAI_CHAT_MODEL ?? "gpt-4o-mini";
 const DEFAULT_TIMEOUT_MS = 30_000;
 
+function usesMaxCompletionTokens(model: string): boolean {
+  return /^(gpt-5|o[134])(?:[.-]|$)/.test(model);
+}
+
 export async function openaiChat(params: {
   system?: string;
   messages: Array<{ role: "user" | "assistant"; content: string }>;
@@ -34,6 +38,12 @@ export async function openaiChat(params: {
     ? [{ role: "system" as const, content: params.system }, ...params.messages]
     : params.messages;
 
+  const model = params.model ?? DEFAULT_MODEL;
+  const tokenBudget = params.max_tokens ?? 1024;
+  const tokenParam = usesMaxCompletionTokens(model)
+    ? { max_completion_tokens: tokenBudget }
+    : { max_tokens: tokenBudget };
+
   let res: Response;
   try {
     res = await fetch(OPENAI_API_URL, {
@@ -43,9 +53,9 @@ export async function openaiChat(params: {
         Authorization: `Bearer ${apiKey}`,
       },
       body: JSON.stringify({
-        model: params.model ?? DEFAULT_MODEL,
+        model,
         messages,
-        max_tokens: params.max_tokens ?? 1024,
+        ...tokenParam,
         temperature: 0.2,
         ...(params.response_format ? { response_format: params.response_format } : {}),
       }),
