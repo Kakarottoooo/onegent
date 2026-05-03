@@ -118,6 +118,16 @@ npx playwright install chromium
 SMOKE_BASE_URL=http://localhost:4000 npm run smoke:phase1
 ```
 
+### Turbopack reports `Symlink node_modules is invalid`
+在某些 review worktree（例如 Codex detached worktree）里，`npm run dev`
+可能因为 `node_modules` 是指向主仓库外部的 symlink 而触发 Turbopack panic。
+这不是 smoke 脚本失败。临时用 webpack dev server 验证：
+
+```bash
+npx next dev --webpack
+npm run smoke:phase1
+```
+
 ### `Failed to launch chromium` (exit 3)
 跑 `npx playwright install chromium`。
 

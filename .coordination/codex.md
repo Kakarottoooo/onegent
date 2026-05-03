@@ -1,8 +1,8 @@
 # Codex - coordination state
 
 > **Branch**: `master`
-> **Last updated**: 2026-05-03 11:54 UTC
-> **Last commit**: `7f601a2`
+> **Last updated**: 2026-05-03 12:19 UTC
+> **Last commit**: `f9dd0ba`
 >
 > Claude reads this at session start. I write to it before each push.
 > See `CLAUDE.md` section "coordination protocol".
@@ -11,18 +11,20 @@
 
 ## Currently doing
 
-Idle after landing Claude Path B hardening.
+Idle after landing Claude Phase 1 no-token smoke.
 
 What I just shipped:
-- Cherry-picked Claude `acec60c` onto current master as `f423b56`.
-- Did **not** merge `origin/claude/phase-1-7-path-b-hardening` directly because that branch was based on `ed7b866` and would have reverted the post-merge docs landed in `845abaa`.
-- Landed only the intended 7 hardening files: extracted profile-gap decision/save helpers, 19 focused tests, and `/dev/path-b-demo`.
+- Merged `origin/claude/phase-1-e2e-smoke` into master as `f9dd0ba`.
+- Added no-token `npm run smoke:phase1` harness for 6 Phase 1 demo/dev surfaces.
+- Added a doc note for Codex detached worktrees: Turbopack can panic on symlinked `node_modules`; use `npx next dev --webpack` for smoke verification in that environment.
 - No live OpenAI / Computer Use / benchmark run was executed.
 
 Verification:
 - `npx tsc --noEmit --pretty false` passed.
 - `npm run check-drift` passed.
 - `npx vitest run lib/__tests__/profile-gap-decision.test.ts lib/__tests__/profile-gap-on-save.test.ts components/profile-gap components/benchmark components/task-timeline lib/agent/nlu-v2` passed: 350/356, 6 skipped.
+- `npm run smoke:phase1` first correctly failed with dev server unreachable when no server was running.
+- `npx next dev --webpack` + `npm run smoke:phase1` passed all 6 routes.
 
 ## Blocking on Claude
 
@@ -32,6 +34,7 @@ Verification:
 
 | Commit | Subject | Notes for Claude |
 |---|---|---|
+| `f9dd0ba` | `merge: land Phase 1 no-token smoke` | Merges Claude `phase-1-e2e-smoke`: `scripts/smoke-phase1.mjs`, `npm run smoke:phase1`, `PHASE_1_E2E_SMOKE.md`, and founder E2E preflight docs. Verified tsc + drift + 350 targeted tests + smoke 6/6 using webpack dev server in Codex symlinked worktree. No live calls. |
 | `f423b56` | `feat(phase-1-7): Path B hardening — extract helpers + tests + dev demo` | Cherry-picks Claude `acec60c` onto current master without stale branch reversions. Adds `lib/profile-gap-decision.ts`, `lib/profile-gap-on-save.ts`, 19 focused tests, and `/dev/path-b-demo`. Verified tsc + drift + 350 targeted tests. No live calls. |
 | `8e690e5` | `merge: land post-merge Phase 1 docs` | Merges cleaned `post-merge-doc-fixes`: audit doc, Phase 1 #7 spec, founder E2E corrections, dev doc links, and Claude coord cleanup. Verified tsc + drift + 331 targeted tests. No live calls. |
 | `4cdaa36` | `merge: land Phase 1 homepage profile gap path B` | Merges Path B inline `ProfileGapCard` in homepage chat. Codex kept master coord state and fixed PATCH-failure control flow so failed profile save does not resume booking. Verified tsc + drift + 331 targeted tests. No live calls. |
@@ -51,11 +54,8 @@ Verification:
 
 ## Open questions for Claude
 
-- Recommended next Claude task: start `claude/phase-1-e2e-smoke` from latest `origin/master`.
-- Scope for Claude: automate the no-token Phase 1 founder walkthrough surfaces. Prefer a Playwright/browser smoke harness if repo setup supports it; otherwise add a dev smoke script. Cover `/dev/path-b-demo`, `/tasks/demo-executing`, `/tasks/demo-awaiting-profile`, `/tasks/demo-ready`, `/dev/benchmark-runs` fixture, and `/dev/profile-gap-flow`.
-- Keep scope frontend/test-only. Do **not** touch `app/api/**`, `lib/core/**`, `lib/execution-v2/**`, `worker/src/**`, or live benchmark scripts.
-- Expected output: one runnable command documented in `PHASE_1_FOUNDER_E2E.md` or a short `PHASE_1_E2E_SMOKE.md`, plus tests/scripts that require no OpenAI key and no external network.
-- Codex will review/merge and handle any core/test-runner integration issues.
+- Phase 1 no-token smoke is landed. Recommended next Claude task: pause new implementation until Codex/user decide whether to run Founder E2E manually or prepare Phase 0 live R-003.
+- If asked for more Track B work before live smoke, keep it frontend-only polish around `PHASE_1_FOUNDER_E2E.md` wording or `/dev` navigation. Do not start Phase 2 vertical work yet.
 
 ## Hold rules I'm respecting
 
