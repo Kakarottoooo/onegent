@@ -62,16 +62,25 @@ async function locateOpenTableDinerField(
       el.name,
       el.autocomplete,
       el.getAttribute("inputmode"),
+    ].filter(Boolean).join(" ").toLowerCase();
+    const contextText = (el: HTMLInputElement): string => [
       el.closest("label, div, section")?.textContent?.slice(0, 160),
     ].filter(Boolean).join(" ").toLowerCase();
     const classify = (el: HTMLInputElement): Field | null => {
-      const haystack = inputText(el);
-      if (haystack.includes("country") || haystack.includes("code")) return null;
+      const direct = inputText(el);
+      const haystack = `${direct} ${contextText(el)}`;
+      const directLooksPhone =
+        el.type === "tel" ||
+        direct.includes("phone") ||
+        direct.includes("mobile") ||
+        direct.includes("telephone") ||
+        direct.includes("tel");
+      if (directLooksPhone) return "phone";
+      if (direct.includes("country") || direct.includes("code")) return null;
       if (haystack.includes("first") || haystack.includes("given-name")) return "firstName";
       if (haystack.includes("last") || haystack.includes("family-name")) return "lastName";
       if (el.type === "email" || haystack.includes("email")) return "email";
       if (
-        el.type === "tel" ||
         haystack.includes("phone") ||
         haystack.includes("mobile") ||
         haystack.includes("telephone") ||
@@ -112,7 +121,7 @@ async function verifyOpenTableDinerField(
       return style.display !== "none" && style.visibility !== "hidden" && style.opacity !== "0";
     };
     const classify = (el: HTMLInputElement): OpenTableDinerField | null => {
-      const haystack = [
+      const direct = [
         el.type,
         el.placeholder,
         el.getAttribute("aria-label"),
@@ -121,11 +130,11 @@ async function verifyOpenTableDinerField(
         el.autocomplete,
         el.getAttribute("inputmode"),
       ].join(" ").toLowerCase();
-      if (haystack.includes("country") || haystack.includes("code")) return null;
-      if (haystack.includes("first") || haystack.includes("given-name")) return "firstName";
-      if (haystack.includes("last") || haystack.includes("family-name")) return "lastName";
-      if (el.type === "email" || haystack.includes("email")) return "email";
-      if (el.type === "tel" || haystack.includes("phone") || haystack.includes("tel")) return "phone";
+      if (el.type === "tel" || direct.includes("phone") || direct.includes("mobile") || direct.includes("telephone") || direct.includes("tel")) return "phone";
+      if (direct.includes("country") || direct.includes("code")) return null;
+      if (direct.includes("first") || direct.includes("given-name")) return "firstName";
+      if (direct.includes("last") || direct.includes("family-name")) return "lastName";
+      if (el.type === "email" || direct.includes("email")) return "email";
       return null;
     };
     const input = Array.from(document.querySelectorAll<HTMLInputElement>("input"))
@@ -137,6 +146,36 @@ async function verifyOpenTableDinerField(
     if (targetField === "email") return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value);
     return value.length > 0;
   }, field).catch(() => false);
+}
+
+async function describeOpenTableDinerInputs(page: Page): Promise<string> {
+  return page.evaluate(() => {
+    const isShown = (el: HTMLElement): boolean => {
+      if (el.hidden || !el.isConnected) return false;
+      const rect = el.getBoundingClientRect();
+      if (rect.width === 0 || rect.height === 0) return false;
+      const style = window.getComputedStyle(el);
+      return style.display !== "none" && style.visibility !== "hidden" && style.opacity !== "0";
+    };
+    return Array.from(document.querySelectorAll<HTMLInputElement>("input"))
+      .filter((el) => el.type !== "hidden" && el.type !== "checkbox" && el.type !== "radio" && !el.disabled && isShown(el))
+      .slice(0, 8)
+      .map((el) => {
+        const rect = el.getBoundingClientRect();
+        const descriptor = [
+          el.type ? `type=${el.type}` : "",
+          el.placeholder ? `ph=${el.placeholder}` : "",
+          el.getAttribute("aria-label") ? `aria=${el.getAttribute("aria-label")}` : "",
+          el.id ? `id=${el.id}` : "",
+          el.name ? `name=${el.name}` : "",
+          el.autocomplete ? `ac=${el.autocomplete}` : "",
+          `valueLen=${el.value?.length ?? 0}`,
+          `rect=${Math.round(rect.width)}x${Math.round(rect.height)}`,
+        ].filter(Boolean).join(" ");
+        return descriptor;
+      })
+      .join(" | ");
+  }).catch((error: Error) => `input diagnostics unavailable: ${error.message?.slice(0, 80)}`);
 }
 
 async function typeOpenTableFieldByCoordinate(
@@ -154,6 +193,9 @@ async function typeOpenTableFieldByCoordinate(
   const target = await locateOpenTableDinerField(page, field);
   if (!target) {
     trace?.(`[opentable] coordinate typing target not found for ${field}`);
+    if (trace) {
+      trace(`[opentable] visible diner input candidates: ${await describeOpenTableDinerInputs(page) || "none"}`);
+    }
     return false;
   }
   try {
@@ -215,7 +257,7 @@ async function fillOpenTableFieldFallback(
         return [...labels, closestText].join(" ");
       };
       const classify = (el: HTMLInputElement): OpenTableDinerField | null => {
-        const haystack = [
+        const direct = [
           el.type,
           el.placeholder,
           el.getAttribute("aria-label"),
@@ -223,14 +265,23 @@ async function fillOpenTableFieldFallback(
           el.name,
           el.autocomplete,
           el.getAttribute("inputmode"),
+        ].join(" ").toLowerCase();
+        const haystack = [
+          direct,
           labelText(el),
         ].join(" ").toLowerCase();
-        if (haystack.includes("country") || haystack.includes("code")) return null;
+        const directLooksPhone =
+          el.type === "tel" ||
+          direct.includes("phone") ||
+          direct.includes("mobile") ||
+          direct.includes("telephone") ||
+          direct.includes("tel");
+        if (directLooksPhone) return "phone";
+        if (direct.includes("country") || direct.includes("code")) return null;
         if (haystack.includes("first") || haystack.includes("given-name")) return "firstName";
         if (haystack.includes("last") || haystack.includes("family-name")) return "lastName";
         if (el.type === "email" || haystack.includes("email")) return "email";
         if (
-          el.type === "tel" ||
           haystack.includes("phone") ||
           haystack.includes("mobile") ||
           haystack.includes("telephone") ||
@@ -262,7 +313,7 @@ async function readOpenTableDinerFormState(page: Page): Promise<OpenTableDinerFo
       return style.display !== "none" && style.visibility !== "hidden" && style.opacity !== "0";
     };
     const classify = (el: HTMLInputElement): Field | null => {
-      const haystack = [
+      const direct = [
         el.type,
         el.placeholder,
         el.getAttribute("aria-label"),
@@ -270,11 +321,11 @@ async function readOpenTableDinerFormState(page: Page): Promise<OpenTableDinerFo
         el.name,
         el.autocomplete,
       ].join(" ").toLowerCase();
-      if (haystack.includes("country") || haystack.includes("code")) return null;
-      if (haystack.includes("first") || haystack.includes("given-name")) return "firstName";
-      if (haystack.includes("last") || haystack.includes("family-name")) return "lastName";
-      if (el.type === "email" || haystack.includes("email")) return "email";
-      if (el.type === "tel" || haystack.includes("phone") || haystack.includes("tel")) return "phone";
+      if (el.type === "tel" || direct.includes("phone") || direct.includes("mobile") || direct.includes("telephone") || direct.includes("tel")) return "phone";
+      if (direct.includes("country") || direct.includes("code")) return null;
+      if (direct.includes("first") || direct.includes("given-name")) return "firstName";
+      if (direct.includes("last") || direct.includes("family-name")) return "lastName";
+      if (el.type === "email" || direct.includes("email")) return "email";
       return null;
     };
 
