@@ -1,8 +1,8 @@
 # Codex - coordination state
 
 > **Branch**: `master`
-> **Last updated**: 2026-05-03 06:13 UTC
-> **Last commit**: `601716b`
+> **Last updated**: 2026-05-03 06:58 UTC
+> **Last commit**: `6f81b5c`
 >
 > Claude reads this at session start. I write to it before each push.
 > See `CLAUDE.md` section "coordination protocol".
@@ -11,22 +11,20 @@
 
 ## Currently doing
 
-Claude's founder E2E walkthrough has been merged into master.
+No-token founder E2E follow-up is complete in a clean worktree.
 
-What I just landed:
-- `PHASE_1_FOUNDER_E2E.md` (founder/manual walkthrough script).
-- Latest `.coordination/claude.md` acking `3c95561` / `be97b8d`.
-- Claude's `handleCancel` dependency ordering change in `/tasks/[taskId]`.
+What I just fixed:
+- Dev demo hydration warnings caused by scoped `styled-jsx` class-name mismatches in `/dev/*` demo pages.
+- `ProfileGapCard` allowed submitting an empty inline profile form; submit is now disabled until at least one inline value is present.
 
-Verification after this merge:
+Verification after these fixes:
 - `npx tsc --noEmit --pretty false` passed.
 - `npm run check-drift` passed.
 - `npx vitest run components/profile-gap components/benchmark components/task-timeline` passed: 137/137.
+- Playwright smoke checked `/dev`, 5 task demo states, benchmark dashboard, profile-gap-flow, and timeline/profile/DR demo routes with no relevant console errors.
 
-Q13 note:
-- Claude reported a Windows-only CRLF drift false positive for `dry-run.ts`.
-- I did not reproduce it in a fresh Windows worktree from master; `check-drift` is clean.
-- I did not broaden `.gitattributes` yet to avoid mass line-ending churn. Revisit only if Q13 reproduces on current master.
+Tooling note:
+- gstack `/browse` was attempted per AGENTS, but the local gstack setup was unreliable on this Windows/WSL/CRLF environment. I used Playwright fallback for the no-token UI smoke and did not stage generated gstack files.
 
 No live OpenAI / Computer Use / benchmark run was executed.
 
@@ -38,6 +36,8 @@ No live OpenAI / Computer Use / benchmark run was executed.
 
 | Commit | Subject | Notes for Claude |
 |---|---|---|
+| `6f81b5c` | `fix(e2e): clean Phase 1 demo hydration and profile submit gating` | No-token founder E2E follow-up. Fixes scoped style hydration mismatches in dev demos and prevents empty ProfileGapCard submission. Verified tsc + drift + 137 tests + Playwright route smoke. No live calls. |
+| `26da001` | `[coord] update codex state after founder E2E merge` | Coordination state updated after landing founder E2E walkthrough. |
 | `601716b` | `merge: land founder E2E walkthrough` | Founder E2E doc merged. Verified tsc + drift + 137 tests. Q13 CRLF drift did not reproduce on fresh master; no `.gitattributes` change yet. No live calls. |
 | `c2be764` | `merge: land Track B Phase 1 UI` | Track B branch merged cleanly. I excluded local Claude settings, fixed one callback dependency, and verified tsc + drift + 137 UI/benchmark tests. No live calls. |
 | `3c95561` | `fix(build): restore clean master typecheck baseline` | Clean master now passes typecheck and drift. Rehearsal merge with Claude branch is also green. Includes missing profile gate component, chat replay snapshot types, live-log entries, OpenTable URL helper parity, and `createBookingJob.status`. No live calls. |
