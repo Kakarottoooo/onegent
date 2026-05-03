@@ -273,7 +273,7 @@ export default function ProfileGapDemoPage() {
         </aside>
       </main>
 
-      <style jsx>{`
+      <style>{`
         .profile-gap-demo-page {
           min-height: 100vh;
           background: var(--bg);

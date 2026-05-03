@@ -384,7 +384,7 @@ export default function ProfileGapFlowPage() {
         </div>
       )}
 
-      <style jsx>{`
+      <style>{`
         .flow-page {
           min-height: 100vh;
           background: var(--bg);
@@ -668,7 +668,7 @@ function ChatBubble({ message }: { message: ChatMessage }) {
     return (
       <div className="flow-bubble flow-bubble--user">
         <p>{message.text}</p>
-        <style jsx>{`
+        <style>{`
           .flow-bubble {
             align-self: flex-end;
             max-width: 78%;
@@ -715,7 +715,7 @@ function ChatBubble({ message }: { message: ChatMessage }) {
           ))}
         </div>
       )}
-      <style jsx>{`
+      <style>{`
         .flow-bubble {
           align-self: flex-start;
           max-width: 84%;
@@ -845,7 +845,7 @@ function ActionCard({ action }: { action: RouterAction }) {
           <code>{JSON.stringify({ kind: action.kind, directBooking: action.directBooking }, null, 2)}</code>
         </pre>
       )}
-      <style jsx>{`
+      <style>{`
         .action-card {
           display: flex;
           flex-direction: column;
@@ -934,7 +934,7 @@ function ProfileCard({ profile }: { profile: MockBackendProfile }) {
         ))}
       </ul>
 
-      <style jsx>{`
+      <style>{`
         .profile-card-empty {
           margin: 0;
           font-size: 12px;
