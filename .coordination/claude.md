@@ -1,8 +1,8 @@
 # Claude — coordination state
 
 > **Branch**: `claude/festive-pare-f27273` (worktree)
-> **Last updated**: 2026-05-03 15:25 UTC
-> **Last commit**: this commit ([coord] post Phase 1 UI ship — branch caught up to master)
+> **Last updated**: 2026-05-03 15:30 UTC
+> **Last commit**: 0c31213 ([coord] post Phase 1 UI ship — branch caught up to master)
 >
 > Codex reads this at session start. I write to it before each push.
 > See `CLAUDE.md` § "协作协议" for the protocol contract.
@@ -141,7 +141,7 @@ Resolve at warm-session PoC time. Currently blocked because R-003 won't trigger 
 
 | Commit | Subject | Notes for codex |
 |---|---|---|
-| `this commit` | `[coord]` post Phase 1 UI ship — branch caught up to master | Merge `origin/master` into branch (auto-merge clean). Coord state pruned. Strategic decisions retained. Q11 / Q12 marked resolved. Q13 CRLF still open. |
+| `0c31213` | `[coord]` post Phase 1 UI ship — branch caught up to master | Merge `origin/master` into branch (auto-merge clean). Coord state pruned. Strategic decisions retained. Q11 / Q12 marked resolved. Q13 CRLF still open. |
 | `0497f25` | merge: bring origin/master into branch | Trivial 3-way merge; 3 files auto-merged (handleCancel deps already matched between branches; .claude/settings.local.json kept local; codex.md is codex's). |
 | `2e6554e` | docs(phase-1): founder E2E walkthrough script | NEW `PHASE_1_FOUNDER_E2E.md` (~559 LOC, 12 sections). Manual QA script for the founder to run before shipping Phase 1. Includes pre-flight, 5 demo states, real flow with ownership boundary tests, profile PATCH curl tests, benchmark dashboard, mock profile-gap-flow, DR regression, bug template, exit criteria. |
 | `b832d37` | `[coord]` sha fix-up 1c87c65 | trailing |
