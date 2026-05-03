@@ -1,8 +1,8 @@
 # Codex - coordination state
 
 > **Branch**: `codex/openai-chat-model-env`
-> **Last updated**: 2026-05-03 17:08 UTC
-> **Last commit**: `60df17d`
+> **Last updated**: 2026-05-03 17:21 UTC
+> **Last commit**: `78c87a9`
 >
 > Claude reads this at session start. I write to it before each push.
 > See `CLAUDE.md` section "coordination protocol".
@@ -11,9 +11,15 @@
 
 ## Currently doing
 
-Idle after shipping the third OpenTable guest-form fix. Waiting for a fresh founder E2E retry after dev + worker restart.
+Idle after shipping the fourth OpenTable guest-form fix. Waiting for a fresh founder E2E retry after dev + worker restart.
 
 Latest shipped fix:
+- `78c87a9 fix(opentable): classify phone gate before country wrapper text`
+- Root cause from founder retry: `formType` saw the phone field, but coordinate target discovery returned "target not found" because the stricter classifier could reject the real phone input when nearby country/code wrapper text was included in the haystack.
+- Fix: classify direct phone-like input attributes before rejecting country/code wrapper text, mirror the same rule in verification/state/fallback paths, and add visible-input diagnostics for the next retry if target discovery still fails.
+- Verification: `npx vitest run lib/__tests__/opentable-provider-policy.test.ts`, `npx tsc --noEmit --pretty false`, and `npx tsx scripts/check-drift.ts` all passed. No live retry from Codex yet.
+
+Previous shipped fix:
 - `7591b03 fix(opentable): type into phone gate with compatible input APIs`
 - Root cause from founder log: OpenTable's phone-only gate reached the form, but DOM value assignment did not stick, and the raw worker page does not expose full Playwright locator APIs.
 - Fix: keep the DOM setter path, then fall back to Stagehand-compatible CDP input (`click`, `keyPress`, `type`) by locating visible diner-field coordinates. Phone gate now tries raw digit typing after direct fill fails; generic first/last/email/phone fallback uses the same compatible input path. Worker mirror is byte-identical.
@@ -120,6 +126,7 @@ What I just merged from Claude:
 
 | Commit | Subject | Notes for Claude |
 |---|---|---|
+| `78c87a9` | `fix(opentable): classify phone gate before country wrapper text` | Founder retry showed `formType` saw phone but coordinate target discovery found none. Phone classification now prefers direct phone-like attributes before excluding country/code wrapper text, and logs visible input candidates if target discovery still fails. Verified provider test + tsc + drift. |
 | `7591b03` | `fix(opentable): type into phone gate with compatible input APIs` | Founder log showed DOM value assignment did not fill OpenTable's phone-only gate. Adds Stagehand-compatible coordinate click + keyPress/type fallback for diner fields, mirrored to worker, with provider policy regression coverage. Verified provider test + tsc + drift. |
 | `09f8023` | `fix(opentable): avoid locator fallback on guest form` | Founder log showed `page.getByPlaceholder is not a function`. Replaced OpenTable locator fallback with DOM-evaluate filling and blocked OpenTable guest-form errors from becoming `paused_payment`. Verified provider policy test + tsc + drift. |
 | `f1f3665` | `fix(opentable): fill phone gate and stop before final submit` | OpenTable founder E2E fix: fill the native phone verification gate directly when phone exists, only use email fallback without phone, never auto-click final `Complete reservation`, keep local review browser/session open 60 minutes, and add no-live policy regression test. Verified provider test + tsc + drift. |
