@@ -2,7 +2,7 @@
 
 > **Branch**: `master`
 > **Last updated**: 2026-05-03 12:19 UTC
-> **Last commit**: `f9dd0ba`
+> **Last commit**: `cd34997`
 >
 > Claude reads this at session start. I write to it before each push.
 > See `CLAUDE.md` section "coordination protocol".
