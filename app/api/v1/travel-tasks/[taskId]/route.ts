@@ -1,5 +1,9 @@
 import { NextResponse, type NextRequest } from "next/server";
-import { requireApiKey } from "@/lib/api-auth/require-api-key";
+import {
+  actorCanAccessTask,
+  notFoundResponse,
+  requireApiActor,
+} from "@/lib/api-auth/require-api-actor";
 import { getJob, getTaskEvents, getTravelTask, type TravelTask } from "@/lib/core";
 
 export const runtime = "nodejs";
@@ -9,8 +13,9 @@ export async function GET(
   req: NextRequest,
   ctx: { params: Promise<{ taskId: string }> },
 ) {
-  const auth = await requireApiKey(req);
+  const auth = await requireApiActor(req);
   if (!auth.ok) return auth.response;
+  const { actor } = auth;
 
   const { taskId } = await ctx.params;
   if (!taskId) {
@@ -21,11 +26,8 @@ export async function GET(
   }
 
   const task = await getTravelTask(taskId);
-  if (!task) {
-    return NextResponse.json(
-      { error: { code: "task_not_found", message: `No travel task with id "${taskId}".` } },
-      { status: 404 },
-    );
+  if (!task || !actorCanAccessTask(actor, task)) {
+    return notFoundResponse("task_not_found", `No travel task with id "${taskId}".`);
   }
 
   const [events, currentJob] = await Promise.all([

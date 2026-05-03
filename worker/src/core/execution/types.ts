@@ -182,6 +182,11 @@ export interface ClientMetadata {
   userId?: string;
   sessionId?: string;
   idempotencyKey?: string;
+  /**
+   * Optional executor preference for benchmark / controlled rollout paths.
+   * Environment overrides still win; this is only a per-request hint.
+   */
+  preferredExecutor?: "legacy_stagehand" | "computer_use";
 }
 
 /**

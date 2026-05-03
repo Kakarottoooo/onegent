@@ -12,7 +12,11 @@
  */
 
 import { NextResponse, type NextRequest } from "next/server";
-import { requireApiKey } from "@/lib/api-auth/require-api-key";
+import {
+  actorCanAccessJobUser,
+  notFoundResponse,
+  requireApiActor,
+} from "@/lib/api-auth/require-api-actor";
 import {
   getBookingJob,
   deleteBookingJob,
@@ -27,8 +31,9 @@ export async function POST(
   _req: NextRequest,
   ctx: { params: Promise<{ jobId: string }> },
 ) {
-  const auth = await requireApiKey(_req);
+  const auth = await requireApiActor(_req);
   if (!auth.ok) return auth.response;
+  const { actor } = auth;
 
   const { jobId } = await ctx.params;
   if (!jobId) {
@@ -39,11 +44,8 @@ export async function POST(
   }
 
   const job = await getBookingJob(jobId);
-  if (!job) {
-    return NextResponse.json(
-      { error: { code: "job_not_found", message: `No job with id "${jobId}".` } },
-      { status: 404 },
-    );
+  if (!job || !actorCanAccessJobUser(actor, job.user_id)) {
+    return notFoundResponse("job_not_found", `No job with id "${jobId}".`);
   }
 
   // Cascade-clean monitors + decision-room links so stale UI cards don't

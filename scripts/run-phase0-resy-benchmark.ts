@@ -7,6 +7,7 @@ import {
   phase0TaskSnapshotsUrl,
   phase0TaskTimelineUrl,
 } from "../lib/benchmark/phase0-report";
+import { createApiKey } from "../lib/db";
 
 type Flags = Record<string, string | boolean>;
 
@@ -194,6 +195,35 @@ function booleanFlag(flags: Flags, key: string): boolean {
   return flags[key] === true || flags[key] === "true";
 }
 
+function isLocalBaseUrl(baseUrl: string): boolean {
+  try {
+    const host = new URL(baseUrl).hostname.toLowerCase();
+    return host === "localhost" || host === "127.0.0.1" || host === "::1";
+  } catch {
+    return false;
+  }
+}
+
+async function resolveApiKey(baseUrl: string, flags: Flags, dryRun: boolean): Promise<string | undefined> {
+  const explicit =
+    stringFlag(flags, "api-key") ??
+    process.env.ONEGENT_BENCHMARK_API_KEY ??
+    process.env.ONEGENT_API_KEY ??
+    process.env.API_KEY;
+  if (explicit || dryRun) return explicit;
+  if (!isLocalBaseUrl(baseUrl)) return undefined;
+
+  const created = await createApiKey({
+    organizationName: "Phase 0 local benchmark",
+    env: "test",
+    allowedJobTypes: ["restaurant"],
+    rateLimitPerDay: 200,
+    userId: null,
+  });
+  console.log("[phase0] minted ephemeral local benchmark API key (not printed)");
+  return created.plaintextKey;
+}
+
 function usage(): void {
   console.log(`Usage:
   npx tsx scripts/run-phase0-resy-benchmark.ts --dry-run
@@ -209,6 +239,8 @@ Options:
   --concurrency <n>      Defaults to 1. Keep 1 for local browser runs.
   --timeout-ms <n>       Per-case wait timeout. Defaults to 420000.
   --poll-ms <n>          Poll interval. Defaults to 2500.
+  --live-openai          Required for live runs; prevents accidental Computer Use spend.
+  --confirm-suite        Required with --live-openai when running more than one selected case.
   --dry-run              Print payloads; do not call the API.
   --dispatch-only        Create tasks but do not wait for completion.
   --allow-failures       Exit 0 even when the Phase 0 gate fails.
@@ -218,6 +250,11 @@ Options:
 function loadSuite(): BenchmarkSuite {
   const raw = fs.readFileSync(FIXTURE_PATH, "utf8");
   return JSON.parse(raw) as BenchmarkSuite;
+}
+
+function liveOpenAiAllowed(flags: Flags): boolean {
+  if (booleanFlag(flags, "live-openai")) return true;
+  return /^(1|true|yes)$/i.test(process.env.ONEGENT_ALLOW_LIVE_OPENAI ?? "");
 }
 
 function selectCases(suite: BenchmarkSuite, flags: Flags): BenchmarkCase[] {
@@ -257,7 +294,8 @@ function defaultProfile(): Record<string, unknown> {
 function resyStartUrl(testCase: BenchmarkCase): string {
   const slug = encodeURIComponent(testCase.resySlug);
   const seats = encodeURIComponent(String(testCase.covers));
-  return `https://resy.com/cities/new-york-ny/venues/${slug}?date=${testCase.date}&seats=${seats}`;
+  const time = encodeURIComponent(testCase.time.replace(":", ""));
+  return `https://resy.com/cities/new-york-ny/venues/${slug}?date=${testCase.date}&seats=${seats}&time=${time}`;
 }
 
 function buildCreatePayload(
@@ -299,6 +337,7 @@ function buildCreatePayload(
         agentId: "phase0-resy-benchmark",
         sessionId: runId,
         idempotencyKey: `${suite.suiteId}:${testCase.id}:${runId}`,
+        preferredExecutor: "computer_use",
       },
     },
     task: {
@@ -441,10 +480,14 @@ function inferFailureTaxonomy(
   if (terminalCode === "needs_otp" || task?.state === "awaiting_otp") return "F-PROVIDER-OTP";
   if (terminalCode === "no_availability" || /no availability|not available|unavailable|sold out/.test(text)) return "F-AVAIL-NONE";
   if (terminalCode === "captcha" || /captcha|access denied|akamai|blocked/.test(text)) return "F-PROVIDER-CAPTCHA";
-  if (terminalCode === "executor_crashed" || /executor crashed|uncaught|exception|crash/.test(text)) return "F-INFRA-CRASH";
+  if (/model_not_found|does not have access to model|computer-use-preview/.test(text)) return "F-INFRA-MODEL-ACCESS";
+  if (/unknown parameter|invalid_request_error|responses api 400/.test(text)) return "F-INFRA-API-SCHEMA";
+  if (/insufficient_quota|quota|billing|rate limit|responses api 402|responses api 429/.test(text)) return "F-INFRA-PROVIDER-QUOTA";
+  if (/responses api 5\d\d|server_error|server had an error processing/i.test(text)) return "F-INFRA-CRASH";
+  if (terminalCode === "executor_crashed" || /executor crashed|uncaught|exception|crash|keyboard\.press: unknown key/.test(text)) return "F-INFRA-CRASH";
   if (/timeout|timed out/.test(text) || timedOut) return "F-INFRA-TIMEOUT";
   if (/dom|selector|button|click failed|could not click/.test(text)) return "F-DATA-DOM";
-  if (/party|covers|guest count|party size/.test(text)) return "F-AVAIL-PARTY";
+  if (/no tables? for (?:that )?party|party size unavailable|can't accommodate.*party|covers unavailable|guest count unavailable|party size/i.test(text)) return "F-AVAIL-PARTY";
   if (/provider|resy|opentable/.test(text)) return "F-PROVIDER-UNKNOWN";
   return undefined;
 }
@@ -511,7 +554,7 @@ function classifyResult(
     return finishResult(testCase, {
       task,
       durationMs,
-      outcome: "failed_with_clear_reason",
+      outcome: state === "awaiting_otp" ? "safe_handoff" : "failed_with_clear_reason",
       taxonomyCode,
     });
   }
@@ -551,8 +594,13 @@ function finishResult(
     error?: string;
   },
 ): CaseResult {
+  const phase0OtpAccepted =
+    testCase.provider === "Resy" &&
+    params.outcome === "safe_handoff" &&
+    params.taxonomyCode === "F-PROVIDER-OTP";
   const taxonomyAccepted =
     !params.taxonomyCode ||
+    phase0OtpAccepted ||
     testCase.acceptableFailureTaxonomy.includes(params.taxonomyCode) ||
     testCase.severeTripwires.includes(params.taxonomyCode);
   return {
@@ -699,11 +747,19 @@ async function main(): Promise<void> {
   const dryRun = booleanFlag(flags, "dry-run");
   const dispatchOnly = booleanFlag(flags, "dispatch-only");
   const baseUrl = stringFlag(flags, "base-url", process.env.ONEGENT_BASE_URL ?? "http://localhost:3000")!.replace(/\/$/, "");
-  const apiKey =
-    stringFlag(flags, "api-key") ??
-    process.env.ONEGENT_BENCHMARK_API_KEY ??
-    process.env.ONEGENT_API_KEY ??
-    process.env.API_KEY;
+  if (!dryRun && !liveOpenAiAllowed(flags)) {
+    throw new Error(
+      "Refusing to run live Phase 0 Computer Use benchmark without --live-openai " +
+        "or ONEGENT_ALLOW_LIVE_OPENAI=1. Use --dry-run for payload validation.",
+    );
+  }
+  if (!dryRun && selected.length > 1 && !booleanFlag(flags, "confirm-suite")) {
+    throw new Error(
+      `Refusing to run ${selected.length} live Phase 0 Computer Use cases without --confirm-suite. ` +
+        "Use --case R-003 for a one-case smoke, or pass --confirm-suite when you intentionally want a multi-case spend.",
+    );
+  }
+  const apiKey = await resolveApiKey(baseUrl, flags, dryRun);
   const concurrency = numberFlag(flags, "concurrency", 1);
   const timeoutMs = numberFlag(flags, "timeout-ms", 420_000);
   const pollMs = numberFlag(flags, "poll-ms", 2_500);

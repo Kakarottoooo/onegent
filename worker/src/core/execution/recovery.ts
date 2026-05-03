@@ -122,7 +122,10 @@ export async function runExecutionJobWithRecovery(
     const isWindowFullySoldOut =
       isNoAvailability &&
       /no online availability within|within the requested time window/i.test(noAvailabilityText);
-    const phase2Eligible = isNoAvailability && !isNotFound && !isWindowFullySoldOut;
+    const skipVisualTimeFallback =
+      isNoAvailability && shouldSkipTimeFallbackForSingleVisualAttempt(request);
+    const phase2Eligible =
+      isNoAvailability && !isNotFound && !isWindowFullySoldOut && !skipVisualTimeFallback;
 
     let attemptsAfter = phase1.attemptCount;
 
@@ -146,6 +149,17 @@ export async function runExecutionJobWithRecovery(
         stepIndex: ctx.stepIndex,
         message: "Skipping nearby time retries because the provider reported the whole requested window unavailable",
         details: { summary: phase1.result.summary },
+      });
+    } else if (skipVisualTimeFallback) {
+      await writeAudit({
+        jobId: ctx.jobId,
+        type: "provider_fallback",
+        stepIndex: ctx.stepIndex,
+        message: "Skipping nearby time retries because the visual executor already evaluated the requested time window",
+        details: {
+          executor: request.clientMetadata?.preferredExecutor,
+          summary: phase1.result.summary,
+        },
       });
     }
 
@@ -188,7 +202,7 @@ async function tryPrimary(
   policy: ConsentPolicy,
 ): Promise<PhaseResult> {
   const maxTotalAttempts = Math.min(
-    policy.maxRetries ?? RETRY_BACKOFF_MS.length,
+    Math.max(1, policy.maxRetries ?? RETRY_BACKOFF_MS.length),
     RETRY_BACKOFF_MS.length,
   );
 
@@ -341,7 +355,14 @@ async function tryTimeFallbacks(
       ...request,
       request: {
         ...request.request,
-        params: { ...request.request.params, time: altTime },
+        params: {
+          ...request.request.params,
+          time: altTime,
+          startUrl: rewriteRestaurantStartUrlTimeForFallback(
+            request.request.params.startUrl,
+            altTime,
+          ),
+        },
       },
     };
 
@@ -394,6 +415,48 @@ function buildTimeFallbackCandidates(
     .map((shift) => base + shift)
     .filter((total) => total >= 0 && total < 24 * 60)
     .map(formatMinutesToTime);
+}
+
+export function rewriteRestaurantStartUrlTimeForFallback(
+  startUrl: string | undefined,
+  time: string,
+): string | undefined {
+  if (!startUrl) return startUrl;
+  const compactTime = time.replace(":", "");
+
+  try {
+    const url = new URL(startUrl);
+    const host = url.hostname.toLowerCase();
+
+    if (host.endsWith("resy.com") && url.searchParams.has("time")) {
+      url.searchParams.set("time", compactTime);
+      return url.toString();
+    }
+
+    for (const key of ["dateTime", "sd"]) {
+      const value = url.searchParams.get(key);
+      const nextValue = rewriteIsoDateTime(value, time);
+      if (nextValue) {
+        url.searchParams.set(key, nextValue);
+        return url.toString();
+      }
+    }
+  } catch {
+    return startUrl;
+  }
+
+  return startUrl;
+}
+
+function shouldSkipTimeFallbackForSingleVisualAttempt(request: ExecutionJobRequest): boolean {
+  return request.clientMetadata?.preferredExecutor === "computer_use";
+}
+
+function rewriteIsoDateTime(value: string | null, time: string): string | null {
+  if (!value) return null;
+  const match = /^(\d{4}-\d{2}-\d{2})T\d{1,2}:\d{2}(?::\d{2})?/.exec(value);
+  if (!match) return null;
+  return `${match[1]}T${time}:00`;
 }
 
 function parseTimeToMinutes(hhmm: string): number {

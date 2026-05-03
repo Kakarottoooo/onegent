@@ -124,6 +124,7 @@ const ClientMetadataSchema = z.object({
   userId: z.string().optional(),
   sessionId: z.string().optional(),
   idempotencyKey: z.string().optional(),
+  preferredExecutor: z.enum(["legacy_stagehand", "computer_use"]).optional(),
 });
 
 // ─── Top-level request ───────────────────────────────────────────────────────

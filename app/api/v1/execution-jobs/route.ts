@@ -86,6 +86,7 @@ export async function POST(req: NextRequest) {
       userId: null, // B 端 caller — no Clerk user
       sessionId: body.clientMetadata?.sessionId,
       tripLabel: undefined, // use default derived from scenario + params
+      initialStatus: "running",
     });
   } catch (err) {
     console.error("[api/v1/execution-jobs] createJob failed", err);
@@ -131,7 +132,7 @@ export async function POST(req: NextRequest) {
   return NextResponse.json(
     {
       jobId: job.id,
-      status: "pending" as const,
+      status: "running" as const,
       scenario: body.request.scenario,
       organizationName: context.organizationName,
       _links: {

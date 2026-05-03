@@ -6,13 +6,19 @@
  */
 
 import { NextResponse, type NextRequest } from "next/server";
-import { requireApiKey } from "@/lib/api-auth/require-api-key";
+import {
+  actorCanUseScenario,
+  actorUserId,
+  apiKeyContext,
+  requireApiActor,
+} from "@/lib/api-auth/require-api-actor";
 import {
   appendTaskEvent,
   completeJob,
   createJob,
   createTravelTask,
   listTravelTasks,
+  listTravelTasksForUser,
   runExecutionJobWithRecovery,
   updateTravelTaskState,
   type ExecutionJobRequest,
@@ -30,19 +36,25 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 export async function GET(req: NextRequest) {
-  const auth = await requireApiKey(req);
+  const auth = await requireApiActor(req);
   if (!auth.ok) return auth.response;
+  const { actor } = auth;
 
   const limitParam = req.nextUrl.searchParams.get("limit");
   const limit = limitParam ? Number.parseInt(limitParam, 10) : 25;
-  const tasks = await listTravelTasks(Number.isFinite(limit) ? limit : 25);
+  const resolvedLimit = Number.isFinite(limit) ? limit : 25;
+  const tasks =
+    actor.type === "user"
+      ? await listTravelTasksForUser(actor.userId, resolvedLimit)
+      : await listTravelTasks(resolvedLimit);
   return NextResponse.json({ tasks: tasks.map(toPublicTask) }, { status: 200 });
 }
 
 export async function POST(req: NextRequest) {
-  const auth = await requireApiKey(req);
+  const auth = await requireApiActor(req);
   if (!auth.ok) return auth.response;
-  const { context } = auth;
+  const { actor } = auth;
+  const context = apiKeyContext(actor);
 
   let rawBody: unknown;
   try {
@@ -60,16 +72,13 @@ export async function POST(req: NextRequest) {
   }
 
   const { execution, task: taskOptions } = parsed.value;
-  if (
-    context.allowedJobTypes !== null &&
-    !context.allowedJobTypes.includes(execution.request.scenario)
-  ) {
+  if (!actorCanUseScenario(actor, execution.request.scenario)) {
     return NextResponse.json(
       {
         error: {
           code: "scenario_not_allowed",
           message: `This API key is not authorized for scenario "${execution.request.scenario}".`,
-          allowedJobTypes: context.allowedJobTypes,
+          allowedJobTypes: context?.allowedJobTypes ?? [],
         },
       },
       { status: 403 },
@@ -79,9 +88,10 @@ export async function POST(req: NextRequest) {
   let job;
   try {
     job = await createJob(execution, {
-      userId: null,
+      userId: actorUserId(actor),
       sessionId: execution.clientMetadata?.sessionId,
       tripLabel: taskOptions?.title,
+      initialStatus: "running",
     });
   } catch (err) {
     console.error("[api/v1/travel-tasks] createJob failed", err);
@@ -94,7 +104,7 @@ export async function POST(req: NextRequest) {
   let task: TravelTask;
   try {
     task = await createTravelTask({
-      userId: null,
+      userId: actorUserId(actor),
       scenario: execution.request.scenario,
       title: taskOptions?.title ?? deriveTaskTitle(execution),
       state: "executing",
@@ -102,8 +112,8 @@ export async function POST(req: NextRequest) {
       policy: taskOptions?.policy,
       currentBookingJobId: job.id,
       decisionRoomId: taskOptions?.decisionRoomId,
-      createdByKeyId: context.keyId,
-      createdByOrgName: context.organizationName,
+      createdByKeyId: context?.keyId ?? null,
+      createdByOrgName: context?.organizationName ?? null,
     });
     await appendTaskEvent(task.id, "execution_started", { jobId: job.id });
   } catch (err) {
@@ -121,7 +131,6 @@ export async function POST(req: NextRequest) {
       task: toPublicTask(task),
       currentJobId: job.id,
       status: task.state,
-      organizationName: context.organizationName,
       _links: {
         self: `/api/v1/travel-tasks/${task.id}`,
         events: `/api/v1/travel-tasks/${task.id}/events`,
@@ -130,6 +139,7 @@ export async function POST(req: NextRequest) {
         currentJob: `/api/v1/execution-jobs/${job.id}`,
         currentJobAudit: `/api/v1/execution-jobs/${job.id}/audit`,
       },
+      ...(context ? { organizationName: context.organizationName } : {}),
     },
     { status: 202 },
   );
@@ -238,8 +248,20 @@ function terminalDataForResult(result: ExecutionJobResult): Record<string, unkno
     case "paused_payment":
     case "ready_for_confirmation":
       return { terminalCode: result.status, terminalReason: result.summary };
-    case "needs_profile_data":
-      return { terminalCode: "needs_profile_data", terminalReason: result.profileGap?.message ?? result.summary };
+    case "needs_profile_data": {
+      const profileGap = result.profileGap;
+      return {
+        terminalCode: "needs_profile_data",
+        terminalReason: profileGap?.message ?? result.summary,
+        ...(profileGap
+          ? {
+              profileGap,
+              missing: profileGap.missing,
+              profileGapScenario: profileGap.scenario,
+            }
+          : {}),
+      };
+    }
     case "needs_login":
     case "needs_otp":
       return { terminalCode: result.status, terminalReason: result.summary };

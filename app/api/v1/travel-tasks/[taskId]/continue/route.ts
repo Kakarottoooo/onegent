@@ -6,7 +6,12 @@
  */
 
 import { NextResponse, type NextRequest } from "next/server";
-import { requireApiKey } from "@/lib/api-auth/require-api-key";
+import {
+  actorCanAccessTask,
+  actorCanUseScenario,
+  notFoundResponse,
+  requireApiActor,
+} from "@/lib/api-auth/require-api-actor";
 import {
   appendTaskEvent,
   createJob,
@@ -15,6 +20,7 @@ import {
   type ExecutionJobRequest,
 } from "@/lib/core";
 import { ExecutionJobRequestSchema } from "@/lib/api-v1/schemas";
+import { parseProfilePatch, upsertDefaultBookingProfile } from "@/lib/profile-patch";
 import { runTravelTaskAttempt } from "../../route";
 
 export const runtime = "nodejs";
@@ -24,9 +30,9 @@ export async function POST(
   req: NextRequest,
   ctx: { params: Promise<{ taskId: string }> },
 ) {
-  const auth = await requireApiKey(req);
+  const auth = await requireApiActor(req);
   if (!auth.ok) return auth.response;
-  const { context } = auth;
+  const { actor } = auth;
 
   const { taskId } = await ctx.params;
   if (!taskId) {
@@ -37,11 +43,8 @@ export async function POST(
   }
 
   const task = await getTravelTask(taskId);
-  if (!task) {
-    return NextResponse.json(
-      { error: { code: "task_not_found", message: `No travel task with id "${taskId}".` } },
-      { status: 404 },
-    );
+  if (!task || !actorCanAccessTask(actor, task)) {
+    return notFoundResponse("task_not_found", `No travel task with id "${taskId}".`);
   }
 
   let rawBody: unknown;
@@ -54,21 +57,31 @@ export async function POST(
     );
   }
 
-  const nextExecution = parseContinueBody(rawBody, task.request_json);
+  const profilePatch = getProfilePatch(rawBody);
+  let profileUpdatedFields: string[] = [];
+  let continueBody = rawBody;
+
+  if (actor.type === "user" && profilePatch !== undefined && !hasExecutionRequest(rawBody)) {
+    const parsedProfile = parseProfilePatch(profilePatch);
+    if (!parsedProfile.ok) {
+      return NextResponse.json({ error: parsedProfile.error }, { status: 400 });
+    }
+    await upsertDefaultBookingProfile(actor.userId, parsedProfile.value);
+    profileUpdatedFields = parsedProfile.updatedFields;
+    continueBody = { profile: parsedProfile.value };
+  }
+
+  const nextExecution = parseContinueBody(continueBody, task.request_json);
   if (!nextExecution.ok) {
     return NextResponse.json(nextExecution.body, { status: 400 });
   }
 
-  if (
-    context.allowedJobTypes !== null &&
-    !context.allowedJobTypes.includes(nextExecution.value.request.scenario)
-  ) {
+  if (!actorCanUseScenario(actor, nextExecution.value.request.scenario)) {
     return NextResponse.json(
       {
         error: {
           code: "scenario_not_allowed",
           message: `This API key is not authorized for scenario "${nextExecution.value.request.scenario}".`,
-          allowedJobTypes: context.allowedJobTypes,
         },
       },
       { status: 403 },
@@ -81,6 +94,7 @@ export async function POST(
       userId: task.user_id,
       sessionId: nextExecution.value.clientMetadata?.sessionId ?? task.id,
       tripLabel: task.title,
+      initialStatus: "running",
     });
   } catch (err) {
     console.error("[api/v1/travel-tasks/continue] createJob failed", err);
@@ -98,6 +112,7 @@ export async function POST(
     eventData: {
       reason: "continue",
       supersededJobId: task.current_booking_job_id,
+      ...(profileUpdatedFields.length > 0 ? { profileUpdatedFields } : {}),
     },
   });
   if (!updatedTask) {
@@ -149,6 +164,17 @@ export async function POST(
     },
     { status: 202 },
   );
+}
+
+function getProfilePatch(rawBody: unknown): Record<string, unknown> | undefined {
+  if (!rawBody || typeof rawBody !== "object" || Array.isArray(rawBody)) return undefined;
+  const value = (rawBody as { profile?: unknown }).profile;
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+  return value as Record<string, unknown>;
+}
+
+function hasExecutionRequest(rawBody: unknown): boolean {
+  return Boolean(rawBody && typeof rawBody === "object" && !Array.isArray(rawBody) && "request" in rawBody);
 }
 
 function parseContinueBody(

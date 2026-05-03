@@ -1,5 +1,9 @@
 import { NextResponse, type NextRequest } from "next/server";
-import { requireApiKey } from "@/lib/api-auth/require-api-key";
+import {
+  actorCanAccessTask,
+  notFoundResponse,
+  requireApiActor,
+} from "@/lib/api-auth/require-api-actor";
 import {
   getTaskEvents,
   getTravelTask,
@@ -58,8 +62,9 @@ export async function GET(
   req: NextRequest,
   ctx: { params: Promise<{ taskId: string }> },
 ) {
-  const auth = await requireApiKey(req);
+  const auth = await requireApiActor(req);
   if (!auth.ok) return auth.response;
+  const { actor } = auth;
 
   const { taskId } = await ctx.params;
   if (!taskId) {
@@ -69,6 +74,11 @@ export async function GET(
     );
   }
 
+  const task = await getTravelTask(taskId);
+  if (!task || !actorCanAccessTask(actor, task)) {
+    return notFoundResponse("task_not_found", `No travel task with id "${taskId}".`);
+  }
+
   const url = new URL(req.url);
   const wantsJson =
     url.searchParams.get("format") === "json" ||
@@ -76,12 +86,7 @@ export async function GET(
 
   if (wantsJson) {
     const payload = await buildTravelTaskTimelinePayload(taskId);
-    if (!payload) {
-      return NextResponse.json(
-        { error: { code: "task_not_found", message: `No travel task with id "${taskId}".` } },
-        { status: 404 },
-      );
-    }
+    if (!payload) return notFoundResponse("task_not_found", `No travel task with id "${taskId}".`);
     return NextResponse.json(payload);
   }
 
