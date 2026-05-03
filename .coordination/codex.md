@@ -1,8 +1,8 @@
 # Codex - coordination state
 
 > **Branch**: `codex/openai-chat-model-env`
-> **Last updated**: 2026-05-03 14:29 UTC
-> **Last commit**: `72c80c5`
+> **Last updated**: 2026-05-03 14:55 UTC
+> **Last commit**: pending
 >
 > Claude reads this at session start. I write to it before each push.
 > See `CLAUDE.md` section "coordination protocol".
@@ -11,9 +11,23 @@
 
 ## Currently doing
 
-Idle after fixing founder E2E stale worker error display. Waiting for a restarted local Next + worker and a fresh Buvette/new restaurant task retry.
+Fixing a P0 OpenTable exact-venue guard found during founder E2E.
 
 Current local test finding:
+- A fresh Buvette task reached OpenTable, but OpenTable returned a visible `Sirrah` result because the review text mentioned Buvette. The worker clicked the 8:00 PM slot and landed on `Sirrah` booking details. This is a severe wrong-venue risk.
+- The earlier stale failed UI issue is fixed in API/DB for the new job; this new issue is not stale UI, it is target selection.
+- I patched `lib/booking-autopilot/stagehand-executor.ts` and the worker mirror to:
+  - derive a restaurant target from the OpenTable `term` query when hotel-name extraction is not enough,
+  - match venue names by distinctive words rather than a brittle prefix,
+  - scan OpenTable search result titles before clicking any time slot,
+  - refuse unrelated result-card slots when the requested venue title is absent,
+  - re-use the same restaurant target in post-click booking-details validation.
+- Verification: `npx tsc --noEmit --pretty false` passed; `npx tsx scripts/check-drift.ts` passed. No live retry from Codex yet.
+
+Do not click "Complete reservation" in the existing Sirrah browser tab. After this patch, Buvette should either match an exact Buvette result or safely no-availability/fallback; it should not continue into Sirrah.
+
+Previous local test context:
+
 - `smoke:phase1` passes 6/6.
 - Homepage chat parse was failing before NLU routing because the configured OpenAI project does not have `gpt-4o-mini` access.
 - I added an `OPENAI_CHAT_MODEL` override in `lib/openai.ts` and set local `.env.local` to `OPENAI_CHAT_MODEL=gpt-5.5` in the detached E2E worktree.
@@ -69,6 +83,7 @@ What I just merged from Claude:
 
 | Commit | Subject | Notes for Claude |
 |---|---|---|
+| pending | `fix(opentable): refuse unrelated search-result slots` | Founder E2E found Buvette -> Sirrah wrong-venue risk. OpenTable now title-scopes restaurant result cards before slot clicks and reuses the restaurant target for booking-details validation. Verified tsc + drift. No live retry from Codex. |
 | `72c80c5` | `fix(tasks): clear stale step errors after core success` | Founder E2E Buvette reached `paused_payment` but UI showed failed because stale `step.error` survived result mapping. Worker + in-process core mapping now clears stale errors for success/awaiting/no-availability statuses. Verified root tsc + 22 core integration tests. No live Computer Use run from Codex. |
 | `3043a29` | `merge: land founder E2E polish` | Merges Claude `founder-e2e-polish`: quick/full walkthrough split, stop conditions, stronger bug template, and R-003 reference. Verified tsc. No live calls. |
 | `88e7ecd` | `fix(docs): align R-003 runbook with current runner` | Corrects Claude's phase docs after review: single-case R-003 uses `--case R-003 --live-openai --allow-failures`, no `--confirm-suite`, no unsupported `--output`, current path is local Next + local worker + local Playwright, and Resy fixture wording reflects observed rows rather than invented 25-case completeness. |

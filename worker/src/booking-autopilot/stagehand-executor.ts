@@ -257,6 +257,57 @@ function extractOpenTableDateTextFromUrl(url: string): string {
   }
 }
 
+function extractOpenTableSearchTerm(url: string | undefined): string | undefined {
+  if (!url) return undefined;
+  try {
+    const parsed = new URL(url);
+    return parsed.searchParams.get("term")?.trim() || undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+const VENUE_MATCH_STOP_WORDS = new Set([
+  "a",
+  "an",
+  "and",
+  "at",
+  "book",
+  "city",
+  "for",
+  "in",
+  "new",
+  "ny",
+  "nyc",
+  "of",
+  "restaurant",
+  "reservation",
+  "table",
+  "the",
+  "york",
+]);
+
+function venueMatchWords(value: string): string[] {
+  return normalizeLooseText(value)
+    .split(" ")
+    .map((word) => word.trim())
+    .filter((word) => word.length >= 2 && !VENUE_MATCH_STOP_WORDS.has(word));
+}
+
+function venueNameMatchesTarget(target: string | undefined, seen: string | undefined): boolean {
+  const targetWords = venueMatchWords(target ?? "");
+  const seenText = normalizeLooseText(seen ?? "");
+  if (targetWords.length === 0 || !seenText) return false;
+
+  const distinctiveWords = targetWords.filter((word) => word.length >= 3);
+  const requiredWords = distinctiveWords.length > 0 ? distinctiveWords : targetWords;
+  const matched = requiredWords.filter((word) => seenText.split(" ").includes(word) || seenText.includes(word)).length;
+  const ratio = matched / requiredWords.length;
+
+  if (requiredWords.length === 1) return matched === 1;
+  return matched >= 1 && ratio >= 0.6;
+}
+
 async function readOpenTableBookingSummary(page: Page): Promise<{
   restaurant: string;
   dateText: string;
@@ -341,9 +392,7 @@ async function validateOpenTableBookingTarget(
 
   const summary = await readOpenTableBookingSummary(page);
   const reasons: string[] = [];
-  const normalizedRestaurant = normalizeLooseText(targetRestaurant ?? "");
-  const normalizedSeenRestaurant = normalizeLooseText(summary.restaurant);
-  if (targetRestaurant && normalizedSeenRestaurant && !normalizedSeenRestaurant.includes(normalizedRestaurant.slice(0, Math.min(normalizedRestaurant.length, 12)))) {
+  if (targetRestaurant && summary.restaurant && !venueNameMatchesTarget(targetRestaurant, summary.restaurant)) {
     reasons.push(`restaurant="${summary.restaurant || "unknown"}"`);
   }
 
@@ -1633,6 +1682,10 @@ The user will enter CVV and confirm payment themselves.`,
       targetHotelFromTask ||
       targetHotelFromStartUrl ||
       targetHotelFromCurrentUrl;
+    const targetRestaurantName =
+      startProvider?.id === "opentable-com" || startProvider?.id === "resy-com" || startProvider?.id === "yelp-com"
+        ? targetHotelName || extractOpenTableSearchTerm(input.startUrl) || extractOpenTableSearchTerm(currentUrl)
+        : undefined;
     const targetHotelSource =
       targetHotelFromTask ? "task" :
       targetHotelFromStartUrl ? "startUrl" :
@@ -1644,6 +1697,9 @@ The user will enter CVV and confirm payment themselves.`,
     );
     if (targetCity) {
       trace(`Target city: ${targetCity}`);
+    }
+    if (targetRestaurantName) {
+      trace(`Target restaurant: ${targetRestaurantName}`);
     }
 
     // Extract room type preference from the task text.
@@ -4556,11 +4612,112 @@ The user will enter CVV and confirm payment themselves.`,
 
               // Stagehand's locator shim does not support Playwright's
               // locator.filter({ hasText }) yet. Scan the OpenTable page-level
-              // slot controls and rely on the existing post-click booking target
-              // validation to reject a wrong restaurant if the search page
-              // returns unrelated cards.
-              const targetCardCount = 0;
-              const slotHits = await collectOpenTableSlots("page", raw);
+              // slot controls only when we cannot identify result cards. If OT
+              // returns an unrelated result whose review text mentions the
+              // requested venue (Buvette -> Sirrah), page-level slot clicks can
+              // book the wrong restaurant. Prefer exact title-card matches.
+              const exactOpenTableTarget = targetRestaurantName ?? targetHotelName;
+              const exactTargetSlot = exactOpenTableTarget
+                ? await raw.evaluate(
+                    ({ target, reqMins, maxDiffMins }: { target: string; reqMins: number; maxDiffMins: number }) => {
+                      const stopWords = new Set(["a", "an", "and", "at", "book", "city", "for", "in", "new", "ny", "nyc", "of", "restaurant", "reservation", "table", "the", "york"]);
+                      const normalize = (value: string) => value.toLowerCase().replace(/[^a-z0-9]+/g, " ").replace(/\s+/g, " ").trim();
+                      const venueWords = (value: string) => normalize(value).split(" ").filter((word) => word.length >= 2 && !stopWords.has(word));
+                      const venueMatches = (seen: string) => {
+                        const words = venueWords(target);
+                        const seenNorm = normalize(seen);
+                        if (!words.length || !seenNorm) return false;
+                        const distinctive = words.filter((word) => word.length >= 3);
+                        const required = distinctive.length ? distinctive : words;
+                        const matched = required.filter((word) => seenNorm.split(" ").includes(word) || seenNorm.includes(word)).length;
+                        return required.length === 1 ? matched === 1 : matched >= 1 && matched / required.length >= 0.6;
+                      };
+                      const parseT = (text: string): number | null => {
+                        const m = text.match(/(\d{1,2}):(\d{2})\s*(AM|PM)/i);
+                        if (!m) return null;
+                        let h = parseInt(m[1], 10);
+                        if (m[3].toUpperCase() === "PM" && h < 12) h += 12;
+                        if (m[3].toUpperCase() === "AM" && h === 12) h = 0;
+                        return h * 60 + parseInt(m[2], 10);
+                      };
+                      const isVisible = (el: Element) => {
+                        const r = (el as HTMLElement).getBoundingClientRect();
+                        return r.width > 0 && r.height > 0;
+                      };
+                      const titleElements = Array.from(document.querySelectorAll<HTMLElement>(
+                        'a[href*="/r/"], h2, h3, [data-test*="restaurant" i], [data-testid*="restaurant" i], [class*="restaurant" i]'
+                      )).filter((el) => {
+                        const text = (el.textContent ?? "").trim().replace(/\s+/g, " ");
+                        return isVisible(el) && text.length >= 2 && text.length <= 80 && !parseT(text) && !/opentable|featured|reviews?|booked \d+/i.test(text);
+                      });
+                      const seenNames = Array.from(new Set(titleElements.map((el) => (el.textContent ?? "").trim().replace(/\s+/g, " ")).filter(Boolean))).slice(0, 8);
+                      const matchedTitle = titleElements.find((el) => venueMatches((el.textContent ?? "").trim()));
+                      if (!matchedTitle) {
+                        return seenNames.length > 0
+                          ? { status: "no_match" as const, seenNames }
+                          : { status: "no_titles" as const, seenNames };
+                      }
+
+                      let scope: HTMLElement = matchedTitle;
+                      for (let i = 0; i < 5; i += 1) {
+                        const parent = scope.closest<HTMLElement>('article, li, section, [data-test*="restaurant-card" i], [data-testid*="restaurant-card" i], [class*="card" i], [class*="result" i]') ?? scope.parentElement;
+                        if (!parent || parent === scope) break;
+                        scope = parent;
+                        const hasSlot = Array.from(scope.querySelectorAll<HTMLElement>('a, button, [role="button"], [data-test^="time-slot-"]'))
+                          .some((el) => isVisible(el) && parseT((el.textContent ?? "").trim()) !== null);
+                        if (hasSlot) break;
+                      }
+
+                      const slots = Array.from(scope.querySelectorAll<HTMLElement>('a, button, [role="button"], [data-test^="time-slot-"]'))
+                        .map((el) => {
+                          const text = (el.textContent ?? "").trim().replace(/\s+/g, " ").replace(/\*$/, "");
+                          const minutes = parseT(text);
+                          return !isVisible(el) || minutes === null || Math.abs(minutes - reqMins) > maxDiffMins
+                            ? null
+                            : { el, text, minutes };
+                        })
+                        .filter((item): item is { el: HTMLElement; text: string; minutes: number } => item !== null)
+                        .sort((a, b) => Math.abs(a.minutes - reqMins) - Math.abs(b.minutes - reqMins));
+                      const best = slots[0];
+                      if (!best) {
+                        return { status: "no_slot" as const, seenNames, matchedName: (matchedTitle.textContent ?? "").trim().replace(/\s+/g, " ") };
+                      }
+                      best.el.scrollIntoView({ block: "center" });
+                      const rect = best.el.getBoundingClientRect();
+                      return {
+                        status: "slot" as const,
+                        seenNames,
+                        matchedName: (matchedTitle.textContent ?? "").trim().replace(/\s+/g, " "),
+                        text: best.text.slice(0, 20),
+                        minutes: best.minutes,
+                        x: Math.round(rect.left + rect.width / 2),
+                        y: Math.round(rect.top + rect.height / 2),
+                      };
+                    },
+                    { target: exactOpenTableTarget, reqMins: requestedMinutes, maxDiffMins: timeWindowMins },
+                  ).catch((error) => ({ status: "error" as const, reason: (error as Error).message?.slice(0, 120) }))
+                : null;
+              if (exactTargetSlot?.status === "no_match") {
+                trace(`[opentable] exact venue guard: "${exactOpenTableTarget}" not found in result titles (${exactTargetSlot.seenNames.join(" | ") || "none"}) — refusing to click unrelated slots`);
+                return false;
+              }
+              if (exactTargetSlot?.status === "no_slot") {
+                trace(`[opentable] exact venue guard: matched "${exactTargetSlot.matchedName}", but no time slot in ±${timeWindowMins} min — refusing other restaurants' slots`);
+                return false;
+              }
+              if (exactTargetSlot?.status === "error") {
+                trace(`[opentable] exact venue guard failed: ${exactTargetSlot.reason}`);
+              }
+
+              const targetCardCount = exactTargetSlot?.status === "slot" ? 1 : 0;
+              const slotHits = exactTargetSlot?.status === "slot"
+                ? [{
+                    text: exactTargetSlot.text,
+                    minutes: exactTargetSlot.minutes,
+                    scope: `target-card "${exactTargetSlot.matchedName}"`,
+                    click: () => sh(raw).click(exactTargetSlot.x, exactTargetSlot.y),
+                  }]
+                : await collectOpenTableSlots("page", raw);
 
               const slotDiag = slotHits
                 .slice(0, 8)
@@ -4647,7 +4804,7 @@ The user will enter CVV and confirm payment themselves.`,
                   // Avoid booking the wrong restaurant (e.g. from "you may also like" cards).
                   // OpenTable booking pages show restaurant name in specific elements near the
                   // booking header — NOT in generic page headings like "You're almost done!".
-                  if (targetHotelName) {
+                  if (exactOpenTableTarget) {
                     const pageRestaurant = await raw.evaluate(() => {
                       // OpenTable booking pages show the restaurant name near the top,
                       // separate from the page's action heading (h1: "You're almost done!").
@@ -4676,12 +4833,12 @@ The user will enter CVV and confirm payment themselves.`,
                       return normaliseQuotes(document.title.replace(/\s*[-|].*$/, "").trim()).slice(0, 80);
                     }).catch(() => "");
                     const normalize = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, " ").replace(/\s+/g, " ").trim();
-                    const targetWords = normalize(targetHotelName).split(" ").filter(w => w.length > 3);
+                    const targetWords = venueMatchWords(exactOpenTableTarget).filter(w => w.length > 2);
                     const pageWords = normalize(pageRestaurant);
                     const matched = targetWords.filter(w => pageWords.includes(w)).length;
                     const matchRatio = targetWords.length > 0 ? matched / targetWords.length : 1;
                     if (pageRestaurant && matchRatio < 0.4) {
-                      trace(`[opentable] wrong restaurant on booking page: "${pageRestaurant}" (target: "${targetHotelName}") — going back`);
+                      trace(`[opentable] wrong restaurant on booking page: "${pageRestaurant}" (target: "${exactOpenTableTarget}") — going back`);
                       await raw.evaluate(() => window.history.back()).catch(() => {});
                       await new Promise(r => setTimeout(r, 1000));
                       return false; // retry the listing stage
@@ -4731,7 +4888,7 @@ The user will enter CVV and confirm payment themselves.`,
                   });
                   if (match) { match.click(); return true; }
                   return false;
-                }, targetHotelName ?? "").catch(() => false);
+                }, exactOpenTableTarget ?? "").catch(() => false);
 
                 if (cardClicked) {
                   trace("[opentable] clicked restaurant card — waiting for detail page");
@@ -5900,7 +6057,7 @@ The user will enter CVV and confirm payment themselves.`,
       /\bmake a reservation\b/i.test(input.task);
 
     if (currentUrl.toLowerCase().includes("opentable.com/booking/")) {
-      const otTargetCheck = await validateOpenTableBookingTarget(raw, input.task, targetHotelName, trace);
+      const otTargetCheck = await validateOpenTableBookingTarget(raw, input.task, targetRestaurantName ?? targetHotelName, trace);
       if (!otTargetCheck.ok) {
         const screenshotBase64 = `data:image/png;base64,${(await page.screenshot({ type: "png" })).toString("base64")}`;
         return {
