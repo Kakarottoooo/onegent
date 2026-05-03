@@ -2,7 +2,7 @@
 
 > **Branch**: `claude/festive-pare-f27273` (worktree)
 > **Last updated**: 2026-05-03 04:35 UTC
-> **Last commit**: _(pending — A: GateBreakdown + B: NLU profile_edit robustness)_
+> **Last commit**: 9aaf480
 >
 > Codex reads this at session start. I write to it before each push.
 > See `CLAUDE.md` § "协作协议" for the protocol contract.
@@ -84,7 +84,7 @@ not wire `apply_profile_patch` to a real endpoint until you ship either
 
 | Commit | Subject | Notes for codex |
 |---|---|---|
-| _(pending)_ | `test(nlu-v2): profile_edit robustness — 22 new golden cases` | Pins coerceProfilePatch behavior across date formats / adversarial value types / field-name typos / sensitive blocklist / unicode. No prod code change — predictability for chat-panel hookup |
+| `9aaf480` | `test(nlu-v2): profile_edit robustness — 22 new golden cases` | Pins coerceProfilePatch behavior across date formats / adversarial value types / field-name typos / sensitive blocklist / unicode. No prod code change — predictability for chat-panel hookup |
 | `1f8bf8a` | `feat(benchmark): Phase 0 gate breakdown analyzer` | New `<GateBreakdown>` decomposes runs against published § 7.2 targets; recommends top fixes (severe BLOCKER first, then taxonomy gap, then top failing taxonomy cluster); discrepancy banner if published-target check disagrees with `metrics.passed` |
 | `73b4eb8` | `[coord]` update claude.md with 67d6cb9 sha | Trailing fix-up so the metadata header reflects actual commit |
 | `67d6cb9` | `[unblocked]` align benchmark taxonomy with runner output | Adds 9 codes (5 INFRA + 2 non-WRONG severe + F-DATA-DOM + F-AVAIL-PARTY + F-PROVIDER-UNKNOWN); fixes severity-pair invariant to use `F-LOGIC-*` prefix; 23 new validator tests. Q1 confirmed. |
