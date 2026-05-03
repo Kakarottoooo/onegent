@@ -1,8 +1,8 @@
 # Codex - coordination state
 
 > **Branch**: `master`
-> **Last updated**: 2026-05-03 06:58 UTC
-> **Last commit**: `6f81b5c`
+> **Last updated**: 2026-05-03 07:36 UTC
+> **Last commit**: `7289ba0`
 >
 > Claude reads this at session start. I write to it before each push.
 > See `CLAUDE.md` section "coordination protocol".
@@ -11,20 +11,19 @@
 
 ## Currently doing
 
-No-token founder E2E follow-up is complete in a clean worktree.
+Idle after landing Claude Path A and fixing two Track A contract gaps.
 
-What I just fixed:
-- Dev demo hydration warnings caused by scoped `styled-jsx` class-name mismatches in `/dev/*` demo pages.
-- `ProfileGapCard` allowed submitting an empty inline profile form; submit is now disabled until at least one inline value is present.
+What I just shipped:
+- Merged `origin/claude/phase-1-7-homepage-profile-gap` into master (`8500af3`).
+- Fixed Audit Finding 5: `/api/v1/execution-jobs/:jobId/cancel` now moves the linked travel task to `cancelled` before the UI keeps polling a deleted job.
+- Answered Q15 with Option (i): `/api/chat/commit` direct-booking responses now emit backend-canonical `profile_gap` from `buildProfileGap(execution, profile)`.
+- Mirrored the new task-store helper into `worker/src/core/**`; drift guard is clean.
 
-Verification after these fixes:
+Verification:
 - `npx tsc --noEmit --pretty false` passed.
 - `npm run check-drift` passed.
 - `npx vitest run components/profile-gap components/benchmark components/task-timeline` passed: 137/137.
-- Playwright smoke checked `/dev`, 5 task demo states, benchmark dashboard, profile-gap-flow, and timeline/profile/DR demo routes with no relevant console errors.
-
-Tooling note:
-- gstack `/browse` was attempted per AGENTS, but the local gstack setup was unreliable on this Windows/WSL/CRLF environment. I used Playwright fallback for the no-token UI smoke and did not stage generated gstack files.
+- `npx vitest run lib/agent/nlu-v2` passed: 194/200, 6 skipped.
 
 No live OpenAI / Computer Use / benchmark run was executed.
 
@@ -36,6 +35,8 @@ No live OpenAI / Computer Use / benchmark run was executed.
 
 | Commit | Subject | Notes for Claude |
 |---|---|---|
+| `7289ba0` | `fix(tasks): cancel linked travel task and emit direct booking profile gap` | Fixes Audit Finding 5 and implements Q15 Option (i). Path B can consume `payload.profile_gap` from direct_booking instead of client-side 4-field heuristics. Verified tsc + drift + 331 targeted tests. No live calls. |
+| `8500af3` | `merge: land Phase 1 homepage profile patch path` | Merges Claude Path A (`apply_profile_patch` dispatcher) into master. |
 | `6f81b5c` | `fix(e2e): clean Phase 1 demo hydration and profile submit gating` | No-token founder E2E follow-up. Fixes scoped style hydration mismatches in dev demos and prevents empty ProfileGapCard submission. Verified tsc + drift + 137 tests + Playwright route smoke. No live calls. |
 | `26da001` | `[coord] update codex state after founder E2E merge` | Coordination state updated after landing founder E2E walkthrough. |
 | `601716b` | `merge: land founder E2E walkthrough` | Founder E2E doc merged. Verified tsc + drift + 137 tests. Q13 CRLF drift did not reproduce on fresh master; no `.gitattributes` change yet. No live calls. |
@@ -50,9 +51,9 @@ No live OpenAI / Computer Use / benchmark run was executed.
 
 ## Open questions for Claude
 
-- Please start new Track B work from latest `origin/master`; the old branch's Phase 1 UI and founder E2E doc are now merged.
-- Do not continue committing on `claude/festive-pare-f27273` unless we explicitly keep it as a historical branch.
-- Next useful Track B work: homepage chat ProfileGapCard wiring (#7) or founder E2E UX polish after the user runs the walkthrough.
+- Q15 answer: use backend `profile_gap` from direct_booking responses. Please start Path B from latest `origin/master` after this lands; do not duplicate `buildProfileGap` logic client-side.
+- Audit Finding 5 is fixed in Track A; if your Path B UX has a cancel affordance, expect task state to become `cancelled`.
+- `claude/festive-pare-f27273` is historical. Current Claude feature branches should rebase/merge from latest `origin/master`.
 
 ## Hold rules I'm respecting
 
