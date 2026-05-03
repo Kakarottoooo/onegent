@@ -1,8 +1,8 @@
 # Codex - coordination state
 
 > **Branch**: `master`
-> **Last updated**: 2026-05-03 05:27 UTC
-> **Last commit**: this commit
+> **Last updated**: 2026-05-03 05:51 UTC
+> **Last commit**: `3c95561`
 >
 > Claude reads this at session start. I write to it before each push.
 > See `CLAUDE.md` section "coordination protocol".
@@ -11,20 +11,15 @@
 
 ## Currently doing
 
-Finished review of Claude `e098252` / `2f5a2b2` and shipped the Track A contract fixes it needed.
+Clean master baseline is restored and Claude branch merge rehearsal is green.
 
-What this commit changes:
-- Mirrors Q11(a) into `benchmark/restaurant-resy-phase0.json`: R-003 now accepts `no_availability_correct` in addition to `ready_for_confirmation` and `safe_handoff`.
-- Adds `missing`, `profileGap`, and `profileGapScenario` to `needs_profile_data` task `state_changed` event data. This unblocks Claude's `/tasks/[taskId]` `deriveProfileGapState(data)` helper, which reads `state_changed.data.missing`.
+What I just verified:
+- Clean `master` at `3c95561` passes `npx tsc --noEmit --pretty false`.
+- Clean `master` at `3c95561` passes `npm run check-drift`.
+- Rehearsal merge `master@3c95561 + origin/claude/festive-pare-f27273` has no file conflicts.
+- The rehearsal merge also passes `npx tsc --noEmit --pretty false` and `npm run check-drift`.
 
-Review notes for Claude's `/tasks/[taskId]` real API wire:
-- `credentials: "include"` is correct for cookie-auth `/api/v1/*` routes.
-- `/api/v1/travel-tasks/:id/continue` body `{ profile: payload.values }` matches Track A's parser.
-- `POST /api/v1/execution-jobs/:jobId/cancel` with no body is correct.
-- 5s polling is acceptable for Phase 1 founder testing; revisit after real traffic or when adding hidden-tab pausing.
-- Owner checks intentionally avoid leaking other users' tasks. Current route behavior can be rendered as sign-in/not-found UI without exposing ownership.
-
-No live OpenAI / Computer Use / benchmark run was executed in this commit.
+No live OpenAI / Computer Use / benchmark run was executed.
 
 ## Blocking on Claude
 
@@ -34,7 +29,8 @@ No live OpenAI / Computer Use / benchmark run was executed in this commit.
 
 | Commit | Subject | Notes for Claude |
 |---|---|---|
-| `this commit` | `[handoff] fix(tasks): expose profile gaps and mirror R-003 expectation` | Unblocks `/tasks/[taskId]` ProfileGapCard derivation from task events; mirrors Q11(a) in the Resy Phase 0 fixture. No live calls. |
+| `3c95561` | `fix(build): restore clean master typecheck baseline` | Clean master now passes typecheck and drift. Rehearsal merge with Claude branch is also green. Includes missing profile gate component, chat replay snapshot types, live-log entries, OpenTable URL helper parity, and `createBookingJob.status`. No live calls. |
+| `2167181` | `[handoff] fix(tasks): expose profile gaps and mirror R-003 expectation` | Unblocks `/tasks/[taskId]` ProfileGapCard derivation from task events; mirrors Q11(a) in the Resy Phase 0 fixture. No live calls. |
 | `48c80b2` | `[handoff] feat(api): allow cookie-auth travel task reads and profile patch` | Unblocks browser-cookie reads for travel task facade, timeline/snapshots SSE, ProfileGapCard `{ profile }` resume, and user-owned job drill-down/cancel. |
 | `2cbddfc` | `[handoff] fix(computer-use): trust no-availability and stop visual time ladders` | Second R-003 live smoke proved exact venue repair works; this stops CU time-ladder token burn after a no-availability signal and rewrites explicit time params for legacy fallback. |
 | `d79364f` | `[handoff] chore(benchmark): require suite confirmation for live spend` | Multi-case live benchmark runs require both `--live-openai` and `--confirm-suite`; accidental live runs are capped to one selected case. |
@@ -43,7 +39,8 @@ No live OpenAI / Computer Use / benchmark run was executed in this commit.
 
 ## Open questions for Claude
 
-(none)
+- Please rebase/merge latest `origin/master` before the next Track B batch; rehearsal is green from my side.
+- Minor review note for `/tasks/[taskId]`: `handleCancel` reads `taskId` in its demo branch, so include `taskId` in the `useCallback` dependency array when you next touch that file.
 
 ## Hold rules I'm respecting
 
