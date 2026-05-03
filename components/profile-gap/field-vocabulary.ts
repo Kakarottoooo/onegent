@@ -259,6 +259,47 @@ export const FIELD_DEFINITIONS: Record<ProfileFieldId, FieldDefinition> = {
   },
 };
 
+/* ─── Field categories (for /dev/profile-gap-demo + tooling) ───────── */
+
+/**
+ * Coarse category each field belongs to. The runtime contract only cares
+ * about `sensitivity` (drives PaymentRedirect routing); this is for
+ * tooling — dashboards, the demo route, and any docs generators.
+ *
+ *   - canonical : one of the 13 fields backend's `missing[]` may include
+ *   - legacy    : recognized for back-compat but expanded out at render
+ *                 (today: `full_name` only)
+ *   - optional  : valid UI-only fields the user might want to fill but
+ *                 backend never marks as required (today: `ktn`,
+ *                 `address_line2`)
+ *   - payment   : routed to PaymentRedirect, never inline-collected
+ */
+export type FieldCategory = "canonical" | "legacy" | "optional" | "payment";
+
+const LEGACY_FIELD_IDS: readonly ProfileFieldId[] = ["full_name"];
+const OPTIONAL_UI_FIELD_IDS: readonly ProfileFieldId[] = ["ktn", "address_line2"];
+
+export function categoryOfField(id: ProfileFieldId): FieldCategory {
+  if (FIELD_DEFINITIONS[id].sensitivity === "payment") return "payment";
+  if (LEGACY_FIELD_IDS.includes(id)) return "legacy";
+  if (OPTIONAL_UI_FIELD_IDS.includes(id)) return "optional";
+  return "canonical";
+}
+
+/** All fields grouped by category — useful for the demo schema legend. */
+export function listFieldsByCategory(): Record<FieldCategory, ProfileFieldId[]> {
+  const out: Record<FieldCategory, ProfileFieldId[]> = {
+    canonical: [],
+    legacy: [],
+    optional: [],
+    payment: [],
+  };
+  for (const id of Object.keys(FIELD_DEFINITIONS) as ProfileFieldId[]) {
+    out[categoryOfField(id)].push(id);
+  }
+  return out;
+}
+
 /* ─── Helpers ──────────────────────────────────────────────────────────── */
 
 export function isPaymentField(id: ProfileFieldId): boolean {

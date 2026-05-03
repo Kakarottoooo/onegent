@@ -14,11 +14,13 @@ export { default as FieldRow } from "./FieldRow";
 export { default as PaymentRedirect } from "./PaymentRedirect";
 export {
   FIELD_DEFINITIONS,
+  categoryOfField,
   isPaymentField,
+  listFieldsByCategory,
   normalizeMissingFields,
   partitionMissing,
 } from "./field-vocabulary";
-export type { FieldDefinition } from "./field-vocabulary";
+export type { FieldCategory, FieldDefinition } from "./field-vocabulary";
 export {
   CANONICAL_FIELD_IDS,
 } from "./types";

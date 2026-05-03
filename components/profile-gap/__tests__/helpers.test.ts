@@ -16,7 +16,9 @@ import { describe, expect, it } from "vitest";
 import {
   CANONICAL_FIELD_IDS,
   FIELD_DEFINITIONS,
+  categoryOfField,
   isPaymentField,
+  listFieldsByCategory,
   normalizeMissingFields,
   partitionMissing,
   type ProfileFieldId,
@@ -221,6 +223,56 @@ describe("partitionMissing", () => {
     ]);
     expect(out.inline).toEqual(["phone", "first_name"]);
     expect(out.payment).toEqual(["card_expiry", "card_number"]);
+  });
+});
+
+/* ─── categoryOfField + listFieldsByCategory ─────────────────────── */
+
+describe("categoryOfField", () => {
+  it("classifies all 13 canonical fields as 'canonical'", () => {
+    for (const id of CANONICAL_FIELD_IDS) {
+      expect(categoryOfField(id)).toBe("canonical");
+    }
+  });
+
+  it("classifies full_name as 'legacy'", () => {
+    expect(categoryOfField("full_name")).toBe("legacy");
+  });
+
+  it("classifies ktn and address_line2 as 'optional' (UI-only)", () => {
+    expect(categoryOfField("ktn")).toBe("optional");
+    expect(categoryOfField("address_line2")).toBe("optional");
+  });
+
+  it("classifies card fields as 'payment' (regardless of legacy/optional)", () => {
+    expect(categoryOfField("card_number")).toBe("payment");
+    expect(categoryOfField("card_expiry")).toBe("payment");
+    expect(categoryOfField("billing_address")).toBe("payment");
+  });
+});
+
+describe("listFieldsByCategory", () => {
+  it("partitions every FIELD_DEFINITIONS entry exactly once", () => {
+    const grouped = listFieldsByCategory();
+    const total =
+      grouped.canonical.length +
+      grouped.legacy.length +
+      grouped.optional.length +
+      grouped.payment.length;
+    expect(total).toBe(Object.keys(FIELD_DEFINITIONS).length);
+  });
+
+  it("matches the documented schema: 13 + 1 + 2 + 3 = 19 fields", () => {
+    const grouped = listFieldsByCategory();
+    expect(grouped.canonical).toHaveLength(13);
+    expect(grouped.legacy).toHaveLength(1);
+    expect(grouped.optional).toHaveLength(2);
+    expect(grouped.payment).toHaveLength(3);
+  });
+
+  it("'canonical' bucket exactly equals CANONICAL_FIELD_IDS as a set", () => {
+    const grouped = listFieldsByCategory();
+    expect([...grouped.canonical].sort()).toEqual([...CANONICAL_FIELD_IDS].sort());
   });
 });
 
