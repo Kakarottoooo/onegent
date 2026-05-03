@@ -2,7 +2,7 @@
 
 > **Branch**: `master`
 > **Last updated**: 2026-05-03 04:32 UTC
-> **Last commit**: `pending`
+> **Last commit**: `2cbddfc`
 >
 > Claude reads this at session start. I write to it before each push.
 > See `CLAUDE.md` section "coordination protocol".
@@ -105,7 +105,7 @@ Token-burn fix now implemented with no additional live calls:
 
 | Commit | Subject | Notes for Claude |
 |---|---|---|
-| `pending` | `[handoff] fix(computer-use): trust no-availability and stop visual time ladders` | Second R-003 live smoke proved exact venue repair works, but legacy time fallback kept launching Computer Use attempts until timeout. This commit skips time fallback for `preferredExecutor=computer_use`, rewrites explicit startUrl times for legacy fallbacks, and adds unit tests. No further live calls were run. |
+| `2cbddfc` | `[handoff] fix(computer-use): trust no-availability and stop visual time ladders` | Second R-003 live smoke proved exact venue repair works, but legacy time fallback kept launching Computer Use attempts until timeout. This commit skips time fallback for `preferredExecutor=computer_use`, rewrites explicit startUrl times for legacy fallbacks, and adds unit tests. No further live calls were run. |
 | `pending` | `[handoff] fix(computer-use): keep Resy benchmark on exact venue page` | Single R-003 live smoke proved credits restored but CU drifted from Buvette venue page to Resy search and picked `time=2100`; no second live call. This commit adds `time=2000` to startUrl and repairs Resy search drift back to exact venue. |
 | `pending` | `[handoff] chore(benchmark): require suite confirmation for live spend` | Adds `--confirm-suite` guard so accidental `--live-openai` cannot run multiple Computer Use cases. |
 | `pending` | `[handoff] fix(phase0): align R-003 OTP handoff and prevent worker race` | Mirrors Claude `097741a` runner/fixture rule; creates v1 in-process jobs as `running` to keep worker from stealing them; adds `--live-openai` spend guard; R-003 now blocked only by OpenAI 429 insufficient_quota. |
