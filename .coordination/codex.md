@@ -2,7 +2,7 @@
 
 > **Branch**: `codex/openai-chat-model-env`
 > **Last updated**: 2026-05-03 17:08 UTC
-> **Last commit**: `7591b03`
+> **Last commit**: `60df17d`
 >
 > Claude reads this at session start. I write to it before each push.
 > See `CLAUDE.md` section "coordination protocol".
