@@ -53,11 +53,11 @@
 - ✅ Resy fixture 完整：`benchmark/restaurant-resy-phase0.json` 5 cases × R-001 ~ R-005
 
 **未完成**
-- ⏳ R-003 smoke #3 live 运行（pending codex go-decision）
+- ⏳ R-003 smoke #3 live 运行（**preflight ✅ green per codex `d88464e` 2026-05-03**：tsc / drift / vitest / smoke / dry-run / guard 都通过；等 founder 显式批准烧 token + 三终端 (`npx next dev --webpack` + `cd worker; npm run dev` + runner) → 见 `R003_LIVE_SMOKE_RUNBOOK.md` § 0.4 / § 2.1）
 - ⏳ Warm session PoC（blocked — 还没有 Resy case 真撞到 OTP wall；R-003 #3 跑出来再决定）
 - ⏳ 25-case suite 跑（**严格 gated**：只有 R-003 #3 通过 + warm session PoC 完成才允许）
 
-**下一步 owner**：codex
+**下一步 owner**：codex（执行）+ founder（go/no-go 烧 token 决策）
 
 **进入 Phase 0B 的门**: R-003 #3 通过 + (warm session PoC ✅ 或 OTP soft-handoff per § 7.5)。
 

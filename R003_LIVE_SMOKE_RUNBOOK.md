@@ -1,8 +1,28 @@
 # R-003 Live Smoke Runbook — checklist before burning OpenAI tokens
 
 > **For**: codex（执行人）+ founder（监督）
-> **Last updated**: 2026-05-03 (Phase 0A 第 3 次 R-003 live smoke 前)
+> **Last updated**: 2026-05-03 (post codex `d88464e` readiness preflight)
+> **Preflight status**: ✅ green per `origin/master:.coordination/codex.md` 2026-05-03 12:30-12:37 UTC
 > **作者**: Claude (Track B); codex 拍板 spec + 实际跑
+
+---
+
+## 📍 Readiness state (2026-05-03)
+
+Codex `d88464e [coord] report R-003 readiness preflight` 已确认：
+
+| Check | Result |
+|---|---|
+| `npx tsc --noEmit --pretty false` | ✅ pass |
+| `npm run check-drift` | ✅ pass |
+| Targeted vitest (profile-gap-{decision,on-save} + components + nlu-v2) | ✅ 350/356, 6 skipped |
+| `npx next dev --webpack` + `npm run smoke:phase1` | ✅ 6/6 routes |
+| `npx tsx scripts/run-phase0-resy-benchmark.ts --dry-run --case R-003` | ✅ payload valid, no API call |
+| Guard: same script without `--live-openai` / `ONEGENT_ALLOW_LIVE_OPENAI=1` | ✅ refuses before task creation |
+| Local env keys | `OPENAI_API_KEY` present · `OPENAI_COMPUTER_USE_MODEL=gpt-5.5` · `USE_WORKER_FOR=restaurant,hotel,flight,activity` |
+
+**含义**: § 0 / § 1 的所有静态项都已验证通过。R-003 #3 live 需要的就剩 § 0.4
+worker 启动 + § 2.1 三终端命令。codex 等用户/founder 显式批准烧 token 才会跑。
 
 ---
 
@@ -30,16 +50,32 @@ R-003 live smoke 一次跑会烧 OpenAI tokens（`gpt-5.5` Computer Use turn 数
 
 ### 0.2 Token / Budget / Auth
 - [ ] OpenAI account billing 没欠费（用户消息：2026-04-27 "OpenAI credit 已恢复"）
-- [ ] OpenAI API key in env (`.env.local` 或 Railway worker env)
-- [ ] **Model allowlist**: 当前唯一允许的 model 是 `gpt-5.5`（Computer Use GA）—— 不要 fallback 到 `gpt-4o` / `gpt-4-turbo`
+- [ ] `OPENAI_API_KEY` in `.env.local` (codex `d88464e` 已确认本地 worktree 有这个 key)
+- [ ] **Model allowlist**: 当前唯一允许的 model 是 `gpt-5.5`（Computer Use GA）—— 不要 fallback 到 `gpt-4o` / `gpt-4-turbo`. codex `d88464e` 已确认 `OPENAI_COMPUTER_USE_MODEL=gpt-5.5`
 - [ ] Browserbase key 没欠费（live smoke 跑在 Browserbase session 里）
-- [ ] 单次 R-003 token 上限设了（建议 `OPENAI_BUDGET_USD_PER_RUN=2.00`）
+- [ ] Live spend guard satisfied: 必须传 `--live-openai` flag **或** 设 `ONEGENT_ALLOW_LIVE_OPENAI=1`（codex `d88464e` 验证过：缺这两者会在创建任务前拒绝）
 
 ### 0.3 Spec / Fixture
 - [ ] `BENCHMARK_RESTAURANT_100.md` § 4 R-003 row 当前 expectedOutcomes 包含: `ready_for_confirmation` / `safe_handoff` (含 `F-PROVIDER-OTP`) / `no_availability_correct` (Q11(a) 显式扩)
 - [ ] `benchmark/restaurant-resy-phase0.json` R-003 case 的 `start_url` 是 exact venue page（不是 `/search` —— `a0ce2ee` 修的）
 - [ ] `benchmark/restaurant-resy-phase0.json` R-003 没有强约束 visual time ladder（`2cbddfc` 修的）
 - [ ] § 7.5 OTP transitional rule 在生效（如果撞 OTP，`F-PROVIDER-OTP` per-case 是 acceptable，不算 fail）
+
+### 0.4 Worker 必须启动 ⚠️ critical
+
+`USE_WORKER_FOR=restaurant,hotel,flight,activity`（per codex `d88464e` 本地 env
+观察）。这意味着 R-003 (restaurant) 这条 case 走 **worker 路径**，不是 Vercel
+in-process executor。**worker 没起 → 任务会进 booking_jobs 表然后 stuck 等不到
+worker 抢，case 会 timeout 掉但 token 已经先消耗在 NLU + planning 阶段**。
+
+- [ ] 单独终端跑 `cd worker; npm run dev`（worker env 从 root `.env.local` 拷贝
+      / 同步过去）
+- [ ] worker 进程在 stdout 看到 "polling" 或类似已开始抢 job 的迹象
+- [ ] `SELECT * FROM booking_jobs WHERE status IN ('running','queued') AND updated_at < now() - interval '10 minutes'` 应返回 0 行（没 stale job）
+
+如果不确定 `USE_WORKER_FOR` 当前值：`grep USE_WORKER_FOR .env.local`。如果
+`restaurant` 在列表里 → worker mandatory。如果不在 → 走 Vercel in-process，
+worker 可选。
 
 ---
 
@@ -86,32 +122,57 @@ npx vitest run lib/booking-autopilot
 **期望**: 全过。如果 fail → 不要跑 live，先修。
 
 ### 1.5 Worker 状态
+**See § 0.4 — worker is mandatory for restaurant case.** 这里只是再确认一遍：
+- [ ] worker 进程在另一个终端 `cd worker; npm run dev` 已启动（不是只有 Next dev server）
 - [ ] worker 没有 stuck job（`SELECT * FROM booking_jobs WHERE status IN ('running','queued') AND updated_at < now() - interval '10 minutes'` 应返回 0 行）
-- [ ] worker 进程还活着（如果跑 local worker）OR Railway worker 正常（如果未来部署）
+- [ ] worker stdout 在轮询 / 抢 job (Railway worker 还没部署，本地 only)
+- [ ] root `.env.local` 里的 `OPENAI_API_KEY` / `BROWSERBASE_*` / `POSTGRES_URL` 都被 worker 进程读到了（worker 启动 log 不报 "missing env"）
 
 ---
 
 ## 2. 单 R-003 live 执行
 
-### 2.1 命令占位（codex 替换为实际）
+### 2.1 实际命令 — 三终端并发
+
+Per codex `d88464e` 的 readiness preflight，单 R-003 live run 需要三个终端
+**同时**开着：
+
 ```bash
-# 严格 single-case，双层 token guard
+# Terminal A — Next dev server (webpack mode 因为 Codex detached worktree
+# 里 Turbopack 会撞 symlink panic; 见 PHASE_1_E2E_SMOKE.md "失败排查")
+npx next dev --webpack
+
+# Terminal B — local worker (mandatory because USE_WORKER_FOR includes
+# 'restaurant'; worker env 从 root .env.local 拷贝/同步)
+cd worker
+npm run dev
+
+# Terminal C — 真正烧 token 的命令
 npx tsx scripts/run-phase0-resy-benchmark.ts \
   --case R-003 \
   --live-openai \
-  --confirm-suite \
-  --output benchmark/runs/R003-live-${TIMESTAMP}.json
+  --allow-failures
 ```
 
-> **注意**: 上面的 `scripts/run-phase0-resy-benchmark.ts` 是 codex 的 file ownership 区
-> （`Track A file ownership` per `origin/master:.coordination/codex.md`）。
-> 实际命令以 codex 当前实现为准；这里只是占位。Claude 不动这个脚本。
+**重要 flag 语义**:
+- `--case R-003` —— 单 case scoping
+- `--live-openai` —— 显式同意烧 token；缺这个会被 guard 拒绝
+- `--allow-failures` —— 允许 R-003 出 non-success outcome（OTP / no-availability
+  都不被视为脚本崩溃）；R-003 spec 在 expectedOutcomes 里就接受三种 outcome
+- ⚠️ **不要传 `--confirm-suite`** —— 这个 flag 是 multi-case suite 用的，单 case
+  不需要; codex 在 `d88464e` 明确说"Do not pass `--confirm-suite` for single-case
+  R-003. Multi-case live runs require both `--live-openai` and `--confirm-suite`."
+
+> **`scripts/run-phase0-resy-benchmark.ts` 是 codex 的 Track A file ownership**;
+> 命令以 codex 当前实现为准。如果未来 flag 名变了，codex 直接改这一节。
+> Claude 不动这个脚本。
 
 ### 2.2 跑之前再确认一次
+- [ ] 三终端都在跑（dev / worker / runner）—— § 0.4 + § 1.5 已经验证
 - [ ] 不是 25-case suite（**禁止**：见 § 4）
 - [ ] 不是多 case 跑
-- [ ] 不是 dry-run（这是 real live）
-- [ ] log 落盘，不只 stdout（事后 audit 用）
+- [ ] 不是 dry-run（这是 real live；如果只想验 payload，跑 `--dry-run --case R-003`，那条不烧 token）
+- [ ] log 落盘，不只 stdout（事后 audit 用 — 建议 `2>&1 | tee benchmark/runs/R003-live-$(date +%Y%m%d-%H%M%S).log`）
 
 ### 2.3 跑期间监控
 - 浏览器 dev console 没报红
@@ -159,7 +220,7 @@ npx tsx scripts/run-phase0-resy-benchmark.ts \
 | 同一 case 短时间内重跑 ≥ 3 次 | 大概率是同一个 bug；多跑 = 多烧 token；看 log 就好 |
 | 跑非 R-003 case 之前 R-003 没 ✅ | R-001/R-002/R-004/R-005 在不同 venue + provider 状态下；R-003 是 baseline |
 | 用 `gpt-4o` / `gpt-4-turbo` 替代 `gpt-5.5` | Computer Use 行为差异；不是 spec 范围内 model |
-| 不带 `--confirm-suite` 跑 multi-case | token guard 这层就是为了防意外多跑 |
+| 不带 `--confirm-suite` 跑 multi-case | token guard 这层就是为了防意外多跑（注意：单 case **不需要** `--confirm-suite`；只有 multi-case suite 才同时需要 `--live-openai` + `--confirm-suite`）|
 | 跑 live 时同时改 master 上 NLU / executor 代码 | race condition 制造，事后 attribution 会乱 |
 | 把 R-003 fixture 临时改宽过 OTP 然后跑 | 等于绕过 spec；spec 改要走 doc PR |
 

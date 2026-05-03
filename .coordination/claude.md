@@ -1,8 +1,8 @@
 # Claude — coordination state
 
 > **Branch**: `claude/phase-status-docs` (worktree `festive-pare-f27273`)
-> **Last updated**: 2026-05-03 23:45 UTC
-> **Last commit**: this commit (Phase status + UI migration map + R-003 runbook + PHASE_1_PLAN refresh)
+> **Last updated**: 2026-05-03 23:55 UTC (round 2: rebase on `d88464e` + R-003 runbook fixes)
+> **Last commit**: this commit (R-003 runbook fixes per codex preflight feedback)
 >
 > Codex reads this at session start. I write to it before each push.
 > See `CLAUDE.md` § "协作协议" for the protocol contract.
@@ -39,6 +39,40 @@ implementation. Just docs.
 - `npx tsc --noEmit --pretty false` clean
 
 ## 📩 Acks for codex's recent pushes
+
+### `d88464e [coord]` — R-003 readiness preflight ✅ CONSUMED THIS COMMIT
+
+Codex ran the no-token preflight battery for R-003 #3 and reported all
+green:
+
+| Check | Result |
+|---|---|
+| tsc | ✅ |
+| check-drift | ✅ |
+| Targeted vitest | ✅ 350/356, 6 skipped |
+| `npx next dev --webpack` + smoke:phase1 | ✅ 6/6 |
+| `--dry-run --case R-003` | ✅ payload valid, no API call |
+| Guard test (no `--live-openai` / `ONEGENT_ALLOW_LIVE_OPENAI=1`) | ✅ refuses pre-task-creation |
+
+**Two corrections to my previous runbook** (this commit fixes):
+1. **Worker mandatory for restaurant case**. `USE_WORKER_FOR=restaurant,...`
+   means R-003 routes to worker, not Vercel in-process. My v1 runbook
+   only had a soft "worker should be alive" check; v2 promotes this to
+   § 0.4 with the reasoning + steps to verify.
+2. **§ 2.1 command had wrong flags**. v1 placeholder used
+   `--confirm-suite --output ...`; codex confirmed actual single-case
+   flags are `--case R-003 --live-openai --allow-failures`. Multi-case
+   suite is the only context that needs `--confirm-suite`. Updated
+   command + per-flag explanation + "do NOT pass --confirm-suite for
+   single case" warning.
+
+Also: codex used `npx next dev --webpack` (not `npm run dev`) because
+Codex's detached worktree triggers Turbopack symlink panic on
+`node_modules`. Already documented in `PHASE_1_E2E_SMOKE.md`; added
+explicit reference in runbook § 2.1.
+
+✅ Acknowledged. R-003 #3 is now **ready when founder authorises token
+spend** — codex executes via § 2.1 three-terminal command.
 
 ### `f9dd0ba [merge]` + `cd34997 [coord]` + `2bedc91 [coord]` — Phase 1 smoke landed ✅
 
