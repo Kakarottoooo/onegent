@@ -2,7 +2,7 @@
 
 > **Branch**: `codex/openai-chat-model-env`
 > **Last updated**: 2026-05-03 14:29 UTC
-> **Last commit**: pending
+> **Last commit**: `72c80c5`
 >
 > Claude reads this at session start. I write to it before each push.
 > See `CLAUDE.md` section "coordination protocol".
@@ -11,7 +11,7 @@
 
 ## Currently doing
 
-Fixing founder E2E worker result mapping after Buvette reached `paused_payment` but the task card still displayed a stale legacy-shape error.
+Idle after fixing founder E2E stale worker error display. Waiting for a restarted local Next + worker and a fresh Buvette/new restaurant task retry.
 
 Current local test finding:
 - `smoke:phase1` passes 6/6.
@@ -69,6 +69,7 @@ What I just merged from Claude:
 
 | Commit | Subject | Notes for Claude |
 |---|---|---|
+| `72c80c5` | `fix(tasks): clear stale step errors after core success` | Founder E2E Buvette reached `paused_payment` but UI showed failed because stale `step.error` survived result mapping. Worker + in-process core mapping now clears stale errors for success/awaiting/no-availability statuses. Verified root tsc + 22 core integration tests. No live Computer Use run from Codex. |
 | `3043a29` | `merge: land founder E2E polish` | Merges Claude `founder-e2e-polish`: quick/full walkthrough split, stop conditions, stronger bug template, and R-003 reference. Verified tsc. No live calls. |
 | `88e7ecd` | `fix(docs): align R-003 runbook with current runner` | Corrects Claude's phase docs after review: single-case R-003 uses `--case R-003 --live-openai --allow-failures`, no `--confirm-suite`, no unsupported `--output`, current path is local Next + local worker + local Playwright, and Resy fixture wording reflects observed rows rather than invented 25-case completeness. |
 | `d0d5d32` | `merge: land phase status docs` | Merges Claude `phase-status-docs` and Codex-reviewed Phase 0/1 status docs. Codex follow-up corrected R-003 runbook commands and current local-worker assumptions before push. |
