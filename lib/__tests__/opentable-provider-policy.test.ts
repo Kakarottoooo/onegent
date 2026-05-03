@@ -25,7 +25,12 @@ describe("OpenTable provider safety policy", () => {
     expect(providerSource).toContain("ot-phone-01-exact-locator");
     expect(providerSource).toContain("ot-phone-02-dom-direct");
     expect(providerSource).toContain("ot-phone-03-discovered-coordinate");
-    expect(providerSource).toContain("ot-phone-04-fixed-coordinate");
+    expect(providerSource).toContain("ot-phone-04-fixed-coordinate-high");
+    expect(providerSource).toContain("ot-phone-05-fixed-coordinate-mid");
+    expect(providerSource).toContain("ot-phone-06-fixed-coordinate-low");
+    expect(providerSource).toContain("fixed-phone-gate-high");
+    expect(providerSource).toContain("accepted unverified phone because this is the calibrated OpenTable phone-gate coordinate fallback");
+    expect(providerSource).toContain("refusing ready handoff");
     expect(providerSource).toContain(".debug-screenshots");
     expect(providerSource).toContain("saved guest-form artifact");
     expect(providerSource).toContain("diner form state unreadable after phone gate fill");
@@ -34,6 +39,7 @@ describe("OpenTable provider safety policy", () => {
     expect(providerSource).not.toContain("phone-only form detected - clicking 'Use email instead'");
     expect(providerSource).not.toContain("getByPlaceholder");
     expect(providerSource).not.toContain("getByLabel");
+    expect(providerSource).not.toContain('verified || field === "phone"');
     expect(providerSource).not.toContain('empty: ["email"]');
   });
 

@@ -545,18 +545,34 @@ async function typeOpenTableFieldByCoordinate(
     return false;
   }
   const verified = await verifyOpenTableDinerField(page, field);
-  const accepted = verified || field === "phone";
+  const accepted = verified;
   trace?.(`[opentable] coordinate typing ${field}: target="${target.descriptor}" verified=${verified} accepted=${accepted}`);
+  if (!accepted && field === "phone") {
+    trace?.("[opentable] phone coordinate typing was not verified - refusing ready handoff");
+  }
   return accepted;
 }
 
-function fixedOpenTablePhoneGateTarget(page: Page): OpenTableFieldTarget {
+function fixedOpenTablePhoneGateTargets(page: Page): OpenTableFieldTarget[] {
   const viewport = (page as OpenTableInputPage).viewportSize?.() ?? { width: 1270, height: 790 };
-  return {
-    x: Math.round(viewport.width * 0.5),
-    y: Math.round(Math.min(Math.max(viewport.height * 0.52, 360), 430)),
-    descriptor: `fixed-phone-gate viewport=${viewport.width}x${viewport.height}`,
-  };
+  const x = Math.round(viewport.width * 0.5);
+  return [
+    {
+      x,
+      y: Math.round(Math.min(Math.max(viewport.height * 0.405, 300), 340)),
+      descriptor: `fixed-phone-gate-high viewport=${viewport.width}x${viewport.height}`,
+    },
+    {
+      x,
+      y: Math.round(Math.min(Math.max(viewport.height * 0.46, 340), 380)),
+      descriptor: `fixed-phone-gate-mid viewport=${viewport.width}x${viewport.height}`,
+    },
+    {
+      x,
+      y: Math.round(Math.min(Math.max(viewport.height * 0.52, 380), 430)),
+      descriptor: `fixed-phone-gate-low viewport=${viewport.width}x${viewport.height}`,
+    },
+  ];
 }
 
 async function typeOpenTableFieldAtTarget(
@@ -566,6 +582,7 @@ async function typeOpenTableFieldAtTarget(
   target: OpenTableFieldTarget,
   strategy: string,
   trace?: (msg: string) => void,
+  options?: { acceptUnverifiedPhone?: boolean },
 ): Promise<boolean> {
   if (!value) return false;
   try {
@@ -583,8 +600,13 @@ async function typeOpenTableFieldAtTarget(
     return false;
   }
   const verified = await verifyOpenTableDinerField(page, field);
-  const accepted = verified || field === "phone";
+  const accepted = verified || (field === "phone" && options?.acceptUnverifiedPhone === true);
   traceOpenTableStrategy(trace, strategy, `typed ${field}: verified=${verified} accepted=${accepted}`);
+  if (field === "phone" && !verified && options?.acceptUnverifiedPhone === true) {
+    traceOpenTableStrategy(trace, strategy, "accepted unverified phone because this is the calibrated OpenTable phone-gate coordinate fallback");
+  } else if (field === "phone" && !accepted) {
+    traceOpenTableStrategy(trace, strategy, "phone typing was not verified - refusing ready handoff");
+  }
   return accepted;
 }
 
@@ -645,10 +667,26 @@ async function fillOpenTablePhoneGateWithLadder(
     return true;
   }
 
-  traceOpenTableStrategy(trace, "ot-phone-04-fixed-coordinate", "trying known OpenTable phone gate coordinate fallback");
-  const fixedTarget = fixedOpenTablePhoneGateTarget(page);
-  if (await typeOpenTableFieldAtTarget(page, "phone", phoneTypedValue || phoneDigits, fixedTarget, "ot-phone-04-fixed-coordinate", trace)) {
-    return true;
+  const fixedTargets = fixedOpenTablePhoneGateTargets(page);
+  for (let index = 0; index < fixedTargets.length; index += 1) {
+    const strategy = [
+      "ot-phone-04-fixed-coordinate-high",
+      "ot-phone-05-fixed-coordinate-mid",
+      "ot-phone-06-fixed-coordinate-low",
+    ][index] ?? `ot-phone-fixed-coordinate-${index + 1}`;
+    traceOpenTableStrategy(trace, strategy, "trying calibrated OpenTable phone gate coordinate fallback");
+    const acceptUnverifiedPhone = strategy === "ot-phone-04-fixed-coordinate-high";
+    if (await typeOpenTableFieldAtTarget(
+      page,
+      "phone",
+      phoneTypedValue || phoneDigits,
+      fixedTargets[index],
+      strategy,
+      trace,
+      { acceptUnverifiedPhone },
+    )) {
+      return true;
+    }
   }
 
   await captureOpenTableGuestFormArtifact(page, "phone-gate-fill-failed", trace);
@@ -695,8 +733,11 @@ async function fillOpenTableFieldWithLocator(
   }
   await new Promise((r) => setTimeout(r, 250));
   const verified = await verifyOpenTableDinerField(page, field);
-  const accepted = verified || field === "phone";
+  const accepted = verified;
   trace?.(`[opentable] locator fill ${field}: target="${target.descriptor}" verified=${verified} accepted=${accepted}`);
+  if (!accepted && field === "phone") {
+    trace?.("[opentable] phone locator fill was not verified - refusing ready handoff");
+  }
   return accepted;
 }
 
