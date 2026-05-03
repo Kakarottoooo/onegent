@@ -125,35 +125,35 @@ const TASK_DETAIL_DEMOS: DevRoute[] = [
 
 const STRATEGY_DOCS: DocLink[] = [
   {
-    href: "https://github.com/Kakarottoooo/onegent/blob/claude/festive-pare-f27273/BENCHMARK_RESTAURANT_100.md",
+    href: "https://github.com/Kakarottoooo/onegent/blob/master/BENCHMARK_RESTAURANT_100.md",
     title: "BENCHMARK_RESTAURANT_100.md",
     blurb:
       "Phase 0 acceptance gate spec. 100 cases + 4-metric thresholds + § 3 taxonomy + § 7.5 OTP transitional rule. Source of truth for what 'Phase 0 declared' means.",
     status: "active",
   },
   {
-    href: "https://github.com/Kakarottoooo/onegent/blob/claude/festive-pare-f27273/WARM_SESSION_STRATEGY.md",
+    href: "https://github.com/Kakarottoooo/onegent/blob/master/WARM_SESSION_STRATEGY.md",
     title: "WARM_SESSION_STRATEGY.md",
     blurb:
       "Phase 0 OTP bypass via Playwright storageState. 3-step PoC plan + 5 risks + decision tree. BLOCKED until R-003 reaches OTP layer post-navigation-repair.",
     status: "blocked",
   },
   {
-    href: "https://github.com/Kakarottoooo/onegent/blob/claude/festive-pare-f27273/NLU_CONSUMER_CONTRACT.md",
+    href: "https://github.com/Kakarottoooo/onegent/blob/master/NLU_CONSUMER_CONTRACT.md",
     title: "NLU_CONSUMER_CONTRACT.md",
     blurb:
       "Chat panel hookup contract. 5 RouterAction dispatch traces + apply_profile_patch deep dive + 5 open questions for codex.",
     status: "active",
   },
   {
-    href: "https://github.com/Kakarottoooo/onegent/blob/claude/festive-pare-f27273/EXECUTOR_V2_PIVOT.md",
+    href: "https://github.com/Kakarottoooo/onegent/blob/master/EXECUTOR_V2_PIVOT.md",
     title: "EXECUTOR_V2_PIVOT.md",
     blurb:
       "Track A/B pivot doc. Why we moved to Computer Use as default executor + what didn't change (NLU/DR/profile/queue/MCP — the moat).",
     status: "active",
   },
   {
-    href: "https://github.com/Kakarottoooo/onegent/blob/claude/festive-pare-f27273/PROJECT_SUMMARY.md",
+    href: "https://github.com/Kakarottoooo/onegent/blob/master/PROJECT_SUMMARY.md",
     title: "PROJECT_SUMMARY.md",
     blurb:
       "High-level state + architecture + Browserbase roadmap + Phase 0 doctrine. Time-reversed release notes.",
@@ -168,7 +168,7 @@ const COORDINATION = [
     blurb: "Read on origin/master. What codex is doing right now + their open questions for me.",
   },
   {
-    href: "https://github.com/Kakarottoooo/onegent/blob/claude/festive-pare-f27273/.coordination/claude.md",
+    href: "https://github.com/Kakarottoooo/onegent/blob/master/.coordination/claude.md",
     title: "claude.md (Track B state)",
     blurb: "Read on this branch. What I'm doing + blockers on codex + recently shipped.",
   },
