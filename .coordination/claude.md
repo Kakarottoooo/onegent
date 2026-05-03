@@ -1,8 +1,8 @@
 # Claude — coordination state
 
 > **Branch**: `claude/festive-pare-f27273` (worktree)
-> **Last updated**: 2026-05-02 19:25 UTC
-> **Last commit**: `fcdc1d9`
+> **Last updated**: 2026-05-02 19:55 UTC
+> **Last commit**: pending (this session)
 >
 > Codex reads this at session start. I write to it before each push.
 > See `CLAUDE.md` § "协作协议" for the protocol contract.
@@ -10,8 +10,9 @@
 
 ## 🟢 Currently doing
 
-Idle — just shipped `fcdc1d9` (`/dev/profile-gap-flow` end-to-end mock).
-Awaiting next user direction. Not running any background processes.
+Idle — just shipped `NLU_CONSUMER_CONTRACT.md` (handoff doc for the
+real chat-panel hookup) + `[coord]` 774312d (coordination protocol).
+Not running any background processes.
 
 ## ⏳ Blocking on codex
 
@@ -22,11 +23,13 @@ Awaiting next user direction. Not running any background processes.
 | Cookie-auth proxy for `/api/v1/travel-tasks/*` | Browser-side `/tasks/[taskId]` page can't render real timeline without it; benchmark dashboard drawer drill-down link is a placeholder until then |
 | Phase 0 R-003 smoke run output | Dashboard at `/dev/benchmark-runs` ready to render real run; waiting on first `benchmark/runs/phase0-resy-*.json` |
 
-## 📦 Recently shipped (Track B, last 7 commits on this branch)
+## 📦 Recently shipped (Track B, last 9 commits on this branch)
 
 | Commit | Subject | Notes for codex |
 |---|---|---|
-| `fcdc1d9` | `/dev/profile-gap-flow` end-to-end mock | Demonstrates the wiring shape codex's real chat-panel hookup will use |
+| _(pending)_ | `[handoff]` `NLU_CONSUMER_CONTRACT.md` | **Read this before wiring chat panel.** Full dispatch contract + 5 worked traces + open questions section listing what I need from you (PATCH endpoint path, validation shape, idempotency, etc.) |
+| `774312d` | `[coord]` `.coordination/{claude,codex}.md` protocol + commit-msg tags | Coordination scaffolding; CLAUDE.md § "协作协议" describes the protocol you're now reading |
+| `fcdc1d9` | `/dev/profile-gap-flow` end-to-end mock | Demonstrates the wiring shape codex's real chat-panel hookup will use — clone `handleSend` and replace mocks with real fetches |
 | `76e35b9` | NLU profile_edit + apply_profile_patch + 21 golden tests | Contract layer — `lib/agent/nlu-v2/` types/router/extractor extended |
 | `cee4d9a` | profile-gap demo polish (schema legend + wire trace + payload preview) | `/dev/profile-gap-demo` is now a contract reference page |
 | `8f44eeb` | benchmark drawer drill-down fix + 56 helper tests | Drops broken `/tasks/{taskId}` link; locks codex's report contract |
@@ -36,7 +39,22 @@ Awaiting next user direction. Not running any background processes.
 
 ## 🤝 Open questions for codex
 
-_(none right now — file 留空表示无待回答问题)_
+5 questions from `NLU_CONSUMER_CONTRACT.md` § "Open questions for codex":
+
+1. **PATCH endpoint path** — `/api/users/me/profile` (cookie) vs
+   `/api/v1/users/me/profile` (API-key)? Both? When does the
+   cookie-auth proxy for `/api/v1/*` land?
+2. **Validation contract** — what error shape on field-level rejection
+   (DOB in future, phone too short, etc.)?
+3. **Idempotency** — is PATCH idempotent? (network retry → 200 silent or 409?)
+4. **Telemetry** — should `apply_profile_patch` dispatches emit a
+   client telemetry event so we can spot extractor accuracy regressions?
+5. **MCP path mid-flow state** — when chat surface is `tools/call`
+   instead of browser, how do we ack patch + leave booking state for
+   the next call?
+
+Resolve at chat-panel hookup time. No rush; doc captures my commitments
+until then.
 
 ## 🚧 Hold rules I'm respecting
 
