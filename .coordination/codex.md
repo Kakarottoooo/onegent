@@ -1,8 +1,8 @@
 # Codex - coordination state
 
 > **Branch**: `codex/openai-chat-model-env`
-> **Last updated**: 2026-05-03 15:50 UTC
-> **Last commit**: `24e146e`
+> **Last updated**: 2026-05-03 16:37 UTC
+> **Last commit**: `f1f3665`
 >
 > Claude reads this at session start. I write to it before each push.
 > See `CLAUDE.md` section "coordination protocol".
@@ -10,6 +10,18 @@
 > `origin/claude/festive-pare-f27273:.coordination/claude.md`.
 
 ## Currently doing
+
+Idle after shipping the OpenTable phone-gate / final-confirm handoff fix. Waiting for a fresh founder E2E retry after dev + worker restart.
+
+Latest shipped fix:
+- `f1f3665 fix(opentable): fill phone gate and stop before final submit`
+- OpenTable still uses the legacy Stagehand + local Playwright programmatic provider, not Computer Use.
+- Root cause: OpenTable's native phone verification gate was being switched to the flaky email path, then the blank form was misreported as a payment/CVC-ready handoff.
+- Fix: fill phone directly when a profile phone exists, keep email fallback only when no phone exists, stop before the final `Complete reservation` click, keep local browser sessions open for 60 minutes, and replace visible CVC copy in the task UI with generic review/confirm wording.
+- Regression: `lib/__tests__/opentable-provider-policy.test.ts` locks the phone-first path and final-submit skip policy.
+- Verification: `npx vitest run lib/__tests__/opentable-provider-policy.test.ts`, `npx tsc --noEmit --pretty false`, and `npx tsx scripts/check-drift.ts` all passed. No live retry from Codex yet.
+
+Historical context below:
 
 Fixing a second OpenTable false-positive ready state from the Sirrah founder E2E run.
 
@@ -96,6 +108,7 @@ What I just merged from Claude:
 
 | Commit | Subject | Notes for Claude |
 |---|---|---|
+| `f1f3665` | `fix(opentable): fill phone gate and stop before final submit` | OpenTable founder E2E fix: fill the native phone verification gate directly when phone exists, only use email fallback without phone, never auto-click final `Complete reservation`, keep local review browser/session open 60 minutes, and add no-live policy regression test. Verified provider test + tsc + drift. |
 | `24e146e` | `fix(opentable): block ready status when diner fields are blank` | Adds an executor-level OpenTable guard before restaurant checkout returns. Visible empty diner fields now force manual/error handoff and keep the browser open, preventing false `Ready for payment` when email/phone are blank. Verified tsc + drift. |
 | `521fbc3` | `fix(opentable): verify diner fields before ready handoff` | Founder E2E found Sirrah checkout showed blank phone/email but UI reported ready. OpenTable now locator-fallback fills visible diner fields and throws `opentable_guest_form_incomplete` if any remain empty; executor no longer converts that error to paused_payment. Verified tsc + drift. |
 | `85c90e3` | `fix(timeline): render local snapshot image payloads` | Snapshot endpoint returns page `url` plus screenshot `imageBase64`; UI was using `url` as image src. Now prefers base64 data URL and uses `title` for label. Verified tsc + drift. |
