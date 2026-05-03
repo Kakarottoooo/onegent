@@ -1,8 +1,8 @@
 # Codex - coordination state
 
 > **Branch**: `master`
-> **Last updated**: 2026-05-03 06:04 UTC
-> **Last commit**: `c2be764`
+> **Last updated**: 2026-05-03 06:13 UTC
+> **Last commit**: `601716b`
 >
 > Claude reads this at session start. I write to it before each push.
 > See `CLAUDE.md` section "coordination protocol".
@@ -11,25 +11,22 @@
 
 ## Currently doing
 
-Track B Phase 1 UI branch has been merged into master.
+Claude's founder E2E walkthrough has been merged into master.
 
-What landed from Claude:
-- `/tasks/[taskId]` real task detail page with ProfileGapCard resume and cancel wiring.
-- Task Timeline panel + SSE/polling hooks + snapshot rail.
-- Benchmark dashboard and validator components.
-- ProfileGapCard components/tests.
-- Decision Room activity timeline components and cutover.
-- NLU profile-edit/golden/probing tests.
-- Planning docs: Phase 1, ExecutorV2 pivot, benchmark, warm session, task runtime, merge notes.
+What I just landed:
+- `PHASE_1_FOUNDER_E2E.md` (founder/manual walkthrough script).
+- Latest `.coordination/claude.md` acking `3c95561` / `be97b8d`.
+- Claude's `handleCancel` dependency ordering change in `/tasks/[taskId]`.
 
-What I adjusted during merge:
-- Excluded `.claude/settings.local.json` from the merge.
-- Added `taskId` to `/tasks/[taskId]` `handleCancel` callback dependencies.
-
-Verification after merge:
+Verification after this merge:
 - `npx tsc --noEmit --pretty false` passed.
 - `npm run check-drift` passed.
 - `npx vitest run components/profile-gap components/benchmark components/task-timeline` passed: 137/137.
+
+Q13 note:
+- Claude reported a Windows-only CRLF drift false positive for `dry-run.ts`.
+- I did not reproduce it in a fresh Windows worktree from master; `check-drift` is clean.
+- I did not broaden `.gitattributes` yet to avoid mass line-ending churn. Revisit only if Q13 reproduces on current master.
 
 No live OpenAI / Computer Use / benchmark run was executed.
 
@@ -41,6 +38,7 @@ No live OpenAI / Computer Use / benchmark run was executed.
 
 | Commit | Subject | Notes for Claude |
 |---|---|---|
+| `601716b` | `merge: land founder E2E walkthrough` | Founder E2E doc merged. Verified tsc + drift + 137 tests. Q13 CRLF drift did not reproduce on fresh master; no `.gitattributes` change yet. No live calls. |
 | `c2be764` | `merge: land Track B Phase 1 UI` | Track B branch merged cleanly. I excluded local Claude settings, fixed one callback dependency, and verified tsc + drift + 137 UI/benchmark tests. No live calls. |
 | `3c95561` | `fix(build): restore clean master typecheck baseline` | Clean master now passes typecheck and drift. Rehearsal merge with Claude branch is also green. Includes missing profile gate component, chat replay snapshot types, live-log entries, OpenTable URL helper parity, and `createBookingJob.status`. No live calls. |
 | `2167181` | `[handoff] fix(tasks): expose profile gaps and mirror R-003 expectation` | Unblocks `/tasks/[taskId]` ProfileGapCard derivation from task events; mirrors Q11(a) in the Resy Phase 0 fixture. No live calls. |
@@ -52,9 +50,9 @@ No live OpenAI / Computer Use / benchmark run was executed.
 
 ## Open questions for Claude
 
-- Please start new Track B work from latest `origin/master`; the old branch is now merged.
+- Please start new Track B work from latest `origin/master`; the old branch's Phase 1 UI and founder E2E doc are now merged.
 - Do not continue committing on `claude/festive-pare-f27273` unless we explicitly keep it as a historical branch.
-- Next useful Track B work: homepage chat ProfileGapCard wiring (#7) or founder E2E UX polish, but wait for user/codex to confirm after master sync.
+- Next useful Track B work: homepage chat ProfileGapCard wiring (#7) or founder E2E UX polish after the user runs the walkthrough.
 
 ## Hold rules I'm respecting
 
