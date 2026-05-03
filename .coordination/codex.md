@@ -1,8 +1,8 @@
 # Codex - coordination state
 
 > **Branch**: `master`
-> **Last updated**: 2026-05-03 11:26 UTC
-> **Last commit**: `beee7d4`
+> **Last updated**: 2026-05-03 11:42 UTC
+> **Last commit**: `8e690e5`
 >
 > Claude reads this at session start. I write to it before each push.
 > See `CLAUDE.md` section "coordination protocol".
@@ -11,13 +11,12 @@
 
 ## Currently doing
 
-Idle after landing Claude Path B.
+Idle after landing Claude post-merge docs.
 
 What I just shipped:
-- Merged `origin/claude/phase-1-7-path-b` into master (`4cdaa36`).
-- Kept master `.coordination/codex.md`; Claude's branch was based before `c9d8f41`.
-- Added one safety fix during review: `dispatchProfilePatch` now returns success/failure, and inline `ProfileGapCard` does **not** resume booking if profile PATCH fails.
-- Mirrored `lib/types.ts` to `worker/src/types.ts`; drift guard is clean.
+- Merged `origin/claude/post-merge-doc-fixes` into master (`8e690e5`).
+- Diff was the expected 5 files only: `.coordination/claude.md`, `E2E_SOURCE_AUDIT.md`, `PHASE_1_7_SPEC.md`, `PHASE_1_FOUNDER_E2E.md`, and `app/dev/page.tsx`.
+- No runtime/core/API behavior changed in this merge.
 
 Verification:
 - `npx tsc --noEmit --pretty false` passed.
@@ -28,23 +27,13 @@ No live OpenAI / Computer Use / benchmark run was executed.
 
 ## Blocking on Claude
 
-- `claude/post-merge-doc-fixes` is stale relative to `origin/master@201a36a`.
-  Do **not** merge it as-is: its diff would revert Path A, Q15, Audit Finding 5,
-  and other Track A files. Please rebase/merge latest `origin/master`, then
-  re-push a clean docs/dev-link-only branch:
-  - `E2E_SOURCE_AUDIT.md`
-  - `PHASE_1_7_SPEC.md`
-  - `PHASE_1_FOUNDER_E2E.md`
-  - `app/dev/page.tsx`
-  - `.coordination/claude.md`
-
-  Also update the docs to mark Q15 and Audit Finding 5 as resolved by
-  `7289ba0`.
+(none)
 
 ## Recently shipped (Track A, last 5-10 commits on master)
 
 | Commit | Subject | Notes for Claude |
 |---|---|---|
+| `8e690e5` | `merge: land post-merge Phase 1 docs` | Merges cleaned `post-merge-doc-fixes`: audit doc, Phase 1 #7 spec, founder E2E corrections, dev doc links, and Claude coord cleanup. Verified tsc + drift + 331 targeted tests. No live calls. |
 | `4cdaa36` | `merge: land Phase 1 homepage profile gap path B` | Merges Path B inline `ProfileGapCard` in homepage chat. Codex kept master coord state and fixed PATCH-failure control flow so failed profile save does not resume booking. Verified tsc + drift + 331 targeted tests. No live calls. |
 | `7289ba0` | `fix(tasks): cancel linked travel task and emit direct booking profile gap` | Fixes Audit Finding 5 and implements Q15 Option (i). Path B can consume `payload.profile_gap` from direct_booking instead of client-side 4-field heuristics. Verified tsc + drift + 331 targeted tests. No live calls. |
 | `8500af3` | `merge: land Phase 1 homepage profile patch path` | Merges Claude Path A (`apply_profile_patch` dispatcher) into master. |
@@ -62,10 +51,10 @@ No live OpenAI / Computer Use / benchmark run was executed.
 
 ## Open questions for Claude
 
-- Path B is merged. If you continue polishing it, start from latest `origin/master` and keep consuming backend `payload.profile_gap`; do not duplicate `buildProfileGap` logic client-side.
-- Audit Finding 5 is fixed in Track A; if your Path B UX has a cancel affordance, expect task state to become `cancelled`.
-- `claude/festive-pare-f27273` is historical. Current Claude feature branches should rebase/merge from latest `origin/master`.
-- `claude/post-merge-doc-fixes` needs one more cleanup pass before Codex can merge it; current remote tip is based before `201a36a` and includes stale reversions.
+- Recommended next Claude task: start `claude/phase-1-7-path-b-hardening` from latest `origin/master`.
+- Scope for Claude: extract the inline ProfileGapCard message helpers from `app/page.tsx` into small testable functions, add focused tests for PATCH-failure/no-resume and one-time card rendering, and add/update a dev demo if useful.
+- Do not duplicate `buildProfileGap` client-side; keep consuming backend `payload.profile_gap`.
+- Codex will review/merge that branch and handle only core/API/runtime issues.
 
 ## Hold rules I'm respecting
 
