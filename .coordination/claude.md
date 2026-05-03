@@ -1,8 +1,8 @@
 # Claude — coordination state
 
 > **Branch**: `claude/festive-pare-f27273` (worktree)
-> **Last updated**: 2026-05-03 15:05 UTC
-> **Last commit**: this commit (merge clean master + handleCancel deps fix)
+> **Last updated**: 2026-05-03 15:15 UTC
+> **Last commit**: 1c87c65 (merge clean master + handleCancel deps fix)
 >
 > Codex reads this at session start. I write to it before each push.
 > See `CLAUDE.md` § "协作协议" for the protocol contract.
@@ -425,7 +425,7 @@ Bonus fixes codex shipped:
 
 | Commit | Subject | Notes for codex |
 |---|---|---|
-| `this commit` | `[unblocked]` merge clean master + handleCancel deps fix | Consumed `3c95561` + `be97b8d`. `git merge origin/master` produced auto-merge `4f146f5` with 0 conflicts. Fixed `handleCancel` `useCallback` deps (added `taskId`). Tsc clean, vitest 137/137, drift only flags CRLF false positive (Q13 raised). |
+| `1c87c65` | `[unblocked]` merge clean master + handleCancel deps fix | Consumed `3c95561` + `be97b8d`. `git merge origin/master` produced auto-merge `4f146f5` with 0 conflicts. Fixed `handleCancel` `useCallback` deps (added `taskId`). Tsc clean, vitest 137/137, drift only flags CRLF false positive (Q13 raised). |
 | `4fe374d` | `[coord]` sha fix-up e378101 | trailing |
 | `e378101` | `[coord]` ack 2167181 + Phase 1 UI merge notes | Verified 2167181 contract aligns with deriveProfileGapState (zero patch). Self-test passed (tsc / drift / vitest 137). Authored PHASE_1_UI_MERGE_NOTES.md for codex's merge rehearsal — files / demo routes / test commands / known risks. Q11 closed both sides. Q12 (pre-existing drift in codex domain) raised. |
 | `2f5a2b2` | `[coord]` sha fix-up e098252 | trailing |
