@@ -1,4 +1,4 @@
-import type { Page } from "playwright";
+import type { Locator, Page } from "playwright";
 import { registerProvider } from "./registry";
 import type { BrowserProvider, PaymentFillResult, ProviderStageSignals } from "./types";
 import { fillGuestFormWithAI, auditAndRefillEmptyFields } from "../ai-loop/fill-form";
@@ -16,6 +16,138 @@ interface OpenTableProfile {
   card_expiry?: string;
   billing_zip?: string;
   zip?: string;
+}
+
+type OpenTableDinerField = "firstName" | "lastName" | "email" | "phone";
+
+interface OpenTableDinerFormState {
+  present: OpenTableDinerField[];
+  filled: OpenTableDinerField[];
+  empty: OpenTableDinerField[];
+  verificationGate: boolean;
+  submitVisible: boolean;
+}
+
+async function fillFirstVisible(locator: Locator, value: string): Promise<boolean> {
+  if (!value) return false;
+  const count = await locator.count().catch(() => 0);
+  for (let i = 0; i < Math.min(count, 5); i += 1) {
+    const candidate = locator.nth(i);
+    const visible = await candidate.isVisible().catch(() => false);
+    if (!visible) continue;
+    await candidate.fill(value, { timeout: 1500 }).catch(() => undefined);
+    const actual = await candidate.inputValue({ timeout: 500 }).catch(() => "");
+    if (actual.trim().length > 0) return true;
+  }
+  return false;
+}
+
+async function fillOpenTableFieldFallback(
+  page: Page,
+  field: OpenTableDinerField,
+  value: string,
+): Promise<boolean> {
+  if (!value) return false;
+  const candidates: Locator[] = (() => {
+    switch (field) {
+      case "firstName":
+        return [
+          page.getByPlaceholder(/first/i),
+          page.getByLabel(/first name/i),
+          page.locator('input[autocomplete="given-name"], input[name*="first" i], input[id*="first" i]'),
+        ];
+      case "lastName":
+        return [
+          page.getByPlaceholder(/last/i),
+          page.getByLabel(/last name/i),
+          page.locator('input[autocomplete="family-name"], input[name*="last" i], input[id*="last" i]'),
+        ];
+      case "email":
+        return [
+          page.locator('input[type="email"]'),
+          page.getByPlaceholder(/email/i),
+          page.getByLabel(/email/i),
+          page.locator('input[autocomplete="email"], input[name*="email" i], input[id*="email" i]'),
+        ];
+      case "phone":
+        return [
+          page.locator('input[type="tel"]'),
+          page.getByPlaceholder(/phone/i),
+          page.getByLabel(/phone/i),
+          page.locator('input[autocomplete="tel"], input[name*="phone" i], input[id*="phone" i]'),
+        ];
+    }
+  })();
+  for (const locator of candidates) {
+    if (await fillFirstVisible(locator, value)) return true;
+  }
+  return false;
+}
+
+async function readOpenTableDinerFormState(page: Page): Promise<OpenTableDinerFormState> {
+  return page.evaluate(() => {
+    type Field = "firstName" | "lastName" | "email" | "phone";
+    const isShown = (el: HTMLElement): boolean => {
+      if (el.hidden || !el.isConnected) return false;
+      const rect = el.getBoundingClientRect();
+      if (rect.width === 0 || rect.height === 0) return false;
+      const style = window.getComputedStyle(el);
+      return style.display !== "none" && style.visibility !== "hidden" && style.opacity !== "0";
+    };
+    const classify = (el: HTMLInputElement): Field | null => {
+      const haystack = [
+        el.type,
+        el.placeholder,
+        el.getAttribute("aria-label"),
+        el.id,
+        el.name,
+        el.autocomplete,
+      ].join(" ").toLowerCase();
+      if (haystack.includes("country") || haystack.includes("code")) return null;
+      if (haystack.includes("first") || haystack.includes("given-name")) return "firstName";
+      if (haystack.includes("last") || haystack.includes("family-name")) return "lastName";
+      if (el.type === "email" || haystack.includes("email")) return "email";
+      if (el.type === "tel" || haystack.includes("phone") || haystack.includes("tel")) return "phone";
+      return null;
+    };
+
+    const present = new Set<Field>();
+    const filled = new Set<Field>();
+    const empty = new Set<Field>();
+    const inputs = Array.from(document.querySelectorAll<HTMLInputElement>("input"))
+      .filter((el) => el.type !== "hidden" && el.type !== "checkbox" && el.type !== "radio" && !el.disabled && isShown(el));
+
+    for (const input of inputs) {
+      const field = classify(input);
+      if (!field) continue;
+      present.add(field);
+      if (input.value.trim().length > 0) filled.add(field);
+      else empty.add(field);
+    }
+
+    const text = (document.body?.innerText ?? "").toLowerCase();
+    const verificationGate =
+      text.includes("verify your account") ||
+      text.includes("verification code") ||
+      text.includes("receive a text message") ||
+      text.includes("receive an email message");
+    const submitVisible = Array.from(document.querySelectorAll<HTMLElement>('button[type="submit"], button'))
+      .some((button) => isShown(button) && /complete reservation|confirm reservation|reserve now|book now/i.test((button.textContent ?? "").trim()));
+
+    return {
+      present: Array.from(present),
+      filled: Array.from(filled),
+      empty: Array.from(empty),
+      verificationGate,
+      submitVisible,
+    };
+  }).catch(() => ({
+    present: [],
+    filled: [],
+    empty: ["email"],
+    verificationGate: false,
+    submitVisible: false,
+  }));
 }
 
 /**
@@ -610,11 +742,29 @@ export const openTableProvider: BrowserProvider = {
 
     trace(`[opentable] guest form filled: firstName=${results.firstName} lastName=${results.lastName} email=${results.email} phone=${results.phone}`);
 
+    const fallbackFilled: string[] = [];
+    if (results.firstName !== true && await fillOpenTableFieldFallback(page, "firstName", p.first_name ?? "")) {
+      fallbackFilled.push("firstName");
+    }
+    if (results.lastName !== true && await fillOpenTableFieldFallback(page, "lastName", p.last_name ?? "")) {
+      fallbackFilled.push("lastName");
+    }
+    if (results.email !== true && await fillOpenTableFieldFallback(page, "email", p.email ?? "")) {
+      fallbackFilled.push("email");
+    }
+    if (results.phone !== true && await fillOpenTableFieldFallback(page, "phone", phoneDigits)) {
+      fallbackFilled.push("phone");
+    }
+    if (fallbackFilled.length > 0) {
+      trace(`[opentable] locator fallback filled: ${fallbackFilled.join(",")}`);
+    }
+
+    let dinerFormState = await readOpenTableDinerFormState(page);
+
     // Step 4: AI fill for any fields the programmatic pass missed.
     if (stagehand) {
-      const missed = [results.firstName, results.lastName, results.email, results.phone].filter(v => v === "not_found" || v === false);
-      if (missed.length > 0) {
-        trace(`[opentable] ${missed.length} field(s) not found by programmatic fill - running AI fill`);
+      if (dinerFormState.empty.length > 0) {
+        trace(`[opentable] still-empty diner field(s) after programmatic fill: ${dinerFormState.empty.join(",")} - running AI fill`);
         const effectiveProfile = buildEffectiveProfile(p as BookingProfile, "");
         try {
           const aiResult = await fillGuestFormWithAI(stagehand, effectiveProfile, trace);
@@ -631,6 +781,16 @@ export const openTableProvider: BrowserProvider = {
       } catch (e) {
         trace(`[opentable] audit error: ${(e as Error).message?.slice(0, 80)}`);
       }
+    }
+
+    dinerFormState = await readOpenTableDinerFormState(page);
+    trace(
+      `[opentable] diner form state: present=${dinerFormState.present.join(",") || "none"} ` +
+      `filled=${dinerFormState.filled.join(",") || "none"} empty=${dinerFormState.empty.join(",") || "none"} ` +
+      `verificationGate=${dinerFormState.verificationGate} submitVisible=${dinerFormState.submitVisible}`,
+    );
+    if (dinerFormState.empty.length > 0) {
+      throw new Error(`opentable_guest_form_incomplete:${dinerFormState.empty.join(",")}`);
     }
 
     // Step 6: conditionally click submit.

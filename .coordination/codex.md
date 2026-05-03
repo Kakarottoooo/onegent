@@ -1,8 +1,8 @@
 # Codex - coordination state
 
 > **Branch**: `codex/openai-chat-model-env`
-> **Last updated**: 2026-05-03 15:09 UTC
-> **Last commit**: `85c90e3`
+> **Last updated**: 2026-05-03 15:28 UTC
+> **Last commit**: pending
 >
 > Claude reads this at session start. I write to it before each push.
 > See `CLAUDE.md` section "coordination protocol".
@@ -11,7 +11,7 @@
 
 ## Currently doing
 
-Fixing two founder E2E findings from the Buvette/OpenTable run.
+Fixing an OpenTable false-positive ready state from the Sirrah founder E2E run.
 
 Current local test finding:
 - A fresh Buvette task reached OpenTable, but OpenTable returned a visible `Sirrah` result because the review text mentioned Buvette. The worker clicked the 8:00 PM slot and landed on `Sirrah` booking details. This is a severe wrong-venue risk.
@@ -27,6 +27,15 @@ Current local test finding:
 - Verification after snapshot fix: `npx tsc --noEmit --pretty false` passed; `npx tsx scripts/check-drift.ts` passed. Local `.debug-screenshots/live/...` entries have non-empty `imageBase64`.
 
 Do not click "Complete reservation" in the existing Sirrah browser tab. After this patch, Buvette should either match an exact Buvette result or safely no-availability/fallback; it should not continue into Sirrah.
+
+Current local fix:
+- Sirrah reached OpenTable checkout, but visible diner fields were still empty. The worker reported `Ready for payment` because `reachedGuestForm=true` converted the throw into `paused_payment`.
+- Patched OpenTable guest fill to:
+  - run Playwright locator fallbacks for first/last/email/phone after the DOM evaluate pass,
+  - read visible diner fields from the DOM after fill/audit,
+  - throw `opentable_guest_form_incomplete:<fields>` when any visible diner field remains empty.
+- Patched the executor catch path so `opentable_guest_form_incomplete` is not converted into `paused_payment`.
+- Verification: `npx tsc --noEmit --pretty false` passed; `npx tsx scripts/check-drift.ts` passed. No live retry from Codex yet.
 
 Previous local test context:
 
@@ -85,6 +94,7 @@ What I just merged from Claude:
 
 | Commit | Subject | Notes for Claude |
 |---|---|---|
+| pending | `fix(opentable): verify diner fields before ready handoff` | Founder E2E found Sirrah checkout showed blank phone/email but UI reported ready. OpenTable now locator-fallback fills visible diner fields and throws `opentable_guest_form_incomplete` if any remain empty; executor no longer converts that error to paused_payment. Verified tsc + drift. |
 | `85c90e3` | `fix(timeline): render local snapshot image payloads` | Snapshot endpoint returns page `url` plus screenshot `imageBase64`; UI was using `url` as image src. Now prefers base64 data URL and uses `title` for label. Verified tsc + drift. |
 | `6956a43` | `fix(opentable): refuse unrelated search-result slots` | Founder E2E found Buvette -> Sirrah wrong-venue risk. OpenTable now title-scopes restaurant result cards before slot clicks and reuses the restaurant target for booking-details validation. Verified tsc + drift. No live retry from Codex. |
 | `72c80c5` | `fix(tasks): clear stale step errors after core success` | Founder E2E Buvette reached `paused_payment` but UI showed failed because stale `step.error` survived result mapping. Worker + in-process core mapping now clears stale errors for success/awaiting/no-availability statuses. Verified root tsc + 22 core integration tests. No live Computer Use run from Codex. |
