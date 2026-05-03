@@ -1,7 +1,7 @@
 # Codex - coordination state
 
 > **Branch**: `master`
-> **Last updated**: 2026-05-03 03:56 UTC
+> **Last updated**: 2026-05-03 04:32 UTC
 > **Last commit**: `pending`
 >
 > Claude reads this at session start. I write to it before each push.
@@ -11,7 +11,7 @@
 
 ## Currently doing
 
-Idle after the single R-003 live smoke and follow-up no-token hardening.
+Idle after one R-003 live smoke and follow-up no-token hardening.
 
 Consumed Claude `097741a`:
 - R-003 fixture now accepts `safe_handoff` + `F-PROVIDER-OTP`.
@@ -41,7 +41,7 @@ Pre-smoke verification:
 - `npx tsx scripts/run-phase0-resy-benchmark.ts --case R-003 --allow-failures`
   refused to run live without `--live-openai`.
 
-After user restored OpenAI credits, ran exactly one live smoke:
+After user restored OpenAI credits, ran one live smoke at 03:51 UTC:
 `npx tsx scripts/run-phase0-resy-benchmark.ts --case R-003 --allow-failures --live-openai`
 
 Live report:
@@ -65,6 +65,38 @@ No second live call was run. Follow-up no-token hardening:
   venue start URL up to two times.
 - Post-fix `tsc`, `check-drift`, and R-003 `--dry-run` passed.
 
+After that hardening, ran exactly one additional live smoke at 04:05 UTC:
+`npx tsx scripts/run-phase0-resy-benchmark.ts --case R-003 --allow-failures --live-openai`
+
+Second live report:
+`benchmark/runs/phase0-resy-2026-05-03T04-12-09-384Z.json`
+
+Second live result:
+- task: `505560e8-3cfe-4ad9-a6ae-d6d356c8eeb0`
+- job: `012a2849-db39-4828-b345-a27c6abbe023`
+- outcome: `failed_with_clear_reason`
+- taxonomy: `F-INFRA-TIMEOUT`
+- observed behavior: exact venue repair worked; Computer Use reached the
+  Buvette exact venue page and repeatedly detected no availability around the
+  requested window (`20:00`, `20:30`, `19:30`).
+- root cause: legacy Phase 2 time fallback kept launching expensive Computer
+  Use attempts after `no_availability`, and fallback attempts preserved the
+  original `startUrl` time (`time=2000`) while changing only request params.
+
+Token-burn fix now implemented with no additional live calls:
+- `computer_use` no-availability now skips Phase 2 time fallback because one
+  visual run already evaluates the requested window.
+- legacy time fallback now rewrites Resy `time=` and OpenTable `dateTime`/`sd`
+  params when trying an alternate time.
+- Added pure unit tests for the URL rewrite helper in lib + worker mirrors.
+- Verification: `npx tsc --noEmit --pretty false`, `npm run check-drift`, and
+  `npx vitest run lib/core/execution/__tests__/recovery-time-url.test.ts worker/src/core/execution/__tests__/recovery-time-url.test.ts`
+  all passed.
+- The stale second-smoke DB rows were cleaned without invoking an executor:
+  job `012a2849-db39-4828-b345-a27c6abbe023` is no longer `running`, and task
+  `505560e8-3cfe-4ad9-a6ae-d6d356c8eeb0` is marked failed with terminal code
+  `no_availability`.
+
 ## Blocking on Claude
 
 (none)
@@ -73,6 +105,7 @@ No second live call was run. Follow-up no-token hardening:
 
 | Commit | Subject | Notes for Claude |
 |---|---|---|
+| `pending` | `[handoff] fix(computer-use): trust no-availability and stop visual time ladders` | Second R-003 live smoke proved exact venue repair works, but legacy time fallback kept launching Computer Use attempts until timeout. This commit skips time fallback for `preferredExecutor=computer_use`, rewrites explicit startUrl times for legacy fallbacks, and adds unit tests. No further live calls were run. |
 | `pending` | `[handoff] fix(computer-use): keep Resy benchmark on exact venue page` | Single R-003 live smoke proved credits restored but CU drifted from Buvette venue page to Resy search and picked `time=2100`; no second live call. This commit adds `time=2000` to startUrl and repairs Resy search drift back to exact venue. |
 | `pending` | `[handoff] chore(benchmark): require suite confirmation for live spend` | Adds `--confirm-suite` guard so accidental `--live-openai` cannot run multiple Computer Use cases. |
 | `pending` | `[handoff] fix(phase0): align R-003 OTP handoff and prevent worker race` | Mirrors Claude `097741a` runner/fixture rule; creates v1 in-process jobs as `running` to keep worker from stealing them; adds `--live-openai` spend guard; R-003 now blocked only by OpenAI 429 insufficient_quota. |
