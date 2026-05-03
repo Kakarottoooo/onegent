@@ -1,8 +1,8 @@
 # Codex - coordination state
 
 > **Branch**: `master`
-> **Last updated**: 2026-05-03 11:42 UTC
-> **Last commit**: `9f252b8`
+> **Last updated**: 2026-05-03 11:54 UTC
+> **Last commit**: `f423b56`
 >
 > Claude reads this at session start. I write to it before each push.
 > See `CLAUDE.md` section "coordination protocol".
@@ -11,19 +11,18 @@
 
 ## Currently doing
 
-Idle after landing Claude post-merge docs.
+Idle after landing Claude Path B hardening.
 
 What I just shipped:
-- Merged `origin/claude/post-merge-doc-fixes` into master (`8e690e5`).
-- Diff was the expected 5 files only: `.coordination/claude.md`, `E2E_SOURCE_AUDIT.md`, `PHASE_1_7_SPEC.md`, `PHASE_1_FOUNDER_E2E.md`, and `app/dev/page.tsx`.
-- No runtime/core/API behavior changed in this merge.
+- Cherry-picked Claude `acec60c` onto current master as `f423b56`.
+- Did **not** merge `origin/claude/phase-1-7-path-b-hardening` directly because that branch was based on `ed7b866` and would have reverted the post-merge docs landed in `845abaa`.
+- Landed only the intended 7 hardening files: extracted profile-gap decision/save helpers, 19 focused tests, and `/dev/path-b-demo`.
+- No live OpenAI / Computer Use / benchmark run was executed.
 
 Verification:
 - `npx tsc --noEmit --pretty false` passed.
 - `npm run check-drift` passed.
-- `npx vitest run components/profile-gap components/benchmark components/task-timeline lib/agent/nlu-v2` passed: 331/337, 6 skipped.
-
-No live OpenAI / Computer Use / benchmark run was executed.
+- `npx vitest run lib/__tests__/profile-gap-decision.test.ts lib/__tests__/profile-gap-on-save.test.ts components/profile-gap components/benchmark components/task-timeline lib/agent/nlu-v2` passed: 350/356, 6 skipped.
 
 ## Blocking on Claude
 
@@ -33,6 +32,7 @@ No live OpenAI / Computer Use / benchmark run was executed.
 
 | Commit | Subject | Notes for Claude |
 |---|---|---|
+| `f423b56` | `feat(phase-1-7): Path B hardening — extract helpers + tests + dev demo` | Cherry-picks Claude `acec60c` onto current master without stale branch reversions. Adds `lib/profile-gap-decision.ts`, `lib/profile-gap-on-save.ts`, 19 focused tests, and `/dev/path-b-demo`. Verified tsc + drift + 350 targeted tests. No live calls. |
 | `8e690e5` | `merge: land post-merge Phase 1 docs` | Merges cleaned `post-merge-doc-fixes`: audit doc, Phase 1 #7 spec, founder E2E corrections, dev doc links, and Claude coord cleanup. Verified tsc + drift + 331 targeted tests. No live calls. |
 | `4cdaa36` | `merge: land Phase 1 homepage profile gap path B` | Merges Path B inline `ProfileGapCard` in homepage chat. Codex kept master coord state and fixed PATCH-failure control flow so failed profile save does not resume booking. Verified tsc + drift + 331 targeted tests. No live calls. |
 | `7289ba0` | `fix(tasks): cancel linked travel task and emit direct booking profile gap` | Fixes Audit Finding 5 and implements Q15 Option (i). Path B can consume `payload.profile_gap` from direct_booking instead of client-side 4-field heuristics. Verified tsc + drift + 331 targeted tests. No live calls. |
@@ -51,10 +51,11 @@ No live OpenAI / Computer Use / benchmark run was executed.
 
 ## Open questions for Claude
 
-- Recommended next Claude task: start `claude/phase-1-7-path-b-hardening` from latest `origin/master`.
-- Scope for Claude: extract the inline ProfileGapCard message helpers from `app/page.tsx` into small testable functions, add focused tests for PATCH-failure/no-resume and one-time card rendering, and add/update a dev demo if useful.
-- Do not duplicate `buildProfileGap` client-side; keep consuming backend `payload.profile_gap`.
-- Codex will review/merge that branch and handle only core/API/runtime issues.
+- Recommended next Claude task: start `claude/phase-1-e2e-smoke` from latest `origin/master`.
+- Scope for Claude: automate the no-token Phase 1 founder walkthrough surfaces. Prefer a Playwright/browser smoke harness if repo setup supports it; otherwise add a dev smoke script. Cover `/dev/path-b-demo`, `/tasks/demo-executing`, `/tasks/demo-awaiting-profile`, `/tasks/demo-ready`, `/dev/benchmark-runs` fixture, and `/dev/profile-gap-flow`.
+- Keep scope frontend/test-only. Do **not** touch `app/api/**`, `lib/core/**`, `lib/execution-v2/**`, `worker/src/**`, or live benchmark scripts.
+- Expected output: one runnable command documented in `PHASE_1_FOUNDER_E2E.md` or a short `PHASE_1_E2E_SMOKE.md`, plus tests/scripts that require no OpenAI key and no external network.
+- Codex will review/merge and handle any core/test-runner integration issues.
 
 ## Hold rules I'm respecting
 
