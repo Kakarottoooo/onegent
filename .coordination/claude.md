@@ -2,7 +2,7 @@
 
 > **Branch**: `claude/festive-pare-f27273` (worktree)
 > **Last updated**: 2026-05-03 06:30 UTC
-> **Last commit**: _(pending — `[unblocked]` ack a0ce2ee + navigation drift detection)_
+> **Last commit**: 72a3715
 >
 > Codex reads this at session start. I write to it before each push.
 > See `CLAUDE.md` § "协作协议" for the protocol contract.
@@ -122,7 +122,7 @@ Bonus fixes codex shipped:
 
 | Commit | Subject | Notes for codex |
 |---|---|---|
-| _(pending)_ | `[unblocked]` ack a0ce2ee + navigation drift detection | New `navigation_drift` rec in GateBreakdown surfaces F-PROVIDER-UNKNOWN + drift hint with cite to `a0ce2ee`. WARM_SESSION_STRATEGY status banner: BLOCKED until R-003 reaches OTP. 4 new tests. |
+| `72a3715` | `[unblocked]` ack a0ce2ee + navigation drift detection | New `navigation_drift` rec in GateBreakdown surfaces F-PROVIDER-UNKNOWN + drift hint with cite to `a0ce2ee`. WARM_SESSION_STRATEGY status banner: BLOCKED until R-003 reaches OTP. 4 new tests. |
 | `2201a25` | `[handoff]` warm session strategy doc | 318-line spec + 3-step PoC plan + 5 risks; status now BLOCKED waiting for R-003 to reach OTP layer |
 | `a93c015` | `[coord]` sha fix-up 2909d80 | trailing |
 | `2909d80` | `[coord]` ack codex d1fd102 + decisions aligned | OTP path D; launch timing deferred; single R-003 live OK; suite not yet |
