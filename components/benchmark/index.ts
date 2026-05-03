@@ -11,6 +11,9 @@ export { default as BucketDistribution } from "./BucketDistribution";
 export { default as FailureTaxonomyChart } from "./FailureTaxonomyChart";
 export { default as CaseTable } from "./CaseTable";
 export { default as CaseDetailDrawer } from "./CaseDetailDrawer";
+export { default as Validator } from "./ValidatorPanel";
+export { validateBenchmarkReport } from "./validator";
+export type { ValidationIssue, ValidationResult, ValidationSeverity } from "./validator";
 
 export {
   // Constants

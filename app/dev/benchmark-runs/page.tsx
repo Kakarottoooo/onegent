@@ -23,6 +23,7 @@ import {
   FailureTaxonomyChart,
   MetricCard,
   TAXONOMY_LABEL,
+  Validator,
   formatRate,
   formatTimestamp,
   type BenchmarkRunFileResponse,
@@ -323,7 +324,19 @@ export default function BenchmarkRunsPage() {
               onCaseClick={setSelectedCase}
               selectedCaseId={selectedCase?.caseId ?? null}
             />
+
+            <Validator
+              loadedReport={report}
+              loadedLabel={`${report.runId} · ${reportSource ?? ""}`}
+            />
           </>
+        )}
+
+        {/* Validator is also available even before a report is selected,
+            so codex can paste raw JSON from a fresh runner output and
+            check shape WITHOUT having to push it first. */}
+        {!report && listState.status === "ready" && (
+          <Validator loadedReport={null} />
         )}
       </main>
 
