@@ -1,8 +1,8 @@
 # Codex - coordination state
 
 > **Branch**: `master`
-> **Last updated**: 2026-05-03 02:05 UTC
-> **Last commit**: `620444a`
+> **Last updated**: 2026-05-03 02:15 UTC
+> **Last commit**: `2d71625`
 >
 > Claude reads this at session start. I write to it before each push.
 > See `CLAUDE.md` section "coordination protocol".
@@ -11,33 +11,33 @@
 
 ## Currently doing
 
-Idle on Phase 0 execution until `.env.local` is switched to a rotated
-OpenAI project key with GA Computer Use (`gpt-5.5`) access, or until we
-explicitly decide to run legacy baseline.
+Investigating Phase 0 OTP boundary after the user switched `.env.local` to
+a rotated OpenAI project key with GA Computer Use (`gpt-5.5`) access.
 
-Phase 0 R-003 smoke is blocked on OpenAI project access to
-`gpt-5.5`, not on Resy DOM or task orchestration. Master typecheck and
-drift checks passed after migrating the Computer Use adapter to the GA
-Responses API shape (`model: gpt-5.5`, `tools: [{ type: "computer" }]`).
+Phase 0 R-003 now gets past OpenAI model access and reaches Resy's OTP
+boundary. This is a real product/state-machine blocker, not an infra/model
+blocker and not a Resy DOM-click blocker.
 
 Current local R-003 report:
-`benchmark/runs/phase0-resy-2026-05-03T02-00-32-703Z.json`
+`benchmark/runs/phase0-resy-2026-05-03T02-09-19-595Z.json`
 
 Result summary:
-- task: `e985e044-8a81-46e9-bbd4-505e929f0ace`
-- job: `1093397b-87e9-46bf-ae8b-7efb2406428f`
+- task: `48484541-d7f4-4093-bfa5-ede48d92f1ac`
+- job: `5cb83c68-6425-446b-9a2b-dfc08d0cb0b2`
 - outcome: `failed_with_clear_reason`
-- taxonomy: `F-INFRA-MODEL-ACCESS`
-- terminal reason: current OpenAI project cannot access `gpt-5.5`
-- model-list check: current `.env.local` key only sees `gpt-5.4*`, not
-  `gpt-5.5`; user screenshots show a different project/key has the needed
-  model allow-list
+- taxonomy: `F-PROVIDER-OTP`
+- task state: `awaiting_otp`
+- terminal reason: `The booking flow is waiting for a one-time verification code.`
+- model-list check: current `.env.local` key now sees `gpt-5.5*`
+- Gmail connector check: failed with `token_expired` (401), so Codex cannot
+  currently read the Resy code through the connector
 
 Next Track A step after this commit:
-- User should revoke the API key pasted in chat, create a fresh key in the
-  project that lists `gpt-5.5`, update `.env.local`, then rerun R-003.
-- If that key still 403s, inspect project model allow-list/budget/service tier
-  in the OpenAI dashboard before debugging Resy.
+- Decide whether Phase 0 treats Resy OTP as acceptable `safe_handoff`, or
+  implement OTP resume: read Gmail OTP, pass it into the paused task, and
+  continue to `ready_for_confirmation`.
+- Current code has `awaiting_otp` state and `continue` endpoint, but it does
+  not persist/resume the same browser session with an OTP code.
 
 ## Blocking on Claude
 
@@ -47,7 +47,8 @@ Next Track A step after this commit:
 
 | Commit | Subject | Notes for Claude |
 |---|---|---|
-| `620444a` | `[handoff] fix(executor): migrate Computer Use adapter to GA gpt-5.5 tool` | Replaces deprecated `computer-use-preview` tool shape with GA `gpt-5.5` + `type: "computer"` in lib/worker mirrors. R-003 still reports `F-INFRA-MODEL-ACCESS` because current `.env.local` key is from a project without `gpt-5.5` access. |
+| `pending` | `[coord] update codex state after R-003 reaches OTP` | Records that GA Computer Use/model access is unblocked. R-003 now reaches `awaiting_otp` / `F-PROVIDER-OTP`; Gmail connector token is expired. |
+| `620444a` | `[handoff] fix(executor): migrate Computer Use adapter to GA gpt-5.5 tool` | Replaces deprecated `computer-use-preview` tool shape with GA `gpt-5.5` + `type: "computer"` in lib/worker mirrors. |
 | `38558db` | `[coord] update codex state after claude benchmark validator` | Records Claude's validator/taxonomy alignment and keeps Phase 0 blocked on OpenAI project model access. |
 | `f2b7dae` | `[handoff] feat(benchmark): route phase0 resy through computer use` | Adds `clientMetadata.preferredExecutor`, makes R-003 auto-mint a local benchmark API key, aligns OpenAI Computer Use request shape with official Responses API docs, and fixes benchmark taxonomy for model/API access failures. R-003 now reports `F-INFRA-MODEL-ACCESS`. |
 | `1bcb076` | `[coord] add codex state file; adopt coordination protocol` | Coordination handshake complete; Codex now updates this file for cross-track status. |
@@ -62,11 +63,10 @@ Next Track A step after this commit:
 
 ## Open questions for Claude
 
-1. Claude shipped `f378020` with a benchmark report validator. Please confirm
-   the real R-003 report shape renders/validates cleanly with taxonomy
-   `F-INFRA-MODEL-ACCESS`.
-2. Keep `/api/v1/users/me/profile` consumer work blocked until Track A ships a
+1. Keep `/api/v1/users/me/profile` consumer work blocked until Track A ships a
    dedicated profile PATCH endpoint or explicit cookie-auth equivalent.
+2. If Track B updates benchmark expectations, R-003 currently produces
+   `F-PROVIDER-OTP` safely after real Computer Use execution.
 
 ## Hold rules I'm respecting
 
