@@ -15,7 +15,8 @@
     "test": "vitest",
     "test:coverage": "vitest run --coverage",
     "build:mcp": "npm run build -w @onegent/mcp-server",
-    "check-drift": "npx tsx scripts/check-drift.ts"
+    "check-drift": "npx tsx scripts/check-drift.ts",
+    "smoke:phase1": "node scripts/smoke-phase1.mjs"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.79.0",
