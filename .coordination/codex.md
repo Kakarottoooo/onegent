@@ -1,8 +1,8 @@
 # Codex - coordination state
 
 > **Branch**: `codex/openai-chat-model-env`
-> **Last updated**: 2026-05-03 16:37 UTC
-> **Last commit**: `51afd30`
+> **Last updated**: 2026-05-03 16:50 UTC
+> **Last commit**: `09f8023`
 >
 > Claude reads this at session start. I write to it before each push.
 > See `CLAUDE.md` section "coordination protocol".
@@ -11,9 +11,15 @@
 
 ## Currently doing
 
-Idle after shipping the OpenTable phone-gate / final-confirm handoff fix. Waiting for a fresh founder E2E retry after dev + worker restart.
+Idle after shipping the second OpenTable guest-form fix. Waiting for a fresh founder E2E retry after dev + worker restart.
 
 Latest shipped fix:
+- `09f8023 fix(opentable): avoid locator fallback on guest form`
+- Root cause from founder log: the fallback path called `page.getByPlaceholder`, but the provider raw page in this worker path does not expose the full Playwright locator API. That throw was then converted into a ready handoff because `reachedGuestForm=true`.
+- Fix: replace locator fallback with DOM `page.evaluate` filling, and make OpenTable guest-form errors in the executor return `error` instead of `paused_payment`.
+- Verification: `npx vitest run lib/__tests__/opentable-provider-policy.test.ts`, `npx tsc --noEmit --pretty false`, and `npx tsx scripts/check-drift.ts` all passed. No live retry from Codex yet.
+
+Previous shipped fix:
 - `f1f3665 fix(opentable): fill phone gate and stop before final submit`
 - OpenTable still uses the legacy Stagehand + local Playwright programmatic provider, not Computer Use.
 - Root cause: OpenTable's native phone verification gate was being switched to the flaky email path, then the blank form was misreported as a payment/CVC-ready handoff.
@@ -108,6 +114,7 @@ What I just merged from Claude:
 
 | Commit | Subject | Notes for Claude |
 |---|---|---|
+| `09f8023` | `fix(opentable): avoid locator fallback on guest form` | Founder log showed `page.getByPlaceholder is not a function`. Replaced OpenTable locator fallback with DOM-evaluate filling and blocked OpenTable guest-form errors from becoming `paused_payment`. Verified provider policy test + tsc + drift. |
 | `f1f3665` | `fix(opentable): fill phone gate and stop before final submit` | OpenTable founder E2E fix: fill the native phone verification gate directly when phone exists, only use email fallback without phone, never auto-click final `Complete reservation`, keep local review browser/session open 60 minutes, and add no-live policy regression test. Verified provider test + tsc + drift. |
 | `24e146e` | `fix(opentable): block ready status when diner fields are blank` | Adds an executor-level OpenTable guard before restaurant checkout returns. Visible empty diner fields now force manual/error handoff and keep the browser open, preventing false `Ready for payment` when email/phone are blank. Verified tsc + drift. |
 | `521fbc3` | `fix(opentable): verify diner fields before ready handoff` | Founder E2E found Sirrah checkout showed blank phone/email but UI reported ready. OpenTable now locator-fallback fills visible diner fields and throws `opentable_guest_form_incomplete` if any remain empty; executor no longer converts that error to paused_payment. Verified tsc + drift. |
