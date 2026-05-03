@@ -113,6 +113,9 @@ Current State Snapshot · 2026-05-03
 - 公开发布（HN + X + PH + Reddit launch post）
 - @onegent/mcp-server 加 tool annotations 后 npm 重发（~5min）
 - Live Stripe key 切换（等真有付费意愿用户）
+- **Inspire 模式 / Daydream Explorer**（Phase 3 主线之一）：homepage 第
+  二 CTA + DR explore mode；实现要点：30-template gallery 不用 LLM 自
+  由发挥；详见 2026-05-03 (cont. 2) 段战略定位锁定
 
 【Browserbase Infra 演进路线图（2026-04-30 决定）】
 关键决策：现在不升 Browserbase Pro，按用户增长曲线分阶段决定 infra
@@ -159,6 +162,153 @@ B 端基础设施 / Phase 0 UI / Positioning Shift 等）已归档至
 [PROJECT_SUMMARY_ARCHIVE_2026Q1.md](./PROJECT_SUMMARY_ARCHIVE_2026Q1.md)。
 
 按钮 / 功能行为速查见 [FEATURE_MAP.md](./FEATURE_MAP.md)。
+
+================================================================
+Recent Updates - 2026-05-03 (cont. 2) · 战略定位锁定 · 混合路线（不是纯基础设施）· Inspire 模式延后到 Phase 3 · template gallery > LLM 自由发挥
+================================================================
+
+【触发讨论】
+
+用户读到 PointsYeah "Daydream Explorer" 模式（输入 anywhere/beach/golf
+等弱意图，系统跨品类返回上百万方案，按 cents-per-point 排序），问两个
+问题：
+- Q1: Onegent homepage 要不要加 "Inspire me" 入口？DR 创建时让 AI
+  自己决定品类？
+- Q2: 未来 ChatGPT / Claude / 个人 agent 都要调用 onegent，那我们还
+  需要做 To-C 流量吗？
+
+Q2 是 Q1 的根，先决定定位再决定具体功能。
+
+【战略定位锁定：混合路线（infra + 自有窗口），不是纯基础设施】
+
+三条纯路线对比：
+
+| 路线 | 长什么样 | 例子 |
+|---|---|---|
+| 纯消费 | own front door, MAU 是核心，渠道靠 SEO/social/广告 | Tripadvisor / Hopper / Kayak |
+| 纯基础设施 | 只 B 端 API 服务 agent / partner，C 端不做 | Plaid / Stripe / Twilio / Auth0 |
+| **混合**（选这个）| Backend 主收入，但保留消费表面作为可信度 + landing + edge case sink + 可选订阅入口 | Notion API / Vercel / Supabase / 37signals |
+
+**7 个理由：哪怕走基础设施路线，消费表面也要保留**：
+
+1. **信任信号** — Agent 平台筛选合作伙伴时，"有真用户的产品" vs "只有
+   API" 评价不同。OpenAI Apps marketplace、Anthropic Claude Skills 都
+   更愿意 surface 有真实使用者的工具。
+2. **Edge case detection** — 真用户撞到的 bug 比聚合 agent 调用更早暴
+   露问题（agent 调用是过滤过的）。
+3. **定价权** — 自己有用户付费 = 有 reference price。卖给 agent
+   ecosystem 时，"我们 To-C 收 $9/月" 比"看着办" 谈判更稳。
+4. **被颠覆的对冲** — OpenAI 看到你 Resy 适配器赚钱，2 周内可以自己实
+   现。**有 direct users = 你被淘汰时还有救**。Plaid 早期最怕的就是
+   "Stripe 直接做账户聚合"——靠的就是已有银行客户绑定。
+5. **人才** — 工程师宁愿做"我朋友能用的东西"。招人时"自己用得起来"
+   是巨大加分项。
+6. **投资叙事** — Seed 轮 pitch "10000 用户 + 8 个 agent integration"
+   永远胜过 "只有 agent integration"。
+7. **领域学习** — agent 调用经过 NLU 抽象，丢失了用户最朴素的语言。直
+   接对 C 是产品改进的金矿。
+
+**关键 caveat**：消费表面**不需要做成 Tripadvisor**。做成 Vercel /
+Supabase / 37signals 模式：1 个 self-serve 入口，付费 funnel 走通，
+Trip Portfolio 公开，benchmark 公开，**不追百万 MAU、不烧广告**。
+
+参照人物：
+- **DHH / 37signals**: 1 个 Basecamp，一直自给自足
+- **Stripe / Linus**: API + 良好 dev 文档 + 自己也是用户
+- **Vercel**: B2B 主收入但保留 vercel.com showcase
+
+【Inspire 模式具体评估】
+
+PointsYeah Daydream 之所以成立：**points booking 自带 cents-per-point
+客观排序锚**。输入 anywhere → 按 cpp 排 → 最优秀 deals 浮上来。
+
+Onegent 直接照搬"Inspire me"会撞 4 个问题：
+1. 没有 cpp 这种客观排序锚 → 每次返回都是 LLM 主观挑选，用户感知随机
+2. 跨品类组合的"对错"标准模糊 → A 用户觉得 X 餐厅好，B 觉得不好
+3. LLM cost 高 → 每次 inspire 调用 = 大 prompt + 候选池抓取
+4. **核心矛盾**：Onegent 现在工程能力只能保证"用户说订 Buvette → 帮
+   他订到"——还做不到"Buvette 都还没订成的情况下，去推荐替代方案"
+
+**结论**：现在不做 Inspire mode。**放进 Phase 3（公开发布期）**做。
+
+【Phase 节奏与消费表面投入】
+
+```
+Phase 0  ████████████████░░░░  80%   ← 当前
+   "证明能订一家餐厅"
+   消费表面投入：0
+   
+Phase 1  ░░░░░░░░░░░░░░░░░░░░    0%
+   "真用户在 prod 跑通一笔订单"
+   消费表面投入：维持现有（Trip Portfolio / Pricing / MCP server）
+   
+Phase 2  ░░░░░░░░░░░░░░░░░░░░    0%
+   "扩到 hotels/flights/activities，垂直饱和"
+   消费表面投入：开始（public benchmark dashboard / Trip Portfolio
+   强化 / curated templates "Date Night NYC" 等）
+   
+Phase 3  ░░░░░░░░░░░░░░░░░░░░    0%   ← Inspire mode 时机
+   "公开发布 + 内容/社区/SEO/Inspire 探索入口"
+   消费表面投入：homepage 第二 CTA / DR explore mode / newsletter /
+   HN/PH launch
+   
+Phase 4  ░░░░░░░░░░░░░░░░░░░░    0%
+   "规模化基础设施 + B2B + agent ecosystem 强渠道"
+```
+
+**Phase 0/1 不做 Inspire 的硬理由**：
+- Inspire mode 价值假设：用户进 → 看推荐 → 选一个 → **订成**
+- 现在订不成 → Inspire 把用户带进去结尾"订单失败"，比没 Inspire 更伤
+- 等 Phase 1 declare 后真订单 funnel 走通再做 Inspire，叙事是闭环
+
+【Inspire 模式具体实现要点（Phase 3 实施时参考）】
+
+不做"无限可能性 LLM 自由发挥"。做成 **template gallery**：
+- 30 个手工预设模板（"Friday night date <$150 Williamsburg" 等）
+- 用户输入弱意图，系统**只在模板池内匹配 + 微调**
+- 客观可控、低成本、可优化、不会跑偏
+- 跟 PointsYeah 一样有客观锚（"周内最热门 / 性价比最高"）
+- 模板池本质上是已有 Weekend Trip OS / Date Night OS 的 entry-point
+  扩展，不是新功能
+
+参照思路：
+- **Sam Altman**: "Make something people want, then make people want
+  it." 你现在在第一步。
+- **Paul Graham**: "Do things that don't scale" 早期。Inspire 一开始
+  就是 30 个手工模板，不是 LLM 自由。
+- **DHH**: 不做你不会自己用的功能。你现在 Inspire 自己会用吗？大概率
+  不会——你已经知道要订什么。
+
+【现在该做 vs 之后该做的具体清单（执行清单）】
+
+**Phase 0/1 期间（现在到 ~2 周后）**：
+- ❌ 不做：Inspire mode、Daydream Explorer、新 homepage hero、social
+  feed、内容 SEO
+- ✅ 做：单 task path 跑通、/tasks/[taskId] 真实页面（已 ship 95%）、
+  Trip Portfolio / Pricing / MCP server 维持
+
+**Phase 2 期间（vertical 扩展，~3-4 个月）**：
+- 启动消费表面投入
+- Trip Portfolio public 强化
+- Public benchmark dashboard "84% reliability" — credibility play
+- Curated templates（"Date Night NYC" / "Weekend Trip Brooklyn"）
+
+**Phase 3 期间（公开发布）**：
+- homepage 第二 CTA "Inspire me"（不替代主 CTA）
+- DR explore mode：DR 创建时让 AI 决定品类
+- Newsletter "this week in NYC"
+- HN / Product Hunt launch
+
+【与 Phase 1 plan 的关系】
+
+PHASE_1_PLAN.md 里 Out-of-scope 清单已经把 "Social Feed / ChatGPT
+Apps / B2B Lane C / live Stripe" 等划到 Phase 2-3。本次锁定的"Inspire
+mode 在 Phase 3"是这个 Out-of-scope 清单的精确化补充——它不是"以后某
+天要做"，而是"Phase 3 主线之一"。
+
+【最危险的不是没 Inspire】
+
+最危险的是"还没有第一笔成功订单"。先解后者。
 
 ================================================================
 Recent Updates - 2026-05-03 (cont. 1) · R-003 reaches Computer Use · OTP transitional rule § 7.5 · Track B ships 16 more commits · Phase 1 plan authored
