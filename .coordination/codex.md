@@ -1,8 +1,8 @@
 # Codex - coordination state
 
 > **Branch**: `codex/openai-chat-model-env`
-> **Last updated**: 2026-05-03 14:55 UTC
-> **Last commit**: `6956a43`
+> **Last updated**: 2026-05-03 15:06 UTC
+> **Last commit**: pending
 >
 > Claude reads this at session start. I write to it before each push.
 > See `CLAUDE.md` section "coordination protocol".
@@ -11,7 +11,7 @@
 
 ## Currently doing
 
-Fixing a P0 OpenTable exact-venue guard found during founder E2E.
+Fixing two founder E2E findings from the Buvette/OpenTable run.
 
 Current local test finding:
 - A fresh Buvette task reached OpenTable, but OpenTable returned a visible `Sirrah` result because the review text mentioned Buvette. The worker clicked the 8:00 PM slot and landed on `Sirrah` booking details. This is a severe wrong-venue risk.
@@ -23,6 +23,8 @@ Current local test finding:
   - refuse unrelated result-card slots when the requested venue title is absent,
   - re-use the same restaurant target in post-click booking-details validation.
 - Verification: `npx tsc --noEmit --pretty false` passed; `npx tsx scripts/check-drift.ts` passed. No live retry from Codex yet.
+- Screenshot rail bug: live snapshot JSON includes both `url` (the browser page URL) and `imageBase64` (the screenshot). The UI normalizer treated `url` as `<img src>`, so it rendered a broken image. Patched `components/task-timeline/use-snapshots.ts` to prefer `imageBase64` as a `data:image/jpeg;base64,...` source and use `title` as the fallback label.
+- Verification after snapshot fix: `npx tsc --noEmit --pretty false` passed; `npx tsx scripts/check-drift.ts` passed. Local `.debug-screenshots/live/...` entries have non-empty `imageBase64`.
 
 Do not click "Complete reservation" in the existing Sirrah browser tab. After this patch, Buvette should either match an exact Buvette result or safely no-availability/fallback; it should not continue into Sirrah.
 
@@ -83,6 +85,7 @@ What I just merged from Claude:
 
 | Commit | Subject | Notes for Claude |
 |---|---|---|
+| pending | `fix(timeline): render local snapshot image payloads` | Snapshot endpoint returns page `url` plus screenshot `imageBase64`; UI was using `url` as image src. Now prefers base64 data URL and uses `title` for label. Verified tsc + drift. |
 | `6956a43` | `fix(opentable): refuse unrelated search-result slots` | Founder E2E found Buvette -> Sirrah wrong-venue risk. OpenTable now title-scopes restaurant result cards before slot clicks and reuses the restaurant target for booking-details validation. Verified tsc + drift. No live retry from Codex. |
 | `72c80c5` | `fix(tasks): clear stale step errors after core success` | Founder E2E Buvette reached `paused_payment` but UI showed failed because stale `step.error` survived result mapping. Worker + in-process core mapping now clears stale errors for success/awaiting/no-availability statuses. Verified root tsc + 22 core integration tests. No live Computer Use run from Codex. |
 | `3043a29` | `merge: land founder E2E polish` | Merges Claude `founder-e2e-polish`: quick/full walkthrough split, stop conditions, stronger bug template, and R-003 reference. Verified tsc. No live calls. |

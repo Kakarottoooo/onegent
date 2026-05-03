@@ -140,8 +140,16 @@ function normalizeSnapshot(raw: unknown): ExecutionSnapshot | null {
 
   const id = r.id ?? r.snapshot_id ?? r.snapshotId;
   const ts = r.ts ?? r.created_at ?? r.timestamp;
-  // Codex may use `url` (CDN/blob) or `src` (data URL) or `image_url`
-  const src = r.src ?? r.url ?? r.image_url ?? r.dataUrl;
+  // Local worker snapshots include both `url` (the browser page URL) and
+  // `imageBase64` (the screenshot). Prefer image payloads; treating the page
+  // URL as <img src> renders a broken image.
+  const imageBase64 = r.imageBase64;
+  const src =
+    r.src ??
+    r.image_url ??
+    r.dataUrl ??
+    (typeof imageBase64 === "string" ? `data:image/jpeg;base64,${imageBase64}` : undefined) ??
+    r.url;
   if (typeof id !== "string" || typeof ts !== "string" || typeof src !== "string") {
     return null;
   }
@@ -150,7 +158,10 @@ function normalizeSnapshot(raw: unknown): ExecutionSnapshot | null {
     id,
     ts,
     src,
-    label: typeof r.label === "string" ? r.label : undefined,
+    label:
+      typeof r.label === "string" ? r.label :
+      typeof r.title === "string" ? r.title :
+      undefined,
     naturalWidth: typeof r.width === "number" ? r.width : undefined,
     naturalHeight: typeof r.height === "number" ? r.height : undefined,
   };
