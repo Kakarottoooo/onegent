@@ -1,9 +1,38 @@
 # Phase 1 Plan — From declared to first paying user
 
 > **Date opened**: 2026-05-03
-> **Status**: 🔵 Pending Phase 0 declaration (gated by Phase 0 acceptance gate per `BENCHMARK_RESTAURANT_100.md` § 7.2)
+> **Last updated**: 2026-05-03 (post Phase 1 #7 path B + hardening + smoke)
+> **Status**: 🟢 ~95% shipped; **#8 founder E2E walkthrough is the only remaining gate** (#5 OTP resume conditional, doesn't fire unless Phase 0A picks Gmail OTP fallback)
 > **Owners**: codex (Track A, backend) · Claude (Track B, UI + observability)
-> **Archive criteria**: when (a) `claude/festive-pare-f27273` is merged to master, (b) a real (non-fixture) Resy task runs end-to-end through `/tasks/[taskId]` in production, AND (c) the first paying user successfully completes a booking. Then this file moves to `PROJECT_SUMMARY_ARCHIVE_*` and Phase 2 plan opens.
+> **Archive criteria**: when (a) `claude/festive-pare-f27273` is merged to master ✅ (done via `c2be764`), (b) a real (non-fixture) Resy task runs end-to-end through `/tasks/[taskId]` in production (gated on Phase 0A R-003 live smoke #3), AND (c) the first paying user successfully completes a booking. Then this file moves to `PROJECT_SUMMARY_ARCHIVE_*` and Phase 2 plan opens.
+
+---
+
+## 📌 Status snapshot (2026-05-03)
+
+每个 deliverable 的当前状态。详细解释见后面 § Deliverables 表。
+
+| # | Item | Status | Closure commit |
+|---|---|---|---|
+| 1 | Master typecheck cleanup | ✅ done | codex `3c95561` |
+| 2 | `/api/v1/users/me/profile` PATCH | ✅ done | codex `48c80b2` |
+| 3 | Cookie-auth proxy `/api/v1/*` | ✅ done | codex `48c80b2` |
+| 4 | Track B Phase 1 UI merge | ✅ done | codex `c2be764` |
+| 5 | OTP resume | ⏸ conditional pending | gated by Phase 0A path choice |
+| 6 | `/tasks/[taskId]` real API wire | ✅ done | Claude `e098252` |
+| 7 | ProfileGapCard hookup to homepage | ✅ done | Path A `8500af3` + Path B `4cdaa36` + safety + hardening `f423b56` |
+| 8 | Founder E2E walkthrough | ⏳ pending | gated by user (60-90 min manual + 30s `npm run smoke:phase1` preflight) |
+
+**Bonus shipped (not on the original list but landed during Phase 1)**:
+- ✅ Q15 Option (i): backend emits `payload.profile_gap` (codex `7289ba0`)
+- ✅ Audit Finding 5: cancel updates `task.state` (codex `7289ba0`)
+- ✅ Path B safety: `dispatchProfilePatch → Promise<boolean>` blocks booking on failed save (codex during `4cdaa36`)
+- ✅ Path B hardening: helper extraction + 19 tests + `/dev/path-b-demo` (Claude `f423b56` cherry-pick)
+- ✅ no-token founder smoke harness `npm run smoke:phase1` (Claude `f9dd0ba`)
+
+**进入 Phase 1 declared 的最后一道门**: 用户跑完 founder E2E walkthrough，满足 § Definition of done 的 6 条。
+
+---
 
 ---
 
@@ -36,16 +65,18 @@ If 1-6 work for at least one user (could be the founder testing on a personal ac
 
 | # | Item | Owner | Est | Depends on | Status |
 |---|---|---|---|---|---|
-| 1 | Master typecheck cleanup (17 TS errors) | codex | 1-3h | — | 🟡 in progress |
-| 2 | `/api/v1/users/me/profile` PATCH endpoint OR cookie-auth equivalent | codex | 4-8h | #1 | ❌ not started |
-| 3 | Cookie-auth proxy for `/api/v1/*` (browser session → API-key validity inside the proxy layer) | codex | 4-8h | #1 | 🟡 in flight per codex |
-| 4 | `claude/festive-pare-f27273` → `master` merge | codex | 1h | #1 | ❌ not until #1 clean |
-| 5 | OTP resume **if** Phase 0 used the soft-handoff path AND warm session strategy didn't close the gap | codex | 2-5d | Phase 0 result | ⏸ conditional |
-| 6 | `/tasks/[taskId]` production wire (replace 2 SWAP POINT comments with real fetch calls) | Claude | 2h | #2, #3 | 🟡 page UI shipped, fetch swap pending |
-| 7 | ProfileGapCard wire to homepage chat (replace mock NLU consumer with real PATCH dispatch) | Claude | 4h | #2, #3 | 🟡 mock E2E ready in `/dev/profile-gap-flow`; production swap pending |
-| 8 | First real user E2E walkthrough (founder test on production) | user | 1h | All above | ❌ not until 1-7 done |
+| 1 | Master typecheck cleanup (17 TS errors) | codex | 1-3h | — | ✅ done (`3c95561`) |
+| 2 | `/api/v1/users/me/profile` PATCH endpoint OR cookie-auth equivalent | codex | 4-8h | #1 | ✅ done (`48c80b2`) |
+| 3 | Cookie-auth proxy for `/api/v1/*` (browser session → API-key validity inside the proxy layer) | codex | 4-8h | #1 | ✅ done (`48c80b2`) |
+| 4 | `claude/festive-pare-f27273` → `master` merge | codex | 1h | #1 | ✅ done (`c2be764`) |
+| 5 | OTP resume **if** Phase 0 used the soft-handoff path AND warm session strategy didn't close the gap | codex | 2-5d | Phase 0 result | ⏸ conditional (gated by Phase 0A R-003 #3 outcome) |
+| 6 | `/tasks/[taskId]` production wire (replace 2 SWAP POINT comments with real fetch calls) | Claude | 2h | #2, #3 | ✅ done (`e098252`; cookie-auth Just Works for real UUIDs, demo IDs hit fixture short-circuit) |
+| 7 | ProfileGapCard wire to homepage chat (replace mock NLU consumer with real PATCH dispatch) | Claude | 4h | #2, #3 | ✅ done — Path A `8500af3` (mid-conversation `apply_profile_patch` dispatcher) + Path B `4cdaa36` (booking-blocked inline `ProfileGapCard`) + Path B hardening `f423b56` (helpers + 19 tests + `/dev/path-b-demo`) |
+| 8 | First real user E2E walkthrough (founder test on production) | user | 1h | All above | ⏳ pending — checklist in `PHASE_1_FOUNDER_E2E.md`; preflight via `npm run smoke:phase1` (`PHASE_1_E2E_SMOKE.md`) |
 
 **Total work-time**: ~15-25 person-hours codex + ~6h Claude + 1h user = ~3 days realistic IF OTP resume is not needed; **~2 weeks** if OTP resume is part of Phase 1.
+
+**Actual calendar (retrospective)**: opened 2026-05-03, ~95% shipped same day via codex backend + Claude bulk UI/docs split. Founder E2E walkthrough is the gating manual step. OTP resume hasn't fired (Phase 0A still in flight; warm-session-first decision still standing).
 
 **Calendar time**: depends on how many of these can run in parallel.
 
