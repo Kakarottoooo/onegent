@@ -7,6 +7,7 @@
  */
 
 export { default as MetricCard } from "./MetricCard";
+export { default as GateBreakdown } from "./GateBreakdown";
 export { default as BucketDistribution } from "./BucketDistribution";
 export { default as FailureTaxonomyChart } from "./FailureTaxonomyChart";
 export { default as CaseTable } from "./CaseTable";

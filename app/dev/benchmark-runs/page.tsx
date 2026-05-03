@@ -21,6 +21,7 @@ import {
   CaseDetailDrawer,
   CaseTable,
   FailureTaxonomyChart,
+  GateBreakdown,
   MetricCard,
   TAXONOMY_LABEL,
   Validator,
@@ -266,6 +267,8 @@ export default function BenchmarkRunsPage() {
                 />
               </div>
             </section>
+
+            <GateBreakdown metrics={metrics} results={cases} />
 
             <BucketDistribution
               cases={cases}
