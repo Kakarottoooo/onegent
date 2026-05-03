@@ -16,11 +16,13 @@ describe("OpenTable provider safety policy", () => {
     expect(providerSource).toContain("phone-only form detected - filling phone directly");
     expect(providerSource).toContain("phone-only direct fill result");
     expect(providerSource).toContain("phone-only coordinate typing result");
+    expect(providerSource).toContain("diner form state unreadable after phone gate fill");
     expect(providerSource).toContain("coordinate typing");
     expect(providerSource).toContain("phone-only form detected without usable phone - clicking 'Use email instead'");
     expect(providerSource).not.toContain("phone-only form detected - clicking 'Use email instead'");
     expect(providerSource).not.toContain("getByPlaceholder");
     expect(providerSource).not.toContain("getByLabel");
+    expect(providerSource).not.toContain('empty: ["email"]');
   });
 
   it("does not auto-click the final Complete reservation button", () => {

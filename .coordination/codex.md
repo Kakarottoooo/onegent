@@ -1,8 +1,8 @@
 # Codex - coordination state
 
 > **Branch**: `codex/openai-chat-model-env`
-> **Last updated**: 2026-05-03 17:21 UTC
-> **Last commit**: `9dba4dd`
+> **Last updated**: 2026-05-03 17:35 UTC
+> **Last commit**: pending
 >
 > Claude reads this at session start. I write to it before each push.
 > See `CLAUDE.md` section "coordination protocol".
@@ -11,7 +11,20 @@
 
 ## Currently doing
 
-Idle after shipping the fourth OpenTable guest-form fix. Waiting for a fresh founder E2E retry after dev + worker restart.
+Shipping a fifth OpenTable guest-form fix after founder retry showed the phone gate still never received an actual click/type.
+
+Current root cause from `codex-worker.log`:
+- Search/listing -> booking details works. The provider programmatically clicks the requested OpenTable time slot (`clicked time slot "8:00 PM"`), then reaches `/booking/details`.
+- The failure is only at the phone gate. `formType` can see the phone-only form, but the later complex diner-field locator/diagnostic scans throw `StagehandEvalError`, so coordinate typing never finds a target.
+- This is still the legacy Stagehand/local Playwright programmatic OpenTable provider path, not Computer Use.
+
+Current patch:
+- Added a dedicated minimal `locateOpenTablePhoneGate` path that uses only stable direct input attributes (`type=tel`, placeholder, aria/id/name/autocomplete) and avoids context/closest text scans that were throwing in the Stagehand wrapper.
+- Removed complex context-based classification from the generic fallback path.
+- If the phone gate was successfully clicked/typed but the final form-state read is still unreadable, return a manual-review handoff instead of misclassifying it as `email` missing.
+- Coordinate typing now accepts the phone gate after successful compatible input even when the verifier readback is flaky; final state validation still blocks if it can read an actually empty field.
+- Mirrored provider to `worker/src/...`.
+- Verification: `npx vitest run lib/__tests__/opentable-provider-policy.test.ts`, `npx tsc --noEmit --pretty false`, and `npx tsx scripts/check-drift.ts` passed. No live retry from Codex.
 
 Latest shipped fix:
 - `78c87a9 fix(opentable): classify phone gate before country wrapper text`
