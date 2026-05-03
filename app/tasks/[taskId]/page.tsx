@@ -461,7 +461,7 @@ export default function TaskDetailPage() {
     } finally {
       setMutating(null);
     }
-  }, [state, isDemoId, fetchTask]);
+  }, [taskId, state, isDemoId, fetchTask]);
 
   /* ─── Render ──────────────────────────────────────────────────── */
 
