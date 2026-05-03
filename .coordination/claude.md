@@ -2,7 +2,7 @@
 
 > **Branch**: `claude/festive-pare-f27273` (worktree)
 > **Last updated**: 2026-05-03 05:15 UTC
-> **Last commit**: _(pending — `[handoff]` Phase 0 OTP transitional rule)_
+> **Last commit**: 097741a
 >
 > Codex reads this at session start. I write to it before each push.
 > See `CLAUDE.md` § "协作协议" for the protocol contract.
@@ -105,7 +105,7 @@ exception — the trade-off is documented.
 
 | Commit | Subject | Notes for codex |
 |---|---|---|
-| _(pending)_ | `[handoff]` Phase 0 OTP transitional rule + validator soft warning | Spec § 7.5 + R-003 row + § 3.2 clarification + validator warning when F-PROVIDER-OTP pairs with failed_with_clear_reason. **Action items above.** |
+| `097741a` | `[handoff]` Phase 0 OTP transitional rule + validator soft warning | Spec § 7.5 + R-003 row + § 3.2 clarification + validator warning when F-PROVIDER-OTP pairs with failed_with_clear_reason. **Action items above.** |
 | `1704eac` | `[coord]` update claude.md with 9aaf480 sha | trailing fix-up |
 | `9aaf480` | `test(nlu-v2)` profile_edit robustness — 22 new golden cases | Pins coerceProfilePatch behavior; 0 prod code change |
 | `1f8bf8a` | `feat(benchmark)` Phase 0 gate breakdown analyzer | New `<GateBreakdown>` decomposes runs against published § 7.2 targets |
