@@ -28,8 +28,8 @@
 
 | Phase | 名字 | What "done" means | Est calendar |
 |---|---|---|---|
-| **0A** | Resy + Computer Use | 1 R-003 live smoke 不烧 OTP token + 4-metric gate 在 spec 范围内 OK | days |
-| **0B** | Restaurant v1 | Resy 5-case → 25-case 都过 + OpenTable parallel coverage（OpenTable Phase 0） | 2-3 weeks |
+| **0A** | Resy + Computer Use | 1 R-003 live smoke 在 spec 范围内返回 booking-ready / safe handoff / correct no-availability，且 0 severe error | days |
+| **0B** | Restaurant v1 | Resy smoke subset → observed Resy fixture suite → OpenTable parallel coverage（OpenTable Phase 0） | 2-3 weeks |
 | **1** | First paying user | Founder 完整跑 `homepage chat → /tasks/[taskId] → ready_for_confirmation → 一键 confirm`，cookie-auth 全程 | days |
 | **1.5** | Polish | Phase 1 founder E2E 暴露的 UX gap 集合（迟到 ticket 桶）| as needed |
 | **2** | Vertical expansion | OpenTable Phase 0 + Booking.com hotel + Expedia hotel + Flights + Activities | 3-4 months |
@@ -50,12 +50,12 @@
 - ✅ § 7.5 OTP transitional rule 写入 spec
 - ✅ Q11 R-003 expectedOutcomes 显式扩 `no_availability_correct`（option a）
 - ✅ Token 守卫: `--live-openai` + `--confirm-suite` 双层
-- ✅ Resy fixture 完整：`benchmark/restaurant-resy-phase0.json` 5 cases × R-001 ~ R-005
+- ✅ Resy fixture exists：`benchmark/restaurant-resy-phase0.json` 当前 observed 22 rows（doc 目标 25；fixture notes 明确不 invent missing cases）
 
 **未完成**
 - ⏳ R-003 smoke #3 live 运行（pending codex go-decision）
 - ⏳ Warm session PoC（blocked — 还没有 Resy case 真撞到 OTP wall；R-003 #3 跑出来再决定）
-- ⏳ 25-case suite 跑（**严格 gated**：只有 R-003 #3 通过 + warm session PoC 完成才允许）
+- ⏳ observed Resy fixture suite 跑（**严格 gated**：只有 R-003 #3 通过 + warm session PoC 完成/或明确不需要才允许）
 
 **下一步 owner**：codex
 
@@ -65,13 +65,13 @@
 
 ## Phase 0B — Restaurant v1 (0%, gated)
 
-**Goal**: Resy 完整 25-case ≥ 80% booking-ready + OpenTable Phase 0 同样标准。这是声明 "Restaurant 这个 vertical 真的可用" 的门。
+**Goal**: Resy observed fixture suite（向 25-case 补齐）≥ 80% booking-ready + OpenTable Phase 0 同样标准。这是声明 "Restaurant 这个 vertical 真的可用" 的门。
 
 **已完成**: 无（gated by 0A）
 
 **未完成**:
-- Resy 5 case (R-001 ~ R-005) 单跑通过
-- Resy 25 case suite 通过 4-metric gate (≥80% booking-ready / ≥95% safe-outcome / =0 severe / 100% taxonomy)
+- Resy smoke subset 单跑通过（从 R-003 + 其他 stable cases 开始）
+- Resy observed fixture suite 通过 4-metric gate (≥80% booking-ready / ≥95% safe-outcome / =0 severe / 100% taxonomy)，并补齐 doc 目标 25 cases 的缺口
 - OpenTable Phase 0 spec 写出来（mirror BENCHMARK_RESTAURANT_100.md 格式）
 - OpenTable benchmark fixture（25 cases）
 - OpenTable adapter 在 `lib/booking-autopilot/providers/opentable-com.ts` 跑通基线

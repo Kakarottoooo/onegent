@@ -32,8 +32,8 @@ R-003 live smoke 一次跑会烧 OpenAI tokens（`gpt-5.5` Computer Use turn 数
 - [ ] OpenAI account billing 没欠费（用户消息：2026-04-27 "OpenAI credit 已恢复"）
 - [ ] OpenAI API key in env (`.env.local` 或 Railway worker env)
 - [ ] **Model allowlist**: 当前唯一允许的 model 是 `gpt-5.5`（Computer Use GA）—— 不要 fallback 到 `gpt-4o` / `gpt-4-turbo`
-- [ ] Browserbase key 没欠费（live smoke 跑在 Browserbase session 里）
-- [ ] 单次 R-003 token 上限设了（建议 `OPENAI_BUDGET_USD_PER_RUN=2.00`）
+- [ ] 当前本地路径不依赖 Browserbase：Next API 创建 task，local worker claim job，Computer Use 使用本地 Playwright context。只有显式切回 Browserbase 时才检查 Browserbase billing。
+- [ ] 已人工确认本次只跑单 case。当前 runner 没有实现 `OPENAI_BUDGET_USD_PER_RUN` 硬限；成本控制靠 `--case R-003`、`--live-openai`、不传 `--confirm-suite`、8 分钟超时 kill。
 
 ### 0.3 Spec / Fixture
 - [ ] `BENCHMARK_RESTAURANT_100.md` § 4 R-003 row 当前 expectedOutcomes 包含: `ready_for_confirmation` / `safe_handoff` (含 `F-PROVIDER-OTP`) / `no_availability_correct` (Q11(a) 显式扩)
@@ -68,10 +68,15 @@ npx vitest run \
 
 ### 1.3 Phase 1 founder smoke
 ```bash
-# 起 dev server
-npm run dev > ./dev.log 2>&1 &
+# Terminal A: 起 Next dev server
+# Codex detached worktree 里 Turbopack 可能因 symlinked node_modules panic，优先用 webpack。
+npx next dev --webpack > ./dev.log 2>&1
 
-# 装 chromium（一次性）
+# Terminal B: 起 local worker（restaurant 当前被 USE_WORKER_FOR 路由到 worker）
+cd worker
+npm run dev > ../worker.log 2>&1
+
+# 一次性安装 chromium（如果 smoke 报 missing browser）
 npx playwright install chromium
 
 # 跑 6-route smoke
@@ -93,30 +98,28 @@ npx vitest run lib/booking-autopilot
 
 ## 2. 单 R-003 live 执行
 
-### 2.1 命令占位（codex 替换为实际）
+### 2.1 实际命令（single-case）
 ```bash
-# 严格 single-case，双层 token guard
+# Terminal C: 严格 single-case。不要传 --confirm-suite；它只用于 multi-case suite。
 npx tsx scripts/run-phase0-resy-benchmark.ts \
   --case R-003 \
   --live-openai \
-  --confirm-suite \
-  --output benchmark/runs/R003-live-${TIMESTAMP}.json
+  --allow-failures
 ```
 
-> **注意**: 上面的 `scripts/run-phase0-resy-benchmark.ts` 是 codex 的 file ownership 区
-> （`Track A file ownership` per `origin/master:.coordination/codex.md`）。
-> 实际命令以 codex 当前实现为准；这里只是占位。Claude 不动这个脚本。
+The runner writes a report under `benchmark/runs/` automatically for non-dry runs. It currently has no `--output` flag.
 
 ### 2.2 跑之前再确认一次
 - [ ] 不是 25-case suite（**禁止**：见 § 4）
 - [ ] 不是多 case 跑
 - [ ] 不是 dry-run（这是 real live）
 - [ ] log 落盘，不只 stdout（事后 audit 用）
+- [ ] Terminal A + B 都在跑；如果 worker 没起，task 会停在 queued / waiting executor，不要误判为 CU failure。
 
 ### 2.3 跑期间监控
 - 浏览器 dev console 没报红
 - worker.log / dev.log 没 stack trace
-- Browserbase session viewer 能看到流量正常
+- local worker 有 claim job log；任务 timeline 有 execution events
 - 单 case 不应跑超 8 分钟；超时立即 kill
 
 ---
@@ -127,7 +130,7 @@ npx tsx scripts/run-phase0-resy-benchmark.ts \
 - Resy 把 R-003 推到了 `ready_for_confirmation` 状态
 - 用户一键 confirm 就能下单
 - 这是 happy path；记录 4-metric gate 数据
-- **下一步**: 进 Phase 0B（5→25 case）
+- **下一步**: 先跑 Resy 5-case subset，再决定是否进 25-case suite。
 
 ### 3.2 ✅ safe_handoff w/ F-PROVIDER-OTP （§ 7.5 transitional acceptable）
 - Resy 卡 OTP wall（用户邮箱 / SMS code）
@@ -138,8 +141,8 @@ npx tsx scripts/run-phase0-resy-benchmark.ts \
 ### 3.3 ✅ no_availability_correct （Q11(a) 显式扩）
 - R-003 venue 那个时间点真没位
 - Computer Use 正确读出 "no availability" 并返回
-- 这是 spec 里显式接受的 outcome（不是 R-001~R-005 默认 happy path 的语义）
-- **下一步**: 选另一个 R-001~R-005 case 验 happy path
+- 这是 spec 里显式接受的 outcome（不是所有 stable case 都默认接受的语义）
+- **下一步**: 选 fixture 里的另一个 stable Resy case 验 happy path。
 
 ### 3.4 ❌ 任何其他 outcome（real bug）
 - `failed` with terminal reason ≠ OTP / no-availability
@@ -157,7 +160,7 @@ npx tsx scripts/run-phase0-resy-benchmark.ts \
 |---|---|
 | 25-case suite 跑（除非 R-003 ✅ + warm session PoC ✅）| 单 case 没过 25-case 烧的就是 25× R-003 token |
 | 同一 case 短时间内重跑 ≥ 3 次 | 大概率是同一个 bug；多跑 = 多烧 token；看 log 就好 |
-| 跑非 R-003 case 之前 R-003 没 ✅ | R-001/R-002/R-004/R-005 在不同 venue + provider 状态下；R-003 是 baseline |
+| 跑非 R-003 case 之前 R-003 没 ✅ | 其他 fixture case 在不同 venue + availability 状态下；R-003 是 baseline |
 | 用 `gpt-4o` / `gpt-4-turbo` 替代 `gpt-5.5` | Computer Use 行为差异；不是 spec 范围内 model |
 | 不带 `--confirm-suite` 跑 multi-case | token guard 这层就是为了防意外多跑 |
 | 跑 live 时同时改 master 上 NLU / executor 代码 | race condition 制造，事后 attribution 会乱 |
@@ -190,7 +193,7 @@ codex 在 `.coordination/codex.md` 的 § 📩 Acks 段加一行 → Claude sess
 | 卡 OTP（Resy 弹码框）| § 7.5 transitional acceptable；per-case OK | record `F-PROVIDER-OTP`；启动 warm session PoC |
 | worker race / stuck job | 跑期间有人改 worker code OR Neon 连接断 | check worker.log；rollback 改动；retry |
 | OpenAI 4xx/5xx | key 失效 / billing / model 不对 | 检查 § 0.2 |
-| Browserbase 拒连 | 会话耗尽 / billing | 检查 Browserbase dashboard |
+| task 一直 queued | local worker 没起，或 worker env 没加载 | 启 `cd worker; npm run dev`，检查 `worker.log` claim 行 |
 
 ---
 

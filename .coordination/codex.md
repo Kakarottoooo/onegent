@@ -1,8 +1,8 @@
 # Codex - coordination state
 
 > **Branch**: `master`
-> **Last updated**: 2026-05-03 12:37 UTC
-> **Last commit**: `2bedc91`
+> **Last updated**: 2026-05-03 12:46 UTC
+> **Last commit**: `d0d5d32`
 >
 > Claude reads this at session start. I write to it before each push.
 > See `CLAUDE.md` section "coordination protocol".
@@ -11,7 +11,7 @@
 
 ## Currently doing
 
-Idle after Phase 1 no-token smoke + R-003 readiness preflight.
+Idle after landing Claude phase status docs and applying Codex runbook corrections.
 
 What I just shipped:
 - Merged `origin/claude/phase-1-e2e-smoke` into master as `f9dd0ba`.
@@ -41,6 +41,12 @@ R-003 live command when user explicitly authorizes token spend:
 3. Terminal C: `npx tsx scripts/run-phase0-resy-benchmark.ts --case R-003 --live-openai --allow-failures`.
 4. Do not pass `--confirm-suite` for single-case R-003. Multi-case live runs require both `--live-openai` and `--confirm-suite`.
 
+What I just merged from Claude:
+- `origin/claude/phase-status-docs` merged into master as `d0d5d32`.
+- Added `PHASE_STATUS.md`, `UI_MIGRATION_MAP.md`, `R003_LIVE_SMOKE_RUNBOOK.md`, and refreshed `PHASE_1_PLAN.md`.
+- Codex corrected the runbook after review: removed single-case `--confirm-suite`, removed unsupported `--output`, replaced Browserbase assumptions with current local Next + local worker + local Playwright path, and fixed Resy fixture count wording.
+- Verification after docs merge: `npx tsc --noEmit --pretty false` passed. No live calls.
+
 ## Blocking on Claude
 
 (none)
@@ -49,6 +55,7 @@ R-003 live command when user explicitly authorizes token spend:
 
 | Commit | Subject | Notes for Claude |
 |---|---|---|
+| `d0d5d32` | `merge: land phase status docs` | Merges Claude `phase-status-docs` and Codex-reviewed Phase 0/1 status docs. Codex follow-up corrected R-003 runbook commands and current local-worker assumptions before push. |
 | `2bedc91` | `[coord] sha fix-up cd34997` | Coordination sha fix after Phase 1 no-token smoke landing. |
 | `cd34997` | `[coord] report Phase 1 smoke landing` | Documents merge verification and Turbopack symlink workaround. |
 | `f9dd0ba` | `merge: land Phase 1 no-token smoke` | Merges Claude `phase-1-e2e-smoke`: `scripts/smoke-phase1.mjs`, `npm run smoke:phase1`, `PHASE_1_E2E_SMOKE.md`, and founder E2E preflight docs. Verified tsc + drift + 350 targeted tests + smoke 6/6 using webpack dev server in Codex symlinked worktree. No live calls. |
@@ -71,9 +78,9 @@ R-003 live command when user explicitly authorizes token spend:
 
 ## Open questions for Claude
 
-- Phase 1 no-token smoke is landed and R-003 dry-run/guard readiness is green. Do not run live from Claude.
-- If Claude is doing the docs/status assignment from user, include the live R-003 command above and the requirement that local worker is running when `USE_WORKER_FOR` includes `restaurant`.
-- Keep Track B work docs/UI/dev-only. Do not start Phase 2 vertical implementation yet.
+- Phase status docs are landed. Do not run live from Claude.
+- Next Track B task, if user asks for more before live smoke: founder-facing copy polish only in `PHASE_1_FOUNDER_E2E.md` / `/dev` docs, or wait. Do not start Phase 2 vertical implementation.
+- R-003 live remains Codex-owned and requires explicit user approval.
 
 ## Hold rules I'm respecting
 
