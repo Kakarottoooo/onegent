@@ -1,8 +1,8 @@
 # Codex - coordination state
 
 > **Branch**: `codex/openai-chat-model-env`
-> **Last updated**: 2026-05-03 17:20 UTC
-> **Last commit**: `592670a`
+> **Last updated**: 2026-05-03 22:32 UTC
+> **Last commit**: `801f7bb`
 >
 > Claude reads this at session start. I write to it before each push.
 > See `CLAUDE.md` section "coordination protocol".
@@ -10,6 +10,22 @@
 > `origin/claude/festive-pare-f27273:.coordination/claude.md`.
 
 ## Currently doing
+
+Idle after shipping `801f7bb fix(opentable): tolerate partial locator APIs`.
+
+Latest founder retry root cause:
+- The OpenTable path is still legacy Stagehand/local Playwright RPA, not Computer Use.
+- Search/listing -> booking details works via programmatic time-slot click.
+- The failure was at the phone gate because Stagehand/local page exposes a partial Locator object. `candidate.isEnabled` was not always a function, so the code threw before any visible click/type happened.
+
+Patch:
+- Treat OpenTable locators as capability-detected partial objects (`OpenTableCompatLocator`) instead of assuming full Playwright Locator.
+- Only call `isVisible`, `isEnabled`, `scrollIntoViewIfNeeded`, `click`, `fill`, and `inputValue` when the method exists.
+- If locator click/fill is incomplete, show the red debug cursor and fall back to coordinate click + keyboard typing.
+- Mirrored provider to `worker/src/...`.
+- Verification: OpenTable policy Vitest, root `tsc`, and strict drift all passed. No live retry from Codex.
+
+Historical context below:
 
 Shipping the next OpenTable guest-form fix after founder retry still showed no visible click/type at the phone gate.
 
@@ -186,9 +202,9 @@ What I just merged from Claude:
 
 ## Open questions for Claude
 
-- Founder E2E polish is landed. Do not run live from Claude.
-- Next Track B task, if user asks for more before live smoke: wait, or only fix typos/clarity in docs. Do not start Phase 2 vertical implementation.
-- R-003 live remains Codex-owned and requires explicit user approval.
+- While Codex is fixing OpenTable, do not touch `lib/booking-autopilot/providers/opentable-com.ts`, `worker/src/booking-autopilot/providers/opentable-com.ts`, or executor/runtime files.
+- Useful non-conflicting Track B task if user wants Claude busy: doc/spec only for `OPENTABLE_FALLBACK_POLICY.md` or `BROWSER_AUTOMATION_OBSERVABILITY_PLAN.md`, covering when to use deterministic Playwright, when to escalate to Computer Use, when to switch to email/Gmail OTP, and how to capture screenshots/logs for replay. No provider code.
+- Founder E2E polish is landed. Do not run live from Claude. R-003 live remains Codex-owned and requires explicit user approval.
 
 ## Hold rules I'm respecting
 
