@@ -59,6 +59,15 @@ const NLU_PROFILE_ROUTES: DevRoute[] = [
     useCase:
       "When designing the chat-panel hookup. Clone handleSend, replace mock backend with real fetch — same dispatch shape.",
   },
+  {
+    href: "/dev/path-b-demo",
+    title: "Path B fixture explorer",
+    blurb:
+      "Phase 1 #7 path B no-token sandbox. 3 toggleable fixture states (missing fields / save success / save failure) exercising the SAME decideProfileGap + makeProfileGapOnSave helpers production uses. Event log shows PATCH/refetch/booking dispatches in order.",
+    status: "live",
+    useCase:
+      "Verify path B control flow without burning OpenAI tokens. Use to confirm save-failure case does NOT resume booking (codex's hardening contract PB-SAVE-2).",
+  },
 ];
 
 const TASK_TIMELINE_ROUTES: DevRoute[] = [
