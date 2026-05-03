@@ -38,7 +38,7 @@ export default function ForkAsDrButton({ slug, isSignedIn }: Props) {
       const data = (await res.json()) as { sessionId: string };
       router.push(`/decide/${data.sessionId}?role=initiator`);
     } catch {
-      setError("Network error.");
+      setError("Connection problem. Check your network and try again.");
     } finally {
       setBusy(false);
     }

@@ -20,13 +20,42 @@ ChatGPT Apps + 第三方 agent builder via /api/v1）
 产品地址：https://onegent.one/
 
 ================================================================
-Current State Snapshot · 2026-04-30
+Current State Snapshot · 2026-05-03
 ================================================================
+
+⚠ **Phase 0 主线锁定（2026-05-03）**：Resy + Computer Use 端到端闭环是
+唯一主线，不再继续深修 Stagehand DOM。详细 doctrine 见下方
+"Recent Updates - 2026-05-03 · Phase 0 main line locked"。
+
+🤝 **Agent 协作协议已启用（2026-05-03）**：codex (Track A) 和 Claude
+(Track B) 通过 `.coordination/{codex,claude}.md` 双文件总线同步状态。
+用户不再当 relay。详见 CLAUDE.md § "协作协议"。
+
+详细计划 / 架构 / Track A&B 分工 / 迁移清单全部记录在
+[EXECUTOR_V2_PIVOT.md](./EXECUTOR_V2_PIVOT.md)。
 
 【架构现状】
 - C 端：Vercel-hosted Next.js (onegent.one)，Neon Postgres，Clerk auth
 - Worker：Railway long-process container 跑 booking-autopilot（restaurant
   scenario via USE_WORKER_FOR），其它 scenario 仍在 Vercel in-process
+- **Executor 层（2026-05-02 重构中）**：`lib/core/execution` + `worker/src/core/execution`
+  下面新增 `ExecutorV2 registry`，两个 adapter：
+  · `legacy_stagehand`（现状默认，包旧 stagehand-executor.ts，保留作 fallback）
+  · `computer_use`（新主路径，OpenAI Computer Use Responses API）
+  · 灰度开关：`ONEGENT_EXECUTOR_V2=computer_use` +
+    `ONEGENT_COMPUTER_USE_FOR=resy|restaurant|all`
+  · 统一事件模型：`opened_site / selected_slot / accepted_policy /
+    needs_otp / otp_submitted / ready_for_confirmation / failed`
+  · 统一状态：`needs_otp / needs_login / ready_for_user_confirmation /
+    no_availability / failed`（`needs_profile_data` 即将加入）
+- **观察体验层（2026-05-02 上线）**：`/api/booking-jobs/:id/timeline-events`
+  SSE + `/api/booking-jobs/:id/snapshots` canonical endpoint，给前端 UI
+  消费（Task Timeline + Snapshot rail + ProfileGapCard）。
+  **2026-05-03 扩展**：codex `8a2da14` + `75a3dbe` 加了 task-level 镜像
+  endpoint (`/api/v1/travel-tasks/:taskId/timeline-events` 等)；
+  benchmark report contract 落地于 `lib/benchmark/phase0-report.ts` +
+  `/api/dev/benchmark-runs` (`9e295b0`)；Track B 已 ship `/dev/benchmark-runs`
+  dashboard 消费 (`4e06f29`/`8f44eeb`/`6dbef7a`)
 - MCP：双轨发行
   · npm @onegent/mcp-server v0.1.0（stdio for Claude Desktop）
   · /api/mcp（Streamable HTTP for Claude.ai web / ChatGPT Apps / 第三方）
@@ -37,7 +66,10 @@ Current State Snapshot · 2026-04-30
   · Free: 3 bookings + 1 DR / 月，跨 surface 共享配额
   · Pro: $9/月 或 $79/年（年付省 27%）
 - 双份代码（lib/booking-autopilot ≡ worker/src/booking-autopilot）：
-  byte-identical，DELETE_WHEN trigger 未到（详见 CLAUDE.md）
+  byte-identical，作为 `legacy_stagehand` adapter 的实现保留。删除条件
+  已更新（见 [EXECUTOR_V2_PIVOT.md "Lib deletion criteria"](./EXECUTOR_V2_PIVOT.md)），
+  从"4 类切到 worker"改成"Computer Use 路径关 Resy Essex 闭环 +
+  `ONEGENT_COMPUTER_USE_FOR=all` 在 prod 跑稳 ≥ 3 类"。
 
 【已上线产品面（按时间倒序）】
 1. Social Feed 路线图（plan.md 已写，未实施）— 2026-04-30
@@ -52,17 +84,45 @@ Current State Snapshot · 2026-04-30
 10. 主页 chat Claude.ai 风格重构 + NLU state 持久化 — 2026-04-26
 
 【当前阻塞 / 等外部触发的事项（统一在此，下面 release notes 不重复）】
+- **Phase 0 主线 — Resy Computer Use 闭环**（~80%，第二次 R-003 跑完
+  在 codex 这边 investigate；详见下方 2026-05-03 (cont. 1) 段 +
+  [EXECUTOR_V2_PIVOT.md](./EXECUTOR_V2_PIVOT.md) +
+  [BENCHMARK_RESTAURANT_100.md](./BENCHMARK_RESTAURANT_100.md) § 7.5）
+- **Phase 1 plan 已写**（[PHASE_1_PLAN.md](./PHASE_1_PLAN.md)）—— 等
+  Phase 0 declared 后立刻进。8 个 deliverable，~3 天（无 OTP resume
+  情况）/ ~2 周（含 OTP resume）
+- **OTP path D（warm session）**（[WARM_SESSION_STRATEGY.md](./WARM_SESSION_STRATEGY.md)）
+  —— BLOCKED until R-003 真的到 OTP layer post-navigation-repair
 - ChatGPT Apps marketplace review 结果（OpenAI 5-10 工作日，被动等）
-- Browserbase Pro $99/mo 升级（等付费用户敲门触发）
-- Worker 双份代码 cleanup（等 hotel/flight/activity 切到 worker）
+- Browserbase Pro $99/mo 升级（路径已变 — Computer Use 走 OpenAI
+  Responses API，Browserbase 升级时机改成"自建 farm 启动信号触发"，
+  详见 BROWSER_FARM_PLAN.md）
+- Worker 双份代码 cleanup（删除条件已更新 — 见 EXECUTOR_V2_PIVOT.md
+  "Lib deletion criteria"）
 - B2B Lane C cold outreach（4 客户类型 × 5 contacts 还没启动）
 - Cofounder / 早期合伙人搜索
 
 【Pending backlog（不阻塞，待动手）】
+- ProfileGapCard wiring **进入 Phase 1 deliverable #7**：UI 100% ready
+  （/tasks/[taskId] + /dev/profile-gap-flow），等 codex profile PATCH
+  endpoint + cookie-auth proxy 落地后接真 fetch
+- /tasks/[taskId] **production wire 进入 Phase 1 deliverable #6**：
+  页面 + 5 个 demo state 全 ship（`f718831`），2 个 SWAP POINT 注释
+  标好，cookie-auth proxy 落地后 1 行 fetch 替换 → 上 prod
 - Social Feed MVP 实施（trip-anchored posts + 单向 follow + /feed 入口）
 - 公开发布（HN + X + PH + Reddit launch post）
 - @onegent/mcp-server 加 tool annotations 后 npm 重发（~5min）
 - Live Stripe key 切换（等真有付费意愿用户）
+- **Inspire 模式 / Daydream Explorer**（Phase 3 主线之一）：homepage 第
+  二 CTA + DR explore mode；实现要点：30-template gallery 不用 LLM 自
+  由发挥；详见 2026-05-03 (cont. 2) 段战略定位锁定
+- **数据飞轮 Layer A + B**（Phase 4 主线之一）：场馆/Provider 健康度信
+  号 + Provider 短时态信号；升级现有 venue_baselines 表；Layer C
+  实时 availability cache 显式不做；触发条件 ≥ 100 真实 booking；详见
+  2026-05-03 (cont. 3) 段
+- **订阅 gamification 3 机制**（Phase 2-3 主线之一）：referral 互助
+  码 / DR payer 折扣 / 完成返 credit；Phase 1 期间用 "do things that
+  don't scale" 文案版替代；详见 2026-05-03 (cont. 3) 段
 
 【Browserbase Infra 演进路线图（2026-04-30 决定）】
 关键决策：现在不升 Browserbase Pro，按用户增长曲线分阶段决定 infra
@@ -109,6 +169,836 @@ B 端基础设施 / Phase 0 UI / Positioning Shift 等）已归档至
 [PROJECT_SUMMARY_ARCHIVE_2026Q1.md](./PROJECT_SUMMARY_ARCHIVE_2026Q1.md)。
 
 按钮 / 功能行为速查见 [FEATURE_MAP.md](./FEATURE_MAP.md)。
+
+================================================================
+Recent Updates - 2026-05-03 (cont. 3) · 数据飞轮 3 层分类（取 A+B，弃 C）· 订阅 gamification 3 机制延后到 Phase 2-3 · PointsYeah 移植清单锁定
+================================================================
+
+【触发讨论】
+
+用户读到 PointsYeah 两个产品设计：
+- (1) "缓存 + 网络效应"数据飞轮：用户实时搜索喂给所有用户的 deal alerts
+- (2) "订阅 = 累积 miles"心理学：referral 码、payer 折扣、完成返 credit
+
+问：onegent 应该照搬吗？
+
+承接 cont. 2 的混合定位：消费表面要保留但不做百万 MAU，所以问题不是
+"要不要做"，是"哪些移植 / 哪些跳过 / 何时做"。
+
+【1. 数据飞轮：3 层分类，取 A+B、弃 C】
+
+PointsYeah 缓存的是 points 价格——业务逻辑相对稳定（一天-一周内不大
+变），缓存价值高。Onegent 想缓存的东西分 3 层，每层结论不同：
+
+**Layer A：场馆/Provider 健康度信号（durable、高信号）✅ 做**
+- Success rate per (venue, provider) rolling window：Resy Carbone 上
+  周 90% 成功 → 路由优先；某 OpenTable 餐厅 50% 失败 → 提前警告 / 自
+  动 fallback
+- Failure mode 分布：F-PROVIDER-OTP 多 / F-AVAIL-NONE 多 /
+  F-PROVIDER-CAPTCHA 多 → 决定 Phase 0 acceptance gate 调优 + 客户
+  端 messaging
+- Best-time-to-book heuristics：Buvette 周一-周三 7pm 通常有座 vs
+  周五-周六 8pm 永远满
+- TTL：天-周
+- 实现：每次 autopilot 完成 → 写一行 `(venue_slug, provider, outcome,
+  taxonomy, ts, user_id_anonymized)` → 后台聚合视图喂 router
+- 现有契机：codex `venue_baselines` 表（weekly cron 重查）已经有雏形，
+  升级成"用户调用产生的真实数据池"
+
+**Layer B：Provider 短时态信号（minutes、高信号）✅ 做**
+- "OpenTable 5xx 上 5min" → router 立刻 route around 走 Resy fallback
+- "Resy CAPTCHA 触发率上 30min" → 警告 + 切策略
+- "ChatGPT Apps OAuth 反复失败" → 自动告警
+- TTL：5-15 分钟
+- 本质是分布式监控反馈到路由层
+
+**Layer C：实时 availability 缓存（ephemeral、低信号、陷阱）❌ 不做**
+
+用户原文："A 用户刚查过某餐厅今晚 7pm 没位、8pm 有位，这个信号保留 5
+分钟对 B 用户就是免费的价值"——**这条对 Onegent 不成立**，原因 3 条：
+1. Resy/OpenTable availability **真的 5 分钟内会变**（一桌取消、一桌
+   新订）
+2. Resy/OT 有 **per-device fingerprinting**：A 看到没位不代表 B 看到
+   没位（B 可能是 VIP 账户、不同地区 IP、登录态不同）
+3. 给 B 用 stale availability cache → B 信任 → 真去订时撞实际有座但
+   cache 说没座，**比没 cache 更糟**
+
+PointsYeah 缓存的是业务逻辑稳定的 points 价格。Onegent 缓存
+availability 是 ETL race condition + 1% 概率害所有用户。**0 价值 + 高
+风险 → 跳过**。
+
+**触发条件**：≥ 100 真实 booking。数据池才有统计意义；现在 0 付费用
+户做飞轮 = 飞轮没东西飞。
+
+**Phase 归属**：Phase 4 主线之一（"Domain Brain seed"），把 § 8.1 抽
+象升格成具体三层规划。
+
+**跟现有架构关系**：
+- `venue_baselines` 表 → Layer A 写入路径
+- `agent_feedback` / `plan_outcomes` → Layer A 聚合数据源
+- Layer B 全新，要新建 short-cache Redis 层（或 Postgres TTL 表）
+- Layer C 显式不做（避免未来 session 重新讨论）
+
+【2. 订阅 = 累积 miles 心理学：3 机制延后】
+
+承认观察对：onegent 用户大概率 IS miles-game 玩家，"我每次消费都该
+赚点什么" 是这群体精神基本面。但现在做 = 反 Linus / Paul Graham 原则
+（premature optimization / do things that don't scale）。
+
+**3 机制评估**：
+
+| 机制 | 工时 | 何时做 | 风险 |
+|---|---|---|---|
+| Referral 互助码（双方 1 个月免费）| 3-4 天 Stripe coupon + invite UI + 追踪 | Phase 2-3，≥ 100 付费用户 | 套利账户，需 fraud 检测 |
+| DR payer 折扣（付钱 = 下次 9 折）| 1-2 天，payer 已被 track | Phase 2，DR 使用稳定 | 低，架构匹配 |
+| 完成任务返 credit（5 成功 → 1 免费）| 3-4 天 credit ledger + UI | Phase 3，使用模式明确 | 中，gaming 风险，需风控 |
+
+**Phase 1 期间的最低成本"不 scale"替代**：
+
+landing page / pricing 页面写一句 "refer a friend, get 1 month free"
+——**不实现任何 backend**，纯文案 + 联系邮箱。手动处理前 10 个
+referral，有数据后再上系统。
+
+参照人物：
+- **Linus**："premature optimization is the root of all evil"
+- **Paul Graham**："do things that don't scale" 标准玩法
+- **Sam Altman**："make something people want, then make people want
+  it" — 你现在还在第一步
+
+**Phase 归属**：Phase 2-3 主线之一，放在公开发布 + 用户量积累之后。
+
+【3. PointsYeah 移植清单（cont. 1 + 2 + 3 综合）】
+
+| PointsYeah 设计 | Onegent 移植？ | Phase | 备注 |
+|---|---|---|---|
+| Daydream Explorer (anywhere/beach/golf 主题) | ✅ Inspire mode | Phase 3 | cont. 2 锁；30-template gallery，不 LLM 自由发挥 |
+| 实时搜索缓存喂 deal alerts (Layer A) | ✅ 场馆健康度 | Phase 4 | 本段锁；升级 venue_baselines |
+| Provider state monitoring (Layer B) | ✅ 短时态信号 | Phase 4 | 本段锁；router 用于 fallback |
+| 跨用户实时 availability cache (Layer C) | ❌ 不做 | — | 本段锁；domain 错配，会害用户 |
+| Cents-per-point 客观排序 | ❌ 直接复制 | — | onegent 无此对应锚；用 success rate / popularity 替代 |
+| Shopping portal earn miles 双重激励 | ⚠️ 思路移植 | Phase 2-3 | referral / DR payer 折扣 / 完成 credit；本段锁 |
+| 推荐码 (TRAVELFREELY 等) | ✅ Referral 互助码 | Phase 2-3 | 本段锁；先做不 scale 文案版 |
+
+**这张表是承诺**：未来任何讨论"要不要照搬 PointsYeah X"先看这表。表里
+有的按 phase 节奏走，没有的需要新讨论；表里 ❌ 的明确不做，避免重复
+litigate。
+
+【与 cont. 1 + cont. 2 关系】
+
+- cont. 1 落地 R-003 工程进展 + Phase 1 plan
+- cont. 2 锁混合定位 + Inspire mode 延后
+- cont. 3 锁数据飞轮分层 + 订阅 gamification 节奏 + PointsYeah 移植
+  清单
+
+3 段一起把 Phase 0 declared 之后所有产品方向钉死。未来 session 起手读
+PROJECT_SUMMARY 直接看 cont. 1/2/3 三段对齐，不重新讨论方向。
+
+【最危险的判断没变】
+
+最危险的不是没数据飞轮、没 referral 码——是**还没有第一笔成功订单**。
+所有 Phase 2+ 设想的前提是 Phase 1 declare。先解 Phase 0 → Phase 1。
+
+================================================================
+Recent Updates - 2026-05-03 (cont. 2) · 战略定位锁定 · 混合路线（不是纯基础设施）· Inspire 模式延后到 Phase 3 · template gallery > LLM 自由发挥
+================================================================
+
+【触发讨论】
+
+用户读到 PointsYeah "Daydream Explorer" 模式（输入 anywhere/beach/golf
+等弱意图，系统跨品类返回上百万方案，按 cents-per-point 排序），问两个
+问题：
+- Q1: Onegent homepage 要不要加 "Inspire me" 入口？DR 创建时让 AI
+  自己决定品类？
+- Q2: 未来 ChatGPT / Claude / 个人 agent 都要调用 onegent，那我们还
+  需要做 To-C 流量吗？
+
+Q2 是 Q1 的根，先决定定位再决定具体功能。
+
+【战略定位锁定：混合路线（infra + 自有窗口），不是纯基础设施】
+
+三条纯路线对比：
+
+| 路线 | 长什么样 | 例子 |
+|---|---|---|
+| 纯消费 | own front door, MAU 是核心，渠道靠 SEO/social/广告 | Tripadvisor / Hopper / Kayak |
+| 纯基础设施 | 只 B 端 API 服务 agent / partner，C 端不做 | Plaid / Stripe / Twilio / Auth0 |
+| **混合**（选这个）| Backend 主收入，但保留消费表面作为可信度 + landing + edge case sink + 可选订阅入口 | Notion API / Vercel / Supabase / 37signals |
+
+**7 个理由：哪怕走基础设施路线，消费表面也要保留**：
+
+1. **信任信号** — Agent 平台筛选合作伙伴时，"有真用户的产品" vs "只有
+   API" 评价不同。OpenAI Apps marketplace、Anthropic Claude Skills 都
+   更愿意 surface 有真实使用者的工具。
+2. **Edge case detection** — 真用户撞到的 bug 比聚合 agent 调用更早暴
+   露问题（agent 调用是过滤过的）。
+3. **定价权** — 自己有用户付费 = 有 reference price。卖给 agent
+   ecosystem 时，"我们 To-C 收 $9/月" 比"看着办" 谈判更稳。
+4. **被颠覆的对冲** — OpenAI 看到你 Resy 适配器赚钱，2 周内可以自己实
+   现。**有 direct users = 你被淘汰时还有救**。Plaid 早期最怕的就是
+   "Stripe 直接做账户聚合"——靠的就是已有银行客户绑定。
+5. **人才** — 工程师宁愿做"我朋友能用的东西"。招人时"自己用得起来"
+   是巨大加分项。
+6. **投资叙事** — Seed 轮 pitch "10000 用户 + 8 个 agent integration"
+   永远胜过 "只有 agent integration"。
+7. **领域学习** — agent 调用经过 NLU 抽象，丢失了用户最朴素的语言。直
+   接对 C 是产品改进的金矿。
+
+**关键 caveat**：消费表面**不需要做成 Tripadvisor**。做成 Vercel /
+Supabase / 37signals 模式：1 个 self-serve 入口，付费 funnel 走通，
+Trip Portfolio 公开，benchmark 公开，**不追百万 MAU、不烧广告**。
+
+参照人物：
+- **DHH / 37signals**: 1 个 Basecamp，一直自给自足
+- **Stripe / Linus**: API + 良好 dev 文档 + 自己也是用户
+- **Vercel**: B2B 主收入但保留 vercel.com showcase
+
+【Inspire 模式具体评估】
+
+PointsYeah Daydream 之所以成立：**points booking 自带 cents-per-point
+客观排序锚**。输入 anywhere → 按 cpp 排 → 最优秀 deals 浮上来。
+
+Onegent 直接照搬"Inspire me"会撞 4 个问题：
+1. 没有 cpp 这种客观排序锚 → 每次返回都是 LLM 主观挑选，用户感知随机
+2. 跨品类组合的"对错"标准模糊 → A 用户觉得 X 餐厅好，B 觉得不好
+3. LLM cost 高 → 每次 inspire 调用 = 大 prompt + 候选池抓取
+4. **核心矛盾**：Onegent 现在工程能力只能保证"用户说订 Buvette → 帮
+   他订到"——还做不到"Buvette 都还没订成的情况下，去推荐替代方案"
+
+**结论**：现在不做 Inspire mode。**放进 Phase 3（公开发布期）**做。
+
+【Phase 节奏与消费表面投入】
+
+```
+Phase 0  ████████████████░░░░  80%   ← 当前
+   "证明能订一家餐厅"
+   消费表面投入：0
+   
+Phase 1  ░░░░░░░░░░░░░░░░░░░░    0%
+   "真用户在 prod 跑通一笔订单"
+   消费表面投入：维持现有（Trip Portfolio / Pricing / MCP server）
+   
+Phase 2  ░░░░░░░░░░░░░░░░░░░░    0%
+   "扩到 hotels/flights/activities，垂直饱和"
+   消费表面投入：开始（public benchmark dashboard / Trip Portfolio
+   强化 / curated templates "Date Night NYC" 等）
+   
+Phase 3  ░░░░░░░░░░░░░░░░░░░░    0%   ← Inspire mode 时机
+   "公开发布 + 内容/社区/SEO/Inspire 探索入口"
+   消费表面投入：homepage 第二 CTA / DR explore mode / newsletter /
+   HN/PH launch
+   
+Phase 4  ░░░░░░░░░░░░░░░░░░░░    0%
+   "规模化基础设施 + B2B + agent ecosystem 强渠道"
+```
+
+**Phase 0/1 不做 Inspire 的硬理由**：
+- Inspire mode 价值假设：用户进 → 看推荐 → 选一个 → **订成**
+- 现在订不成 → Inspire 把用户带进去结尾"订单失败"，比没 Inspire 更伤
+- 等 Phase 1 declare 后真订单 funnel 走通再做 Inspire，叙事是闭环
+
+【Inspire 模式具体实现要点（Phase 3 实施时参考）】
+
+不做"无限可能性 LLM 自由发挥"。做成 **template gallery**：
+- 30 个手工预设模板（"Friday night date <$150 Williamsburg" 等）
+- 用户输入弱意图，系统**只在模板池内匹配 + 微调**
+- 客观可控、低成本、可优化、不会跑偏
+- 跟 PointsYeah 一样有客观锚（"周内最热门 / 性价比最高"）
+- 模板池本质上是已有 Weekend Trip OS / Date Night OS 的 entry-point
+  扩展，不是新功能
+
+参照思路：
+- **Sam Altman**: "Make something people want, then make people want
+  it." 你现在在第一步。
+- **Paul Graham**: "Do things that don't scale" 早期。Inspire 一开始
+  就是 30 个手工模板，不是 LLM 自由。
+- **DHH**: 不做你不会自己用的功能。你现在 Inspire 自己会用吗？大概率
+  不会——你已经知道要订什么。
+
+【现在该做 vs 之后该做的具体清单（执行清单）】
+
+**Phase 0/1 期间（现在到 ~2 周后）**：
+- ❌ 不做：Inspire mode、Daydream Explorer、新 homepage hero、social
+  feed、内容 SEO
+- ✅ 做：单 task path 跑通、/tasks/[taskId] 真实页面（已 ship 95%）、
+  Trip Portfolio / Pricing / MCP server 维持
+
+**Phase 2 期间（vertical 扩展，~3-4 个月）**：
+- 启动消费表面投入
+- Trip Portfolio public 强化
+- Public benchmark dashboard "84% reliability" — credibility play
+- Curated templates（"Date Night NYC" / "Weekend Trip Brooklyn"）
+
+**Phase 3 期间（公开发布）**：
+- homepage 第二 CTA "Inspire me"（不替代主 CTA）
+- DR explore mode：DR 创建时让 AI 决定品类
+- Newsletter "this week in NYC"
+- HN / Product Hunt launch
+
+【与 Phase 1 plan 的关系】
+
+PHASE_1_PLAN.md 里 Out-of-scope 清单已经把 "Social Feed / ChatGPT
+Apps / B2B Lane C / live Stripe" 等划到 Phase 2-3。本次锁定的"Inspire
+mode 在 Phase 3"是这个 Out-of-scope 清单的精确化补充——它不是"以后某
+天要做"，而是"Phase 3 主线之一"。
+
+【最危险的不是没 Inspire】
+
+最危险的是"还没有第一笔成功订单"。先解后者。
+
+================================================================
+Recent Updates - 2026-05-03 (cont. 1) · R-003 reaches Computer Use · OTP transitional rule § 7.5 · Track B ships 16 more commits · Phase 1 plan authored
+================================================================
+
+承接早段 Phase 0 doctrine + 协议握手。今天后半天完成两条链路：
+（A）R-003 真实跑通 Computer Use 三阶段（model access → OTP 墙 →
+navigation drift），每段都 ship 修复；（B）Track B 在 codex 跑 R-003 期间
+并行 ship 了"R-003 反馈驱动"的工程储备，包括 OTP transitional rule、
+warm session 策略、GateBreakdown analyzer、/tasks/[taskId] 真实页面、
+/dev landing 等。
+
+【R-003 真实跑通的三阶段】
+
+**阶段 1：model access**（codex `bd72f56` 之前）
+- gpt-5.5 GA Computer Use 上线，但 codex 当前 OpenAI project 拿不到
+  `computer-use-preview`/`gpt-5.5` model access
+- codex `620444a` 把 Computer Use adapter 从 preview shape 升到 GA
+  shape (`tools: [{ type: "computer" }]`, model: `gpt-5.5`)
+- 用户 rotate 新 key + 解锁新 project model allow-list → 终于 unblock
+
+**阶段 2：OTP 墙**（codex `bd72f56`，2026-05-03 02:09 UTC）
+- 第一次 R-003 真实跑通 Computer Use 全程，命中 Resy OTP 验证墙
+- 报告：outcome `failed_with_clear_reason`, taxonomy `F-PROVIDER-OTP`,
+  task state `awaiting_otp`
+- Gmail connector OAuth `token_expired 401`，无法自动读 OTP 验证码
+- **从"infra 死锁"转到"产品状态机层面问题"**——CU 对接 OK、Resy 导航
+  OK、订位流程跑通、停在 OTP 等用户介入
+
+**阶段 3：navigation drift**（codex `a0ce2ee`，第二次 R-003 之前）
+- 第二次 R-003 落点不是 OTP 而是 `F-PROVIDER-UNKNOWN` —— Computer Use
+  从 Buvette venue page 漂到 Resy /search?query=Buvette&time=2100
+  （时间还选错了：21:00 vs 请求 20:00）
+- codex `a0ce2ee` 修复：start URL 加 `&time=2000`、CU prompt 明确要求
+  exact venue page、auto-pullback 检测 /search 漂移最多回拉 2 次
+- 第二次 R-003 跑出来后还在 codex 这边 investigate（job hang on timeout）
+
+**当前 Phase 0 declared 路径**：等 codex 第二次 R-003 真实结果 →
+`ready_for_confirmation`（path A，扩 5-case 子集）/ `F-PROVIDER-OTP`
+（path B，启动 warm session PoC）/ 还是 drift（path C，继续修
+prompt/recovery，不烧 token 重跑）
+
+【Phase 0 § 7.5 OTP transitional rule（spec broadening + dual-side fix）】
+
+R-003 OTP 墙触发的设计决策：codex 跟 Claude 跨边对齐，**不做完整 Gmail
+OTP resume 工程**（5 天重投入），**也不放宽 Phase 0 阈值**，而是把
+F-PROVIDER-OTP 当作 transitional safe handoff（per-case 算 pass，但
+4-metric headline gate 仍要求 ≥80% booking-ready 真过 OTP）。
+
+Spec 改动（Claude `097741a`）：
+- BENCHMARK_RESTAURANT_100.md § 3.2 F-PROVIDER-OTP 行明确
+- BENCHMARK_RESTAURANT_100.md § 7.5（新章节）记录 transitional 规则
+- R-003 row: `expectedOutcomes` 加 `safe_handoff`,
+  `acceptableFailureTaxonomy` 加 F-PROVIDER-OTP
+
+Validator 软警告（同 commit）：当 case 是 F-PROVIDER-OTP +
+`failed_with_clear_reason` 时发 warning 引用 § 3.2 + § 7.5，提示
+runner 没正确归桶。
+
+Codex 同步（`d1fd102 [handoff]`）所有 3 条 action item：
+- ✅ R-003 fixture 同步 expectedOutcomes / acceptableFailureTaxonomy
+- ✅ runner outcome bucketing：`state==="awaiting_otp" ? "safe_handoff"
+  : "failed_with_clear_reason"`
+- ✅ § 7.5 普适规则：`provider==="Resy" && safe_handoff &&
+  F-PROVIDER-OTP` → 自动通过 taxonomy gate
+
+Bonus（codex 还多送 4 件）：
+- OpenAI 5xx → F-INFRA-CRASH（之前误归类）
+- F-AVAIL-PARTY 收紧（之前 trace 里随便有"party"字样就误判）
+- **`--live-openai` 安全护栏**：phase0 benchmark 默认 dry-run，必须
+  显式 flag 才烧 token——避免迭代中误烧
+- v1 task worker race 修
+- `normalizeKey()` GA Computer Use → Playwright key alias 映射
+  （`LEFT` → `ArrowLeft` 等）
+
+【WARM_SESSION_STRATEGY.md（318 行设计 doc，Claude `2201a25 [handoff]`）】
+
+OTP path D（warm session 先 → Gmail resume fallback）的设计储备。
+关键发现：CU executor 用本地 Playwright（不是 Browserbase），所以
+`context.storageState()` 是直接可用的内置 API，**不需要 Browserbase
+Pro 升级**（之前路线图里 $99/mo 决定可以继续往后推）。
+
+3-step PoC 阶梯：
+1. 4h 手动 capture + replay 验证（Resy 是否当 replay 是登录态）
+2. 1d 接入 runComputerUse() + DB 存 storageState
+3. 1d 跑 5-case Resy subset → 25 case → declare Phase 0
+
+vs Gmail OTP resume 5 天 → 省一半工程。
+
+5 个风险 + mitigation 写完（指纹识别 / TTL / 多账号混淆 / cookie 加密 /
+Resy ToS）。文档当前 status: 🔵 BLOCKED until R-003 reaches OTP layer
+post-navigation-repair。
+
+【Track B 16 个新 commit（自上一段 e923192 后）】
+
+按时间顺序：
+1. `f378020 [handoff]` benchmark report validator + ValidatorPanel
+   （36 测试 → 让 codex push report 前可 paste 自检 shape）
+2. `67d6cb9 [unblocked]` align benchmark taxonomy with runner
+   （加 9 个 runner-emitted 码：F-INFRA-MODEL-ACCESS 等 5 个 +
+   F-LOGIC-UNAUTHORIZED-PAYMENT 等 2 个 + F-DATA-DOM / F-AVAIL-PARTY /
+   F-PROVIDER-UNKNOWN；fix `isSevereTaxonomy` 前缀 → `F-LOGIC-`）
+3. `73b4eb8 [coord]` sha fix-up
+4. `9aaf480` NLU profile_edit robustness 22 新 golden test（日期格式
+   / 对抗 value type / 字段别名 / 敏感黑名单 / unicode）
+5. `1704eac [coord]` sha fix-up
+6. `1f8bf8a` GateBreakdown analyzer（新 `<GateBreakdown>` 组件 +
+   8 测试，按 § 7.2 阈值分解 run 距离 + top recommended fixes 排序）
+7. `097741a [handoff]` Phase 0 OTP transitional rule（spec § 7.5 +
+   R-003 row + validator 软警告）
+8. `e458dd9 [coord]` sha fix-up
+9. `2909d80 [coord]` ack codex d1fd102 + 决策对齐（OTP 路径 D / launch
+   暂缓 / 单 R-003 OK / 25-case suite 暂不跑）
+10. `a93c015 [coord]` sha fix-up
+11. `2201a25 [handoff]` warm session strategy doc（318 行）
+12. `72a3715 [unblocked]` navigation drift detection
+    （GateBreakdown 加 `navigation_drift` rec kind，触发条件
+    F-PROVIDER-UNKNOWN + terminalReason 含 /search/?query=/search?，
+    引用 codex `a0ce2ee` 的修复）
+13. `07c860b [coord]` sha fix-up
+14. `d2f09b7` /dev landing page（5 dev 路由 + 5 strategy doc + coord
+    一站式 index，加 status pill + use case 提示）
+15. `f718831` /tasks/[taskId] task detail page（750 行 production-ready
+    UI + 5 个 demo task ID + 2 个 SWAP POINT 注释，cookie-auth proxy
+    落地后 1 行替换 → 上 prod。Phase 1 surface 0% → ~95% UI 完成）
+16. **本 commit** PROJECT_SUMMARY refresh + PHASE_1_PLAN.md
+
+【Phase 1 plan 写完（Claude PHASE_1_PLAN.md）】
+
+Phase 1 = 真实用户在 prod 跑通"一句话 → ready_for_confirmation →
+一键 confirm"。8 个 deliverable：
+
+| # | 项 | 责任 | 工时 |
+|---|---|---|---|
+| 1 | master typecheck 17 errors 清 | codex | 1-3h |
+| 2 | profile PATCH endpoint | codex | 4-8h |
+| 3 | cookie-auth proxy `/api/v1/*` | codex | 4-8h |
+| 4 | branch → master merge | codex | 1h |
+| 5 | OTP resume（条件触发：Phase 0 没用 warm session 关闭 OTP）| codex | 2-5d |
+| 6 | /tasks/[taskId] 接真 fetch（2 个 SWAP POINT 替换）| 我 | 2h |
+| 7 | ProfileGapCard 接 homepage chat（替 mock NLU consumer）| 我 | 4h |
+| 8 | 创始人 E2E 走查 | 用户 | 1h |
+
+总人时：~3 天（如果 Phase 0 已闭环 OTP）/ ~2 周（如果还要 OTP resume）
+
+Critical path：#1 → (#2 ‖ #3) → #4 → (#6 ‖ #7) → #5 → #8 → declared
+
+详见 PHASE_1_PLAN.md（含 5 个 risk + mitigation + 5 个 open question +
+Phase 1 → Phase 2 transition）。
+
+【协调协议运转情况】
+
+5+ 次握手（每次都 git-based，用户不 relay）：
+- 774312d → 1bcb076 → 9d659d4 → f378020 → 67d6cb9 → 097741a →
+  d1fd102 → 2909d80 → 2201a25 → 72a3715 → a0ce2ee
+- 用户进入"对齐者"角色（决策路径 D / launch 暂缓 / suite 不跑），
+  不再当 status relay
+- `[handoff]` / `[unblocked]` / `[coord]` tag 让 git log 一行就看出
+  跨边语义
+
+【当前 idle 状态】
+
+Track A（codex）：第二次 R-003 跑完后 investigate，job hang on
+timeout 在停 local dev process 防继续烧 token。结果未知。
+
+Track B（我）：等 codex result。不主动跑 live。可做的非阻塞工作：
+PROJECT_SUMMARY refresh（本 commit）/ PHASE_1_PLAN（本 commit）/
+Validator UX upgrade / BENCHMARK_DEBUG_PLAYBOOK。
+
+用户：等 codex 第二次 R-003 result 决定 OTP 路径走哪个 fork。
+
+================================================================
+Recent Updates - 2026-05-03 · Phase 0 main line locked · Coordination protocol live · Track B ships 12 commits (ProfileGapCard / benchmark dashboard / NLU profile_edit / contract docs / mock-pipeline tests)
+================================================================
+
+承接 2026-05-02 的 pivot 决策。今天主要做了三件事：
+（1）Phase 0 战略 doctrine 明确锁定，划清主线/不做清单/分工边界；
+（2）codex ↔ Claude 之间的协作协议从"用户人肉 relay"切到 git-based
+双文件总线；（3）Track B 沿着 pivot 路线 ship 了 12 个 commit，把
+ProfileGapCard / benchmark dashboard / NLU profile_edit consumer 三条链
+路推到"contract + 测试 + 端到端 mock 都 ready，等 Track A endpoint 接入
+即上线"的状态。
+
+【Phase 0 战略 doctrine（codex 起草，本节锁定）】
+
+**目标**不是"修好 Resy Essex 那个按钮"，而是证明 Computer Use 执行路线
+能稳定做到：
+
+```
+用户一句话任务 → 创建 travel task → Computer Use 打开 Resy →
+选正确餐厅/日期/人数/时间 → 填资料/处理登录或 OTP →
+停在最终确认前 → 产出 timeline + screenshots + benchmark report
+```
+
+**6 个 deliverable**：
+
+1. **执行路径切换** — Resy/restaurant Phase 0 默认走 `computer_use`；
+   `legacy_stagehand` 仅作 fallback/baseline，不再追 Resy DOM 细节。
+   Router 必须能记录"这次为什么选 computer_use"。
+
+2. **R-003 smoke 跑通** — 用 benchmark Resy Essex case。成功标准：到
+   `ready_for_confirmation` / `needs_otp` / 明确 `safe_handoff` 任一。
+   不能出现：错日期 / 错人数 / 错餐厅 / 假装成功 / 未经授权确认。
+
+3. **Profile / OTP 流程补齐** — 后端 `/api/v1/users/me/profile` 或等价
+   PATCH endpoint；`needs_profile_data` 能被 ProfileGapCard 消费；OTP
+   先做安全 handoff 或 Gmail read path（不要求第一版完全自动），但
+   状态必须清晰。
+
+4. **Task Runtime 观察面补齐** — Timeline events / snapshots / benchmark
+   report 都要和一个 `travel_task` 对齐。用户不需要看 raw log。截图流
+   作为证据，不作为主控制逻辑。
+
+5. **Benchmark gate** — 先 R-003 → Resy-only subset → Phase 0 完成标准
+   `booking-ready ≥ 80%` + `safe outcome ≥ 95%` + `severe error = 0` +
+   `taxonomy 覆盖 100%`（详见 BENCHMARK_RESTAURANT_100.md）。
+
+6. **清掉工程 blocker** — master typecheck 清零；drift check 干净；
+   `.coordination/{codex,claude}.md` 持续更新，避免互相踩文件。
+
+**明确不做（这一阶段）**：
+- 不继续优化 OpenTable 反爬
+- 不扩 hotel / flight / activity
+- 不做 Social Feed
+- 不重构大文件
+- 不继续手搓 Resy DOM 成功率（保留路径但不是主线）
+
+**分工**：
+- **Codex Track A**：ExecutorV2 router、Computer Use path、profile API、
+  cookie-auth proxy、benchmark runner、typecheck、R-003 smoke
+- **Claude Track B**：ProfileGapCard wiring、benchmark dashboard、Task
+  Timeline UI、dev demo、NLU/profile_edit 前端消费
+
+【协作协议上线（2026-05-03 早间）】
+
+之前用户人肉在 codex 和 Claude 之间复制粘贴状态——容易丢信息、产生
+代差、引入冲突。改用 git 仓库里两个状态文件做单向消息总线，零新基础设施。
+
+**机制**（CLAUDE.md § "协作协议" 完整描述）：
+```
+.coordination/
+  codex.md      ← codex 写（在 master 分支）
+  claude.md     ← Claude 写（在 claude/festive-pare-f27273 分支）
+```
+两个文件在不同分支，永远不会冲突。每边只写自己那个，只读对方那个
+（`git fetch + git show origin/<ref>:<file>`）。
+
+**协议要素**：
+- Session-start ritual（强制）：fetch + 读两个文件
+- 5 个必备 H2 section + 顶部 metadata（branch/timestamp/last-commit）
+- 5 个 commit-msg tag：`[handoff]` / `[blocked]` / `[unblocked]` /
+  `[shared]` / `[coord]`，让 `git log --oneline` 扫一眼就看到信号
+- 失败模式 + conflict resolution
+
+**首次握手已完成**：Claude 在 `774312d` 起草协议，发 prompt 给 codex；
+codex 在 `1bcb076` 创建 codex.md 并 adopt 协议，提了 3 个 open question；
+Claude 在 `9d659d4` 回答了 3 个问题。**用户从此不再当 relay**。
+
+【Track B 12 个 commit（按顺序）】
+
+1. `077a05c` ProfileGapCard 字段对齐到 codex backend canonical 13 字段
+   （`first_name` / `last_name` / `email` / `phone` / `date_of_birth` /
+   `passport_number` / `passport_expiry` / `passport_country` /
+   `address_line1` / `city` / `state` / `zip` / `country`）。`full_name`
+   保留为 legacy alias 但运行时拆 first/last；`ktn` / `address_line2`
+   作 UI-only optional；payment 字段 (`card_*`) 单独走 PaymentRedirect。
+
+2. `bf1598f` Merge `origin/master`。executor.ts 冲突取 codex 那边的
+   `buildProfileGap` 抽象（比之前的 5357f98 flight-only 硬编码更通用）。
+
+3. `4e06f29` `/dev/benchmark-runs` Phase 0 dashboard 主体（10 文件，
+   2310 行）。消费 codex 的 `/api/dev/benchmark-runs` API，渲染：headline
+   metrics + 8-bucket outcome distribution + taxonomy chart + per-case
+   filterable table + drill-down drawer。Source-of-truth 是
+   `lib/benchmark/phase0-report.ts` (codex 的)，UI 只是 mirror + display
+   helpers。
+
+4. `8f44eeb` 修 dashboard drawer drill-down bug + 56 helper 测试。drawer
+   之前 hardcoded `<a href="/tasks/{taskId}">`，但 `/tasks/[taskId]` 路由
+   不存在，会 404。改成 timelineUrl/snapshotsUrl JSON 链接 + CopyableCode
+   chip。56 cases 锁住 codex `Phase0BenchmarkReport` shape 契约。
+
+5. `cee4d9a` `/dev/profile-gap-demo` 升级成 contract 参考页：schema legend
+   (13 canonical / 1 legacy / 2 UI-only / 3 payment) + wire trace
+   (`missing[]` → `normalize` → `partition`) + 实时 JSON payload preview
+   (会发给 `/continue` 的 body)。+ 7 cases 锁 categoryOfField /
+   listFieldsByCategory。
+
+6. `76e35b9` NLU v2 加 `profile_edit` intent + `apply_profile_patch`
+   router action + 21 golden tests。用户说 "save my DOB 1995/05/15" /
+   "我的护照号 A1234567" 等 → 路由到 PATCH 而不是进 booking pipeline。
+   Mid-flow patch 时 ambient booking sub-state 完整保留（验证用例 PI3）。
+
+7. `fcdc1d9` `/dev/profile-gap-flow` 端到端 mock 集成 demo (1379 行)：
+   左侧 fake chat panel + 9 个 preset chip，右侧 inspector
+   (last action / mock backend profile / IntentState / raw extractor JSON)。
+   关键设计：mock-pipeline 跑**真实** `coerceIntentState` + `routeIntent`
+   (生产函数)，只 stub LLM extractor 用 pattern matcher。证明整条
+   action-dispatch 链路 work，等 codex 后端就绪一行 `fetch` 替换两个
+   `mock*` 调用即上线。
+
+8. `774312d` `[coord]` `.coordination/{claude,codex}.md` 协议
+   scaffolding + CLAUDE.md "协作协议" 章节 + 5 个 commit-msg tag 约定。
+
+9. `893d477` `[handoff]` `NLU_CONSUMER_CONTRACT.md` (473 行) — 给 codex
+   接 chat panel 时直接读的"消费方契约文档"。覆盖：5 个 RouterAction
+   完整 dispatch / `apply_profile_patch` 深度（PATCH endpoint 建议路径 /
+   body shape / mid-flow 状态保留 / assistant_reply 渲染）/ 5 个 worked
+   trace / 6 个 failure mode / 5 个 open question。
+
+10. `6dbef7a` 给 mock-pipeline pattern matcher 加 vitest (37 cases) +
+    **修了 4 个真 bug**：CJK `\b` word-boundary 问题 (save-verb gate +
+    chitchat 都受影响) / name regex alternation 顺序错（吃多了 prefix）/
+    venue regex 大小写不匹配。写测试时炸出来的真 bug，不是测试期望错。
+
+11. `9d659d4` `[coord]` 回答 codex `1bcb076` 的 3 个 open question：
+    Q1 (ProfileGapCard resume coverage) 区分两条路 — `/continue` cover
+    onSave，`apply_profile_patch` 仍需 `/users/me/profile` PATCH。
+    Q2 (dashboard report-shape) 等真 R-003 报告再 confirm。Q3
+    (Track B idle on Track A files) acknowledged。
+
+12. **本 commit** — PROJECT_SUMMARY.md 更新到 2026-05-03（你正在读）。
+
+【Track B 当前测试覆盖】
+- NLU v2: 172 passed / 6 skipped (LLM-dependent)
+- profile-gap helpers: 31 passed
+- benchmark dashboard helpers: 32 passed
+- mock-pipeline pattern matcher: 37 passed
+- **总计: 272 passed / 6 skipped, 0 regression**
+
+【Track A 当前状态（来自 `.coordination/codex.md`）】
+
+- `1bcb076` codex adopted 协议
+- `ef110d9` `fix(core): run primary attempt when maxRetries is zero` —
+  benchmark jobs `maxRetries=0` 会跳过首次执行的 bug 修了
+- 之前已 ship：`8a2da14` (timeline + snapshot endpoints) /
+  `84d7e5f` (needs_profile_data status emission) /
+  `8b7e3dd` (travel_tasks facade) /
+  `0f5c080` (facade schema 对齐) /
+  `13036a0` (`/api/v1/travel-tasks/:taskId/continue` endpoint) /
+  `75a3dbe` (task-level timeline/snapshots) /
+  `50f0d41` (Phase 0 Resy runner script) /
+  `9e295b0` (`/api/dev/benchmark-runs` API + sample fixture +
+   `lib/benchmark/phase0-report.ts` contract)
+- 当前 in-flight：master typecheck cleanup (17 errors) / R-003 smoke
+  / `/api/v1/users/me/profile` PATCH endpoint /
+  `/api/v1/travel-tasks/*` cookie-auth proxy
+
+【Track B 等 Track A 解锁的事项】
+
+| Blocker | 我等的具体东西 | Codex 状态 |
+|---|---|---|
+| Master typecheck 17 个 errors | 不能安全 re-merge master 进 branch | in progress |
+| `/api/v1/users/me/profile` PATCH endpoint | NLU `apply_profile_patch` 实际消费方 | aware, 未开工 |
+| Cookie-auth proxy for `/api/v1/travel-tasks/*` | 浏览器端 `/tasks/[taskId]` + dashboard drill-down | 在 codex 当前 in-flight |
+| 首次 R-003 真实报告 | Dashboard 渲染验证（详见 `9d659d4` Q2） | in progress |
+
+**ProfileGapCard `onSave` resume 路径** — RESOLVED。codex `13036a0`
++ `84d7e5f` 已经 cover。
+
+【Track B 当前累积资产清单】
+
+UI 组件包：
+- `components/profile-gap/` — 8 文件 + 2 demo route + 31 tests，13 字段
+  canonical 对齐，PaymentRedirect 隔离
+- `components/benchmark/` — 7 React 组件 + 32 tests，消费 codex
+  `Phase0BenchmarkReport`
+- `components/task-timeline/` — `useTimelineEvents` 3-tier 防御加载
+  hook + `useSnapshots` + 已接 `/tasks` page
+
+NLU v2 扩展 (`lib/agent/nlu-v2/`)：
+- `profile_edit` intent + `apply_profile_patch` router action
+- 21 golden tests + 完整 anti-pattern 覆盖（casual age / 问句 /
+  traveler count）
+- 13 canonical field mirror (`PROFILE_EDIT_FIELDS`)
+
+Dev routes：
+- `/dev/profile-gap-demo` — schema reference + wire trace + payload preview
+- `/dev/profile-gap-flow` — 端到端 mock 集成 (chat → state → action →
+  mock backend)
+- `/dev/benchmark-runs` — Phase 0 acceptance gate 仪表板
+- `/dev/timeline-demo` (之前 ship)
+- `/dev/dr-timeline-demo` (之前 ship)
+
+Contract docs：
+- `BENCHMARK_RESTAURANT_100.md` — 100 case + 13 exemplar Phase 0 gate
+- `NLU_CONSUMER_CONTRACT.md` — chat panel hookup 契约
+- `EXECUTOR_V2_PIVOT.md` — pivot 决策记录
+- `TASK_RUNTIME_DESIGN.md` — Phase 1 facade 设计
+
+【还没完成的两件事（同 2026-05-02 段，更新进度）】
+
+1. ProfileGapCard 接真 chat — `onSave` 路径 unblocked（codex `13036a0`），
+   等 codex 完成 cookie-auth proxy 后做 1-PR 接入。
+2. Resy Essex Computer Use 闭环 — Track A 主战场，Phase 0 doctrine 落地后
+   方向锁定（不再深修 DOM）。
+
+================================================================
+Recent Updates - 2026-05-02 · Executor V2 pivot — Computer Use as new main path · Track A/B parallel build · Task Timeline + DR Activity Timeline ship + NLU coverage +63 tests + 1 bug fix
+================================================================
+
+跨大约一天（2026-05-02 全天）从"修第 11 轮 OpenTable bug"切到了**架构层
+重新选型**。详细计划见 [EXECUTOR_V2_PIVOT.md](./EXECUTOR_V2_PIVOT.md)。
+今天发生的事按时间顺序：
+
+【上午：触底反弹决策】
+连续 7 个 commit 修一个 OpenTable 餐厅预订（OT round 5→10），bug 列表
+没有尽头：phantom worker / require-undefined ESM / Stagehand wrapper
+proxy gaps / esbuild __name leak / extractTargetCity missing export /
+lib·worker fork drift…用户喊停：**"我们的技术路径是不是有问题"**。
+
+讨论结论：Stagehand 这一坨**结构性复杂度本身在产生 bug**。OpenAI Computer
+Use（Anthropic Computer Use API surface 同款）把 6 个 platform provider
++ 3-layer 逻辑 + Stagehand wrapper 全压成"截图 + 自然语言指令"。代价是
+单次预订成本上升（$0.1-0.5 → $1-5）+ 速度慢（10-20s → 30-90s），但**0
+平台代码 / 平台改版自适应 / 一个执行 loop**。
+
+战略锚点：**Computer Use is to Onegent what AWS S3 is to Dropbox** —
+基础设施变便宜让产品层（chat / NLU / DR / profile / queue / MCP / 信任
+边界 / domain knowledge）更繁荣，不是更萎缩。
+
+【下午：Track A / B 并行落地】
+分工：
+- **Track A（codex，master 分支）** — 后端执行引擎 + 数据契约
+- **Track B（Claude，claude/festive-pare-f27273 分支）** — UI + 观察体验 + 测试
+- 文件域显式划分（见 EXECUTOR_V2_PIVOT.md "Ownership matrix"），两边并行
+  施工 0 冲突
+
+【今日 13 个 commit · Track A 端（codex / master）】
+
+1. 49f9175 — feat(execution-v2): registry + legacy_stagehand + computer_use
+   - lib/execution-v2/** + worker/src/execution-v2/** 新建
+   - 统一事件 / 状态契约
+   - ONEGENT_EXECUTOR_V2 + ONEGENT_COMPUTER_USE_FOR 灰度开关
+   - 默认仍走 legacy_stagehand，零回归
+
+2. 8a2da14 — feat(tasks): expose timeline and snapshot endpoints
+   - GET /api/booking-jobs/:id/timeline-events SSE（也支持 ?format=json）
+   - GET /api/booking-jobs/:id/snapshots（canonical）
+   - GET /api/browser-live/:id/snapshots（compat）
+   - 修 worker boot：extractTargetCity 加到 lib/worker mirror profile.ts
+   - check-drift 改成 Node 原生比较，扩到 browser-snapshot-store
+   - 提交 browser-snapshot-store，删 task 时同步删截图
+
+【今日 11 个 commit · Track B 端（Claude / claude/festive-pare-f27273）】
+
+1. 5357f98 — fix(flight): require only DOB, not passport — 国内航班不需要
+   passport（codex 后续会 port 到 master 因为现在跟 49f9175 在
+   lib/core/execution/executor.ts 上有交集）
+
+2. cd4f2de + 07f4e4a — feat(task-timeline): components/task-timeline 组件
+   包 + /dev/timeline-demo
+   - 14 个 TimelineEventKind + 4 个保留位
+   - 左侧时间线 + 右侧截图流 + lightbox + StatusBanner + 5 demo states
+   - derive-events.ts 从现有 decisionLog 推断高层事件（Stage 3 fallback）
+
+3. a8e011f — feat(profile-gap): components/profile-gap 组件包 + /dev/profile-gap-demo
+   - 17 字段 × {label, inputType, helper, validator, sensitivity}
+   - 信用卡字段强制走 PaymentRedirect，不 inline 收（"止步 CVV"规则）
+   - 6 fixture state：flight_dob_only / flight_full_intl /
+     hotel_payment_only / hotel_address_and_payment / restaurant_basic /
+     generic_minimal
+
+4. ed5a5e4 — feat(dr): polish ChatPanel — bigger surface, avatars,
+   better hierarchy
+   - max-h-56(224px) → min-h-280px max-h-60vh
+   - text-xs(12px) → text-[13px]
+   - agent 不再斜体；左侧蓝色头像 + "ONEGENT" eyebrow
+   - 其他成员首字母圆头像
+   - empty 态 + Sending… 状态
+
+5. e127156 — feat(dr-timeline): components/dr-timeline 组件包 +
+   /dev/dr-timeline-demo
+   - 18 个 DREventKind 覆盖 DR 完整生命周期
+     （room_created / member_joined / constraint_submitted /
+     proposal_generated/regenerated/accepted/rejected/superseded /
+     vote_approve/decline/request_changes / booking_started/completed/failed）
+   - derive-events.ts 从 DecisionRoomSnapshot 推断（无新 API）
+
+6. d0172f5 — feat(dr): wire Activity Timeline into the room detail page
+   - app/rooms/[id]/page.tsx 加 #room-activity 区块在 ChatPanel 上面
+   - sidebar nav 加 "Activity" 链接
+   - useRoomState polling 自动驱动，4s 一次刷新
+   - extractProposalVenue helper 抽 venue label（"accepted — Carbone"）
+   - **真实数据已生效** — 不只是 demo route
+
+7. 210fd30 — test(nlu-v2): add 38 golden tests covering composite plans +
+   edge cases
+   - 之前 composite_plan 整个 branch 0 测试（router.ts:187-200）
+   - 新增 5 section 38 case：composite plan / multi-DR routing /
+     required-field 边界 / planning_assumptions / flatten 边界
+   - 88 → 126 passing，回归 0
+
+8. a2e5006 — fix(nlu-v2): blank/whitespace member_names must not pass
+   DR creation gate
+   - **probing tests 找到的真 bug**：member_names=[""] 或 ["  "] 之前
+     绕过了 DR 创建的 name-required gate，导致 Decision Room 被创建
+     但没有实际成员可以邀请
+   - router.ts 加 realMemberCount() helper（trim + filter blank +
+     防 non-array）
+   - routeIntent 2 个 gate + buildStateSummary "with X" 后缀都用上
+   - 25 probing case + 5 MN 案例固定修复后行为
+   - 总计 88 → 151 passing（+63 cases，+71%）
+
+9. 134aa43 — copy(ui): rewrite ~30 dev-tone error strings + add UI_ERR helper
+   - 全仓 grep 改写 dev 口吻字符串：
+     · "Network error." × 11 处 → "Connection problem. Check your network..."
+     · "Failed to process avatar." → "Couldn't process that image..."
+     · "Checkout response was malformed." → "Something went wrong starting..."
+     · "No plan to share/vote/watch/export" × 4 → "Nothing to share/...
+       yet — generate a plan first."
+     · "No booking profile found. Please set up..." → "Set up your booking
+       profile in Settings first — we need a name, email, and phone..."
+   - 16 个文件，30+ strings
+   - 新建 lib/ui-copy/errors.ts UI_ERR helper（network/generic/
+     notFound/forbidden/unauthenticated/loadFailed/saveFailed/serverError）
+     给未来 i18n 留单点替换口子
+
+10. efa0404 — feat(task-timeline): wire SSE + snapshot endpoints; cutover
+    /tasks page
+    - 新 components/task-timeline/use-timeline-events.ts（258 行）
+      三层 fallback：EventSource SSE → ?format=json polling → 老
+      /api/booking-jobs/:id + derive-events
+    - 新 components/task-timeline/use-snapshots.ts（157 行）
+      canonical /snapshots first / browser-live compat fallback /
+      paused 联动 timeline.closed
+    - TaskTimelinePanel 重构：删旧 polling hook，组合两个新 hook
+    - **app/tasks/page.tsx cutover** — slide-over 内容从
+      <BrowserLiveView fullscreen /> 替换成 <TaskTimelinePanel />
+      （slide-over 容器 + drag-resize 保留，TaskTimelinePanel 自带
+      header / banner / footer）
+    - export BrowserSnapshotRail alias（= SnapshotStream）跟 codex
+      vocabulary 对齐
+    - 防御性 normalizer：未知 event kind filter / snapshot 字段别名
+      容忍 → 后端加新东西 UI 不会炸
+
+【NLU 测试覆盖增量】
+- Pre-today: 88 passed / 6 skipped
+- Post-today: 151 passed / 6 skipped
+- 新文件：golden-composite.test.ts (38 cases) + golden-probing.test.ts (25 cases)
+- Bug 找到 / 修了：1 / 1（member_names blank validation gap）
+- 守护的 invariant：composite_plan 整个 branch 现在有 9 个 case 钉住，
+  trip-vs-room 路由优先级 4 个 case 钉住，refine_existing 4 个 case
+  钉住，buildStateSummary 防御性 5 个 case 钉住
+
+【还没完成的两件事】
+1. ProfileGapCard 接 chat：等 Track A 落地 needs_profile_data 结构化
+   状态。组件 + ProfileFieldId types 已经 ready。
+2. Resy Essex 用 Computer Use 闭环：Track A 当前主战场。
+
+【下一阶段产品 release 解锁条件】
+- Resy Essex Computer Use 跑到"最终确认前停下"且稳定 → 把
+  ONEGENT_COMPUTER_USE_FOR 从 resy → 扩到 restaurant 全套
+- 然后 hotel / flight / activity 一个一个迁
+- 4 类全过后才可以删 lib/booking-autopilot
 
 ================================================================
 Recent Updates - 2026-04-30 · DR Phase 4 闭环 + 联系人模糊匹配 + Profile portfolio + Expedia drift handling + Social Feed plan

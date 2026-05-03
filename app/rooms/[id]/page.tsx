@@ -24,6 +24,11 @@ import GlobalNav from "@/components/GlobalNav";
 import PhotoCarousel from "@/components/PhotoCarousel";
 import FlightCard from "@/components/FlightCard";
 import ActivityCard from "@/components/ActivityCard";
+import {
+  DRTimelineList,
+  deriveDREventsFromSnapshot,
+  type DRTimelineInputs,
+} from "@/components/dr-timeline";
 
 // Leaflet pulls in `window` — force client-only so the room detail page (a
 // server component by default) doesn't choke during SSR.
@@ -189,6 +194,53 @@ function RoomView({
   const isPayer = userId === payerId;
   const isCreator = userId === room.creator_id;
 
+  // ── DR Activity Timeline ──────────────────────────────────────────────────
+  // Derive a chronological event feed from the existing snapshot. No new API
+  // calls — feeds entirely off room / members / constraints / proposals data
+  // we already fetch via useRoomState. Updates each refresh tick automatically.
+  const drTimelineEvents = useMemo(() => {
+    const member_names: Record<string, string> = {};
+    for (const [uid, profile] of Object.entries(member_profiles)) {
+      member_names[uid] = profile.display_name ?? `@${profile.profile_code ?? uid.slice(-6)}`;
+    }
+    const inputs: DRTimelineInputs = {
+      room: {
+        id: room.id,
+        title: room.title,
+        status: room.status,
+        creator_id: room.creator_id,
+        created_at: room.created_at,
+        updated_at: room.updated_at,
+        booking_job_id: room.booking_job_id,
+        approval_rule: room.approval_rule ?? "unanimous",
+      },
+      members: members.map((m) => ({
+        user_id: m.user_id,
+        role: m.role,
+        status: m.status,
+        joined_at: m.joined_at,
+      })),
+      constraints: constraints.map((c) => ({
+        user_id: c.user_id,
+        submitted: c.submitted,
+        updated_at: c.updated_at,
+      })),
+      proposals: proposals.map((p) => ({
+        id: p.id,
+        status: p.status,
+        created_at: p.created_at,
+        venue: extractProposalVenue(p),
+        votes: p.votes.map((v) => ({
+          user_id: v.user_id,
+          vote: v.vote,
+          voted_at: v.voted_at,
+        })),
+      })),
+      member_names,
+    };
+    return deriveDREventsFromSnapshot(inputs);
+  }, [room, members, member_profiles, constraints, proposals]);
+
   const submittedCount = constraints.filter((c) => c.submitted).length;
   const roomStatusMeta: Record<string, { text: string; tone: string }> = {
     collecting: { text: "Collecting", tone: "bg-[var(--card-2)] text-[var(--text-secondary)] border border-[var(--border)]" },
@@ -340,6 +392,7 @@ function RoomView({
                   {(acceptedProposal || room.status === "executing" || room.status === "done") && (
                     <a href="#room-booking" className="px-3 py-2 rounded-xl text-sm text-[var(--text-secondary)] hover:bg-[var(--card-2)] hover:text-[var(--text-primary)] transition-colors">Booking</a>
                   )}
+                  <a href="#room-activity" className="px-3 py-2 rounded-xl text-sm text-[var(--text-secondary)] hover:bg-[var(--card-2)] hover:text-[var(--text-primary)] transition-colors">Activity</a>
                   <a href="#room-chat" className="px-3 py-2 rounded-xl text-sm text-[var(--text-secondary)] hover:bg-[var(--card-2)] hover:text-[var(--text-primary)] transition-colors">Chat</a>
                 </div>
               </div>
@@ -495,6 +548,15 @@ function RoomView({
             <p className="text-sm text-[var(--text-secondary)]">This room was abandoned.</p>
           </div>
         )}
+        </div>
+
+        {/* Activity timeline — chronological event feed derived from snapshot */}
+        <div id="room-activity" className="scroll-mt-24 mb-4">
+        <DRTimelineList
+          events={drTimelineEvents}
+          subtitle={`${drTimelineEvents.length} ${drTimelineEvents.length === 1 ? "event" : "events"}`}
+          emptyMessage="Room just created"
+        />
         </div>
 
         {/* Chat */}
@@ -882,6 +944,33 @@ function RoomActionsMenu({
 
 function memberDisplayName(userId: string, profiles: Record<string, UserProfile>): string {
   return profiles[userId]?.display_name ?? `@${profiles[userId]?.profile_code ?? userId.slice(-6)}`;
+}
+
+/**
+ * Best-effort label extractor for a proposal's primary option. Used by the
+ * DR Activity Timeline to surface "accepted: Carbone" instead of "accepted".
+ * Tolerates the multi-shape content_json (options[].card vs legacy single-
+ * card) — returns undefined when nothing useful is found.
+ */
+function extractProposalVenue(proposal: { content_json: Record<string, unknown> | null }): string | undefined {
+  const content = proposal.content_json;
+  if (!content || typeof content !== "object") return undefined;
+  // Prefer .options[0].card.{name,title,airline} when present.
+  const options = (content as { options?: unknown }).options;
+  if (Array.isArray(options) && options[0] && typeof options[0] === "object") {
+    const card = (options[0] as { card?: unknown }).card;
+    if (card && typeof card === "object") {
+      const c = card as { name?: unknown; title?: unknown; airline?: unknown };
+      if (typeof c.name === "string" && c.name) return c.name;
+      if (typeof c.title === "string" && c.title) return c.title;
+      if (typeof c.airline === "string" && c.airline) return c.airline;
+    }
+  }
+  // Fall back to top-level fields on legacy single-card proposals.
+  const c = content as { name?: unknown; title?: unknown };
+  if (typeof c.name === "string" && c.name) return c.name;
+  if (typeof c.title === "string" && c.title) return c.title;
+  return undefined;
 }
 
 function MembersStrip({
@@ -3415,60 +3504,120 @@ function ChatPanel({
   }
 
   return (
-    <div className={`${CARD} p-3 mb-4`}>
-      <p className="text-xs font-semibold text-[var(--text-secondary)] mb-2">Chat</p>
-      <div className="max-h-56 overflow-y-auto flex flex-col gap-1.5 mb-2">
+    <div className={`${CARD} p-4 mb-4`}>
+      {/* Header — eyebrow + member count */}
+      <div className="flex items-center justify-between mb-3">
+        <div>
+          <p className="text-[10px] font-semibold uppercase tracking-[0.08em] text-[var(--text-secondary)]">
+            Chat
+          </p>
+          <p className="text-[11px] text-[var(--text-muted)] mt-0.5">
+            {members.length} {members.length === 1 ? "member" : "members"}
+            {messages.length > 0 && (
+              <>
+                <span className="mx-1.5 opacity-40">·</span>
+                {messages.length} {messages.length === 1 ? "message" : "messages"}
+              </>
+            )}
+          </p>
+        </div>
+      </div>
+
+      {/* Messages — taller, breathable, with avatars */}
+      <div className="min-h-[280px] max-h-[60vh] overflow-y-auto flex flex-col gap-3 mb-3 pr-1 -mr-1">
         {messages.length === 0 && (
-          <p className="text-xs text-[var(--text-muted)] text-center py-4">No messages yet.</p>
+          <div className="flex-1 flex items-center justify-center py-8 text-center">
+            <div>
+              <p className="text-3xl opacity-25 mb-2">💬</p>
+              <p className="text-xs font-semibold text-[var(--text-secondary)]">
+                No messages yet
+              </p>
+              <p className="text-[11px] text-[var(--text-muted)] mt-1 max-w-[240px]">
+                Anyone in the room can chat here. The agent will narrate what it&apos;s doing too.
+              </p>
+            </div>
+          </div>
         )}
         {messages.map((m) => {
           const agent = m.sender_id === null;
           const mine = m.sender_id === userId;
           const time = new Date(m.created_at).toLocaleTimeString([], {
-            hour: "2-digit", minute: "2-digit",
+            hour: "numeric", minute: "2-digit", hour12: true,
           });
+          const otherName = agent
+            ? "Onegent"
+            : memberShort[m.sender_id ?? ""] ?? "Member";
+          const initial = otherName.charAt(0).toUpperCase();
           return (
             <div
               key={m.id}
-              className={`text-xs rounded-xl px-2.5 py-1.5 max-w-[85%] ${
-                agent
-                  ? "bg-blue-500/10 text-blue-600 border border-blue-500/20 self-start italic"
-                  : mine
-                    ? "bg-[var(--text-primary)] text-[var(--bg)] self-end"
-                    : "bg-[var(--card-2)] text-[var(--text-primary)] border border-[var(--border)] self-start"
-              }`}
-              title={time}
+              className={`flex gap-2 ${mine ? "flex-row-reverse" : "flex-row"} items-start`}
             >
-              {agent && <span className="mr-1">🤖</span>}
-              {!agent && !mine && (
-                <span className="block text-[10px] opacity-60 mb-0.5">
-                  {memberShort[m.sender_id ?? ""] ?? "user"} · {time}
+              {/* Avatar — agent / other (not shown for self) */}
+              {!mine && (
+                <div
+                  className={`mt-4 w-7 h-7 rounded-full flex items-center justify-center text-[11px] font-semibold flex-shrink-0 ${
+                    agent
+                      ? "bg-blue-500/15 border border-blue-500/30 text-blue-600"
+                      : "bg-[var(--card-2)] border border-[var(--border)] text-[var(--text-secondary)]"
+                  }`}
+                  aria-hidden
+                >
+                  {agent ? "🤖" : initial}
+                </div>
+              )}
+
+              {/* Bubble + meta column */}
+              <div className={`flex flex-col max-w-[78%] min-w-0 ${mine ? "items-end" : "items-start"}`}>
+                {!mine && (
+                  <span
+                    className={`text-[10px] font-semibold mb-1 px-1 ${
+                      agent
+                        ? "text-blue-600 uppercase tracking-[0.08em]"
+                        : "text-[var(--text-muted)]"
+                    }`}
+                  >
+                    {otherName}
+                  </span>
+                )}
+                <div
+                  className={`text-[13px] leading-relaxed rounded-2xl px-3.5 py-2 break-words ${
+                    agent
+                      ? "bg-blue-500/10 text-blue-700 border border-blue-500/15"
+                      : mine
+                        ? "bg-[var(--text-primary)] text-[var(--bg)]"
+                        : "bg-[var(--card-2)] text-[var(--text-primary)] border border-[var(--border)]"
+                  }`}
+                  title={new Date(m.created_at).toLocaleString()}
+                >
+                  {m.content}
+                </div>
+                <span className={`text-[10px] text-[var(--text-muted)] mt-1 px-1 ${mine ? "text-right" : ""}`}>
+                  {time}
                 </span>
-              )}
-              {m.content}
-              {mine && (
-                <span className="block text-[10px] opacity-60 mt-0.5 text-right">{time}</span>
-              )}
+              </div>
             </div>
           );
         })}
         <div ref={bottomRef} />
       </div>
-      <div className="flex gap-2">
+
+      {/* Composer */}
+      <div className="flex gap-2 items-stretch">
         <input
           value={text}
           onChange={(e) => setText(e.target.value)}
           onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(); } }}
-          placeholder="Say something…"
+          placeholder="Say something…  (Enter to send)"
           maxLength={2000}
           className={`flex-1 ${INPUT}`}
         />
         <button
           onClick={send}
           disabled={sending || !text.trim()}
-          className={`px-4 py-2 ${CTA}`}
+          className={`px-5 py-2 ${CTA}`}
         >
-          Send
+          {sending ? "Sending…" : "Send"}
         </button>
       </div>
     </div>

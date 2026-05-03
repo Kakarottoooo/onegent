@@ -1545,3 +1545,611 @@
   margin-bottom: var(--space-2);
   opacity: 0.6;
 }
+
+/* ═══════════════════════════════════════════════════════════════════════
+ * TASK TIMELINE — slide-over panel with high-level events + snapshots
+ *
+ * Replaces the live raw-trace view with a Bytebot/Linear-tier surface:
+ *   - Left column: vertical event timeline with icon rail + connectors
+ *   - Right column: vertical stream of clickable snapshot cards
+ *   - Top: status banner (only shown for pause / terminal states)
+ *
+ * Dark theme (matches existing slide-over container which inlines #111).
+ * Components live in components/task-timeline/**.
+ * ═══════════════════════════════════════════════════════════════════════ */
+
+.task-timeline {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  width: 100%;
+  background: #111;
+  color: rgba(255, 255, 255, 0.92);
+  font-family: var(--font-dm-sans);
+}
+
+/* ── Header ─────────────────────────────────────────────────────────── */
+
+.task-timeline__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-shrink: 0;
+  padding: 14px 18px;
+  border-bottom: 0.5px solid rgba(255, 255, 255, 0.08);
+}
+
+.task-timeline__header-text {
+  min-width: 0;
+}
+
+.task-timeline__header-title {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 700;
+  color: #fff;
+  letter-spacing: -0.005em;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.task-timeline__header-glyph {
+  font-size: 14px;
+  line-height: 1;
+}
+
+.task-timeline__header-subtitle {
+  margin: 2px 0 0 0;
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.45);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.task-timeline__header-close {
+  flex-shrink: 0;
+  margin-left: 12px;
+  background: rgba(255, 255, 255, 0.08);
+  border: none;
+  border-radius: 8px;
+  color: #fff;
+  padding: 7px 14px;
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  transition: background 120ms ease;
+}
+
+.task-timeline__header-close:hover {
+  background: rgba(255, 255, 255, 0.14);
+}
+
+/* ── Status banner ──────────────────────────────────────────────────── */
+
+.task-timeline__banner {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  flex-shrink: 0;
+  padding: 12px 18px;
+  border-bottom: 0.5px solid rgba(255, 255, 255, 0.06);
+}
+
+.task-timeline__banner--pause {
+  background: rgba(245, 158, 11, 0.08);
+  border-bottom-color: rgba(245, 158, 11, 0.18);
+}
+
+.task-timeline__banner--success {
+  background: rgba(34, 197, 94, 0.08);
+  border-bottom-color: rgba(34, 197, 94, 0.18);
+}
+
+.task-timeline__banner--warning {
+  background: rgba(234, 179, 8, 0.06);
+  border-bottom-color: rgba(234, 179, 8, 0.18);
+}
+
+.task-timeline__banner--error {
+  background: rgba(220, 38, 38, 0.08);
+  border-bottom-color: rgba(220, 38, 38, 0.18);
+}
+
+.task-timeline__banner-icon {
+  flex-shrink: 0;
+  font-size: 16px;
+  line-height: 1;
+  margin-top: 1px;
+}
+
+.task-timeline__banner-text {
+  flex: 1;
+  min-width: 0;
+}
+
+.task-timeline__banner-title {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 700;
+  color: #fff;
+  letter-spacing: -0.005em;
+}
+
+.task-timeline__banner-body {
+  margin: 2px 0 0 0;
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.7);
+  line-height: 1.4;
+}
+
+.task-timeline__banner-actions {
+  display: flex;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.task-timeline__banner-action {
+  border: none;
+  border-radius: 6px;
+  padding: 6px 12px;
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  transition: filter 120ms ease, background 120ms ease;
+}
+
+.task-timeline__banner-action--secondary {
+  background: rgba(255, 255, 255, 0.08);
+  color: #fff;
+}
+
+.task-timeline__banner-action--secondary:hover {
+  background: rgba(255, 255, 255, 0.14);
+}
+
+.task-timeline__banner-action--primary {
+  background: #fff;
+  color: #111;
+}
+
+.task-timeline__banner-action--primary:hover {
+  filter: brightness(0.95);
+}
+
+/* ── Body & columns ─────────────────────────────────────────────────── */
+
+.task-timeline__body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  overflow: hidden;
+}
+
+.task-timeline__columns {
+  flex: 1;
+  display: grid;
+  grid-template-columns: minmax(280px, 38%) 1fr;
+  min-height: 0;
+}
+
+.task-timeline__column {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 16px 18px 24px;
+}
+
+.task-timeline__column--events {
+  border-right: 0.5px solid rgba(255, 255, 255, 0.08);
+}
+
+.task-timeline__column--snapshots {
+  background: rgba(255, 255, 255, 0.02);
+}
+
+.task-timeline__column-eyebrow {
+  margin: 0 0 12px 0;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: rgba(255, 255, 255, 0.45);
+}
+
+/* ── Events list (left column) ──────────────────────────────────────── */
+
+.task-timeline__events {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.task-timeline__events-empty {
+  padding: 20px 0;
+}
+
+.task-timeline__events-empty-line {
+  margin: 0;
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.4);
+}
+
+.task-timeline__event {
+  display: flex;
+  gap: 12px;
+  padding: 6px 0 14px 0;
+  position: relative;
+  transition: opacity 120ms ease;
+}
+
+.task-timeline__event--last {
+  padding-bottom: 6px;
+}
+
+.task-timeline__event--active .task-timeline__event-glyph {
+  box-shadow: 0 0 0 3px rgba(255, 255, 255, 0.12);
+}
+
+.task-timeline__event-rail {
+  flex-shrink: 0;
+  width: 22px;
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.task-timeline__event-glyph {
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.08);
+  color: #fff;
+  font-size: 11px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  position: relative;
+  z-index: 1;
+}
+
+.task-timeline__event--success .task-timeline__event-glyph {
+  background: rgba(34, 197, 94, 0.18);
+  color: rgb(74, 222, 128);
+}
+
+.task-timeline__event--progress .task-timeline__event-glyph {
+  background: rgba(59, 130, 246, 0.18);
+  color: rgb(96, 165, 250);
+}
+
+.task-timeline__event--pause .task-timeline__event-glyph {
+  background: rgba(245, 158, 11, 0.22);
+  color: rgb(251, 191, 36);
+}
+
+.task-timeline__event--warning .task-timeline__event-glyph {
+  background: rgba(234, 179, 8, 0.18);
+  color: rgb(250, 204, 21);
+}
+
+.task-timeline__event--error .task-timeline__event-glyph {
+  background: rgba(220, 38, 38, 0.22);
+  color: rgb(248, 113, 113);
+}
+
+.task-timeline__event-line {
+  position: absolute;
+  top: 22px;
+  bottom: -8px;
+  width: 1px;
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.task-timeline__event-body {
+  flex: 1;
+  min-width: 0;
+  padding-top: 1px;
+}
+
+.task-timeline__event-label {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 500;
+  color: rgba(255, 255, 255, 0.92);
+  line-height: 1.35;
+}
+
+.task-timeline__event-meta {
+  margin: 3px 0 0 0;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.42);
+}
+
+.task-timeline__event-snapshot-link {
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  font: inherit;
+  color: rgba(96, 165, 250, 0.9);
+  text-decoration: underline;
+  text-decoration-color: rgba(96, 165, 250, 0.4);
+  text-underline-offset: 2px;
+  transition: color 120ms ease;
+}
+
+.task-timeline__event-snapshot-link:hover {
+  color: rgb(147, 197, 253);
+}
+
+/* ── Snapshots stream (right column) ────────────────────────────────── */
+
+.task-timeline__snapshots {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.task-timeline__snapshots-empty {
+  padding: 32px 8px;
+  text-align: center;
+}
+
+.task-timeline__snapshots-empty-line {
+  margin: 0;
+  font-size: 13px;
+  color: rgba(255, 255, 255, 0.6);
+  font-weight: 600;
+}
+
+.task-timeline__snapshots-empty-sub {
+  margin: 4px 0 0 0;
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.4);
+}
+
+.task-timeline__snapshot {
+  border-radius: 12px;
+  overflow: hidden;
+  background: rgba(255, 255, 255, 0.04);
+  border: 0.5px solid rgba(255, 255, 255, 0.08);
+  transition: transform 160ms ease, border-color 160ms ease, box-shadow 160ms ease;
+}
+
+.task-timeline__snapshot:hover {
+  transform: translateY(-1px);
+  border-color: rgba(255, 255, 255, 0.18);
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.35);
+}
+
+.task-timeline__snapshot--active {
+  border-color: rgba(96, 165, 250, 0.5);
+  box-shadow: 0 0 0 3px rgba(96, 165, 250, 0.18);
+}
+
+.task-timeline__snapshot-button {
+  display: block;
+  width: 100%;
+  border: none;
+  background: none;
+  padding: 0;
+  cursor: zoom-in;
+  position: relative;
+}
+
+.task-timeline__snapshot-image {
+  display: block;
+  width: 100%;
+  height: auto;
+  background: #1a1a1a;
+}
+
+.task-timeline__snapshot-zoom-hint {
+  position: absolute;
+  bottom: 10px;
+  right: 10px;
+  background: rgba(0, 0, 0, 0.65);
+  color: #fff;
+  font-size: 10px;
+  font-weight: 600;
+  padding: 4px 8px;
+  border-radius: 6px;
+  opacity: 0;
+  transition: opacity 120ms ease;
+  pointer-events: none;
+  letter-spacing: 0.02em;
+}
+
+.task-timeline__snapshot:hover .task-timeline__snapshot-zoom-hint {
+  opacity: 1;
+}
+
+.task-timeline__snapshot-meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 12px 10px;
+  gap: 8px;
+}
+
+.task-timeline__snapshot-label {
+  margin: 0;
+  font-size: 12px;
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.85);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.task-timeline__snapshot-time {
+  flex-shrink: 0;
+  font-size: 10px;
+  color: rgba(255, 255, 255, 0.42);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ── Lightbox ───────────────────────────────────────────────────────── */
+
+.task-timeline__lightbox {
+  position: fixed;
+  inset: 0;
+  z-index: 10000;
+  background: rgba(0, 0, 0, 0.88);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 40px;
+  cursor: zoom-out;
+  animation: task-timeline-fade-in 140ms ease;
+}
+
+@keyframes task-timeline-fade-in {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+.task-timeline__lightbox-frame {
+  max-width: 100%;
+  max-height: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  cursor: default;
+}
+
+.task-timeline__lightbox-image {
+  max-width: 100%;
+  max-height: calc(100vh - 140px);
+  object-fit: contain;
+  border-radius: 8px;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.6);
+}
+
+.task-timeline__lightbox-meta {
+  margin-top: 14px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+}
+
+.task-timeline__lightbox-label {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+  color: #fff;
+}
+
+.task-timeline__lightbox-time {
+  margin: 0;
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.55);
+  font-variant-numeric: tabular-nums;
+}
+
+.task-timeline__lightbox-close {
+  position: absolute;
+  top: 20px;
+  right: 24px;
+  background: rgba(255, 255, 255, 0.12);
+  border: none;
+  border-radius: 8px;
+  color: #fff;
+  padding: 8px 14px;
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  transition: background 120ms ease;
+}
+
+.task-timeline__lightbox-close:hover {
+  background: rgba(255, 255, 255, 0.2);
+}
+
+.task-timeline__lightbox-hint {
+  position: absolute;
+  bottom: 20px;
+  left: 50%;
+  transform: translateX(-50%);
+  margin: 0;
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.4);
+}
+
+/* ── Empty / connecting states ──────────────────────────────────────── */
+
+.task-timeline__empty {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  padding: 48px 24px;
+  gap: 8px;
+}
+
+.task-timeline__empty-title {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.85);
+}
+
+.task-timeline__empty-body {
+  margin: 0;
+  max-width: 320px;
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.5);
+  line-height: 1.5;
+}
+
+.task-timeline__pulse-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: rgb(96, 165, 250);
+  box-shadow: 0 0 0 0 rgba(96, 165, 250, 0.6);
+  margin-bottom: 12px;
+  animation: task-timeline-pulse 1.4s ease-in-out infinite;
+}
+
+@keyframes task-timeline-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(96, 165, 250, 0.6); }
+  50%      { box-shadow: 0 0 0 10px rgba(96, 165, 250, 0); }
+}
+
+/* ── Footer ─────────────────────────────────────────────────────────── */
+
+.task-timeline__footer {
+  flex-shrink: 0;
+  padding: 8px 18px;
+  border-top: 0.5px solid rgba(255, 255, 255, 0.08);
+  text-align: center;
+}
+
+.task-timeline__footer-line {
+  margin: 0;
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.32);
+}

@@ -81,7 +81,7 @@ export default function AddContactCTA({
       }
       setError(data?.error ?? "Couldn't send request.");
     } catch {
-      setError("Network error.");
+      setError("Connection problem. Check your network and try again.");
     } finally {
       setBusy(false);
     }

@@ -1992,7 +1992,7 @@ function HomeInner() {
         query: lastUserQuery,
       });
 
-      if (!chat.decisionPlan) throw new Error("No plan to share");
+      if (!chat.decisionPlan) throw new Error("Nothing to share yet — generate a plan first.");
 
       const res = await fetch("/api/plan/save", {
         method: "POST",
@@ -2024,7 +2024,7 @@ function HomeInner() {
         query: lastUserQuery,
       });
 
-      if (!chat.decisionPlan) throw new Error("No plan to share for vote");
+      if (!chat.decisionPlan) throw new Error("Nothing to vote on yet — generate a plan first.");
 
       // Mark vote_mode on the plan before saving
       const voteModePlan = { ...chat.decisionPlan, vote_mode: true };
@@ -2052,7 +2052,7 @@ function HomeInner() {
     }
 
     if (action.type === "watch_price") {
-      if (!chat.decisionPlan) throw new Error("No plan to watch");
+      if (!chat.decisionPlan) throw new Error("Nothing to track yet — generate a plan first.");
 
       // Request push notification permission to deliver price drop alerts
       subscribeToPushNotifications(chat.getSessionId(), userId).catch(() => {});
@@ -2103,7 +2103,7 @@ function HomeInner() {
     }
 
     if (action.type === "export_brief") {
-      if (!chat.decisionPlan) throw new Error("No plan to export");
+      if (!chat.decisionPlan) throw new Error("Nothing to export yet — generate a plan first.");
 
       // Save the plan so the brief route can read it from DB
       const res = await fetch("/api/plan/save", {

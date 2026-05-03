@@ -1,0 +1,356 @@
+/**
+ * Per-field metadata: how to render, validate, and explain each field
+ * the ProfileGapCard might ask for.
+ *
+ * Keep the map dense and the component dumb — no special-cases in
+ * FieldRow.tsx. Adding a new field = adding one entry here.
+ *
+ * Field IDs match the canonical schema codex's Track A emits via
+ * `/api/v1/travel-tasks/:id/needs` (see `CANONICAL_FIELD_IDS` in
+ * `./types.ts`). The legacy `full_name` alias is normalized into
+ * `first_name` + `last_name` before render — see
+ * `normalizeMissingFields()` below.
+ */
+
+import type { FieldSensitivity, ProfileFieldId } from "./types";
+
+export interface FieldDefinition {
+  /** Stable id (matches the key on profile records / API). */
+  id: ProfileFieldId;
+  /** Form-row label, e.g. "Date of birth". */
+  label: string;
+  /** HTML input type — keeps the component switch trivial. */
+  inputType: "text" | "email" | "tel" | "date" | "select";
+  /** Helper text under the input (small, muted). */
+  helper?: string;
+  /** Placeholder copy when empty. */
+  placeholder?: string;
+  /** Sensitivity bucket — payment fields short-circuit to PaymentRedirect. */
+  sensitivity: FieldSensitivity;
+  /** Optional value list for select-type inputs. */
+  options?: { value: string; label: string }[];
+  /** Optional pure-fn validator. Returns an error message or undefined. */
+  validate?: (value: string) => string | undefined;
+}
+
+/* ─── Validators ────────────────────────────────────────────────────────── */
+
+const required = (label: string) => (v: string) =>
+  v.trim().length === 0 ? `${label} is required` : undefined;
+
+const emailRe = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const isEmail = (v: string) =>
+  v.trim().length === 0
+    ? "Email is required"
+    : !emailRe.test(v)
+    ? "Enter a valid email"
+    : undefined;
+
+const phoneMinDigits = (v: string) => {
+  const digits = v.replace(/\D/g, "");
+  if (digits.length === 0) return "Phone is required";
+  if (digits.length < 7) return "Enter a valid phone number";
+  return undefined;
+};
+
+const isPastDate = (v: string) => {
+  if (!v) return "Date is required";
+  const d = Date.parse(v);
+  if (Number.isNaN(d)) return "Enter a valid date";
+  if (d >= Date.now()) return "Date must be in the past";
+  return undefined;
+};
+
+const isFutureDate = (v: string) => {
+  if (!v) return "Date is required";
+  const d = Date.parse(v);
+  if (Number.isNaN(d)) return "Enter a valid date";
+  if (d <= Date.now()) return "Date must be in the future";
+  return undefined;
+};
+
+/* ─── Country options (short list — covers ~95% of bookings) ───────────── */
+
+const COMMON_COUNTRIES = [
+  "US",
+  "CN",
+  "GB",
+  "CA",
+  "MX",
+  "JP",
+  "KR",
+  "IN",
+  "AU",
+  "FR",
+  "DE",
+  "IT",
+  "ES",
+  "BR",
+  "SG",
+  "TH",
+  "TR",
+  "AE",
+] as const;
+
+const countryOptions = COMMON_COUNTRIES.map((c) => ({ value: c, label: c }));
+
+/* ─── Registry ─────────────────────────────────────────────────────────── */
+
+export const FIELD_DEFINITIONS: Record<ProfileFieldId, FieldDefinition> = {
+  // ── Personal ───────────────────────────────────────────────
+  first_name: {
+    id: "first_name",
+    label: "First name",
+    inputType: "text",
+    helper: "As it appears on your travel documents.",
+    placeholder: "Jane",
+    sensitivity: "personal",
+    validate: required("First name"),
+  },
+  last_name: {
+    id: "last_name",
+    label: "Last name",
+    inputType: "text",
+    helper: "As it appears on your travel documents.",
+    placeholder: "Doe",
+    sensitivity: "personal",
+    validate: required("Last name"),
+  },
+  email: {
+    id: "email",
+    label: "Email",
+    inputType: "email",
+    helper: "Used for booking confirmations.",
+    placeholder: "you@example.com",
+    sensitivity: "personal",
+    validate: isEmail,
+  },
+  phone: {
+    id: "phone",
+    label: "Phone",
+    inputType: "tel",
+    helper: "Some venues require a phone number for SMS confirmations.",
+    placeholder: "+1 555 555 5555",
+    sensitivity: "personal",
+    validate: phoneMinDigits,
+  },
+
+  // ── Travel documents ──────────────────────────────────────
+  date_of_birth: {
+    id: "date_of_birth",
+    label: "Date of birth",
+    inputType: "date",
+    helper: "Required for flights — TSA needs this. Domestic + international.",
+    sensitivity: "travel",
+    validate: isPastDate,
+  },
+  passport_number: {
+    id: "passport_number",
+    label: "Passport number",
+    inputType: "text",
+    helper: "International flights only. Domestic US (e.g. JFK→LAX) doesn't need this.",
+    placeholder: "A1234567",
+    sensitivity: "travel",
+    validate: required("Passport number"),
+  },
+  passport_expiry: {
+    id: "passport_expiry",
+    label: "Passport expiry",
+    inputType: "date",
+    helper: "Most countries require 6+ months validity at travel.",
+    sensitivity: "travel",
+    validate: isFutureDate,
+  },
+  passport_country: {
+    id: "passport_country",
+    label: "Country of issue",
+    inputType: "select",
+    options: countryOptions,
+    sensitivity: "travel",
+    validate: required("Country"),
+  },
+  ktn: {
+    // UI-only optional — backend never includes this in `missing[]`.
+    id: "ktn",
+    label: "TSA Known Traveler Number",
+    inputType: "text",
+    helper: "Optional — speeds up US airport security.",
+    placeholder: "9 digits",
+    sensitivity: "travel",
+  },
+
+  // ── Address ───────────────────────────────────────────────
+  address_line1: {
+    id: "address_line1",
+    label: "Street address",
+    inputType: "text",
+    placeholder: "123 Main St",
+    sensitivity: "address",
+    validate: required("Address"),
+  },
+  address_line2: {
+    // UI-only optional — backend never includes this in `missing[]`.
+    id: "address_line2",
+    label: "Apt / suite",
+    inputType: "text",
+    placeholder: "Optional",
+    sensitivity: "address",
+  },
+  city: {
+    id: "city",
+    label: "City",
+    inputType: "text",
+    sensitivity: "address",
+    validate: required("City"),
+  },
+  state: {
+    id: "state",
+    label: "State / region",
+    inputType: "text",
+    sensitivity: "address",
+  },
+  zip: {
+    id: "zip",
+    label: "ZIP / postal code",
+    inputType: "text",
+    sensitivity: "address",
+    validate: required("ZIP"),
+  },
+  country: {
+    id: "country",
+    label: "Country",
+    inputType: "select",
+    options: countryOptions,
+    sensitivity: "address",
+    validate: required("Country"),
+  },
+
+  // ── Payment (LOCKED — handled by PaymentRedirect, never inline) ──
+  card_number: {
+    id: "card_number",
+    label: "Card number",
+    inputType: "text",
+    sensitivity: "payment",
+  },
+  card_expiry: {
+    id: "card_expiry",
+    label: "Card expiry",
+    inputType: "text",
+    sensitivity: "payment",
+  },
+  billing_address: {
+    id: "billing_address",
+    label: "Billing address",
+    inputType: "text",
+    sensitivity: "payment",
+  },
+
+  // ── Legacy alias (kept for back-compat; expanded by normalizeMissingFields) ─
+  full_name: {
+    id: "full_name",
+    label: "Full name",
+    inputType: "text",
+    helper: "As it appears on your travel documents.",
+    placeholder: "Jane Doe",
+    sensitivity: "personal",
+    // No `validate` — `full_name` should never reach inline render after
+    // normalization. The entry only exists so demo fixtures and any
+    // legacy backend payload can still be displayed without crashing.
+  },
+};
+
+/* ─── Field categories (for /dev/profile-gap-demo + tooling) ───────── */
+
+/**
+ * Coarse category each field belongs to. The runtime contract only cares
+ * about `sensitivity` (drives PaymentRedirect routing); this is for
+ * tooling — dashboards, the demo route, and any docs generators.
+ *
+ *   - canonical : one of the 13 fields backend's `missing[]` may include
+ *   - legacy    : recognized for back-compat but expanded out at render
+ *                 (today: `full_name` only)
+ *   - optional  : valid UI-only fields the user might want to fill but
+ *                 backend never marks as required (today: `ktn`,
+ *                 `address_line2`)
+ *   - payment   : routed to PaymentRedirect, never inline-collected
+ */
+export type FieldCategory = "canonical" | "legacy" | "optional" | "payment";
+
+const LEGACY_FIELD_IDS: readonly ProfileFieldId[] = ["full_name"];
+const OPTIONAL_UI_FIELD_IDS: readonly ProfileFieldId[] = ["ktn", "address_line2"];
+
+export function categoryOfField(id: ProfileFieldId): FieldCategory {
+  if (FIELD_DEFINITIONS[id].sensitivity === "payment") return "payment";
+  if (LEGACY_FIELD_IDS.includes(id)) return "legacy";
+  if (OPTIONAL_UI_FIELD_IDS.includes(id)) return "optional";
+  return "canonical";
+}
+
+/** All fields grouped by category — useful for the demo schema legend. */
+export function listFieldsByCategory(): Record<FieldCategory, ProfileFieldId[]> {
+  const out: Record<FieldCategory, ProfileFieldId[]> = {
+    canonical: [],
+    legacy: [],
+    optional: [],
+    payment: [],
+  };
+  for (const id of Object.keys(FIELD_DEFINITIONS) as ProfileFieldId[]) {
+    out[categoryOfField(id)].push(id);
+  }
+  return out;
+}
+
+/* ─── Helpers ──────────────────────────────────────────────────────────── */
+
+export function isPaymentField(id: ProfileFieldId): boolean {
+  return FIELD_DEFINITIONS[id].sensitivity === "payment";
+}
+
+/**
+ * Normalize a backend-supplied `missing[]` array into the canonical render
+ * set:
+ *
+ *   1. Expand the legacy `full_name` alias into `first_name` + `last_name`
+ *      so older code paths keep rendering correctly.
+ *   2. De-duplicate while preserving order of first appearance — important
+ *      because the backend's order roughly follows "ask in the order the
+ *      provider's form asks".
+ *
+ * Pure function; safe to call inside `useMemo`.
+ */
+export function normalizeMissingFields(
+  missing: readonly ProfileFieldId[],
+): ProfileFieldId[] {
+  const out: ProfileFieldId[] = [];
+  const seen = new Set<ProfileFieldId>();
+  for (const id of missing) {
+    if (id === "full_name") {
+      for (const sub of ["first_name", "last_name"] as const) {
+        if (!seen.has(sub)) {
+          out.push(sub);
+          seen.add(sub);
+        }
+      }
+      continue;
+    }
+    if (!seen.has(id)) {
+      out.push(id);
+      seen.add(id);
+    }
+  }
+  return out;
+}
+
+/** Partition missing fields into (inline-collectable, payment-redirect).
+ *  Caller is expected to have already run `normalizeMissingFields`. */
+export function partitionMissing(
+  missing: readonly ProfileFieldId[],
+): { inline: ProfileFieldId[]; payment: ProfileFieldId[] } {
+  const inline: ProfileFieldId[] = [];
+  const payment: ProfileFieldId[] = [];
+  for (const id of missing) {
+    if (isPaymentField(id)) payment.push(id);
+    else inline.push(id);
+  }
+  return { inline, payment };
+}

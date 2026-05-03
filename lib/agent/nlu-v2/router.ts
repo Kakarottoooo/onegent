@@ -38,6 +38,23 @@ const CATEGORIES_QUICK_PICKS: QuickPick[] = [
  * Decide what to do next given the current conversation state.
  */
 export function routeIntent(state: IntentState): RouterAction {
+  // profile_edit takes precedence over the booking pipeline. User said
+  // "save my DOB 1995/05/15" mid-conversation → patch the profile, don't
+  // advance any booking flow. Extractor is responsible for preserving the
+  // ambient booking sub-state (restaurant{}, etc.) so the next turn picks
+  // up where the user left off.
+  //
+  // Defensive: if the extractor classified profile_edit but emitted no
+  // usable fields (or the coercion stripped them all), fall back to
+  // continue_chat so we don't ship an empty PATCH to the backend.
+  if (state.intent === "profile_edit") {
+    const patch = state.profile_patch ?? {};
+    if (Object.keys(patch).length === 0) {
+      return { type: "continue_chat" };
+    }
+    return { type: "apply_profile_patch", patch };
+  }
+
   // Chitchat / unknown → just keep chatting. Layer 1 already generated a
   // conversational reply; no structured action to take.
   if (state.intent === "chitchat" || state.intent === "unknown") {
@@ -83,13 +100,20 @@ export function routeIntent(state: IntentState): RouterAction {
   // creates a DR for casual "dinner with my friend" that the user didn't
   // want. So we ASK before either path commits. Quick picks so it's a tap.
   //
+  // Count members the LLM actually named — empty / whitespace-only entries
+  // don't count. Without this filter, an extractor glitch that emits
+  // member_names=[""] would let create_room slip through as if a real
+  // co-decider were present, and we'd create a Decision Room with no
+  // actual member to invite. (Surfaced by golden-probing MN1-MN3.)
+  const namedMemberCount = realMemberCount(state.member_names);
+
   // Detection signal: extractor sets party_type=multi when relationship
   // co-decider words appear, but member_names stays empty because no proper
   // name was given. That combo is the unambiguous "we don't know which
   // bucket this belongs to" case.
   if (
     state.party_type === "multi" &&
-    state.member_names.length === 0 &&
+    namedMemberCount === 0 &&
     state.intent === "create_plan"
   ) {
     return {
@@ -109,7 +133,7 @@ export function routeIntent(state: IntentState): RouterAction {
   // co-decider — they'll add the actual contact at room-creation time.
   // Without an explicit count, "拉 ta 进 DR" with no name is genuinely
   // ambiguous and asking is the right move.
-  if (state.intent === "create_room" && state.member_names.length === 0) {
+  if (state.intent === "create_room" && namedMemberCount === 0) {
     const hasNumericMultiSignal =
       (state.restaurant?.party_size ?? 1) >= 2 ||
       (state.hotel?.guests ?? 1) >= 2 ||
@@ -270,7 +294,13 @@ export function buildStateSummary(state: IntentState): string {
 
   const parts: string[] = [];
   const label = scenarioLabel(state.scenario);
-  parts.push(`User wants a ${label} booking (${state.party_type}${state.member_names.length ? ` with ${state.member_names.join(", ")}` : ""})`);
+  // Filter blank / whitespace-only names so the summary doesn't render
+  // "with ," for a malformed extractor output. Mirrors the routeIntent
+  // gate above — see realMemberCount().
+  const namedMembers = (state.member_names ?? []).filter(
+    (n): n is string => typeof n === "string" && n.trim().length > 0,
+  );
+  parts.push(`User wants a ${label} booking (${state.party_type}${namedMembers.length ? ` with ${namedMembers.join(", ")}` : ""})`);
 
   switch (state.scenario) {
     case "restaurant":
@@ -500,4 +530,22 @@ function summarizeTrip(t: NonNullable<IntentState["trip"]>): string[] {
 
 function truthy(v: string | undefined | null): v is string {
   return typeof v === "string" && v.trim().length > 0;
+}
+
+/**
+ * Count member names the LLM actually emitted as non-blank strings.
+ * Defensive against extractor glitches that produce [""] or ["  "] —
+ * those entries shouldn't pass any "do we have a real co-decider?" gate.
+ *
+ * Used by routeIntent to short-circuit DR creation when the seed only
+ * has whitespace, and mirrored in buildStateSummary's "with X" suffix
+ * so the chat prompt doesn't render "(multi with )".
+ */
+function realMemberCount(names: unknown): number {
+  if (!Array.isArray(names)) return 0;
+  let count = 0;
+  for (const n of names) {
+    if (typeof n === "string" && n.trim().length > 0) count++;
+  }
+  return count;
 }

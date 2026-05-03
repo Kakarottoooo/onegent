@@ -13,6 +13,192 @@ Always respond in Chinese. Never respond in Korean.
 
 ---
 
+## 协作协议 — codex (Track A) ↔ Claude (Track B)
+
+两个 agent 并行开发时，用户曾经手动在两边复制粘贴状态——容易丢信息、产生
+代差、导致冲突。**改用 git 仓库里两个状态文件做单向消息总线**，零新基础设施。
+
+### 文件位置
+
+```
+.coordination/
+  codex.md      ← codex 写（在 master 分支）
+  claude.md     ← Claude 写（在 claude/festive-pare-f27273 分支或后续替换分支）
+```
+
+每一边只写自己那个文件，只读对方那个。永远不会冲突。
+
+### Session start ritual（强制；每次开新对话都跑）
+
+```bash
+git fetch origin
+echo "═══ codex 当前状态 (origin/master) ═══"
+git show origin/master:.coordination/codex.md 2>/dev/null || echo "(codex.md 还不存在)"
+echo
+echo "═══ Claude 当前状态 (本分支) ═══"
+cat .coordination/claude.md 2>/dev/null || echo "(claude.md 还不存在)"
+```
+
+读到的内容是判断"对方现在在干嘛 / 给我交付了什么 / 我有没有 unblock 他"
+的唯一可靠依据。**不要凭记忆判断**——上一轮 session 的状态可能已经过时。
+
+### 何时更新自己的 `.coordination/claude.md`
+
+必须更新的时机（任一即触发）：
+1. **开始一个新任务**——把 "Currently doing" 改成新任务标题
+2. **完成一个任务**——把对应行从 "Currently doing" 移到 "Recently shipped"
+3. **发现一个 blocker**——加到 "Blocking on codex"
+4. **解锁了对方**——记入 "Recently shipped" 并在 commit 用 `[handoff]` tag
+5. **收到对方的产出**——更新 "Blocking on codex" 把已解的项删掉
+
+更新即 commit。每次 push 代码时把 `.coordination/claude.md` 一起带上。
+**不要单独 push 状态文件**——和当时的代码改动绑在同一个 commit。
+
+### 必须保留的章节（schema 契约）
+
+`.coordination/claude.md` 必须有这 7 个 section（H2）。codex.md 镜像。
+
+```
+🟢 Currently doing             # 当前任务一句话；空闲时写 "Idle"
+📍 Strategic decisions locked  # 锁定的产品/架构方向决策；指针 + 1 行总结
+⏳ Blocking on codex           # 我在等对方什么；空时写 "(none)"
+📦 Recently shipped            # 最近 5-10 个 commit 表，含给对方的备注
+🤝 Open questions for codex    # 给对方的问题；空时写 "(none)"
+🚧 Hold rules I'm respecting   # 当前我承诺不碰的范围
+🗂 Track B file ownership      # 我的文件域（变化时更新）
+```
+
+顶部必须有 metadata 行：
+```
+> Branch: <branch-name>
+> Last updated: YYYY-MM-DD HH:MM UTC
+> Last commit: <short-sha>
+```
+
+### Role allocation（2026-05-03 锁定）
+
+**Codex（Track A）= 30-40%**：
+- 架构边界 + 核心 runtime（lib/core/execution/, lib/execution-v2/, worker/src/）
+- Auth / security / Stripe / Clerk
+- Executor / Computer Use adapter / browser session lifecycle
+- Benchmark runner（scripts/run-phase0-resy-benchmark.ts）
+- 复杂 debug（state machine / race condition）
+- 最终 review + merge to master
+
+**Claude（Track B）= 60-70%**：
+- 页面（app/**, app/dev/**, app/tasks/**）
+- 组件（components/**）
+- Dashboard / observability surfaces
+- 文档（PROJECT_SUMMARY / PHASE_X_PLAN / 各种 strategy doc）
+- 测试补齐（**/__tests__/**）
+- mock-to-real wiring（fetch swap / SWAP POINT 标记的 1 行替换）
+- 大批量 UI/UX 实现
+
+**交付节奏**：
+1. Claude 大量实现到 `claude/festive-pare-f27273` branch
+2. Codex review 接口契约 + auth + risk surface（重点：跨边契约和安全）
+3. Codex 合并到 master / 修核心冲突
+
+**保护规则（hold rules 强化）**：
+- Claude **不动** `lib/core/execution/**` / `lib/execution-v2/**` /
+  `worker/src/**` / `app/api/v1/**` / `scripts/run-phase0-resy-benchmark.ts` /
+  `benchmark/PHASE0_REPORT_CONTRACT.md` / `benchmark/fixtures/` /
+  `lib/benchmark/phase0-report.ts` —— 除非 codex 明确放权
+- Codex 不动 Track B UI（`components/profile-gap/**` /
+  `components/benchmark/**` / `components/task-timeline/**` /
+  `app/dev/**` / `lib/agent/nlu-v2/**` / Track B docs）—— 除非修集成点
+- 灰色地带（API routes shell / 新 page route / 新 doc）默认 Claude 写
+- 跨保护规则的工作要在 commit msg 里 explicit 标注 `[delegated by codex]`
+  或 `[delegated by user]`
+
+**Review 失败处理**：
+- Codex review 发现 Claude 实现有问题 → push 一个 [coord] commit 列具体
+  pain points + 修法建议；Claude 接到后修正再 push
+- 不要 codex 直接改 Claude 域文件——保护边界，避免漂移
+
+**为什么要锁这个**：
+- 2 agent 并行长期会出现 "谁该写这个" 的歧义；锁定后无歧义
+- Claude 写代码速度比 codex 快 2-3 倍（实测）；codex 思考深度比 Claude
+  深；让两边各自做擅长的事 ROI 最高
+- 保护规则不变（避免 Claude 误改核心 logic 创造 silent bug）
+
+### Strategic decisions section 用法
+
+`📍 Strategic decisions locked` 是协议的 long-term memory layer。任何
+跨 phase 影响或定方向的决策，**必须**在这里加 1 行 + 指向 canonical doc
+的指针。这样下次对方 session-start 读 `.coordination/<peer>.md` 就能
+立刻看到"这些方向已经锁了，不重新讨论"。
+
+哪些算"strategic decision"（任一即记入）：
+- "Phase X 主线之一" / "Phase X 显式不做" 类决策
+- 架构选择（warm session vs Gmail OTP / Browserbase Pro vs 本地 / 等）
+- 产品定位（消费 vs 基础设施 vs 混合）
+- 重大 spec 改动（如 BENCHMARK_RESTAURANT_100 § 7.5 OTP transitional）
+- 第三方工具评估结论（如"不引入 MultiOn/Skyvern/browser-use"）
+- 移植清单 lock（如 PointsYeah 移植清单 cont. 3）
+- 研发节奏决策（如"先 R-003 后 suite"）
+
+格式：
+```
+- [YYYY-MM-DD] [一句话决策标题] · [phase 归属] · doc: `<path>` § <section>
+```
+
+例：
+```
+- 2026-05-03 Phase 0 OTP transitional rule (safe_handoff + F-PROVIDER-OTP
+  per-case acceptable, 4-metric gate stays strict) · Phase 0 · doc:
+  `BENCHMARK_RESTAURANT_100.md` § 7.5
+```
+
+指针格式严格：`<path>` § <section>，让对方一秒定位。
+
+### Strategic decisions 的对方义务
+
+任何长期工作（非当前 phase 的 in-flight task）开始前，对方必须读
+`.coordination/<peer>.md` § 📍 Strategic decisions locked，验证：
+- 这个工作方向有没有被 lock 过？
+- 决策标记是否跟自己即将写的代码冲突？
+- 如果冲突，先 [coord] 协商再动代码，不绕过决策默默改
+
+短期 in-flight work（当前 phase 内的 ticket）不强制读这一段。但接到
+跨 phase 工作（如"我开始做 Phase 4 数据飞轮"）必读。
+
+### Commit message tag 约定（C — 强信号补充）
+
+写 git log 时给跨边相关的 commit 加 prefix tag，让 `git log --oneline -20`
+扫一眼就能看到 handoff / blocker 信号：
+
+| Tag | 含义 |
+|---|---|
+| `[handoff]` | 这个 commit 完成了对方在等的事——交付方应该立即更新自己的 `.coordination/*.md` 把对应项移出 Blocking 并写到 Recently shipped 的"Notes for codex/claude"列 |
+| `[blocked]` | 这个 commit 创造了一个我等对方的 blocker——要同时更新 `.coordination/claude.md` 的 Blocking on codex 列 |
+| `[unblocked]` | 对方刚 push 的东西解了我的某个 blocker，本 commit 是对应的消费/接入 |
+| `[shared]` | 改了 shared file（lib/db.ts, schema, 协议 doc 等）——对方需要看一眼 |
+| `[coord]` | 纯协调——只更新 .coordination/*.md，没有代码 |
+
+不强制——零 tag 也行；加上等于额外加固。多数 commit 不需要 tag。
+
+### Conflict resolution
+
+理论上不会冲突（两个文件，两个分支）。如果出现：
+- 自己的 .coordination/claude.md 跟 master 上的 codex.md 不矛盾——它们各自独立，无 merge 概念
+- 我 merge master 时，只会接收对方的 codex.md（它在 master 上），不会动我的 claude.md（它只在我分支上）
+
+如果未来切分支（比如 Phase 1 完成后开新 feature branch），把 `.coordination/claude.md`
+跟新分支一起带过去；codex 那边知道分支名变了即可（在 codex.md 顶部 metadata 写
+"Claude branch: <new-branch-name>"，对方会看到）。
+
+### 失败模式
+
+- **codex 不更新**：我 fetch 后看 codex.md 时间戳老于 24h → 在回复里
+  flag 给用户，问 codex session 是否活着，不强行假设
+- **我自己忘记更新**：用户读 `.coordination/claude.md` 看到时间戳 / 状态过时
+  → 用户提醒；视作 bug 修复
+- **两边状态对不上**：以 git log 实际 commit 为准（事实），状态文件是
+  解读层（注释）
+
+---
+
 ## Booking-autopilot 架构 — 双份代码并存（B+B2，2026-05-01；修正 2026-05-01 PM）
 
 **事实校正（2026-05-01 audit）：之前说 lib/booking-autopilot 是 "deprecated dead code"

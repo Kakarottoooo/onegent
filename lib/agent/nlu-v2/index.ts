@@ -33,7 +33,10 @@ export type {
   HotelFields,
   FlightFields,
   ActivityFields,
+  ProfileEditField,
+  ProfilePatch,
 } from "./types";
+export { PROFILE_EDIT_FIELDS } from "./types";
 
 // ─── v1 compatibility aliases ─────────────────────────────────────────────
 // The v1 module (lib/conversational-nlu.ts) was retired in Phase C cleanup.

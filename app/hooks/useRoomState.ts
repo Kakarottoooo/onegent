@@ -22,15 +22,15 @@ export function useRoomState(roomId: string | null) {
         : `/api/rooms/${roomId}/state?since=${versionRef.current}`;
       const res = await fetch(url);
       if (res.status === 304) return; // no change
-      if (res.status === 404) { setError("Room not found."); return; }
-      if (res.status === 403) { setError("You're not a member of this room."); return; }
-      if (!res.ok) { setError("Couldn't load room."); return; }
+      if (res.status === 404) { setError("This room doesn't exist or has been removed."); return; }
+      if (res.status === 403) { setError("You're not a member of this room. Ask the creator for an invite."); return; }
+      if (!res.ok) { setError("We couldn't open this room. Please refresh."); return; }
       const data = await res.json() as DecisionRoomSnapshot;
       versionRef.current = data.version;
       setSnapshot(data);
       setError(null);
     } catch {
-      setError("Network error.");
+      setError("Connection problem. Check your network and try again.");
     } finally {
       setLoading(false);
     }

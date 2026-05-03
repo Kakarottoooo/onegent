@@ -96,7 +96,7 @@ export default function RoomsListPage() {
         const data = (await res.json()) as { rooms: DecisionRoomWithMembership[] };
         if (!cancelled) setRooms(data.rooms);
       } catch {
-        if (!cancelled) setError("Couldn't load your rooms.");
+        if (!cancelled) setError("We couldn't load your rooms. Please refresh.");
       }
     })();
     return () => {

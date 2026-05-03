@@ -19,7 +19,7 @@ export default function SharePage() {
 
   useEffect(() => {
     if (!token) {
-      setError("Invalid share link");
+      setError("This share link looks invalid. Ask the sender to resend it.");
       setLoading(false);
       return;
     }
@@ -29,7 +29,7 @@ export default function SharePage() {
       const data = JSON.parse(decoded);
       setCards(Array.isArray(data) ? data : []);
     } catch {
-      setError("Could not decode share link");
+      setError("This share link looks corrupted. Ask the sender to resend it.");
     } finally {
       setLoading(false);
     }

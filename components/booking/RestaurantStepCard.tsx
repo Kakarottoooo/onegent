@@ -53,7 +53,7 @@ export default function RestaurantStepCard({
     try {
       const profileRes = await fetch("/api/user/booking-profiles?default=true");
       const { profile } = await profileRes.json();
-      if (!profile) { setError("No booking profile found. Please set up your profile first."); return; }
+      if (!profile) { setError("Set up your booking profile in Settings first — we need a name, email, and phone to confirm reservations."); return; }
       await proceedWithProfile(profile);
     } finally {
       setLoading(false);
