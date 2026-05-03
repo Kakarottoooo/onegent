@@ -1,4 +1,4 @@
-import type { Locator, Page } from "playwright";
+import type { Page } from "playwright";
 import { registerProvider } from "./registry";
 import type { BrowserProvider, PaymentFillResult, ProviderStageSignals } from "./types";
 import { fillGuestFormWithAI, auditAndRefillEmptyFields } from "../ai-loop/fill-form";
@@ -36,8 +36,20 @@ interface OpenTableFieldTarget {
   descriptor: string;
 }
 
+interface OpenTableCompatLocator {
+  count?: () => Promise<number>;
+  nth?: (index: number) => OpenTableCompatLocator;
+  isVisible?: () => Promise<boolean>;
+  isEnabled?: () => Promise<boolean>;
+  scrollIntoViewIfNeeded?: () => Promise<unknown>;
+  boundingBox?: () => Promise<{ x: number; y: number; width: number; height: number } | null>;
+  click?: (options?: { timeout?: number }) => Promise<unknown>;
+  fill?: (value: string, options?: { timeout?: number }) => Promise<unknown>;
+  inputValue?: () => Promise<string>;
+}
+
 interface OpenTableLocatedInput extends OpenTableFieldTarget {
-  locator: Locator;
+  locator: OpenTableCompatLocator;
 }
 
 type OpenTableInputPage = Page & {
@@ -180,17 +192,27 @@ async function locateOpenTableInputByLocator(
   page: Page,
   field: OpenTableDinerField,
 ): Promise<OpenTableLocatedInput | null> {
-  if (typeof page.locator !== "function") return null;
+  const locatorFactory = (page as { locator?: (selector: string) => OpenTableCompatLocator }).locator;
+  if (typeof locatorFactory !== "function") return null;
   for (const selector of openTableFieldSelectors(field)) {
-    const matches = page.locator(selector);
-    const count = await matches.count().catch(() => 0);
+    const matches = locatorFactory.call(page, selector);
+    const count = typeof matches.count === "function"
+      ? await matches.count().catch(() => 0)
+      : 1;
     for (let index = 0; index < Math.min(count, 5); index += 1) {
-      const candidate = matches.nth(index);
-      const visible = await candidate.isVisible().catch(() => false);
+      const candidate = typeof matches.nth === "function" ? matches.nth(index) : matches;
+      const visible = typeof candidate.isVisible === "function"
+        ? await candidate.isVisible().catch(() => false)
+        : true;
       if (!visible) continue;
-      const enabled = await candidate.isEnabled().catch(() => true);
+      const enabled = typeof candidate.isEnabled === "function"
+        ? await candidate.isEnabled().catch(() => true)
+        : true;
       if (!enabled) continue;
-      await candidate.scrollIntoViewIfNeeded().catch(() => undefined);
+      if (typeof candidate.scrollIntoViewIfNeeded === "function") {
+        await candidate.scrollIntoViewIfNeeded().catch(() => undefined);
+      }
+      if (typeof candidate.boundingBox !== "function") continue;
       const box = await candidate.boundingBox().catch(() => null);
       if (!box || box.width <= 0 || box.height <= 0) continue;
       return {
@@ -322,10 +344,12 @@ async function verifyOpenTableDinerField(
 ): Promise<boolean> {
   const locatorHit = await locateOpenTableInputByLocator(page, field);
   if (locatorHit) {
-    const value = await locatorHit.locator.inputValue().catch(() => "");
-    if (field === "phone") return value.replace(/\D/g, "").length >= 10;
-    if (field === "email") return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value.trim());
-    return value.trim().length > 0;
+    if (typeof locatorHit.locator.inputValue === "function") {
+      const value = await locatorHit.locator.inputValue().catch(() => "");
+      if (field === "phone") return value.replace(/\D/g, "").length >= 10;
+      if (field === "email") return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value.trim());
+      return value.trim().length > 0;
+    }
   }
   return page.evaluate((targetField: OpenTableDinerField) => {
     const isShown = (el: HTMLElement): boolean => {
@@ -438,14 +462,35 @@ async function fillOpenTableFieldWithLocator(
   const target = await locateOpenTableInputByLocator(page, field);
   if (!target) return false;
   await showOpenTableDebugCursor(page, target, field, trace);
+  let filledByLocator = false;
   try {
-    await target.locator.click({ timeout: 3000 });
-    await target.locator.fill(value, { timeout: 3000 });
-    await new Promise((r) => setTimeout(r, 250));
+    if (typeof target.locator.click === "function") {
+      await target.locator.click({ timeout: 3000 });
+    } else {
+      await clickOpenTablePoint(page, target.x, target.y);
+    }
+    if (typeof target.locator.fill === "function") {
+      await target.locator.fill(value, { timeout: 3000 });
+      filledByLocator = true;
+    }
   } catch (error) {
     trace?.(`[opentable] locator fill failed for ${field}: ${(error as Error).message?.slice(0, 100)}`);
-    return false;
   }
+  if (!filledByLocator) {
+    try {
+      trace?.(`[opentable] locator lacks full fill API for ${field}; using coordinate keyboard fallback`);
+      await clickOpenTablePoint(page, target.x, target.y);
+      await new Promise((r) => setTimeout(r, 150));
+      await pressOpenTableKey(page, "Control+A").catch(() => pressOpenTableKey(page, "Control+a").catch(() => undefined));
+      await pressOpenTableKey(page, "Backspace").catch(() => undefined);
+      await new Promise((r) => setTimeout(r, 100));
+      await typeOpenTableText(page, value, field === "phone" ? 45 : 55);
+    } catch (error) {
+      trace?.(`[opentable] locator coordinate fallback failed for ${field}: ${(error as Error).message?.slice(0, 100)}`);
+      return false;
+    }
+  }
+  await new Promise((r) => setTimeout(r, 250));
   const verified = await verifyOpenTableDinerField(page, field);
   const accepted = verified || field === "phone";
   trace?.(`[opentable] locator fill ${field}: target="${target.descriptor}" verified=${verified} accepted=${accepted}`);

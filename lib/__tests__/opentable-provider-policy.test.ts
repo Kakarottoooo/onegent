@@ -19,6 +19,9 @@ describe("OpenTable provider safety policy", () => {
     expect(providerSource).toContain("using raw Playwright page for guest-form DOM operations");
     expect(providerSource).toContain("onegent-opentable-debug-cursor");
     expect(providerSource).toContain("locator fill ${field}");
+    expect(providerSource).toContain("OpenTableCompatLocator");
+    expect(providerSource).toContain("typeof candidate.isEnabled === \"function\"");
+    expect(providerSource).toContain("locator lacks full fill API");
     expect(providerSource).toContain("diner form state unreadable after phone gate fill");
     expect(providerSource).toContain("coordinate typing");
     expect(providerSource).toContain("phone-only form detected without usable phone - clicking 'Use email instead'");
