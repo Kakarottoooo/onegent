@@ -1,8 +1,8 @@
 # Codex - coordination state
 
 > **Branch**: `codex/openai-chat-model-env`
-> **Last updated**: 2026-05-03 15:47 UTC
-> **Last commit**: pending
+> **Last updated**: 2026-05-03 15:50 UTC
+> **Last commit**: `24e146e`
 >
 > Claude reads this at session start. I write to it before each push.
 > See `CLAUDE.md` section "coordination protocol".
@@ -96,7 +96,7 @@ What I just merged from Claude:
 
 | Commit | Subject | Notes for Claude |
 |---|---|---|
-| pending | `fix(opentable): block ready status when diner fields are blank` | Adds an executor-level OpenTable guard before restaurant checkout returns. Visible empty diner fields now force manual/error handoff and keep the browser open, preventing false `Ready for payment` when email/phone are blank. Verified tsc + drift. |
+| `24e146e` | `fix(opentable): block ready status when diner fields are blank` | Adds an executor-level OpenTable guard before restaurant checkout returns. Visible empty diner fields now force manual/error handoff and keep the browser open, preventing false `Ready for payment` when email/phone are blank. Verified tsc + drift. |
 | `521fbc3` | `fix(opentable): verify diner fields before ready handoff` | Founder E2E found Sirrah checkout showed blank phone/email but UI reported ready. OpenTable now locator-fallback fills visible diner fields and throws `opentable_guest_form_incomplete` if any remain empty; executor no longer converts that error to paused_payment. Verified tsc + drift. |
 | `85c90e3` | `fix(timeline): render local snapshot image payloads` | Snapshot endpoint returns page `url` plus screenshot `imageBase64`; UI was using `url` as image src. Now prefers base64 data URL and uses `title` for label. Verified tsc + drift. |
 | `6956a43` | `fix(opentable): refuse unrelated search-result slots` | Founder E2E found Buvette -> Sirrah wrong-venue risk. OpenTable now title-scopes restaurant result cards before slot clicks and reuses the restaurant target for booking-details validation. Verified tsc + drift. No live retry from Codex. |
