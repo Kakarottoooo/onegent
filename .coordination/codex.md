@@ -1,8 +1,8 @@
 # Codex - coordination state
 
 > **Branch**: `master`
-> **Last updated**: 2026-05-03 01:34 UTC
-> **Last commit**: `f2b7dae`
+> **Last updated**: 2026-05-03 02:05 UTC
+> **Last commit**: `38558db`
 >
 > Claude reads this at session start. I write to it before each push.
 > See `CLAUDE.md` section "coordination protocol".
@@ -11,27 +11,33 @@
 
 ## Currently doing
 
-Idle on Phase 0 execution until a project/key with `computer-use-preview`
-access is available, or until we explicitly decide to run legacy baseline.
+Idle on Phase 0 execution until `.env.local` is switched to a rotated
+OpenAI project key with GA Computer Use (`gpt-5.5`) access, or until we
+explicitly decide to run legacy baseline.
 
 Phase 0 R-003 smoke is blocked on OpenAI project access to
-`computer-use-preview`, not on Resy DOM or task orchestration. Master
-typecheck and drift checks passed in the `f2b7dae` validation loop.
+`gpt-5.5`, not on Resy DOM or task orchestration. Master typecheck and
+drift checks passed after migrating the Computer Use adapter to the GA
+Responses API shape (`model: gpt-5.5`, `tools: [{ type: "computer" }]`).
 
 Current local R-003 report:
-`benchmark/runs/phase0-resy-2026-05-03T01-24-48-265Z.json`
+`benchmark/runs/phase0-resy-2026-05-03T02-00-32-703Z.json`
 
 Result summary:
-- task: `fd3266f1-0f44-465e-acf9-6f34824e73e7`
-- job: `6b7da784-0d9b-4dbc-bc58-289463aee0fc`
+- task: `e985e044-8a81-46e9-bbd4-505e929f0ace`
+- job: `1093397b-87e9-46bf-ae8b-7efb2406428f`
 - outcome: `failed_with_clear_reason`
 - taxonomy: `F-INFRA-MODEL-ACCESS`
-- terminal reason: current OpenAI project cannot access `computer-use-preview`
-- model-list check: no model id containing `computer` is visible to this project
+- terminal reason: current OpenAI project cannot access `gpt-5.5`
+- model-list check: current `.env.local` key only sees `gpt-5.4*`, not
+  `gpt-5.5`; user screenshots show a different project/key has the needed
+  model allow-list
 
 Next Track A step after this commit:
-- Either switch to an OpenAI project/key with Computer Use access and rerun R-003,
-  or explicitly run a legacy baseline while keeping Phase 0 marked blocked.
+- User should revoke the API key pasted in chat, create a fresh key in the
+  project that lists `gpt-5.5`, update `.env.local`, then rerun R-003.
+- If that key still 403s, inspect project model allow-list/budget/service tier
+  in the OpenAI dashboard before debugging Resy.
 
 ## Blocking on Claude
 
@@ -41,6 +47,8 @@ Next Track A step after this commit:
 
 | Commit | Subject | Notes for Claude |
 |---|---|---|
+| `pending` | `[handoff] fix(executor): migrate Computer Use adapter to GA gpt-5.5 tool` | Replaces deprecated `computer-use-preview` tool shape with GA `gpt-5.5` + `type: "computer"` in lib/worker mirrors. R-003 still reports `F-INFRA-MODEL-ACCESS` because current `.env.local` key is from a project without `gpt-5.5` access. |
+| `38558db` | `[coord] update codex state after claude benchmark validator` | Records Claude's validator/taxonomy alignment and keeps Phase 0 blocked on OpenAI project model access. |
 | `f2b7dae` | `[handoff] feat(benchmark): route phase0 resy through computer use` | Adds `clientMetadata.preferredExecutor`, makes R-003 auto-mint a local benchmark API key, aligns OpenAI Computer Use request shape with official Responses API docs, and fixes benchmark taxonomy for model/API access failures. R-003 now reports `F-INFRA-MODEL-ACCESS`. |
 | `1bcb076` | `[coord] add codex state file; adopt coordination protocol` | Coordination handshake complete; Codex now updates this file for cross-track status. |
 | `ef110d9` | `fix(core): run primary attempt when maxRetries is zero` | Benchmark jobs with `maxRetries=0` now run their first attempt instead of skipping execution. |

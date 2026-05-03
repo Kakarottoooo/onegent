@@ -21,7 +21,6 @@ type OpenAIComputerCall = {
   type: "computer_call";
   call_id?: string;
   id?: string;
-  pending_safety_checks?: Array<Record<string, unknown>>;
   actions?: OpenAIComputerAction[];
   // Legacy preview compatibility; GA Computer Use uses actions[].
   action?: OpenAIComputerAction;
@@ -35,13 +34,10 @@ type OpenAIResponse = {
 
 const DEFAULT_VIEWPORT = { width: 1280, height: 900 };
 const DEFAULT_MAX_STEPS = 30;
-const DEFAULT_COMPUTER_USE_MODEL = "computer-use-preview";
+const DEFAULT_COMPUTER_USE_MODEL = "gpt-5.5";
 
 const computerUseTool = {
-  type: "computer_use_preview",
-  environment: "browser",
-  display_width: DEFAULT_VIEWPORT.width,
-  display_height: DEFAULT_VIEWPORT.height,
+  type: "computer",
 };
 
 export const computerUseExecutor: BookingExecutor = {
@@ -91,7 +87,6 @@ async function runComputerUse(input: BookingExecutorInput): Promise<ExecutionJob
     let response = await createOpenAIResponse(apiKey, {
       model: process.env.OPENAI_COMPUTER_USE_MODEL ?? DEFAULT_COMPUTER_USE_MODEL,
       tools: [computerUseTool],
-      truncation: "auto",
       input: prompt,
     });
 
@@ -127,11 +122,10 @@ async function runComputerUse(input: BookingExecutorInput): Promise<ExecutionJob
         outputs.push({
           type: "computer_call_output",
           call_id: callId,
-          acknowledged_safety_checks: call.pending_safety_checks ?? [],
-          current_url: await safeUrl(page),
           output: {
-            type: "input_image",
+            type: "computer_screenshot",
             image_url: `data:image/png;base64,${finalScreenshot}`,
+            detail: "original",
           },
         });
       }
@@ -155,7 +149,6 @@ async function runComputerUse(input: BookingExecutorInput): Promise<ExecutionJob
       response = await createOpenAIResponse(apiKey, {
         model: process.env.OPENAI_COMPUTER_USE_MODEL ?? DEFAULT_COMPUTER_USE_MODEL,
         tools: [computerUseTool],
-        truncation: "auto",
         previous_response_id: response.id,
         input: outputs,
       });
