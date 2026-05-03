@@ -2,8 +2,8 @@
 
 > **For**: 用户（创始人）— 手动验证 Phase 1 的全部 user-facing surface
 > **作者**: Claude (Track B)
-> **状态**: 等 codex merge `claude/festive-pare-f27273` → master 后再跑
-> **预计耗时**: 60-90 分钟（彻底走一遍）
+> **状态**: 🟢 ready to run — Phase 1 ~95% shipped (per `PHASE_STATUS.md`)；这条 walkthrough 是 declared 前的最后一道门
+> **两条路径**: 10 分钟 quick path（first-pass smoke）/ 60-90 分钟 full path（sign-off 用）—— 见下面 § 选哪条
 
 这个文档是 PHASE_1_PLAN.md #8 — Founder E2E walkthrough。目标是在用户视角
 **手动**走完 Phase 1 的每个用户路径，找出 UX 缺口、复现 bug、签字 Phase 1
@@ -16,7 +16,160 @@
 
 底部有 **bug 记录模板** + **已知不在 Phase 1 范围内的事情**（不要花时间纠结这些）。
 
+> **R-003 live smoke 不在这个文档范围内**。那是 Phase 0A 的 Computer Use 真跑流程，
+> 由 codex 执行 + 烧 OpenAI token；checklist 在 `R003_LIVE_SMOKE_RUNBOOK.md`，不要把
+> 这条 founder walkthrough 跟 R-003 live 混做一锅。
+
 ---
+
+## 选哪条路径？
+
+| 场景 | 路径 | 时间 | 覆盖 |
+|---|---|---|---|
+| First pass / 想快速验证今天的 build 没崩 / 拍 release video 前 sanity check | **§ A — Quick path** | ~10 分钟 | 自动 smoke + 3 个 cookie-auth 闭环关键流 |
+| 准备签字 Phase 1 declared / 给团队 demo / 签字进 Phase 0B | **§ 0–§ 11 Full path** | 60-90 分钟 | 12 段全部，含每个 demo 状态、真实 task 流程、PATCH 端点 curl、benchmark dashboard、DR 多人 |
+
+**推荐顺序**: 先跑 Quick；Quick 全过 → 再决定要不要 Full。Quick 抓到任何 🔴/🟠
+issue → 走 § 🛑 停测条件 决定是修后再继续还是先记账。
+
+---
+
+## 🛑 什么时候停止不要继续测
+
+不是所有 bug 都该让 walkthrough 继续。这一节列**停**的条件 vs **记下继续**的条件。
+目的是不浪费 60 分钟在已经塌了的地基上找小 bug。
+
+### 🔴 立刻停 — 这些是 Phase 1 ship blocker
+
+| 症状 | 为什么停 | 下一步 |
+|---|---|---|
+| `npm run smoke:phase1` 任意 route FAIL | 渲染都没过，下面 60 分钟全是噪音 | 把 fail 列表 + console error 贴给 Claude；等修完再跑 walkthrough |
+| Cookie-auth 失效（`/api/v1/*` 任意 endpoint 401，但用户已登录）| Phase 1 整套用户路径就靠 cookie；cookie 没生效 → 下面所有真实流程都过不了 | 立即 ping codex（auth domain）；Phase 1 declaration 卡死直到这条修 |
+| ziweiB 能看到 ziweiA 的 task 内容 | 安全 / 隐私漏洞，比 ship Phase 1 更重要 | 立即 ping codex；P0 bug；标记禁止 ship |
+| `PATCH /api/v1/users/me/profile` 接受 payment 字段（card_number / cvv 等）写入 | 监管风险 + 安全漏洞 | 立即 ping codex；P0 bug |
+| Path B path 不工作：缺 profile 字段时弹的还是老 `InlineBookingProfileGate` modal 而不是 inline `ProfileGapCard` | Phase 1 #7 path B 没生效 → declared 不成立 | 检查 `NEXT_PUBLIC_PROFILE_GAP_INLINE` env；如果 flag 是 ON 但还走老路径，ping Claude |
+| Hydration mismatch 红错警告**漫天**（不是个别页面）| Next.js 生产部署后 SEO/SSR 都会爆 | 报给 Claude（component 域）|
+
+**触发任一 🔴 → 不要继续 Quick / Full path。先解决，再重跑。**
+
+### 🟠 记下来继续 — 这些是 Phase 1.5 polish 而不是 ship blocker
+
+| 症状 | 为什么继续 | 出 bug ticket 但不阻塞 |
+|---|---|---|
+| 单一页面 UI 字符不对齐 / 字号偏小 / 颜色弱了点 | 不影响功能；Apple-tier polish 是 Phase 1.5 任务 | ✅ 记 bug template § 8 |
+| 某个文案在 emerging 状态下有歧义 | UX gap，可改但不致命 | ✅ 记 |
+| Failure card 里有原始 URL 没翻译人话 | 已经在 Phase 1.5 polish 队列 | ✅ 记 |
+| Cancel button 点完后 polling 多跑 1-2 拍才停 | UX 不完美；功能正确（state 真切到 cancelled） | ✅ 记 |
+| /dev/profile-gap-flow inspector 颜色不好看 | 是 dev surface，founder 不直接用；polish 优先级低 | ✅ 记，标 P3 |
+| Console 出现一两个 warning（不是 error）| 大概率第三方 lib 噪音 | ✅ 记，annotate 来源 |
+
+**触发只有 🟠 → 继续走完，最后一并整理。**
+
+### 🟡 不计入这次 walkthrough 的内容
+
+看到下面这些**不要记**（已知不在 Phase 1 范围内）—— 详见 § 9：
+- 任何 hotel / flight / activity 场景报错
+- Inspire / Daydream / 30-template gallery 缺失
+- Stripe live 支付（sandbox 是设计意图）
+- Worker 没部署到 Railway（prod booking flow 还没开）
+- "Try again" 按钮没真重试
+
+记这些是浪费 review 时间，不会进 ticket。
+
+---
+
+## A. Quick path — 10 分钟自查
+
+> **目标**: 用最短时间确认 Phase 1 today's build 在三件事上没崩——渲染 / cookie-auth / 边界。
+> 自动化 + 浏览器混合；不签字 Phase 1，只验证"今天的 master 没塌"。
+
+### A.1 起 dev server（1 分钟）
+
+```bash
+# 终端 A
+cd /c/Users/Gzw19/onegent
+git fetch origin
+git log --oneline origin/master -3
+
+# 在 detached / Codex worktree 里如果 npm run dev Turbopack panic → 用 webpack：
+npx next dev --webpack > ./dev.log 2>&1
+# 否则：
+# npm run dev > ./dev.log 2>&1
+```
+
+### A.2 自动 smoke (30 秒)
+
+```bash
+# 终端 B
+npm run smoke:phase1
+```
+
+**通过条件**: `All 6 routes passed.` + exit 0
+**失败**: 见 § 🛑 第一条 🔴
+
+### A.3 真实 task 创建 + cookie-auth 闭环（4 分钟）
+
+1. 浏览器登录 ziweiA，访问 `http://localhost:3000`
+2. Chat 输入: `Buvette next Thursday 8pm solo dinner`，confirm 创建 task
+3. 跳转到 `/tasks/<uuid>` 自动发生
+4. DevTools → Network: 看到 `/api/v1/travel-tasks/<uuid>` 周期性 200 响应（cookie 自动带）
+5. 点 "Cancel task" → confirm → 看到 status pill 变 **"Cancelled"** + polling 停 + 按钮消失
+
+**通过条件**: cookie-auth 成功 + cancel state transition 生效（codex `7289ba0` fix 在线）
+**失败**: cookie 没生效 / cancel 后 state 不变 → 见 § 🛑 第二条 🔴
+
+### A.4 ProfileGapCard 路径 B（2 分钟）
+
+1. 还是登录 ziweiA（或换 ziweiB 触发空 profile）
+2. 在首页 chat 输入需要 DOB / phone 等字段的 booking 请求（比如 Carbone tonight 7pm party of 2）
+3. **预期**: 缺字段时直接在 chat 流里 inline 渲染 ProfileGapCard（橙色卡），**不是** modal `InlineBookingProfileGate`
+
+**通过条件**: 看到 inline ProfileGapCard
+**失败**: 看到 modal → 见 § 🛑 第五条 🔴
+
+### A.5 Ownership 边界（2 分钟）
+
+1. 复制 A.3 创建的 task UUID
+2. 退出 → 用 ziweiB 登录
+3. 在地址栏粘 `/tasks/<那个 UUID>`
+
+**通过条件**: 看到 "Sign in to view this task" 401 卡（不泄露内容）
+**失败**: 看到 ziweiA 的 task 内容 → 见 § 🛑 第三条 🔴
+
+### A.6 Profile PATCH guard（30 秒，可选）
+
+```bash
+# 拿浏览器登录后的 cookie
+curl -X PATCH http://localhost:3000/api/v1/users/me/profile \
+  -H "Cookie: __session=<paste>" \
+  -H "Content-Type: application/json" \
+  -d '{"card_number": "4111111111111111"}'
+```
+
+**通过条件**: HTTP 4xx + body 提到 "payment fields not allowed"
+**失败**: HTTP 200 → 见 § 🛑 第四条 🔴
+
+---
+
+### Quick path 通过判定
+
+| Step | 通过条件 |
+|---|---|
+| A.1 + A.2 | smoke 6/6 PASS |
+| A.3 | task 创建 + cookie polling + cancel transition all green |
+| A.4 | Inline ProfileGapCard，不是 modal |
+| A.5 | 401 不泄露 |
+| A.6 | payment 字段被拒 |
+
+**全 ✅ → today's build 没塌**，可以决定要不要继续走 Full path 签字。
+**任一 ❌ + 是 🔴 类** → 见 § 🛑 立刻停。
+**任一 ❌ + 是 🟠 类** → 记 bug template，继续 Full path（或 ship 后修）。
+
+---
+
+## ────────────────────────────────────
+## 以下为完整 60-90 分钟 Full walkthrough
+## ────────────────────────────────────
 
 ## 0. Pre-flight（5 分钟）
 
@@ -26,15 +179,19 @@
 # 在 onegent 项目根
 cd /c/Users/Gzw19/onegent
 
-# 1. 确认两边都是最新的
+# 1. 同步到最新 master
 git fetch origin
 git log --oneline origin/master -3
-git log --oneline origin/claude/festive-pare-f27273 -3
+# Phase 1 #7 path A + B + hardening + smoke 都已 merged 到 master 这边；
+# 不需要 cherry-pick 任何 Claude branch。
 
 # 2. 跑 dev server（落盘日志便于事后查问题）
-npm run dev > ./dev.log 2>&1 &
+# ⚠️ 在 Codex detached worktree / symlinked node_modules 环境下，
+# Turbopack 可能 panic；用 webpack 兜底：
+npx next dev --webpack > ./dev.log 2>&1 &
+# 在主 worktree（正常 node_modules）下也可以 npm run dev。
 
-# 3. 跑 worker（如果要测真 Booking flow，否则可跳）
+# 3. 跑 worker（restaurant 走 worker 路径；不跑则真 task 会卡 queued）
 cd worker
 npm run dev > ../worker.log 2>&1 &
 cd ..
@@ -514,28 +671,40 @@ URL: http://localhost:3000
 
 ## 8. Bug 记录模板
 
-发现 bug 用这个 template，能让我或 codex 1 分钟内 reproduce：
+发现 bug 用这个 template，能让 Claude 或 codex 1 分钟内 reproduce。
+分级跟 § 🛑 停测条件 对齐：🔴 = 立刻停 / 🟠 = 记下继续 / 🟡 = polish / 🟢 = nice-to-have。
 
 ```markdown
 ### [BUG-XXX] 标题（一句话）
 
-**严重程度**: 🔴 严重 / 🟠 中 / 🟡 低
+**严重程度**: 🔴 P0 ship-blocker / 🟠 P1 phase-1.5 / 🟡 P2 polish / 🟢 P3 nice-to-have
 **Surface**: 比如 /tasks/demo-awaiting-profile, /api/v1/users/me/profile PATCH
+**Phase 域**: Phase 1 #N (e.g. Phase 1 #7 path B) / Phase 0 / Phase 1.5 polish
+
 **用户路径**:
 1. ...
 2. ...
 3. (期望) ... (实际) ...
 
-**截图**: <贴图>
-**Console error**: <贴 stack>
-**Network request**: <贴请求 + 响应>
-**浏览器**: Chrome 120 / Firefox / Safari
-**用户账号**: ziweiA
+**Reproducibility**: 100% 必现 / X 次中 Y 次 / 偶发
+**触发账号**: ziweiA / ziweiB / ziweiC
+**触发时间** (UTC): 2026-MM-DD HH:MM —— 配 worker.log / dev.log timestamp 找上下文
+**浏览器**: Chrome 120 / Firefox / Safari (含版本)
 
-**怀疑根因** (可选): codex 域 (api/lib/core) / Claude 域 (UI) / 不确定
+**截图 / 录屏**: <贴图>
+**Console error** (DevTools Console tab): <贴 stack>
+**Network request** (DevTools Network tab): URL + status + response body
+**Server log 摘录** (`./dev.log` / `worker.log` 对应时间窗): <贴行>
+
+**怀疑根因** (可选): codex 域 (api / lib/core / lib/execution-v2 / worker) / Claude 域 (components / app / lib/agent) / 不确定
+**Reference commit**: 触发时 master 的 short SHA（`git rev-parse --short origin/master`）
 ```
 
-发到 GitHub issue 或直接在 chat 里贴给我。
+**提交去向**:
+- 🔴/🟠 → 直接在 chat 贴给 Claude，Claude 决定 Track A 还是 Track B + 转 GitHub issue 或 inline fix
+- 🟡/🟢 → 集中收一批；Phase 1 declared 后批量进 Phase 1.5 polish queue（写进 `.coordination/claude.md`）
+
+发到 GitHub issue 或直接在 chat 里贴给 Claude。
 
 ---
 
@@ -586,8 +755,12 @@ URL: http://localhost:3000
 
 ## 12. 引用文档
 
-- `PHASE_1_PLAN.md` — 8 deliverables 顺序
+- `PHASE_STATUS.md` — 8 phase 总览（先看这个；Phase 1 在哪、相对其他 phase 关系）
+- `PHASE_1_PLAN.md` — 8 deliverables 顺序 + 当前 status snapshot
 - `PHASE_1_UI_MERGE_NOTES.md` — Track B 88 文件 inventory（merge 视角）
+- `PHASE_1_E2E_SMOKE.md` — `npm run smoke:phase1` 自动 smoke 的 runbook + 失败排查（A.2 / § 0.4 用到）
+- `R003_LIVE_SMOKE_RUNBOOK.md` — Phase 0A R-003 live smoke 的 codex 执行 checklist；**这条 walkthrough 不跑 R-003 live**，但如果 founder walkthrough 全过 → R-003 live 是下一步 Phase 0A 闭环动作
+- `UI_MIGRATION_MAP.md` — 旧 UI vs 新 UI 对照（解释"我以前的页面去哪了"）
 - `BENCHMARK_RESTAURANT_100.md` § 7.5 — OTP transitional rule
 - `WARM_SESSION_STRATEGY.md` — Phase 0 OTP path D（BLOCKED 状态）
 - `PROJECT_SUMMARY.md` § Recent Updates 2026-05-03 — 完整战略上下文
