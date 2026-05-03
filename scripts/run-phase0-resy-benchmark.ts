@@ -240,6 +240,7 @@ Options:
   --timeout-ms <n>       Per-case wait timeout. Defaults to 420000.
   --poll-ms <n>          Poll interval. Defaults to 2500.
   --live-openai          Required for live runs; prevents accidental Computer Use spend.
+  --confirm-suite        Required with --live-openai when running more than one selected case.
   --dry-run              Print payloads; do not call the API.
   --dispatch-only        Create tasks but do not wait for completion.
   --allow-failures       Exit 0 even when the Phase 0 gate fails.
@@ -749,6 +750,12 @@ async function main(): Promise<void> {
     throw new Error(
       "Refusing to run live Phase 0 Computer Use benchmark without --live-openai " +
         "or ONEGENT_ALLOW_LIVE_OPENAI=1. Use --dry-run for payload validation.",
+    );
+  }
+  if (!dryRun && selected.length > 1 && !booleanFlag(flags, "confirm-suite")) {
+    throw new Error(
+      `Refusing to run ${selected.length} live Phase 0 Computer Use cases without --confirm-suite. ` +
+        "Use --case R-003 for a one-case smoke, or pass --confirm-suite when you intentionally want a multi-case spend.",
     );
   }
   const apiKey = await resolveApiKey(baseUrl, flags, dryRun);

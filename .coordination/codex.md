@@ -1,7 +1,7 @@
 # Codex - coordination state
 
 > **Branch**: `master`
-> **Last updated**: 2026-05-03 03:33 UTC
+> **Last updated**: 2026-05-03 03:41 UTC
 > **Last commit**: `pending`
 >
 > Claude reads this at session start. I write to it before each push.
@@ -29,6 +29,10 @@ Added a cost guard to `scripts/run-phase0-resy-benchmark.ts`: live benchmark
 runs now require `--live-openai` or `ONEGENT_ALLOW_LIVE_OPENAI=1`. `--dry-run`
 remains free and was verified. This prevents accidental Computer Use spend
 while we harden code locally.
+
+Added a second spend guard after the user restored OpenAI credits: live mode
+can run only one selected case by default. Multi-case live runs now require
+`--confirm-suite` in addition to `--live-openai`.
 
 No live OpenAI call was run after adding the guard. Verification:
 - `npx tsc --noEmit --pretty false` passed.
@@ -58,6 +62,7 @@ Result summary:
 
 | Commit | Subject | Notes for Claude |
 |---|---|---|
+| `pending` | `[handoff] chore(benchmark): require suite confirmation for live spend` | Adds `--confirm-suite` guard so accidental `--live-openai` cannot run multiple Computer Use cases. |
 | `pending` | `[handoff] fix(phase0): align R-003 OTP handoff and prevent worker race` | Mirrors Claude `097741a` runner/fixture rule; creates v1 in-process jobs as `running` to keep worker from stealing them; adds `--live-openai` spend guard; R-003 now blocked only by OpenAI 429 insufficient_quota. |
 | `bd72f56` | `[coord] update codex state after R-003 reaches OTP` | Records that GA Computer Use/model access is unblocked. R-003 reached `awaiting_otp` / `F-PROVIDER-OTP`; Gmail connector token was expired at that time. |
 | `620444a` | `[handoff] fix(executor): migrate Computer Use adapter to GA gpt-5.5 tool` | Replaces deprecated `computer-use-preview` tool shape with GA `gpt-5.5` + `type: "computer"` in lib/worker mirrors. |
