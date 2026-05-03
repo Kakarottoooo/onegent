@@ -294,7 +294,8 @@ function defaultProfile(): Record<string, unknown> {
 function resyStartUrl(testCase: BenchmarkCase): string {
   const slug = encodeURIComponent(testCase.resySlug);
   const seats = encodeURIComponent(String(testCase.covers));
-  return `https://resy.com/cities/new-york-ny/venues/${slug}?date=${testCase.date}&seats=${seats}`;
+  const time = encodeURIComponent(testCase.time.replace(":", ""));
+  return `https://resy.com/cities/new-york-ny/venues/${slug}?date=${testCase.date}&seats=${seats}&time=${time}`;
 }
 
 function buildCreatePayload(

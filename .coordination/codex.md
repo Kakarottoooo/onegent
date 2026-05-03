@@ -1,7 +1,7 @@
 # Codex - coordination state
 
 > **Branch**: `master`
-> **Last updated**: 2026-05-03 03:41 UTC
+> **Last updated**: 2026-05-03 03:56 UTC
 > **Last commit**: `pending`
 >
 > Claude reads this at session start. I write to it before each push.
@@ -11,8 +11,7 @@
 
 ## Currently doing
 
-Idle after shipping the Phase 0 runner/facade hardening and live OpenAI spend
-guard.
+Idle after the single R-003 live smoke and follow-up no-token hardening.
 
 Consumed Claude `097741a`:
 - R-003 fixture now accepts `safe_handoff` + `F-PROVIDER-OTP`.
@@ -34,7 +33,7 @@ Added a second spend guard after the user restored OpenAI credits: live mode
 can run only one selected case by default. Multi-case live runs now require
 `--confirm-suite` in addition to `--live-openai`.
 
-No live OpenAI call was run after adding the guard. Verification:
+Pre-smoke verification:
 - `npx tsc --noEmit --pretty false` passed.
 - `npm run check-drift` passed.
 - `npx tsx scripts/run-phase0-resy-benchmark.ts --case R-003 --dry-run`
@@ -42,17 +41,29 @@ No live OpenAI call was run after adding the guard. Verification:
 - `npx tsx scripts/run-phase0-resy-benchmark.ts --case R-003 --allow-failures`
   refused to run live without `--live-openai`.
 
-Latest local R-003 after the race fix:
-`benchmark/runs/phase0-resy-2026-05-03T03-25-03-604Z.json`
+After user restored OpenAI credits, ran exactly one live smoke:
+`npx tsx scripts/run-phase0-resy-benchmark.ts --case R-003 --allow-failures --live-openai`
+
+Live report:
+`benchmark/runs/phase0-resy-2026-05-03T03-51-52-014Z.json`
 
 Result summary:
-- task: `4c08a2a5-7a1a-42aa-a2e6-373a13520ebf`
-- job: `8b94d30c-ba21-4676-84b8-a4116f5697d5`
-- worker race: fixed (job source is local core marker; no legacy-shape fail)
-- current blocker: OpenAI Responses API 429 `insufficient_quota`
-- taxonomy: `F-INFRA-PROVIDER-QUOTA`
-- note for user: project model access is now present, but billing/quota is
-  still blocking Computer Use calls
+- task: `ad16b246-d75b-44ed-9c80-284582c33729`
+- job: `e3b2e3a2-b870-4308-8467-24910486fe64`
+- worker race: still fixed (job source is local core marker; no legacy-shape fail)
+- OpenAI credit/model access: restored enough to run the smoke
+- outcome: `failed_with_clear_reason`
+- taxonomy: `F-PROVIDER-UNKNOWN`
+- terminal reason: `Computer Use stopped without reaching a known handoff state.`
+- final URL: `https://resy.com/cities/new-york-ny/search?date=2026-05-07&seats=1&query=Buvette&time=2100`
+
+No second live call was run. Follow-up no-token hardening:
+- R-003 Resy start URL now includes target time: `&time=2000`.
+- Computer Use prompt now says exact venue pages should stay on the venue page,
+  not general search results.
+- Computer Use repairs accidental Resy `/search` drift back to the exact
+  venue start URL up to two times.
+- Post-fix `tsc`, `check-drift`, and R-003 `--dry-run` passed.
 
 ## Blocking on Claude
 
@@ -62,6 +73,7 @@ Result summary:
 
 | Commit | Subject | Notes for Claude |
 |---|---|---|
+| `pending` | `[handoff] fix(computer-use): keep Resy benchmark on exact venue page` | Single R-003 live smoke proved credits restored but CU drifted from Buvette venue page to Resy search and picked `time=2100`; no second live call. This commit adds `time=2000` to startUrl and repairs Resy search drift back to exact venue. |
 | `pending` | `[handoff] chore(benchmark): require suite confirmation for live spend` | Adds `--confirm-suite` guard so accidental `--live-openai` cannot run multiple Computer Use cases. |
 | `pending` | `[handoff] fix(phase0): align R-003 OTP handoff and prevent worker race` | Mirrors Claude `097741a` runner/fixture rule; creates v1 in-process jobs as `running` to keep worker from stealing them; adds `--live-openai` spend guard; R-003 now blocked only by OpenAI 429 insufficient_quota. |
 | `bd72f56` | `[coord] update codex state after R-003 reaches OTP` | Records that GA Computer Use/model access is unblocked. R-003 reached `awaiting_otp` / `F-PROVIDER-OTP`; Gmail connector token was expired at that time. |

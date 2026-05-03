@@ -92,6 +92,7 @@ async function runComputerUse(input: BookingExecutorInput): Promise<ExecutionJob
 
     let finalText = getResponseText(response);
     const maxSteps = parseInt(process.env.ONEGENT_COMPUTER_USE_MAX_STEPS ?? `${DEFAULT_MAX_STEPS}`, 10);
+    let repairedNavigationCount = 0;
 
     for (let i = 0; i < maxSteps; i += 1) {
       const calls = getComputerCalls(response);
@@ -104,6 +105,16 @@ async function runComputerUse(input: BookingExecutorInput): Promise<ExecutionJob
           trace(jobId, `[computer-use] action ${action.type}${formatAction(action)}`);
           await executeComputerAction(page, action);
           await page.waitForTimeout(450);
+        }
+        if (repairedNavigationCount < 2 && (await repairProviderNavigation(page, input))) {
+          repairedNavigationCount += 1;
+          await writeAudit({
+            jobId,
+            stepIndex,
+            type: "step_started",
+            message: "Computer Use was returned to the exact venue page after drifting to search results.",
+            details: { executor: "computer_use", url: await safeUrl(page), repair: "resy_exact_venue" },
+          });
         }
 
         finalScreenshot = await capture(
@@ -227,6 +238,7 @@ function buildComputerUsePrompt(input: BookingExecutorInput): string {
     "Do not enter CVV. Do not submit payment.",
     "If a button says Confirm, Reserve Now, Complete reservation, Purchase, Pay, or Book, only click it when it is clearly an intermediate step before login/OTP/payment. Stop before the final action that commits the reservation.",
     "When you stop, include exactly one handoff token in your response: ONEGENT_NEEDS_OTP, ONEGENT_NEEDS_LOGIN, ONEGENT_PAUSED_PAYMENT, ONEGENT_READY_FOR_CONFIRMATION, ONEGENT_NO_AVAILABILITY, ONEGENT_COMPLETED, or ONEGENT_FAILED.",
+    "If the Start URL is an exact venue page, stay on that venue page. Do not use general search results unless the venue page itself is unavailable or 404.",
     ...targetConstraintLines(input),
     `Task: ${input.browserTask.task}`,
     `Start URL: ${input.browserTask.startUrl}`,
@@ -384,6 +396,21 @@ async function classifyPage(
     status: "error",
     summary: modelText || "Computer Use stopped without reaching a known handoff state.",
   };
+}
+
+async function repairProviderNavigation(page: Page, input: BookingExecutorInput): Promise<boolean> {
+  const startUrl = input.browserTask.startUrl;
+  if (!/resy\.com\/cities\/[^/]+\/venues\//i.test(startUrl)) return false;
+
+  const currentUrl = await safeUrl(page);
+  if (!/resy\.com\/cities\/[^/]+\/search\b/i.test(currentUrl)) return false;
+
+  await page.goto(startUrl, {
+    waitUntil: "domcontentloaded",
+    timeout: 60_000,
+  });
+  await page.waitForTimeout(750);
+  return true;
 }
 
 function targetConstraintLines(input: BookingExecutorInput): string[] {
