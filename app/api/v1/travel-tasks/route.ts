@@ -248,8 +248,20 @@ function terminalDataForResult(result: ExecutionJobResult): Record<string, unkno
     case "paused_payment":
     case "ready_for_confirmation":
       return { terminalCode: result.status, terminalReason: result.summary };
-    case "needs_profile_data":
-      return { terminalCode: "needs_profile_data", terminalReason: result.profileGap?.message ?? result.summary };
+    case "needs_profile_data": {
+      const profileGap = result.profileGap;
+      return {
+        terminalCode: "needs_profile_data",
+        terminalReason: profileGap?.message ?? result.summary,
+        ...(profileGap
+          ? {
+              profileGap,
+              missing: profileGap.missing,
+              profileGapScenario: profileGap.scenario,
+            }
+          : {}),
+      };
+    }
     case "needs_login":
     case "needs_otp":
       return { terminalCode: result.status, terminalReason: result.summary };
