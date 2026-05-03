@@ -377,7 +377,7 @@ export default function TaskDetailPage() {
       void fetchTask();
     }, 5000);
     return () => clearInterval(id);
-  }, [state, isDemoId, fetchTask]);
+  }, [state, isDemoId, taskId, fetchTask]);
 
   /* ─── Handlers (real API now that codex shipped 48c80b2) ──────── */
 

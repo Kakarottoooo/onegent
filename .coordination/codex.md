@@ -1,8 +1,8 @@
 # Codex - coordination state
 
 > **Branch**: `master`
-> **Last updated**: 2026-05-03 05:51 UTC
-> **Last commit**: `3c95561`
+> **Last updated**: 2026-05-03 06:04 UTC
+> **Last commit**: `c2be764`
 >
 > Claude reads this at session start. I write to it before each push.
 > See `CLAUDE.md` section "coordination protocol".
@@ -11,13 +11,25 @@
 
 ## Currently doing
 
-Clean master baseline is restored and Claude branch merge rehearsal is green.
+Track B Phase 1 UI branch has been merged into master.
 
-What I just verified:
-- Clean `master` at `3c95561` passes `npx tsc --noEmit --pretty false`.
-- Clean `master` at `3c95561` passes `npm run check-drift`.
-- Rehearsal merge `master@3c95561 + origin/claude/festive-pare-f27273` has no file conflicts.
-- The rehearsal merge also passes `npx tsc --noEmit --pretty false` and `npm run check-drift`.
+What landed from Claude:
+- `/tasks/[taskId]` real task detail page with ProfileGapCard resume and cancel wiring.
+- Task Timeline panel + SSE/polling hooks + snapshot rail.
+- Benchmark dashboard and validator components.
+- ProfileGapCard components/tests.
+- Decision Room activity timeline components and cutover.
+- NLU profile-edit/golden/probing tests.
+- Planning docs: Phase 1, ExecutorV2 pivot, benchmark, warm session, task runtime, merge notes.
+
+What I adjusted during merge:
+- Excluded `.claude/settings.local.json` from the merge.
+- Added `taskId` to `/tasks/[taskId]` `handleCancel` callback dependencies.
+
+Verification after merge:
+- `npx tsc --noEmit --pretty false` passed.
+- `npm run check-drift` passed.
+- `npx vitest run components/profile-gap components/benchmark components/task-timeline` passed: 137/137.
 
 No live OpenAI / Computer Use / benchmark run was executed.
 
@@ -29,6 +41,7 @@ No live OpenAI / Computer Use / benchmark run was executed.
 
 | Commit | Subject | Notes for Claude |
 |---|---|---|
+| `c2be764` | `merge: land Track B Phase 1 UI` | Track B branch merged cleanly. I excluded local Claude settings, fixed one callback dependency, and verified tsc + drift + 137 UI/benchmark tests. No live calls. |
 | `3c95561` | `fix(build): restore clean master typecheck baseline` | Clean master now passes typecheck and drift. Rehearsal merge with Claude branch is also green. Includes missing profile gate component, chat replay snapshot types, live-log entries, OpenTable URL helper parity, and `createBookingJob.status`. No live calls. |
 | `2167181` | `[handoff] fix(tasks): expose profile gaps and mirror R-003 expectation` | Unblocks `/tasks/[taskId]` ProfileGapCard derivation from task events; mirrors Q11(a) in the Resy Phase 0 fixture. No live calls. |
 | `48c80b2` | `[handoff] feat(api): allow cookie-auth travel task reads and profile patch` | Unblocks browser-cookie reads for travel task facade, timeline/snapshots SSE, ProfileGapCard `{ profile }` resume, and user-owned job drill-down/cancel. |
@@ -39,8 +52,9 @@ No live OpenAI / Computer Use / benchmark run was executed.
 
 ## Open questions for Claude
 
-- Please rebase/merge latest `origin/master` before the next Track B batch; rehearsal is green from my side.
-- Minor review note for `/tasks/[taskId]`: `handleCancel` reads `taskId` in its demo branch, so include `taskId` in the `useCallback` dependency array when you next touch that file.
+- Please start new Track B work from latest `origin/master`; the old branch is now merged.
+- Do not continue committing on `claude/festive-pare-f27273` unless we explicitly keep it as a historical branch.
+- Next useful Track B work: homepage chat ProfileGapCard wiring (#7) or founder E2E UX polish, but wait for user/codex to confirm after master sync.
 
 ## Hold rules I'm respecting
 
