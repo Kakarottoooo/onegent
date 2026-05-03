@@ -1,8 +1,8 @@
 # Codex - coordination state
 
 > **Branch**: `master`
-> **Last updated**: 2026-05-03 12:56 UTC
-> **Last commit**: `88e7ecd`
+> **Last updated**: 2026-05-03 13:00 UTC
+> **Last commit**: `3043a29`
 >
 > Claude reads this at session start. I write to it before each push.
 > See `CLAUDE.md` section "coordination protocol".
@@ -11,7 +11,7 @@
 
 ## Currently doing
 
-Idle after landing Claude phase status docs and applying Codex runbook corrections.
+Idle after landing Claude founder E2E polish.
 
 What I just shipped:
 - Merged `origin/claude/phase-1-e2e-smoke` into master as `f9dd0ba`.
@@ -42,6 +42,10 @@ R-003 live command when user explicitly authorizes token spend:
 4. Do not pass `--confirm-suite` for single-case R-003. Multi-case live runs require both `--live-openai` and `--confirm-suite`.
 
 What I just merged from Claude:
+- `origin/claude/founder-e2e-polish` merged into master as `3043a29`.
+- Added quick/full founder E2E paths, stop conditions, stronger bug template, and R-003 runbook references in `PHASE_1_FOUNDER_E2E.md`.
+- Merge preserved Codex-owned `R003_LIVE_SMOKE_RUNBOOK.md`, `PHASE_STATUS.md`, and `.coordination/codex.md` corrections.
+- Verification after founder E2E polish merge: `npx tsc --noEmit --pretty false` passed. No live calls.
 - `origin/claude/phase-status-docs` merged into master as `d0d5d32`.
 - Added `PHASE_STATUS.md`, `UI_MIGRATION_MAP.md`, `R003_LIVE_SMOKE_RUNBOOK.md`, and refreshed `PHASE_1_PLAN.md`.
 - Codex corrected the runbook after review: removed single-case `--confirm-suite`, removed unsupported `--output`, replaced Browserbase assumptions with current local Next + local worker + local Playwright path, and fixed Resy fixture count wording.
@@ -55,6 +59,7 @@ What I just merged from Claude:
 
 | Commit | Subject | Notes for Claude |
 |---|---|---|
+| `3043a29` | `merge: land founder E2E polish` | Merges Claude `founder-e2e-polish`: quick/full walkthrough split, stop conditions, stronger bug template, and R-003 reference. Verified tsc. No live calls. |
 | `88e7ecd` | `fix(docs): align R-003 runbook with current runner` | Corrects Claude's phase docs after review: single-case R-003 uses `--case R-003 --live-openai --allow-failures`, no `--confirm-suite`, no unsupported `--output`, current path is local Next + local worker + local Playwright, and Resy fixture wording reflects observed rows rather than invented 25-case completeness. |
 | `d0d5d32` | `merge: land phase status docs` | Merges Claude `phase-status-docs` and Codex-reviewed Phase 0/1 status docs. Codex follow-up corrected R-003 runbook commands and current local-worker assumptions before push. |
 | `2bedc91` | `[coord] sha fix-up cd34997` | Coordination sha fix after Phase 1 no-token smoke landing. |
@@ -79,8 +84,8 @@ What I just merged from Claude:
 
 ## Open questions for Claude
 
-- Phase status docs are landed. Do not run live from Claude.
-- Next Track B task, if user asks for more before live smoke: founder-facing copy polish only in `PHASE_1_FOUNDER_E2E.md` / `/dev` docs, or wait. Do not start Phase 2 vertical implementation.
+- Founder E2E polish is landed. Do not run live from Claude.
+- Next Track B task, if user asks for more before live smoke: wait, or only fix typos/clarity in docs. Do not start Phase 2 vertical implementation.
 - R-003 live remains Codex-owned and requires explicit user approval.
 
 ## Hold rules I'm respecting
