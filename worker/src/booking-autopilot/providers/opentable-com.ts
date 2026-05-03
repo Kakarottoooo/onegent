@@ -1,3 +1,5 @@
+import { mkdir, writeFile } from "node:fs/promises";
+import { join } from "node:path";
 import type { Page } from "playwright";
 import { registerProvider } from "./registry";
 import type { BrowserProvider, PaymentFillResult, ProviderStageSignals } from "./types";
@@ -53,6 +55,10 @@ interface OpenTableLocatedInput extends OpenTableFieldTarget {
 }
 
 type OpenTableInputPage = Page & {
+  url?: () => string;
+  screenshot?: (options: { path: string; fullPage?: boolean }) => Promise<unknown>;
+  content?: () => Promise<string>;
+  viewportSize?: () => { width: number; height: number } | null;
   click?: (x: number, y: number, options?: { button?: string; clickCount?: number }) => Promise<unknown>;
   keyPress?: (key: string, options?: { delay?: number }) => Promise<unknown>;
   type?: (text: string, options?: { delay?: number }) => Promise<unknown>;
@@ -65,6 +71,98 @@ type OpenTableInputPage = Page & {
     type: (text: string, options?: { delay?: number }) => Promise<unknown>;
   };
 };
+
+function traceOpenTableStrategy(
+  trace: ((msg: string) => void) | undefined,
+  strategy: string,
+  message: string,
+): void {
+  trace?.(`[opentable][strategy ${strategy}] ${message}`);
+}
+
+function safeOpenTableArtifactName(value: string): string {
+  return value.replace(/[^a-z0-9._-]+/gi, "-").replace(/^-+|-+$/g, "").slice(0, 80) || "artifact";
+}
+
+async function captureOpenTableGuestFormArtifact(
+  page: Page,
+  label: string,
+  trace?: (msg: string) => void,
+): Promise<void> {
+  const debugPage = page as OpenTableInputPage;
+  const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+  const dir = join(process.cwd(), ".debug-screenshots", "opentable", `${stamp}-${safeOpenTableArtifactName(label)}`);
+  try {
+    await mkdir(dir, { recursive: true });
+    const url = typeof debugPage.url === "function" ? debugPage.url() : "unknown";
+    const viewport = typeof debugPage.viewportSize === "function" ? debugPage.viewportSize() : null;
+    const summary = await page.evaluate(() => {
+      const isShown = (el: HTMLElement): boolean => {
+        if (el.hidden || !el.isConnected) return false;
+        const rect = el.getBoundingClientRect();
+        if (rect.width === 0 || rect.height === 0) return false;
+        const style = window.getComputedStyle(el);
+        return style.display !== "none" && style.visibility !== "hidden" && style.opacity !== "0";
+      };
+      const inputs = Array.from(document.querySelectorAll<HTMLInputElement>("input"))
+        .filter((el) => el.type !== "hidden" && !el.disabled && isShown(el))
+        .slice(0, 20)
+        .map((el) => {
+          const rect = el.getBoundingClientRect();
+          return {
+            type: el.type,
+            id: el.id,
+            name: el.name,
+            placeholder: el.placeholder,
+            aria: el.getAttribute("aria-label"),
+            autocomplete: el.autocomplete,
+            valueLength: el.value?.length ?? 0,
+            rect: {
+              x: Math.round(rect.left),
+              y: Math.round(rect.top),
+              width: Math.round(rect.width),
+              height: Math.round(rect.height),
+            },
+          };
+        });
+      const buttons = Array.from(document.querySelectorAll<HTMLElement>("button, a, [role='button']"))
+        .filter((el) => isShown(el))
+        .slice(0, 20)
+        .map((el) => {
+          const rect = el.getBoundingClientRect();
+          return {
+            text: (el.textContent ?? "").trim().slice(0, 120),
+            aria: el.getAttribute("aria-label"),
+            id: el.id,
+            test: el.getAttribute("data-test"),
+            rect: {
+              x: Math.round(rect.left),
+              y: Math.round(rect.top),
+              width: Math.round(rect.width),
+              height: Math.round(rect.height),
+            },
+          };
+        });
+      return {
+        title: document.title,
+        bodyText: (document.body?.innerText ?? "").slice(0, 3000),
+        inputs,
+        buttons,
+      };
+    }).catch((error: Error) => ({ error: error.message?.slice(0, 200) }));
+    await writeFile(join(dir, "summary.json"), JSON.stringify({ label, url, viewport, summary }, null, 2), "utf8");
+    if (typeof debugPage.screenshot === "function") {
+      await debugPage.screenshot({ path: join(dir, "page.png"), fullPage: true }).catch(() => undefined);
+    }
+    if (typeof debugPage.content === "function") {
+      const html = await debugPage.content().catch(() => "");
+      if (html) await writeFile(join(dir, "page.html"), html, "utf8");
+    }
+    trace?.(`[opentable][artifact] saved guest-form artifact: ${dir}`);
+  } catch (error) {
+    trace?.(`[opentable][artifact] capture failed: ${(error as Error).message?.slice(0, 120)}`);
+  }
+}
 
 async function showOpenTableDebugCursor(
   page: Page,
@@ -450,6 +548,111 @@ async function typeOpenTableFieldByCoordinate(
   const accepted = verified || field === "phone";
   trace?.(`[opentable] coordinate typing ${field}: target="${target.descriptor}" verified=${verified} accepted=${accepted}`);
   return accepted;
+}
+
+function fixedOpenTablePhoneGateTarget(page: Page): OpenTableFieldTarget {
+  const viewport = (page as OpenTableInputPage).viewportSize?.() ?? { width: 1270, height: 790 };
+  return {
+    x: Math.round(viewport.width * 0.5),
+    y: Math.round(Math.min(Math.max(viewport.height * 0.52, 360), 430)),
+    descriptor: `fixed-phone-gate viewport=${viewport.width}x${viewport.height}`,
+  };
+}
+
+async function typeOpenTableFieldAtTarget(
+  page: Page,
+  field: OpenTableDinerField,
+  value: string,
+  target: OpenTableFieldTarget,
+  strategy: string,
+  trace?: (msg: string) => void,
+): Promise<boolean> {
+  if (!value) return false;
+  try {
+    await showOpenTableDebugCursor(page, target, field, trace);
+    traceOpenTableStrategy(trace, strategy, `clicking ${field} at ${target.x},${target.y} target="${target.descriptor}"`);
+    await clickOpenTablePoint(page, target.x, target.y);
+    await new Promise((r) => setTimeout(r, 150));
+    await pressOpenTableKey(page, "Control+A").catch(() => pressOpenTableKey(page, "Control+a").catch(() => undefined));
+    await pressOpenTableKey(page, "Backspace").catch(() => undefined);
+    await new Promise((r) => setTimeout(r, 100));
+    await typeOpenTableText(page, value, field === "phone" ? 45 : 55);
+    await new Promise((r) => setTimeout(r, 250));
+  } catch (error) {
+    traceOpenTableStrategy(trace, strategy, `failed for ${field}: ${(error as Error).message?.slice(0, 100)}`);
+    return false;
+  }
+  const verified = await verifyOpenTableDinerField(page, field);
+  const accepted = verified || field === "phone";
+  traceOpenTableStrategy(trace, strategy, `typed ${field}: verified=${verified} accepted=${accepted}`);
+  return accepted;
+}
+
+async function fillOpenTablePhoneGateWithLadder(
+  page: Page,
+  phoneDigits: string,
+  phoneTypedValue: string,
+  trace?: (msg: string) => void,
+): Promise<boolean> {
+  if (!phoneDigits && !phoneTypedValue) return false;
+
+  traceOpenTableStrategy(trace, "ot-phone-01-exact-locator", "trying #phoneNumber/tel locator fill");
+  if (await fillOpenTableFieldWithLocator(page, "phone", phoneTypedValue || phoneDigits, trace)) {
+    return true;
+  }
+
+  traceOpenTableStrategy(trace, "ot-phone-02-dom-direct", "trying direct DOM value setter on #phoneNumber/tel");
+  const directDomFilled = await page.evaluate((phone: string) => {
+    const nativeFill = (el: HTMLInputElement, val: string): boolean => {
+      if (!val) return false;
+      const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set;
+      el.scrollIntoView({ block: "center", inline: "center" });
+      el.focus();
+      if (setter) {
+        setter.call(el, "");
+        el.dispatchEvent(new Event("input", { bubbles: true }));
+        setter.call(el, val);
+      } else {
+        el.value = "";
+        el.dispatchEvent(new Event("input", { bubbles: true }));
+        el.value = val;
+      }
+      el.dispatchEvent(new InputEvent("input", { bubbles: true, inputType: "insertText", data: val }));
+      el.dispatchEvent(new Event("change", { bubbles: true }));
+      return el.value.replace(/\D/g, "").length >= Math.min(10, val.replace(/\D/g, "").length);
+    };
+    const selectors = [
+      "#phoneNumber",
+      'input#phoneNumber',
+      'input[type="tel"]',
+      'input[autocomplete="tel"]',
+      'input[aria-label*="Phone"]',
+      'input[placeholder*="Phone"]',
+    ];
+    for (const selector of selectors) {
+      const input = document.querySelector<HTMLInputElement>(selector);
+      if (input && !input.disabled) {
+        if (nativeFill(input, phone)) return { ok: true, selector };
+      }
+    }
+    return { ok: false, selector: "none" };
+  }, phoneDigits).catch((error: Error) => ({ ok: false, selector: `error:${error.message?.slice(0, 80)}` }));
+  traceOpenTableStrategy(trace, "ot-phone-02-dom-direct", `result=${directDomFilled.ok} selector=${directDomFilled.selector}`);
+  if (directDomFilled.ok) return true;
+
+  traceOpenTableStrategy(trace, "ot-phone-03-discovered-coordinate", "trying discovered input coordinate");
+  if (await typeOpenTableFieldByCoordinate(page, "phone", phoneTypedValue || phoneDigits, trace)) {
+    return true;
+  }
+
+  traceOpenTableStrategy(trace, "ot-phone-04-fixed-coordinate", "trying known OpenTable phone gate coordinate fallback");
+  const fixedTarget = fixedOpenTablePhoneGateTarget(page);
+  if (await typeOpenTableFieldAtTarget(page, "phone", phoneTypedValue || phoneDigits, fixedTarget, "ot-phone-04-fixed-coordinate", trace)) {
+    return true;
+  }
+
+  await captureOpenTableGuestFormArtifact(page, "phone-gate-fill-failed", trace);
+  return false;
 }
 
 async function fillOpenTableFieldWithLocator(
@@ -1142,41 +1345,9 @@ export const openTableProvider: BrowserProvider = {
     let phoneGateSatisfied = false;
     if (formType.hasPhone && !formType.hasName && phoneDigits) {
       trace("[opentable] phone-only form detected - filling phone directly");
-      const phoneFilled = await formPage.evaluate((phone: string) => {
-        const nativeFill = (el: HTMLInputElement, val: string): boolean => {
-          if (!val) return false;
-          const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set;
-          el.focus();
-          if (setter) { setter.call(el, ""); setter.call(el, val); }
-          else { el.value = ""; el.value = val; }
-          el.dispatchEvent(new Event("input", { bubbles: true }));
-          el.dispatchEvent(new Event("change", { bubbles: true }));
-          el.blur();
-          return el.value.replace(/\D/g, "").length > 0;
-        };
-        const isShown = (el: HTMLElement): boolean => {
-          if (el.hidden || !el.isConnected) return false;
-          const rect = el.getBoundingClientRect();
-          if (rect.width === 0 || rect.height === 0) return false;
-          const style = window.getComputedStyle(el);
-          return style.display !== "none" && style.visibility !== "hidden" && style.opacity !== "0";
-        };
-        const phoneEl = Array.from(document.querySelectorAll<HTMLInputElement>("input"))
-          .filter(el => el.type !== "hidden" && !el.disabled && isShown(el))
-          .find(el =>
-            (el.placeholder || "").toLowerCase().includes("phone") ||
-            (el.getAttribute("aria-label") || "").toLowerCase().includes("phone") ||
-            el.type === "tel"
-        );
-        return phoneEl ? nativeFill(phoneEl, phone) : false;
-      }, phoneDigits).catch(() => false);
+      const phoneFilled = await fillOpenTablePhoneGateWithLadder(formPage, phoneDigits, phoneTypedValue, trace);
       trace(`[opentable] phone-only direct fill result: ${phoneFilled}`);
       phoneGateSatisfied = phoneFilled;
-      if (!phoneFilled) {
-        const typedPhone = await typeOpenTableFieldByCoordinate(formPage, "phone", phoneTypedValue, trace);
-        trace(`[opentable] phone-only coordinate typing result: ${typedPhone}`);
-        phoneGateSatisfied = typedPhone;
-      }
     } else if (formType.hasPhone && !formType.hasName && formType.hasEmailLink) {
       trace("[opentable] phone-only form detected without usable phone - clicking 'Use email instead'");
       const clicked = await formPage.evaluate(() => {
@@ -1302,12 +1473,15 @@ export const openTableProvider: BrowserProvider = {
       `verificationGate=${dinerFormState.verificationGate} submitVisible=${dinerFormState.submitVisible}`,
     );
     if (dinerFormState.empty.length > 0) {
+      await captureOpenTableGuestFormArtifact(formPage, `guest-form-incomplete-${dinerFormState.empty.join("-")}`, trace);
       throw new Error(`opentable_guest_form_incomplete:${dinerFormState.empty.join(",")}`);
     }
     if (dinerFormState.readFailed) {
       if (phoneGateSatisfied && formType.hasPhone && !formType.hasName) {
+        await captureOpenTableGuestFormArtifact(formPage, "phone-gate-manual-review", trace);
         trace("[opentable] diner form state unreadable after phone gate fill - treating as manual-review handoff");
       } else {
+        await captureOpenTableGuestFormArtifact(formPage, "guest-form-state-unreadable", trace);
         throw new Error("opentable_guest_form_state_unreadable");
       }
     }

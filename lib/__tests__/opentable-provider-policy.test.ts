@@ -15,13 +15,19 @@ describe("OpenTable provider safety policy", () => {
   it("fills the native phone verification gate before trying email fallback", () => {
     expect(providerSource).toContain("phone-only form detected - filling phone directly");
     expect(providerSource).toContain("phone-only direct fill result");
-    expect(providerSource).toContain("phone-only coordinate typing result");
     expect(providerSource).toContain("using raw Playwright page for guest-form DOM operations");
     expect(providerSource).toContain("onegent-opentable-debug-cursor");
     expect(providerSource).toContain("locator fill ${field}");
     expect(providerSource).toContain("OpenTableCompatLocator");
     expect(providerSource).toContain("typeof candidate.isEnabled === \"function\"");
     expect(providerSource).toContain("locator lacks full fill API");
+    expect(providerSource).toContain("[opentable][strategy ${strategy}]");
+    expect(providerSource).toContain("ot-phone-01-exact-locator");
+    expect(providerSource).toContain("ot-phone-02-dom-direct");
+    expect(providerSource).toContain("ot-phone-03-discovered-coordinate");
+    expect(providerSource).toContain("ot-phone-04-fixed-coordinate");
+    expect(providerSource).toContain(".debug-screenshots");
+    expect(providerSource).toContain("saved guest-form artifact");
     expect(providerSource).toContain("diner form state unreadable after phone gate fill");
     expect(providerSource).toContain("coordinate typing");
     expect(providerSource).toContain("phone-only form detected without usable phone - clicking 'Use email instead'");
