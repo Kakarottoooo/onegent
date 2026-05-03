@@ -1,8 +1,8 @@
 # Codex - coordination state
 
 > **Branch**: `codex/openai-chat-model-env`
-> **Last updated**: 2026-05-03 16:50 UTC
-> **Last commit**: `20ad0fc`
+> **Last updated**: 2026-05-03 17:08 UTC
+> **Last commit**: `7591b03`
 >
 > Claude reads this at session start. I write to it before each push.
 > See `CLAUDE.md` section "coordination protocol".
@@ -11,9 +11,15 @@
 
 ## Currently doing
 
-Idle after shipping the second OpenTable guest-form fix. Waiting for a fresh founder E2E retry after dev + worker restart.
+Idle after shipping the third OpenTable guest-form fix. Waiting for a fresh founder E2E retry after dev + worker restart.
 
 Latest shipped fix:
+- `7591b03 fix(opentable): type into phone gate with compatible input APIs`
+- Root cause from founder log: OpenTable's phone-only gate reached the form, but DOM value assignment did not stick, and the raw worker page does not expose full Playwright locator APIs.
+- Fix: keep the DOM setter path, then fall back to Stagehand-compatible CDP input (`click`, `keyPress`, `type`) by locating visible diner-field coordinates. Phone gate now tries raw digit typing after direct fill fails; generic first/last/email/phone fallback uses the same compatible input path. Worker mirror is byte-identical.
+- Verification: `npx vitest run lib/__tests__/opentable-provider-policy.test.ts`, `npx tsc --noEmit --pretty false`, and `npx tsx scripts/check-drift.ts` all passed. No live retry from Codex yet.
+
+Previous shipped fix:
 - `09f8023 fix(opentable): avoid locator fallback on guest form`
 - Root cause from founder log: the fallback path called `page.getByPlaceholder`, but the provider raw page in this worker path does not expose the full Playwright locator API. That throw was then converted into a ready handoff because `reachedGuestForm=true`.
 - Fix: replace locator fallback with DOM `page.evaluate` filling, and make OpenTable guest-form errors in the executor return `error` instead of `paused_payment`.
@@ -114,6 +120,7 @@ What I just merged from Claude:
 
 | Commit | Subject | Notes for Claude |
 |---|---|---|
+| `7591b03` | `fix(opentable): type into phone gate with compatible input APIs` | Founder log showed DOM value assignment did not fill OpenTable's phone-only gate. Adds Stagehand-compatible coordinate click + keyPress/type fallback for diner fields, mirrored to worker, with provider policy regression coverage. Verified provider test + tsc + drift. |
 | `09f8023` | `fix(opentable): avoid locator fallback on guest form` | Founder log showed `page.getByPlaceholder is not a function`. Replaced OpenTable locator fallback with DOM-evaluate filling and blocked OpenTable guest-form errors from becoming `paused_payment`. Verified provider policy test + tsc + drift. |
 | `f1f3665` | `fix(opentable): fill phone gate and stop before final submit` | OpenTable founder E2E fix: fill the native phone verification gate directly when phone exists, only use email fallback without phone, never auto-click final `Complete reservation`, keep local review browser/session open 60 minutes, and add no-live policy regression test. Verified provider test + tsc + drift. |
 | `24e146e` | `fix(opentable): block ready status when diner fields are blank` | Adds an executor-level OpenTable guard before restaurant checkout returns. Visible empty diner fields now force manual/error handoff and keep the browser open, preventing false `Ready for payment` when email/phone are blank. Verified tsc + drift. |
