@@ -1,0 +1,559 @@
+# Phase 1 — founder E2E walkthrough
+
+> **For**: 用户（创始人）— 手动验证 Phase 1 的全部 user-facing surface
+> **作者**: Claude (Track B)
+> **状态**: 等 codex merge `claude/festive-pare-f27273` → master 后再跑
+> **预计耗时**: 60-90 分钟（彻底走一遍）
+
+这个文档是 PHASE_1_PLAN.md #8 — Founder E2E walkthrough。目标是在用户视角
+**手动**走完 Phase 1 的每个用户路径，找出 UX 缺口、复现 bug、签字 Phase 1
+是否真正"产品就绪"。
+
+每个步骤都有：
+- **怎么做**（精确点击/输入）
+- **预期看到**（什么算正确）
+- **要警惕**（什么算 bug，要记下来）
+
+底部有 **bug 记录模板** + **已知不在 Phase 1 范围内的事情**（不要花时间纠结这些）。
+
+---
+
+## 0. Pre-flight（5 分钟）
+
+### 0.1 环境
+
+```bash
+# 在 onegent 项目根
+cd /c/Users/Gzw19/onegent
+
+# 1. 确认两边都是最新的
+git fetch origin
+git log --oneline origin/master -3
+git log --oneline origin/claude/festive-pare-f27273 -3
+
+# 2. 跑 dev server（落盘日志便于事后查问题）
+npm run dev > ./dev.log 2>&1 &
+
+# 3. 跑 worker（如果要测真 Booking flow，否则可跳）
+cd worker
+npm run dev > ../worker.log 2>&1 &
+cd ..
+
+# 4. 浏览器打开
+open http://localhost:3000          # 或 Chrome 手动开
+```
+
+### 0.2 账号准备
+
+测试账号位于 `MEMORY.md` → `test_accounts.md`：
+- `ziweiA@onegent.dev` — 主账号，profile 完整（用于 happy path）
+- `ziweiB@onegent.dev` — 空 profile（用于触发 ProfileGapCard）
+- `ziweiC@onegent.dev` — 中间状态（用于多用户 DR 测试）
+
+> 三个都在 Clerk natural-tuna-90 dev instance 上，密码同 password manager。
+
+### 0.3 浏览器开发者工具
+
+- 打开 DevTools → Network tab，过滤 `/api/v1/`
+- 打开 Console tab，留意红色错误
+- DevTools 保持开着整个 walkthrough，事后好回放
+
+---
+
+## 1. /dev landing 索引页（2 分钟 · 健康检查）
+
+```
+URL: http://localhost:3000/dev
+```
+
+**怎么看是好的**：
+- ✅ 看到 5 个 Phase 0 / NLU / Timeline 路由卡片，每个有 status 徽章（live/mock/spec）
+- ✅ "Strategy docs" 区块列出 8 个 .md 文件链接
+- ✅ "Coordination" 区块的 codex.md / claude.md 链接可点
+- ✅ 没有红色 console 错误
+
+**警惕**：
+- ❌ 任何路由卡片报 404
+- ❌ Hydration mismatch warning（"Text content does not match server-rendered HTML"）
+- ❌ Server Component 异常
+
+记下来 → bug template 一格。
+
+---
+
+## 2. Phase 1 task surface — 5 demo states（10 分钟 · UI 质感）
+
+**核心目标**：每个 demo 状态在 UI 上分别长什么样，色调对不对、文案有没有歧义。
+
+### 2.1 `demo-executing`（运行中）
+
+```
+URL: http://localhost:3000/tasks/demo-executing
+```
+
+**预期看到**：
+- 标题: "Buvette in West Village next Thursday 8pm solo dinner"
+- 状态徽章: **"Running"**（蓝色 / "active" 色调）
+- 主区: TaskTimelinePanel 显示空 events（fixture 没事件）
+- 侧栏: Task meta 显示 createdAt / updatedAt / scenario "restaurant"
+- "Cancel task" 按钮可见（task is cancelable）
+
+**警惕**：
+- ❌ 状态徽章颜色跟"运行中"不匹配（应该是 active 蓝，不是 done 绿）
+- ❌ "Cancel task" 按钮被禁用
+- ❌ TaskTimelinePanel 报错 / 不渲染
+
+### 2.2 `demo-awaiting-profile`（缺 profile 字段，**核心**）
+
+```
+URL: http://localhost:3000/tasks/demo-awaiting-profile
+```
+
+**预期看到**：
+- 标题: "Carbone tonight 7pm party of 2"
+- 状态徽章: **"Need details"**（橙色 / "blocked" 色调）
+- 主区: **ProfileGapCard 渲染** — 显示 2 个空字段（date_of_birth + phone）
+- ProfileGapCard 文案: "Carbone uses Resy and needs verified contact details."
+- 字段输入框: DOB 用 date picker，phone 用 tel input
+- "Save and continue" 按钮: 默认禁用（直到至少填一个字段）
+- "Maybe later" 链接 / 跳过选项可见
+
+**操作 — 填表**：
+1. 在 DOB 输入框输入一个日期（比如 1990-01-01）
+2. 在 phone 输入框输入 +1 555 555 5555
+3. 看到 "Save and continue" 变可点
+4. 点 "Save and continue"
+
+**预期看到**：
+- 弹出 alert: `Demo mode — would POST to /api/v1/travel-tasks/demo-awaiting-profile/continue` 后跟 JSON payload
+- 这个 alert 表示 mutation handler 正确接到了 GapSavePayload
+
+**警惕**：
+- ❌ "Save and continue" 按钮在没填字段就可点
+- ❌ 输入 DOB 用 text input 而不是 date picker
+- ❌ Alert 里 JSON payload 缺字段或字段名跟 canonical 13 不对齐
+- ❌ payment 字段（card_number 等）被 inline 收集了（违反规则；应该重定向到 /permissions）
+- ❌ "Maybe later" 跳过后没有合理 fallback
+
+### 2.3 `demo-awaiting-otp`（等验证码）
+
+```
+URL: http://localhost:3000/tasks/demo-awaiting-otp
+```
+
+**预期看到**：
+- 标题: "Don Angie next Friday 7:30pm party of 2"
+- 状态徽章: **"Awaiting code"**（橙色）
+- 主区: 提示性文案 "Resy is asking for the verification code from your inbox."
+- 侧栏: Cancel 按钮可见
+
+**警惕**：
+- ❌ 没有"我去手动接力"的提示（Phase 0 § 7.5 说 OTP 是 transitional 状态）
+
+### 2.4 `demo-ready-for-confirmation`（待用户最后一击）
+
+```
+URL: http://localhost:3000/tasks/demo-ready-for-confirmation
+```
+
+**预期看到**：
+- 标题: "TAO Downtown tomorrow 7pm 2 people for date night"
+- 状态徽章: **"Ready to confirm"**（绿色 / "done" 色调）
+- 主区: 大型确认卡片 — "Reservation form is filled. One tap from confirmed."
+- 一个 prominent 的 "Confirm reservation" 按钮（这是用户的最后一击）
+
+**警惕**：
+- ❌ 确认卡片视觉权重不够（按 UI quality bar，应该是页面焦点）
+- ❌ 没有"看一下 agent 填了什么"的展开链接（可选，但好的产品有）
+
+### 2.5 `demo-failed`（失败）
+
+```
+URL: http://localhost:3000/tasks/demo-failed
+```
+
+**预期看到**：
+- 标题: "Atomix 2 Saturdays out 8pm 2 people"
+- 状态徽章: **"Failed"**（红色 / "fail" 色调）
+- 主区: 失败原因卡片 — terminal_reason 文案 "Computer Use stopped at https://resy.com/cities/ny/search?query=Atomix&time=2100"
+- 一个 "Try again" 或 "Back to tasks" 行动按钮
+
+**警惕**：
+- ❌ 失败原因文案里有原始 URL，没翻译成人话（"agent got stuck at..."）
+- ❌ 用户没有"下一步该做什么"的 CTA
+- ❌ 没有"contact support"链接（Phase 1 不强制，但 nice-to-have）
+
+### 2.6 Demo not-found 兜底
+
+```
+URL: http://localhost:3000/tasks/demo-bogus-state
+```
+
+**预期看到**：
+- "Demo not found" 卡片
+- 列出 5 个有效 demo ID
+- 每个 ID 是可点链接
+
+**警惕**：
+- ❌ 直接 500 错误而不是友好的 not-found 卡片
+
+---
+
+## 3. Phase 1 task surface — 真实流程（20 分钟 · 端到端）
+
+> ⚠️ 这一节会真的创建 booking job 但不会真预订（Computer Use force-gate
+> 路由到 worker；worker 没部署到 Railway，所以 job 会卡在 pending 直到
+> 你本地 worker 抢占。如果不想跑 worker，看到 task=executing → 卡住属于
+> 预期行为，不是 bug）。
+
+### 3.1 注册 / 登录
+
+```
+URL: http://localhost:3000
+```
+
+**操作**：
+1. 右上角 "Sign in"
+2. 选 ziweiA 账号登录（密码在 password manager）
+
+**预期看到**：
+- ✅ 跳回首页，右上角变成头像/邮箱
+- ✅ DevTools Network tab 看到 Clerk session cookie 设置
+
+**警惕**：
+- ❌ Clerk OAuth 页面 401 / 502 / 报错
+- ❌ 跳回首页后右上角还是 "Sign in"
+
+### 3.2 创建一个新 task（chat 入口）
+
+**操作**：
+1. 首页输入框输入：`Buvette next Thursday 8pm solo dinner`
+2. 按 Enter
+3. 看 chat 面板的反应
+
+**预期看到**：
+- ✅ Agent 回复：理解了（restaurant + date + time + party_size）
+- ✅ 跳出 quick_picks 或 confirm_card（取决于场景的字段全不全）
+- ✅ 当用户 confirm 后，POST /api/chat/commit 创建 task
+
+**警惕**：
+- ❌ NLU extractor 把 scenario 识别错（restaurant 识别成 hotel）
+- ❌ Confirm card 显示的日期跟用户输入对不上
+- ❌ Console 报 NLU JSON parse error
+- ⚠️ **homepage chat 还在用 LEGACY `InlineBookingProfileGate`**，不是新的
+  ProfileGapCard。Phase 1 #7 还没做。所以缺 profile 字段时，会看到旧 gate
+  UI（不是橙色 ProfileGapCard）— 这是预期行为，**不是 bug**。
+
+### 3.3 跳到 /tasks/[taskId] 看真实状态
+
+**操作**：
+1. Confirm 创建 task 后，应该跳转到 `/tasks/<uuid>`，或在 chat 里有"View task"链接
+2. 点过去
+
+**预期看到**：
+- ✅ URL 是真实 UUID，不是 demo-*
+- ✅ 状态徽章可能是 "Running"（worker 还没抢）或 "Executing"
+- ✅ 5s 一次的 polling — DevTools Network tab 看到 `/api/v1/travel-tasks/:taskId` 周期性请求
+- ✅ Cookie 自动携带（每个请求 Headers 看到 `Cookie: __session=...`）
+
+**警惕**：
+- ❌ 跳转后 401 — cookie auth 没生效（这是 codex `48c80b2` 的核心 fix，必须 work）
+- ❌ Polling 速率不对（>5s 或 <5s）
+- ❌ Task 状态卡死不变（如果 worker 在跑，应该会进入 awaiting_* 或 ready_for_confirmation）
+
+### 3.4 Cancel 真实 task
+
+**操作**：
+1. 在 task 还在 non-terminal 状态时，点 "Cancel task"
+2. Confirm 弹窗
+
+**预期看到**：
+- ✅ DevTools Network tab 看到 `POST /api/v1/execution-jobs/<jobId>/cancel`
+- ✅ 请求带 cookie，无 body
+- ✅ 响应 200 / 204
+- ✅ Page refetch 后 task 状态变成 "Cancelled"
+- ✅ "Cancel task" 按钮消失（terminal state）
+
+**警惕**：
+- ❌ Cancel endpoint 401 / 403 — 这是 codex `48c80b2` 的另一个 fix
+- ❌ Cancel 后 polling 没停（应该自动停在 terminal state）
+- ❌ Cancel 后 worker 还在跑（race condition，需要 codex 看）
+
+### 3.5 测试 ownership 边界
+
+**操作**：
+1. 复制刚才的 task UUID
+2. 退出 ziweiA → 登录 ziweiB
+3. 在浏览器地址栏粘 `http://localhost:3000/tasks/<刚才的UUID>`
+
+**预期看到**：
+- ✅ 看到 "Sign in to view this task" 卡片（codex 故意 401，不泄露 ownership）
+- ✅ 没有 task 信息泄漏（连 task title 都看不到）
+
+**警惕**：
+- ❌ 看到了 ziweiA 的 task 内容（**严重 bug — 安全漏洞**）
+- ❌ 看到了 "Task not found"（应该是 401 sign-in，不是 404 not-found；
+  分得清两种 case 才 OK）
+
+---
+
+## 4. Profile PATCH endpoint（10 分钟 · 后端契约）
+
+> 这一节用 curl 直接打 API，验证 codex `48c80b2` 的 PATCH 端点。
+
+### 4.1 拿 cookie
+
+```bash
+# 在浏览器里登录 ziweiA 后，DevTools → Application → Cookies →
+# 找 __session 或 __clerk_db_jwt（视 Clerk 版本）
+# 复制完整 cookie 值
+```
+
+### 4.2 GET 当前 profile
+
+```bash
+curl http://localhost:3000/api/v1/users/me/profile \
+  -H "Cookie: __session=<paste-here>" \
+  | jq
+```
+
+**预期看到**：
+- ✅ JSON 含 first_name / last_name / email / phone（至少这几个）
+- ✅ 不包含 card_number 或任何 payment 字段（payment 永远不在 profile API 上）
+
+### 4.3 PATCH 一个字段
+
+```bash
+curl -X PATCH http://localhost:3000/api/v1/users/me/profile \
+  -H "Cookie: __session=<paste-here>" \
+  -H "Content-Type: application/json" \
+  -d '{"phone": "+15555550199"}' \
+  | jq
+```
+
+**预期看到**：
+- ✅ 200 响应
+- ✅ 响应 JSON 显示新 phone 已生效
+- ✅ 重新 GET 验证 phone 落库
+
+**警惕**：
+- ❌ 401 — cookie auth 没生效
+- ❌ 422 / 400 — schema 校验意外严格（Phase 1 期间应该宽松）
+- ❌ 修了 phone 但其他字段被清空（PATCH 应该是 partial update，不是 PUT）
+
+### 4.4 PATCH 一个非法字段
+
+```bash
+curl -X PATCH http://localhost:3000/api/v1/users/me/profile \
+  -H "Cookie: __session=<paste-here>" \
+  -H "Content-Type: application/json" \
+  -d '{"card_number": "4111111111111111"}' \
+  | jq
+```
+
+**预期看到**：
+- ✅ 4xx 拒绝（payment 字段永远不能通过这个 endpoint 写入）
+- ✅ 错误 body 提到 "payment fields not allowed here"
+
+**警惕**：
+- ❌ 200 — payment 数据进了 profile 表（**严重 bug — 安全漏洞 + 监管风险**）
+
+---
+
+## 5. Benchmark dashboard（10 分钟 · Phase 0 飞轮）
+
+```
+URL: http://localhost:3000/dev/benchmark-runs
+```
+
+**操作 1 — 浏览历史 runs**：
+- 看左栏 list of runs（如果 codex 跑过 R-003 live smoke，应该有几个 entries）
+- 点一个进去看 detail drawer
+
+**预期看到**：
+- ✅ Run detail 显示 4 个 metric 卡片（booking-ready / safe-outcome / severe-failure / taxonomy-coverage）
+- ✅ GateBreakdown 4 行 threshold 表，每行有 "met" / "short" 徽章
+- ✅ "Top recommended fixes" 面板按优先级列出建议
+- ✅ Per-case drawer 列出 R-001 ... R-025（如果是 25-case suite）或单 R-003
+
+**操作 2 — Validator paste 测试**：
+- 准备一段假 JSON（参考 `benchmark/runs/phase0-resy-*.json` 格式但故意残废一个字段）
+- 粘到 ValidatorPanel 输入框
+- 看 errors / warnings 列表
+
+**预期看到**：
+- ✅ Validator 报出残废字段名 + 期望 shape
+- ✅ § 7.5 OTP 软警告（如果故意造一个 F-PROVIDER-OTP + safe_handoff case）
+
+**警惕**：
+- ❌ Dashboard 直接报 console error
+- ❌ GateBreakdown 算错（手算一遍 ≥80% / ≥95% / =0 / 100% 看是否一致）
+- ❌ Validator 漏检一个 schema 字段
+
+---
+
+## 6. Profile gap mock pipeline（5 分钟 · Phase 1 #7 预演）
+
+```
+URL: http://localhost:3000/dev/profile-gap-flow
+```
+
+> 这一节是 Phase 1 #7（homepage chat 接 ProfileGapCard）的**预演**。真实
+> 接线还没做，但这个 dev route 用 mock backend 跑通了完整 chat → NLU →
+> ProfileGapCard → mock PATCH 的循环，可以验证产品 UX 是不是合理的。
+
+**操作**：
+1. 左栏 chat 输入框输入：`my email is foo@example.com and phone is 555-1234`
+2. 按 Enter
+
+**预期看到**：
+- ✅ 右栏 inspector 显示：
+  - **Last action**: `apply_profile_patch`
+  - **Mock backend profile**: 现在含 email + phone
+  - **IntentState**: scenario = "profile_edit"
+  - **Raw extractor JSON**: extractor 抽出来的 patch 内容
+
+**操作 2**：
+1. chat 输入：`book me a restaurant tonight 7pm party of 2`
+2. 应该触发 needs_profile_data（mock backend 缺了 first_name / last_name / DOB）
+3. 看 ProfileGapCard 弹出来
+
+**预期看到**：
+- ✅ ProfileGapCard 渲染在 chat 流里（inline，不是 modal）
+- ✅ 缺字段 first_name / last_name / DOB 高亮
+- ✅ 用户填完点 "Save and continue" → inspector 显示 mock PATCH dispatch
+
+**警惕**：
+- ❌ ProfileGapCard 弹出来时挡住了之前的 chat 历史
+- ❌ ProfileGapCard 字段顺序违和（first_name 应该在 last_name 前面，DOB 在后面）
+- ❌ Mock pipeline 报错（如果报错说明 NLU v2 production code 有问题，因为这条路用 real coerceIntentState + routeIntent）
+
+---
+
+## 7. Decision Room（10 分钟 · 多人协作）
+
+> Phase 1 期间 DR 是已有功能，这次主要做 regression check。
+
+### 7.1 创建 DR
+
+```
+URL: http://localhost:3000
+```
+
+**操作**：
+1. 登录 ziweiA
+2. Chat 输入: `让我和小明小红一起决定周末去哪吃饭`
+3. NLU 应该识别成 multi_member_room（scenario）
+4. 创建 DR，跳转到 `/rooms/<id>`
+
+### 7.2 邀请 ziweiB
+
+**操作**：
+1. 在 DR 页面点 "Invite member"
+2. 输入 ziweiB 的邮箱
+
+**预期看到**：
+- ✅ ziweiB 在 member 列表
+- ✅ 用 ziweiB 账号登录（incognito 或不同浏览器）打开 DR 链接，能看到对话
+- ✅ ziweiB 的 chat 输入栏可见
+
+### 7.3 多人 chat
+
+**操作**：
+1. ziweiA 打: "我想吃日料"
+2. ziweiB 打: "我想吃中餐"
+3. 等 NLU 推荐 / quick_picks
+
+**预期看到**：
+- ✅ Typing indicators 工作
+- ✅ Member avatars 渲染
+- ✅ 每条消息有发送者标签
+
+**警惕**：
+- ❌ 实时同步丢失（B 的消息 A 看不到）
+- ❌ NLU 在多人语境里崩
+- ❌ 谁是 payer 显示错乱
+
+---
+
+## 8. Bug 记录模板
+
+发现 bug 用这个 template，能让我或 codex 1 分钟内 reproduce：
+
+```markdown
+### [BUG-XXX] 标题（一句话）
+
+**严重程度**: 🔴 严重 / 🟠 中 / 🟡 低
+**Surface**: 比如 /tasks/demo-awaiting-profile, /api/v1/users/me/profile PATCH
+**用户路径**:
+1. ...
+2. ...
+3. (期望) ... (实际) ...
+
+**截图**: <贴图>
+**Console error**: <贴 stack>
+**Network request**: <贴请求 + 响应>
+**浏览器**: Chrome 120 / Firefox / Safari
+**用户账号**: ziweiA
+
+**怀疑根因** (可选): codex 域 (api/lib/core) / Claude 域 (UI) / 不确定
+```
+
+发到 GitHub issue 或直接在 chat 里贴给我。
+
+---
+
+## 9. 已知不在 Phase 1 范围内（不要花时间纠结）
+
+> 这些是**故意没做**的事。看到了不是 bug — 是 Phase 2-3 计划。
+
+| 现象 | 状态 |
+|---|---|
+| Homepage chat 缺 profile 时弹的是**旧 InlineBookingProfileGate**，不是新 ProfileGapCard | Phase 1 #7 待做 (~4h Claude) |
+| 任何 hotel / flight / activity 场景的真实预订 | Phase 2 |
+| Inspire mode / Daydream Explorer 入口 | Phase 3，30-template gallery |
+| 推荐 / referral / payer discount / completion credit | Phase 2-3 |
+| Public Social Feed | Phase 3 |
+| ChatGPT Apps 主动推送 | Phase 3 |
+| Stripe live key（目前是 sandbox） | 等付费用户后再切 |
+| Worker 部署到 Railway（prod booking 走真实环境） | 等真付费用户后 |
+| 失败 task 的 "Try again" 按钮真的重试 | Phase 1 #5 OTP resume + 通用重试，conditional |
+| Browserbase Pro 升级（warm session 持久化） | ≥ 500 paying users 才考虑 |
+
+---
+
+## 10. Phase 1 #8 完成判定（exit criteria）
+
+✅ 全部 5 demo 状态 UI 看起来 Apple/Linear/Stripe 级
+✅ 真实 task 创建 → polling → cancel 全 flow 跑通
+✅ Cookie auth 在 ziweiA / ziweiB 之间正确隔离 task 可见性
+✅ Profile PATCH endpoint 接受 partial update + 拒绝 payment 字段
+✅ Benchmark dashboard 渲染历史 runs + Validator paste 工作
+✅ Mock profile-gap-flow 跑通（验证 Phase 1 #7 接线 spec 正确）
+✅ DR 多人 chat regression 没坏
+✅ 0 个 🔴 严重 bug；🟠 中 bug ≤ 3 个
+
+如果 ≥ 6 项打勾且严重 bug = 0 → **Phase 1 #8 通过，可以 Ship Phase 1**。
+
+---
+
+## 11. 走完之后
+
+1. 把 bug 列表发给我
+2. 我整理成 GitHub issues / .coordination/claude.md 任务
+3. Codex 审核哪些是 codex 域的（auth / API / executor）
+4. Track A + Track B 修完后再走一次 walkthrough
+5. 第二次干净 → ship Phase 1（在 PROJECT_SUMMARY.md 写 launch announcement）
+6. 进入 Phase 2 计划
+
+---
+
+## 12. 引用文档
+
+- `PHASE_1_PLAN.md` — 8 deliverables 顺序
+- `PHASE_1_UI_MERGE_NOTES.md` — Track B 88 文件 inventory（merge 视角）
+- `BENCHMARK_RESTAURANT_100.md` § 7.5 — OTP transitional rule
+- `WARM_SESSION_STRATEGY.md` — Phase 0 OTP path D（BLOCKED 状态）
+- `PROJECT_SUMMARY.md` § Recent Updates 2026-05-03 — 完整战略上下文
+- `CLAUDE.md` § 协作协议 — codex / Claude 分工 + commit 协议
+- `.coordination/claude.md` / `.coordination/codex.md` — 跨边状态同步
