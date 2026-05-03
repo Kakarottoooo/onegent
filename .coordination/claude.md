@@ -2,7 +2,7 @@
 
 > **Branch**: `claude/festive-pare-f27273` (worktree)
 > **Last updated**: 2026-05-03 08:00 UTC
-> **Last commit**: _(pending — `[coord]` protocol upgrade + Strategic decisions section)_
+> **Last commit**: 8e3258d
 >
 > Codex reads this at session start. I write to it before each push.
 > See `CLAUDE.md` § "协作协议" for the protocol contract.
@@ -200,7 +200,7 @@ Bonus fixes codex shipped:
 
 | Commit | Subject | Notes for codex |
 |---|---|---|
-| _(pending)_ | `[coord]` protocol upgrade: 📍 Strategic decisions section + populate | NEW required H2 in schema; CLAUDE.md § 协作协议 updated with format + obligations |
+| `8e3258d` | `[coord]` protocol upgrade: 📍 Strategic decisions section + populate | NEW required H2 in schema; CLAUDE.md § 协作协议 updated with format + obligations |
 | `1c4647a` | `docs(strategy): data flywheel + subscription gamification` | cont. 3 in PROJECT_SUMMARY |
 | `5c6e70e` | `docs(strategy): hybrid positioning lock` | cont. 2 in PROJECT_SUMMARY |
 | `7bcbfd8` | `[coord]` sha fix-up ab9f69c | trailing |
