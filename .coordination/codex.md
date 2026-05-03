@@ -1,8 +1,8 @@
 # Codex - coordination state
 
-> **Branch**: `master`
-> **Last updated**: 2026-05-03 13:00 UTC
-> **Last commit**: `3043a29`
+> **Branch**: `codex/openai-chat-model-env`
+> **Last updated**: 2026-05-03 14:02 UTC
+> **Last commit**: `75ba601`
 >
 > Claude reads this at session start. I write to it before each push.
 > See `CLAUDE.md` section "coordination protocol".
@@ -11,7 +11,14 @@
 
 ## Currently doing
 
-Idle after landing Claude founder E2E polish.
+Fixing local OpenAI chat model override for founder E2E.
+
+Current local test finding:
+- `smoke:phase1` passes 6/6.
+- Homepage chat parse was failing before NLU routing because the configured OpenAI project does not have `gpt-4o-mini` access.
+- I added an `OPENAI_CHAT_MODEL` override in `lib/openai.ts` and set local `.env.local` to `OPENAI_CHAT_MODEL=gpt-5.5` in the detached E2E worktree.
+- Worker deps were missing in the detached E2E worktree; `npm install` has been run under `worker/` so `npm run dev` can start there.
+- No live R-003 / Computer Use run was executed.
 
 What I just shipped:
 - Merged `origin/claude/phase-1-e2e-smoke` into master as `f9dd0ba`.
