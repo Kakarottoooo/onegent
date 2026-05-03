@@ -93,8 +93,9 @@ function stubExtractor(
     };
   }
 
-  // Trivial chitchat fallback
-  if (/^(hi|hello|hey|你好|嗨)\b/i.test(tl)) {
+  // Trivial chitchat fallback. Split CJK from ASCII because JS `\b` is
+  // ASCII-only and won't fire between "好" and end-of-string.
+  if (/^(hi|hello|hey)\b/i.test(tl) || /^(你好|嗨)/.test(t)) {
     return {
       intent: "chitchat",
       scenario: null,
@@ -159,11 +160,14 @@ function parseProfilePatch(text: string): ProfilePatchOut | null {
   const out: ProfilePatchOut = {};
   let any = false;
 
-  // "save my name as Jane Doe"
+  // "save my name as Jane Doe" / "my name is Jane Doe" / "我的名字是 ..."
+  // Anchor on the name-specific verbs so the broader save-verb (which can
+  // appear earlier in the sentence) doesn't make the regex capture
+  // "y name as Jane Doe" by greedy-matching from the wrong position.
   const nameMatch = text.match(
-    /(?:save|store|update|set|我的名字是|my name is|name as)\s+([A-Za-z一-龥][A-Za-z一-龥\s]{1,40}?)(?:[.,;]|$)/i,
+    /(?:my name is|name as|我的名字是)\s+([A-Za-z一-龥][A-Za-z一-龥\s]{1,40}?)(?:[.,;]|$)/i,
   );
-  if (nameMatch && /\b(name|我的名字)\b/i.test(text)) {
+  if (nameMatch) {
     const parts = nameMatch[1].trim().split(/\s+/);
     if (parts.length >= 2) {
       out.first_name = parts[0];
@@ -214,7 +218,12 @@ function parseProfilePatch(text: string): ProfilePatchOut | null {
   // Require some explicit save-intent verb if we matched ONLY phone/email
   // and no other field — anti-pattern: "call me at 555-..." shouldn't be
   // a profile patch. Save-verb gate.
-  const hasSaveVerb = /\b(save|store|update|set|存|保存|记下|记一下|update)\b/i.test(text);
+  //
+  // Split ASCII from CJK because JS `\b` is ASCII-only — "存" between two
+  // non-word chars (CJK is non-word) won't trigger a word boundary.
+  const hasSaveVerb =
+    /\b(save|store|update|set)\b/i.test(text) ||
+    /(存|保存|记下|记一下)/.test(text);
   if (any && !hasSaveVerb) {
     // If we only matched soft fields without a save verb, drop them.
     const hardSignal = out.date_of_birth || out.passport_number || out.first_name;
@@ -241,8 +250,11 @@ function parseRestaurantBooking(text: string): RestaurantOut | null {
   }
   const out: RestaurantOut = {};
 
-  // Venue — capture proper nouns following "book/reserve"
-  const venueMatch = text.match(/(?:book|reserve|订)\s+([A-Z][\w'&]*(?:\s+[A-Z][\w'&]*)*)/);
+  // Venue — capture proper nouns following "book/reserve". The verb is
+  // case-permissive ([Bb]ook etc.) but the captured token MUST start with
+  // an uppercase letter so we don't catch "book a table" → restaurant_name="a".
+  // (Don't use /i on the whole regex — that'd make [A-Z] case-insensitive too.)
+  const venueMatch = text.match(/(?:[Bb]ook|[Rr]eserve|订)\s+([A-Z][\w'&]*(?:\s+[A-Z][\w'&]*)*)/);
   if (venueMatch) out.restaurant_name = venueMatch[1];
 
   // Party size: "for 2", "2 人", "for 4 people"

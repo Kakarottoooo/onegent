@@ -1,8 +1,8 @@
 # Claude — coordination state
 
 > **Branch**: `claude/festive-pare-f27273` (worktree)
-> **Last updated**: 2026-05-02 19:55 UTC
-> **Last commit**: pending (this session)
+> **Last updated**: 2026-05-02 20:05 UTC
+> **Last commit**: 893d477 (predecessor of this update)
 >
 > Codex reads this at session start. I write to it before each push.
 > See `CLAUDE.md` § "协作协议" for the protocol contract.
@@ -10,8 +10,9 @@
 
 ## 🟢 Currently doing
 
-Idle — just shipped `NLU_CONSUMER_CONTRACT.md` (handoff doc for the
-real chat-panel hookup) + `[coord]` 774312d (coordination protocol).
+Idle — just shipped vitest coverage for `/dev/profile-gap-flow`'s
+mock-pipeline pattern matcher (37 cases). Writing the tests **found 4
+real regex bugs** in the matcher; fixed all 4 in the same commit.
 Not running any background processes.
 
 ## ⏳ Blocking on codex
@@ -23,11 +24,12 @@ Not running any background processes.
 | Cookie-auth proxy for `/api/v1/travel-tasks/*` | Browser-side `/tasks/[taskId]` page can't render real timeline without it; benchmark dashboard drawer drill-down link is a placeholder until then |
 | Phase 0 R-003 smoke run output | Dashboard at `/dev/benchmark-runs` ready to render real run; waiting on first `benchmark/runs/phase0-resy-*.json` |
 
-## 📦 Recently shipped (Track B, last 9 commits on this branch)
+## 📦 Recently shipped (Track B, last 10 commits on this branch)
 
 | Commit | Subject | Notes for codex |
 |---|---|---|
-| _(pending)_ | `[handoff]` `NLU_CONSUMER_CONTRACT.md` | **Read this before wiring chat panel.** Full dispatch contract + 5 worked traces + open questions section listing what I need from you (PATCH endpoint path, validation shape, idempotency, etc.) |
+| _(pending)_ | mock-pipeline tests (37 cases) + 4 regex bug fixes | Locks the demo's pattern matcher; CJK `\b` issues + name-regex order + venue case-sensitivity all fixed |
+| `893d477` | `[handoff]` `NLU_CONSUMER_CONTRACT.md` | **Read this before wiring chat panel.** Full dispatch contract + 5 worked traces + open questions section listing what I need from you (PATCH endpoint path, validation shape, idempotency, etc.) |
 | `774312d` | `[coord]` `.coordination/{claude,codex}.md` protocol + commit-msg tags | Coordination scaffolding; CLAUDE.md § "协作协议" describes the protocol you're now reading |
 | `fcdc1d9` | `/dev/profile-gap-flow` end-to-end mock | Demonstrates the wiring shape codex's real chat-panel hookup will use — clone `handleSend` and replace mocks with real fetches |
 | `76e35b9` | NLU profile_edit + apply_profile_patch + 21 golden tests | Contract layer — `lib/agent/nlu-v2/` types/router/extractor extended |
