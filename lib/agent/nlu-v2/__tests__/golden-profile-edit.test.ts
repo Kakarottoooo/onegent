@@ -334,6 +334,219 @@ describe("coerceIntentState · profile_edit integration", () => {
   });
 });
 
+/* ─── Date format normalization (PD1-PD7) ────────────────────────── */
+//
+// The model is told to emit YYYY-MM-DD. When it slips up, coerceProfilePatch
+// runs the value through resolveDateHint as a safety net. These tests pin
+// what does and doesn't get normalized so we don't accidentally PATCH a
+// raw string that the backend will reject.
+
+describe("coerceProfilePatch · date format normalization", () => {
+  it("PD1. ISO YYYY-MM-DD passes through unchanged", () => {
+    const out = coerceProfilePatch({ date_of_birth: "1995-05-15" });
+    expect(out).toEqual({ date_of_birth: "1995-05-15" });
+  });
+
+  it("PD2. MM/DD/YYYY normalizes to ISO", () => {
+    const out = coerceProfilePatch({ date_of_birth: "5/15/1995" });
+    expect(out).toEqual({ date_of_birth: "1995-05-15" });
+  });
+
+  it("PD3. zero-padded MM/DD/YYYY normalizes to ISO", () => {
+    const out = coerceProfilePatch({ date_of_birth: "05/15/1995" });
+    expect(out).toEqual({ date_of_birth: "1995-05-15" });
+  });
+
+  it("PD4. textual 'May 15 1995' normalizes to ISO via JS Date", () => {
+    const out = coerceProfilePatch({ date_of_birth: "May 15 1995" });
+    expect(out).toEqual({ date_of_birth: "1995-05-15" });
+  });
+
+  it("PD5. CJK year-month-day '1995年5月15日' is dropped (no parser handles it)", () => {
+    // Model output should pre-normalize this to ISO; if it leaks through raw
+    // we drop rather than risk PATCHing a string the backend can't read.
+    const out = coerceProfilePatch({ date_of_birth: "1995年5月15日" });
+    expect(out).toBeUndefined();
+  });
+
+  it("PD6. valid + invalid date in same patch — only invalid drops", () => {
+    const out = coerceProfilePatch({
+      first_name: "Jane",
+      date_of_birth: "garbage-date",
+      phone: "+1 555 0100",
+    });
+    expect(out).toEqual({ first_name: "Jane", phone: "+1 555 0100" });
+  });
+
+  it("PD7. passport_expiry in MM/DD/YYYY normalizes (same path as DOB)", () => {
+    const out = coerceProfilePatch({ passport_expiry: "12/01/2030" });
+    expect(out).toEqual({ passport_expiry: "2030-12-01" });
+  });
+});
+
+/* ─── Adversarial value types (PA1-PA5) ──────────────────────────── */
+//
+// strOrUndef coerces to a non-blank string or undefined. Pin the behavior
+// against typical LLM JSON-mode escapes (numbers in name fields, nulls,
+// nested objects, arrays, booleans).
+
+describe("coerceProfilePatch · adversarial value types", () => {
+  it("PA1. number value (e.g. phone as int) is dropped", () => {
+    const out = coerceProfilePatch({
+      first_name: "Jane",
+      phone: 4155550100, // number, not string
+    });
+    // strOrUndef rejects non-strings → phone dropped, only first_name survives
+    expect(out).toEqual({ first_name: "Jane" });
+  });
+
+  it("PA2. null value is dropped", () => {
+    const out = coerceProfilePatch({
+      first_name: "Jane",
+      last_name: null,
+      email: null,
+    });
+    expect(out).toEqual({ first_name: "Jane" });
+  });
+
+  it("PA3. boolean value is dropped", () => {
+    const out = coerceProfilePatch({ first_name: true, last_name: "Doe" });
+    expect(out).toEqual({ last_name: "Doe" });
+  });
+
+  it("PA4. nested object value is dropped", () => {
+    const out = coerceProfilePatch({
+      first_name: { first: "Jane" },
+      last_name: "Doe",
+    });
+    expect(out).toEqual({ last_name: "Doe" });
+  });
+
+  it("PA5. array value is dropped", () => {
+    const out = coerceProfilePatch({
+      first_name: ["Jane"],
+      email: "jane@example.com",
+    });
+    expect(out).toEqual({ email: "jane@example.com" });
+  });
+});
+
+/* ─── Field-name aliases dropped (PN1-PN4) ────────────────────────── */
+//
+// PROFILE_EDIT_FIELDS is the canonical 13. Any case-mangled / camelCased /
+// kebab-cased / snake-typo'd alias the LLM might emit gets dropped. The
+// extractor prompt teaches canonical snake_case; this is the safety net.
+
+describe("coerceProfilePatch · field-name aliases dropped", () => {
+  it("PN1. camelCase 'firstName' is NOT accepted (canonical is 'first_name')", () => {
+    const out = coerceProfilePatch({
+      firstName: "Jane",
+      first_name: "Jane",
+    });
+    // Only the canonical snake_case key wins
+    expect(out).toEqual({ first_name: "Jane" });
+  });
+
+  it("PN2. uppercase 'FIRST_NAME' is NOT accepted", () => {
+    const out = coerceProfilePatch({
+      FIRST_NAME: "Jane",
+      last_name: "Doe",
+    });
+    expect(out).toEqual({ last_name: "Doe" });
+  });
+
+  it("PN3. common typo 'dob' is NOT accepted (canonical is 'date_of_birth')", () => {
+    // Frequent LLM mistake — model abbreviates "date of birth" to "dob".
+    const out = coerceProfilePatch({
+      dob: "1995-05-15",
+      first_name: "Jane",
+    });
+    expect(out).toEqual({ first_name: "Jane" });
+  });
+
+  it("PN4. common typo 'zip_code' is NOT accepted (canonical is 'zip')", () => {
+    const out = coerceProfilePatch({
+      zip_code: "10001",
+      zip: "10001",
+    });
+    expect(out).toEqual({ zip: "10001" });
+  });
+});
+
+/* ─── Sensitive field blocklist hardening (PS1-PS3) ──────────────── */
+//
+// Any field that smells like authentication / payment-secret should never
+// reach a profile PATCH endpoint, even if the LLM hallucinates emitting it.
+// PC2 already covers ssn / credit_card / full_name; this layer adds a few
+// more LLM-plausible names.
+
+describe("coerceProfilePatch · sensitive field blocklist", () => {
+  it("PS1. CVV / CVC / PIN values are dropped", () => {
+    const out = coerceProfilePatch({
+      first_name: "Jane",
+      cvv: "123",
+      cvc: "123",
+      pin: "1234",
+    });
+    expect(out).toEqual({ first_name: "Jane" });
+  });
+
+  it("PS2. password / secret values are dropped", () => {
+    const out = coerceProfilePatch({
+      first_name: "Jane",
+      password: "hunter2",
+      secret: "abc",
+      api_key: "sk-...",
+    });
+    expect(out).toEqual({ first_name: "Jane" });
+  });
+
+  it("PS3. nationality dropped (model should use canonical 'passport_country' instead)", () => {
+    const out = coerceProfilePatch({
+      first_name: "Jane",
+      nationality: "American",
+      passport_country: "USA",
+    });
+    expect(out).toEqual({
+      first_name: "Jane",
+      passport_country: "USA",
+    });
+  });
+});
+
+/* ─── Unicode + edge cases (PU1-PU3) ──────────────────────────────── */
+
+describe("coerceProfilePatch · unicode + edge cases", () => {
+  it("PU1. CJK names pass through unchanged", () => {
+    // Backend accepts unicode names; coerce shouldn't reject them.
+    const out = coerceProfilePatch({
+      first_name: "伟",
+      last_name: "王",
+    });
+    expect(out).toEqual({ first_name: "伟", last_name: "王" });
+  });
+
+  it("PU2. tab/newline-only values are dropped (treated as blank)", () => {
+    const out = coerceProfilePatch({
+      first_name: "\t\n  ",
+      last_name: "Doe",
+      email: "\r\n",
+    });
+    expect(out).toEqual({ last_name: "Doe" });
+  });
+
+  it("PU3. leading/trailing whitespace is trimmed (strOrUndef trims)", () => {
+    // strOrUndef returns v.trim() for any non-blank string, so the patch
+    // value gets normalized before reaching the wire. Pinning this so we
+    // notice if anyone removes the trim and starts shipping ragged spaces.
+    const out = coerceProfilePatch({
+      first_name: "  Jane  ",
+      last_name: "\tDoe\n",
+    });
+    expect(out).toEqual({ first_name: "Jane", last_name: "Doe" });
+  });
+});
+
 /* ─── Type-level mirror check (smoke) ───────────────────────────── */
 
 describe("PROFILE_EDIT_FIELDS mirror to backend canonical 13", () => {
