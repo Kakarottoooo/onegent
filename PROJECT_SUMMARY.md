@@ -84,9 +84,15 @@ Current State Snapshot · 2026-05-03
 10. 主页 chat Claude.ai 风格重构 + NLU state 持久化 — 2026-04-26
 
 【当前阻塞 / 等外部触发的事项（统一在此，下面 release notes 不重复）】
-- **Phase 0 主线 — Resy Essex Computer Use 闭环**（codex Track A 当前
-  主战场；6 个 deliverable 见下方 2026-05-03 段；详见
-  [EXECUTOR_V2_PIVOT.md](./EXECUTOR_V2_PIVOT.md)）
+- **Phase 0 主线 — Resy Computer Use 闭环**（~80%，第二次 R-003 跑完
+  在 codex 这边 investigate；详见下方 2026-05-03 (cont. 1) 段 +
+  [EXECUTOR_V2_PIVOT.md](./EXECUTOR_V2_PIVOT.md) +
+  [BENCHMARK_RESTAURANT_100.md](./BENCHMARK_RESTAURANT_100.md) § 7.5）
+- **Phase 1 plan 已写**（[PHASE_1_PLAN.md](./PHASE_1_PLAN.md)）—— 等
+  Phase 0 declared 后立刻进。8 个 deliverable，~3 天（无 OTP resume
+  情况）/ ~2 周（含 OTP resume）
+- **OTP path D（warm session）**（[WARM_SESSION_STRATEGY.md](./WARM_SESSION_STRATEGY.md)）
+  —— BLOCKED until R-003 真的到 OTP layer post-navigation-repair
 - ChatGPT Apps marketplace review 结果（OpenAI 5-10 工作日，被动等）
 - Browserbase Pro $99/mo 升级（路径已变 — Computer Use 走 OpenAI
   Responses API，Browserbase 升级时机改成"自建 farm 启动信号触发"，
@@ -97,13 +103,12 @@ Current State Snapshot · 2026-05-03
 - Cofounder / 早期合伙人搜索
 
 【Pending backlog（不阻塞，待动手）】
-- ProfileGapCard wiring（**onSave 路径解锁**：codex 已 ship
-  `13036a0` `/api/v1/travel-tasks/:taskId/continue` + `84d7e5f`
-  `needs_profile_data` 状态。NLU `apply_profile_patch` 路径仍等
-  `/api/v1/users/me/profile` PATCH endpoint）
-- Task Timeline + Snapshot rail E2E 联调（task-level endpoints
-  `75a3dbe` 已 ship；C 端 `/tasks/[taskId]` 还需 cookie-auth proxy
-  for `/api/v1/*`）
+- ProfileGapCard wiring **进入 Phase 1 deliverable #7**：UI 100% ready
+  （/tasks/[taskId] + /dev/profile-gap-flow），等 codex profile PATCH
+  endpoint + cookie-auth proxy 落地后接真 fetch
+- /tasks/[taskId] **production wire 进入 Phase 1 deliverable #6**：
+  页面 + 5 个 demo state 全 ship（`f718831`），2 个 SWAP POINT 注释
+  标好，cookie-auth proxy 落地后 1 行 fetch 替换 → 上 prod
 - Social Feed MVP 实施（trip-anchored posts + 单向 follow + /feed 入口）
 - 公开发布（HN + X + PH + Reddit launch post）
 - @onegent/mcp-server 加 tool annotations 后 npm 重发（~5min）
@@ -154,6 +159,176 @@ B 端基础设施 / Phase 0 UI / Positioning Shift 等）已归档至
 [PROJECT_SUMMARY_ARCHIVE_2026Q1.md](./PROJECT_SUMMARY_ARCHIVE_2026Q1.md)。
 
 按钮 / 功能行为速查见 [FEATURE_MAP.md](./FEATURE_MAP.md)。
+
+================================================================
+Recent Updates - 2026-05-03 (cont. 1) · R-003 reaches Computer Use · OTP transitional rule § 7.5 · Track B ships 16 more commits · Phase 1 plan authored
+================================================================
+
+承接早段 Phase 0 doctrine + 协议握手。今天后半天完成两条链路：
+（A）R-003 真实跑通 Computer Use 三阶段（model access → OTP 墙 →
+navigation drift），每段都 ship 修复；（B）Track B 在 codex 跑 R-003 期间
+并行 ship 了"R-003 反馈驱动"的工程储备，包括 OTP transitional rule、
+warm session 策略、GateBreakdown analyzer、/tasks/[taskId] 真实页面、
+/dev landing 等。
+
+【R-003 真实跑通的三阶段】
+
+**阶段 1：model access**（codex `bd72f56` 之前）
+- gpt-5.5 GA Computer Use 上线，但 codex 当前 OpenAI project 拿不到
+  `computer-use-preview`/`gpt-5.5` model access
+- codex `620444a` 把 Computer Use adapter 从 preview shape 升到 GA
+  shape (`tools: [{ type: "computer" }]`, model: `gpt-5.5`)
+- 用户 rotate 新 key + 解锁新 project model allow-list → 终于 unblock
+
+**阶段 2：OTP 墙**（codex `bd72f56`，2026-05-03 02:09 UTC）
+- 第一次 R-003 真实跑通 Computer Use 全程，命中 Resy OTP 验证墙
+- 报告：outcome `failed_with_clear_reason`, taxonomy `F-PROVIDER-OTP`,
+  task state `awaiting_otp`
+- Gmail connector OAuth `token_expired 401`，无法自动读 OTP 验证码
+- **从"infra 死锁"转到"产品状态机层面问题"**——CU 对接 OK、Resy 导航
+  OK、订位流程跑通、停在 OTP 等用户介入
+
+**阶段 3：navigation drift**（codex `a0ce2ee`，第二次 R-003 之前）
+- 第二次 R-003 落点不是 OTP 而是 `F-PROVIDER-UNKNOWN` —— Computer Use
+  从 Buvette venue page 漂到 Resy /search?query=Buvette&time=2100
+  （时间还选错了：21:00 vs 请求 20:00）
+- codex `a0ce2ee` 修复：start URL 加 `&time=2000`、CU prompt 明确要求
+  exact venue page、auto-pullback 检测 /search 漂移最多回拉 2 次
+- 第二次 R-003 跑出来后还在 codex 这边 investigate（job hang on timeout）
+
+**当前 Phase 0 declared 路径**：等 codex 第二次 R-003 真实结果 →
+`ready_for_confirmation`（path A，扩 5-case 子集）/ `F-PROVIDER-OTP`
+（path B，启动 warm session PoC）/ 还是 drift（path C，继续修
+prompt/recovery，不烧 token 重跑）
+
+【Phase 0 § 7.5 OTP transitional rule（spec broadening + dual-side fix）】
+
+R-003 OTP 墙触发的设计决策：codex 跟 Claude 跨边对齐，**不做完整 Gmail
+OTP resume 工程**（5 天重投入），**也不放宽 Phase 0 阈值**，而是把
+F-PROVIDER-OTP 当作 transitional safe handoff（per-case 算 pass，但
+4-metric headline gate 仍要求 ≥80% booking-ready 真过 OTP）。
+
+Spec 改动（Claude `097741a`）：
+- BENCHMARK_RESTAURANT_100.md § 3.2 F-PROVIDER-OTP 行明确
+- BENCHMARK_RESTAURANT_100.md § 7.5（新章节）记录 transitional 规则
+- R-003 row: `expectedOutcomes` 加 `safe_handoff`,
+  `acceptableFailureTaxonomy` 加 F-PROVIDER-OTP
+
+Validator 软警告（同 commit）：当 case 是 F-PROVIDER-OTP +
+`failed_with_clear_reason` 时发 warning 引用 § 3.2 + § 7.5，提示
+runner 没正确归桶。
+
+Codex 同步（`d1fd102 [handoff]`）所有 3 条 action item：
+- ✅ R-003 fixture 同步 expectedOutcomes / acceptableFailureTaxonomy
+- ✅ runner outcome bucketing：`state==="awaiting_otp" ? "safe_handoff"
+  : "failed_with_clear_reason"`
+- ✅ § 7.5 普适规则：`provider==="Resy" && safe_handoff &&
+  F-PROVIDER-OTP` → 自动通过 taxonomy gate
+
+Bonus（codex 还多送 4 件）：
+- OpenAI 5xx → F-INFRA-CRASH（之前误归类）
+- F-AVAIL-PARTY 收紧（之前 trace 里随便有"party"字样就误判）
+- **`--live-openai` 安全护栏**：phase0 benchmark 默认 dry-run，必须
+  显式 flag 才烧 token——避免迭代中误烧
+- v1 task worker race 修
+- `normalizeKey()` GA Computer Use → Playwright key alias 映射
+  （`LEFT` → `ArrowLeft` 等）
+
+【WARM_SESSION_STRATEGY.md（318 行设计 doc，Claude `2201a25 [handoff]`）】
+
+OTP path D（warm session 先 → Gmail resume fallback）的设计储备。
+关键发现：CU executor 用本地 Playwright（不是 Browserbase），所以
+`context.storageState()` 是直接可用的内置 API，**不需要 Browserbase
+Pro 升级**（之前路线图里 $99/mo 决定可以继续往后推）。
+
+3-step PoC 阶梯：
+1. 4h 手动 capture + replay 验证（Resy 是否当 replay 是登录态）
+2. 1d 接入 runComputerUse() + DB 存 storageState
+3. 1d 跑 5-case Resy subset → 25 case → declare Phase 0
+
+vs Gmail OTP resume 5 天 → 省一半工程。
+
+5 个风险 + mitigation 写完（指纹识别 / TTL / 多账号混淆 / cookie 加密 /
+Resy ToS）。文档当前 status: 🔵 BLOCKED until R-003 reaches OTP layer
+post-navigation-repair。
+
+【Track B 16 个新 commit（自上一段 e923192 后）】
+
+按时间顺序：
+1. `f378020 [handoff]` benchmark report validator + ValidatorPanel
+   （36 测试 → 让 codex push report 前可 paste 自检 shape）
+2. `67d6cb9 [unblocked]` align benchmark taxonomy with runner
+   （加 9 个 runner-emitted 码：F-INFRA-MODEL-ACCESS 等 5 个 +
+   F-LOGIC-UNAUTHORIZED-PAYMENT 等 2 个 + F-DATA-DOM / F-AVAIL-PARTY /
+   F-PROVIDER-UNKNOWN；fix `isSevereTaxonomy` 前缀 → `F-LOGIC-`）
+3. `73b4eb8 [coord]` sha fix-up
+4. `9aaf480` NLU profile_edit robustness 22 新 golden test（日期格式
+   / 对抗 value type / 字段别名 / 敏感黑名单 / unicode）
+5. `1704eac [coord]` sha fix-up
+6. `1f8bf8a` GateBreakdown analyzer（新 `<GateBreakdown>` 组件 +
+   8 测试，按 § 7.2 阈值分解 run 距离 + top recommended fixes 排序）
+7. `097741a [handoff]` Phase 0 OTP transitional rule（spec § 7.5 +
+   R-003 row + validator 软警告）
+8. `e458dd9 [coord]` sha fix-up
+9. `2909d80 [coord]` ack codex d1fd102 + 决策对齐（OTP 路径 D / launch
+   暂缓 / 单 R-003 OK / 25-case suite 暂不跑）
+10. `a93c015 [coord]` sha fix-up
+11. `2201a25 [handoff]` warm session strategy doc（318 行）
+12. `72a3715 [unblocked]` navigation drift detection
+    （GateBreakdown 加 `navigation_drift` rec kind，触发条件
+    F-PROVIDER-UNKNOWN + terminalReason 含 /search/?query=/search?，
+    引用 codex `a0ce2ee` 的修复）
+13. `07c860b [coord]` sha fix-up
+14. `d2f09b7` /dev landing page（5 dev 路由 + 5 strategy doc + coord
+    一站式 index，加 status pill + use case 提示）
+15. `f718831` /tasks/[taskId] task detail page（750 行 production-ready
+    UI + 5 个 demo task ID + 2 个 SWAP POINT 注释，cookie-auth proxy
+    落地后 1 行替换 → 上 prod。Phase 1 surface 0% → ~95% UI 完成）
+16. **本 commit** PROJECT_SUMMARY refresh + PHASE_1_PLAN.md
+
+【Phase 1 plan 写完（Claude PHASE_1_PLAN.md）】
+
+Phase 1 = 真实用户在 prod 跑通"一句话 → ready_for_confirmation →
+一键 confirm"。8 个 deliverable：
+
+| # | 项 | 责任 | 工时 |
+|---|---|---|---|
+| 1 | master typecheck 17 errors 清 | codex | 1-3h |
+| 2 | profile PATCH endpoint | codex | 4-8h |
+| 3 | cookie-auth proxy `/api/v1/*` | codex | 4-8h |
+| 4 | branch → master merge | codex | 1h |
+| 5 | OTP resume（条件触发：Phase 0 没用 warm session 关闭 OTP）| codex | 2-5d |
+| 6 | /tasks/[taskId] 接真 fetch（2 个 SWAP POINT 替换）| 我 | 2h |
+| 7 | ProfileGapCard 接 homepage chat（替 mock NLU consumer）| 我 | 4h |
+| 8 | 创始人 E2E 走查 | 用户 | 1h |
+
+总人时：~3 天（如果 Phase 0 已闭环 OTP）/ ~2 周（如果还要 OTP resume）
+
+Critical path：#1 → (#2 ‖ #3) → #4 → (#6 ‖ #7) → #5 → #8 → declared
+
+详见 PHASE_1_PLAN.md（含 5 个 risk + mitigation + 5 个 open question +
+Phase 1 → Phase 2 transition）。
+
+【协调协议运转情况】
+
+5+ 次握手（每次都 git-based，用户不 relay）：
+- 774312d → 1bcb076 → 9d659d4 → f378020 → 67d6cb9 → 097741a →
+  d1fd102 → 2909d80 → 2201a25 → 72a3715 → a0ce2ee
+- 用户进入"对齐者"角色（决策路径 D / launch 暂缓 / suite 不跑），
+  不再当 status relay
+- `[handoff]` / `[unblocked]` / `[coord]` tag 让 git log 一行就看出
+  跨边语义
+
+【当前 idle 状态】
+
+Track A（codex）：第二次 R-003 跑完后 investigate，job hang on
+timeout 在停 local dev process 防继续烧 token。结果未知。
+
+Track B（我）：等 codex result。不主动跑 live。可做的非阻塞工作：
+PROJECT_SUMMARY refresh（本 commit）/ PHASE_1_PLAN（本 commit）/
+Validator UX upgrade / BENCHMARK_DEBUG_PLAYBOOK。
+
+用户：等 codex 第二次 R-003 result 决定 OTP 路径走哪个 fork。
 
 ================================================================
 Recent Updates - 2026-05-03 · Phase 0 main line locked · Coordination protocol live · Track B ships 12 commits (ProfileGapCard / benchmark dashboard / NLU profile_edit / contract docs / mock-pipeline tests)
