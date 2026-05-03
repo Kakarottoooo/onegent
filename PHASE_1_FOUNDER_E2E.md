@@ -58,6 +58,21 @@ open http://localhost:3000          # 或 Chrome 手动开
 - 打开 Console tab，留意红色错误
 - DevTools 保持开着整个 walkthrough，事后好回放
 
+### 0.4 自动 smoke 预热（30 秒 · 推荐先跑）
+
+在花 60-90 分钟手动 walkthrough 之前，先跑一次自动 render-level smoke：
+
+```bash
+npm run smoke:phase1
+```
+
+这会用 headless chromium 串行访问 6 个核心 surface
+(`/dev/path-b-demo` / `/tasks/demo-*` / `/dev/benchmark-runs` / `/dev/profile-gap-flow`)
+并断言每个页面渲染出关键文案。**全过 (`exit 0`)** 才值得继续手动走 walkthrough；
+有 route fail 就先修页面再继续。
+
+详见 `PHASE_1_E2E_SMOKE.md`（覆盖范围、失败排查、设计选择）。
+
 ---
 
 ## 1. /dev landing 索引页（2 分钟 · 健康检查）
