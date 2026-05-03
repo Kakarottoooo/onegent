@@ -13,6 +13,103 @@ Always respond in Chinese. Never respond in Korean.
 
 ---
 
+## 协作协议 — codex (Track A) ↔ Claude (Track B)
+
+两个 agent 并行开发时，用户曾经手动在两边复制粘贴状态——容易丢信息、产生
+代差、导致冲突。**改用 git 仓库里两个状态文件做单向消息总线**，零新基础设施。
+
+### 文件位置
+
+```
+.coordination/
+  codex.md      ← codex 写（在 master 分支）
+  claude.md     ← Claude 写（在 claude/festive-pare-f27273 分支或后续替换分支）
+```
+
+每一边只写自己那个文件，只读对方那个。永远不会冲突。
+
+### Session start ritual（强制；每次开新对话都跑）
+
+```bash
+git fetch origin
+echo "═══ codex 当前状态 (origin/master) ═══"
+git show origin/master:.coordination/codex.md 2>/dev/null || echo "(codex.md 还不存在)"
+echo
+echo "═══ Claude 当前状态 (本分支) ═══"
+cat .coordination/claude.md 2>/dev/null || echo "(claude.md 还不存在)"
+```
+
+读到的内容是判断"对方现在在干嘛 / 给我交付了什么 / 我有没有 unblock 他"
+的唯一可靠依据。**不要凭记忆判断**——上一轮 session 的状态可能已经过时。
+
+### 何时更新自己的 `.coordination/claude.md`
+
+必须更新的时机（任一即触发）：
+1. **开始一个新任务**——把 "Currently doing" 改成新任务标题
+2. **完成一个任务**——把对应行从 "Currently doing" 移到 "Recently shipped"
+3. **发现一个 blocker**——加到 "Blocking on codex"
+4. **解锁了对方**——记入 "Recently shipped" 并在 commit 用 `[handoff]` tag
+5. **收到对方的产出**——更新 "Blocking on codex" 把已解的项删掉
+
+更新即 commit。每次 push 代码时把 `.coordination/claude.md` 一起带上。
+**不要单独 push 状态文件**——和当时的代码改动绑在同一个 commit。
+
+### 必须保留的章节（schema 契约）
+
+`.coordination/claude.md` 必须有这 5 个 section（H2）。codex.md 镜像。
+
+```
+🟢 Currently doing             # 当前任务一句话；空闲时写 "Idle"
+⏳ Blocking on codex           # 我在等对方什么；空时写 "(none)"
+📦 Recently shipped            # 最近 5-10 个 commit 表，含给对方的备注
+🤝 Open questions for codex    # 给对方的问题；空时写 "(none)"
+🚧 Hold rules I'm respecting   # 当前我承诺不碰的范围
+🗂 Track B file ownership      # 我的文件域（变化时更新）
+```
+
+顶部必须有 metadata 行：
+```
+> Branch: <branch-name>
+> Last updated: YYYY-MM-DD HH:MM UTC
+> Last commit: <short-sha>
+```
+
+### Commit message tag 约定（C — 强信号补充）
+
+写 git log 时给跨边相关的 commit 加 prefix tag，让 `git log --oneline -20`
+扫一眼就能看到 handoff / blocker 信号：
+
+| Tag | 含义 |
+|---|---|
+| `[handoff]` | 这个 commit 完成了对方在等的事——交付方应该立即更新自己的 `.coordination/*.md` 把对应项移出 Blocking 并写到 Recently shipped 的"Notes for codex/claude"列 |
+| `[blocked]` | 这个 commit 创造了一个我等对方的 blocker——要同时更新 `.coordination/claude.md` 的 Blocking on codex 列 |
+| `[unblocked]` | 对方刚 push 的东西解了我的某个 blocker，本 commit 是对应的消费/接入 |
+| `[shared]` | 改了 shared file（lib/db.ts, schema, 协议 doc 等）——对方需要看一眼 |
+| `[coord]` | 纯协调——只更新 .coordination/*.md，没有代码 |
+
+不强制——零 tag 也行；加上等于额外加固。多数 commit 不需要 tag。
+
+### Conflict resolution
+
+理论上不会冲突（两个文件，两个分支）。如果出现：
+- 自己的 .coordination/claude.md 跟 master 上的 codex.md 不矛盾——它们各自独立，无 merge 概念
+- 我 merge master 时，只会接收对方的 codex.md（它在 master 上），不会动我的 claude.md（它只在我分支上）
+
+如果未来切分支（比如 Phase 1 完成后开新 feature branch），把 `.coordination/claude.md`
+跟新分支一起带过去；codex 那边知道分支名变了即可（在 codex.md 顶部 metadata 写
+"Claude branch: <new-branch-name>"，对方会看到）。
+
+### 失败模式
+
+- **codex 不更新**：我 fetch 后看 codex.md 时间戳老于 24h → 在回复里
+  flag 给用户，问 codex session 是否活着，不强行假设
+- **我自己忘记更新**：用户读 `.coordination/claude.md` 看到时间戳 / 状态过时
+  → 用户提醒；视作 bug 修复
+- **两边状态对不上**：以 git log 实际 commit 为准（事实），状态文件是
+  解读层（注释）
+
+---
+
 ## Booking-autopilot 架构 — 双份代码并存（B+B2，2026-05-01；修正 2026-05-01 PM）
 
 **事实校正（2026-05-01 audit）：之前说 lib/booking-autopilot 是 "deprecated dead code"
