@@ -21,6 +21,10 @@ function usesMaxCompletionTokens(model: string): boolean {
   return /^(gpt-5|o[134])(?:[.-]|$)/.test(model);
 }
 
+function usesDefaultTemperatureOnly(model: string): boolean {
+  return /^(gpt-5|o[134])(?:[.-]|$)/.test(model);
+}
+
 export async function openaiChat(params: {
   system?: string;
   messages: Array<{ role: "user" | "assistant"; content: string }>;
@@ -43,6 +47,9 @@ export async function openaiChat(params: {
   const tokenParam = usesMaxCompletionTokens(model)
     ? { max_completion_tokens: tokenBudget }
     : { max_tokens: tokenBudget };
+  const temperatureParam = usesDefaultTemperatureOnly(model)
+    ? {}
+    : { temperature: 0.2 };
 
   let res: Response;
   try {
@@ -56,7 +63,7 @@ export async function openaiChat(params: {
         model,
         messages,
         ...tokenParam,
-        temperature: 0.2,
+        ...temperatureParam,
         ...(params.response_format ? { response_format: params.response_format } : {}),
       }),
       signal: AbortSignal.timeout(params.timeout_ms ?? DEFAULT_TIMEOUT_MS),

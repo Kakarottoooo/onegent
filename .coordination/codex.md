@@ -17,6 +17,7 @@ Current local test finding:
 - `smoke:phase1` passes 6/6.
 - Homepage chat parse was failing before NLU routing because the configured OpenAI project does not have `gpt-4o-mini` access.
 - I added an `OPENAI_CHAT_MODEL` override in `lib/openai.ts` and set local `.env.local` to `OPENAI_CHAT_MODEL=gpt-5.5` in the detached E2E worktree.
+- Follow-up local test exposed gpt-5.5 Chat Completions compatibility issues: use `max_completion_tokens` instead of `max_tokens`, and omit custom `temperature` because this model only accepts the default.
 - Worker deps were missing in the detached E2E worktree; `npm install` has been run under `worker/` so `npm run dev` can start there.
 - No live R-003 / Computer Use run was executed.
 
