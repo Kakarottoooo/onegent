@@ -22,6 +22,11 @@ export function selectExecutor(input: BookingExecutorInput): ExecutorSelection {
     return { id: forced, reason: "ONEGENT_EXECUTOR_V2 override" };
   }
 
+  const preferred = input.request.clientMetadata?.preferredExecutor;
+  if (preferred === "legacy_stagehand" || preferred === "computer_use") {
+    return { id: preferred, reason: "clientMetadata.preferredExecutor" };
+  }
+
   const targets = splitTargets(process.env.ONEGENT_COMPUTER_USE_FOR);
   if (targets.has("all")) {
     return { id: "computer_use", reason: "ONEGENT_COMPUTER_USE_FOR=all" };

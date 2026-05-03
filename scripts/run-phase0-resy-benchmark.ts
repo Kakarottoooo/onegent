@@ -7,6 +7,7 @@ import {
   phase0TaskSnapshotsUrl,
   phase0TaskTimelineUrl,
 } from "../lib/benchmark/phase0-report";
+import { createApiKey } from "../lib/db";
 
 type Flags = Record<string, string | boolean>;
 
@@ -194,6 +195,35 @@ function booleanFlag(flags: Flags, key: string): boolean {
   return flags[key] === true || flags[key] === "true";
 }
 
+function isLocalBaseUrl(baseUrl: string): boolean {
+  try {
+    const host = new URL(baseUrl).hostname.toLowerCase();
+    return host === "localhost" || host === "127.0.0.1" || host === "::1";
+  } catch {
+    return false;
+  }
+}
+
+async function resolveApiKey(baseUrl: string, flags: Flags, dryRun: boolean): Promise<string | undefined> {
+  const explicit =
+    stringFlag(flags, "api-key") ??
+    process.env.ONEGENT_BENCHMARK_API_KEY ??
+    process.env.ONEGENT_API_KEY ??
+    process.env.API_KEY;
+  if (explicit || dryRun) return explicit;
+  if (!isLocalBaseUrl(baseUrl)) return undefined;
+
+  const created = await createApiKey({
+    organizationName: "Phase 0 local benchmark",
+    env: "test",
+    allowedJobTypes: ["restaurant"],
+    rateLimitPerDay: 200,
+    userId: null,
+  });
+  console.log("[phase0] minted ephemeral local benchmark API key (not printed)");
+  return created.plaintextKey;
+}
+
 function usage(): void {
   console.log(`Usage:
   npx tsx scripts/run-phase0-resy-benchmark.ts --dry-run
@@ -299,6 +329,7 @@ function buildCreatePayload(
         agentId: "phase0-resy-benchmark",
         sessionId: runId,
         idempotencyKey: `${suite.suiteId}:${testCase.id}:${runId}`,
+        preferredExecutor: "computer_use",
       },
     },
     task: {
@@ -441,6 +472,9 @@ function inferFailureTaxonomy(
   if (terminalCode === "needs_otp" || task?.state === "awaiting_otp") return "F-PROVIDER-OTP";
   if (terminalCode === "no_availability" || /no availability|not available|unavailable|sold out/.test(text)) return "F-AVAIL-NONE";
   if (terminalCode === "captcha" || /captcha|access denied|akamai|blocked/.test(text)) return "F-PROVIDER-CAPTCHA";
+  if (/model_not_found|does not have access to model|computer-use-preview/.test(text)) return "F-INFRA-MODEL-ACCESS";
+  if (/unknown parameter|invalid_request_error|responses api 400/.test(text)) return "F-INFRA-API-SCHEMA";
+  if (/insufficient_quota|quota|billing|rate limit|responses api 402|responses api 429/.test(text)) return "F-INFRA-PROVIDER-QUOTA";
   if (terminalCode === "executor_crashed" || /executor crashed|uncaught|exception|crash/.test(text)) return "F-INFRA-CRASH";
   if (/timeout|timed out/.test(text) || timedOut) return "F-INFRA-TIMEOUT";
   if (/dom|selector|button|click failed|could not click/.test(text)) return "F-DATA-DOM";
@@ -699,11 +733,7 @@ async function main(): Promise<void> {
   const dryRun = booleanFlag(flags, "dry-run");
   const dispatchOnly = booleanFlag(flags, "dispatch-only");
   const baseUrl = stringFlag(flags, "base-url", process.env.ONEGENT_BASE_URL ?? "http://localhost:3000")!.replace(/\/$/, "");
-  const apiKey =
-    stringFlag(flags, "api-key") ??
-    process.env.ONEGENT_BENCHMARK_API_KEY ??
-    process.env.ONEGENT_API_KEY ??
-    process.env.API_KEY;
+  const apiKey = await resolveApiKey(baseUrl, flags, dryRun);
   const concurrency = numberFlag(flags, "concurrency", 1);
   const timeoutMs = numberFlag(flags, "timeout-ms", 420_000);
   const pollMs = numberFlag(flags, "poll-ms", 2_500);
