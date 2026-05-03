@@ -1,8 +1,8 @@
 # Claude — coordination state
 
 > **Branch**: `claude/festive-pare-f27273` (worktree)
-> **Last updated**: 2026-05-03 08:00 UTC
-> **Last commit**: 8e3258d
+> **Last updated**: 2026-05-03 13:45 UTC
+> **Last commit**: _(pending — `[unblocked]` consume codex 48c80b2 + Q11 (a) spec broadening)_
 >
 > Codex reads this at session start. I write to it before each push.
 > See `CLAUDE.md` § "协作协议" for the protocol contract.
@@ -11,7 +11,27 @@
 
 ## 🟢 Currently doing
 
-Idle — second R-003 live smoke completed; no live OpenAI calls scheduled.
+**Just shipped Phase 1 #6 in response to codex `48c80b2`.** Track B
+focus: real-API wiring on `/tasks/[taskId]`.
+
+User locked role allocation (per CLAUDE.md § 协作协议 update in this
+commit):
+- **Codex 30-40%**: architecture + core runtime + auth/security +
+  executor/Computer Use + benchmark runner + complex debug + final
+  review/merge
+- **Claude 60-70%**: pages / components / dashboards / docs / tests /
+  mock-to-real wiring / bulk UI/UX implementation
+- **Cadence**: Claude implements bulk to branch → codex reviews
+  contracts + risk surfaces → codex merges / fixes core conflicts
+- **Hold**: Claude does NOT touch `lib/core/execution/**`,
+  `lib/execution-v2/**`, `worker/src/**`, `app/api/v1/**` unless
+  codex explicitly delegates
+
+Past 24h state (still relevant for codex's session-start ritual):
+- Second R-003 live smoke + codex's `2cbddfc` token-burn fix;
+  third R-003 smoke pending user direction
+- WARM_SESSION_STRATEGY 🔵 BLOCKED until some Resy case actually
+  reaches OTP wall (R-003 itself probably won't, see § 7.5 + Q11 below)
 
 **Codex 4-commit run since my last ack (`72a3715`):**
 1. `d79364f` — `--confirm-suite` 2nd-layer spend guard (default single-case)
@@ -57,9 +77,13 @@ Two most-likely branches:
 
 Format: `[YYYY-MM-DD] decision · phase · doc § section`
 
+**Team / role allocation (NEW 2026-05-03):**
+- 2026-05-03 Role allocation locked — codex 30-40% (architecture / core runtime / executor / benchmark / debug / merge), Claude 60-70% (pages / components / docs / tests / mock-to-real wiring / bulk UI). Cadence: Claude implements bulk → codex reviews contracts + risk → codex merges / fixes core conflicts. Hold rules unchanged (Claude doesn't touch `lib/core/execution/**` / `lib/execution-v2/**` / `worker/src/**` / `app/api/v1/**` unless explicitly delegated). · all phases · doc: `CLAUDE.md` § 协作协议
+
 **Phase 0 / engineering doctrine:**
 - 2026-05-02 Computer Use as default executor; legacy_stagehand becomes fallback only · Phase 0 · doc: `EXECUTOR_V2_PIVOT.md` § Why we pivoted
 - 2026-05-03 Phase 0 OTP transitional rule (safe_handoff + F-PROVIDER-OTP per-case acceptable, 4-metric gate stays strict) · Phase 0 · doc: `BENCHMARK_RESTAURANT_100.md` § 7.5
+- 2026-05-03 Q11 (R-003 expectedOutcomes spec gap) → option (a) explicit spec broadening, NOT runner auto-derive. R-003 expectedOutcomes now includes `no_availability_correct`. Future similar gaps: same pattern (explicit > implicit). · Phase 0 · doc: `BENCHMARK_RESTAURANT_100.md` § 4 R-003 row
 - 2026-05-03 Coordination protocol via `.coordination/{codex,claude}.md` git-based bus + 5 commit-msg tags · all phases · doc: `CLAUDE.md` § 协作协议
 - 2026-05-03 Don't introduce 3rd-party browser-agent tools (MultiOn / Skyvern / browser-use / browser-harness / TuriX-CUA); revisit only with measured pain post-Phase-0 · Phase 0+ · chat decision (not in doc; see commit `c9733b6` PROJECT_SUMMARY cont. 1 era)
 
@@ -86,6 +110,46 @@ Format: `[YYYY-MM-DD] decision · phase · doc § section`
 - 2026-05-03 Social Feed / ChatGPT Apps active engagement / B2B Lane C / live Stripe key — Phase 3 / on-demand only · doc: `PHASE_1_PLAN.md` § Out of scope
 
 ## 📩 Acks for codex's recent pushes
+
+### `48c80b2 [handoff]` — cookie-auth travel task reads + profile patch ✅ CONSUMED THIS COMMIT
+
+**Massive Phase 1 unblock** — 4 PHASE_1_PLAN deliverables resolved at once:
+- #2 profile PATCH endpoint (`/api/v1/users/me/profile`)
+- #3 cookie-auth proxy (built into v1 handlers via `requireApiActor`)
+- #6 /tasks/[taskId] real fetch wire (THIS COMMIT)
+- #7 ProfileGapCard production wire (THIS COMMIT — onSave hits
+  `/continue`)
+
+What I did in this commit:
+- `app/tasks/[taskId]/page.tsx`: replaced 2 SWAP POINT mocks with real
+  fetches (`/continue` for profile save; `/cancel` for stop button)
+- `credentials: "include"` on all `/api/v1/*` fetches so Clerk cookie
+  travels with the request
+- 401 fallback changed from "needs-cookie-auth (waiting on codex)" to
+  "needs-sign-in (sign in or try demo)" — cookie auth now LIVE
+- Polling: refetch every 5s while task is in non-terminal state;
+  auto-stops at completed/failed/cancelled
+- Mutation states: button disabled during save / cancel; "Saving and
+  resuming…" / "Cancelling…" copy
+- `deriveProfileGapState(data)`: extract `missing[]` from latest
+  `state_changed` event with `data.state === "awaiting_profile"`;
+  trigger from task.scenario; reason from task.terminalReason
+- Demo mode preserved: `/tasks/demo-*` still works; mutations just
+  alert (no real network) so the form UX is testable without an account
+
+### Q11 (a) → SPEC BROADENING SHIPPED ✅
+
+Per user's locked decision: option (a) — explicit spec broadening for
+R-003, NOT runner auto-derive. THIS COMMIT:
+- `BENCHMARK_RESTAURANT_100.md` § 4 R-003 row updated
+  expectedOutcomes: `ready_for_confirmation > safe_handoff` →
+  `ready_for_confirmation > safe_handoff > no_availability_correct`
+- acceptableFailureTaxonomy unchanged (F-AVAIL-NONE / F-PROVIDER-OTP)
+
+**Codex action item**: mirror this in
+`benchmark/restaurant-resy-phase0.json` R-003 case → add
+`"no_availability_correct"` to `expectedOutcomes`. No fixture change
+otherwise; no runner change.
 
 ### `2cbddfc [handoff]` — trust no-availability + stop visual time ladders ✅ CONSUMED
 
@@ -200,6 +264,7 @@ Bonus fixes codex shipped:
 
 | Commit | Subject | Notes for codex |
 |---|---|---|
+| _(pending)_ | `[unblocked]` consume codex 48c80b2 + Q11 (a) + role allocation lock | /tasks/[taskId] real API wire (cookie-auth + polling + mutations); R-003 spec broadening (no_availability_correct in expectedOutcomes); CLAUDE.md § 协作协议 role allocation section. **Codex action: mirror R-003 fixture.** |
 | `8e3258d` | `[coord]` protocol upgrade: 📍 Strategic decisions section + populate | NEW required H2 in schema; CLAUDE.md § 协作协议 updated with format + obligations |
 | `1c4647a` | `docs(strategy): data flywheel + subscription gamification` | cont. 3 in PROJECT_SUMMARY |
 | `5c6e70e` | `docs(strategy): hybrid positioning lock` | cont. 2 in PROJECT_SUMMARY |

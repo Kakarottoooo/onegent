@@ -287,8 +287,11 @@ type LoadState =
   | { kind: "loading" }
   | { kind: "ready"; data: TaskFacadeResponse }
   | { kind: "demo-not-found" }
-  | { kind: "needs-cookie-auth" }
+  | { kind: "needs-sign-in" }
+  | { kind: "not-found" }
   | { kind: "error"; message: string };
+
+const TERMINAL_STATES: TravelTaskState[] = ["completed", "failed", "cancelled"];
 
 export default function TaskDetailPage() {
   const params = useParams();
@@ -300,12 +303,14 @@ export default function TaskDetailPage() {
       : "";
 
   const [state, setState] = useState<LoadState>({ kind: "loading" });
+  /** Becomes true while a mutation (continue / cancel) is mid-flight; disables buttons. */
+  const [mutating, setMutating] = useState<null | "continue" | "cancel">(null);
 
   const isDemoId = taskId.toLowerCase().startsWith("demo-");
 
   /* ─── Fetch / fixture lookup ─────────────────────────────────── */
 
-  useEffect(() => {
+  const fetchTask = useCallback(async (): Promise<void> => {
     if (!taskId) {
       setState({ kind: "error", message: "Missing task ID in URL." });
       return;
@@ -317,68 +322,107 @@ export default function TaskDetailPage() {
         setState({ kind: "demo-not-found" });
         return;
       }
-      // Tiny artificial delay so the loading state renders briefly —
-      // gives a sense of the real fetch shape.
-      const t = setTimeout(() => setState({ kind: "ready", data: fx }), 80);
-      return () => clearTimeout(t);
+      setState({ kind: "ready", data: fx });
+      return;
     }
 
-    let cancelled = false;
-    setState({ kind: "loading" });
-    (async () => {
-      try {
-        const res = await fetch(`/api/v1/travel-tasks/${encodeURIComponent(taskId)}`, {
-          cache: "no-store",
-        });
-        if (cancelled) return;
-        if (res.status === 401 || res.status === 403) {
-          // Expected until codex ships cookie-auth proxy for /api/v1/*.
-          setState({ kind: "needs-cookie-auth" });
-          return;
-        }
-        if (!res.ok) {
-          setState({
-            kind: "error",
-            message: `API returned ${res.status} ${res.statusText}`,
-          });
-          return;
-        }
-        const json = (await res.json()) as TaskFacadeResponse;
-        setState({ kind: "ready", data: json });
-      } catch (err) {
-        if (cancelled) return;
+    try {
+      const res = await fetch(`/api/v1/travel-tasks/${encodeURIComponent(taskId)}`, {
+        cache: "no-store",
+        credentials: "include",
+      });
+      if (res.status === 401 || res.status === 403) {
+        // Codex's `48c80b2` enabled cookie-auth on /api/v1/travel-tasks/*.
+        // 401 now means the user isn't signed in (or the task isn't theirs).
+        setState({ kind: "needs-sign-in" });
+        return;
+      }
+      if (res.status === 404) {
+        setState({ kind: "not-found" });
+        return;
+      }
+      if (!res.ok) {
         setState({
           kind: "error",
-          message: err instanceof Error ? err.message : "Fetch failed.",
+          message: `API returned ${res.status} ${res.statusText}`,
         });
+        return;
       }
-    })();
-    return () => {
-      cancelled = true;
-    };
+      const json = (await res.json()) as TaskFacadeResponse;
+      setState({ kind: "ready", data: json });
+    } catch (err) {
+      setState({
+        kind: "error",
+        message: err instanceof Error ? err.message : "Fetch failed.",
+      });
+    }
   }, [taskId, isDemoId]);
 
-  /* ─── Handlers (placeholders until cookie-auth proxy ships) ─── */
+  // Initial fetch + on taskId change.
+  useEffect(() => {
+    setState({ kind: "loading" });
+    void fetchTask();
+  }, [fetchTask]);
+
+  // Polling: refetch every 5s while task is in a non-terminal state.
+  // Stops automatically when the task completes / fails / cancels, AND when
+  // the page unmounts. Demo tasks don't poll (they're static fixtures).
+  useEffect(() => {
+    if (state.kind !== "ready") return;
+    if (isDemoId) return;
+    const taskState = state.data.task.state;
+    if (TERMINAL_STATES.includes(taskState)) return;
+
+    const id = setInterval(() => {
+      void fetchTask();
+    }, 5000);
+    return () => clearInterval(id);
+  }, [state, isDemoId, fetchTask]);
+
+  /* ─── Handlers (real API now that codex shipped 48c80b2) ──────── */
 
   const handleProfileSave = useCallback(
     async (payload: GapSavePayload) => {
-      // SWAP POINT: when cookie-auth proxy lands, replace this console.log
-      // with: await fetch(`/api/v1/travel-tasks/${taskId}/continue`, {
-      //   method: "POST",
-      //   headers: { "Content-Type": "application/json" },
-      //   body: JSON.stringify({ profile: payload.values }),
-      // });
-      // Then refetch task to pick up the new state.
-      console.log("[/tasks/[taskId]] ProfileGapCard onSave (mock):", payload);
-      window.alert(
-        `Mock save — would POST to /api/v1/travel-tasks/${taskId}/continue\nValues: ${JSON.stringify(
-          payload.values,
-          null,
-          2,
-        )}`,
-      );
+      if (isDemoId) {
+        // Demo path: keep informative log but no real network. Allows
+        // testing the form UX in /tasks/demo-awaiting-profile.
+        console.log("[/tasks/[taskId]] ProfileGapCard onSave (demo, no-op):", payload);
+        window.alert(
+          `Demo mode — would POST to /api/v1/travel-tasks/${taskId}/continue\n${JSON.stringify(
+            payload.values,
+            null,
+            2,
+          )}`,
+        );
+        return;
+      }
+      setMutating("continue");
+      try {
+        const res = await fetch(
+          `/api/v1/travel-tasks/${encodeURIComponent(taskId)}/continue`,
+          {
+            method: "POST",
+            credentials: "include",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ profile: payload.values }),
+          },
+        );
+        if (!res.ok) {
+          const text = await res.text();
+          throw new Error(`/continue returned ${res.status}: ${text.slice(0, 200)}`);
+        }
+        // Refetch immediately to pick up the new state (executor now
+        // has the profile data and should transition out of awaiting_profile).
+        await fetchTask();
+      } catch (err) {
+        window.alert(
+          `Couldn't save profile: ${err instanceof Error ? err.message : "unknown error"}`,
+        );
+      } finally {
+        setMutating(null);
+      }
     },
-    [taskId],
+    [taskId, isDemoId, fetchTask],
   );
 
   const handleCancel = useCallback(async () => {
@@ -388,11 +432,36 @@ export default function TaskDetailPage() {
       window.alert("No active booking job to cancel.");
       return;
     }
-    // SWAP POINT: when cookie-auth proxy lands, replace this with:
-    // await fetch(`/api/v1/execution-jobs/${jobId}/cancel`, { method: "POST" });
-    console.log("[/tasks/[taskId]] Cancel job (mock):", jobId);
-    window.alert(`Mock cancel — would POST to /api/v1/execution-jobs/${jobId}/cancel`);
-  }, [state]);
+    if (!window.confirm("Cancel this task? The current booking attempt will be stopped.")) {
+      return;
+    }
+    if (isDemoId) {
+      console.log("[/tasks/[taskId]] Cancel job (demo, no-op):", jobId);
+      window.alert(`Demo mode — would POST to /api/v1/execution-jobs/${jobId}/cancel`);
+      return;
+    }
+    setMutating("cancel");
+    try {
+      const res = await fetch(
+        `/api/v1/execution-jobs/${encodeURIComponent(jobId)}/cancel`,
+        {
+          method: "POST",
+          credentials: "include",
+        },
+      );
+      if (!res.ok) {
+        const text = await res.text();
+        throw new Error(`/cancel returned ${res.status}: ${text.slice(0, 200)}`);
+      }
+      await fetchTask();
+    } catch (err) {
+      window.alert(
+        `Couldn't cancel: ${err instanceof Error ? err.message : "unknown error"}`,
+      );
+    } finally {
+      setMutating(null);
+    }
+  }, [state, isDemoId, fetchTask]);
 
   /* ─── Render ──────────────────────────────────────────────────── */
 
@@ -428,18 +497,17 @@ export default function TaskDetailPage() {
         </div>
       )}
 
-      {state.kind === "needs-cookie-auth" && (
+      {state.kind === "needs-sign-in" && (
         <div className="task-detail__error-card">
-          <h2>Cookie-auth proxy not yet live</h2>
+          <h2>Sign in to view this task</h2>
           <p>
-            <code>/api/v1/travel-tasks/:taskId</code> currently requires
-            an API key, which the browser doesn&apos;t carry. Codex&apos;s
-            cookie-auth proxy for <code>/api/v1/*</code> is in their
-            in-flight queue — once it lands, this page will fetch real
-            tasks transparently.
+            This page reads <code>/api/v1/travel-tasks/{taskId}</code> with
+            your session cookie. Either you aren&apos;t signed in, or this
+            task belongs to a different account.
           </p>
           <p>
-            For now, try a demo state:
+            <Link href="/sign-in">Sign in</Link>, or try one of the demo
+            states below to see the page UX without an account:
           </p>
           <ul>
             {Object.keys(DEMO_TASKS).map((id) => (
@@ -453,6 +521,17 @@ export default function TaskDetailPage() {
         </div>
       )}
 
+      {state.kind === "not-found" && (
+        <div className="task-detail__error-card">
+          <h2>Task not found</h2>
+          <p>
+            <code>{taskId}</code> doesn&apos;t exist. It may have been
+            cleaned up, or the ID is mistyped. Check{" "}
+            <Link href="/tasks">your task list</Link>.
+          </p>
+        </div>
+      )}
+
       {state.kind === "error" && (
         <div className="task-detail__error-card">
           <h2>Couldn&apos;t load task</h2>
@@ -461,7 +540,12 @@ export default function TaskDetailPage() {
       )}
 
       {state.kind === "ready" && (
-        <Body data={state.data} onProfileSave={handleProfileSave} onCancel={handleCancel} />
+        <Body
+          data={state.data}
+          onProfileSave={handleProfileSave}
+          onCancel={handleCancel}
+          mutating={mutating}
+        />
       )}
 
       <TaskDetailStyles />
@@ -523,14 +607,18 @@ function Body({
   data,
   onProfileSave,
   onCancel,
+  mutating,
 }: {
   data: TaskFacadeResponse;
   onProfileSave: (payload: GapSavePayload) => Promise<void> | void;
   onCancel: () => void;
+  mutating: null | "continue" | "cancel";
 }) {
   const { task, currentJob } = data;
-  const showProfileGap =
-    task.state === "awaiting_profile" && data._fixtureProfileGap;
+  // Real tasks: derive ProfileGapState from task data when state ===
+  // awaiting_profile. Demo tasks: use the hard-coded _fixtureProfileGap.
+  const profileGapState = data._fixtureProfileGap ?? deriveProfileGapState(data);
+  const showProfileGap = task.state === "awaiting_profile" && profileGapState;
   const showConfirm = task.state === "ready_for_confirmation";
   const showFailure = task.state === "failed";
 
@@ -559,10 +647,15 @@ function Body({
           />
         </div>
 
-        {showProfileGap && data._fixtureProfileGap && (
+        {showProfileGap && profileGapState && (
           <div className="task-detail__profile-gap">
+            {mutating === "continue" && (
+              <p className="task-detail__hint" style={{ marginBottom: 8 }}>
+                Saving and resuming…
+              </p>
+            )}
             <ProfileGapCard
-              state={data._fixtureProfileGap}
+              state={profileGapState}
               onSave={onProfileSave}
             />
           </div>
@@ -631,8 +724,9 @@ function Body({
               type="button"
               className="task-detail__btn task-detail__btn--danger"
               onClick={onCancel}
+              disabled={mutating !== null}
             >
-              Cancel this task
+              {mutating === "cancel" ? "Cancelling…" : "Cancel this task"}
             </button>
           ) : (
             <p className="task-detail__rail-empty">
@@ -677,6 +771,49 @@ function RailSection({ title, children }: { title: string; children: React.React
 }
 
 /* ─── Helpers ─────────────────────────────────────────────────────── */
+
+/**
+ * Derive a ProfileGapState from a real task facade response.
+ *
+ * Looks for the latest event with shape `{ kind: "state_changed",
+ * data: { state: "awaiting_profile", missing: [...] } }` and uses its
+ * `missing[]` field. Falls back to a generic empty list if the event
+ * shape doesn't match — backend can fill the field and this page
+ * picks it up without further code change.
+ *
+ * `trigger` derives from task.scenario; `reason` from task.terminalReason.
+ */
+function deriveProfileGapState(data: TaskFacadeResponse): ProfileGapState | null {
+  if (data.task.state !== "awaiting_profile") return null;
+
+  const scenario = data.task.scenario;
+  const trigger: ProfileGapState["trigger"] =
+    scenario === "restaurant" || scenario === "hotel" ||
+    scenario === "flight" || scenario === "activity"
+      ? scenario
+      : "generic";
+
+  // Try to extract missing[] from the most recent state_changed event.
+  let missing: ProfileGapState["missing"] = [];
+  for (let i = data.events.length - 1; i >= 0; i--) {
+    const ev = data.events[i];
+    if (ev.kind !== "state_changed") continue;
+    const evData = ev.data as Record<string, unknown> | null;
+    if (!evData || evData.state !== "awaiting_profile") continue;
+    const m = evData.missing;
+    if (Array.isArray(m)) {
+      // Filter to strings; FieldRow / normalizeMissingFields handles unknown IDs.
+      missing = m.filter((x): x is string => typeof x === "string") as ProfileGapState["missing"];
+    }
+    break;
+  }
+
+  return {
+    trigger,
+    missing,
+    reason: data.task.terminalReason ?? undefined,
+  };
+}
 
 function fmtDate(iso: string | null | undefined): string {
   if (!iso) return "—";

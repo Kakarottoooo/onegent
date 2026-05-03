@@ -260,7 +260,7 @@ Compact format, 7 groups. Each row: `id | class | stability | provider | prompt 
 |---|---|---|---|---|---|---|
 | R-001 | solo / specific / 2wk | stable | OT | "Book Lure Fishbar Soho Friday 2 weeks from now 7pm 1 person" | `ready_for_confirmation` | F-AVAIL-NONE |
 | R-002 | solo / specific / 2wk | stable | OT | "Reserve a seat at Gramercy Tavern next Saturday 6:30pm for 1" | `ready_for_confirmation` | F-AVAIL-NONE |
-| R-003 | solo / specific / 2wk | stable | Resy | "Book me Buvette in West Village next Thursday 8pm solo dinner" | `ready_for_confirmation > safe_handoff` | F-AVAIL-NONE / F-PROVIDER-OTP |
+| R-003 | solo / specific / 2wk | stable | Resy | "Book me Buvette in West Village next Thursday 8pm solo dinner" | `ready_for_confirmation > safe_handoff > no_availability_correct` | F-AVAIL-NONE / F-PROVIDER-OTP |
 | R-004 | solo / specific / tmrw | stable | OT | "Tomorrow night 7pm, ABC Kitchen, 1 person" | `ready_for_confirmation` | F-AVAIL-NONE |
 | R-005 | solo / specific / 2wk | stable | OT | "I want to eat at Babbo two weeks from Tuesday at 7:30pm by myself" | `ready_for_confirmation` | F-AVAIL-NONE |
 | R-006 | solo / specific / weekend | stable | OT | "Boucherie Soho Saturday next week 6pm just me" | `ready_for_confirmation` | F-AVAIL-NONE |

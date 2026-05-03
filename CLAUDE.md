@@ -75,6 +75,53 @@ cat .coordination/claude.md 2>/dev/null || echo "(claude.md 还不存在)"
 > Last commit: <short-sha>
 ```
 
+### Role allocation（2026-05-03 锁定）
+
+**Codex（Track A）= 30-40%**：
+- 架构边界 + 核心 runtime（lib/core/execution/, lib/execution-v2/, worker/src/）
+- Auth / security / Stripe / Clerk
+- Executor / Computer Use adapter / browser session lifecycle
+- Benchmark runner（scripts/run-phase0-resy-benchmark.ts）
+- 复杂 debug（state machine / race condition）
+- 最终 review + merge to master
+
+**Claude（Track B）= 60-70%**：
+- 页面（app/**, app/dev/**, app/tasks/**）
+- 组件（components/**）
+- Dashboard / observability surfaces
+- 文档（PROJECT_SUMMARY / PHASE_X_PLAN / 各种 strategy doc）
+- 测试补齐（**/__tests__/**）
+- mock-to-real wiring（fetch swap / SWAP POINT 标记的 1 行替换）
+- 大批量 UI/UX 实现
+
+**交付节奏**：
+1. Claude 大量实现到 `claude/festive-pare-f27273` branch
+2. Codex review 接口契约 + auth + risk surface（重点：跨边契约和安全）
+3. Codex 合并到 master / 修核心冲突
+
+**保护规则（hold rules 强化）**：
+- Claude **不动** `lib/core/execution/**` / `lib/execution-v2/**` /
+  `worker/src/**` / `app/api/v1/**` / `scripts/run-phase0-resy-benchmark.ts` /
+  `benchmark/PHASE0_REPORT_CONTRACT.md` / `benchmark/fixtures/` /
+  `lib/benchmark/phase0-report.ts` —— 除非 codex 明确放权
+- Codex 不动 Track B UI（`components/profile-gap/**` /
+  `components/benchmark/**` / `components/task-timeline/**` /
+  `app/dev/**` / `lib/agent/nlu-v2/**` / Track B docs）—— 除非修集成点
+- 灰色地带（API routes shell / 新 page route / 新 doc）默认 Claude 写
+- 跨保护规则的工作要在 commit msg 里 explicit 标注 `[delegated by codex]`
+  或 `[delegated by user]`
+
+**Review 失败处理**：
+- Codex review 发现 Claude 实现有问题 → push 一个 [coord] commit 列具体
+  pain points + 修法建议；Claude 接到后修正再 push
+- 不要 codex 直接改 Claude 域文件——保护边界，避免漂移
+
+**为什么要锁这个**：
+- 2 agent 并行长期会出现 "谁该写这个" 的歧义；锁定后无歧义
+- Claude 写代码速度比 codex 快 2-3 倍（实测）；codex 思考深度比 Claude
+  深；让两边各自做擅长的事 ROI 最高
+- 保护规则不变（避免 Claude 误改核心 logic 创造 silent bug）
+
 ### Strategic decisions section 用法
 
 `📍 Strategic decisions locked` 是协议的 long-term memory layer。任何
