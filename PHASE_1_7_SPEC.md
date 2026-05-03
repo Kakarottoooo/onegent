@@ -269,6 +269,169 @@ Q14 是 hard blocker —— 如果是 4-field，我需要 codex 升级 commit ro
 
 ---
 
+## 11. Path B 设计补充（codex 拍板前不写代码）
+
+> **状态更新 2026-05-03 16:10 UTC** — Path A 已 ship 在
+> `claude/phase-1-7-homepage-profile-gap` 分支 (`bf34e54`)。Path B
+> 等 codex review/merge Path A + 修 Audit Finding 5 之后再启动，避免
+> `app/page.tsx` 冲突。这一段是 path B 的设计细化，**只更 spec**。
+
+### 11.1 Legacy `InlineBookingProfileGate` 入口位置
+
+**触发链**（数据流，从用户操作到 modal 显示）：
+
+```
+用户在 chat 输入"book Carbone tonight 7pm"
+  ↓
+ConfirmCard (commit) →  /api/chat/commit (US-W5 direct_booking branch)
+  ↓
+返回 CommitResponse with kind === "direct_booking" + booking_step
+  ↓
+app/page.tsx:1848  handleDirectBooking(payload: CommitResponse)
+  ↓
+检查 user profile via /api/user/booking-profiles?default=true
+  ↓
+profile lacks first_name/last_name/email/phone → 调:
+  setInlineBookingProfile({
+    id: ...,
+    venueName: ...,
+    payload: <CommitResponse>,
+    first_name: ..., last_name: ..., email: ..., phone: ...,
+    missing: getMissingBookingFields(profile),  // 4-field legacy hardcode
+  })
+  ↓
+app/page.tsx:4291  <InlineBookingProfileGate open={!!inlineBookingProfile} ... />
+  ↓
+用户填表 + submit
+  ↓
+app/page.tsx:1772  submitInlineBookingProfile()
+  ↓
+PUT/POST /api/user/booking-profiles  (legacy endpoint)
+  ↓
+成功 → startDirectBookingWithProfile(payload, profile) 续 booking
+```
+
+**Path B 切换点**（按数据流改动顺序）：
+
+| # | 文件 / 函数 | 现状 | 切换后 |
+|---|---|---|---|
+| 1 | `app/page.tsx:4291` `<InlineBookingProfileGate />` 渲染 | Modal overlay (fixed inset-0) | Inline `<ProfileGapCard />` push 进 chat messages 流 |
+| 2 | `app/page.tsx:1713` `getMissingBookingFields()` 4-field hardcode | 客户端 4 字段检查 | 用后端 `buildProfileGap()` emit 的 13-field canonical（**Q15 — 见 11.4**） |
+| 3 | `app/page.tsx:1772` `submitInlineBookingProfile()` 用 legacy endpoint | `POST /api/user/booking-profiles` (label, is_default, 4 字段) | `PATCH /api/v1/users/me/profile` `{ profile: payload.values }` (cookie-auth) |
+| 4 | `app/page.tsx:343-345` 三个 state hook | `inlineBookingProfile` / `inlineBookingProfileSaving` / `inlineBookingProfileError` | 删除（移到每条 chat message 自己的状态里，因为 inline 不再是单 modal） |
+| 5 | `lib/chat-replay.ts` `InlineBookingProfileSnapshot` | persist 到 session 的 modal 状态 | 加 `ChatMessageKind: "profile_gap_card"` 变体 + persist GapSavePayload state |
+| 6 | `components/booking/InlineBookingProfileGate.tsx` | 309 LOC modal 组件 | **保留**（feature flag fallback），删除发生在 path B 完成 + 一周观察后 |
+
+### 11.2 Props mapping
+
+`InlineBookingProfileGate` props → `ProfileGapCard` props：
+
+| InlineBookingProfileGate prop | ProfileGapCard 对应 | 转换 |
+|---|---|---|
+| `open: boolean` | （N/A，inline 渲染不需要 open flag）| 在 chat message renderer 里 conditional render |
+| `venueName: string` | `state.reason: string`（在 ProfileGapState 里）| `\`${venueName} requires verified contact details.\`` |
+| `values: { first_name, last_name, email, phone }` | `initialValues: GapFormValues`（13-field 子集）| 把 4 字段塞进 GapFormValues，剩下 9 字段留 undefined |
+| `missingFields: string[]` | `state.missing: ProfileFieldId[]` | 直接传（4-field 是 13-field 的子集） |
+| `saving: boolean` | （N/A，ProfileGapCard 内部状态）| 删 saving prop；ProfileGapCard 自己处理 submitting state |
+| `error: string \| null` | （N/A）| ProfileGapCard 不渲染 error，error 由 chat message 渲染（见 path A `dispatchProfilePatch` 错误 chat-bubble） |
+| `onChange(patch)` | （N/A） | 删 — ProfileGapCard 内部管 form state |
+| `onClose()` | `onDismiss?: () => void` | 1:1 |
+| `onSubmit()` | `onSave: (payload: GapSavePayload) => Promise<void>` | onSubmit 是无 payload 的 button click；onSave 接 `{ values, skipped }`，回调 dispatch path A 的 dispatchProfilePatch + 触发 startDirectBookingWithProfile 续 booking |
+
+### 11.3 `getMissingBookingFields` 4-field vs `buildProfileGap` 13-field 差异
+
+**4-field legacy**（`app/page.tsx:1713-1720`）：
+
+```ts
+function getMissingBookingFields(profile) {
+  const missing = [];
+  if (!profile?.first_name?.trim()) missing.push("first_name");
+  if (!profile?.last_name?.trim()) missing.push("last_name");
+  if (!profile?.email?.trim()) missing.push("email");
+  if (!profile?.phone?.trim()) missing.push("phone");
+  return missing;
+}
+```
+
+**13-field canonical**（`lib/core/execution/profile-requirements.ts:buildProfileGap`）：
+
+| Scenario | Required fields | Total |
+|---|---|---|
+| restaurant | first_name, last_name, email, phone | 4 |
+| hotel / activity | + address_line1, city, state, zip, country | 9 |
+| flight 国内 (US→US) | + date_of_birth | 5 |
+| flight 国际 | + date_of_birth, passport_number, passport_expiry, passport_country | 8 |
+
+**核心差异**：
+- 4-field 适合 restaurant scenario，对其他 scenario 不够
+- restaurant 现在用 4-field 跑通 legacy gate，**没有 bug**（覆盖刚好）
+- 但用户在 hotel / flight 场景下用 legacy gate 会**漏问**关键字段（DOB / passport / address），导致 booking 后续在 booking automation layer 失败
+- 切换到 13-field canonical 是把"booking-time 失败"提前到"chat-time 收集"，UX 改善 + 失败率下降
+
+### 11.4 Q15 — codex 决定的后端/前端职责
+
+**问题**：homepage chat 的 `direct_booking` 流程目前**不**调 backend `buildProfileGap`。它走的是：
+1. `/api/chat/commit` US-W5 branch 返回 `kind: "direct_booking"`
+2. 客户端 `handleDirectBooking` 拉 `/api/user/booking-profiles?default=true`
+3. 客户端跑 `getMissingBookingFields(profile)` 4-字段检查
+4. 客户端决定是否弹 gate
+
+`buildProfileGap` 只在 `lib/core/execution/executor.ts` 真正起 booking job 时被调，那是 `/tasks/[taskId]` 的路径，不是 homepage chat 的路径。
+
+**两个选择给 codex**：
+
+#### Option (i)：后端在 commit route emit 13-field canonical missing[]
+
+`/api/chat/commit` 在 `kind: "direct_booking"` 分支里跑 `buildProfileGap(execution, profile)` 并把 `missing[]` + `scenario` 塞回 `CommitResponse`。客户端只读 `commitResponse.profile_gap.missing` 渲染 ProfileGapCard。
+
+**优点**：
+- 单一信源，跟 `/tasks/[taskId]` 走的是同一个 `buildProfileGap`
+- 客户端 `getMissingBookingFields` 可以删
+- Scenario-aware（hotel 场景自动加 address，flight 自动加 DOB / passport）
+
+**缺点**：
+- 需要 codex 改 `/api/chat/commit` route（codex 域）
+- commit response shape 变（需要协议升级）
+
+#### Option (ii)：客户端 import `buildProfileGap` 自己跑
+
+把 `lib/core/execution/profile-requirements.ts` 抽成 pure function（已经是 pure），客户端 `handleDirectBooking` 调它生成 missing[]。
+
+**优点**：
+- 不动 commit route
+- 客户端自己控制
+- 不依赖 codex 改 API
+
+**缺点**：
+- 业务逻辑客户端化（违反"客户端只渲染，业务在 server"原则）
+- 国际航线判断（`isInternationalFlight`）依赖 US_AIRPORT_CODES 数据集，客户端 import 这一坨 ~200 LOC
+
+**Claude 推荐 Option (i)** —— 单一信源更干净，且 codex 改 commit route 也是一行：在 direct_booking 分支里 `result.profile_gap = buildProfileGap(execution, profile)` 即可。
+
+**等 codex 答 Q15 才进 path B coding 阶段。**
+
+### 11.5 Path B 实施估时（LLM 速度）
+
+| 步骤 | 时间 |
+|---|---|
+| 解 Q15（codex 答） | 0（外部依赖） |
+| Add chat message kind `profile_gap_card` 到 chat-replay.ts union | 3 分钟 |
+| 加 `<ProfileGapCard />` 渲染到 chat message renderer | 3 分钟 |
+| 改 `handleDirectBooking` 用新 missing[] 来源 + 客户端 onSave 接 dispatchProfilePatch + startDirectBookingWithProfile | 5 分钟 |
+| 加 `NEXT_PUBLIC_PROFILE_GAP_INLINE` feature flag | 2 分钟 |
+| 测试：legacy modal 路径 + 新 inline 路径 都跑通 | 3 分钟 |
+| Tsc + commit + push | 2 分钟 |
+
+**总：约 18 分钟**（不含 Q15 解决时间）。
+
+### 11.6 Path B Test plan 补充
+
+- 加 `app/__tests__/dispatch-profile-patch.test.tsx`（如果不存在）：mock fetch，验证 dispatchProfilePatch 在 401 / 400 / 200 / network 下的 chat 行为（已经 ship 过 path A，行为已 implicit 测过；但显式单测更稳）
+- 改 chat-replay test 验证 `profile_gap_card` 变体 round-trip
+- Manual：feature flag on/off 切换，看 legacy modal vs inline 渲染差异
+
+---
+
 ## 10. 引用
 
 - `NLU_CONSUMER_CONTRACT.md` — dispatcher pattern + reference impl

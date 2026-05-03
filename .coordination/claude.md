@@ -1,8 +1,8 @@
 # Claude — coordination state
 
 > **Branch**: `claude/post-merge-doc-fixes` (worktree `festive-pare-f27273`)
-> **Last updated**: 2026-05-03 15:55 UTC
-> **Last commit**: 208cae8 (post-merge doc fixes from E2E source audit)
+> **Last updated**: 2026-05-03 16:15 UTC
+> **Last commit**: this commit (rebase on master + Path B design supplement)
 >
 > Codex reads this at session start. I write to it before each push.
 > See `CLAUDE.md` § "协作协议" for the protocol contract.
@@ -10,11 +10,46 @@
 
 ## 🟢 Currently doing
 
-🆕 **Switched to new branch `claude/post-merge-doc-fixes` from
-`origin/master` per codex's directive in `26da001` codex.md** ("start
-new Track B work from latest origin/master; old branch is now
-merged"). Old `claude/festive-pare-f27273` remote tip frozen at
-`d3e1881`, abandoned.
+**Cleaned up `claude/post-merge-doc-fixes` branch per user directive.**
+
+Per user feedback: "claude/post-merge-doc-fixes 不建议直接 merge。它
+基于旧 master，diff 里混进了已落 master 的 demo hydration/ProfileGap
+修复，需要 Claude 先 rebase/merge 最新 master 后整理成纯 docs/spec
+branch。"
+
+This commit:
+1. ✅ Merged latest `origin/master` into branch (auto-merge clean —
+   pulled in codex's `6f81b5c` hydration + ProfileGapCard submit fix
+   + `7127fb6` coord). Diff against master is now ONLY 5 files:
+   - `.coordination/claude.md` (this file)
+   - `E2E_SOURCE_AUDIT.md` (160 LOC, new)
+   - `PHASE_1_7_SPEC.md` (now ~440 LOC after path B supplement)
+   - `PHASE_1_FOUNDER_E2E.md` (Finding 1-4 doc fixes)
+   - `app/dev/page.tsx` (7 strategy-docs links → master)
+
+2. ✅ Added § 11 "Path B 设计补充" to PHASE_1_7_SPEC.md per user
+   directive ("Path B 只做设计补充，不写代码"):
+   - § 11.1 Legacy InlineBookingProfileGate 入口位置（数据流图）
+   - § 11.2 Props mapping (InlineBookingProfileGate ↔ ProfileGapCard)
+   - § 11.3 4-field legacy vs 13-field canonical 差异表
+   - § 11.4 Q15 raised: codex decides commit-route emits 13-field
+     (Option i) vs client-side `buildProfileGap` (Option ii). Claude
+     recommends Option i (single source of truth).
+   - § 11.5 Path B 实施估时（~18 分钟 LLM 速度，待 Q15 解后启动）
+   - § 11.6 Path B Test plan 补充
+
+3. **NOT touched** (per user directive): app/dev/*-demo and
+   ProfileGapCard already-in-master fixes. Codex landed those in
+   `6f81b5c`; this branch baseline now includes them via merge.
+
+**Idle while codex reviews path A** (`bf34e54` on
+`claude/phase-1-7-homepage-profile-gap` branch) and fixes Audit
+Finding 5 (cancel doesn't update task.state).
+
+🆕 Originally switched to new branch from old `claude/festive-pare-
+f27273` per codex's directive in `26da001` codex.md ("start new Track
+B work from latest origin/master"). Old branch frozen at `d3e1881`,
+abandoned.
 
 **Idle / awaiting codex's E2E result.** Last codex update: 22-min
 no-token founder walkthrough in clean detached worktree on
