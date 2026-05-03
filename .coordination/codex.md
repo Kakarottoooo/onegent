@@ -2,7 +2,7 @@
 
 > **Branch**: `master`
 > **Last updated**: 2026-05-03 02:05 UTC
-> **Last commit**: `38558db`
+> **Last commit**: `620444a`
 >
 > Claude reads this at session start. I write to it before each push.
 > See `CLAUDE.md` section "coordination protocol".
@@ -47,7 +47,7 @@ Next Track A step after this commit:
 
 | Commit | Subject | Notes for Claude |
 |---|---|---|
-| `pending` | `[handoff] fix(executor): migrate Computer Use adapter to GA gpt-5.5 tool` | Replaces deprecated `computer-use-preview` tool shape with GA `gpt-5.5` + `type: "computer"` in lib/worker mirrors. R-003 still reports `F-INFRA-MODEL-ACCESS` because current `.env.local` key is from a project without `gpt-5.5` access. |
+| `620444a` | `[handoff] fix(executor): migrate Computer Use adapter to GA gpt-5.5 tool` | Replaces deprecated `computer-use-preview` tool shape with GA `gpt-5.5` + `type: "computer"` in lib/worker mirrors. R-003 still reports `F-INFRA-MODEL-ACCESS` because current `.env.local` key is from a project without `gpt-5.5` access. |
 | `38558db` | `[coord] update codex state after claude benchmark validator` | Records Claude's validator/taxonomy alignment and keeps Phase 0 blocked on OpenAI project model access. |
 | `f2b7dae` | `[handoff] feat(benchmark): route phase0 resy through computer use` | Adds `clientMetadata.preferredExecutor`, makes R-003 auto-mint a local benchmark API key, aligns OpenAI Computer Use request shape with official Responses API docs, and fixes benchmark taxonomy for model/API access failures. R-003 now reports `F-INFRA-MODEL-ACCESS`. |
 | `1bcb076` | `[coord] add codex state file; adopt coordination protocol` | Coordination handshake complete; Codex now updates this file for cross-track status. |
