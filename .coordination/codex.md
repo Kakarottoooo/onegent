@@ -1,8 +1,8 @@
 # Codex - coordination state
 
 > **Branch**: `master`
-> **Last updated**: 2026-05-03 12:19 UTC
-> **Last commit**: `cd34997`
+> **Last updated**: 2026-05-03 12:37 UTC
+> **Last commit**: `2bedc91`
 >
 > Claude reads this at session start. I write to it before each push.
 > See `CLAUDE.md` section "coordination protocol".
@@ -11,7 +11,7 @@
 
 ## Currently doing
 
-Idle after landing Claude Phase 1 no-token smoke.
+Idle after Phase 1 no-token smoke + R-003 readiness preflight.
 
 What I just shipped:
 - Merged `origin/claude/phase-1-e2e-smoke` into master as `f9dd0ba`.
@@ -19,12 +19,27 @@ What I just shipped:
 - Added a doc note for Codex detached worktrees: Turbopack can panic on symlinked `node_modules`; use `npx next dev --webpack` for smoke verification in that environment.
 - No live OpenAI / Computer Use / benchmark run was executed.
 
-Verification:
+Verification from the merge:
 - `npx tsc --noEmit --pretty false` passed.
 - `npm run check-drift` passed.
 - `npx vitest run lib/__tests__/profile-gap-decision.test.ts lib/__tests__/profile-gap-on-save.test.ts components/profile-gap components/benchmark components/task-timeline lib/agent/nlu-v2` passed: 350/356, 6 skipped.
 - `npm run smoke:phase1` first correctly failed with dev server unreachable when no server was running.
 - `npx next dev --webpack` + `npm run smoke:phase1` passed all 6 routes.
+
+Latest no-token preflight (2026-05-03 12:30-12:37 UTC):
+- Re-ran `npx tsc --noEmit --pretty false`: passed.
+- Re-ran `npm run check-drift`: passed.
+- Re-ran targeted Vitest suite above: 350/356, 6 skipped.
+- Re-ran `npx next dev --webpack` + `npm run smoke:phase1`: 6/6 routes passed.
+- Ran `npx tsx scripts/run-phase0-resy-benchmark.ts --dry-run --case R-003`: payload validated, no API call.
+- Ran `npx tsx scripts/run-phase0-resy-benchmark.ts --case R-003`: refused before task creation because `--live-openai` / `ONEGENT_ALLOW_LIVE_OPENAI=1` was absent.
+- Observed local env keys only: `OPENAI_API_KEY` present, `OPENAI_COMPUTER_USE_MODEL=gpt-5.5`, `USE_WORKER_FOR=restaurant,hotel,flight,activity`.
+
+R-003 live command when user explicitly authorizes token spend:
+1. Terminal A: `npx next dev --webpack` from repo root in this detached Codex worktree (`npm run dev` can Turbopack-panic on symlinked `node_modules` here).
+2. Terminal B: `cd worker; npm run dev` with worker env loaded/copied from root `.env.local`; local worker is required because `USE_WORKER_FOR` includes `restaurant`.
+3. Terminal C: `npx tsx scripts/run-phase0-resy-benchmark.ts --case R-003 --live-openai --allow-failures`.
+4. Do not pass `--confirm-suite` for single-case R-003. Multi-case live runs require both `--live-openai` and `--confirm-suite`.
 
 ## Blocking on Claude
 
@@ -34,6 +49,8 @@ Verification:
 
 | Commit | Subject | Notes for Claude |
 |---|---|---|
+| `2bedc91` | `[coord] sha fix-up cd34997` | Coordination sha fix after Phase 1 no-token smoke landing. |
+| `cd34997` | `[coord] report Phase 1 smoke landing` | Documents merge verification and Turbopack symlink workaround. |
 | `f9dd0ba` | `merge: land Phase 1 no-token smoke` | Merges Claude `phase-1-e2e-smoke`: `scripts/smoke-phase1.mjs`, `npm run smoke:phase1`, `PHASE_1_E2E_SMOKE.md`, and founder E2E preflight docs. Verified tsc + drift + 350 targeted tests + smoke 6/6 using webpack dev server in Codex symlinked worktree. No live calls. |
 | `f423b56` | `feat(phase-1-7): Path B hardening — extract helpers + tests + dev demo` | Cherry-picks Claude `acec60c` onto current master without stale branch reversions. Adds `lib/profile-gap-decision.ts`, `lib/profile-gap-on-save.ts`, 19 focused tests, and `/dev/path-b-demo`. Verified tsc + drift + 350 targeted tests. No live calls. |
 | `8e690e5` | `merge: land post-merge Phase 1 docs` | Merges cleaned `post-merge-doc-fixes`: audit doc, Phase 1 #7 spec, founder E2E corrections, dev doc links, and Claude coord cleanup. Verified tsc + drift + 331 targeted tests. No live calls. |
@@ -54,8 +71,9 @@ Verification:
 
 ## Open questions for Claude
 
-- Phase 1 no-token smoke is landed. Recommended next Claude task: pause new implementation until Codex/user decide whether to run Founder E2E manually or prepare Phase 0 live R-003.
-- If asked for more Track B work before live smoke, keep it frontend-only polish around `PHASE_1_FOUNDER_E2E.md` wording or `/dev` navigation. Do not start Phase 2 vertical work yet.
+- Phase 1 no-token smoke is landed and R-003 dry-run/guard readiness is green. Do not run live from Claude.
+- If Claude is doing the docs/status assignment from user, include the live R-003 command above and the requirement that local worker is running when `USE_WORKER_FOR` includes `restaurant`.
+- Keep Track B work docs/UI/dev-only. Do not start Phase 2 vertical implementation yet.
 
 ## Hold rules I'm respecting
 
