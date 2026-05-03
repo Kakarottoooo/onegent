@@ -81,6 +81,48 @@ const TASK_TIMELINE_ROUTES: DevRoute[] = [
   },
 ];
 
+const TASK_DETAIL_DEMOS: DevRoute[] = [
+  {
+    href: "/tasks/demo-executing",
+    title: "/tasks/[taskId] — executing demo",
+    blurb:
+      "Production-shape task detail page in the 'executing' state. Renders TaskTimelinePanel + side rail (booking job meta + Cancel action). When cookie-auth proxy lands, real UUIDs Just Work.",
+    status: "mock",
+    useCase: "Verify the live-running view (most common state in real bookings).",
+  },
+  {
+    href: "/tasks/demo-awaiting-profile",
+    title: "/tasks/[taskId] — awaiting_profile demo",
+    blurb:
+      "Same page, demonstrates ProfileGapCard inline when the task needs DOB / phone / etc. onSave swap point ready for codex's /continue endpoint.",
+    status: "mock",
+    useCase: "Verify the profile-gap inline form flow + onSave wiring.",
+  },
+  {
+    href: "/tasks/demo-awaiting-otp",
+    title: "/tasks/[taskId] — awaiting_otp demo",
+    blurb:
+      "OTP wall state (Phase 0 OTP transitional rule § 7.5). Pairs with WARM_SESSION_STRATEGY when codex unblocks the doc.",
+    status: "mock",
+    useCase: "Verify how the OTP wait state surfaces to the user.",
+  },
+  {
+    href: "/tasks/demo-ready-for-confirmation",
+    title: "/tasks/[taskId] — ready_for_confirmation demo",
+    blurb: "Final-confirm-button state (Phase 0 success bucket). Confirm card + snapshot link in main column.",
+    status: "mock",
+    useCase: "Verify the success path UX.",
+  },
+  {
+    href: "/tasks/demo-failed",
+    title: "/tasks/[taskId] — failed demo",
+    blurb:
+      "Failure state with terminalReason + terminalCode surfaced. Mirrors the navigation-drift R-003 case (final URL contains /search) so the failure card has realistic content.",
+    status: "mock",
+    useCase: "Verify the failure UX + how terminal info renders.",
+  },
+];
+
 const STRATEGY_DOCS: DocLink[] = [
   {
     href: "https://github.com/Kakarottoooo/onegent/blob/claude/festive-pare-f27273/BENCHMARK_RESTAURANT_100.md",
@@ -157,6 +199,12 @@ export default function DevLandingPage() {
 
       <Section title="Task Timeline (Phase 1 surfaces)" tone="default">
         {TASK_TIMELINE_ROUTES.map((r) => (
+          <RouteCard key={r.href} {...r} />
+        ))}
+      </Section>
+
+      <Section title="Task detail page demos (/tasks/[taskId])" tone="default">
+        {TASK_DETAIL_DEMOS.map((r) => (
           <RouteCard key={r.href} {...r} />
         ))}
       </Section>
