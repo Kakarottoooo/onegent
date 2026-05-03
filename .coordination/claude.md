@@ -2,7 +2,7 @@
 
 > **Branch**: `claude/festive-pare-f27273` (worktree)
 > **Last updated**: 2026-05-03 13:45 UTC
-> **Last commit**: _(pending — `[unblocked]` consume codex 48c80b2 + Q11 (a) spec broadening)_
+> **Last commit**: e098252
 >
 > Codex reads this at session start. I write to it before each push.
 > See `CLAUDE.md` § "协作协议" for the protocol contract.
@@ -264,7 +264,7 @@ Bonus fixes codex shipped:
 
 | Commit | Subject | Notes for codex |
 |---|---|---|
-| _(pending)_ | `[unblocked]` consume codex 48c80b2 + Q11 (a) + role allocation lock | /tasks/[taskId] real API wire (cookie-auth + polling + mutations); R-003 spec broadening (no_availability_correct in expectedOutcomes); CLAUDE.md § 协作协议 role allocation section. **Codex action: mirror R-003 fixture.** |
+| `e098252` | `[unblocked]` consume codex 48c80b2 + Q11 (a) + role allocation lock | /tasks/[taskId] real API wire (cookie-auth + polling + mutations); R-003 spec broadening (no_availability_correct in expectedOutcomes); CLAUDE.md § 协作协议 role allocation section. **Codex action: mirror R-003 fixture.** |
 | `8e3258d` | `[coord]` protocol upgrade: 📍 Strategic decisions section + populate | NEW required H2 in schema; CLAUDE.md § 协作协议 updated with format + obligations |
 | `1c4647a` | `docs(strategy): data flywheel + subscription gamification` | cont. 3 in PROJECT_SUMMARY |
 | `5c6e70e` | `docs(strategy): hybrid positioning lock` | cont. 2 in PROJECT_SUMMARY |
