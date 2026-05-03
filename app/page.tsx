@@ -43,6 +43,7 @@ import {
 } from "@/lib/quick-picks-fallback";
 import type {
   ConversationalNLUResult,
+  ProfilePatch,
   QuickPick,
 } from "@/lib/agent/nlu-v2";
 import type { ChatMessage } from "@/lib/llm-client";
@@ -1379,6 +1380,23 @@ function HomeInner() {
         lastNluStateRef.current = nlu.__v2_state;
       }
 
+      // Phase 1 #7 path A — apply_profile_patch dispatcher.
+      // User said "save my DOB 1995/05/15" / "我的护照号 A1234567" / etc.
+      // mid-conversation. PATCH the profile, do NOT advance any booking
+      // pipeline — the IntentState's ambient booking sub-state is preserved
+      // by the extractor so the next turn picks up where the user left off.
+      // See NLU_CONSUMER_CONTRACT.md § "apply_profile_patch" for the contract,
+      // PHASE_1_7_SPEC.md for the design.
+      const v2Action = nlu.__v2_action;
+      if (v2Action?.type === "apply_profile_patch") {
+        // Always render the Layer 1 conversational reply first ("Got it —
+        // saved your DOB."). Empty-patch case is impossible here: router
+        // returns continue_chat instead when patch has no usable fields.
+        if (nlu.assistant_reply) chat.injectAssistantMessage(nlu.assistant_reply);
+        await dispatchProfilePatch(v2Action.patch);
+        return;
+      }
+
       // Trip scenario runs through a dedicated package planner (not the legacy
       // search). Surface a ConfirmCard so the user can review what we captured
       // before we spend 10-15s running hotel+flight pipelines in parallel.
@@ -1708,6 +1726,77 @@ function HomeInner() {
       first_name: parts[0] ?? "",
       last_name: parts.slice(1).join(" "),
     };
+  }
+
+  /**
+   * Phase 1 #7 path A — apply_profile_patch dispatcher.
+   *
+   * PATCH the user's booking profile via codex's `48c80b2` cookie-auth
+   * endpoint. Surfaces success quietly (assistant_reply already rendered
+   * by the chat handler); errors fall back to a chat-bubble notification.
+   *
+   * Idempotency: the underlying `upsertDefaultBookingProfile` is safe on
+   * retry (existence check before update vs create). Same patch sent
+   * twice is a no-op net effect.
+   *
+   * Validation: codex's `parseProfilePatch` rejects payment fields with
+   * 400; we surface the field-level errors as a chat bubble so the user
+   * can correct (e.g. invalid email format → "Hmm, email: Enter a valid
+   * email. Try again?").
+   *
+   * Auth: 401 means session expired or user signed out — surface "sign
+   * in first" prompt rather than a generic error. Cookie auth wired by
+   * codex `48c80b2` for cookie-authed `/api/v1/*` routes.
+   *
+   * Path A scope: this only handles MID-CONVERSATION profile_edit
+   * ("save my DOB 1995-05-15"). The booking-blocked needs_profile_data
+   * path (path B) still uses the legacy InlineBookingProfileGate
+   * modal — that cutover is the next sub-step of Phase 1 #7, not this
+   * commit. See PHASE_1_7_SPEC.md.
+   */
+  async function dispatchProfilePatch(patch: ProfilePatch): Promise<void> {
+    try {
+      const res = await fetch("/api/v1/users/me/profile", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({ profile: patch }),
+      });
+      if (res.status === 401) {
+        chat.injectAssistantMessage(
+          "Sign in first so I can save your profile.",
+        );
+        return;
+      }
+      if (!res.ok) {
+        const errBody = (await res.json().catch(() => ({}))) as {
+          error?: {
+            code?: string;
+            message?: string;
+            fields?: Record<string, string>;
+          };
+        };
+        const fields = errBody?.error?.fields ?? {};
+        const fieldErrSummary = Object.entries(fields)
+          .map(([k, v]) => `${k}: ${v}`)
+          .join("; ");
+        const summary =
+          fieldErrSummary ||
+          errBody?.error?.message ||
+          "Couldn't save those fields.";
+        chat.injectAssistantMessage(`Hmm, ${summary} Try again?`);
+        return;
+      }
+      // Success — assistant_reply (Layer 1 conversational confirmation,
+      // e.g. "Got it — saved your DOB.") was already rendered by the chat
+      // handler before this dispatcher fired. No additional bubble needed
+      // unless we want to add a structured "saved field list" — that's
+      // Phase 2 polish.
+    } catch {
+      chat.injectAssistantMessage(
+        "Network hiccup saving your profile. Try again in a moment.",
+      );
+    }
   }
 
   function getMissingBookingFields(profile: Partial<MinimalBookingProfileDraft> | null | undefined) {
