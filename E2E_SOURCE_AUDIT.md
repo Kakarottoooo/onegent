@@ -1,22 +1,23 @@
 # E2E Source Audit — Pre-Walkthrough Verification
 
 > **生成时间**: 2026-05-03 15:35 UTC
-> **状态**: 🔴 5 处与源码不符 / ✅ 多数验证通过
+> **更新**: 2026-05-03 16:40 UTC — **所有 5 个 findings 已修**
+> **状态**: ✅ 全部 resolved
 > **作者**: Claude (Track B)
 > **目的**: codex 跑 `PHASE_1_FOUNDER_E2E.md` no-token walkthrough 时，
 > 用这份对照表立刻判断"报的 bug 是真 bug 还是 spec 写错"
 
 ---
 
-## TL;DR — 5 个发现，按严重度排
+## TL;DR — 5 个发现，**全部已修**
 
-| # | 严重度 | 发现 | 域 | 修法 |
-|---|---|---|---|---|
-| 5 | 🔴 HIGH | `POST /api/v1/execution-jobs/:jobId/cancel` 删 job 但不更新 `task.state` 到 `cancelled`，polling 不停，UX 显示 cancel 没生效 | codex | codex 加 `updateTravelTaskState(taskId, "cancelled", ...)` |
-| 1 | 🟠 MED | `app/dev/page.tsx` STRATEGY_DOCS 链接指向已 abandon 的 `claude/festive-pare-f27273` 分支 | Claude | 改成 `master` |
-| 4 | 🟠 MED | E2E spec § 4.2 让用户 `curl GET /api/v1/users/me/profile`，但**只实现 PATCH，没有 GET** | Claude (spec) | 改 spec：用 PATCH 自验证 / 或 codex 加 GET endpoint |
-| 2 | 🟡 LOW | E2E spec § 2.4 写 demo-ready 文案是 "One tap from confirmed."，实际是更长的解释 | Claude (spec) | 改 spec |
-| 3 | 🟡 LOW | E2E spec § 2.4 期望 "Confirm reservation" 按钮，UI 实际无任何确认按钮（**设计意图**：让用户在自己浏览器确认） | Claude (spec) | 改 spec |
+| # | 严重度 | 发现 | 域 | 修法 | 状态 |
+|---|---|---|---|---|---|
+| 5 | 🔴 HIGH | `POST /api/v1/execution-jobs/:jobId/cancel` 删 job 但不更新 `task.state` 到 `cancelled`，polling 不停，UX 显示 cancel 没生效 | codex | codex 加 `updateTravelTaskState(taskId, "cancelled", ...)` | ✅ **RESOLVED** by codex `7289ba0` |
+| 1 | 🟠 MED | `app/dev/page.tsx` STRATEGY_DOCS 链接指向已 abandon 的 `claude/festive-pare-f27273` 分支 | Claude | 改成 `master` | ✅ **RESOLVED** by Claude `208cae8` (this branch) |
+| 4 | 🟠 MED | E2E spec § 4.2 让用户 `curl GET /api/v1/users/me/profile`，但**只实现 PATCH，没有 GET** | Claude (spec) | 改 spec：用 PATCH 自验证 | ✅ **RESOLVED** by Claude `208cae8` (this branch) |
+| 2 | 🟡 LOW | E2E spec § 2.4 写 demo-ready 文案是 "One tap from confirmed."，实际是更长的解释 | Claude (spec) | 改 spec | ✅ **RESOLVED** by Claude `208cae8` (this branch) |
+| 3 | 🟡 LOW | E2E spec § 2.4 期望 "Confirm reservation" 按钮，UI 实际无任何确认按钮（**设计意图**：让用户在自己浏览器确认） | Claude (spec) | 改 spec | ✅ **RESOLVED** by Claude `208cae8` (this branch) |
 
 ---
 
@@ -88,8 +89,8 @@
 | 401 → "Sign in to view this task" | `if (res.status === 401 || res.status === 403) setState({ kind: "needs-sign-in" })` | ✅ |
 | 404 → "Task not found" | `if (res.status === 404) setState({ kind: "not-found" })` | ✅ |
 | Cancel POST 无 body | `fetch(.../cancel, { method: "POST", credentials: "include" })` | ✅ |
-| **Cancel 后 task 状态变 "Cancelled"** | 实际：cancel 端点删 booking_jobs row，**不调 `updateTravelTaskState(taskId, "cancelled")`** | 🔴 **Finding 5 — codex 域 bug** |
-| Polling 在 cancel 后停 | 因 task.state 没变 cancelled，polling 不会停 | 🔴 同上，由 Finding 5 引发 |
+| **Cancel 后 task 状态变 "Cancelled"** | ✅ codex `7289ba0` 加了 `updateTravelTaskState(taskId, "cancelled", ...)`；polling 现在会停 | ✅ **Finding 5 RESOLVED** |
+| Polling 在 cancel 后停 | task.state 现在变 cancelled，polling 自动停 | ✅ |
 
 ### § 4 PATCH endpoint
 
@@ -133,7 +134,7 @@
 
 1. 跑到任何一步发现 UI 跟 PHASE_1_FOUNDER_E2E.md 期望不符 → 先查这份 audit 表
 2. 如果是**Finding 1-4** → spec 写错，**不是 bug**。我会修 spec
-3. 如果是**Finding 5** → 真 bug，codex 加 `updateTravelTaskState(taskId, "cancelled")` 到 cancel route
+3. ~~Finding 5 → 真 bug~~ ✅ **已 fix by codex `7289ba0`** — cancel 后 task.state 正确变 cancelled，polling 自动停。
 4. 如果发现新的偏差不在这份 audit 里 → 是潜在 bug，按 PHASE_1_FOUNDER_E2E.md § 8 模板记下来
 
 ---

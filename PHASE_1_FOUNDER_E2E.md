@@ -242,9 +242,7 @@ URL: http://localhost:3000
 - ❌ NLU extractor 把 scenario 识别错（restaurant 识别成 hotel）
 - ❌ Confirm card 显示的日期跟用户输入对不上
 - ❌ Console 报 NLU JSON parse error
-- ⚠️ **homepage chat 还在用 LEGACY `InlineBookingProfileGate`**，不是新的
-  ProfileGapCard。Phase 1 #7 还没做。所以缺 profile 字段时，会看到旧 gate
-  UI（不是橙色 ProfileGapCard）— 这是预期行为，**不是 bug**。
+- ✅ **Phase 1 #7 已 ship**：缺 profile 字段时**应该看到 inline ProfileGapCard**（橙色卡片渲染在 chat 流里），不是 modal `InlineBookingProfileGate`。如果看到 modal，说明 `NEXT_PUBLIC_PROFILE_GAP_INLINE=0` 或 backend 漏 emit `payload.profile_gap`（fallback path）。
 
 ### 3.3 跳到 /tasks/[taskId] 看真实状态
 
@@ -274,15 +272,13 @@ URL: http://localhost:3000
 - ✅ 请求带 cookie，无 body
 - ✅ 响应 200 with `{ jobId, cancelled: true, priorStatus }`
 - ✅ Booking job row 从 DB 删除（cancel endpoint 直接删行）
+- ✅ **Refetch 后 task.state 变 `cancelled`**（codex `7289ba0` fix）
+- ✅ Polling 自动停（terminal state）
+- ✅ "Cancel this task" 按钮消失
 
 **警惕**：
-- ❌ Cancel endpoint 401 / 403 — 这是 codex `48c80b2` 的另一个 fix
-- 🔴 **已知 bug（E2E_SOURCE_AUDIT.md Finding 5）**：cancel endpoint 删 booking_jobs 行**但不更新 `task.state` 到 `cancelled`**。后果：
-  - polling 不会停（task 还在 `executing`）
-  - "Cancel this task" 按钮一直显示
-  - UX 看起来 cancel 没生效
-  - 修法：codex 在 cancel route 加 `await updateTravelTaskState(taskId, "cancelled", ...)`
-  - 在这个 bug 修之前，跑 cancel 的预期是看到上面的"已知 bug"现象，**不是** task 变 "Cancelled"
+- ❌ Cancel endpoint 401 / 403 — 这是 codex `48c80b2` 的 fix 应该 work
+- ❌ task.state 没变 cancelled / polling 不停（codex `7289ba0` 已修，如果回归请 flag）
 
 ### 3.5 测试 ownership 边界
 
@@ -534,7 +530,7 @@ URL: http://localhost:3000
 
 | 现象 | 状态 |
 |---|---|
-| Homepage chat 缺 profile 时弹的是**旧 InlineBookingProfileGate**，不是新 ProfileGapCard | Phase 1 #7 待做 (~4h Claude) |
+| ~~Homepage chat 缺 profile 时弹的是 InlineBookingProfileGate~~ | ✅ **已修**：Phase 1 #7 path B shipped (`4cdaa36`)。现在缺字段直接 inline ProfileGapCard 在 chat 里 |
 | 任何 hotel / flight / activity 场景的真实预订 | Phase 2 |
 | Inspire mode / Daydream Explorer 入口 | Phase 3，30-template gallery |
 | 推荐 / referral / payer discount / completion credit | Phase 2-3 |

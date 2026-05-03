@@ -1,9 +1,13 @@
 # Phase 1 #7 — Homepage Chat ProfileGapCard Hookup
 
-> **Status**: Spec only — no code yet. Author Claude (Track B).
-> **Trigger to start coding**: codex E2E walkthrough done + green + user says go.
-> **Estimated time**: ~30-40 分钟（spec → code → test → ship）。
-> **Branch**: 从 `origin/master` 开 `claude/phase-1-7-homepage-profile-gap`。
+> **Status**: ✅ **FULLY SHIPPED** (2026-05-03).
+> **Path A**: codex `8500af3 [merge]` (合 Claude `bf34e54`). apply_profile_patch dispatcher.
+> **Path B**: codex `4cdaa36 [merge]` (合 Claude `d51e732` + codex safety enhancement).
+> **Q15**: ✅ resolved (Option (i)) — codex `7289ba0` emits `payload.profile_gap` from commit route.
+> **Author**: Claude (Track B).
+> **Original estimate vs actual**: spec said 30-40 min for human; LLM speed actually shipped Path A in 3.5 min + Path B in 4 min ≈ 8 min total.
+> **Document purpose now**: historical record + reference for future
+> apply_profile_patch consumers (MCP path, DR private chat).
 
 ---
 
@@ -216,26 +220,26 @@ if (USE_PROFILE_GAP_INLINE) {
 
 ---
 
-## 7. Must-resolve 问题（开始 coding 前）
+## 7. Must-resolve 问题（开始 coding 前）— 全部 ✅ RESOLVED
 
 参照 `NLU_CONSUMER_CONTRACT.md` § "Open questions for codex" 的 5 个：
 
-| Q | 问题 | 答案 (有则 lock) |
+| Q | 问题 | 状态 |
 |---|---|---|
-| Q1 | PATCH endpoint path? `/api/users/me/profile` (cookie) vs `/api/v1/users/me/profile` (API-key) | ✅ 已 ship `/api/v1/users/me/profile` 兼容两种 auth (codex `48c80b2`)，统一用这个 |
-| Q2 | 校验失败的 error shape | ✅ 见 `lib/profile-patch.ts:156-165` — `{ error: { code: "invalid_profile_patch", message, fields: { [field]: msg } } }` |
-| Q3 | PATCH 是否 idempotent | ✅ 是 — `upsertDefaultBookingProfile` 用 `getDefaultBookingProfile` + 存在则 `updateBookingProfile`，不重复 |
-| Q4 | `apply_profile_patch` dispatch 是否要 telemetry | 暂缓 — Phase 1 不强求；Phase 2 加 |
-| Q5 | MCP `tools/call` 路径中怎么 ack patch | 暂缓 — 跟 MCP 流程一起在 Phase 2 处理；Phase 1 #7 只覆盖 homepage chat |
+| Q1 | PATCH endpoint path? `/api/users/me/profile` (cookie) vs `/api/v1/users/me/profile` (API-key) | ✅ resolved by codex `48c80b2` — `/api/v1/users/me/profile` 兼容两种 auth |
+| Q2 | 校验失败的 error shape | ✅ resolved — see `lib/profile-patch.ts:156-165` |
+| Q3 | PATCH 是否 idempotent | ✅ resolved — `upsertDefaultBookingProfile` 是 idempotent |
+| Q4 | `apply_profile_patch` dispatch 是否要 telemetry | ⏸ 暂缓到 Phase 2 |
+| Q5 | MCP `tools/call` 路径中怎么 ack patch | ⏸ 暂缓到 Phase 2（一起处理 MCP 流程） |
 
-新增 must-resolve（这次 spec 发现的）：
+新增 must-resolve（这 spec 演进过程中发现的）：
 
-| Q | 问题 | 谁回答 |
+| Q | 问题 | 状态 |
 |---|---|---|
-| Q14 | `/api/chat/commit` 在 needs_profile_data 时返回的 `missing[]` 是 4-field（legacy）还是 13-field（canonical）？ | codex（看 `app/api/chat/commit/route.ts`） |
-| Q15 | `pendingBookingPayload` 里塞着 `CommitResponse`，但 ProfileGapCard 不知道这个类型。chat-replay 持久化时是否要序列化整个对象？ | 设计选择；建议只序列化 jobId + booking step，不存整个 commit response |
+| Q14 | `/api/chat/commit` 在 needs_profile_data 时返回的 `missing[]` 是 4-field（legacy）还是 13-field（canonical）？ | ✅ resolved — backend `buildProfileGap` 已 emit 13-field canonical (实测确认) |
+| Q15 | 客户端复刻 `buildProfileGap` 还是后端 commit route emit `profile_gap`？ | ✅ resolved — codex `7289ba0` 实现了 Option (i)：`/api/chat/commit` direct_booking 分支 emit `payload.profile_gap`（canonical 13-field、scenario-aware）。客户端不复刻。 |
 
-Q14 是 hard blocker —— 如果是 4-field，我需要 codex 升级 commit route 返回 13-field，或者 Phase 1 #7 范围缩小到只支持 4 字段（不大值）。
+**全部 must-resolve 问题 closed**。Path A + Path B 均已 ship 到 master。
 
 ---
 
@@ -269,12 +273,18 @@ Q14 是 hard blocker —— 如果是 4-field，我需要 codex 升级 commit ro
 
 ---
 
-## 11. Path B 设计补充（codex 拍板前不写代码）
+## 11. Path B 设计补充（已实现并 ship 到 master）
 
-> **状态更新 2026-05-03 16:10 UTC** — Path A 已 ship 在
-> `claude/phase-1-7-homepage-profile-gap` 分支 (`bf34e54`)。Path B
-> 等 codex review/merge Path A + 修 Audit Finding 5 之后再启动，避免
-> `app/page.tsx` 冲突。这一段是 path B 的设计细化，**只更 spec**。
+> **状态更新 2026-05-03 16:40 UTC** — ✅ **Path B 已 ship**:
+> - Claude `d51e732 feat(phase-1-7): inline ProfileGapCard in chat (path B)`
+> - codex `4cdaa36 [merge]` (含 codex 加的 `dispatchProfilePatch` Promise<boolean> safety fix)
+> - 实际实施时间：4 分钟（vs 原计划 18 分钟），归功于 codex 提前实现 Q15
+> - 实施跟原 spec 一致，唯一变化：codex 在 merge 时把 `dispatchProfilePatch` 改成
+>   返回 boolean，path B onSave 检查 false 时 throw 阻止续 booking（防 silent
+>   profile fail 导致 booking 用旧 profile 出错）
+>
+> 下面的设计细节保留作 historical reference，**未来 apply_profile_patch
+> 消费者**（MCP path、DR private chat）可参照同样 pattern。
 
 ### 11.1 Legacy `InlineBookingProfileGate` 入口位置
 
