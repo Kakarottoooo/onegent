@@ -3,8 +3,28 @@
 > **Context**: BENCHMARK_RESTAURANT_100.md § 7.5 (Phase 0 OTP transitional rule).
 > **Decision locked**: Option D — warm session first; Gmail OTP resume only as fallback.
 > **Owners**: codex (PoC implementation) · Claude (spec + observability + tests).
-> **Status**: 🟡 spec — execution gated on R-003 single live smoke result.
+> **Status**: 🔵 **BLOCKED** until R-003 reaches `F-PROVIDER-OTP` or `ready_for_confirmation` after exact-venue navigation repair.
 > **Archive criteria**: when warm session reliably bypasses OTP for the 25-case Phase 0 suite OR the strategy is abandoned for Gmail OTP resume.
+
+> ## ⏸ Status update — 2026-05-03 (after first R-003 live smoke)
+>
+> R-003 `failed_with_clear_reason` + `F-PROVIDER-UNKNOWN`. Did NOT reach OTP wall.
+> Agent drifted from Buvette venue page to Resy's `/search?query=Buvette&time=2100` page,
+> wrong time, no booking attempted. Real blocker is **navigation drift before reaching OTP**,
+> not OTP itself.
+>
+> Codex's `a0ce2ee [handoff]` shipped the navigation repair:
+> - R-003 start URL now carries explicit `&time=2000`
+> - CU prompt instructs agent to stay on exact venue page, no general search
+> - Auto-recovery: if drift detected to `/search`, runner pulls back to exact venue URL
+>   (max 2 retries)
+>
+> **Don't start warm session PoC until next R-003 actually reaches OTP.** This doc
+> remains correct as a design — only the trigger condition changed. Codex will rerun
+> R-003 once with the navigation repair; based on outcome:
+> - `ready_for_confirmation` → skip this doc, expand subset, declare path
+> - `F-PROVIDER-OTP` → unblock this doc, execute PoC step 1
+> - drift again → fix prompt/recovery, no token reburn for warm session yet
 
 ---
 

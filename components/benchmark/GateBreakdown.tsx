@@ -133,9 +133,11 @@ export default function GateBreakdown({ metrics, results }: Props) {
   const runnerSaysPassed = metrics.passed;
   const discrepancy = allMet !== runnerSaysPassed;
 
-  const recommendations = anyShort
-    ? buildRecommendations(rows, results)
-    : [];
+  // Threshold-related recs (severe / taxonomy gap / booking-ready / safe-outcome)
+  // only fire when the corresponding row is short — the rec body checks `!row.met`
+  // internally. Navigation drift is independent of thresholds and fires whenever
+  // drift cases exist, even on a passing run.
+  const recommendations = buildRecommendations(rows, results);
 
   /* ─── Render ──────────────────────────────────────────────────────── */
 
@@ -279,11 +281,28 @@ interface Recommendation {
     | "severe_blocker"
     | "booking_ready_short"
     | "safe_outcome_short"
-    | "taxonomy_coverage_short";
+    | "taxonomy_coverage_short"
+    | "navigation_drift";
   severity: "blocker" | "warning" | "info";
   headline: string;
   detail?: string;
   caseIds?: string[];
+}
+
+/**
+ * Pattern in `terminalReason` that suggests the agent drifted from a venue
+ * page to Resy's general search. Observed in the first R-003 live smoke
+ * (2026-05-03) — final URL ended at `/search?query=Buvette&time=2100`.
+ * Codex's `a0ce2ee` shipped CU prompt hardening + auto-pullback (max 2x).
+ */
+const NAVIGATION_DRIFT_HINTS = ["/search", "/q=", "?query=", "search?"] as const;
+
+function smellsLikeNavigationDrift(
+  terminalReason: string | null | undefined,
+): boolean {
+  if (!terminalReason) return false;
+  const t = terminalReason.toLowerCase();
+  return NAVIGATION_DRIFT_HINTS.some((hint) => t.includes(hint));
 }
 
 function buildRecommendations(
@@ -308,7 +327,30 @@ function buildRecommendations(
     });
   }
 
-  // 2. Taxonomy coverage gap — fast to fix (label uncategorized cases).
+  // 2. Navigation drift detection. F-PROVIDER-UNKNOWN often surfaces when
+  // Computer Use drifts from a venue page to Resy's general /search page
+  // (observed first in R-003 live smoke 2026-05-03). Codex shipped
+  // auto-pullback in `a0ce2ee` (max 2 retries). If this rec keeps firing
+  // post-`a0ce2ee`, the prompt or recovery is insufficient.
+  const driftCases = results.filter(
+    (r) =>
+      r.taxonomyCode === "F-PROVIDER-UNKNOWN" &&
+      smellsLikeNavigationDrift(r.terminalReason),
+  );
+  if (driftCases.length > 0) {
+    out.push({
+      kind: "navigation_drift",
+      severity: "warning",
+      headline: `${driftCases.length} case${
+        driftCases.length === 1 ? "" : "s"
+      } likely drifted to Resy /search instead of staying on the venue page`,
+      detail:
+        "Pattern: `taxonomyCode === F-PROVIDER-UNKNOWN` AND `terminalReason` mentions /search / ?query= / search?. Codex's `a0ce2ee` added: explicit `&time=…` on start URLs + CU prompt instructing exact venue page only + auto-pullback to venue URL on drift detection (max 2 retries). If you still see this rec post-`a0ce2ee`, the recovery isn't enough — investigate per-case `terminalReason` and consider tightening the prompt or increasing retry count.",
+      caseIds: driftCases.map((c) => c.caseId),
+    });
+  }
+
+  // 3. Taxonomy coverage gap — fast to fix (label uncategorized cases).
   const taxRow = rows.find((r) => r.key === "taxonomyCoverageRate");
   if (taxRow && !taxRow.met) {
     const uncategorized = results.filter(
@@ -330,7 +372,7 @@ function buildRecommendations(
     });
   }
 
-  // 3. Booking-ready short — biggest opportunity is the largest non-ready bucket.
+  // 4. Booking-ready short — biggest opportunity is the largest non-ready bucket.
   const brRow = rows.find((r) => r.key === "bookingReadyRate");
   if (brRow && !brRow.met) {
     const notReady = results.filter((r) => !r.bookingReady);
@@ -349,7 +391,7 @@ function buildRecommendations(
     });
   }
 
-  // 4. Safe-outcome short — usually means failed_unknown / hallucinated_confirm.
+  // 5. Safe-outcome short — usually means failed_unknown / hallucinated_confirm.
   const soRow = rows.find((r) => r.key === "safeOutcomeRate");
   if (soRow && !soRow.met) {
     const unsafeCases = results.filter((r) => !r.safe);

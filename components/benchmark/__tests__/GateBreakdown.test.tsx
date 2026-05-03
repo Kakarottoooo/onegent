@@ -321,6 +321,133 @@ describe("GateBreakdown · discrepancy", () => {
   });
 });
 
+/* ─── Navigation drift detection ──────────────────────────────────── */
+
+describe("GateBreakdown · navigation drift", () => {
+  // Pattern observed first in R-003 live smoke 2026-05-03:
+  // taxonomyCode === "F-PROVIDER-UNKNOWN" AND terminalReason mentions
+  // /search / ?query= / search?. Codex's a0ce2ee shipped CU prompt
+  // hardening + auto-pullback. GateBreakdown surfaces this as a
+  // dedicated rec independent of threshold state.
+  it("surfaces drift case with /search in terminalReason", () => {
+    const m = passingMetrics();
+    m.passed = false;
+    m.bookingReady = 0;
+    m.bookingReadyRate = 0;
+    const results: Phase0BenchmarkCaseResult[] = [
+      makeCase({
+        caseId: "R-003",
+        outcome: "failed_with_clear_reason",
+        taxonomyCode: "F-PROVIDER-UNKNOWN",
+        terminalReason:
+          "Computer Use stopped at https://resy.com/cities/ny/search?query=Buvette&time=2100",
+        bookingReady: false,
+        safe: true,
+      }),
+    ];
+    render(<GateBreakdown metrics={m} results={results} />);
+
+    expect(
+      screen.getByText(/likely drifted to Resy \/search/i),
+    ).toBeInTheDocument();
+    expect(screen.getByText("R-003")).toBeInTheDocument();
+  });
+
+  it("does NOT flag F-PROVIDER-UNKNOWN without drift hint in terminalReason", () => {
+    const m = passingMetrics();
+    m.passed = false;
+    m.bookingReady = 0;
+    m.bookingReadyRate = 0;
+    const results: Phase0BenchmarkCaseResult[] = [
+      makeCase({
+        caseId: "R-007",
+        outcome: "failed_with_clear_reason",
+        taxonomyCode: "F-PROVIDER-UNKNOWN",
+        terminalReason: "Provider returned an unexpected error",
+        bookingReady: false,
+        safe: true,
+      }),
+    ];
+    render(<GateBreakdown metrics={m} results={results} />);
+
+    expect(screen.queryByText(/drifted to Resy/i)).toBeNull();
+  });
+
+  it("flags multiple drift cases with combined headline", () => {
+    const m = passingMetrics();
+    m.passed = false;
+    m.bookingReady = 0;
+    m.bookingReadyRate = 0;
+    const results: Phase0BenchmarkCaseResult[] = [
+      makeCase({
+        caseId: "R-003",
+        outcome: "failed_with_clear_reason",
+        taxonomyCode: "F-PROVIDER-UNKNOWN",
+        terminalReason: "Final URL: https://resy.com/cities/ny/search?query=Buvette",
+        bookingReady: false,
+      }),
+      makeCase({
+        caseId: "R-007",
+        outcome: "failed_with_clear_reason",
+        taxonomyCode: "F-PROVIDER-UNKNOWN",
+        terminalReason: "Drifted to /search?query=Carbone&time=1900",
+        bookingReady: false,
+      }),
+    ];
+    render(<GateBreakdown metrics={m} results={results} />);
+
+    expect(screen.getByText(/2 cases likely drifted/i)).toBeInTheDocument();
+    expect(screen.getByText("R-003")).toBeInTheDocument();
+    expect(screen.getByText("R-007")).toBeInTheDocument();
+  });
+
+  it("drift rec fires even when all 4 thresholds met (informational on passing run)", () => {
+    // Edge case: a 25-case run with 24 ready_for_confirmation + 1 drift.
+    // Thresholds pass but drift is still useful signal.
+    const m: Phase0BenchmarkMetrics = {
+      total: 25,
+      bookingReady: 24,
+      safe: 24,
+      severe: 0,
+      taxonomyNeeded: 1,
+      taxonomyCovered: 1,
+      bookingReadyRate: 24 / 25, // 96% — meets ≥80%
+      safeOutcomeRate: 24 / 25, // 96% — meets ≥95%
+      severeErrorRate: 0,
+      taxonomyCoverageRate: 1,
+      passed: true,
+    };
+    const results: Phase0BenchmarkCaseResult[] = [
+      ...Array.from({ length: 24 }, (_, i) =>
+        makeCase({
+          caseId: `R-${String(i + 1).padStart(3, "0")}`,
+          outcome: "ready_for_confirmation",
+          bookingReady: true,
+          safe: true,
+        }),
+      ),
+      makeCase({
+        caseId: "R-025",
+        outcome: "failed_with_clear_reason",
+        taxonomyCode: "F-PROVIDER-UNKNOWN",
+        terminalReason: "Final URL contains /search?query=...",
+        bookingReady: false,
+        safe: false,
+      }),
+    ];
+    render(<GateBreakdown metrics={m} results={results} />);
+
+    // All-met note should still show (passing run)
+    expect(
+      screen.getByText(/All published Phase 0 thresholds met/i),
+    ).toBeInTheDocument();
+    // But drift rec ALSO fires — informational
+    expect(
+      screen.getByText(/likely drifted to Resy \/search/i),
+    ).toBeInTheDocument();
+  });
+});
+
 /* ─── R-003 model-access scenario (mirrors codex's actual report) ─── */
 
 describe("GateBreakdown · R-003 model-access scenario", () => {

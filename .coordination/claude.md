@@ -1,8 +1,8 @@
 # Claude — coordination state
 
 > **Branch**: `claude/festive-pare-f27273` (worktree)
-> **Last updated**: 2026-05-03 05:55 UTC
-> **Last commit**: 2909d80
+> **Last updated**: 2026-05-03 06:30 UTC
+> **Last commit**: _(pending — `[unblocked]` ack a0ce2ee + navigation drift detection)_
 >
 > Codex reads this at session start. I write to it before each push.
 > See `CLAUDE.md` § "协作协议" for the protocol contract.
@@ -11,16 +11,58 @@
 
 ## 🟢 Currently doing
 
-Idle — alignment locked between user / codex / Claude on:
+Idle — first R-003 live smoke landed at navigation drift, NOT OTP.
 
-1. **OTP path**: Option D — Warm session strategy first; Gmail OTP resume only as fallback if warm session unstable.
-2. **OpenAI credit**: recovered (user confirmed). **Single R-003 live smoke is OK**; full 25-case suite is NOT yet.
-3. **Launch timing**: deferred until Phase 0 declared.
-4. **OTP rule clarification confirmed**: F-PROVIDER-OTP + safe_handoff is "passing per-case outcome", but does NOT count as booking-ready. Phase 0 4-metric gate (≥ 80% booking-ready) still requires reservations to clear OTP. § 7.5 already encodes this; both sides aligned.
+Codex's `a0ce2ee [handoff]` shipped CU navigation hardening (start URL
+gets explicit `&time=2000`, prompt instructs exact venue page only,
+auto-pullback to venue URL on `/search` drift, max 2 retries).
 
-Awaiting codex's next push (single R-003 live smoke + classification result, or warm-session PoC if R-003 lands at OTP).
+Per codex's directive, I:
+1. ✅ ack `a0ce2ee` (this commit)
+2. ✅ updated `WARM_SESSION_STRATEGY.md` status to BLOCKED until R-003
+   reaches `F-PROVIDER-OTP` or `ready_for_confirmation` post-repair
+3. ✅ added navigation drift detection to GateBreakdown (the
+   "no-conflict work" codex suggested) — surfaces F-PROVIDER-UNKNOWN
+   + drift hint in terminalReason as a dedicated rec, even when
+   thresholds otherwise pass
+4. ❌ Did NOT write capture-resy-state script (premature; not at OTP yet)
+
+Awaiting codex's second R-003 live smoke (post-navigation-repair).
+Three branches:
+- `ready_for_confirmation` → expand subset, archive WARM_SESSION_STRATEGY
+- `F-PROVIDER-OTP` → unblock WARM_SESSION_STRATEGY, execute PoC step 1
+- drift again → fix prompt/recovery; no token reburn for warm session
 
 ## 📩 Acks for codex's recent pushes
+
+### `a0ce2ee [handoff]` — keep Resy benchmark on exact venue page ✅ CONSUMED
+
+First R-003 live smoke result (codex shared in chat):
+- outcome: `failed_with_clear_reason`
+- taxonomy: `F-PROVIDER-UNKNOWN`
+- final URL: `resy.com/.../search?date=2026-05-07&seats=1&query=Buvette&time=2100`
+- task: `ad16b246-d75b-44ed-9c80-284582c33729`
+
+Diagnosis: CU agent drifted from Buvette venue page to Resy `/search`,
+also picked wrong time (21:00 vs requested 20:00). Real blocker is
+navigation drift, NOT OTP.
+
+Codex's `a0ce2ee` repair:
+- R-003 start URL now carries explicit `&time=2000`
+- CU prompt instructs agent to stay on exact venue page (no general search)
+- Auto-pullback: if drift detected to `/search`, runner pulls back to
+  exact venue URL, max 2 retries
+- Local gates verified (tsc / check-drift / R-003 dry-run); no second live burn
+
+Track B response (this commit):
+- GateBreakdown gains a `navigation_drift` recommendation kind. Pattern:
+  `taxonomyCode === "F-PROVIDER-UNKNOWN"` AND `terminalReason` contains
+  `/search` / `?query=` / `search?`. Surfaces case IDs + cites `a0ce2ee`'s
+  fix. Independent of threshold state — fires even on a passing run.
+- 4 new tests in `GateBreakdown.test.tsx` covering drift detection
+  (single case / no-drift control / multiple cases / passing-run drift)
+- WARM_SESSION_STRATEGY.md gains a status banner — BLOCKED until R-003
+  actually reaches OTP wall. Doc remains technically correct as design.
 
 ### `d1fd102 [handoff]` — guard live benchmark + isolate v1 attempts ✅ ALL ACTION ITEMS RESOLVED
 
@@ -65,7 +107,7 @@ Bonus fixes codex shipped:
 | Master typecheck cleanup (17 TS errors) | Can't safely re-merge master into branch until clean | Codex says: in progress |
 | `/api/v1/users/me/profile` PATCH endpoint | NLU `apply_profile_patch` route needs a real consumer | Codex aware; not yet started |
 | Cookie-auth proxy for `/api/v1/travel-tasks/*` | Browser-side `/tasks/[taskId]` page + dashboard drawer drill-down | Codex says: in flight |
-| Single R-003 live smoke output | Dashboard at `/dev/benchmark-runs` ready to render the real run | Pending codex's no-token-gates pass + smoke run |
+| Single R-003 live smoke output (post-`a0ce2ee` navigation repair) | Dashboard ready to render; navigation drift detection added to GateBreakdown | Pending codex's no-token-gates pass + 2nd smoke |
 | Warm session PoC (cookie persistence to bypass OTP) | Validates Phase 0 OTP path can avoid Gmail resume engineering | Pending after R-003 smoke confirms OTP wall |
 
 **Resolved blockers** ✓
@@ -80,6 +122,9 @@ Bonus fixes codex shipped:
 
 | Commit | Subject | Notes for codex |
 |---|---|---|
+| _(pending)_ | `[unblocked]` ack a0ce2ee + navigation drift detection | New `navigation_drift` rec in GateBreakdown surfaces F-PROVIDER-UNKNOWN + drift hint with cite to `a0ce2ee`. WARM_SESSION_STRATEGY status banner: BLOCKED until R-003 reaches OTP. 4 new tests. |
+| `2201a25` | `[handoff]` warm session strategy doc | 318-line spec + 3-step PoC plan + 5 risks; status now BLOCKED waiting for R-003 to reach OTP layer |
+| `a93c015` | `[coord]` sha fix-up 2909d80 | trailing |
 | `2909d80` | `[coord]` ack codex d1fd102 + decisions aligned | OTP path D; launch timing deferred; single R-003 live OK; suite not yet |
 | `e458dd9` | `[coord]` update claude.md with 097741a sha | trailing fix-up |
 | `097741a` | `[handoff]` Phase 0 OTP transitional rule | Spec § 7.5 + R-003 row + § 3.2 + validator soft warning. **All 3 action items consumed by codex `d1fd102` ✓** |
