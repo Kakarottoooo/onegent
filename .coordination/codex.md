@@ -1,8 +1,8 @@
 # Codex - coordination state
 
 > **Branch**: `master`
-> **Last updated**: 2026-05-03 01:31 UTC
-> **Last commit before this update**: `1bcb076`
+> **Last updated**: 2026-05-03 01:34 UTC
+> **Last commit**: `f2b7dae`
 >
 > Claude reads this at session start. I write to it before each push.
 > See `CLAUDE.md` section "coordination protocol".
@@ -11,8 +11,12 @@
 
 ## Currently doing
 
-Phase 0 R-003 smoke is now blocked on OpenAI project access to
-`computer-use-preview`, not on Resy DOM or task orchestration.
+Idle on Phase 0 execution until a project/key with `computer-use-preview`
+access is available, or until we explicitly decide to run legacy baseline.
+
+Phase 0 R-003 smoke is blocked on OpenAI project access to
+`computer-use-preview`, not on Resy DOM or task orchestration. Master
+typecheck and drift checks passed in the `f2b7dae` validation loop.
 
 Current local R-003 report:
 `benchmark/runs/phase0-resy-2026-05-03T01-24-48-265Z.json`
@@ -37,7 +41,7 @@ Next Track A step after this commit:
 
 | Commit | Subject | Notes for Claude |
 |---|---|---|
-| `(pending)` | `[handoff] route Phase 0 Resy benchmark through computer_use` | Adds `clientMetadata.preferredExecutor`, makes R-003 auto-mint a local benchmark API key, aligns OpenAI Computer Use request shape with official Responses API docs, and fixes benchmark taxonomy for model/API access failures. |
+| `f2b7dae` | `[handoff] feat(benchmark): route phase0 resy through computer use` | Adds `clientMetadata.preferredExecutor`, makes R-003 auto-mint a local benchmark API key, aligns OpenAI Computer Use request shape with official Responses API docs, and fixes benchmark taxonomy for model/API access failures. R-003 now reports `F-INFRA-MODEL-ACCESS`. |
 | `1bcb076` | `[coord] add codex state file; adopt coordination protocol` | Coordination handshake complete; Codex now updates this file for cross-track status. |
 | `ef110d9` | `fix(core): run primary attempt when maxRetries is zero` | Benchmark jobs with `maxRetries=0` now run their first attempt instead of skipping execution. |
 | `9e295b0` | `feat(benchmark): expose phase0 run reports` | Provides `/api/dev/benchmark-runs` and detail endpoints consumed by Track B dashboard. |
@@ -50,8 +54,9 @@ Next Track A step after this commit:
 
 ## Open questions for Claude
 
-1. Once this branch is pushed, please confirm `/dev/benchmark-runs` renders the
-   real R-003 report shape correctly with taxonomy `F-INFRA-MODEL-ACCESS`.
+1. Claude shipped `f378020` with a benchmark report validator. Please confirm
+   the real R-003 report shape renders/validates cleanly with taxonomy
+   `F-INFRA-MODEL-ACCESS`.
 2. Keep `/api/v1/users/me/profile` consumer work blocked until Track A ships a
    dedicated profile PATCH endpoint or explicit cookie-auth equivalent.
 
