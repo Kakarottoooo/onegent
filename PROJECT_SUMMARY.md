@@ -116,6 +116,13 @@ Current State Snapshot · 2026-05-03
 - **Inspire 模式 / Daydream Explorer**（Phase 3 主线之一）：homepage 第
   二 CTA + DR explore mode；实现要点：30-template gallery 不用 LLM 自
   由发挥；详见 2026-05-03 (cont. 2) 段战略定位锁定
+- **数据飞轮 Layer A + B**（Phase 4 主线之一）：场馆/Provider 健康度信
+  号 + Provider 短时态信号；升级现有 venue_baselines 表；Layer C
+  实时 availability cache 显式不做；触发条件 ≥ 100 真实 booking；详见
+  2026-05-03 (cont. 3) 段
+- **订阅 gamification 3 机制**（Phase 2-3 主线之一）：referral 互助
+  码 / DR payer 折扣 / 完成返 credit；Phase 1 期间用 "do things that
+  don't scale" 文案版替代；详见 2026-05-03 (cont. 3) 段
 
 【Browserbase Infra 演进路线图（2026-04-30 决定）】
 关键决策：现在不升 Browserbase Pro，按用户增长曲线分阶段决定 infra
@@ -162,6 +169,134 @@ B 端基础设施 / Phase 0 UI / Positioning Shift 等）已归档至
 [PROJECT_SUMMARY_ARCHIVE_2026Q1.md](./PROJECT_SUMMARY_ARCHIVE_2026Q1.md)。
 
 按钮 / 功能行为速查见 [FEATURE_MAP.md](./FEATURE_MAP.md)。
+
+================================================================
+Recent Updates - 2026-05-03 (cont. 3) · 数据飞轮 3 层分类（取 A+B，弃 C）· 订阅 gamification 3 机制延后到 Phase 2-3 · PointsYeah 移植清单锁定
+================================================================
+
+【触发讨论】
+
+用户读到 PointsYeah 两个产品设计：
+- (1) "缓存 + 网络效应"数据飞轮：用户实时搜索喂给所有用户的 deal alerts
+- (2) "订阅 = 累积 miles"心理学：referral 码、payer 折扣、完成返 credit
+
+问：onegent 应该照搬吗？
+
+承接 cont. 2 的混合定位：消费表面要保留但不做百万 MAU，所以问题不是
+"要不要做"，是"哪些移植 / 哪些跳过 / 何时做"。
+
+【1. 数据飞轮：3 层分类，取 A+B、弃 C】
+
+PointsYeah 缓存的是 points 价格——业务逻辑相对稳定（一天-一周内不大
+变），缓存价值高。Onegent 想缓存的东西分 3 层，每层结论不同：
+
+**Layer A：场馆/Provider 健康度信号（durable、高信号）✅ 做**
+- Success rate per (venue, provider) rolling window：Resy Carbone 上
+  周 90% 成功 → 路由优先；某 OpenTable 餐厅 50% 失败 → 提前警告 / 自
+  动 fallback
+- Failure mode 分布：F-PROVIDER-OTP 多 / F-AVAIL-NONE 多 /
+  F-PROVIDER-CAPTCHA 多 → 决定 Phase 0 acceptance gate 调优 + 客户
+  端 messaging
+- Best-time-to-book heuristics：Buvette 周一-周三 7pm 通常有座 vs
+  周五-周六 8pm 永远满
+- TTL：天-周
+- 实现：每次 autopilot 完成 → 写一行 `(venue_slug, provider, outcome,
+  taxonomy, ts, user_id_anonymized)` → 后台聚合视图喂 router
+- 现有契机：codex `venue_baselines` 表（weekly cron 重查）已经有雏形，
+  升级成"用户调用产生的真实数据池"
+
+**Layer B：Provider 短时态信号（minutes、高信号）✅ 做**
+- "OpenTable 5xx 上 5min" → router 立刻 route around 走 Resy fallback
+- "Resy CAPTCHA 触发率上 30min" → 警告 + 切策略
+- "ChatGPT Apps OAuth 反复失败" → 自动告警
+- TTL：5-15 分钟
+- 本质是分布式监控反馈到路由层
+
+**Layer C：实时 availability 缓存（ephemeral、低信号、陷阱）❌ 不做**
+
+用户原文："A 用户刚查过某餐厅今晚 7pm 没位、8pm 有位，这个信号保留 5
+分钟对 B 用户就是免费的价值"——**这条对 Onegent 不成立**，原因 3 条：
+1. Resy/OpenTable availability **真的 5 分钟内会变**（一桌取消、一桌
+   新订）
+2. Resy/OT 有 **per-device fingerprinting**：A 看到没位不代表 B 看到
+   没位（B 可能是 VIP 账户、不同地区 IP、登录态不同）
+3. 给 B 用 stale availability cache → B 信任 → 真去订时撞实际有座但
+   cache 说没座，**比没 cache 更糟**
+
+PointsYeah 缓存的是业务逻辑稳定的 points 价格。Onegent 缓存
+availability 是 ETL race condition + 1% 概率害所有用户。**0 价值 + 高
+风险 → 跳过**。
+
+**触发条件**：≥ 100 真实 booking。数据池才有统计意义；现在 0 付费用
+户做飞轮 = 飞轮没东西飞。
+
+**Phase 归属**：Phase 4 主线之一（"Domain Brain seed"），把 § 8.1 抽
+象升格成具体三层规划。
+
+**跟现有架构关系**：
+- `venue_baselines` 表 → Layer A 写入路径
+- `agent_feedback` / `plan_outcomes` → Layer A 聚合数据源
+- Layer B 全新，要新建 short-cache Redis 层（或 Postgres TTL 表）
+- Layer C 显式不做（避免未来 session 重新讨论）
+
+【2. 订阅 = 累积 miles 心理学：3 机制延后】
+
+承认观察对：onegent 用户大概率 IS miles-game 玩家，"我每次消费都该
+赚点什么" 是这群体精神基本面。但现在做 = 反 Linus / Paul Graham 原则
+（premature optimization / do things that don't scale）。
+
+**3 机制评估**：
+
+| 机制 | 工时 | 何时做 | 风险 |
+|---|---|---|---|
+| Referral 互助码（双方 1 个月免费）| 3-4 天 Stripe coupon + invite UI + 追踪 | Phase 2-3，≥ 100 付费用户 | 套利账户，需 fraud 检测 |
+| DR payer 折扣（付钱 = 下次 9 折）| 1-2 天，payer 已被 track | Phase 2，DR 使用稳定 | 低，架构匹配 |
+| 完成任务返 credit（5 成功 → 1 免费）| 3-4 天 credit ledger + UI | Phase 3，使用模式明确 | 中，gaming 风险，需风控 |
+
+**Phase 1 期间的最低成本"不 scale"替代**：
+
+landing page / pricing 页面写一句 "refer a friend, get 1 month free"
+——**不实现任何 backend**，纯文案 + 联系邮箱。手动处理前 10 个
+referral，有数据后再上系统。
+
+参照人物：
+- **Linus**："premature optimization is the root of all evil"
+- **Paul Graham**："do things that don't scale" 标准玩法
+- **Sam Altman**："make something people want, then make people want
+  it" — 你现在还在第一步
+
+**Phase 归属**：Phase 2-3 主线之一，放在公开发布 + 用户量积累之后。
+
+【3. PointsYeah 移植清单（cont. 1 + 2 + 3 综合）】
+
+| PointsYeah 设计 | Onegent 移植？ | Phase | 备注 |
+|---|---|---|---|
+| Daydream Explorer (anywhere/beach/golf 主题) | ✅ Inspire mode | Phase 3 | cont. 2 锁；30-template gallery，不 LLM 自由发挥 |
+| 实时搜索缓存喂 deal alerts (Layer A) | ✅ 场馆健康度 | Phase 4 | 本段锁；升级 venue_baselines |
+| Provider state monitoring (Layer B) | ✅ 短时态信号 | Phase 4 | 本段锁；router 用于 fallback |
+| 跨用户实时 availability cache (Layer C) | ❌ 不做 | — | 本段锁；domain 错配，会害用户 |
+| Cents-per-point 客观排序 | ❌ 直接复制 | — | onegent 无此对应锚；用 success rate / popularity 替代 |
+| Shopping portal earn miles 双重激励 | ⚠️ 思路移植 | Phase 2-3 | referral / DR payer 折扣 / 完成 credit；本段锁 |
+| 推荐码 (TRAVELFREELY 等) | ✅ Referral 互助码 | Phase 2-3 | 本段锁；先做不 scale 文案版 |
+
+**这张表是承诺**：未来任何讨论"要不要照搬 PointsYeah X"先看这表。表里
+有的按 phase 节奏走，没有的需要新讨论；表里 ❌ 的明确不做，避免重复
+litigate。
+
+【与 cont. 1 + cont. 2 关系】
+
+- cont. 1 落地 R-003 工程进展 + Phase 1 plan
+- cont. 2 锁混合定位 + Inspire mode 延后
+- cont. 3 锁数据飞轮分层 + 订阅 gamification 节奏 + PointsYeah 移植
+  清单
+
+3 段一起把 Phase 0 declared 之后所有产品方向钉死。未来 session 起手读
+PROJECT_SUMMARY 直接看 cont. 1/2/3 三段对齐，不重新讨论方向。
+
+【最危险的判断没变】
+
+最危险的不是没数据飞轮、没 referral 码——是**还没有第一笔成功订单**。
+所有 Phase 2+ 设想的前提是 Phase 1 declare。先解 Phase 0 → Phase 1。
 
 ================================================================
 Recent Updates - 2026-05-03 (cont. 2) · 战略定位锁定 · 混合路线（不是纯基础设施）· Inspire 模式延后到 Phase 3 · template gallery > LLM 自由发挥
