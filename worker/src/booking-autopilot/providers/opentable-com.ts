@@ -29,13 +29,158 @@ interface OpenTableDinerFormState {
   submitVisible: boolean;
 }
 
+interface OpenTableFieldTarget {
+  x: number;
+  y: number;
+  descriptor: string;
+}
+
+type OpenTableInputPage = Page & {
+  click?: (x: number, y: number, options?: { button?: string; clickCount?: number }) => Promise<unknown>;
+  keyPress?: (key: string, options?: { delay?: number }) => Promise<unknown>;
+  type?: (text: string, options?: { delay?: number }) => Promise<unknown>;
+};
+
+async function locateOpenTableDinerField(
+  page: Page,
+  field: OpenTableDinerField,
+): Promise<OpenTableFieldTarget | null> {
+  return page.evaluate((targetField: OpenTableDinerField) => {
+    type Field = "firstName" | "lastName" | "email" | "phone";
+    const isShown = (el: HTMLElement): boolean => {
+      if (el.hidden || !el.isConnected) return false;
+      const rect = el.getBoundingClientRect();
+      if (rect.width === 0 || rect.height === 0) return false;
+      const style = window.getComputedStyle(el);
+      return style.display !== "none" && style.visibility !== "hidden" && style.opacity !== "0";
+    };
+    const inputText = (el: HTMLInputElement): string => [
+      el.type,
+      el.placeholder,
+      el.getAttribute("aria-label"),
+      el.id,
+      el.name,
+      el.autocomplete,
+      el.getAttribute("inputmode"),
+      el.closest("label, div, section")?.textContent?.slice(0, 160),
+    ].filter(Boolean).join(" ").toLowerCase();
+    const classify = (el: HTMLInputElement): Field | null => {
+      const haystack = inputText(el);
+      if (haystack.includes("country") || haystack.includes("code")) return null;
+      if (haystack.includes("first") || haystack.includes("given-name")) return "firstName";
+      if (haystack.includes("last") || haystack.includes("family-name")) return "lastName";
+      if (el.type === "email" || haystack.includes("email")) return "email";
+      if (
+        el.type === "tel" ||
+        haystack.includes("phone") ||
+        haystack.includes("mobile") ||
+        haystack.includes("telephone") ||
+        haystack.includes("tel")
+      ) return "phone";
+      return null;
+    };
+    const inputs = Array.from(document.querySelectorAll<HTMLInputElement>("input"))
+      .filter((el) => el.type !== "hidden" && el.type !== "checkbox" && el.type !== "radio" && !el.disabled && isShown(el));
+    const target = inputs.find((el) => classify(el) === targetField);
+    if (!target) return null;
+    target.scrollIntoView({ block: "center", inline: "center" });
+    const rect = target.getBoundingClientRect();
+    return {
+      x: Math.round(rect.left + rect.width / 2),
+      y: Math.round(rect.top + rect.height / 2),
+      descriptor: [
+        target.tagName.toLowerCase(),
+        target.type ? `type=${target.type}` : "",
+        target.placeholder ? `placeholder=${target.placeholder}` : "",
+        target.getAttribute("aria-label") ? `aria=${target.getAttribute("aria-label")}` : "",
+        target.autocomplete ? `autocomplete=${target.autocomplete}` : "",
+      ].filter(Boolean).join(" "),
+    };
+  }, field).catch(() => null);
+}
+
+async function verifyOpenTableDinerField(
+  page: Page,
+  field: OpenTableDinerField,
+): Promise<boolean> {
+  return page.evaluate((targetField: OpenTableDinerField) => {
+    const isShown = (el: HTMLElement): boolean => {
+      if (el.hidden || !el.isConnected) return false;
+      const rect = el.getBoundingClientRect();
+      if (rect.width === 0 || rect.height === 0) return false;
+      const style = window.getComputedStyle(el);
+      return style.display !== "none" && style.visibility !== "hidden" && style.opacity !== "0";
+    };
+    const classify = (el: HTMLInputElement): OpenTableDinerField | null => {
+      const haystack = [
+        el.type,
+        el.placeholder,
+        el.getAttribute("aria-label"),
+        el.id,
+        el.name,
+        el.autocomplete,
+        el.getAttribute("inputmode"),
+      ].join(" ").toLowerCase();
+      if (haystack.includes("country") || haystack.includes("code")) return null;
+      if (haystack.includes("first") || haystack.includes("given-name")) return "firstName";
+      if (haystack.includes("last") || haystack.includes("family-name")) return "lastName";
+      if (el.type === "email" || haystack.includes("email")) return "email";
+      if (el.type === "tel" || haystack.includes("phone") || haystack.includes("tel")) return "phone";
+      return null;
+    };
+    const input = Array.from(document.querySelectorAll<HTMLInputElement>("input"))
+      .filter((el) => el.type !== "hidden" && el.type !== "checkbox" && el.type !== "radio" && !el.disabled && isShown(el))
+      .find((el) => classify(el) === targetField);
+    if (!input) return false;
+    const value = input.value.trim();
+    if (targetField === "phone") return value.replace(/\D/g, "").length >= 10;
+    if (targetField === "email") return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value);
+    return value.length > 0;
+  }, field).catch(() => false);
+}
+
+async function typeOpenTableFieldByCoordinate(
+  page: Page,
+  field: OpenTableDinerField,
+  value: string,
+  trace?: (msg: string) => void,
+): Promise<boolean> {
+  if (!value) return false;
+  const compat = page as OpenTableInputPage;
+  if (typeof compat.click !== "function" || typeof compat.keyPress !== "function" || typeof compat.type !== "function") {
+    trace?.(`[opentable] coordinate typing unavailable for ${field} (missing Stagehand CDP input APIs)`);
+    return false;
+  }
+  const target = await locateOpenTableDinerField(page, field);
+  if (!target) {
+    trace?.(`[opentable] coordinate typing target not found for ${field}`);
+    return false;
+  }
+  try {
+    await compat.click(target.x, target.y);
+    await new Promise((r) => setTimeout(r, 150));
+    await compat.keyPress("Control+a").catch(() => undefined);
+    await compat.keyPress("Backspace").catch(() => undefined);
+    await new Promise((r) => setTimeout(r, 100));
+    await compat.type(value, { delay: field === "phone" ? 45 : 55 });
+    await new Promise((r) => setTimeout(r, 250));
+  } catch (error) {
+    trace?.(`[opentable] coordinate typing failed for ${field}: ${(error as Error).message?.slice(0, 100)}`);
+    return false;
+  }
+  const verified = await verifyOpenTableDinerField(page, field);
+  trace?.(`[opentable] coordinate typing ${field}: target="${target.descriptor}" verified=${verified}`);
+  return verified;
+}
+
 async function fillOpenTableFieldFallback(
   page: Page,
   field: OpenTableDinerField,
   value: string,
+  trace?: (msg: string) => void,
 ): Promise<boolean> {
   if (!value) return false;
-  return page.evaluate(
+  const domFilled = await page.evaluate(
     ({ field, value }: { field: OpenTableDinerField; value: string }) => {
       const nativeFill = (el: HTMLInputElement, val: string): boolean => {
         const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set;
@@ -102,6 +247,8 @@ async function fillOpenTableFieldFallback(
     },
     { field, value },
   ).catch(() => false);
+  if (domFilled) return true;
+  return typeOpenTableFieldByCoordinate(page, field, value, trace);
 }
 
 async function readOpenTableDinerFormState(page: Page): Promise<OpenTableDinerFormState> {
@@ -610,6 +757,7 @@ export const openTableProvider: BrowserProvider = {
     const phoneDigits = tenDigit.length === 10
       ? `(${tenDigit.slice(0, 3)}) ${tenDigit.slice(3, 6)}-${tenDigit.slice(6)}`
       : rawDigits; // non-US / unexpected length — fall back to raw digits
+    const phoneTypedValue = tenDigit.length === 10 ? tenDigit : rawDigits;
     trace(
       `[opentable] guest fill profile input: first=${firstName.length > 0} ` +
       `last=${lastName.length > 0} email=${email.length > 0} phoneDigits=${rawDigits.length}`,
@@ -699,6 +847,10 @@ export const openTableProvider: BrowserProvider = {
         return phoneEl ? nativeFill(phoneEl, phone) : false;
       }, phoneDigits).catch(() => false);
       trace(`[opentable] phone-only direct fill result: ${phoneFilled}`);
+      if (!phoneFilled) {
+        const typedPhone = await typeOpenTableFieldByCoordinate(page, "phone", phoneTypedValue, trace);
+        trace(`[opentable] phone-only coordinate typing result: ${typedPhone}`);
+      }
     } else if (formType.hasPhone && !formType.hasName && formType.hasEmailLink) {
       trace("[opentable] phone-only form detected without usable phone - clicking 'Use email instead'");
       const clicked = await page.evaluate(() => {
@@ -774,20 +926,20 @@ export const openTableProvider: BrowserProvider = {
     trace(`[opentable] guest form filled: firstName=${results.firstName} lastName=${results.lastName} email=${results.email} phone=${results.phone}`);
 
     const fallbackFilled: string[] = [];
-    if (results.firstName !== true && await fillOpenTableFieldFallback(page, "firstName", firstName)) {
+    if (results.firstName !== true && await fillOpenTableFieldFallback(page, "firstName", firstName, trace)) {
       fallbackFilled.push("firstName");
     }
-    if (results.lastName !== true && await fillOpenTableFieldFallback(page, "lastName", lastName)) {
+    if (results.lastName !== true && await fillOpenTableFieldFallback(page, "lastName", lastName, trace)) {
       fallbackFilled.push("lastName");
     }
-    if (results.email !== true && await fillOpenTableFieldFallback(page, "email", email)) {
+    if (results.email !== true && await fillOpenTableFieldFallback(page, "email", email, trace)) {
       fallbackFilled.push("email");
     }
-    if (results.phone !== true && await fillOpenTableFieldFallback(page, "phone", phoneDigits)) {
+    if (results.phone !== true && await fillOpenTableFieldFallback(page, "phone", phoneTypedValue, trace)) {
       fallbackFilled.push("phone");
     }
     if (fallbackFilled.length > 0) {
-      trace(`[opentable] locator fallback filled: ${fallbackFilled.join(",")}`);
+      trace(`[opentable] compatible input fallback filled: ${fallbackFilled.join(",")}`);
     }
 
     let dinerFormState = await readOpenTableDinerFormState(page);

@@ -15,6 +15,8 @@ describe("OpenTable provider safety policy", () => {
   it("fills the native phone verification gate before trying email fallback", () => {
     expect(providerSource).toContain("phone-only form detected - filling phone directly");
     expect(providerSource).toContain("phone-only direct fill result");
+    expect(providerSource).toContain("phone-only coordinate typing result");
+    expect(providerSource).toContain("coordinate typing");
     expect(providerSource).toContain("phone-only form detected without usable phone - clicking 'Use email instead'");
     expect(providerSource).not.toContain("phone-only form detected - clicking 'Use email instead'");
     expect(providerSource).not.toContain("getByPlaceholder");
