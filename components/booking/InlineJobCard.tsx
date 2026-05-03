@@ -48,7 +48,7 @@ function stepStatusLabel(step: BookingJobStep): string {
   }
   if (step.retryScheduledFor) return "Retry scheduled";
   if (step.actionItem) return "Needs your choice";
-  if (step.status === "awaiting_confirmation") return "Ready for payment — enter CVC";
+  if (step.status === "awaiting_confirmation") return "Ready to review — confirm on site";
   if (step.status === "loading") return "Agent working…";
   if (step.status === "no_availability") return "No availability found";
   if (step.status === "error") {
@@ -263,7 +263,9 @@ export default function InlineJobCard({ jobId, onNeedsTravelDocs, onDeleted }: I
   }
 
   const semanticStatus = computeJobSemanticStatus(job);
-  const statusDisplay = JOB_SEMANTIC_DISPLAY[semanticStatus];
+  const statusDisplay = semanticStatus === "awaiting_payment"
+    ? { ...JOB_SEMANTIC_DISPLAY[semanticStatus], label: "Ready to review — confirm on site" }
+    : JOB_SEMANTIC_DISPLAY[semanticStatus];
   const doneCount = job.steps.filter((s) => s.status === "done").length;
   const isRunning = job.status === "running" || job.status === "pending";
   const isComplete = job.status === "done" || job.status === "failed";

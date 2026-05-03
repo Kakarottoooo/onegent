@@ -7029,9 +7029,9 @@ The user will enter CVV and confirm payment themselves.`,
     // Safety net: if we already filled guest/payment form fields but the
     // outcome was error (or unexpected throw), keep the browser open so the
     // user can visually review what's on the page and submit manually.
-    // Mirrors the paused_payment TTL (15 min).
+    // Mirrors the paused_payment TTL (60 min).
     if (!keepBrowserOpen && reachedGuestForm && !useCloud && input.jobId) {
-      holdBrowserOpenForManualReview("Safety net: guest form was reached — keeping browser open 15 min for manual review/submit.");
+      holdBrowserOpenForManualReview(`Safety net: guest form was reached — keeping browser open for ${Math.round(BROWSER_KEEP_OPEN_MS / 60000)} minutes for manual review/submit.`);
     }
 
     if (!keepBrowserOpen) {

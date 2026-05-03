@@ -7,6 +7,7 @@ import type { BookingProfile } from "../types";
 import { shouldStopForDryRun, DRY_RUN_BOUNDARY_MARKER } from "../dry-run";
 
 interface OpenTableProfile {
+  full_name?: string;
   first_name?: string;
   last_name?: string;
   email?: string;
@@ -573,6 +574,10 @@ export const openTableProvider: BrowserProvider = {
     trace: (msg: string) => void
   ): Promise<void> {
     const p = profile as OpenTableProfile;
+    const fullNameParts = (p.full_name ?? "").trim().split(/\s+/).filter(Boolean);
+    const firstName = p.first_name ?? fullNameParts[0] ?? "";
+    const lastName = p.last_name ?? fullNameParts.slice(1).join(" ");
+    const email = p.email ?? "";
     // OT validates phone format strictly: plain "5555550100" gets rejected
     // with "Your phone number format is invalid". 10-digit US numbers must
     // be formatted as "(555) 555-0100". Strip to digits, drop a leading "1"
@@ -586,6 +591,10 @@ export const openTableProvider: BrowserProvider = {
     const phoneDigits = tenDigit.length === 10
       ? `(${tenDigit.slice(0, 3)}) ${tenDigit.slice(3, 6)}-${tenDigit.slice(6)}`
       : rawDigits; // non-US / unexpected length — fall back to raw digits
+    trace(
+      `[opentable] guest fill profile input: first=${firstName.length > 0} ` +
+      `last=${lastName.length > 0} email=${email.length > 0} phoneDigits=${rawDigits.length}`,
+    );
     // Extract stagehand + rawPage from helpers (injected by executor)
     const h = helpers as { stagehand?: { act: (s: string) => Promise<unknown> }; rawPage?: Page } | null;
     const stagehand = h?.stagehand;
@@ -636,23 +645,13 @@ export const openTableProvider: BrowserProvider = {
 
     trace(`[opentable] form type: phone=${formType.hasPhone} name=${formType.hasName} email=${formType.hasEmail} emailLink=${formType.hasEmailLink}`);
 
-    // Step 2: if phone-only form, click "Use email instead" for guest checkout.
-    if (formType.hasPhone && !formType.hasName && formType.hasEmailLink) {
-      trace("[opentable] phone-only form detected - clicking 'Use email instead'");
-      const clicked = await page.evaluate(() => {
-        const link = Array.from(document.querySelectorAll<HTMLElement>("a, button, span"))
-          .find(el => /use email instead/i.test((el.textContent || "").trim()));
-        if (link) { link.click(); return true; }
-        return false;
-      }).catch(() => false);
-      if (clicked) {
-        await new Promise(r => setTimeout(r, 1500));
-        trace("[opentable] switched to email form");
-      }
-    } else if (formType.hasPhone && !formType.hasName) {
-      // Phone-only form without email link - just fill the phone field.
-      trace("[opentable] phone-only form - filling phone directly");
-      await page.evaluate((phone: string) => {
+    // Step 2: if phone-only form, fill phone directly when possible.
+    // OpenTable currently shows phone as the native verification gate. The
+    // "Use email instead" branch is flaky in Chromium and left fields blank
+    // in founder E2E, so only switch to email when we do not have a phone.
+    if (formType.hasPhone && !formType.hasName && phoneDigits) {
+      trace("[opentable] phone-only form detected - filling phone directly");
+      const phoneFilled = await page.evaluate((phone: string) => {
         const nativeFill = (el: HTMLInputElement, val: string): boolean => {
           if (!val) return false;
           const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set;
@@ -677,9 +676,22 @@ export const openTableProvider: BrowserProvider = {
             (el.placeholder || "").toLowerCase().includes("phone") ||
             (el.getAttribute("aria-label") || "").toLowerCase().includes("phone") ||
             el.type === "tel"
-          );
+        );
         return phoneEl ? nativeFill(phoneEl, phone) : false;
       }, phoneDigits).catch(() => false);
+      trace(`[opentable] phone-only direct fill result: ${phoneFilled}`);
+    } else if (formType.hasPhone && !formType.hasName && formType.hasEmailLink) {
+      trace("[opentable] phone-only form detected without usable phone - clicking 'Use email instead'");
+      const clicked = await page.evaluate(() => {
+        const link = Array.from(document.querySelectorAll<HTMLElement>("a, button, span"))
+          .find(el => /use email instead/i.test((el.textContent || "").trim()));
+        if (link) { link.click(); return true; }
+        return false;
+      }).catch(() => false);
+      if (clicked) {
+        await new Promise(r => setTimeout(r, 1500));
+        trace("[opentable] switched to email form");
+      }
     }
 
     // Step 3: fill name / email / phone on the full form.
@@ -734,7 +746,7 @@ export const openTableProvider: BrowserProvider = {
 
         return res;
       },
-      { first: p.first_name ?? "", last: p.last_name ?? "", email: p.email ?? "", phone: phoneDigits }
+      { first: firstName, last: lastName, email, phone: phoneDigits }
     ).catch((err: Error) => {
       trace(`[opentable] guest form evaluate failed: ${err.message?.slice(0, 80)}`);
       return {} as Record<string, boolean | string>;
@@ -743,13 +755,13 @@ export const openTableProvider: BrowserProvider = {
     trace(`[opentable] guest form filled: firstName=${results.firstName} lastName=${results.lastName} email=${results.email} phone=${results.phone}`);
 
     const fallbackFilled: string[] = [];
-    if (results.firstName !== true && await fillOpenTableFieldFallback(page, "firstName", p.first_name ?? "")) {
+    if (results.firstName !== true && await fillOpenTableFieldFallback(page, "firstName", firstName)) {
       fallbackFilled.push("firstName");
     }
-    if (results.lastName !== true && await fillOpenTableFieldFallback(page, "lastName", p.last_name ?? "")) {
+    if (results.lastName !== true && await fillOpenTableFieldFallback(page, "lastName", lastName)) {
       fallbackFilled.push("lastName");
     }
-    if (results.email !== true && await fillOpenTableFieldFallback(page, "email", p.email ?? "")) {
+    if (results.email !== true && await fillOpenTableFieldFallback(page, "email", email)) {
       fallbackFilled.push("email");
     }
     if (results.phone !== true && await fillOpenTableFieldFallback(page, "phone", phoneDigits)) {
@@ -765,7 +777,7 @@ export const openTableProvider: BrowserProvider = {
     if (stagehand) {
       if (dinerFormState.empty.length > 0) {
         trace(`[opentable] still-empty diner field(s) after programmatic fill: ${dinerFormState.empty.join(",")} - running AI fill`);
-        const effectiveProfile = buildEffectiveProfile(p as BookingProfile, "");
+        const effectiveProfile = buildEffectiveProfile({ ...p, first_name: firstName, last_name: lastName, email } as BookingProfile, "");
         try {
           const aiResult = await fillGuestFormWithAI(stagehand, effectiveProfile, trace);
           trace(`[opentable] AI fill: filled=${aiResult.filled.join(",")} failed=${aiResult.failed.join(",")}`);
@@ -775,7 +787,7 @@ export const openTableProvider: BrowserProvider = {
       }
       // Step 5: audit - catch any still-empty fields.
       try {
-        const effectiveProfile = buildEffectiveProfile(p as BookingProfile, "");
+        const effectiveProfile = buildEffectiveProfile({ ...p, first_name: firstName, last_name: lastName, email } as BookingProfile, "");
         const audit = await auditAndRefillEmptyFields(stagehand, rawPage, effectiveProfile, trace);
         if (audit.refilled.length) trace(`[opentable] audit refilled: ${audit.refilled.join(",")}`);
       } catch (e) {
@@ -793,7 +805,7 @@ export const openTableProvider: BrowserProvider = {
       throw new Error(`opentable_guest_form_incomplete:${dinerFormState.empty.join(",")}`);
     }
 
-    // Step 6: conditionally click submit.
+    // Step 6: stop before the final submit.
     // If the restaurant requires a credit card (deposit / no-show guarantee),
     // DO NOT click "Complete reservation" here - the executor will call
     // fillPaymentForm next and leave the final submit to the user (after they
@@ -822,23 +834,7 @@ export const openTableProvider: BrowserProvider = {
       return;
     }
 
-    const submitted = await page.evaluate(() => {
-      const isVisible = (el: Element) => {
-        const r = (el as HTMLElement).getBoundingClientRect();
-        return r.width > 0 && r.height > 0;
-      };
-      const pattern = /complete reservation|confirm reservation|reserve now|book now/i;
-      const btn = Array.from(document.querySelectorAll<HTMLElement>("button[type=\"submit\"], button"))
-        .find(el => isVisible(el) && pattern.test((el.textContent ?? "").trim()));
-      if (btn) { btn.click(); return (btn.textContent ?? "").trim().slice(0, 40); }
-      return null;
-    }).catch(() => null);
-
-    if (submitted) {
-      trace(`[opentable] clicked submit button: "${submitted}"`);
-    } else {
-      trace("[opentable] submit button not found - may need manual confirmation");
-    }
+    trace("[opentable] final confirmation button left for user - submit click skipped by policy");
   },
 
   /**

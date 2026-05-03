@@ -143,7 +143,7 @@ function stepStatusLabel(step: BookingJobStep): string {
   }
   if (step.retryScheduledFor) return `Retry scheduled for ${formatTime(step.retryScheduledFor)}`;
   if (step.actionItem) return "Needs your choice";
-  if (step.status === "awaiting_confirmation") return "Ready for payment — enter CVC";
+  if (step.status === "awaiting_confirmation") return "Ready to review — confirm on site";
   if (step.status === "loading") return "Agent working…";
   if (step.status === "no_availability") {
     const err = (step.error ?? "").toLowerCase();
@@ -1022,12 +1022,12 @@ function InterventionBanner({ step, jobId, onOpenLive }: { step: BookingJobStep;
   const color = isPaymentWait ? "rgba(22,163,74,0.85)" : "rgba(220,38,38,0.8)";
   const bg = isPaymentWait ? "rgba(22,163,74,0.06)" : "rgba(220,38,38,0.05)";
   const border = isPaymentWait ? "rgba(22,163,74,0.25)" : "rgba(220,38,38,0.2)";
-  const emoji = isPaymentWait ? "💳" : "🔑";
-  const title = isPaymentWait ? "Agent paused — ready for payment" : "Agent needs your help";
+  const emoji = isPaymentWait ? "🖥️" : "🔑";
+  const title = isPaymentWait ? "Agent paused — ready for your review" : "Agent needs your help";
   const subtitle = isPaymentWait
     ? hasCloudSession
-      ? "The agent filled everything in. Tap below to open the payment page and enter your CVC."
-      : "The agent filled everything in. Open the link to enter payment and confirm."
+      ? "The agent filled what it can. Open the page, review the details, and complete the final site step yourself."
+      : "The agent filled what it can. Watch the live browser, review the details, and complete the final site step yourself."
     : "The site requires your login. Open the link, sign in, then the agent can continue.";
 
   return (
@@ -1052,7 +1052,7 @@ function InterventionBanner({ step, jobId, onOpenLive }: { step: BookingJobStep;
                 className="intervention__btn"
                 style={{ background: color }}
               >
-                💳 Enter CVC →
+                🖥️ Open page →
               </a>
             )}
             {isPaymentWait && !hasCloudSession && (
@@ -1102,11 +1102,10 @@ function InterventionBanner({ step, jobId, onOpenLive }: { step: BookingJobStep;
                   className="intervention-modal__cta"
                   style={{ background: color, color: "#fff" }}
                 >
-                  💳 Open payment page →
+                  🖥️ Open page →
                 </a>
                 <p className="intervention-modal__caption">
-                  Opens in a cloud browser — card details are already filled in.<br />
-                  Just enter your CVC and confirm.
+                  Opens in a cloud browser. Review the details and complete the final site step yourself.
                 </p>
               </>
             ) : step.handoff_url && (step.handoff_url.includes("basket_id=") || step.handoff_url.includes("secure.booking.com/book")) ? (
@@ -1195,7 +1194,9 @@ function JobCard({ job, onRefresh, sessionId, onOpenLive }: { job: BookingJob; o
   }
 
   const semanticStatus = computeJobSemanticStatus(job);
-  const statusDisplay = JOB_SEMANTIC_DISPLAY[semanticStatus];
+  const statusDisplay = semanticStatus === "awaiting_payment"
+    ? { ...JOB_SEMANTIC_DISPLAY[semanticStatus], label: "Ready to review — confirm on site" }
+    : JOB_SEMANTIC_DISPLAY[semanticStatus];
 
   function openAll() {
     for (const s of job.steps.filter((s) => s.status === "done" && s.handoff_url)) {
@@ -3317,7 +3318,9 @@ function TripsPageInner() {
                               )}
                             </div>
                             <div style={{ marginTop: 2, fontFamily: "var(--font-dm-sans)", fontSize: 11, color: "var(--text-secondary,#666)" }}>
-                              {JOB_SEMANTIC_DISPLAY[computeJobSemanticStatus(job)].label}
+                              {computeJobSemanticStatus(job) === "awaiting_payment"
+                                ? "Ready to review — confirm on site"
+                                : JOB_SEMANTIC_DISPLAY[computeJobSemanticStatus(job)].label}
                             </div>
                           </button>
                         );
