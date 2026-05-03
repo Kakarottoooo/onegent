@@ -20,12 +20,19 @@ ChatGPT Apps + 第三方 agent builder via /api/v1）
 产品地址：https://onegent.one/
 
 ================================================================
-Current State Snapshot · 2026-05-02
+Current State Snapshot · 2026-05-03
 ================================================================
 
-⚠ **Active pivot in progress**：browser execution layer 正在从 bespoke
-Stagehand 重构为 OpenAI Computer Use。详细计划 / 架构 / Track A&B 分工 /
-迁移清单全部记录在 [EXECUTOR_V2_PIVOT.md](./EXECUTOR_V2_PIVOT.md)。
+⚠ **Phase 0 主线锁定（2026-05-03）**：Resy + Computer Use 端到端闭环是
+唯一主线，不再继续深修 Stagehand DOM。详细 doctrine 见下方
+"Recent Updates - 2026-05-03 · Phase 0 main line locked"。
+
+🤝 **Agent 协作协议已启用（2026-05-03）**：codex (Track A) 和 Claude
+(Track B) 通过 `.coordination/{codex,claude}.md` 双文件总线同步状态。
+用户不再当 relay。详见 CLAUDE.md § "协作协议"。
+
+详细计划 / 架构 / Track A&B 分工 / 迁移清单全部记录在
+[EXECUTOR_V2_PIVOT.md](./EXECUTOR_V2_PIVOT.md)。
 
 【架构现状】
 - C 端：Vercel-hosted Next.js (onegent.one)，Neon Postgres，Clerk auth
@@ -43,7 +50,12 @@ Stagehand 重构为 OpenAI Computer Use。详细计划 / 架构 / Track A&B 分�
     no_availability / failed`（`needs_profile_data` 即将加入）
 - **观察体验层（2026-05-02 上线）**：`/api/booking-jobs/:id/timeline-events`
   SSE + `/api/booking-jobs/:id/snapshots` canonical endpoint，给前端 UI
-  消费（Task Timeline + Snapshot rail + ProfileGapCard）
+  消费（Task Timeline + Snapshot rail + ProfileGapCard）。
+  **2026-05-03 扩展**：codex `8a2da14` + `75a3dbe` 加了 task-level 镜像
+  endpoint (`/api/v1/travel-tasks/:taskId/timeline-events` 等)；
+  benchmark report contract 落地于 `lib/benchmark/phase0-report.ts` +
+  `/api/dev/benchmark-runs` (`9e295b0`)；Track B 已 ship `/dev/benchmark-runs`
+  dashboard 消费 (`4e06f29`/`8f44eeb`/`6dbef7a`)
 - MCP：双轨发行
   · npm @onegent/mcp-server v0.1.0（stdio for Claude Desktop）
   · /api/mcp（Streamable HTTP for Claude.ai web / ChatGPT Apps / 第三方）
@@ -72,8 +84,9 @@ Stagehand 重构为 OpenAI Computer Use。详细计划 / 架构 / Track A&B 分�
 10. 主页 chat Claude.ai 风格重构 + NLU state 持久化 — 2026-04-26
 
 【当前阻塞 / 等外部触发的事项（统一在此，下面 release notes 不重复）】
-- **Executor V2 pivot — Resy Essex Computer Use 闭环**（codex Track A 当前
-  主战场，详见 [EXECUTOR_V2_PIVOT.md](./EXECUTOR_V2_PIVOT.md)）
+- **Phase 0 主线 — Resy Essex Computer Use 闭环**（codex Track A 当前
+  主战场；6 个 deliverable 见下方 2026-05-03 段；详见
+  [EXECUTOR_V2_PIVOT.md](./EXECUTOR_V2_PIVOT.md)）
 - ChatGPT Apps marketplace review 结果（OpenAI 5-10 工作日，被动等）
 - Browserbase Pro $99/mo 升级（路径已变 — Computer Use 走 OpenAI
   Responses API，Browserbase 升级时机改成"自建 farm 启动信号触发"，
@@ -84,10 +97,13 @@ Stagehand 重构为 OpenAI Computer Use。详细计划 / 架构 / Track A&B 分�
 - Cofounder / 早期合伙人搜索
 
 【Pending backlog（不阻塞，待动手）】
-- ProfileGapCard wiring（等 Track A 发 needs_profile_data 状态；前端
-  组件 + types 已 ready）
-- Task Timeline + Snapshot rail E2E 联调（master ↔ worktree 合并后验证
-  SSE / snapshot endpoint 真实数据流）
+- ProfileGapCard wiring（**onSave 路径解锁**：codex 已 ship
+  `13036a0` `/api/v1/travel-tasks/:taskId/continue` + `84d7e5f`
+  `needs_profile_data` 状态。NLU `apply_profile_patch` 路径仍等
+  `/api/v1/users/me/profile` PATCH endpoint）
+- Task Timeline + Snapshot rail E2E 联调（task-level endpoints
+  `75a3dbe` 已 ship；C 端 `/tasks/[taskId]` 还需 cookie-auth proxy
+  for `/api/v1/*`）
 - Social Feed MVP 实施（trip-anchored posts + 单向 follow + /feed 入口）
 - 公开发布（HN + X + PH + Reddit launch post）
 - @onegent/mcp-server 加 tool annotations 后 npm 重发（~5min）
@@ -138,6 +154,232 @@ B 端基础设施 / Phase 0 UI / Positioning Shift 等）已归档至
 [PROJECT_SUMMARY_ARCHIVE_2026Q1.md](./PROJECT_SUMMARY_ARCHIVE_2026Q1.md)。
 
 按钮 / 功能行为速查见 [FEATURE_MAP.md](./FEATURE_MAP.md)。
+
+================================================================
+Recent Updates - 2026-05-03 · Phase 0 main line locked · Coordination protocol live · Track B ships 12 commits (ProfileGapCard / benchmark dashboard / NLU profile_edit / contract docs / mock-pipeline tests)
+================================================================
+
+承接 2026-05-02 的 pivot 决策。今天主要做了三件事：
+（1）Phase 0 战略 doctrine 明确锁定，划清主线/不做清单/分工边界；
+（2）codex ↔ Claude 之间的协作协议从"用户人肉 relay"切到 git-based
+双文件总线；（3）Track B 沿着 pivot 路线 ship 了 12 个 commit，把
+ProfileGapCard / benchmark dashboard / NLU profile_edit consumer 三条链
+路推到"contract + 测试 + 端到端 mock 都 ready，等 Track A endpoint 接入
+即上线"的状态。
+
+【Phase 0 战略 doctrine（codex 起草，本节锁定）】
+
+**目标**不是"修好 Resy Essex 那个按钮"，而是证明 Computer Use 执行路线
+能稳定做到：
+
+```
+用户一句话任务 → 创建 travel task → Computer Use 打开 Resy →
+选正确餐厅/日期/人数/时间 → 填资料/处理登录或 OTP →
+停在最终确认前 → 产出 timeline + screenshots + benchmark report
+```
+
+**6 个 deliverable**：
+
+1. **执行路径切换** — Resy/restaurant Phase 0 默认走 `computer_use`；
+   `legacy_stagehand` 仅作 fallback/baseline，不再追 Resy DOM 细节。
+   Router 必须能记录"这次为什么选 computer_use"。
+
+2. **R-003 smoke 跑通** — 用 benchmark Resy Essex case。成功标准：到
+   `ready_for_confirmation` / `needs_otp` / 明确 `safe_handoff` 任一。
+   不能出现：错日期 / 错人数 / 错餐厅 / 假装成功 / 未经授权确认。
+
+3. **Profile / OTP 流程补齐** — 后端 `/api/v1/users/me/profile` 或等价
+   PATCH endpoint；`needs_profile_data` 能被 ProfileGapCard 消费；OTP
+   先做安全 handoff 或 Gmail read path（不要求第一版完全自动），但
+   状态必须清晰。
+
+4. **Task Runtime 观察面补齐** — Timeline events / snapshots / benchmark
+   report 都要和一个 `travel_task` 对齐。用户不需要看 raw log。截图流
+   作为证据，不作为主控制逻辑。
+
+5. **Benchmark gate** — 先 R-003 → Resy-only subset → Phase 0 完成标准
+   `booking-ready ≥ 80%` + `safe outcome ≥ 95%` + `severe error = 0` +
+   `taxonomy 覆盖 100%`（详见 BENCHMARK_RESTAURANT_100.md）。
+
+6. **清掉工程 blocker** — master typecheck 清零；drift check 干净；
+   `.coordination/{codex,claude}.md` 持续更新，避免互相踩文件。
+
+**明确不做（这一阶段）**：
+- 不继续优化 OpenTable 反爬
+- 不扩 hotel / flight / activity
+- 不做 Social Feed
+- 不重构大文件
+- 不继续手搓 Resy DOM 成功率（保留路径但不是主线）
+
+**分工**：
+- **Codex Track A**：ExecutorV2 router、Computer Use path、profile API、
+  cookie-auth proxy、benchmark runner、typecheck、R-003 smoke
+- **Claude Track B**：ProfileGapCard wiring、benchmark dashboard、Task
+  Timeline UI、dev demo、NLU/profile_edit 前端消费
+
+【协作协议上线（2026-05-03 早间）】
+
+之前用户人肉在 codex 和 Claude 之间复制粘贴状态——容易丢信息、产生
+代差、引入冲突。改用 git 仓库里两个状态文件做单向消息总线，零新基础设施。
+
+**机制**（CLAUDE.md § "协作协议" 完整描述）：
+```
+.coordination/
+  codex.md      ← codex 写（在 master 分支）
+  claude.md     ← Claude 写（在 claude/festive-pare-f27273 分支）
+```
+两个文件在不同分支，永远不会冲突。每边只写自己那个，只读对方那个
+（`git fetch + git show origin/<ref>:<file>`）。
+
+**协议要素**：
+- Session-start ritual（强制）：fetch + 读两个文件
+- 5 个必备 H2 section + 顶部 metadata（branch/timestamp/last-commit）
+- 5 个 commit-msg tag：`[handoff]` / `[blocked]` / `[unblocked]` /
+  `[shared]` / `[coord]`，让 `git log --oneline` 扫一眼就看到信号
+- 失败模式 + conflict resolution
+
+**首次握手已完成**：Claude 在 `774312d` 起草协议，发 prompt 给 codex；
+codex 在 `1bcb076` 创建 codex.md 并 adopt 协议，提了 3 个 open question；
+Claude 在 `9d659d4` 回答了 3 个问题。**用户从此不再当 relay**。
+
+【Track B 12 个 commit（按顺序）】
+
+1. `077a05c` ProfileGapCard 字段对齐到 codex backend canonical 13 字段
+   （`first_name` / `last_name` / `email` / `phone` / `date_of_birth` /
+   `passport_number` / `passport_expiry` / `passport_country` /
+   `address_line1` / `city` / `state` / `zip` / `country`）。`full_name`
+   保留为 legacy alias 但运行时拆 first/last；`ktn` / `address_line2`
+   作 UI-only optional；payment 字段 (`card_*`) 单独走 PaymentRedirect。
+
+2. `bf1598f` Merge `origin/master`。executor.ts 冲突取 codex 那边的
+   `buildProfileGap` 抽象（比之前的 5357f98 flight-only 硬编码更通用）。
+
+3. `4e06f29` `/dev/benchmark-runs` Phase 0 dashboard 主体（10 文件，
+   2310 行）。消费 codex 的 `/api/dev/benchmark-runs` API，渲染：headline
+   metrics + 8-bucket outcome distribution + taxonomy chart + per-case
+   filterable table + drill-down drawer。Source-of-truth 是
+   `lib/benchmark/phase0-report.ts` (codex 的)，UI 只是 mirror + display
+   helpers。
+
+4. `8f44eeb` 修 dashboard drawer drill-down bug + 56 helper 测试。drawer
+   之前 hardcoded `<a href="/tasks/{taskId}">`，但 `/tasks/[taskId]` 路由
+   不存在，会 404。改成 timelineUrl/snapshotsUrl JSON 链接 + CopyableCode
+   chip。56 cases 锁住 codex `Phase0BenchmarkReport` shape 契约。
+
+5. `cee4d9a` `/dev/profile-gap-demo` 升级成 contract 参考页：schema legend
+   (13 canonical / 1 legacy / 2 UI-only / 3 payment) + wire trace
+   (`missing[]` → `normalize` → `partition`) + 实时 JSON payload preview
+   (会发给 `/continue` 的 body)。+ 7 cases 锁 categoryOfField /
+   listFieldsByCategory。
+
+6. `76e35b9` NLU v2 加 `profile_edit` intent + `apply_profile_patch`
+   router action + 21 golden tests。用户说 "save my DOB 1995/05/15" /
+   "我的护照号 A1234567" 等 → 路由到 PATCH 而不是进 booking pipeline。
+   Mid-flow patch 时 ambient booking sub-state 完整保留（验证用例 PI3）。
+
+7. `fcdc1d9` `/dev/profile-gap-flow` 端到端 mock 集成 demo (1379 行)：
+   左侧 fake chat panel + 9 个 preset chip，右侧 inspector
+   (last action / mock backend profile / IntentState / raw extractor JSON)。
+   关键设计：mock-pipeline 跑**真实** `coerceIntentState` + `routeIntent`
+   (生产函数)，只 stub LLM extractor 用 pattern matcher。证明整条
+   action-dispatch 链路 work，等 codex 后端就绪一行 `fetch` 替换两个
+   `mock*` 调用即上线。
+
+8. `774312d` `[coord]` `.coordination/{claude,codex}.md` 协议
+   scaffolding + CLAUDE.md "协作协议" 章节 + 5 个 commit-msg tag 约定。
+
+9. `893d477` `[handoff]` `NLU_CONSUMER_CONTRACT.md` (473 行) — 给 codex
+   接 chat panel 时直接读的"消费方契约文档"。覆盖：5 个 RouterAction
+   完整 dispatch / `apply_profile_patch` 深度（PATCH endpoint 建议路径 /
+   body shape / mid-flow 状态保留 / assistant_reply 渲染）/ 5 个 worked
+   trace / 6 个 failure mode / 5 个 open question。
+
+10. `6dbef7a` 给 mock-pipeline pattern matcher 加 vitest (37 cases) +
+    **修了 4 个真 bug**：CJK `\b` word-boundary 问题 (save-verb gate +
+    chitchat 都受影响) / name regex alternation 顺序错（吃多了 prefix）/
+    venue regex 大小写不匹配。写测试时炸出来的真 bug，不是测试期望错。
+
+11. `9d659d4` `[coord]` 回答 codex `1bcb076` 的 3 个 open question：
+    Q1 (ProfileGapCard resume coverage) 区分两条路 — `/continue` cover
+    onSave，`apply_profile_patch` 仍需 `/users/me/profile` PATCH。
+    Q2 (dashboard report-shape) 等真 R-003 报告再 confirm。Q3
+    (Track B idle on Track A files) acknowledged。
+
+12. **本 commit** — PROJECT_SUMMARY.md 更新到 2026-05-03（你正在读）。
+
+【Track B 当前测试覆盖】
+- NLU v2: 172 passed / 6 skipped (LLM-dependent)
+- profile-gap helpers: 31 passed
+- benchmark dashboard helpers: 32 passed
+- mock-pipeline pattern matcher: 37 passed
+- **总计: 272 passed / 6 skipped, 0 regression**
+
+【Track A 当前状态（来自 `.coordination/codex.md`）】
+
+- `1bcb076` codex adopted 协议
+- `ef110d9` `fix(core): run primary attempt when maxRetries is zero` —
+  benchmark jobs `maxRetries=0` 会跳过首次执行的 bug 修了
+- 之前已 ship：`8a2da14` (timeline + snapshot endpoints) /
+  `84d7e5f` (needs_profile_data status emission) /
+  `8b7e3dd` (travel_tasks facade) /
+  `0f5c080` (facade schema 对齐) /
+  `13036a0` (`/api/v1/travel-tasks/:taskId/continue` endpoint) /
+  `75a3dbe` (task-level timeline/snapshots) /
+  `50f0d41` (Phase 0 Resy runner script) /
+  `9e295b0` (`/api/dev/benchmark-runs` API + sample fixture +
+   `lib/benchmark/phase0-report.ts` contract)
+- 当前 in-flight：master typecheck cleanup (17 errors) / R-003 smoke
+  / `/api/v1/users/me/profile` PATCH endpoint /
+  `/api/v1/travel-tasks/*` cookie-auth proxy
+
+【Track B 等 Track A 解锁的事项】
+
+| Blocker | 我等的具体东西 | Codex 状态 |
+|---|---|---|
+| Master typecheck 17 个 errors | 不能安全 re-merge master 进 branch | in progress |
+| `/api/v1/users/me/profile` PATCH endpoint | NLU `apply_profile_patch` 实际消费方 | aware, 未开工 |
+| Cookie-auth proxy for `/api/v1/travel-tasks/*` | 浏览器端 `/tasks/[taskId]` + dashboard drill-down | 在 codex 当前 in-flight |
+| 首次 R-003 真实报告 | Dashboard 渲染验证（详见 `9d659d4` Q2） | in progress |
+
+**ProfileGapCard `onSave` resume 路径** — RESOLVED。codex `13036a0`
++ `84d7e5f` 已经 cover。
+
+【Track B 当前累积资产清单】
+
+UI 组件包：
+- `components/profile-gap/` — 8 文件 + 2 demo route + 31 tests，13 字段
+  canonical 对齐，PaymentRedirect 隔离
+- `components/benchmark/` — 7 React 组件 + 32 tests，消费 codex
+  `Phase0BenchmarkReport`
+- `components/task-timeline/` — `useTimelineEvents` 3-tier 防御加载
+  hook + `useSnapshots` + 已接 `/tasks` page
+
+NLU v2 扩展 (`lib/agent/nlu-v2/`)：
+- `profile_edit` intent + `apply_profile_patch` router action
+- 21 golden tests + 完整 anti-pattern 覆盖（casual age / 问句 /
+  traveler count）
+- 13 canonical field mirror (`PROFILE_EDIT_FIELDS`)
+
+Dev routes：
+- `/dev/profile-gap-demo` — schema reference + wire trace + payload preview
+- `/dev/profile-gap-flow` — 端到端 mock 集成 (chat → state → action →
+  mock backend)
+- `/dev/benchmark-runs` — Phase 0 acceptance gate 仪表板
+- `/dev/timeline-demo` (之前 ship)
+- `/dev/dr-timeline-demo` (之前 ship)
+
+Contract docs：
+- `BENCHMARK_RESTAURANT_100.md` — 100 case + 13 exemplar Phase 0 gate
+- `NLU_CONSUMER_CONTRACT.md` — chat panel hookup 契约
+- `EXECUTOR_V2_PIVOT.md` — pivot 决策记录
+- `TASK_RUNTIME_DESIGN.md` — Phase 1 facade 设计
+
+【还没完成的两件事（同 2026-05-02 段，更新进度）】
+
+1. ProfileGapCard 接真 chat — `onSave` 路径 unblocked（codex `13036a0`），
+   等 codex 完成 cookie-auth proxy 后做 1-PR 接入。
+2. Resy Essex Computer Use 闭环 — Track A 主战场，Phase 0 doctrine 落地后
+   方向锁定（不再深修 DOM）。
 
 ================================================================
 Recent Updates - 2026-05-02 · Executor V2 pivot — Computer Use as new main path · Track A/B parallel build · Task Timeline + DR Activity Timeline ship + NLU coverage +63 tests + 1 bug fix

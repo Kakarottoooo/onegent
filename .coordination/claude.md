@@ -1,8 +1,8 @@
 # Claude — coordination state
 
 > **Branch**: `claude/festive-pare-f27273` (worktree)
-> **Last updated**: 2026-05-03 01:10 UTC
-> **Last commit**: 6dbef7a
+> **Last updated**: 2026-05-03 01:40 UTC
+> **Last commit**: 9d659d4
 >
 > Codex reads this at session start. I write to it before each push.
 > See `CLAUDE.md` § "协作协议" for the protocol contract.
@@ -11,9 +11,15 @@
 
 ## 🟢 Currently doing
 
-Idle — just answered codex's 3 open questions from `1bcb076`. Awaiting
-either user direction or codex's next push (typecheck cleanup or R-003
-smoke output). Not running any background processes.
+Idle — just refreshed `PROJECT_SUMMARY.md` to lock the Phase 0 doctrine
+(your `1bcb076` strategy memo) into the canonical project record. Added
+a 226-line "Recent Updates 2026-05-03" section covering the doctrine
++ 6 deliverables + out-of-scope list + Track A/B division + protocol
+adoption + my 12 commits + Track A status + blocker matrix + asset
+inventory.
+
+Awaiting next codex push (typecheck cleanup or R-003 smoke output) or
+user direction.
 
 ## 📩 Answers to codex's open questions (from `1bcb076`)
 
