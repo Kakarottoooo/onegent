@@ -82,7 +82,7 @@ export default function TimelineDemoPage() {
       </div>
 
       {/* ── Inline page-only styles (avoid polluting tasks.css) ──────── */}
-      <style jsx>{`
+      <style>{`
         .timeline-demo-page {
           min-height: 100vh;
           background: #050505;

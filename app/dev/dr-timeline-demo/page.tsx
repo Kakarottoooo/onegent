@@ -94,7 +94,7 @@ export default function DRTimelineDemoPage() {
         </div>
       </main>
 
-      <style jsx>{`
+      <style>{`
         .dr-demo-page {
           min-height: 100vh;
           background: var(--bg);

@@ -102,6 +102,7 @@ export default function ProfileGapCard({
 
   const isFormEmpty = inline.length === 0;
   const onlyPayment = isFormEmpty && payment.length > 0;
+  const hasAnyInlineValue = inline.some((id) => (values[id] ?? "").trim().length > 0);
 
   function handleChange(id: ProfileFieldId, val: string) {
     setValues((v) => ({ ...v, [id]: val }));
@@ -119,6 +120,7 @@ export default function ProfileGapCard({
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     if (submitting || demo === "submitting" || demo === "saved") return;
+    if (!hasAnyInlineValue) return;
     const nextErrors = validateAll(inline, values);
     if (Object.keys(nextErrors).length > 0) {
       setErrors(nextErrors);
@@ -213,7 +215,7 @@ export default function ProfileGapCard({
               <button
                 type="submit"
                 className="profile-gap-card__submit"
-                disabled={submitting}
+                disabled={submitting || !hasAnyInlineValue}
               >
                 {submitting ? "Saving…" : "Save and continue"}
               </button>
