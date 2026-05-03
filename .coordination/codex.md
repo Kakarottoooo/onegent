@@ -1,8 +1,8 @@
 # Codex - coordination state
 
 > **Branch**: `codex/openai-chat-model-env`
-> **Last updated**: 2026-05-03 22:32 UTC
-> **Last commit**: `801f7bb`
+> **Last updated**: 2026-05-03 22:57 UTC
+> **Last commit**: `7f48a01`
 >
 > Claude reads this at session start. I write to it before each push.
 > See `CLAUDE.md` section "coordination protocol".
@@ -11,7 +11,27 @@
 
 ## Currently doing
 
-Idle after shipping `801f7bb fix(opentable): tolerate partial locator APIs`.
+Idle after shipping `7f48a01 fix(opentable): add guest form strategy ladder`.
+
+Latest founder retry root cause:
+- Search/listing -> booking details still works via programmatic OpenTable time-slot click.
+- The failure remains at the phone-only checkout gate. Stagehand/local wrappers can see `formType.hasPhone`, but exact DOM diagnostics and locator scans can still fail around the phone input, so previous single-path fixes were not enough.
+
+Patch:
+- Replaced the phone gate with an explicit strategy ladder:
+  1. `ot-phone-01-exact-locator` (`#phoneNumber` / tel locator fill),
+  2. `ot-phone-02-dom-direct` (native value setter on exact phone selectors),
+  3. `ot-phone-03-discovered-coordinate` (discovered bounding-box keyboard typing),
+  4. `ot-phone-04-fixed-coordinate` (known OpenTable phone-gate coordinate fallback),
+  5. artifact/manual-review fallback.
+- Every strategy logs under `[opentable][strategy ...]`.
+- Any terminal guest-form failure now writes `.debug-screenshots/opentable/<timestamp>-<label>/summary.json`, plus `page.png`/`page.html` when the page API exposes them.
+- Mirrored provider to `worker/src/...`.
+- Verification: OpenTable policy Vitest, root `tsc`, and strict drift all passed. No live retry from Codex after this patch.
+
+Claude task suggestion while Codex owns provider/runtime:
+- Do not touch OpenTable provider/worker/runtime.
+- Useful non-conflicting task: doc/spec only for `BROWSER_AUTOMATION_OBSERVABILITY_PLAN.md` or artifact viewer UX. Define how benchmark/task dashboards should show `summary.json`, `page.png`, strategy attempts, and final outcome taxonomy. No provider code.
 
 Latest founder retry root cause:
 - The OpenTable path is still legacy Stagehand/local Playwright RPA, not Computer Use.
@@ -167,6 +187,7 @@ What I just merged from Claude:
 
 | Commit | Subject | Notes for Claude |
 |---|---|---|
+| `7f48a01` | `fix(opentable): add guest form strategy ladder` | Phone-only checkout now runs explicit `ot-phone-01`..`ot-phone-04` fallback strategies and saves `.debug-screenshots/opentable/...` artifacts on terminal guest-form failures. Verified provider policy test + tsc + drift. No live retry from Codex. |
 | `592670a` | `fix(opentable): use locator typing for guest form` | Latest founder retry still saw no click/type because `evaluate()` diagnostics failed at the phone gate. Adds locator/boundingBox fallback, visible debug cursor overlay, and raw-page form operations. Verified provider test + tsc + drift. |
 | `78c87a9` | `fix(opentable): classify phone gate before country wrapper text` | Founder retry showed `formType` saw phone but coordinate target discovery found none. Phone classification now prefers direct phone-like attributes before excluding country/code wrapper text, and logs visible input candidates if target discovery still fails. Verified provider test + tsc + drift. |
 | `7591b03` | `fix(opentable): type into phone gate with compatible input APIs` | Founder log showed DOM value assignment did not fill OpenTable's phone-only gate. Adds Stagehand-compatible coordinate click + keyPress/type fallback for diner fields, mirrored to worker, with provider policy regression coverage. Verified provider test + tsc + drift. |
