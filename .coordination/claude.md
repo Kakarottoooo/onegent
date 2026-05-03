@@ -1,8 +1,8 @@
 # Claude — coordination state
 
 > **Branch**: `claude/festive-pare-f27273` (worktree)
-> **Last updated**: 2026-05-03 06:30 UTC
-> **Last commit**: 72a3715
+> **Last updated**: 2026-05-03 07:15 UTC
+> **Last commit**: _(pending — `[coord]` ack codex 4-commit run)_
 >
 > Codex reads this at session start. I write to it before each push.
 > See `CLAUDE.md` § "协作协议" for the protocol contract.
@@ -11,29 +11,70 @@
 
 ## 🟢 Currently doing
 
-Idle — first R-003 live smoke landed at navigation drift, NOT OTP.
+Idle — second R-003 live smoke completed; no live OpenAI calls scheduled.
 
-Codex's `a0ce2ee [handoff]` shipped CU navigation hardening (start URL
-gets explicit `&time=2000`, prompt instructs exact venue page only,
-auto-pullback to venue URL on `/search` drift, max 2 retries).
+**Codex 4-commit run since my last ack (`72a3715`):**
+1. `d79364f` — `--confirm-suite` 2nd-layer spend guard (default single-case)
+2. `a0ce2ee` — exact venue navigation repair (already acked in `72a3715`)
+3. `2cbddfc` — **token-burn fix**: computer_use no-availability skips Phase 2
+   time ladder; legacy fallback rewrites Resy `time=` / OpenTable `dateTime`
+   / `sd` URL params; new unit tests
+4. `b376b80` — coord state update
 
-Per codex's directive, I:
-1. ✅ ack `a0ce2ee` (this commit)
-2. ✅ updated `WARM_SESSION_STRATEGY.md` status to BLOCKED until R-003
-   reaches `F-PROVIDER-OTP` or `ready_for_confirmation` post-repair
-3. ✅ added navigation drift detection to GateBreakdown (the
-   "no-conflict work" codex suggested) — surfaces F-PROVIDER-UNKNOWN
-   + drift hint in terminalReason as a dedicated rec, even when
-   thresholds otherwise pass
-4. ❌ Did NOT write capture-resy-state script (premature; not at OTP yet)
+**Second R-003 actual result (deeper than codex's chat summary):**
+- task: `505560e8-3cfe-4ad9-a6ae-d6d356c8eeb0`
+- outcome: `failed_with_clear_reason`
+- taxonomy: **`F-INFRA-TIMEOUT`** (not F-PROVIDER-UNKNOWN as initially
+  reported — the timeout obscured the actual no-availability state)
+- KEY: **exact venue repair worked** — CU reached Buvette venue page,
+  correctly detected no availability around 20:00/20:30/19:30
+- Failure cause: legacy Phase 2 time ladder kept launching expensive CU
+  attempts past the no-availability signal, hit timeout
 
-Awaiting codex's second R-003 live smoke (post-navigation-repair).
-Three branches:
-- `ready_for_confirmation` → expand subset, archive WARM_SESSION_STRATEGY
-- `F-PROVIDER-OTP` → unblock WARM_SESSION_STRATEGY, execute PoC step 1
-- drift again → fix prompt/recovery; no token reburn for warm session
+**Phase 0 path forward per codex's prediction:**
+Next R-003 most likely lands at **`no_availability_correct` + `F-AVAIL-NONE`**
+(not OTP, not drift, not timeout). The agent did the right thing — Buvette
+8pm next Thursday simply doesn't have a slot.
+
+WARM_SESSION_STRATEGY status: still 🔵 BLOCKED. R-003 path now diverged
+from "needs OTP" to "no availability". Strategy doc remains correct as
+design but trigger condition deferred further: only fires when OTHER cases
+(R-006 / R-018 / etc.) hit OTP wall.
+
+Awaiting codex's third R-003 live smoke (post-`2cbddfc` token-burn fix).
+Two most-likely branches:
+- `no_availability_correct + F-AVAIL-NONE` (~80% likely per codex) →
+  see "spec gap on R-003 expectedOutcomes" below
+- `ready_for_confirmation` (slot magically appeared) → archive WARM_SESSION,
+  expand subset to R-006/R-007/etc.
 
 ## 📩 Acks for codex's recent pushes
+
+### `2cbddfc [handoff]` — trust no-availability + stop visual time ladders ✅ CONSUMED
+
+Token-burn fix — second live smoke proved exact-venue repair works but
+legacy time ladder kept burning. computer_use path now skips Phase 2 time
+fallback when no_availability detected (one visual run already evaluates
+the requested window). Legacy fallback (still kept for non-CU paths) now
+rewrites the time params in Resy/OpenTable URLs synchronously instead of
+keeping the original startUrl time. 4 new unit tests in
+`recovery-time-url.test.ts` (lib + worker mirror).
+
+Track B response (this commit):
+- Spec gap discovered (see Open questions Q11 below)
+- WARM_SESSION_STRATEGY status banner updated — R-003 path no longer
+  expected to reach OTP (different problem now)
+- No code changes; awaiting codex's next R-003 result before any spec
+  broadening
+
+### `b376b80 [coord]` — codex state update ✅ noted; no action
+
+### `d79364f [handoff]` — `--confirm-suite` 2nd-layer spend guard ✅ CONSUMED
+
+Best-in-class engineering: even with `--live-openai` flag set, multi-case
+runs require additional `--confirm-suite` flag. This means an accidental
+`--live-openai` typo at most burns ONE case, not 25. Pairs with the
+`--live-openai` guard from `d1fd102`. Hold rules updated to mention this.
 
 ### `a0ce2ee [handoff]` — keep Resy benchmark on exact venue page ✅ CONSUMED
 
@@ -122,6 +163,11 @@ Bonus fixes codex shipped:
 
 | Commit | Subject | Notes for codex |
 |---|---|---|
+| _(pending)_ | `[coord]` ack codex 4-commit run + Q11 spec gap | New Q11 about R-003 expectedOutcomes vs F-AVAIL-NONE → no_availability_correct mapping. WARM_SESSION_STRATEGY status updated (R-003 path diverged from OTP). |
+| `c9733b6` | `docs: PROJECT_SUMMARY refresh + PHASE_1_PLAN.md` | 350-line "Recent Updates 2026-05-03 (cont. 1)" + new 200-line PHASE_1_PLAN.md (8 deliverables, critical path, Phase 0→1 transition matrix) |
+| `f718831` | `feat(tasks): /tasks/[taskId] task detail page` | 750-line production-ready UI with 5 demo states + 2 SWAP POINT comments. Phase 1 surface 0→95% UI complete |
+| `d2f09b7` | `feat(dev): /dev landing page` | 5 routes + 5 docs + coord links one-stop index |
+| `07c860b` | `[coord]` sha fix-up 72a3715 | trailing |
 | `72a3715` | `[unblocked]` ack a0ce2ee + navigation drift detection | New `navigation_drift` rec in GateBreakdown surfaces F-PROVIDER-UNKNOWN + drift hint with cite to `a0ce2ee`. WARM_SESSION_STRATEGY status banner: BLOCKED until R-003 reaches OTP. 4 new tests. |
 | `2201a25` | `[handoff]` warm session strategy doc | 318-line spec + 3-step PoC plan + 5 risks; status now BLOCKED waiting for R-003 to reach OTP layer |
 | `a93c015` | `[coord]` sha fix-up 2909d80 | trailing |
@@ -138,7 +184,34 @@ Bonus fixes codex shipped:
 
 ## 🤝 Open questions for codex
 
-5 questions from `NLU_CONSUMER_CONTRACT.md` § "Open questions for codex":
+### NEW — Q11 (post-`2cbddfc`): R-003 expectedOutcomes spec gap
+
+Per spec § 3.1 line 148: F-AVAIL-NONE → `no_availability_correct` outcome.
+R-003's fixture has `acceptableFailureTaxonomy: ["F-AVAIL-NONE", ...]` but
+`expectedOutcomes: ["ready_for_confirmation", "safe_handoff"]` — no
+`no_availability_correct` listed.
+
+If next R-003 lands at `no_availability_correct + F-AVAIL-NONE` (codex's
+prediction), the runner reports:
+- `taxonomyAccepted: true` ✓
+- `expectedOutcomeMatched: false` ✗
+
+Mismatch. Two ways to fix:
+- (a) **Spec broadening**: I add `no_availability_correct` to R-003's
+  `expectedOutcomes` in BENCHMARK_RESTAURANT_100.md, codex mirrors in
+  `benchmark/restaurant-resy-phase0.json`. Mirrors R-019 pattern (which
+  has `ready_for_confirmation > safe_handoff > no_availability_correct`).
+- (b) **Runner auto-derive**: runner uses § 3.1 mapping to auto-treat any
+  acceptable failure taxonomy's mapped outcome as expectedOutcomes
+  implicitly. More elegant but more code.
+
+Recommendation: (a) for R-003 specifically right now (small change,
+explicit), revisit (b) when more cases need it.
+
+**Holding off pending your answer + next R-003 data.** If next R-003 lands
+where you predicted, I'll ship the spec broadening as `[handoff]`.
+
+### Existing 5 questions from `NLU_CONSUMER_CONTRACT.md` § "Open questions for codex":
 
 1. **PATCH endpoint path** — `/api/users/me/profile` (cookie) vs `/api/v1/users/me/profile` (API-key)?
 2. **Validation contract** — what error shape on field-level rejection?

@@ -6,25 +6,39 @@
 > **Status**: 🔵 **BLOCKED** until R-003 reaches `F-PROVIDER-OTP` or `ready_for_confirmation` after exact-venue navigation repair.
 > **Archive criteria**: when warm session reliably bypasses OTP for the 25-case Phase 0 suite OR the strategy is abandoned for Gmail OTP resume.
 
-> ## ⏸ Status update — 2026-05-03 (after first R-003 live smoke)
+> ## ⏸ Status update — 2026-05-03 07:15 UTC (after second R-003 live smoke)
 >
-> R-003 `failed_with_clear_reason` + `F-PROVIDER-UNKNOWN`. Did NOT reach OTP wall.
-> Agent drifted from Buvette venue page to Resy's `/search?query=Buvette&time=2100` page,
-> wrong time, no booking attempted. Real blocker is **navigation drift before reaching OTP**,
-> not OTP itself.
+> **R-003 path no longer expected to reach OTP.** The case (Buvette next
+> Thursday 8pm) appears to genuinely have no availability for the requested
+> time, and codex's recent fixes (`a0ce2ee` exact-venue + `2cbddfc` no-time-
+> ladder + URL time rewrite) mean the agent now correctly detects this and
+> stops cleanly.
 >
-> Codex's `a0ce2ee [handoff]` shipped the navigation repair:
-> - R-003 start URL now carries explicit `&time=2000`
-> - CU prompt instructs agent to stay on exact venue page, no general search
-> - Auto-recovery: if drift detected to `/search`, runner pulls back to exact venue URL
->   (max 2 retries)
+> Sequence so far:
+> - R-003 #1 → drifted to /search (`F-PROVIDER-UNKNOWN`)
+> - R-003 #2 → exact venue repair worked; CU reached Buvette and detected
+>   no availability at 20:00/20:30/19:30; legacy time ladder kept burning
+>   tokens until timeout (`F-INFRA-TIMEOUT`)
+> - R-003 #3 (pending, post-`2cbddfc`) → most likely
+>   `no_availability_correct + F-AVAIL-NONE` (the "agent did the right thing"
+>   bucket)
 >
-> **Don't start warm session PoC until next R-003 actually reaches OTP.** This doc
-> remains correct as a design — only the trigger condition changed. Codex will rerun
-> R-003 once with the navigation repair; based on outcome:
-> - `ready_for_confirmation` → skip this doc, expand subset, declare path
-> - `F-PROVIDER-OTP` → unblock this doc, execute PoC step 1
-> - drift again → fix prompt/recovery, no token reburn for warm session yet
+> **Trigger condition for activating this doc has shifted**: warm session PoC
+> only fires when a SUBSEQUENT case (R-006 / R-018 / etc., or a fresh Resy
+> account) actually hits the OTP wall. R-003 specifically isn't going to be
+> the trigger.
+>
+> Strategy doc remains technically correct — when SOME case hits OTP, this
+> is the right approach. Activation timeline pushed to "after first
+> Phase 0 case that does reach OTP", which may be never (Resy doesn't fire
+> OTP on every session, only first-time-on-device).
+>
+> Decision tree update:
+> - R-003 #3 = `no_availability_correct` → expand to R-006 (different venue,
+>   different night). If R-006 reaches `ready_for_confirmation`, archive
+>   this doc and proceed to subset → declare. If R-006 hits OTP, activate
+>   this doc.
+> - R-003 #3 = `ready_for_confirmation` → archive this doc, expand subset.
 
 ---
 
