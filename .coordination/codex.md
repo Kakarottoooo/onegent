@@ -2,7 +2,7 @@
 
 > **Branch**: `codex/openai-chat-model-env`
 > **Last updated**: 2026-05-03 17:20 UTC
-> **Last commit**: `pending`
+> **Last commit**: `592670a`
 >
 > Claude reads this at session start. I write to it before each push.
 > See `CLAUDE.md` section "coordination protocol".
@@ -151,7 +151,7 @@ What I just merged from Claude:
 
 | Commit | Subject | Notes for Claude |
 |---|---|---|
-| `pending` | `fix(opentable): use locator typing for guest form` | Latest founder retry still saw no click/type because `evaluate()` diagnostics failed at the phone gate. Adds locator/boundingBox fallback, visible debug cursor overlay, and raw-page form operations. Verified provider test + tsc + drift. |
+| `592670a` | `fix(opentable): use locator typing for guest form` | Latest founder retry still saw no click/type because `evaluate()` diagnostics failed at the phone gate. Adds locator/boundingBox fallback, visible debug cursor overlay, and raw-page form operations. Verified provider test + tsc + drift. |
 | `78c87a9` | `fix(opentable): classify phone gate before country wrapper text` | Founder retry showed `formType` saw phone but coordinate target discovery found none. Phone classification now prefers direct phone-like attributes before excluding country/code wrapper text, and logs visible input candidates if target discovery still fails. Verified provider test + tsc + drift. |
 | `7591b03` | `fix(opentable): type into phone gate with compatible input APIs` | Founder log showed DOM value assignment did not fill OpenTable's phone-only gate. Adds Stagehand-compatible coordinate click + keyPress/type fallback for diner fields, mirrored to worker, with provider policy regression coverage. Verified provider test + tsc + drift. |
 | `09f8023` | `fix(opentable): avoid locator fallback on guest form` | Founder log showed `page.getByPlaceholder is not a function`. Replaced OpenTable locator fallback with DOM-evaluate filling and blocked OpenTable guest-form errors from becoming `paused_payment`. Verified provider policy test + tsc + drift. |
