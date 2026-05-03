@@ -1,8 +1,8 @@
 # Codex - coordination state
 
 > **Branch**: `codex/openai-chat-model-env`
-> **Last updated**: 2026-05-03 17:35 UTC
-> **Last commit**: `8320f71`
+> **Last updated**: 2026-05-03 17:20 UTC
+> **Last commit**: `pending`
 >
 > Claude reads this at session start. I write to it before each push.
 > See `CLAUDE.md` section "coordination protocol".
@@ -10,6 +10,18 @@
 > `origin/claude/festive-pare-f27273:.coordination/claude.md`.
 
 ## Currently doing
+
+Shipping the next OpenTable guest-form fix after founder retry still showed no visible click/type at the phone gate.
+
+Root cause from `codex-worker.log`:
+- Listing -> details works by programmatic OpenTable time-slot click; this is still legacy Stagehand/local Playwright RPA, not Computer Use.
+- At `/booking/details`, `formType` sees the phone-only gate, but subsequent DOM `evaluate()` diagnostics can throw `StagehandEvalError`, so prior coordinate typing had no target and no visible cursor.
+
+Patch:
+- Add locator/boundingBox/inputValue fallback for phone/name/email fields before any browser `evaluate()` path.
+- Add explicit `onegent-opentable-debug-cursor` overlay plus Playwright `mouse.move/click` support before coordinate typing, so founder can visually see the click target.
+- Route guest-form operations through raw page when available and keep the final `Complete reservation` click disabled by policy.
+- Mirrored provider to worker. Verification: OpenTable policy Vitest, root `tsc`, and strict drift all passed. No live retry from Codex.
 
 Shipping a fifth OpenTable guest-form fix after founder retry showed the phone gate still never received an actual click/type.
 
@@ -139,6 +151,7 @@ What I just merged from Claude:
 
 | Commit | Subject | Notes for Claude |
 |---|---|---|
+| `pending` | `fix(opentable): use locator typing for guest form` | Latest founder retry still saw no click/type because `evaluate()` diagnostics failed at the phone gate. Adds locator/boundingBox fallback, visible debug cursor overlay, and raw-page form operations. Verified provider test + tsc + drift. |
 | `78c87a9` | `fix(opentable): classify phone gate before country wrapper text` | Founder retry showed `formType` saw phone but coordinate target discovery found none. Phone classification now prefers direct phone-like attributes before excluding country/code wrapper text, and logs visible input candidates if target discovery still fails. Verified provider test + tsc + drift. |
 | `7591b03` | `fix(opentable): type into phone gate with compatible input APIs` | Founder log showed DOM value assignment did not fill OpenTable's phone-only gate. Adds Stagehand-compatible coordinate click + keyPress/type fallback for diner fields, mirrored to worker, with provider policy regression coverage. Verified provider test + tsc + drift. |
 | `09f8023` | `fix(opentable): avoid locator fallback on guest form` | Founder log showed `page.getByPlaceholder is not a function`. Replaced OpenTable locator fallback with DOM-evaluate filling and blocked OpenTable guest-form errors from becoming `paused_payment`. Verified provider policy test + tsc + drift. |

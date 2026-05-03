@@ -1,4 +1,4 @@
-import type { Page } from "playwright";
+import type { Locator, Page } from "playwright";
 import { registerProvider } from "./registry";
 import type { BrowserProvider, PaymentFillResult, ProviderStageSignals } from "./types";
 import { fillGuestFormWithAI, auditAndRefillEmptyFields } from "../ai-loop/fill-form";
@@ -36,13 +36,177 @@ interface OpenTableFieldTarget {
   descriptor: string;
 }
 
+interface OpenTableLocatedInput extends OpenTableFieldTarget {
+  locator: Locator;
+}
+
 type OpenTableInputPage = Page & {
   click?: (x: number, y: number, options?: { button?: string; clickCount?: number }) => Promise<unknown>;
   keyPress?: (key: string, options?: { delay?: number }) => Promise<unknown>;
   type?: (text: string, options?: { delay?: number }) => Promise<unknown>;
+  mouse?: {
+    click: (x: number, y: number, options?: { button?: string; clickCount?: number }) => Promise<unknown>;
+    move?: (x: number, y: number) => Promise<unknown>;
+  };
+  keyboard?: {
+    press: (key: string, options?: { delay?: number }) => Promise<unknown>;
+    type: (text: string, options?: { delay?: number }) => Promise<unknown>;
+  };
 };
 
+async function showOpenTableDebugCursor(
+  page: Page,
+  target: OpenTableFieldTarget,
+  field: OpenTableDinerField,
+  trace?: (msg: string) => void,
+): Promise<void> {
+  await page.evaluate(
+    ({ x, y, field }: { x: number; y: number; field: string }) => {
+      const id = "onegent-opentable-debug-cursor";
+      document.getElementById(id)?.remove();
+      const marker = document.createElement("div");
+      marker.id = id;
+      marker.textContent = field;
+      marker.style.position = "fixed";
+      marker.style.left = `${x - 10}px`;
+      marker.style.top = `${y - 10}px`;
+      marker.style.width = "20px";
+      marker.style.height = "20px";
+      marker.style.borderRadius = "9999px";
+      marker.style.background = "rgba(239, 68, 68, 0.92)";
+      marker.style.border = "3px solid white";
+      marker.style.boxShadow = "0 0 0 3px rgba(239, 68, 68, 0.35), 0 4px 14px rgba(0,0,0,0.35)";
+      marker.style.color = "white";
+      marker.style.font = "10px/20px sans-serif";
+      marker.style.textAlign = "center";
+      marker.style.zIndex = "2147483647";
+      marker.style.pointerEvents = "none";
+      document.documentElement.appendChild(marker);
+      window.setTimeout(() => marker.remove(), 5000);
+    },
+    { x: target.x, y: target.y, field },
+  ).catch((error: Error) => {
+    trace?.(`[opentable] debug cursor overlay failed for ${field}: ${error.message?.slice(0, 80)}`);
+  });
+}
+
+async function clickOpenTablePoint(page: Page, x: number, y: number): Promise<void> {
+  const compat = page as OpenTableInputPage;
+  if (compat.mouse?.click) {
+    await compat.mouse.move?.(x, y).catch(() => undefined);
+    await compat.mouse.click(x, y);
+    return;
+  }
+  if (typeof compat.click === "function") {
+    await compat.click(x, y);
+    return;
+  }
+  throw new Error("no compatible click API");
+}
+
+async function pressOpenTableKey(page: Page, key: string): Promise<void> {
+  const compat = page as OpenTableInputPage;
+  if (compat.keyboard?.press) {
+    await compat.keyboard.press(key);
+    return;
+  }
+  if (typeof compat.keyPress === "function") {
+    await compat.keyPress(key);
+    return;
+  }
+  throw new Error("no compatible keyPress API");
+}
+
+async function typeOpenTableText(page: Page, value: string, delay: number): Promise<void> {
+  const compat = page as OpenTableInputPage;
+  if (compat.keyboard?.type) {
+    await compat.keyboard.type(value, { delay });
+    return;
+  }
+  if (typeof compat.type === "function") {
+    await compat.type(value, { delay });
+    return;
+  }
+  throw new Error("no compatible type API");
+}
+
+function openTableFieldSelectors(field: OpenTableDinerField): string[] {
+  switch (field) {
+    case "phone":
+      return [
+        'input[type="tel"]',
+        'input[placeholder*="Phone"]',
+        'input[placeholder*="phone"]',
+        'input[aria-label*="Phone"]',
+        'input[aria-label*="phone"]',
+        'input[name*="phone"]',
+        'input[id*="phone"]',
+      ];
+    case "firstName":
+      return [
+        'input[placeholder*="First"]',
+        'input[placeholder*="first"]',
+        'input[aria-label*="First"]',
+        'input[aria-label*="first"]',
+        'input[name*="first"]',
+        'input[id*="first"]',
+        'input[autocomplete="given-name"]',
+      ];
+    case "lastName":
+      return [
+        'input[placeholder*="Last"]',
+        'input[placeholder*="last"]',
+        'input[aria-label*="Last"]',
+        'input[aria-label*="last"]',
+        'input[name*="last"]',
+        'input[id*="last"]',
+        'input[autocomplete="family-name"]',
+      ];
+    case "email":
+      return [
+        'input[type="email"]',
+        'input[placeholder*="Email"]',
+        'input[placeholder*="email"]',
+        'input[aria-label*="Email"]',
+        'input[aria-label*="email"]',
+        'input[name*="email"]',
+        'input[id*="email"]',
+        'input[autocomplete="email"]',
+      ];
+  }
+}
+
+async function locateOpenTableInputByLocator(
+  page: Page,
+  field: OpenTableDinerField,
+): Promise<OpenTableLocatedInput | null> {
+  if (typeof page.locator !== "function") return null;
+  for (const selector of openTableFieldSelectors(field)) {
+    const matches = page.locator(selector);
+    const count = await matches.count().catch(() => 0);
+    for (let index = 0; index < Math.min(count, 5); index += 1) {
+      const candidate = matches.nth(index);
+      const visible = await candidate.isVisible().catch(() => false);
+      if (!visible) continue;
+      const enabled = await candidate.isEnabled().catch(() => true);
+      if (!enabled) continue;
+      await candidate.scrollIntoViewIfNeeded().catch(() => undefined);
+      const box = await candidate.boundingBox().catch(() => null);
+      if (!box || box.width <= 0 || box.height <= 0) continue;
+      return {
+        locator: candidate,
+        x: Math.round(box.x + box.width / 2),
+        y: Math.round(box.y + box.height / 2),
+        descriptor: `${selector}#${index} ${Math.round(box.width)}x${Math.round(box.height)}`,
+      };
+    }
+  }
+  return null;
+}
+
 async function locateOpenTablePhoneGate(page: Page): Promise<OpenTableFieldTarget | null> {
+  const locatorHit = await locateOpenTableInputByLocator(page, "phone");
+  if (locatorHit) return locatorHit;
   return page.evaluate(() => {
     const isShown = (el: HTMLElement): boolean => {
       if (el.hidden || !el.isConnected) return false;
@@ -93,6 +257,8 @@ async function locateOpenTableDinerField(
   page: Page,
   field: OpenTableDinerField,
 ): Promise<OpenTableFieldTarget | null> {
+  const locatorHit = await locateOpenTableInputByLocator(page, field);
+  if (locatorHit) return locatorHit;
   if (field === "phone") {
     const phoneGate = await locateOpenTablePhoneGate(page);
     if (phoneGate) return phoneGate;
@@ -154,6 +320,13 @@ async function verifyOpenTableDinerField(
   page: Page,
   field: OpenTableDinerField,
 ): Promise<boolean> {
+  const locatorHit = await locateOpenTableInputByLocator(page, field);
+  if (locatorHit) {
+    const value = await locatorHit.locator.inputValue().catch(() => "");
+    if (field === "phone") return value.replace(/\D/g, "").length >= 10;
+    if (field === "email") return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value.trim());
+    return value.trim().length > 0;
+  }
   return page.evaluate((targetField: OpenTableDinerField) => {
     const isShown = (el: HTMLElement): boolean => {
       if (el.hidden || !el.isConnected) return false;
@@ -227,11 +400,6 @@ async function typeOpenTableFieldByCoordinate(
   trace?: (msg: string) => void,
 ): Promise<boolean> {
   if (!value) return false;
-  const compat = page as OpenTableInputPage;
-  if (typeof compat.click !== "function" || typeof compat.keyPress !== "function" || typeof compat.type !== "function") {
-    trace?.(`[opentable] coordinate typing unavailable for ${field} (missing Stagehand CDP input APIs)`);
-    return false;
-  }
   const target = await locateOpenTableDinerField(page, field);
   if (!target) {
     trace?.(`[opentable] coordinate typing target not found for ${field}`);
@@ -241,12 +409,14 @@ async function typeOpenTableFieldByCoordinate(
     return false;
   }
   try {
-    await compat.click(target.x, target.y);
+    await showOpenTableDebugCursor(page, target, field, trace);
+    trace?.(`[opentable] coordinate typing ${field}: clicking ${target.x},${target.y} target="${target.descriptor}"`);
+    await clickOpenTablePoint(page, target.x, target.y);
     await new Promise((r) => setTimeout(r, 150));
-    await compat.keyPress("Control+a").catch(() => undefined);
-    await compat.keyPress("Backspace").catch(() => undefined);
+    await pressOpenTableKey(page, "Control+A").catch(() => pressOpenTableKey(page, "Control+a").catch(() => undefined));
+    await pressOpenTableKey(page, "Backspace").catch(() => undefined);
     await new Promise((r) => setTimeout(r, 100));
-    await compat.type(value, { delay: field === "phone" ? 45 : 55 });
+    await typeOpenTableText(page, value, field === "phone" ? 45 : 55);
     await new Promise((r) => setTimeout(r, 250));
   } catch (error) {
     trace?.(`[opentable] coordinate typing failed for ${field}: ${(error as Error).message?.slice(0, 100)}`);
@@ -258,6 +428,30 @@ async function typeOpenTableFieldByCoordinate(
   return accepted;
 }
 
+async function fillOpenTableFieldWithLocator(
+  page: Page,
+  field: OpenTableDinerField,
+  value: string,
+  trace?: (msg: string) => void,
+): Promise<boolean> {
+  if (!value) return false;
+  const target = await locateOpenTableInputByLocator(page, field);
+  if (!target) return false;
+  await showOpenTableDebugCursor(page, target, field, trace);
+  try {
+    await target.locator.click({ timeout: 3000 });
+    await target.locator.fill(value, { timeout: 3000 });
+    await new Promise((r) => setTimeout(r, 250));
+  } catch (error) {
+    trace?.(`[opentable] locator fill failed for ${field}: ${(error as Error).message?.slice(0, 100)}`);
+    return false;
+  }
+  const verified = await verifyOpenTableDinerField(page, field);
+  const accepted = verified || field === "phone";
+  trace?.(`[opentable] locator fill ${field}: target="${target.descriptor}" verified=${verified} accepted=${accepted}`);
+  return accepted;
+}
+
 async function fillOpenTableFieldFallback(
   page: Page,
   field: OpenTableDinerField,
@@ -265,6 +459,8 @@ async function fillOpenTableFieldFallback(
   trace?: (msg: string) => void,
 ): Promise<boolean> {
   if (!value) return false;
+  const locatorFilled = await fillOpenTableFieldWithLocator(page, field, value, trace);
+  if (locatorFilled) return true;
   const domFilled = await page.evaluate(
     ({ field, value }: { field: OpenTableDinerField; value: string }) => {
       const nativeFill = (el: HTMLInputElement, val: string): boolean => {
@@ -844,6 +1040,10 @@ export const openTableProvider: BrowserProvider = {
     const h = helpers as { stagehand?: { act: (s: string) => Promise<unknown> }; rawPage?: Page } | null;
     const stagehand = h?.stagehand;
     const rawPage = h?.rawPage ?? page;
+    const formPage = rawPage;
+    if (formPage !== page) {
+      trace("[opentable] using raw Playwright page for guest-form DOM operations");
+    }
 
     // Preflight intermediate pages (seating-options / specials). Extracted
     // to runOpenTableIntermediatePreflight so the stagehand-executor's
@@ -857,7 +1057,7 @@ export const openTableProvider: BrowserProvider = {
     // Step 1: detect which form type is showing.
     // OpenTable unauthenticated flow shows a phone-only form first.
     // Clicking "Use email instead" reveals the full name/email form.
-    const formType = await page.evaluate(() => {
+    const formType = await formPage.evaluate(() => {
       const inputs = Array.from(document.querySelectorAll<HTMLInputElement>("input"))
         .filter(el => {
         if (el.type === "hidden" || el.disabled) return false;
@@ -897,7 +1097,7 @@ export const openTableProvider: BrowserProvider = {
     let phoneGateSatisfied = false;
     if (formType.hasPhone && !formType.hasName && phoneDigits) {
       trace("[opentable] phone-only form detected - filling phone directly");
-      const phoneFilled = await page.evaluate((phone: string) => {
+      const phoneFilled = await formPage.evaluate((phone: string) => {
         const nativeFill = (el: HTMLInputElement, val: string): boolean => {
           if (!val) return false;
           const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set;
@@ -928,13 +1128,13 @@ export const openTableProvider: BrowserProvider = {
       trace(`[opentable] phone-only direct fill result: ${phoneFilled}`);
       phoneGateSatisfied = phoneFilled;
       if (!phoneFilled) {
-        const typedPhone = await typeOpenTableFieldByCoordinate(page, "phone", phoneTypedValue, trace);
+        const typedPhone = await typeOpenTableFieldByCoordinate(formPage, "phone", phoneTypedValue, trace);
         trace(`[opentable] phone-only coordinate typing result: ${typedPhone}`);
         phoneGateSatisfied = typedPhone;
       }
     } else if (formType.hasPhone && !formType.hasName && formType.hasEmailLink) {
       trace("[opentable] phone-only form detected without usable phone - clicking 'Use email instead'");
-      const clicked = await page.evaluate(() => {
+      const clicked = await formPage.evaluate(() => {
         const link = Array.from(document.querySelectorAll<HTMLElement>("a, button, span"))
           .find(el => /use email instead/i.test((el.textContent || "").trim()));
         if (link) { link.click(); return true; }
@@ -947,7 +1147,7 @@ export const openTableProvider: BrowserProvider = {
     }
 
     // Step 3: fill name / email / phone on the full form.
-    const results = await page.evaluate(
+    const results = await formPage.evaluate(
       ({ first, last, email, phone }: { first: string; last: string; email: string; phone: string }) => {
         const nativeFill = (el: HTMLInputElement, val: string): boolean => {
           if (!val) return false;
@@ -1007,16 +1207,16 @@ export const openTableProvider: BrowserProvider = {
     trace(`[opentable] guest form filled: firstName=${results.firstName} lastName=${results.lastName} email=${results.email} phone=${results.phone}`);
 
     const fallbackFilled: string[] = [];
-    if (results.firstName !== true && await fillOpenTableFieldFallback(page, "firstName", firstName, trace)) {
+    if (results.firstName !== true && await fillOpenTableFieldFallback(formPage, "firstName", firstName, trace)) {
       fallbackFilled.push("firstName");
     }
-    if (results.lastName !== true && await fillOpenTableFieldFallback(page, "lastName", lastName, trace)) {
+    if (results.lastName !== true && await fillOpenTableFieldFallback(formPage, "lastName", lastName, trace)) {
       fallbackFilled.push("lastName");
     }
-    if (results.email !== true && await fillOpenTableFieldFallback(page, "email", email, trace)) {
+    if (results.email !== true && await fillOpenTableFieldFallback(formPage, "email", email, trace)) {
       fallbackFilled.push("email");
     }
-    if (results.phone !== true && await fillOpenTableFieldFallback(page, "phone", phoneTypedValue, trace)) {
+    if (results.phone !== true && await fillOpenTableFieldFallback(formPage, "phone", phoneTypedValue, trace)) {
       fallbackFilled.push("phone");
       if (formType.hasPhone && !formType.hasName) {
         phoneGateSatisfied = true;
@@ -1026,7 +1226,7 @@ export const openTableProvider: BrowserProvider = {
       trace(`[opentable] compatible input fallback filled: ${fallbackFilled.join(",")}`);
     }
 
-    let dinerFormState = await readOpenTableDinerFormState(page);
+    let dinerFormState = await readOpenTableDinerFormState(formPage);
 
     // Step 4: AI fill for any fields the programmatic pass missed.
     if (stagehand) {
@@ -1043,14 +1243,14 @@ export const openTableProvider: BrowserProvider = {
       // Step 5: audit - catch any still-empty fields.
       try {
         const effectiveProfile = buildEffectiveProfile({ ...p, first_name: firstName, last_name: lastName, email } as BookingProfile, "");
-        const audit = await auditAndRefillEmptyFields(stagehand, rawPage, effectiveProfile, trace);
+        const audit = await auditAndRefillEmptyFields(stagehand, formPage, effectiveProfile, trace);
         if (audit.refilled.length) trace(`[opentable] audit refilled: ${audit.refilled.join(",")}`);
       } catch (e) {
         trace(`[opentable] audit error: ${(e as Error).message?.slice(0, 80)}`);
       }
     }
 
-    dinerFormState = await readOpenTableDinerFormState(page);
+    dinerFormState = await readOpenTableDinerFormState(formPage);
     trace(
       `[opentable] diner form state: present=${dinerFormState.present.join(",") || "none"} ` +
       `filled=${dinerFormState.filled.join(",") || "none"} empty=${dinerFormState.empty.join(",") || "none"} ` +
@@ -1074,7 +1274,7 @@ export const openTableProvider: BrowserProvider = {
     // enter CVV). Clicking submit now would trigger client-side validation and
     // surface misleading red errors to the user.
     await new Promise(r => setTimeout(r, 800));
-    const ccRequired = await hasCreditCardSection(page);
+    const ccRequired = await hasCreditCardSection(formPage);
     if (ccRequired) {
       trace('[opentable] credit card section detected - skipping submit click (payment stage will handle it)');
       // For benchmark dry_run, also emit the boundary marker so the
