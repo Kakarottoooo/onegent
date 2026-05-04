@@ -54,6 +54,15 @@ Expected primary provider:
 Do not begin with Hotels.com or Expedia hotel unless Booking.com is explicitly
 blocked and the founder approves a changed provider target.
 
+## Hotel Runtime Audit Finding
+
+Booking.com is the most demo-adjacent hotel provider for the first controlled
+retry. The current static path has Booking.com URL construction, stage helpers,
+room selection helpers, guest-details detection, payment-boundary guards, bot
+patterns, and no-live runtime-forensics fixtures/tests. Hotels.com remains a
+fallback only after Booking.com is explicitly blocked. Expedia hotel should stay
+out of scope until a separate founder-approved hotel case exists.
+
 ## Preflight Environment
 
 Before a retry:
@@ -74,6 +83,31 @@ Before a retry:
 
 Do not add a runner, dashboard button, cron, automation, or one-click live
 control for this retry.
+
+## Hotel Controlled Retry Decision Tree
+
+1. If profile data is missing before provider work, stop and classify
+   `profile_gating`.
+2. If Booking.com does not show YOTEL New York Times Square with the approved
+   dates, guest count, and room count, stop and preserve DB/log/screenshot
+   evidence before considering URL or search-result drift.
+3. If room selection is reached, stop for operator review when evidence is
+   sufficient and classify `room_selection_manual_review_reached`. Patch the
+   room-to-guest transition only if screenshots and logs prove selector or
+   runtime drift.
+4. If guest details or manual review is reached, stop before payment/CVV/final
+   controls and classify `guest_details_manual_review_reached`.
+5. If payment, billing, checkout, CVV, or final booking controls appear, hard
+   stop. Classify `payment_manual_review_reached` only when no payment data was
+   entered and no final control was clicked.
+6. If login, OTP, CAPTCHA, phone verification, bot wall, or an account prompt
+   appears, hard stop and classify `login_or_captcha_boundary`. Do not bypass.
+7. If Booking.com returns 5xx, timeout, blocked provider response, or network
+   instability, classify `network_provider_failure`. Do not patch selectors from
+   network evidence alone.
+8. If room/rate inventory is visible but selection fails, classify
+   `room_selection_drift` only after DB/log/screenshot evidence confirms the
+   correct target was visible.
 
 ## DB Evidence Query
 
@@ -253,6 +287,9 @@ anything.
 
 Acceptable retry outcomes:
 
+- `room_selection_manual_review_reached`: room/rate selection reached and the
+  operator stopped before guest details, payment, CVV, login, OTP, CAPTCHA, or
+  final confirmation.
 - `checkout_reached_manual_review`: guest details or final details reached,
   then stopped before CVV/final confirmation.
 - `paused_payment`: payment boundary reached and browser handed off safely.

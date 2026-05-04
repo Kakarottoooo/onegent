@@ -13,6 +13,7 @@ export type HotelRetryState =
   | "safety_boundary_violation"
   | "payment_manual_review_reached"
   | "guest_details_manual_review_reached"
+  | "room_selection_manual_review_reached"
   | "login_or_captcha_boundary"
   | "profile_gating"
   | "network_provider_failure"
@@ -23,6 +24,7 @@ type SignalKind =
   | "safety_boundary_violation"
   | "payment_boundary"
   | "guest_details_reached"
+  | "room_selection_reached"
   | "login_or_captcha"
   | "profile_gating"
   | "network_provider_failure"
@@ -34,6 +36,7 @@ export const HOTEL_RETRY_STATE_LABEL: Record<HotelRetryState, string> = {
   safety_boundary_violation: "Safety boundary violation",
   payment_manual_review_reached: "Payment/manual-review reached",
   guest_details_manual_review_reached: "Guest-details/manual-review reached",
+  room_selection_manual_review_reached: "Room-selection/manual-review reached",
   login_or_captcha_boundary: "Login/CAPTCHA/OTP boundary",
   profile_gating: "Profile gating before provider work",
   network_provider_failure: "Network/provider failure",
@@ -179,6 +182,21 @@ const SIGNAL_PATTERNS: SignalPattern[] = [
     rx: /\breservation details\s+(page|form)\s+(visible|reached|loaded)\b/i,
   },
   {
+    kind: "room_selection_reached",
+    label: "room selection reached",
+    rx: /\b(room|rate)\s+(selected|selection)\s+(visible|reached|loaded|succeeded|complete|completed)\b/i,
+  },
+  {
+    kind: "room_selection_reached",
+    label: "room quantity selected",
+    rx: /\bselected room quantity\b|\broom quantity\s+(selected|set|updated)\b/i,
+  },
+  {
+    kind: "room_selection_reached",
+    label: "room selected before manual review",
+    rx: /\b(room|rate)\s+selected\b.*\b(manual review|operator review|safe handoff)\b/i,
+  },
+  {
     kind: "login_or_captcha",
     label: "login or sign-in wall",
     rx: /\b(login|sign[-\s]?in)\s+(wall|required|prompt|modal)\b/i,
@@ -270,6 +288,7 @@ export function analyzeHotelRetryArtifactBundle(
   const hasSafetyViolation = has("safety_boundary_violation");
   const hasPaymentBoundary = has("payment_boundary");
   const hasGuestDetails = has("guest_details_reached");
+  const hasRoomSelectionReached = has("room_selection_reached");
   const hasLoginOrCaptcha = has("login_or_captcha");
   const hasProfileGating = has("profile_gating");
   const hasNetwork = has("network_provider_failure");
@@ -288,6 +307,8 @@ export function analyzeHotelRetryArtifactBundle(
     state = "profile_gating";
   } else if (hasNetwork) {
     state = "network_provider_failure";
+  } else if (hasRoomSelectionReached) {
+    state = "room_selection_manual_review_reached";
   } else if (hasRoomSelectionDrift) {
     state = "room_selection_drift";
   } else {
@@ -310,6 +331,7 @@ export function analyzeHotelRetryArtifactBundle(
   const confidence = classifyConfidence(state, {
     hasPaymentBoundary,
     hasGuestDetails,
+    hasRoomSelectionReached,
     hasRoomSelectionDrift,
   });
 
@@ -468,6 +490,7 @@ function classifyConfidence(
   flags: {
     hasPaymentBoundary: boolean;
     hasGuestDetails: boolean;
+    hasRoomSelectionReached: boolean;
     hasRoomSelectionDrift: boolean;
   },
 ): "high" | "medium" | "low" {
@@ -481,6 +504,8 @@ function classifyConfidence(
       return flags.hasPaymentBoundary ? "high" : "medium";
     case "guest_details_manual_review_reached":
       return flags.hasGuestDetails ? "high" : "medium";
+    case "room_selection_manual_review_reached":
+      return flags.hasRoomSelectionReached ? "high" : "medium";
     case "room_selection_drift":
       return flags.hasRoomSelectionDrift ? "high" : "medium";
     case "insufficient_evidence":
@@ -511,6 +536,8 @@ function nextActionForState(state: HotelRetryState): string {
       return "Count as safe hotel progress only if the run stopped before CVV, payment submission, login bypass, CAPTCHA/OTP bypass, or final confirmation.";
     case "guest_details_manual_review_reached":
       return "Count as partial hotel progress. Inspect whether guest-details fill or payment-boundary detection is the next smallest patch, using screenshots first.";
+    case "room_selection_manual_review_reached":
+      return "Count as safe partial hotel progress. Preserve room-selection screenshots and only patch the room-to-guest transition if DB/log/screenshot evidence proves selector or runtime drift.";
     case "login_or_captcha_boundary":
       return "Treat as an expected safe provider boundary. Do not bypass login, CAPTCHA, OTP, or account-sensitive prompts.";
     case "profile_gating":
@@ -532,14 +559,16 @@ function signalRank(kind: SignalKind): number {
       return 1;
     case "guest_details_reached":
       return 2;
-    case "login_or_captcha":
+    case "room_selection_reached":
       return 3;
-    case "profile_gating":
+    case "login_or_captcha":
       return 4;
-    case "network_provider_failure":
+    case "profile_gating":
       return 5;
-    case "room_selection_drift":
+    case "network_provider_failure":
       return 6;
+    case "room_selection_drift":
+      return 7;
   }
 }
 
