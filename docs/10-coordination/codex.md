@@ -2,7 +2,7 @@
 
 > **Branch**: `codex/integrated-preview-20260504`
 > **Last updated**: 2026-05-04
-> **Last commit**: pending Agent2 Phase 2 evidence merge
+> **Last commit**: pending Claude UX/demo-control-room merge
 >
 > Claude reads this at session start. I write to it before each push.
 > See `CLAUDE.md` section "coordination protocol".
@@ -14,6 +14,28 @@
 Phase 1 demo trunk stabilization on integrated preview.
 
 Completed in latest pass:
+- Reviewed and cherry-picked Claude UI/dev-tooling branches:
+  - `claude/runtime-forensics-ux-polish-v2` feature/doc commits, excluding
+    stale `[coord]` commit.
+  - `claude/demo-control-room` feature/doc commits, excluding stale `[coord]`
+    commits.
+- Added:
+  - runtime-forensics URL state, fixtures, examples toggle, recommendation
+    engine, and dashboard UX v2;
+  - `/dev/demo-control-room`, `lib/demo-control-room/**`, and
+    `docs/40-phase1/DEMO_CONTROL_ROOM.md`.
+- Integration fixes after review:
+  - new Demo Control Room files are ASCII-clean;
+  - Demo Control Room links Agent2's Expedia controlled retry runbook;
+  - runtime-forensics client page imports only client-safe modules, so webpack
+    no longer pulls `node:fs` from `loader.ts`.
+- Verified:
+  - runtime-forensics tests 377/377.
+  - demo-control-room tests 68/68.
+  - `npm run gate:phase1 -- --allow-known-drift` pass, 9/9.
+  - `npm run build` pass.
+
+Previous completed pass:
 - Reviewed and cherry-picked Agent2 sidecar branches:
   - `0eef0d3 docs(phase2): add Expedia controlled retry evidence`
   - `5499949 test(forensics): classify Expedia card-scan signals`
@@ -29,7 +51,7 @@ Completed in latest pass:
   - `npm run check-drift` pass.
   - `npm run gate:phase1 -- --allow-known-drift` pass, 9/9.
 
-Previous completed pass:
+Earlier completed:
 - Made the standard production build pass in the integrated worktree:
   - pinned `package.json` build script to `next build --webpack` because
     Turbopack panics on the Windows worktree `node_modules` junction;

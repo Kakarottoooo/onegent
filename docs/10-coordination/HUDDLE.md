@@ -33,6 +33,15 @@ small.
 
 ## Live Activity
 
+- 2026-05-04 codex: cherry-picked Claude runtime-forensics UX v2 and Demo
+  Control Room into integrated preview, skipping stale Claude coord commits.
+  Added URL filters, static fixtures, recommended evidence, examples toggle,
+  `/dev/runtime-forensics` UX v2, and `/dev/demo-control-room`. Fixed follow-up
+  integration issues: cleaned new Demo Control Room files to ASCII, linked the
+  Expedia controlled retry runbook, and changed runtime-forensics client imports
+  so webpack does not pull `node:fs` into the client bundle. Verified
+  runtime-forensics tests 377/377, demo-control-room tests 68/68, Phase 1 gate
+  9/9, and `npm run build`.
 - 2026-05-04 codex: cherry-picked Agent2 Phase 2 evidence and Expedia
   forensics commits into integrated preview:
   `0eef0d3`, `5499949`, `24def46`. Added
