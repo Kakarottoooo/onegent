@@ -17,6 +17,14 @@ No-live freeze checker:
 npx tsx scripts/check-demo-freeze.ts
 ```
 
+Restaurant artifact analyzer:
+
+- `docs/20-phase0-restaurant/RESTAURANT_ARTIFACT_ANALYSIS.md`
+- The restaurant artifact analyzer is no-live only.
+- It reads already-collected DB/log/screenshot bundles and does
+  not start providers, OpenAI, payment, OTP, CAPTCHA, login, retry, or final
+  confirmation flows.
+
 ## How To Read Latest Readiness
 
 Use these in order:

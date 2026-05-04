@@ -20,6 +20,19 @@ the safe boundary.
 For the one-page printable checklist, use
 `docs/40-phase1/YC_DEMO_OPERATOR_CARD.md`.
 
+Before the demo, run the no-live freeze checker:
+
+```powershell
+npx tsx scripts/check-demo-freeze.ts
+```
+
+For restaurant artifact questions, use
+`docs/20-phase0-restaurant/RESTAURANT_ARTIFACT_ANALYSIS.md`.
+The restaurant artifact analyzer is no-live only.
+It reads already-collected DB/log/screenshot bundles and does not start
+providers, OpenAI, payment, OTP, CAPTCHA, login, retry, or final confirmation
+flows.
+
 ## Five-Minute Preflight
 
 Run these checks from the integrated preview worktree:
@@ -113,7 +126,8 @@ Do not claim:
 
 - Resy is fully closed.
 - Every restaurant provider is production reliable.
-- The agent can automatically handle OTP, CAPTCHA, login, or payment.
+- Do not claim the agent can automatically handle OTP, CAPTCHA, login, or
+  payment.
 
 ### Phase 1 - First Paying User Path
 

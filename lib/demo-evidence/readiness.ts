@@ -228,6 +228,11 @@ const DOC_LINKS: Omit<DemoEvidenceDocLink, "exists">[] = [
     kind: "runbook",
   },
   {
+    label: "Restaurant artifact analysis",
+    path: "docs/20-phase0-restaurant/RESTAURANT_ARTIFACT_ANALYSIS.md",
+    kind: "runbook",
+  },
+  {
     label: "Phase 2 coordination",
     path: "docs/10-coordination/phase2.md",
     kind: "coordination",

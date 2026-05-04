@@ -4,9 +4,9 @@
 > Owner: Track C demo operator polish
 > Print target: one page, read-only checklist.
 
-This card is for the person driving the demo. It is not approval to start
-provider production sessions, enter payment details, enter OTP codes, solve
-CAPTCHA, shortcut login, or perform final confirmation.
+This card is for the person driving the demo. It gives no approval for
+provider production sessions, payment details, OTP codes, CAPTCHA solving,
+login shortcuts, or final confirmation.
 
 Before the demo, run the no-live freeze checker:
 
@@ -16,6 +16,23 @@ npx tsx scripts/check-demo-freeze.ts
 
 The checker reads local artifacts and docs only. It does not start providers,
 workers, payment, OTP, CAPTCHA, login, retry, or final confirmation flows.
+
+## Demo Day Checklist
+
+Use this sequence before anyone opens the user-facing flow:
+
+1. Confirm the branch is the intended integrated preview.
+2. Run `npx tsx scripts/check-demo-freeze.ts`.
+3. Open `/dev/demo-readiness` and confirm the verdict is not blocked.
+4. Open `/dev/demo-control-room` and confirm no evidence card is unexplained
+   red.
+5. Confirm the Phase 2 wording is "audited / not live-verified."
+6. If restaurant provider evidence comes up, use
+   `docs/20-phase0-restaurant/RESTAURANT_ARTIFACT_ANALYSIS.md`.
+   The restaurant artifact analyzer is no-live only.
+   It reads existing DB/log/screenshot bundles and does not start providers,
+   OpenAI, payment, OTP, CAPTCHA, login, retry, or final confirmation flows.
+7. Keep the hard stops visible before switching to `/` or `/tasks?view=history`.
 
 ## 30-Second Product Pitch
 
@@ -88,7 +105,7 @@ demo promise. Booking.com and Hotels.com need fresh artifacts first."
 
 Avoid:
 
-- "Phase 2 is revived."
-- "Expedia is demo-ready."
-- "Hotels and flights are live-verified."
-- "The checkout path is verified."
+- Do not claim Phase 2 is revived.
+- Do not claim Expedia is demo-ready.
+- Do not claim hotels and flights are live-verified.
+- Do not claim the checkout path is verified.
