@@ -173,6 +173,11 @@ Example from 2026-05-04 flight failure:
 - Screenshot showed the target Southwest card visibly present.
 - Conclusion: provider runtime selector/DOM scan failed. NLU and core marker
   were not the root cause.
+- Follow-up fix: if the bulk DOM `page.evaluate()` scan throws, fall back to
+  Playwright locators over visible `button, [role="button"]` nodes. Score each
+  visible button with the same airline/price/time/flight-number rules, then
+  scroll the selected locator and return its bounding-box center. This avoids
+  treating a Stagehand evaluate wrapper error as provider inventory drift.
 
 ## 5. Provider-Specific Notes
 
@@ -249,7 +254,8 @@ Current flight issue:
 - Latest Expedia failure has correct core marker and params.
 - Screenshot shows Southwest 8:50am MCO->BNA $152 visible.
 - Worker log says flight-card DOM scan failed.
-- Next likely fix: harden Expedia card matching and popup dismissal.
+- Current fix branch: `codex/expedia-flight-card-fallback` hardens Expedia
+  card matching with a locator fallback after `StagehandEvalError`.
 
 Rules:
 - Do not automate payment, OTP, CAPTCHA, or final provider confirmation.

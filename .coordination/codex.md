@@ -11,6 +11,38 @@
 
 ## Currently doing
 
+Shipping Expedia flight-card fallback hardening after the MCO -> BNA founder
+run proved the legacy-shape worker error is fixed and the live blocker moved
+to provider DOM scanning.
+
+Current evidence:
+- DB job `dfa54219-dd3d-447a-9231-a9dd13edf0cb` has
+  `steps[0].body.__source=lib/core/execution-local-...`.
+- DB params are correct: `origin=MCO`, `dest=BNA`, `date=2026-06-01`,
+  `targetAirline=Southwest`, `targetDepartureTime=08:50`,
+  `targetFlightNumber=WN 3084`, `targetPrice=152`.
+- `codex-worker.log` shows `[flight-rpa] Flight-card DOM scan failed:
+  StagehandEvalError: Uncaught`.
+- Screenshot `worker/.debug-screenshots/flight-rpa-1777875646570/01-search-results.jpg`
+  shows the visible Southwest card.
+
+Patch summary:
+- Kept the existing Expedia bulk DOM scan as the fast path.
+- Added a Playwright locator fallback when that scan throws. It iterates
+  visible `button, [role="button"]` nodes, scores each visible label/context
+  against airline/price/time/flight number, scrolls the best match, and returns
+  bounding-box coordinates for the existing click path.
+- Extracted the candidate scoring into `scoreExpediaFlightCandidateText` and
+  covered the observed Southwest card in a regression test.
+- Mirrored provider to `worker/src/...`.
+
+Verification:
+- `npx vitest run lib/__tests__/expedia-flight-card-match.test.ts lib/__tests__/flight-time-filter.test.ts` passed 17/17.
+- `npx tsc --noEmit --pretty false` passed.
+- `npx tsx scripts/check-drift.ts` passed.
+
+Historical current-state handoff below:
+
 Shipping Resy form/OTP hardening before the next visible live run.
 
 Patch summary:
