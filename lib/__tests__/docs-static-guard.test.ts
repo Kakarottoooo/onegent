@@ -30,6 +30,21 @@ describe("docs static guard", () => {
     }
   });
 
+  it("keeps Phase 2 no-live review docs in place", () => {
+    const requiredDocs = [
+      "docs/10-coordination/phase2.md",
+      "docs/10-coordination/phase2-goal-review.md",
+      "docs/30-provider-debug/PROVIDER_RUNTIME_DEBUG_PLAYBOOK.md",
+      "docs/50-product-areas/EXPEDIA_CONTROLLED_RETRY_RUNBOOK.md",
+      "docs/50-product-areas/HOTEL_CONTROLLED_RETRY_RUNBOOK.md",
+      "docs/50-product-areas/HOTEL_VERTICAL_REVIVAL_AUDIT.md",
+    ];
+
+    for (const relPath of requiredDocs) {
+      expect(existsSync(path.join(ROOT, relPath)), relPath).toBe(true);
+    }
+  });
+
   it("keeps active demo docs free of mojibake and unsafe live-action copy", () => {
     const activeDemoDocs = [
       "docs/40-phase1/DEMO_CONTROL_ROOM.md",
