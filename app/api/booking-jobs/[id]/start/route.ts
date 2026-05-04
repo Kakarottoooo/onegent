@@ -78,6 +78,23 @@ const inFlightJobStarts = new Set<string>();
 function now() { return new Date().toISOString(); }
 function sleep(ms: number) { return new Promise<void>((r) => setTimeout(r, ms)); }
 
+function resetStepForWorkerEnqueue(step: BookingJobStep): BookingJobStep {
+  const nextBody = { ...(step.body as Record<string, unknown>) };
+  delete nextBody.__lastExecutionStatus;
+
+  return {
+    ...step,
+    body: nextBody,
+    status: "pending",
+    error: undefined,
+    decisionLog: undefined,
+    handoff_url: undefined,
+    session_url: undefined,
+    attemptCount: undefined,
+    actionItem: undefined,
+  };
+}
+
 function looksLikeSyntheticProfileValue(field: string, value: string | undefined): boolean {
   if (!value) return false;
   const normalized = value.trim().toLowerCase();
@@ -1459,27 +1476,28 @@ export async function POST(_req: NextRequest, { params }: Params) {
     const stampedSteps = job.steps.map((step) => {
       const body = step.body as Record<string, unknown> | undefined;
       if (isCoreExecutionSource(body?.__source)) {
-        if (body?.__source === CORE_EXECUTION_SOURCE) return step;
-        stampedCount += 1;
-        return {
-          ...step,
-          body: {
-            ...body,
-            __source: CORE_EXECUTION_SOURCE,
-          },
-        };
+        const restampedStep =
+          body?.__source === CORE_EXECUTION_SOURCE
+            ? step
+            : {
+                ...step,
+                body: {
+                  ...body,
+                  __source: CORE_EXECUTION_SOURCE,
+                },
+              };
+        if (body?.__source !== CORE_EXECUTION_SOURCE) stampedCount += 1;
+        return resetStepForWorkerEnqueue(restampedStep);
       }
       if (!_isCoreSupported(step.type)) return step;
       try {
         stampedCount += 1;
-        return markStepForCore(step);
+        return resetStepForWorkerEnqueue(markStepForCore(step));
       } catch {
         return step;
       }
     });
-    if (stampedCount > 0) {
-      await updateBookingJobSteps(id, stampedSteps);
-    }
+    await updateBookingJobSteps(id, stampedSteps);
     // Round-3 phantom isolation: enqueue with `pending_local` (in dev) so
     // phantom's hardcoded `WHERE status='pending'` claimOne SQL cannot
     // see this row. Local worker filters on PENDING_QUEUE_STATUS.

@@ -1507,7 +1507,7 @@ export async function bookExpediaFlightProgrammatic(
           return text === "one-way" && r.width > 0 && r.height > 0;
         });
       if (!target) return false;
-      target.scrollIntoView({ block: "center", behavior: "instant" as ScrollBehavior });
+      target.scrollIntoView({ block: "center", behavior: "auto" as ScrollBehavior });
       target.click();
       return true;
     }).catch(() => false);
@@ -1791,7 +1791,7 @@ export async function bookExpediaFlightProgrammatic(
 
     const rectBefore = best.btn.getBoundingClientRect();
     const inViewportBefore = rectBefore.top >= 0 && rectBefore.bottom <= window.innerHeight;
-    best.btn.scrollIntoView({ block: "center", behavior: "instant" as ScrollBehavior });
+    best.btn.scrollIntoView({ block: "center", behavior: "auto" as ScrollBehavior });
     // Return viewport-relative center (after scroll). Need to re-read rect after scroll.
     const rectAfter = best.btn.getBoundingClientRect();
     return {
@@ -1813,7 +1813,23 @@ export async function bookExpediaFlightProgrammatic(
           : `cross-airline fallback timeDelta=${best.timeDelta ?? "?"} priceDelta=${best.priceDelta ?? "?"}`,
       samples: [...strictCandidates, ...sameAirlineFallbackCandidates, ...crossAirlineFallbackCandidates].slice(0, 4).map(c => c.label),
     };
-  }, { airline: legTargetAirline, price: legTargetPrice, time: legTargetDepartureTime, flightNumber: legTargetFlightNumber });
+  }, { airline: legTargetAirline, price: legTargetPrice, time: legTargetDepartureTime, flightNumber: legTargetFlightNumber })
+    .catch((err: Error) => ({
+      found: false,
+      label: "",
+      candidates: 0,
+      x: 0,
+      y: 0,
+      inViewportBefore: false,
+      samples: [] as string[],
+      matchMode: undefined,
+      matchReason: undefined,
+      evalError: err.message?.slice(0, 160) ?? "unknown evaluate error",
+    }));
+
+  if ("evalError" in found && found.evalError) {
+    trace(`[flight-rpa] Flight-card DOM scan failed: ${found.evalError}`);
+  }
 
   if (!found.found) {
     if (Array.isArray((found as { samples?: string[] }).samples) && (found as { samples?: string[] }).samples!.length > 0) {
@@ -1909,7 +1925,7 @@ export async function bookExpediaFlightProgrammatic(
       }
 
       const target = selectBtns[0];
-      target.scrollIntoView({ block: "center", behavior: "instant" as ScrollBehavior });
+      target.scrollIntoView({ block: "center", behavior: "auto" as ScrollBehavior });
       const r = target.getBoundingClientRect();
       return {
         found: true,
@@ -1988,7 +2004,7 @@ export async function bookExpediaFlightProgrammatic(
         const target = withPrices[0]?.btn ?? selectBtns[0];
         if (!target) return { x: 0, y: 0, reason: "no select btn", elAtPoint: "", elText: "", modalRect: "" };
 
-        target.scrollIntoView({ block: "center", behavior: "instant" as ScrollBehavior });
+        target.scrollIntoView({ block: "center", behavior: "auto" as ScrollBehavior });
         const r = target.getBoundingClientRect();
         const cx = r.x + r.width / 2;
         const cy = r.y + r.height / 2;
@@ -2082,7 +2098,7 @@ export async function bookExpediaFlightProgrammatic(
             });
           const target = candidates[0];
           if (!target) return false;
-          target.scrollIntoView({ block: "center", behavior: "instant" as ScrollBehavior });
+          target.scrollIntoView({ block: "center", behavior: "auto" as ScrollBehavior });
           target.click();
           return true;
         }, selector).catch(() => false);
@@ -2107,7 +2123,7 @@ export async function bookExpediaFlightProgrammatic(
             });
           const target = candidates[0];
           if (!target) return false;
-          target.scrollIntoView({ block: "center", behavior: "instant" as ScrollBehavior });
+          target.scrollIntoView({ block: "center", behavior: "auto" as ScrollBehavior });
           target.focus();
           return document.activeElement === target;
         }, selector).catch(() => false);
@@ -2266,7 +2282,7 @@ export async function bookExpediaFlightProgrammatic(
             return label.includes("select") && label.includes("flight") && (airlineLower === "" || label.includes(airlineLower));
           });
           if (!target) return { found: false, x: 0, y: 0 };
-          target.scrollIntoView({ block: "center", behavior: "instant" as ScrollBehavior });
+          target.scrollIntoView({ block: "center", behavior: "auto" as ScrollBehavior });
           const r = target.getBoundingClientRect();
           return { found: true, x: r.x + r.width / 2, y: r.y + r.height / 2 };
         }, { airline: (legTargetAirline ?? "").toLowerCase() })
@@ -2321,7 +2337,7 @@ export async function bookExpediaFlightProgrammatic(
           });
           const target = withPrices[0]?.btn;
           if (!target) return { x: 0, y: 0, price: 0 };
-          target.scrollIntoView({ block: "center", behavior: "instant" as ScrollBehavior });
+          target.scrollIntoView({ block: "center", behavior: "auto" as ScrollBehavior });
           const r = target.getBoundingClientRect();
           return { x: r.x + r.width / 2, y: r.y + r.height / 2, price: withPrices[0]?.effectivePrice ?? 0 };
         }, legTargetPrice).catch(() => ({ x: 0, y: 0, price: 0 }));
@@ -2431,7 +2447,7 @@ export async function bookExpediaFlightProgrammatic(
             return t === kw || t.startsWith(kw + " ") || t.includes(kw);
           });
           if (btn) {
-            btn.scrollIntoView({ block: "center", behavior: "instant" as ScrollBehavior });
+            btn.scrollIntoView({ block: "center", behavior: "auto" as ScrollBehavior });
             const r = btn.getBoundingClientRect();
             return {
               found: true,
@@ -2559,7 +2575,7 @@ export async function bookExpediaFlightProgrammatic(
         return { found: false, reason: "no dismiss button in modal", source, modalSize: size, noThanksText: "", btnHtml: "", href: "", x: 0, y: 0 };
       }
 
-      dismissBtn.scrollIntoView({ block: "center", behavior: "instant" as ScrollBehavior });
+      dismissBtn.scrollIntoView({ block: "center", behavior: "auto" as ScrollBehavior });
       const clicked = (() => {
         try {
           dismissBtn.click();
@@ -2701,7 +2717,7 @@ export async function bookExpediaFlightProgrammatic(
 
             const target = withPrices[0]?.btn;
             if (!target) return false;
-            target.scrollIntoView({ block: "center", behavior: "instant" as ScrollBehavior });
+            target.scrollIntoView({ block: "center", behavior: "auto" as ScrollBehavior });
             target.click();
             return true;
           }).catch(() => false);
@@ -2873,7 +2889,7 @@ export async function bookExpediaFlightProgrammatic(
           return t.includes(kw) && r.width > 0 && r.height > 0;
         });
         if (btn) {
-          btn.scrollIntoView({ block: "center", behavior: "instant" as ScrollBehavior });
+          btn.scrollIntoView({ block: "center", behavior: "auto" as ScrollBehavior });
           const r = btn.getBoundingClientRect();
           return { kw, x: r.x + r.width / 2, y: r.y + r.height / 2 };
         }
@@ -2941,7 +2957,7 @@ export async function bookExpediaFlightProgrammatic(
         continueTarget: null as { x: number; y: number; text: string } | null,
       };
     }
-    continueBtn.scrollIntoView({ block: "center", behavior: "instant" as ScrollBehavior });
+    continueBtn.scrollIntoView({ block: "center", behavior: "auto" as ScrollBehavior });
     const rect = continueBtn.getBoundingClientRect();
     return {
       hasSeatConfirm:
