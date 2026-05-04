@@ -340,3 +340,58 @@ Verification from the branch worktree:
 
 No live provider was run for this hotel audit. No payment, CVV,
 OTP/CAPTCHA/login bypass, or final confirmation path was exercised.
+
+## No-Live Hotel Analyzer Port
+
+Codex branch:
+
+- `codex/phase2-goal-hotel-analyzer-port`
+- Base: latest `origin/codex/integrated-preview-20260504`
+- Source goal commit:
+  `0214f0a23963cffa4a9c6a8d36696a8bbb4d8236`
+- Scope: confirm the selective hotel analyzer port on latest integrated and
+  record no-live verification. The analyzer files themselves are present in
+  latest integrated via `98473e9`.
+
+Confirmed present on latest integrated:
+
+- Pure hotel artifact analyzer:
+  `lib/runtime-forensics/hotel-retry-analysis.ts`
+- Synthetic no-live hotel analyzer fixtures:
+  `lib/runtime-forensics/__fixtures__/hotel-retry-analysis/*.json`
+- Targeted analyzer tests:
+  `lib/__tests__/hotel-retry-analysis.test.ts`
+- Runtime-forensics barrel export for the hotel analyzer.
+
+Still not ported by this branch:
+
+- `scripts/analyze-phase2-artifact.ts`; the existing Expedia-specific CLI
+  remains the current robust validated artifact CLI path.
+- Goal-branch hotel runbook/audit rewrites. Current integrated
+  `HOTEL_CONTROLLED_RETRY_RUNBOOK.md` and `HOTEL_VERTICAL_REVIVAL_AUDIT.md`
+  were preserved.
+- `HUDDLE.md`.
+
+Hotel analyzer states:
+
+- `room_selection_drift`
+- `guest_details_manual_review_reached`
+- `payment_manual_review_reached`
+- `login_or_captcha_boundary`
+- `profile_gating`
+- `network_provider_failure`
+- `safety_boundary_violation`
+- `insufficient_evidence`
+
+Verification from the branch worktree:
+
+- `npx vitest run lib/__tests__/hotel-retry-analysis.test.ts lib/__tests__/runtime-forensics-fixtures.test.ts`:
+  pass, 58/58.
+- `npm run build:mcp`: pass; needed in the clean worktree before the requested
+  TypeScript command could resolve the local MCP workspace package.
+- `npx tsc --noEmit --pretty false`: pass after `npm run build:mcp`.
+- `npm run check-drift`: pass.
+- `git diff --check`: pass.
+
+No live provider was run for this analyzer port. No payment, CVV,
+OTP/CAPTCHA/login bypass, or final confirmation path was exercised.
