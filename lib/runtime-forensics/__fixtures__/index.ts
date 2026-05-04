@@ -29,6 +29,7 @@ export const FIXTURE_FILENAMES = [
   "resy-no-availability.json",
   "resy-otp-required.json",
   "opentable-form-incomplete.json",
+  "booking-hotel-guest-form-incomplete.json",
   "booking-5xx.json",
   "unknown.json",
 ] as const;
@@ -42,6 +43,7 @@ export const FIXTURE_EXPECTED_CLASS: Record<FixtureFilename, FailureClass> = {
   "resy-no-availability.json": "provider_no_availability",
   "resy-otp-required.json": "otp_or_login_required",
   "opentable-form-incomplete.json": "provider_form_incomplete",
+  "booking-hotel-guest-form-incomplete.json": "provider_form_incomplete",
   "booking-5xx.json": "network_or_provider_5xx",
   "unknown.json": "unknown",
 };
