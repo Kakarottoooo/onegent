@@ -18,6 +18,9 @@ describe("docs static guard", () => {
       "docs/40-phase1/DEMO_CONTROL_ROOM.md",
       "docs/40-phase1/YC_DEMO_RUNBOOK.md",
       "docs/40-phase1/PHASE_1_FOUNDER_E2E.md",
+      "docs/40-phase1/AUTONOMOUS_FOUNDER_E2E.md",
+      "docs/40-phase1/PHASE_1_QUALITY_GATE.md",
+      "docs/40-phase1/PHASE_1_E2E_SMOKE.md",
       "docs/50-product-areas/EXPEDIA_CONTROLLED_RETRY_RUNBOOK.md",
     ];
 
@@ -49,9 +52,20 @@ describe("docs static guard", () => {
   it("links the YC demo runbook from the demo control room docs and page", () => {
     const doc = read("docs/40-phase1/DEMO_CONTROL_ROOM.md");
     const page = read("app/dev/demo-control-room/page.tsx");
+    const devPage = read("app/dev/page.tsx");
 
     expect(doc).toContain("docs/40-phase1/YC_DEMO_RUNBOOK.md");
     expect(page).toContain("docs/40-phase1/YC_DEMO_RUNBOOK.md");
+    expect(devPage).toContain("/dev/demo-readiness");
     expect(page).not.toMatch(/run\s+live|retry\s+live/i);
+  });
+
+  it("keeps the developer docs hub linked to static docs routes", () => {
+    const hub = read("app/developers/docs/page.tsx");
+
+    expect(hub).toContain("/developers/docs/api/v1");
+    expect(hub).toContain("/developers/docs/oauth");
+    expect(hub).toContain("/developers/docs/integrations/claude-mcp");
+    expect(hub).toContain("/developers/docs/integrations/chatgpt-apps");
   });
 });

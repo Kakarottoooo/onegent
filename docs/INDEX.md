@@ -14,8 +14,9 @@ Read these first, in order:
 2. `docs/00-start-here/PHASE_STATUS.md` - phase completion, blockers, owners.
 3. `docs/10-coordination/README.md` - how Codex/Claude coordinate.
 4. `docs/10-coordination/HUDDLE.md` - short shared working memory.
-5. `docs/10-coordination/codex.md`, `docs/10-coordination/claude.md`, and
-   `docs/10-coordination/phase2.md` - current agent-specific state.
+5. `docs/10-coordination/codex.md`, `docs/10-coordination/claude.md`,
+   `docs/10-coordination/phase2.md`, and `docs/10-coordination/track-c.md` -
+   current agent-specific state.
 
 Then read the task-specific section below.
 
@@ -88,4 +89,5 @@ release entrypoints (`AGENTS.md`, `CLAUDE.md`, `README.md`, `CHANGELOG.md`).
 | Restaurant handoff | `docs/20-phase0-restaurant/RESTAURANT_PHASE0_HANDOFF.md` |
 | R-003 live runbook | `docs/20-phase0-restaurant/R003_LIVE_SMOKE_RUNBOOK.md` |
 | Phase 1 founder E2E | `docs/40-phase1/PHASE_1_FOUNDER_E2E.md` |
+| YC demo prep | `docs/40-phase1/YC_DEMO_RUNBOOK.md` |
 | Coordination | `docs/10-coordination/` |

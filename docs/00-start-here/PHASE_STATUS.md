@@ -53,6 +53,10 @@ Do not enter Phase 2 yet. Stabilize Phase 0, Phase 1, and Phase 1.5 first.
   - `/dev/demo-control-room` is integrated as the founder-facing pre-demo
     control room. It is read-only and links Phase 1 gates, runtime forensics,
     hard stops, and Phase 2/Expedia evidence.
+  - `/dev/demo-readiness` is integrated as the compact Track C read-only
+    readiness sidecar. It summarizes gate/founder/smoke/runtime evidence,
+    hard stops, route order, and useful docs links, and points back to
+    `/dev/demo-control-room` for the full script.
 
 ## Phase 0A - Restaurant Provider Closure
 
@@ -132,6 +136,8 @@ Current state:
   provider/runtime failures.
 - `/dev/demo-control-room` is a read-only founder demo control room for
   pre-demo status, hard stops, recovery phrases, and Phase 2 posture.
+- `/dev/demo-readiness` is a compact read-only Track C supplement for
+  build/gate/demo readiness, hard stops, route order, and useful doc links.
 - The 2026-05-04 integrated preview dogfood passed all listed dev pages.
 
 When a task lands:

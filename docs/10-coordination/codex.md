@@ -14,6 +14,29 @@
 Phase 1 demo trunk stabilization on integrated preview.
 
 Completed in latest pass:
+- Selectively integrated Agent3 `codex/track-c-demo-readiness @ f3c44b3` onto
+  latest integrated preview. Kept:
+  - `app/dev/demo-readiness/page.tsx`
+  - `lib/demo-evidence/**`
+  - `lib/__tests__/demo-evidence.test.ts`
+  - `/dev` landing card for Demo Readiness
+  - small docs index/status/coordination updates
+- Skipped duplicate `YC_DEMO_RUNBOOK.md`, duplicate `track-c.md`, and duplicate
+  static guard test content that already landed in `82ec398`.
+- Removed the production-only page gate from `/dev/demo-readiness`; this is a
+  read-only demo route and must work in production preview like
+  `/dev/demo-control-room`.
+- Verified:
+  - `npx vitest run lib/__tests__/demo-evidence.test.ts lib/__tests__/docs-static-guard.test.ts`
+    pass, 11/11.
+  - `npx tsc --noEmit --pretty false` pass.
+  - `npm run gate:phase1 -- --allow-known-drift` pass, 9/9.
+  - `npm run build` pass.
+  - production `next start` probe returned 200 for `/dev`,
+    `/dev/demo-readiness`, `/dev/demo-control-room`, `/dev/runtime-forensics`,
+    `/dev/phase1-quality-gates`, `/dev/founder-e2e`, `/tasks`, and `/`.
+
+Previous completed pass:
 - Integrated Agent2 `codex/phase2-expedia-retry-analysis-pack @ 005e638` onto
   current integrated preview as `687c0b3` instead of merging its older
   `400a716` base. The pack adds:

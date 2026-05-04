@@ -45,6 +45,14 @@ small.
   `/dev/demo-control-room` and the Demo Control Room runbook. Verified targeted
   Vitest 80/80, root `tsc`, Phase 1 gate 9/9, `npm run build`, and
   `git diff --check`.
+- 2026-05-04 codex: selectively integrated Agent3
+  `codex/track-c-demo-readiness @ f3c44b3` onto latest integrated preview.
+  Kept `/dev/demo-readiness`, `lib/demo-evidence/**`, demo evidence tests, and
+  the `/dev` landing link. Skipped duplicate YC runbook/static guard files and
+  removed the production-only page gate because the route is read-only and
+  should open in production preview. Verified demo evidence/static guard tests
+  11/11, root `tsc`, Phase 1 gate 9/9, `npm run build`, and production route
+  probe 8/8 including `/dev/demo-readiness`.
 - 2026-05-04 codex: fixed `/dev/demo-control-room` production-preview 404 by
   removing the page's production-only dev gate. The page is read-only and safe
   for the integrated preview. Cleaned the new Demo Control Room ASCII fallback

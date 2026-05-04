@@ -17,6 +17,12 @@ Latest integrated work:
   Phase 1 docs or regress developer docs path wiring after the docs reorg.
 - Linked the YC runbook from `/dev/demo-control-room` and the Demo Control Room
   runbook.
+- Integrated Agent3 `codex/track-c-demo-readiness @ f3c44b3` selectively:
+  kept the compact `/dev/demo-readiness` page, `lib/demo-evidence/**`,
+  `lib/__tests__/demo-evidence.test.ts`, and the `/dev` landing link. Skipped
+  duplicate runbook/static-guard files already present in integrated preview.
+  Removed the production-only page gate so the read-only route works in
+  production preview.
 
 ## Read First
 

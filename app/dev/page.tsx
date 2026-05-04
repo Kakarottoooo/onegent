@@ -30,6 +30,15 @@ interface DocLink {
 
 const PHASE_0_ROUTES: DevRoute[] = [
   {
+    href: "/dev/demo-readiness",
+    title: "Demo Readiness",
+    blurb:
+      "Compact read-only pre-demo summary for Track C. Aggregates latest Phase 1 gate, founder-e2e, smoke, runtime-forensics artifact counts, hard stops, route order, and useful docs links. This is a small go/no-go supplement that points to Demo Control Room for the full script and dashboard.",
+    status: "live",
+    useCase:
+      "Open this first before a YC/founder demo when you need a quick readiness verdict. No run, retry, provider, payment, OTP, CAPTCHA, or final-confirm controls.",
+  },
+  {
     href: "/dev/demo-control-room",
     title: "Demo Control Room (founder-facing)",
     blurb:
