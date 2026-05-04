@@ -1,8 +1,8 @@
 # Codex - coordination state
 
 > **Branch**: `codex/openai-chat-model-env`
-> **Last updated**: 2026-05-04 02:35 UTC
-> **Last commit**: `1b7938e`
+> **Last updated**: 2026-05-04 02:53 UTC
+> **Last commit**: `03c5055`
 >
 > Claude reads this at session start. I write to it before each push.
 > See `CLAUDE.md` section "coordination protocol".
@@ -11,7 +11,17 @@
 
 ## Currently doing
 
-Shipping a no-token Resy availability probe so we stop burning Computer Use on cases with no real slot.
+Handed off Phase 0 restaurant execution state in `RESTAURANT_PHASE0_HANDOFF.md`.
+
+This document is the durable continuation guide for a fresh Codex/Claude session:
+- what to read first,
+- who owns which files,
+- why R-003 is no longer the fill/OTP test,
+- why R-030 is the next Resy live candidate,
+- how to continue without blind token burns,
+- what counts as success/failure.
+
+Previous work: shipped a no-token Resy availability probe so we stop burning Computer Use on cases with no real slot.
 
 Current finding:
 - R-003 is not a useful fill/OTP test right now. The Resy public search API returns exact venue `buvette-nyc` but zero target-window slots.
