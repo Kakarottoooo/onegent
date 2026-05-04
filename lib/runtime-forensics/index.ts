@@ -19,6 +19,7 @@ export * from "./report";
 export * from "./markdown";
 export * from "./expedia-retry-analysis";
 export * from "./hotel-retry-analysis";
+export * from "./restaurant-artifact-analysis";
 export * from "./url-filter";
 export * from "./recommendations";
 export * from "./loader";

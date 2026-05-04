@@ -207,6 +207,20 @@ The runner writes a report under `benchmark/runs/` automatically for non-dry run
 - 更新 `docs/10-coordination/codex.md` § 📦 Recently shipped + § 🟢 Currently doing
 - 如果撞 OTP → 更新 `docs/20-phase0-restaurant/WARM_SESSION_STRATEGY.md` 状态（从 BLOCKED → in-flight PoC）
 
+### 5.1.1 No-live artifact analysis
+
+After DB/log/screenshot evidence exists, assemble a local restaurant artifact
+bundle and run:
+
+```powershell
+npx tsx scripts/analyze-restaurant-artifact.ts .tmp\restaurant-artifact-bundle.json
+```
+
+Use `docs/20-phase0-restaurant/RESTAURANT_ARTIFACT_ANALYSIS.md` for the bundle
+shape. This is an offline classifier only; it does not start a provider run,
+call OpenAI, solve OTP/CAPTCHA/login, submit payment, or click final
+confirmation.
+
 ### 5.2 Push artifacts
 - `benchmark/runs/R003-live-${TIMESTAMP}.json` commit 到 master（codex domain；不算入 drift）
 - 如果跑出 bug fix → 单独 commit + push

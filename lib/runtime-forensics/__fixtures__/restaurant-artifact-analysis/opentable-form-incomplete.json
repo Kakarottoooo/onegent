@@ -1,0 +1,35 @@
+{
+  "job": {
+    "id": "fixture-restaurant-opentable-form-incomplete",
+    "taskId": "fixture-task-restaurant-opentable-form-incomplete",
+    "provider": "opentable",
+    "scenario": "OT-FORM",
+    "status": "failed",
+    "errorMessage": "OpenTable guest form incomplete: required phone field missing.",
+    "steps": [
+      {
+        "name": "opentable-form-fill",
+        "type": "restaurant",
+        "__source": "lib/core/execution-local-fixture",
+        "error": "OpenTable required field missing after auditAndRefill gave up."
+      }
+    ],
+    "params": {
+      "venue": "Synthetic Bistro",
+      "date": "2026-05-08",
+      "time": "19:30",
+      "partySize": 2
+    }
+  },
+  "workerLogExcerpt": "[opentable] guest form incomplete after strategy ladder\n[opentable] required field missing: phone\n[opentable] auditAndRefill gave up",
+  "workerLogPath": "codex-worker.log",
+  "screenshotPaths": [
+    "worker/.debug-screenshots/opentable-fixture-form-incomplete/02-form.jpg"
+  ],
+  "liveSnapshotPaths": [
+    ".debug-screenshots/live/fixture-restaurant-opentable-form-incomplete/snapshot.json"
+  ],
+  "notes": [
+    "Synthetic no-live fixture. Patch only after screenshots prove the expected field was visible."
+  ]
+}
