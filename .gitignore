@@ -59,6 +59,8 @@ next-env.d.ts
 .next-dev.log
 .playwright-cli/
 benchmark/runs/*.json
+benchmark/runs/*.md
+benchmark/runs/founder-e2e-assets/
 .claude/worktrees/
 .context/
 .debug-screenshots/

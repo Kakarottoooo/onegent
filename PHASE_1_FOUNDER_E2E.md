@@ -5,6 +5,27 @@
 > **状态**: 🟢 ready to run — Phase 1 ~95% shipped (per `PHASE_STATUS.md`)；这条 walkthrough 是 declared 前的最后一道门
 > **两条路径**: 10 分钟 quick path（first-pass smoke）/ 60-90 分钟 full path（sign-off 用）—— 见下面 § 选哪条
 
+> 🆕 **2026-05-04**: 这套流程现在有了运行态 ——
+> [`/dev/founder-e2e`](http://localhost:3000/dev/founder-e2e) 把下面每个 step 变成
+> 一个可勾选的行，每行可以 fail/blocker + 填 actual / screenshot / taskId，
+> 一键 Export Markdown 直接给 codex/Claude 当 bug ticket。
+> 详见 `FOUNDER_E2E_BUG_TRIAGE.md`。
+> Preflight: `npm run preflight:founder-e2e` （需要 dev server 在跑）。
+
+> 🤖 **2026-05-04 自动 runner**: 新增 `npm run e2e:founder` 一键自动跑 15 项
+> 渲染 + API + 安全边界 check，1-2 分钟出 verdict (pass / needs_polish /
+> fail)。**推荐流程**：
+>
+> 1. **先跑 `npm run e2e:founder`** —— 只要 verdict = `pass`，今天的 build 没塌。
+> 2. **如果还要签字 Phase 1** —— 用 `/dev/founder-e2e` 走 Quick / Full path
+>    人工 spot-check 那些 runner 抓不到的事（cookie auth / 真实 chat 流 /
+>    DR 多人）。
+> 3. **如果 fail** —— 把生成的 Markdown report (`benchmark/runs/<runId>-auto.md`)
+>    直接 paste 给 codex / Claude，按 surface 路由到对应 agent。
+>
+> Runner 严格不烧 token / 不碰 provider / 不点支付/OTP/最终确认。
+> 详见 `AUTONOMOUS_FOUNDER_E2E.md`。
+
 这个文档是 PHASE_1_PLAN.md #8 — Founder E2E walkthrough。目标是在用户视角
 **手动**走完 Phase 1 的每个用户路径，找出 UX 缺口、复现 bug、签字 Phase 1
 是否真正"产品就绪"。

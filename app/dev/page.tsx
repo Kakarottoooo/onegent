@@ -57,6 +57,15 @@ const PHASE_0_ROUTES: DevRoute[] = [
       "After codex runs a live R-* case. Answers four questions: where it's stuck, which strategies tried/failed, next safe case, what founder needs to provide manually. Replaces terminal log paste.",
   },
   {
+    href: "/dev/founder-e2e",
+    title: "Founder QA Suite (Phase 1.5)",
+    blurb:
+      "Runnable, recordable, replayable PHASE_1_FOUNDER_E2E checklist. Quick path (10 min) + Full path (60-90 min). Mark each step pass/fail/blocker, fill artifacts, export Markdown bug report or JSON. Saved runs at benchmark/runs/founder-e2e-*.json.",
+    status: "live",
+    useCase:
+      "Run before declaring Phase 1 #8 done. Quick path = first-pass smoke, Full path = sign-off. No live providers, no token spend.",
+  },
+  {
     href: "/dev/benchmark-runs",
     title: "Phase 0 benchmark runs",
     blurb:

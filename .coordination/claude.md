@@ -12,6 +12,7 @@ Long-term decisions are in `STRATEGIC_LEDGER.md`.
 - `claude/resy-observability-suite`
 - `claude/restaurant-readiness-control-center`
 - `claude/resy-run-analysis-workbench`
+- `claude/autonomous-founder-e2e-runner`
 
 Additional Claude branches may be integrated after this file was written; check
 the branch merge commits for the exact set.
