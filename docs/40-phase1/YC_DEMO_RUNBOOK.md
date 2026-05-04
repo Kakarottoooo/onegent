@@ -12,9 +12,10 @@ integrated preview worktree:
 C:\Users\Gzw19\onegent-integrated-20260504
 ```
 
-Do not use this document as approval to run live providers. Any Expedia,
-Resy, OpenTable, hotel, payment, OTP, CAPTCHA, login, or final-confirmation
-flow still needs explicit founder approval and must stop at the safe boundary.
+Do not use this document as approval to start provider production sessions.
+Any Expedia, Resy, OpenTable, hotel, payment, OTP, CAPTCHA, login, or
+final-confirmation flow still needs explicit founder approval and must stop at
+the safe boundary.
 
 ## Five-Minute Preflight
 
@@ -43,11 +44,11 @@ Preflight acceptance:
 - `git status` is clean or only contains an intentional current task.
 - Phase 1 gate passes.
 - `/dev/demo-readiness` opens and gives the compact readiness verdict,
-  hard stops, route order, and copyable markdown export.
+  hard stops, route order, acceptance doc link, and copyable markdown export.
 - `/dev/demo-control-room` opens and shows green or yellow cards, not red.
 - The Phase 2 panel says Expedia is not live verified.
-- No live provider, payment, OTP, CAPTCHA, login bypass, or final confirmation
-  is launched during preflight.
+- No provider production session, payment entry, OTP entry, CAPTCHA solving,
+  login shortcut, or final confirmation is launched during preflight.
 
 If any required check is red, do not improvise a live provider demo. Use the
 fallback lines below.
@@ -109,7 +110,7 @@ Do not claim:
 
 - Resy is fully closed.
 - Every restaurant provider is production reliable.
-- The agent can bypass OTP, CAPTCHA, login, or payment.
+- The agent can automatically handle OTP, CAPTCHA, login, or payment.
 
 ### Phase 1 - First Paying User Path
 
@@ -182,7 +183,7 @@ If Resy is degraded:
 "This is a provider/session state issue, not a reason to keep clicking. We use
 probe and readiness artifacts before spending tokens on another live case."
 
-If Expedia live retry is not approved:
+If Expedia controlled check is not approved:
 
 "Expedia is the closest Phase 2 candidate, but it is not live verified in this
 build. The next step is one controlled retry, then classification from DB,

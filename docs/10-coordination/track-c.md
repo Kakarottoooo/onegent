@@ -1,7 +1,8 @@
 # Track C - demo readiness coordination
 
 > Last updated: 2026-05-04
-> Branch: `codex/track-c-demo-readiness-v2`
+> Branches: `codex/track-c-demo-readiness-v2`,
+> `codex/track-c-demo-acceptance-pack`
 > Owner: demo readiness sidecar / Codex integration
 
 Track C owns read-only demo readiness docs, static guard tests, and light
@@ -15,6 +16,14 @@ Latest integrated work:
   for `lib/demo-evidence`, renders a read-only markdown export block on
   `/dev/demo-readiness`, and expands demo-evidence tests for markdown export
   plus hard-stop coverage.
+- Added `docs/40-phase1/DEMO_FREEZE_ACCEPTANCE.md` as the pre-demo acceptance
+  pack: latest gate/founder/readiness interpretation, YC 10-minute checklist,
+  fallback script, hard stops, and explicit Phase 2 not-live-verified posture.
+- Extended the docs static guard around active demo docs for mojibake, unsafe
+  live-action/boundary copy, and key runbook existence.
+- Lightly polished `/dev/demo-readiness` with the acceptance doc path and an
+  explicit Phase 2 not-live-verified notice. No run, retry, live, provider,
+  payment, OTP, CAPTCHA, or final-confirmation controls were added.
 - Added `docs/40-phase1/YC_DEMO_RUNBOOK.md` as the YC-style five-minute
   preflight and demo script.
 - Added a static docs guard test so future agents do not accidentally drop key

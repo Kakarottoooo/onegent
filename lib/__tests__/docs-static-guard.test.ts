@@ -16,6 +16,7 @@ describe("docs static guard", () => {
       "docs/10-coordination/HUDDLE.md",
       "docs/10-coordination/track-c.md",
       "docs/40-phase1/DEMO_CONTROL_ROOM.md",
+      "docs/40-phase1/DEMO_FREEZE_ACCEPTANCE.md",
       "docs/40-phase1/YC_DEMO_RUNBOOK.md",
       "docs/40-phase1/PHASE_1_FOUNDER_E2E.md",
       "docs/40-phase1/AUTONOMOUS_FOUNDER_E2E.md",
@@ -26,6 +27,28 @@ describe("docs static guard", () => {
 
     for (const relPath of requiredDocs) {
       expect(existsSync(path.join(ROOT, relPath)), relPath).toBe(true);
+    }
+  });
+
+  it("keeps active demo docs free of mojibake and unsafe live-action copy", () => {
+    const activeDemoDocs = [
+      "docs/40-phase1/DEMO_CONTROL_ROOM.md",
+      "docs/40-phase1/DEMO_FREEZE_ACCEPTANCE.md",
+      "docs/40-phase1/YC_DEMO_RUNBOOK.md",
+    ];
+    const unsafePatterns = [
+      /\b(run live|retry live|live retry)\b/i,
+      /\b(otp|payment|captcha|login)\s+bypass\b/i,
+      /\bbypass\s+(otp|payment|captcha|login)\b/i,
+      /\bclick\s+(the\s+)?final\s+(confirm|confirmation|booking|purchase)\b/i,
+    ];
+
+    for (const relPath of activeDemoDocs) {
+      const source = read(relPath);
+      expect(source, relPath).not.toMatch(/[鈥�馃]/);
+      for (const pattern of unsafePatterns) {
+        expect(source, `${relPath} should not match ${pattern}`).not.toMatch(pattern);
+      }
     }
   });
 
@@ -55,9 +78,19 @@ describe("docs static guard", () => {
     const devPage = read("app/dev/page.tsx");
 
     expect(doc).toContain("docs/40-phase1/YC_DEMO_RUNBOOK.md");
+    expect(doc).toContain("docs/40-phase1/DEMO_FREEZE_ACCEPTANCE.md");
     expect(page).toContain("docs/40-phase1/YC_DEMO_RUNBOOK.md");
     expect(devPage).toContain("/dev/demo-readiness");
     expect(page).not.toMatch(/run\s+live|retry\s+live/i);
+  });
+
+  it("links demo freeze acceptance and Phase 2 posture from demo readiness", () => {
+    const page = read("app/dev/demo-readiness/page.tsx");
+    const helper = read("lib/demo-evidence/readiness.ts");
+
+    expect(page).toContain("docs/40-phase1/DEMO_FREEZE_ACCEPTANCE.md");
+    expect(page).toMatch(/Phase 2.*not live verified/i);
+    expect(helper).toContain("docs/40-phase1/DEMO_FREEZE_ACCEPTANCE.md");
   });
 
   it("keeps the developer docs hub linked to static docs routes", () => {

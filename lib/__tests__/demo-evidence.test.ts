@@ -193,6 +193,7 @@ describe("loadDemoEvidenceSnapshot", () => {
     expect(snap.founderE2e.available).toBe(true);
     expect(snap.runtimeForensics.reportCount).toBe(1);
     expect(snap.docs.every((doc) => doc.exists)).toBe(true);
+    expect(snap.docs.some((doc) => doc.path === "docs/40-phase1/DEMO_FREEZE_ACCEPTANCE.md")).toBe(true);
     expect(snap.readiness.verdict).toBe("ready");
   });
 });
@@ -274,6 +275,7 @@ async function writeFounderRun(root: string): Promise<void> {
 
 async function seedRunbooks(root: string): Promise<void> {
   const docs = [
+    "docs/40-phase1/DEMO_FREEZE_ACCEPTANCE.md",
     "docs/40-phase1/YC_DEMO_RUNBOOK.md",
     "docs/40-phase1/DEMO_CONTROL_ROOM.md",
     "docs/40-phase1/PHASE_1_QUALITY_GATE.md",

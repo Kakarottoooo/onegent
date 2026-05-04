@@ -53,7 +53,7 @@ Hard rules - verified per commit and by the test suite:
   founder-e2e runner, the worker, or any provider. The only mutating
   action on the page is `router.refresh()`, which re-renders the
   server component (re-reading filesystem artifacts).
-- **No live OpenAI / Computer Use / payment / OTP / CAPTCHA bypass.**
+- **No live OpenAI / Computer Use / payment entry / OTP entry / CAPTCHA solving.**
 - **No DB queries.** V1 is artifact-based; consumes the same
   `benchmark/runs/*.json` files that ship today.
 - **No retry / re-run / accept buttons.** Re-runs happen from a shell:
@@ -132,8 +132,9 @@ lib/__tests__/
 3. Verify all three verdict cards are green or yellow. **Red = stop.**
 4. Skim the Phase 2 panel - confirm the Expedia phrasing matches what
    you plan to say.
-5. Read `docs/40-phase1/YC_DEMO_RUNBOOK.md` for the route order and
-   YC-specific fallback lines.
+5. Read `docs/40-phase1/YC_DEMO_RUNBOOK.md` and
+   `docs/40-phase1/DEMO_FREEZE_ACCEPTANCE.md` for the route order,
+   acceptance checklist, and YC-specific fallback lines.
 6. Triple-click the markdown textarea to copy the safe demo script;
    paste into Slack / a deck.
 

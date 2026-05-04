@@ -16,6 +16,7 @@ export default async function DemoReadinessPage() {
       <Styles />
       <Header snap={snap} />
       <EvidenceGrid snap={snap} />
+      <Phase2Posture />
       <HardStops snap={snap} />
       <RouteOrder snap={snap} />
       <UsefulLinks snap={snap} />
@@ -37,6 +38,8 @@ function Header({ snap }: { snap: DemoEvidenceSnapshot }) {
           <p>
             Compact, read-only pre-demo summary. For the full founder script
             and evidence dashboard, open <a href="/dev/demo-control-room">Demo Control Room</a>.
+            Use <code>docs/40-phase1/DEMO_FREEZE_ACCEPTANCE.md</code> as the
+            final acceptance checklist.
           </p>
         </div>
         <div className={`dr__verdict dr__verdict--${snap.readiness.tone}`}>
@@ -45,6 +48,7 @@ function Header({ snap }: { snap: DemoEvidenceSnapshot }) {
       </div>
       <div className="dr__notes">
         <span>Generated {new Date(snap.generatedAt).toLocaleString()}</span>
+        <span>Phase 2 not live verified.</span>
         <span>No live provider, payment, OTP, CAPTCHA, or final confirmation controls.</span>
       </div>
       {snap.readiness.blockers.length > 0 && (
@@ -104,6 +108,19 @@ function EvidenceGrid({ snap }: { snap: DemoEvidenceSnapshot }) {
           meta={`${runtime.scannedFiles} benchmark file(s) scanned. Worker log: ${runtime.workerLogAvailable ? "available" : "not found"}`}
         />
       </div>
+    </section>
+  );
+}
+
+function Phase2Posture() {
+  return (
+    <section className="dr__phase2">
+      <h2>Phase 2 Posture</h2>
+      <p>
+        Phase 2 is not live verified. Treat Expedia as an audited candidate,
+        and treat Booking.com and Hotels.com as not demo-ready until fresh
+        founder-approved artifacts exist.
+      </p>
     </section>
   );
 }
@@ -368,6 +385,14 @@ h2 {
 .dr__card a { color: #2563eb; text-decoration: none; font-size: 12px; }
 .dr__card-body { margin: 8px 0 4px; color: #111827; }
 .dr__card-meta { margin: 0; font-size: 12px; color: #64748b; word-break: break-word; }
+.dr__phase2 {
+  border: 1px solid #fed7aa;
+  border-left: 4px solid #ea580c;
+  border-radius: 8px;
+  padding: 14px;
+  background: #fff7ed;
+}
+.dr__phase2 p { margin: 0; color: #7c2d12; max-width: 860px; }
 .dr__stops {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
