@@ -345,7 +345,7 @@ describe("formatForensicsBugReport — recommendation integration", () => {
   it("markdown contains the recommended-next-evidence section", () => {
     const report = buildForensicsReport(jobOf());
     // Re-import here to avoid circular pull at top.
-    
+
     const md = formatForensicsBugReport(report);
     expect(md).toContain("### Recommended next evidence");
     expect(md).toContain("Checklist (work top to bottom):");
@@ -355,7 +355,7 @@ describe("formatForensicsBugReport — recommendation integration", () => {
 
   it("markdown checklist items are numbered", () => {
     const report = buildForensicsReport(jobOf());
-    
+
     const md = formatForensicsBugReport(report);
     expect(md).toMatch(/\n1\. /);
     expect(md).toMatch(/\n2\. /);
@@ -363,14 +363,14 @@ describe("formatForensicsBugReport — recommendation integration", () => {
 
   it("markdown V1 caveat at bottom mentions playbook", () => {
     const report = buildForensicsReport(jobOf());
-    
+
     const md = formatForensicsBugReport(report);
     expect(md).toContain("PROVIDER_RUNTIME_DEBUG_PLAYBOOK");
   });
 
   it("markdown prefixes [FIXTURE] heading when isFixture=true", () => {
     const report = buildForensicsReport(jobOf(), { isFixture: true });
-    
+
     const md = formatForensicsBugReport(report);
     expect(md.split("\n")[0]).toContain("[FIXTURE]");
     expect(md).toContain("This row is a synthetic fixture");
@@ -378,14 +378,14 @@ describe("formatForensicsBugReport — recommendation integration", () => {
 
   it("markdown does NOT prefix [FIXTURE] for real artifacts", () => {
     const report = buildForensicsReport(jobOf(), { isFixture: false });
-    
+
     const md = formatForensicsBugReport(report);
     expect(md.split("\n")[0]).not.toContain("[FIXTURE]");
   });
 
   it("markdown allows a custom recommendation override", () => {
     const report = buildForensicsReport(jobOf());
-    
+
     const md = formatForensicsBugReport(report, {
       recommendation: {
         primaryClass: "unknown",
@@ -403,7 +403,7 @@ describe("formatForensicsBugReport — recommendation integration", () => {
 
   it("markdown is idempotent (same input -> same output)", () => {
     const report = buildForensicsReport(jobOf(), { generatedAt: "2026-05-04T00:00:00Z" });
-    
+
     const a = formatForensicsBugReport(report);
     const b = formatForensicsBugReport(report);
     expect(a).toBe(b);
