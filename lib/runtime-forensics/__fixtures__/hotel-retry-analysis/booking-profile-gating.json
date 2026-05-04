@@ -1,0 +1,33 @@
+{
+  "job": {
+    "id": "fixture-hotel-profile-gating",
+    "taskId": "fixture-task-hotel-profile-gating",
+    "provider": "booking-com",
+    "scenario": "hotel",
+    "status": "failed",
+    "terminalReason": "profile_gating",
+    "terminalCode": "MISSING_PROFILE",
+    "errorMessage": "Profile gap: missing date of birth and billing address before provider work.",
+    "steps": [
+      {
+        "name": "profile-check",
+        "type": "hotel",
+        "__source": "lib/core/execution-local-fixture",
+        "error": "Start route blocked by profile completeness: missing date of birth and billing address."
+      }
+    ],
+    "params": {
+      "city": "Tokyo",
+      "checkIn": "2026-07-10",
+      "checkOut": "2026-07-13",
+      "adults": 2
+    }
+  },
+  "workerLogExcerpt": "",
+  "workerLogPath": "codex-worker.log",
+  "screenshotPaths": [],
+  "liveSnapshotPaths": [],
+  "notes": [
+    "Synthetic no-live fixture. Provider work should not begin until profile gating is resolved."
+  ]
+}

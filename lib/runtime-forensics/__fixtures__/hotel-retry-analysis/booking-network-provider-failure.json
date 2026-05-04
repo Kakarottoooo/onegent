@@ -1,0 +1,37 @@
+{
+  "job": {
+    "id": "fixture-hotel-network-provider-failure",
+    "taskId": "fixture-task-hotel-network-provider-failure",
+    "provider": "booking-com",
+    "scenario": "hotel",
+    "status": "failed",
+    "terminalReason": "network_provider_failure",
+    "terminalCode": "PROVIDER_5XX",
+    "errorMessage": "Booking.com returned a 503 server response during availability scan.",
+    "steps": [
+      {
+        "name": "book-hotel",
+        "type": "hotel",
+        "__source": "lib/core/execution-local-fixture",
+        "error": "503 server response from provider availability endpoint."
+      }
+    ],
+    "params": {
+      "city": "Tokyo",
+      "checkIn": "2026-07-10",
+      "checkOut": "2026-07-13",
+      "adults": 2
+    }
+  },
+  "workerLogExcerpt": "[booking-com] Availability scan failed: 503 server response\n[booking-com] net::ERR_TUNNEL_CONNECTION_FAILED\n[booking-com] provider unavailable after bounded retry",
+  "workerLogPath": "codex-worker.log",
+  "screenshotPaths": [
+    "worker/.debug-screenshots/booking-com-fixture-network/01-error.jpg"
+  ],
+  "liveSnapshotPaths": [
+    ".debug-screenshots/live/fixture-hotel-network-provider-failure/snapshot.json"
+  ],
+  "notes": [
+    "Synthetic no-live fixture. Treat as provider/network instability, not selector evidence."
+  ]
+}
