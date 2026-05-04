@@ -12,6 +12,13 @@
 > 详见 `FOUNDER_E2E_BUG_TRIAGE.md`。
 > Preflight: `npm run preflight:founder-e2e` （需要 dev server 在跑）。
 
+> 🎛️ **2026-05-04 demo control room**: `/dev/demo-control-room` 把
+> Phase 1 quality gate / founder-e2e / smoke verdict / Phase 2 vertical
+> 状态 / 安全 demo 脚本聚合到一个 founder-facing 页面。**演示前**先开
+> 它确认三张 verdict 卡（gate / founder-e2e / smoke）都是绿/黄，再走
+> 下面这条 walkthrough。Runbook:
+> `docs/40-phase1/DEMO_CONTROL_ROOM.md`。
+
 > 🤖 **2026-05-04 自动 runner**: 新增 `npm run e2e:founder` 一键自动跑 15 项
 > 渲染 + API + 安全边界 check，1-2 分钟出 verdict (pass / needs_polish /
 > fail)。**推荐流程**：
