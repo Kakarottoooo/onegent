@@ -1,0 +1,36 @@
+{
+  "job": {
+    "id": "fixture-restaurant-resy-no-availability",
+    "taskId": "fixture-task-restaurant-resy-no-availability",
+    "provider": "resy",
+    "scenario": "R-003",
+    "status": "failed",
+    "terminalReason": "no_availability_correct",
+    "terminalCode": "F-AVAIL-NONE",
+    "steps": [
+      {
+        "name": "probe-slots",
+        "type": "restaurant",
+        "__source": "lib/core/execution-local-fixture",
+        "error": "Resy no availability for target window."
+      }
+    ],
+    "params": {
+      "venue": "Buvette",
+      "date": "2026-05-08",
+      "time": "19:00",
+      "partySize": 2
+    }
+  },
+  "workerLogExcerpt": "[resy] probe returned no slots for target window\n[resy] no availability correct; F-AVAIL-NONE",
+  "workerLogPath": "codex-worker.log",
+  "screenshotPaths": [
+    "worker/.debug-screenshots/resy-fixture-no-availability/01-no-slots.jpg"
+  ],
+  "liveSnapshotPaths": [
+    ".debug-screenshots/live/fixture-restaurant-resy-no-availability/snapshot.json"
+  ],
+  "notes": [
+    "Synthetic no-live fixture. A no-slot case cannot close the fill/OTP path."
+  ]
+}

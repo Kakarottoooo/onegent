@@ -1,0 +1,35 @@
+{
+  "job": {
+    "id": "fixture-restaurant-safe-manual-review",
+    "taskId": "fixture-task-restaurant-safe-manual-review",
+    "provider": "opentable",
+    "scenario": "OT-REVIEW",
+    "status": "ready_for_confirmation",
+    "terminalReason": "safe_manual_review_reached",
+    "steps": [
+      {
+        "name": "opentable-review",
+        "type": "restaurant",
+        "__source": "lib/core/execution-local-fixture",
+        "error": null
+      }
+    ],
+    "params": {
+      "venue": "Synthetic Bistro",
+      "date": "2026-05-08",
+      "time": "19:30",
+      "partySize": 2
+    }
+  },
+  "workerLogExcerpt": "[opentable] ready_for_confirmation\n[opentable] manual review reached; complete reservation button visible\n[opentable] stopped before final confirmation",
+  "workerLogPath": "codex-worker.log",
+  "screenshotPaths": [
+    "worker/.debug-screenshots/opentable-fixture-manual-review/03-review.jpg"
+  ],
+  "liveSnapshotPaths": [
+    ".debug-screenshots/live/fixture-restaurant-safe-manual-review/snapshot.json"
+  ],
+  "notes": [
+    "Synthetic no-live fixture. The browser is at a safe human review boundary."
+  ]
+}

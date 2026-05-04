@@ -1,0 +1,35 @@
+{
+  "job": {
+    "id": "fixture-restaurant-resy-modal-disabled",
+    "taskId": "fixture-task-restaurant-resy-modal-disabled",
+    "provider": "resy",
+    "scenario": "R-030",
+    "status": "failed",
+    "errorMessage": "Resy details API failed and reservation modal remained disabled.",
+    "steps": [
+      {
+        "name": "select-slot",
+        "type": "restaurant",
+        "__source": "lib/core/execution-local-fixture",
+        "error": "Resy venue details API failed with 500; reservation modal disabled."
+      }
+    ],
+    "params": {
+      "venue": "Charlie Bird",
+      "date": "2026-05-08",
+      "time": "20:00",
+      "partySize": 2
+    }
+  },
+  "workerLogExcerpt": "[resy] selected matching slot for Charlie Bird\n[resy] details API failed: 500 response from venue details endpoint\n[resy] reservation modal disabled; cannot continue safely",
+  "workerLogPath": "codex-worker.log",
+  "screenshotPaths": [
+    "worker/.debug-screenshots/resy-fixture-modal-disabled/02-modal-disabled.jpg"
+  ],
+  "liveSnapshotPaths": [
+    ".debug-screenshots/live/fixture-restaurant-resy-modal-disabled/snapshot.json"
+  ],
+  "notes": [
+    "Synthetic no-live fixture. Do not rerun live until details API/modal evidence is inspected."
+  ]
+}

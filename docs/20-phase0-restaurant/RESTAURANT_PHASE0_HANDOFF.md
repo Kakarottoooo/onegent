@@ -260,6 +260,20 @@ HUDDLE coordination protocol
 
 Codex should review/merge these after checking that they consume actual Codex output shapes.
 
+### Task D: No-Live Artifact Classification
+
+After a Resy or OpenTable run already has DB/log/screenshot evidence, use the
+pure artifact analyzer before deciding whether to patch or retry:
+
+```powershell
+npx tsx scripts/analyze-restaurant-artifact.ts .tmp\restaurant-artifact-bundle.json
+```
+
+Read `docs/20-phase0-restaurant/RESTAURANT_ARTIFACT_ANALYSIS.md` for the bundle
+shape and supported classes. The analyzer is no-live: it does not run providers,
+OpenAI, workers, browser automation, payment, OTP/CAPTCHA/login bypass, or
+final confirmation.
+
 ---
 
 ## 4. Existing Commands

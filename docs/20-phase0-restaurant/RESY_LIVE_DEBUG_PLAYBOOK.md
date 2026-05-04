@@ -173,6 +173,20 @@ technically automate them.
 - Does not modify provider / runtime / runner code. Track B observability
   only.
 
+## No-live artifact analyzer
+
+When a run already has DB/log/screenshot evidence, use the restaurant artifact
+analyzer before asking for another live token or a provider patch:
+
+```powershell
+npx tsx scripts/analyze-restaurant-artifact.ts .tmp\restaurant-artifact-bundle.json
+```
+
+The bundle shape and state taxonomy live in
+`docs/20-phase0-restaurant/RESTAURANT_ARTIFACT_ANALYSIS.md`. The analyzer is
+read-only and offline; it does not run providers, call OpenAI, bypass
+OTP/CAPTCHA/login, submit payment, or click final confirmation.
+
 ---
 
 ## Related dashboards

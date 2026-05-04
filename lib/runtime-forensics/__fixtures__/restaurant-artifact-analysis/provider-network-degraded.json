@@ -1,0 +1,37 @@
+{
+  "job": {
+    "id": "fixture-restaurant-provider-network-degraded",
+    "taskId": "fixture-task-restaurant-provider-network-degraded",
+    "provider": "resy",
+    "scenario": "R-NETWORK",
+    "status": "failed",
+    "terminalReason": "network_or_provider_5xx",
+    "terminalCode": "PROVIDER_5XX",
+    "errorMessage": "Provider degraded: Resy API returned gateway timeout.",
+    "steps": [
+      {
+        "name": "provider-load",
+        "type": "restaurant",
+        "__source": "lib/core/execution-local-fixture",
+        "error": "Gateway timeout 504 while reading provider page."
+      }
+    ],
+    "params": {
+      "venue": "Synthetic Venue",
+      "date": "2026-05-08",
+      "time": "19:30",
+      "partySize": 2
+    }
+  },
+  "workerLogExcerpt": "[resy] provider degraded: 504 gateway timeout\n[resy] net::ERR_CONNECTION_RESET during provider load\n[resy] stopping without retry loop",
+  "workerLogPath": "codex-worker.log",
+  "screenshotPaths": [
+    "worker/.debug-screenshots/resy-fixture-network/01-error.jpg"
+  ],
+  "liveSnapshotPaths": [
+    ".debug-screenshots/live/fixture-restaurant-provider-network-degraded/snapshot.json"
+  ],
+  "notes": [
+    "Synthetic no-live fixture. Treat provider/network degradation separately from selector drift."
+  ]
+}
