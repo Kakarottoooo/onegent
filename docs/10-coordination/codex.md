@@ -2,7 +2,7 @@
 
 > **Branch**: `codex/integrated-preview-20260504`
 > **Last updated**: 2026-05-04
-> **Last commit**: pending Phase 0 restaurant artifact pack push
+> **Last commit**: pending latest sidecar integration push
 >
 > Claude reads this at session start. I write to it before each push.
 > See `CLAUDE.md` section "coordination protocol".
@@ -11,10 +11,42 @@
 
 ## Currently doing
 
-Integrated Goal's Phase 0 restaurant artifact pack onto the Phase 1/1.5
+Integrated latest Agent2/Agent3/Claude sidecar batch onto the Phase 1/1.5
 demo-freeze baseline.
 
 Completed in latest pass:
+- Cherry-picked Agent2 `codex/phase2-unified-artifact-cli @ 0082e6e` as
+  `eb49aed`, adding `scripts/analyze-provider-artifact.ts` and shared tests for
+  routing no-live Expedia, hotel, and restaurant artifact bundle analysis.
+- Cherry-picked Agent3 `codex/track-c-demo-freeze-hardening @ 3ad48ed` as
+  `3ad87bf`, hardening active demo docs and static guards around the no-live
+  demo safety boundary.
+- Cherry-picked Claude `claude/new-agent-startup-contract @ e5edba8` as
+  `8a4c5bd`, adding
+  `docs/10-coordination/NEW_AGENT_STARTUP_CONTRACT.md` and wiring it into the
+  multi-agent protocol/docs index.
+- Verified:
+  - Forbidden-path audit pass for all three branches.
+  - Artifact analyzer/CLI tests pass, 49/49.
+  - Docs/demo static guards pass, 24/24.
+  - Unified restaurant CLI fixture output pass.
+  - `npx tsx scripts/check-demo-freeze.ts` pass with verdict `ready`.
+  - `npx tsc --noEmit --pretty false` pass.
+  - `npm run check-drift` pass.
+  - `git diff --check` pass.
+  - `npm run gate:phase1 -- --allow-known-drift` pass, 9/9, run
+    `phase1-quality-gate-2026-05-04T18-31-28-191Z.json`.
+  - Full `npm run gate:phase1 -- --allow-known-drift --include-smoke --include-e2e`
+    pass, 12/12, run
+    `phase1-quality-gate-2026-05-04T18-34-31-750Z.json`.
+  - `npm run build` pass.
+  - Production `next start` probe returned 200 for 13/13 demo routes:
+    `/`, `/tasks`, `/dev`, `/dev/demo-readiness`, `/dev/demo-control-room`,
+    `/dev/runtime-forensics`, `/dev/phase1-quality-gates`, `/dev/founder-e2e`,
+    `/dev/restaurant-readiness`, `/dev/resy-run-analysis`,
+    `/developers/docs/api/v1`, `/pricing`, and `/permissions`.
+
+Previous completed pass:
 - Cherry-picked Goal `codex/goal-phase0-restaurant-artifact-pack @ 6691bf9` as
   `c1f41a6`, adding a pure no-live restaurant artifact analyzer for
   Resy/OpenTable evidence bundles.

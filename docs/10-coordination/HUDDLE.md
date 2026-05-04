@@ -33,6 +33,19 @@ small.
 
 ## Live Activity
 
+- 2026-05-04 codex: integrated latest Agent2/Agent3/Claude sidecar batch.
+  Cherry-picked Agent2 `codex/phase2-unified-artifact-cli @ 0082e6e` as
+  `eb49aed`, Agent3 `codex/track-c-demo-freeze-hardening @ 3ad48ed` as
+  `3ad87bf`, and Claude `claude/new-agent-startup-contract @ e5edba8` as
+  `8a4c5bd`. Added the unified no-live artifact CLI, hardened demo-freeze
+  docs/tests, and added the new-agent startup contract. Verified artifact
+  analyzer/CLI tests 49/49, docs/demo guards 24/24, unified restaurant CLI
+  fixture output, demo freeze checker `ready`, `tsc`, `check-drift`,
+  `git diff --check`, Phase 1 gate 9/9, full Phase 1 gate with smoke+e2e
+  12/12 (`phase1-quality-gate-2026-05-04T18-34-31-750Z.json`),
+  `npm run build`, and production route probe 13/13. No live provider/OpenAI
+  calls, payment, OTP, CAPTCHA, login bypass, final confirmation, or forbidden
+  paths.
 - 2026-05-04 codex: integrated Goal
   `codex/goal-phase0-restaurant-artifact-pack @ 6691bf9` as `c1f41a6`.
   Added a pure no-live Phase 0 restaurant artifact analyzer, CLI, synthetic
