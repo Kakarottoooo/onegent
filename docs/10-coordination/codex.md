@@ -2,7 +2,7 @@
 
 > **Branch**: `codex/integrated-preview-20260504`
 > **Last updated**: 2026-05-04
-> **Last commit**: pending second sidecar integration push
+> **Last commit**: pending third sidecar + goal integration push
 >
 > Claude reads this at session start. I write to it before each push.
 > See `CLAUDE.md` section "coordination protocol".
@@ -11,9 +11,36 @@
 
 ## Currently doing
 
-Integrated second sidecar batch onto the Phase 1/1.5 demo-freeze baseline.
+Integrated third sidecar batch plus reduced Goal v2 analyzer pack onto the
+Phase 1/1.5 demo-freeze baseline.
 
 Completed in latest pass:
+- Cherry-picked Agent2 `codex/phase2-goal-review-pack @ 3de606d` as
+  `45efc1c`, adding `docs/10-coordination/phase2-goal-review.md`.
+- Cherry-picked Goal `codex/goal-phase2-no-live-consolidation-v2 @ 6bfe5a2`
+  as `98473e9`, adding only the reduced no-live hotel analyzer pack and
+  `docs/10-coordination/goal.md`.
+- Cherry-picked Agent3 `codex/track-c-demo-operator-pack @ 6dd005e` as
+  `2d56e6f`, adding `docs/40-phase1/YC_DEMO_OPERATOR_CARD.md` and demo docs
+  guards.
+- Cherry-picked Claude `claude/docs-ia-post-freeze-index @ b1ddda2` as
+  `9b83153`, refreshing docs IA and post-freeze summary docs.
+- Verified:
+  - Hotel/Expedia/runtime-forensics analyzer tests pass, 75/75.
+  - Demo evidence/static guard tests pass, 22/22.
+  - `npx tsc --noEmit --pretty false` pass.
+  - `npm run check-drift` pass.
+  - `git diff --check` pass.
+  - `npm run gate:phase1 -- --allow-known-drift` pass, 9/9, run
+    `phase1-quality-gate-2026-05-04T17-37-20-323Z.json`.
+  - `npm run build` pass.
+  - Production `next start` probe returned 200 for 13/13 demo routes:
+    `/`, `/tasks`, `/dev`, `/dev/demo-readiness`, `/dev/demo-control-room`,
+    `/dev/runtime-forensics`, `/dev/phase1-quality-gates`, `/dev/founder-e2e`,
+    `/dev/restaurant-readiness`, `/dev/resy-run-analysis`,
+    `/developers/docs/api/v1`, `/pricing`, and `/permissions`.
+
+Previous completed pass:
 - Cherry-picked Agent2 `codex/phase2-hotel-artifact-audit @ 354b4f3` as
   `0bdccf8`, adding hotel no-live audit/runbook docs plus a synthetic
   Booking.com hotel runtime-forensics fixture.

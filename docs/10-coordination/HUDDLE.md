@@ -33,6 +33,17 @@ small.
 
 ## Live Activity
 
+- 2026-05-04 codex: integrated third sidecar batch plus reduced Goal v2 pack
+  onto current integrated preview. Cherry-picked Agent2
+  `codex/phase2-goal-review-pack @ 3de606d` as `45efc1c`, Goal
+  `codex/goal-phase2-no-live-consolidation-v2 @ 6bfe5a2` as `98473e9`,
+  Agent3 `codex/track-c-demo-operator-pack @ 6dd005e` as `2d56e6f`, and
+  Claude `claude/docs-ia-post-freeze-index @ b1ddda2` as `9b83153`.
+  Verified hotel/Expedia/runtime-forensics analyzer tests 75/75,
+  demo evidence/static guard tests 22/22, `tsc`, `check-drift`,
+  `git diff --check`, Phase 1 gate 9/9
+  (`phase1-quality-gate-2026-05-04T17-37-20-323Z.json`), `npm run build`,
+  and production route probe 13/13. No live provider or forbidden paths.
 - 2026-05-04 track-c: started `codex/track-c-demo-operator-pack` from latest
   integrated preview `a704e6f`. Added
   `docs/40-phase1/YC_DEMO_OPERATOR_CARD.md` as a one-page printable operator
