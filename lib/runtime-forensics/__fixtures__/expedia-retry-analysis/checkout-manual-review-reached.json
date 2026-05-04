@@ -1,0 +1,38 @@
+{
+  "job": {
+    "id": "fixture-expedia-checkout-manual-review-reached",
+    "taskId": "fixture-task-expedia-checkout-manual-review-reached",
+    "provider": "expedia",
+    "scenario": "flight",
+    "status": "ready_for_confirmation",
+    "terminalReason": "checkout_reached_manual_review",
+    "steps": [
+      {
+        "name": "book-flight",
+        "type": "flight",
+        "__source": "lib/core/execution-local-fixture",
+        "error": null
+      }
+    ],
+    "params": {
+      "origin": "MCO",
+      "dest": "BNA",
+      "date": "2026-06-01",
+      "targetAirline": "Southwest",
+      "targetDepartureTime": "08:50",
+      "targetFlightNumber": "WN 3084",
+      "targetPrice": 152
+    }
+  },
+  "workerLogExcerpt": "[flight-rpa] Trying locator fallback for flight-card scan\n[flight-rpa] Locator fallback matched flight card: Southwest 8:50am MCO to BNA $152\n[flight-rpa] Checkout reached: traveler review page visible\n[flight-rpa] safe handoff for manual review before payment",
+  "workerLogPath": "codex-worker.log",
+  "screenshotPaths": [
+    "worker/.debug-screenshots/flight-rpa-fixture-checkout/03-checkout-review.jpg"
+  ],
+  "liveSnapshotPaths": [
+    ".debug-screenshots/live/fixture-expedia-checkout-manual-review-reached/snapshot.json"
+  ],
+  "notes": [
+    "Synthetic no-live fixture. Checkout/manual review was reached and the flow stopped safely."
+  ]
+}

@@ -210,3 +210,42 @@ Retry failure means one of:
   final booking confirmation.
 
 Patch only after classifying the retry from DB, logs, and screenshots.
+
+## No-Live Retry Analysis Pack
+
+Agent2 branch:
+
+- `codex/phase2-expedia-retry-analysis-pack`
+- Base: `origin/codex/integrated-preview-20260504 @ 400a716`
+- Scope: no-live Expedia artifact analysis only.
+
+Added:
+
+- Pure analyzer module:
+  `lib/runtime-forensics/expedia-retry-analysis.ts`
+- Synthetic no-live fixtures:
+  `lib/runtime-forensics/__fixtures__/expedia-retry-analysis/*.json`
+- Targeted tests:
+  `lib/__tests__/expedia-retry-analysis.test.ts`
+- Runbook instructions for using the analyzer on a future controlled retry
+  artifact bundle after founder approval.
+
+Analyzer states:
+
+- `card_scan_failed_before_fallback`
+- `fallback_attempted_no_match`
+- `fallback_matched_no_checkout`
+- `checkout_manual_review_reached`
+- `network_provider_failure`
+
+Verification from the branch worktree:
+
+- `npx vitest run lib/__tests__/expedia-retry-analysis.test.ts`: pass, 9/9.
+- `npm run build:mcp`: pass; needed in the clean worktree before the requested
+  TypeScript command could resolve the local MCP workspace package.
+- `npx tsc --noEmit --pretty false`: pass after `npm run build:mcp`.
+- `npm run check-drift`: pass.
+- `git diff --check`: pass.
+
+No live provider was run for this analysis pack. No payment, CVV,
+OTP/CAPTCHA/login bypass, or final confirmation path was exercised.

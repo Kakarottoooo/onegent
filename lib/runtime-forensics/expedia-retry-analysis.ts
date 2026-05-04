@@ -1,0 +1,543 @@
+/**
+ * Expedia retry artifact analyzer.
+ *
+ * Pure no-live module: consumes already-collected DB/log/screenshot metadata
+ * and returns a deterministic post-run classification. It does not read from
+ * disk, touch the network, or invoke any provider/runtime code.
+ */
+
+import type { JobLikeInput } from "./types";
+
+export type ExpediaRetryState =
+  | "card_scan_failed_before_fallback"
+  | "fallback_attempted_no_match"
+  | "fallback_matched_no_checkout"
+  | "checkout_manual_review_reached"
+  | "network_provider_failure"
+  | "insufficient_evidence";
+
+type SignalKind =
+  | "card_scan_failed"
+  | "fallback_attempted"
+  | "fallback_matched"
+  | "no_match"
+  | "checkout_reached"
+  | "network_provider_failure";
+
+type TextSourceKind = "job" | "db_row" | "worker_log" | "artifact_path" | "note";
+
+export const EXPEDIA_RETRY_STATE_LABEL: Record<ExpediaRetryState, string> = {
+  card_scan_failed_before_fallback: "Card scan failed before fallback",
+  fallback_attempted_no_match: "Fallback attempted but no match",
+  fallback_matched_no_checkout: "Fallback matched but did not reach checkout",
+  checkout_manual_review_reached: "Checkout/manual-review reached",
+  network_provider_failure: "Network/provider failure",
+  insufficient_evidence: "Insufficient evidence",
+};
+
+export interface ExpediaRetryArtifactBundle {
+  /**
+   * Duck-typed booking job or extracted DB row transformed into JobLikeInput.
+   */
+  job?: JobLikeInput | null;
+  /**
+   * Optional raw DB row. Useful when the operator pasted the booking_jobs row
+   * before shaping it into JobLikeInput.
+   */
+  dbRow?: unknown;
+  /**
+   * Bounded excerpt from codex-worker.log collected after the approved retry.
+   */
+  workerLogExcerpt?: string | null;
+  /**
+   * Optional filesystem path to the worker log excerpt source.
+   */
+  workerLogPath?: string | null;
+  /**
+   * Provider screenshots, typically worker/.debug-screenshots/flight-rpa-*.
+   */
+  screenshotPaths?: readonly string[];
+  /**
+   * Live snapshot JSON paths, typically .debug-screenshots/live/<job-id>/*.json.
+   */
+  liveSnapshotPaths?: readonly string[];
+  /**
+   * Operator notes copied from the runbook checklist.
+   */
+  notes?: readonly string[];
+}
+
+export interface ExpediaRetryEvidenceSignal {
+  kind: SignalKind;
+  source: TextSourceKind;
+  sourceLabel: string;
+  label: string;
+  excerpt: string;
+}
+
+export interface ExpediaRetryAnalysis {
+  state: ExpediaRetryState;
+  label: string;
+  confidence: "high" | "medium" | "low";
+  jobId: string | null;
+  taskId: string | null;
+  provider: string;
+  scenario: string;
+  status: string;
+  signals: ExpediaRetryEvidenceSignal[];
+  artifactPaths: {
+    workerLogPath: string | null;
+    screenshots: string[];
+    liveSnapshots: string[];
+  };
+  summary: string;
+  nextAction: string;
+}
+
+interface SignalPattern {
+  kind: SignalKind;
+  label: string;
+  rx: RegExp;
+}
+
+interface TextEntry {
+  source: TextSourceKind;
+  label: string;
+  text: string;
+}
+
+const SIGNAL_PATTERNS: SignalPattern[] = [
+  {
+    kind: "checkout_reached",
+    label: "checkout reached",
+    rx: /\bCheckout reached\b/i,
+  },
+  {
+    kind: "checkout_reached",
+    label: "checkout_reached marker",
+    rx: /\bcheckout[-_\s]?reached\b/i,
+  },
+  {
+    kind: "checkout_reached",
+    label: "ready for confirmation",
+    rx: /\bready[-_\s]?for[-_\s]?confirmation\b/i,
+  },
+  {
+    kind: "checkout_reached",
+    label: "awaiting manual confirmation",
+    rx: /\bawaiting[-_\s]?(confirmation|human|founder|manual)[-_\s]?(confirm|review|tap)?\b/i,
+  },
+  {
+    kind: "checkout_reached",
+    label: "manual review",
+    rx: /\bmanual[-_\s]?review\b/i,
+  },
+  {
+    kind: "checkout_reached",
+    label: "safe handoff",
+    rx: /\bsafe[-_\s]?handoff\b/i,
+  },
+  {
+    kind: "checkout_reached",
+    label: "paused payment",
+    rx: /\bpaused[-_\s]?payment\b/i,
+  },
+  {
+    kind: "checkout_reached",
+    label: "payment wall / CVV gate",
+    rx: /\b(payment[-_\s]?wall|cvv[-_\s]?gate|stop[-_\s]?at[-_\s]?cvv)\b/i,
+  },
+  {
+    kind: "network_provider_failure",
+    label: "5xx provider/server status",
+    rx: /\b5\d{2}\b\s*(error|response|status|server)?/i,
+  },
+  {
+    kind: "network_provider_failure",
+    label: "TCP-level network error",
+    rx: /\b(econnreset|econnrefused|enotfound|etimedout)\b/i,
+  },
+  {
+    kind: "network_provider_failure",
+    label: "Chromium network error",
+    rx: /\bnet::ERR_[A-Z_]+\b/,
+  },
+  {
+    kind: "network_provider_failure",
+    label: "gateway timeout/error",
+    rx: /\bgateway\s+(timeout|error)\b/i,
+  },
+  {
+    kind: "network_provider_failure",
+    label: "provider unavailable",
+    rx: /\b(provider|expedia)\s+(unreachable|down|unavailable|timed out)\b/i,
+  },
+  {
+    kind: "card_scan_failed",
+    label: "flight-card DOM scan failed",
+    rx: /Flight-card DOM scan failed/i,
+  },
+  {
+    kind: "fallback_attempted",
+    label: "locator fallback attempted",
+    rx: /Trying locator fallback for flight-card scan/i,
+  },
+  {
+    kind: "fallback_matched",
+    label: "locator fallback matched",
+    rx: /Locator fallback matched flight card/i,
+  },
+  {
+    kind: "no_match",
+    label: "no matching flight button",
+    rx: /no matching flight button found/i,
+  },
+  {
+    kind: "no_match",
+    label: "no matching flight candidate",
+    rx: /no matching flight|no candidate selected|could not find matching flight/i,
+  },
+  {
+    kind: "no_match",
+    label: "checkout not reached",
+    rx: /flight checkout was not reached|not reaching checkout|did not reach checkout/i,
+  },
+];
+
+export function analyzeExpediaRetryArtifactBundle(
+  bundle: ExpediaRetryArtifactBundle,
+): ExpediaRetryAnalysis {
+  const entries = buildTextEntries(bundle);
+  const signals = collectSignals(entries);
+  const has = (kind: SignalKind) => signals.some((s) => s.kind === kind);
+
+  const hasCheckout = has("checkout_reached");
+  const hasNetwork = has("network_provider_failure");
+  const hasCardScanFailed = has("card_scan_failed");
+  const hasFallbackAttempted = has("fallback_attempted");
+  const hasFallbackMatched = has("fallback_matched");
+  const hasNoMatch = has("no_match");
+
+  let state: ExpediaRetryState;
+  if (hasCheckout) {
+    state = "checkout_manual_review_reached";
+  } else if (hasNetwork) {
+    state = "network_provider_failure";
+  } else if (hasFallbackMatched) {
+    state = "fallback_matched_no_checkout";
+  } else if (hasFallbackAttempted) {
+    state = "fallback_attempted_no_match";
+  } else if (hasCardScanFailed) {
+    state = "card_scan_failed_before_fallback";
+  } else {
+    state = "insufficient_evidence";
+  }
+
+  const job = bundle.job ?? null;
+  const dbRow = bundle.dbRow;
+  const jobId = firstString(job?.id, readString(dbRow, "id"));
+  const taskId = firstString(job?.taskId, readString(dbRow, "task_id"), readString(dbRow, "taskId"));
+  const provider = firstString(job?.provider, readString(dbRow, "provider")) ?? "unknown";
+  const scenario = firstString(job?.scenario, readString(dbRow, "scenario")) ?? "unknown";
+  const status = firstString(job?.status, readString(dbRow, "status")) ?? "unknown";
+  const artifactPaths = {
+    workerLogPath: firstString(bundle.workerLogPath) ?? null,
+    screenshots: cleanStringList(bundle.screenshotPaths),
+    liveSnapshots: cleanStringList(bundle.liveSnapshotPaths),
+  };
+
+  const confidence = classifyConfidence(state, {
+    hasCardScanFailed,
+    hasFallbackAttempted,
+    hasFallbackMatched,
+    hasNoMatch,
+  });
+
+  return {
+    state,
+    label: EXPEDIA_RETRY_STATE_LABEL[state],
+    confidence,
+    jobId,
+    taskId,
+    provider,
+    scenario,
+    status,
+    signals,
+    artifactPaths,
+    summary: buildSummary(state, confidence, signals),
+    nextAction: nextActionForState(state),
+  };
+}
+
+export function formatExpediaRetryAnalysisMarkdown(
+  analysis: ExpediaRetryAnalysis,
+): string {
+  const lines: string[] = [];
+
+  lines.push("## Expedia Retry Artifact Analysis");
+  lines.push("");
+  lines.push(`- **State**: \`${analysis.state}\` (${analysis.label})`);
+  lines.push(`- **Confidence**: \`${analysis.confidence}\``);
+  lines.push(`- **Job id**: \`${analysis.jobId ?? "(unknown)"}\``);
+  if (analysis.taskId) lines.push(`- **Task id**: \`${analysis.taskId}\``);
+  lines.push(`- **Provider**: \`${analysis.provider}\``);
+  lines.push(`- **Scenario**: \`${analysis.scenario}\``);
+  lines.push(`- **Status**: \`${analysis.status}\``);
+  lines.push("");
+  lines.push("### Evidence Signals");
+  lines.push("");
+  if (analysis.signals.length === 0) {
+    lines.push("_No known Expedia retry signals were found in the artifact bundle._");
+  } else {
+    for (const signal of analysis.signals.slice(0, 12)) {
+      lines.push(
+        `- **${signal.label}** from \`${signal.sourceLabel}\`: ${escapeMarkdownLine(
+          signal.excerpt,
+        )}`,
+      );
+    }
+  }
+  lines.push("");
+  lines.push("### Artifact Paths");
+  lines.push("");
+  if (analysis.artifactPaths.workerLogPath) {
+    lines.push(`- Worker log: \`${analysis.artifactPaths.workerLogPath}\``);
+  }
+  if (analysis.artifactPaths.screenshots.length > 0) {
+    for (const screenshotPath of analysis.artifactPaths.screenshots) {
+      lines.push(`- Screenshot: \`${screenshotPath}\``);
+    }
+  }
+  if (analysis.artifactPaths.liveSnapshots.length > 0) {
+    for (const liveSnapshotPath of analysis.artifactPaths.liveSnapshots) {
+      lines.push(`- Live snapshot: \`${liveSnapshotPath}\``);
+    }
+  }
+  if (
+    !analysis.artifactPaths.workerLogPath &&
+    analysis.artifactPaths.screenshots.length === 0 &&
+    analysis.artifactPaths.liveSnapshots.length === 0
+  ) {
+    lines.push("_No artifact paths were included._");
+  }
+  lines.push("");
+  lines.push("### Verdict");
+  lines.push("");
+  lines.push(analysis.summary);
+  lines.push("");
+  lines.push("### Next Action");
+  lines.push("");
+  lines.push(analysis.nextAction);
+
+  return lines.join("\n");
+}
+
+export function formatExpediaRetryArtifactBundleMarkdown(
+  bundle: ExpediaRetryArtifactBundle,
+): string {
+  return formatExpediaRetryAnalysisMarkdown(
+    analyzeExpediaRetryArtifactBundle(bundle),
+  );
+}
+
+function buildTextEntries(bundle: ExpediaRetryArtifactBundle): TextEntry[] {
+  const entries: TextEntry[] = [];
+  const job = bundle.job ?? null;
+
+  addText(entries, "worker_log", "workerLogExcerpt", bundle.workerLogExcerpt);
+  addText(entries, "worker_log", "job.rawWorkerLogExcerpt", job?.rawWorkerLogExcerpt);
+  addText(entries, "job", "job.errorMessage", job?.errorMessage);
+  addText(entries, "job", "job.terminalReason", job?.terminalReason);
+  addText(entries, "job", "job.terminalCode", job?.terminalCode);
+  addText(entries, "job", "job.steps", stringify(job?.steps));
+  addText(entries, "job", "job.decisionLog", stringify(job?.decisionLog));
+  addText(entries, "job", "job.params", stringify(job?.params));
+  addText(entries, "db_row", "dbRow", stringify(bundle.dbRow));
+  addText(entries, "artifact_path", "workerLogPath", bundle.workerLogPath);
+  addText(
+    entries,
+    "artifact_path",
+    "screenshotPaths",
+    cleanStringList(bundle.screenshotPaths).join("\n"),
+  );
+  addText(
+    entries,
+    "artifact_path",
+    "liveSnapshotPaths",
+    cleanStringList(bundle.liveSnapshotPaths).join("\n"),
+  );
+  for (const [i, note] of cleanStringList(bundle.notes).entries()) {
+    addText(entries, "note", `notes[${i}]`, note);
+  }
+
+  return entries;
+}
+
+function collectSignals(entries: TextEntry[]): ExpediaRetryEvidenceSignal[] {
+  const signals: ExpediaRetryEvidenceSignal[] = [];
+  const seen = new Set<string>();
+
+  for (const entry of entries) {
+    for (const pattern of SIGNAL_PATTERNS) {
+      const match = pattern.rx.exec(entry.text);
+      if (!match) continue;
+      const excerpt = excerptAround(entry.text, match.index, match[0].length);
+      if (
+        pattern.kind === "checkout_reached" &&
+        isNegatedCheckoutExcerpt(excerpt)
+      ) {
+        continue;
+      }
+      const key = `${pattern.kind}|${entry.label}|${pattern.label}|${excerpt}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      signals.push({
+        kind: pattern.kind,
+        source: entry.source,
+        sourceLabel: entry.label,
+        label: pattern.label,
+        excerpt,
+      });
+    }
+  }
+
+  return signals.sort((a, b) => signalRank(a.kind) - signalRank(b.kind));
+}
+
+function classifyConfidence(
+  state: ExpediaRetryState,
+  flags: {
+    hasCardScanFailed: boolean;
+    hasFallbackAttempted: boolean;
+    hasFallbackMatched: boolean;
+    hasNoMatch: boolean;
+  },
+): "high" | "medium" | "low" {
+  switch (state) {
+    case "checkout_manual_review_reached":
+    case "network_provider_failure":
+      return "high";
+    case "fallback_matched_no_checkout":
+      return flags.hasNoMatch ? "high" : "medium";
+    case "fallback_attempted_no_match":
+      return flags.hasNoMatch ? "high" : "medium";
+    case "card_scan_failed_before_fallback":
+      return flags.hasCardScanFailed && !flags.hasFallbackAttempted
+        ? "high"
+        : "medium";
+    case "insufficient_evidence":
+      return "low";
+  }
+}
+
+function buildSummary(
+  state: ExpediaRetryState,
+  confidence: "high" | "medium" | "low",
+  signals: ExpediaRetryEvidenceSignal[],
+): string {
+  const signalText =
+    signals.length === 0
+      ? "no known signals"
+      : signals
+          .slice(0, 3)
+          .map((s) => s.label)
+          .join(", ");
+  return `${EXPEDIA_RETRY_STATE_LABEL[state]} with ${confidence} confidence (${signalText}).`;
+}
+
+function nextActionForState(state: ExpediaRetryState): string {
+  switch (state) {
+    case "card_scan_failed_before_fallback":
+      return "Treat as selector/card-scan fallback not reached. Compare the visible card screenshot with the DOM scan entry point before patching.";
+    case "fallback_attempted_no_match":
+      return "Treat as locator fallback too narrow only if the screenshot still shows the target card. Patch selector/card matching, not routing/job shape.";
+    case "fallback_matched_no_checkout":
+      return "Inspect the fare modal and checkout transition evidence. Patch fare-modal or checkout-boundary detection only after screenshot confirmation.";
+    case "checkout_manual_review_reached":
+      return "Count as demo-useful safe progress. Preserve the hard stop before payment, CVV, OTP, CAPTCHA, login bypass, or final confirmation.";
+    case "network_provider_failure":
+      return "Treat as provider/network instability. Do not patch selectors from this state unless a separate screenshot/log signal proves card matching failed.";
+    case "insufficient_evidence":
+      return "Collect the DB row, codex-worker.log excerpt, provider screenshots, and live snapshot paths before making a patch decision.";
+  }
+}
+
+function signalRank(kind: SignalKind): number {
+  switch (kind) {
+    case "checkout_reached":
+      return 0;
+    case "network_provider_failure":
+      return 1;
+    case "fallback_matched":
+      return 2;
+    case "fallback_attempted":
+      return 3;
+    case "card_scan_failed":
+      return 4;
+    case "no_match":
+      return 5;
+  }
+}
+
+function addText(
+  entries: TextEntry[],
+  source: TextSourceKind,
+  label: string,
+  value: string | null | undefined,
+): void {
+  const text = typeof value === "string" ? value.trim() : "";
+  if (!text) return;
+  entries.push({ source, label, text });
+}
+
+function cleanStringList(value: readonly string[] | null | undefined): string[] {
+  if (!Array.isArray(value)) return [];
+  return value.filter((item): item is string => typeof item === "string" && item.trim().length > 0);
+}
+
+function stringify(value: unknown): string | null {
+  if (value === null || value === undefined) return null;
+  if (typeof value === "string") return value;
+  try {
+    return JSON.stringify(value);
+  } catch {
+    return String(value);
+  }
+}
+
+function firstString(...values: Array<string | null | undefined>): string | null {
+  for (const value of values) {
+    if (typeof value === "string" && value.trim()) return value.trim();
+  }
+  return null;
+}
+
+function readString(value: unknown, key: string): string | null {
+  if (!isRecord(value)) return null;
+  const candidate = value[key];
+  return typeof candidate === "string" && candidate.trim()
+    ? candidate.trim()
+    : null;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function excerptAround(text: string, index: number, length: number): string {
+  const start = Math.max(0, index - 80);
+  const end = Math.min(text.length, index + length + 120);
+  const prefix = start > 0 ? "..." : "";
+  const suffix = end < text.length ? "..." : "";
+  return `${prefix}${text.slice(start, end).replace(/\s+/g, " ").trim()}${suffix}`;
+}
+
+function isNegatedCheckoutExcerpt(excerpt: string): boolean {
+  return /\b(no|not|never|without)\s+(checkout[-_\s]?reached|reached[-_\s]?checkout)\b/i.test(
+    excerpt,
+  );
+}
+
+function escapeMarkdownLine(text: string): string {
+  return text.replace(/`/g, "\\`");
+}

@@ -232,6 +232,103 @@ When inspecting screenshots, answer these questions:
 4. Did Expedia navigate to fare selection, review, checkout, login, or error?
 5. Did the page state match the terminal error?
 
+## Post-Retry Analyzer
+
+Use the analyzer only after the single founder-approved retry has already
+completed and the DB/log/screenshot evidence has been collected. The analyzer
+does not run a provider, read the database, open Expedia, or click anything.
+It classifies an artifact bundle that the operator assembled from the evidence
+above.
+
+Create this local artifact bundle from the DB row, worker log grep output, and
+artifact paths:
+
+```json
+{
+  "job": {
+    "id": "<retry-job-id>",
+    "taskId": "<task-id>",
+    "provider": "expedia",
+    "scenario": "flight",
+    "status": "<booking_jobs.status>",
+    "errorMessage": "<top-level or step error>",
+    "terminalReason": "<step terminalReason if present>",
+    "terminalCode": "<step terminalCode if present>",
+    "steps": [
+      {
+        "type": "flight",
+        "status": "<steps[0].status>",
+        "error": "<steps[0].error>",
+        "terminalReason": "<steps[0].terminalReason if present>",
+        "terminalCode": "<steps[0].terminalCode if present>",
+        "__source": "<steps[0].body.__source or step.__source>",
+        "body": {
+          "scenario": "flight",
+          "params": "<copy steps[0].body.params>"
+        }
+      }
+    ],
+    "params": {
+      "origin": "MCO",
+      "dest": "BNA",
+      "date": "2026-06-01",
+      "passengers": 1,
+      "cabin_class": "economy",
+      "targetAirline": "Southwest",
+      "targetDepartureTime": "08:50",
+      "targetFlightNumber": "WN 3084",
+      "targetPrice": 152
+    }
+  },
+  "dbRow": "<optional raw booking_jobs row>",
+  "workerLogExcerpt": "<bounded Select-String output from codex-worker.log>",
+  "workerLogPath": "C:\\Users\\Gzw19\\onegent-integrated-20260504\\codex-worker.log",
+  "screenshotPaths": [
+    "C:\\Users\\Gzw19\\onegent-integrated-20260504\\worker\\.debug-screenshots\\flight-rpa-*"
+  ],
+  "liveSnapshotPaths": [
+    "C:\\Users\\Gzw19\\onegent-integrated-20260504\\.debug-screenshots\\live\\<retry-job-id>\\*.json"
+  ],
+  "notes": [
+    "One founder-approved retry only. No payment, CVV, OTP/CAPTCHA/login bypass, or final booking confirmation."
+  ]
+}
+```
+
+Save it as:
+
+```powershell
+C:\Users\Gzw19\onegent-integrated-20260504\.tmp\expedia-retry-artifact-bundle.json
+```
+
+Then run the pure analyzer from the integrated preview worktree:
+
+```powershell
+cd C:\Users\Gzw19\onegent-integrated-20260504
+$env:BUNDLE_PATH = "C:\Users\Gzw19\onegent-integrated-20260504\.tmp\expedia-retry-artifact-bundle.json"
+npx tsx -e "import fs from 'node:fs'; import { formatExpediaRetryArtifactBundleMarkdown } from './lib/runtime-forensics/expedia-retry-analysis'; const p = process.env.BUNDLE_PATH; if (!p) throw new Error('BUNDLE_PATH required'); const bundle = JSON.parse(fs.readFileSync(p, 'utf8')); console.log(formatExpediaRetryArtifactBundleMarkdown(bundle));"
+```
+
+The output is paste-ready Markdown. Paste it into the Phase 2 handoff before
+deciding whether a patch is justified.
+
+Analyzer states:
+
+- `card_scan_failed_before_fallback`: `Flight-card DOM scan failed` appears
+  and no `Trying locator fallback for flight-card scan` signal follows.
+- `fallback_attempted_no_match`: fallback attempted, but no
+  `Locator fallback matched flight card` signal appears.
+- `fallback_matched_no_checkout`: fallback matched a flight card, but checkout
+  or manual review was not reached.
+- `checkout_manual_review_reached`: checkout, safe handoff, manual review,
+  payment wall, or confirmation boundary was reached without crossing a hard
+  stop.
+- `network_provider_failure`: provider/network failure such as 5xx,
+  `net::ERR_*`, TCP errors, gateway timeout, or Expedia unavailable.
+
+If the analyzer returns `insufficient_evidence`, do not patch. Collect the DB
+row, worker log excerpt, provider screenshots, and live snapshot paths first.
+
 ## Success Taxonomy
 
 Acceptable retry outcomes:

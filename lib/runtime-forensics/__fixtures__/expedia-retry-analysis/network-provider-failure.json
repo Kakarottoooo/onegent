@@ -1,0 +1,38 @@
+{
+  "job": {
+    "id": "fixture-expedia-network-provider-failure",
+    "taskId": "fixture-task-expedia-network-provider-failure",
+    "provider": "expedia",
+    "scenario": "flight",
+    "status": "failed",
+    "errorMessage": "Expedia unavailable: HTTP 503 response while loading Flights-Search.",
+    "steps": [
+      {
+        "name": "book-flight",
+        "type": "flight",
+        "__source": "lib/core/execution-local-fixture",
+        "error": "Expedia unavailable: HTTP 503 response while loading Flights-Search."
+      }
+    ],
+    "params": {
+      "origin": "MCO",
+      "dest": "BNA",
+      "date": "2026-06-01",
+      "targetAirline": "Southwest",
+      "targetDepartureTime": "08:50",
+      "targetFlightNumber": "WN 3084",
+      "targetPrice": 152
+    }
+  },
+  "workerLogExcerpt": "[flight-rpa] Expedia provider unavailable: HTTP 503 response while loading Flights-Search\n[flight-rpa] page error: net::ERR_HTTP_RESPONSE_CODE_FAILURE",
+  "workerLogPath": "codex-worker.log",
+  "screenshotPaths": [
+    "worker/.debug-screenshots/flight-rpa-fixture-network/00-provider-error.jpg"
+  ],
+  "liveSnapshotPaths": [
+    ".debug-screenshots/live/fixture-expedia-network-provider-failure/snapshot.json"
+  ],
+  "notes": [
+    "Synthetic no-live fixture. Provider/network failure occurs before selector evidence is meaningful."
+  ]
+}
