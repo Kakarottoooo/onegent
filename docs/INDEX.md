@@ -12,16 +12,22 @@ If you are a fresh agent picking up Onegent cold, read this exact set first
 and stop at the first task-specific runbook that matches your assignment:
 
 1. `docs/INDEX.md` (this file).
-2. `docs/00-start-here/PROJECT_SUMMARY.md` - short current project overview.
-3. `docs/00-start-here/PHASE_STATUS.md` - phase status, blockers, owners,
+2. `docs/10-coordination/NEW_AGENT_STARTUP_CONTRACT.md` - the one-page
+   contract every coding agent signs implicitly when opening a branch.
+   Read this BEFORE you read PROJECT_SUMMARY or PHASE_STATUS.
+3. `docs/00-start-here/PROJECT_SUMMARY.md` - short current project overview.
+4. `docs/00-start-here/PHASE_STATUS.md` - phase status, blockers, owners,
    and current verified verdict numbers.
-4. `docs/10-coordination/README.md` - how Codex/Claude coordinate.
-5. `docs/10-coordination/HUDDLE.md` - short shared working memory; latest
+5. `docs/10-coordination/README.md` - how Codex/Claude coordinate.
+6. `docs/10-coordination/MULTI_AGENT_PROTOCOL.md` - long-form
+   merge-conflict-avoidance contract. Mandatory before opening any new
+   branch that touches shared docs, tests, or coordination state.
+7. `docs/10-coordination/HUDDLE.md` - short shared working memory; latest
    activity + active locks + inboxes for codex / claude / track-c.
-6. `docs/10-coordination/codex.md`, `docs/10-coordination/claude.md`,
+8. `docs/10-coordination/codex.md`, `docs/10-coordination/claude.md`,
    `docs/10-coordination/phase2.md`, and `docs/10-coordination/track-c.md` -
    current agent-specific state.
-7. The task-specific section below that matches your assignment.
+9. The task-specific section below that matches your assignment.
 
 Verification baseline for any non-trivial branch:
 
@@ -159,6 +165,8 @@ release entrypoints (`AGENTS.md`, `CLAUDE.md`, `README.md`, `CHANGELOG.md`).
 | Phase status | `docs/00-start-here/PHASE_STATUS.md` |
 | Full historical project summary | `docs/90-archive/history/PROJECT_SUMMARY_FULL_2026-05-03.md` |
 | Coordination root | `docs/10-coordination/README.md` |
+| New agent startup contract | `docs/10-coordination/NEW_AGENT_STARTUP_CONTRACT.md` |
+| Multi-agent conflict protocol | `docs/10-coordination/MULTI_AGENT_PROTOCOL.md` |
 | Coordination shared memory | `docs/10-coordination/HUDDLE.md` |
 | Coordination strategic ledger | `docs/10-coordination/STRATEGIC_LEDGER.md` |
 | Codex state | `docs/10-coordination/codex.md` |

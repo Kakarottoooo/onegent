@@ -3,8 +3,15 @@
 > Last updated: 2026-05-04
 > Owner: Codex (Track A) reviews; Claude (Track B) and sidecar agents follow.
 > Read order: this file is the canonical merge-conflict-avoidance contract;
-> read it after `docs/10-coordination/README.md` and before opening any new
-> branch that touches shared docs, tests, or coordination state.
+> read it after `docs/10-coordination/README.md` and
+> `docs/10-coordination/NEW_AGENT_STARTUP_CONTRACT.md`, and before opening
+> any new branch that touches shared docs, tests, or coordination state.
+
+For a 3-minute boiled-down version that every new agent should read
+before this one, see
+`docs/10-coordination/NEW_AGENT_STARTUP_CONTRACT.md`. The contract is
+the cold-start checklist; this protocol is the long-form legal text
+that the contract references.
 
 This document exists because the project now has multiple coding agents
 (Codex Track A, Claude Track B, Phase 2 sidecar Agent2, Track C demo
