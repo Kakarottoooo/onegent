@@ -444,3 +444,54 @@ Validation from this branch worktree:
 
 No live provider was run for this CLI pack. No OpenAI live call, payment, CVV,
 OTP/CAPTCHA/login bypass, or final confirmation path was exercised.
+
+## Flight Controlled Runtime Closure
+
+Agent2 branch:
+
+- `codex/flight-controlled-runtime-closure`
+- Base: latest `origin/codex/integrated-preview-20260504 @ 0c7efca`
+- Scope: Expedia/flight no-live controlled retry preparation only.
+
+Inspected:
+
+- Expedia flight runtime path:
+  `lib/booking-autopilot/providers/expedia.ts`
+- Expedia flight executor handoff path:
+  `lib/booking-autopilot/stagehand-executor.ts`
+- Expedia retry analyzer:
+  `lib/runtime-forensics/expedia-retry-analysis.ts`
+- Expedia retry fixtures:
+  `lib/runtime-forensics/__fixtures__/expedia-retry-analysis/*.json`
+
+Added:
+
+- No-live controlled retry preflight test:
+  `lib/__tests__/expedia-controlled-retry-preflight.test.ts`
+- Runbook checklist for exact prompt:
+  `帮我订一个6月1号从奥兰多飞 Nashville 的机票，一个人`
+
+Preflight guard coverage:
+
+- Normalized params must include `origin=MCO`, `dest=BNA`,
+  `date=2026-06-01`, and `passengers=1`.
+- Source marker must be present at `steps[0].body.__source` or
+  `step.__source` before a worker start.
+- Card-scan fallback signals classify through the existing Expedia retry
+  analyzer.
+- Checkout/manual-review evidence wins over diagnostic fallback evidence.
+
+Validation from the branch worktree:
+
+- `npx vitest run lib/__tests__/expedia-controlled-retry-preflight.test.ts lib/__tests__/expedia-retry-analysis.test.ts lib/__tests__/expedia-flight-card-match.test.ts`:
+  pass, 16/16.
+- `npm run build:mcp`: pass; needed in the clean worktree before the requested
+  TypeScript command could resolve the local MCP workspace package.
+- `npx tsc --noEmit --pretty false`: pass after `npm run build:mcp`.
+- `npm run check-drift`: pass.
+- `git diff --check`: pass.
+
+No live provider was run for this closure prep. No payment, CVV,
+OTP/CAPTCHA/login bypass, or final confirmation path was exercised. If founder
+later approves one retry, DB row plus worker log plus screenshots remain the
+source of truth before any selector/runtime patch.
