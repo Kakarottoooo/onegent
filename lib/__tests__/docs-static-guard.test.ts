@@ -149,4 +149,85 @@ describe("docs static guard", () => {
       "PHASE_1_FOUNDER_E2E header must reflect demo-freeze pass",
     ).toMatch(/demo-freeze passed/i);
   });
+
+  it("keeps docs/INDEX.md as the single new-agent entrypoint with current canonical paths", () => {
+    // INDEX.md is the cold-start map for any new agent. These invariants
+    // are narrow and do not duplicate Track C's required-docs check
+    // (which only asserts file existence). Here we verify INDEX itself
+    // routes a new agent to the correct read order, the post-freeze
+    // task surfaces, and the Phase 2 hotel revival paths.
+    const index = read("docs/INDEX.md");
+
+    expect(
+      index,
+      "INDEX must document the explicit new-agent read order",
+    ).toMatch(/##\s+New Agent Read Order/);
+
+    // Post-freeze quick path must exist and reference the demo surfaces.
+    expect(
+      index,
+      "INDEX must include a Phase 1/1.5 demo freeze quick path",
+    ).toMatch(/Phase 1\s*\/\s*1\.5 Demo Freeze Quick Path/);
+
+    // Canonical doc table must include every key post-freeze runbook
+    // and Phase 2 audit so that a new agent can find them by title.
+    const requiredCanonicalPaths = [
+      "docs/40-phase1/DEMO_CONTROL_ROOM.md",
+      "docs/40-phase1/YC_DEMO_RUNBOOK.md",
+      "docs/40-phase1/DEMO_FREEZE_ACCEPTANCE.md",
+      "docs/40-phase1/PHASE_1_FOUNDER_E2E.md",
+      "docs/40-phase1/AUTONOMOUS_FOUNDER_E2E.md",
+      "docs/40-phase1/PHASE_1_QUALITY_GATE.md",
+      "docs/50-product-areas/PHASE2_VERTICAL_REVIVAL_AUDIT.md",
+      "docs/50-product-areas/HOTEL_VERTICAL_REVIVAL_AUDIT.md",
+      "docs/50-product-areas/EXPEDIA_CONTROLLED_RETRY_RUNBOOK.md",
+      "docs/50-product-areas/HOTEL_CONTROLLED_RETRY_RUNBOOK.md",
+      "docs/10-coordination/HUDDLE.md",
+      "docs/10-coordination/codex.md",
+      "docs/10-coordination/claude.md",
+      "docs/10-coordination/track-c.md",
+      "docs/10-coordination/phase2.md",
+    ];
+    for (const relPath of requiredCanonicalPaths) {
+      expect(
+        index,
+        `INDEX must reference ${relPath} so a new agent can find it`,
+      ).toContain(relPath);
+    }
+
+    // INDEX must remain ASCII (no mojibake or stray emoji) so that the
+    // root entrypoint stays clean across editors and terminals.
+    expect(
+      index,
+      "INDEX must be ASCII-only (no mojibake, no decorative emoji)",
+    ).not.toMatch(/[鈥�馃]/);
+    // Replacement char (U+FFFD) and double-encoded UTF-8 markers indicate
+    // mojibake even when the byte stream decodes as UTF-8.
+    expect(index, "INDEX must not contain U+FFFD").not.toMatch(/�/);
+  });
+
+  it("keeps PROJECT_SUMMARY phase snapshot aligned with the current integrated preview", () => {
+    const summary = read("docs/00-start-here/PROJECT_SUMMARY.md");
+
+    expect(
+      summary,
+      "PROJECT_SUMMARY must point at the current integrated preview worktree",
+    ).toContain("onegent-integrated-20260504");
+    expect(
+      summary,
+      "PROJECT_SUMMARY must point at the current integrated preview branch",
+    ).toContain("codex/integrated-preview-20260504");
+    expect(
+      summary,
+      "PROJECT_SUMMARY phase snapshot must record demo-freeze pass for Phase 1",
+    ).toMatch(/Phase 1\s*\|\s*Demo-freeze passed/);
+    expect(
+      summary,
+      "PROJECT_SUMMARY phase snapshot must record demo-freeze pass for Phase 1.5",
+    ).toMatch(/Phase 1\.5\s*\|\s*Demo-freeze passed/);
+    expect(
+      summary,
+      "PROJECT_SUMMARY must drop the older 'Mostly shipped' Phase 1 phrasing",
+    ).not.toMatch(/Phase 1\s*\|\s*Mostly shipped/);
+  });
 });

@@ -19,9 +19,17 @@ Do not enter Phase 2 yet. Stabilize Phase 0, Phase 1, and Phase 1.5 first.
 
 ## Current Verified State
 
-- Integrated preview branch: `codex/integrated-preview-20260504`.
-- Runtime/debug branch: `codex/openai-chat-model-env`.
-- Expedia fix branch: `codex/expedia-flight-card-fallback`.
+- Integrated preview branch: `codex/integrated-preview-20260504` (canonical;
+  contains all merged Phase 0/1/1.5 work plus Phase 2 audit/runbooks).
+- Historical side branches now folded into integrated preview:
+  `codex/openai-chat-model-env` (runtime/debug),
+  `codex/expedia-flight-card-fallback` (Expedia visible-card fallback),
+  `codex/phase2-expedia-retry-analysis-pack`,
+  `codex/phase2-expedia-artifact-cli`,
+  `codex/phase2-hotel-artifact-audit`,
+  `codex/track-c-demo-readiness`,
+  `codex/track-c-demo-readiness-v2`,
+  `codex/track-c-demo-acceptance-pack`.
 - 2026-05-04 latest Phase 1/1.5 demo-freeze check:
   - `npm run gate:phase1 -- --allow-known-drift --include-smoke --include-e2e`
     passed with 12 pass, 0 fail, 0 skipped, 0 known-existing drift.
@@ -126,6 +134,9 @@ Primary docs:
 - `docs/40-phase1/PHASE_1_FOUNDER_E2E.md`
 - `docs/40-phase1/AUTONOMOUS_FOUNDER_E2E.md`
 - `docs/40-phase1/PHASE_1_QUALITY_GATE.md`
+- `docs/40-phase1/DEMO_CONTROL_ROOM.md`
+- `docs/40-phase1/YC_DEMO_RUNBOOK.md`
+- `docs/40-phase1/DEMO_FREEZE_ACCEPTANCE.md`
 
 ## Phase 1.5 - Quality Gate And Polish
 
@@ -175,6 +186,11 @@ Next step:
   making any further provider changes.
 - Phase 2 revival audit lives at
   `docs/50-product-areas/PHASE2_VERTICAL_REVIVAL_AUDIT.md`.
+- Hotel-specific no-live audit lives at
+  `docs/50-product-areas/HOTEL_VERTICAL_REVIVAL_AUDIT.md`.
+- Controlled retry checklists:
+  `docs/50-product-areas/EXPEDIA_CONTROLLED_RETRY_RUNBOOK.md` and
+  `docs/50-product-areas/HOTEL_CONTROLLED_RETRY_RUNBOOK.md`.
 
 ## Phase 2 - Frozen
 
