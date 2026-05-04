@@ -22,7 +22,12 @@ Safety boundary:
 3. Search the worker log for the job id, provider marker, or trip label.
 4. Open the latest provider debug screenshot folder.
 5. Compare the visible page state against what the worker believed.
-6. Only then decide whether to patch selectors, strategy ordering, or runtime
+6. **Classify against the four-way operator taxonomy in
+   `docs/30-provider-debug/FAILURE_TAXONOMY.md`** (model_env_transient /
+   provider_network_degraded / provider_logic_failure /
+   safe_boundary_reached) before deciding to patch. A model/env transient
+   or network-degraded run is not a provider regression.
+7. Only then decide whether to patch selectors, strategy ordering, or runtime
    state handling.
 
 Do not diagnose from the task UI alone. The UI intentionally compresses provider

@@ -7,6 +7,21 @@ from Resy and OpenTable. This document prepares review of already-collected
 DB/log/screenshot evidence. It does not authorize live provider runs, OpenAI
 calls, payment, OTP/CAPTCHA/login bypass, or final confirmation.
 
+## Triage Order: Classify Before You Analyze
+
+Before running the restaurant artifact analyzer below, classify the failure
+against the four-way operator taxonomy in
+`docs/30-provider-debug/FAILURE_TAXONOMY.md`. The analyzer only fires usefully
+on a `provider_logic_failure`. If the run actually died at planning time with
+an OpenAI 5xx, or if the provider site itself was network-degraded, the
+analyzer will return `insufficient_evidence` and the correct response is to
+wait and re-run the same case, not to patch a Resy/OpenTable selector.
+
+The 2026-05-04 R-030 Resy live run is a worked example of why this matters:
+the run never reached Resy and is classified as `model_env_transient`
+(OpenAI Responses API 500). It is not a Resy fill/OTP regression and must
+not be treated as one.
+
 ## Safety Boundary
 
 Hard stops:
