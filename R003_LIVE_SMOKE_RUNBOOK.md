@@ -1,7 +1,7 @@
 # R-003 Live Smoke Runbook — checklist before burning OpenAI tokens
 
 > **For**: codex（执行人）+ founder（监督）
-> **Last updated**: 2026-05-03 (Phase 0A 第 3 次 R-003 live smoke 前)
+> **Last updated**: 2026-05-04 (Phase 0A — readiness control-center landed)
 > **作者**: Claude (Track B); codex 拍板 spec + 实际跑
 
 ---
@@ -29,6 +29,12 @@ not R-003.
 
 Full protocol: `RESY_AVAILABILITY_PROBE_PROTOCOL.md`. Skip Step 0 and you
 risk burning the token on another `no_availability_correct` outcome.
+
+Also open `/dev/restaurant-readiness` first. It aggregates latest probe,
+benchmark, and debug artifacts into one verdict (`READY TO BURN ONE CASE`,
+`NEEDS PROBE`, or `DO NOT BURN`) plus the recommended single-case command.
+The execution commands and spec checks below still apply; only the `--case`
+value should come from the readiness dashboard instead of defaulting to R-003.
 
 ---
 
