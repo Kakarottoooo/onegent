@@ -33,6 +33,20 @@ small.
 
 ## Live Activity
 
+- 2026-05-04 codex: integrated fourth sidecar batch onto current integrated
+  preview. Cherry-picked Agent2
+  `codex/phase2-goal-hotel-analyzer-port @ ee8f9d5` as `30892a3`, Agent3
+  `codex/track-c-demo-freeze-checker @ cb499a3` as `5334000`, and Claude
+  `claude/multi-agent-conflict-protocol @ bbccf87` as `7e66950`. Resolved
+  shared-doc conflicts by preserving current integrated history, porting
+  Agent3's no-live freeze checker into the existing demo docs, and adopting
+  Claude's split docs static guard layout without dropping current invariants.
+  Verified demo/docs guard tests 24/24, hotel/Expedia/runtime-forensics
+  analyzer tests 75/75, `tsc`, `check-drift`, `git diff --check`, full
+  Phase 1 gate with smoke+e2e 12/12
+  (`phase1-quality-gate-2026-05-04T18-02-09-646Z.json`), demo freeze checker
+  `ready`, `npm run build`, and production route probe 13/13. No live provider,
+  payment, OTP, CAPTCHA, login bypass, final confirmation, or forbidden paths.
 - 2026-05-04 codex: integrated third sidecar batch plus reduced Goal v2 pack
   onto current integrated preview. Cherry-picked Agent2
   `codex/phase2-goal-review-pack @ 3de606d` as `45efc1c`, Goal

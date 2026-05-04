@@ -2,7 +2,7 @@
 
 > **Branch**: `codex/integrated-preview-20260504`
 > **Last updated**: 2026-05-04
-> **Last commit**: pending third sidecar + goal integration push
+> **Last commit**: pending fourth sidecar integration push
 >
 > Claude reads this at session start. I write to it before each push.
 > See `CLAUDE.md` section "coordination protocol".
@@ -11,10 +11,39 @@
 
 ## Currently doing
 
-Integrated third sidecar batch plus reduced Goal v2 analyzer pack onto the
-Phase 1/1.5 demo-freeze baseline.
+Integrated fourth sidecar batch onto the Phase 1/1.5 demo-freeze baseline.
 
 Completed in latest pass:
+- Cherry-picked Agent2 `codex/phase2-goal-hotel-analyzer-port @ ee8f9d5` as
+  `30892a3`, recording the hotel analyzer port verification in Phase 2
+  coordination docs.
+- Cherry-picked Agent3 `codex/track-c-demo-freeze-checker @ cb499a3` as
+  `5334000`, adding the no-live demo freeze checker script and preserving the
+  existing YC operator card/runbook docs.
+- Cherry-picked Claude `claude/multi-agent-conflict-protocol @ bbccf87` as
+  `7e66950`, adding `docs/10-coordination/MULTI_AGENT_PROTOCOL.md` and
+  splitting the docs static guard tests by domain.
+- Resolved shared-doc conflicts by preserving current integrated history,
+  porting new invariants into the split docs static guard tests, and avoiding
+  stale branch-head merges.
+- Verified:
+  - Demo freeze/docs guard tests pass, 24/24.
+  - Hotel/Expedia/runtime-forensics analyzer tests pass, 75/75.
+  - `npx tsc --noEmit --pretty false` pass.
+  - `npm run check-drift` pass.
+  - `git diff --check` pass.
+  - Full `npm run gate:phase1 -- --allow-known-drift --include-smoke --include-e2e`
+    pass, 12/12, run
+    `phase1-quality-gate-2026-05-04T18-02-09-646Z.json`.
+  - `npx tsx scripts/check-demo-freeze.ts` pass with verdict `ready`.
+  - `npm run build` pass.
+  - Production `next start` probe returned 200 for 13/13 demo routes:
+    `/`, `/tasks`, `/dev`, `/dev/demo-readiness`, `/dev/demo-control-room`,
+    `/dev/runtime-forensics`, `/dev/phase1-quality-gates`, `/dev/founder-e2e`,
+    `/dev/restaurant-readiness`, `/dev/resy-run-analysis`,
+    `/developers/docs/api/v1`, `/pricing`, and `/permissions`.
+
+Previous completed pass:
 - Cherry-picked Agent2 `codex/phase2-goal-review-pack @ 3de606d` as
   `45efc1c`, adding `docs/10-coordination/phase2-goal-review.md`.
 - Cherry-picked Goal `codex/goal-phase2-no-live-consolidation-v2 @ 6bfe5a2`
