@@ -1,6 +1,6 @@
 # HUDDLE - Shared Working Memory
 
-> Last writer: codex
+> Last writer: track-c
 > Last updated: 2026-05-04
 > Cap: 2000 words. Trim oldest Live activity first.
 
@@ -37,6 +37,14 @@ small.
   demo-control-room tests 68/68, root `tsc`, `git diff --check`,
   `npm run build`, and production `next start` route probe 12/12 including
   `/dev/demo-control-room`.
+- 2026-05-04 track-c: created sidecar branch
+  `codex/track-c-demo-readiness` from
+  `origin/codex/integrated-preview-20260504 @ ac34190`. Scope is UI/docs/tests
+  only. Added `docs/10-coordination/track-c.md`,
+  `docs/40-phase1/YC_DEMO_RUNBOOK.md`, `lib/demo-evidence/**`,
+  `/dev/demo-readiness`, and docs/static guards. No provider/runtime/core/live
+  files touched; no live provider, OpenAI token, payment, OTP, CAPTCHA, or
+  final confirmation run.
 - 2026-05-04 codex: cherry-picked Claude runtime-forensics UX v2 and Demo
   Control Room into integrated preview, skipping stale Claude coord commits.
   Added URL filters, static fixtures, recommended evidence, examples toggle,

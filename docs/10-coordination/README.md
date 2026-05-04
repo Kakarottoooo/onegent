@@ -11,7 +11,8 @@ This folder is the shared state layer for Codex, Claude, and future agents.
 3. `docs/10-coordination/codex.md`
 4. `docs/10-coordination/claude.md`
 5. `docs/10-coordination/phase2.md`
-6. `docs/10-coordination/STRATEGIC_LEDGER.md`
+6. `docs/10-coordination/track-c.md` when demo-readiness work is active
+7. `docs/10-coordination/STRATEGIC_LEDGER.md`
 
 If `.coordination/*.md` exists, treat it as a compatibility pointer only. The
 canonical files are in this folder.

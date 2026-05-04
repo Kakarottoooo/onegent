@@ -50,9 +50,14 @@ Do not enter Phase 2 yet. Stabilize Phase 0, Phase 1, and Phase 1.5 first.
     local dogfood.
   - `/dev/runtime-forensics` and `/api/dev/runtime-forensics` returned 200 after
     runtime-forensics integration. Empty artifact state renders cleanly.
-  - `/dev/demo-control-room` is integrated as the founder-facing pre-demo
-    control room. It is read-only and links Phase 1 gates, runtime forensics,
-    hard stops, and Phase 2/Expedia evidence.
+- `/dev/demo-control-room` is integrated as the founder-facing pre-demo
+  control room. It is read-only and links Phase 1 gates, runtime forensics,
+  hard stops, and Phase 2/Expedia evidence.
+- Track C demo-readiness sidecar is being prepared on
+  `codex/track-c-demo-readiness`: `docs/40-phase1/YC_DEMO_RUNBOOK.md`,
+  `lib/demo-evidence/**`, and `/dev/demo-readiness`. It is read-only and
+  does not run providers, workers, payment, OTP, CAPTCHA, or final
+  confirmation.
 
 ## Phase 0A - Restaurant Provider Closure
 
@@ -132,6 +137,8 @@ Current state:
   provider/runtime failures.
 - `/dev/demo-control-room` is a read-only founder demo control room for
   pre-demo status, hard stops, recovery phrases, and Phase 2 posture.
+- `/dev/demo-readiness` is a compact read-only Track C supplement for
+  build/gate/demo readiness, hard stops, route order, and useful doc links.
 - The 2026-05-04 integrated preview dogfood passed all listed dev pages.
 
 When a task lands:
