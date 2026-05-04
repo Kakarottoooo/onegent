@@ -395,3 +395,52 @@ Verification from the branch worktree:
 
 No live provider was run for this analyzer port. No payment, CVV,
 OTP/CAPTCHA/login bypass, or final confirmation path was exercised.
+
+## Unified No-Live Artifact CLI
+
+Agent2 branch:
+
+- `codex/phase2-unified-artifact-cli`
+- Base: latest `origin/codex/integrated-preview-20260504 @ 0b83d1b`
+- Scope: pure local artifact bundle analysis only.
+
+Added:
+
+- Unified CLI:
+  `scripts/analyze-provider-artifact.ts`
+- Supported kinds:
+  `expedia`, `hotel`, `restaurant`
+- Targeted CLI tests:
+  `lib/__tests__/analyze-provider-artifact-cli.test.ts`
+
+Usage:
+
+```powershell
+npx tsx scripts/analyze-provider-artifact.ts --kind expedia .tmp\expedia-retry-artifact-bundle.json
+npx tsx scripts/analyze-provider-artifact.ts --kind hotel .tmp\hotel-retry-artifact-bundle.json
+npx tsx scripts/analyze-provider-artifact.ts --kind restaurant .tmp\restaurant-artifact-bundle.json
+```
+
+The CLI reuses the existing Expedia, hotel, and restaurant artifact analyzers.
+It only reads an existing local JSON bundle and prints paste-ready Markdown.
+It does not read the database, start workers, open providers, call OpenAI, or
+click anything.
+
+Validation from this branch worktree:
+
+- `npx vitest run lib/__tests__/analyze-provider-artifact-cli.test.ts lib/__tests__/analyze-expedia-retry-artifact-cli.test.ts lib/__tests__/restaurant-artifact-analysis.test.ts lib/__tests__/debug-artifacts.test.ts`:
+  pass, 51/51. Note: literal `lib/__tests__/*artifact*.test.ts` did not
+  expand under PowerShell/Vitest 4 and exited with no matching files; the
+  explicit artifact test file list is the equivalent runnable form in this
+  environment.
+- `npx tsx scripts/analyze-provider-artifact.ts --kind restaurant lib/runtime-forensics/__fixtures__/restaurant-artifact-analysis/resy-modal-disabled-details-api-failed.json`:
+  pass; printed restaurant artifact Markdown with
+  `resy_modal_disabled_details_api_failed`.
+- `npm run build:mcp`: pass; needed in the clean worktree before the requested
+  TypeScript command could resolve the local MCP workspace package.
+- `npx tsc --noEmit --pretty false`: pass after `npm run build:mcp`.
+- `npm run check-drift`: pass.
+- `git diff --check`: pass.
+
+No live provider was run for this CLI pack. No OpenAI live call, payment, CVV,
+OTP/CAPTCHA/login bypass, or final confirmation path was exercised.

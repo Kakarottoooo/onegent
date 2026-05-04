@@ -314,6 +314,13 @@ cd C:\Users\Gzw19\onegent-integrated-20260504
 npx tsx scripts/analyze-expedia-retry-artifact.ts .tmp\expedia-retry-artifact-bundle.json
 ```
 
+Unified artifact CLI equivalent:
+
+```powershell
+cd C:\Users\Gzw19\onegent-integrated-20260504
+npx tsx scripts/analyze-provider-artifact.ts --kind expedia .tmp\expedia-retry-artifact-bundle.json
+```
+
 The output is paste-ready Markdown. Paste it into the Phase 2 handoff before
 deciding whether a patch is justified.
 

@@ -97,6 +97,12 @@ From the active worktree after an artifact bundle has been assembled:
 npx tsx scripts/analyze-restaurant-artifact.ts .tmp\restaurant-artifact-bundle.json
 ```
 
+Unified artifact CLI equivalent:
+
+```powershell
+npx tsx scripts/analyze-provider-artifact.ts --kind restaurant .tmp\restaurant-artifact-bundle.json
+```
+
 The output is paste-ready Markdown. Paste it into
 `docs/10-coordination/goal.md` or the current handoff before deciding whether a
 runtime/provider patch is justified.
