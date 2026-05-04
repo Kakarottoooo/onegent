@@ -176,6 +176,9 @@ Example from 2026-05-04 flight failure:
 - Fix branch: `codex/expedia-flight-card-fallback`.
   - Adds a visible-text locator fallback when the bulk flight-card DOM scan
     throws.
+  - The fallback iterates visible `button, [role="button"]` nodes, scores each
+    label/context against airline, price, time, and flight number, then returns
+    the selected locator bounding-box center for the existing click path.
   - Keeps the safety boundary unchanged: no payment, OTP, CAPTCHA, login bypass,
     or final booking confirmation automation.
   - Verified with targeted Expedia/flight Vitest, TypeScript, and drift check.
@@ -255,7 +258,8 @@ Current flight issue:
 - Latest Expedia failure has correct core marker and params.
 - Screenshot shows Southwest 8:50am MCO->BNA $152 visible.
 - Worker log says flight-card DOM scan failed.
-- Next likely fix: harden Expedia card matching and popup dismissal.
+- Current fix branch: `codex/expedia-flight-card-fallback` hardens Expedia
+  card matching with a locator fallback after `StagehandEvalError`.
 
 Rules:
 - Do not automate payment, OTP, CAPTCHA, or final provider confirmation.

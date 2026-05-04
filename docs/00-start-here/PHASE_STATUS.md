@@ -123,14 +123,17 @@ provider DOM scan failed while the target Southwest card was visible.
 Current fix branch:
 
 - `codex/expedia-flight-card-fallback`
+- Merged into `codex/integrated-preview-20260504` on 2026-05-04.
 - Adds a visible-text locator fallback when the bulk Expedia flight-card DOM
   scan throws.
-- Verified with targeted Vitest, TypeScript, and drift check on 2026-05-04.
+- Verified after merge with targeted Vitest, TypeScript, drift check, and Phase
+  1 quality gate.
 
-Next step before merging into integrated preview:
+Next step:
 
-- Review the Expedia fix branch and decide whether to merge/cherry-pick it into
-  the integrated preview branch after current docs/dev-page stabilization.
+- If the founder approves a controlled provider runtime check, retry the same
+  MCO to BNA Expedia task and inspect DB, worker log, and screenshots before
+  making any further provider changes.
 
 ## Phase 2 - Frozen
 

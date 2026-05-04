@@ -57,6 +57,162 @@ interface ExpediaGroupProfile {
   phone?: string;
 }
 
+export interface ExpediaFlightTarget {
+  airline?: string;
+  price?: number;
+  time?: string;
+  flightNumber?: string;
+}
+
+export interface ExpediaFlightCandidateScore {
+  hasAirline: boolean;
+  score: number;
+  exactMatch: boolean;
+  fallbackEligible: boolean;
+  fallbackScore: number;
+  hasPrice: boolean;
+  hasFlightNumber: boolean;
+  timeScore: number;
+  departureMinutes: number;
+  timeDelta: number | null;
+  priceDelta: number | null;
+}
+
+type ExpediaFlightButtonMatch = {
+  found: boolean;
+  label: string;
+  candidates: number;
+  x: number;
+  y: number;
+  inViewportBefore: boolean;
+  samples: string[];
+  matchMode?: string;
+  matchReason?: string;
+  evalError?: string;
+};
+
+function parseExpediaFlightTimeToMinutes(t: string | null | undefined): number | null {
+  if (!t) return null;
+  const raw = t.trim().toLowerCase();
+  const match = raw.match(/(\d{1,2}):(\d{2})\s*(am|pm)?/i);
+  if (!match) return null;
+  let hour = parseInt(match[1], 10);
+  const minute = parseInt(match[2], 10);
+  const suffix = match[3]?.toLowerCase() ?? null;
+  if (suffix === "pm" && hour < 12) hour += 12;
+  if (suffix === "am" && hour === 12) hour = 0;
+  if (!suffix && hour === 24) hour = 0;
+  return hour * 60 + minute;
+}
+
+function normalizeExpediaFlightLoose(s: string | null | undefined): string {
+  return (s ?? "").toLowerCase().replace(/\s+/g, " ").trim();
+}
+
+function normalizeExpediaFlightTight(s: string | null | undefined): string {
+  return (s ?? "").toLowerCase().replace(/[^a-z0-9]/g, "");
+}
+
+function extractExpediaFlightPrices(text: string): number[] {
+  return Array.from(text.matchAll(/\$([\d,]+)/g))
+    .map(match => Number.parseInt((match[1] ?? "").replace(/,/g, ""), 10))
+    .filter(value => Number.isFinite(value));
+}
+
+export function scoreExpediaFlightCandidateText(
+  rawText: string,
+  target: ExpediaFlightTarget,
+): ExpediaFlightCandidateScore {
+  const combined = normalizeExpediaFlightLoose(rawText);
+  const combinedTight = normalizeExpediaFlightTight(combined);
+  const timeMinutes = parseExpediaFlightTimeToMinutes(target.time);
+  const airlineLoose = normalizeExpediaFlightLoose(target.airline);
+  const airlineWord = airlineLoose.split(" ")[0] ?? "";
+  const flightNumberTight = normalizeExpediaFlightTight(target.flightNumber);
+  const flightDigits = (target.flightNumber ?? "").replace(/\D/g, "");
+  const priceToken = typeof target.price === "number" ? `$${target.price}` : "";
+
+  const hasAirline = !airlineWord || combined.includes(airlineWord) || combined.includes(airlineLoose);
+  const visiblePrices = extractExpediaFlightPrices(combined);
+  const priceDelta =
+    typeof target.price === "number" && visiblePrices.length > 0
+      ? Math.min(...visiblePrices.map(value => Math.abs(value - target.price!)))
+      : null;
+  const hasPrice = !priceToken || combined.includes(priceToken) || priceDelta === 0;
+  const hasFlightNumber =
+    !flightNumberTight ||
+    combinedTight.includes(flightNumberTight) ||
+    (flightDigits.length >= 3 && combinedTight.includes(flightDigits));
+  const departureMatch =
+    combined.match(/departing at (\d{1,2}:\d{2}\s*(?:am|pm)?)/i) ??
+    combined.match(/\b(\d{1,2}:\d{2}\s*(?:am|pm)?)\b/i);
+  const departureMinutes = parseExpediaFlightTimeToMinutes(departureMatch?.[1] ?? null);
+  const timeDelta =
+    timeMinutes !== null && departureMinutes !== null
+      ? Math.abs(departureMinutes - timeMinutes)
+      : null;
+  const timeScore =
+    timeMinutes !== null
+      ? departureMinutes === timeMinutes
+        ? 4
+        : departureMinutes !== null && Math.abs(departureMinutes - timeMinutes) <= 5
+          ? 2
+          : 0
+      : 1;
+  const score =
+    (hasFlightNumber ? 5 : 0) +
+    (hasPrice ? 3 : 0) +
+    timeScore;
+  const exactMatch =
+    (!flightNumberTight || hasFlightNumber) &&
+    (!priceToken || hasPrice) &&
+    (timeMinutes === null || timeScore > 0);
+  const fallbackEligible =
+    hasFlightNumber ||
+    hasPrice ||
+    (timeDelta !== null && timeDelta <= 120) ||
+    (priceDelta !== null && priceDelta <= 60);
+  const fallbackScore =
+    (hasFlightNumber ? 90 : 0) +
+    (hasPrice ? 40 : 0) +
+    (timeDelta !== null ? Math.max(0, 30 - Math.floor(timeDelta / 5)) : 0) +
+    (priceDelta !== null ? Math.max(0, 20 - Math.floor(priceDelta / 5)) : 0);
+
+  return {
+    hasAirline,
+    score,
+    exactMatch,
+    fallbackEligible,
+    fallbackScore,
+    hasPrice,
+    hasFlightNumber,
+    timeScore,
+    departureMinutes: departureMinutes ?? -1,
+    timeDelta,
+    priceDelta,
+  };
+}
+
+function sortExpediaFlightCandidatesByFit(
+  target: ExpediaFlightTarget,
+  a: ExpediaFlightCandidateScore,
+  b: ExpediaFlightCandidateScore,
+  mode: "strict" | "fallback",
+): number {
+  if (mode === "strict" && b.score !== a.score) return b.score - a.score;
+  if (mode === "fallback" && b.fallbackScore !== a.fallbackScore) return b.fallbackScore - a.fallbackScore;
+  const timeMinutes = parseExpediaFlightTimeToMinutes(target.time);
+  if (timeMinutes !== null) {
+    const aDelta = a.departureMinutes >= 0 ? Math.abs(a.departureMinutes - timeMinutes) : Number.POSITIVE_INFINITY;
+    const bDelta = b.departureMinutes >= 0 ? Math.abs(b.departureMinutes - timeMinutes) : Number.POSITIVE_INFINITY;
+    if (aDelta !== bDelta) return aDelta - bDelta;
+  }
+  const aPriceDelta = a.priceDelta ?? Number.POSITIVE_INFINITY;
+  const bPriceDelta = b.priceDelta ?? Number.POSITIVE_INFINITY;
+  if (aPriceDelta !== bPriceDelta) return aPriceDelta - bPriceDelta;
+  return 0;
+}
+
 // Billing ZIP code selectors for Expedia checkout.
 // NOTE: "autocomplete=postal-code" is intentionally omitted — Expedia checkout pages often
 // have multiple fields with that attribute (including street address), and browser autocomplete
@@ -1428,6 +1584,109 @@ export interface FlightBookingProfile extends ExpediaGuestProfile {
   nationality?: string;
 }
 
+async function findExpediaFlightButtonWithLocatorFallback(
+  page: Page,
+  target: ExpediaFlightTarget,
+  trace: (msg: string) => void,
+): Promise<ExpediaFlightButtonMatch> {
+  const locator = page.locator('button, [role="button"]');
+  const count = await locator.count().catch(() => 0);
+  const candidates: Array<{
+    index: number;
+    label: string;
+    score: ExpediaFlightCandidateScore;
+  }> = [];
+  const samples: string[] = [];
+
+  for (let index = 0; index < Math.min(count, 250); index++) {
+    const item = locator.nth(index);
+    const visible = await item.isVisible().catch(() => false);
+    if (!visible) continue;
+    const label = await item.evaluate((btn) => {
+      const container = btn.closest('li, article, section, [data-test-id], [data-stid], [class*="uitk-card"], [class*="offer-card"], [class*="result"]');
+      const context = container?.textContent ?? btn.parentElement?.textContent ?? "";
+      return `${btn.getAttribute("aria-label") ?? ""} ${btn.textContent ?? ""} ${context}`.replace(/\s+/g, " ").trim();
+    }).catch(() => "");
+    if (!label.toLowerCase().includes("select")) continue;
+    if (samples.length < 6) samples.push(label.slice(0, 140));
+    const score = scoreExpediaFlightCandidateText(label, target);
+    if (score.hasAirline || score.exactMatch || score.fallbackEligible) {
+      candidates.push({ index, label: label.slice(0, 140), score });
+    }
+  }
+
+  const airlineCandidates = candidates.filter(candidate => candidate.score.hasAirline);
+  const strictCandidates = airlineCandidates
+    .filter(candidate => candidate.score.exactMatch)
+    .sort((a, b) => sortExpediaFlightCandidatesByFit(target, a.score, b.score, "strict"));
+  const sameAirlineFallbackCandidates = airlineCandidates
+    .filter(candidate => !candidate.score.exactMatch && candidate.score.fallbackEligible)
+    .sort((a, b) => sortExpediaFlightCandidatesByFit(target, a.score, b.score, "fallback"));
+  const crossAirlineFallbackCandidates = candidates
+    .filter(candidate =>
+      !candidate.score.hasAirline &&
+      !candidate.score.exactMatch &&
+      (
+        candidate.score.hasFlightNumber ||
+        candidate.score.hasPrice ||
+        (candidate.score.timeDelta !== null && candidate.score.timeDelta <= 180) ||
+        (candidate.score.priceDelta !== null && candidate.score.priceDelta <= 100)
+      )
+    )
+    .sort((a, b) => sortExpediaFlightCandidatesByFit(target, a.score, b.score, "fallback"));
+
+  const best = strictCandidates[0] ?? sameAirlineFallbackCandidates[0] ?? crossAirlineFallbackCandidates[0];
+  if (!best) {
+    return {
+      found: false,
+      label: "",
+      candidates: 0,
+      x: 0,
+      y: 0,
+      inViewportBefore: false,
+      samples,
+    };
+  }
+
+  const targetButton = locator.nth(best.index);
+  const beforeBox = await targetButton.boundingBox().catch(() => null);
+  await targetButton.scrollIntoViewIfNeeded().catch(() => undefined);
+  await new Promise(r => setTimeout(r, 200));
+  const afterBox = await targetButton.boundingBox().catch(() => null);
+  if (!afterBox) {
+    trace("[flight-rpa] Locator fallback found a text match but could not read its bounding box");
+    return {
+      found: false,
+      label: best.label,
+      candidates: candidates.length,
+      x: 0,
+      y: 0,
+      inViewportBefore: false,
+      samples,
+    };
+  }
+
+  return {
+    found: true,
+    label: best.label,
+    candidates: candidates.length,
+    x: afterBox.x + afterBox.width / 2,
+    y: afterBox.y + afterBox.height / 2,
+    inViewportBefore: !!beforeBox && beforeBox.y >= 0 && beforeBox.y + beforeBox.height <= 900,
+    matchMode: strictCandidates[0]
+      ? "locator_fallback"
+      : sameAirlineFallbackCandidates[0]
+        ? "fallback"
+        : "cross_airline_fallback",
+    matchReason: strictCandidates[0]
+      ? "locator fallback exact target fit"
+      : sameAirlineFallbackCandidates[0]
+        ? `locator fallback same airline timeDelta=${best.score.timeDelta ?? "?"} priceDelta=${best.score.priceDelta ?? "?"}`
+        : `locator fallback cross-airline timeDelta=${best.score.timeDelta ?? "?"} priceDelta=${best.score.priceDelta ?? "?"}`,
+    samples: candidates.slice(0, 4).map(candidate => candidate.label),
+  };
+}
+
 export async function bookExpediaFlightProgrammatic(
   page: Page,
   profile: FlightBookingProfile,
@@ -1626,7 +1885,7 @@ export async function bookExpediaFlightProgrammatic(
   trace(`[flight-rpa] Searching for flight: airline="${legTargetAirline}" price=$${legTargetPrice} time="${legTargetDepartureTime}" flightNo="${legTargetFlightNumber}"`);
   await safeScreenshot("01-search-results");
 
-  const found = await page.evaluate(({ airline, price, time, flightNumber }: { airline?: string; price?: number; time?: string; flightNumber?: string }) => {
+  let found: ExpediaFlightButtonMatch = await page.evaluate(({ airline, price, time, flightNumber }: { airline?: string; price?: number; time?: string; flightNumber?: string }) => {
     const parseTimeToMinutes = (t: string | null | undefined): number | null => {
       if (!t) return null;
       const raw = t.trim().toLowerCase();
@@ -1829,6 +2088,19 @@ export async function bookExpediaFlightProgrammatic(
 
   if ("evalError" in found && found.evalError) {
     trace(`[flight-rpa] Flight-card DOM scan failed: ${found.evalError}`);
+    trace("[flight-rpa] Trying locator fallback for flight-card scan");
+    const fallback = await findExpediaFlightButtonWithLocatorFallback(page, {
+      airline: legTargetAirline,
+      price: legTargetPrice,
+      time: legTargetDepartureTime,
+      flightNumber: legTargetFlightNumber,
+    }, trace);
+    if (fallback.found) {
+      trace(`[flight-rpa] Locator fallback matched flight card: "${fallback.label}"`);
+      found = fallback;
+    } else if (fallback.samples.length > 0) {
+      found = { ...found, samples: fallback.samples };
+    }
   }
 
   if (!found.found) {

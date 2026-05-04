@@ -28,6 +28,11 @@ small.
 
 ## Live Activity
 
+- 2026-05-04 codex: merged `codex/expedia-flight-card-fallback` into
+  `codex/integrated-preview-20260504`. Resolved docs-reorg conflicts by keeping
+  `.coordination/codex.md` as a stub and the canonical provider notes in
+  `docs/30-provider-debug/PROVIDER_RUNTIME_DEBUG_PLAYBOOK.md`. Verified targeted
+  Expedia Vitest 17/17, root `tsc`, strict drift, and Phase 1 gate 9/9.
 - 2026-05-04 codex: took ownership of local dev server on port 3001 for
   integrated preview dogfood. Fixed client/server import-boundary crashes in
   `/dev/founder-e2e`, `/dev/restaurant-readiness`, `/dev/resy-run-analysis`,

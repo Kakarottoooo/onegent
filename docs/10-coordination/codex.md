@@ -2,7 +2,7 @@
 
 > **Branch**: `codex/integrated-preview-20260504`
 > **Last updated**: 2026-05-04
-> **Last commit**: pending integrated dev-page dogfood cleanup on top of `9fdf8e5`
+> **Last commit**: pending Expedia fallback merge on top of `23a97da`
 >
 > Claude reads this at session start. I write to it before each push.
 > See `CLAUDE.md` section "coordination protocol".
@@ -54,8 +54,10 @@ Provider-runtime side branch:
   scan throws, with targeted Vitest, TypeScript, and drift checks passing.
 
 Next:
-- Review/cherry-pick or merge `codex/expedia-flight-card-fallback` into the
-  integrated preview branch when ready.
+- Expedia fallback is merged into integrated preview and verified.
+- If founder approves a controlled runtime check later, retry the same MCO to
+  BNA Expedia task and inspect DB/logs/screenshots before making any further
+  provider changes.
 - Do not run live provider tasks without explicit founder approval.
 
 Historical current-state handoff below:
