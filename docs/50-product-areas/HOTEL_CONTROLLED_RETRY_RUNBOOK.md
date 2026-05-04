@@ -237,6 +237,18 @@ provider_form_incomplete
 It represents Booking.com staying on guest details while payment/card fill is
 blocked. That is a safe failure until fresh screenshots prove a selector bug.
 
+After a founder-approved retry has already produced a local artifact bundle,
+use the unified no-live artifact CLI from the integrated preview worktree:
+
+```powershell
+cd C:\Users\Gzw19\onegent-integrated-20260504
+npx tsx scripts/analyze-provider-artifact.ts --kind hotel .tmp\hotel-retry-artifact-bundle.json
+```
+
+The command only reads the local JSON bundle and prints paste-ready Markdown.
+It does not start a worker, open a provider, read the database, or click
+anything.
+
 ## Success Taxonomy
 
 Acceptable retry outcomes:
