@@ -5,6 +5,13 @@
 > **状态**: 🟢 ready to run — Phase 1 ~95% shipped (per `PHASE_STATUS.md`)；这条 walkthrough 是 declared 前的最后一道门
 > **两条路径**: 10 分钟 quick path（first-pass smoke）/ 60-90 分钟 full path（sign-off 用）—— 见下面 § 选哪条
 
+> 🆕 **2026-05-04**: 这套流程现在有了运行态 ——
+> [`/dev/founder-e2e`](http://localhost:3000/dev/founder-e2e) 把下面每个 step 变成
+> 一个可勾选的行，每行可以 fail/blocker + 填 actual / screenshot / taskId，
+> 一键 Export Markdown 直接给 codex/Claude 当 bug ticket。
+> 详见 `FOUNDER_E2E_BUG_TRIAGE.md`。
+> Preflight: `npm run preflight:founder-e2e` （需要 dev server 在跑）。
+
 这个文档是 PHASE_1_PLAN.md #8 — Founder E2E walkthrough。目标是在用户视角
 **手动**走完 Phase 1 的每个用户路径，找出 UX 缺口、复现 bug、签字 Phase 1
 是否真正"产品就绪"。
