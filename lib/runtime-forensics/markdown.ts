@@ -14,15 +14,41 @@ import {
   type ClassifierSignal,
   type ForensicsReport,
 } from "./types";
+import {
+  recommendNextEvidence,
+  type Recommendation,
+  type RecommendOptions,
+} from "./recommendations";
 
-export function formatForensicsBugReport(report: ForensicsReport): string {
+export interface FormatBugReportOptions extends RecommendOptions {
+  /**
+   * Override the recommendation entirely (e.g. tests). When absent the
+   * formatter calls `recommendNextEvidence(report, options)`.
+   */
+  recommendation?: Recommendation;
+}
+
+export function formatForensicsBugReport(
+  report: ForensicsReport,
+  options: FormatBugReportOptions = {},
+): string {
+  const recommendation =
+    options.recommendation ?? recommendNextEvidence(report, options);
   const lines: string[] = [];
 
+  const fixtureTag = report.isFixture ? "[FIXTURE] " : "";
   lines.push(
-    `## [${FORENSICS_SEVERITY_LABEL[report.classification.severity]}] Runtime forensics — ${
+    `## ${fixtureTag}[${FORENSICS_SEVERITY_LABEL[report.classification.severity]}] Runtime forensics — ${
       FAILURE_CLASS_LABEL[report.classification.primaryClass]
     }`,
   );
+  if (report.isFixture) {
+    lines.push("");
+    lines.push(
+      "_This row is a synthetic fixture, not real evidence. " +
+        "Do not file bugs against it._",
+    );
+  }
   lines.push("");
   lines.push(`- **Job id**: \`${report.jobId ?? "(unknown)"}\``);
   if (report.taskId) lines.push(`- **Task id**: \`${report.taskId}\``);
@@ -71,7 +97,7 @@ export function formatForensicsBugReport(report: ForensicsReport): string {
   );
   if (report.stepShape.hasLegacyShapeBug) {
     lines.push(
-      "- 🚨 **Legacy-shape bug detected** — step reached worker without " +
+      "- **[!] Legacy-shape bug detected** — step reached worker without " +
         "`__source` marker. This is a P0: M5 force-gate at " +
         "`app/api/booking-jobs/[id]/start/route.ts` failed to stamp the step.",
     );
@@ -156,17 +182,39 @@ export function formatForensicsBugReport(report: ForensicsReport): string {
     lines.push("");
   }
 
+  // ── Recommended next evidence
+  lines.push("### Recommended next evidence");
+  lines.push("");
+  lines.push("Checklist (work top to bottom):");
+  lines.push("");
+  recommendation.baseChecklist.forEach((step, i) => {
+    lines.push(`${i + 1}. ${step}`);
+  });
+  if (recommendation.pointers.length > 0) {
+    lines.push("");
+    lines.push("Pointers:");
+    lines.push("");
+    for (const p of recommendation.pointers) {
+      lines.push(`- **${p.label}** (\`${p.kind}\`) — \`${p.ref}\``);
+    }
+  }
+  if (recommendation.searchCommands.length > 0) {
+    lines.push("");
+    lines.push("Suggested worker-log searches (PowerShell):");
+    lines.push("");
+    for (const sc of recommendation.searchCommands) {
+      lines.push(`- ${sc.description}`);
+      lines.push("  ```powershell");
+      lines.push(`  ${sc.command}`);
+      lines.push("  ```");
+    }
+  }
+  lines.push("");
+
   // ── Notes (V1 caveat)
   lines.push("---");
   lines.push("");
-  lines.push(
-    "_V1 is artifact-based: this report parses `benchmark/runs/*.json`, " +
-      "`worker/.debug-screenshots/<provider>/<run>/summary.json`, and an " +
-      "optional `codex-worker.log` excerpt. **Source of truth is still the " +
-      "DB + worker log + screenshots, NOT this report.** DB live lookup is " +
-      "a future enhancement (codex domain). See " +
-      "`docs/30-provider-debug/PROVIDER_RUNTIME_DEBUG_PLAYBOOK.md`._",
-  );
+  lines.push(`_${recommendation.caveat}_`);
   if (report.notes.length > 0) {
     lines.push("");
     lines.push("Loader notes:");
