@@ -1,9 +1,52 @@
 # Claude - coordination state
 
-> Branch context: integrated preview includes Claude Track B branches through
-> `codex/integrated-preview-20260504`.
+> Branch context: working on `claude/demo-control-room`, based on
+> `codex/integrated-preview-20260504 @ 5e6a246`.
 > Last updated: 2026-05-04.
 > Canonical path: `docs/10-coordination/claude.md`.
+
+## Currently Doing
+
+`claude/demo-control-room` — read-only Demo Control Room dashboard at
+`/dev/demo-control-room`. Founder-facing landing that aggregates the
+existing Phase 1 / Phase 1.5 / Phase 2 evidence into one screen for
+demo prep.
+
+Scope (read-only, no provider/runtime/worker/DB touched):
+
+- `lib/demo-control-room/phase2-status.ts` — single structured
+  source for the 3 Phase 2 verticals (Expedia / Booking.com /
+  Hotels.com) + their "candidate, not live-verified" / "needs fresh
+  artifacts" copy. Page and audit doc both reference this.
+- `lib/demo-control-room/loader.ts` — pulls latest Phase 1
+  quality-gate verdict + latest founder-e2e verdict via the existing
+  `lib/quality-gate/loader.ts` + `lib/founder-e2e/loader.ts`. Extracts
+  the smoke check from the gate's `checks[]` when present (smoke does
+  not write its own artifact).
+- `lib/demo-control-room/script.ts` — deterministic safe demo script
+  + hard stops + recovery phrases + markdown export. Pure; covered
+  by tests.
+- `app/dev/demo-control-room/page.tsx` — server component composing
+  the three loader outputs + a small client `RefreshButton`
+  subcomponent that calls `router.refresh()`.
+- `app/dev/page.tsx` — adds a "Demo Control Room" card pointing to
+  the new route as the founder entry point.
+- `docs/40-phase1/DEMO_CONTROL_ROOM.md` — operator runbook for the
+  dashboard (what it reads, how to extend, safety boundary).
+- `docs/40-phase1/PHASE_1_FOUNDER_E2E.md` — gains a "Pre-demo: Demo
+  Control Room" pointer.
+
+Hard rules (verified per commit):
+
+- No `lib/booking-autopilot/**`, `lib/core/**`, `lib/execution-v2/**`,
+  `worker/src/**`, `app/api/v1/**`, `app/api/booking-jobs/**`.
+- No provider modules.
+- No `lib/db.ts`, no schema changes.
+- No live OpenAI / Computer Use / payment / OTP / CAPTCHA path.
+- No retry / run / mutating buttons added — only `router.refresh()`
+  to re-render the read-only view.
+- Only consumes existing `benchmark/runs/*.json` artifacts and docs;
+  never invokes a runner.
 
 Codex reads this at session start. Claude should update it before pushing work
 that changes Track B status, handoff rules, or UI/docs/tooling ownership.

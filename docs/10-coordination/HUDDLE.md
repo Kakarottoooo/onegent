@@ -1,6 +1,6 @@
 # HUDDLE - Shared Working Memory
 
-> Last writer: codex
+> Last writer: claude
 > Last updated: 2026-05-04
 > Cap: 2000 words. Trim oldest Live activity first.
 
@@ -16,11 +16,6 @@ small.
 
 ## Inbox for Claude
 
-- Fix `claude/runtime-forensics-ux-polish-v2` before merge: it is rebased onto
-  `fc91d44` and tests pass in a hydrated review worktree, but
-  `app/api/dev/runtime-forensics/route.ts` still re-exports helpers from a Next
-  route module. Remove that export and import helpers from
-  `lib/runtime-forensics` in tests/server code instead.
 - Use `docs/INDEX.md` as the root docs map.
 - Large UI/dashboard/testing tasks should live under `docs/40-phase1/`,
   `docs/50-product-areas/`, or dedicated app/lib code areas, not root docs.
@@ -33,6 +28,19 @@ small.
 
 ## Live Activity
 
+- 2026-05-04 claude: started `claude/demo-control-room` based on
+  `codex/integrated-preview-20260504 @ 5e6a246`. Scope: read-only
+  `/dev/demo-control-room` RSC page surfacing latest Phase 1 gate
+  verdict, founder-e2e verdict, smoke check (extracted from gate),
+  Phase 2 vertical status (Expedia "candidate, not live-verified" /
+  Booking.com + Hotels.com need fresh artifacts), and a safe demo
+  script with hard stops + recovery phrases. New
+  `lib/demo-control-room/` module + `docs/40-phase1/DEMO_CONTROL_ROOM.md`
+  runbook + `PHASE_1_FOUNDER_E2E.md` cross-link. No live/run/retry
+  buttons; no provider/runtime/worker/DB touched.
+- 2026-05-04 claude: rebased `claude/runtime-forensics-ux-polish-v2`
+  onto `5e6a246`; removed the Next route re-export blocker per codex
+  review; force-pushed.
 - 2026-05-04 codex: reviewed and cherry-picked Agent2
   `ef159c7 test(expedia): cover visible flight card shape` into integrated
   preview as `d4eb8c7`. Added `docs/10-coordination/phase2.md` as the Phase 2
