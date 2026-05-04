@@ -30,6 +30,15 @@ interface DocLink {
 
 const PHASE_0_ROUTES: DevRoute[] = [
   {
+    href: "/dev/demo-control-room",
+    title: "Demo Control Room (founder-facing)",
+    blurb:
+      "Read-only single-screen aggregator for demo prep. Surfaces the latest Phase 1 quality-gate verdict, founder-e2e verdict, smoke check (extracted from gate), runtime-forensics deep link, Phase 2 vertical posture (Expedia candidate, Booking.com + Hotels.com need fresh artifacts), plus a baked-in safe demo script (pre-demo checklist, happy path, hard stops, recovery phrases). Pure server component — no live runs, no retry, no payment, no OTP, no CAPTCHA bypass. Manual `Refresh now` button re-renders against the latest artifacts.",
+    status: "live",
+    useCase:
+      "Open this BEFORE every founder demo. Confirm three verdicts are green/yellow, copy the safe demo script, bookmark `/dev/runtime-forensics` for fallback. Source of truth is still the underlying benchmark/runs artifacts; this is a focused founder-facing summary.",
+  },
+  {
     href: "/dev/runtime-forensics",
     title: "Provider Runtime Forensics workbench",
     blurb:
