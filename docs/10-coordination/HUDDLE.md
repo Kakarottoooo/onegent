@@ -1,6 +1,6 @@
 # HUDDLE - Shared Working Memory
 
-> Last writer: track-c
+> Last writer: codex
 > Last updated: 2026-05-04
 > Cap: 2000 words. Trim oldest Live activity first.
 
@@ -42,6 +42,37 @@ small.
   wording. Scope stayed docs/read-only demo evidence/tests; no provider,
   runtime, core, worker, DB, live, payment, OTP, CAPTCHA, login shortcut, or
   final-confirmation work.
+- 2026-05-04 claude: docs IA cleanup after the second sidecar batch on
+  `claude/docs-ia-post-freeze-index` (based on
+  `codex/integrated-preview-20260504 @ a704e6f`). Refreshed
+  `docs/INDEX.md` with an explicit "New Agent Read Order" section, a
+  "Phase 1/1.5 Demo Freeze Quick Path", an updated Phase 2 quick path
+  that includes the hotel revival audit + hotel controlled retry
+  runbook, a richer Task-Specific Reading table that splits Phase 1
+  founder walkthrough vs Phase 1.5 demo readiness, expanded
+  Maintenance Rules (now covers track-c + Phase 2 mirror), and a
+  Current Canonical Files table that includes every key post-freeze
+  runbook plus all four coordination files. Refreshed
+  `docs/00-start-here/PROJECT_SUMMARY.md` to point the Active Worktree
+  at `onegent-integrated-20260504` / `codex/integrated-preview-20260504`,
+  updated the phase snapshot table for demo-freeze pass on Phase 1/1.5,
+  and expanded "Where To Look Next" to cover demo / coordination /
+  Phase 2 hotel paths. Refreshed
+  `docs/00-start-here/PHASE_STATUS.md` "Current Verified State" branch
+  list to record the historical side branches now folded into integrated
+  preview, listed the demo / freeze acceptance / YC runbook docs under
+  Phase 1 Primary docs, and added hotel revival audit + hotel/Expedia
+  controlled retry runbook references under the Expedia next-step
+  section. Extended `lib/__tests__/docs-static-guard.test.ts` with two
+  new it blocks that lock INDEX (read-order, demo-freeze quick path,
+  every canonical doc reference, ASCII-only) and PROJECT_SUMMARY
+  (current worktree/branch, demo-freeze phase snapshot, no stale
+  "Mostly shipped" phrasing). Updated this HUDDLE entry and
+  `docs/10-coordination/claude.md` Recently Shipped table. No app/dev
+  edits, no provider/runtime/core/worker/db touched. Verified `tsc`
+  clean, targeted vitest 14/14 (docs-static-guard 7/7 + demo-evidence
+  7/7), Phase 1 gate `--allow-known-drift` 8/0/0/1 (exit 0), and
+  `git diff --check` clean.
 - 2026-05-04 codex: integrated second sidecar batch onto current integrated
   preview. Cherry-picked Agent2 `codex/phase2-hotel-artifact-audit @ 354b4f3`
   as `0bdccf8`, Agent3 `codex/track-c-demo-acceptance-pack @ da0dbd6` as

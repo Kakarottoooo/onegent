@@ -1,9 +1,11 @@
 # Claude - coordination state
 
-> Branch context: working on `claude/phase1-doc-cleanup-after-freeze`,
-> based on `codex/integrated-preview-20260504 @ 4d6d991`.
+> Branch context: working on `claude/docs-ia-post-freeze-index`,
+> based on `codex/integrated-preview-20260504 @ a704e6f`.
 > Integrated preview now includes Claude Track B branches through
-> `codex/integrated-preview-20260504` post Phase 1/1.5 demo-freeze pass.
+> `codex/integrated-preview-20260504` post Phase 1/1.5 demo-freeze pass
+> plus the second sidecar batch (Phase 2 hotel artifact audit + Track C
+> demo acceptance pack + Phase 1 doc cleanup).
 > Last updated: 2026-05-04.
 > Canonical path: `docs/10-coordination/claude.md`.
 
@@ -228,7 +230,8 @@ Boundaries:
 | `claude/runtime-forensics-workbench` | merged | Provider runtime forensics workbench. |
 | `claude/runtime-forensics-ux-polish-v2` | merged via cherry-pick | URL multi-select filters, sortable headers, fixtures (`?examples=1`), recommendation engine, signal-by-source detail panel. |
 | `claude/demo-control-room` | merged via cherry-pick | Read-only `/dev/demo-control-room` aggregating gate/founder-e2e/smoke verdicts plus Phase 2 posture and safe demo script. |
-| `claude/phase1-doc-cleanup-after-freeze` | active | Phase 1/1.5 docs refresh after demo-freeze pass; updates stale 95% claim and 213-test count, extends `docs-static-guard` with post-freeze invariants. |
+| `claude/phase1-doc-cleanup-after-freeze` | merged via cherry-pick (`db0aef8`) | Phase 1/1.5 docs refresh after demo-freeze pass; dropped stale 95% claim and 213-test count, extended `docs-static-guard` with post-freeze invariants. |
+| `claude/docs-ia-post-freeze-index` | active | Docs IA cleanup after demo-freeze: refresh `docs/INDEX.md` with new-agent read order + post-freeze quick path + Phase 2 hotel paths, refresh `PROJECT_SUMMARY` worktree/phase snapshot, refresh `PHASE_STATUS` integrated-preview branch list and Phase 2 doc references, extend `docs-static-guard` with INDEX read-order + canonical path invariants. |
 
 ## Current Claude Inbox
 

@@ -20,15 +20,16 @@ The product is not a generic browser bot. It is a user-facing agent that:
 
 ## Active Worktree
 
-Most recent active debugging has used:
+Most recent canonical worktree is the integrated preview:
 
 ```text
-C:\Users\Gzw19\onegent-e2e-20260503
-branch: codex/openai-chat-model-env
+C:\Users\Gzw19\onegent-integrated-20260504
+branch: codex/integrated-preview-20260504
 ```
 
-The older root worktree `C:\Users\Gzw19\onegent` may be stale or dirty. Verify
-before using it for tests.
+Older worktrees (`C:\Users\Gzw19\onegent` root, `onegent-e2e-20260503` for
+provider/runtime debugging) may be stale or dirty. Verify before using any of
+them for tests.
 
 ## Phase Snapshot
 
@@ -36,11 +37,11 @@ Read `docs/00-start-here/PHASE_STATUS.md` for the detailed table. Short version:
 
 | Phase | Status | Notes |
 |---|---|---|
-| Phase 0A | In flight | Resy + Computer Use still needs a live slot case to close fill/OTP-safe handoff. |
+| Phase 0A | In flight | OpenTable can reach safe handoff. Resy still needs a live probe-recommended case to close fill/OTP-safe handoff. |
 | Phase 0B | Gated | Restaurant v1 requires Resy suite + OpenTable coverage after 0A. |
-| Phase 1 | Mostly shipped | Task UI, profile gap, smoke tests exist; founder/user E2E still drives polish. |
-| Phase 1.5 | Starting | Observability, automated QA, and provider debug tooling. |
-| Phase 2+ | Frozen | Do not expand verticals until Phase 0/1 are stable. |
+| Phase 1 | Demo-freeze passed | Phase 1 gate with smoke + autonomous founder E2E is 12/12; production build is clean; production route probe is 13/13. Founder manual walkthrough is the remaining human acceptance gate. |
+| Phase 1.5 | Demo-freeze passed | Quality gate, Founder E2E, Runtime Forensics, Demo Control Room, and Track C Demo Readiness are all read-only and integrated. |
+| Phase 2 | Frozen, under audit | Expedia flight is the only candidate, not live verified. Booking.com / Hotels.com need fresh artifacts before any live promise. |
 
 ## Current Runtime Reality
 
@@ -65,7 +66,20 @@ The shared coordination home is `docs/10-coordination/`.
 ## Where To Look Next
 
 - Need to know what phase is blocked: `docs/00-start-here/PHASE_STATUS.md`
+- Need the new agent read order: `docs/INDEX.md` § "New Agent Read Order"
 - Need to continue restaurant execution: `docs/20-phase0-restaurant/RESTAURANT_PHASE0_HANDOFF.md`
 - Need to debug provider runtime: `docs/30-provider-debug/PROVIDER_RUNTIME_DEBUG_PLAYBOOK.md`
 - Need to run founder checks: `docs/40-phase1/PHASE_1_FOUNDER_E2E.md`
+- Need to operate / extend the demo surfaces:
+  `docs/40-phase1/DEMO_CONTROL_ROOM.md`,
+  `docs/40-phase1/YC_DEMO_RUNBOOK.md`,
+  `docs/40-phase1/DEMO_FREEZE_ACCEPTANCE.md`
+- Need to plan a Phase 2 controlled retry:
+  `docs/50-product-areas/EXPEDIA_CONTROLLED_RETRY_RUNBOOK.md`,
+  `docs/50-product-areas/HOTEL_VERTICAL_REVIVAL_AUDIT.md`,
+  `docs/50-product-areas/HOTEL_CONTROLLED_RETRY_RUNBOOK.md`
+- Need cross-agent handoff context:
+  `docs/10-coordination/HUDDLE.md`, `docs/10-coordination/codex.md`,
+  `docs/10-coordination/claude.md`, `docs/10-coordination/track-c.md`,
+  `docs/10-coordination/phase2.md`
 - Need historical context: `docs/90-archive/history/PROJECT_SUMMARY_FULL_2026-05-03.md`
