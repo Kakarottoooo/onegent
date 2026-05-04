@@ -200,6 +200,12 @@ const PATTERN_RULES: ReadonlyArray<PatternRule> = [
     label: "reached checkout / payment wall",
   },
   {
+    rx: /checkout[-_\s]?reached/i,
+    cls: "checkout_reached_manual_review",
+    weight: 0.85,
+    label: "checkout reached",
+  },
+  {
     rx: /safe[-_\s]?handoff/i,
     cls: "checkout_reached_manual_review",
     weight: 0.8,
@@ -278,6 +284,27 @@ const PATTERN_RULES: ReadonlyArray<PatternRule> = [
     cls: "network_or_provider_5xx",
     weight: 0.8,
     label: "net::ERR_ (chromium)",
+  },
+  // Expedia flight card-scan diagnostics. These are not a terminal success
+  // class by themselves; they make the otherwise-unknown provider-selector
+  // failure legible in the forensics workbench.
+  {
+    rx: /Flight-card DOM scan failed/i,
+    cls: "unknown",
+    weight: 0.6,
+    label: "Expedia flight-card DOM scan failed",
+  },
+  {
+    rx: /Trying locator fallback for flight-card scan/i,
+    cls: "unknown",
+    weight: 0.1,
+    label: "Expedia locator fallback attempted",
+  },
+  {
+    rx: /Locator fallback matched flight card/i,
+    cls: "unknown",
+    weight: 0.1,
+    label: "Expedia locator fallback matched",
   },
 ];
 
