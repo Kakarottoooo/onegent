@@ -455,6 +455,31 @@ describe("applyEnhancedFilter", () => {
     const out = applyEnhancedFilter(summaries, DEFAULT_FILTER_STATE);
     expect(out).toEqual(summaries);
   });
+
+  it("providers filter restricts rows (multi-select)", () => {
+    const mixed: ForensicsSummary[] = [
+      makeSummary({ jobId: "a", provider: "resy" }),
+      makeSummary({ jobId: "b", provider: "opentable" }),
+      makeSummary({ jobId: "c", provider: "expedia" }),
+    ];
+    const out = applyEnhancedFilter(mixed, {
+      ...DEFAULT_FILTER_STATE,
+      providers: ["resy", "opentable"],
+    });
+    expect(out.map((s) => s.jobId)).toEqual(["a", "b"]);
+  });
+
+  it("providers filter is case-insensitive", () => {
+    const mixed: ForensicsSummary[] = [
+      makeSummary({ jobId: "a", provider: "RESY" }),
+      makeSummary({ jobId: "b", provider: "expedia" }),
+    ];
+    const out = applyEnhancedFilter(mixed, {
+      ...DEFAULT_FILTER_STATE,
+      providers: ["resy"],
+    });
+    expect(out.map((s) => s.jobId)).toEqual(["a"]);
+  });
 });
 
 describe("sortSummaries", () => {

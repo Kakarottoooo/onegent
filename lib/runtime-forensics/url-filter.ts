@@ -234,9 +234,9 @@ export function filtersEqual(a: FilterState, b: FilterState): boolean {
 
 /**
  * Apply the post-classification slice of a FilterState to summary
- * rows. Provider / status / single-value filters are applied at the
- * loader level; this handles classes, severities, hideUnknown, and
- * fixture-row filtering.
+ * rows. Single-value provider / status filters are applied at the
+ * loader level for efficiency; this handles MULTI-select providers,
+ * classes, severities, hideUnknown, and fixture-row filtering.
  */
 export function applyEnhancedFilter(
   summaries: ReadonlyArray<ForensicsSummary>,
@@ -244,10 +244,17 @@ export function applyEnhancedFilter(
 ): ForensicsSummary[] {
   const classSet = new Set(state.classes);
   const sevSet = new Set(state.severities);
+  const providerSet = new Set(
+    state.providers.map((p) => p.toLowerCase()),
+  );
   return summaries.filter((s) => {
     if (state.hideUnknown && s.primaryClass === "unknown") return false;
     if (classSet.size > 0 && !classSet.has(s.primaryClass)) return false;
     if (sevSet.size > 0 && !sevSet.has(s.severity)) return false;
+    if (providerSet.size > 0) {
+      const sp = (s.provider ?? "").toLowerCase();
+      if (!providerSet.has(sp)) return false;
+    }
     return true;
   });
 }
