@@ -1,8 +1,8 @@
 # Codex - coordination state
 
 > **Branch**: `codex/openai-chat-model-env`
-> **Last updated**: 2026-05-03 23:16 UTC
-> **Last commit**: `915833d`
+> **Last updated**: 2026-05-04 00:42 UTC
+> **Last commit**: `1ef97fb`
 >
 > Claude reads this at session start. I write to it before each push.
 > See `CLAUDE.md` section "coordination protocol".
@@ -11,7 +11,27 @@
 
 ## Currently doing
 
-Idle after shipping `915833d fix(opentable): reject unverified phone-gate typing`.
+Idle after shipping `1ef97fb fix(resy): add phone verify strategy ladder`.
+
+Latest Resy Phase 0 prep:
+- We did not run live OpenAI/Computer Use. This was a no-token hardening pass before R-003 live.
+- Resy already had the core path: click "Reserve Now" on the confirmation modal, detect `guest_form` vs `mobile_verify`, fill mobile, then stop at OTP as safe handoff.
+- Patch adds a first-class Resy phone strategy ladder:
+  1. `rs-phone-01-locator` fills and verifies phone through Playwright locator, then clicks Continue.
+  2. `rs-phone-02-dom-direct` falls back to native DOM setter + Continue click.
+- Added `lib/__tests__/resy-provider-mobile.test.ts` with 4 no-token cases: locator success to OTP, locator fallback to DOM, no phone, and all-strategies-fail reason.
+- Updated the existing OpenTable dry-run test mock to match the current deeper provider preflight shape (`url()` + diner form state).
+- Mirrored Resy provider to `worker/src/...`.
+- Verification: Resy mobile Vitest + dry-run Vitest 23/23, root `tsc`, strict drift, and `run-phase0-resy-benchmark --dry-run --case R-003` all passed.
+
+Next suggested live gate:
+- Only after founder approves token spend, run one case only:
+  `npx tsx scripts/run-phase0-resy-benchmark.ts --case R-003 --live-openai --allow-failures`
+- Do not run the full 22/25 Resy suite until R-003 reaches one of the accepted buckets.
+
+Claude task suggestion while Codex owns Resy provider/runtime:
+- Do not touch Resy provider/worker/runtime.
+- Useful parallel task: dashboard/artifact viewer UX for provider strategy logs (`[resy][strategy ...]`, `[opentable][strategy ...]`) and screenshots, so founder does not need to paste terminal output.
 
 Latest founder retry root cause:
 - The page did reach OpenTable checkout and the browser stayed open, but the phone input stayed blank.
