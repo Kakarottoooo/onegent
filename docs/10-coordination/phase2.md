@@ -297,3 +297,46 @@ Verification from the branch worktree:
 
 No live provider was run for this CLI pack. No payment, CVV,
 OTP/CAPTCHA/login bypass, or final confirmation path was exercised.
+
+## Hotel No-Live Artifact Audit
+
+Agent2 branch:
+
+- `codex/phase2-hotel-artifact-audit`
+- Base: latest `origin/codex/integrated-preview-20260504`
+- Scope: no-live hotel vertical audit and controlled retry preparation only.
+
+Added:
+
+- Hotel audit:
+  `docs/50-product-areas/HOTEL_VERTICAL_REVIVAL_AUDIT.md`
+- Hotel controlled retry runbook:
+  `docs/50-product-areas/HOTEL_CONTROLLED_RETRY_RUNBOOK.md`
+- Synthetic Booking.com hotel runtime-forensics fixture:
+  `lib/runtime-forensics/__fixtures__/booking-hotel-guest-form-incomplete.json`
+- Fixture index/test updates for the synthetic hotel fixture.
+
+Current hotel posture:
+
+- Booking.com is the primary hotel path, but still needs fresh artifacts before
+  live promises.
+- Hotels.com remains a fallback/Expedia Group checkout compatibility path, not
+  a separate live-ready demo promise.
+- Expedia hotel provider support exists, but there is no current fresh hotel
+  artifact proving checkout reach.
+- Clean branch artifact check found no current `codex-worker.log`,
+  `benchmark/runs`, `worker/.debug-screenshots`, or `.debug-screenshots/live`
+  hotel evidence in the worktree.
+
+Verification from the branch worktree:
+
+- `npx vitest run lib/__tests__/runtime-forensics-fixtures.test.ts lib/__tests__/final-outcome-signals.test.ts lib/__tests__/booking-links.test.ts lib/__tests__/demo-control-room-phase2-status.test.ts`:
+  pass, 116/116.
+- `npm run build:mcp`: pass; needed in the clean worktree before the requested
+  TypeScript command could resolve the local MCP workspace package.
+- `npx tsc --noEmit --pretty false`: pass after `npm run build:mcp`.
+- `npm run check-drift`: pass.
+- `git diff --check`: pass.
+
+No live provider was run for this hotel audit. No payment, CVV,
+OTP/CAPTCHA/login bypass, or final confirmation path was exercised.

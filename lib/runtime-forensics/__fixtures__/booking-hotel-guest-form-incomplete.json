@@ -1,0 +1,63 @@
+{
+  "id": "fixture-booking-hotel-guest-form-incomplete",
+  "taskId": "fixture-task-booking-hotel-001",
+  "sessionId": "fixture-session-booking-hotel-001",
+  "provider": "booking-com",
+  "scenario": "hotel",
+  "status": "failed",
+  "errorMessage": "Booking.com guest form incomplete: required field missing before final-details/payment page.",
+  "terminalReason": "FORM_INCOMPLETE_GUEST_DETAILS",
+  "terminalCode": "FORM_INCOMPLETE",
+  "createdAt": "2026-05-04T18:30:00Z",
+  "updatedAt": "2026-05-04T18:31:40Z",
+  "params": {
+    "hotel_name": "Fixture Hotel Times Square",
+    "city": "New York",
+    "checkin": "2026-06-10",
+    "checkout": "2026-06-12",
+    "adults": 1,
+    "rooms": 1
+  },
+  "steps": [
+    {
+      "name": "open-hotel-search",
+      "type": "provider.scan",
+      "__source": "lib/core/execution",
+      "timestamp": "2026-05-04T18:30:10Z"
+    },
+    {
+      "name": "select-room",
+      "type": "provider.click",
+      "__source": "lib/core/execution",
+      "timestamp": "2026-05-04T18:30:55Z"
+    },
+    {
+      "name": "fill-guest-details",
+      "type": "provider.fill",
+      "__source": "lib/core/execution",
+      "timestamp": "2026-05-04T18:31:20Z",
+      "error": "guest form incomplete: required field missing on Booking.com guest-details step."
+    }
+  ],
+  "decisionLog": [
+    {
+      "at": "2026-05-04T18:30:10Z",
+      "level": "info",
+      "event": "hotel_search_opened",
+      "message": "normaliseStartUrl: hotelNameForUrl=\"Fixture Hotel Times Square\" -> startUrl=https://www.booking.com/searchresults.html"
+    },
+    {
+      "at": "2026-05-04T18:30:55Z",
+      "level": "info",
+      "event": "room_selected",
+      "message": "Booking.com: selected room quantity and continued to guest details."
+    },
+    {
+      "at": "2026-05-04T18:31:40Z",
+      "level": "error",
+      "event": "guest_details_incomplete",
+      "message": "Booking.com final state check: still on guest-details step, so payment/card filling is not allowed yet. Required field missing; no payment, CVV, OTP, CAPTCHA, login bypass, or final confirmation was attempted."
+    }
+  ],
+  "rawWorkerLogExcerpt": "Booking.com final state check: still on guest-details step, so payment/card filling is not allowed yet.\nBooking.com guest form incomplete: required field missing before final-details/payment page."
+}

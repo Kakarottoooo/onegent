@@ -1,7 +1,7 @@
 /**
  * Tests for the static-fixture pipeline:
  *
- *  - all 7 fixture files parse as valid JSON
+ *  - all 8 fixture files parse as valid JSON
  *  - each fixture classifies to the expected primary class
  *  - loadFixtureJobs returns FIXTURE_FILENAMES in canonical order
  *  - aggregateForensics({ includeFixtures: true }) tags rows isFixture
@@ -35,9 +35,9 @@ import {
 } from "@/lib/runtime-forensics/__fixtures__";
 
 describe("FIXTURE_FILENAMES whitelist", () => {
-  it("has exactly 7 entries", () => {
-    expect(FIXTURE_FILENAMES.length).toBe(7);
-    expect(FIXTURE_COUNT).toBe(7);
+  it("has exactly 8 entries", () => {
+    expect(FIXTURE_FILENAMES.length).toBe(8);
+    expect(FIXTURE_COUNT).toBe(8);
   });
 
   it("lists each fixture exactly once", () => {
@@ -55,9 +55,9 @@ describe("FIXTURE_FILENAMES whitelist", () => {
     const classes = new Set(
       FIXTURE_FILENAMES.map((n) => FIXTURE_EXPECTED_CLASS[n]),
     );
-    // 7 fixtures cover 7 of 8 classes (`model_or_env_blocked` is the
-    // one we chose not to fixture in V2 — environment is rarer in
-    // production triage; classifier already has unit coverage).
+    // Fixtures cover 7 of 8 classes; provider_form_incomplete has both
+    // restaurant and hotel examples, while model_or_env_blocked is covered
+    // by classifier unit tests.
     expect(classes.size).toBe(7);
   });
 });
@@ -113,6 +113,24 @@ describe("classifier correctness on fixtures", () => {
     if (!job) throw new Error("payload failed to parse");
     const result = classifyJob(job);
     expect(["high", "medium"]).toContain(result.confidence);
+  });
+
+  it("booking hotel guest-details fixture classifies as form incomplete", async () => {
+    const payload = await readFixtureFile(
+      "booking-hotel-guest-form-incomplete.json",
+    );
+    const job = extractJobFromFixturePayload(
+      payload,
+      "booking-hotel-guest-form-incomplete.json",
+    );
+    if (!job) throw new Error("payload failed to parse");
+    const result = classifyJob(job);
+    expect(job.provider).toBe("booking-com");
+    expect(job.scenario).toBe("hotel");
+    expect(result.primaryClass).toBe("provider_form_incomplete");
+    expect(result.signals.some((s) => s.label.includes("form incomplete"))).toBe(
+      true,
+    );
   });
 });
 
