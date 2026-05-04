@@ -25,6 +25,11 @@ const CASES: Array<{ file: string; state: HotelRetryState; provider: string }> =
     provider: "booking-com",
   },
   {
+    file: "booking-room-selection-reached.json",
+    state: "room_selection_manual_review_reached",
+    provider: "booking-com",
+  },
+  {
     file: "booking-guest-details-reached.json",
     state: "guest_details_manual_review_reached",
     provider: "booking-com",
@@ -83,6 +88,41 @@ describe("analyzeHotelRetryArtifactBundle", () => {
 
     expect(analysis.state).toBe("guest_details_manual_review_reached");
     expect(analysis.signals.map((s) => s.kind)).not.toContain("login_or_captcha");
+  });
+
+  it("covers safe hotel boundary classifications without invoking live providers", async () => {
+    const safeBoundaryCases: Array<{ file: string; state: HotelRetryState }> = [
+      {
+        file: "booking-room-selection-reached.json",
+        state: "room_selection_manual_review_reached",
+      },
+      {
+        file: "booking-guest-details-reached.json",
+        state: "guest_details_manual_review_reached",
+      },
+      {
+        file: "hotels-payment-manual-review-reached.json",
+        state: "payment_manual_review_reached",
+      },
+      {
+        file: "booking-login-captcha-boundary.json",
+        state: "login_or_captcha_boundary",
+      },
+      {
+        file: "booking-network-provider-failure.json",
+        state: "network_provider_failure",
+      },
+    ];
+
+    for (const { file, state } of safeBoundaryCases) {
+      const bundle = await readFixture(file);
+      const analysis = analyzeHotelRetryArtifactBundle(bundle);
+
+      expect(analysis.state, file).toBe(state);
+      expect(analysis.nextAction, file).not.toMatch(
+        /\b(click|press|submit|enter|fill)\s+(final|cvv|cvc|payment|otp|captcha|login)\b/i,
+      );
+    }
   });
 
   it("returns insufficient evidence for bundles without known signals", () => {

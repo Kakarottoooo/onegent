@@ -1,0 +1,39 @@
+{
+  "job": {
+    "id": "fixture-hotel-room-selection-reached",
+    "taskId": "fixture-task-hotel-room-selection-reached",
+    "provider": "booking-com",
+    "scenario": "hotel",
+    "status": "manual_review",
+    "terminalReason": "Room selection reached; operator paused for manual review before continuing.",
+    "steps": [
+      {
+        "name": "book-hotel",
+        "type": "hotel",
+        "__source": "lib/core/execution-local-fixture",
+        "status": "manual_review",
+        "result": "Room selected before manual review."
+      }
+    ],
+    "params": {
+      "city": "New York",
+      "checkIn": "2026-06-10",
+      "checkOut": "2026-06-12",
+      "adults": 1,
+      "rooms": 1,
+      "hotelName": "YOTEL New York Times Square"
+    }
+  },
+  "workerLogExcerpt": "[booking-com] Search results loaded for YOTEL New York Times Square\n[booking-com] Hotel detail page loaded for 2026-06-10 to 2026-06-12\n[booking-com] selected room quantity set to 1\n[booking-com] room selection succeeded; safe handoff captured for operator review",
+  "workerLogPath": "codex-worker.log",
+  "screenshotPaths": [
+    "worker/.debug-screenshots/booking-com-fixture-room-selected/01-hotel-detail.jpg",
+    "worker/.debug-screenshots/booking-com-fixture-room-selected/02-room-selected.jpg"
+  ],
+  "liveSnapshotPaths": [
+    ".debug-screenshots/live/fixture-hotel-room-selection-reached/snapshot.json"
+  ],
+  "notes": [
+    "Synthetic no-live fixture. Room selection reached for the controlled Booking.com case; no CVV, account wall, or confirmation controls were observed."
+  ]
+}
