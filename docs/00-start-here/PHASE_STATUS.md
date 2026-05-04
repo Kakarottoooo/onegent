@@ -167,7 +167,7 @@
 |---|---|---|
 | Computer Use 是 default executor | 0+ | `docs/30-provider-debug/EXECUTOR_V2_PIVOT.md` |
 | 不引入 3rd-party browser-agent (MultiOn / Skyvern / browser-use) | 全部 | chat decision 2026-05-02 |
-| Hybrid positioning (NOT pure-infra, NOT pure-consumer) | 2-3 | `docs/00-start-here/PROJECT_SUMMARY.md` cont. 2 |
+| Hybrid positioning (NOT pure-infra, NOT pure-consumer) | 2-3 | `docs/90-archive/history/PROJECT_SUMMARY_FULL_2026-05-03.md` cont. 2 |
 | Inspire mode 30-template gallery (NOT LLM-free-form) | 3 | chat decision 2026-05-02 |
 | Data flywheel: A + B 做; C 不做 | 4 | chat decision 2026-05-02 |
 | Stripe live key swap deferred | 2+ | `docs/40-phase1/PHASE_1_PLAN.md` § R5 |
@@ -188,4 +188,5 @@
 - **OTP path D**: `docs/20-phase0-restaurant/WARM_SESSION_STRATEGY.md`
 - **Executor pivot**: `docs/30-provider-debug/EXECUTOR_V2_PIVOT.md`
 - **NLU contract**: `docs/50-product-areas/NLU_CONSUMER_CONTRACT.md`
-- **Long-form narrative**: `docs/00-start-here/PROJECT_SUMMARY.md` (含 cont. 1/2/3 战略锁定)
+- **Current project summary**: `docs/00-start-here/PROJECT_SUMMARY.md`
+- **Long-form narrative / historical cont. 1/2/3**: `docs/90-archive/history/PROJECT_SUMMARY_FULL_2026-05-03.md`

@@ -33,6 +33,22 @@ Then read the task-specific section below.
 | API, OAuth, ChatGPT apps, Claude MCP | `docs/60-api-integrations/` |
 | Old plans, audits, full historical summaries | `docs/90-archive/` |
 
+## Expedia Debug Quick Path
+
+For the current Expedia / flight-card DOM scan work, read this exact sequence:
+
+1. `docs/INDEX.md`
+2. `docs/00-start-here/PROJECT_SUMMARY.md`
+3. `docs/00-start-here/PHASE_STATUS.md`
+4. `docs/10-coordination/codex.md`
+5. `docs/30-provider-debug/PROVIDER_RUNTIME_DEBUG_PLAYBOOK.md`
+
+Then inspect runtime evidence:
+
+- DB fields: `booking_jobs.steps[0].error`, `decisionLog`, `params`.
+- Worker log: `codex-worker.log` in the active e2e worktree.
+- Debug screenshots: `worker/.debug-screenshots/`.
+
 ## Maintenance Rules
 
 When a task finishes, update only the relevant layer:
