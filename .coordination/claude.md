@@ -1,27 +1,12 @@
-# Claude coordination state
+# Moved: Claude Coordination
 
-This file was compacted on the integration preview branch.
+Canonical file:
 
-Canonical short working memory is `.coordination/HUDDLE.md`.
-Long-term decisions are in `STRATEGIC_LEDGER.md`.
+```text
+docs/10-coordination/claude.md
+```
 
-## Integrated Claude branches
+Start with `docs/INDEX.md`, then read `docs/10-coordination/README.md`.
 
-- `claude/coord-huddle-protocol`
-- `claude/opentable-email-preference`
-- `claude/resy-observability-suite`
-- `claude/restaurant-readiness-control-center`
-- `claude/resy-run-analysis-workbench`
-- `claude/autonomous-founder-e2e-runner`
-- `claude/phase-1-5-quality-gate-orchestrator`
-
-Additional Claude branches may be integrated after this file was written; check
-the branch merge commits for the exact set.
-
-## Notes for agents
-
-- Treat this integration branch as a local preview branch, not the canonical
-  coordination source of truth.
-- Use `docs/INDEX.md` first after docs-reorg is merged.
-- Use `docs/10-coordination/HUDDLE.md` for current cross-agent state once the
-  docs-reorg branch is included.
+Integration preview note: this branch merged multiple Claude feature branches.
+For exact details, inspect the merge commits on `codex/integrated-preview-20260504`.

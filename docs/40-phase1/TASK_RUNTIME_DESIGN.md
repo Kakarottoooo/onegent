@@ -1,7 +1,7 @@
 # Task Runtime — Phase 1 design (TravelTask facade)
 
 > **Date opened**: 2026-05-02
-> **Phase**: 1 of 5 (per [EXECUTOR_V2_PIVOT.md](./EXECUTOR_V2_PIVOT.md))
+> **Phase**: 1 of 5 (per [docs/30-provider-debug/EXECUTOR_V2_PIVOT.md](./EXECUTOR_V2_PIVOT.md))
 > **Status**: 📐 Design only — no code yet, awaiting codex Phase 0 (Resy CU closure) before implementation
 > **Owners**: codex (backend FSM + schema + API) · Claude (UI migration + design feedback)
 > **Archive criteria**: when Phase 1 ships and `/api/v1/travel-tasks` is the canonical write path, this file moves to `_archived/` and the design lives on in code + tests.
@@ -390,12 +390,12 @@ Tracks A + B work in parallel from step 7. Steps 1-6 are codex serial.
 
 ## Pointers
 
-- **Pivot context**: [EXECUTOR_V2_PIVOT.md](./EXECUTOR_V2_PIVOT.md)
+- **Pivot context**: [docs/30-provider-debug/EXECUTOR_V2_PIVOT.md](./EXECUTOR_V2_PIVOT.md)
 - **Track B's existing event vocabulary** (will be reused as task_events.kind values): [components/task-timeline/event-vocabulary.ts](./components/task-timeline/event-vocabulary.ts)
 - **Track B's existing ProfileGapCard contract** (will trigger when `state === 'awaiting_profile'`): [components/profile-gap/types.ts](./components/profile-gap/types.ts)
 - **DR data shapes** (will be referenced via `decision_room_id`): [lib/db.ts](./lib/db.ts) — `DecisionRoom`, `DecisionRoomProposal`, etc.
-- **Codex's ExecutorV2 contracts** (master 49f9175 + 8a2da14): see PROJECT_SUMMARY.md "Recent Updates 2026-05-02"
+- **Codex's ExecutorV2 contracts** (master 49f9175 + 8a2da14): see docs/00-start-here/PROJECT_SUMMARY.md "Recent Updates 2026-05-02"
 
 ---
 
-*This is a Phase 1-only design. Phases 2-5 will get their own design docs as they're queued. Resist the urge to design the 5-year OS in this file — that's [EXECUTOR_V2_PIVOT.md](./EXECUTOR_V2_PIVOT.md)'s job.*
+*This is a Phase 1-only design. Phases 2-5 will get their own design docs as they're queued. Resist the urge to design the 5-year OS in this file — that's [docs/30-provider-debug/EXECUTOR_V2_PIVOT.md](./EXECUTOR_V2_PIVOT.md)'s job.*

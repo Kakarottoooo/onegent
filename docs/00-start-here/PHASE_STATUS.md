@@ -3,7 +3,7 @@
 > **For**: founder · codex · Claude — quick read before any planning conversation
 > **Last updated**: 2026-05-03 (post Phase 1 path B hardening + smoke harness)
 > **Maintained by**: Claude (Track B), with codex sign-off on Phase 0 / 0B / executor / auth rows
-> **Read this after**: `.coordination/{codex,claude}.md` (live state) and `PROJECT_SUMMARY.md` (long-form narrative)
+> **Read this after**: `docs/10-coordination/{codex,claude}.md` (live state) and `docs/00-start-here/PROJECT_SUMMARY.md` (long-form narrative)
 
 ---
 
@@ -43,7 +43,7 @@
 
 **Doctrine** (locked 2026-05-02): Resy 单 vendor + Computer Use (gpt-5.5 GA) 端到端闭环。1 个 vendor 闭环够才扩 OpenTable，避免 N 平台 N 状态机 in-flight 同步崩。
 
-**已完成** (verbatim from `origin/master:.coordination/codex.md`)
+**已完成** (verbatim from `origin/master:docs/10-coordination/codex.md`)
 - ✅ Computer Use GA 接入 `lib/execution-v2/` 路径 (codex `620444a`)
 - ✅ R-003 smoke #1: navigation drift fix (codex `a0ce2ee`) — exact venue URL
 - ✅ R-003 smoke #2: timeout fix (codex `2cbddfc`) — visual time ladder 收敛
@@ -74,7 +74,7 @@
 **未完成**:
 - Resy smoke subset 单跑通过（从 R-003 + 其他 stable cases 开始）
 - Resy observed fixture suite 通过 4-metric gate (≥80% booking-ready / ≥95% safe-outcome / =0 severe / 100% taxonomy)，并补齐 doc 目标 25 cases 的缺口
-- OpenTable Phase 0 spec 写出来（mirror BENCHMARK_RESTAURANT_100.md 格式）
+- OpenTable Phase 0 spec 写出来（mirror docs/20-phase0-restaurant/BENCHMARK_RESTAURANT_100.md 格式）
 - OpenTable benchmark fixture（25 cases）
 - OpenTable adapter 在 `lib/booking-autopilot/providers/opentable-com.ts` 跑通基线
 
@@ -104,7 +104,7 @@
 - ✅ no-token founder smoke harness `npm run smoke:phase1` — `f9dd0ba`
 
 **未完成**:
-- ⏳ #8 Founder E2E walkthrough（60-90 分钟手动；用户自跑；用 `PHASE_1_FOUNDER_E2E.md` 作 checklist + `npm run smoke:phase1` 作 30 秒 preflight）
+- ⏳ #8 Founder E2E walkthrough（60-90 分钟手动；用户自跑；用 `docs/40-phase1/PHASE_1_FOUNDER_E2E.md` 作 checklist + `npm run smoke:phase1` 作 30 秒 preflight）
 - ⏸ #5 OTP resume — conditional：只在 Phase 0A warm session 失败 + 选 path C（Gmail OTP resume fallback）时触发
 
 **下一步 owner**：用户（founder E2E）；codex（如果 #5 fires）
@@ -115,7 +115,7 @@
 
 **Goal**: founder E2E 暴露的所有"不是 blocker 但烦人"的 UX gap 都进这个桶。每个 ≤ 1 day 工作量。
 
-**Process**: founder 在 walkthrough 时记 bug，每条进 `PHASE_1_FOUNDER_E2E.md` § 8 bug 模板。Phase 1 declared 后批量处理。
+**Process**: founder 在 walkthrough 时记 bug，每条进 `docs/40-phase1/PHASE_1_FOUNDER_E2E.md` § 8 bug 模板。Phase 1 declared 后批量处理。
 
 **Quality Gate (in progress, claude/phase-1-5-quality-gate-orchestrator)**:
 - `npm run gate:phase1` 一条命令产出 verdict + paste-ready markdown bug report
@@ -175,27 +175,28 @@
 
 | 决策 | Phase | 锁定来源 |
 |---|---|---|
-| Computer Use 是 default executor | 0+ | `EXECUTOR_V2_PIVOT.md` |
+| Computer Use 是 default executor | 0+ | `docs/30-provider-debug/EXECUTOR_V2_PIVOT.md` |
 | 不引入 3rd-party browser-agent (MultiOn / Skyvern / browser-use) | 全部 | chat decision 2026-05-02 |
-| Hybrid positioning (NOT pure-infra, NOT pure-consumer) | 2-3 | `PROJECT_SUMMARY.md` cont. 2 |
+| Hybrid positioning (NOT pure-infra, NOT pure-consumer) | 2-3 | `docs/90-archive/history/PROJECT_SUMMARY_FULL_2026-05-03.md` cont. 2 |
 | Inspire mode 30-template gallery (NOT LLM-free-form) | 3 | chat decision 2026-05-02 |
 | Data flywheel: A + B 做; C 不做 | 4 | chat decision 2026-05-02 |
-| Stripe live key swap deferred | 2+ | `PHASE_1_PLAN.md` § R5 |
-| 协作协议 via `.coordination/{codex,claude}.md` | 全部 | `CLAUDE.md` § 协作协议 |
-| Branch hygiene: 每个 task 从最新 origin/master 起新 branch | 全部 | `origin/master:.coordination/codex.md` 2026-05-03 |
+| Stripe live key swap deferred | 2+ | `docs/40-phase1/PHASE_1_PLAN.md` § R5 |
+| 协作协议 via `docs/10-coordination/{codex,claude}.md` | 全部 | `CLAUDE.md` § 协作协议 |
+| Branch hygiene: 每个 task 从最新 origin/master 起新 branch | 全部 | `origin/master:docs/10-coordination/codex.md` 2026-05-03 |
 
 ---
 
 ## 关联文档
 
-- **Live state**: `.coordination/{codex,claude}.md`
-- **Phase 0 spec**: `BENCHMARK_RESTAURANT_100.md` (含 § 7.5 OTP transitional)
-- **Phase 1 plan**: `PHASE_1_PLAN.md`
-- **Founder E2E**: `PHASE_1_FOUNDER_E2E.md`
-- **Smoke harness**: `PHASE_1_E2E_SMOKE.md`
-- **R-003 live runbook**: `R003_LIVE_SMOKE_RUNBOOK.md`
-- **UI migration**: `UI_MIGRATION_MAP.md`
-- **OTP path D**: `WARM_SESSION_STRATEGY.md`
-- **Executor pivot**: `EXECUTOR_V2_PIVOT.md`
-- **NLU contract**: `NLU_CONSUMER_CONTRACT.md`
-- **Long-form narrative**: `PROJECT_SUMMARY.md` (含 cont. 1/2/3 战略锁定)
+- **Live state**: `docs/10-coordination/{codex,claude}.md`
+- **Phase 0 spec**: `docs/20-phase0-restaurant/BENCHMARK_RESTAURANT_100.md` (含 § 7.5 OTP transitional)
+- **Phase 1 plan**: `docs/40-phase1/PHASE_1_PLAN.md`
+- **Founder E2E**: `docs/40-phase1/PHASE_1_FOUNDER_E2E.md`
+- **Smoke harness**: `docs/40-phase1/PHASE_1_E2E_SMOKE.md`
+- **R-003 live runbook**: `docs/20-phase0-restaurant/R003_LIVE_SMOKE_RUNBOOK.md`
+- **UI migration**: `docs/40-phase1/UI_MIGRATION_MAP.md`
+- **OTP path D**: `docs/20-phase0-restaurant/WARM_SESSION_STRATEGY.md`
+- **Executor pivot**: `docs/30-provider-debug/EXECUTOR_V2_PIVOT.md`
+- **NLU contract**: `docs/50-product-areas/NLU_CONSUMER_CONTRACT.md`
+- **Current project summary**: `docs/00-start-here/PROJECT_SUMMARY.md`
+- **Long-form narrative / historical cont. 1/2/3**: `docs/90-archive/history/PROJECT_SUMMARY_FULL_2026-05-03.md`

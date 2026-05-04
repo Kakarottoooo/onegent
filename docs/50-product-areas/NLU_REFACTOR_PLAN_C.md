@@ -9,7 +9,7 @@ NLU 架构重构计划 · Plan C · v1.0 · 2026-04-23
 - 想 30 秒搞懂要做什么：读 "一、Vision" + "三、目标架构"
 - 想知道为什么这样切：读 "二、现状诊断" + "四、为什么选 Plan C"
 - 想开工：读 "六、任务列表" + "七、数据契约" + "八、用户自选模型"
-- 本计划配合 `PROJECT_SUMMARY.md`（三段式骨架章节）和 `CLAUDE.md` 使用
+- 本计划配合 `docs/00-start-here/PROJECT_SUMMARY.md`（三段式骨架章节）和 `CLAUDE.md` 使用
 
 **状态**（截至 2026-04-23）
 - ✅ Phase A · Trip 试点：T1–T6 全部落地（`lib/agent/nlu-v2/` 三层上线）
@@ -539,7 +539,7 @@ lib/agent/nlu-v2/
 ### 修改（已有文件）
 
 - `app/api/chat/parse/route.ts` — 添加 v2 分支
-- `PROJECT_SUMMARY.md` — NLU 章节重写
+- `docs/00-start-here/PROJECT_SUMMARY.md` — NLU 章节重写
 - `CLAUDE.md` — 如有 NLU 相关规则需更新
 
 ### 删除（Phase C 结束后）
@@ -551,7 +551,7 @@ lib/agent/nlu-v2/
 十二、下一步 · 立即行动
 ================================================================
 
-1. 本计划提交到 git（与 PROJECT_SUMMARY.md 同级）
+1. 本计划提交到 git（与 docs/00-start-here/PROJECT_SUMMARY.md 同级）
 2. **Stage 1 Trip Packaging 完整验收通过后**再开工 Phase A（不抢占当前闭环）
 3. T1 开始前，先手写 10 条 trip 场景的预期输入 / 预期 state / 预期 router action
    作为 v2 的"金标准测试集"

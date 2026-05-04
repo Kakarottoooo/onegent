@@ -9,7 +9,7 @@ Trip Packaging 计划 · v1.0 · 2026-04-22
 - 想快速了解要做什么：读 "一、Vision" + "三、Stage 1 任务列表"
 - 想知道为什么这样做：读 "二、现状诊断" + "六、决策记录（ADR）"
 - 改代码前必读：读 "三、Stage 1" 完整 + "四、Stage 2" 的数据契约
-- 本计划配合 `PROJECT_SUMMARY.md` 和 `CLAUDE.md` 使用，不重复这两份文档的内容
+- 本计划配合 `docs/00-start-here/PROJECT_SUMMARY.md` 和 `CLAUDE.md` 使用，不重复这两份文档的内容
 
 **状态**（截至 2026-04-23）
 - ✅ Stage 1（单人 trip 打包）：已落地 — `lib/agent/planners/trip-package.ts`、
@@ -464,7 +464,7 @@ ADR-6. BookingJob.steps 并行而非串行
 ================================================================
 
 【相关文档】
-- `PROJECT_SUMMARY.md` — 项目全局架构和阶段演进
+- `docs/00-start-here/PROJECT_SUMMARY.md` — 项目全局架构和阶段演进
 - `CLAUDE.md` — Booking Automation 三层架构规范（程序化 + AI 填表 + AI 验证）
 - `DECISION_ROOM_TEST_PLAN.md` — DR 手测用例（Stage 2 实施时复用）
 
@@ -489,7 +489,7 @@ ADR-6. BookingJob.steps 并行而非串行
 八、下一步 · 立即行动
 ================================================================
 
-1. 本计划提交到 git（与 PROJECT_SUMMARY.md 同级）
+1. 本计划提交到 git（与 docs/00-start-here/PROJECT_SUMMARY.md 同级）
 2. 在任务系统创建 T1-T13 追踪记录
 3. 开工 T1（NLU 识别 trip + missing-fields 检测）
 4. 每完成一个 task 在任务系统 mark completed

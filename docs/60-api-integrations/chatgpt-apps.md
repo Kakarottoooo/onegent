@@ -79,7 +79,7 @@ The older but still-supported Custom GPT path lets you build a private GPT that 
 
 1. Go to [chatgpt.com/gpts/editor](https://chatgpt.com/gpts/editor) → **Create**
 2. In **Configure → Actions → Create new action**
-3. Paste this OpenAPI 3.1 spec (abridged; the full surface is in [`docs/api/v1.md`](../api/v1.md)):
+3. Paste this OpenAPI 3.1 spec (abridged; the full surface is in [`docs/60-api-integrations/api-v1.md`](../api/v1.md)):
 
    ```yaml
    openapi: 3.1.0
@@ -150,5 +150,5 @@ For everything past an internal demo, submit via the Apps SDK path above.
 
 - Package source: [`packages/mcp-server`](../../packages/mcp-server)
 - Manifest template: [`packages/mcp-server/chatgpt-apps/manifest.json`](../../packages/mcp-server/chatgpt-apps/manifest.json)
-- REST API: [`docs/api/v1.md`](../api/v1.md)
-- Claude Desktop path (for comparison): [`docs/integrations/claude-mcp.md`](./claude-mcp.md)
+- REST API: [`docs/60-api-integrations/api-v1.md`](../api/v1.md)
+- Claude Desktop path (for comparison): [`docs/60-api-integrations/claude-mcp.md`](./claude-mcp.md)

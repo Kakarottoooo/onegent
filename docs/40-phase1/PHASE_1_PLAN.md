@@ -72,7 +72,7 @@ If 1-6 work for at least one user (could be the founder testing on a personal ac
 | 5 | OTP resume **if** Phase 0 used the soft-handoff path AND warm session strategy didn't close the gap | codex | 2-5d | Phase 0 result | ⏸ conditional (gated by Phase 0A R-003 #3 outcome) |
 | 6 | `/tasks/[taskId]` production wire (replace 2 SWAP POINT comments with real fetch calls) | Claude | 2h | #2, #3 | ✅ done (`e098252`; cookie-auth Just Works for real UUIDs, demo IDs hit fixture short-circuit) |
 | 7 | ProfileGapCard wire to homepage chat (replace mock NLU consumer with real PATCH dispatch) | Claude | 4h | #2, #3 | ✅ done — Path A `8500af3` (mid-conversation `apply_profile_patch` dispatcher) + Path B `4cdaa36` (booking-blocked inline `ProfileGapCard`) + Path B hardening `f423b56` (helpers + 19 tests + `/dev/path-b-demo`) |
-| 8 | First real user E2E walkthrough (founder test on production) | user | 1h | All above | ⏳ pending — checklist in `PHASE_1_FOUNDER_E2E.md`; preflight via `npm run smoke:phase1` (`PHASE_1_E2E_SMOKE.md`) |
+| 8 | First real user E2E walkthrough (founder test on production) | user | 1h | All above | ⏳ pending — checklist in `docs/40-phase1/PHASE_1_FOUNDER_E2E.md`; preflight via `npm run smoke:phase1` (`docs/40-phase1/PHASE_1_E2E_SMOKE.md`) |
 
 **Total work-time**: ~15-25 person-hours codex + ~6h Claude + 1h user = ~3 days realistic IF OTP resume is not needed; **~2 weeks** if OTP resume is part of Phase 1.
 
@@ -109,7 +109,7 @@ If 1-6 work for at least one user (could be the founder testing on a personal ac
    Phase 1 declared
 ```
 
-`#2` and `#3` can run in parallel after `#1`. `#4` is gated on both. `#5` only fires if Phase 0 didn't already close the OTP loop (e.g. warm session strategy from `WARM_SESSION_STRATEGY.md` failed).
+`#2` and `#3` can run in parallel after `#1`. `#4` is gated on both. `#5` only fires if Phase 0 didn't already close the OTP loop (e.g. warm session strategy from `docs/20-phase0-restaurant/WARM_SESSION_STRATEGY.md` failed).
 
 ---
 
@@ -140,7 +140,7 @@ Currently `/api/v1/*` requires API-key header. For browser flows, options are:
 - (b) Proxy `/api/v1/*` through a Clerk-authed `/api/me/*/v1/...` shim that mints API-key context server-side
 - (c) Co-locate cookie-auth in the existing `/api/v1/*` handlers (sniff cookie OR API key)
 
-**Mitigation**: codex picks the simplest viable option. Lean toward (c) — least new code, smallest blast radius. Document the decision in EXECUTOR_V2_PIVOT.md.
+**Mitigation**: codex picks the simplest viable option. Lean toward (c) — least new code, smallest blast radius. Document the decision in docs/30-provider-debug/EXECUTOR_V2_PIVOT.md.
 
 ### R3: ProfileGapCard production wire has more edge cases than the mock
 
@@ -149,7 +149,7 @@ The mock at `/dev/profile-gap-flow` covers happy path + 9 preset chips. Producti
 - Validation errors from PATCH endpoint
 - Race conditions (NLU dispatches concurrent patches from chat history)
 
-**Mitigation**: Claude writes integration tests for the 6 failure modes documented in `NLU_CONSUMER_CONTRACT.md` § "Failure modes". Backend-side validation contract (PATCH endpoint open question Q2) becomes a hard input here.
+**Mitigation**: Claude writes integration tests for the 6 failure modes documented in `docs/50-product-areas/NLU_CONSUMER_CONTRACT.md` § "Failure modes". Backend-side validation contract (PATCH endpoint open question Q2) becomes a hard input here.
 
 ### R4: First-user E2E test reveals UX gaps
 
@@ -181,7 +181,7 @@ Per the locked Phase 0 doctrine ("不做" list) — these stay deferred to Phase
 
 ---
 
-## Open questions (carried from `NLU_CONSUMER_CONTRACT.md`)
+## Open questions (carried from `docs/50-product-areas/NLU_CONSUMER_CONTRACT.md`)
 
 These need answers before #6, #7 can ship cleanly. Rough ETAs based on dependency:
 
@@ -191,7 +191,7 @@ These need answers before #6, #7 can ship cleanly. Rough ETAs based on dependenc
 4. **Telemetry**: `apply_profile_patch` dispatches emit a client event so we can measure extractor accuracy regressions?
 5. **MCP path mid-flow state**: when chat surface is `tools/call` not browser, how do we ack the patch + leave booking state for the next call?
 
-Plus 5 warm-session-specific questions in `WARM_SESSION_STRATEGY.md` (Q6-Q10) that fire only if Phase 0 went down the warm-session path.
+Plus 5 warm-session-specific questions in `docs/20-phase0-restaurant/WARM_SESSION_STRATEGY.md` (Q6-Q10) that fire only if Phase 0 went down the warm-session path.
 
 ---
 
@@ -213,12 +213,12 @@ Phase 2 inherits this plan's ownership matrix (codex backend, Claude UI/observab
 
 ## Pointers
 
-- **State doc**: `PROJECT_SUMMARY.md`
-- **Phase 0 spec**: `BENCHMARK_RESTAURANT_100.md`
-- **Pivot doc**: `EXECUTOR_V2_PIVOT.md`
-- **NLU contract**: `NLU_CONSUMER_CONTRACT.md`
-- **OTP strategy** (conditional): `WARM_SESSION_STRATEGY.md`
-- **Coordination**: `.coordination/{codex,claude}.md`
+- **State doc**: `docs/00-start-here/PROJECT_SUMMARY.md`
+- **Phase 0 spec**: `docs/20-phase0-restaurant/BENCHMARK_RESTAURANT_100.md`
+- **Pivot doc**: `docs/30-provider-debug/EXECUTOR_V2_PIVOT.md`
+- **NLU contract**: `docs/50-product-areas/NLU_CONSUMER_CONTRACT.md`
+- **OTP strategy** (conditional): `docs/20-phase0-restaurant/WARM_SESSION_STRATEGY.md`
+- **Coordination**: `docs/10-coordination/{codex,claude}.md`
 
 ---
 

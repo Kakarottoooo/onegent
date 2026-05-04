@@ -2,7 +2,7 @@
 
 > **For**: 用户（创始人）— 手动验证 Phase 1 的全部 user-facing surface
 > **作者**: Claude (Track B)
-> **状态**: 🟢 ready to run — Phase 1 ~95% shipped (per `PHASE_STATUS.md`)；这条 walkthrough 是 declared 前的最后一道门
+> **状态**: 🟢 ready to run — Phase 1 ~95% shipped (per `docs/00-start-here/PHASE_STATUS.md`)；这条 walkthrough 是 declared 前的最后一道门
 > **两条路径**: 10 分钟 quick path（first-pass smoke）/ 60-90 分钟 full path（sign-off 用）—— 见下面 § 选哪条
 
 > 🆕 **2026-05-04**: 这套流程现在有了运行态 ——
@@ -26,7 +26,7 @@
 > Runner 严格不烧 token / 不碰 provider / 不点支付/OTP/最终确认。
 > 详见 `AUTONOMOUS_FOUNDER_E2E.md`。
 
-这个文档是 PHASE_1_PLAN.md #8 — Founder E2E walkthrough。目标是在用户视角
+这个文档是 docs/40-phase1/PHASE_1_PLAN.md #8 — Founder E2E walkthrough。目标是在用户视角
 **手动**走完 Phase 1 的每个用户路径，找出 UX 缺口、复现 bug、签字 Phase 1
 是否真正"产品就绪"。
 
@@ -38,7 +38,7 @@
 底部有 **bug 记录模板** + **已知不在 Phase 1 范围内的事情**（不要花时间纠结这些）。
 
 > **R-003 live smoke 不在这个文档范围内**。那是 Phase 0A 的 Computer Use 真跑流程，
-> 由 codex 执行 + 烧 OpenAI token；checklist 在 `R003_LIVE_SMOKE_RUNBOOK.md`，不要把
+> 由 codex 执行 + 烧 OpenAI token；checklist 在 `docs/20-phase0-restaurant/R003_LIVE_SMOKE_RUNBOOK.md`，不要把
 > 这条 founder walkthrough 跟 R-003 live 混做一锅。
 
 ---
@@ -249,7 +249,7 @@ npm run smoke:phase1
 并断言每个页面渲染出关键文案。**全过 (`exit 0`)** 才值得继续手动走 walkthrough；
 有 route fail 就先修页面再继续。
 
-详见 `PHASE_1_E2E_SMOKE.md`（覆盖范围、失败排查、设计选择）。
+详见 `docs/40-phase1/PHASE_1_E2E_SMOKE.md`（覆盖范围、失败排查、设计选择）。
 
 ---
 
@@ -723,7 +723,7 @@ URL: http://localhost:3000
 
 **提交去向**:
 - 🔴/🟠 → 直接在 chat 贴给 Claude，Claude 决定 Track A 还是 Track B + 转 GitHub issue 或 inline fix
-- 🟡/🟢 → 集中收一批；Phase 1 declared 后批量进 Phase 1.5 polish queue（写进 `.coordination/claude.md`）
+- 🟡/🟢 → 集中收一批；Phase 1 declared 后批量进 Phase 1.5 polish queue（写进 `docs/10-coordination/claude.md`）
 
 发到 GitHub issue 或直接在 chat 里贴给 Claude。
 
@@ -766,24 +766,24 @@ URL: http://localhost:3000
 ## 11. 走完之后
 
 1. 把 bug 列表发给我
-2. 我整理成 GitHub issues / .coordination/claude.md 任务
+2. 我整理成 GitHub issues / docs/10-coordination/claude.md 任务
 3. Codex 审核哪些是 codex 域的（auth / API / executor）
 4. Track A + Track B 修完后再走一次 walkthrough
-5. 第二次干净 → ship Phase 1（在 PROJECT_SUMMARY.md 写 launch announcement）
+5. 第二次干净 → ship Phase 1（在 docs/00-start-here/PROJECT_SUMMARY.md 写 launch announcement）
 6. 进入 Phase 2 计划
 
 ---
 
 ## 12. 引用文档
 
-- `PHASE_STATUS.md` — 8 phase 总览（先看这个；Phase 1 在哪、相对其他 phase 关系）
-- `PHASE_1_PLAN.md` — 8 deliverables 顺序 + 当前 status snapshot
+- `docs/00-start-here/PHASE_STATUS.md` — 8 phase 总览（先看这个；Phase 1 在哪、相对其他 phase 关系）
+- `docs/40-phase1/PHASE_1_PLAN.md` — 8 deliverables 顺序 + 当前 status snapshot
 - `PHASE_1_UI_MERGE_NOTES.md` — Track B 88 文件 inventory（merge 视角）
-- `PHASE_1_E2E_SMOKE.md` — `npm run smoke:phase1` 自动 smoke 的 runbook + 失败排查（A.2 / § 0.4 用到）
-- `R003_LIVE_SMOKE_RUNBOOK.md` — Phase 0A R-003 live smoke 的 codex 执行 checklist；**这条 walkthrough 不跑 R-003 live**，但如果 founder walkthrough 全过 → R-003 live 是下一步 Phase 0A 闭环动作
-- `UI_MIGRATION_MAP.md` — 旧 UI vs 新 UI 对照（解释"我以前的页面去哪了"）
-- `BENCHMARK_RESTAURANT_100.md` § 7.5 — OTP transitional rule
-- `WARM_SESSION_STRATEGY.md` — Phase 0 OTP path D（BLOCKED 状态）
-- `PROJECT_SUMMARY.md` § Recent Updates 2026-05-03 — 完整战略上下文
+- `docs/40-phase1/PHASE_1_E2E_SMOKE.md` — `npm run smoke:phase1` 自动 smoke 的 runbook + 失败排查（A.2 / § 0.4 用到）
+- `docs/20-phase0-restaurant/R003_LIVE_SMOKE_RUNBOOK.md` — Phase 0A R-003 live smoke 的 codex 执行 checklist；**这条 walkthrough 不跑 R-003 live**，但如果 founder walkthrough 全过 → R-003 live 是下一步 Phase 0A 闭环动作
+- `docs/40-phase1/UI_MIGRATION_MAP.md` — 旧 UI vs 新 UI 对照（解释"我以前的页面去哪了"）
+- `docs/20-phase0-restaurant/BENCHMARK_RESTAURANT_100.md` § 7.5 — OTP transitional rule
+- `docs/20-phase0-restaurant/WARM_SESSION_STRATEGY.md` — Phase 0 OTP path D（BLOCKED 状态）
+- `docs/00-start-here/PROJECT_SUMMARY.md` § Recent Updates 2026-05-03 — 完整战略上下文
 - `CLAUDE.md` § 协作协议 — codex / Claude 分工 + commit 协议
-- `.coordination/claude.md` / `.coordination/codex.md` — 跨边状态同步
+- `docs/10-coordination/claude.md` / `docs/10-coordination/codex.md` — 跨边状态同步

@@ -81,10 +81,10 @@ Do not commit those logs unless the user explicitly asks for a log artifact.
 
 Read in this order:
 
-1. `.coordination/codex.md`
-2. `.coordination/claude.md`
-3. `PHASE_STATUS.md`
-4. `R003_LIVE_SMOKE_RUNBOOK.md`
+1. `docs/10-coordination/codex.md`
+2. `docs/10-coordination/claude.md`
+3. `docs/00-start-here/PHASE_STATUS.md`
+4. `docs/20-phase0-restaurant/R003_LIVE_SMOKE_RUNBOOK.md`
 5. `benchmark/restaurant-resy-phase0.json`
 6. `scripts/probe-resy-availability.ts`
 7. `scripts/run-phase0-resy-benchmark.ts`
@@ -93,7 +93,7 @@ Read in this order:
 10. `worker/src/booking-autopilot/providers/resy-com.ts`
 11. `worker/src/booking-autopilot/providers/opentable-com.ts`
 
-If Claude's HUDDLE protocol has been merged, read `.coordination/HUDDLE.md` before the two per-agent files. If it is not present, use `.coordination/codex.md` as the live state source.
+If Claude's HUDDLE protocol has been merged, read `docs/10-coordination/HUDDLE.md` before the two per-agent files. If it is not present, use `docs/10-coordination/codex.md` as the live state source.
 
 ---
 
@@ -473,7 +473,7 @@ If services are started manually in visible terminals, ask the user only for scr
 ### If Continuing Codex Work
 
 1. Verify current branch and status.
-2. Read `.coordination/codex.md`.
+2. Read `docs/10-coordination/codex.md`.
 3. Run:
 
 ```powershell
