@@ -371,6 +371,23 @@ describe("classifyJob — model_or_env_blocked", () => {
     expect(r.signals.map((s) => s.label)).toContain("OpenAI Responses API 5xx");
     expect(r.alternatives.map((a) => a.class)).toContain("network_or_provider_5xx");
   });
+  it("classifies OpenAI Responses API 500 as model/env transient, not provider 5xx", () => {
+    const r = classifyJob(
+      job({
+        provider: "expedia",
+        scenario: "flight",
+        rawWorkerLogExcerpt:
+          "OpenAI Responses API 500: upstream model worker unavailable during Computer Use turn",
+      }),
+    );
+
+    expect(r.primaryClass).toBe("model_or_env_blocked");
+    expect(r.severity).toBe("p1");
+    expect(r.signals.map((s) => s.label)).toContain("OpenAI Responses API 5xx");
+    expect(r.alternatives.map((alt) => alt.class)).not.toContain(
+      "network_or_provider_5xx",
+    );
+  });
   it("matches 'Computer Use unavailable'", () => {
     const r = classifyJob(
       job({ errorMessage: "Computer Use unavailable in this region" }),
