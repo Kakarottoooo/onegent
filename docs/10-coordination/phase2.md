@@ -444,3 +444,85 @@ Validation from this branch worktree:
 
 No live provider was run for this CLI pack. No OpenAI live call, payment, CVV,
 OTP/CAPTCHA/login bypass, or final confirmation path was exercised.
+
+## Flight Live Readiness Pack v2
+
+Agent2 branch:
+
+- `codex/flight-live-readiness-pack-v2`
+- Base: latest `origin/codex/integrated-preview-20260504 @ 0c7efca`
+- Scope: Expedia/flight no-live readiness and artifact-driven runtime closure
+  only.
+
+Previous branch review:
+
+- Reviewed `codex/flight-controlled-runtime-closure @ f58ab84` against latest
+  integrated tip.
+- `f58ab84` was not yet in integrated, so its no-live prompt/source-marker
+  guard was ported into this branch and expanded.
+- No provider selector/runtime patch was made.
+
+Inspected:
+
+- Expedia flight runtime path:
+  `lib/booking-autopilot/providers/expedia.ts`
+- Expedia flight executor handoff path:
+  `lib/booking-autopilot/stagehand-executor.ts`
+- Expedia retry analyzer:
+  `lib/runtime-forensics/expedia-retry-analysis.ts`
+- Expedia retry fixtures:
+  `lib/runtime-forensics/__fixtures__/expedia-retry-analysis/*.json`
+
+Added:
+
+- Pure no-live readiness validator:
+  `lib/runtime-forensics/expedia-flight-live-readiness.ts`
+- No-live controlled retry preflight test:
+  `lib/__tests__/expedia-controlled-retry-preflight.test.ts`
+- Expedia artifact template updates:
+  `docs/50-product-areas/EXPEDIA_RETRY_ARTIFACT_TEMPLATE.json`
+- Runtime-forensics classifier/report tests for OpenAI Responses API 500 as a
+  non-provider model/env transient while preserving Expedia provider signals.
+- Runbook checklist for exact prompt:
+  `帮我订一个6月1号从奥兰多飞 Nashville 的机票，一个人`
+
+Preflight guard coverage:
+
+- Required env names `POSTGRES_URL` and `OPENAI_API_KEY` are checked by name
+  only; values are intentionally not printed.
+- If present, `USE_WORKER_FOR` must include `flight`.
+- `BROWSERBASE_API_KEY` / `BROWSERBASE_PROJECT_ID` must be present together or
+  absent together.
+- Exact prompt and Expedia start URL must match the controlled retry.
+- Normalized params must include `origin=MCO`, `dest=BNA`,
+  `date=2026-06-01`, and `passengers=1`.
+- Source marker must be present at `steps[0].body.__source` or
+  `step.__source` before a worker start.
+- Hard stops cover payment submission, CVV, OTP, CAPTCHA, login bypass, and
+  final booking confirmation.
+- Expected artifact paths cover `codex-worker.log`,
+  `worker/.debug-screenshots/flight-rpa-*`,
+  `.debug-screenshots/live/<retry-job-id>/*.json`, and
+  `benchmark/runs/<retry-run-id>.json`.
+- Card-scan fallback signals classify through the existing Expedia retry
+  analyzer.
+- Checkout/manual-review evidence wins over diagnostic fallback evidence.
+- OpenAI Responses API 500 classifies as model/env transient, not provider
+  selector drift, while provider-specific Expedia signals remain visible.
+- Expedia/provider 503 still classifies as provider/network, not model/env.
+
+Validation from the branch worktree:
+
+- `npx vitest run lib/__tests__/expedia-controlled-retry-preflight.test.ts lib/__tests__/expedia-retry-analysis.test.ts lib/__tests__/expedia-flight-card-match.test.ts lib/__tests__/runtime-forensics-classifier.test.ts lib/__tests__/runtime-forensics-report.test.ts`:
+  pass, 140/140.
+- `npm run build:mcp`: pass; needed in the clean worktree before the requested
+  TypeScript command could resolve the local MCP workspace package.
+- `npx tsc --noEmit --pretty false`: pass after `npm run build:mcp`.
+- `npm run check-drift`: pass.
+- `git diff --check`: pass.
+
+No live provider was run for this readiness pack. No OpenAI live call, payment,
+CVV, OTP/CAPTCHA/login bypass, or final confirmation path was exercised. If
+founder later approves one retry, DB row plus worker log plus screenshots plus
+benchmark artifact remain the source of truth before any selector/runtime
+patch.

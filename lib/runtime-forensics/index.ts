@@ -18,6 +18,7 @@ export * from "./decision-log";
 export * from "./report";
 export * from "./markdown";
 export * from "./expedia-retry-analysis";
+export * from "./expedia-flight-live-readiness";
 export * from "./hotel-retry-analysis";
 export * from "./restaurant-artifact-analysis";
 export * from "./url-filter";

@@ -13,7 +13,9 @@ export type ExpediaRetryState =
   | "fallback_attempted_no_match"
   | "fallback_matched_no_checkout"
   | "checkout_manual_review_reached"
+  | "model_or_env_transient"
   | "network_provider_failure"
+  | "provider_no_availability"
   | "insufficient_evidence";
 
 type SignalKind =
@@ -22,7 +24,9 @@ type SignalKind =
   | "fallback_matched"
   | "no_match"
   | "checkout_reached"
-  | "network_provider_failure";
+  | "model_or_env_transient"
+  | "network_provider_failure"
+  | "provider_no_availability";
 
 type TextSourceKind = "job" | "db_row" | "worker_log" | "artifact_path" | "note";
 
@@ -31,7 +35,9 @@ export const EXPEDIA_RETRY_STATE_LABEL: Record<ExpediaRetryState, string> = {
   fallback_attempted_no_match: "Fallback attempted but no match",
   fallback_matched_no_checkout: "Fallback matched but did not reach checkout",
   checkout_manual_review_reached: "Checkout/manual-review reached",
+  model_or_env_transient: "Model/env transient",
   network_provider_failure: "Network/provider failure",
+  provider_no_availability: "Provider no availability",
   insufficient_evidence: "Insufficient evidence",
 };
 
@@ -62,6 +68,17 @@ export interface ExpediaRetryArtifactBundle {
    */
   liveSnapshotPaths?: readonly string[];
   /**
+   * Optional benchmark report path, if the controlled retry also emitted a
+   * benchmark/runs JSON artifact.
+   */
+  benchmarkReportPath?: string | null;
+  /**
+   * Optional operator-facing taxonomy list copied into a template bundle.
+   * The analyzer does not require it, but preserving it in templates keeps the
+   * expected post-live decision classes explicit.
+   */
+  expectedClassificationTaxonomy?: readonly ExpediaRetryState[];
+  /**
    * Operator notes copied from the runbook checklist.
    */
   notes?: readonly string[];
@@ -87,6 +104,7 @@ export interface ExpediaRetryAnalysis {
   signals: ExpediaRetryEvidenceSignal[];
   artifactPaths: {
     workerLogPath: string | null;
+    benchmarkReportPath: string | null;
     screenshots: string[];
     liveSnapshots: string[];
   };
@@ -148,6 +166,26 @@ const SIGNAL_PATTERNS: SignalPattern[] = [
     rx: /\b(payment[-_\s]?wall|cvv[-_\s]?gate|stop[-_\s]?at[-_\s]?cvv)\b/i,
   },
   {
+    kind: "model_or_env_transient",
+    label: "OpenAI Responses API 5xx",
+    rx: /\bOpenAI\b.*\bResponses?\s+API\b.*\b5\d{2}\b/i,
+  },
+  {
+    kind: "model_or_env_transient",
+    label: "OpenAI Responses API 5xx",
+    rx: /\bResponses?\s+API\b.*\b5\d{2}\b.*\bOpenAI\b/i,
+  },
+  {
+    kind: "model_or_env_transient",
+    label: "OpenAI model/env blocked",
+    rx: /\b(openai|model|computer[-_\s]?use)\b.*\b(rate[-_\s]?limit|quota|billing|unavailable|disabled|required|missing|500)\b/i,
+  },
+  {
+    kind: "model_or_env_transient",
+    label: "missing OpenAI env",
+    rx: /\bOPENAI_API_KEY\b.*\b(required|missing|not set)\b/i,
+  },
+  {
     kind: "network_provider_failure",
     label: "5xx provider/server status",
     rx: /\b5\d{2}\b\s*(error|response|status|server)?/i,
@@ -171,6 +209,21 @@ const SIGNAL_PATTERNS: SignalPattern[] = [
     kind: "network_provider_failure",
     label: "provider unavailable",
     rx: /\b(provider|expedia)\s+(unreachable|down|unavailable|timed out)\b/i,
+  },
+  {
+    kind: "provider_no_availability",
+    label: "provider no availability",
+    rx: /\b(no availability|no available flights?|no matching (?:flight|fare)|provider inventory changed)\b/i,
+  },
+  {
+    kind: "provider_no_availability",
+    label: "target card not visible",
+    rx: /\b(target|southwest|flight)\s+card\s+(is\s+)?not\s+visible\b/i,
+  },
+  {
+    kind: "provider_no_availability",
+    label: "fare sold out",
+    rx: /\bfare\s+(may\s+have\s+)?sold\s+out\b/i,
   },
   {
     kind: "card_scan_failed",
@@ -212,15 +265,19 @@ export function analyzeExpediaRetryArtifactBundle(
   const has = (kind: SignalKind) => signals.some((s) => s.kind === kind);
 
   const hasCheckout = has("checkout_reached");
+  const hasModelOrEnv = has("model_or_env_transient");
   const hasNetwork = has("network_provider_failure");
   const hasCardScanFailed = has("card_scan_failed");
   const hasFallbackAttempted = has("fallback_attempted");
   const hasFallbackMatched = has("fallback_matched");
   const hasNoMatch = has("no_match");
+  const hasNoAvailability = has("provider_no_availability");
 
   let state: ExpediaRetryState;
   if (hasCheckout) {
     state = "checkout_manual_review_reached";
+  } else if (hasModelOrEnv) {
+    state = "model_or_env_transient";
   } else if (hasNetwork) {
     state = "network_provider_failure";
   } else if (hasFallbackMatched) {
@@ -229,6 +286,8 @@ export function analyzeExpediaRetryArtifactBundle(
     state = "fallback_attempted_no_match";
   } else if (hasCardScanFailed) {
     state = "card_scan_failed_before_fallback";
+  } else if (hasNoAvailability) {
+    state = "provider_no_availability";
   } else {
     state = "insufficient_evidence";
   }
@@ -242,6 +301,7 @@ export function analyzeExpediaRetryArtifactBundle(
   const status = firstString(job?.status, readString(dbRow, "status")) ?? "unknown";
   const artifactPaths = {
     workerLogPath: firstString(bundle.workerLogPath) ?? null,
+    benchmarkReportPath: firstString(bundle.benchmarkReportPath) ?? null,
     screenshots: cleanStringList(bundle.screenshotPaths),
     liveSnapshots: cleanStringList(bundle.liveSnapshotPaths),
   };
@@ -303,6 +363,9 @@ export function formatExpediaRetryAnalysisMarkdown(
   if (analysis.artifactPaths.workerLogPath) {
     lines.push(`- Worker log: \`${analysis.artifactPaths.workerLogPath}\``);
   }
+  if (analysis.artifactPaths.benchmarkReportPath) {
+    lines.push(`- Benchmark report: \`${analysis.artifactPaths.benchmarkReportPath}\``);
+  }
   if (analysis.artifactPaths.screenshots.length > 0) {
     for (const screenshotPath of analysis.artifactPaths.screenshots) {
       lines.push(`- Screenshot: \`${screenshotPath}\``);
@@ -315,6 +378,7 @@ export function formatExpediaRetryAnalysisMarkdown(
   }
   if (
     !analysis.artifactPaths.workerLogPath &&
+    !analysis.artifactPaths.benchmarkReportPath &&
     analysis.artifactPaths.screenshots.length === 0 &&
     analysis.artifactPaths.liveSnapshots.length === 0
   ) {
@@ -354,6 +418,7 @@ function buildTextEntries(bundle: ExpediaRetryArtifactBundle): TextEntry[] {
   addText(entries, "job", "job.params", stringify(job?.params));
   addText(entries, "db_row", "dbRow", stringify(bundle.dbRow));
   addText(entries, "artifact_path", "workerLogPath", bundle.workerLogPath);
+  addText(entries, "artifact_path", "benchmarkReportPath", bundle.benchmarkReportPath);
   addText(
     entries,
     "artifact_path",
@@ -415,7 +480,9 @@ function classifyConfidence(
 ): "high" | "medium" | "low" {
   switch (state) {
     case "checkout_manual_review_reached":
+    case "model_or_env_transient":
     case "network_provider_failure":
+    case "provider_no_availability":
       return "high";
     case "fallback_matched_no_checkout":
       return flags.hasNoMatch ? "high" : "medium";
@@ -455,8 +522,12 @@ function nextActionForState(state: ExpediaRetryState): string {
       return "Inspect the fare modal and checkout transition evidence. Patch fare-modal or checkout-boundary detection only after screenshot confirmation.";
     case "checkout_manual_review_reached":
       return "Count as demo-useful safe progress. Preserve the hard stop before payment, CVV, OTP, CAPTCHA, login bypass, or final confirmation.";
+    case "model_or_env_transient":
+      return "Treat as model/env transient. Preserve provider selector evidence, but do not patch Expedia selectors from a model/API outage alone.";
     case "network_provider_failure":
       return "Treat as provider/network instability. Do not patch selectors from this state unless a separate screenshot/log signal proves card matching failed.";
+    case "provider_no_availability":
+      return "Treat as provider inventory/no-availability only when screenshots confirm the target card is absent. Do not patch selector logic from availability copy alone.";
     case "insufficient_evidence":
       return "Collect the DB row, codex-worker.log excerpt, provider screenshots, and live snapshot paths before making a patch decision.";
   }
@@ -466,16 +537,20 @@ function signalRank(kind: SignalKind): number {
   switch (kind) {
     case "checkout_reached":
       return 0;
-    case "network_provider_failure":
+    case "model_or_env_transient":
       return 1;
-    case "fallback_matched":
+    case "network_provider_failure":
       return 2;
-    case "fallback_attempted":
+    case "fallback_matched":
       return 3;
-    case "card_scan_failed":
+    case "fallback_attempted":
       return 4;
-    case "no_match":
+    case "card_scan_failed":
       return 5;
+    case "no_match":
+      return 6;
+    case "provider_no_availability":
+      return 7;
   }
 }
 

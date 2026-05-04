@@ -161,6 +161,31 @@ describe("buildForensicsReport — classification embedded", () => {
       ]),
     );
   });
+  it("reports OpenAI Responses API 500 as a non-provider model/env transient", () => {
+    const r = buildForensicsReport(
+      job({
+        id: "job-expedia-openai-500",
+        provider: "expedia",
+        scenario: "flight",
+        rawWorkerLogExcerpt: [
+          "[stagehand] [flight-rpa] Flight-card DOM scan failed: StagehandEvalError: Uncaught",
+          "[stagehand] OpenAI Responses API returned 500 while filling traveler details",
+        ].join("\n"),
+      }),
+      {
+        inputSource: "worker-log",
+        generatedAt: "2026-05-04T21:00:00.000Z",
+      },
+    );
+
+    expect(r.classification.primaryClass).toBe("model_or_env_blocked");
+    expect(r.classification.signals.map((s) => s.label)).toEqual(
+      expect.arrayContaining([
+        "OpenAI Responses API 5xx",
+        "Expedia flight-card DOM scan failed",
+      ]),
+    );
+  });
 });
 
 describe("buildForensicsReport — notes", () => {
@@ -316,6 +341,24 @@ describe("formatForensicsBugReport", () => {
     expect(md).toContain("Expedia locator fallback attempted");
     expect(md).toContain("worker/.debug-screenshots/flight-rpa-1777875646570/");
     expect(md).toContain("DB + worker log + screenshots");
+  });
+  it("renders OpenAI Responses API 500 without erasing provider-specific evidence", () => {
+    const r = buildForensicsReport(
+      job({
+        provider: "expedia",
+        scenario: "flight",
+        rawWorkerLogExcerpt: [
+          "[stagehand] [flight-rpa] Flight-card DOM scan failed: StagehandEvalError: Uncaught",
+          "[stagehand] OpenAI Responses API returned 500 while filling traveler details",
+        ].join("\n"),
+      }),
+    );
+
+    const md = formatForensicsBugReport(r);
+
+    expect(md).toContain("Model / environment blocked");
+    expect(md).toContain("OpenAI Responses API 5xx");
+    expect(md).toContain("Expedia flight-card DOM scan failed");
   });
   it("is idempotent for same input", () => {
     const r = buildForensicsReport(
