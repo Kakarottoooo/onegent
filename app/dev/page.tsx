@@ -30,6 +30,15 @@ interface DocLink {
 
 const PHASE_0_ROUTES: DevRoute[] = [
   {
+    href: "/dev/restaurant-readiness",
+    title: "Restaurant readiness control center",
+    blurb:
+      "One-page go/no-go before burning a live restaurant case. Aggregates latest Resy probe, latest Phase 0 benchmark, and latest worker debug artifacts into a single verdict (READY / DO NOT BURN / NEEDS PROBE) plus pre-baked single-case live command. No 'run live' button — only copy.",
+    status: "live",
+    useCase:
+      "FIRST STOP before any live R-* token spend. Single screen verdict + recommended case command. Drill into /dev/resy-probe-runs / /dev/benchmark-runs / /dev/debug-artifacts when you need source-of-truth detail.",
+  },
+  {
     href: "/dev/benchmark-runs",
     title: "Phase 0 benchmark runs",
     blurb:

@@ -1,8 +1,24 @@
 # R-003 Live Smoke Runbook — checklist before burning OpenAI tokens
 
 > **For**: codex（执行人）+ founder（监督）
-> **Last updated**: 2026-05-03 (Phase 0A 第 3 次 R-003 live smoke 前)
+> **Last updated**: 2026-05-04 (Phase 0A — readiness control-center landed)
 > **作者**: Claude (Track B); codex 拍板 spec + 实际跑
+
+---
+
+## ℹ️ 2026-05-04 更新：R-003 不再是默认 live case
+
+R-003 (Buvette) 当前 Resy 没有 fixture 时间窗口内的可用 slot — 跑 live 只会
+重新验证 `no_availability_correct` taxonomy，**不会验证 fill/OTP closure**.
+
+**先看 `/dev/restaurant-readiness`**：那里聚合了最新 probe + benchmark +
+debug artifacts，并给出 single verdict（`READY TO BURN ONE CASE` /
+`NEEDS PROBE` / `DO NOT BURN`）+ 推荐的 single-case 命令 (e.g. R-030
+Charlie Bird). 如果 dashboard 推荐另一个 case，这份 runbook 的所有 § 1+
+检查都仍然适用——只是 `--case` 参数换成推荐的那个 caseId.
+
+本 runbook 的执行命令 / spec 检查全部不变；只是 case 选择由 readiness
+dashboard 驱动而不是默认 R-003.
 
 ---
 

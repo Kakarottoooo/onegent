@@ -53,13 +53,13 @@
 - ✅ Resy fixture exists：`benchmark/restaurant-resy-phase0.json` 当前 observed 22 rows（doc 目标 25；fixture notes 明确不 invent missing cases）
 
 **未完成**
-- ⏳ R-003 smoke #3 live 运行（pending codex go-decision）
-- ⏳ Warm session PoC（blocked — 还没有 Resy case 真撞到 OTP wall；R-003 #3 跑出来再决定）
-- ⏳ observed Resy fixture suite 跑（**严格 gated**：只有 R-003 #3 通过 + warm session PoC 完成/或明确不需要才允许）
+- ⏳ 下一次 live retry — R-003 #3 (`phase0-resy-2026-05-04T01-03-14-028Z.json`) outcome `no_availability_correct` (Q11(a))，是 safe failure 不是 fill failure. 下一次 retry 由 `/dev/restaurant-readiness` 推荐 (probe-first protocol; 当前推荐 R-030 Charlie Bird 12 matching slots)，pending founder go-decision.
+- ⏳ Warm session PoC（blocked — 还没有 Resy case 真撞到 OTP wall；下一次 fill-OK case 跑出来再决定）
+- ⏳ observed Resy fixture suite 跑（**严格 gated**：只有至少 1 个 case 通过 fill/OTP closure + warm session PoC 完成/或明确不需要才允许）
 
-**下一步 owner**：codex
+**下一步 owner**：codex（runner + provider 持续修；最新 `49b5670 fix(resy): add form strategy ladder` + `74867e8 [coord] report Resy strategy ladder`）；founder（拍板烧 token）
 
-**进入 Phase 0B 的门**: R-003 #3 通过 + (warm session PoC ✅ 或 OTP soft-handoff per § 7.5)。
+**进入 Phase 0B 的门**: 至少 1 个 readiness-recommended case 通过 + (warm session PoC ✅ 或 OTP soft-handoff per § 7.5)。
 
 ---
 
