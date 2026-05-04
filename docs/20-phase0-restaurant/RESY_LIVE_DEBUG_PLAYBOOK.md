@@ -190,7 +190,7 @@ technically automate them.
 ## Related docs
 
 - `R003_LIVE_SMOKE_RUNBOOK.md` — codex's pre-token-spend checklist
-- `RESY_AVAILABILITY_PROBE_PROTOCOL.md` — probe-first protocol context
+- `docs/20-phase0-restaurant/RESY_AVAILABILITY_PROBE_PROTOCOL.md` — probe-first protocol context
 - `BENCHMARK_RESTAURANT_100.md` § 7.5 — OTP transitional rule
 - `WARM_SESSION_STRATEGY.md` — Phase 0 OTP path D PoC plan
 - `PHASE_STATUS.md` — Phase 0A overall status

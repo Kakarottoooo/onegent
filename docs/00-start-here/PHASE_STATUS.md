@@ -54,7 +54,7 @@
 
 **未完成**
 - ⏳ R-003 smoke #3 live retry — **2026-05-04 跑了一次** (`phase0-resy-2026-05-04T01-03-14-028Z.json`) outcome = `no_availability_correct` (Q11(a)). 这是 safe failure, 不是 fill failure — 只证明了 no-availability path 工作, **没证明 fill/OTP closure**.
-- ⏳ Probe-first protocol: 下一次 live retry 前必须先跑 `npm run probe:resy` + 看 `/dev/resy-probe-runs` dashboard 找到 `use_for_live_fill_test` case (例如 R-030 Charlie Bird). Codex 已 ship probe runner (`024dd05`)；Claude 已 ship dashboard. 协议 doc: `RESY_AVAILABILITY_PROBE_PROTOCOL.md`.
+- ⏳ Probe-first protocol: 下一次 live retry 前必须先跑 `npm run probe:resy` + 看 `/dev/resy-probe-runs` dashboard 找到 `use_for_live_fill_test` case (例如 R-030 Charlie Bird). Codex 已 ship probe runner (`024dd05`)；Claude 已 ship dashboard. 协议 doc: `docs/20-phase0-restaurant/RESY_AVAILABILITY_PROBE_PROTOCOL.md`.
 - ⏳ Restaurant readiness control center: `/dev/restaurant-readiness` aggregates latest probe, benchmark report, and debug artifacts to choose the next safe single live case before any token spend.
 - ⏳ Warm session PoC — blocked: 还没有 Resy case 真撞到 OTP wall；先跑 readiness-recommended case (例如 R-030 if still valid) 看会不会触发 OTP, 再决定 warm session 是否启动.
 - ⏳ Resy observed fixture suite 跑（**严格 gated**：probe 找到 ≥1 个 `use_for_live_fill_test` case + 该 case 真跑通 fill/OTP 之后才允许）
@@ -123,7 +123,7 @@
 - Optional `--include-smoke` / `--include-e2e`：依赖 dev server，缺则 env_blocked
 - Verdict: `pass` / `needs_polish` / `fail` / `env_blocked`，exit codes `0/0/1/2`
 - 配套 `/dev/phase1-quality-gates` dashboard 看历史 run + 复用 stdout/stderr tail
-- 完整规范见 `PHASE_1_QUALITY_GATE.md`
+- 完整规范见 `docs/40-phase1/PHASE_1_QUALITY_GATE.md`
 
 ---
 

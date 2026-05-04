@@ -141,7 +141,7 @@ ownership 备查文件，主战场是 HUDDLE。Schema 从原来的 7 段精简�
 🚧 Hold rules I'm respecting        # 当前承诺不碰的范围
 ```
 
-`📍 Strategic decisions locked` 段已迁出到 `STRATEGIC_LEDGER.md`（root-level
+`📍 Strategic decisions locked` 段已迁出到 `docs/10-coordination/STRATEGIC_LEDGER.md`
 单一文件；不再每个 agent 镜像一份）。codex.md 同步精简。
 
 顶部必须有 metadata 行：

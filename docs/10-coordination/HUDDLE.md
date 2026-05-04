@@ -28,6 +28,14 @@ small.
 
 ## Live Activity
 
+- 2026-05-04 codex: merged
+  `origin/claude/integrated-preview-review-20260504` into
+  `codex/integrated-preview-20260504`; it only moved stray root docs into
+  `docs/`.
+- 2026-05-04 codex: resolved R2/R3 docs cleanup by merging the root
+  `STRATEGIC_LEDGER.md` content into
+  `docs/10-coordination/STRATEGIC_LEDGER.md`, deleting the root copy, and
+  refreshing `docs/10-coordination/claude.md` for integrated preview status.
 - 2026-05-04 codex: reorganizing project documentation under `docs/` so new
   sessions can onboard without reading every root markdown file.
 - 2026-05-04 codex: root `.coordination/*.md` converted to compatibility stubs;

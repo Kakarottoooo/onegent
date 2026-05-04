@@ -1,220 +1,163 @@
-# Claude — coordination state
+# Claude - coordination state
 
-> **Branch**: `claude/founder-e2e-polish` (worktree `festive-pare-f27273`)
-> **Last updated**: 2026-05-03 24:05 UTC
-> **Last commit**: this commit (founder E2E walkthrough polish — quick path / stop conditions / R003 reference)
->
-> Codex reads this at session start. I write to it before each push.
-> See `CLAUDE.md` § "协作协议" for the protocol contract.
-> Codex's parallel file lives at `origin/master:docs/10-coordination/codex.md`.
+> Branch context: integrated preview includes Claude Track B branches through
+> `codex/integrated-preview-20260504`.
+> Last updated: 2026-05-04.
+> Canonical path: `docs/10-coordination/claude.md`.
 
-## 🟢 Currently doing
+Codex reads this at session start. Claude should update it before pushing work
+that changes Track B status, handoff rules, or UI/docs/tooling ownership.
 
-**Founder E2E walkthrough doc polish**, per codex's directive in chat
-(after `88e7ecd fix(docs): align R-003 runbook with current runner`):
-> "停止当前 `claude/phase-status-docs`...从最新 `origin/master` 新开分支
-> `claude/founder-e2e-polish`...只做 doc/copy polish，不改 R003 runbook
-> 的执行命令，不改 PHASE_STATUS 的 Phase 0A/0B 定义."
+## Agent Quickstart
 
-This commit (doc-only, scoped strictly to `docs/40-phase1/PHASE_1_FOUNDER_E2E.md`):
-1. ✅ Added top-of-doc "选哪条路径" decision matrix (10-min Quick vs
-   60-90 min Full).
-2. ✅ Added `🛑 什么时候停止不要继续测` section with 🔴 ship-blocker /
-   🟠 phase-1.5 / 🟡 not-counted classifications. Each 🔴 row points
-   at the specific Phase 1 fix that owns it (cookie-auth / cancel
-   transition / ProfileGapCard inline / payment guard / etc.).
-3. ✅ Added § A. Quick path (10 min): smoke + cookie-auth闭环 +
-   ProfileGapCard inline check + ownership boundary + payment guard
-   curl. Maps directly to the Phase 1 deltas from path A/B + cookie
-   auth + Audit Finding 5.
-4. ✅ Enhanced § 8 bug template with priority labels (P0/P1/P2/P3 mapped
-   to the stop-condition tiers), reproducibility,触发时间, server
-   log excerpt slot, reference commit SHA, submission routing rules.
-5. ✅ Updated § 0.1 environment block: removed stale
-   `claude/festive-pare-f27273` reference (already merged via
-   `c2be764`); added webpack fallback note for Codex detached
-   worktrees (Turbopack symlink panic); kept worker startup since
-   restaurant routes through worker.
-6. ✅ Updated § 12 references to point at `docs/00-start-here/PHASE_STATUS.md`,
-   `docs/40-phase1/PHASE_1_E2E_SMOKE.md`, `docs/20-phase0-restaurant/R003_LIVE_SMOKE_RUNBOOK.md`,
-   `docs/40-phase1/UI_MIGRATION_MAP.md` (with explicit clarifier: this walkthrough
-   does NOT run R-003 live; R-003 runbook is for codex post-walkthrough).
-7. ✅ Updated stale top-of-file status banner from "等 codex merge" to
-   "🟢 ready to run — Phase 1 ~95% shipped".
+Read in this order when picking up Onegent cold:
 
-**Strictly NOT touched**:
-- `docs/20-phase0-restaurant/R003_LIVE_SMOKE_RUNBOOK.md` (codex's `88e7ecd` corrections preserved)
-- `docs/00-start-here/PHASE_STATUS.md` Phase 0A / 0B definitions (codex's "observed 22
-  rows" + "向 25 补齐" language preserved)
-- Any `app/api/**`, `lib/core/**`, `lib/execution-v2/**`,
-  `worker/src/**`, `lib/booking-autopilot/**`
-- Any code (this is doc-only)
+1. `docs/INDEX.md`
+2. `docs/00-start-here/PROJECT_SUMMARY.md`
+3. `docs/00-start-here/PHASE_STATUS.md`
+4. `docs/10-coordination/HUDDLE.md`
+5. `docs/10-coordination/codex.md`
+6. `docs/10-coordination/claude.md`
+7. Task-specific runbook:
+   - Provider/runtime: `docs/30-provider-debug/PROVIDER_RUNTIME_DEBUG_PLAYBOOK.md`
+   - Phase 1/QA: `docs/40-phase1/PHASE_1_FOUNDER_E2E.md`,
+     `docs/40-phase1/PHASE_1_QUALITY_GATE.md`,
+     `docs/40-phase1/AUTONOMOUS_FOUNDER_E2E.md`
+   - Restaurant/Resy: `docs/20-phase0-restaurant/R003_LIVE_SMOKE_RUNBOOK.md`,
+     `docs/20-phase0-restaurant/RESY_LIVE_DEBUG_PLAYBOOK.md`,
+     `docs/20-phase0-restaurant/RESY_AVAILABILITY_PROBE_PROTOCOL.md`
 
-**Verified pre-push**:
-- `npx tsc --noEmit --pretty false` clean
+Default verification for integrated preview:
 
-## 📩 Acks for codex's recent pushes
+```bash
+npm run gate:phase1 -- --allow-known-drift
+```
 
-### `88e7ecd [fix-docs]` + `d0d5d32 [merge]` — Phase status docs landed + R-003 corrections ✅ CONSUMED THIS COMMIT
+Do not run live OpenAI, Computer Use, provider navigation, payment, OTP,
+CAPTCHA, or final-confirm flows unless the user explicitly approves the exact
+live run.
 
-Codex merged `claude/phase-status-docs` (commit `1c9299d`) and then
-pushed `88e7ecd` to fix two errors I had introduced:
+## Product Context
 
-1. **R-003 single-case command was wrong**. My v2 runbook still had a
-   `--confirm-suite` ref under the multi-case warning + an `--output`
-   flag that doesn't exist. Codex's `88e7ecd` aligns the actual command:
-   `--case R-003 --live-openai --allow-failures` (no `--confirm-suite`,
-   no `--output`); reports auto-write to `benchmark/runs/`.
-2. **Browserbase assumption was wrong**. I phrased some checks as if
-   Browserbase session was the live target. Reality: current path is
-   Next dev + local worker + local Playwright/Computer Use. Browserbase
-   is a switchable target, not the default. Codex rewrote § 0.2 / § 1.3
-   / § 2.3 / § 6 to reflect actual local stack.
-3. **Resy fixture description**. I wrote "5 case 完整集 R-001~R-005";
-   actual fixture has 22 observed rows (doc target 25, but source of
-   truth is the file, not the spec). Codex updated PHASE_STATUS to
-   "observed 22 rows" + "向 25 补齐".
+Onegent is a consumer travel-booking automation product. The user chats in
+natural language, the NLU produces an intent, the commit pipeline creates a
+booking job, and provider automation drives public booking sites only up to
+safe handoff boundaries. Final confirmation, payment, OTP, and CAPTCHA remain
+human-controlled.
 
-✅ Acknowledged. All three corrections are net improvements; my v2 was
-based on incomplete first-hand info about the runner. Future runbook
-updates touching these files: I'll defer to codex's master state since
-the runner / fixture are codex's Track A file ownership. This branch
-explicitly does NOT touch those files.
+Architecture nouns to keep in working memory:
 
-### `f9dd0ba [merge]` + earlier — Phase 1 smoke landed ✅ CONSUMED earlier
+- Next.js app and API routes in `app/**`.
+- Neon Postgres shared by app and worker.
+- Clerk auth.
+- Railway/local worker in `worker/src/**`.
+- Stripe for billing, with payment automation forbidden.
+- Stagehand/Playwright/Computer Use provider automation.
 
-### `f423b56` cherry-pick + earlier — Path B hardening landed ✅ CONSUMED earlier
+Sharp corner: `lib/booking-autopilot/**` and
+`worker/src/booking-autopilot/**` are intentional mirrors. Provider/runtime
+changes must be mirrored and checked with `npm run check-drift`.
 
-### `8e690e5 [merge]` + earlier — post-merge docs landed ✅ CONSUMED earlier
+## Track Split
 
-## 🔴 Open BUG reports for codex
+Codex owns Track A:
 
-(none)
+- `lib/booking-autopilot/**`
+- `lib/core/**`
+- `lib/execution-v2/**`
+- `worker/src/**`
+- `app/api/v1/**`
+- `app/api/booking-jobs/**`
+- provider modules for Resy, OpenTable, Expedia, Booking, hotels, activities
+- benchmark fixtures, live runners, provider safety policies
 
-## 🤝 Open questions / status
+Claude owns Track B unless told otherwise:
 
-### For this branch (`claude/founder-e2e-polish`)
+- `app/dev/**`
+- `app/api/dev/**`
+- `components/**`
+- `lib/agent/nlu-v2/**`
+- `lib/profile-gap-*`
+- `lib/founder-e2e/**`
+- `lib/quality-gate/**`
+- `scripts/run-founder-e2e.ts`
+- `scripts/run-phase1-quality-gate.ts`
+- dashboards, observability, docs, and focused tests
 
-- **Stop conditions calibration**: 我用 `🔴 立刻停 / 🟠 记下继续 / 🟡 不计入`
-  三档分类。如果 codex 觉得某条应该跨档（例如 hydration mismatch warning
-  应该升 🔴 而不是 🟠），告诉我，一行 doc PR 调。
-- **Quick path 时间预算**: 10 分钟是含等 dev server / smoke run-time + 5
-  个真人手动步。实际跑可能 8-12 分钟，看 cold/warm cache。如果觉得太挤，
-  我可以拆成 7 分钟 minimal + 12 分钟 quick 两档。
+Claude should not touch Track A provider/runtime files while Codex is debugging
+Expedia, Resy, or OpenTable.
 
-### Q11 / Q12 / Q13 / Q14 / Q15 — all ✅ resolved earlier
+## Current Integrated Preview State
 
-### NLU contract Q4 (telemetry) / Q5 (MCP mid-flow) — Phase 2
+Integrated preview branch: `codex/integrated-preview-20260504`.
 
-### Phase 0 warm session Q6-Q7 — blocked (no Resy case at OTP wall yet; R-003 #3 will inform)
+This branch has merged:
 
-## ⏳ Blocking on codex
+- docs information architecture under `docs/`
+- HUDDLE coordination protocol and canonical coordination docs
+- OpenTable email/SMS preference work
+- Resy observability suite
+- restaurant readiness control center
+- Resy run analysis workbench
+- autonomous founder E2E runner
+- Phase 1.5 Quality Gate orchestrator
+- Claude docs cleanup branch `claude/integrated-preview-review-20260504`
 
-| Blocker | Status |
-|---|---|
-| Focused review + merge `claude/founder-e2e-polish` (this branch) | ⏳ pending |
-| R-003 #3 live smoke decision + execution | Pending founder go/no-go on token spend; preflight green per `d88464e` |
-| Warm session PoC | Blocked until R-003 #3 outcome (if `F-PROVIDER-OTP` → 启动) |
+Recent integrated verification before this coordination refresh:
 
-**Resolved this round** ✓
-- Phase status doc package — landed via `d0d5d32` + `88e7ecd` corrections
+- `npx tsc --noEmit --pretty false` passed.
+- targeted vitest suite passed 245/245.
+- `npm run gate:phase1 -- --allow-known-drift` passed with all required checks.
 
-## 📦 Recently shipped (Track B)
+## Phase Snapshot
 
-| Commit | Subject | Notes for codex |
+- Phase 0A: active. OpenTable is close to stable safe handoff; Resy is still
+  not closed and must use probe/artifacts/readiness before any live token spend.
+- Phase 0B: gated behind restaurant provider stability.
+- Phase 1: roughly 95% shipped; remaining work is founder sign-off and QA
+  confidence, not broad new product work.
+- Phase 1.5: active tooling/observability layer. Quality Gate and Founder E2E
+  surfaces exist for no-token verification.
+- Phase 2: frozen until Phase 0/1 stabilization is declared.
+
+## Safety Rails
+
+- No live OpenAI or Computer Use unless the user approves the exact run.
+- No live provider navigation from Track B.
+- No payment automation.
+- No OTP bypass or CAPTCHA bypass.
+- No final irreversible booking confirmation.
+- No new dashboard button that can burn tokens or run a live provider flow.
+- No auto-starting dev server or worker from gate scripts.
+
+## Recently Shipped By Claude Track B
+
+| Branch | Status in integrated preview | Notes |
 |---|---|---|
-| `this commit` | `docs(founder-e2e): quick path + stop conditions + R003 reference` | doc-only on `docs/40-phase1/PHASE_1_FOUNDER_E2E.md` only. tsc clean. R003 runbook + PHASE_STATUS Phase 0A/0B definitions strictly untouched. |
-| `1c9299d → d0d5d32` + `88e7ecd` | `merge + fix: phase status docs + R-003 runner alignment` | Merged earlier this round; codex's `88e7ecd` corrections fully absorbed. |
-| `4f213ac → f9dd0ba` | `feat(phase-1-e2e): no-token founder walkthrough smoke` | Merged earlier. |
-| `acec60c → f423b56` | `feat(phase-1-7): Path B hardening` | Cherry-picked earlier. |
-| `dce583a → 8e690e5` | `docs(phase-1-7): post-merge cleanup` | Merged earlier. |
+| `claude/coord-huddle-protocol` | merged | Coordination and shared memory protocol. |
+| `claude/opentable-email-preference` | merged | OpenTable marketing SMS/email preference handling. |
+| `claude/resy-observability-suite` | merged | Resy probe/debug artifact dashboards. |
+| `claude/restaurant-readiness-control-center` | merged | Go/no-go readiness dashboard for restaurant work. |
+| `claude/resy-run-analysis-workbench` | merged | Resy run analysis workbench. |
+| `claude/phase-1-5-founder-qa-suite` | merged via integrated preview | Founder E2E manual workbench. |
+| `claude/autonomous-founder-e2e-runner` | merged | `npm run e2e:founder` autonomous runner. |
+| `claude/phase-1-5-quality-gate-orchestrator` | merged | `npm run gate:phase1` plus dashboard. |
+| `claude/integrated-preview-review-20260504` | merged | Moved remaining stray root docs into `docs/`. |
 
-Archival branches (no further commits):
-- `claude/phase-status-docs` (frozen at `3e37175`; superseded by `88e7ecd`; per codex directive do NOT merge)
-- `claude/phase-1-e2e-smoke` (frozen at `4f213ac`, merged via `f9dd0ba`)
-- `claude/phase-1-7-path-b-hardening` (frozen at `acec60c`, cherry-picked as `f423b56`)
-- `claude/post-merge-doc-fixes` (frozen at `dce583a`, merged via `8e690e5`)
-- `claude/phase-1-7-homepage-profile-gap` (merged via `8500af3`)
-- `claude/phase-1-7-path-b` (merged via `4cdaa36`)
-- `claude/festive-pare-f27273` (frozen at `d3e1881`)
+## Current Claude Inbox
 
-## 🚧 Hold rules I'm respecting
+- Do not start new provider/runtime work.
+- If assigned UI/docs/tooling, first check `docs/INDEX.md` and avoid adding
+  new root markdown files.
+- If adding a dashboard or runner, update the closest runbook plus
+  `docs/00-start-here/PHASE_STATUS.md` if phase status changes.
+- If touching docs generated before the reorg, fix old root-path links to the
+  new `docs/<category>/` paths.
 
-- Never merge to master directly
-- Don't touch:
-  - `lib/booking-autopilot/`, `lib/core/execution/`, `lib/execution-v2/`,
-    `worker/src/**`, `app/api/v1/**`, `scripts/run-phase0-resy-benchmark.ts`,
-    `app/api/booking-jobs/[id]/start/route.ts`,
-    `benchmark/PHASE0_REPORT_CONTRACT.md`, `benchmark/fixtures/`,
-    `lib/benchmark/phase0-report.ts`, `benchmark/restaurant-resy-phase0.json`
-- Don't run `npm run dev` or worker (would interfere with codex E2E)
-- Don't run live OpenAI calls
-- Don't run 25-case suite
-- Every new task starts from latest `origin/master`
-- **No Phase 2 vertical implementation** (codex's directive 2026-05-03)
-- **No new features**; doc/copy polish only until Phase 0 + 1 closed
-- **Don't modify** `docs/20-phase0-restaurant/R003_LIVE_SMOKE_RUNBOOK.md` execution commands or
-  `docs/00-start-here/PHASE_STATUS.md` Phase 0A/0B definitions (codex's directive
-  2026-05-03 post-`88e7ecd`)
+## Blocking On Codex
 
-## 🗂 Track B file ownership
+- Expedia/flight provider runtime debugging remains Codex-owned. Source of
+  truth is DB job state, `codex-worker.log`, and
+  `worker/.debug-screenshots/**`, not the task UI alone.
+- Resy live closure remains Codex-owned and should not be retried blindly.
 
-- `components/profile-gap/**`, `components/benchmark/**`, `components/task-timeline/**`, `components/dr-timeline/**`
-- `app/dev/**`, `app/tasks/[taskId]/**`, `app/tasks/page.tsx`, `app/page.tsx` chat sections
-- `lib/agent/nlu-v2/**`, `lib/ui-copy/**`, `lib/profile-gap-decision.ts`, `lib/profile-gap-on-save.ts`
-- `scripts/smoke-phase1.mjs` (Track B test/smoke domain)
-- All Phase 1 / strategy `.md` docs except runbook execution commands and Phase 0A/0B definitions
-- All `__tests__/` for the above
-
-## 📍 Strategic decisions locked
-
-> Long-term memory layer; codex consults before non-current-phase work.
-
-**Team / role allocation:**
-- 2026-05-03 Role allocation: codex 30-40% / Claude 60-70% with hold rules · doc: `CLAUDE.md` § 协作协议
-- 2026-05-03 Time-prediction protocol: every task starts with "预计最快 X 分钟" + use `date` for actual measurement. LLM speed: simple replies 1-2 min, multi-file extractions 8-15 min, doc-pack 12-18 min · chat decision
-- 2026-05-03 Branch hygiene: every new task cuts a fresh branch from latest `origin/master`; archival branches get no further commits · `origin/master:docs/10-coordination/codex.md`
-- 2026-05-03 **Claude paused on new features** until Phase 0 + Phase 1 closed; docs polish only · `origin/master:docs/10-coordination/codex.md` 2026-05-03
-- 2026-05-03 **R-003 runbook commands + Phase 0A/0B definitions are codex domain**; Claude must not modify (post `88e7ecd`)
-
-**Phase 0 / engineering doctrine:**
-- 2026-05-02 Computer Use as default executor · `docs/30-provider-debug/EXECUTOR_V2_PIVOT.md`
-- 2026-05-03 Phase 0 OTP transitional rule § 7.5 · `docs/20-phase0-restaurant/BENCHMARK_RESTAURANT_100.md`
-- 2026-05-03 Q11 R-003 expectedOutcomes: option (a) explicit spec broadening · `docs/20-phase0-restaurant/BENCHMARK_RESTAURANT_100.md` § 4
-- 2026-05-03 Coordination protocol via `docs/10-coordination/{codex,claude}.md` · `CLAUDE.md` § 协作协议
-- 2026-05-03 Don't introduce 3rd-party browser-agent tools · chat decision
-- 2026-05-03 R-003 live smoke checklist + readiness preflight green · `docs/20-phase0-restaurant/R003_LIVE_SMOKE_RUNBOOK.md` (codex `88e7ecd`)
-
-**Phase 0 OTP path:**
-- 2026-05-03 OTP path D: warm session first; Gmail OTP resume fallback · `docs/20-phase0-restaurant/WARM_SESSION_STRATEGY.md`
-
-**Phase 0B (codex domain definition):**
-- 2026-05-03 Phase 0B = Restaurant v1: Resy observed fixture suite (currently 22 rows, target 25) + OpenTable Phase 0 coverage · `docs/00-start-here/PHASE_STATUS.md` (codex `88e7ecd`)
-
-**Phase 1 status:**
-- 2026-05-03 **Phase 1 UI shipped to master** via `c2be764` + `601716b` + `6f81b5c` · `docs/40-phase1/PHASE_1_PLAN.md`
-- 2026-05-03 **Phase 1 #7 fully shipped**: path A `8500af3` + path B `4cdaa36` + safety fix · `PHASE_1_7_SPEC.md`
-- 2026-05-03 **Path B hardening landed**: helpers + 19 tests + dev demo via `f423b56` cherry-pick · `lib/profile-gap-decision.ts` / `lib/profile-gap-on-save.ts`
-- 2026-05-03 **Audit Finding 5 closed**: cancel updates task.state via `7289ba0` · `E2E_SOURCE_AUDIT.md`
-- 2026-05-03 Q14 / Q15 closed: backend emits canonical via `buildProfileGap`; client consumes `payload.profile_gap` · `PHASE_1_7_SPEC.md` § 11.4
-- 2026-05-03 Q13 wontfix: CRLF false-positive Windows-quirk only
-- 2026-05-03 **Phase 1 founder walkthrough has automated render-smoke gate** via `npm run smoke:phase1` · `docs/40-phase1/PHASE_1_E2E_SMOKE.md` (merged `f9dd0ba`)
-- 2026-05-03 **Phase 1 plan refreshed** to ~95% shipped state · `docs/40-phase1/PHASE_1_PLAN.md`
-- 2026-05-03 **Founder E2E walkthrough has Quick (10 min) + Full (60-90 min) bifurcation + stop conditions** · `docs/40-phase1/PHASE_1_FOUNDER_E2E.md`
-
-**Phase 2 freeze:**
-- 2026-05-03 Phase 2 vertical expansion FROZEN until Phase 0B + Phase 1 declared · `docs/00-start-here/PHASE_STATUS.md`
-
-**Phase 2-3 product positioning:**
-- 2026-05-03 Hybrid positioning (NOT pure-infra, NOT pure-consumer) · `docs/00-start-here/PROJECT_SUMMARY.md` cont. 2
-- 2026-05-03 Inspire mode / Daydream Explorer → Phase 3 with 30-template gallery (NOT LLM-free-form) · Phase 3
-- 2026-05-03 Subscription gamification → Phase 2-3
-
-**Phase 4 data flywheel:**
-- 2026-05-03 Data flywheel: A (✅) + B (✅) + C (❌); trigger ≥ 100 real bookings
-
-**Infra:**
-- 2026-04-30 Browserbase Pro upgrade trigger: ≥ 500 paying users OR ≥ $1500/mo bill OR cofounder OR seed round · Phase 4
-
-**UI migration:**
-- 2026-05-03 No "原来的 UI" deletion at Phase 1 boundary; deprecation queue with explicit删除 conditions · `docs/40-phase1/UI_MIGRATION_MAP.md`

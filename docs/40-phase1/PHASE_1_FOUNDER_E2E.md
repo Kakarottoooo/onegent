@@ -24,7 +24,7 @@
 >    直接 paste 给 codex / Claude，按 surface 路由到对应 agent。
 >
 > Runner 严格不烧 token / 不碰 provider / 不点支付/OTP/最终确认。
-> 详见 `AUTONOMOUS_FOUNDER_E2E.md`。
+> 详见 `docs/40-phase1/AUTONOMOUS_FOUNDER_E2E.md`。
 
 这个文档是 docs/40-phase1/PHASE_1_PLAN.md #8 — Founder E2E walkthrough。目标是在用户视角
 **手动**走完 Phase 1 的每个用户路径，找出 UX 缺口、复现 bug、签字 Phase 1

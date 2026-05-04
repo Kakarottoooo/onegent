@@ -261,6 +261,6 @@ interface GateCheck {
 - `lib/__tests__/quality-gate-runner.test.ts` — argv + check spec suite.
 - `PHASE_1_FOUNDER_E2E.md` — the manual checklist this gate
   complements.
-- `AUTONOMOUS_FOUNDER_E2E.md` — the autonomous founder runner the
+- `docs/40-phase1/AUTONOMOUS_FOUNDER_E2E.md` — the autonomous founder runner the
   gate optionally invokes via `--include-e2e`.
 - `FOUNDER_E2E_BUG_TRIAGE.md` — severity ladder shared with this doc.

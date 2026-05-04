@@ -27,7 +27,7 @@ Latest probe finding (2026-05-04): R-030 Charlie Bird 2026-05-08 20:00
 party 2 has 12 matching slots — that's the recommended next live target,
 not R-003.
 
-Full protocol: `RESY_AVAILABILITY_PROBE_PROTOCOL.md`. Skip Step 0 and you
+Full protocol: `docs/20-phase0-restaurant/RESY_AVAILABILITY_PROBE_PROTOCOL.md`. Skip Step 0 and you
 risk burning the token on another `no_availability_correct` outcome.
 
 Also open `/dev/restaurant-readiness` first. It aggregates latest probe,

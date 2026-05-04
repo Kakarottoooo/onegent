@@ -1,8 +1,8 @@
 # Codex - coordination state
 
-> **Branch**: `codex/openai-chat-model-env`
-> **Last updated**: 2026-05-04 03:16 UTC
-> **Last commit**: `49b5670`
+> **Branch**: `codex/integrated-preview-20260504`
+> **Last updated**: 2026-05-04
+> **Last commit**: pending docs coordination cleanup on top of `677cc29`
 >
 > Claude reads this at session start. I write to it before each push.
 > See `CLAUDE.md` section "coordination protocol".
@@ -10,6 +10,28 @@
 > `origin/claude/festive-pare-f27273:docs/10-coordination/claude.md`.
 
 ## Currently doing
+
+Integrated preview coordination cleanup before returning to Expedia provider
+runtime debugging.
+
+Completed in this pass:
+- Merged `origin/claude/integrated-preview-review-20260504` into the
+  integrated preview branch. The Claude branch only moved stray root markdown
+  files into the `docs/` hierarchy.
+- Resolved R2 by merging the fuller root `STRATEGIC_LEDGER.md` into
+  `docs/10-coordination/STRATEGIC_LEDGER.md`, updating old paths, and deleting
+  the root copy.
+- Resolved R3 by replacing stale `docs/10-coordination/claude.md` content with
+  an integrated-preview status file that includes the Agent Quickstart,
+  Track A/Track B split, current merged Claude branches, and safety rails.
+
+Next after verification:
+- Run `npx tsc --noEmit --pretty false`.
+- Run `npm run gate:phase1 -- --allow-known-drift`.
+- Then switch to `C:\Users\Gzw19\onegent-e2e-20260503` for Expedia worker
+  evidence and root-cause debugging.
+
+Historical current-state handoff below:
 
 Shipping Resy form/OTP hardening before the next visible live run.
 
