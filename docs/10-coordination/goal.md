@@ -1,80 +1,83 @@
-# Goal Handoff - Phase 0 Restaurant No-Live Artifact Pack
+# Goal Handoff - Artifact Corpus Consolidation
 
 Last updated: 2026-05-04
 
-Branch: `codex/goal-phase0-restaurant-artifact-pack`
+Branch: `codex/goal-artifact-corpus-consolidation`
 
-Base: latest `origin/codex/integrated-preview-20260504`
+Base: `origin/codex/integrated-preview-20260504` at
+`0b83d1b303cc342c3b2ab69b0e7a1af52731f933`.
 
 ## Current State
 
-This branch adds a no-live restaurant artifact analysis package for Phase 0
-closure work. It does not implement restaurant provider runtime, does not touch
-provider/core/worker/API code, does not run live providers, and does not call
-OpenAI.
+This branch consolidates the synthetic no-live fixture corpus used by Phase 0
+restaurant artifact analysis and Phase 2 Expedia/hotel retry analysis. It adds
+inventory documentation, a local fixture-count helper, and corpus guard tests.
 
-The package classifies operator-assembled Resy/OpenTable evidence bundles from
-DB/log/screenshot metadata so future fixes can be based on artifacts instead of
-task-card summaries.
+No provider runtime, worker, core, API, database, schema, live-run, retry, or
+dashboard control path is changed.
 
 ## Changed Files
 
-Code and tests:
-
-- `lib/runtime-forensics/restaurant-artifact-analysis.ts`
-- `lib/runtime-forensics/index.ts`
-- `lib/runtime-forensics/__fixtures__/restaurant-artifact-analysis/*.json`
-- `lib/__tests__/restaurant-artifact-analysis.test.ts`
-- `scripts/analyze-restaurant-artifact.ts`
-
-Docs:
-
-- `docs/20-phase0-restaurant/RESTAURANT_ARTIFACT_ANALYSIS.md`
-- `docs/20-phase0-restaurant/RESTAURANT_PHASE0_HANDOFF.md`
-- `docs/20-phase0-restaurant/R003_LIVE_SMOKE_RUNBOOK.md`
-- `docs/20-phase0-restaurant/RESY_LIVE_DEBUG_PLAYBOOK.md`
+- `docs/50-product-areas/ARTIFACT_CORPUS_INVENTORY.md`
 - `docs/10-coordination/goal.md`
+- `lib/__tests__/artifact-fixture-corpus.test.ts`
+- `scripts/list-artifact-fixtures.ts`
 
-## Covered Classes
+## Fixture Inventory
 
-- `resy_modal_disabled_details_api_failed`
-- `resy_otp_login_boundary`
-- `resy_no_availability`
-- `opentable_phone_otp_handoff`
-- `opentable_form_incomplete`
-- `provider_network_degraded`
-- `safe_manual_review_reached`
-- `insufficient_evidence`
+`npx tsx scripts/list-artifact-fixtures.ts` inventories 27 synthetic fixtures:
+
+- restaurant: 10 fixtures.
+- Expedia: 8 fixtures.
+- hotel: 9 fixtures.
+
+The inventory covers analyzer fixtures under:
+
+- `lib/runtime-forensics/__fixtures__/restaurant-artifact-analysis/*.json`
+- `lib/runtime-forensics/__fixtures__/expedia-retry-analysis/*.json`
+- `lib/runtime-forensics/__fixtures__/hotel-retry-analysis/*.json`
+
+It also includes the existing top-level runtime-forensics demo fixtures from
+`FIXTURE_FILENAMES`.
+
+## Corpus Guards
+
+`lib/__tests__/artifact-fixture-corpus.test.ts` asserts every inventoried
+fixture has:
+
+- a synthetic marker or fixture-style id;
+- provider, scenario, and status metadata;
+- no non-example email address or non-fixture E.164 phone number;
+- no payment card number;
+- no CVV/CVC/security-code value;
+- no OTP, one-time-code, verification-code, or SMS-code value.
 
 ## Validation
 
 Current results:
 
-- `npx vitest run lib/__tests__/restaurant-artifact-analysis.test.ts`: pass, 19/19.
-- `npx tsx scripts/analyze-restaurant-artifact.ts lib/runtime-forensics/__fixtures__/restaurant-artifact-analysis/resy-modal-disabled-details-api-failed.json`: pass.
+- Targeted Vitest fixture/artifact suite: pass, 5 files / 91 tests. The raw
+  wildcard command does not expand under PowerShell, so the same target set was
+  run with PowerShell-expanded matching files.
+- `npx tsx scripts/list-artifact-fixtures.ts`: pass, 27 fixtures.
 - `npx tsc --noEmit --pretty false`: pass.
 - `npm run check-drift`: pass.
 - `git diff --check`: pass.
-- Forbidden-path audit: pass.
+- Forbidden-path audit against working diff: pass.
 
 ## Safety Notes
 
 No live provider run was performed. No OpenAI live call was performed. No
-payment, CVV, OTP/CAPTCHA/login bypass, or final confirmation path was
-exercised.
+provider browser automation, payment, CVV, OTP/CAPTCHA/login bypass, or final
+confirmation path was exercised. `docs/10-coordination/HUDDLE.md` was not
+edited.
 
 ## Next Human Approval Points
 
 Human approval is required before:
 
-- Any Resy live case.
-- Any OpenTable live case.
-- Any OpenAI live call.
-- Any broad restaurant suite, retry loop, cron, dashboard button, or
-  live-provider automation batch.
-- Any action involving payment submission, CVV, OTP, CAPTCHA, login-sensitive
-  checks, or final booking/reserve/purchase confirmation.
-
-If a future restaurant run is approved, collect the DB row, bounded worker log
-excerpt, provider screenshot paths, and live snapshot paths before deciding
-whether a provider patch is justified.
+- any live restaurant, Expedia, Booking.com, Hotels.com, or other provider run;
+- any OpenAI live call;
+- any retry loop, broad provider suite, or live dashboard control;
+- any action involving payment submission, CVV, OTP, CAPTCHA, login-sensitive
+  checks, phone verification, or final booking/reserve/purchase confirmation.
