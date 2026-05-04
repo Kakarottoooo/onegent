@@ -33,6 +33,15 @@ small.
 
 ## Live Activity
 
+- 2026-05-04 codex: completed Phase 1/1.5 demo-freeze pass on integrated
+  preview. Initial full gate exposed two optional demo failures: payment-field
+  guard returned 500 and smoke saw an unstable old dev server. Fixed the root
+  issues by rejecting profile payment fields (`card_number`, `cvv`, aliases)
+  before auth/DB work and by treating missing Clerk config as anonymous for
+  optional booking-job/profile paths. Final verification: full Phase 1 gate
+  with smoke+e2e passed 12/12, targeted auth/profile/founder tests passed
+  144/144, `npm run build` passed, and production route probe returned 200 for
+  13/13 demo routes.
 - 2026-05-04 codex: integrated Agent2
   `codex/phase2-expedia-retry-analysis-pack @ 005e638` by cherry-picking onto
   current integrated preview as `687c0b3`. Added the pure no-live Expedia retry

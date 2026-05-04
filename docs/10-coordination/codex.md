@@ -2,7 +2,7 @@
 
 > **Branch**: `codex/integrated-preview-20260504`
 > **Last updated**: 2026-05-04
-> **Last commit**: pending Agent2 retry analyzer + Track C demo readiness
+> **Last commit**: pending Phase 1/1.5 demo-freeze closure
 >
 > Claude reads this at session start. I write to it before each push.
 > See `CLAUDE.md` section "coordination protocol".
@@ -14,6 +14,29 @@
 Phase 1 demo trunk stabilization on integrated preview.
 
 Completed in latest pass:
+- Closed the Phase 1/1.5 demo-freeze gate on integrated preview.
+- Fixed the final P0 from the full gate:
+  - `/api/v1/users/me/profile` now rejects payment fields before auth/DB work.
+  - The denylist includes `card_number`, `card_expiry`, `card_name`,
+    `billing_address`, `cvv`, `cvc`, `card_cvv`, `card_cvc`, and
+    `security_code`.
+  - Missing Clerk config is treated as anonymous for optional booking-job and
+    profile routes, preventing local demo stderr noise from `auth()` when the
+    no-op proxy is active.
+- Verified:
+  - `npx vitest run lib/__tests__/optional-clerk-user.test.ts lib/__tests__/profile-patch.test.ts lib/__tests__/booking-jobs-db-errors.test.ts lib/__tests__/founder-e2e-runner.test.ts lib/__tests__/founder-e2e.test.ts`
+    pass, 144/144.
+  - `npx tsc --noEmit --pretty false` pass.
+  - Full `npm run gate:phase1 -- --allow-known-drift --include-smoke --include-e2e`
+    pass, 12/12.
+  - `npm run build` pass.
+  - Production `next start` probe returned 200 for 13/13 demo routes:
+    `/`, `/tasks`, `/dev`, `/dev/demo-readiness`, `/dev/demo-control-room`,
+    `/dev/runtime-forensics`, `/dev/phase1-quality-gates`, `/dev/founder-e2e`,
+    `/dev/restaurant-readiness`, `/dev/resy-run-analysis`,
+    `/developers/docs/api/v1`, `/pricing`, and `/permissions`.
+
+Previous completed pass:
 - Selectively integrated Agent3 `codex/track-c-demo-readiness @ f3c44b3` onto
   latest integrated preview. Kept:
   - `app/dev/demo-readiness/page.tsx`

@@ -11,8 +11,8 @@ import {
 } from "@/lib/db";
 import type { BookingJob, BookingJobStep } from "@/lib/db";
 import type { AgentAutonomySettings } from "@/lib/autonomy";
-import { auth } from "@clerk/nextjs/server";
 import { randomUUID } from "crypto";
+import { getOptionalClerkUserId } from "@/lib/auth/optional-clerk-user";
 import { isCoreSupported, markStepForCore } from "@/lib/core/cend-adapter";
 import { canUseNoDatabaseBookingJobsFallback } from "@/lib/booking-jobs/db-errors";
 
@@ -31,7 +31,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "steps required" }, { status: 400 });
   }
 
-  const { userId } = await auth();
+  const userId = await getOptionalClerkUserId();
   const jobId = randomUUID();
 
   const initialSteps: BookingJobStep[] = steps.map((s) => ({ ...s, status: "pending" }));
@@ -88,7 +88,7 @@ export async function GET(req: NextRequest) {
   if (!sessionId) {
     return NextResponse.json({ error: "session_id required" }, { status: 400 });
   }
-  const { userId } = await auth();
+  const userId = await getOptionalClerkUserId();
 
   let sessionJobs: BookingJob[];
   let userJobs: BookingJob[];
@@ -152,7 +152,7 @@ export async function DELETE(req: NextRequest) {
   if (!sessionId) {
     return NextResponse.json({ error: "session_id required" }, { status: 400 });
   }
-  const { userId } = await auth();
+  const userId = await getOptionalClerkUserId();
 
   let sessionJobs: BookingJob[];
   let userJobs: BookingJob[];

@@ -1,7 +1,9 @@
-import { auth } from "@clerk/nextjs/server";
 import { NextResponse, type NextRequest } from "next/server";
+import { getOptionalClerkUserId } from "@/lib/auth/optional-clerk-user";
 import {
+  findProfilePaymentFields,
   parseProfilePatch,
+  paymentFieldsError,
   toPublicBookingProfile,
   upsertDefaultBookingProfile,
 } from "@/lib/profile-patch";
@@ -10,14 +12,6 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 export async function PATCH(req: NextRequest) {
-  const { userId } = await auth();
-  if (!userId) {
-    return NextResponse.json(
-      { error: { code: "unauthorized", message: "Sign in to update your booking profile." } },
-      { status: 401 },
-    );
-  }
-
   let rawBody: unknown;
   try {
     rawBody = await req.json();
@@ -32,6 +26,23 @@ export async function PATCH(req: NextRequest) {
     rawBody && typeof rawBody === "object" && "profile" in rawBody
       ? (rawBody as { profile?: unknown }).profile
       : rawBody;
+
+  const paymentFields = findProfilePaymentFields(rawPatch);
+  if (paymentFields.length > 0) {
+    const parsed = paymentFieldsError(paymentFields);
+    if (!parsed.ok) {
+      return NextResponse.json({ error: parsed.error }, { status: 400 });
+    }
+  }
+
+  const userId = await getOptionalClerkUserId();
+  if (!userId) {
+    return NextResponse.json(
+      { error: { code: "unauthorized", message: "Sign in to update your booking profile." } },
+      { status: 401 },
+    );
+  }
+
   const parsed = parseProfilePatch(rawPatch);
   if (!parsed.ok) return NextResponse.json({ error: parsed.error }, { status: 400 });
 
