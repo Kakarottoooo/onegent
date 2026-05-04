@@ -24,8 +24,8 @@ Completed in latest pass:
   - removed unsupported `size`/`contentType` exports from OG route modules;
   - pointed developer docs pages at `docs/60-api-integrations/**` after docs
     reorg;
-  - guarded Clerk-dependent developer/pricing client UI for environments where
-    Clerk is intentionally disabled.
+  - guarded Clerk-dependent middleware and developer/pricing client UI for
+    environments where Clerk is intentionally disabled.
 - Verified:
   - `npm run build` pass, including MCP prebuild and SW postbuild.
   - `npx tsc --noEmit --pretty false` pass.

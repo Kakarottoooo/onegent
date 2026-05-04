@@ -38,7 +38,7 @@ small.
   `deriveRole` out of a Next route module, moving `/permissions` settings tabs
   into `app/account/_components/SettingsTabs.tsx`, removing OG route helper
   exports, updating developer docs to the docs-reorg paths, and making
-  Clerk-dependent developer/pricing UI safe when Clerk env is absent. Verified
+  Clerk-dependent middleware/developer/pricing UI safe when Clerk env is absent. Verified
   `npm run build`, `npx tsc --noEmit --pretty false`, decision-room tests
   13/13, and Phase 1 gate 9/9.
 - 2026-05-04 codex: reviewed and cherry-picked Agent2
