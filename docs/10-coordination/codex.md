@@ -2,7 +2,7 @@
 
 > **Branch**: `codex/integrated-preview-20260504`
 > **Last updated**: 2026-05-04
-> **Last commit**: pending fourth sidecar integration push
+> **Last commit**: pending Phase 0 restaurant artifact pack push
 >
 > Claude reads this at session start. I write to it before each push.
 > See `CLAUDE.md` section "coordination protocol".
@@ -11,9 +11,32 @@
 
 ## Currently doing
 
-Integrated fourth sidecar batch onto the Phase 1/1.5 demo-freeze baseline.
+Integrated Goal's Phase 0 restaurant artifact pack onto the Phase 1/1.5
+demo-freeze baseline.
 
 Completed in latest pass:
+- Cherry-picked Goal `codex/goal-phase0-restaurant-artifact-pack @ 6691bf9` as
+  `c1f41a6`, adding a pure no-live restaurant artifact analyzer for
+  Resy/OpenTable evidence bundles.
+- Added:
+  - `lib/runtime-forensics/restaurant-artifact-analysis.ts`
+  - `scripts/analyze-restaurant-artifact.ts`
+  - synthetic restaurant artifact fixtures under
+    `lib/runtime-forensics/__fixtures__/restaurant-artifact-analysis/`
+  - `docs/20-phase0-restaurant/RESTAURANT_ARTIFACT_ANALYSIS.md`
+  - restaurant runbook links/updates.
+- Verified:
+  - Forbidden-path audit pass.
+  - `npx vitest run lib/__tests__/restaurant-artifact-analysis.test.ts` pass,
+    19/19.
+  - `npx tsx scripts/analyze-restaurant-artifact.ts lib/runtime-forensics/__fixtures__/restaurant-artifact-analysis/resy-modal-disabled-details-api-failed.json`
+    pass.
+  - `npm run gate:phase1 -- --allow-known-drift` pass, 9/9, run
+    `phase1-quality-gate-2026-05-04T18-13-37-295Z.json`.
+  - `npm run build` pass.
+  - `git diff --check` pass.
+
+Previous completed pass:
 - Cherry-picked Agent2 `codex/phase2-goal-hotel-analyzer-port @ ee8f9d5` as
   `30892a3`, recording the hotel analyzer port verification in Phase 2
   coordination docs.

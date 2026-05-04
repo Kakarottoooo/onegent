@@ -33,6 +33,13 @@ small.
 
 ## Live Activity
 
+- 2026-05-04 codex: integrated Goal
+  `codex/goal-phase0-restaurant-artifact-pack @ 6691bf9` as `c1f41a6`.
+  Added a pure no-live Phase 0 restaurant artifact analyzer, CLI, synthetic
+  Resy/OpenTable fixtures, and restaurant runbook updates. Verified restaurant
+  analyzer tests 19/19, CLI fixture output, Phase 1 gate 9/9, `npm run build`,
+  forbidden-path audit, and `git diff --check`. No live provider/OpenAI calls,
+  payment, OTP, CAPTCHA, login bypass, final confirmation, or forbidden paths.
 - 2026-05-04 codex: integrated fourth sidecar batch onto current integrated
   preview. Cherry-picked Agent2
   `codex/phase2-goal-hotel-analyzer-port @ ee8f9d5` as `30892a3`, Agent3
