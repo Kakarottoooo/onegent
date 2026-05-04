@@ -1,6 +1,6 @@
 # HUDDLE - Shared Working Memory
 
-> Last writer: codex
+> Last writer: claude
 > Last updated: 2026-05-04
 > Cap: 2000 words. Trim oldest Live activity first.
 
@@ -33,6 +33,26 @@ small.
 
 ## Live Activity
 
+- 2026-05-04 claude: post-demo-freeze docs cleanup on
+  `claude/phase1-doc-cleanup-after-freeze` (based on
+  `codex/integrated-preview-20260504 @ 4d6d991`). Refreshed
+  `docs/10-coordination/claude.md` to drop the stale "Phase 1 ~95%
+  shipped" claim and the stale "213 targeted tests" count, added Demo
+  Control Room and runtime-forensics UX v2 to the integrated preview
+  state, added the latest demo-freeze verification (12/12 gate, 13/13
+  prod route probe, 15/15 e2e:founder, build clean), and listed the
+  new Track B branches in Recently Shipped. Refreshed
+  `docs/40-phase1/PHASE_1_FOUNDER_E2E.md` header to reflect
+  "demo-freeze passed". Extended `lib/__tests__/docs-static-guard.test.ts`
+  with a 5th `it` block locking post-freeze invariants (PHASE_STATUS
+  records demo-freeze pass and lists demo-control-room/demo-readiness;
+  claude.md drops the 95% phrasing and lists the 2 new branches;
+  PHASE_1_FOUNDER_E2E header drops the 95% phrasing) without
+  duplicating Agent3's existing checks. No app/dev edits, no provider/
+  runtime/core/worker/db touched. Verified `tsc` clean, targeted
+  vitest 12/12 (docs-static-guard 5/5 + demo-evidence 7/7), Phase 1
+  gate `--allow-known-drift` 8/0/0/1 (exit 0), and `git diff --check`
+  clean.
 - 2026-05-04 codex: completed Phase 1/1.5 demo-freeze pass on integrated
   preview. Initial full gate exposed two optional demo failures: payment-field
   guard returned 500 and smoke saw an unstable old dev server. Fixed the root
