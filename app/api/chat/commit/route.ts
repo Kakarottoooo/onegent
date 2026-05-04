@@ -56,6 +56,7 @@ import { notifyDecisionRoomInvite } from "@/lib/room-notifications";
 import { buildProfileGap } from "@/lib/core/execution/profile-requirements";
 import type { ExecutionParams, NeedsProfileDataPayload } from "@/lib/core";
 import type { BookingProfile } from "@/lib/booking-autopilot/types";
+import { buildPlanQueryFromConstraints } from "@/lib/chat-plan-query";
 
 export const maxDuration = 30;
 
@@ -1118,7 +1119,14 @@ export async function POST(req: NextRequest) {
       ok: true,
       kind: "plan",
       scenario,
-      search_query: originalMessage || buildPlanQueryFromConstraints(scenario, constraints),
+      // Flight v2 NLU already has structured origin/destination/date. Prefer a
+      // deterministic English handoff for the legacy /api/chat flight parser;
+      // reparsing the original Chinese booking sentence has regressed to
+      // BNA->BNA/today and produced false "no flights" results.
+      search_query:
+        scenario === "flight"
+          ? buildPlanQueryFromConstraints(scenario, constraints)
+          : originalMessage || buildPlanQueryFromConstraints(scenario, constraints),
       constraints,
     });
   }
@@ -1392,26 +1400,3 @@ function buildTripSummary(state: TripIntentState): string {
   return parts.join(" ");
 }
 
-function buildPlanQueryFromConstraints(
-  scenario: ConversationalScenario,
-  constraints: Record<string, unknown>
-): string {
-  const city = readString(constraints, "city", "hotel_city", "arrival_city");
-  const date = readString(constraints, "date", "check_in", "departure_date");
-  const cuisine = readString(constraints, "cuisine", "cuisine_hint");
-  const pieces: string[] = [];
-  if (scenario === "restaurant") {
-    pieces.push(cuisine ? `Find a ${cuisine} restaurant` : "Find a restaurant");
-  } else if (scenario === "hotel") {
-    pieces.push("Find a hotel");
-  } else if (scenario === "flight") {
-    pieces.push("Find a flight");
-  } else if (scenario === "activity") {
-    pieces.push("Find something to do");
-  } else {
-    pieces.push("Plan a trip");
-  }
-  if (city) pieces.push(`in ${city}`);
-  if (date) pieces.push(`on ${date}`);
-  return pieces.join(" ").trim();
-}
