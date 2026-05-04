@@ -28,6 +28,71 @@ Safety boundary:
 Do not diagnose from the task UI alone. The UI intentionally compresses provider
 runtime logs for normal users.
 
+## 1.5 Where to look (canonical evidence sources)
+
+There is no single dashboard that holds the truth. Use this exact order:
+
+| Source | Path / surface | What it gives you |
+|---|---|---|
+| **Database** | `booking_jobs` row → `steps[0].error`, `steps[0].decisionLog`, `steps[0].body.params`, `steps[0].body.__source`, `terminalReason`, `terminalCode` | Authoritative job + step + decision-log content |
+| **Worker log** | `C:\Users\Gzw19\onegent-e2e-20260503\codex-worker.log` (Codex's worktree) — override locally with `WORKER_LOG_PATH` env, default `./codex-worker.log` | Step-by-step execution narrative, strategy ladder hits, frame-aware probe results |
+| **Debug screenshots** | `worker/.debug-screenshots/<provider>/<run>/` (page.png + page.html + summary.json) | Visual ground truth of what the provider site looked like at terminal failure |
+| **Benchmark report** | `benchmark/runs/*.json` (no `phase1-quality-gate-` / `founder-e2e-` prefix) | Phase 0 acceptance suite per-case outcomes |
+| **Task UI** | `/tasks/<taskId>` | Customer-facing summary; **not** ground truth (compressed) |
+
+**Triage rule**: the task UI is the lowest-fidelity source. Do not draw a
+conclusion from it alone. The forensics workbench (next section) re-renders
+the same evidence after pre-classification, but is still **not** authoritative —
+the artifact files + DB are.
+
+## 1.6 Forensics workbench (`/dev/runtime-forensics`)
+
+Read-only triage helper that pre-classifies provider failures across 8
+categories. Reads filesystem artifacts (V1):
+
+- `benchmark/runs/*.json` (excluding quality-gate / founder-e2e prefixes)
+- `worker/.debug-screenshots/<provider>/<run>/summary.json`
+- `./codex-worker.log` (or `$WORKER_LOG_PATH`) — graceful empty if missing
+
+Failure classifications:
+
+| Class | Severity | What it means |
+|---|---|---|
+| `legacy_shape_missing_source` | **P0** | Worker received a step without `__source` — M5 force-gate at `app/api/booking-jobs/[id]/start/route.ts` failed to stamp. Worker-gating regression. |
+| `provider_no_availability` | INFO | Provider returned no slots in the target window. Not a fill failure. |
+| `provider_form_incomplete` | P1 | Guest form not fully filled / required field empty / `auditAndRefill` gave up. |
+| `otp_or_login_required` | INFO | OTP / phone-verify / login wall reached. Expected boundary. |
+| `checkout_reached_manual_review` | INFO | Reached final-confirm / payment / CVV. Safe handoff success boundary. |
+| `model_or_env_blocked` | P1 | OpenAI rate-limit / Computer Use unavailable / chromium missing / token-guard hit. |
+| `network_or_provider_5xx` | P2 | 5xx, ECONNRESET, gateway timeout, `net::ERR_*`. Often transient. |
+| `unknown` | P2 | No signals matched. Needs human triage. |
+
+How to use:
+
+1. Open `/dev/runtime-forensics` (dev-gated; requires
+   `NODE_ENV !== "production"` or `ENABLE_DEV_BENCHMARK_API=1`).
+2. Filter by provider / status / classification.
+3. Click a job row → the detail drawer shows raw terminal fields + matched
+   signals + step shape audit + decision log + cross-references + a
+   paste-ready markdown bug-report block.
+4. Triple-click the markdown textarea, copy, paste into the Codex / Claude
+   chat for triage.
+
+Hard rules:
+
+- The page never starts a worker, never invokes a provider, never
+  retries a job. It is read-only.
+- The page must render an empty state cleanly when no benchmark runs
+  exist and the worker log is missing. **Test this**: delete
+  `./benchmark/runs/*.json` and `./codex-worker.log`, refresh; you
+  should see the empty state with `WORKER_LOG_PATH` hint.
+- V1 is artifact-based. DB live lookup is a future source (Codex domain
+  if/when added; pure parser already accepts duck-typed input).
+
+**The workbench is a triage tool, not source of truth.** When the
+classification disagrees with what the worker actually did, trust the
+worker log + screenshots, not this page.
+
 ## 2. Database Evidence
 
 The useful table is usually `booking_jobs`.

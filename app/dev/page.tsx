@@ -30,6 +30,15 @@ interface DocLink {
 
 const PHASE_0_ROUTES: DevRoute[] = [
   {
+    href: "/dev/runtime-forensics",
+    title: "Provider Runtime Forensics workbench",
+    blurb:
+      "Read-only triage workbench. Pre-classifies provider failures across 8 categories (legacy-shape missing __source / no-availability / form-incomplete / OTP / checkout-reached / model-blocked / 5xx / unknown) by parsing benchmark/runs/*.json + debug-screenshots + an optional codex-worker.log excerpt. P0 red-flag for the legacy-shape worker-gating bug. NO live runs, NO retry. V1 is artifact-based; DB live lookup is future codex domain.",
+    status: "live",
+    useCase:
+      "First stop for any 'worker / provider / Expedia / Resy / OpenTable just failed' triage. Gives you classification + matched signals + step shape audit + paste-ready bug report. Source of truth is still DB + worker log + screenshots — see PROVIDER_RUNTIME_DEBUG_PLAYBOOK.md.",
+  },
+  {
     href: "/dev/restaurant-readiness",
     title: "Restaurant readiness control center",
     blurb:

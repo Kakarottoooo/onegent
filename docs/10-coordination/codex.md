@@ -2,7 +2,7 @@
 
 > **Branch**: `codex/integrated-preview-20260504`
 > **Last updated**: 2026-05-04
-> **Last commit**: pending Expedia fallback merge on top of `23a97da`
+> **Last commit**: pending runtime forensics workbench integration on top of `81f6f7e`
 >
 > Claude reads this at session start. I write to it before each push.
 > See `CLAUDE.md` section "coordination protocol".
@@ -52,9 +52,18 @@ Provider-runtime side branch:
   card was visible in screenshots.
 - The Expedia branch adds a visible-text locator fallback when the bulk card
   scan throws, with targeted Vitest, TypeScript, and drift checks passing.
+- Reviewed and integrated `claude/runtime-forensics-workbench @ d5a2d00` via
+  cherry-pick, because the branch was based before current Expedia/docs commits.
+  Preserved current integrated state and added:
+  - `lib/runtime-forensics/**`
+  - `/api/dev/runtime-forensics`
+  - `/dev/runtime-forensics`
+  - runtime forensics tests
+  - playbook "where to look" guidance
 
 Next:
 - Expedia fallback is merged into integrated preview and verified.
+- Runtime forensics is merged into integrated preview and verified.
 - If founder approves a controlled runtime check later, retry the same MCO to
   BNA Expedia task and inspect DB/logs/screenshots before making any further
   provider changes.

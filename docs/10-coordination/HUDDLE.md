@@ -28,6 +28,12 @@ small.
 
 ## Live Activity
 
+- 2026-05-04 codex: reviewed and integrated
+  `claude/runtime-forensics-workbench @ d5a2d00` via cherry-pick, because the
+  branch was based before the latest Expedia/docs integrated commits. Preserved
+  current Expedia fallback and docs IA, resolved `claude.md`, and verified
+  runtime-forensics tests 213/213, root `tsc`, Phase 1 gate 9/9, and local
+  `/dev/runtime-forensics` + `/api/dev/runtime-forensics` dogfood on port 3001.
 - 2026-05-04 codex: merged `codex/expedia-flight-card-fallback` into
   `codex/integrated-preview-20260504`. Resolved docs-reorg conflicts by keeping
   `.coordination/codex.md` as a stub and the canonical provider notes in

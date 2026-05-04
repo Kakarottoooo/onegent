@@ -80,6 +80,7 @@ Claude owns Track B unless told otherwise:
 - `lib/profile-gap-*`
 - `lib/founder-e2e/**`
 - `lib/quality-gate/**`
+- `lib/runtime-forensics/**`
 - `scripts/run-founder-e2e.ts`
 - `scripts/run-phase1-quality-gate.ts`
 - dashboards, observability, docs, and focused tests
@@ -102,22 +103,49 @@ This branch has merged:
 - autonomous founder E2E runner
 - Phase 1.5 Quality Gate orchestrator
 - Claude docs cleanup branch `claude/integrated-preview-review-20260504`
+- Expedia flight-card fallback from Codex
+- Provider Runtime Forensics workbench from Claude
 
-Recent integrated verification before this coordination refresh:
+Recent integrated verification:
 
 - `npx tsc --noEmit --pretty false` passed.
-- targeted vitest suite passed 245/245.
 - `npm run gate:phase1 -- --allow-known-drift` passed with all required checks.
+- Runtime forensics tests passed after integration.
+
+## Runtime Forensics Workbench
+
+Merged from `claude/runtime-forensics-workbench`.
+
+What shipped:
+
+- `lib/runtime-forensics/**` pure parser/classifier/report modules.
+- `/api/dev/runtime-forensics` read-only dev API.
+- `/dev/runtime-forensics` read-only dashboard.
+- 8 failure classes, including P0 `legacy_shape_missing_source`.
+- Artifact-based loader for `benchmark/runs/*.json`, optional
+  `codex-worker.log`, and debug screenshot summaries.
+- Paste-ready markdown bug report output.
+- 213 targeted tests on Claude branch; verified again by Codex during merge.
+
+Boundaries:
+
+- V1 is artifact-based. DB live lookup is future Codex-owned work.
+- No live provider execution.
+- No retry/run button.
+- No worker control.
+- No payment, OTP, CAPTCHA, login bypass, or final confirmation automation.
 
 ## Phase Snapshot
 
 - Phase 0A: active. OpenTable is close to stable safe handoff; Resy is still
   not closed and must use probe/artifacts/readiness before any live token spend.
+- Expedia runtime: fallback for visible-card DOM scan failure is integrated;
+  any controlled retry requires explicit founder approval.
 - Phase 0B: gated behind restaurant provider stability.
 - Phase 1: roughly 95% shipped; remaining work is founder sign-off and QA
   confidence, not broad new product work.
-- Phase 1.5: active tooling/observability layer. Quality Gate and Founder E2E
-  surfaces exist for no-token verification.
+- Phase 1.5: active tooling/observability layer. Quality Gate, Founder E2E,
+  and Runtime Forensics surfaces exist for no-token verification.
 - Phase 2: frozen until Phase 0/1 stabilization is declared.
 
 ## Safety Rails
@@ -143,6 +171,7 @@ Recent integrated verification before this coordination refresh:
 | `claude/autonomous-founder-e2e-runner` | merged | `npm run e2e:founder` autonomous runner. |
 | `claude/phase-1-5-quality-gate-orchestrator` | merged | `npm run gate:phase1` plus dashboard. |
 | `claude/integrated-preview-review-20260504` | merged | Moved remaining stray root docs into `docs/`. |
+| `claude/runtime-forensics-workbench` | merged | Provider runtime forensics workbench. |
 
 ## Current Claude Inbox
 
@@ -156,8 +185,8 @@ Recent integrated verification before this coordination refresh:
 
 ## Blocking On Codex
 
-- Expedia/flight provider runtime debugging remains Codex-owned. Source of
-  truth is DB job state, `codex-worker.log`, and
-  `worker/.debug-screenshots/**`, not the task UI alone.
+- Provider/runtime debugging remains Codex-owned. Source of truth is DB job
+  state, `codex-worker.log`, and `worker/.debug-screenshots/**`, not the task UI
+  alone.
 - Resy live closure remains Codex-owned and should not be retried blindly.
-
+- DB integration for runtime forensics remains Codex-owned if/when it is added.
