@@ -8,6 +8,12 @@ This document is the final pre-demo acceptance pack. It does not approve
 provider execution, production provider sessions, payment entry, OTP entry,
 CAPTCHA solving, login shortcuts, or final confirmation.
 
+No-live freeze checker:
+
+```powershell
+npx tsx scripts/check-demo-freeze.ts
+```
+
 ## How To Read Latest Readiness
 
 Use these in order:
@@ -124,7 +130,9 @@ Stop immediately if any of these appear:
 ## Source Links
 
 - `docs/40-phase1/YC_DEMO_RUNBOOK.md`
+- `docs/40-phase1/YC_DEMO_OPERATOR_CARD.md`
 - `docs/40-phase1/DEMO_CONTROL_ROOM.md`
+- `scripts/check-demo-freeze.ts`
 - `/dev/demo-readiness`
 - `/dev/demo-control-room`
 - `/dev/phase1-quality-gates`
