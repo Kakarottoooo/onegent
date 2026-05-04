@@ -6,7 +6,7 @@
 
 This card is for the person driving the demo. It is not approval to start
 provider production sessions, enter payment details, enter OTP codes, solve
-CAPTCHA, shortcut login, or click final confirmation.
+CAPTCHA, shortcut login, or perform final confirmation.
 
 Before the demo, run the no-live freeze checker:
 

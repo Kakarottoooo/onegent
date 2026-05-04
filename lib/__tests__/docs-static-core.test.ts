@@ -1,0 +1,66 @@
+import { readFileSync, existsSync } from "node:fs";
+import path from "node:path";
+import { describe, expect, it } from "vitest";
+
+const ROOT = process.cwd();
+
+function read(relPath: string): string {
+  return readFileSync(path.join(ROOT, relPath), "utf8");
+}
+
+describe("docs static guard - core", () => {
+  it("keeps key Phase 1 and demo-readiness docs in place", () => {
+    const requiredDocs = [
+      "docs/INDEX.md",
+      "docs/00-start-here/PHASE_STATUS.md",
+      "docs/10-coordination/HUDDLE.md",
+      "docs/10-coordination/MULTI_AGENT_PROTOCOL.md",
+      "docs/10-coordination/phase2-goal-review.md",
+      "docs/10-coordination/track-c.md",
+      "docs/40-phase1/DEMO_CONTROL_ROOM.md",
+      "docs/40-phase1/DEMO_FREEZE_ACCEPTANCE.md",
+      "docs/40-phase1/YC_DEMO_OPERATOR_CARD.md",
+      "docs/40-phase1/YC_DEMO_RUNBOOK.md",
+      "docs/40-phase1/PHASE_1_FOUNDER_E2E.md",
+      "docs/40-phase1/AUTONOMOUS_FOUNDER_E2E.md",
+      "docs/40-phase1/PHASE_1_QUALITY_GATE.md",
+      "docs/40-phase1/PHASE_1_E2E_SMOKE.md",
+      "docs/50-product-areas/EXPEDIA_CONTROLLED_RETRY_RUNBOOK.md",
+      "docs/50-product-areas/HOTEL_CONTROLLED_RETRY_RUNBOOK.md",
+      "docs/50-product-areas/HOTEL_VERTICAL_REVIVAL_AUDIT.md",
+    ];
+
+    for (const relPath of requiredDocs) {
+      expect(existsSync(path.join(ROOT, relPath)), relPath).toBe(true);
+    }
+  });
+
+  it("keeps developer docs routes pointed at docs/60-api-integrations", () => {
+    const routeFiles = [
+      "app/developers/docs/api/v1/page.tsx",
+      "app/developers/docs/oauth/page.tsx",
+      "app/developers/docs/integrations/[slug]/page.tsx",
+    ];
+
+    for (const relPath of routeFiles) {
+      const source = read(relPath);
+
+      expect(source, relPath).toContain('"docs", "60-api-integrations"');
+      expect(source, relPath).not.toMatch(
+        /path\.join\(process\.cwd\(\),\s*"docs",\s*"api/,
+      );
+      expect(source, relPath).not.toMatch(
+        /path\.join\(process\.cwd\(\),\s*"docs",\s*"oauth\.md"/,
+      );
+    }
+  });
+
+  it("keeps the developer docs hub linked to static docs routes", () => {
+    const hub = read("app/developers/docs/page.tsx");
+
+    expect(hub).toContain("/developers/docs/api/v1");
+    expect(hub).toContain("/developers/docs/oauth");
+    expect(hub).toContain("/developers/docs/integrations/claude-mcp");
+    expect(hub).toContain("/developers/docs/integrations/chatgpt-apps");
+  });
+});

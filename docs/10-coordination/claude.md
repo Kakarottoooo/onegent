@@ -1,6 +1,7 @@
 # Claude - coordination state
 
-> Branch context: working on `claude/docs-ia-post-freeze-index`,
+> Branch context: latest Claude branch reviewed is
+> `claude/multi-agent-conflict-protocol`,
 > based on `codex/integrated-preview-20260504 @ a704e6f`.
 > Integrated preview now includes Claude Track B branches through
 > `codex/integrated-preview-20260504` post Phase 1/1.5 demo-freeze pass
@@ -19,10 +20,13 @@ Read in this order when picking up Onegent cold:
 1. `docs/INDEX.md`
 2. `docs/00-start-here/PROJECT_SUMMARY.md`
 3. `docs/00-start-here/PHASE_STATUS.md`
-4. `docs/10-coordination/HUDDLE.md`
-5. `docs/10-coordination/codex.md`
-6. `docs/10-coordination/claude.md`
-7. Task-specific runbook:
+4. `docs/10-coordination/MULTI_AGENT_PROTOCOL.md` (mandatory before any
+   new branch; branch freshness, ownership map, HUDDLE discipline,
+   cherry-pick policy, forbidden paths)
+5. `docs/10-coordination/HUDDLE.md`
+6. `docs/10-coordination/codex.md`
+7. `docs/10-coordination/claude.md`
+8. Task-specific runbook:
    - Provider/runtime: `docs/30-provider-debug/PROVIDER_RUNTIME_DEBUG_PLAYBOOK.md`
    - Phase 1/QA: `docs/40-phase1/PHASE_1_FOUNDER_E2E.md`,
      `docs/40-phase1/PHASE_1_QUALITY_GATE.md`,
@@ -231,7 +235,8 @@ Boundaries:
 | `claude/runtime-forensics-ux-polish-v2` | merged via cherry-pick | URL multi-select filters, sortable headers, fixtures (`?examples=1`), recommendation engine, signal-by-source detail panel. |
 | `claude/demo-control-room` | merged via cherry-pick | Read-only `/dev/demo-control-room` aggregating gate/founder-e2e/smoke verdicts plus Phase 2 posture and safe demo script. |
 | `claude/phase1-doc-cleanup-after-freeze` | merged via cherry-pick (`db0aef8`) | Phase 1/1.5 docs refresh after demo-freeze pass; dropped stale 95% claim and 213-test count, extended `docs-static-guard` with post-freeze invariants. |
-| `claude/docs-ia-post-freeze-index` | active | Docs IA cleanup after demo-freeze: refresh `docs/INDEX.md` with new-agent read order + post-freeze quick path + Phase 2 hotel paths, refresh `PROJECT_SUMMARY` worktree/phase snapshot, refresh `PHASE_STATUS` integrated-preview branch list and Phase 2 doc references, extend `docs-static-guard` with INDEX read-order + canonical path invariants. |
+| `claude/docs-ia-post-freeze-index` | merged via cherry-pick (`9b83153`) | Refresh `docs/INDEX.md` with new-agent read order + post-freeze quick path + Phase 2 hotel paths, refresh `PROJECT_SUMMARY` worktree/phase snapshot, refresh `PHASE_STATUS` integrated-preview branch list, extend docs static guards with INDEX read-order + canonical path invariants. |
+| `claude/multi-agent-conflict-protocol` | integrated in current Codex batch | Add `docs/10-coordination/MULTI_AGENT_PROTOCOL.md` (branch freshness rule, ownership map, HUDDLE discipline, goal-branch behavior, cherry-pick policy, forbidden paths). Split the docs static guard into focused files while preserving current demo/Phase 2/IA invariants. Update `docs/10-coordination/README.md` to point at the protocol. |
 
 ## Current Claude Inbox
 
