@@ -53,4 +53,32 @@ describe("OpenTable provider safety policy", () => {
     expect(executorSource).toContain("OpenTable guest-form error occurred after reaching the form");
     expect(executorSource).toContain("reachedGuestForm && !guestFormIncomplete && !isOpenTableGuestFormError");
   });
+
+  it("opts the user out of SMS marketing checkboxes by default", () => {
+    // Founder directive 2026-05-03: never auto-consent users to SMS
+    // marketing because the booking phone is the user's real number;
+    // restaurant text spam = harassment. Email marketing is left alone
+    // (different harm profile; not in scope this round).
+    expect(providerSource).toContain("SMS_PATTERNS");
+    expect(providerSource).toContain("/text updates?/i");
+    expect(providerSource).toContain("/reminders.*reservations?/i");
+    expect(providerSource).toContain("founder anti-spam policy");
+    expect(providerSource).toContain("unchecked ${smsUncheckedCount} SMS marketing checkbox(es)");
+    // Use cb.click() to fire React onChange, NOT direct .checked = false:
+    expect(providerSource).toContain("cb.click()");
+    expect(providerSource).not.toContain("cb.checked = false");
+    // Don't blanket-uncheck every checkbox — only those matching SMS_PATTERNS:
+    expect(providerSource).toContain("SMS_PATTERNS.some(re => re.test(labelText))");
+  });
+
+  it("captures the founder live-verified success rationale in code comments", () => {
+    // The fillGuestForm doc-block records WHY the 6-layer ladder works
+    // and prevents future "small refactor accidentally drops a layer"
+    // regressions. If you remove these phrases you almost certainly
+    // also broke something the comment was protecting.
+    expect(providerSource).toContain("founder live-verified 2026-05-03");
+    expect(providerSource).toContain("Sirrah / Thu May 14 8:00 PM / 1 person");
+    expect(providerSource).toContain("structurally durable shape");
+    expect(providerSource).toContain("CANNOT silently regress");
+  });
 });
