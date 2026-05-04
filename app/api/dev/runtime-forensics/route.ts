@@ -35,12 +35,9 @@ import { NextResponse, type NextRequest } from "next/server";
 import {
   aggregateForensics,
   applyEnhancedFilter,
-  buildForensicsReport,
   buildForensicsSummary,
   formatForensicsBugReport,
-  getWorkerLogPath,
   parseFiltersFromQuery,
-  readWorkerLogExcerpt,
   recommendNextEvidence,
   serializeFiltersToString,
   sortSummaries,
@@ -240,6 +237,3 @@ function buildLoaderFilter(
   if (state.jobId) filter.jobId = state.jobId;
   return filter;
 }
-
-/* ─── Re-export helpers used by tests / other server-side code. ──── */
-export { buildForensicsReport, getWorkerLogPath, readWorkerLogExcerpt };
