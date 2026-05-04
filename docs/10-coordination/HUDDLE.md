@@ -1,6 +1,6 @@
 # HUDDLE - Shared Working Memory
 
-> Last writer: codex
+> Last writer: track-c
 > Last updated: 2026-05-04
 > Cap: 2000 words. Trim oldest Live activity first.
 
@@ -33,6 +33,15 @@ small.
 
 ## Live Activity
 
+- 2026-05-04 track-c: started `codex/track-c-demo-operator-pack` from latest
+  integrated preview `a704e6f`. Added
+  `docs/40-phase1/YC_DEMO_OPERATOR_CARD.md` as a one-page printable operator
+  card, linked it from the YC runbook, freeze acceptance doc, and
+  `/dev/demo-readiness` useful docs, and extended static guards for operator
+  card existence, active-demo-doc mojibake, and Phase 2 not-live-verified
+  wording. Scope stayed docs/read-only demo evidence/tests; no provider,
+  runtime, core, worker, DB, live, payment, OTP, CAPTCHA, login shortcut, or
+  final-confirmation work.
 - 2026-05-04 codex: integrated second sidecar batch onto current integrated
   preview. Cherry-picked Agent2 `codex/phase2-hotel-artifact-audit @ 354b4f3`
   as `0bdccf8`, Agent3 `codex/track-c-demo-acceptance-pack @ da0dbd6` as

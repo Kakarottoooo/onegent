@@ -2,7 +2,8 @@
 
 > Last updated: 2026-05-04
 > Branches: `codex/track-c-demo-readiness-v2`,
-> `codex/track-c-demo-acceptance-pack`
+> `codex/track-c-demo-acceptance-pack`,
+> `codex/track-c-demo-operator-pack`
 > Owner: demo readiness sidecar / Codex integration
 
 Track C owns read-only demo readiness docs, static guard tests, and light
@@ -12,6 +13,14 @@ founder-facing demo surface polish. It does not own provider/runtime/live code.
 
 Latest integrated work:
 
+- Branch `codex/track-c-demo-operator-pack` adds
+  `docs/40-phase1/YC_DEMO_OPERATOR_CARD.md` as a one-page printable operator
+  checklist with route order, 30-second pitch, fallback lines, hard stops, and
+  Phase 2 "audited / not live-verified" wording. It links the card from the
+  YC runbook, freeze acceptance doc, and `/dev/demo-readiness` useful docs via
+  `lib/demo-evidence`. Static guards now require the operator card, catch
+  mojibake in active demo docs, and prevent positive Phase 2 live-verified
+  claims.
 - Branch `codex/track-c-demo-readiness-v2` adds a pure markdown export helper
   for `lib/demo-evidence`, renders a read-only markdown export block on
   `/dev/demo-readiness`, and expands demo-evidence tests for markdown export

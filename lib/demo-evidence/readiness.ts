@@ -203,6 +203,11 @@ const DOC_LINKS: Omit<DemoEvidenceDocLink, "exists">[] = [
     kind: "runbook",
   },
   {
+    label: "YC demo operator card",
+    path: "docs/40-phase1/YC_DEMO_OPERATOR_CARD.md",
+    kind: "runbook",
+  },
+  {
     label: "YC demo runbook",
     path: "docs/40-phase1/YC_DEMO_RUNBOOK.md",
     kind: "runbook",
