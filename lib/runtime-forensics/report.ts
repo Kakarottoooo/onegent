@@ -25,6 +25,12 @@ export interface BuildReportOptions {
   hints?: Partial<ForensicsHints>;
   /** Notes to attach (loader-provided). */
   notes?: string[];
+  /**
+   * True when the input came from a static fixture file. The
+   * dashboard renders a `[FIXTURE]` tag on these rows. Defaults to
+   * false (real artifacts).
+   */
+  isFixture?: boolean;
 }
 
 const FALLBACK_VALUE = "unknown";
@@ -100,6 +106,7 @@ export function buildForensicsReport(
     decisionLogSummary,
     hints,
     notes,
+    isFixture: Boolean(options.isFixture),
   };
 }
 
@@ -120,6 +127,7 @@ export function buildForensicsSummary(report: ForensicsReport): ForensicsSummary
     ageSeconds,
     updatedAt: report.updatedAt,
     inputSource: report.inputSource,
+    isFixture: report.isFixture,
   };
 }
 
