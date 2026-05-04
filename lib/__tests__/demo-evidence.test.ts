@@ -9,7 +9,9 @@ import {
   DEMO_ROUTE_ORDER,
   deriveDemoReadiness,
   extractSmokeEvidence,
+  formatDemoReadinessMarkdown,
   loadDemoEvidenceSnapshot,
+  type DemoEvidenceSnapshot,
 } from "@/lib/demo-evidence";
 import {
   buildAutoRunFromProbes,
@@ -26,14 +28,65 @@ describe("demo evidence constants", () => {
   it("hard stops include the forbidden live boundaries", () => {
     const text = JSON.stringify(DEMO_HARD_STOPS).toLowerCase();
     expect(text).toContain("payment");
+    expect(text).toContain("cvv");
     expect(text).toContain("otp");
     expect(text).toContain("captcha");
+    expect(text).toContain("login");
     expect(text).toContain("final");
+    expect(text).toContain("live");
   });
 
   it("route order starts with demo-readiness and links control room", () => {
     expect(DEMO_ROUTE_ORDER[0].href).toBe("/dev/demo-readiness");
     expect(DEMO_ROUTE_ORDER.some((step) => step.href === "/dev/demo-control-room")).toBe(true);
+  });
+});
+
+describe("formatDemoReadinessMarkdown", () => {
+  it("renders verdict, blockers, warnings, routes, hard stops, and docs", () => {
+    const markdown = formatDemoReadinessMarkdown(makeSnapshot());
+    expect(markdown).toContain("# Demo Readiness Export");
+    expect(markdown).toContain("Verdict: needs_attention");
+    expect(markdown).toContain("## Blockers");
+    expect(markdown).toContain("- Gate is stale");
+    expect(markdown).toContain("## Warnings");
+    expect(markdown).toContain("- Smoke missing");
+    expect(markdown).toContain("## Exact Demo Route Order");
+    expect(markdown).toContain("1. /dev/demo-readiness - Demo readiness");
+    expect(markdown).toContain("## Hard Stops");
+    expect(markdown).toContain("Payment, CVV, card form");
+    expect(markdown).toContain("## Useful Docs");
+    expect(markdown).toContain("present - YC demo runbook");
+    expect(markdown).toContain("missing - Missing doc");
+  });
+
+  it("renders none rows when there are no blockers or warnings", () => {
+    const snapshot = makeSnapshot({
+      readiness: {
+        verdict: "ready",
+        tone: "good",
+        blockers: [],
+        warnings: [],
+      },
+    });
+    const markdown = formatDemoReadinessMarkdown(snapshot);
+    expect(markdown).toContain("## Blockers\n\n- None");
+    expect(markdown).toContain("## Warnings\n\n- None");
+  });
+
+  it("is deterministic and does not stringify objects", () => {
+    const snapshot = makeSnapshot();
+    expect(formatDemoReadinessMarkdown(snapshot)).toBe(
+      formatDemoReadinessMarkdown(snapshot),
+    );
+    expect(formatDemoReadinessMarkdown(snapshot)).not.toContain("[object Object]");
+  });
+
+  it("includes the safety boundary line", () => {
+    const markdown = formatDemoReadinessMarkdown(makeSnapshot());
+    expect(markdown).toContain(
+      "No live provider, payment, OTP, CAPTCHA, login bypass, or final confirmation",
+    );
   });
 });
 
@@ -253,5 +306,98 @@ function emptyRuntime() {
     classCounts: {},
     severityCounts: { p0: 0, p1: 0, p2: 0, p3: 0, info: 0 },
     latest: [],
+  };
+}
+
+function makeSnapshot(
+  overrides: Partial<DemoEvidenceSnapshot> = {},
+): DemoEvidenceSnapshot {
+  const base: DemoEvidenceSnapshot = {
+    schemaVersion: 1,
+    generatedAt: NOW,
+    readiness: {
+      verdict: "needs_attention",
+      tone: "warn",
+      blockers: ["Gate is stale"],
+      warnings: ["Smoke missing"],
+    },
+    phase1Gate: {
+      available: true,
+      summary: {
+        runId: "gate",
+        generatedAt: NOW,
+        fileName: "phase1-quality-gate-ready.json",
+        verdict: "pass",
+        exitCode: 0,
+        totalChecks: 9,
+        passCount: 9,
+        failCount: 0,
+        skippedCount: 0,
+        knownExistingFailureCount: 0,
+        durationMs: 1000,
+        command: "npm run gate:phase1",
+      },
+      relPath: "benchmark/runs/phase1-quality-gate-ready.json",
+      smoke: {
+        present: false,
+        status: null,
+        severity: null,
+        command: null,
+        hint: "missing",
+      },
+    },
+    founderE2e: {
+      available: true,
+      summary: {
+        file: "founder-e2e-auto-ready.json",
+        runId: "founder",
+        pathId: "auto",
+        startedAt: NOW,
+        updatedAt: NOW,
+        meetsBar: true,
+        pass: 15,
+        fail: 0,
+        blocker: 0,
+        skipped: 0,
+        pending: 0,
+        total: 15,
+        p0Count: 0,
+        p1Count: 0,
+        source: "automated",
+        runnerVerdict: "pass",
+      },
+      relPath: "benchmark/runs/founder-e2e-auto-ready.json",
+    },
+    runtimeForensics: emptyRuntime(),
+    docs: [
+      {
+        label: "YC demo runbook",
+        path: "docs/40-phase1/YC_DEMO_RUNBOOK.md",
+        kind: "runbook",
+        exists: true,
+      },
+      {
+        label: "Missing doc",
+        path: "docs/missing.md",
+        kind: "runbook",
+        exists: false,
+      },
+    ],
+    phase2Links: [
+      {
+        label: "Expedia",
+        path: "docs/50-product-areas/EXPEDIA_CONTROLLED_RETRY_RUNBOOK.md",
+        note: "candidate, not live-verified",
+      },
+    ],
+    hardStops: DEMO_HARD_STOPS,
+    routeOrder: DEMO_ROUTE_ORDER,
+    notes: [],
+  };
+
+  return {
+    ...base,
+    ...overrides,
+    readiness: overrides.readiness ?? base.readiness,
   };
 }

@@ -1,4 +1,5 @@
 import {
+  formatDemoReadinessMarkdown,
   loadDemoEvidenceSnapshot,
   type DemoEvidenceSnapshot,
   type DemoEvidenceTone,
@@ -8,6 +9,7 @@ export const dynamic = "force-dynamic";
 
 export default async function DemoReadinessPage() {
   const snap = await loadDemoEvidenceSnapshot();
+  const markdown = formatDemoReadinessMarkdown(snap);
 
   return (
     <main className="demo-readiness">
@@ -17,6 +19,7 @@ export default async function DemoReadinessPage() {
       <HardStops snap={snap} />
       <RouteOrder snap={snap} />
       <UsefulLinks snap={snap} />
+      <MarkdownExport markdown={markdown} />
     </main>
   );
 }
@@ -176,6 +179,23 @@ function UsefulLinks({ snap }: { snap: DemoEvidenceSnapshot }) {
           </ul>
         </details>
       )}
+    </section>
+  );
+}
+
+function MarkdownExport({ markdown }: { markdown: string }) {
+  return (
+    <section>
+      <h2>Markdown Export</h2>
+      <details className="dr__markdown-export">
+        <summary>Copy demo readiness markdown</summary>
+        <textarea
+          readOnly
+          className="dr__markdown-textarea"
+          value={markdown}
+          rows={Math.min(32, markdown.split("\n").length + 2)}
+        />
+      </details>
     </section>
   );
 }
@@ -421,6 +441,28 @@ h2 {
 .dr__subhead { margin: 18px 0 8px; font-size: 14px; color: #334155; }
 .dr__loader-notes { margin-top: 12px; color: #64748b; font-size: 12px; }
 .dr__loader-notes ul { padding-left: 18px; }
+.dr__markdown-export {
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  background: #fff;
+  padding: 12px;
+}
+.dr__markdown-export summary {
+  cursor: pointer;
+  font-weight: 700;
+  color: #334155;
+}
+.dr__markdown-textarea {
+  width: 100%;
+  margin-top: 10px;
+  border: 1px solid #cbd5e1;
+  border-radius: 6px;
+  background: #0f172a;
+  color: #e2e8f0;
+  padding: 12px;
+  font: 12px / 1.5 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  resize: vertical;
+}
 @media (max-width: 760px) {
   .demo-readiness { padding: 20px 18px 48px; }
   .dr__hero-row { display: block; }

@@ -1,7 +1,7 @@
 # Track C - demo readiness coordination
 
 > Last updated: 2026-05-04
-> Branch: `codex/integrated-preview-20260504`
+> Branch: `codex/track-c-demo-readiness-v2`
 > Owner: demo readiness sidecar / Codex integration
 
 Track C owns read-only demo readiness docs, static guard tests, and light
@@ -11,6 +11,10 @@ founder-facing demo surface polish. It does not own provider/runtime/live code.
 
 Latest integrated work:
 
+- Branch `codex/track-c-demo-readiness-v2` adds a pure markdown export helper
+  for `lib/demo-evidence`, renders a read-only markdown export block on
+  `/dev/demo-readiness`, and expands demo-evidence tests for markdown export
+  plus hard-stop coverage.
 - Added `docs/40-phase1/YC_DEMO_RUNBOOK.md` as the YC-style five-minute
   preflight and demo script.
 - Added a static docs guard test so future agents do not accidentally drop key
