@@ -32,26 +32,30 @@ import {
 import { useRouter, useSearchParams } from "next/navigation";
 
 import {
-  DEFAULT_FILTER_STATE,
   FAILURE_CLASS_LABEL,
   FAILURE_CLASS_TONE,
   FAILURE_CLASS_SEVERITY,
   FORENSICS_SEVERITY_LABEL,
-  parseFiltersFromQuery,
-  serializeFiltersToString,
   type ClassifierSignal,
   type FailureClass,
-  type FilterState,
   type ForensicsReport,
   type ForensicsSeverity,
   type ForensicsSummary,
-  type Pointer,
-  type Recommendation,
-  type SearchCommand,
+  type StepShapeAuditRow,
+} from "@/lib/runtime-forensics/types";
+import {
+  DEFAULT_FILTER_STATE,
+  parseFiltersFromQuery,
+  serializeFiltersToString,
+  type FilterState,
   type SortDir,
   type SortKey,
-  type StepShapeAuditRow,
-} from "@/lib/runtime-forensics";
+} from "@/lib/runtime-forensics/url-filter";
+import type {
+  Pointer,
+  Recommendation,
+  SearchCommand,
+} from "@/lib/runtime-forensics/recommendations";
 
 interface ListResponse {
   summaries: ForensicsSummary[];
