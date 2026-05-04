@@ -18,8 +18,7 @@ import {
 // is required. Cached aggressively at the CDN so the slight cold-start
 // cost is paid once per profile.
 export const runtime = "nodejs";
-export const contentType = "image/png";
-export const size = { width: 1200, height: 630 };
+const imageSize = { width: 1200, height: 630 };
 
 type Params = { params: Promise<{ username: string }> };
 
@@ -205,6 +204,6 @@ export async function GET(_req: Request, { params }: Params) {
         </div>
       </div>
     ),
-    { ...size },
+    { ...imageSize },
   );
 }

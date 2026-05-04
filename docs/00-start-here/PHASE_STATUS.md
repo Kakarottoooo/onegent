@@ -39,6 +39,9 @@ Do not enter Phase 2 yet. Stabilize Phase 0, Phase 1, and Phase 1.5 first.
   - `npm run gate:phase1 -- --allow-known-drift` passed with 9/9 checks and no
     known-existing drift.
 - 2026-05-04 integrated preview verification:
+  - `npm run build` passed end-to-end after production build cleanup. The build
+    uses `next build --webpack` because the local Windows worktree uses a
+    `node_modules` junction that currently trips Turbopack.
   - `npx tsc --noEmit --pretty false` passed.
   - `npm run gate:phase1 -- --allow-known-drift` passed, 9/9 required checks.
   - `/dev`, `/dev/phase1-quality-gates`, `/dev/founder-e2e`,

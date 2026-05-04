@@ -5,6 +5,10 @@ import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
 import { SignInButton, UserButton, useUser } from "@clerk/nextjs";
 
+const clerkEnabled =
+  process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY?.startsWith("pk_") &&
+  process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY !== "pk_test_placeholder";
+
 /**
  * Developer surface nav — sticky, transparent at the top, gains a hairline
  * border + backdrop-blur once the user scrolls. Hides itself entirely on
@@ -13,7 +17,6 @@ import { SignInButton, UserButton, useUser } from "@clerk/nextjs";
  */
 export function DevNav() {
   const [scrolled, setScrolled] = useState(false);
-  const { isSignedIn, isLoaded } = useUser();
   const pathname = usePathname();
 
   // ALL hooks must run on every render — never put a useEffect after
@@ -29,11 +32,6 @@ export function DevNav() {
   if (pathname?.startsWith("/developers/keys")) {
     return null;
   }
-
-  // Don't render auth UI until Clerk has hydrated, otherwise the
-  // signed-in/out branches flicker on every page load.
-  const showSignedIn = isLoaded && isSignedIn;
-  const showSignedOut = isLoaded && !isSignedIn;
 
   return (
     <header
@@ -113,7 +111,7 @@ export function DevNav() {
         >
           <NavLink href="/developers/docs">Docs</NavLink>
           <NavLink href="/developers/pricing">Pricing</NavLink>
-          {showSignedIn && <NavLink href="/developers/keys">Dashboard</NavLink>}
+          {clerkEnabled && <DeveloperDashboardLink />}
         </nav>
 
         {/* Right CTA cluster */}
@@ -124,39 +122,7 @@ export function DevNav() {
             gap: "var(--space-4)",
           }}
         >
-          {showSignedOut && (
-            <>
-              <SignInButton mode="modal">
-                <button
-                  type="button"
-                  style={{
-                    background: "transparent",
-                    border: "none",
-                    color: "var(--ink-700)",
-                    fontFamily: "var(--font-dm-sans), system-ui, sans-serif",
-                    fontSize: "15px",
-                    fontWeight: 500,
-                    cursor: "pointer",
-                    padding: "var(--space-2) var(--space-3)",
-                  }}
-                >
-                  Sign in
-                </button>
-              </SignInButton>
-              <Link href="/developers/keys" className="dev-cta-pill">
-                Get API key
-              </Link>
-            </>
-          )}
-          {showSignedIn && (
-            <UserButton
-              appearance={{
-                elements: {
-                  avatarBox: { width: "32px", height: "32px" },
-                },
-              }}
-            />
-          )}
+          {clerkEnabled ? <DeveloperAuthControls /> : <DeveloperKeysLink />}
         </div>
       </div>
 
@@ -168,6 +134,59 @@ export function DevNav() {
         }
       `}</style>
     </header>
+  );
+}
+
+function DeveloperDashboardLink() {
+  const { isSignedIn, isLoaded } = useUser();
+  return isLoaded && isSignedIn ? <NavLink href="/developers/keys">Dashboard</NavLink> : null;
+}
+
+function DeveloperAuthControls() {
+  const { isSignedIn, isLoaded } = useUser();
+
+  if (!isLoaded) return null;
+  if (!isSignedIn) {
+    return (
+      <>
+        <SignInButton mode="modal">
+          <button
+            type="button"
+            style={{
+              background: "transparent",
+              border: "none",
+              color: "var(--ink-700)",
+              fontFamily: "var(--font-dm-sans), system-ui, sans-serif",
+              fontSize: "15px",
+              fontWeight: 500,
+              cursor: "pointer",
+              padding: "var(--space-2) var(--space-3)",
+            }}
+          >
+            Sign in
+          </button>
+        </SignInButton>
+        <DeveloperKeysLink />
+      </>
+    );
+  }
+
+  return (
+    <UserButton
+      appearance={{
+        elements: {
+          avatarBox: { width: "32px", height: "32px" },
+        },
+      }}
+    />
+  );
+}
+
+function DeveloperKeysLink() {
+  return (
+    <Link href="/developers/keys" className="dev-cta-pill">
+      Get API key
+    </Link>
   );
 }
 

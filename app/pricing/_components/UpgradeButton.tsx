@@ -17,7 +17,34 @@ import { useAuth } from "@clerk/nextjs";
 
 type Plan = "monthly" | "yearly";
 
+const clerkEnabled =
+  process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY?.startsWith("pk_") &&
+  process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY !== "pk_test_placeholder";
+
 export function UpgradeButton({
+  plan,
+  variant = "primary",
+  children,
+}: {
+  plan: Plan;
+  variant?: "primary" | "ghost";
+  children: React.ReactNode;
+}) {
+  if (!clerkEnabled) {
+    return (
+      <StaticUpgradeButton variant={variant}>
+        {children}
+      </StaticUpgradeButton>
+    );
+  }
+  return (
+    <ClerkUpgradeButton plan={plan} variant={variant}>
+      {children}
+    </ClerkUpgradeButton>
+  );
+}
+
+function ClerkUpgradeButton({
   plan,
   variant = "primary",
   children,
@@ -131,6 +158,64 @@ export function UpgradeButton({
           {error}
         </p>
       ) : null}
+    </div>
+  );
+}
+
+function StaticUpgradeButton({
+  variant,
+  children,
+}: {
+  variant: "primary" | "ghost";
+  children: React.ReactNode;
+}) {
+  const baseStyle: React.CSSProperties = {
+    appearance: "none",
+    border: "none",
+    fontFamily: "inherit",
+    fontWeight: 500,
+    fontSize: "15px",
+    letterSpacing: "0.01em",
+    padding: "14px 24px",
+    borderRadius: "var(--radius-pill)",
+    cursor: "not-allowed",
+    width: "100%",
+    opacity: 0.72,
+  };
+
+  return (
+    <div>
+      <button
+        type="button"
+        disabled
+        style={
+          variant === "primary"
+            ? {
+                ...baseStyle,
+                background: "var(--ink-9)",
+                color: "var(--ink-1)",
+              }
+            : {
+                ...baseStyle,
+                background: "transparent",
+                color: "var(--ink-8)",
+                border: "1px solid var(--ink-3)",
+              }
+        }
+      >
+        {children}
+      </button>
+      <p
+        role="status"
+        style={{
+          marginTop: "var(--space-3)",
+          fontSize: "13px",
+          color: "var(--ink-5)",
+          textAlign: "center",
+        }}
+      >
+        Billing sign-in is disabled in this environment.
+      </p>
     </div>
   );
 }

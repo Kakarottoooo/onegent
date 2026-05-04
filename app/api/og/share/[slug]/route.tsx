@@ -23,8 +23,7 @@ import {
 // — Node.js runtime is required. The OG image is small + cached, so the
 // slight cold-start cost beats refactoring the DB layer.
 export const runtime = "nodejs";
-export const contentType = "image/png";
-export const size = { width: 1200, height: 630 };
+const imageSize = { width: 1200, height: 630 };
 
 type Params = { params: Promise<{ slug: string }> };
 
@@ -230,6 +229,6 @@ export async function GET(_req: Request, { params }: Params) {
         </div>
       </div>
     ),
-    { ...size },
+    { ...imageSize },
   );
 }

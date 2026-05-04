@@ -33,6 +33,14 @@ small.
 
 ## Live Activity
 
+- 2026-05-04 codex: cleared production build blockers on integrated preview.
+  `npm run build` now passes end-to-end using webpack. Fixes included moving
+  `deriveRole` out of a Next route module, moving `/permissions` settings tabs
+  into `app/account/_components/SettingsTabs.tsx`, removing OG route helper
+  exports, updating developer docs to the docs-reorg paths, and making
+  Clerk-dependent developer/pricing UI safe when Clerk env is absent. Verified
+  `npm run build`, `npx tsc --noEmit --pretty false`, decision-room tests
+  13/13, and Phase 1 gate 9/9.
 - 2026-05-04 codex: reviewed and cherry-picked Agent2
   `ef159c7 test(expedia): cover visible flight card shape` into integrated
   preview as `d4eb8c7`. Added `docs/10-coordination/phase2.md` as the Phase 2
@@ -100,3 +108,6 @@ small.
   task cards alone are not enough.
 - New root markdown files are discouraged. Put docs under the appropriate
   `docs/<category>/` folder.
+- Next route/page modules must not export helper functions or shared UI. Move
+  helpers/components into `lib/**` or `_components/**`; production build catches
+  violations that ordinary `tsc` can miss before `.next/types` exists.

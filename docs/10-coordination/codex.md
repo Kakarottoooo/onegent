@@ -2,7 +2,7 @@
 
 > **Branch**: `codex/integrated-preview-20260504`
 > **Last updated**: 2026-05-04
-> **Last commit**: pending Phase 2 Expedia test merge + Claude UX review
+> **Last commit**: pending production build blocker cleanup
 >
 > Claude reads this at session start. I write to it before each push.
 > See `CLAUDE.md` section "coordination protocol".
@@ -14,6 +14,25 @@
 Phase 1 demo trunk stabilization on integrated preview.
 
 Completed in latest pass:
+- Made the standard production build pass in the integrated worktree:
+  - pinned `package.json` build script to `next build --webpack` because
+    Turbopack panics on the Windows worktree `node_modules` junction;
+  - moved `deriveRole` from `app/api/decision-session/[id]/route.ts` into
+    `lib/decision-session/role.ts`;
+  - moved account settings tab exports out of `app/permissions/page.tsx` into
+    `app/account/_components/SettingsTabs.tsx`;
+  - removed unsupported `size`/`contentType` exports from OG route modules;
+  - pointed developer docs pages at `docs/60-api-integrations/**` after docs
+    reorg;
+  - guarded Clerk-dependent developer/pricing client UI for environments where
+    Clerk is intentionally disabled.
+- Verified:
+  - `npm run build` pass, including MCP prebuild and SW postbuild.
+  - `npx tsc --noEmit --pretty false` pass.
+  - `npx vitest run lib/__tests__/decision-room.test.ts` pass, 13/13.
+  - `npm run gate:phase1 -- --allow-known-drift` pass, 9/9, no known drift.
+
+Previous completed pass:
 - Reviewed Agent2 `ef159c7 test(expedia): cover visible flight card shape`.
 - Cherry-picked it into integrated preview as `d4eb8c7`.
 - Added `docs/10-coordination/phase2.md` as the Phase 2 sidecar coordination
