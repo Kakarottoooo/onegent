@@ -67,6 +67,7 @@ Then read the task-specific section below.
 | Computer Use / executor architecture | `docs/30-provider-debug/EXECUTOR_V2_PIVOT.md` |
 | Phase 1 founder walkthrough / task UI | `docs/40-phase1/PHASE_1_FOUNDER_E2E.md`, `docs/40-phase1/AUTONOMOUS_FOUNDER_E2E.md`, `docs/40-phase1/PHASE_1_QUALITY_GATE.md` |
 | Phase 1.5 demo readiness / control room | `docs/40-phase1/DEMO_CONTROL_ROOM.md`, `docs/40-phase1/YC_DEMO_RUNBOOK.md`, `docs/40-phase1/DEMO_FREEZE_ACCEPTANCE.md` |
+| Live operator checklist (controlled retry cockpit) | `/dev/live-operator-checklist` (read-only page), `docs/50-product-areas/EXPEDIA_CONTROLLED_RETRY_RUNBOOK.md`, `docs/50-product-areas/HOTEL_CONTROLLED_RETRY_RUNBOOK.md`, `docs/20-phase0-restaurant/RESTAURANT_ARTIFACT_ANALYSIS.md` |
 | Phase 2 Expedia controlled retry | `docs/50-product-areas/EXPEDIA_CONTROLLED_RETRY_RUNBOOK.md`, `docs/50-product-areas/PHASE2_VERTICAL_REVIVAL_AUDIT.md`, `docs/10-coordination/phase2.md` |
 | Phase 2 hotel revival audit | `docs/50-product-areas/HOTEL_VERTICAL_REVIVAL_AUDIT.md`, `docs/50-product-areas/HOTEL_CONTROLLED_RETRY_RUNBOOK.md` |
 | NLU, decision room, trip packaging, social feed | `docs/50-product-areas/` |

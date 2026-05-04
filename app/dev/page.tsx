@@ -30,6 +30,15 @@ interface DocLink {
 
 const PHASE_0_ROUTES: DevRoute[] = [
   {
+    href: "/dev/live-operator-checklist",
+    title: "Live Operator Checklist",
+    blurb:
+      "Read-only operator surface for a controlled live retry the founder has approved separately. Per-provider hard stops (restaurant / Expedia / hotel), exact post-run evidence to collect (DB row, worker log Select-String, screenshot path, live snapshot path), analyzer CLI commands, and runbook links. The page itself authorizes nothing.",
+    status: "live",
+    useCase:
+      "Open this BEFORE the operator starts a controlled live retry. Read the per-provider hard stops, copy the evidence Select-String for the right provider, and confirm which analyzer the artifact bundle should go through. No run / retry / live / bypass / submit buttons exist on this page.",
+  },
+  {
     href: "/dev/demo-readiness",
     title: "Demo Readiness",
     blurb:

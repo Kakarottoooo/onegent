@@ -149,4 +149,105 @@ describe("docs static guard - core", () => {
       "MULTI_AGENT_PROTOCOL must cross-link to the startup contract",
     ).toContain("docs/10-coordination/NEW_AGENT_STARTUP_CONTRACT.md");
   });
+
+  it("keeps /dev/live-operator-checklist read-only with no action buttons", () => {
+    // The live operator checklist page is a hard safety surface. It must:
+    //   1. exist;
+    //   2. carry the "no live run is authorized by this page" notice via
+    //      lib/live-operator-checklist;
+    //   3. not contain any control that could start/retry/bypass anything;
+    //   4. not import a client component or use onClick / form handlers;
+    //   5. be linked from the /dev landing as a Phase 0 route.
+    const page = read("app/dev/live-operator-checklist/page.tsx");
+    const lib = read("lib/live-operator-checklist/disclaimer.ts");
+    const providers = read("lib/live-operator-checklist/providers.ts");
+    const devLanding = read("app/dev/page.tsx");
+
+    // 1 + 2: notice plumbing.
+    expect(
+      lib,
+      "disclaimer module must expose the no-live authorization notice",
+    ).toMatch(/No live run is authorized by this page/i);
+    expect(
+      page,
+      "page must render the no-live authorization notice",
+    ).toContain("NO_LIVE_AUTHORIZATION_NOTICE");
+
+    // 3: no action buttons / form handlers / client mutation hooks.
+    const forbiddenAttributes = [
+      /<button\b/i,
+      /<form\b/i,
+      /<input\b/i,
+      /<select\b/i,
+      /onClick\s*=/,
+      /onSubmit\s*=/,
+      /onChange\s*=/,
+      /useState\b/,
+      /useTransition\b/,
+      /router\.refresh\(/,
+      /router\.push\(/,
+      /fetch\(/,
+      /axios\./,
+      /\bswr\b/i,
+    ];
+    for (const pattern of forbiddenAttributes) {
+      expect(
+        page,
+        `live-operator-checklist page must not match ${pattern}`,
+      ).not.toMatch(pattern);
+    }
+    // No client boundary either; this stays a server component.
+    expect(
+      page,
+      "live-operator-checklist page must remain a server component (no 'use client')",
+    ).not.toMatch(/^\s*"use client"|^\s*'use client'/m);
+    // Forbidden action verbs in the rendered copy. These would imply a
+    // run/retry/live action is available from this page.
+    const forbiddenCopy = [
+      /\brun live\b/i,
+      /\bretry now\b/i,
+      /\bre-run\b/i,
+      /\bbypass otp\b/i,
+      /\bbypass captcha\b/i,
+      /\bsubmit payment\b/i,
+      /\bconfirm reservation\b/i,
+    ];
+    for (const pattern of forbiddenCopy) {
+      const hits = page
+        .split(/\r?\n/)
+        .filter((line) => pattern.test(line))
+        .filter(
+          (line) =>
+            // Allow these patterns to appear inside a "No ..." denial line
+            // sourced from FORBIDDEN_BUTTONS, since that is the disclaimer.
+            !/\b(no|never|forbidden|not authorize|stop)\b/i.test(line),
+        );
+      expect(
+        hits,
+        `live-operator-checklist page must not promise ${pattern}`,
+      ).toEqual([]);
+    }
+
+    // 4: providers source must reference each runbook the page advertises.
+    const requiredRunbookPaths = [
+      "docs/20-phase0-restaurant/RESTAURANT_ARTIFACT_ANALYSIS.md",
+      "docs/20-phase0-restaurant/R003_LIVE_SMOKE_RUNBOOK.md",
+      "docs/50-product-areas/EXPEDIA_CONTROLLED_RETRY_RUNBOOK.md",
+      "docs/50-product-areas/HOTEL_CONTROLLED_RETRY_RUNBOOK.md",
+      "docs/50-product-areas/HOTEL_VERTICAL_REVIVAL_AUDIT.md",
+      "docs/50-product-areas/PHASE2_VERTICAL_REVIVAL_AUDIT.md",
+    ];
+    for (const path of requiredRunbookPaths) {
+      expect(
+        providers,
+        `live-operator-checklist providers must reference ${path}`,
+      ).toContain(path);
+    }
+
+    // 5: /dev landing must list the new route.
+    expect(
+      devLanding,
+      "/dev landing must list /dev/live-operator-checklist as a Phase 0 route",
+    ).toContain("/dev/live-operator-checklist");
+  });
 });

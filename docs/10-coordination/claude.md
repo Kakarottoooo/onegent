@@ -1,12 +1,13 @@
 # Claude - coordination state
 
-> Branch context: working on `claude/new-agent-startup-contract`,
-> based on `codex/integrated-preview-20260504 @ 0b83d1b`.
+> Branch context: working on `claude/live-operator-control-surface`,
+> based on `codex/integrated-preview-20260504 @ 0c7efca`.
 > Integrated preview now includes Claude Track B branches through
 > `codex/integrated-preview-20260504` post Phase 1/1.5 demo-freeze pass
 > plus the second/third/fourth sidecar batches (Phase 2 hotel audit +
 > retry analysis pack, Track C demo acceptance + freeze checker, Claude
-> multi-agent conflict protocol, Goal Phase 0 restaurant artifact pack).
+> multi-agent conflict protocol, Claude new-agent startup contract,
+> Goal Phase 0 restaurant artifact pack + artifact corpus).
 > Last updated: 2026-05-04.
 > Canonical path: `docs/10-coordination/claude.md`.
 
@@ -240,7 +241,8 @@ Boundaries:
 | `claude/phase1-doc-cleanup-after-freeze` | merged via cherry-pick (`db0aef8`) | Phase 1/1.5 docs refresh after demo-freeze pass; dropped stale 95% claim and 213-test count, extended `docs-static-guard` with post-freeze invariants. |
 | `claude/docs-ia-post-freeze-index` | merged via cherry-pick (`9b83153`) | Refresh `docs/INDEX.md` with new-agent read order + post-freeze quick path + Phase 2 hotel paths, refresh `PROJECT_SUMMARY` worktree/phase snapshot, refresh `PHASE_STATUS` integrated-preview branch list, extend docs static guards with INDEX read-order + canonical path invariants. |
 | `claude/multi-agent-conflict-protocol` | merged via cherry-pick (`7e66950`) | Add `docs/10-coordination/MULTI_AGENT_PROTOCOL.md` (branch freshness rule, ownership map, HUDDLE discipline, goal-branch behavior, cherry-pick policy, forbidden paths). Split the docs static guard into focused files while preserving current demo/Phase 2/IA invariants. Update `docs/10-coordination/README.md` to point at the protocol. |
-| `claude/new-agent-startup-contract` | active | Add `docs/10-coordination/NEW_AGENT_STARTUP_CONTRACT.md` as the 3-minute cold-start checklist for any coding agent (canonical branch/worktree, HUDDLE vs track-file discipline, stale branch / cherry-pick rules, forbidden paths, safety hard stops, three validation levels, how to report results). Cross-link from `docs/INDEX.md` (New Agent Read Order + Current Canonical Files) and `docs/10-coordination/MULTI_AGENT_PROTOCOL.md`. Extend `lib/__tests__/docs-static-core.test.ts` with required-docs entry plus a new it block locking the contract's seven sections, key terms (canonical branch, forbidden paths, safety hard stops, validation commands, branch+commit-hash report shape), ASCII-only invariant, and INDEX/protocol cross-links. |
+| `claude/new-agent-startup-contract` | merged via cherry-pick (`8a4c5bd`) | Add `docs/10-coordination/NEW_AGENT_STARTUP_CONTRACT.md` as the 3-minute cold-start checklist for any coding agent (canonical branch/worktree, HUDDLE vs track-file discipline, stale branch / cherry-pick rules, forbidden paths, safety hard stops, three validation levels, how to report results). Cross-link from `docs/INDEX.md` and `docs/10-coordination/MULTI_AGENT_PROTOCOL.md`. Extend `lib/__tests__/docs-static-core.test.ts` with required-docs entry plus a new it block locking the contract's seven sections, key terms, ASCII-only invariant, and cross-links. |
+| `claude/live-operator-control-surface` | active | Add read-only `/dev/live-operator-checklist` page powered by pure `lib/live-operator-checklist/` modules (`providers.ts` for restaurant / Expedia / hotel hard stops + evidence + analyzer + runbook links; `disclaimer.ts` for the locked "No live run is authorized by this page" notice + pre-run requirements + cross-provider hard stops + post-run report fields + forbidden-buttons list). Page is RSC, read-only, ASCII-only, no buttons / forms / inputs / `use client` / mutating handlers. Add `/dev` landing card as the first Phase 0 route. Add `lib/__tests__/live-operator-checklist.test.ts` (17 cases) plus a new it block in `lib/__tests__/docs-static-core.test.ts` locking page is read-only with no action buttons + every advertised runbook path is present in providers source + /dev landing lists the route. |
 
 ## Current Claude Inbox
 
