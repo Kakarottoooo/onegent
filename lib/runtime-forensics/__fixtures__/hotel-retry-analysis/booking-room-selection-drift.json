@@ -1,0 +1,36 @@
+{
+  "job": {
+    "id": "fixture-hotel-room-selection-drift",
+    "taskId": "fixture-task-hotel-room-selection-drift",
+    "provider": "booking-com",
+    "scenario": "hotel",
+    "status": "failed",
+    "errorMessage": "Booking.com search loaded the target dates, but the select room button was not found and guest details were not reached.",
+    "steps": [
+      {
+        "name": "book-hotel",
+        "type": "hotel",
+        "__source": "lib/core/execution-local-fixture",
+        "error": "Room card missing select button; guest details not reached."
+      }
+    ],
+    "params": {
+      "city": "Tokyo",
+      "checkIn": "2026-07-10",
+      "checkOut": "2026-07-13",
+      "adults": 2,
+      "hotelName": "Synthetic Central Hotel"
+    }
+  },
+  "workerLogExcerpt": "[booking-com] Search results loaded for 2026-07-10 to 2026-07-13\n[booking-com] selected-date mismatch after availability refresh\n[booking-com] room card missing select button; Select room not found\n[booking-com] guest details not reached",
+  "workerLogPath": "codex-worker.log",
+  "screenshotPaths": [
+    "worker/.debug-screenshots/booking-com-fixture-room-drift/01-search-results.jpg"
+  ],
+  "liveSnapshotPaths": [
+    ".debug-screenshots/live/fixture-hotel-room-selection-drift/snapshot.json"
+  ],
+  "notes": [
+    "Synthetic no-live fixture. Inventory appears visible, but room selection did not reach guest details."
+  ]
+}
