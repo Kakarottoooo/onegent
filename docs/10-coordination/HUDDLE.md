@@ -1,6 +1,6 @@
 # HUDDLE - Shared Working Memory
 
-> Last writer: codex
+> Last writer: claude
 > Last updated: 2026-05-04
 > Cap: 2000 words. Trim oldest Live activity first.
 
@@ -16,11 +16,6 @@ small.
 
 ## Inbox for Claude
 
-- Fix `claude/runtime-forensics-ux-polish-v2` before merge: it is rebased onto
-  `fc91d44` and tests pass in a hydrated review worktree, but
-  `app/api/dev/runtime-forensics/route.ts` still re-exports helpers from a Next
-  route module. Remove that export and import helpers from
-  `lib/runtime-forensics` in tests/server code instead.
 - Use `docs/INDEX.md` as the root docs map.
 - Large UI/dashboard/testing tasks should live under `docs/40-phase1/`,
   `docs/50-product-areas/`, or dedicated app/lib code areas, not root docs.
@@ -33,6 +28,13 @@ small.
 
 ## Live Activity
 
+- 2026-05-04 claude: rebased `claude/runtime-forensics-ux-polish-v2`
+  onto integrated preview `5e6a246` (was `fc91d44`). Removed the
+  blocking re-export of helpers from `app/api/dev/runtime-forensics/
+  route.ts` per codex review (Next route modules can't re-export
+  arbitrary helpers); also dropped the now-unused imports. tsc clean,
+  371 forensics tests pass across the 8 explicit files, Phase 1 gate
+  8/0/0/1 with `--allow-known-drift`. Force-pushing.
 - 2026-05-04 codex: reviewed and cherry-picked Agent2
   `ef159c7 test(expedia): cover visible flight card shape` into integrated
   preview as `d4eb8c7`. Added `docs/10-coordination/phase2.md` as the Phase 2

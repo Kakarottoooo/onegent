@@ -1,9 +1,79 @@
 # Claude - coordination state
 
-> Branch context: integrated preview includes Claude Track B branches through
-> `codex/integrated-preview-20260504`.
+> Branch context: working on `claude/runtime-forensics-ux-polish-v2`,
+> rebased onto `codex/integrated-preview-20260504 @ 5e6a246`.
 > Last updated: 2026-05-04.
 > Canonical path: `docs/10-coordination/claude.md`.
+
+## Currently Doing
+
+Pending review on `claude/runtime-forensics-ux-polish-v2` (rebased onto
+`5e6a246`; route re-export blocker fixed).
+
+## Recently Shipped (this branch)
+
+`claude/runtime-forensics-ux-polish-v2` rebased onto
+`codex/integrated-preview-20260504 @ 5e6a246`. 6 feat/doc commits +
+1 route fix + 1 fresh `[coord]`.
+
+What landed (read-only, V1 artifact-based, no
+provider/runtime/DB/worker code touched):
+
+- `lib/runtime-forensics/url-filter.ts` (411 LOC) — comma-separated
+  multi-select serializer + tolerant parser; `applyEnhancedFilter`
+  and `sortSummaries` post-classification helpers.
+- `lib/runtime-forensics/__fixtures__/*` — 7 synthetic JSON cases
+  (Resy no-slot / Resy OTP / OpenTable form / Expedia legacy-shape
+  (P0) / Expedia checkout / Booking 5xx / unknown), gated behind
+  `?examples=1`, tagged `isFixture: true`. PII-guarded by regex test.
+- `lib/runtime-forensics/recommendations.ts` (477 LOC) — 8 per-class
+  static checklists + pointers + dynamically generated PowerShell
+  `Select-String` commands. `sanitizeForShell` strips control +
+  metacharacters, `pwshSingleQuote` doubles `'` for safe quoting.
+- `lib/runtime-forensics/markdown.ts` — wired into recommendations,
+  emits a "Recommended next evidence" section + ASCII `[!]` and
+  `[FIXTURE]` markers (replaced emoji).
+- `app/api/dev/runtime-forensics/route.ts` — multi-select query
+  parsing via shared `parseFiltersFromQuery`; `?examples=1`
+  propagates into loader `includeFixtures`; per-row sort applied
+  server-side; single-job lookup also returns recommendation +
+  markdown. **Blocker fix**: removed a re-export of helpers
+  (`buildForensicsReport`, `getWorkerLogPath`,
+  `readWorkerLogExcerpt`) from the Next route module per codex
+  review; consumers must import helpers from `lib/runtime-forensics`
+  directly.
+- `app/dev/runtime-forensics/page.tsx` (1425 LOC, full rewrite) —
+  multi-select chip filters, sortable column headers, hide-unknown +
+  show-fixtures toggles, `[FIXTURE]` tag, source-of-truth reminder,
+  signal grouping by source, copy buttons (markdown / id / command /
+  filter URL), URL roundtrip via Next.js router.
+- `docs/30-provider-debug/PROVIDER_RUNTIME_DEBUG_PLAYBOOK.md` § 1.6 —
+  operating procedure + URL parameter reference table.
+
+Verification on rebased branch:
+
+- 371 runtime-forensics vitest cases pass across 8 explicit test files.
+- `npx tsc --noEmit --pretty false` clean.
+- `npm run gate:phase1 -- --allow-known-drift` passes 8/0/0/1.
+
+Hard rules (verified per commit):
+
+- No `lib/booking-autopilot/**`, `lib/core/**`, `lib/execution-v2/**`,
+  `worker/src/**`, `app/api/v1/**`, `app/api/booking-jobs/**`.
+- No provider modules.
+- No `scripts/run-phase0-resy-benchmark.ts` / `probe-resy-availability.ts`.
+- No DB, no `lib/db.ts`, no schema changes.
+- No live OpenAI / Computer Use / payment / OTP / CAPTCHA path.
+- No retry / run / mutating buttons added to any dev surface.
+
+## Next Up
+
+`claude/demo-control-room` — read-only Demo Control Room dashboard at
+`/dev/demo-control-room`. Surfaces Phase 1 gate verdict, founder-e2e
+verdict, smoke verdict (extracted from latest gate), Phase 2 vertical
+status, and a safe demo script. Pure RSC + small client refresh
+button. Will branch fresh from `origin/codex/integrated-preview-20260504`
+once this branch lands.
 
 Codex reads this at session start. Claude should update it before pushing work
 that changes Track B status, handoff rules, or UI/docs/tooling ownership.
