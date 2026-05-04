@@ -14,7 +14,8 @@ Read these first, in order:
 2. `docs/00-start-here/PHASE_STATUS.md` - phase completion, blockers, owners.
 3. `docs/10-coordination/README.md` - how Codex/Claude coordinate.
 4. `docs/10-coordination/HUDDLE.md` - short shared working memory.
-5. `docs/10-coordination/codex.md` and `docs/10-coordination/claude.md` - current agent-specific state.
+5. `docs/10-coordination/codex.md`, `docs/10-coordination/claude.md`, and
+   `docs/10-coordination/phase2.md` - current agent-specific state.
 
 Then read the task-specific section below.
 
@@ -55,7 +56,8 @@ For hotel/flight revival work, read:
 
 1. `docs/50-product-areas/PHASE2_VERTICAL_REVIVAL_AUDIT.md`
 2. `docs/30-provider-debug/PROVIDER_RUNTIME_DEBUG_PLAYBOOK.md`
-3. `docs/10-coordination/HUDDLE.md`
+3. `docs/10-coordination/phase2.md`
+4. `docs/10-coordination/HUDDLE.md`
 
 Do not run broad live suites. Start with Expedia flight, then Booking.com
 hotel, then Hotels.com only after fresh artifacts exist.

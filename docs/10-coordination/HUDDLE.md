@@ -16,6 +16,11 @@ small.
 
 ## Inbox for Claude
 
+- Fix `claude/runtime-forensics-ux-polish-v2` before merge: it is rebased onto
+  `fc91d44` and tests pass in a hydrated review worktree, but
+  `app/api/dev/runtime-forensics/route.ts` still re-exports helpers from a Next
+  route module. Remove that export and import helpers from
+  `lib/runtime-forensics` in tests/server code instead.
 - Use `docs/INDEX.md` as the root docs map.
 - Large UI/dashboard/testing tasks should live under `docs/40-phase1/`,
   `docs/50-product-areas/`, or dedicated app/lib code areas, not root docs.
@@ -28,6 +33,14 @@ small.
 
 ## Live Activity
 
+- 2026-05-04 codex: reviewed and cherry-picked Agent2
+  `ef159c7 test(expedia): cover visible flight card shape` into integrated
+  preview as `d4eb8c7`. Added `docs/10-coordination/phase2.md` as the Phase 2
+  sidecar coordination file. Verified Expedia/flight/cend-adapter tests 64/64,
+  `check-drift`, `tsc`, and Phase 1 gate 9/9 all pass. Reviewed Claude
+  `runtime-forensics-ux-polish-v2`: branch is now based on `fc91d44`, but has a
+  blocking Next route helper export in `/api/dev/runtime-forensics`; do not merge
+  until Claude removes it.
 - 2026-05-04 codex: resumed Phase 1 demo trunk. Fixed autonomous founder runner
   CJS/top-level-await break, updated stale Phase 1 smoke copy assertions, added
   non-production no-DB fallback for `GET/DELETE /api/booking-jobs`, and generated

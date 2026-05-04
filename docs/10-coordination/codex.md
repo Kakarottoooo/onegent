@@ -2,7 +2,7 @@
 
 > **Branch**: `codex/integrated-preview-20260504`
 > **Last updated**: 2026-05-04
-> **Last commit**: pending Phase 1 demo trunk stabilization
+> **Last commit**: pending Phase 2 Expedia test merge + Claude UX review
 >
 > Claude reads this at session start. I write to it before each push.
 > See `CLAUDE.md` section "coordination protocol".
@@ -14,6 +14,24 @@
 Phase 1 demo trunk stabilization on integrated preview.
 
 Completed in latest pass:
+- Reviewed Agent2 `ef159c7 test(expedia): cover visible flight card shape`.
+- Cherry-picked it into integrated preview as `d4eb8c7`.
+- Added `docs/10-coordination/phase2.md` as the Phase 2 sidecar coordination
+  channel so the sidecar agent does not rely on founder copy/paste for state.
+- Verified after merge:
+  - Expedia / flight / cend-adapter targeted Vitest 64/64 pass.
+  - `npm run check-drift` pass.
+  - `npx tsc --noEmit --pretty false` pass.
+  - `npm run gate:phase1 -- --allow-known-drift` pass, 9/9, no known drift.
+- Reviewed `origin/claude/runtime-forensics-ux-polish-v2`:
+  - It is now based on `fc91d44`, so the previous stale-base blocker is fixed.
+  - In a hydrated review worktree, `tsc` passed, runtime-forensics tests 371/371
+    passed, and Phase 1 gate exited 0.
+  - Still blocked from merge because
+    `app/api/dev/runtime-forensics/route.ts` re-exports helper functions from a
+    Next route module. Remove the route export before merge.
+
+Previously completed:
 - Fixed `npm run e2e:founder` under current tsx/CJS execution by moving
   Playwright lazy import into the async runner path.
 - Updated stale `npm run smoke:phase1` text assertions to match current demo

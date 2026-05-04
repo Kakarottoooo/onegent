@@ -32,6 +32,12 @@ Do not enter Phase 2 yet. Stabilize Phase 0, Phase 1, and Phase 1.5 first.
     `/tasks?view=history`.
   - Local no-DB demo mode now returns an empty job list for
     `GET /api/booking-jobs` instead of a Postgres config 500.
+- 2026-05-04 Expedia test merge:
+  - Agent2's no-live Expedia visible-card-shape regression is merged into
+    integrated preview.
+  - `npm run check-drift` now passes without a known-drift exception.
+  - `npm run gate:phase1 -- --allow-known-drift` passed with 9/9 checks and no
+    known-existing drift.
 - 2026-05-04 integrated preview verification:
   - `npx tsc --noEmit --pretty false` passed.
   - `npm run gate:phase1 -- --allow-known-drift` passed, 9/9 required checks.
