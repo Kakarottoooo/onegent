@@ -17,6 +17,7 @@ describe("docs static guard", () => {
       "docs/10-coordination/track-c.md",
       "docs/40-phase1/DEMO_CONTROL_ROOM.md",
       "docs/40-phase1/DEMO_FREEZE_ACCEPTANCE.md",
+      "docs/40-phase1/YC_DEMO_OPERATOR_CARD.md",
       "docs/40-phase1/YC_DEMO_RUNBOOK.md",
       "docs/40-phase1/PHASE_1_FOUNDER_E2E.md",
       "docs/40-phase1/AUTONOMOUS_FOUNDER_E2E.md",
@@ -52,6 +53,30 @@ describe("docs static guard", () => {
     }
   });
 
+  it("keeps active demo operator docs free of mojibake and Phase 2 live-verified claims", () => {
+    const activeDemoDocs = [
+      "docs/40-phase1/DEMO_CONTROL_ROOM.md",
+      "docs/40-phase1/DEMO_FREEZE_ACCEPTANCE.md",
+      "docs/40-phase1/YC_DEMO_OPERATOR_CARD.md",
+      "docs/40-phase1/YC_DEMO_RUNBOOK.md",
+    ];
+    const mojibakePattern = /[\u9225\uFFFD\u99C3]/;
+
+    for (const relPath of activeDemoDocs) {
+      const source = read(relPath);
+      expect(source, relPath).not.toMatch(mojibakePattern);
+
+      const phase2Lines = source
+        .split(/\r?\n/)
+        .filter((line) => /phase 2/i.test(line) && /live[- ]verified/i.test(line));
+      for (const line of phase2Lines) {
+        expect(line, `${relPath}: ${line}`).toMatch(
+          /not[- ]live[- ]verified|not live[- ]verified|audited|under audit|frozen/i,
+        );
+      }
+    }
+  });
+
   it("keeps developer docs routes pointed at docs/60-api-integrations", () => {
     const routeFiles = [
       "app/developers/docs/api/v1/page.tsx",
@@ -74,11 +99,15 @@ describe("docs static guard", () => {
 
   it("links the YC demo runbook from the demo control room docs and page", () => {
     const doc = read("docs/40-phase1/DEMO_CONTROL_ROOM.md");
+    const runbook = read("docs/40-phase1/YC_DEMO_RUNBOOK.md");
+    const acceptance = read("docs/40-phase1/DEMO_FREEZE_ACCEPTANCE.md");
     const page = read("app/dev/demo-control-room/page.tsx");
     const devPage = read("app/dev/page.tsx");
 
     expect(doc).toContain("docs/40-phase1/YC_DEMO_RUNBOOK.md");
     expect(doc).toContain("docs/40-phase1/DEMO_FREEZE_ACCEPTANCE.md");
+    expect(runbook).toContain("docs/40-phase1/YC_DEMO_OPERATOR_CARD.md");
+    expect(acceptance).toContain("docs/40-phase1/YC_DEMO_OPERATOR_CARD.md");
     expect(page).toContain("docs/40-phase1/YC_DEMO_RUNBOOK.md");
     expect(devPage).toContain("/dev/demo-readiness");
     expect(page).not.toMatch(/run\s+live|retry\s+live/i);
@@ -91,6 +120,7 @@ describe("docs static guard", () => {
     expect(page).toContain("docs/40-phase1/DEMO_FREEZE_ACCEPTANCE.md");
     expect(page).toMatch(/Phase 2.*not live verified/i);
     expect(helper).toContain("docs/40-phase1/DEMO_FREEZE_ACCEPTANCE.md");
+    expect(helper).toContain("docs/40-phase1/YC_DEMO_OPERATOR_CARD.md");
   });
 
   it("keeps the developer docs hub linked to static docs routes", () => {

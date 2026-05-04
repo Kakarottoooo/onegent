@@ -17,6 +17,9 @@ Any Expedia, Resy, OpenTable, hotel, payment, OTP, CAPTCHA, login, or
 final-confirmation flow still needs explicit founder approval and must stop at
 the safe boundary.
 
+For the one-page printable checklist, use
+`docs/40-phase1/YC_DEMO_OPERATOR_CARD.md`.
+
 ## Five-Minute Preflight
 
 Run these checks from the integrated preview worktree:
