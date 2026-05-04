@@ -114,6 +114,53 @@ describe("buildForensicsReport — classification embedded", () => {
     expect(r.stepShape.totalSteps).toBe(2);
     expect(r.stepShape.stepsWithSourceMarker).toBe(1);
   });
+  it("keeps Expedia card-scan diagnostics visible on an unknown provider-selector failure", () => {
+    const r = buildForensicsReport(
+      job({
+        id: "dfa54219-dd3d-447a-9231-a9dd13edf0cb",
+        provider: "expedia",
+        scenario: "flight",
+        rawWorkerLogExcerpt: [
+          '[stagehand] [flight-rpa] Starting programmatic flight booking: airline="Southwest" price=$152 time="08:50" flightNo="WN 3084"',
+          "[stagehand] [flight-rpa] Flight-card DOM scan failed: StagehandEvalError: Uncaught",
+          '[stagehand] [flight-rpa] No matching flight button found (tried airline="Southwest" price=$152)',
+        ].join("\n"),
+      }),
+      {
+        inputSource: "worker-log",
+        generatedAt: "2026-05-04T06:22:00.000Z",
+      },
+    );
+
+    expect(r.classification.primaryClass).toBe("unknown");
+    expect(r.classification.severity).toBe("p2");
+    expect(r.classification.signals.map((s) => s.label)).toContain(
+      "Expedia flight-card DOM scan failed",
+    );
+  });
+  it("classifies Expedia checkout-reached logs as manual review even with fallback diagnostics present", () => {
+    const r = buildForensicsReport(
+      job({
+        provider: "expedia",
+        scenario: "flight",
+        rawWorkerLogExcerpt: [
+          "[stagehand] [flight-rpa] Flight-card DOM scan failed: StagehandEvalError: Uncaught",
+          "[stagehand] [flight-rpa] Trying locator fallback for flight-card scan",
+          '[stagehand] [flight-rpa] Locator fallback matched flight card: "Select flight Southwest 8:50am 9:55am $152"',
+          "[stagehand] [flight-rpa] Checkout reached - running AI form fill",
+        ].join("\n"),
+      }),
+    );
+
+    expect(r.classification.primaryClass).toBe("checkout_reached_manual_review");
+    expect(r.classification.signals.map((s) => s.label)).toEqual(
+      expect.arrayContaining([
+        "Expedia locator fallback attempted",
+        "Expedia locator fallback matched",
+        "checkout reached",
+      ]),
+    );
+  });
 });
 
 describe("buildForensicsReport — notes", () => {
@@ -237,6 +284,38 @@ describe("formatForensicsBugReport", () => {
     expect(md).toContain("/tasks/tsk-1");
     expect(md).toContain("benchmark/runs/run-2026-05-04.json");
     expect(md).toContain("worker/.debug-screenshots/resy/run-1/");
+  });
+  it("renders Expedia card-scan signals and screenshot hints in the paste-ready markdown", () => {
+    const r = buildForensicsReport(
+      job({
+        id: "dfa54219-dd3d-447a-9231-a9dd13edf0cb",
+        taskId: "task-expedia-1",
+        provider: "expedia",
+        scenario: "flight",
+        status: "failed",
+        rawWorkerLogExcerpt: [
+          "[stagehand] [flight-rpa] Flight-card DOM scan failed: StagehandEvalError: Uncaught",
+          "[stagehand] [flight-rpa] Trying locator fallback for flight-card scan",
+        ].join("\n"),
+      }),
+      {
+        inputSource: "worker-log",
+        hints: {
+          hasScreenshots: true,
+          screenshotsRel:
+            "worker/.debug-screenshots/flight-rpa-1777875646570/",
+        },
+      },
+    );
+
+    const md = formatForensicsBugReport(r);
+
+    expect(md).toContain("[P2]");
+    expect(md).toContain("Unknown");
+    expect(md).toContain("Expedia flight-card DOM scan failed");
+    expect(md).toContain("Expedia locator fallback attempted");
+    expect(md).toContain("worker/.debug-screenshots/flight-rpa-1777875646570/");
+    expect(md).toContain("DB + worker log + screenshots");
   });
   it("is idempotent for same input", () => {
     const r = buildForensicsReport(
