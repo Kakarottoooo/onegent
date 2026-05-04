@@ -1,8 +1,8 @@
 # Codex - coordination state
 
 > **Branch**: `codex/openai-chat-model-env`
-> **Last updated**: 2026-05-04 02:53 UTC
-> **Last commit**: `03c5055`
+> **Last updated**: 2026-05-04 03:16 UTC
+> **Last commit**: pending
 >
 > Claude reads this at session start. I write to it before each push.
 > See `CLAUDE.md` section "coordination protocol".
@@ -10,6 +10,35 @@
 > `origin/claude/festive-pare-f27273:.coordination/claude.md`.
 
 ## Currently doing
+
+Shipping Resy form/OTP hardening before the next visible live run.
+
+Patch summary:
+- Added a frame-aware Resy interaction helper so confirmation, phone, and OTP probes are not limited to the main frame.
+- Added an explicit Resy confirmation-modal click ladder:
+  1. `rs-confirm-01-locator`
+  2. `rs-confirm-02-role`
+  3. `rs-confirm-03-dom-main`
+  4. `rs-confirm-04-dom-frame`
+- Replaced the two-step Resy phone flow with a strategy ladder:
+  1. `rs-phone-01-locator-main`
+  2. `rs-phone-02-locator-frame`
+  3. `rs-phone-03-dom-main`
+  4. `rs-phone-04-dom-frame`
+  5. `rs-phone-05-mouse-keyboard`
+- Each strategy logs `ok/step/filled`, so the next live run can identify the winning or failing path without founder pasting DOM manually.
+- Mirrored provider to `worker/src/...`.
+- Verification so far: Resy mobile Vitest 5/5, root `tsc`, strict drift, and no-token `npm run probe:resy -- --case R-030` all passed.
+
+Next live gate:
+- Do not rerun R-003 for fill/OTP. It has no target-window Resy slot right now.
+- If founder approves a visible live run, run only:
+  `npx tsx scripts\run-phase0-resy-benchmark.ts --case R-030 --live-openai --allow-failures`
+- Expected useful outcomes:
+  - reaches OTP/mobile verification => Resy fill closure is working;
+  - fails with `[resy][strategy ...]` logs => patch that specific strategy, do not blind retry.
+
+Historical current-state handoff:
 
 Handed off Phase 0 restaurant execution state in `RESTAURANT_PHASE0_HANDOFF.md`.
 

@@ -35,12 +35,21 @@ function makeResyPhonePage(options: {
   phoneVisible?: boolean;
   domFillResult?: unknown;
   otpProbe?: unknown;
+  mouseTarget?: { x: number; y: number } | null;
+  evaluateSequence?: unknown[];
 } = {}) {
   const phoneLocator = makeLocator({ visible: options.phoneVisible ?? true });
   const continueLocator = makeLocator({ visible: true });
-  const evaluate = vi.fn(async () => {
-    if (options.domFillResult !== undefined && evaluate.mock.calls.length === 1) {
+  const evaluateSequence = [...(options.evaluateSequence ?? [])];
+  const evaluate = vi.fn(async (_fn?: unknown, arg?: unknown) => {
+    if (evaluateSequence.length > 0) {
+      return evaluateSequence.shift();
+    }
+    if (typeof arg === "string" && options.domFillResult !== undefined) {
       return options.domFillResult;
+    }
+    if (Object.prototype.hasOwnProperty.call(options, "mouseTarget")) {
+      return options.mouseTarget;
     }
     return options.otpProbe ?? { otpText: true, sixSmallInputs: false };
   });
@@ -50,7 +59,15 @@ function makeResyPhonePage(options: {
   });
 
   return {
-    page: { locator, evaluate } as unknown as Page,
+    page: {
+      locator,
+      evaluate,
+      mouse: { click: vi.fn(async () => undefined) },
+      keyboard: {
+        press: vi.fn(async () => undefined),
+        type: vi.fn(async () => undefined),
+      },
+    } as unknown as Page,
     locator,
     phoneLocator,
     continueLocator,
@@ -75,10 +92,10 @@ describe("fillResyMobileNumberAndStopAtOtp", () => {
       reachedOtp: true,
       reason: "otp-screen-detected",
     });
-    expect(phoneLocator.fill).toHaveBeenCalledWith("5551234567", { timeout: 3000 });
-    expect(continueLocator.click).toHaveBeenCalledWith({ timeout: 3000 });
+    expect(phoneLocator.fill).toHaveBeenCalledWith("5551234567", { timeout: 2500 });
+    expect(continueLocator.click).toHaveBeenCalledWith({ timeout: 2500 });
     expect(evaluate).toHaveBeenCalledTimes(1);
-    expect(traceLines.join("\n")).toContain("[resy][strategy rs-phone-01-locator] Continue clicked");
+    expect(traceLines.join("\n")).toContain("[resy][strategy rs-phone-01-locator-main] ok=true step=clicked");
     expect(traceLines.join("\n")).toContain("phone otp gate reached");
   });
 
@@ -99,8 +116,36 @@ describe("fillResyMobileNumberAndStopAtOtp", () => {
 
     expect(result.reachedOtp).toBe(true);
     expect(evaluate).toHaveBeenCalledTimes(2);
-    expect(traceLines.join("\n")).toContain("falling back to DOM direct");
-    expect(traceLines.join("\n")).toContain("[resy][strategy rs-phone-02-dom-direct] ok=true");
+    expect(traceLines.join("\n")).toContain("[resy][strategy rs-phone-01-locator-main] ok=false");
+    expect(traceLines.join("\n")).toContain("[resy][strategy rs-phone-03-dom-main] ok=true");
+  });
+
+  it("falls back to mouse and keyboard typing when locator and DOM direct fail", async () => {
+    const traceLines: string[] = [];
+    const trace = (line: string) => traceLines.push(line);
+    const { page } = makeResyPhonePage({
+      phoneVisible: false,
+      evaluateSequence: [
+        { ok: false, step: "find-input", filled: false },
+        { x: 120, y: 40 },
+        true,
+        true,
+        { otpText: true, sixSmallInputs: false },
+      ],
+    });
+
+    const result = await fillResyMobileNumberAndStopAtOtp(
+      page,
+      { phone: "5551234567" },
+      trace,
+    );
+
+    expect(result).toEqual({
+      filled: true,
+      reachedOtp: true,
+      reason: "otp-screen-detected",
+    });
+    expect(traceLines.join("\n")).toContain("[resy][strategy rs-phone-05-mouse-keyboard] ok=true");
   });
 
   it("returns a clear no-phone reason without touching the page", async () => {
@@ -125,6 +170,7 @@ describe("fillResyMobileNumberAndStopAtOtp", () => {
     const { page } = makeResyPhonePage({
       phoneVisible: false,
       domFillResult: { ok: false, step: "find-input", filled: false },
+      mouseTarget: null,
     });
 
     const result = await fillResyMobileNumberAndStopAtOtp(
@@ -136,8 +182,8 @@ describe("fillResyMobileNumberAndStopAtOtp", () => {
     expect(result).toEqual({
       filled: false,
       reachedOtp: false,
-      reason: "step:find-input",
+      reason: "step:rs-phone-05-mouse-keyboard:target-not-found",
     });
-    expect(traceLines.join("\n")).toContain("[resy] fillResyMobileNumber: failed at find-input");
+    expect(traceLines.join("\n")).toContain("all strategies failed at rs-phone-05-mouse-keyboard:target-not-found");
   });
 });
