@@ -30,17 +30,61 @@ Always respond in Chinese. Never respond in Korean.
 
 ### Session start ritual（强制；每次开新对话都跑）
 
+**自 2026-05-03 起协议升级 v2**：HUDDLE 是 working memory 的单一入口，
+旧两文件降级为 ack history + ownership 备查。两个都读，但 HUDDLE 优先。
+
 ```bash
 git fetch origin
-echo "═══ codex 当前状态 (origin/master) ═══"
+echo "═══ HUDDLE — shared working memory ═══"
+git show origin/master:.coordination/HUDDLE.md 2>/dev/null || cat .coordination/HUDDLE.md
+echo
+echo "═══ STRATEGIC_LEDGER — long-term locks ═══"
+git show origin/master:STRATEGIC_LEDGER.md 2>/dev/null || cat STRATEGIC_LEDGER.md
+echo
+echo "═══ codex 当前状态 (origin/master) — ack history fallback ═══"
 git show origin/master:.coordination/codex.md 2>/dev/null || echo "(codex.md 还不存在)"
 echo
-echo "═══ Claude 当前状态 (本分支) ═══"
+echo "═══ Claude 当前状态 (本分支) — ack history fallback ═══"
 cat .coordination/claude.md 2>/dev/null || echo "(claude.md 还不存在)"
 ```
 
+**读法的优先级**:
+1. HUDDLE first — 它带 `seq` + `Last writer`；如果 seq 没增长意味着对方
+   没新 push，不用读 ack files
+2. STRATEGIC_LEDGER second — 跨 phase 工作前必读；当前 phase 内的小 task
+   可跳过
+3. 旧两文件 third — 只在 HUDDLE 缺信息时回查（commit 历史 / file ownership）
+
 读到的内容是判断"对方现在在干嘛 / 给我交付了什么 / 我有没有 unblock 他"
 的唯一可靠依据。**不要凭记忆判断**——上一轮 session 的状态可能已经过时。
+
+### HUDDLE 写规则（push 前必更）
+
+`.coordination/HUDDLE.md` 是 2000-word cap 的共享 working memory。两个
+agent 都写，每次 commit 带上。具体规则在文件底部 § "How to update this
+file (write protocol)"。摘要：
+
+- **每次 push 必更**: `seq` += 1, `Last writer` = self, `UTC` = now
+- **🔥 Live activity** 顶部 prepend 一行 `[YYYY-MM-DD HH:MM agent] 一句话`
+- **📨 Inbox**: 给对方留 todo → 写在他的 inbox 段；自己被分配的事完成后从
+  自己 inbox 删
+- **🔒 Active locks**: 多 commit 操作开始时声明（30 分钟 SLA 自动过期）
+- **📍 Hot decisions**: 只放需要 fresh session 5 行内看到的；其他放
+  STRATEGIC_LEDGER
+- **2k 词上限**: 超了从 🔥 Live 最旧条目开始 trim（不删 📨 / 🔒）
+- **冲突**: 新条目都 prepend → 多数 rebase clean；真冲突手动解决
+
+### STRATEGIC_LEDGER 写规则（append-only）
+
+`STRATEGIC_LEDGER.md` 是不会 trim 的长期决策层。只放：
+- Phase scope / freeze 决策
+- 跨多组件的架构选择
+- 产品定位锁
+- spec-level rule（违反 = bug）
+- 大 infra move 的 trigger 条件
+
+不放: 日常任务分配 / 单 commit 状态 / 开放问题（这些在 HUDDLE / 旧两文件）。
+**append-only**: 旧条目不改写；如果决策反转，加新行 supersedes 旧行。
 
 ### 何时更新自己的 `.coordination/claude.md`
 
@@ -56,17 +100,26 @@ cat .coordination/claude.md 2>/dev/null || echo "(claude.md 还不存在)"
 
 ### 必须保留的章节（schema 契约）
 
-`.coordination/claude.md` 必须有这 7 个 section（H2）。codex.md 镜像。
+**v2 (post-HUDDLE)**: `.coordination/claude.md` 是 ack history / blockers /
+ownership 备查文件，主战场是 HUDDLE。Schema 从原来的 7 段精简到 4 段强制
+(其他可选)，因为 working memory 已经到 HUDDLE：
 
 ```
 🟢 Currently doing             # 当前任务一句话；空闲时写 "Idle"
-📍 Strategic decisions locked  # 锁定的产品/架构方向决策；指针 + 1 行总结
 ⏳ Blocking on codex           # 我在等对方什么；空时写 "(none)"
 📦 Recently shipped            # 最近 5-10 个 commit 表，含给对方的备注
-🤝 Open questions for codex    # 给对方的问题；空时写 "(none)"
-🚧 Hold rules I'm respecting   # 当前我承诺不碰的范围
 🗂 Track B file ownership      # 我的文件域（变化时更新）
 ```
+
+可选段（按需保留）:
+```
+📩 Acks for codex's recent pushes   # 跨边消费明细
+🤝 Open questions for codex          # 短期开放问题（长期决策搬到 STRATEGIC_LEDGER）
+🚧 Hold rules I'm respecting        # 当前承诺不碰的范围
+```
+
+`📍 Strategic decisions locked` 段已迁出到 `STRATEGIC_LEDGER.md`（root-level
+单一文件；不再每个 agent 镜像一份）。codex.md 同步精简。
 
 顶部必须有 metadata 行：
 ```
