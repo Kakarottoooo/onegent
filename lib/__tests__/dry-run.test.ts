@@ -129,9 +129,22 @@ describe("provider boundary integration (OpenTable)", () => {
     const trace = (m: string) => traceLines.push(m);
 
     const page = {
+      url: vi.fn(() => "https://www.opentable.com/booking/details"),
       evaluate: vi.fn(async (fnOrArg: unknown) => {
         const src = typeof fnOrArg === "function" ? fnOrArg.toString() : "";
         evaluateCalls.push(src);
+        // No OpenTable intermediate modal is present in this minimal dry-run mock.
+        if (src.includes("available seating options")) return null;
+        // OpenTable form-state reader expects the full shape.
+        if (src.includes("verificationGate") && src.includes("submitVisible")) {
+          return {
+            present: [],
+            filled: [],
+            empty: [],
+            verificationGate: false,
+            submitVisible: false,
+          };
+        }
         // Make hasCreditCardSection return false so we proceed past CC gate.
         if (src.includes("credit card required")) return false;
         // Make all form-fill steps return synthetic empty success.

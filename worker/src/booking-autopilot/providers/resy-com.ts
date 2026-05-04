@@ -200,10 +200,53 @@ export async function fillResyMobileNumberAndStopAtOtp(
     ? phoneDigits.slice(1)
     : phoneDigits.slice(-10);
 
-  // Find phone input via DOM, set value via native setter, dispatch input
-  // events. Then locate Continue button and click. This is programmatic
-  // (no AI) and fast.
-  const fillResult = await page.evaluate((digits: string) => {
+  type ResyPhoneFillResult = { ok: boolean; step: string; filled?: boolean };
+
+  const fillWithLocator = async (): Promise<ResyPhoneFillResult> => {
+    const phoneInput = page.locator(
+      [
+        'input[type="tel"]',
+        'input[autocomplete="tel"]',
+        'input[placeholder*="phone" i]',
+        'input[placeholder*="mobile" i]',
+        'input[aria-label*="phone" i]',
+        'input[aria-label*="mobile" i]',
+      ].join(", "),
+    ).first();
+    const visible = await phoneInput.isVisible({ timeout: 1500 }).catch(() => false);
+    if (!visible) {
+      trace("[resy][strategy rs-phone-01-locator] phone input not visible");
+      return { ok: false, step: "locator-input-not-visible", filled: false };
+    }
+
+    await phoneInput.scrollIntoViewIfNeeded({ timeout: 1500 }).catch(() => undefined);
+    await phoneInput.fill(phoneTen, { timeout: 3000 }).catch((e: Error) => {
+      trace(`[resy][strategy rs-phone-01-locator] fill failed (${e.message?.slice(0, 80)})`);
+      throw e;
+    });
+
+    const valueDigits = (await phoneInput.inputValue({ timeout: 1000 }).catch(() => "")).replace(/\D/g, "");
+    const verified = valueDigits.endsWith(phoneTen);
+    trace(`[resy][strategy rs-phone-01-locator] typed phone verified=${verified} valueDigits=${valueDigits.length}`);
+    if (!verified) {
+      return { ok: false, step: "locator-input-unverified", filled: valueDigits.length > 0 };
+    }
+
+    const continueBtn = page.locator(
+      'button:has-text("Continue"), [role="button"]:has-text("Continue")',
+    ).first();
+    const buttonVisible = await continueBtn.isVisible({ timeout: 1500 }).catch(() => false);
+    if (!buttonVisible) {
+      trace("[resy][strategy rs-phone-01-locator] Continue button not visible after verified phone fill");
+      return { ok: false, step: "locator-button-not-visible", filled: true };
+    }
+    await continueBtn.scrollIntoViewIfNeeded({ timeout: 1500 }).catch(() => undefined);
+    await continueBtn.click({ timeout: 3000 });
+    trace("[resy][strategy rs-phone-01-locator] Continue clicked");
+    return { ok: true, step: "locator-clicked", filled: true };
+  };
+
+  const fillWithDom = async (): Promise<ResyPhoneFillResult> => page.evaluate((digits: string) => {
     const isShown = (el: HTMLElement): boolean => {
       if (el.hidden || !el.isConnected) return false;
       const r = el.getBoundingClientRect();
@@ -234,6 +277,17 @@ export async function fillResyMobileNumberAndStopAtOtp(
     continueBtn.click();
     return { ok: true, step: "clicked", filled: true };
   }, phoneTen).catch((e: Error) => ({ ok: false, step: `error:${e.message?.slice(0, 60)}`, filled: false }));
+
+  let fillResult = await fillWithLocator().catch((e: Error) => ({
+    ok: false,
+    step: `locator-error:${e.message?.slice(0, 60)}`,
+    filled: false,
+  }));
+  if (!fillResult.ok) {
+    trace(`[resy][strategy rs-phone-01-locator] failed at ${fillResult.step}; falling back to DOM direct`);
+    fillResult = await fillWithDom();
+    trace(`[resy][strategy rs-phone-02-dom-direct] ok=${fillResult.ok} step=${fillResult.step} filled=${Boolean(fillResult.filled)}`);
+  }
 
   if (!fillResult.ok) {
     trace(`[resy] fillResyMobileNumber: failed at ${fillResult.step}`);
