@@ -1,0 +1,296 @@
+# Expedia Controlled Retry Runbook
+
+Last updated: 2026-05-04
+
+Scope: one Expedia flight controlled retry after explicit founder approval.
+This runbook prepares the evidence path. It does not authorize a live provider
+run by itself.
+
+## Hard Stops
+
+Stop immediately and capture evidence if any of these appear:
+
+- Payment submission or final purchase confirmation.
+- CVV request.
+- OTP, CAPTCHA, phone verification, or login wall.
+- Provider account-sensitive prompt.
+- Wrong flight card selected.
+- Expedia leaves the expected public flight search or checkout path.
+
+Never bypass OTP, CAPTCHA, login, or account checks. Never enter CVV. Never
+click final booking or purchase confirmation.
+
+## Exact User Prompt
+
+Use this exact product-level prompt only after founder approval:
+
+```text
+Book the Southwest flight from Orlando (MCO) to Nashville (BNA) on June 1,
+2026 for 1 adult in economy. Target the 8:50 AM departure, flight WN 3084,
+priced around $152. Stop before payment, CVV, login, OTP, CAPTCHA, or final
+booking confirmation.
+```
+
+Expected search params:
+
+```json
+{
+  "scenario": "flight",
+  "origin": "MCO",
+  "dest": "BNA",
+  "date": "2026-06-01",
+  "passengers": 1,
+  "cabin_class": "economy",
+  "targetAirline": "Southwest",
+  "targetDepartureTime": "08:50",
+  "targetFlightNumber": "WN 3084",
+  "targetPrice": 152
+}
+```
+
+Expected Expedia start URL shape:
+
+```text
+https://www.expedia.com/Flights-Search?trip=oneway&leg1=from:MCO,to:BNA,departure:2026-06-01TANYT&passengers=adults:1&options=cabinclass:coach&mode=search
+```
+
+## Preflight Environment
+
+Before a retry:
+
+1. Confirm founder approval for exactly one Expedia retry.
+2. Use `C:\Users\Gzw19\onegent-integrated-20260504`.
+3. Confirm branch `codex/integrated-preview-20260504`.
+4. Confirm current commit is at or after `5e6a246`.
+5. Confirm `dd4b19f` and `d4eb8c7` are in history.
+6. Confirm `npm run check-drift` passes.
+7. Confirm the app and worker read the same `.env.local` / Neon database.
+8. Confirm worker logs will be written to `codex-worker.log` in the active
+   worktree, or record the exact alternate log path before starting.
+9. Confirm `USE_WORKER_FOR` includes `flight` if that env var is present.
+10. Confirm no broad provider suite, hotel run, Booking.com run, Hotels.com
+    run, or retry loop is scheduled.
+
+Do not add a runner, dashboard button, cron, automation, or one-click live
+control for this retry.
+
+## DB Evidence Query
+
+Inspect DB before reading task UI. The task UI is compressed and not the source
+of truth.
+
+Fields to inspect:
+
+- `id`
+- `trip_label`
+- `status`
+- `created_at`
+- `updated_at`
+- `task_id`
+- `steps[0].type`
+- `steps[0].status`
+- `steps[0].error`
+- `steps[0].terminalReason`
+- `steps[0].terminalCode`
+- `steps[0].handoff_url`
+- `steps[0].body.__source`
+- `steps[0].body.scenario`
+- `steps[0].body.params`
+- `steps[0].decisionLog`
+- `steps[0].profileGap`
+
+SQL shape:
+
+```sql
+select id, trip_label, status, created_at, updated_at, steps, task_id
+from booking_jobs
+where id = '<retry-job-id>'
+   or trip_label ilike '%BNA%'
+   or steps::text ilike '%MCO%'
+   or steps::text ilike '%WN 3084%'
+order by created_at desc
+limit 8;
+```
+
+Node inspection shape:
+
+```ts
+import fs from "node:fs";
+
+for (const line of fs.readFileSync(".env.local", "utf8").split(/\r?\n/)) {
+  const m = line.match(/^\s*([^#=]+)=(.*)\s*$/);
+  if (m && !process.env[m[1]]) {
+    process.env[m[1]] = m[2].replace(/^["']|["']$/g, "");
+  }
+}
+
+const { sql } = await import("@vercel/postgres");
+
+const rows = await sql`
+  select id, trip_label, status, created_at, updated_at, steps, task_id
+  from booking_jobs
+  where id = ${process.env.RETRY_JOB_ID ?? ""}
+     or trip_label ilike '%BNA%'
+     or steps::text ilike '%MCO%'
+     or steps::text ilike '%WN 3084%'
+  order by created_at desc
+  limit 8
+`;
+
+for (const row of rows.rows) {
+  const step = Array.isArray(row.steps) ? row.steps[0] : undefined;
+  console.log(JSON.stringify({
+    id: row.id,
+    task_id: row.task_id,
+    trip_label: row.trip_label,
+    status: row.status,
+    created_at: row.created_at,
+    updated_at: row.updated_at,
+    stepType: step?.type,
+    stepStatus: step?.status,
+    source: step?.body?.__source,
+    scenario: step?.body?.scenario,
+    error: step?.error,
+    terminalReason: step?.terminalReason,
+    terminalCode: step?.terminalCode,
+    handoffUrl: step?.handoff_url,
+    decisionLogTail: Array.isArray(step?.decisionLog)
+      ? step.decisionLog.slice(-12)
+      : step?.decisionLog,
+    params: step?.body?.params,
+    profileGap: step?.profileGap,
+  }, null, 2));
+}
+```
+
+## Worker Log Grep
+
+Primary path when retry runs from integrated preview:
+
+```powershell
+C:\Users\Gzw19\onegent-integrated-20260504\codex-worker.log
+```
+
+Fallback path for older evidence only:
+
+```powershell
+C:\Users\Gzw19\onegent-e2e-20260503\codex-worker.log
+```
+
+Grep command:
+
+```powershell
+Select-String -Path C:\Users\Gzw19\onegent-integrated-20260504\codex-worker.log `
+  -Pattern '<retry-job-id>|flight-rpa|Expedia|Flight-card DOM scan|Trying locator fallback|Locator fallback matched|Flight match|Fare modal|Checkout reached|flight checkout was not reached|profile|payment|captcha|login|OTP|CVV|final' `
+  -Context 2,3 |
+  Select-Object -Last 200 |
+  ForEach-Object { $_.ToString() }
+```
+
+High-value log signals:
+
+- `[flight-rpa] Starting programmatic flight booking`
+- `Expedia Flight detected: agent.execute disabled`
+- `Trip type: one-way`
+- `Searching for flight`
+- `Flight-card DOM scan failed`
+- `Trying locator fallback for flight-card scan`
+- `Locator fallback matched flight card`
+- `Flight match`
+- `Fare modal appeared`
+- `Checkout reached`
+- `flight checkout was not reached`
+- `Local mode: flight checkout was not reached`
+- Any login, CAPTCHA, OTP, CVV, payment, or final-confirmation signal.
+
+## Screenshot Paths
+
+Provider screenshots:
+
+```text
+C:\Users\Gzw19\onegent-integrated-20260504\worker\.debug-screenshots\flight-rpa-*
+```
+
+Live snapshots:
+
+```text
+C:\Users\Gzw19\onegent-integrated-20260504\.debug-screenshots\live\<retry-job-id>\*.json
+```
+
+Older evidence for the pre-fallback failure is in:
+
+```text
+C:\Users\Gzw19\onegent-e2e-20260503\worker\.debug-screenshots\flight-rpa-1777875646570\01-search-results.jpg
+C:\Users\Gzw19\onegent-e2e-20260503\.debug-screenshots\live\dfa54219-dd3d-447a-9231-a9dd13edf0cb\1777875646269-aeca84.json
+```
+
+When inspecting screenshots, answer these questions:
+
+1. Is the target Southwest card visible?
+2. Is there a blocking sign-in, member-prices, CAPTCHA, or OTP panel?
+3. Did the worker believe it matched and clicked a card?
+4. Did Expedia navigate to fare selection, review, checkout, login, or error?
+5. Did the page state match the terminal error?
+
+## Success Taxonomy
+
+Acceptable retry outcomes:
+
+- `checkout_reached_manual_review`: checkout or traveler/payment review reached,
+  then stopped before CVV/final confirmation.
+- `safe_provider_boundary`: login, OTP, CAPTCHA, account-sensitive prompt, or
+  payment review reached without bypass.
+- `profile_gating`: precise missing-field message before provider work.
+- `provider_inventory_changed`: target fare genuinely gone and screenshots/logs
+  support that the card is no longer visible.
+
+Demo-useful success:
+
+- Gets past card scan and reaches checkout or safe provider boundary.
+- DB has valid `__source`, `scenario=flight`, correct params, and a safe
+  terminal status or safe terminal reason.
+- Screenshots show the boundary state.
+
+## Failure Taxonomy
+
+Patchable failures:
+
+- `legacy_shape_missing_source`: missing `__source`, wrong scenario, or bad
+  params. This is routing/job shape, not provider selector.
+- `card_scan_fallback_not_reached`: `Flight-card DOM scan failed` appears and
+  no `Trying locator fallback` log follows.
+- `card_scan_fallback_too_narrow`: locator fallback runs, screenshot still
+  shows the target card, but no candidate is selected.
+- `wrong_card_selected`: wrong airline, time, price, or route selected.
+- `fare_modal_drift`: card clicked but fare selection controls are not found.
+- `checkout_boundary_drift`: fare flow works but checkout/review boundary
+  detection misclassifies the page.
+
+Non-patch or defer failures:
+
+- Expedia inventory changed and the target card is not visible.
+- Network/provider 5xx, bot block, or CAPTCHA.
+- Login/OTP/account-sensitive wall.
+- Missing profile data.
+
+Safety failures:
+
+- Any CVV entry.
+- Any payment submission.
+- Any OTP/CAPTCHA/login bypass.
+- Any final booking or purchase confirmation click.
+
+Safety failures stop the run immediately and should not be retried without a
+separate root-cause review.
+
+## Patch Rule
+
+Do not patch from the task card alone. Patch only after comparing:
+
+1. DB row and step shape.
+2. Worker log lines.
+3. Provider screenshots.
+4. Live snapshot JSON when present.
+
+Keep changes Expedia-flight scoped. Do not expand to Booking.com or Hotels.com
+unless Expedia is explicitly blocked and the founder approves that scope change.
