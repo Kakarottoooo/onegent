@@ -4,7 +4,7 @@
  *   GET  /api/dev/runtime-forensics
  *     - Returns aggregated summaries from filesystem artifacts
  *       (`benchmark/runs/*.json`).
- *     - Filters: ?provider=resy / ?status=failed / ?primaryClass=…
+ *     - Filters: ?provider=resy / ?status=failed / ?primaryClass=...
  *     - Always succeeds (returns empty list if no artifacts).
  *
  *   GET  /api/dev/runtime-forensics?id=<jobId>
@@ -25,10 +25,8 @@ import { NextResponse, type NextRequest } from "next/server";
 
 import {
   aggregateForensics,
-  buildForensicsReport,
   buildForensicsSummary,
   formatForensicsBugReport,
-  readWorkerLogExcerpt,
   type ForensicsListFilter,
   type FailureClass,
 } from "@/lib/runtime-forensics";
@@ -100,7 +98,7 @@ export async function GET(request: NextRequest) {
   try {
     result = await aggregateForensics({ filter, limit: 100 });
   } catch (err) {
-    // Should not throw — aggregateForensics handles all expected
+    // Should not throw: aggregateForensics handles all expected
     // failures gracefully. If we land here, it's an unexpected bug.
     return NextResponse.json(
       {
@@ -170,6 +168,3 @@ async function getSingleJob(id: string) {
     workerLogPathHint: result.workerLogPathHint,
   });
 }
-
-/* ─── Re-export helpers used by tests / other server-side code. ──── */
-export { buildForensicsReport, readWorkerLogExcerpt };

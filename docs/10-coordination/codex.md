@@ -64,6 +64,10 @@ Provider-runtime side branch:
 Next:
 - Expedia fallback is merged into integrated preview and verified.
 - Runtime forensics is merged into integrated preview and verified.
+- Phase 2 revival audit is documented in
+  `docs/50-product-areas/PHASE2_VERTICAL_REVIVAL_AUDIT.md`.
+- Runtime-forensics route no longer exports test helpers from a Next route
+  module; import helpers from `lib/runtime-forensics` instead.
 - If founder approves a controlled runtime check later, retry the same MCO to
   BNA Expedia task and inspect DB/logs/screenshots before making any further
   provider changes.

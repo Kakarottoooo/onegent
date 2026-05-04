@@ -15,7 +15,7 @@ Do not enter Phase 2 yet. Stabilize Phase 0, Phase 1, and Phase 1.5 first.
 | Phase 0B - Restaurant v1 coverage | Gated | Start after 0A proves at least one real fill/OTP or safe handoff path. |
 | Phase 1 - First paying user path | Mostly ready | Founder E2E walkthrough remains the human acceptance gate. |
 | Phase 1.5 - QA and polish | Active | Quality gate and dev workbenches are integrated and passing. |
-| Phase 2 - Vertical expansion | Frozen | Do not add new vertical scope until 0/1/1.5 are stable. |
+| Phase 2 - Vertical expansion | Frozen, under audit | Old hotel/flight paths exist, but need current artifact/live-safe revalidation before demo promises. |
 
 ## Current Verified State
 
@@ -138,6 +138,8 @@ Next step:
 - If the founder approves a controlled provider runtime check, retry the same
   MCO to BNA Expedia task and inspect DB, worker log, and screenshots before
   making any further provider changes.
+- Phase 2 revival audit lives at
+  `docs/50-product-areas/PHASE2_VERTICAL_REVIVAL_AUDIT.md`.
 
 ## Phase 2 - Frozen
 

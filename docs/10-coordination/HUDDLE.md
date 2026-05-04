@@ -28,6 +28,14 @@ small.
 
 ## Live Activity
 
+- 2026-05-04 codex: completed no-live Phase 2 revival audit for hotel/flight.
+  Current finding: Expedia flight is the only plausible tonight demo-adjacent
+  Phase 2 candidate; Booking.com hotel and Hotels.com need fresh artifacts
+  before live promises. Added
+  `docs/50-product-areas/PHASE2_VERTICAL_REVIVAL_AUDIT.md`. Fixed stale
+  cend-adapter test assertion, repaired a Next route export issue in
+  `/api/dev/runtime-forensics`, and verified tsc, core/flight tests 82/82,
+  runtime-forensics tests 213/213, and Phase 1 gate with known drift allowed.
 - 2026-05-04 codex: reviewed and integrated
   `claude/runtime-forensics-workbench @ d5a2d00` via cherry-pick, because the
   branch was based before the latest Expedia/docs integrated commits. Preserved

@@ -29,7 +29,7 @@ Then read the task-specific section below.
 | Provider runtime bug, logs, screenshots | `docs/30-provider-debug/PROVIDER_RUNTIME_DEBUG_PLAYBOOK.md` |
 | Computer Use / executor architecture | `docs/30-provider-debug/EXECUTOR_V2_PIVOT.md` |
 | Phase 1 founder test / task UI | `docs/40-phase1/` |
-| NLU, decision room, trip packaging, social feed | `docs/50-product-areas/` |
+| NLU, decision room, trip packaging, Phase 2 revival, social feed | `docs/50-product-areas/` |
 | API, OAuth, ChatGPT apps, Claude MCP | `docs/60-api-integrations/` |
 | Old plans, audits, full historical summaries | `docs/90-archive/` |
 
@@ -48,6 +48,17 @@ Then inspect runtime evidence:
 - DB fields: `booking_jobs.steps[0].error`, `decisionLog`, `params`.
 - Worker log: `codex-worker.log` in the active e2e worktree.
 - Debug screenshots: `worker/.debug-screenshots/`.
+
+## Phase 2 Revival Quick Path
+
+For hotel/flight revival work, read:
+
+1. `docs/50-product-areas/PHASE2_VERTICAL_REVIVAL_AUDIT.md`
+2. `docs/30-provider-debug/PROVIDER_RUNTIME_DEBUG_PLAYBOOK.md`
+3. `docs/10-coordination/HUDDLE.md`
+
+Do not run broad live suites. Start with Expedia flight, then Booking.com
+hotel, then Hotels.com only after fresh artifacts exist.
 
 ## Maintenance Rules
 
