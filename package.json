@@ -21,7 +21,9 @@
     "e2e:founder": "npx tsx scripts/run-founder-e2e.ts",
     "e2e:founder:headed": "npx tsx scripts/run-founder-e2e.ts --headed",
     "e2e:founder:json": "npx tsx scripts/run-founder-e2e.ts --json",
-    "probe:resy": "npx tsx scripts/probe-resy-availability.ts"
+    "probe:resy": "npx tsx scripts/probe-resy-availability.ts",
+    "gate:phase1": "npx tsx scripts/run-phase1-quality-gate.ts",
+    "gate:phase1:json": "npx tsx scripts/run-phase1-quality-gate.ts --json"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.79.0",

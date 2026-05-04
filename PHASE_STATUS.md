@@ -111,11 +111,19 @@
 
 ---
 
-## Phase 1.5 — Polish bucket (0%, lazy)
+## Phase 1.5 — Polish bucket (0%, lazy) + Quality Gate
 
 **Goal**: founder E2E 暴露的所有"不是 blocker 但烦人"的 UX gap 都进这个桶。每个 ≤ 1 day 工作量。
 
 **Process**: founder 在 walkthrough 时记 bug，每条进 `PHASE_1_FOUNDER_E2E.md` § 8 bug 模板。Phase 1 declared 后批量处理。
+
+**Quality Gate (in progress, claude/phase-1-5-quality-gate-orchestrator)**:
+- `npm run gate:phase1` 一条命令产出 verdict + paste-ready markdown bug report
+- Required: tsc + 8 vitest 套件 + check-drift（含 `--allow-known-drift` 转 known_existing_failure）
+- Optional `--include-smoke` / `--include-e2e`：依赖 dev server，缺则 env_blocked
+- Verdict: `pass` / `needs_polish` / `fail` / `env_blocked`，exit codes `0/0/1/2`
+- 配套 `/dev/phase1-quality-gates` dashboard 看历史 run + 复用 stdout/stderr tail
+- 完整规范见 `PHASE_1_QUALITY_GATE.md`
 
 ---
 
