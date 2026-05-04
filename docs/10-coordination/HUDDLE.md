@@ -33,6 +33,16 @@ small.
 
 ## Live Activity
 
+- 2026-05-04 codex: integrated second sidecar batch onto current integrated
+  preview. Cherry-picked Agent2 `codex/phase2-hotel-artifact-audit @ 354b4f3`
+  as `0bdccf8`, Agent3 `codex/track-c-demo-acceptance-pack @ da0dbd6` as
+  `eb807f4`, and Claude `claude/phase1-doc-cleanup-after-freeze @ d5805e1` as
+  `db0aef8`. Kept all work no-live and avoided stale branch-head merges.
+  Verified runtime-forensics fixture/classifier tests 122/122,
+  demo evidence/static guard tests 18/18, `tsc`, `check-drift`,
+  `git diff --check`, `npm run build`, full Phase 1 gate with smoke+e2e 12/12
+  (`phase1-quality-gate-2026-05-04T17-17-47-721Z.json`), and production route
+  probe 13/13.
 - 2026-05-04 codex: integrated latest sidecars onto the Phase 1/1.5
   demo-freeze baseline. Cherry-picked Agent2
   `codex/phase2-expedia-artifact-cli @ 4c04936` as `465ec79` and Agent3
