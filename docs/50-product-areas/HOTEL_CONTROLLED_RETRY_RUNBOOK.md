@@ -54,6 +54,15 @@ Expected primary provider:
 Do not begin with Hotels.com or Expedia hotel unless Booking.com is explicitly
 blocked and the founder approves a changed provider target.
 
+## Hotel Runtime Audit Finding
+
+Booking.com is the most demo-adjacent hotel provider for the first controlled
+retry. The current static path has Booking.com URL construction, stage helpers,
+room selection helpers, guest-details detection, payment-boundary guards, bot
+patterns, and no-live runtime-forensics fixtures/tests. Hotels.com remains a
+fallback only after Booking.com is explicitly blocked. Expedia hotel should stay
+out of scope until a separate founder-approved hotel case exists.
+
 ## Preflight Environment
 
 Before a retry:
@@ -74,6 +83,40 @@ Before a retry:
 
 Do not add a runner, dashboard button, cron, automation, or one-click live
 control for this retry.
+
+## Hotel Controlled Retry Decision Tree
+
+1. If profile data is missing before provider work, stop and classify
+   `profile_gating`.
+2. If Booking.com does not show YOTEL New York Times Square with the approved
+   dates, guest count, and room count, stop and preserve DB/log/screenshot
+   evidence before considering URL or search-result drift.
+3. If the target hotel is visible but not selected, classify
+   `provider_selector_drift` only after screenshots prove the approved target
+   hotel was visible.
+4. If room selection is reached, stop for operator review when evidence is
+   sufficient and classify `room_selection_manual_review_reached`. Patch the
+   room-to-guest transition only if screenshots and logs prove selector or
+   runtime drift.
+5. If room/rate inventory is visible but selection or room/card scan fails,
+   classify `room_selection_drift` only after DB/log/screenshot evidence
+   confirms the correct target was visible.
+6. If guest details or manual review is reached, stop before payment/CVV/final
+   controls and classify `guest_details_manual_review_reached`.
+7. If payment, billing, checkout, CVV, or final booking controls appear, hard
+   stop. Classify `payment_manual_review_reached` only when no payment data was
+   entered and no final control was clicked.
+8. If login, OTP, CAPTCHA, phone verification, bot wall, or an account prompt
+   appears, hard stop and classify `login_or_captcha_boundary`. Do not bypass.
+9. If OpenAI Responses API, Computer Use, or local model/runtime environment
+   fails before provider evidence exists, classify `model_env_transient`. Do not
+   patch hotel selectors from model/env evidence alone.
+10. If Booking.com returns 5xx, timeout, blocked provider response, or network
+    instability, classify `network_provider_failure`. Do not patch selectors
+    from network evidence alone.
+11. If the target hotel is sold out, fully booked, or has no rooms available,
+    classify `provider_no_availability`. Do not patch selectors unless
+    screenshots show matching available inventory that the worker missed.
 
 ## DB Evidence Query
 
@@ -249,10 +292,55 @@ The command only reads the local JSON bundle and prints paste-ready Markdown.
 It does not start a worker, open a provider, read the database, or click
 anything.
 
+## Post-Live Artifact Bundle Template
+
+Use this template only after a founder-approved hotel retry has already
+produced DB/log/screenshot evidence:
+
+```text
+docs/50-product-areas/HOTEL_RETRY_ARTIFACT_TEMPLATE.json
+```
+
+Copy it to `.tmp\hotel-retry-artifact-bundle.json`, replace every synthetic
+fixture value, then run:
+
+```powershell
+npx tsx scripts/analyze-provider-artifact.ts --kind hotel .tmp\hotel-retry-artifact-bundle.json
+```
+
+Required artifact bundle fields:
+
+- `job.id`, `job.taskId`, `job.provider`, `job.scenario`, `job.status`.
+- `job.steps[0].type`, `job.steps[0].status`, `job.steps[0].error`,
+  `job.steps[0].body.__source`, `job.steps[0].body.scenario`,
+  `job.steps[0].body.params`.
+- `dbRow.id`, `dbRow.task_id`, `dbRow.trip_label`, `dbRow.status`,
+  `dbRow.created_at`, `dbRow.updated_at`.
+- `workerLogExcerpt` with bounded lines around the approved retry.
+- `workerLogPath`, `screenshotPaths`, and `liveSnapshotPaths`.
+- `notes` stating which boundary was reached and confirming no payment, CVV,
+  OTP, CAPTCHA, account prompt, or final confirmation was completed.
+
+Post-live triage buckets:
+
+- `provider_selector_drift`: target hotel/result selection failed.
+- `room_selection_drift`: room/rate card scan or selected-room control failed.
+- `guest_details_manual_review_reached`,
+  `payment_manual_review_reached`, or `room_selection_manual_review_reached`:
+  checkout/manual boundary or safe partial progress.
+- `model_env_transient`: OpenAI Responses API, Computer Use, or local runtime
+  transient.
+- `network_provider_failure`: Booking.com/network degraded.
+- `provider_no_availability`: sold out, fully booked, or no room availability.
+- `insufficient_evidence`: DB/log/screenshot bundle is incomplete.
+
 ## Success Taxonomy
 
 Acceptable retry outcomes:
 
+- `room_selection_manual_review_reached`: room/rate selection reached and the
+  operator stopped before guest details, payment, CVV, login, OTP, CAPTCHA, or
+  final confirmation.
 - `checkout_reached_manual_review`: guest details or final details reached,
   then stopped before CVV/final confirmation.
 - `paused_payment`: payment boundary reached and browser handed off safely.
@@ -278,8 +366,10 @@ Patchable failures:
   params.
 - `hotel_url_shape_drift`: start URL lacks expected hotel, city, date, adult,
   or room params.
-- `hotel_search_result_drift`: target hotel visible but not selected.
-- `room_selection_drift`: room/rate visible but not selected.
+- `provider_selector_drift` / `hotel_search_result_drift`: target hotel
+  visible but not selected.
+- `room_selection_drift`: room/rate visible but not selected or room/card scan
+  fails.
 - `guest_details_incomplete`: visible guest field remains empty or selector
   drift prevents completion.
 - `checkout_boundary_drift`: guest details work but final details/payment
@@ -288,6 +378,8 @@ Patchable failures:
 Non-patch or defer failures:
 
 - Target hotel sold out/fully booked and no matching room is visible.
+- OpenAI Responses API 500, Computer Use transient, or local model/runtime
+  environment failure.
 - Network/provider 5xx, bot block, CAPTCHA, or login/account wall.
 - Missing profile data.
 - Price/inventory changed enough that the selected room is no longer the same

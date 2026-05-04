@@ -225,6 +225,12 @@ const PATTERN_RULES: ReadonlyArray<PatternRule> = [
     label: "OpenAI rate-limit / quota",
   },
   {
+    rx: /\b(openai|responses api|responses\.create)\b.*\b5\d{2}\b|\b5\d{2}\b.*\b(openai|responses api|responses\.create)\b/i,
+    cls: "model_or_env_blocked",
+    weight: 1.0,
+    label: "OpenAI Responses API 5xx",
+  },
+  {
     rx: /computer[-_\s]?use[-_\s]?(unavailable|disabled|not[-_\s]?ready)/i,
     cls: "model_or_env_blocked",
     weight: 0.85,

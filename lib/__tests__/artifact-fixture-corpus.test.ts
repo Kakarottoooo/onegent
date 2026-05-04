@@ -12,10 +12,10 @@ describe("artifact fixture corpus inventory", () => {
   it("lists every no-live restaurant, Expedia, and hotel fixture", async () => {
     const fixtures = await listArtifactFixtures();
 
-    expect(fixtures).toHaveLength(27);
+    expect(fixtures).toHaveLength(31);
     expect(countDomain(fixtures, "restaurant")).toBe(10);
     expect(countDomain(fixtures, "expedia")).toBe(8);
-    expect(countDomain(fixtures, "hotel")).toBe(9);
+    expect(countDomain(fixtures, "hotel")).toBe(13);
     expect(new Set(fixtures.map((fixture) => fixture.relativePath)).size).toBe(
       fixtures.length,
     );
@@ -27,10 +27,14 @@ describe("artifact fixture corpus inventory", () => {
     expect(output).toContain("Artifact fixture corpus");
     expect(output).toContain("restaurant: 10");
     expect(output).toContain("expedia: 8");
-    expect(output).toContain("hotel: 9");
+    expect(output).toContain("hotel: 13");
     expect(output).toContain("resy_otp_login_boundary: 1");
     expect(output).toContain("checkout_manual_review_reached: 1");
+    expect(output).toContain("model_env_transient: 1");
     expect(output).toContain("payment_manual_review_reached: 1");
+    expect(output).toContain("provider_no_availability: 1");
+    expect(output).toContain("provider_selector_drift: 1");
+    expect(output).toContain("room_selection_manual_review_reached: 1");
   });
 
   it("requires synthetic markers, fixture metadata, and no secret values", async () => {

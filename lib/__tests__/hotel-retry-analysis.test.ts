@@ -25,6 +25,16 @@ const CASES: Array<{ file: string; state: HotelRetryState; provider: string }> =
     provider: "booking-com",
   },
   {
+    file: "booking-provider-selector-drift.json",
+    state: "provider_selector_drift",
+    provider: "booking-com",
+  },
+  {
+    file: "booking-room-selection-reached.json",
+    state: "room_selection_manual_review_reached",
+    provider: "booking-com",
+  },
+  {
     file: "booking-guest-details-reached.json",
     state: "guest_details_manual_review_reached",
     provider: "booking-com",
@@ -47,6 +57,16 @@ const CASES: Array<{ file: string; state: HotelRetryState; provider: string }> =
   {
     file: "booking-network-provider-failure.json",
     state: "network_provider_failure",
+    provider: "booking-com",
+  },
+  {
+    file: "booking-no-availability.json",
+    state: "provider_no_availability",
+    provider: "booking-com",
+  },
+  {
+    file: "booking-model-env-transient.json",
+    state: "model_env_transient",
     provider: "booking-com",
   },
   {
@@ -83,6 +103,56 @@ describe("analyzeHotelRetryArtifactBundle", () => {
 
     expect(analysis.state).toBe("guest_details_manual_review_reached");
     expect(analysis.signals.map((s) => s.kind)).not.toContain("login_or_captcha");
+  });
+
+  it("covers the hotel live-readiness triage split without invoking providers", async () => {
+    const triageCases: Array<{ file: string; state: HotelRetryState }> = [
+      {
+        file: "booking-provider-selector-drift.json",
+        state: "provider_selector_drift",
+      },
+      {
+        file: "booking-room-selection-drift.json",
+        state: "room_selection_drift",
+      },
+      {
+        file: "booking-guest-details-reached.json",
+        state: "guest_details_manual_review_reached",
+      },
+      {
+        file: "booking-model-env-transient.json",
+        state: "model_env_transient",
+      },
+      {
+        file: "booking-network-provider-failure.json",
+        state: "network_provider_failure",
+      },
+      {
+        file: "booking-no-availability.json",
+        state: "provider_no_availability",
+      },
+    ];
+
+    for (const { file, state } of triageCases) {
+      const bundle = await readFixture(file);
+      const analysis = analyzeHotelRetryArtifactBundle(bundle);
+
+      expect(analysis.state, file).toBe(state);
+      expect(analysis.signals.length, file).toBeGreaterThan(0);
+      expect(analysis.nextAction, file).not.toMatch(
+        /\b(click|press|submit|enter|fill)\s+(final|cvv|cvc|payment|otp|captcha|login)\b/i,
+      );
+    }
+  });
+
+  it("keeps OpenAI Responses API 500 separate from hotel provider/network bugs", async () => {
+    const bundle = await readFixture("booking-model-env-transient.json");
+    const analysis = analyzeHotelRetryArtifactBundle(bundle);
+
+    expect(analysis.state).toBe("model_env_transient");
+    expect(analysis.signals.map((s) => s.kind)).toContain("model_env_transient");
+    expect(analysis.signals.map((s) => s.kind)).toContain("network_provider_failure");
+    expect(analysis.nextAction).toContain("Do not patch hotel provider selectors");
   });
 
   it("returns insufficient evidence for bundles without known signals", () => {

@@ -14,10 +14,10 @@ bypass, or final confirmation.
 |---|---:|---|---:|
 | Restaurant artifact analyzer | restaurant | `lib/runtime-forensics/__fixtures__/restaurant-artifact-analysis/*.json` | 7 |
 | Expedia retry analyzer | expedia | `lib/runtime-forensics/__fixtures__/expedia-retry-analysis/*.json` | 5 |
-| Hotel retry analyzer | hotel | `lib/runtime-forensics/__fixtures__/hotel-retry-analysis/*.json` | 7 |
+| Hotel retry analyzer | hotel | `lib/runtime-forensics/__fixtures__/hotel-retry-analysis/*.json` | 11 |
 | Runtime-forensics demo examples | mixed | `lib/runtime-forensics/__fixtures__/*.json` via `FIXTURE_FILENAMES` | 8 |
 
-Total synthetic fixtures inventoried: 27.
+Total synthetic fixtures inventoried: 31.
 
 ## Domain And Class Counts
 
@@ -61,18 +61,22 @@ Count: 8.
 
 ### Hotel
 
-Count: 9.
+Count: 13.
 
 | Class | Count |
 |---|---:|
 | `guest_details_manual_review_reached` | 1 |
 | `login_or_captcha_boundary` | 1 |
+| `model_env_transient` | 1 |
 | `network_or_provider_5xx` | 1 |
 | `network_provider_failure` | 1 |
 | `payment_manual_review_reached` | 1 |
 | `profile_gating` | 1 |
 | `provider_form_incomplete` | 1 |
+| `provider_no_availability` | 1 |
+| `provider_selector_drift` | 1 |
 | `room_selection_drift` | 1 |
+| `room_selection_manual_review_reached` | 1 |
 | `safety_boundary_violation` | 1 |
 
 ## Guardrails
