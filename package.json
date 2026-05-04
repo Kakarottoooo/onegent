@@ -17,6 +17,7 @@
     "build:mcp": "npm run build -w @onegent/mcp-server",
     "check-drift": "npx tsx scripts/check-drift.ts",
     "smoke:phase1": "node scripts/smoke-phase1.mjs",
+    "preflight:founder-e2e": "node scripts/founder-e2e-preflight.mjs",
     "probe:resy": "npx tsx scripts/probe-resy-availability.ts"
   },
   "dependencies": {
