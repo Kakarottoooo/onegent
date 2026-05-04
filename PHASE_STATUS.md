@@ -53,13 +53,14 @@
 - ✅ Resy fixture exists：`benchmark/restaurant-resy-phase0.json` 当前 observed 22 rows（doc 目标 25；fixture notes 明确不 invent missing cases）
 
 **未完成**
-- ⏳ R-003 smoke #3 live 运行（pending codex go-decision）
-- ⏳ Warm session PoC（blocked — 还没有 Resy case 真撞到 OTP wall；R-003 #3 跑出来再决定）
-- ⏳ observed Resy fixture suite 跑（**严格 gated**：只有 R-003 #3 通过 + warm session PoC 完成/或明确不需要才允许）
+- ⏳ R-003 smoke #3 live retry — **2026-05-04 跑了一次** (`phase0-resy-2026-05-04T01-03-14-028Z.json`) outcome = `no_availability_correct` (Q11(a)). 这是 safe failure, 不是 fill failure — 只证明了 no-availability path 工作, **没证明 fill/OTP closure**.
+- ⏳ Probe-first protocol: 下一次 live retry 前必须先跑 `npm run probe:resy` + 看 `/dev/resy-probe-runs` dashboard 找到 `use_for_live_fill_test` case (例如 R-030 Charlie Bird). Codex 已 ship probe runner (`024dd05`)；Claude 已 ship dashboard. 协议 doc: `RESY_AVAILABILITY_PROBE_PROTOCOL.md`.
+- ⏳ Warm session PoC — blocked: 还没有 Resy case 真撞到 OTP wall；先跑 R-030 (probe says live_ok) 看会不会触发 OTP, 再决定 warm session 是否启动.
+- ⏳ Resy observed fixture suite 跑（**严格 gated**：probe 找到 ≥1 个 `use_for_live_fill_test` case + 该 case 真跑通 fill/OTP 之后才允许）
 
-**下一步 owner**：codex
+**下一步 owner**：codex（拍板下一次 live retry case + 收敛 R-030 probe finding）；founder（批准 token spend）
 
-**进入 Phase 0B 的门**: R-003 #3 通过 + (warm session PoC ✅ 或 OTP soft-handoff per § 7.5)。
+**进入 Phase 0B 的门**: 至少 1 个 case 在 probe 下 `use_for_live_fill_test` + live 跑通到 `ready_for_confirmation` 或 `safe_handoff` 带 `F-PROVIDER-OTP` (per § 7.5).
 
 ---
 

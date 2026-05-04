@@ -30,13 +30,31 @@ interface DocLink {
 
 const PHASE_0_ROUTES: DevRoute[] = [
   {
+    href: "/dev/resy-probe-runs",
+    title: "Resy availability probe runs",
+    blurb:
+      "Cheap no-token probe of Resy availability for Phase 0 fixture cases. Recommended-case card + per-case detail drawer (date/time/covers, exact venue match, slots table, blocker signals) + copy-paste live command. Probe-first: don't burn an OpenAI token unless this dashboard says use_for_live_fill_test.",
+    status: "live",
+    useCase:
+      "Open BEFORE asking codex to spend a live R-003 / R-030 token. If no case is recommended, generate a fresh probe with `npm run probe:resy`. Codex's runner: scripts/probe-resy-availability.ts.",
+  },
+  {
     href: "/dev/benchmark-runs",
     title: "Phase 0 benchmark runs",
     blurb:
-      "Live consumer of codex's /api/dev/benchmark-runs. Headline metrics + 8-bucket distribution + failure taxonomy chart + per-case drawer + GateBreakdown analyzer + Validator paste panel. Single source of truth for run results.",
+      "Live consumer of codex's /api/dev/benchmark-runs. Headline metrics + 8-bucket distribution + failure taxonomy chart + per-case drawer + GateBreakdown analyzer + Validator paste panel + ArtifactRail (taskId / timeline / strategy log + cross-dashboard pointers).",
     status: "live",
     useCase:
-      "Open this when codex pushes a new benchmark/runs/*.json. Paste the JSON into Validator if you want shape pre-check before reading.",
+      "Open this when codex pushes a new benchmark/runs/*.json. Click a case to see ArtifactRail + cross-dashboard links to probe / debug-screenshots.",
+  },
+  {
+    href: "/dev/debug-artifacts",
+    title: "Debug artifacts viewer",
+    blurb:
+      "Reads worker/.debug-screenshots/<provider>/<run>/. summary.json + page.png lightbox + sandboxed page.html iframe. Newest-first with per-provider 'Latest run' shortcut. Captures land here when the worker hits a terminal failure.",
+    status: "live",
+    useCase:
+      "Open after a failed live run. Pair with /dev/benchmark-runs (run report) and /dev/resy-probe-runs (was the case probe-validated?) to triangulate root cause.",
   },
 ];
 
