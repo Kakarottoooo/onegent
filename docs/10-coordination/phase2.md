@@ -249,3 +249,51 @@ Verification from the branch worktree:
 
 No live provider was run for this analysis pack. No payment, CVV,
 OTP/CAPTCHA/login bypass, or final confirmation path was exercised.
+
+## No-Live Artifact CLI
+
+Agent2 branch:
+
+- `codex/phase2-expedia-artifact-cli`
+- Base: `origin/codex/integrated-preview-20260504 @ e76346a`
+- Scope: no-live Expedia artifact bundle parsing only.
+
+Added:
+
+- CLI script:
+  `scripts/analyze-expedia-retry-artifact.ts`
+- Fake-data template:
+  `docs/50-product-areas/EXPEDIA_RETRY_ARTIFACT_TEMPLATE.json`
+- Targeted CLI helper tests:
+  `lib/__tests__/analyze-expedia-retry-artifact-cli.test.ts`
+
+Exact usage after a founder-approved retry has already produced evidence:
+
+```powershell
+cd C:\Users\Gzw19\onegent-integrated-20260504
+npx tsx scripts/analyze-expedia-retry-artifact.ts .tmp\expedia-retry-artifact-bundle.json
+```
+
+The CLI reads only the local JSON artifact bundle and prints the existing
+Expedia retry markdown analysis. It does not run a provider, read the database,
+open Expedia, click anything, or start a retry.
+
+Validation behavior:
+
+- Missing file: non-zero exit with missing path.
+- Invalid JSON: non-zero exit with parse error.
+- Empty JSON object: non-zero exit.
+- Unknown but valid bundle: Markdown output with `insufficient_evidence`.
+
+Verification from the branch worktree:
+
+- `npx vitest run lib/__tests__/expedia-retry-analysis.test.ts lib/__tests__/analyze-expedia-retry-artifact-cli.test.ts`:
+  pass, 17/17.
+- `npm run build:mcp`: pass; needed in the clean worktree before the requested
+  TypeScript command could resolve the local MCP workspace package.
+- `npx tsc --noEmit --pretty false`: pass after `npm run build:mcp`.
+- `npm run check-drift`: pass.
+- `git diff --check`: pass.
+
+No live provider was run for this CLI pack. No payment, CVV,
+OTP/CAPTCHA/login bypass, or final confirmation path was exercised.

@@ -243,6 +243,12 @@ above.
 Create this local artifact bundle from the DB row, worker log grep output, and
 artifact paths:
 
+Template with fake data:
+
+```text
+docs/50-product-areas/EXPEDIA_RETRY_ARTIFACT_TEMPLATE.json
+```
+
 ```json
 {
   "job": {
@@ -305,12 +311,18 @@ Then run the pure analyzer from the integrated preview worktree:
 
 ```powershell
 cd C:\Users\Gzw19\onegent-integrated-20260504
-$env:BUNDLE_PATH = "C:\Users\Gzw19\onegent-integrated-20260504\.tmp\expedia-retry-artifact-bundle.json"
-npx tsx -e "import fs from 'node:fs'; import { formatExpediaRetryArtifactBundleMarkdown } from './lib/runtime-forensics/expedia-retry-analysis'; const p = process.env.BUNDLE_PATH; if (!p) throw new Error('BUNDLE_PATH required'); const bundle = JSON.parse(fs.readFileSync(p, 'utf8')); console.log(formatExpediaRetryArtifactBundleMarkdown(bundle));"
+npx tsx scripts/analyze-expedia-retry-artifact.ts .tmp\expedia-retry-artifact-bundle.json
 ```
 
 The output is paste-ready Markdown. Paste it into the Phase 2 handoff before
 deciding whether a patch is justified.
+
+CLI validation behavior:
+
+- Missing file: exits non-zero and reports the missing artifact path.
+- Invalid JSON: exits non-zero and reports a parse error.
+- Empty JSON object: exits non-zero and reports `Artifact bundle is empty`.
+- Unknown but valid bundle: prints Markdown with `insufficient_evidence`.
 
 Analyzer states:
 

@@ -1,0 +1,64 @@
+{
+  "job": {
+    "id": "fixture-expedia-retry-job",
+    "taskId": "fixture-expedia-retry-task",
+    "provider": "expedia",
+    "scenario": "flight",
+    "status": "failed",
+    "errorMessage": "Synthetic fixture: fallback ran but did not find a matching Expedia flight card.",
+    "terminalReason": "synthetic_no_live_fixture",
+    "terminalCode": "SYNTHETIC_FIXTURE",
+    "steps": [
+      {
+        "type": "flight",
+        "status": "error",
+        "error": "Synthetic fixture: fallback ran but did not find a matching Expedia flight card.",
+        "__source": "lib/core/execution-local-fixture",
+        "body": {
+          "scenario": "flight",
+          "params": {
+            "origin": "MCO",
+            "dest": "BNA",
+            "date": "2026-06-01",
+            "passengers": 1,
+            "cabin_class": "economy",
+            "targetAirline": "Southwest",
+            "targetDepartureTime": "08:50",
+            "targetFlightNumber": "WN 3084",
+            "targetPrice": 152
+          }
+        }
+      }
+    ],
+    "params": {
+      "origin": "MCO",
+      "dest": "BNA",
+      "date": "2026-06-01",
+      "passengers": 1,
+      "cabin_class": "economy",
+      "targetAirline": "Southwest",
+      "targetDepartureTime": "08:50",
+      "targetFlightNumber": "WN 3084",
+      "targetPrice": 152
+    }
+  },
+  "dbRow": {
+    "id": "fixture-expedia-retry-job",
+    "task_id": "fixture-expedia-retry-task",
+    "trip_label": "Synthetic Southwest MCO->BNA 2026-06-01",
+    "status": "failed",
+    "created_at": "2026-05-04T00:00:00.000Z",
+    "updated_at": "2026-05-04T00:05:00.000Z"
+  },
+  "workerLogExcerpt": "[flight-rpa] Flight-card DOM scan failed: StagehandEvalError: synthetic fixture\n[flight-rpa] Trying locator fallback for flight-card scan\n[flight-rpa] no matching flight button found\n[flight-rpa] flight checkout was not reached",
+  "workerLogPath": "C:\\Users\\Gzw19\\onegent-integrated-20260504\\codex-worker.log",
+  "screenshotPaths": [
+    "C:\\Users\\Gzw19\\onegent-integrated-20260504\\worker\\.debug-screenshots\\flight-rpa-fixture\\01-search-results.jpg"
+  ],
+  "liveSnapshotPaths": [
+    "C:\\Users\\Gzw19\\onegent-integrated-20260504\\.debug-screenshots\\live\\fixture-expedia-retry-job\\snapshot.json"
+  ],
+  "notes": [
+    "Synthetic template only. Replace every fixture value with post-retry evidence after founder approval."
+  ]
+}
