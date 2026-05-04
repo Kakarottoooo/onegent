@@ -148,8 +148,8 @@ This is non-negotiable:
 
 If you need an end-to-end run that includes the provider side, that
 is `npx tsx scripts/run-phase0-resy-benchmark.ts --case <id> --live-openai`
-under codex's domain — see `R003_LIVE_SMOKE_RUNBOOK.md` and the
-readiness gate in `RESY_AVAILABILITY_PROBE_PROTOCOL.md`.
+under codex's domain — see `../20-phase0-restaurant/R003_LIVE_SMOKE_RUNBOOK.md`
+and the readiness gate in `../20-phase0-restaurant/RESY_AVAILABILITY_PROBE_PROTOCOL.md`.
 
 ---
 
