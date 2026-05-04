@@ -93,6 +93,82 @@ Hard rules:
 classification disagrees with what the worker actually did, trust the
 worker log + screenshots, not this page.
 
+### Operating procedure (UX v2)
+
+Use this when you open `/dev/runtime-forensics` for a real triage:
+
+1. **Land on the dashboard** with no query string. The list shows real
+   benchmark/runs rows. If empty, the empty-state suggests two paths:
+   place benchmark JSON files at `benchmark/runs/`, or click *Show
+   `[FIXTURE]` example rows* to see synthetic demo data tagged
+   `[FIXTURE]`.
+2. **Narrow the list** with multi-select chip filters. Provider /
+   classification / severity all stack additively. The two toggles
+   (*hide unknown* + *show fixtures*) are persistent across reloads
+   because they round-trip through the URL.
+3. **Sort** by clicking a column header. Severity defaults to
+   descending (P0 first); subsequent clicks toggle direction. Sort
+   state is preserved in the URL.
+4. **Copy a share URL** to send the same view to a teammate via the
+   *Copy filter URL* button next to the chips.
+5. **Open a row** with *Inspect*. The detail drawer renders, top to
+   bottom:
+   - **Source of truth** reminder (4-step verification ladder).
+   - **Recommended next evidence** — a numbered checklist tailored
+     to the failure class, plus per-class file/doc/db pointers, plus
+     ready-to-paste PowerShell `Select-String` commands keyed to the
+     job's id, scenario, and top matched signals.
+   - **Signals grouped by source** — `step_shape_audit` / `error_message`
+     / `terminal_reason` / `step_error` / `decision_log` /
+     `raw_worker_log`. Helps you see whether the verdict came from one
+     loud field or several converging hints.
+   - **Step shape audit** table with rows missing `__source` outlined
+     in red and a `[!]` marker.
+   - **Raw terminal fields** + **Decision log** + **Cross references**.
+   - **Paste-ready markdown bug report** — same text the API returns,
+     with a Copy button.
+6. **Verify against ground truth** before filing or fixing. The drawer
+   nudges this in the green "Source of truth" block — open the worker
+   log, screenshot dir, and DB row referenced there.
+
+### Hard rules (operator)
+
+- The dashboard NEVER triggers a live run, retry, payment, OTP, or
+  worker action. If you see a button that suggests otherwise, it's a
+  bug — file under Track B.
+- `[FIXTURE]` rows are SYNTHETIC. Do not file bugs against them, do
+  not screenshot them as evidence, do not reference them in retros.
+- Generated `Select-String` commands sanitize signal text before
+  embedding (strips `;` `&` `|` `<` `>` `$` `(` `)` backtick `\`),
+  but you should still review before pasting into a privileged shell.
+- The PowerShell path the commands target is read from
+  `WORKER_LOG_PATH` (env override) or defaults to
+  `./codex-worker.log`. Codex's canonical path is
+  `C:\Users\Gzw19\onegent-e2e-20260503\codex-worker.log`.
+
+### URL parameters reference
+
+| Param | Type | Purpose |
+|---|---|---|
+| `providers` | comma list | multi-select provider filter |
+| `classes` | comma list | multi-select classification filter |
+| `severities` | comma list | multi-select severity filter |
+| `hideUnknown` | `1` | drop rows where `primaryClass=unknown` |
+| `showFixtures` / `examples` | `1` | merge `[FIXTURE]` example rows |
+| `sort` | `key:dir` | `severity:desc` / `updatedAt:asc` / etc |
+| `provider` | string | single-value back-compat (v1) |
+| `status` | string | single-value status filter |
+| `taskId` | string | filter by task |
+| `sessionId` | string | filter by session |
+| `jobId` | string | filter by job (server-side) |
+| `id` | string | single-job lookup mode |
+| `primaryClass` | enum | single-value back-compat (folds into classes) |
+
+The parser is tolerant: empty segments drop, duplicates dedup, unknown
+enum values are dropped with warnings (surfaced as the orange "URL
+filter warnings" banner). Default values are omitted from the
+serialized URL so canonical share-links stay short.
+
 ## 2. Database Evidence
 
 The useful table is usually `booking_jobs`.
