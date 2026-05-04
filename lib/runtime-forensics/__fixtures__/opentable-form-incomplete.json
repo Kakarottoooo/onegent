@@ -1,0 +1,65 @@
+{
+  "id": "fixture-opentable-form-incomplete",
+  "taskId": "fixture-task-ot-001",
+  "sessionId": "fixture-session-ot-001",
+  "provider": "opentable",
+  "scenario": "OT-FORM-FAIL",
+  "status": "failed",
+  "errorMessage": "form incomplete: phone field unfilled after auditAndRefill gave up",
+  "terminalReason": "FORM_INCOMPLETE_PHONE",
+  "terminalCode": "FORM_INCOMPLETE",
+  "createdAt": "2026-05-04T18:00:00Z",
+  "updatedAt": "2026-05-04T18:01:50Z",
+  "params": {
+    "restaurant": "Atelier Crenn",
+    "city": "San Francisco",
+    "date": "2026-06-22",
+    "time": "19:00",
+    "partySize": 2
+  },
+  "steps": [
+    {
+      "name": "search-availability",
+      "type": "provider.scan",
+      "__source": "lib/core/execution",
+      "timestamp": "2026-05-04T18:00:10Z"
+    },
+    {
+      "name": "select-slot",
+      "type": "provider.click",
+      "__source": "lib/core/execution",
+      "timestamp": "2026-05-04T18:00:35Z"
+    },
+    {
+      "name": "fill-guest-form",
+      "type": "provider.fill",
+      "__source": "lib/core/execution",
+      "timestamp": "2026-05-04T18:01:30Z",
+      "error": "guest form partially filled: required field missing for phone (input.phone-field unfilled). auditAndRefill gave up after 3 retries."
+    }
+  ],
+  "decisionLog": [
+    {
+      "at": "2026-05-04T18:00:10Z",
+      "level": "info",
+      "event": "scan_started"
+    },
+    {
+      "at": "2026-05-04T18:00:35Z",
+      "level": "info",
+      "event": "slot_selected"
+    },
+    {
+      "at": "2026-05-04T18:01:30Z",
+      "level": "warn",
+      "event": "audit_refill_started",
+      "message": "AI refill triggered: phone field empty after primary fill"
+    },
+    {
+      "at": "2026-05-04T18:01:50Z",
+      "level": "error",
+      "event": "audit_refill_failed",
+      "message": "auditAndRefill gave up - phone input remained unfilled after 3 retries; selector may have changed"
+    }
+  ]
+}

@@ -1,0 +1,40 @@
+{
+  "id": "fixture-unknown",
+  "taskId": "fixture-task-misc-001",
+  "sessionId": "fixture-session-misc-001",
+  "provider": "expedia",
+  "scenario": "MISC-001",
+  "status": "failed",
+  "errorMessage": "execution halted at unexpected boundary; underlying cause undiagnosed",
+  "terminalReason": "OPAQUE_HALT",
+  "terminalCode": "OPAQUE",
+  "createdAt": "2026-05-04T22:00:00Z",
+  "updatedAt": "2026-05-04T22:00:30Z",
+  "params": {
+    "city": "Lisbon",
+    "checkIn": "2026-08-01"
+  },
+  "steps": [
+    {
+      "name": "search-availability",
+      "type": "provider.scan",
+      "__source": "lib/core/execution",
+      "timestamp": "2026-05-04T22:00:25Z",
+      "error": "stage assessment returned ambiguous state; routing layer halted"
+    }
+  ],
+  "decisionLog": [
+    {
+      "at": "2026-05-04T22:00:25Z",
+      "level": "warn",
+      "event": "stage_ambiguous",
+      "message": "page state did not match any known signature"
+    },
+    {
+      "at": "2026-05-04T22:00:30Z",
+      "level": "error",
+      "event": "verdict",
+      "message": "OPAQUE_HALT - needs human triage"
+    }
+  ]
+}

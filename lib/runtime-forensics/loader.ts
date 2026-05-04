@@ -32,6 +32,7 @@ import {
   type JobLikeInput,
 } from "./types";
 import { buildForensicsReport, buildForensicsSummary } from "./report";
+import { FIXTURE_FILENAMES } from "./__fixtures__";
 
 /* ─── Config ──────────────────────────────────────────────────────── */
 
@@ -54,6 +55,16 @@ export function getWorkerLogPath(): string {
   return path.resolve(process.cwd(), "codex-worker.log");
 }
 
+/** Resolution of the static-fixtures directory. */
+export function getFixturesDir(): string {
+  return path.resolve(
+    process.cwd(),
+    "lib",
+    "runtime-forensics",
+    "__fixtures__",
+  );
+}
+
 /* ─── Filename + path safety ──────────────────────────────────────── */
 
 /** Whitelist for benchmark-runs filenames (json only). */
@@ -74,6 +85,21 @@ export function resolveSafeBenchmarkRunPath(name: string): string {
     throw new RuntimeForensicsLoaderError(`Refusing unsafe artifact name: ${String(name)}`);
   }
   const dir = getBenchmarkRunsDir();
+  const resolved = path.resolve(dir, name);
+  if (!resolved.startsWith(dir + path.sep)) {
+    throw new RuntimeForensicsLoaderError(
+      `Path-traversal attempt blocked: ${String(name)}`,
+    );
+  }
+  return resolved;
+}
+
+/** Resolve a fixture filename to an absolute path inside the fixtures dir. */
+export function resolveSafeFixturePath(name: string): string {
+  if (!isSafeForensicsArtifactName(name) || !BENCHMARK_RUN_FILE_PATTERN.test(name)) {
+    throw new RuntimeForensicsLoaderError(`Refusing unsafe fixture name: ${String(name)}`);
+  }
+  const dir = getFixturesDir();
   const resolved = path.resolve(dir, name);
   if (!resolved.startsWith(dir + path.sep)) {
     throw new RuntimeForensicsLoaderError(
@@ -272,6 +298,79 @@ function pickArray<T = unknown>(v: unknown): T[] | null {
   return Array.isArray(v) ? (v as T[]) : null;
 }
 
+/* ─── Fixtures (synthetic example data, dev-only) ─────────────────── */
+
+/**
+ * Read one fixture JSON file from `lib/runtime-forensics/__fixtures__/`.
+ * Throws on shape violations + path-traversal.
+ */
+export async function readFixtureFile(name: string): Promise<unknown> {
+  const resolved = resolveSafeFixturePath(name);
+  let raw: string;
+  try {
+    raw = await fs.readFile(resolved, "utf8");
+  } catch (err) {
+    if (isEnoent(err)) {
+      throw new RuntimeForensicsLoaderError(`Fixture not found: ${name}`);
+    }
+    throw err;
+  }
+  try {
+    return JSON.parse(raw);
+  } catch (err) {
+    throw new RuntimeForensicsLoaderError(
+      `Invalid JSON in fixture ${name}: ${(err as Error).message}`,
+    );
+  }
+}
+
+/**
+ * Coerce a fixture payload into a `JobLikeInput`. Each fixture is a
+ * single-record JSON file in the same shape as a benchmark-run case.
+ */
+export function extractJobFromFixturePayload(
+  payload: unknown,
+  sourceName: string,
+): JobLikeInput | null {
+  if (payload === null || typeof payload !== "object" || Array.isArray(payload)) {
+    return null;
+  }
+  const job = duckCastToJob(payload as Record<string, unknown>);
+  job.loaderNotes = [
+    ...(job.loaderNotes ?? []),
+    `from-fixture:${sourceName}`,
+  ];
+  return job;
+}
+
+/**
+ * Load all whitelisted fixtures. Skips any that fail to parse with a
+ * loader note. Never throws on missing files (returns the ones that
+ * succeeded). Returns objects in the canonical FIXTURE_FILENAMES
+ * order.
+ */
+export async function loadFixtureJobs(): Promise<{
+  jobs: { job: JobLikeInput; sourceName: string }[];
+  notes: string[];
+}> {
+  const jobs: { job: JobLikeInput; sourceName: string }[] = [];
+  const notes: string[] = [];
+  for (const name of FIXTURE_FILENAMES) {
+    let parsed: unknown;
+    try {
+      parsed = await readFixtureFile(name);
+    } catch (err) {
+      notes.push(
+        `skipped fixture ${name}: ${(err as Error).message}`.slice(0, 240),
+      );
+      continue;
+    }
+    const job = extractJobFromFixturePayload(parsed, name);
+    if (job) jobs.push({ job, sourceName: name });
+  }
+  return { jobs, notes };
+}
+
 /* ─── Aggregator: build summaries / reports for the dashboard ────── */
 
 export interface AggregateOptions {
@@ -280,6 +379,13 @@ export interface AggregateOptions {
   limit?: number;
   /** Whether to attach a worker log excerpt per job. Default false. */
   attachWorkerLog?: boolean;
+  /**
+   * When true, additionally load static fixtures from
+   * `lib/runtime-forensics/__fixtures__/` and merge them into the
+   * result. Each fixture row is tagged `isFixture: true` so the
+   * dashboard can render `[FIXTURE]`. Off by default.
+   */
+  includeFixtures?: boolean;
 }
 
 export interface AggregateResult {
@@ -288,6 +394,7 @@ export interface AggregateResult {
   workerLogAvailable: boolean;
   workerLogPathHint: string;
   benchmarkRunsScanned: number;
+  fixturesLoaded: number;
   loaderNotes: string[];
 }
 
@@ -301,7 +408,8 @@ export async function aggregateForensics(
 ): Promise<AggregateResult> {
   const limit = Math.max(1, options.limit ?? 100);
   const loaderNotes: string[] = [];
-  const allJobs: { job: JobLikeInput; sourceName: string }[] = [];
+  const realJobs: { job: JobLikeInput; sourceName: string }[] = [];
+  const fixtureJobs: { job: JobLikeInput; sourceName: string }[] = [];
 
   let filenames: string[] = [];
   try {
@@ -314,7 +422,7 @@ export async function aggregateForensics(
   }
 
   for (const name of filenames) {
-    if (allJobs.length >= limit) break;
+    if (realJobs.length >= limit) break;
     let parsed: unknown;
     try {
       parsed = await readBenchmarkRunFile(name);
@@ -326,24 +434,34 @@ export async function aggregateForensics(
     }
     const jobs = extractJobsFromBenchmarkPayload(parsed, name);
     for (const j of jobs) {
-      if (allJobs.length >= limit) break;
-      allJobs.push({ job: j, sourceName: name });
+      if (realJobs.length >= limit) break;
+      realJobs.push({ job: j, sourceName: name });
+    }
+  }
+
+  // Optional fixtures (gated by includeFixtures flag).
+  if (options.includeFixtures) {
+    const fx = await loadFixtureJobs();
+    loaderNotes.push(...fx.notes);
+    for (const j of fx.jobs) {
+      if (realJobs.length + fixtureJobs.length >= limit) break;
+      fixtureJobs.push(j);
     }
   }
 
   // Worker log presence (no excerpt unless asked).
   let workerLogAvailable = false;
   try {
-    const path = getWorkerLogPath();
-    await fs.access(path);
+    const wp = getWorkerLogPath();
+    await fs.access(wp);
     workerLogAvailable = true;
   } catch {
     workerLogAvailable = false;
   }
 
-  // Optional excerpt attach per job.
+  // Optional excerpt attach per real job (fixtures never get worker log).
   if (options.attachWorkerLog && workerLogAvailable) {
-    for (const e of allJobs) {
+    for (const e of realJobs) {
       const filter = e.job.id ?? e.job.taskId ?? e.job.scenario ?? null;
       const excerpt = filter
         ? await readWorkerLogExcerpt({ filterSubstring: filter, maxBytes: 4096 })
@@ -354,15 +472,26 @@ export async function aggregateForensics(
     }
   }
 
-  // Filter step (post-extraction).
-  const filtered = allJobs.filter((e) => matchesFilter(e.job, options.filter));
-
-  const reports: ForensicsReport[] = filtered.map((e) =>
-    buildForensicsReport(e.job, {
-      inputSource: `benchmark-run:${e.sourceName}`,
-      hints: { benchmarkReportFile: e.sourceName },
-    }),
+  // Filter step (post-extraction). Same filter applies to both pools.
+  const filteredReal = realJobs.filter((e) => matchesFilter(e.job, options.filter));
+  const filteredFixtures = fixtureJobs.filter((e) =>
+    matchesFilter(e.job, options.filter),
   );
+
+  const reports: ForensicsReport[] = [
+    ...filteredReal.map((e) =>
+      buildForensicsReport(e.job, {
+        inputSource: `benchmark-run:${e.sourceName}`,
+        hints: { benchmarkReportFile: e.sourceName },
+      }),
+    ),
+    ...filteredFixtures.map((e) =>
+      buildForensicsReport(e.job, {
+        inputSource: `fixture:${e.sourceName}`,
+        isFixture: true,
+      }),
+    ),
+  ];
   const summaries = reports.map(buildForensicsSummary);
 
   return {
@@ -371,6 +500,7 @@ export async function aggregateForensics(
     workerLogAvailable,
     workerLogPathHint: getWorkerLogPath(),
     benchmarkRunsScanned: filenames.length,
+    fixturesLoaded: fixtureJobs.length,
     loaderNotes,
   };
 }

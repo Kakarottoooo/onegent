@@ -1,0 +1,63 @@
+{
+  "id": "fixture-resy-no-availability",
+  "taskId": "fixture-task-resy-001",
+  "sessionId": "fixture-session-resy-001",
+  "provider": "resy",
+  "scenario": "R-001",
+  "status": "failed",
+  "errorMessage": "no slots in target window: 2026-06-15 19:00 +/- 30min for restaurant 'Bestia'",
+  "terminalReason": "PROVIDER_NO_SLOT",
+  "terminalCode": "PROVIDER_NO_SLOT",
+  "createdAt": "2026-05-04T16:00:00Z",
+  "updatedAt": "2026-05-04T16:02:14Z",
+  "params": {
+    "restaurant": "Bestia",
+    "city": "Los Angeles",
+    "date": "2026-06-15",
+    "time": "19:00",
+    "partySize": 2
+  },
+  "steps": [
+    {
+      "name": "search-availability",
+      "type": "provider.scan",
+      "__source": "lib/core/execution",
+      "timestamp": "2026-05-04T16:00:05Z",
+      "error": null,
+      "result": {
+        "scanned": true,
+        "slotsFound": 0
+      }
+    },
+    {
+      "name": "verdict",
+      "type": "control.verdict",
+      "__source": "lib/core/execution",
+      "timestamp": "2026-05-04T16:02:14Z",
+      "error": "no slot in window: 0 matching slots",
+      "result": {
+        "verdict": "no_availability_correct"
+      }
+    }
+  ],
+  "decisionLog": [
+    {
+      "at": "2026-05-04T16:00:05Z",
+      "level": "info",
+      "event": "scan_started",
+      "message": "probe-first availability scan started"
+    },
+    {
+      "at": "2026-05-04T16:02:10Z",
+      "level": "info",
+      "event": "scan_completed",
+      "message": "0 matching slots in target window (+/- 30min)"
+    },
+    {
+      "at": "2026-05-04T16:02:14Z",
+      "level": "info",
+      "event": "verdict",
+      "message": "no_availability_correct"
+    }
+  ]
+}

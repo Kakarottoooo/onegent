@@ -291,6 +291,13 @@ export interface ForensicsReport {
   hints: ForensicsHints;
   /** Loader-attached notes about source completeness. */
   notes: string[];
+  /**
+   * True when this report was loaded from a static fixture file
+   * under `lib/runtime-forensics/__fixtures__/`. Dashboards must
+   * visibly tag these rows `[FIXTURE]` so operators do not mistake
+   * fixtures for real evidence. Defaults to false.
+   */
+  isFixture: boolean;
 }
 
 /** Cross-reference + side-band info the loader hands the parser. */
@@ -314,6 +321,11 @@ export interface ForensicsSummary {
   ageSeconds: number | null;
   updatedAt: string | null;
   inputSource: string;
+  /**
+   * Mirrors `ForensicsReport.isFixture`. Defaults to false on real
+   * artifacts. Dashboards render a `[FIXTURE]` tag when true.
+   */
+  isFixture: boolean;
 }
 
 /* ─── Filter input shape (for API + dashboard) ────────────────────── */

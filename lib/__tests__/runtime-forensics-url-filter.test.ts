@@ -48,6 +48,7 @@ function makeSummary(overrides: Partial<ForensicsSummary> = {}): ForensicsSummar
     ageSeconds: null,
     updatedAt: null,
     inputSource: "benchmark-run:fake.json",
+    isFixture: false,
     ...overrides,
   };
 }
