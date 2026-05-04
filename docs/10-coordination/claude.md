@@ -7,34 +7,52 @@
 
 ## Currently Doing
 
-`claude/demo-control-room` — read-only Demo Control Room dashboard at
-`/dev/demo-control-room`. Founder-facing landing that aggregates the
-existing Phase 1 / Phase 1.5 / Phase 2 evidence into one screen for
-demo prep.
+Idle / pending review on `claude/demo-control-room` (and
+`claude/runtime-forensics-ux-polish-v2`).
 
-Scope (read-only, no provider/runtime/worker/DB touched):
+## Recently Shipped — claude/demo-control-room
 
-- `lib/demo-control-room/phase2-status.ts` — single structured
-  source for the 3 Phase 2 verticals (Expedia / Booking.com /
-  Hotels.com) + their "candidate, not live-verified" / "needs fresh
-  artifacts" copy. Page and audit doc both reference this.
-- `lib/demo-control-room/loader.ts` — pulls latest Phase 1
-  quality-gate verdict + latest founder-e2e verdict via the existing
-  `lib/quality-gate/loader.ts` + `lib/founder-e2e/loader.ts`. Extracts
-  the smoke check from the gate's `checks[]` when present (smoke does
-  not write its own artifact).
-- `lib/demo-control-room/script.ts` — deterministic safe demo script
-  + hard stops + recovery phrases + markdown export. Pure; covered
-  by tests.
-- `app/dev/demo-control-room/page.tsx` — server component composing
-  the three loader outputs + a small client `RefreshButton`
-  subcomponent that calls `router.refresh()`.
-- `app/dev/page.tsx` — adds a "Demo Control Room" card pointing to
-  the new route as the founder entry point.
-- `docs/40-phase1/DEMO_CONTROL_ROOM.md` — operator runbook for the
-  dashboard (what it reads, how to extend, safety boundary).
-- `docs/40-phase1/PHASE_1_FOUNDER_E2E.md` — gains a "Pre-demo: Demo
-  Control Room" pointer.
+5 feat/doc commits + 2 coord on
+`claude/demo-control-room`, based on
+`codex/integrated-preview-20260504 @ 5e6a246`.
+
+Read-only Demo Control Room dashboard at `/dev/demo-control-room`.
+Founder-facing landing that aggregates the existing Phase 1 / Phase
+1.5 / Phase 2 evidence onto one screen for demo prep.
+
+What landed:
+
+- `lib/demo-control-room/phase2-status.ts` (239 LOC) — structured
+  mirror of the 3 Phase 2 verticals (Expedia "candidate, not
+  live-verified"; Booking.com + Hotels.com "needs fresh artifacts
+  before live promises"). Single source of truth for the page.
+- `lib/demo-control-room/loader.ts` (305 LOC) — composes the
+  existing `lib/quality-gate/loader.ts` + `lib/founder-e2e/loader.ts`
+  into a `DemoControlRoomSnapshot`. Extracts the `smoke:phase1` check
+  from the latest gate JSON's `checks[]` when present. Graceful
+  empty state for every section.
+- `lib/demo-control-room/script.ts` (341 LOC) — deterministic safe
+  demo script: 6 pre-demo checklist items, 6 happy-path steps, 5
+  hard stops with recovery lines, 5 recovery phrases, plus a
+  markdown export with pipe-escaped table cells. ASCII-only.
+- `app/dev/demo-control-room/page.tsx` (server component) +
+  `refresh-button.tsx` (client). Sections: header / verdict trio
+  (gate / founder-e2e / smoke) / runtime-forensics quick-link /
+  Phase 2 panel (3 vertical cards w/ rationale + evidence) / safe
+  demo script / sources + loader notes. Tone-coded cards, ASCII
+  markers, no emoji, no live/run/retry buttons.
+- `app/dev/page.tsx` — new first card under PHASE_0_ROUTES pointing
+  at `/dev/demo-control-room`.
+- `docs/40-phase1/DEMO_CONTROL_ROOM.md` — operator runbook (what it
+  shows / what it doesn't / architecture / how to extend / before-
+  during-after-demo procedure / hold rules).
+- `docs/40-phase1/PHASE_1_FOUNDER_E2E.md` — pre-demo cross-link.
+
+Verification:
+
+- 68 vitest cases pass (17 phase2-status + 31 loader + 20 script).
+- `npx tsc --noEmit --pretty false` clean.
+- `npm run gate:phase1 -- --allow-known-drift` 8/0/0/1.
 
 Hard rules (verified per commit):
 

@@ -28,6 +28,17 @@ small.
 
 ## Live Activity
 
+- 2026-05-04 claude: shipped `claude/demo-control-room` (5 commits +
+  this coord). New read-only `/dev/demo-control-room` RSC page +
+  `lib/demo-control-room/` module (phase2-status / loader / script,
+  68 vitest cases) + `docs/40-phase1/DEMO_CONTROL_ROOM.md` runbook +
+  `PHASE_1_FOUNDER_E2E.md` cross-link. Surfaces latest Phase 1 gate /
+  founder-e2e / smoke verdict, runtime-forensics deep link, Phase 2
+  vertical posture (Expedia "candidate", hotels "needs fresh
+  artifacts"), and a deterministic safe demo script (pre-demo
+  checklist / happy path / hard stops / recovery phrases) with
+  paste-ready markdown export. tsc clean, Phase 1 gate 8/0/0/1.
+  Pushing.
 - 2026-05-04 claude: started `claude/demo-control-room` based on
   `codex/integrated-preview-20260504 @ 5e6a246`. Scope: read-only
   `/dev/demo-control-room` RSC page surfacing latest Phase 1 gate
