@@ -1,8 +1,8 @@
 # Codex - coordination state
 
 > **Branch**: `codex/openai-chat-model-env`
-> **Last updated**: 2026-05-04 01:20 UTC
-> **Last commit**: `ff84707`
+> **Last updated**: 2026-05-04 02:35 UTC
+> **Last commit**: `1b7938e`
 >
 > Claude reads this at session start. I write to it before each push.
 > See `CLAUDE.md` section "coordination protocol".
@@ -11,27 +11,29 @@
 
 ## Currently doing
 
-Shipping a no-token R-003 live-run follow-up after `phase0-resy-2026-05-04T01-03-14-028Z.json`.
+Shipping a no-token Resy availability probe so we stop burning Computer Use on cases with no real slot.
 
-Latest R-003 live result:
-- Command run by Codex in `C:\Users\Gzw19\onegent-e2e-20260503`:
-  `npx tsx scripts\run-phase0-resy-benchmark.ts --case R-003 --live-openai --allow-failures`
-- Report: `benchmark/runs/phase0-resy-2026-05-04T01-03-14-028Z.json`
-- Task/job: `b42ac0dc-f1d8-403c-b353-c273e14fb5a0` / `fb2b2f5a-d46c-4734-9f05-2a58f53f9e5a`
-- Outcome: safe failure, not severe. It did not reach the Resy phone/OTP ladder.
-- Root cause from DB/audit logs: Computer Use opened Resy, repaired from `buvette` to `buvette-nyc`, then returned `Unable to complete due to the venue page not returning availability slots for the requested date/time`.
-- Runner misclassified that as `F-PROVIDER-UNKNOWN`; R-003 accepts `F-AVAIL-NONE`.
+Current finding:
+- R-003 is not a useful fill/OTP test right now. The Resy public search API returns exact venue `buvette-nyc` but zero target-window slots.
+- The new probe uses Resy's own frontend API (`POST /3/venuesearch/search`) and exact `resySlug` matching, so it avoids false positives from visible filter text and avoids wrong-venue matches like "Don Angie" -> "Don Don".
+- Latest no-token full probe found three valid live-fill candidates:
+  - `R-030` Charlie Bird, 2026-05-08 20:00, party 2, exact slug, 12 matching slots. Recommended first.
+  - `R-051` Loring Place, 2026-05-04 19:00, party 4, 12 matching slots.
+  - `R-052` Pasquale Jones, 2026-05-09 20:00, party 4, 4 matching slots.
 
-Current patch:
-- Canonicalize R-003 `resySlug` to `buvette-nyc`, avoiding the exact-venue repair hop.
-- Broaden `NO_AVAILABILITY_PATTERN` in the Phase 0 runner so "not returning availability slots" maps to `F-AVAIL-NONE` / `no_availability_correct`.
-- Verification: root `tsc` clean after clearing generated `.next`, strict drift clean, and R-003 dry-run shows startUrl `https://resy.com/cities/new-york-ny/venues/buvette-nyc?...`.
+Verification:
+- `npm run probe:resy` passed and printed next single-case command:
+  `npx tsx scripts\run-phase0-resy-benchmark.ts --case R-030 --live-openai --allow-failures`
+- `npx tsc --noEmit --pretty false` passed after clearing generated `.next`.
+- No live OpenAI / Computer Use run was executed in this patch.
 
 Next live gate:
-- Do not run live again automatically. If founder approves another token burn, rerun exactly one R-003 case and check whether canonical slug reaches slots/OTP.
-- If it again fails before OTP, next work is Computer Use observability: persist screenshots/action traces for the Resy page, not more blind prompt tweaks.
+- Do not rerun R-003 for fill/OTP. Use `R-030` if founder approves one visible live run.
+- If `R-030` reaches contact/OTP, use that as the Resy fill-closure path. If it fails before contact/OTP, capture logs/screenshots and do not retry blindly.
 
-Previous shipped item: `1ef97fb fix(resy): add phone verify strategy ladder`.
+Claude task suggestion:
+- Do not touch Resy provider/runtime/runner while Codex owns it.
+- Useful parallel work: dashboard for `resy-availability-probe-*.json`, showing recommended cases, exact venue match errors, and next safe single-case command.
 
 Latest Resy Phase 0 prep:
 - We did not run live OpenAI/Computer Use. This was a no-token hardening pass before R-003 live.
