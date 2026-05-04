@@ -8,6 +8,15 @@ This card is for the person driving the demo. It is not approval to start
 provider production sessions, enter payment details, enter OTP codes, solve
 CAPTCHA, shortcut login, or click final confirmation.
 
+Before the demo, run the no-live freeze checker:
+
+```powershell
+npx tsx scripts/check-demo-freeze.ts
+```
+
+The checker reads local artifacts and docs only. It does not start providers,
+workers, payment, OTP, CAPTCHA, login, retry, or final confirmation flows.
+
 ## 30-Second Product Pitch
 
 "Onegent turns a messy travel or restaurant request into a tracked task with
