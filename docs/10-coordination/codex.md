@@ -2,7 +2,7 @@
 
 > **Branch**: `codex/integrated-preview-20260504`
 > **Last updated**: 2026-05-04
-> **Last commit**: pending docs coordination cleanup on top of `677cc29`
+> **Last commit**: pending integrated dev-page dogfood cleanup on top of `9fdf8e5`
 >
 > Claude reads this at session start. I write to it before each push.
 > See `CLAUDE.md` section "coordination protocol".
@@ -11,8 +11,7 @@
 
 ## Currently doing
 
-Integrated preview coordination cleanup before returning to Expedia provider
-runtime debugging.
+Integrated preview dogfood and provider-runtime handoff cleanup.
 
 Completed in this pass:
 - Merged `origin/claude/integrated-preview-review-20260504` into the
@@ -24,12 +23,40 @@ Completed in this pass:
 - Resolved R3 by replacing stale `docs/10-coordination/claude.md` content with
   an integrated-preview status file that includes the Agent Quickstart,
   Track A/Track B split, current merged Claude branches, and safety rails.
+- Fixed integrated preview dev-page crashes caused by client components
+  importing server-only filesystem modules:
+  - `app/dev/founder-e2e/page.tsx`
+  - `app/dev/restaurant-readiness/page.tsx`
+  - `app/dev/resy-run-analysis/page.tsx`
+  - `app/dev/resy-probe-runs/page.tsx`
+- Rewrote mojibaked `docs/00-start-here/PHASE_STATUS.md` as a short ASCII
+  status overview.
+- Verified local dogfood on `http://127.0.0.1:3001`:
+  - `/dev`
+  - `/dev/phase1-quality-gates`
+  - `/dev/founder-e2e`
+  - `/dev/restaurant-readiness`
+  - `/dev/resy-run-analysis`
+  - `/dev/resy-probe-runs`
+  - `/dev/debug-artifacts`
+- Verified `npx tsc --noEmit --pretty false`.
+- Verified `npm run gate:phase1 -- --allow-known-drift` with 9/9 required
+  checks passing.
 
-Next after verification:
-- Run `npx tsc --noEmit --pretty false`.
-- Run `npm run gate:phase1 -- --allow-known-drift`.
-- Then switch to `C:\Users\Gzw19\onegent-e2e-20260503` for Expedia worker
-  evidence and root-cause debugging.
+Provider-runtime side branch:
+- Created and pushed `codex/expedia-flight-card-fallback` from
+  `origin/codex/openai-chat-model-env`.
+- DB evidence showed the latest Expedia flight job had a valid `__source`
+  marker and correct params. The active failure was not the legacy-shape worker
+  bug; it was Expedia flight-card DOM scan failure while the target Southwest
+  card was visible in screenshots.
+- The Expedia branch adds a visible-text locator fallback when the bulk card
+  scan throws, with targeted Vitest, TypeScript, and drift checks passing.
+
+Next:
+- Review/cherry-pick or merge `codex/expedia-flight-card-fallback` into the
+  integrated preview branch when ready.
+- Do not run live provider tasks without explicit founder approval.
 
 Historical current-state handoff below:
 

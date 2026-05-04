@@ -1,202 +1,153 @@
-# Phase Status — single-source overview
+# Phase Status - single-source overview
 
-> **For**: founder · codex · Claude — quick read before any planning conversation
-> **Last updated**: 2026-05-03 (post Phase 1 path B hardening + smoke harness)
-> **Maintained by**: Claude (Track B), with codex sign-off on Phase 0 / 0B / executor / auth rows
-> **Read this after**: `docs/10-coordination/{codex,claude}.md` (live state) and `docs/00-start-here/PROJECT_SUMMARY.md` (long-form narrative)
-
----
+> For: founder, Codex, Claude, and future agents.
+> Last updated: 2026-05-04.
+> Read after: `docs/INDEX.md`, `docs/00-start-here/PROJECT_SUMMARY.md`,
+> and `docs/10-coordination/HUDDLE.md`.
 
 ## TL;DR
 
-> **当前不进入 Phase 2**。先闭环 Phase 0 (R-003 live smoke + warm session) 和 Phase 1 (founder E2E walkthrough)，再开 Phase 0B (Resy 5→25 case + OpenTable v1 coverage)。Phase 2 vertical 扩张要等 Phase 0B 完成。
+Do not enter Phase 2 yet. Stabilize Phase 0, Phase 1, and Phase 1.5 first.
 
-```
-[Phase 0A] Resy + Computer Use 闭环          ████████░░  ~85%   ←— in flight
-[Phase 0B] Restaurant v1 (Resy 25 + OT)     ░░░░░░░░░░    0%   ←— gated by 0A
-[Phase 1]  First paying user 端到端           █████████░  ~95%   ←— founder E2E pending
-[Phase 1.5] UX polish from founder E2E       ░░░░░░░░░░    0%   ←— catch-all bucket
-[Phase 2]  Vertical expansion (Hotel/Flight)  ░░░░░░░░░░    0%   ←— FROZEN until 0B+1 closed
-[Phase 3]  Inspire / B2B / marketplace        ░░░░░░░░░░    0%   ←— deferred
-[Phase 4]  Data flywheel + Browserbase Pro   ░░░░░░░░░░    0%   ←— trigger ≥500 paying
-[Phase 5]  Self-built browser farm            ░░░░░░░░░░    0%   ←— trigger ≥$1500/mo or seed
-```
+| Phase | Status | Current gate |
+| --- | --- | --- |
+| Phase 0A - Restaurant provider closure | In flight, about 85% | Resy still needs a probe-selected live fill/OTP/safe-handoff run. |
+| Phase 0B - Restaurant v1 coverage | Gated | Start after 0A proves at least one real fill/OTP or safe handoff path. |
+| Phase 1 - First paying user path | Mostly ready | Founder E2E walkthrough remains the human acceptance gate. |
+| Phase 1.5 - QA and polish | Active | Quality gate and dev workbenches are integrated and passing. |
+| Phase 2 - Vertical expansion | Frozen | Do not add new vertical scope until 0/1/1.5 are stable. |
 
----
+## Current Verified State
 
-## Phase definitions
+- Integrated preview branch: `codex/integrated-preview-20260504`.
+- Runtime/debug branch: `codex/openai-chat-model-env`.
+- Expedia fix branch: `codex/expedia-flight-card-fallback`.
+- 2026-05-04 integrated preview verification:
+  - `npx tsc --noEmit --pretty false` passed.
+  - `npm run gate:phase1 -- --allow-known-drift` passed, 9/9 required checks.
+  - `/dev`, `/dev/phase1-quality-gates`, `/dev/founder-e2e`,
+    `/dev/restaurant-readiness`, `/dev/resy-run-analysis`,
+    `/dev/resy-probe-runs`, and `/dev/debug-artifacts` all returned 200 on
+    local dogfood.
 
-| Phase | 名字 | What "done" means | Est calendar |
-|---|---|---|---|
-| **0A** | Resy + Computer Use | 1 R-003 live smoke 在 spec 范围内返回 booking-ready / safe handoff / correct no-availability，且 0 severe error | days |
-| **0B** | Restaurant v1 | Resy smoke subset → observed Resy fixture suite → OpenTable parallel coverage（OpenTable Phase 0） | 2-3 weeks |
-| **1** | First paying user | Founder 完整跑 `homepage chat → /tasks/[taskId] → ready_for_confirmation → 一键 confirm`，cookie-auth 全程 | days |
-| **1.5** | Polish | Phase 1 founder E2E 暴露的 UX gap 集合（迟到 ticket 桶）| as needed |
-| **2** | Vertical expansion | OpenTable Phase 0 + Booking.com hotel + Expedia hotel + Flights + Activities | 3-4 months |
-| **3** | Inspire / marketplace | Daydream Explorer + 30-template gallery + ChatGPT Apps / claude.ai listing + B2B Lane C cold outreach | quarters |
-| **4** | Data flywheel | Layer A + B 上线; Browserbase Pro upgrade; ≥100 real bookings 飞轮启动 | quarter+ |
-| **5** | Scale infra | Self-hosted browser farm; replaces Browserbase 长期成本 | seed-funded |
+## Phase 0A - Restaurant Provider Closure
 
----
+Goal: one restaurant provider flow reaches an accepted safe outcome:
+`ready_for_confirmation`, `safe_handoff`, `OTP/login required`, or a correct
+no-availability classification. The system must never submit final booking,
+payment, OTP, CAPTCHA, or account-sensitive actions automatically.
 
-## Phase 0A — Resy + Computer Use (~85%)
+Completed:
 
-**Doctrine** (locked 2026-05-02): Resy 单 vendor + Computer Use (gpt-5.5 GA) 端到端闭环。1 个 vendor 闭环够才扩 OpenTable，避免 N 平台 N 状态机 in-flight 同步崩。
+- OpenTable can reach checkout/contact boundaries and stop before final submit.
+- Resy probe-first protocol exists and is represented in dev dashboards.
+- Restaurant readiness surfaces exist:
+  - `docs/20-phase0-restaurant/RESY_AVAILABILITY_PROBE_PROTOCOL.md`
+  - `docs/20-phase0-restaurant/RESY_LIVE_DEBUG_PLAYBOOK.md`
+  - `docs/20-phase0-restaurant/R003_LIVE_SMOKE_RUNBOOK.md`
+  - `/dev/restaurant-readiness`
+  - `/dev/resy-probe-runs`
+  - `/dev/resy-run-analysis`
 
-**已完成** (verbatim from `origin/master:docs/10-coordination/codex.md`)
-- ✅ Computer Use GA 接入 `lib/execution-v2/` 路径 (codex `620444a`)
-- ✅ R-003 smoke #1: navigation drift fix (codex `a0ce2ee`) — exact venue URL
-- ✅ R-003 smoke #2: timeout fix (codex `2cbddfc`) — visual time ladder 收敛
-- ✅ § 7.5 OTP transitional rule 写入 spec
-- ✅ Q11 R-003 expectedOutcomes 显式扩 `no_availability_correct`（option a）
-- ✅ Token 守卫: `--live-openai` + `--confirm-suite` 双层
-- ✅ Resy fixture exists：`benchmark/restaurant-resy-phase0.json` 当前 observed 22 rows（doc 目标 25；fixture notes 明确不 invent missing cases）
+Still open:
 
-**未完成**
-- ⏳ R-003 smoke #3 live retry — **2026-05-04 跑了一次** (`phase0-resy-2026-05-04T01-03-14-028Z.json`) outcome = `no_availability_correct` (Q11(a)). 这是 safe failure, 不是 fill failure — 只证明了 no-availability path 工作, **没证明 fill/OTP closure**.
-- ⏳ Probe-first protocol: 下一次 live retry 前必须先跑 `npm run probe:resy` + 看 `/dev/resy-probe-runs` dashboard 找到 `use_for_live_fill_test` case (例如 R-030 Charlie Bird). Codex 已 ship probe runner (`024dd05`)；Claude 已 ship dashboard. 协议 doc: `docs/20-phase0-restaurant/RESY_AVAILABILITY_PROBE_PROTOCOL.md`.
-- ⏳ Restaurant readiness control center: `/dev/restaurant-readiness` aggregates latest probe, benchmark report, and debug artifacts to choose the next safe single live case before any token spend.
-- ⏳ Warm session PoC — blocked: 还没有 Resy case 真撞到 OTP wall；先跑 readiness-recommended case (例如 R-030 if still valid) 看会不会触发 OTP, 再决定 warm session 是否启动.
-- ⏳ Resy observed fixture suite 跑（**严格 gated**：probe 找到 ≥1 个 `use_for_live_fill_test` case + 该 case 真跑通 fill/OTP 之后才允许）
+- Resy has not closed a live fill/OTP path. Do not blind-run the same case.
+- Before any Resy live spend, use the probe/readiness flow to pick one case
+  with real target-window availability.
+- Treat repeated Resy API 500s or desktop/mobile network differences as
+  provider/network/session degradation, not automatically as provider code bugs.
 
-**下一步 owner**：codex（runner + provider 持续修；form strategy ladder + readiness-driven case selection）；founder（批准 token spend）
+## Phase 0B - Restaurant v1 Coverage
 
-**进入 Phase 0B 的门**: 至少 1 个 readiness-recommended case 在 probe 下 `use_for_live_fill_test` + live 跑通到 `ready_for_confirmation` 或 `safe_handoff` 带 `F-PROVIDER-OTP` (per § 7.5), then decide whether warm session PoC is needed.
+Goal: broaden from one proven restaurant flow to repeatable Restaurant v1
+coverage across Resy/OpenTable fixtures.
 
----
+Entry gate:
 
-## Phase 0B — Restaurant v1 (0%, gated)
+- At least one readiness-recommended Resy case reaches fill/OTP/safe handoff,
+  or OpenTable provides an equivalent safe contact/confirmation boundary.
 
-**Goal**: Resy observed fixture suite（向 25-case 补齐）≥ 80% booking-ready + OpenTable Phase 0 同样标准。这是声明 "Restaurant 这个 vertical 真的可用" 的门。
+Do not start broad fixture burn until that entry gate is met.
 
-**已完成**: 无（gated by 0A）
+## Phase 1 - First Paying User Path
 
-**未完成**:
-- Resy smoke subset 单跑通过（从 R-003 + 其他 stable cases 开始）
-- Resy observed fixture suite 通过 4-metric gate (≥80% booking-ready / ≥95% safe-outcome / =0 severe / 100% taxonomy)，并补齐 doc 目标 25 cases 的缺口
-- OpenTable Phase 0 spec 写出来（mirror docs/20-phase0-restaurant/BENCHMARK_RESTAURANT_100.md 格式）
-- OpenTable benchmark fixture（25 cases）
-- OpenTable adapter 在 `lib/booking-autopilot/providers/opentable-com.ts` 跑通基线
+Goal: founder can complete the user-facing flow from chat to task page to safe
+provider handoff/confirmation boundary, with profile gap handling and cookie
+auth working.
 
-**下一步 owner**：codex（spec + adapter + benchmark），Claude（observability dashboard 适配）
+Completed:
 
-**进入 Phase 1 是 Phase 0B 的并行支线** — Phase 1 不依赖 0B（founder 用 R-003 单 case 验真），但 0B 完成后才有"Restaurant vertical declared"的资格。
+- Profile gap handling is wired into homepage chat and task flow.
+- Cookie-auth API/proxy path exists.
+- Founder E2E checklist and runner exist.
+- Phase 1 smoke and quality-gate suites exist.
 
----
+Still open:
 
-## Phase 1 — First paying user (~95%)
+- Founder manual E2E walkthrough remains the final acceptance check.
+- OTP resume remains conditional and should only be built when a real Phase 0
+  flow proves it is needed.
 
-**Goal**: 真用户在 production，cookie-auth 全程，跑通 `chat → /tasks/[taskId] → ProfileGapCard 内联 → ready_for_confirmation → 一键 confirm`。
+Primary docs:
 
-**已完成**:
-- ✅ #1 Master typecheck cleanup — codex `3c95561`
-- ✅ #2 PATCH `/api/v1/users/me/profile` 端点 (cookie + API key) — codex `48c80b2`
-- ✅ #3 Cookie-auth proxy `/api/v1/*` — codex `48c80b2`
-- ✅ #4 Track B Phase 1 UI merge — codex `c2be764`
-- ✅ #6 `/tasks/[taskId]` real API wire — Claude `e098252`
-- ✅ #7 ProfileGapCard 接入 homepage chat
-  - Path A `apply_profile_patch` 中流 dispatcher — `8500af3`
-  - Path B inline ProfileGapCard 替代 modal — `4cdaa36`
-  - Codex safety fix `dispatchProfilePatch → Promise<boolean>` 阻断失败下的 booking resume
-  - Path B hardening: 抽出 `lib/profile-gap-decision.ts` + `lib/profile-gap-on-save.ts` + 19 tests + `/dev/path-b-demo` — `f423b56`
-- ✅ Q15 `payload.profile_gap` 服务端发出 — `7289ba0`
-- ✅ Audit Finding 5: cancel 更新 `task.state` — `7289ba0`
-- ✅ no-token founder smoke harness `npm run smoke:phase1` — `f9dd0ba`
+- `docs/40-phase1/PHASE_1_FOUNDER_E2E.md`
+- `docs/40-phase1/AUTONOMOUS_FOUNDER_E2E.md`
+- `docs/40-phase1/PHASE_1_QUALITY_GATE.md`
 
-**未完成**:
-- ⏳ #8 Founder E2E walkthrough（60-90 分钟手动；用户自跑；用 `docs/40-phase1/PHASE_1_FOUNDER_E2E.md` 作 checklist + `npm run smoke:phase1` 作 30 秒 preflight）
-- ⏸ #5 OTP resume — conditional：只在 Phase 0A warm session 失败 + 选 path C（Gmail OTP resume fallback）时触发
+## Phase 1.5 - Quality Gate And Polish
 
-**下一步 owner**：用户（founder E2E）；codex（如果 #5 fires）
+Goal: keep Phase 1 shippable while polishing the issues found during founder
+dogfood.
 
----
+Current state:
 
-## Phase 1.5 — Polish bucket (0%, lazy) + Quality Gate
+- `npm run gate:phase1 -- --allow-known-drift` is the canonical quick verdict.
+- `/dev/phase1-quality-gates` reads the latest gate reports.
+- `/dev/founder-e2e` is client-safe after import-boundary fixes.
+- The 2026-05-04 integrated preview dogfood passed all listed dev pages.
 
-**Goal**: founder E2E 暴露的所有"不是 blocker 但烦人"的 UX gap 都进这个桶。每个 ≤ 1 day 工作量。
+When a task lands:
 
-**Process**: founder 在 walkthrough 时记 bug，每条进 `docs/40-phase1/PHASE_1_FOUNDER_E2E.md` § 8 bug 模板。Phase 1 declared 后批量处理。
+- Update `docs/10-coordination/HUDDLE.md` for short-term handoff.
+- Update `docs/10-coordination/codex.md` or `docs/10-coordination/claude.md`
+  for agent-specific state.
+- Update the closest phase/runbook doc only if the durable operating procedure
+  changed.
 
-**Quality Gate (in progress, claude/phase-1-5-quality-gate-orchestrator)**:
-- `npm run gate:phase1` 一条命令产出 verdict + paste-ready markdown bug report
-- Required: tsc + 8 vitest 套件 + check-drift（含 `--allow-known-drift` 转 known_existing_failure）
-- Optional `--include-smoke` / `--include-e2e`：依赖 dev server，缺则 env_blocked
-- Verdict: `pass` / `needs_polish` / `fail` / `env_blocked`，exit codes `0/0/1/2`
-- 配套 `/dev/phase1-quality-gates` dashboard 看历史 run + 复用 stdout/stderr tail
-- 完整规范见 `docs/40-phase1/PHASE_1_QUALITY_GATE.md`
+## Expedia / Flight Runtime Status
 
----
+The earlier legacy-shape worker error is considered fixed. The latest reproduced
+flight failure had a valid `__source` marker and correct Expedia params, but the
+provider DOM scan failed while the target Southwest card was visible.
 
-## Phase 2 — Vertical expansion (0%, FROZEN)
+Current fix branch:
 
-**Status**: ❄️ FROZEN until Phase 0B + Phase 1 都 declared。不允许任何 vertical 实现代码 leak 到 master。
+- `codex/expedia-flight-card-fallback`
+- Adds a visible-text locator fallback when the bulk Expedia flight-card DOM
+  scan throws.
+- Verified with targeted Vitest, TypeScript, and drift check on 2026-05-04.
 
-**Scope when unfrozen** (estimated 3-4 months):
-- OpenTable Phase 0 — Phase 0B 已经预热; 真扩到 vertical-declared 还要 2 weeks
-- Booking.com hotel — 2-3 weeks
-- Expedia hotel — 1 week (cribs Booking 模式)
-- Flights (DOB / passport / KTN 复杂) — 3-4 weeks
-- Activities — 1 week
+Next step before merging into integrated preview:
 
----
+- Review the Expedia fix branch and decide whether to merge/cherry-pick it into
+  the integrated preview branch after current docs/dev-page stabilization.
 
-## Phase 3 — Inspire / B2B / marketplace (0%, deferred)
+## Phase 2 - Frozen
 
-**Scope when opened**:
-- Daydream Explorer + 30-template gallery (NOT LLM-free-form — locked decision)
-- Newsletter / HN / PH launch
-- ChatGPT Apps + claude.ai marketplace 优先 listing
-- B2B Lane C cold outreach (cofounder agent / B2B integrator)
-- Subscription gamification (referral / payer 折扣 / credit)
+Do not expand vertical scope or add new live provider work until Phase 0,
+Phase 1, and Phase 1.5 are stable enough to dogfood without repeated handoff
+confusion.
 
----
+Allowed while frozen:
 
-## Phase 4 — Data flywheel + infra (0%, trigger-gated)
+- Fix runtime bugs exposed by current founder tasks.
+- Improve observability and debug workbenches for existing restaurant/flight
+  flows.
+- Clean documentation structure and coordination state.
 
-**Trigger**: ≥ 100 real bookings OR ≥ 500 paying users OR ≥ $1500/mo Browserbase bill OR cofounder OR seed round。
+Not allowed while frozen:
 
-**Scope**:
-- Layer A 飞轮: 场馆 / Provider 健康度 (days-weeks TTL) ✅ 设计已锁
-- Layer B: provider 短时态 (5-15 min TTL) ✅ 设计已锁
-- Layer C live availability ❌ 显式不做（5 min volatility + per-device fingerprint + stale-cache-worse-than-no-cache）
-- Browserbase Pro upgrade
-
----
-
-## Phase 5 — Self-hosted browser farm (0%, seed-gated)
-
-**Trigger**: seed round closed AND Browserbase Pro 月单 > $5k。
-
-**Scope**: 自建 Chromium pool / queue / cookie store 取代 Browserbase。这个工作量 ≈ 1.5 quarter，需要 dedicated infra eng。
-
----
-
-## Cross-phase 锁定决策
-
-| 决策 | Phase | 锁定来源 |
-|---|---|---|
-| Computer Use 是 default executor | 0+ | `docs/30-provider-debug/EXECUTOR_V2_PIVOT.md` |
-| 不引入 3rd-party browser-agent (MultiOn / Skyvern / browser-use) | 全部 | chat decision 2026-05-02 |
-| Hybrid positioning (NOT pure-infra, NOT pure-consumer) | 2-3 | `docs/90-archive/history/PROJECT_SUMMARY_FULL_2026-05-03.md` cont. 2 |
-| Inspire mode 30-template gallery (NOT LLM-free-form) | 3 | chat decision 2026-05-02 |
-| Data flywheel: A + B 做; C 不做 | 4 | chat decision 2026-05-02 |
-| Stripe live key swap deferred | 2+ | `docs/40-phase1/PHASE_1_PLAN.md` § R5 |
-| 协作协议 via `docs/10-coordination/{codex,claude}.md` | 全部 | `CLAUDE.md` § 协作协议 |
-| Branch hygiene: 每个 task 从最新 origin/master 起新 branch | 全部 | `origin/master:docs/10-coordination/codex.md` 2026-05-03 |
-
----
-
-## 关联文档
-
-- **Live state**: `docs/10-coordination/{codex,claude}.md`
-- **Phase 0 spec**: `docs/20-phase0-restaurant/BENCHMARK_RESTAURANT_100.md` (含 § 7.5 OTP transitional)
-- **Phase 1 plan**: `docs/40-phase1/PHASE_1_PLAN.md`
-- **Founder E2E**: `docs/40-phase1/PHASE_1_FOUNDER_E2E.md`
-- **Smoke harness**: `docs/40-phase1/PHASE_1_E2E_SMOKE.md`
-- **R-003 live runbook**: `docs/20-phase0-restaurant/R003_LIVE_SMOKE_RUNBOOK.md`
-- **UI migration**: `docs/40-phase1/UI_MIGRATION_MAP.md`
-- **OTP path D**: `docs/20-phase0-restaurant/WARM_SESSION_STRATEGY.md`
-- **Executor pivot**: `docs/30-provider-debug/EXECUTOR_V2_PIVOT.md`
-- **NLU contract**: `docs/50-product-areas/NLU_CONSUMER_CONTRACT.md`
-- **Current project summary**: `docs/00-start-here/PROJECT_SUMMARY.md`
-- **Long-form narrative / historical cont. 1/2/3**: `docs/90-archive/history/PROJECT_SUMMARY_FULL_2026-05-03.md`
+- New provider verticals.
+- Payment automation.
+- OTP/CAPTCHA/login bypass.
+- Final booking confirmation automation.

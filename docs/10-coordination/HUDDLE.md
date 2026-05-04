@@ -28,6 +28,15 @@ small.
 
 ## Live Activity
 
+- 2026-05-04 codex: took ownership of local dev server on port 3001 for
+  integrated preview dogfood. Fixed client/server import-boundary crashes in
+  `/dev/founder-e2e`, `/dev/restaurant-readiness`, `/dev/resy-run-analysis`,
+  and `/dev/resy-probe-runs`. Verified `/dev`, all six target dev pages, root
+  `tsc`, and `npm run gate:phase1 -- --allow-known-drift` pass.
+- 2026-05-04 codex: shipped Expedia fallback fix on
+  `codex/expedia-flight-card-fallback`. The legacy-shape worker error was not
+  present in the latest DB evidence; the active bug was Expedia flight-card DOM
+  scan failure while the target Southwest card was visible.
 - 2026-05-04 codex: merged
   `origin/claude/integrated-preview-review-20260504` into
   `codex/integrated-preview-20260504`; it only moved stray root docs into

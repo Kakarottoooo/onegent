@@ -173,6 +173,12 @@ Example from 2026-05-04 flight failure:
 - Screenshot showed the target Southwest card visibly present.
 - Conclusion: provider runtime selector/DOM scan failed. NLU and core marker
   were not the root cause.
+- Fix branch: `codex/expedia-flight-card-fallback`.
+  - Adds a visible-text locator fallback when the bulk flight-card DOM scan
+    throws.
+  - Keeps the safety boundary unchanged: no payment, OTP, CAPTCHA, login bypass,
+    or final booking confirmation automation.
+  - Verified with targeted Expedia/flight Vitest, TypeScript, and drift check.
 
 ## 5. Provider-Specific Notes
 

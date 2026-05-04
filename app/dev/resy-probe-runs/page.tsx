@@ -27,24 +27,162 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import {
-  buildNextLiveCommand,
-  countByRecommendation,
-  explainRecommendation,
-  isExactVenueMatch,
-  parseResyProbeUrl,
-  RECOMMENDATION_LABEL,
-  RECOMMENDATION_TONE,
-  type ResyProbeCase,
-  type ResyProbeRun,
-  type ResyProbeRunSummary,
-  type ResyProbeSlot,
-} from "@/lib/benchmark/resy-probe-report";
-
 type LoadState =
   | { status: "loading" }
   | { status: "error"; message: string }
   | { status: "ready" };
+
+interface ResyProbeSlot {
+  text: string;
+  minutes: number;
+  diffMinutes: number;
+  dateIso?: string | null;
+  href?: string | null;
+  tagName?: string;
+  source: "api" | "dom";
+  token?: string | null;
+  venueSlug?: string | null;
+  venueName?: string | null;
+}
+
+interface ResyProbeCase {
+  caseId: string;
+  restaurantName: string;
+  url: string;
+  targetTime: string;
+  targetMinutes: number;
+  allowedWindowMinutes: number;
+  probeSource: "api" | "api+browser" | "browser";
+  apiStatus?: number;
+  apiVenueName?: string;
+  apiVenueSlug?: string;
+  apiError?: string;
+  pageUrl: string;
+  title: string;
+  slots: ResyProbeSlot[];
+  matchingSlots: ResyProbeSlot[];
+  noAvailabilitySignals: string[];
+  blockerSignals: string[];
+  bodySnippet: string;
+  screenshotPath?: string;
+  recommendation: "use_for_live_fill_test" | "no_matching_slot" | "blocked_or_unknown";
+}
+
+interface ResyProbeRun {
+  runId: string;
+  createdAt: string;
+  suitePath: string;
+  visible: boolean;
+  results: ResyProbeCase[];
+  recommendedCase?: ResyProbeCase;
+  recommendedCases: ResyProbeCase[];
+}
+
+interface ResyProbeRunSummary {
+  file: string;
+  createdAt: string | null;
+  total: number | null;
+  liveOk: number | null;
+  noMatchingSlot: number | null;
+  blockedOrUnknown: number | null;
+  recommendedCaseId: string | null;
+}
+
+interface ResyProbeUrlParts {
+  date: string | null;
+  covers: number | null;
+  time: string | null;
+  resySlug: string | null;
+  citySlug: string | null;
+}
+
+const RECOMMENDATION_LABEL: Record<ResyProbeCase["recommendation"], string> = {
+  use_for_live_fill_test: "Live OK",
+  no_matching_slot: "No matching slot",
+  blocked_or_unknown: "Blocked / unknown",
+};
+
+const RECOMMENDATION_TONE: Record<ResyProbeCase["recommendation"], "good" | "ok" | "warn"> = {
+  use_for_live_fill_test: "good",
+  no_matching_slot: "ok",
+  blocked_or_unknown: "warn",
+};
+
+function countByRecommendation(results: Pick<ResyProbeCase, "recommendation">[]): {
+  use_for_live_fill_test: number;
+  no_matching_slot: number;
+  blocked_or_unknown: number;
+} {
+  const out = {
+    use_for_live_fill_test: 0,
+    no_matching_slot: 0,
+    blocked_or_unknown: 0,
+  };
+  for (const r of results) {
+    if (r.recommendation === "use_for_live_fill_test") out.use_for_live_fill_test++;
+    else if (r.recommendation === "no_matching_slot") out.no_matching_slot++;
+    else if (r.recommendation === "blocked_or_unknown") out.blocked_or_unknown++;
+  }
+  return out;
+}
+
+function parseResyProbeUrl(rawUrl: string): ResyProbeUrlParts {
+  const empty: ResyProbeUrlParts = {
+    date: null,
+    covers: null,
+    time: null,
+    resySlug: null,
+    citySlug: null,
+  };
+  let parsed: URL;
+  try {
+    parsed = new URL(rawUrl);
+  } catch {
+    return empty;
+  }
+  const segments = parsed.pathname.split("/").filter(Boolean);
+  let citySlug: string | null = null;
+  let resySlug: string | null = null;
+  for (let i = 0; i < segments.length - 1; i++) {
+    if (segments[i] === "cities") citySlug = segments[i + 1] ?? null;
+    if (segments[i] === "venues") resySlug = segments[i + 1] ?? null;
+  }
+  const dateRaw = parsed.searchParams.get("date");
+  const seatsRaw = parsed.searchParams.get("seats");
+  const timeRaw = parsed.searchParams.get("time");
+  const seats = seatsRaw ? Number(seatsRaw) : NaN;
+  return {
+    date: dateRaw && /^\d{4}-\d{2}-\d{2}$/.test(dateRaw) ? dateRaw : null,
+    covers: Number.isFinite(seats) ? seats : null,
+    time: timeRaw && /^\d{1,2}:\d{2}$/.test(timeRaw) ? timeRaw : null,
+    resySlug,
+    citySlug,
+  };
+}
+
+function buildNextLiveCommand(caseId: string): string {
+  return `npx tsx scripts\\run-phase0-resy-benchmark.ts --case ${caseId} --live-openai --allow-failures`;
+}
+
+function isExactVenueMatch(c: ResyProbeCase): boolean {
+  const { resySlug } = parseResyProbeUrl(c.url);
+  if (!resySlug || !c.apiVenueSlug) return false;
+  return c.apiVenueSlug.toLowerCase() === resySlug.toLowerCase();
+}
+
+function explainRecommendation(c: ResyProbeCase): string {
+  switch (c.recommendation) {
+    case "use_for_live_fill_test":
+      return `${c.matchingSlots.length} matching slot(s) within +/-${c.allowedWindowMinutes}min of ${c.targetTime}. Exact venue slug confirmed${isExactVenueMatch(c) ? "" : " (slug mismatch - verify)"}.`;
+    case "no_matching_slot":
+      if (c.apiError) return `No exact venue match: ${c.apiError}`;
+      if (c.slots.length === 0) return "Resy returned zero slots for this date/time. Maps to no_availability_correct - cannot validate fill/OTP.";
+      return `${c.slots.length} slot(s) returned but none within +/-${c.allowedWindowMinutes}min window.`;
+    case "blocked_or_unknown":
+      if (c.blockerSignals.length > 0) return `Blocker signals: ${c.blockerSignals.join(", ")}.`;
+      return "Probe could not classify; rerun probe before any live spend.";
+  }
+}
 
 interface ListResp {
   runs: ResyProbeRunSummary[];

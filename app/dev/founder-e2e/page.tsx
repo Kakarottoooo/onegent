@@ -19,10 +19,14 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 
 import {
-  FOUNDER_E2E_PATHS,
+  type ChecklistPath,
+  type ChecklistStep,
+  type PathId,
+  type QaRun,
+  type Severity,
+  type StepResult,
+  type StepStatus,
   PATH_LABEL,
-  RUNNER_VERDICT_LABEL,
-  RUNNER_VERDICT_TONE,
   RUN_SOURCE_LABEL,
   SEVERITY_GUIDANCE,
   SEVERITY_LABEL,
@@ -31,22 +35,44 @@ import {
   countFailuresBySeverity,
   formatRunAsBugReport,
   formatStepAsBugReport,
-  getExitCriteriaForPath,
-  getPathDef,
   isFailingStatus,
-  isSafeRunnerAssetPath,
   listAllSteps,
   recomputeRun,
   sanitizeResult,
-  type ChecklistPath,
-  type ChecklistStep,
-  type FounderRunSummary,
-  type PathId,
-  type QaRun,
-  type Severity,
-  type StepResult,
-  type StepStatus,
-} from "@/lib/founder-e2e";
+  RUNNER_VERDICT_LABEL,
+  RUNNER_VERDICT_TONE,
+} from "@/lib/founder-e2e/checklist";
+import {
+  FOUNDER_E2E_PATHS,
+  getExitCriteriaForPath,
+  getFounderE2ePath,
+} from "@/lib/founder-e2e/fixtures";
+import {
+  isSafeRunnerAssetPath,
+} from "@/lib/founder-e2e/runner-report";
+
+interface FounderRunSummary {
+  file: string;
+  runId: string;
+  pathId: "quick" | "full" | "auto";
+  startedAt: string;
+  updatedAt: string;
+  branchSha?: string;
+  meetsBar: boolean;
+  pass: number;
+  fail: number;
+  blocker: number;
+  skipped: number;
+  pending: number;
+  total: number;
+  p0Count: number;
+  p1Count: number;
+  source: "manual" | "automated";
+  runnerVerdict?: "pass" | "needs_polish" | "fail";
+  baseUrl?: string;
+  command?: string;
+  durationMs?: number;
+}
 
 type LoadState =
   | { status: "idle" }
@@ -72,7 +98,7 @@ const SEVERITY_OPTIONS: ReadonlyArray<Severity> = ["P0", "P1", "P2", "P3"];
 
 export default function FounderE2ePage() {
   const [pathId, setPathId] = useState<PathId>("quick");
-  const pathDef = useMemo<ChecklistPath>(() => getPathDef(pathId), [pathId]);
+  const pathDef = useMemo<ChecklistPath>(() => getFounderE2ePath(pathId), [pathId]);
   const exitDefs = useMemo(() => getExitCriteriaForPath(pathId), [pathId]);
 
   const [run, setRun] = useState<QaRun>(() => buildEmptyRun(pathDef, exitDefs));

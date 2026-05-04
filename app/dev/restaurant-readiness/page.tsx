@@ -35,10 +35,22 @@ import type {
   ReadinessRecommendedCase,
   RestaurantReadinessSummary,
 } from "@/lib/benchmark/restaurant-readiness";
-import {
-  GO_NO_GO_LABEL,
-  GO_NO_GO_TONE,
-} from "@/lib/benchmark/restaurant-readiness";
+
+const GO_NO_GO_LABEL: Record<ReadinessGoNoGo, string> = {
+  ready_for_single_live: "READY TO BURN ONE CASE",
+  needs_probe: "NEEDS PROBE",
+  blocked_no_slots: "DO NOT BURN - NO SLOTS",
+  blocked_no_artifacts: "DO NOT BURN - NO ARTIFACTS",
+  unknown: "DO NOT BURN - PROBE BLOCKED",
+};
+
+const GO_NO_GO_TONE: Record<ReadinessGoNoGo, "good" | "warn" | "bad" | "neutral"> = {
+  ready_for_single_live: "good",
+  needs_probe: "neutral",
+  blocked_no_slots: "warn",
+  blocked_no_artifacts: "warn",
+  unknown: "bad",
+};
 
 type LoadState =
   | { status: "loading" }

@@ -30,13 +30,52 @@ import type {
   ResyRunCaseAnalysis,
   ResyStrategyAttempt,
 } from "@/lib/benchmark/resy-run-analysis";
-import {
-  FAILURE_STAGE_FUNNEL,
-  FAILURE_STAGE_LABEL,
-  FAILURE_STAGE_TONE,
-  VERDICT_LABEL,
-  VERDICT_TONE,
-} from "@/lib/benchmark/resy-run-analysis";
+
+const VERDICT_LABEL: Record<ResyAnalysisVerdict, string> = {
+  RUN: "RUN - single live retry safe",
+  DO_NOT_RUN: "DO NOT RUN - fix provider first",
+  NEED_PROBE: "NEED PROBE - run probe before any live spend",
+  NEED_ARTIFACTS: "NEED ARTIFACTS - gather logs first",
+};
+
+const VERDICT_TONE: Record<ResyAnalysisVerdict, "good" | "warn" | "bad" | "neutral"> = {
+  RUN: "good",
+  DO_NOT_RUN: "bad",
+  NEED_PROBE: "neutral",
+  NEED_ARTIFACTS: "warn",
+};
+
+const FAILURE_STAGE_LABEL: Record<ResyFailureStage, string> = {
+  probe_no_slot: "Probe says no slot",
+  slot_api_available_dom_missing: "API has slot, DOM missing",
+  slot_selection_failed: "Slot selection failed",
+  guest_form_reached: "Guest form reached",
+  guest_form_incomplete: "Guest form incomplete",
+  otp_or_login_required: "OTP / login required",
+  ready_for_confirmation: "Ready for confirmation",
+  unknown: "Unknown",
+};
+
+const FAILURE_STAGE_TONE: Record<ResyFailureStage, "good" | "ok" | "warn" | "bad" | "neutral"> = {
+  probe_no_slot: "neutral",
+  slot_api_available_dom_missing: "warn",
+  slot_selection_failed: "bad",
+  guest_form_reached: "ok",
+  guest_form_incomplete: "warn",
+  otp_or_login_required: "warn",
+  ready_for_confirmation: "good",
+  unknown: "neutral",
+};
+
+const FAILURE_STAGE_FUNNEL: ResyFailureStage[] = [
+  "probe_no_slot",
+  "slot_api_available_dom_missing",
+  "slot_selection_failed",
+  "guest_form_reached",
+  "guest_form_incomplete",
+  "otp_or_login_required",
+  "ready_for_confirmation",
+];
 
 type LoadState =
   | { status: "loading" }
