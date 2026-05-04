@@ -354,7 +354,22 @@ describe("classifyJob — model_or_env_blocked", () => {
     );
     expect(r.primaryClass).toBe("model_or_env_blocked");
     expect(r.severity).toBe("p1");
-    expect(r.signals.some((s) => s.label === "OpenAI Responses API server error")).toBe(true);
+    expect(r.signals.some((s) => s.label === "OpenAI Responses API 5xx")).toBe(true);
+  });
+  it("classifies OpenAI Responses API 500 as model/env transient instead of provider 5xx", () => {
+    const r = classifyJob(
+      job({
+        provider: "booking-com",
+        scenario: "hotel",
+        errorMessage:
+          "OpenAI Responses API returned 500 while generating hotel runtime action plan",
+      }),
+    );
+
+    expect(r.primaryClass).toBe("model_or_env_blocked");
+    expect(r.severity).toBe("p1");
+    expect(r.signals.map((s) => s.label)).toContain("OpenAI Responses API 5xx");
+    expect(r.alternatives.map((a) => a.class)).toContain("network_or_provider_5xx");
   });
   it("matches 'Computer Use unavailable'", () => {
     const r = classifyJob(

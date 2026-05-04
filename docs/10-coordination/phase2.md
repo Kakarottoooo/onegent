@@ -24,6 +24,32 @@ Safety boundary:
 - Do not run a live provider retry without explicit founder approval for that
   exact retry.
 
+## Active Hotel Closure Branch
+
+Codex branch:
+
+- `codex/hotel-live-readiness-pack-v2`
+- Base: latest `origin/codex/integrated-preview-20260504`.
+- Scope: no-live hotel live-readiness classification, post-live artifact
+  bundle template, and docs/tests only.
+
+Follow-up from `codex/hotel-controlled-runtime-closure @ 10192569`:
+
+- The previous branch was not yet present in the latest integrated tip, so this
+  branch carries forward the useful no-live analyzer split for
+  `room_selection_manual_review_reached` and the hotel controlled retry
+  decision tree.
+- Adds post-live hotel triage buckets for provider selector drift, room/card
+  scan drift, checkout/manual boundary, model/env transient,
+  network/provider degraded, and no availability.
+- Adds a hotel artifact template at
+  `docs/50-product-areas/HOTEL_RETRY_ARTIFACT_TEMPLATE.json` and keeps the
+  runbook pointed at the unified no-live artifact analyzer:
+  `scripts/analyze-provider-artifact.ts --kind hotel`.
+
+No live provider, OpenAI live call, payment, CVV, OTP/CAPTCHA/login bypass, or
+final confirmation is authorized by this branch.
+
 ## Latest Expedia Evidence
 
 Agent2 audited the latest Expedia MCO to BNA failure and found that job shape

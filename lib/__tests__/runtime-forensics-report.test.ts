@@ -186,6 +186,30 @@ describe("buildForensicsReport — classification embedded", () => {
       ]),
     );
   });
+  it("reports OpenAI Responses API 500 as model/env transient, not hotel provider failure", () => {
+    const r = buildForensicsReport(
+      job({
+        provider: "booking-com",
+        scenario: "hotel",
+        status: "failed",
+        errorMessage:
+          "OpenAI Responses API returned 500 while generating hotel runtime action plan",
+      }),
+      {
+        inputSource: "hotel-artifact-bundle",
+        generatedAt: "2026-05-04T19:00:00.000Z",
+      },
+    );
+    const md = formatForensicsBugReport(r);
+
+    expect(r.classification.primaryClass).toBe("model_or_env_blocked");
+    expect(r.classification.severity).toBe("p1");
+    expect(r.classification.signals.map((s) => s.label)).toContain(
+      "OpenAI Responses API 5xx",
+    );
+    expect(md).toContain("[P1]");
+    expect(md).toContain("Model / environment blocked");
+  });
 });
 
 describe("buildForensicsReport — notes", () => {

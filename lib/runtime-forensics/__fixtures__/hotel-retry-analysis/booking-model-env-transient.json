@@ -1,0 +1,34 @@
+{
+  "job": {
+    "id": "fixture-hotel-model-env-transient",
+    "taskId": "fixture-task-hotel-model-env-transient",
+    "provider": "booking-com",
+    "scenario": "hotel",
+    "status": "failed",
+    "errorMessage": "OpenAI Responses API returned 500 while generating hotel runtime action plan.",
+    "terminalReason": "model_env_transient",
+    "steps": [
+      {
+        "name": "book-hotel",
+        "type": "hotel",
+        "__source": "lib/core/execution-local-fixture",
+        "error": "Responses API 500 before provider selector patch evidence was available."
+      }
+    ],
+    "params": {
+      "city": "New York",
+      "checkIn": "2026-06-10",
+      "checkOut": "2026-06-12",
+      "adults": 1,
+      "rooms": 1,
+      "hotelName": "YOTEL New York Times Square"
+    }
+  },
+  "workerLogExcerpt": "[booking-com] Starting controlled hotel retry\n[model] OpenAI Responses API returned 500; model transient before hotel provider selector evidence",
+  "workerLogPath": "codex-worker.log",
+  "screenshotPaths": [],
+  "liveSnapshotPaths": [],
+  "notes": [
+    "Synthetic no-live fixture. This is model/environment transient evidence, not a Booking.com selector bug."
+  ]
+}

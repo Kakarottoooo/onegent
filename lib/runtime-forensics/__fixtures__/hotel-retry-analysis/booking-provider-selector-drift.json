@@ -1,0 +1,37 @@
+{
+  "job": {
+    "id": "fixture-hotel-provider-selector-drift",
+    "taskId": "fixture-task-hotel-provider-selector-drift",
+    "provider": "booking-com",
+    "scenario": "hotel",
+    "status": "failed",
+    "errorMessage": "Target hotel visible but not selected from Booking.com search results.",
+    "steps": [
+      {
+        "name": "book-hotel",
+        "type": "hotel",
+        "__source": "lib/core/execution-local-fixture",
+        "error": "Hotel search result selector drift; hotel detail not reached."
+      }
+    ],
+    "params": {
+      "city": "New York",
+      "checkIn": "2026-06-10",
+      "checkOut": "2026-06-12",
+      "adults": 1,
+      "rooms": 1,
+      "hotelName": "YOTEL New York Times Square"
+    }
+  },
+  "workerLogExcerpt": "[booking-com] Search results loaded for YOTEL New York Times Square\n[booking-com] target hotel card visible but not selected\n[booking-com] hotel detail not reached",
+  "workerLogPath": "codex-worker.log",
+  "screenshotPaths": [
+    "worker/.debug-screenshots/booking-com-fixture-provider-selector/01-search-results.jpg"
+  ],
+  "liveSnapshotPaths": [
+    ".debug-screenshots/live/fixture-hotel-provider-selector-drift/snapshot.json"
+  ],
+  "notes": [
+    "Synthetic no-live fixture. This is a provider selector triage case before room/card scan."
+  ]
+}

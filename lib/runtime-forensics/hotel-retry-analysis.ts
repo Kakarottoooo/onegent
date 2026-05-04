@@ -13,9 +13,13 @@ export type HotelRetryState =
   | "safety_boundary_violation"
   | "payment_manual_review_reached"
   | "guest_details_manual_review_reached"
+  | "room_selection_manual_review_reached"
   | "login_or_captcha_boundary"
   | "profile_gating"
+  | "model_env_transient"
   | "network_provider_failure"
+  | "provider_no_availability"
+  | "provider_selector_drift"
   | "room_selection_drift"
   | "insufficient_evidence";
 
@@ -23,9 +27,13 @@ type SignalKind =
   | "safety_boundary_violation"
   | "payment_boundary"
   | "guest_details_reached"
+  | "room_selection_reached"
   | "login_or_captcha"
   | "profile_gating"
+  | "model_env_transient"
   | "network_provider_failure"
+  | "provider_no_availability"
+  | "provider_selector_drift"
   | "room_selection_drift";
 
 type TextSourceKind = "job" | "db_row" | "worker_log" | "artifact_path" | "note";
@@ -34,10 +42,14 @@ export const HOTEL_RETRY_STATE_LABEL: Record<HotelRetryState, string> = {
   safety_boundary_violation: "Safety boundary violation",
   payment_manual_review_reached: "Payment/manual-review reached",
   guest_details_manual_review_reached: "Guest-details/manual-review reached",
+  room_selection_manual_review_reached: "Room-selection/manual-review reached",
   login_or_captcha_boundary: "Login/CAPTCHA/OTP boundary",
   profile_gating: "Profile gating before provider work",
-  network_provider_failure: "Network/provider failure",
-  room_selection_drift: "Room-selection or date selector drift",
+  model_env_transient: "Model/environment transient",
+  network_provider_failure: "Network/provider degraded",
+  provider_no_availability: "Provider returned no availability",
+  provider_selector_drift: "Provider selector or hotel-result drift",
+  room_selection_drift: "Room/card scan or date selector drift",
   insufficient_evidence: "Insufficient evidence",
 };
 
@@ -179,6 +191,21 @@ const SIGNAL_PATTERNS: SignalPattern[] = [
     rx: /\breservation details\s+(page|form)\s+(visible|reached|loaded)\b/i,
   },
   {
+    kind: "room_selection_reached",
+    label: "room selection reached",
+    rx: /\b(room|rate)\s+(selected|selection)\s+(visible|reached|loaded|succeeded|complete|completed)\b/i,
+  },
+  {
+    kind: "room_selection_reached",
+    label: "room quantity selected",
+    rx: /\bselected room quantity\b|\broom quantity\s+(selected|set|updated)\b/i,
+  },
+  {
+    kind: "room_selection_reached",
+    label: "room selected before manual review",
+    rx: /\b(room|rate)\s+selected\b.*\b(manual review|operator review|safe handoff)\b/i,
+  },
+  {
     kind: "login_or_captcha",
     label: "login or sign-in wall",
     rx: /\b(login|sign[-\s]?in)\s+(wall|required|prompt|modal)\b/i,
@@ -209,6 +236,16 @@ const SIGNAL_PATTERNS: SignalPattern[] = [
     rx: /\bstart route blocked\b.*\bprofile\b/i,
   },
   {
+    kind: "model_env_transient",
+    label: "OpenAI Responses API 5xx",
+    rx: /\b(openai|responses api|responses\.create)\b.*\b5\d{2}\b|\b5\d{2}\b.*\b(openai|responses api|responses\.create)\b/i,
+  },
+  {
+    kind: "model_env_transient",
+    label: "model/runtime transient",
+    rx: /\b(model|llm|computer use)\b.*\b(transient|unavailable|timeout|timed out|rate[-_\s]?limit|quota|failed)\b/i,
+  },
+  {
     kind: "network_provider_failure",
     label: "5xx provider/server status",
     rx: /\b5\d{2}\b\s*(error|response|status|server)?/i,
@@ -234,9 +271,39 @@ const SIGNAL_PATTERNS: SignalPattern[] = [
     rx: /\b(provider|booking\.com|hotels\.com)\s+(unreachable|down|unavailable|timed out)\b/i,
   },
   {
+    kind: "provider_no_availability",
+    label: "hotel sold out or fully booked",
+    rx: /\b(sold[-\s]?out|fully booked|no rooms? available|no availability)\b/i,
+  },
+  {
+    kind: "provider_no_availability",
+    label: "no exact hotel matches",
+    rx: /\b(no exact matches|no matching rooms?|no matching hotel|target hotel unavailable)\b/i,
+  },
+  {
+    kind: "provider_selector_drift",
+    label: "target hotel visible but not selected",
+    rx: /\b(target hotel|hotel card|hotel result)\b.*\b(visible|found)\b.*\b(not selected|not clicked|selection failed)\b/i,
+  },
+  {
+    kind: "provider_selector_drift",
+    label: "hotel detail not reached",
+    rx: /\b(hotel detail|property detail)\s+(not reached|was not reached|did not load)\b/i,
+  },
+  {
+    kind: "provider_selector_drift",
+    label: "hotel search result drift",
+    rx: /\b(hotel search result|provider selector|hotel selector)\b.*\b(drift|failed|not found)\b/i,
+  },
+  {
     kind: "room_selection_drift",
     label: "room card or selector drift",
     rx: /\b(room|rate|hotel)\s+(card|selection|select button|selected room)\s+(missing|not found|drift|failed)\b/i,
+  },
+  {
+    kind: "room_selection_drift",
+    label: "room/card scan failed",
+    rx: /\b(room|rate)[-\s]?(card|scan)\b.*\b(failed|threw|errored|no match)\b/i,
   },
   {
     kind: "room_selection_drift",
@@ -270,9 +337,13 @@ export function analyzeHotelRetryArtifactBundle(
   const hasSafetyViolation = has("safety_boundary_violation");
   const hasPaymentBoundary = has("payment_boundary");
   const hasGuestDetails = has("guest_details_reached");
+  const hasRoomSelectionReached = has("room_selection_reached");
   const hasLoginOrCaptcha = has("login_or_captcha");
   const hasProfileGating = has("profile_gating");
+  const hasModelEnv = has("model_env_transient");
   const hasNetwork = has("network_provider_failure");
+  const hasNoAvailability = has("provider_no_availability");
+  const hasProviderSelectorDrift = has("provider_selector_drift");
   const hasRoomSelectionDrift = has("room_selection_drift");
 
   let state: HotelRetryState;
@@ -286,8 +357,16 @@ export function analyzeHotelRetryArtifactBundle(
     state = "login_or_captcha_boundary";
   } else if (hasProfileGating) {
     state = "profile_gating";
+  } else if (hasModelEnv) {
+    state = "model_env_transient";
   } else if (hasNetwork) {
     state = "network_provider_failure";
+  } else if (hasNoAvailability) {
+    state = "provider_no_availability";
+  } else if (hasRoomSelectionReached) {
+    state = "room_selection_manual_review_reached";
+  } else if (hasProviderSelectorDrift) {
+    state = "provider_selector_drift";
   } else if (hasRoomSelectionDrift) {
     state = "room_selection_drift";
   } else {
@@ -310,6 +389,10 @@ export function analyzeHotelRetryArtifactBundle(
   const confidence = classifyConfidence(state, {
     hasPaymentBoundary,
     hasGuestDetails,
+    hasRoomSelectionReached,
+    hasModelEnv,
+    hasNoAvailability,
+    hasProviderSelectorDrift,
     hasRoomSelectionDrift,
   });
 
@@ -468,6 +551,10 @@ function classifyConfidence(
   flags: {
     hasPaymentBoundary: boolean;
     hasGuestDetails: boolean;
+    hasRoomSelectionReached: boolean;
+    hasModelEnv: boolean;
+    hasNoAvailability: boolean;
+    hasProviderSelectorDrift: boolean;
     hasRoomSelectionDrift: boolean;
   },
 ): "high" | "medium" | "low" {
@@ -477,10 +564,18 @@ function classifyConfidence(
     case "profile_gating":
     case "network_provider_failure":
       return "high";
+    case "model_env_transient":
+      return flags.hasModelEnv ? "high" : "medium";
+    case "provider_no_availability":
+      return flags.hasNoAvailability ? "high" : "medium";
     case "payment_manual_review_reached":
       return flags.hasPaymentBoundary ? "high" : "medium";
     case "guest_details_manual_review_reached":
       return flags.hasGuestDetails ? "high" : "medium";
+    case "room_selection_manual_review_reached":
+      return flags.hasRoomSelectionReached ? "high" : "medium";
+    case "provider_selector_drift":
+      return flags.hasProviderSelectorDrift ? "high" : "medium";
     case "room_selection_drift":
       return flags.hasRoomSelectionDrift ? "high" : "medium";
     case "insufficient_evidence":
@@ -511,12 +606,20 @@ function nextActionForState(state: HotelRetryState): string {
       return "Count as safe hotel progress only if the run stopped before CVV, payment submission, login bypass, CAPTCHA/OTP bypass, or final confirmation.";
     case "guest_details_manual_review_reached":
       return "Count as partial hotel progress. Inspect whether guest-details fill or payment-boundary detection is the next smallest patch, using screenshots first.";
+    case "room_selection_manual_review_reached":
+      return "Count as safe partial hotel progress. Preserve room-selection screenshots and only patch the room-to-guest transition if DB/log/screenshot evidence proves selector or runtime drift.";
     case "login_or_captcha_boundary":
       return "Treat as an expected safe provider boundary. Do not bypass login, CAPTCHA, OTP, or account-sensitive prompts.";
     case "profile_gating":
       return "Treat as internal readiness gating. Fix profile completeness or prompt copy before any provider retry.";
+    case "model_env_transient":
+      return "Treat as model/runtime environment instability. Do not patch hotel provider selectors from OpenAI Responses API or Computer Use transient evidence alone.";
     case "network_provider_failure":
       return "Treat as provider/network instability. Do not patch selectors from this state unless separate screenshots prove room-selection drift.";
+    case "provider_no_availability":
+      return "Treat as a provider inventory outcome. Do not patch selectors unless screenshots show matching available inventory that the worker missed.";
+    case "provider_selector_drift":
+      return "Treat as Booking.com hotel-result or property-detail selector drift only after screenshots confirm the approved target hotel was visible.";
     case "room_selection_drift":
       return "Treat as Booking.com/Hotels.com room selector or selected-date drift only after screenshots confirm inventory was visible.";
     case "insufficient_evidence":
@@ -532,14 +635,22 @@ function signalRank(kind: SignalKind): number {
       return 1;
     case "guest_details_reached":
       return 2;
-    case "login_or_captcha":
+    case "room_selection_reached":
       return 3;
-    case "profile_gating":
+    case "login_or_captcha":
       return 4;
-    case "network_provider_failure":
+    case "profile_gating":
       return 5;
-    case "room_selection_drift":
+    case "model_env_transient":
       return 6;
+    case "network_provider_failure":
+      return 7;
+    case "provider_no_availability":
+      return 8;
+    case "provider_selector_drift":
+      return 9;
+    case "room_selection_drift":
+      return 10;
   }
 }
 
