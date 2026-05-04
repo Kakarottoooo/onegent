@@ -1,0 +1,55 @@
+# Track C - demo readiness coordination
+
+> Last updated: 2026-05-04
+> Branch: `codex/integrated-preview-20260504`
+> Owner: demo readiness sidecar / Codex integration
+
+Track C owns read-only demo readiness docs, static guard tests, and light
+founder-facing demo surface polish. It does not own provider/runtime/live code.
+
+## Current Status
+
+Latest integrated work:
+
+- Added `docs/40-phase1/YC_DEMO_RUNBOOK.md` as the YC-style five-minute
+  preflight and demo script.
+- Added a static docs guard test so future agents do not accidentally drop key
+  Phase 1 docs or regress developer docs path wiring after the docs reorg.
+- Linked the YC runbook from `/dev/demo-control-room` and the Demo Control Room
+  runbook.
+
+## Read First
+
+1. `docs/INDEX.md`
+2. `docs/00-start-here/PHASE_STATUS.md`
+3. `docs/10-coordination/HUDDLE.md`
+4. `docs/40-phase1/DEMO_CONTROL_ROOM.md`
+5. `docs/40-phase1/YC_DEMO_RUNBOOK.md`
+6. `docs/50-product-areas/EXPEDIA_CONTROLLED_RETRY_RUNBOOK.md`
+
+## Allowed Work
+
+- Demo runbooks and founder-facing demo scripts.
+- Read-only `/dev` demo surface polish.
+- Static documentation guard tests.
+- Coordination doc updates under `docs/10-coordination/`.
+
+## Forbidden Work
+
+- No provider/runtime/live implementation changes.
+- No live provider runs.
+- No payment, CVV, OTP, CAPTCHA, login bypass, or final confirmation.
+- No run/retry/live buttons in demo pages.
+- No direct edits to stale `C:\Users\Gzw19\onegent` main worktree.
+
+## Handoff Protocol
+
+When Track C finishes a task:
+
+1. Push the branch.
+2. Update this file and `docs/10-coordination/HUDDLE.md`.
+3. Report only branch + commit hash unless there is a blocker or direction
+   question.
+
+Full pasted reports are only needed when the branch is not pushed or Codex
+needs to judge a design direction immediately.

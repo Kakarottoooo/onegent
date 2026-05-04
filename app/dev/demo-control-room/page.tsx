@@ -288,8 +288,8 @@ function Phase2Panel({ snap }: { snap: DemoControlRoomSnapshot }) {
       </h2>
       <p className="dcr__phase2-caveat">
         Phase 2 is FROZEN unless Phase 0/1 are stable. The statuses below
-        are the no-live audit verdict; do not interpret them as
-        live-verified. Update protocol: change{" "}
+        are the no-live audit verdict. <strong>Phase 2 is not live
+        verified.</strong> Update protocol: change{" "}
         <code>docs/50-product-areas/PHASE2_VERTICAL_REVIVAL_AUDIT.md</code>{" "}
         first, then mirror in{" "}
         <code>lib/demo-control-room/phase2-status.ts</code>.
@@ -351,9 +351,9 @@ function SafeDemoScriptBlock({ markdown }: { markdown: string }) {
       <h2 className="dcr__section-title">Safe demo script</h2>
       <p className="dcr__script-intro">
         Pre-demo checklist + happy path + hard stops + recovery phrases.
-        Runbook:{" "}
-        <code>docs/40-phase1/DEMO_CONTROL_ROOM.md</code>. Triple-click
-        the textarea below to copy as markdown.
+        Runbooks: <code>docs/40-phase1/DEMO_CONTROL_ROOM.md</code> and{" "}
+        <code>docs/40-phase1/YC_DEMO_RUNBOOK.md</code>. Triple-click the
+        textarea below to copy as markdown.
       </p>
 
       <div className="dcr__script-grid">
@@ -468,6 +468,10 @@ function SourceLinks({ snap }: { snap: DemoControlRoomSnapshot }) {
         <li>
           Demo runbook:{" "}
           <code>docs/40-phase1/DEMO_CONTROL_ROOM.md</code>
+        </li>
+        <li>
+          YC demo runbook:{" "}
+          <code>docs/40-phase1/YC_DEMO_RUNBOOK.md</code>
         </li>
         <li>
           Phase 2 audit:{" "}

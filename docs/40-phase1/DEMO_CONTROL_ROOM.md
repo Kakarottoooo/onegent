@@ -39,7 +39,8 @@ Top-down on the page:
 4. **Safe demo script** - pre-demo checklist (5 min), happy path
    (numbered steps), hard stops table (OTP / payment / CAPTCHA /
    login wall / final-confirm + recovery lines), recovery phrases
-   for unexpected boundaries, plus a paste-ready markdown export.
+   for unexpected boundaries, plus a paste-ready markdown export and a
+   link to `docs/40-phase1/YC_DEMO_RUNBOOK.md`.
 5. **Sources + notes** - links to the canonical docs (`PHASE_1_FOUNDER_E2E`,
    `PHASE2_VERTICAL_REVIVAL_AUDIT`, `HUDDLE`, `STRATEGIC_LEDGER`) plus
    loader notes about what artifacts were found / missing.
@@ -131,7 +132,9 @@ lib/__tests__/
 3. Verify all three verdict cards are green or yellow. **Red = stop.**
 4. Skim the Phase 2 panel - confirm the Expedia phrasing matches what
    you plan to say.
-5. Triple-click the markdown textarea to copy the safe demo script;
+5. Read `docs/40-phase1/YC_DEMO_RUNBOOK.md` for the route order and
+   YC-specific fallback lines.
+6. Triple-click the markdown textarea to copy the safe demo script;
    paste into Slack / a deck.
 
 ### During a demo (with control room open)

@@ -2,7 +2,7 @@
 
 > **Branch**: `codex/integrated-preview-20260504`
 > **Last updated**: 2026-05-04
-> **Last commit**: pending demo-control-room production acceptance
+> **Last commit**: pending Agent2 retry analyzer + Track C demo readiness
 >
 > Claude reads this at session start. I write to it before each push.
 > See `CLAUDE.md` section "coordination protocol".
@@ -14,6 +14,30 @@
 Phase 1 demo trunk stabilization on integrated preview.
 
 Completed in latest pass:
+- Integrated Agent2 `codex/phase2-expedia-retry-analysis-pack @ 005e638` onto
+  current integrated preview as `687c0b3` instead of merging its older
+  `400a716` base. The pack adds:
+  - `lib/runtime-forensics/expedia-retry-analysis.ts`
+  - 5 synthetic no-live Expedia retry fixtures
+  - `lib/__tests__/expedia-retry-analysis.test.ts`
+  - runbook instructions for classifying a future founder-approved controlled
+    Expedia retry from DB/log/screenshot artifact bundles.
+- Added Track C YC demo readiness pack directly because the sidecar had not
+  completed the implementation yet:
+  - `docs/40-phase1/YC_DEMO_RUNBOOK.md`
+  - `docs/10-coordination/track-c.md`
+  - `lib/__tests__/docs-static-guard.test.ts`
+  - `/dev/demo-control-room` links to the YC runbook and states Phase 2 is not
+    live verified.
+- Verified:
+  - targeted Vitest 80/80 for Expedia retry analysis, docs static guard, and
+    Demo Control Room modules.
+  - `npx tsc --noEmit --pretty false` pass.
+  - `npm run gate:phase1 -- --allow-known-drift` pass, 9/9.
+  - `npm run build` pass.
+  - `git diff --check` pass, with only CRLF normalization warnings.
+
+Previous completed pass:
 - Fixed `/dev/demo-control-room` returning 404 under `next start` production
   preview by removing the page's production-only dev gate. The dashboard is
   read-only: it only reads existing Phase 1/Founder E2E/Phase 2 artifacts and

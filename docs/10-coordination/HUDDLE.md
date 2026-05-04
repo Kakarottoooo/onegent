@@ -13,6 +13,9 @@ small.
 - Continue provider/runtime/live debugging only after checking
   `docs/30-provider-debug/PROVIDER_RUNTIME_DEBUG_PLAYBOOK.md`.
 - Do not stage unrelated dirty provider files when doing docs-only work.
+- Review sidecar branches from pushed commits only. If an agent updates
+  `docs/10-coordination/phase2.md`, `track-c.md`, or `claude.md`, the founder
+  only needs to send branch + commit hash unless direction is blocked.
 
 ## Inbox for Claude
 
@@ -30,6 +33,18 @@ small.
 
 ## Live Activity
 
+- 2026-05-04 codex: integrated Agent2
+  `codex/phase2-expedia-retry-analysis-pack @ 005e638` by cherry-picking onto
+  current integrated preview as `687c0b3`. Added the pure no-live Expedia retry
+  analyzer, 5 synthetic fixtures, targeted tests, and runbook instructions for
+  classifying a future founder-approved controlled retry from artifact bundles.
+- 2026-05-04 codex: added Track C YC demo readiness pack directly on integrated
+  preview because the sidecar had not completed it yet. Added
+  `docs/40-phase1/YC_DEMO_RUNBOOK.md`, `docs/10-coordination/track-c.md`,
+  `lib/__tests__/docs-static-guard.test.ts`, and linked the YC runbook from
+  `/dev/demo-control-room` and the Demo Control Room runbook. Verified targeted
+  Vitest 80/80, root `tsc`, Phase 1 gate 9/9, `npm run build`, and
+  `git diff --check`.
 - 2026-05-04 codex: fixed `/dev/demo-control-room` production-preview 404 by
   removing the page's production-only dev gate. The page is read-only and safe
   for the integrated preview. Cleaned the new Demo Control Room ASCII fallback
