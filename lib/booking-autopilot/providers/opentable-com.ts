@@ -1296,6 +1296,76 @@ export const openTableProvider: BrowserProvider = {
     };
   },
 
+  /**
+   * Fill OpenTable's diner form (name + email + phone) and STOP before the
+   * "Complete reservation" button.
+   *
+   * ── Why this works (founder live-verified 2026-05-03) ──────────────────
+   *
+   * OpenTable checkout was historically the most fragile step in Phase 0.
+   * The phone-only verification gate would render, but locator fills, DOM
+   * injection, and keyboard typing each failed silently in different page
+   * variants. Each one-off fix patched a single failure mode and the next
+   * variant brought the next mode — so "we fixed it last week, now it's
+   * broken again" was an honest read of the situation.
+   *
+   * The codex 2026-05-03 patch series (head: `915833d` on
+   * `codex/openai-chat-model-env`) collapsed 6 independent failure modes
+   * into one structurally durable shape:
+   *
+   *   Layer 1: capability-detected `OpenTableCompatLocator` — never assume
+   *            Stagehand exposes a full Playwright Locator. Every method
+   *            is gated by `typeof candidate.method === "function"`.
+   *   Layer 2: `#phoneNumber` / `input[type="tel"]` exact selectors —
+   *            replaces the older placeholder-text and label-based
+   *            locator helpers that drifted between OpenTable variants.
+   *   Layer 3: 6-step phone-gate strategy ladder, each tagged
+   *            `[opentable][strategy ot-phone-0N-...]`:
+   *              01 exact-locator        (locator.fill on #phoneNumber)
+   *              02 dom-direct           (native value setter)
+   *              03 discovered-coordinate (probed bbox keyboard typing)
+   *              04 fixed-coordinate-high (calibrated y~0.405 of viewport)
+   *              05 fixed-coordinate-mid
+   *              06 fixed-coordinate-low
+   *              → all-fail: writes .debug-screenshots/opentable/<ts>/ with
+   *                summary.json + page.png + page.html, then manual review
+   *   Layer 4: verification — strategies 01-03 MUST `inputValue()` read
+   *            back the typed value before claiming success. The pre-fix
+   *            short-circuit ("treat any phone-named field as already
+   *            verified, regardless of whether typing actually landed")
+   *            mistook silent failure for success and produced false-
+   *            positive `ready_for_confirmation` handoffs. Fix `915833d`:
+   *            trace `refusing ready handoff` when verification fails so
+   *            the ladder cascades instead of terminating optimistically.
+   *   Layer 5: explicit submit policy — if credit-card section is on
+   *            screen, skip submit (payment stage handles it); else stop
+   *            before "Complete reservation" so the user makes the
+   *            committing tap themselves.
+   *   Layer 6: enforcement via `lib/__tests__/opentable-provider-policy.test.ts`
+   *            string-matching assertions on this source file. Removing
+   *            any strategy label, verification log, the "skipped by
+   *            policy" string, or reintroducing the Layer-4 short-circuit
+   *            anti-pattern fails CI. So this fix CANNOT silently regress.
+   *
+   * ── Live verification (2026-05-03 founder retry) ──────────────────────
+   *
+   *   Venue:  Sirrah / Thu May 14 8:00 PM / 1 person (Standard seating)
+   *   Phone:  filled — strategy ladder reached ot-phone-01-exact-locator
+   *           (or higher) and verification confirmed
+   *   Submit: "Complete reservation" visible, NOT clicked (per policy)
+   *
+   * This is the canonical screenshot-confirmed Phase 0B OpenTable closure.
+   * Future regressions: grep `[opentable][strategy` in worker.log to find
+   * which step failed; check `.debug-screenshots/opentable/` for artifacts.
+   *
+   * ── Anti-spam policy (founder directive 2026-05-03) ───────────────────
+   *
+   * Step 5.5 below unchecks any "text updates / reminders / sms" marketing
+   * checkbox that OpenTable defaults to checked. Rationale: the booking
+   * phone we submit is the user's real number; consenting them to
+   * restaurant SMS on their behalf is harassment. Email marketing
+   * checkboxes are explicitly left alone (founder only flagged SMS).
+   */
   async fillGuestForm(
     page: Page,
     profile: unknown,
@@ -1525,6 +1595,59 @@ export const openTableProvider: BrowserProvider = {
         await captureOpenTableGuestFormArtifact(formPage, "guest-form-state-unreadable", trace);
         throw new Error("opentable_guest_form_state_unreadable");
       }
+    }
+
+    // Step 5.5: opt-out from SMS marketing checkboxes (founder anti-spam policy).
+    //
+    // OpenTable presents marketing checkboxes after the diner form. Some
+    // venues default-check the SMS-reminders box, which would auto-opt
+    // the user into 1:1 marketing texts on the phone we just submitted.
+    // Founder directive 2026-05-03: phone harassment > inbox harassment;
+    // never auto-consent users to SMS. Email marketing is left alone
+    // (different harm profile + founder explicitly only flagged SMS).
+    //
+    // We MATCH on label text using SMS_PATTERNS, ONLY uncheck if the box
+    // is currently checked-and-not-disabled, and use cb.click() (not
+    // .checked = false) so OpenTable's React onChange handler runs.
+    const smsUncheckedCount = await formPage.evaluate(() => {
+      const SMS_PATTERNS = [
+        /text updates?/i,
+        /reminders.*reservations?/i,
+        /text reminders?/i,
+        /text.*alerts?/i,
+        /\bsms\b/i,
+      ];
+      const checkboxes = Array.from(
+        document.querySelectorAll<HTMLInputElement>("input[type='checkbox']")
+      );
+      let uncheckedCount = 0;
+      for (const cb of checkboxes) {
+        if (!cb.checked || cb.disabled) continue;
+        // Resolve label text: aria-label → <label for> → ancestor text.
+        let labelText = (cb.getAttribute("aria-label") || "").trim();
+        if (!labelText && cb.id) {
+          const lbl = document.querySelector<HTMLLabelElement>(`label[for="${cb.id}"]`);
+          if (lbl) labelText = (lbl.textContent || "").trim();
+        }
+        if (!labelText) {
+          let walk: HTMLElement | null = cb.parentElement;
+          for (let i = 0; i < 4 && walk; i++) {
+            const txt = (walk.textContent || "").trim();
+            if (txt.length > 0 && txt.length < 200) { labelText = txt; break; }
+            walk = walk.parentElement;
+          }
+        }
+        if (!SMS_PATTERNS.some(re => re.test(labelText))) continue;
+        cb.click();
+        uncheckedCount++;
+      }
+      return uncheckedCount;
+    }).catch((err: Error) => {
+      trace(`[opentable] sms checkbox guard error: ${err.message?.slice(0, 80)}`);
+      return -1;
+    });
+    if (smsUncheckedCount > 0) {
+      trace(`[opentable] unchecked ${smsUncheckedCount} SMS marketing checkbox(es) (founder anti-spam policy)`);
     }
 
     // Step 6: stop before the final submit.
