@@ -598,6 +598,68 @@ describe("classifyJob — provider fixture sanity", () => {
     expect(r.severity).toBe("p0");
     expect(r.confidence).toBe("high");
   });
+  it("Expedia card-scan failure case remains unknown but surfaces the selector signal", () => {
+    const r = classifyJob(
+      job({
+        provider: "expedia",
+        scenario: "F-EXP-MCO-BNA-1",
+        rawWorkerLogExcerpt: [
+          '[stagehand] [flight-rpa] Starting programmatic flight booking: airline="Southwest" price=$152 time="08:50" flightNo="WN 3084"',
+          "[stagehand] [flight-rpa] Flight-card DOM scan failed: StagehandEvalError: Uncaught",
+          '[stagehand] [flight-rpa] No matching flight button found (tried airline="Southwest" price=$152)',
+        ].join("\n"),
+      }),
+    );
+
+    expect(r.primaryClass).toBe("unknown");
+    expect(r.severity).toBe("p2");
+    expect(r.confidence).toBe("medium");
+    expect(r.signals.some((s) => s.label === "Expedia flight-card DOM scan failed")).toBe(true);
+  });
+  it("Expedia locator fallback attempt is visible when card scan recovery still fails", () => {
+    const r = classifyJob(
+      job({
+        provider: "expedia",
+        scenario: "F-EXP-MCO-BNA-2",
+        rawWorkerLogExcerpt: [
+          "[stagehand] [flight-rpa] Flight-card DOM scan failed: StagehandEvalError: Uncaught",
+          "[stagehand] [flight-rpa] Trying locator fallback for flight-card scan",
+          '[stagehand] [flight-rpa] No matching flight button found (tried airline="Southwest" price=$152)',
+        ].join("\n"),
+      }),
+    );
+
+    expect(r.primaryClass).toBe("unknown");
+    expect(r.signals.map((s) => s.label)).toEqual(
+      expect.arrayContaining([
+        "Expedia flight-card DOM scan failed",
+        "Expedia locator fallback attempted",
+      ]),
+    );
+  });
+  it("Expedia locator fallback matched signal does not override checkout boundary classification", () => {
+    const r = classifyJob(
+      job({
+        provider: "expedia",
+        scenario: "F-EXP-MCO-BNA-3",
+        rawWorkerLogExcerpt: [
+          "[stagehand] [flight-rpa] Flight-card DOM scan failed: StagehandEvalError: Uncaught",
+          "[stagehand] [flight-rpa] Trying locator fallback for flight-card scan",
+          '[stagehand] [flight-rpa] Locator fallback matched flight card: "Select flight Southwest 8:50am 9:55am $152"',
+          "[stagehand] [flight-rpa] Checkout reached - running AI form fill",
+        ].join("\n"),
+      }),
+    );
+
+    expect(r.primaryClass).toBe("checkout_reached_manual_review");
+    expect(r.signals.map((s) => s.label)).toEqual(
+      expect.arrayContaining([
+        "Expedia locator fallback attempted",
+        "Expedia locator fallback matched",
+        "checkout reached",
+      ]),
+    );
+  });
   it("flight checkout reached case", () => {
     const r = classifyJob(
       job({
