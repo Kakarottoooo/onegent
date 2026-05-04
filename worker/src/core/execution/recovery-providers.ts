@@ -150,7 +150,8 @@ async function tryResy(
     "@/lib/booking-autopilot/providers/resy-com"
   );
   const resySlug = cityToResySlug(p.city || "nashville");
-  const resyUrl = `https://resy.com/cities/${resySlug}?date=${p.date}&seats=${p.covers}&query=${encodeURIComponent(p.restaurant_name)}`;
+  const resyTime = p.time.replace(":", "");
+  const resyUrl = `https://resy.com/cities/${resySlug}?date=${p.date}&seats=${p.covers}&time=${resyTime}&query=${encodeURIComponent(p.restaurant_name)}`;
 
   const { task } = buildRestaurantTask({
     restaurantName: p.restaurant_name,

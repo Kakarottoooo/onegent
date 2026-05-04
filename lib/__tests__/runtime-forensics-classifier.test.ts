@@ -345,6 +345,17 @@ describe("classifyJob — model_or_env_blocked", () => {
     expect(r.primaryClass).toBe("model_or_env_blocked");
     expect(r.severity).toBe("p1");
   });
+  it("matches OpenAI Responses API 500 as model/env transient", () => {
+    const r = classifyJob(
+      job({
+        errorMessage:
+          'OpenAI Responses API 500: {"error":{"type":"server_error","code":"server_error"}}',
+      }),
+    );
+    expect(r.primaryClass).toBe("model_or_env_blocked");
+    expect(r.severity).toBe("p1");
+    expect(r.signals.some((s) => s.label === "OpenAI Responses API server error")).toBe(true);
+  });
   it("matches 'Computer Use unavailable'", () => {
     const r = classifyJob(
       job({ errorMessage: "Computer Use unavailable in this region" }),

@@ -102,9 +102,9 @@ async function probeResyOtpAcrossScopes(page: Page): Promise<{ otpText: boolean;
 
 /** Map app city IDs (from lib/cities.ts) to Resy city slugs */
 export const RESY_CITY_SLUGS: Record<string, string> = {
-  nashville:     "nash",
-  new_york:      "nyc",
-  "new-york":    "nyc",
+  nashville:     "nashville-tn",
+  new_york:      "new-york-ny",
+  "new-york":    "new-york-ny",
   los_angeles:   "la",
   "los-angeles": "la",
   chicago:       "chi",
@@ -786,7 +786,7 @@ export const resyProvider: BrowserProvider = {
 
     // Search results: resy.com/cities/{slug} with query params but NO venue slug
     const searchResults =
-      /resy\.com\/cities\/[a-z]+(\?|$)/.test(lowerUrl) &&
+      /resy\.com\/cities\/[a-z0-9-]+(\?|$)/.test(lowerUrl) &&
       !lowerUrl.includes("/venues/") &&
       !lowerUrl.includes("/restaurant/");
 
@@ -794,7 +794,7 @@ export const resyProvider: BrowserProvider = {
     const restaurantDetail =
       lowerUrl.includes("/venues/") ||
       lowerUrl.includes("/restaurant/") ||
-      /resy\.com\/cities\/[a-z]+\/[a-z0-9-]+(\?|$)/.test(lowerUrl);
+      /resy\.com\/cities\/[a-z0-9-]+\/[a-z0-9-]+(\?|$)/.test(lowerUrl);
 
     // Booking form: /book in URL OR reservation form visible (name/email/phone inputs)
     const isBookingUrl = lowerUrl.includes("/book") || lowerUrl.includes("/reservation");

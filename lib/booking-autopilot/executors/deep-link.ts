@@ -103,7 +103,7 @@ function buildResyLink(input: DeepLinkInput): DeepLinkOutput {
     const url = withParams(input.restaurant_url, {
       date: input.date,
       seats: String(input.party_size),
-      time: input.time,
+      time: formatResyTimeParam(input.time),
     });
     return { url, platform: "resy", label: "Continue on Resy", kind: "detail" };
   }
@@ -114,6 +114,7 @@ function buildResyLink(input: DeepLinkInput): DeepLinkOutput {
   const params = new URLSearchParams({
     date: input.date,
     seats: String(input.party_size),
+    time: formatResyTimeParam(input.time),
     query: input.restaurant_name,
   });
   return {
@@ -141,9 +142,9 @@ function guessResyCitySlug(city: string): string {
   // Conservative: only map known matches. Unknown city → default to "ny"
   // since the seed cases skew there. Adding cities is one-line additive.
   const map: Record<string, string> = {
-    "new york": "ny",
-    "nyc": "ny",
-    "brooklyn": "ny",
+    "new york": "new-york-ny",
+    "nyc": "new-york-ny",
+    "brooklyn": "new-york-ny",
     "los angeles": "la",
     "la": "la",
     "chicago": "chi",
@@ -154,7 +155,13 @@ function guessResyCitySlug(city: string): string {
     "washington": "dc",
     "dc": "dc",
   };
-  return map[slug] ?? "ny";
+  return map[slug] ?? "new-york-ny";
+}
+
+function formatResyTimeParam(time: string): string {
+  const match = time.match(/^(\d{1,2}):(\d{2})$/);
+  if (!match) return time;
+  return `${match[1].padStart(2, "0")}${match[2]}`;
 }
 
 // ─── Helpers ────────────────────────────────────────────────────────────────

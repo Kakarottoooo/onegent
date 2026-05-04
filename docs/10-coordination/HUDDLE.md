@@ -33,6 +33,21 @@ small.
 
 ## Live Activity
 
+- 2026-05-04 codex: ran founder-approved controlled Resy R-030 live closure
+  on integrated preview. First run failed before provider with OpenAI Responses
+  API 500 (`req_ce42a48137424a938a7893b131416d28`), now classified as
+  `model_or_env_blocked`. Retry reached Resy/Charlie Bird safely but ended
+  `no_availability_correct` even though the public probe had matching slots;
+  screenshots showed the venue page loaded with date/time/party controls but no
+  visible slot cards, plus a fallback handoff to a city search URL. Patched
+  no-live root causes before any further live attempt: Resy slot detection no
+  longer treats the top `Time 8:00 PM` filter as a slot, Resy city slugs now use
+  `new-york-ny`/`nashville-tn`, hyphenated Resy URLs are stage-detected, Resy
+  deep links preserve `time=HHMM`, and Resy fallback URLs keep time. Verified
+  Resy/forensics tests 144/144, restaurant/debug tests 72/72, `tsc`,
+  `check-drift`, `git diff --check`, and Phase 1 gate 9/9. No payment, CVV,
+  OTP/CAPTCHA/login bypass, final confirmation, or extra live retry after the
+  patch.
 - 2026-05-04 codex: integrated Goal
   `codex/goal-artifact-corpus-consolidation @ bb238b7` as `ee5a3d7`.
   Added no-live artifact corpus inventory, fixture listing script, and corpus

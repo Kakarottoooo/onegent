@@ -110,6 +110,7 @@ import {
   clickAgreementCheckboxes,
   fillFieldsInScopes,
 } from "./shared/form-actions";
+import { pickBestResySlotCandidate } from "./providers/resy-slot-detection";
 import { bookExpediaFlightProgrammatic } from "./providers/expedia";
 import { bookTicketmasterProgrammatic } from "./providers/ticketmaster-rpa";
 import { bookSeatGeekProgrammatic } from "./providers/seatgeek-rpa";
@@ -5037,21 +5038,50 @@ The user will enter CVV and confirm payment themselves.`,
                 }
               }
 
-              const resySlotCoords = await raw.evaluate(({ reqMins, maxDiff }: { reqMins: number; maxDiff: number }) => {
-                const isVisible = (el: Element) => { const r = (el as HTMLElement).getBoundingClientRect(); return r.width > 0 && r.height > 0; };
-                const parseT = (text: string) => { const m = text.match(/(\d{1,2}):(\d{2})\s*(AM|PM)/i); if (!m) return null; let h = parseInt(m[1], 10); const min = parseInt(m[2], 10); if (m[3].toUpperCase() === "PM" && h < 12) h += 12; if (m[3].toUpperCase() === "AM" && h === 12) h = 0; return h * 60 + min; };
-                const isTimeText = (t: string) => /^\d{1,2}:\d{2}\s*(AM|PM)$/i.test(t.trim());
-                const allEls = [...Array.from(document.querySelectorAll<HTMLElement>('a[href], button, [role="button"], [role="link"]')),
-                                ...Array.from(document.querySelectorAll<HTMLElement>('*')).filter(el => isTimeText((el.textContent ?? '').trim()) && el.children.length === 0 && isVisible(el))];
-                const candidates = [...new Set(allEls)].filter(el => { if (!isVisible(el)) return false; const t = parseT((el.textContent ?? '').trim()); return t !== null && Math.abs(t - reqMins) <= maxDiff; });
-                if (!candidates.length) return { x: -1, y: -1, text: '', diag: 'none' };
-                const best = candidates.sort((a, b) => Math.abs((parseT((a.textContent ?? '').trim()) ?? Infinity) - reqMins) - Math.abs((parseT((b.textContent ?? '').trim()) ?? Infinity) - reqMins))[0];
-                best.scrollIntoView({ block: "center" });
-                const r = best.getBoundingClientRect();
-                return { x: Math.round(r.left + r.width / 2), y: Math.round(r.top + r.height / 2), text: (best.textContent ?? '').trim().slice(0, 20), diag: best.tagName };
-              }, { reqMins: reqMins2, maxDiff: timeWindowMins }).catch(() => null);
+              const resySlotCandidates = await raw.evaluate(() => {
+                const isVisible = (el: HTMLElement) => {
+                  const r = el.getBoundingClientRect();
+                  if (r.width <= 0 || r.height <= 0) return false;
+                  const style = window.getComputedStyle(el);
+                  return style.display !== "none" && style.visibility !== "hidden" && style.opacity !== "0";
+                };
+                const seen = new Set<HTMLElement>();
+                const elements = [
+                  ...Array.from(document.querySelectorAll<HTMLElement>('a[href], button, [role="button"], [role="link"]')),
+                  ...Array.from(document.querySelectorAll<HTMLElement>("*"))
+                    .filter((el) => /^\d{1,2}:\d{2}\s*(AM|PM)$/i.test((el.textContent ?? "").trim())),
+                ].filter((el) => {
+                  if (seen.has(el)) return false;
+                  seen.add(el);
+                  return isVisible(el);
+                });
 
-              if (resySlotCoords?.diag) trace(`[resy] time slot diag: ${resySlotCoords.diag} "${resySlotCoords.text}"`);
+                return elements.map((el) => {
+                  const rect = el.getBoundingClientRect();
+                  const parent = el.closest<HTMLElement>(
+                    'article, li, section, form, [role="dialog"], [data-testid], [class*="Reservation" i], [class*="Availability" i], [class*="Search" i]',
+                  ) ?? el.parentElement;
+                  return {
+                    text: (el.textContent ?? "").trim().replace(/\s+/g, " "),
+                    ariaLabel: el.getAttribute("aria-label") ?? undefined,
+                    href: el instanceof HTMLAnchorElement ? el.href : undefined,
+                    tagName: el.tagName,
+                    role: el.getAttribute("role") ?? undefined,
+                    testId: el.getAttribute("data-testid") ?? el.getAttribute("data-test") ?? undefined,
+                    className: typeof el.className === "string" ? el.className : undefined,
+                    parentText: (parent?.textContent ?? "").trim().replace(/\s+/g, " ").slice(0, 180),
+                    x: Math.round(rect.left + rect.width / 2),
+                    y: Math.round(rect.top + rect.height / 2),
+                    width: Math.round(rect.width),
+                    height: Math.round(rect.height),
+                    disabled: el.hasAttribute("disabled") || el.getAttribute("aria-disabled") === "true",
+                  };
+                });
+              }).catch(() => []);
+
+              const resySlotCoords = pickBestResySlotCandidate(resySlotCandidates, reqMins2, timeWindowMins);
+
+              if (resySlotCoords?.tagName) trace(`[resy] time slot diag: ${resySlotCoords.tagName} "${resySlotCoords.text}"`);
 
               const resySlotClicked = resySlotCoords && resySlotCoords.x > 0
                 ? await sh(raw).click(resySlotCoords.x, resySlotCoords.y).then(() => resySlotCoords.text).catch(() => null)

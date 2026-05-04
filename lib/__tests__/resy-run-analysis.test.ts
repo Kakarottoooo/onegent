@@ -38,7 +38,7 @@ import {
 const RUNS_DIR = path.join(process.cwd(), "benchmark", "runs");
 const DEBUG_DIR = path.join(process.cwd(), "worker", ".debug-screenshots");
 
-const TEST_BENCH_PREFIX = "phase0-2099-CLAUDE-RUN-ANALYSIS-";
+const TEST_BENCH_PREFIX = "phase0-zzzz-CLAUDE-RUN-ANALYSIS-";
 const TEST_PROBE_PREFIX = "resy-availability-probe-2099-CLAUDE-RUN-ANALYSIS-";
 const TEST_DEBUG_PREFIX = "2099-01-01T00-00-00-000Z-CLAUDE-RUN-ANALYSIS-";
 
@@ -314,7 +314,7 @@ describe("decideVerdict", () => {
         createdAt: "2026-05-04T00:00:00Z",
         results: [],
         recommendedCase: {
-          caseId: "R-030",
+          caseId: "ZZ-R-STRAT",
           restaurantName: "Charlie Bird",
           url: "https://resy.com/cities/new-york-ny/venues/charlie-bird?date=2026-05-08&seats=2&time=20%3A00",
           targetTime: "20:00",
@@ -335,7 +335,7 @@ describe("decideVerdict", () => {
         createdAt: "x",
         results: [],
         recommendedCase: {
-          caseId: "R-030",
+          caseId: "ZZ-R-STRAT",
           restaurantName: "Charlie Bird",
           url: "https://resy.com/cities/new-york-ny/venues/charlie-bird",
           targetTime: "20:00",
@@ -545,7 +545,7 @@ describe("buildResyRunAnalysis (fs integration)", () => {
       createdAt: "2099-01-01T00:00:00.000Z",
       results: [
         {
-          caseId: "R-030",
+          caseId: "ZZ-R-STRAT",
           outcome: "failed",
           terminalCode: null,
           terminalReason: [
@@ -567,7 +567,7 @@ describe("buildResyRunAnalysis (fs integration)", () => {
 
     const summary = await buildResyRunAnalysis();
     // Among ladder + caseAnalyses, find ours.
-    const ourCase = summary.caseAnalyses.find((c) => c.caseId === "R-030");
+    const ourCase = summary.caseAnalyses.find((c) => c.caseId === "ZZ-R-STRAT");
     expect(ourCase).toBeDefined();
     if (!ourCase) return;
     expect(ourCase.strategyAttempts.length).toBeGreaterThanOrEqual(3);

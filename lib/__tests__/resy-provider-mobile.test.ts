@@ -1,6 +1,6 @@
 import type { Page } from "playwright";
 import { describe, expect, it, vi } from "vitest";
-import { fillResyMobileNumberAndStopAtOtp } from "@/lib/booking-autopilot/providers/resy-com";
+import { cityToResySlug, fillResyMobileNumberAndStopAtOtp, resyProvider } from "@/lib/booking-autopilot/providers/resy-com";
 
 type LocatorLike = {
   first: () => LocatorLike;
@@ -185,5 +185,36 @@ describe("fillResyMobileNumberAndStopAtOtp", () => {
       reason: "step:rs-phone-05-mouse-keyboard:target-not-found",
     });
     expect(traceLines.join("\n")).toContain("all strategies failed at rs-phone-05-mouse-keyboard:target-not-found");
+  });
+});
+
+describe("Resy URL handling", () => {
+  it("uses current Resy city slugs for New York and Nashville", () => {
+    expect(cityToResySlug("New York")).toBe("new-york-ny");
+    expect(cityToResySlug("New York, NY")).toBe("new-york-ny");
+    expect(cityToResySlug("Nashville")).toBe("nashville-tn");
+    expect(cityToResySlug("Nashville, TN")).toBe("nashville-tn");
+  });
+
+  it("detects hyphenated Resy city search URLs", async () => {
+    const signals = await resyProvider.getStageSignals(
+      { evaluate: async () => false } as unknown as Page,
+      "https://resy.com/cities/new-york-ny?date=2026-05-08&seats=2&time=2000&query=Charlie%20Bird",
+      "",
+    );
+
+    expect(signals.searchResults).toBe(true);
+    expect(signals.hotelDetail).toBe(false);
+  });
+
+  it("detects hyphenated Resy venue detail URLs", async () => {
+    const signals = await resyProvider.getStageSignals(
+      { evaluate: async () => false } as unknown as Page,
+      "https://resy.com/cities/new-york-ny/venues/charlie-bird?date=2026-05-08&seats=2&time=2000",
+      "",
+    );
+
+    expect(signals.searchResults).toBe(false);
+    expect(signals.hotelDetail).toBe(true);
   });
 });

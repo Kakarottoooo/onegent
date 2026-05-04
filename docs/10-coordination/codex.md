@@ -2,7 +2,7 @@
 
 > **Branch**: `codex/integrated-preview-20260504`
 > **Last updated**: 2026-05-04
-> **Last commit**: pending artifact corpus integration push
+> **Last commit**: pending Resy R-030 controlled live closure patch
 >
 > Claude reads this at session start. I write to it before each push.
 > See `CLAUDE.md` section "coordination protocol".
@@ -11,10 +11,39 @@
 
 ## Currently doing
 
-Integrated Goal's no-live artifact corpus consolidation onto the Phase 1/1.5
-demo-freeze baseline.
+Closed the current Resy R-030 controlled-live investigation loop on the Phase
+1/1.5 demo-freeze baseline without running another live attempt after patching.
 
 Completed in latest pass:
+- Ran founder-approved Resy R-030 live benchmark twice:
+  - first run failed before provider with OpenAI Responses API 500
+    (`req_ce42a48137424a938a7893b131416d28`);
+  - retry reached Resy/Charlie Bird safely, but returned
+    `no_availability_correct` while probe evidence had matching slots.
+- Evidence:
+  - report `benchmark/runs/phase0-resy-2026-05-04T19-29-48-731Z.json`;
+  - job `6288fad7-da82-4cbc-b237-6139710a1ef4`;
+  - snapshots under `.debug-screenshots/live/6288fad7-da82-4cbc-b237-6139710a1ef4`;
+  - local extracted PNGs under `.tmp/r030-live-screenshots`.
+- Fixed no-live issues exposed by the run:
+  - classify OpenAI Responses API 5xx as `model_or_env_blocked`;
+  - reject Resy's top time filter as a slot candidate;
+  - use current Resy slugs for New York/Nashville;
+  - detect hyphenated Resy city/detail URLs;
+  - preserve `time=HHMM` in Resy detail, search, and fallback links.
+- Synced `lib/booking-autopilot` and `lib/core` changes to worker mirrors.
+- Verified:
+  - Resy/deeplink/forensics targeted tests pass, 144/144.
+  - Restaurant/debug targeted tests pass, 72/72.
+  - `npx tsc --noEmit --pretty false` pass.
+  - `npm run check-drift` pass.
+  - `git diff --check` pass.
+  - `npm run gate:phase1 -- --allow-known-drift` pass, 9/9, run
+    `phase1-quality-gate-2026-05-04T19-52-46-820Z.json`.
+- Safety boundary preserved: no payment, CVV, OTP/CAPTCHA/login bypass, final
+  confirmation, or extra live retry after the patch.
+
+Previous completed pass:
 - Cherry-picked Goal `codex/goal-artifact-corpus-consolidation @ bb238b7` as
   `ee5a3d7`.
 - Added:

@@ -1166,7 +1166,8 @@ async function runUniversalStep(
           // Try Resy if not already tried
           if (!platformsTried.includes("resy")) {
             const resySlug = cityToResySlug(rCity || "nashville");
-            const resyUrl = `https://resy.com/cities/${resySlug}?date=${rDate}&seats=${rCovers}&query=${encodeURIComponent(rName)}`;
+            const resyTime = rTime.replace(":", "");
+            const resyUrl = `https://resy.com/cities/${resySlug}?date=${rDate}&seats=${rCovers}&time=${resyTime}&query=${encodeURIComponent(rName)}`;
             log.push({ ts: now(), type: "attempt", message: `Not found on OpenTable — trying Resy`, outcome: "Retrying" });
             await onProgress({ ...step, status: "loading", decisionLog: [...log] });
 
