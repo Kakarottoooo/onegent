@@ -4,6 +4,7 @@ Last updated: 2026-05-04
 
 Integrated branches:
 
+- `codex/goal-live-artifact-bridge @ f331ccc`
 - `codex/goal-artifact-corpus-consolidation @ bb238b7`
 - `codex/goal-runtime-closure-consolidation @ d42c8dc`
 
@@ -73,6 +74,19 @@ Overlap handled manually:
 - `scripts/create-artifact-bundle-template.ts`
 - `scripts/list-artifact-fixtures.ts`
 
+## Bridge Behavior
+
+`scripts/create-artifact-bundle-template.ts` prints synthetic templates for:
+
+- `restaurant`
+- `expedia`
+- `hotel`
+
+Each template includes placeholders for job id, task id, provider, scenario,
+status, terminal classification, DB excerpt, worker-log excerpt, screenshot
+paths, and operator notes. It does not read or write provider data, and it does
+not run browser automation.
+
 ## Fixture Inventory
 
 `npx tsx scripts/list-artifact-fixtures.ts` inventories 31 synthetic fixtures:
@@ -105,7 +119,7 @@ fixture has:
 ## Validation
 
 Integrated verification is run by Codex after all cherry-picks land. The Goal
-branch passed:
+branches passed:
 
 - Targeted vitest for closure docs/static/runtime-forensics/artifact modules.
 - `npx tsx scripts/create-artifact-bundle-template.ts --kind restaurant`.
