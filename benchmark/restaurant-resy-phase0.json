@@ -38,7 +38,7 @@
       "date": "2026-05-07",
       "time": "20:00",
       "covers": 1,
-      "resySlug": "buvette",
+      "resySlug": "buvette-nyc",
       "fallbackPolicy": { "time_window_minutes": 60, "allow_platform_switch": false, "allow_venue_switch": false }
     },
     {

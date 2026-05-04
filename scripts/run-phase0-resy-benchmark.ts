@@ -135,6 +135,9 @@ const SAFE_BUCKETS = new Set<OutcomeBucket>([
   "failed_with_clear_reason",
 ]);
 
+const NO_AVAILABILITY_PATTERN =
+  /no availability|not available|unavailable|sold out|no times?|not returning availability slots|no availability slots|no reservation times?/i;
+
 function loadDotenv(): void {
   const candidates = [
     path.resolve(process.cwd(), ".env.local"),
@@ -478,7 +481,7 @@ function inferFailureTaxonomy(
   if (terminalCode === "needs_profile_data" || task?.state === "awaiting_profile") return "F-DATA-PROFILE";
   if (terminalCode === "needs_login" || task?.state === "awaiting_login") return "F-PROVIDER-LOGIN";
   if (terminalCode === "needs_otp" || task?.state === "awaiting_otp") return "F-PROVIDER-OTP";
-  if (terminalCode === "no_availability" || /no availability|not available|unavailable|sold out/.test(text)) return "F-AVAIL-NONE";
+  if (terminalCode === "no_availability" || NO_AVAILABILITY_PATTERN.test(text)) return "F-AVAIL-NONE";
   if (terminalCode === "captcha" || /captcha|access denied|akamai|blocked/.test(text)) return "F-PROVIDER-CAPTCHA";
   if (/model_not_found|does not have access to model|computer-use-preview/.test(text)) return "F-INFRA-MODEL-ACCESS";
   if (/unknown parameter|invalid_request_error|responses api 400/.test(text)) return "F-INFRA-API-SCHEMA";
@@ -558,7 +561,7 @@ function classifyResult(
       taxonomyCode,
     });
   }
-  if (state === "failed" && (terminalCode === "no_availability" || /no availability|not available|unavailable|sold out/.test(text))) {
+  if (state === "failed" && (terminalCode === "no_availability" || NO_AVAILABILITY_PATTERN.test(text))) {
     return finishResult(testCase, {
       task,
       durationMs,
