@@ -33,6 +33,14 @@ small.
 
 ## Live Activity
 
+- 2026-05-04 codex: cherry-picked Agent2 Phase 2 evidence and Expedia
+  forensics commits into integrated preview:
+  `0eef0d3`, `5499949`, `24def46`. Added
+  `docs/50-product-areas/EXPEDIA_CONTROLLED_RETRY_RUNBOOK.md`, expanded
+  `docs/10-coordination/phase2.md`, and taught runtime-forensics to preserve
+  Expedia card-scan/fallback diagnostics without overriding checkout reached
+  classification. Verified Expedia/docs tests, runtime-forensics tests 219/219,
+  `check-drift`, and Phase 1 gate 9/9.
 - 2026-05-04 codex: cleared production build blockers on integrated preview.
   `npm run build` now passes end-to-end using webpack. Fixes included moving
   `deriveRole` out of a Next route module, moving `/permissions` settings tabs

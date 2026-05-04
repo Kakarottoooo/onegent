@@ -2,7 +2,7 @@
 
 > **Branch**: `codex/integrated-preview-20260504`
 > **Last updated**: 2026-05-04
-> **Last commit**: pending production build blocker cleanup
+> **Last commit**: pending Agent2 Phase 2 evidence merge
 >
 > Claude reads this at session start. I write to it before each push.
 > See `CLAUDE.md` section "coordination protocol".
@@ -14,6 +14,22 @@
 Phase 1 demo trunk stabilization on integrated preview.
 
 Completed in latest pass:
+- Reviewed and cherry-picked Agent2 sidecar branches:
+  - `0eef0d3 docs(phase2): add Expedia controlled retry evidence`
+  - `5499949 test(forensics): classify Expedia card-scan signals`
+  - `24def46 test(forensics): render Expedia card-scan report signals`
+- Added/merged:
+  - `docs/50-product-areas/EXPEDIA_CONTROLLED_RETRY_RUNBOOK.md`
+  - richer `docs/10-coordination/phase2.md`
+  - Expedia card-scan/fallback runtime-forensics diagnostic patterns and report
+    tests.
+- Verified:
+  - Expedia evidence tests 7/7.
+  - Runtime-forensics tests 219/219.
+  - `npm run check-drift` pass.
+  - `npm run gate:phase1 -- --allow-known-drift` pass, 9/9.
+
+Previous completed pass:
 - Made the standard production build pass in the integrated worktree:
   - pinned `package.json` build script to `next build --webpack` because
     Turbopack panics on the Windows worktree `node_modules` junction;
@@ -32,7 +48,7 @@ Completed in latest pass:
   - `npx vitest run lib/__tests__/decision-room.test.ts` pass, 13/13.
   - `npm run gate:phase1 -- --allow-known-drift` pass, 9/9, no known drift.
 
-Previous completed pass:
+Earlier completed:
 - Reviewed Agent2 `ef159c7 test(expedia): cover visible flight card shape`.
 - Cherry-picked it into integrated preview as `d4eb8c7`.
 - Added `docs/10-coordination/phase2.md` as the Phase 2 sidecar coordination
