@@ -1,0 +1,35 @@
+{
+  "job": {
+    "id": "fixture-hotel-login-captcha-boundary",
+    "taskId": "fixture-task-hotel-login-captcha-boundary",
+    "provider": "booking-com",
+    "scenario": "hotel",
+    "status": "failed",
+    "terminalReason": "login_or_captcha_boundary",
+    "steps": [
+      {
+        "name": "book-hotel",
+        "type": "hotel",
+        "__source": "lib/core/execution-local-fixture",
+        "error": "Sign-in wall required after room selection."
+      }
+    ],
+    "params": {
+      "city": "Tokyo",
+      "checkIn": "2026-07-10",
+      "checkOut": "2026-07-13",
+      "adults": 2
+    }
+  },
+  "workerLogExcerpt": "[booking-com] Select room succeeded\n[booking-com] sign-in wall required before guest details\n[booking-com] CAPTCHA challenge visible; stopping without bypass",
+  "workerLogPath": "codex-worker.log",
+  "screenshotPaths": [
+    "worker/.debug-screenshots/booking-com-fixture-login-captcha/02-sign-in-wall.jpg"
+  ],
+  "liveSnapshotPaths": [
+    ".debug-screenshots/live/fixture-hotel-login-captcha-boundary/snapshot.json"
+  ],
+  "notes": [
+    "Synthetic no-live fixture. Login/CAPTCHA is an expected hard stop."
+  ]
+}

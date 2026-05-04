@@ -56,6 +56,9 @@ Results:
 
 ## Current Breakpoint Classification
 
+For the current readiness table across flights and hotels, see
+`docs/50-product-areas/PHASE2_READINESS_MATRIX.md`.
+
 ### Expedia Flight
 
 Status: closest to demo revival.
@@ -87,7 +90,8 @@ Next controlled check:
 
 ### Hotel Provider
 
-Status: architecture exists, not demo-verified tonight.
+Status: architecture exists and now has no-live artifact classification, but is
+not demo-verified tonight.
 
 Current path:
 
@@ -102,6 +106,17 @@ Most likely blockers:
 - Hotel profile/payment checks are strict and can fail before provider work if
   billing profile fields are incomplete.
 - Provider login/bot/network walls need fresh artifacts before code changes.
+
+No-live support added for revival:
+
+- `lib/runtime-forensics/hotel-retry-analysis.ts` classifies operator-assembled
+  hotel artifact bundles without provider access.
+- `lib/runtime-forensics/__fixtures__/hotel-retry-analysis/` covers room
+  selector drift, guest-details reached, payment/manual review, login/CAPTCHA
+  boundary, profile gating, network/provider failure, and safety-stop negative
+  evidence.
+- `docs/50-product-areas/HOTEL_CONTROLLED_RETRY_RUNBOOK.md` defines the future
+  controlled retry evidence path.
 
 Next controlled check:
 

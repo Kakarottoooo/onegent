@@ -42,6 +42,12 @@ small.
   `git diff --check`, `npm run build`, full Phase 1 gate with smoke+e2e 12/12
   (`phase1-quality-gate-2026-05-04T16-58-20-533Z.json`), and production route
   probe 13/13.
+- 2026-05-04 codex: building no-live Phase 2 vertical revival package on
+  `codex/goal-phase2-no-live-revival`. Added hotel artifact analysis coverage
+  alongside existing Expedia analyzer: pure analyzer, synthetic fixtures,
+  targeted tests, readiness matrix, hotel controlled retry runbook, and
+  `docs/10-coordination/goal.md`. No live provider run, payment, CVV,
+  OTP/CAPTCHA/login bypass, or final confirmation was performed.
 - 2026-05-04 codex: completed Phase 1/1.5 demo-freeze pass on integrated
   preview. Initial full gate exposed two optional demo failures: payment-field
   guard returned 500 and smoke saw an unstable old dev server. Fixed the root

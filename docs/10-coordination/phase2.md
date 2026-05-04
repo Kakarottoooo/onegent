@@ -9,11 +9,17 @@
 
 - Phase 2 remains a demo bonus, not the main trunk.
 - Expedia flight is the only current demo-adjacent Phase 2 candidate.
-- Booking.com hotel and Hotels.com still need fresh artifacts before any live
-  promise.
+- Booking.com hotel now has no-live artifact analyzer coverage, but still needs
+  fresh real artifacts before any live promise.
+- Hotels.com has a synthetic checkout/manual-review fixture only; treat it as a
+  secondary hotel path after Booking.com.
 - No live provider run is approved by default.
 - Controlled retry procedure lives in
   `docs/50-product-areas/EXPEDIA_CONTROLLED_RETRY_RUNBOOK.md`.
+- Hotel retry preparation lives in
+  `docs/50-product-areas/HOTEL_CONTROLLED_RETRY_RUNBOOK.md`.
+- Current flight/hotel readiness table lives in
+  `docs/50-product-areas/PHASE2_READINESS_MATRIX.md`.
 
 Safety boundary:
 
@@ -296,4 +302,44 @@ Verification from the branch worktree:
 - `git diff --check`: pass.
 
 No live provider was run for this CLI pack. No payment, CVV,
+OTP/CAPTCHA/login bypass, or final confirmation path was exercised.
+
+## No-Live Hotel Analysis Pack
+
+Codex branch:
+
+- `codex/goal-phase2-no-live-revival`
+- Base: latest `origin/codex/integrated-preview-20260504`
+- Scope: no-live Phase 2 flight/hotel readiness only.
+
+Added:
+
+- Pure hotel analyzer module:
+  `lib/runtime-forensics/hotel-retry-analysis.ts`
+- Synthetic no-live hotel fixtures:
+  `lib/runtime-forensics/__fixtures__/hotel-retry-analysis/*.json`
+- Targeted tests:
+  `lib/__tests__/hotel-retry-analysis.test.ts`
+- Shared no-live artifact wrapper:
+  `scripts/analyze-phase2-artifact.ts`
+- Readiness/runbook docs:
+  `docs/50-product-areas/PHASE2_READINESS_MATRIX.md` and
+  `docs/50-product-areas/HOTEL_CONTROLLED_RETRY_RUNBOOK.md`
+
+Hotel analyzer states:
+
+- `room_selection_drift`
+- `guest_details_manual_review_reached`
+- `payment_manual_review_reached`
+- `login_or_captcha_boundary`
+- `profile_gating`
+- `network_provider_failure`
+- `safety_boundary_violation`
+- `insufficient_evidence`
+
+Verification:
+
+- Targeted hotel + Expedia analyzer Vitest: 21/21 pass.
+
+No live provider was run for this hotel analysis pack. No payment, CVV,
 OTP/CAPTCHA/login bypass, or final confirmation path was exercised.

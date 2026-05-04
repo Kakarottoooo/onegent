@@ -1,0 +1,35 @@
+{
+  "job": {
+    "id": "fixture-hotel-safety-boundary-violation",
+    "taskId": "fixture-task-hotel-safety-boundary-violation",
+    "provider": "booking-com",
+    "scenario": "hotel",
+    "status": "failed",
+    "terminalReason": "safety_boundary_violation",
+    "steps": [
+      {
+        "name": "book-hotel",
+        "type": "hotel",
+        "__source": "lib/core/execution-local-fixture",
+        "error": "Safety audit detected final booking submitted."
+      }
+    ],
+    "params": {
+      "city": "Tokyo",
+      "checkIn": "2026-07-10",
+      "checkOut": "2026-07-13",
+      "adults": 2
+    }
+  },
+  "workerLogExcerpt": "[booking-com] Checkout page visible\n[booking-com] AUDIT: submitted payment detected\n[booking-com] AUDIT: clicked final booking button",
+  "workerLogPath": "codex-worker.log",
+  "screenshotPaths": [
+    "worker/.debug-screenshots/booking-com-fixture-safety/04-post-submit.jpg"
+  ],
+  "liveSnapshotPaths": [
+    ".debug-screenshots/live/fixture-hotel-safety-boundary-violation/snapshot.json"
+  ],
+  "notes": [
+    "Synthetic no-live negative fixture. This state must stop all retries and trigger a safety review."
+  ]
+}

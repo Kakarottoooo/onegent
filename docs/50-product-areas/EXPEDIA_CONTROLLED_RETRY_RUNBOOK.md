@@ -314,6 +314,12 @@ cd C:\Users\Gzw19\onegent-integrated-20260504
 npx tsx scripts/analyze-expedia-retry-artifact.ts .tmp\expedia-retry-artifact-bundle.json
 ```
 
+Or use the shared Phase 2 no-live artifact wrapper:
+
+```powershell
+npx tsx scripts/analyze-phase2-artifact.ts flight .tmp\expedia-retry-artifact-bundle.json
+```
+
 The output is paste-ready Markdown. Paste it into the Phase 2 handoff before
 deciding whether a patch is justified.
 

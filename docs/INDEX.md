@@ -56,9 +56,10 @@ Then inspect runtime evidence:
 For hotel/flight revival work, read:
 
 1. `docs/50-product-areas/PHASE2_VERTICAL_REVIVAL_AUDIT.md`
-2. `docs/30-provider-debug/PROVIDER_RUNTIME_DEBUG_PLAYBOOK.md`
-3. `docs/10-coordination/phase2.md`
-4. `docs/10-coordination/HUDDLE.md`
+2. `docs/50-product-areas/PHASE2_READINESS_MATRIX.md`
+3. `docs/30-provider-debug/PROVIDER_RUNTIME_DEBUG_PLAYBOOK.md`
+4. `docs/10-coordination/phase2.md`
+5. `docs/10-coordination/HUDDLE.md`
 
 Do not run broad live suites. Start with Expedia flight, then Booking.com
 hotel, then Hotels.com only after fresh artifacts exist.
@@ -90,4 +91,5 @@ release entrypoints (`AGENTS.md`, `CLAUDE.md`, `README.md`, `CHANGELOG.md`).
 | R-003 live runbook | `docs/20-phase0-restaurant/R003_LIVE_SMOKE_RUNBOOK.md` |
 | Phase 1 founder E2E | `docs/40-phase1/PHASE_1_FOUNDER_E2E.md` |
 | YC demo prep | `docs/40-phase1/YC_DEMO_RUNBOOK.md` |
+| Phase 2 readiness matrix | `docs/50-product-areas/PHASE2_READINESS_MATRIX.md` |
 | Coordination | `docs/10-coordination/` |

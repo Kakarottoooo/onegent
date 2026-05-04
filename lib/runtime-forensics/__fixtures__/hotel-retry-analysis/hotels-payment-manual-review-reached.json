@@ -1,0 +1,36 @@
+{
+  "job": {
+    "id": "fixture-hotel-payment-manual-review-reached",
+    "taskId": "fixture-task-hotel-payment-manual-review-reached",
+    "provider": "hotels-com",
+    "scenario": "hotel",
+    "status": "ready_for_confirmation",
+    "terminalReason": "payment_manual_review_reached",
+    "steps": [
+      {
+        "name": "book-hotel",
+        "type": "hotel",
+        "__source": "lib/core/execution-local-fixture",
+        "error": null
+      }
+    ],
+    "params": {
+      "city": "Chicago",
+      "checkIn": "2026-08-14",
+      "checkOut": "2026-08-16",
+      "adults": 1,
+      "hotelName": "Synthetic River Hotel"
+    }
+  },
+  "workerLogExcerpt": "[hotels-com] Room selected\n[hotels-com] Checkout page visible\n[hotels-com] Payment review reached; CVV field visible\n[hotels-com] stopped before payment and final confirmation",
+  "workerLogPath": "codex-worker.log",
+  "screenshotPaths": [
+    "worker/.debug-screenshots/hotels-com-fixture-payment-review/03-payment-review.jpg"
+  ],
+  "liveSnapshotPaths": [
+    ".debug-screenshots/live/fixture-hotel-payment-manual-review-reached/snapshot.json"
+  ],
+  "notes": [
+    "Synthetic no-live fixture. Payment/manual review was reached and the flow stopped safely."
+  ]
+}
