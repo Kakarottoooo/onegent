@@ -30,6 +30,15 @@ interface DocLink {
 
 const PHASE_0_ROUTES: DevRoute[] = [
   {
+    href: "/dev/phase1-quality-gates",
+    title: "Phase 1 Quality Gate",
+    blurb:
+      "One-command verdict (npm run gate:phase1) on whether today's build keeps Phase 1 shippable. tsc + targeted vitest + check-drift + optional smoke + autonomous founder e2e. Reads JSON from /api/dev/phase1-quality-gates. No tokens, no providers, no payments.",
+    status: "live",
+    useCase:
+      "Run before pushing a Track B branch. Read the verdict + paste-ready markdown report; route P0/P1 fails to the right side (codex vs Claude) per PHASE_1_QUALITY_GATE.md.",
+  },
+  {
     href: "/dev/benchmark-runs",
     title: "Phase 0 benchmark runs",
     blurb:

@@ -17,7 +17,9 @@
     "build:mcp": "npm run build -w @onegent/mcp-server",
     "check-drift": "npx tsx scripts/check-drift.ts",
     "smoke:phase1": "node scripts/smoke-phase1.mjs",
-    "probe:resy": "npx tsx scripts/probe-resy-availability.ts"
+    "probe:resy": "npx tsx scripts/probe-resy-availability.ts",
+    "gate:phase1": "npx tsx scripts/run-phase1-quality-gate.ts",
+    "gate:phase1:json": "npx tsx scripts/run-phase1-quality-gate.ts --json"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.79.0",
