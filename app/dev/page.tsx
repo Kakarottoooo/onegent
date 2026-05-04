@@ -33,10 +33,19 @@ const PHASE_0_ROUTES: DevRoute[] = [
     href: "/dev/benchmark-runs",
     title: "Phase 0 benchmark runs",
     blurb:
-      "Live consumer of codex's /api/dev/benchmark-runs. Headline metrics + 8-bucket distribution + failure taxonomy chart + per-case drawer + GateBreakdown analyzer + Validator paste panel. Single source of truth for run results.",
+      "Live consumer of /api/dev/benchmark-runs. Headline metrics + 8-bucket distribution + failure taxonomy chart + per-case drawer + GateBreakdown + ArtifactRail (taskId / timeline / snapshot URLs / outcome chips / strategy log) + Validator paste panel.",
     status: "live",
     useCase:
-      "Open this when codex pushes a new benchmark/runs/*.json. Paste the JSON into Validator if you want shape pre-check before reading.",
+      "Open this when codex pushes a new benchmark/runs/*.json. Click any case row to populate the ArtifactRail with deep-link URLs.",
+  },
+  {
+    href: "/dev/debug-artifacts",
+    title: "Debug artifacts viewer",
+    blurb:
+      "Reads worker/.debug-screenshots/<provider>/<run>/. Per-provider × per-run sidebar, summary.json + page.png screenshot inline + lightbox + sandboxed page.html iframe. Founder no longer opens file explorer to inspect failure artifacts.",
+    status: "live",
+    useCase:
+      "Right after a provider run fails (OpenTable phone-gate, Resy guest-form, etc.). Opens the captured screenshot + summary.json without terminal. Companion to /dev/benchmark-runs (which tells you outcome) and /dev/resy-probe-runs (which tells you what to run next).",
   },
 ];
 
