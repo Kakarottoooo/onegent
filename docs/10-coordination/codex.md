@@ -2,7 +2,7 @@
 
 > **Branch**: `codex/integrated-preview-20260504`
 > **Last updated**: 2026-05-04
-> **Last commit**: pending latest sidecar integration push
+> **Last commit**: pending artifact corpus integration push
 >
 > Claude reads this at session start. I write to it before each push.
 > See `CLAUDE.md` section "coordination protocol".
@@ -11,10 +11,38 @@
 
 ## Currently doing
 
-Integrated latest Agent2/Agent3/Claude sidecar batch onto the Phase 1/1.5
+Integrated Goal's no-live artifact corpus consolidation onto the Phase 1/1.5
 demo-freeze baseline.
 
 Completed in latest pass:
+- Cherry-picked Goal `codex/goal-artifact-corpus-consolidation @ bb238b7` as
+  `ee5a3d7`.
+- Added:
+  - `docs/50-product-areas/ARTIFACT_CORPUS_INVENTORY.md`
+  - `scripts/list-artifact-fixtures.ts`
+  - `lib/__tests__/artifact-fixture-corpus.test.ts`
+- Current no-live fixture corpus count: 27 total fixtures, split as
+  restaurant 10, Expedia 8, hotel 9.
+- Verified:
+  - Forbidden-path audit pass.
+  - Corpus/artifact tests pass, 98/98.
+  - `npx tsx scripts/list-artifact-fixtures.ts` pass, 27 fixtures.
+  - `npx tsc --noEmit --pretty false` pass.
+  - `npm run check-drift` pass.
+  - `git diff --check` pass.
+  - `npm run gate:phase1 -- --allow-known-drift` pass, 9/9, run
+    `phase1-quality-gate-2026-05-04T18-42-51-926Z.json`.
+  - Full `npm run gate:phase1 -- --allow-known-drift --include-smoke --include-e2e`
+    pass, 12/12, run
+    `phase1-quality-gate-2026-05-04T18-44-11-060Z.json`.
+  - `npx tsx scripts/check-demo-freeze.ts` pass with verdict `ready`.
+  - Production `next start` probe returned 200 for 13/13 demo routes:
+    `/`, `/tasks`, `/dev`, `/dev/demo-readiness`, `/dev/demo-control-room`,
+    `/dev/runtime-forensics`, `/dev/phase1-quality-gates`, `/dev/founder-e2e`,
+    `/dev/restaurant-readiness`, `/dev/resy-run-analysis`,
+    `/developers/docs/api/v1`, `/pricing`, and `/permissions`.
+
+Previous completed pass:
 - Cherry-picked Agent2 `codex/phase2-unified-artifact-cli @ 0082e6e` as
   `eb49aed`, adding `scripts/analyze-provider-artifact.ts` and shared tests for
   routing no-live Expedia, hotel, and restaurant artifact bundle analysis.
