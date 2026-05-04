@@ -42,6 +42,11 @@ interface PatternRule {
   label: string;
 }
 
+const OPENAI_RESPONSES_API_5XX_PATTERNS = [
+  /\bOpenAI\s+Responses\s+API\b.{0,80}\b5\d{2}\b/i,
+  /\bResponses\s+API\b.{0,80}\b5\d{2}\b.{0,80}\b(OpenAI|computer[-_\s]?use|model|env|environment)\b/i,
+] as const;
+
 /**
  * Patterns for terminal reasons / error messages / log lines.
  *
@@ -223,6 +228,18 @@ const PATTERN_RULES: ReadonlyArray<PatternRule> = [
     cls: "model_or_env_blocked",
     weight: 0.95,
     label: "OpenAI rate-limit / quota",
+  },
+  {
+    rx: OPENAI_RESPONSES_API_5XX_PATTERNS[0],
+    cls: "model_or_env_blocked",
+    weight: 1.0,
+    label: "OpenAI Responses API 5xx",
+  },
+  {
+    rx: OPENAI_RESPONSES_API_5XX_PATTERNS[1],
+    cls: "model_or_env_blocked",
+    weight: 0.95,
+    label: "Responses API model/env transient",
   },
   {
     rx: /computer[-_\s]?use[-_\s]?(unavailable|disabled|not[-_\s]?ready)/i,
@@ -458,6 +475,7 @@ export function pushFieldSignals(
 ): void {
   if (!text || typeof text !== "string") return;
   for (const rule of PATTERN_RULES) {
+    if (shouldSuppressGenericProvider5xx(rule, text)) continue;
     const m = text.match(rule.rx);
     if (m) {
       signals.push({
@@ -469,6 +487,14 @@ export function pushFieldSignals(
       });
     }
   }
+}
+
+function shouldSuppressGenericProvider5xx(rule: PatternRule, text: string): boolean {
+  if (rule.cls !== "network_or_provider_5xx") return false;
+  if (rule.label !== "5xx server error" && rule.label !== "5xx status code") {
+    return false;
+  }
+  return OPENAI_RESPONSES_API_5XX_PATTERNS.some((rx) => rx.test(text));
 }
 
 /** Extract a stable text representation from a decision-log entry. */

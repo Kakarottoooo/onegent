@@ -63,7 +63,7 @@ Then read the task-specific section below.
 | Current phase / what to do next | `docs/00-start-here/PHASE_STATUS.md` |
 | Codex / Claude / Track C handoff | `docs/10-coordination/README.md`, then `docs/10-coordination/*.md` |
 | Restaurant Phase 0 / Resy / OpenTable | `docs/20-phase0-restaurant/` |
-| Provider runtime bug, logs, screenshots | `docs/30-provider-debug/PROVIDER_RUNTIME_DEBUG_PLAYBOOK.md` |
+| Provider runtime bug, logs, screenshots | `docs/30-provider-debug/PROVIDER_RUNTIME_DEBUG_PLAYBOOK.md`, `docs/30-provider-debug/LIVE_CLOSURE_EVIDENCE_PROTOCOL.md` |
 | Computer Use / executor architecture | `docs/30-provider-debug/EXECUTOR_V2_PIVOT.md` |
 | Phase 1 founder walkthrough / task UI | `docs/40-phase1/PHASE_1_FOUNDER_E2E.md`, `docs/40-phase1/AUTONOMOUS_FOUNDER_E2E.md`, `docs/40-phase1/PHASE_1_QUALITY_GATE.md` |
 | Phase 1.5 demo readiness / control room | `docs/40-phase1/DEMO_CONTROL_ROOM.md`, `docs/40-phase1/YC_DEMO_RUNBOOK.md`, `docs/40-phase1/DEMO_FREEZE_ACCEPTANCE.md` |
@@ -126,8 +126,9 @@ For hotel/flight revival work, read:
 4. `docs/50-product-areas/HOTEL_CONTROLLED_RETRY_RUNBOOK.md` - hotel-specific
    controlled retry checklist.
 5. `docs/30-provider-debug/PROVIDER_RUNTIME_DEBUG_PLAYBOOK.md`
-6. `docs/10-coordination/phase2.md`
-7. `docs/10-coordination/HUDDLE.md`
+6. `docs/30-provider-debug/LIVE_CLOSURE_EVIDENCE_PROTOCOL.md`
+7. `docs/10-coordination/phase2.md`
+8. `docs/10-coordination/HUDDLE.md`
 
 Do not run broad live suites. Start with Expedia flight, then Booking.com
 hotel, then Hotels.com only after fresh artifacts exist.
@@ -176,6 +177,7 @@ release entrypoints (`AGENTS.md`, `CLAUDE.md`, `README.md`, `CHANGELOG.md`).
 | Restaurant handoff | `docs/20-phase0-restaurant/RESTAURANT_PHASE0_HANDOFF.md` |
 | R-003 live runbook | `docs/20-phase0-restaurant/R003_LIVE_SMOKE_RUNBOOK.md` |
 | Provider runtime debug | `docs/30-provider-debug/PROVIDER_RUNTIME_DEBUG_PLAYBOOK.md` |
+| Live closure evidence protocol | `docs/30-provider-debug/LIVE_CLOSURE_EVIDENCE_PROTOCOL.md` |
 | Phase 1 founder E2E | `docs/40-phase1/PHASE_1_FOUNDER_E2E.md` |
 | Phase 1 autonomous E2E runner | `docs/40-phase1/AUTONOMOUS_FOUNDER_E2E.md` |
 | Phase 1.5 quality gate | `docs/40-phase1/PHASE_1_QUALITY_GATE.md` |
