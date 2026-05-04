@@ -46,6 +46,32 @@ describe("scoreExpediaFlightCandidateText", () => {
     expect(score.fallbackEligible).toBe(true);
   });
 
+  it("keeps the visible Expedia card shape eligible when flight number is hidden", () => {
+    const score = scoreExpediaFlightCandidateText(
+      [
+        "Select flight",
+        "8:50am 9:55am",
+        "Orlando (MCO) - Nashville (BNA)",
+        "Southwest Airlines",
+        "2h 5m Nonstop",
+        "$152",
+      ].join(" "),
+      {
+        airline: "Southwest",
+        price: 152,
+        time: "08:50",
+        flightNumber: "WN 3084",
+      },
+    );
+
+    expect(score.hasAirline).toBe(true);
+    expect(score.hasFlightNumber).toBe(false);
+    expect(score.hasPrice).toBe(true);
+    expect(score.timeScore).toBe(4);
+    expect(score.exactMatch).toBe(false);
+    expect(score.fallbackEligible).toBe(true);
+  });
+
   it("rejects unrelated airline cards with no useful target overlap", () => {
     const score = scoreExpediaFlightCandidateText(
       "Select flight Delta DL 1212 Departing at 6:10 PM $418",
