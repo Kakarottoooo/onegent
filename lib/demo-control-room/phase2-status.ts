@@ -1,5 +1,5 @@
 ﻿/**
- * Phase 2 vertical-revival status -?single structured source.
+ * Phase 2 vertical-revival status - single structured source.
  *
  * `/dev/demo-control-room` reads this and renders the "Phase 2"
  * panel. The canonical narrative explanation lives in
@@ -13,7 +13,7 @@
  *   2. Mirror the change here.
  *   3. The page picks it up on next render.
  *
- * Pure module -?no fs, no DB, no LLM. Imported by the page server
+ * Pure module - no fs, no DB, no LLM. Imported by the page server
  * component and by tests.
  */
 
@@ -71,7 +71,7 @@ export interface Phase2Vertical {
 export const PHASE2_STATUS_LABEL: Record<Phase2Status, string> = {
   candidate: "Candidate, not live-verified",
   needs_fresh_artifacts: "Needs fresh artifacts before live promises",
-  frozen: "Frozen -?Phase 2 gate not crossed",
+  frozen: "Frozen - Phase 2 gate not crossed",
 };
 
 export const PHASE2_STATUS_TONE: Record<Phase2Status, Phase2Vertical["tone"]> = {

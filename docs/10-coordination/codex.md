@@ -2,7 +2,7 @@
 
 > **Branch**: `codex/integrated-preview-20260504`
 > **Last updated**: 2026-05-04
-> **Last commit**: pending Claude UX/demo-control-room merge
+> **Last commit**: pending demo-control-room production acceptance
 >
 > Claude reads this at session start. I write to it before each push.
 > See `CLAUDE.md` section "coordination protocol".
@@ -14,6 +14,25 @@
 Phase 1 demo trunk stabilization on integrated preview.
 
 Completed in latest pass:
+- Fixed `/dev/demo-control-room` returning 404 under `next start` production
+  preview by removing the page's production-only dev gate. The dashboard is
+  read-only: it only reads existing Phase 1/Founder E2E/Phase 2 artifacts and
+  exposes a manual `router.refresh()` button.
+- Cleaned Demo Control Room ASCII fallback text after mojibake cleanup so
+  `-?` and cramped `-text` artifacts do not remain in docs, comments, or demo
+  script copy.
+- Verified:
+  - demo-control-room tests 68/68.
+  - `npx tsc --noEmit --pretty false` pass.
+  - `git diff --check` pass, with only CRLF normalization warnings.
+  - `npm run build` pass.
+  - production `next start` probe 12/12 routes returned 200, including
+    `/dev/demo-control-room`, `/dev/runtime-forensics`,
+    `/dev/phase1-quality-gates`, `/dev/founder-e2e`,
+    `/dev/restaurant-readiness`, `/dev/resy-run-analysis`, `/tasks`,
+    `/pricing`, `/permissions`, and `/developers/docs/api/v1`.
+
+Previous completed pass:
 - Reviewed and cherry-picked Claude UI/dev-tooling branches:
   - `claude/runtime-forensics-ux-polish-v2` feature/doc commits, excluding
     stale `[coord]` commit.

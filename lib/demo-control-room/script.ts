@@ -1,5 +1,5 @@
 ﻿/**
- * Safe demo script -?deterministic content for the founder-facing
+ * Safe demo script - deterministic content for the founder-facing
  * demo prep dashboard.
  *
  * Pulled together from:
@@ -13,7 +13,7 @@
  *       * no CAPTCHA bypass
  *       * stop before final confirm
  *
- * Pure module -?no fs / DB / LLM. Imported by the page server
+ * Pure module - no fs / DB / LLM. Imported by the page server
  * component and by tests. Markdown export keeps the same content
  * verbatim so the founder can copy + paste into Slack / a deck.
  */
@@ -110,7 +110,7 @@ export const SAFE_DEMO_SCRIPT: SafeDemoScript = {
       label: "Confirm audience boundary: no payment / OTP / CAPTCHA on stage",
       hint:
         "If the demo lands on a payment wall, OTP page, or CAPTCHA, you " +
-        "tap your phone -?the agent never bypasses. State this up front.",
+        "tap your phone; the agent never bypasses. State this up front.",
     },
   ],
   happyPath: [
@@ -146,7 +146,7 @@ export const SAFE_DEMO_SCRIPT: SafeDemoScript = {
       title: "Demonstrate safe handoff",
       body:
         "Pause before any provider OTP / payment screen. Say: \"This is " +
-        "the safe-handoff boundary -?I'd tap my phone to enter the OTP, " +
+        "the safe-handoff boundary. I'd tap my phone to enter the OTP, " +
         "or my card to confirm. The agent never bypasses these.\"",
       safety:
         "If a provider page demands OTP / login / CAPTCHA / final-confirm, " +
@@ -176,7 +176,7 @@ export const SAFE_DEMO_SCRIPT: SafeDemoScript = {
         "Never type the OTP. The agent reaches a safe-handoff boundary; " +
         "the operator (founder) provides the code on their own phone.",
       recoveryLine:
-        "\"That's the OTP wall -?that's where I take over and tap my phone.\"",
+        "\"That's the OTP wall; that's where I take over and tap my phone.\"",
     },
     {
       trigger: "Provider asks for CVV / payment / final confirm",
@@ -184,7 +184,7 @@ export const SAFE_DEMO_SCRIPT: SafeDemoScript = {
         "The agent stops before payment fields. Operator manually fills " +
         "and clicks confirm.",
       recoveryLine:
-        "\"And here's the payment boundary -?I'd swipe my card; the agent " +
+        "\"And here's the payment boundary. I'd swipe my card; the agent " +
         "doesn't store or submit cards.\"",
     },
     {
@@ -193,7 +193,7 @@ export const SAFE_DEMO_SCRIPT: SafeDemoScript = {
         "Never bypass. Operator solves manually. If recurring, escalate " +
         "to warm-session strategy off-stage.",
       recoveryLine:
-        "\"That's a CAPTCHA -?I solve those, the agent doesn't bypass.\"",
+        "\"That's a CAPTCHA. I solve those; the agent doesn't bypass.\"",
     },
     {
       trigger: "Login wall on a fresh browser",
@@ -201,7 +201,7 @@ export const SAFE_DEMO_SCRIPT: SafeDemoScript = {
         "If the provider opens a login wall, the agent stops. Operator " +
         "logs in manually before re-running the booking.",
       recoveryLine:
-        "\"This provider wants me to log in -?I'd do that off-camera, then " +
+        "\"This provider wants me to log in. I'd do that off-camera, then " +
         "we'd re-run the agent against the warm session.\"",
     },
     {
@@ -209,20 +209,20 @@ export const SAFE_DEMO_SCRIPT: SafeDemoScript = {
       rule:
         "The agent never clicks the irreversible action. Operator clicks.",
       recoveryLine:
-        "\"This is the irreversible button -?I click it, not the agent.\"",
+        "\"This is the irreversible button. I click it, not the agent.\"",
     },
   ],
   recoveryPhrases: [
     {
       scenario: "Provider returns no availability",
       line:
-        "\"Provider says no slots in our window -?that's data, not a bug. " +
+        "\"Provider says no slots in our window; that's data, not a bug. " +
         "Let me adjust the time and re-run.\"",
     },
     {
       scenario: "Card / time disappears between scan and click",
       line:
-        "\"That option just disappeared -?the agent caught it and stopped " +
+        "\"That option just disappeared; the agent caught it and stopped " +
         "rather than booking the wrong thing.\"",
     },
     {
@@ -235,7 +235,7 @@ export const SAFE_DEMO_SCRIPT: SafeDemoScript = {
     {
       scenario: "Network 5xx",
       line:
-        "\"That's a 5xx from the provider -?I'd retry once or move to a " +
+        "\"That's a 5xx from the provider. I'd retry once or move to a " +
         "fallback. Not an agent bug.\"",
     },
     {

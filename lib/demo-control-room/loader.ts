@@ -78,7 +78,7 @@ export interface FounderE2eSection {
 }
 
 export interface RuntimeForensicsLink {
-  /** Always shown -?link, not data. */
+  /** Always shown - link, not data. */
   href: string;
   /** Helper note about what the linked dashboard does. */
   description: string;
@@ -121,7 +121,7 @@ const SMOKE_ABSENT_HINT =
 
 const RUNTIME_FORENSICS_DESCRIPTION =
   "Read-only triage workbench for provider runtime failures. Use it after " +
-  "a demo if the booking flow stalls -?it pre-classifies the failure " +
+  "a demo if the booking flow stalls; it pre-classifies the failure " +
   "across 8 categories (legacy-shape, no-availability, OTP, checkout, " +
   "5xx, etc.) and surfaces a paste-ready bug report.";
 
@@ -268,7 +268,7 @@ function buildPhase2Section(): Phase2Section {
 /* ------ Helpers -------------------------------------------------------------------------------------------------------------- */
 
 /**
- * Convenience accessor for the verdict tone -?the dashboard uses
+ * Convenience accessor for the verdict tone - the dashboard uses
  * this to color-code each card. Pure function, exported for tests.
  */
 export function verdictTone(

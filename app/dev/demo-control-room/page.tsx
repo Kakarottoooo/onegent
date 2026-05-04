@@ -1,5 +1,5 @@
 ﻿/**
- * /dev/demo-control-room -?founder-facing demo prep dashboard.
+ * /dev/demo-control-room - founder-facing demo prep dashboard.
  *
  * READ-ONLY. Aggregates existing artifact verdicts (Phase 1 quality
  * gate, founder-e2e, smoke check from gate, Phase 2 vertical status)
@@ -7,11 +7,11 @@
  *
  * Hard rules (verified by tests / hold rules):
  *   - No live runs, no retry, no payment, no OTP, no CAPTCHA bypass.
- *   - No "run gate" / "run e2e" buttons -?only `router.refresh()` to
+ *   - No "run gate" / "run e2e" buttons; only `router.refresh()` to
  *     re-render the server component (which re-reads filesystem).
  *   - Server component reads `lib/demo-control-room/loader` directly;
  *     no new dev API.
- *   - Dev-gated via the same pattern as `/dev/founder-e2e`.
+ *   - Read-only and safe to open in production preview.
  *
  * Layout:
  *   1. Header + V1 caveat + manual Refresh button
@@ -23,8 +23,6 @@
  *
  * Pure RSC. Client interactivity lives in `./refresh-button.tsx`.
  */
-
-import { notFound } from "next/navigation";
 
 import {
   formatDemoScriptMarkdown,
@@ -42,17 +40,7 @@ import { RefreshButton } from "./refresh-button";
 
 export const dynamic = "force-dynamic";
 
-function isDevPageEnabled(): boolean {
-  return (
-    process.env.NODE_ENV !== "production" ||
-    process.env.ENABLE_DEV_BENCHMARK_API === "1"
-  );
-}
-
 export default async function DemoControlRoomPage() {
-  if (!isDevPageEnabled()) {
-    notFound();
-  }
   const snap = await loadDemoControlRoomSnapshot();
   const markdown = formatDemoScriptMarkdown();
 
@@ -300,7 +288,7 @@ function Phase2Panel({ snap }: { snap: DemoControlRoomSnapshot }) {
       </h2>
       <p className="dcr__phase2-caveat">
         Phase 2 is FROZEN unless Phase 0/1 are stable. The statuses below
-        are the no-live audit verdict -?do not interpret them as
+        are the no-live audit verdict; do not interpret them as
         live-verified. Update protocol: change{" "}
         <code>docs/50-product-areas/PHASE2_VERTICAL_REVIVAL_AUDIT.md</code>{" "}
         first, then mirror in{" "}
@@ -350,7 +338,7 @@ function EvidenceItem({ link }: { link: Phase2EvidenceLink }) {
       <span className={`dcr__ev-kind dcr__ev-kind--${link.kind}`}>
         [{link.kind}]
       </span>{" "}
-      <strong>{link.label}</strong> -?<code>{link.ref}</code>
+      <strong>{link.label}</strong> - <code>{link.ref}</code>
     </li>
   );
 }

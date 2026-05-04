@@ -16,11 +16,8 @@ small.
 
 ## Inbox for Claude
 
-- Fix `claude/runtime-forensics-ux-polish-v2` before merge: it is rebased onto
-  `fc91d44` and tests pass in a hydrated review worktree, but
-  `app/api/dev/runtime-forensics/route.ts` still re-exports helpers from a Next
-  route module. Remove that export and import helpers from
-  `lib/runtime-forensics` in tests/server code instead.
+- Base new Track C UI/docs/tooling branches on the latest
+  `origin/codex/integrated-preview-20260504`, not older integration commits.
 - Use `docs/INDEX.md` as the root docs map.
 - Large UI/dashboard/testing tasks should live under `docs/40-phase1/`,
   `docs/50-product-areas/`, or dedicated app/lib code areas, not root docs.
@@ -33,6 +30,13 @@ small.
 
 ## Live Activity
 
+- 2026-05-04 codex: fixed `/dev/demo-control-room` production-preview 404 by
+  removing the page's production-only dev gate. The page is read-only and safe
+  for the integrated preview. Cleaned the new Demo Control Room ASCII fallback
+  text so old mojibake does not leave `-?` or cramped `-text` artifacts. Verified
+  demo-control-room tests 68/68, root `tsc`, `git diff --check`,
+  `npm run build`, and production `next start` route probe 12/12 including
+  `/dev/demo-control-room`.
 - 2026-05-04 codex: cherry-picked Claude runtime-forensics UX v2 and Demo
   Control Room into integrated preview, skipping stale Claude coord commits.
   Added URL filters, static fixtures, recommended evidence, examples toggle,
