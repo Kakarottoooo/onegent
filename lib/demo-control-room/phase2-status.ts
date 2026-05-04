@@ -112,6 +112,11 @@ export const PHASE_2_VERTICALS: ReadonlyArray<Phase2Vertical> = [
         kind: "doc",
       },
       {
+        label: "Expedia controlled retry runbook",
+        ref: "docs/50-product-areas/EXPEDIA_CONTROLLED_RETRY_RUNBOOK.md",
+        kind: "runbook",
+      },
+      {
         label: "Card scoring regression",
         ref: "lib/__tests__/expedia-flight-card-match.test.ts",
         kind: "test",
