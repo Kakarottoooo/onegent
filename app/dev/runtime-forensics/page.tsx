@@ -1,38 +1,57 @@
 /**
- * /dev/runtime-forensics — Provider Runtime Forensics Workbench.
+ * /dev/runtime-forensics - Provider Runtime Forensics Workbench (UX v2).
  *
- * Read-only dashboard backed by `/api/dev/runtime-forensics`. V1 is
- * artifact-based: parses `benchmark/runs/*.json` and an optional
- * worker-log excerpt. NO live runs, NO retry buttons. Source of truth
- * is still the DB + worker log + screenshots — this is a triage helper
- * that pre-classifies failures and surfaces signals.
+ * Read-only triage dashboard backed by /api/dev/runtime-forensics. V1 is
+ * artifact-based: parses benchmark/runs/*.json + an optional codex-worker.log
+ * excerpt + (optional) static fixtures from
+ * lib/runtime-forensics/__fixtures__/. NO live runs, NO retry buttons,
+ * NO worker control. Source of truth is still DB + worker log + screenshots.
  *
- * Layout:
- *   - Top banner: V1 artifact-based caveat + worker-log presence.
- *   - Filter rail: provider / status / primaryClass.
- *   - Job table: provider · scenario · status · classification ·
- *     age · task link.
- *   - Detail drawer (on row click): raw terminal fields + parsed
- *     classification + step shape audit + decision log summary +
- *     cross-references + paste-ready markdown bug-report.
- *
- * P0 highlighting: rows with `hasLegacyShapeBug=true` get a red
- * border + 🚨 marker, signaling worker-gating regression.
+ * UX v2 highlights:
+ *  - multi-select chips for providers / classes / severities
+ *  - hide-unknown toggle
+ *  - show-fixtures toggle (?examples=1) tagged [FIXTURE]
+ *  - sortable column headers (severity / updatedAt / provider / scenario)
+ *  - URL state roundtrip preserves all filter + sort state
+ *  - detail drawer: source-of-truth reminder, signal grouping by source,
+ *    step-shape audit with missing-source highlighting, copy buttons,
+ *    recommended-next-evidence checklist + PowerShell commands
+ *  - ASCII-only markers (no emoji) — uses [P0], [!], [FIXTURE], etc.
  */
 
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import {
+  Suspense,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 
 import {
+  DEFAULT_FILTER_STATE,
   FAILURE_CLASS_LABEL,
   FAILURE_CLASS_TONE,
+  FAILURE_CLASS_SEVERITY,
   FORENSICS_SEVERITY_LABEL,
+  parseFiltersFromQuery,
+  serializeFiltersToString,
+  type ClassifierSignal,
   type FailureClass,
+  type FilterState,
   type ForensicsReport,
   type ForensicsSeverity,
   type ForensicsSummary,
-} from "@/lib/runtime-forensics/types";
+  type Pointer,
+  type Recommendation,
+  type SearchCommand,
+  type SortDir,
+  type SortKey,
+  type StepShapeAuditRow,
+} from "@/lib/runtime-forensics";
 
 interface ListResponse {
   summaries: ForensicsSummary[];
@@ -40,13 +59,18 @@ interface ListResponse {
   workerLogAvailable: boolean;
   workerLogPathHint: string;
   benchmarkRunsScanned: number;
+  fixturesLoaded: number;
+  fixturesEnabled: boolean;
   loaderNotes: string[];
+  filterWarnings: string[];
+  canonicalQuery: string;
   sourceCaveat: string;
 }
 
 interface DetailResponse {
   report: ForensicsReport;
   summary: ForensicsSummary;
+  recommendation: Recommendation;
   markdown: string;
   workerLogAvailable: boolean;
   workerLogPathHint: string;
@@ -54,34 +78,92 @@ interface DetailResponse {
 
 const FAILURE_CLASS_OPTIONS: ReadonlyArray<FailureClass> = [
   "legacy_shape_missing_source",
-  "provider_no_availability",
   "provider_form_incomplete",
-  "otp_or_login_required",
-  "checkout_reached_manual_review",
   "model_or_env_blocked",
   "network_or_provider_5xx",
+  "provider_no_availability",
+  "otp_or_login_required",
+  "checkout_reached_manual_review",
   "unknown",
 ];
 
-const PROVIDER_OPTIONS = ["resy", "opentable", "expedia", "booking-com", "hotels-com"];
-const STATUS_OPTIONS = [
-  "pending",
-  "running",
-  "ready_for_confirmation",
-  "succeeded",
-  "failed",
-  "cancelled",
+const SEVERITY_OPTIONS: ReadonlyArray<ForensicsSeverity> = [
+  "p0",
+  "p1",
+  "p2",
+  "p3",
+  "info",
 ];
 
+const PROVIDER_OPTIONS = [
+  "resy",
+  "opentable",
+  "expedia",
+  "booking-com",
+  "hotels-com",
+];
+
+const SOURCE_LABELS: Record<ClassifierSignal["source"], string> = {
+  step_shape_audit: "Step shape audit",
+  status_field: "Status field",
+  error_message: "Error message",
+  terminal_reason: "Terminal reason",
+  terminal_code: "Terminal code",
+  step_error: "Step.error",
+  decision_log: "Decision log",
+  raw_worker_log: "Worker log",
+};
+
 export default function RuntimeForensicsPage() {
+  return (
+    <Suspense fallback={<div className="rfor__loading">Loading filters...</div>}>
+      <RuntimeForensicsClient />
+    </Suspense>
+  );
+}
+
+function RuntimeForensicsClient() {
+  const router = useRouter();
+  const searchParams = useSearchParams();
+
+  // --- Filter state (URL-driven) ---
+  const filterStateRef = useRef<FilterState>(DEFAULT_FILTER_STATE);
+  const [filterState, setFilterState] = useState<FilterState>(() => {
+    const parsed = parseFiltersFromQuery(searchParams ?? null);
+    filterStateRef.current = parsed.state;
+    return parsed.state;
+  });
+
+  // Pull URL changes back into state on navigation events.
+  useEffect(() => {
+    const parsed = parseFiltersFromQuery(searchParams ?? null);
+    if (
+      JSON.stringify(parsed.state) !==
+      JSON.stringify(filterStateRef.current)
+    ) {
+      filterStateRef.current = parsed.state;
+      setFilterState(parsed.state);
+    }
+  }, [searchParams]);
+
+  const updateFilters = useCallback(
+    (updater: (prev: FilterState) => FilterState) => {
+      const next = updater(filterStateRef.current);
+      filterStateRef.current = next;
+      setFilterState(next);
+      const qs = serializeFiltersToString(next);
+      const nextUrl = qs.length > 0 ? `?${qs}` : "/dev/runtime-forensics";
+      router.replace(nextUrl, { scroll: false });
+    },
+    [router],
+  );
+
+  // --- List state ---
   const [list, setList] = useState<ListResponse | null>(null);
   const [listLoading, setListLoading] = useState(true);
   const [listError, setListError] = useState<string | null>(null);
 
-  const [filterProvider, setFilterProvider] = useState<string>("");
-  const [filterStatus, setFilterStatus] = useState<string>("");
-  const [filterClass, setFilterClass] = useState<string>("");
-
+  // --- Detail state ---
   const [activeJobId, setActiveJobId] = useState<string | null>(null);
   const [detail, setDetail] = useState<DetailResponse | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
@@ -91,15 +173,14 @@ export default function RuntimeForensicsPage() {
     setListLoading(true);
     setListError(null);
     try {
-      const params = new URLSearchParams();
-      if (filterProvider) params.set("provider", filterProvider);
-      if (filterStatus) params.set("status", filterStatus);
-      if (filterClass) params.set("primaryClass", filterClass);
-      const url = `/api/dev/runtime-forensics${params.toString() ? `?${params.toString()}` : ""}`;
+      const qs = serializeFiltersToString(filterStateRef.current);
+      const url = `/api/dev/runtime-forensics${qs.length > 0 ? `?${qs}` : ""}`;
       const res = await fetch(url, { cache: "no-store" });
       if (!res.ok) {
         const body = await res.json().catch(() => null);
-        throw new Error(`GET list failed: ${res.status} ${body?.error?.message ?? ""}`);
+        throw new Error(
+          `GET list failed: ${res.status} ${body?.error?.message ?? ""}`,
+        );
       }
       const data = (await res.json()) as ListResponse;
       setList(data);
@@ -109,7 +190,11 @@ export default function RuntimeForensicsPage() {
     } finally {
       setListLoading(false);
     }
-  }, [filterProvider, filterStatus, filterClass]);
+  }, []);
+
+  useEffect(() => {
+    void refreshList();
+  }, [refreshList, filterState]);
 
   const loadDetail = useCallback(async (jobId: string) => {
     setActiveJobId(jobId);
@@ -122,7 +207,9 @@ export default function RuntimeForensicsPage() {
       );
       if (!res.ok) {
         const body = await res.json().catch(() => null);
-        throw new Error(`GET detail failed: ${res.status} ${body?.error?.message ?? ""}`);
+        throw new Error(
+          `GET detail failed: ${res.status} ${body?.error?.message ?? ""}`,
+        );
       }
       const data = (await res.json()) as DetailResponse;
       setDetail(data);
@@ -134,112 +221,95 @@ export default function RuntimeForensicsPage() {
     }
   }, []);
 
-  useEffect(() => {
-    void refreshList();
-  }, [refreshList]);
-
   return (
     <main className="rfor">
       <header className="rfor__top">
         <div className="rfor__breadcrumb">
           <a href="/dev">/dev</a>
-          <span> · </span>
+          <span> / </span>
           <span>runtime-forensics</span>
         </div>
         <h1 className="rfor__title">Provider Runtime Forensics</h1>
         <p className="rfor__subtitle">
-          Read-only triage workbench. Reads `benchmark/runs/*.json`,
-          `worker/.debug-screenshots/`, and an optional `codex-worker.log` excerpt
-          to pre-classify provider failures across 8 categories. **No live
-          runs, no retry, no worker control.**
+          Read-only triage workbench. Parses{" "}
+          <code>benchmark/runs/*.json</code>,{" "}
+          <code>worker/.debug-screenshots/</code>, and an optional{" "}
+          <code>codex-worker.log</code> excerpt to pre-classify provider
+          failures across 8 categories. <strong>No live runs, no retry,
+          no worker control.</strong>
         </p>
         <div className="rfor__caveat">
-          <strong>V1 is artifact-based.</strong> Source of truth is still the
-          DB + worker log + screenshots, not this page. DB live lookup is a
-          future source (codex domain).
+          <strong>[V1]</strong> Artifact-based. Source of truth is still
+          the DB + worker log + screenshots, NOT this page. DB live lookup
+          is a future source (codex domain).
         </div>
       </header>
 
-      <section className="rfor__filters">
-        <h2 className="rfor__section-title">Filter</h2>
-        <div className="rfor__filter-row">
-          <label>
-            <span>Provider</span>
-            <select
-              value={filterProvider}
-              onChange={(e) => setFilterProvider(e.target.value)}
-            >
-              <option value="">(any)</option>
-              {PROVIDER_OPTIONS.map((p) => (
-                <option key={p} value={p}>
-                  {p}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label>
-            <span>Status</span>
-            <select
-              value={filterStatus}
-              onChange={(e) => setFilterStatus(e.target.value)}
-            >
-              <option value="">(any)</option>
-              {STATUS_OPTIONS.map((s) => (
-                <option key={s} value={s}>
-                  {s}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label>
-            <span>Classification</span>
-            <select
-              value={filterClass}
-              onChange={(e) => setFilterClass(e.target.value)}
-            >
-              <option value="">(any)</option>
-              {FAILURE_CLASS_OPTIONS.map((c) => (
-                <option key={c} value={c}>
-                  {FAILURE_CLASS_LABEL[c]}
-                </option>
-              ))}
-            </select>
-          </label>
-          <button
-            type="button"
-            className="rfor__btn-tiny"
-            onClick={() => {
-              setFilterProvider("");
-              setFilterStatus("");
-              setFilterClass("");
-            }}
-          >
-            Clear
-          </button>
-        </div>
-      </section>
+      <FilterRail
+        state={filterState}
+        onChange={updateFilters}
+        list={list}
+      />
 
       <section className="rfor__section">
-        <h2 className="rfor__section-title">
-          Jobs {list ? `(${list.total})` : ""}
-        </h2>
-        {listLoading && <div className="rfor__loading">Loading…</div>}
+        <div className="rfor__section-head">
+          <h2 className="rfor__section-title">
+            Jobs {list ? `(${list.total})` : ""}
+          </h2>
+          <div className="rfor__meta-inline">
+            {list?.fixturesEnabled && list.fixturesLoaded > 0 && (
+              <span className="rfor__pill rfor__pill--fixture">
+                {list.fixturesLoaded} fixture rows visible
+              </span>
+            )}
+          </div>
+        </div>
+
+        {listLoading && <div className="rfor__loading">Loading...</div>}
         {listError && <div className="rfor__error">{listError}</div>}
+
+        {list && list.filterWarnings.length > 0 && (
+          <div className="rfor__warning">
+            <strong>URL filter warnings:</strong>
+            <ul>
+              {list.filterWarnings.map((w) => (
+                <li key={w}>{w}</li>
+              ))}
+            </ul>
+          </div>
+        )}
+
         {!listLoading && list && list.total === 0 && (
           <EmptyState
             workerLogAvailable={list.workerLogAvailable}
             workerLogPathHint={list.workerLogPathHint}
             benchmarkRunsScanned={list.benchmarkRunsScanned}
+            fixturesEnabled={list.fixturesEnabled}
             loaderNotes={list.loaderNotes}
+            onShowFixtures={() =>
+              updateFilters((s) => ({ ...s, showFixtures: true }))
+            }
           />
         )}
+
         {list && list.total > 0 && (
           <JobTable
             summaries={list.summaries}
             activeJobId={activeJobId}
+            sortKey={filterState.sortKey}
+            sortDir={filterState.sortDir}
+            onSort={(k) =>
+              updateFilters((s) => {
+                if (s.sortKey === k) {
+                  return { ...s, sortDir: s.sortDir === "asc" ? "desc" : "asc" };
+                }
+                return { ...s, sortKey: k, sortDir: "desc" };
+              })
+            }
             onSelect={(id) => void loadDetail(id)}
           />
         )}
+
         {list && (
           <div className="rfor__meta">
             Worker log:{" "}
@@ -247,22 +317,25 @@ export default function RuntimeForensicsPage() {
               <span className="rfor__meta-good">present</span>
             ) : (
               <span className="rfor__meta-warn">absent</span>
-            )}
-            {" · "}
-            Path hint: <code>{list.workerLogPathHint}</code>
-            {" · "}
-            Benchmark runs scanned: {list.benchmarkRunsScanned}
+            )}{" "}
+            / Path: <code>{list.workerLogPathHint}</code> / Benchmark runs
+            scanned: {list.benchmarkRunsScanned} / Fixtures loaded:{" "}
+            {list.fixturesLoaded}
           </div>
         )}
       </section>
 
       <section className="rfor__section">
         <h2 className="rfor__section-title">Detail</h2>
-        {detailLoading && <div className="rfor__loading">Loading…</div>}
+        {detailLoading && <div className="rfor__loading">Loading...</div>}
         {detailError && <div className="rfor__error">{detailError}</div>}
         {!detailLoading && !detail && !detailError && (
           <div className="rfor__empty">
-            <p>Select a job above to see classification + step shape audit + paste-ready bug report.</p>
+            <p>
+              Select a job above to see classification, step-shape audit,
+              recommended next evidence, and the paste-ready markdown bug
+              report.
+            </p>
           </div>
         )}
         {detail && <DetailPanel detail={detail} />}
@@ -273,27 +346,277 @@ export default function RuntimeForensicsPage() {
   );
 }
 
-/* ─── Job table ──────────────────────────────────────────────────── */
+/* --- Filter rail with multi-select chips --------------------------- */
 
-interface JobTableProps {
-  summaries: ForensicsSummary[];
-  activeJobId: string | null;
-  onSelect: (jobId: string) => void;
+function FilterRail({
+  state,
+  onChange,
+  list,
+}: {
+  state: FilterState;
+  onChange: (updater: (prev: FilterState) => FilterState) => void;
+  list: ListResponse | null;
+}) {
+  return (
+    <section className="rfor__filters">
+      <div className="rfor__filter-head">
+        <h2 className="rfor__section-title">Filter</h2>
+        <button
+          type="button"
+          className="rfor__btn-tiny"
+          onClick={() => onChange(() => DEFAULT_FILTER_STATE)}
+        >
+          Clear all
+        </button>
+      </div>
+
+      <ChipGroup
+        label="Provider"
+        options={PROVIDER_OPTIONS}
+        selected={state.providers}
+        onToggle={(v) =>
+          onChange((s) => ({
+            ...s,
+            providers: toggleString(s.providers, v),
+          }))
+        }
+      />
+      <ChipGroup
+        label="Classification"
+        options={FAILURE_CLASS_OPTIONS as readonly string[]}
+        labelFor={(v) => FAILURE_CLASS_LABEL[v as FailureClass] ?? v}
+        selected={state.classes as readonly string[]}
+        onToggle={(v) =>
+          onChange((s) => ({
+            ...s,
+            classes: toggleString(s.classes, v as FailureClass) as FailureClass[],
+          }))
+        }
+      />
+      <ChipGroup
+        label="Severity"
+        options={SEVERITY_OPTIONS as readonly string[]}
+        labelFor={(v) => `[${FORENSICS_SEVERITY_LABEL[v as ForensicsSeverity]}]`}
+        selected={state.severities as readonly string[]}
+        onToggle={(v) =>
+          onChange((s) => ({
+            ...s,
+            severities: toggleString(s.severities, v as ForensicsSeverity) as ForensicsSeverity[],
+          }))
+        }
+      />
+
+      <div className="rfor__filter-toggles">
+        <label>
+          <input
+            type="checkbox"
+            checked={state.hideUnknown}
+            onChange={(e) =>
+              onChange((s) => ({ ...s, hideUnknown: e.target.checked }))
+            }
+          />
+          Hide <code>unknown</code> rows
+        </label>
+        <label>
+          <input
+            type="checkbox"
+            checked={state.showFixtures}
+            onChange={(e) =>
+              onChange((s) => ({ ...s, showFixtures: e.target.checked }))
+            }
+          />
+          Show <code>[FIXTURE]</code> example rows{" "}
+          {list && list.fixturesEnabled && list.fixturesLoaded > 0 ? (
+            <span className="rfor__hint">
+              ({list.fixturesLoaded} synthetic, never confused with real
+              evidence)
+            </span>
+          ) : null}
+        </label>
+      </div>
+
+      {list && list.canonicalQuery.length > 0 && (
+        <div className="rfor__filter-share">
+          Share URL:
+          <CopyButton
+            label="Copy filter URL"
+            value={
+              typeof window !== "undefined"
+                ? `${window.location.origin}/dev/runtime-forensics?${list.canonicalQuery}`
+                : `/dev/runtime-forensics?${list.canonicalQuery}`
+            }
+          />
+        </div>
+      )}
+    </section>
+  );
 }
 
-function JobTable({ summaries, activeJobId, onSelect }: JobTableProps) {
+function ChipGroup({
+  label,
+  options,
+  labelFor,
+  selected,
+  onToggle,
+}: {
+  label: string;
+  options: readonly string[];
+  labelFor?: (v: string) => string;
+  selected: readonly string[];
+  onToggle: (v: string) => void;
+}) {
+  return (
+    <div className="rfor__chip-row">
+      <span className="rfor__chip-row-label">{label}</span>
+      <div className="rfor__chips">
+        {options.map((v) => {
+          const active = selected.includes(v);
+          return (
+            <button
+              key={v}
+              type="button"
+              className={
+                active ? "rfor__chip rfor__chip--active" : "rfor__chip"
+              }
+              onClick={() => onToggle(v)}
+            >
+              {labelFor ? labelFor(v) : v}
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function toggleString<T extends string>(arr: ReadonlyArray<T>, v: T): T[] {
+  if (arr.includes(v)) return arr.filter((x) => x !== v);
+  return [...arr, v];
+}
+
+/* --- Empty state --------------------------------------------------- */
+
+function EmptyState({
+  workerLogAvailable,
+  workerLogPathHint,
+  benchmarkRunsScanned,
+  fixturesEnabled,
+  loaderNotes,
+  onShowFixtures,
+}: {
+  workerLogAvailable: boolean;
+  workerLogPathHint: string;
+  benchmarkRunsScanned: number;
+  fixturesEnabled: boolean;
+  loaderNotes: string[];
+  onShowFixtures: () => void;
+}) {
+  return (
+    <div className="rfor__empty">
+      <p>
+        <strong>No artifact rows match the current filters.</strong>
+      </p>
+      <ul className="rfor__empty-list">
+        <li>
+          Benchmark runs scanned: <strong>{benchmarkRunsScanned}</strong>{" "}
+          {benchmarkRunsScanned === 0 && (
+            <em>
+              - place files at <code>benchmark/runs/*.json</code> for the
+              loader to find.
+            </em>
+          )}
+        </li>
+        <li>
+          Worker log:{" "}
+          {workerLogAvailable ? "present" : "absent"} (path:{" "}
+          <code>{workerLogPathHint}</code>). Override with the{" "}
+          <code>WORKER_LOG_PATH</code> env var. Codex's path is{" "}
+          <code>C:\Users\Gzw19\onegent-e2e-20260503\codex-worker.log</code>.
+        </li>
+        {!fixturesEnabled && (
+          <li>
+            Or click{" "}
+            <button
+              type="button"
+              className="rfor__btn-tiny"
+              onClick={onShowFixtures}
+            >
+              Show [FIXTURE] examples
+            </button>{" "}
+            to see synthetic example rows that demonstrate every
+            classification.
+          </li>
+        )}
+      </ul>
+      {loaderNotes.length > 0 && (
+        <details className="rfor__loader-notes">
+          <summary>Loader notes ({loaderNotes.length})</summary>
+          <ul>
+            {loaderNotes.map((n) => (
+              <li key={n}>
+                <code>{n}</code>
+              </li>
+            ))}
+          </ul>
+        </details>
+      )}
+    </div>
+  );
+}
+
+/* --- Job table ----------------------------------------------------- */
+
+function JobTable({
+  summaries,
+  activeJobId,
+  sortKey,
+  sortDir,
+  onSort,
+  onSelect,
+}: {
+  summaries: ForensicsSummary[];
+  activeJobId: string | null;
+  sortKey: SortKey;
+  sortDir: SortDir;
+  onSort: (k: SortKey) => void;
+  onSelect: (jobId: string) => void;
+}) {
   return (
     <div className="rfor__table-wrap">
       <table className="rfor__table">
         <thead>
           <tr>
             <th>Job id</th>
-            <th>Provider</th>
-            <th>Scenario</th>
+            <SortableHeader
+              k="provider"
+              label="Provider"
+              activeKey={sortKey}
+              dir={sortDir}
+              onSort={onSort}
+            />
+            <SortableHeader
+              k="scenario"
+              label="Scenario"
+              activeKey={sortKey}
+              dir={sortDir}
+              onSort={onSort}
+            />
             <th>Status</th>
             <th>Classification</th>
-            <th>Severity</th>
-            <th>Age</th>
+            <SortableHeader
+              k="severity"
+              label="Severity"
+              activeKey={sortKey}
+              dir={sortDir}
+              onSort={onSort}
+            />
+            <SortableHeader
+              k="updatedAt"
+              label="Age"
+              activeKey={sortKey}
+              dir={sortDir}
+              onSort={onSort}
+            />
             <th>Task</th>
             <th></th>
           </tr>
@@ -304,7 +627,7 @@ function JobTable({ summaries, activeJobId, onSelect }: JobTableProps) {
             const isActive = s.jobId === activeJobId;
             return (
               <tr
-                key={(s.jobId ?? "noid") + ":" + s.scenario}
+                key={(s.jobId ?? "noid") + ":" + s.scenario + ":" + s.inputSource}
                 className={
                   s.hasLegacyShapeBug
                     ? "rfor__row--p0"
@@ -314,14 +637,21 @@ function JobTable({ summaries, activeJobId, onSelect }: JobTableProps) {
                 }
               >
                 <td>
-                  <code className="rfor__cell-mono">{s.jobId ?? "—"}</code>
+                  <code className="rfor__cell-mono">
+                    {s.isFixture && (
+                      <span className="rfor__tag rfor__tag--fixture">
+                        [FIXTURE]
+                      </span>
+                    )}
+                    {s.jobId ?? "(none)"}
+                  </code>
                 </td>
                 <td>{s.provider}</td>
                 <td>{s.scenario}</td>
                 <td>{s.status}</td>
                 <td>
                   <span className={`rfor__pill rfor__pill--${tone}`}>
-                    {s.hasLegacyShapeBug ? "🚨 " : ""}
+                    {s.hasLegacyShapeBug ? "[!] " : ""}
                     {FAILURE_CLASS_LABEL[s.primaryClass]}
                   </span>
                 </td>
@@ -330,28 +660,29 @@ function JobTable({ summaries, activeJobId, onSelect }: JobTableProps) {
                 </td>
                 <td>{formatAge(s.ageSeconds)}</td>
                 <td>
-                  {s.taskId ? (
+                  {s.taskId && !s.isFixture ? (
                     <a
                       className="rfor__link"
                       href={`/tasks/${encodeURIComponent(s.taskId)}`}
                       target="_blank"
                       rel="noopener noreferrer"
                     >
-                      open
+                      open task
                     </a>
                   ) : (
-                    "—"
+                    <span className="rfor__hint">{s.taskId ?? "-"}</span>
                   )}
                 </td>
                 <td>
-                  <button
-                    type="button"
-                    className="rfor__btn-tiny"
-                    disabled={!s.jobId}
-                    onClick={() => s.jobId && onSelect(s.jobId)}
-                  >
-                    {isActive ? "Reload" : "Inspect"}
-                  </button>
+                  {s.jobId && (
+                    <button
+                      type="button"
+                      className="rfor__btn-tiny"
+                      onClick={() => onSelect(s.jobId as string)}
+                    >
+                      Inspect
+                    </button>
+                  )}
                 </td>
               </tr>
             );
@@ -362,700 +693,1095 @@ function JobTable({ summaries, activeJobId, onSelect }: JobTableProps) {
   );
 }
 
-/* ─── Detail panel ───────────────────────────────────────────────── */
-
-function DetailPanel({ detail }: { detail: DetailResponse }) {
-  const { report, markdown } = detail;
-  const tone = FAILURE_CLASS_TONE[report.classification.primaryClass];
-  return (
-    <div className={`rfor__detail rfor__detail--${tone}`}>
-      <div className="rfor__detail-headline">
-        <span className={`rfor__pill rfor__pill--${tone}`}>
-          {report.stepShape.hasLegacyShapeBug ? "🚨 " : ""}
-          {FAILURE_CLASS_LABEL[report.classification.primaryClass]}
-        </span>
-        <SeverityChip severity={report.classification.severity} />
-        <span className="rfor__detail-runid">
-          {report.jobId ? <code>{report.jobId}</code> : "(no id)"}
-        </span>
-      </div>
-
-      <dl className="rfor__detail-dl">
-        <div>
-          <dt>Provider</dt>
-          <dd>{report.provider}</dd>
-        </div>
-        <div>
-          <dt>Scenario</dt>
-          <dd>{report.scenario}</dd>
-        </div>
-        <div>
-          <dt>Status</dt>
-          <dd>{report.status}</dd>
-        </div>
-        <div>
-          <dt>Confidence</dt>
-          <dd>{report.classification.confidence}</dd>
-        </div>
-        <div>
-          <dt>Updated</dt>
-          <dd>{report.updatedAt ?? "—"}</dd>
-        </div>
-        <div>
-          <dt>Source</dt>
-          <dd>
-            <code>{report.inputSource}</code>
-          </dd>
-        </div>
-      </dl>
-
-      <h3 className="rfor__sub-title">Top signals</h3>
-      {report.classification.signals.length === 0 ? (
-        <p className="rfor__muted">No matched signals — classifier returned `unknown`.</p>
-      ) : (
-        <ul className="rfor__signal-list">
-          {report.classification.signals.slice(0, 8).map((s, i) => (
-            <li key={i}>
-              <code>[{s.weight.toFixed(2)}]</code>
-              {" "}
-              <code>[{s.source}]</code>
-              {" "}
-              <code>[{s.supportsClass}]</code>
-              {" "}
-              <span>{s.label}</span>
-              {s.excerpt && <div className="rfor__signal-excerpt">{s.excerpt}</div>}
-            </li>
-          ))}
-        </ul>
-      )}
-
-      <h3 className="rfor__sub-title">Step shape audit</h3>
-      <p>
-        Total steps: <strong>{report.stepShape.totalSteps}</strong> · with{" "}
-        <code>__source</code>: {report.stepShape.stepsWithSourceMarker} · missing:{" "}
-        {report.stepShape.stepsMissingSourceMarker}
-      </p>
-      {report.stepShape.hasLegacyShapeBug && (
-        <div className="rfor__p0-callout">
-          <strong>P0: Legacy-shape bug detected.</strong> Step reached worker
-          without `__source` marker — M5 force-gate at{" "}
-          <code>app/api/booking-jobs/[id]/start/route.ts</code> failed to stamp.
-          Review the gate-routing path and the worker step normalizer.
-        </div>
-      )}
-      {report.stepShape.legacyShapeQuotes.length > 0 && (
-        <ul className="rfor__quote-list">
-          {report.stepShape.legacyShapeQuotes.slice(0, 6).map((q, i) => (
-            <li key={i}>
-              <code>{q}</code>
-            </li>
-          ))}
-        </ul>
-      )}
-
-      <h3 className="rfor__sub-title">Raw terminal fields</h3>
-      <ul className="rfor__raw-list">
-        {report.rawTerminalReason && (
-          <li>
-            <strong>terminalReason</strong>
-            <pre className="rfor__pre">{report.rawTerminalReason}</pre>
-          </li>
-        )}
-        {report.rawTerminalCode && (
-          <li>
-            <strong>terminalCode</strong>: <code>{report.rawTerminalCode}</code>
-          </li>
-        )}
-        {report.rawErrorMessage && (
-          <li>
-            <strong>errorMessage</strong>
-            <pre className="rfor__pre">{report.rawErrorMessage}</pre>
-          </li>
-        )}
-      </ul>
-
-      {report.decisionLogSummary.totalEntries > 0 && (
-        <>
-          <h3 className="rfor__sub-title">
-            Decision log ({report.decisionLogSummary.totalEntries})
-          </h3>
-          <p className="rfor__muted">
-            Levels:{" "}
-            {Object.entries(report.decisionLogSummary.byLevel)
-              .map(([k, v]) => `${k}=${v}`)
-              .join(", ")}
-            {report.decisionLogSummary.notableSignals.length > 0 && (
-              <>
-                {" · Notable: "}
-                {report.decisionLogSummary.notableSignals.join(", ")}
-              </>
-            )}
-          </p>
-          <ul className="rfor__event-list">
-            {report.decisionLogSummary.topEvents.map((e, i) => (
-              <li key={i}>
-                <code>{e.event}</code> × {e.count}
-              </li>
-            ))}
-          </ul>
-        </>
-      )}
-
-      <h3 className="rfor__sub-title">Cross-references</h3>
-      <ul className="rfor__raw-list">
-        {report.hints.taskPagePath && (
-          <li>
-            Task page:{" "}
-            <a
-              className="rfor__link"
-              href={report.hints.taskPagePath}
-              target="_blank"
-              rel="noopener noreferrer"
-            >
-              <code>{report.hints.taskPagePath}</code>
-            </a>
-          </li>
-        )}
-        {report.hints.benchmarkReportFile && (
-          <li>
-            Benchmark report:{" "}
-            <code>benchmark/runs/{report.hints.benchmarkReportFile}</code>
-          </li>
-        )}
-        {report.hints.hasScreenshots && (
-          <li>
-            Debug screenshots:{" "}
-            <code>
-              {report.hints.screenshotsRel ?? `worker/.debug-screenshots/${report.provider}/`}
-            </code>
-          </li>
-        )}
-        {!report.hints.taskPagePath &&
-          !report.hints.benchmarkReportFile &&
-          !report.hints.hasScreenshots && (
-            <li className="rfor__muted">No cross-references available for this artifact.</li>
-          )}
-      </ul>
-
-      <h3 className="rfor__sub-title">Paste-ready bug report (Codex / Claude)</h3>
-      <textarea
-        className="rfor__markdown"
-        readOnly
-        value={markdown}
-        onFocus={(e) => e.currentTarget.select()}
-      />
-    </div>
-  );
-}
-
-/* ─── Empty state ────────────────────────────────────────────────── */
-
-function EmptyState({
-  workerLogAvailable,
-  workerLogPathHint,
-  benchmarkRunsScanned,
-  loaderNotes,
+function SortableHeader({
+  k,
+  label,
+  activeKey,
+  dir,
+  onSort,
 }: {
-  workerLogAvailable: boolean;
-  workerLogPathHint: string;
-  benchmarkRunsScanned: number;
-  loaderNotes: string[];
+  k: SortKey;
+  label: string;
+  activeKey: SortKey;
+  dir: SortDir;
+  onSort: (k: SortKey) => void;
 }) {
+  const isActive = k === activeKey;
+  const indicator = isActive ? (dir === "asc" ? "  ^" : "  v") : "  -";
   return (
-    <div className="rfor__empty">
-      <p>
-        <strong>No matching artifacts.</strong> The forensics workbench is
-        designed to render gracefully even when no benchmark runs are present.
-      </p>
-      <ul>
-        <li>
-          Benchmark runs scanned:{" "}
-          <code>benchmark/runs/*.json</code> →{" "}
-          <strong>{benchmarkRunsScanned}</strong>
-        </li>
-        <li>
-          Worker log path:{" "}
-          {workerLogAvailable ? (
-            <span className="rfor__meta-good">present at</span>
-          ) : (
-            <span className="rfor__meta-warn">missing at</span>
-          )}{" "}
-          <code>{workerLogPathHint}</code>
-          {!workerLogAvailable &&
-            ` · override with WORKER_LOG_PATH env (codex's path: C:\\Users\\Gzw19\\onegent-e2e-20260503\\codex-worker.log)`}
-        </li>
-      </ul>
-      {loaderNotes.length > 0 && (
-        <div>
-          <p>Loader notes:</p>
-          <ul>
-            {loaderNotes.map((n, i) => (
-              <li key={i}>
-                <code>{n}</code>
-              </li>
-            ))}
-          </ul>
-        </div>
-      )}
-    </div>
+    <th>
+      <button
+        type="button"
+        className={
+          isActive
+            ? "rfor__sort-header rfor__sort-header--active"
+            : "rfor__sort-header"
+        }
+        onClick={() => onSort(k)}
+        title={`Sort by ${label}`}
+      >
+        {label}
+        <span className="rfor__sort-indicator">{indicator}</span>
+      </button>
+    </th>
   );
 }
-
-/* ─── Building blocks ────────────────────────────────────────────── */
 
 function SeverityChip({ severity }: { severity: ForensicsSeverity }) {
-  const tone =
-    severity === "p0"
-      ? "bad"
-      : severity === "p1"
-      ? "warn"
-      : severity === "p2"
-      ? "warn"
-      : severity === "info"
-      ? "neutral"
-      : "neutral";
   return (
-    <span className={`rfor__sev-chip rfor__sev-chip--${tone}`}>
-      {FORENSICS_SEVERITY_LABEL[severity]}
+    <span className={`rfor__sev rfor__sev--${severity}`}>
+      [{FORENSICS_SEVERITY_LABEL[severity]}]
     </span>
   );
 }
 
-function formatAge(seconds: number | null): string {
-  if (seconds === null || !Number.isFinite(seconds)) return "—";
-  if (seconds < 60) return `${seconds}s`;
-  if (seconds < 3600) return `${Math.round(seconds / 60)}m`;
-  if (seconds < 86400) return `${Math.round(seconds / 3600)}h`;
-  return `${Math.round(seconds / 86400)}d`;
+/* --- Detail panel -------------------------------------------------- */
+
+function DetailPanel({ detail }: { detail: DetailResponse }) {
+  const r = detail.report;
+  return (
+    <div className="rfor__detail">
+      <SourceOfTruthBlock report={r} />
+
+      <div className="rfor__detail-head">
+        <h3 className="rfor__detail-title">
+          {r.isFixture && (
+            <span className="rfor__tag rfor__tag--fixture">[FIXTURE]</span>
+          )}
+          <span className={`rfor__sev rfor__sev--${r.classification.severity}`}>
+            [{FORENSICS_SEVERITY_LABEL[r.classification.severity]}]
+          </span>
+          {r.stepShape.hasLegacyShapeBug ? " [!] " : " "}
+          {FAILURE_CLASS_LABEL[r.classification.primaryClass]}
+        </h3>
+        <div className="rfor__detail-meta">
+          <span>
+            Job id: <code>{r.jobId ?? "(none)"}</code>{" "}
+            {r.jobId && <CopyButton label="Copy id" value={r.jobId} small />}
+          </span>
+          {r.taskId && (
+            <span>
+              Task id: <code>{r.taskId}</code>{" "}
+              <CopyButton label="Copy id" value={r.taskId} small />
+            </span>
+          )}
+          <span>
+            Provider: <code>{r.provider}</code>
+          </span>
+          <span>
+            Scenario: <code>{r.scenario}</code>
+          </span>
+          <span>
+            Status: <code>{r.status}</code>
+          </span>
+          <span>
+            Source: <code>{r.inputSource}</code>
+          </span>
+        </div>
+      </div>
+
+      <RecommendationPanel rec={detail.recommendation} />
+
+      <SignalsBySourceBlock
+        signals={r.classification.signals}
+        perClassWeights={r.classification.perClassWeights}
+      />
+
+      <StepShapeBlock stepShape={r.stepShape} />
+
+      <RawTerminalFields report={r} />
+
+      <DecisionLogBlock summary={r.decisionLogSummary} />
+
+      <CrossReferences hints={r.hints} />
+
+      <MarkdownBlock markdown={detail.markdown} />
+    </div>
+  );
 }
 
-/* ─── Styles ─────────────────────────────────────────────────────── */
+function SourceOfTruthBlock({ report }: { report: ForensicsReport }) {
+  return (
+    <div className="rfor__sot">
+      <strong>Source of truth (verify before filing):</strong>
+      <ol className="rfor__sot-list">
+        <li>
+          <strong>DB</strong>: <code>booking_jobs</code> row
+          {report.jobId && (
+            <>
+              {" "}
+              for <code>id = {report.jobId}</code>
+            </>
+          )}
+          {" - "}check <code>steps[0].body.__source</code>,{" "}
+          <code>terminalReason</code>, <code>terminalCode</code>.
+        </li>
+        <li>
+          <strong>Worker log</strong>: tail{" "}
+          <code>codex-worker.log</code> via <code>Select-String</code> on
+          jobId / scenario / provider tag.
+        </li>
+        <li>
+          <strong>Debug screenshots</strong>:{" "}
+          <code>worker/.debug-screenshots/{report.provider}/&lt;run&gt;/</code>{" "}
+          (page.png + page.html + summary.json).
+        </li>
+        <li>
+          <strong>Playbook</strong>:{" "}
+          <code>docs/30-provider-debug/PROVIDER_RUNTIME_DEBUG_PLAYBOOK.md</code>
+        </li>
+      </ol>
+      {report.isFixture && (
+        <div className="rfor__sot-fixture">
+          [FIXTURE] This is a synthetic example, not real evidence. Do not
+          file bugs against this row.
+        </div>
+      )}
+    </div>
+  );
+}
+
+function RecommendationPanel({ rec }: { rec: Recommendation }) {
+  return (
+    <div className="rfor__rec">
+      <h4>Recommended next evidence</h4>
+      <ol className="rfor__rec-list">
+        {rec.baseChecklist.map((step, i) => (
+          <li key={i}>{step}</li>
+        ))}
+      </ol>
+      {rec.pointers.length > 0 && (
+        <div className="rfor__rec-pointers">
+          <strong>Pointers:</strong>
+          <ul>
+            {rec.pointers.map((p) => (
+              <PointerItem key={p.label + p.ref} pointer={p} />
+            ))}
+          </ul>
+        </div>
+      )}
+      {rec.searchCommands.length > 0 && (
+        <div className="rfor__rec-cmds">
+          <strong>Suggested worker-log searches (PowerShell):</strong>
+          <ul>
+            {rec.searchCommands.map((c) => (
+              <SearchCommandItem key={c.command} cmd={c} />
+            ))}
+          </ul>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function PointerItem({ pointer }: { pointer: Pointer }) {
+  return (
+    <li>
+      <span className={`rfor__ptr-kind rfor__ptr-kind--${pointer.kind}`}>
+        [{pointer.kind}]
+      </span>{" "}
+      <strong>{pointer.label}</strong> -{" "}
+      <code>{pointer.ref}</code>
+    </li>
+  );
+}
+
+function SearchCommandItem({ cmd }: { cmd: SearchCommand }) {
+  return (
+    <li className="rfor__cmd">
+      <div className="rfor__cmd-desc">{cmd.description}</div>
+      <pre className="rfor__cmd-code">{cmd.command}</pre>
+      <CopyButton label="Copy command" value={cmd.command} small />
+    </li>
+  );
+}
+
+function SignalsBySourceBlock({
+  signals,
+  perClassWeights,
+}: {
+  signals: ClassifierSignal[];
+  perClassWeights: Partial<Record<FailureClass, number>>;
+}) {
+  const grouped = useMemo(() => groupSignalsBySource(signals), [signals]);
+  const weightEntries = Object.entries(perClassWeights)
+    .filter(([, v]) => typeof v === "number" && (v as number) > 0)
+    .sort((a, b) => (b[1] as number) - (a[1] as number));
+
+  return (
+    <details className="rfor__block" open>
+      <summary>
+        Signals ({signals.length}, grouped by source)
+      </summary>
+      {signals.length === 0 && <p>(no matched signals - classifier returned unknown)</p>}
+      {weightEntries.length > 0 && (
+        <div className="rfor__weights">
+          <strong>Per-class weight:</strong>
+          {weightEntries.map(([k, v]) => (
+            <span key={k} className="rfor__weight">
+              {k}: {(v as number).toFixed(2)}
+            </span>
+          ))}
+        </div>
+      )}
+      {Array.from(grouped.entries()).map(([src, sigs]) => (
+        <div key={src} className="rfor__source-group">
+          <h5>{SOURCE_LABELS[src as ClassifierSignal["source"]] ?? src}</h5>
+          <ul>
+            {sigs.map((s, i) => (
+              <li key={`${s.label}-${i}`}>
+                <span className="rfor__signal-weight">
+                  [{s.weight.toFixed(2)}]
+                </span>{" "}
+                <span className={`rfor__pill rfor__pill--${FAILURE_CLASS_TONE[s.supportsClass]}`}>
+                  [{FAILURE_CLASS_SEVERITY[s.supportsClass]}]
+                </span>{" "}
+                <strong>{s.label}</strong>
+                {s.excerpt && (
+                  <pre className="rfor__excerpt">{s.excerpt}</pre>
+                )}
+              </li>
+            ))}
+          </ul>
+        </div>
+      ))}
+    </details>
+  );
+}
+
+function groupSignalsBySource(
+  signals: ClassifierSignal[],
+): Map<string, ClassifierSignal[]> {
+  const m = new Map<string, ClassifierSignal[]>();
+  for (const s of signals) {
+    const arr = m.get(s.source) ?? [];
+    arr.push(s);
+    m.set(s.source, arr);
+  }
+  // Sort each group by weight desc.
+  for (const arr of m.values()) {
+    arr.sort((a, b) => b.weight - a.weight);
+  }
+  return m;
+}
+
+function StepShapeBlock({
+  stepShape,
+}: {
+  stepShape: { totalSteps: number; stepsWithSourceMarker: number; stepsMissingSourceMarker: number; hasLegacyShapeBug: boolean; rows: StepShapeAuditRow[]; legacyShapeQuotes: string[] };
+}) {
+  return (
+    <details className="rfor__block" open={stepShape.hasLegacyShapeBug}>
+      <summary>
+        Step shape audit (
+        {stepShape.totalSteps} steps,{" "}
+        {stepShape.stepsMissingSourceMarker} missing __source)
+        {stepShape.hasLegacyShapeBug && " [!] LEGACY SHAPE DETECTED"}
+      </summary>
+      {stepShape.rows.length === 0 ? (
+        <p>(no steps in this job)</p>
+      ) : (
+        <table className="rfor__step-table">
+          <thead>
+            <tr>
+              <th>#</th>
+              <th>Name</th>
+              <th>__source</th>
+              <th>Marker</th>
+              <th>Legacy phrase?</th>
+              <th>Error excerpt</th>
+            </tr>
+          </thead>
+          <tbody>
+            {stepShape.rows.map((row) => (
+              <tr
+                key={row.index}
+                className={
+                  !row.hasSourceMarker ? "rfor__step-row--missing" : undefined
+                }
+              >
+                <td>{row.index}</td>
+                <td>{row.name}</td>
+                <td>
+                  {row.hasSourceMarker ? (
+                    <span className="rfor__ok">yes</span>
+                  ) : (
+                    <span className="rfor__bad">[!] missing</span>
+                  )}
+                </td>
+                <td>
+                  <code>{row.sourceMarker ?? "-"}</code>
+                </td>
+                <td>{row.errorMentionsLegacyShape ? "yes" : "no"}</td>
+                <td>
+                  {row.errorExcerpt ? (
+                    <code className="rfor__cell-mono">{row.errorExcerpt}</code>
+                  ) : (
+                    "-"
+                  )}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+      {stepShape.legacyShapeQuotes.length > 0 && (
+        <div className="rfor__quotes">
+          <strong>Legacy-shape quotes:</strong>
+          <ul>
+            {stepShape.legacyShapeQuotes.map((q) => (
+              <li key={q}>
+                <code>{q}</code>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+    </details>
+  );
+}
+
+function RawTerminalFields({ report }: { report: ForensicsReport }) {
+  if (
+    !report.rawTerminalReason &&
+    !report.rawTerminalCode &&
+    !report.rawErrorMessage
+  ) {
+    return null;
+  }
+  return (
+    <details className="rfor__block">
+      <summary>Raw terminal fields</summary>
+      {report.rawTerminalReason && (
+        <div>
+          <strong>terminalReason:</strong>
+          <pre>{report.rawTerminalReason}</pre>
+        </div>
+      )}
+      {report.rawTerminalCode && (
+        <div>
+          <strong>terminalCode:</strong> <code>{report.rawTerminalCode}</code>
+        </div>
+      )}
+      {report.rawErrorMessage && (
+        <div>
+          <strong>errorMessage:</strong>
+          <pre>{report.rawErrorMessage}</pre>
+        </div>
+      )}
+    </details>
+  );
+}
+
+function DecisionLogBlock({
+  summary,
+}: {
+  summary: { totalEntries: number; byLevel: Partial<Record<string, number>>; topEvents: Array<{ event: string; count: number }>; excerpts: Array<{ at?: string | null; level?: string | null; event?: string | null; message?: string | null }>; notableSignals: string[] };
+}) {
+  if (summary.totalEntries === 0) return null;
+  return (
+    <details className="rfor__block">
+      <summary>
+        Decision log ({summary.totalEntries} entries)
+      </summary>
+      <div>
+        <strong>Levels:</strong>{" "}
+        {Object.entries(summary.byLevel)
+          .filter(([, v]) => typeof v === "number" && (v as number) > 0)
+          .map(([k, v]) => `${k}=${v}`)
+          .join(", ") || "(none)"}
+      </div>
+      {summary.topEvents.length > 0 && (
+        <div>
+          <strong>Top events:</strong>
+          <ul>
+            {summary.topEvents.map((e) => (
+              <li key={e.event}>
+                <code>{e.event}</code> x {e.count}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+      {summary.notableSignals.length > 0 && (
+        <div>
+          <strong>Notable signals:</strong>{" "}
+          {summary.notableSignals.map((s) => (
+            <code key={s} style={{ marginRight: 8 }}>
+              {s}
+            </code>
+          ))}
+        </div>
+      )}
+      {summary.excerpts.length > 0 && (
+        <div>
+          <strong>Excerpts (first 6 / last 6):</strong>
+          <ul className="rfor__log-excerpts">
+            {summary.excerpts.map((e, i) => (
+              <li key={i}>
+                <code>{e.at ?? ""}</code>{" "}
+                <span>[{e.level ?? "info"}]</span>{" "}
+                <strong>{e.event ?? ""}</strong>{" "}
+                {e.message && <em>{e.message}</em>}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+    </details>
+  );
+}
+
+function CrossReferences({
+  hints,
+}: {
+  hints: { hasScreenshots: boolean; screenshotsRel?: string; benchmarkReportFile?: string; taskPagePath?: string };
+}) {
+  if (!hints.hasScreenshots && !hints.benchmarkReportFile && !hints.taskPagePath) {
+    return null;
+  }
+  return (
+    <details className="rfor__block">
+      <summary>Cross references</summary>
+      <ul>
+        {hints.taskPagePath && (
+          <li>
+            Task page: <code>{hints.taskPagePath}</code>
+          </li>
+        )}
+        {hints.benchmarkReportFile && (
+          <li>
+            Benchmark report:{" "}
+            <code>benchmark/runs/{hints.benchmarkReportFile}</code>
+          </li>
+        )}
+        {hints.hasScreenshots && (
+          <li>
+            Screenshots:{" "}
+            <code>{hints.screenshotsRel ?? "worker/.debug-screenshots/"}</code>
+          </li>
+        )}
+      </ul>
+    </details>
+  );
+}
+
+function MarkdownBlock({ markdown }: { markdown: string }) {
+  return (
+    <details className="rfor__block" open>
+      <summary>Paste-ready markdown bug report</summary>
+      <CopyButton label="Copy markdown" value={markdown} />
+      <textarea
+        readOnly
+        className="rfor__markdown"
+        value={markdown}
+        rows={Math.min(40, markdown.split("\n").length + 2)}
+      />
+    </details>
+  );
+}
+
+/* --- Copy button --------------------------------------------------- */
+
+function CopyButton({
+  label,
+  value,
+  small,
+}: {
+  label: string;
+  value: string;
+  small?: boolean;
+}) {
+  const [copied, setCopied] = useState(false);
+  const onClick = useCallback(async () => {
+    try {
+      if (typeof navigator !== "undefined" && navigator.clipboard) {
+        await navigator.clipboard.writeText(value);
+        setCopied(true);
+        setTimeout(() => setCopied(false), 1500);
+      }
+    } catch {
+      // Clipboard API unavailable - leave state alone; user can manually
+      // select the textarea.
+    }
+  }, [value]);
+  return (
+    <button
+      type="button"
+      className={
+        small ? "rfor__btn-tiny" : "rfor__btn"
+      }
+      onClick={onClick}
+    >
+      {copied ? "Copied" : label}
+    </button>
+  );
+}
+
+/* --- Helpers ------------------------------------------------------- */
+
+function formatAge(ageSeconds: number | null): string {
+  if (ageSeconds === null) return "-";
+  if (ageSeconds < 60) return `${ageSeconds}s`;
+  if (ageSeconds < 3600) return `${Math.floor(ageSeconds / 60)}m`;
+  if (ageSeconds < 86400) return `${Math.floor(ageSeconds / 3600)}h`;
+  return `${Math.floor(ageSeconds / 86400)}d`;
+}
+
+/* --- Inline styles ------------------------------------------------- */
 
 function RuntimeForensicsStyles() {
   return (
     <style jsx global>{`
       .rfor {
-        --ink-2: #f3f4f6;
-        --ink-3: #e5e7eb;
-        --ink-6: #6b7280;
-        --ink-7: #4b5563;
-        --ink-8: #1f2937;
-        --ink-9: #111827;
-        --card: #ffffff;
-        --bg: #fafafa;
-        --good: #16a34a;
-        --good-bg: rgba(22, 163, 74, 0.10);
-        --good-border: rgba(22, 163, 74, 0.30);
-        --warn: #f59e0b;
-        --warn-bg: rgba(245, 158, 11, 0.12);
-        --warn-border: rgba(245, 158, 11, 0.32);
-        --bad: #b91c1c;
-        --bad-bg: rgba(185, 28, 28, 0.10);
-        --bad-border: rgba(185, 28, 28, 0.30);
-        --neutral: #6b7280;
-        --neutral-bg: rgba(107, 114, 128, 0.08);
-        --neutral-border: rgba(107, 114, 128, 0.22);
-
-        max-width: 1280px;
+        max-width: 1480px;
         margin: 0 auto;
-        padding: 32px 24px 64px;
-        font-family: "DM Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-        background: var(--bg);
-        min-height: 100vh;
-        color: var(--ink-9);
+        padding: 24px 32px 64px;
+        font: 14px / 1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+          sans-serif;
+        color: #111;
       }
       .rfor__breadcrumb {
-        font-size: 12px;
-        color: var(--ink-6);
-        margin-bottom: 8px;
+        font-size: 13px;
+        color: #666;
+        margin-bottom: 12px;
       }
       .rfor__breadcrumb a {
-        color: var(--ink-7);
+        color: #2563eb;
         text-decoration: none;
       }
-      .rfor__breadcrumb a:hover {
-        text-decoration: underline;
-      }
       .rfor__title {
-        margin: 0 0 6px;
-        font-size: 24px;
-        font-weight: 700;
-        letter-spacing: -0.01em;
+        font-size: 26px;
+        margin: 0 0 8px;
       }
       .rfor__subtitle {
         margin: 0 0 12px;
-        font-size: 13px;
-        color: var(--ink-7);
-        line-height: 1.55;
-        max-width: 760px;
+        color: #444;
       }
       .rfor__caveat {
-        background: var(--warn-bg);
-        border: 1px solid var(--warn-border);
+        background: #fff7ed;
+        border: 1px solid #fed7aa;
         padding: 10px 14px;
-        border-radius: 8px;
-        font-size: 12.5px;
-        color: var(--ink-8);
-        max-width: 760px;
-      }
-      .rfor__section {
-        margin-top: 28px;
-      }
-      .rfor__section-title {
-        margin: 0 0 12px;
-        font-size: 11.5px;
-        font-weight: 700;
-        text-transform: uppercase;
-        letter-spacing: 0.06em;
-        color: var(--ink-7);
+        border-radius: 6px;
+        font-size: 13px;
+        color: #7c2d12;
       }
       .rfor__filters {
-        margin-top: 28px;
+        margin: 24px 0 16px;
+        padding: 16px;
+        background: #f8fafc;
+        border: 1px solid #e2e8f0;
+        border-radius: 8px;
       }
-      .rfor__filter-row {
+      .rfor__filter-head {
         display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 12px;
+      }
+      .rfor__chip-row {
+        display: flex;
+        align-items: flex-start;
         gap: 12px;
-        align-items: end;
+        margin-bottom: 8px;
+      }
+      .rfor__chip-row-label {
+        flex: 0 0 110px;
+        font-weight: 600;
+        font-size: 12px;
+        color: #475569;
+        padding-top: 6px;
+      }
+      .rfor__chips {
+        flex: 1;
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px;
+      }
+      .rfor__chip {
+        background: #fff;
+        border: 1px solid #cbd5e1;
+        border-radius: 16px;
+        padding: 4px 12px;
+        font-size: 12px;
+        cursor: pointer;
+        font-family: inherit;
+        color: #334155;
+      }
+      .rfor__chip:hover {
+        background: #f1f5f9;
+      }
+      .rfor__chip--active {
+        background: #1e293b;
+        color: #fff;
+        border-color: #1e293b;
+      }
+      .rfor__filter-toggles {
+        display: flex;
+        gap: 24px;
+        margin-top: 12px;
+        padding-top: 10px;
+        border-top: 1px dashed #cbd5e1;
         flex-wrap: wrap;
       }
-      .rfor__filter-row label {
+      .rfor__filter-toggles label {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        font-size: 13px;
+        color: #334155;
+      }
+      .rfor__filter-share {
+        margin-top: 12px;
+        font-size: 12px;
+        color: #475569;
         display: flex;
-        flex-direction: column;
-        gap: 4px;
-        font-size: 11px;
-        color: var(--ink-7);
+        gap: 8px;
+        align-items: center;
       }
-      .rfor__filter-row select {
-        padding: 6px 10px;
-        border: 1px solid var(--ink-3);
+      .rfor__hint {
+        color: #64748b;
+        font-size: 12px;
+      }
+      .rfor__section {
+        margin: 24px 0;
+      }
+      .rfor__section-head {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+      }
+      .rfor__section-title {
+        font-size: 16px;
+        margin: 0 0 8px;
+        color: #0f172a;
+      }
+      .rfor__loading {
+        color: #64748b;
+        padding: 8px;
+      }
+      .rfor__error {
+        background: #fef2f2;
+        border: 1px solid #fecaca;
+        color: #991b1b;
+        padding: 8px 12px;
         border-radius: 6px;
-        font-size: 12.5px;
-        min-width: 180px;
+        margin: 8px 0;
       }
-      .rfor__btn-tiny {
-        appearance: none;
-        background: var(--card);
-        border: 1px solid var(--ink-3);
+      .rfor__warning {
+        background: #fffbeb;
+        border: 1px solid #fde68a;
+        color: #92400e;
+        padding: 8px 12px;
         border-radius: 6px;
-        padding: 4px 10px;
-        font-size: 11.5px;
-        font-weight: 600;
-        color: var(--ink-8);
-        cursor: pointer;
-        transition: border-color 120ms;
+        margin: 8px 0;
+        font-size: 13px;
       }
-      .rfor__btn-tiny:hover:not(:disabled) {
-        border-color: var(--good);
+      .rfor__warning ul {
+        margin: 4px 0 0;
+        padding-left: 18px;
       }
-      .rfor__btn-tiny:disabled {
-        opacity: 0.4;
-        cursor: not-allowed;
+      .rfor__empty {
+        background: #f8fafc;
+        border: 1px dashed #cbd5e1;
+        padding: 16px;
+        border-radius: 8px;
+        color: #475569;
       }
-
+      .rfor__empty-list {
+        margin: 8px 0 0;
+        padding-left: 20px;
+      }
+      .rfor__loader-notes {
+        margin-top: 10px;
+        font-size: 12px;
+      }
       .rfor__table-wrap {
         overflow-x: auto;
-        background: var(--card);
-        border: 1px solid var(--ink-3);
-        border-radius: 10px;
       }
       .rfor__table {
         width: 100%;
         border-collapse: collapse;
-        font-size: 12px;
+        font-size: 13px;
+        background: #fff;
+        border: 1px solid #e2e8f0;
+        border-radius: 6px;
+        overflow: hidden;
       }
       .rfor__table th,
       .rfor__table td {
-        padding: 8px 10px;
         text-align: left;
-        border-bottom: 1px solid var(--ink-3);
-        vertical-align: middle;
+        padding: 8px 10px;
+        border-bottom: 1px solid #f1f5f9;
+        vertical-align: top;
       }
       .rfor__table th {
-        font-size: 10.5px;
-        font-weight: 700;
-        text-transform: uppercase;
-        letter-spacing: 0.05em;
-        color: var(--ink-6);
-        background: var(--ink-2);
+        background: #f8fafc;
+        font-weight: 600;
+        color: #475569;
       }
-      .rfor__row--p0 {
-        background: rgba(185, 28, 28, 0.05);
-        outline: 2px solid var(--bad-border);
-        outline-offset: -2px;
+      .rfor__sort-header {
+        background: none;
+        border: 0;
+        padding: 0;
+        font: inherit;
+        color: inherit;
+        cursor: pointer;
+        font-weight: 600;
       }
-      .rfor__row--active {
-        background: rgba(22, 163, 74, 0.05);
+      .rfor__sort-header--active {
+        color: #1e293b;
+      }
+      .rfor__sort-indicator {
+        font-family: ui-monospace, monospace;
+        color: #94a3b8;
+      }
+      .rfor__row--p0 td {
+        background: #fef2f2;
+        border-bottom: 1px solid #fecaca;
+      }
+      .rfor__row--active td {
+        background: #eff6ff;
       }
       .rfor__cell-mono {
-        font-family: ui-monospace, SFMono-Regular, monospace;
-        font-size: 11px;
-        color: var(--ink-7);
+        font-family: ui-monospace, monospace;
+        font-size: 12px;
       }
-
       .rfor__pill {
-        display: inline-flex;
-        align-items: center;
-        padding: 3px 10px;
-        border-radius: 999px;
-        font-size: 10.5px;
-        font-weight: 700;
-        letter-spacing: 0.04em;
-        text-transform: uppercase;
-        white-space: nowrap;
-      }
-      .rfor__pill--good {
-        color: var(--good);
-        background: var(--good-bg);
-        border: 1px solid var(--good-border);
-      }
-      .rfor__pill--warn {
-        color: var(--warn);
-        background: var(--warn-bg);
-        border: 1px solid var(--warn-border);
+        display: inline-block;
+        font-size: 11px;
+        padding: 2px 8px;
+        border-radius: 12px;
+        font-weight: 600;
       }
       .rfor__pill--bad {
-        color: var(--bad);
-        background: var(--bad-bg);
-        border: 1px solid var(--bad-border);
+        background: #fee2e2;
+        color: #991b1b;
+      }
+      .rfor__pill--warn {
+        background: #fef3c7;
+        color: #92400e;
+      }
+      .rfor__pill--good {
+        background: #d1fae5;
+        color: #065f46;
       }
       .rfor__pill--neutral {
-        color: var(--neutral);
-        background: var(--neutral-bg);
-        border: 1px solid var(--neutral-border);
+        background: #e2e8f0;
+        color: #1e293b;
       }
-
-      .rfor__sev-chip {
-        display: inline-flex;
-        padding: 2px 8px;
-        border-radius: 4px;
-        font-size: 10px;
-        font-weight: 700;
-        letter-spacing: 0.05em;
+      .rfor__pill--fixture {
+        background: #ede9fe;
+        color: #5b21b6;
       }
-      .rfor__sev-chip--bad {
-        background: var(--bad-bg);
-        color: var(--bad);
-      }
-      .rfor__sev-chip--warn {
-        background: var(--warn-bg);
-        color: var(--warn);
-      }
-      .rfor__sev-chip--neutral {
-        background: var(--neutral-bg);
-        color: var(--neutral);
-      }
-
-      .rfor__loading,
-      .rfor__error,
-      .rfor__empty {
-        padding: 14px 16px;
-        background: var(--card);
-        border: 1px dashed var(--ink-3);
-        border-radius: 8px;
-        font-size: 12.5px;
-        color: var(--ink-7);
-      }
-      .rfor__error {
-        border-color: var(--bad-border);
-        color: var(--bad);
-      }
-
-      .rfor__empty ul {
-        margin: 8px 0 0 0;
-        padding-left: 20px;
-      }
-      .rfor__empty li {
-        font-size: 12px;
-        margin-bottom: 4px;
-      }
-
-      .rfor__meta {
-        margin-top: 8px;
-        font-size: 11px;
-        color: var(--ink-6);
-      }
-      .rfor__meta code {
+      .rfor__sev {
+        display: inline-block;
         font-family: ui-monospace, monospace;
-        background: var(--ink-2);
-        padding: 1px 5px;
+        font-size: 11px;
+        padding: 2px 6px;
         border-radius: 3px;
-        font-size: 11px;
-      }
-      .rfor__meta-good { color: var(--good); font-weight: 600; }
-      .rfor__meta-warn { color: var(--warn); font-weight: 600; }
-
-      .rfor__detail {
-        background: var(--card);
-        border: 1px solid var(--ink-3);
-        border-radius: 12px;
-        padding: 18px 22px;
-      }
-      .rfor__detail--bad { border-color: var(--bad-border); }
-      .rfor__detail--warn { border-color: var(--warn-border); }
-      .rfor__detail--good { border-color: var(--good-border); }
-      .rfor__detail--neutral { border-color: var(--neutral-border); }
-
-      .rfor__detail-headline {
-        display: flex;
-        align-items: center;
-        gap: 12px;
-        flex-wrap: wrap;
-        margin-bottom: 10px;
-      }
-      .rfor__detail-runid code {
-        font-family: ui-monospace, monospace;
-        font-size: 12px;
-        color: var(--ink-6);
-      }
-
-      .rfor__detail-dl {
-        display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-        gap: 8px;
-        margin: 0 0 14px;
-      }
-      .rfor__detail-dl > div { font-size: 12.5px; }
-      .rfor__detail-dl dt {
         font-weight: 600;
-        color: var(--ink-7);
-        margin-bottom: 2px;
-        font-size: 11px;
-        text-transform: uppercase;
-        letter-spacing: 0.04em;
       }
-      .rfor__detail-dl dd {
-        margin: 0;
-        color: var(--ink-9);
+      .rfor__sev--p0 {
+        background: #991b1b;
+        color: #fff;
       }
-      .rfor__detail-dl code {
-        font-family: ui-monospace, monospace;
-        font-size: 11.5px;
-        background: var(--ink-2);
-        padding: 1px 5px;
+      .rfor__sev--p1 {
+        background: #b45309;
+        color: #fff;
+      }
+      .rfor__sev--p2 {
+        background: #075985;
+        color: #fff;
+      }
+      .rfor__sev--p3 {
+        background: #4b5563;
+        color: #fff;
+      }
+      .rfor__sev--info {
+        background: #d1d5db;
+        color: #1f2937;
+      }
+      .rfor__tag {
+        display: inline-block;
+        font-size: 10px;
+        padding: 1px 6px;
         border-radius: 3px;
-      }
-
-      .rfor__sub-title {
-        margin: 16px 0 8px;
-        font-size: 12px;
         font-weight: 700;
-        text-transform: uppercase;
-        letter-spacing: 0.05em;
-        color: var(--ink-7);
+        margin-right: 4px;
+        font-family: ui-monospace, monospace;
       }
-
-      .rfor__signal-list,
-      .rfor__quote-list,
-      .rfor__event-list,
-      .rfor__raw-list {
-        list-style: none;
-        margin: 0;
-        padding: 0;
-        display: flex;
-        flex-direction: column;
-        gap: 4px;
+      .rfor__tag--fixture {
+        background: #c4b5fd;
+        color: #4c1d95;
       }
-      .rfor__signal-list li,
-      .rfor__event-list li {
-        font-size: 12px;
-        padding: 6px 10px;
-        background: var(--ink-2);
+      .rfor__btn {
+        background: #1e293b;
+        color: #fff;
+        border: 0;
+        padding: 6px 14px;
+        font-size: 13px;
         border-radius: 6px;
+        cursor: pointer;
+        font-family: inherit;
       }
-      .rfor__signal-excerpt {
+      .rfor__btn:hover {
+        background: #0f172a;
+      }
+      .rfor__btn-tiny {
+        background: #fff;
+        border: 1px solid #cbd5e1;
+        color: #1e293b;
+        padding: 2px 10px;
         font-size: 11px;
-        color: var(--ink-6);
-        margin-top: 4px;
-        font-style: italic;
-      }
-      .rfor__quote-list li {
-        font-size: 11.5px;
-        padding: 6px 10px;
-        background: var(--bad-bg);
-        border-radius: 6px;
-        border: 1px solid var(--bad-border);
-      }
-      .rfor__quote-list code {
-        font-family: ui-monospace, monospace;
-        font-size: 11px;
-        color: var(--ink-9);
-        background: transparent;
-      }
-
-      .rfor__raw-list li {
-        margin-bottom: 8px;
-        font-size: 12.5px;
-      }
-      .rfor__raw-list code {
-        font-family: ui-monospace, monospace;
-        font-size: 11.5px;
-        background: var(--ink-2);
-        padding: 1px 5px;
-        border-radius: 3px;
-      }
-      .rfor__pre {
-        background: var(--ink-2);
-        border-radius: 6px;
-        padding: 8px 10px;
-        font-family: ui-monospace, monospace;
-        font-size: 11px;
-        max-height: 200px;
-        overflow: auto;
-        white-space: pre-wrap;
-        word-break: break-word;
-        margin: 4px 0 0;
-      }
-      .rfor__signal-list code {
-        font-family: ui-monospace, monospace;
-        font-size: 11px;
-        background: var(--card);
-        padding: 1px 4px;
-        border-radius: 3px;
-        border: 1px solid var(--ink-3);
-      }
-      .rfor__event-list code {
-        font-family: ui-monospace, monospace;
-        font-size: 11px;
-        background: transparent;
-      }
-
-      .rfor__p0-callout {
-        margin: 8px 0;
-        padding: 10px 14px;
-        background: var(--bad-bg);
-        border-left: 4px solid var(--bad);
         border-radius: 4px;
-        font-size: 12.5px;
-        color: var(--ink-9);
+        cursor: pointer;
+        font-family: inherit;
       }
-      .rfor__p0-callout code {
-        font-family: ui-monospace, monospace;
-        font-size: 11.5px;
-        background: var(--card);
-        padding: 1px 5px;
-        border-radius: 3px;
+      .rfor__btn-tiny:hover {
+        background: #f1f5f9;
       }
-
-      .rfor__markdown {
-        width: 100%;
-        min-height: 280px;
-        padding: 10px;
-        border-radius: 8px;
-        border: 1px solid var(--ink-3);
-        background: var(--ink-2);
-        font-family: ui-monospace, monospace;
-        font-size: 11.5px;
-        resize: vertical;
-      }
-
       .rfor__link {
-        color: var(--ink-9);
+        color: #2563eb;
+        text-decoration: none;
+      }
+      .rfor__link:hover {
         text-decoration: underline;
       }
-
-      .rfor__muted {
-        color: var(--ink-6);
+      .rfor__meta {
+        margin-top: 8px;
         font-size: 12px;
+        color: #64748b;
+      }
+      .rfor__meta-good {
+        color: #047857;
+      }
+      .rfor__meta-warn {
+        color: #b45309;
+      }
+      .rfor__meta-inline {
+        font-size: 12px;
+        color: #475569;
+      }
+      .rfor__detail {
+        background: #fff;
+        border: 1px solid #e2e8f0;
+        padding: 16px;
+        border-radius: 8px;
+      }
+      .rfor__sot {
+        background: #f0fdf4;
+        border-left: 3px solid #16a34a;
+        padding: 12px 14px;
+        border-radius: 4px;
+        margin-bottom: 16px;
+        font-size: 12px;
+        color: #166534;
+      }
+      .rfor__sot-list {
+        margin: 6px 0 0;
+        padding-left: 22px;
+      }
+      .rfor__sot-fixture {
+        margin-top: 8px;
+        background: #ede9fe;
+        color: #5b21b6;
+        padding: 6px 10px;
+        border-radius: 4px;
+        font-weight: 600;
+      }
+      .rfor__detail-head {
+        margin-bottom: 16px;
+      }
+      .rfor__detail-title {
+        font-size: 18px;
+        margin: 0 0 8px;
+      }
+      .rfor__detail-meta {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 16px;
+        font-size: 12px;
+        color: #475569;
+      }
+      .rfor__rec {
+        background: #eff6ff;
+        border: 1px solid #bfdbfe;
+        padding: 12px 16px;
+        border-radius: 6px;
+        margin-bottom: 16px;
+      }
+      .rfor__rec h4 {
+        margin: 0 0 8px;
+        font-size: 14px;
+        color: #1e3a8a;
+      }
+      .rfor__rec-list {
+        margin: 0 0 12px;
+        padding-left: 22px;
+      }
+      .rfor__rec-pointers,
+      .rfor__rec-cmds {
+        margin-top: 12px;
+      }
+      .rfor__rec-cmds ul,
+      .rfor__rec-pointers ul {
+        margin: 6px 0 0;
+        padding-left: 0;
+        list-style: none;
+      }
+      .rfor__cmd {
+        margin-bottom: 10px;
+      }
+      .rfor__cmd-desc {
+        font-size: 12px;
+        color: #475569;
+        margin-bottom: 4px;
+      }
+      .rfor__cmd-code {
+        font-family: ui-monospace, monospace;
+        font-size: 12px;
+        background: #0f172a;
+        color: #e2e8f0;
+        padding: 8px 10px;
+        border-radius: 4px;
+        margin: 0 0 4px;
+        white-space: pre-wrap;
+        word-break: break-all;
+      }
+      .rfor__ptr-kind {
+        display: inline-block;
+        font-family: ui-monospace, monospace;
+        font-size: 10px;
+        padding: 1px 6px;
+        border-radius: 3px;
+        background: #e0e7ff;
+        color: #3730a3;
+      }
+      .rfor__ptr-kind--file {
+        background: #fef3c7;
+        color: #78350f;
+      }
+      .rfor__ptr-kind--doc {
+        background: #d1fae5;
+        color: #064e3b;
+      }
+      .rfor__ptr-kind--screenshot {
+        background: #fce7f3;
+        color: #831843;
+      }
+      .rfor__ptr-kind--db {
+        background: #dbeafe;
+        color: #1e3a8a;
+      }
+      .rfor__block {
+        margin-top: 16px;
+      }
+      .rfor__block summary {
+        cursor: pointer;
+        font-weight: 600;
+        padding: 6px 0;
+      }
+      .rfor__weights {
+        margin: 8px 0;
+        font-size: 12px;
+        color: #475569;
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+      }
+      .rfor__weight {
+        background: #f1f5f9;
+        padding: 2px 8px;
+        border-radius: 3px;
+        font-family: ui-monospace, monospace;
+      }
+      .rfor__source-group {
+        margin-top: 8px;
+      }
+      .rfor__source-group h5 {
+        font-size: 12px;
+        text-transform: uppercase;
+        color: #475569;
+        margin: 8px 0 4px;
+        letter-spacing: 0.05em;
+      }
+      .rfor__source-group ul {
+        margin: 0;
+        padding-left: 18px;
+      }
+      .rfor__signal-weight {
+        font-family: ui-monospace, monospace;
+        color: #64748b;
+        font-size: 11px;
+      }
+      .rfor__excerpt {
+        font-family: ui-monospace, monospace;
+        font-size: 11px;
+        background: #f8fafc;
+        color: #1e293b;
+        padding: 6px 8px;
+        border-radius: 3px;
+        margin: 4px 0 0;
+        white-space: pre-wrap;
+        word-break: break-word;
+      }
+      .rfor__step-table {
+        width: 100%;
+        border-collapse: collapse;
+        font-size: 12px;
+        margin-top: 8px;
+      }
+      .rfor__step-table th,
+      .rfor__step-table td {
+        text-align: left;
+        padding: 6px 8px;
+        border-bottom: 1px solid #f1f5f9;
+        vertical-align: top;
+      }
+      .rfor__step-row--missing td {
+        background: #fef2f2;
+      }
+      .rfor__ok {
+        color: #047857;
+        font-weight: 600;
+      }
+      .rfor__bad {
+        color: #991b1b;
+        font-weight: 700;
+      }
+      .rfor__quotes {
+        margin-top: 8px;
+        font-size: 12px;
+      }
+      .rfor__quotes ul {
+        margin: 4px 0 0;
+        padding-left: 18px;
+      }
+      .rfor__log-excerpts {
+        margin: 6px 0 0;
+        padding-left: 18px;
+        font-size: 12px;
+      }
+      .rfor__log-excerpts code {
+        font-size: 11px;
+        color: #64748b;
+      }
+      .rfor__markdown {
+        width: 100%;
+        font-family: ui-monospace, monospace;
+        font-size: 12px;
+        background: #0f172a;
+        color: #e2e8f0;
+        padding: 12px;
+        border-radius: 6px;
+        margin-top: 8px;
+        border: 1px solid #1e293b;
+      }
+      pre {
+        margin: 4px 0;
+        white-space: pre-wrap;
+        word-break: break-word;
       }
     `}</style>
   );
