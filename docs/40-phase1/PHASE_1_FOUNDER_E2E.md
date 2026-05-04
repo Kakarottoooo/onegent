@@ -2,7 +2,12 @@
 
 > **For**: 用户（创始人）— 手动验证 Phase 1 的全部 user-facing surface
 > **作者**: Claude (Track B)
-> **状态**: 🟢 ready to run — Phase 1 ~95% shipped (per `docs/00-start-here/PHASE_STATUS.md`)；这条 walkthrough 是 declared 前的最后一道门
+> **状态**: 🟢 ready to run — **Phase 1 demo-freeze passed** on the
+> integrated preview (Phase 1 gate 12/12 with smoke+e2e, prod route
+> probe 13/13, `npm run e2e:founder` 15/15, `npm run build` clean).
+> 这条 walkthrough 是 founder-side acceptance 的最后一道门 ——
+> automation 已经 green，剩下是人在浏览器里走一遍 sign off。
+> 详见 `docs/00-start-here/PHASE_STATUS.md`。
 > **两条路径**: 10 分钟 quick path（first-pass smoke）/ 60-90 分钟 full path（sign-off 用）—— 见下面 § 选哪条
 
 > 🆕 **2026-05-04**: 这套流程现在有了运行态 ——

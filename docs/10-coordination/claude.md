@@ -1,7 +1,9 @@
 # Claude - coordination state
 
-> Branch context: integrated preview includes Claude Track B branches through
-> `codex/integrated-preview-20260504`.
+> Branch context: working on `claude/phase1-doc-cleanup-after-freeze`,
+> based on `codex/integrated-preview-20260504 @ 4d6d991`.
+> Integrated preview now includes Claude Track B branches through
+> `codex/integrated-preview-20260504` post Phase 1/1.5 demo-freeze pass.
 > Last updated: 2026-05-04.
 > Canonical path: `docs/10-coordination/claude.md`.
 
@@ -105,12 +107,30 @@ This branch has merged:
 - Claude docs cleanup branch `claude/integrated-preview-review-20260504`
 - Expedia flight-card fallback from Codex
 - Provider Runtime Forensics workbench from Claude
+- Runtime Forensics UX v2 (URL filters, fixtures, recommendation engine,
+  examples toggle, sortable headers, signal-by-source detail panel)
+- Demo Control Room (`/dev/demo-control-room`) and YC Demo Runbook
+- Track C Demo Readiness sidecar (`/dev/demo-readiness`,
+  `lib/demo-evidence/**`)
+- Phase 2 Expedia controlled retry runbook + retry analysis pack
+- Phase 1/1.5 demo-freeze closure: payment-field guard on profile PATCH,
+  optional Clerk anonymous fallback for non-prod paths, PWA icons
 
-Recent integrated verification:
+Recent integrated verification (2026-05-04 demo-freeze pass):
 
 - `npx tsc --noEmit --pretty false` passed.
-- `npm run gate:phase1 -- --allow-known-drift` passed with all required checks.
-- Runtime forensics tests passed after integration.
+- `npm run gate:phase1 -- --allow-known-drift --include-smoke --include-e2e`
+  passed 12/12 with 0 fail, 0 skipped, 0 known-existing drift.
+- `npm run smoke:phase1` passed all 6 routes.
+- `npm run e2e:founder` passed all 15 autonomous probes.
+- `npm run build` passed end-to-end (webpack, due to local Windows
+  worktree `node_modules` junction tripping Turbopack).
+- Production `next start` route probe returned 200 for 13/13 demo routes
+  including `/dev/demo-control-room`, `/dev/demo-readiness`,
+  `/dev/runtime-forensics`, `/dev/phase1-quality-gates`,
+  `/dev/founder-e2e`, `/`, `/tasks`, `/pricing`, `/permissions`,
+  `/developers/docs/api/v1`, `/dev`, `/dev/restaurant-readiness`, and
+  `/dev/resy-run-analysis`.
 
 ## Runtime Forensics Workbench
 
@@ -125,7 +145,9 @@ What shipped:
 - Artifact-based loader for `benchmark/runs/*.json`, optional
   `codex-worker.log`, and debug screenshot summaries.
 - Paste-ready markdown bug report output.
-- 213 targeted tests on Claude branch; verified again by Codex during merge.
+- 377 targeted runtime-forensics tests on the integrated preview after the
+  UX v2 cherry-pick (URL filters, fixtures, recommendation engine, signal
+  grouping, sortable headers); verified by Codex during integration.
 
 Boundaries:
 
@@ -135,17 +157,49 @@ Boundaries:
 - No worker control.
 - No payment, OTP, CAPTCHA, login bypass, or final confirmation automation.
 
+## Demo Control Room
+
+Merged from `claude/demo-control-room` via Codex cherry-pick.
+
+What shipped:
+
+- `lib/demo-control-room/**` pure modules: `phase2-status` (single source
+  of truth for Phase 2 vertical posture), `loader` (composes
+  `lib/quality-gate/loader` and `lib/founder-e2e/loader`, extracts the
+  `smoke:phase1` check from the latest gate `checks[]`), and `script`
+  (deterministic safe demo script with markdown export).
+- `/dev/demo-control-room` read-only RSC page surfacing Phase 1 gate /
+  founder-e2e / smoke verdicts, Phase 2 vertical posture, runtime
+  forensics quick-link, and the safe demo script.
+- `app/dev/demo-control-room/refresh-button.tsx` — only mutating action
+  on the page is `router.refresh()`.
+- 68 vitest cases (17 phase2-status + 31 loader + 20 script).
+- `docs/40-phase1/DEMO_CONTROL_ROOM.md` operator runbook.
+- `docs/40-phase1/YC_DEMO_RUNBOOK.md` (Track C) cross-linked.
+
+Boundaries:
+
+- Read-only V1; never invokes a runner, no DB queries, no new dev API.
+- No retry / re-run / accept buttons. Re-runs happen from a shell.
+- ASCII-only copy. No live OpenAI / Computer Use / payment / OTP /
+  CAPTCHA / final-confirm path.
+
 ## Phase Snapshot
 
 - Phase 0A: active. OpenTable is close to stable safe handoff; Resy is still
   not closed and must use probe/artifacts/readiness before any live token spend.
 - Expedia runtime: fallback for visible-card DOM scan failure is integrated;
-  any controlled retry requires explicit founder approval.
+  any controlled retry requires explicit founder approval per
+  `docs/50-product-areas/EXPEDIA_CONTROLLED_RETRY_RUNBOOK.md`.
 - Phase 0B: gated behind restaurant provider stability.
-- Phase 1: roughly 95% shipped; remaining work is founder sign-off and QA
-  confidence, not broad new product work.
-- Phase 1.5: active tooling/observability layer. Quality Gate, Founder E2E,
-  and Runtime Forensics surfaces exist for no-token verification.
+- Phase 1: demo-freeze passed on integrated preview. Phase 1 gate with
+  smoke + autonomous founder e2e is 12/12, production build is clean,
+  and production route probe is 13/13. Remaining work is the manual
+  founder walkthrough (`docs/40-phase1/PHASE_1_FOUNDER_E2E.md`) for the
+  human acceptance signature.
+- Phase 1.5: demo-freeze passed. Quality Gate, Founder E2E, Runtime
+  Forensics, Demo Control Room, and Track C Demo Readiness are all
+  read-only and integrated.
 - Phase 2: frozen until Phase 0/1 stabilization is declared.
 
 ## Safety Rails
@@ -172,16 +226,24 @@ Boundaries:
 | `claude/phase-1-5-quality-gate-orchestrator` | merged | `npm run gate:phase1` plus dashboard. |
 | `claude/integrated-preview-review-20260504` | merged | Moved remaining stray root docs into `docs/`. |
 | `claude/runtime-forensics-workbench` | merged | Provider runtime forensics workbench. |
+| `claude/runtime-forensics-ux-polish-v2` | merged via cherry-pick | URL multi-select filters, sortable headers, fixtures (`?examples=1`), recommendation engine, signal-by-source detail panel. |
+| `claude/demo-control-room` | merged via cherry-pick | Read-only `/dev/demo-control-room` aggregating gate/founder-e2e/smoke verdicts plus Phase 2 posture and safe demo script. |
+| `claude/phase1-doc-cleanup-after-freeze` | active | Phase 1/1.5 docs refresh after demo-freeze pass; updates stale 95% claim and 213-test count, extends `docs-static-guard` with post-freeze invariants. |
 
 ## Current Claude Inbox
 
 - Do not start new provider/runtime work.
+- Demo-freeze passed; new docs/UI work for Track B should reflect that
+  the integrated preview now ships with `/dev/demo-control-room`,
+  `/dev/demo-readiness`, and runtime-forensics UX v2.
 - If assigned UI/docs/tooling, first check `docs/INDEX.md` and avoid adding
   new root markdown files.
 - If adding a dashboard or runner, update the closest runbook plus
   `docs/00-start-here/PHASE_STATUS.md` if phase status changes.
 - If touching docs generated before the reorg, fix old root-path links to the
   new `docs/<category>/` paths.
+- Do not duplicate Agent3's `lib/__tests__/docs-static-guard.test.ts`
+  invariants; extend it with post-freeze guards instead.
 
 ## Blocking On Codex
 
