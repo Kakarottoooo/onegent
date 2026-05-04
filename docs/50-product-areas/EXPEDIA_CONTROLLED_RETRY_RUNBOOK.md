@@ -20,18 +20,16 @@ Stop immediately and capture evidence if any of these appear:
 Never bypass OTP, CAPTCHA, login, or account checks. Never enter CVV. Never
 click final booking or purchase confirmation.
 
-## Exact User Prompt
+## Exact Controlled Retry Checklist
 
-Use this exact product-level prompt only after founder approval:
+Use this exact product-level prompt only after founder approval for one retry:
 
 ```text
-Book the Southwest flight from Orlando (MCO) to Nashville (BNA) on June 1,
-2026 for 1 adult in economy. Target the 8:50 AM departure, flight WN 3084,
-priced around $152. Stop before payment, CVV, login, OTP, CAPTCHA, or final
-booking confirmation.
+帮我订一个6月1号从奥兰多飞 Nashville 的机票，一个人
 ```
 
-Expected search params:
+Date normalization: because this checklist is dated 2026-05-04, `6月1号`
+means `2026-06-01`. The minimum normalized flight params must be:
 
 ```json
 {
@@ -40,7 +38,15 @@ Expected search params:
   "dest": "BNA",
   "date": "2026-06-01",
   "passengers": 1,
-  "cabin_class": "economy",
+  "cabin_class": "economy"
+}
+```
+
+If the retry is bound to the already-audited Expedia candidate, keep these
+target-card hints on the flight step:
+
+```json
+{
   "targetAirline": "Southwest",
   "targetDepartureTime": "08:50",
   "targetFlightNumber": "WN 3084",
@@ -52,6 +58,29 @@ Expected Expedia start URL shape:
 
 ```text
 https://www.expedia.com/Flights-Search?trip=oneway&leg1=from:MCO,to:BNA,departure:2026-06-01TANYT&passengers=adults:1&options=cabinclass:coach&mode=search
+```
+
+Pre-start checks:
+
+1. Confirm exact founder approval for one retry of the Chinese prompt above.
+2. Confirm no hotel, restaurant, Booking.com, Hotels.com, broad provider suite,
+   retry loop, cron, automation, or UI run button is involved.
+3. Confirm the booking job step is a normalized flight step with source marker
+   present at `steps[0].body.__source` or `step.__source`. Expected prefix:
+   `lib/core/execution` or `lib/execution-v2`.
+4. Confirm params include `origin=MCO`, `dest=BNA`, `date=2026-06-01`, and
+   `passengers=1` before starting the worker.
+5. Confirm the source marker and params are read from the DB row, not inferred
+   from the task UI copy.
+6. Confirm the operator has the DB query, worker log grep, and screenshot paths
+   below ready before the retry starts.
+7. Stop before payment, CVV, OTP, CAPTCHA, login bypass, or final booking
+   confirmation.
+
+No-live preflight guard for this checklist:
+
+```powershell
+npx vitest run lib/__tests__/expedia-controlled-retry-preflight.test.ts lib/__tests__/expedia-retry-analysis.test.ts lib/__tests__/expedia-flight-card-match.test.ts
 ```
 
 ## Preflight Environment
@@ -199,6 +228,9 @@ High-value log signals:
 - `Flight match`
 - `Fare modal appeared`
 - `Checkout reached`
+- `safe handoff`
+- `manual review`
+- `paused_payment`
 - `flight checkout was not reached`
 - `Local mode: flight checkout was not reached`
 - Any login, CAPTCHA, OTP, CVV, payment, or final-confirmation signal.
@@ -347,6 +379,11 @@ Analyzer states:
 
 If the analyzer returns `insufficient_evidence`, do not patch. Collect the DB
 row, worker log excerpt, provider screenshots, and live snapshot paths first.
+
+If a later founder-approved retry runs, the source of truth is DB row plus
+worker log plus screenshots. Do not patch provider selectors from task UI copy
+or from analyzer output alone; patch only when those artifacts prove the
+selector/runtime root cause.
 
 ## Success Taxonomy
 
