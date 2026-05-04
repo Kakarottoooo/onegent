@@ -6,6 +6,26 @@
 
 ---
 
+## ⚠️ Step 0 (added 2026-05-04): probe-first, then read this runbook
+
+The 2026-05-04 R-003 live retry returned `no_availability_correct` — Resy
+served zero slots for the fixture's date/time. **A no-slots case cannot
+validate Resy fill/OTP closure**, so the next live token must be spent on
+a case the probe says has real matching slots.
+
+Before reading § 0–§ 2 below:
+1. Run the cheap availability probe (codex domain):
+   `npx tsx scripts/probe-resy-availability.ts`
+2. Open `http://localhost:3000/dev/resy-probe-runs` and find a case with
+   verdict `live_ok`.
+3. Use the dashboard's copy-paste command. The `--case` flag points at the
+   `live_ok` case, not necessarily R-003.
+
+Full protocol: `RESY_AVAILABILITY_PROBE_PROTOCOL.md`. Skip Step 0 and you
+risk burning the token on another `no_availability_correct` outcome.
+
+---
+
 ## 这个文档存在的理由
 
 R-003 live smoke 一次跑会烧 OpenAI tokens（`gpt-5.5` Computer Use turn 数 × 上下文）。

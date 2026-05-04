@@ -33,10 +33,19 @@ const PHASE_0_ROUTES: DevRoute[] = [
     href: "/dev/benchmark-runs",
     title: "Phase 0 benchmark runs",
     blurb:
-      "Live consumer of codex's /api/dev/benchmark-runs. Headline metrics + 8-bucket distribution + failure taxonomy chart + per-case drawer + GateBreakdown analyzer + Validator paste panel. Single source of truth for run results.",
+      "Live consumer of /api/dev/benchmark-runs. Headline metrics + 8-bucket distribution + failure taxonomy chart + per-case drawer + GateBreakdown + ArtifactRail (taskId / timeline / snapshot URLs / outcome chips / strategy log) + Validator paste panel.",
     status: "live",
     useCase:
-      "Open this when codex pushes a new benchmark/runs/*.json. Paste the JSON into Validator if you want shape pre-check before reading.",
+      "Open this when codex pushes a new benchmark/runs/*.json. Click any case row to populate the ArtifactRail with deep-link URLs. Paste raw JSON into Validator for pre-shipment shape check.",
+  },
+  {
+    href: "/dev/resy-probe-runs",
+    title: "Resy availability probe runs",
+    blurb:
+      "Cheap no-token probe of Resy public availability for Phase 0 fixture cases. Renders recommended next live case + per-case slots/matchingSlots/noAvailabilitySignals/blockerSignals + copy-able next live command. Source: benchmark/runs/resy-availability-probe-*.json.",
+    status: "live",
+    useCase:
+      "Open BEFORE spending a live token on a Resy benchmark case. R-003 burned a token on a no-slots case once; this probe-first protocol prevents that. See RESY_AVAILABILITY_PROBE_PROTOCOL.md.",
   },
 ];
 

@@ -52,14 +52,33 @@
 - ✅ Token 守卫: `--live-openai` + `--confirm-suite` 双层
 - ✅ Resy fixture exists：`benchmark/restaurant-resy-phase0.json` 当前 observed 22 rows（doc 目标 25；fixture notes 明确不 invent missing cases）
 
+**2026-05-04 R-003 live retry (`phase0-resy-2026-05-04T01-03-14-028Z.json`)**:
+- Outcome: **safe failure**, NOT a Resy fill/OTP failure. Computer Use repaired
+  `buvette → buvette-nyc` correctly; Resy returned no slots for the requested
+  date/time.
+- This is `no_availability_correct` (Q11(a) explicit broadening), not a Phase 0A
+  validation. **A no-slots case can never validate fill/OTP closure**, so this
+  retry doesn't move the gate — it just confirms taxonomy.
+- Codex patch: canonicalize R-003 slug to `buvette-nyc` + broaden
+  `NO_AVAILABILITY_PATTERN` so future runs map cleanly to `F-AVAIL-NONE`.
+
 **未完成**
-- ⏳ R-003 smoke #3 live 运行（pending codex go-decision）
-- ⏳ Warm session PoC（blocked — 还没有 Resy case 真撞到 OTP wall；R-003 #3 跑出来再决定）
-- ⏳ observed Resy fixture suite 跑（**严格 gated**：只有 R-003 #3 通过 + warm session PoC 完成/或明确不需要才允许）
+- ⏳ Resy availability **probe-first** before next live R-003 (probe runner
+  in flight; dashboard at `/dev/resy-probe-runs` already live; protocol in
+  `RESY_AVAILABILITY_PROBE_PROTOCOL.md`)
+- ⏳ R-003 (or another `live_ok` case picked from probe output) live retry
+  — pending probe finding a case with real matching slots
+- ⏳ Warm session PoC（blocked — 没有 Resy case 真撞到 OTP wall；要先 probe
+  到 `live_ok` 案例再跑 live，撞 OTP 才决定）
+- ⏳ observed Resy fixture suite 跑（**严格 gated**：要先有 1+ case 在 probe
+  下显示 `live_ok` 且 live 跑出真 fill/OTP 闭环才允许 suite）
 
-**下一步 owner**：codex
+**下一步 owner**：codex（probe runner + 下次 live retry）
 
-**进入 Phase 0B 的门**: R-003 #3 通过 + (warm session PoC ✅ 或 OTP soft-handoff per § 7.5)。
+**进入 Phase 0B 的门**: 至少 1 个 Resy fixture case 在 probe 下显示 `live_ok`
++ live 跑通到 `ready_for_confirmation` 或 `safe_handoff with F-PROVIDER-OTP`
++ (warm session PoC ✅ 或 OTP soft-handoff per § 7.5)。**no_availability_correct
+单独不算开门**。
 
 ---
 

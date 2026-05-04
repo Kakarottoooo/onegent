@@ -1,22 +1,89 @@
 # Claude — coordination state
 
-> **Branch**: `claude/founder-e2e-polish` (worktree `festive-pare-f27273`)
-> **Last updated**: 2026-05-03 24:05 UTC
-> **Last commit**: this commit (founder E2E walkthrough polish — quick path / stop conditions / R003 reference)
+> **Branch**: `claude/dev-resy-probe-dashboard` (worktree `festive-pare-f27273`)
+> **Last updated**: 2026-05-04 04:00 UTC
+> **Last commit**: this commit (Resy probe dashboard + benchmark artifact rail + probe-first protocol doc)
 >
 > Codex reads this at session start. I write to it before each push.
 > See `CLAUDE.md` § "协作协议" for the protocol contract.
-> Codex's parallel file lives at `origin/master:.coordination/codex.md`.
+> Codex's parallel file lives at `origin/master:.coordination/codex.md` (+ codex working branch `origin/codex/openai-chat-model-env:.coordination/codex.md`).
 
 ## 🟢 Currently doing
 
-**Founder E2E walkthrough doc polish**, per codex's directive in chat
-(after `88e7ecd fix(docs): align R-003 runbook with current runner`):
-> "停止当前 `claude/phase-status-docs`...从最新 `origin/master` 新开分支
-> `claude/founder-e2e-polish`...只做 doc/copy polish，不改 R003 runbook
-> 的执行命令，不改 PHASE_STATUS 的 Phase 0A/0B 定义."
+**Resy probe dashboard + benchmark artifact rail + probe-first protocol**,
+per codex's task assignment (relayed by founder):
+> "1. 做 /dev/resy-probe-runs dashboard ... 2. 扩展 benchmark dashboard
+> artifact viewer ... 3. 写 UI 迁移文案/状态说明"
 
-This commit (doc-only, scoped strictly to `PHASE_1_FOUNDER_E2E.md`):
+This commit (UI/docs/tests only — strictly no provider/runtime/worker/benchmark runner):
+1. ✅ New `lib/benchmark/resy-probe-report.ts` — Track B types + node-only
+   loader for Resy probe report. Schema versioned (v1). Codex's probe runner
+   `scripts/probe-resy-availability.ts` (in flight) writes JSON matching
+   this shape.
+2. ✅ New `app/api/dev/resy-probe-runs/route.ts` (list) +
+   `app/api/dev/resy-probe-runs/[file]/route.ts` (single). Path-traversal
+   guard. Same `ENABLE_DEV_BENCHMARK_API=1` env gate as benchmark-runs.
+3. ✅ New `app/dev/resy-probe-runs/page.tsx` (~360 LOC dashboard).
+   Renders: recommended next live case + copy-able command + summary
+   stats + per-case table with slots / matchingSlots / signals / verdict.
+4. ✅ Extended `app/dev/benchmark-runs/page.tsx` — added `<ArtifactRail>`
+   below the case table. Surfaces taskId / currentJobId / timelineUrl /
+   snapshotsUrl / report path / outcome chips
+   (severe-tripwire / no_availability_correct / booking-ready / safe-failure)
+   + `<StrategyLogPanel>` ready to render `[provider][strategy ...]` lines
+   when codex adds a `strategyLog` field to the case result.
+5. ✅ Added artifact-rail CSS to `components/benchmark/benchmark.css`.
+6. ✅ Added `/dev/resy-probe-runs` entry to `/dev` landing index +
+   refreshed `/dev/benchmark-runs` blurb to mention the ArtifactRail.
+7. ✅ New `RESY_AVAILABILITY_PROBE_PROTOCOL.md` — protocol doc explaining
+   the no-slot-vs-fill-OTP gap that the 2026-05-04 R-003 retry exposed.
+8. ✅ `PHASE_STATUS.md` § "Phase 0A R-003 retry" — added `2026-05-04`
+   retry analysis: outcome was `no_availability_correct`, not Resy fill
+   failure; door to Phase 0B requires a `live_ok` case + actual
+   ready-for-confirmation OR safe-handoff w/ OTP. Did NOT modify Phase
+   0A/0B definitions per existing hold rule.
+9. ✅ `R003_LIVE_SMOKE_RUNBOOK.md` § "Step 0" preamble — points at the
+   probe-first protocol BEFORE the existing § 0–§ 7 checklist. Did NOT
+   modify execution commands per existing hold rule.
+10. ✅ `lib/__tests__/resy-probe-report.test.ts` — 9 vitest cases for
+    loader + lister: filename pattern, traversal guard, schema-version
+    gate, JSON-parse guard, sort-newest-first, summary fields, fallback
+    on malformed.
+11. ✅ Empty-state UX on dashboard — `benchmark/runs/*.json` is gitignored
+    (it's an output dir per `.gitignore:61`), so I don't ship a committed
+    dev fixture. When no probe JSON exists, the dashboard renders an
+    explicit "No probe runs yet — generate one with `npx tsx scripts/probe-resy-availability.ts`"
+    state. First real probe run from codex's runner auto-populates.
+
+**Review points for codex** (please check these before merge):
+- **Schema fit**: probe runner output should match `ResyProbeRun` in
+  `lib/benchmark/resy-probe-report.ts`. If shape differs, please tell me
+  and I'll adjust the types in the same commit as your runner ships
+  (single coordinated push).
+- **`strategyLog` field on Phase0BenchmarkCaseResult**: my `<StrategyLogPanel>`
+  currently parses `[provider][strategy ...]` lines from `terminalReason`.
+  When you add a proper `strategyLog?: string[]` field to the report,
+  I switch the source to that — single line in `extractStrategyLines()`.
+- **Probe API gate**: I reused `ENABLE_DEV_BENCHMARK_API=1` env var so
+  flipping prod gate flips both. If you want a separate
+  `ENABLE_DEV_PROBE_API=1`, say so.
+- **DEV-FIXTURE file**: only created so /dev/resy-probe-runs renders out
+  of the box. Safe to delete the file once your real probe lands its
+  first JSON. The dashboard handles empty list gracefully.
+- **Phase 0A/0B docs**: I touched ONLY status text (R-003 outcome
+  analysis), not the codex-owned definitions. If my analysis text
+  conflicts with how you want the gate framed, edit freely.
+
+**Strictly NOT touched** (per task scope):
+- `lib/booking-autopilot/**`
+- `worker/src/**`
+- `lib/execution-v2/**`
+- `lib/core/**`
+- `scripts/run-phase0-resy-benchmark.ts`
+- `scripts/probe-resy-availability.ts`
+- `lib/benchmark/phase0-report.ts` (codex source-of-truth — read-only here)
+
+(Earlier doc-only commit context retained below for the merged history.)
 1. ✅ Added top-of-doc "选哪条路径" decision matrix (10-min Quick vs
    60-90 min Full).
 2. ✅ Added `🛑 什么时候停止不要继续测` section with 🔴 ship-blocker /
