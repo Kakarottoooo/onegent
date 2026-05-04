@@ -198,6 +198,11 @@ export const DEMO_ROUTE_ORDER: DemoRouteStep[] = [
 
 const DOC_LINKS: Omit<DemoEvidenceDocLink, "exists">[] = [
   {
+    label: "Demo freeze acceptance",
+    path: "docs/40-phase1/DEMO_FREEZE_ACCEPTANCE.md",
+    kind: "runbook",
+  },
+  {
     label: "YC demo runbook",
     path: "docs/40-phase1/YC_DEMO_RUNBOOK.md",
     kind: "runbook",

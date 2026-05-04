@@ -12,9 +12,10 @@ integrated preview worktree:
 C:\Users\Gzw19\onegent-integrated-20260504
 ```
 
-Do not use this document as approval to run live providers. Any Expedia,
-Resy, OpenTable, hotel, payment, OTP, CAPTCHA, login, or final-confirmation
-flow still needs explicit founder approval and must stop at the safe boundary.
+Do not use this document as approval to start provider production sessions.
+Any Expedia, Resy, OpenTable, hotel, payment, OTP, CAPTCHA, login, or
+final-confirmation flow still needs explicit founder approval and must stop at
+the safe boundary.
 
 ## Five-Minute Preflight
 
@@ -29,6 +30,7 @@ npm run gate:phase1 -- --allow-known-drift
 If time allows and a dev server is already available, open:
 
 ```text
+/dev/demo-readiness
 /dev/demo-control-room
 /dev/phase1-quality-gates
 /dev/founder-e2e
@@ -41,10 +43,11 @@ Preflight acceptance:
 
 - `git status` is clean or only contains an intentional current task.
 - Phase 1 gate passes.
+- `/dev/demo-readiness` opens and is not blocked.
 - `/dev/demo-control-room` opens and shows green or yellow cards, not red.
 - The Phase 2 panel says Expedia is not live verified.
-- No live provider, payment, OTP, CAPTCHA, login bypass, or final confirmation
-  is launched during preflight.
+- No provider production session, payment entry, OTP entry, CAPTCHA solving,
+  login shortcut, or final confirmation is launched during preflight.
 
 If any required check is red, do not improvise a live provider demo. Use the
 fallback lines below.
@@ -57,32 +60,35 @@ Use this order when showing the product:
    - Show the gate cards and hard stops first.
    - Say: "This is my demo cockpit. It tells me what is verified, what is
      only audited, and where the agent must hand control back to me."
-2. `/`
+2. `/dev/demo-readiness`
+   - Show compact readiness, route order, hard stops, and the acceptance doc.
+   - Say: "This is the go/no-go layer I check before the fuller control room."
+3. `/`
    - Start from the chat surface.
    - Prompt with a restaurant or trip request that does not require payment
      on stage unless explicitly approved.
    - Say: "The user describes intent in plain language; Onegent turns it into
      a concrete task with profile and safety checks."
-3. `/tasks`
+4. `/tasks`
    - Show task history and task lifecycle.
    - Say: "Tasks are not hidden chat magic. Each one has status, evidence,
      and a recoverable audit trail."
-4. `/tasks/<taskId>` if a current safe task exists.
+5. `/tasks/<taskId>` if a current safe task exists.
    - Show timeline, safe boundary, and handoff state.
    - Do not click final provider confirmation.
-5. `/dev/phase1-quality-gates`
+6. `/dev/phase1-quality-gates`
    - Show the latest gate artifact.
    - Say: "This keeps us honest. The demo surface is backed by a repeatable
      quality gate, not a manually curated page."
-6. `/dev/founder-e2e`
+7. `/dev/founder-e2e`
    - Show the manual founder checklist.
    - Say: "This is the human acceptance layer for surfaces automation cannot
      judge well."
-7. `/dev/runtime-forensics`
+8. `/dev/runtime-forensics`
    - Show failure classification and paste-ready reports.
    - Say: "When a provider breaks, we classify it from DB, worker log, and
      screenshots instead of guessing from the UI card."
-8. `/dev/restaurant-readiness` or `/dev/resy-run-analysis` only if Phase 0
+9. `/dev/restaurant-readiness` or `/dev/resy-run-analysis` only if Phase 0
    restaurant context is needed.
    - Say: "Restaurant live work is probe-first. We do not burn tokens on
      cases that the provider has already made unavailable."
@@ -102,7 +108,7 @@ Do not claim:
 
 - Resy is fully closed.
 - Every restaurant provider is production reliable.
-- The agent can bypass OTP, CAPTCHA, login, or payment.
+- The agent can automatically handle OTP, CAPTCHA, login, or payment.
 
 ### Phase 1 - First Paying User Path
 
@@ -175,7 +181,7 @@ If Resy is degraded:
 "This is a provider/session state issue, not a reason to keep clicking. We use
 probe and readiness artifacts before spending tokens on another live case."
 
-If Expedia live retry is not approved:
+If Expedia controlled check is not approved:
 
 "Expedia is the closest Phase 2 candidate, but it is not live verified in this
 build. The next step is one controlled retry, then classification from DB,

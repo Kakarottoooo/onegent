@@ -1,6 +1,6 @@
 # HUDDLE - Shared Working Memory
 
-> Last writer: codex
+> Last writer: track-c
 > Last updated: 2026-05-04
 > Cap: 2000 words. Trim oldest Live activity first.
 
@@ -33,6 +33,14 @@ small.
 
 ## Live Activity
 
+- 2026-05-04 track-c: started
+  `codex/track-c-demo-acceptance-pack` from latest integrated preview
+  `4d6d991`. Added `docs/40-phase1/DEMO_FREEZE_ACCEPTANCE.md`, tightened
+  active demo-doc static guards for mojibake and unsafe live-action/boundary
+  wording, and lightly polished `/dev/demo-readiness` to link the acceptance
+  doc and state Phase 2 is not live verified. Scope stayed read-only demo
+  UI/docs/tests; no provider/runtime/live files and no live provider, payment,
+  OTP, CAPTCHA, or final confirmation.
 - 2026-05-04 codex: completed Phase 1/1.5 demo-freeze pass on integrated
   preview. Initial full gate exposed two optional demo failures: payment-field
   guard returned 500 and smoke saw an unstable old dev server. Fixed the root
