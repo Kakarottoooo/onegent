@@ -15,6 +15,7 @@ describe("docs static guard - core", () => {
       "docs/00-start-here/PHASE_STATUS.md",
       "docs/10-coordination/HUDDLE.md",
       "docs/10-coordination/MULTI_AGENT_PROTOCOL.md",
+      "docs/10-coordination/NEW_AGENT_STARTUP_CONTRACT.md",
       "docs/10-coordination/phase2-goal-review.md",
       "docs/10-coordination/track-c.md",
       "docs/40-phase1/DEMO_CONTROL_ROOM.md",
@@ -62,5 +63,90 @@ describe("docs static guard - core", () => {
     expect(hub).toContain("/developers/docs/oauth");
     expect(hub).toContain("/developers/docs/integrations/claude-mcp");
     expect(hub).toContain("/developers/docs/integrations/chatgpt-apps");
+  });
+
+  it("keeps the new-agent startup contract present and linked", () => {
+    // The contract is the cold-start checklist for any coding agent
+    // and must stay reachable from both INDEX and MULTI_AGENT_PROTOCOL.
+    // This invariant does not duplicate the existence-only check above;
+    // it locks the structural sections and cross-links.
+    const contract = read("docs/10-coordination/NEW_AGENT_STARTUP_CONTRACT.md");
+
+    // Required structural sections (numbered headings the task spec
+    // calls out as the contract's seven rules).
+    const requiredSections = [
+      /##\s+1\.\s+Canonical Branch and Worktree/,
+      /##\s+2\.\s+Who Edits HUDDLE vs Track Files/,
+      /##\s+3\.\s+Stale Branch and Cherry-Pick Rules/,
+      /##\s+4\.\s+Forbidden Paths/,
+      /##\s+5\.\s+Safety Hard Stops/,
+      /##\s+6\.\s+Required Validation Levels/,
+      /##\s+7\.\s+How to Report Results/,
+    ];
+    for (const pattern of requiredSections) {
+      expect(
+        contract,
+        `NEW_AGENT_STARTUP_CONTRACT must keep section matching ${pattern}`,
+      ).toMatch(pattern);
+    }
+
+    // Key terms that anchor the contract's meaning. Removing any of
+    // these would silently weaken the contract.
+    const requiredTerms = [
+      "codex/integrated-preview-20260504",
+      "onegent-integrated-20260504",
+      "docs/10-coordination/MULTI_AGENT_PROTOCOL.md",
+      "docs/10-coordination/HUDDLE.md",
+      "docs/10-coordination/codex.md",
+      "docs/10-coordination/claude.md",
+      "docs/10-coordination/phase2.md",
+      "docs/10-coordination/track-c.md",
+      "lib/booking-autopilot/**",
+      "lib/core/**",
+      "worker/src/**",
+      "app/api/v1/**",
+      "app/api/booking-jobs/**",
+      "lib/db.ts",
+      "Live OpenAI calls",
+      "Live Computer Use sessions",
+      "Final booking",
+      "npx tsc --noEmit --pretty false",
+      "npm run gate:phase1 -- --allow-known-drift",
+      "git diff --check",
+      "Branch: <agent>/<topic>",
+    ];
+    for (const term of requiredTerms) {
+      expect(
+        contract,
+        `NEW_AGENT_STARTUP_CONTRACT must keep key term ${JSON.stringify(term)}`,
+      ).toContain(term);
+    }
+
+    // Contract must be ASCII-only so editors and terminals do not
+    // mojibake the cold-start instructions.
+    expect(
+      contract,
+      "NEW_AGENT_STARTUP_CONTRACT must be ASCII-only",
+    ).not.toMatch(/[^\x00-\x7F]/);
+
+    // INDEX must surface the contract in the New Agent Read Order and
+    // in the Current Canonical Files table so a fresh agent can find it.
+    const index = read("docs/INDEX.md");
+    expect(
+      index,
+      "INDEX must reference the new-agent startup contract",
+    ).toContain("docs/10-coordination/NEW_AGENT_STARTUP_CONTRACT.md");
+    expect(
+      index,
+      "INDEX New Agent Read Order must mention the startup contract",
+    ).toMatch(/New Agent Read Order[\s\S]*NEW_AGENT_STARTUP_CONTRACT/);
+
+    // MULTI_AGENT_PROTOCOL must cross-link to the contract as the
+    // boiled-down checklist version.
+    const protocol = read("docs/10-coordination/MULTI_AGENT_PROTOCOL.md");
+    expect(
+      protocol,
+      "MULTI_AGENT_PROTOCOL must cross-link to the startup contract",
+    ).toContain("docs/10-coordination/NEW_AGENT_STARTUP_CONTRACT.md");
   });
 });

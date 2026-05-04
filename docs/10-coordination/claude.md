@@ -1,12 +1,12 @@
 # Claude - coordination state
 
-> Branch context: latest Claude branch reviewed is
-> `claude/multi-agent-conflict-protocol`,
-> based on `codex/integrated-preview-20260504 @ a704e6f`.
+> Branch context: working on `claude/new-agent-startup-contract`,
+> based on `codex/integrated-preview-20260504 @ 0b83d1b`.
 > Integrated preview now includes Claude Track B branches through
 > `codex/integrated-preview-20260504` post Phase 1/1.5 demo-freeze pass
-> plus the second sidecar batch (Phase 2 hotel artifact audit + Track C
-> demo acceptance pack + Phase 1 doc cleanup).
+> plus the second/third/fourth sidecar batches (Phase 2 hotel audit +
+> retry analysis pack, Track C demo acceptance + freeze checker, Claude
+> multi-agent conflict protocol, Goal Phase 0 restaurant artifact pack).
 > Last updated: 2026-05-04.
 > Canonical path: `docs/10-coordination/claude.md`.
 
@@ -18,15 +18,18 @@ that changes Track B status, handoff rules, or UI/docs/tooling ownership.
 Read in this order when picking up Onegent cold:
 
 1. `docs/INDEX.md`
-2. `docs/00-start-here/PROJECT_SUMMARY.md`
-3. `docs/00-start-here/PHASE_STATUS.md`
-4. `docs/10-coordination/MULTI_AGENT_PROTOCOL.md` (mandatory before any
-   new branch; branch freshness, ownership map, HUDDLE discipline,
-   cherry-pick policy, forbidden paths)
-5. `docs/10-coordination/HUDDLE.md`
-6. `docs/10-coordination/codex.md`
-7. `docs/10-coordination/claude.md`
-8. Task-specific runbook:
+2. `docs/10-coordination/NEW_AGENT_STARTUP_CONTRACT.md` (3-minute
+   cold-start checklist; canonical branch/worktree, HUDDLE discipline,
+   stale branch / cherry-pick rules, forbidden paths, safety hard stops,
+   validation levels, how to report results)
+3. `docs/00-start-here/PROJECT_SUMMARY.md`
+4. `docs/00-start-here/PHASE_STATUS.md`
+5. `docs/10-coordination/MULTI_AGENT_PROTOCOL.md` (long-form contract;
+   read after the startup contract)
+6. `docs/10-coordination/HUDDLE.md`
+7. `docs/10-coordination/codex.md`
+8. `docs/10-coordination/claude.md`
+9. Task-specific runbook:
    - Provider/runtime: `docs/30-provider-debug/PROVIDER_RUNTIME_DEBUG_PLAYBOOK.md`
    - Phase 1/QA: `docs/40-phase1/PHASE_1_FOUNDER_E2E.md`,
      `docs/40-phase1/PHASE_1_QUALITY_GATE.md`,
@@ -236,7 +239,8 @@ Boundaries:
 | `claude/demo-control-room` | merged via cherry-pick | Read-only `/dev/demo-control-room` aggregating gate/founder-e2e/smoke verdicts plus Phase 2 posture and safe demo script. |
 | `claude/phase1-doc-cleanup-after-freeze` | merged via cherry-pick (`db0aef8`) | Phase 1/1.5 docs refresh after demo-freeze pass; dropped stale 95% claim and 213-test count, extended `docs-static-guard` with post-freeze invariants. |
 | `claude/docs-ia-post-freeze-index` | merged via cherry-pick (`9b83153`) | Refresh `docs/INDEX.md` with new-agent read order + post-freeze quick path + Phase 2 hotel paths, refresh `PROJECT_SUMMARY` worktree/phase snapshot, refresh `PHASE_STATUS` integrated-preview branch list, extend docs static guards with INDEX read-order + canonical path invariants. |
-| `claude/multi-agent-conflict-protocol` | integrated in current Codex batch | Add `docs/10-coordination/MULTI_AGENT_PROTOCOL.md` (branch freshness rule, ownership map, HUDDLE discipline, goal-branch behavior, cherry-pick policy, forbidden paths). Split the docs static guard into focused files while preserving current demo/Phase 2/IA invariants. Update `docs/10-coordination/README.md` to point at the protocol. |
+| `claude/multi-agent-conflict-protocol` | merged via cherry-pick (`7e66950`) | Add `docs/10-coordination/MULTI_AGENT_PROTOCOL.md` (branch freshness rule, ownership map, HUDDLE discipline, goal-branch behavior, cherry-pick policy, forbidden paths). Split the docs static guard into focused files while preserving current demo/Phase 2/IA invariants. Update `docs/10-coordination/README.md` to point at the protocol. |
+| `claude/new-agent-startup-contract` | active | Add `docs/10-coordination/NEW_AGENT_STARTUP_CONTRACT.md` as the 3-minute cold-start checklist for any coding agent (canonical branch/worktree, HUDDLE vs track-file discipline, stale branch / cherry-pick rules, forbidden paths, safety hard stops, three validation levels, how to report results). Cross-link from `docs/INDEX.md` (New Agent Read Order + Current Canonical Files) and `docs/10-coordination/MULTI_AGENT_PROTOCOL.md`. Extend `lib/__tests__/docs-static-core.test.ts` with required-docs entry plus a new it block locking the contract's seven sections, key terms (canonical branch, forbidden paths, safety hard stops, validation commands, branch+commit-hash report shape), ASCII-only invariant, and INDEX/protocol cross-links. |
 
 ## Current Claude Inbox
 
