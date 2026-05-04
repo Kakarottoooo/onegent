@@ -660,6 +660,40 @@ describe("classifyJob — provider fixture sanity", () => {
       ]),
     );
   });
+  it("OpenAI Responses API 500 is model/env blocked while preserving Expedia selector signals", () => {
+    const r = classifyJob(
+      job({
+        provider: "expedia",
+        scenario: "F-EXP-MCO-BNA-4",
+        rawWorkerLogExcerpt: [
+          "[stagehand] [flight-rpa] Flight-card DOM scan failed: StagehandEvalError: Uncaught",
+          "[stagehand] OpenAI Responses API returned 500 while filling traveler details",
+        ].join("\n"),
+      }),
+    );
+
+    expect(r.primaryClass).toBe("model_or_env_blocked");
+    expect(r.signals.map((s) => s.label)).toEqual(
+      expect.arrayContaining([
+        "OpenAI Responses API 5xx",
+        "Expedia flight-card DOM scan failed",
+      ]),
+    );
+  });
+  it("Expedia provider 503 remains provider/network, not model/env blocked", () => {
+    const r = classifyJob(
+      job({
+        provider: "expedia",
+        scenario: "F-EXP-MCO-BNA-5",
+        errorMessage: "Expedia returned HTTP 503 response loading flight results.",
+      }),
+    );
+
+    expect(r.primaryClass).toBe("network_or_provider_5xx");
+    expect(r.signals.map((s) => s.label)).not.toContain(
+      "OpenAI Responses API 5xx",
+    );
+  });
   it("flight checkout reached case", () => {
     const r = classifyJob(
       job({

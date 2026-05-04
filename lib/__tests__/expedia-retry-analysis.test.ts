@@ -76,6 +76,46 @@ describe("analyzeExpediaRetryArtifactBundle", () => {
     expect(analysis.confidence).toBe("low");
     expect(analysis.signals).toEqual([]);
   });
+
+  it("classifies OpenAI Responses API 500 as model/env transient without dropping provider signals", () => {
+    const analysis = analyzeExpediaRetryArtifactBundle({
+      job: {
+        id: "fixture-expedia-openai-500",
+        provider: "expedia",
+        scenario: "flight",
+        status: "failed",
+      },
+      workerLogExcerpt: [
+        "[flight-rpa] Flight-card DOM scan failed: StagehandEvalError: Uncaught",
+        "[flight-rpa] OpenAI Responses API returned 500 while filling traveler details",
+      ].join("\n"),
+    });
+
+    expect(analysis.state).toBe("model_or_env_transient");
+    expect(analysis.signals.map((signal) => signal.kind)).toEqual(
+      expect.arrayContaining([
+        "model_or_env_transient",
+        "card_scan_failed",
+      ]),
+    );
+  });
+
+  it("classifies provider no-availability only when explicit availability evidence is present", () => {
+    const analysis = analyzeExpediaRetryArtifactBundle({
+      job: {
+        id: "fixture-expedia-no-availability",
+        provider: "expedia",
+        scenario: "flight",
+        status: "failed",
+        errorMessage: "Provider inventory changed; target Southwest card is not visible.",
+      },
+    });
+
+    expect(analysis.state).toBe("provider_no_availability");
+    expect(analysis.signals.map((signal) => signal.kind)).toContain(
+      "provider_no_availability",
+    );
+  });
 });
 
 describe("Expedia retry markdown helpers", () => {
@@ -97,6 +137,18 @@ describe("Expedia retry markdown helpers", () => {
     expect(markdown).toContain("network_provider_failure");
     expect(markdown).toContain("Expedia Retry Artifact Analysis");
     expect(markdown).toContain("codex-worker.log");
+  });
+
+  it("includes benchmark report paths when present", async () => {
+    const bundle = await readFixture("fallback-attempted-no-match.json");
+    const markdown = formatExpediaRetryArtifactBundleMarkdown({
+      ...bundle,
+      benchmarkReportPath:
+        "C:\\Users\\Gzw19\\onegent-integrated-20260504\\benchmark\\runs\\expedia-controlled-retry.json",
+    });
+
+    expect(markdown).toContain("Benchmark report");
+    expect(markdown).toContain("expedia-controlled-retry.json");
   });
 });
 
