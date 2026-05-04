@@ -267,6 +267,94 @@ export async function loadDemoEvidenceSnapshot(
   };
 }
 
+export function formatDemoReadinessMarkdown(
+  snapshot: DemoEvidenceSnapshot,
+): string {
+  const lines: string[] = [];
+  lines.push("# Demo Readiness Export");
+  lines.push("");
+  lines.push(`Generated: ${snapshot.generatedAt}`);
+  lines.push(`Verdict: ${snapshot.readiness.verdict}`);
+  lines.push("");
+
+  lines.push("## Blockers");
+  if (snapshot.readiness.blockers.length === 0) {
+    lines.push("");
+    lines.push("- None");
+  } else {
+    lines.push("");
+    for (const blocker of snapshot.readiness.blockers) {
+      lines.push(`- ${blocker}`);
+    }
+  }
+  lines.push("");
+
+  lines.push("## Warnings");
+  if (snapshot.readiness.warnings.length === 0) {
+    lines.push("");
+    lines.push("- None");
+  } else {
+    lines.push("");
+    for (const warning of snapshot.readiness.warnings) {
+      lines.push(`- ${warning}`);
+    }
+  }
+  lines.push("");
+
+  lines.push("## Evidence Summary");
+  lines.push("");
+  lines.push(`- Phase 1 gate: ${formatGateLine(snapshot)}`);
+  lines.push(`- Founder E2E: ${formatFounderLine(snapshot)}`);
+  lines.push(`- Smoke: ${formatSmokeLine(snapshot)}`);
+  lines.push(
+    `- Runtime forensics: ${snapshot.runtimeForensics.reportCount} report(s), ` +
+      `${snapshot.runtimeForensics.p0Count} P0, ` +
+      `${snapshot.runtimeForensics.legacyShapeCount} legacy-shape`,
+  );
+  lines.push("");
+
+  lines.push("## Exact Demo Route Order");
+  lines.push("");
+  for (const step of snapshot.routeOrder) {
+    lines.push(`${step.index}. ${step.href} - ${step.label}`);
+    lines.push(`   - ${step.purpose}`);
+  }
+  lines.push("");
+
+  lines.push("## Hard Stops");
+  lines.push("");
+  for (const stop of snapshot.hardStops) {
+    lines.push(`- ${stop.trigger}`);
+    lines.push(`  - ${stop.action}`);
+  }
+  lines.push("");
+
+  lines.push("## Useful Docs");
+  lines.push("");
+  for (const doc of snapshot.docs) {
+    lines.push(
+      `- ${doc.exists ? "present" : "missing"} - ${doc.label}: ${doc.path}`,
+    );
+  }
+  lines.push("");
+
+  lines.push("## Phase 2 / Expedia Links");
+  lines.push("");
+  for (const link of snapshot.phase2Links) {
+    lines.push(`- ${link.label}: ${link.path}`);
+    lines.push(`  - ${link.note}`);
+  }
+  lines.push("");
+
+  lines.push("## Safety Boundary");
+  lines.push("");
+  lines.push(
+    "No live provider, payment, OTP, CAPTCHA, login bypass, or final confirmation is authorized by this export.",
+  );
+
+  return lines.join("\n");
+}
+
 async function loadLatestQualityGate(
   notes: string[],
 ): Promise<DemoEvidenceGate> {
@@ -522,6 +610,24 @@ export function deriveDemoReadiness(input: {
 
 function isBlockingGateVerdict(verdict: GateVerdict): boolean {
   return verdict === "fail" || verdict === "env_blocked";
+}
+
+function formatGateLine(snapshot: DemoEvidenceSnapshot): string {
+  const gate = snapshot.phase1Gate.summary;
+  if (!gate) return "no artifact";
+  return `${gate.verdict}, ${gate.passCount}/${gate.totalChecks} pass (${snapshot.phase1Gate.relPath ?? "no path"})`;
+}
+
+function formatFounderLine(snapshot: DemoEvidenceSnapshot): string {
+  const founder = snapshot.founderE2e.summary;
+  if (!founder) return "no artifact";
+  return `${founder.runnerVerdict ?? "manual"}, ${founder.pass}/${founder.total} pass (${snapshot.founderE2e.relPath ?? "no path"})`;
+}
+
+function formatSmokeLine(snapshot: DemoEvidenceSnapshot): string {
+  const smoke = snapshot.phase1Gate.smoke;
+  if (!smoke.present) return "not present";
+  return `${smoke.status ?? "unknown"} (${smoke.command ?? "no command"})`;
 }
 
 async function pathExists(absPath: string): Promise<boolean> {

@@ -1,6 +1,6 @@
 # HUDDLE - Shared Working Memory
 
-> Last writer: codex
+> Last writer: track-c
 > Last updated: 2026-05-04
 > Cap: 2000 words. Trim oldest Live activity first.
 
@@ -33,6 +33,12 @@ small.
 
 ## Live Activity
 
+- 2026-05-04 track-c: branch `codex/track-c-demo-readiness-v2` adds a pure
+  markdown export helper for demo-readiness, renders a read-only markdown
+  textarea/details block on `/dev/demo-readiness`, tightens hard-stop coverage
+  tests, and points the YC runbook first to `/dev/demo-readiness` then
+  `/dev/demo-control-room`. No provider/runtime/live files touched; no live
+  provider, payment, OTP, CAPTCHA, or final confirmation.
 - 2026-05-04 codex: integrated Agent2
   `codex/phase2-expedia-retry-analysis-pack @ 005e638` by cherry-picking onto
   current integrated preview as `687c0b3`. Added the pure no-live Expedia retry

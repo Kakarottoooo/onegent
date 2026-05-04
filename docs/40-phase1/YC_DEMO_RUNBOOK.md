@@ -29,6 +29,7 @@ npm run gate:phase1 -- --allow-known-drift
 If time allows and a dev server is already available, open:
 
 ```text
+/dev/demo-readiness
 /dev/demo-control-room
 /dev/phase1-quality-gates
 /dev/founder-e2e
@@ -41,6 +42,8 @@ Preflight acceptance:
 
 - `git status` is clean or only contains an intentional current task.
 - Phase 1 gate passes.
+- `/dev/demo-readiness` opens and gives the compact readiness verdict,
+  hard stops, route order, and copyable markdown export.
 - `/dev/demo-control-room` opens and shows green or yellow cards, not red.
 - The Phase 2 panel says Expedia is not live verified.
 - No live provider, payment, OTP, CAPTCHA, login bypass, or final confirmation
@@ -53,36 +56,40 @@ fallback lines below.
 
 Use this order when showing the product:
 
-1. `/dev/demo-control-room`
+1. `/dev/demo-readiness`
+   - Show the compact verdict, blockers/warnings, hard stops, and route order.
+   - Open the markdown export if you need a copyable handoff summary.
+   - Say: "This is my quick go/no-go page. It does not run anything live."
+2. `/dev/demo-control-room`
    - Show the gate cards and hard stops first.
    - Say: "This is my demo cockpit. It tells me what is verified, what is
      only audited, and where the agent must hand control back to me."
-2. `/`
+3. `/`
    - Start from the chat surface.
    - Prompt with a restaurant or trip request that does not require payment
      on stage unless explicitly approved.
    - Say: "The user describes intent in plain language; Onegent turns it into
      a concrete task with profile and safety checks."
-3. `/tasks`
+4. `/tasks`
    - Show task history and task lifecycle.
    - Say: "Tasks are not hidden chat magic. Each one has status, evidence,
      and a recoverable audit trail."
-4. `/tasks/<taskId>` if a current safe task exists.
+5. `/tasks/<taskId>` if a current safe task exists.
    - Show timeline, safe boundary, and handoff state.
    - Do not click final provider confirmation.
-5. `/dev/phase1-quality-gates`
+6. `/dev/phase1-quality-gates`
    - Show the latest gate artifact.
    - Say: "This keeps us honest. The demo surface is backed by a repeatable
      quality gate, not a manually curated page."
-6. `/dev/founder-e2e`
+7. `/dev/founder-e2e`
    - Show the manual founder checklist.
    - Say: "This is the human acceptance layer for surfaces automation cannot
      judge well."
-7. `/dev/runtime-forensics`
+8. `/dev/runtime-forensics`
    - Show failure classification and paste-ready reports.
    - Say: "When a provider breaks, we classify it from DB, worker log, and
      screenshots instead of guessing from the UI card."
-8. `/dev/restaurant-readiness` or `/dev/resy-run-analysis` only if Phase 0
+9. `/dev/restaurant-readiness` or `/dev/resy-run-analysis` only if Phase 0
    restaurant context is needed.
    - Say: "Restaurant live work is probe-first. We do not burn tokens on
      cases that the provider has already made unavailable."
