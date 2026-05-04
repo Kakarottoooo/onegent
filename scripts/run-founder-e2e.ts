@@ -58,22 +58,24 @@ import {
 type Browser = import("playwright").Browser;
 let chromium: typeof import("playwright").chromium;
 let playwrightVersion: string | undefined;
-try {
-  // eslint-disable-next-line @typescript-eslint/no-var-requires
-  ({ chromium } = await import("playwright"));
+
+async function loadPlaywright(): Promise<void> {
   try {
-    const pkg = (await import("playwright/package.json", {
-      with: { type: "json" },
-    })) as { default?: { version?: string } };
-    playwrightVersion = pkg.default?.version;
-  } catch {
-    playwrightVersion = undefined;
+    ({ chromium } = await import("playwright"));
+    try {
+      const pkg = (await import("playwright/package.json", {
+        with: { type: "json" },
+      })) as { default?: { version?: string } };
+      playwrightVersion = pkg.default?.version;
+    } catch {
+      playwrightVersion = undefined;
+    }
+  } catch (err) {
+    process.stderr.write(
+      `\nplaywright is not installed. Run: npx playwright install chromium\n  ${err instanceof Error ? err.message : String(err)}\n`,
+    );
+    process.exit(3);
   }
-} catch (err) {
-  process.stderr.write(
-    `\nplaywright is not installed. Run: npx playwright install chromium\n  ${err instanceof Error ? err.message : String(err)}\n`,
-  );
-  process.exit(3);
 }
 
 const REPO_ROOT = path.resolve(process.cwd());
@@ -472,6 +474,8 @@ const startedAtIso = new Date().toISOString();
 const startedAtMs = Date.now();
 
 async function main(): Promise<never> {
+  await loadPlaywright();
+
   log(COLOR.bold("Founder QA autonomous runner"));
   log(COLOR.dim(`Target: ${BASE_URL}`));
   log(COLOR.dim(`Run id: ${runId}`));
@@ -622,4 +626,7 @@ async function dirHasFiles(p: string): Promise<boolean> {
   }
 }
 
-await main();
+main().catch((err) => {
+  process.stderr.write(`${err instanceof Error ? err.stack ?? err.message : String(err)}\n`);
+  process.exit(1);
+});

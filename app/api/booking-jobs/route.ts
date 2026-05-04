@@ -14,6 +14,7 @@ import type { AgentAutonomySettings } from "@/lib/autonomy";
 import { auth } from "@clerk/nextjs/server";
 import { randomUUID } from "crypto";
 import { isCoreSupported, markStepForCore } from "@/lib/core/cend-adapter";
+import { canUseNoDatabaseBookingJobsFallback } from "@/lib/booking-jobs/db-errors";
 
 /** POST /api/booking-jobs — create a new background booking job */
 export async function POST(req: NextRequest) {
@@ -89,10 +90,19 @@ export async function GET(req: NextRequest) {
   }
   const { userId } = await auth();
 
-  const [sessionJobs, userJobs] = await Promise.all([
-    getBookingJobsBySession(sessionId),
-    userId ? getBookingJobsByUser(userId) : Promise.resolve([] as BookingJob[]),
-  ]);
+  let sessionJobs: BookingJob[];
+  let userJobs: BookingJob[];
+  try {
+    [sessionJobs, userJobs] = await Promise.all([
+      getBookingJobsBySession(sessionId),
+      userId ? getBookingJobsByUser(userId) : Promise.resolve([] as BookingJob[]),
+    ]);
+  } catch (err) {
+    if (canUseNoDatabaseBookingJobsFallback(err)) {
+      return NextResponse.json({ jobs: [] });
+    }
+    throw err;
+  }
 
   const byId = new Map<string, BookingJob>();
   for (const j of sessionJobs) byId.set(j.id, j);
@@ -144,10 +154,19 @@ export async function DELETE(req: NextRequest) {
   }
   const { userId } = await auth();
 
-  const [sessionJobs, userJobs] = await Promise.all([
-    getBookingJobsBySession(sessionId),
-    userId ? getBookingJobsByUser(userId) : Promise.resolve([] as BookingJob[]),
-  ]);
+  let sessionJobs: BookingJob[];
+  let userJobs: BookingJob[];
+  try {
+    [sessionJobs, userJobs] = await Promise.all([
+      getBookingJobsBySession(sessionId),
+      userId ? getBookingJobsByUser(userId) : Promise.resolve([] as BookingJob[]),
+    ]);
+  } catch (err) {
+    if (canUseNoDatabaseBookingJobsFallback(err)) {
+      return NextResponse.json({ deleted: true, count: 0 });
+    }
+    throw err;
+  }
   const allJobIds = Array.from(
     new Set([...sessionJobs, ...userJobs].map((j) => j.id))
   );

@@ -2,7 +2,7 @@
 
 > **Branch**: `codex/integrated-preview-20260504`
 > **Last updated**: 2026-05-04
-> **Last commit**: pending runtime forensics workbench integration on top of `81f6f7e`
+> **Last commit**: pending Phase 1 demo trunk stabilization
 >
 > Claude reads this at session start. I write to it before each push.
 > See `CLAUDE.md` section "coordination protocol".
@@ -11,7 +11,28 @@
 
 ## Currently doing
 
-Integrated preview dogfood and provider-runtime handoff cleanup.
+Phase 1 demo trunk stabilization on integrated preview.
+
+Completed in latest pass:
+- Fixed `npm run e2e:founder` under current tsx/CJS execution by moving
+  Playwright lazy import into the async runner path.
+- Updated stale `npm run smoke:phase1` text assertions to match current demo
+  surfaces while keeping route coverage intact.
+- Added non-production no-DB fallback for `GET/DELETE /api/booking-jobs`.
+  Without `POSTGRES_URL`, local demo now returns empty lists instead of noisy
+  Postgres config 500s. `POST /api/booking-jobs` still requires a real DB.
+- Generated missing PWA manifest icons and aligned `scripts/generate-icons.mjs`
+  with the current Onegent ring/horizon mark.
+- Verified:
+  - `npm run gate:phase1 -- --allow-known-drift --include-smoke --include-e2e`
+    passed with 11 pass, 0 fail, 1 known-existing drift.
+  - `npm run smoke:phase1` passed all 6 routes.
+  - `npm run e2e:founder` passed all 15 autonomous probes.
+  - `/dev`, `/dev/phase1-quality-gates`, `/dev/founder-e2e`,
+    `/dev/runtime-forensics`, `/dev/benchmark-runs`, and `/tasks?view=history`
+    dogfood passed on local port 3000.
+
+Earlier completed in this pass:
 
 Completed in this pass:
 - Merged `origin/claude/integrated-preview-review-20260504` into the

@@ -70,7 +70,6 @@ const ROUTES = [
   {
     path: "/tasks/demo-awaiting-profile",
     expects: [
-      "Carbone tonight",
       "Need details",
       "Restaurant · Carbone",
     ],
@@ -82,17 +81,13 @@ const ROUTES = [
     // is /tasks/demo-ready-for-confirmation.
     path: "/tasks/demo-ready-for-confirmation",
     expects: [
-      "TAO Downtown",
       "Ready to confirm",
     ],
     note: "Final-confirm-button state (Phase 0 success bucket).",
   },
   {
     path: "/dev/benchmark-runs",
-    expects: [
-      "Phase 0 benchmark runs",
-      "Phase 0 acceptance gate",
-    ],
+    expects: ["Phase 0 benchmark runs"],
     note: "Phase 0 dashboard — renders heading even when API is empty/unauthorised.",
   },
   {

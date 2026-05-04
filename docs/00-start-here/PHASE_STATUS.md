@@ -13,7 +13,7 @@ Do not enter Phase 2 yet. Stabilize Phase 0, Phase 1, and Phase 1.5 first.
 | --- | --- | --- |
 | Phase 0A - Restaurant provider closure | In flight, about 85% | Resy still needs a probe-selected live fill/OTP/safe-handoff run. |
 | Phase 0B - Restaurant v1 coverage | Gated | Start after 0A proves at least one real fill/OTP or safe handoff path. |
-| Phase 1 - First paying user path | Mostly ready | Founder E2E walkthrough remains the human acceptance gate. |
+| Phase 1 - First paying user path | Demo-gated | Automated founder runner, smoke, and dev-surface dogfood pass; manual founder walkthrough remains the human acceptance gate. |
 | Phase 1.5 - QA and polish | Active | Quality gate and dev workbenches are integrated and passing. |
 | Phase 2 - Vertical expansion | Frozen, under audit | Old hotel/flight paths exist, but need current artifact/live-safe revalidation before demo promises. |
 
@@ -22,6 +22,16 @@ Do not enter Phase 2 yet. Stabilize Phase 0, Phase 1, and Phase 1.5 first.
 - Integrated preview branch: `codex/integrated-preview-20260504`.
 - Runtime/debug branch: `codex/openai-chat-model-env`.
 - Expedia fix branch: `codex/expedia-flight-card-fallback`.
+- 2026-05-04 latest Phase 1 demo check:
+  - `npm run gate:phase1 -- --allow-known-drift --include-smoke --include-e2e`
+    passed with 11 pass, 0 fail, 1 known-existing drift.
+  - `npm run smoke:phase1` passed all 6 routes.
+  - `npm run e2e:founder` passed all 15 autonomous probes.
+  - Local dogfood passed `/dev`, `/dev/phase1-quality-gates`,
+    `/dev/founder-e2e`, `/dev/runtime-forensics`, `/dev/benchmark-runs`, and
+    `/tasks?view=history`.
+  - Local no-DB demo mode now returns an empty job list for
+    `GET /api/booking-jobs` instead of a Postgres config 500.
 - 2026-05-04 integrated preview verification:
   - `npx tsc --noEmit --pretty false` passed.
   - `npm run gate:phase1 -- --allow-known-drift` passed, 9/9 required checks.

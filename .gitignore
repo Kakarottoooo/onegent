@@ -69,4 +69,5 @@ benchmark/runs/founder-e2e-assets/
 .claude/skills/gstack/
 dev.log
 dev.log~
+phase1-dev.log
 scripts/ralph/.last-branch

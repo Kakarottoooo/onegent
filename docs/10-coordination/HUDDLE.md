@@ -28,6 +28,13 @@ small.
 
 ## Live Activity
 
+- 2026-05-04 codex: resumed Phase 1 demo trunk. Fixed autonomous founder runner
+  CJS/top-level-await break, updated stale Phase 1 smoke copy assertions, added
+  non-production no-DB fallback for `GET/DELETE /api/booking-jobs`, and generated
+  missing PWA icons (`/icon-192.png`, `/icon-512.png`). Verified full Phase 1
+  gate with smoke+e2e: 11 pass, 0 fail, 1 known-existing drift; dogfood passed
+  `/dev`, `/dev/phase1-quality-gates`, `/dev/founder-e2e`,
+  `/dev/runtime-forensics`, `/dev/benchmark-runs`, and `/tasks?view=history`.
 - 2026-05-04 codex: completed no-live Phase 2 revival audit for hotel/flight.
   Current finding: Expedia flight is the only plausible tonight demo-adjacent
   Phase 2 candidate; Booking.com hotel and Hotels.com need fresh artifacts
