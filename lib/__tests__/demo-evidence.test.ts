@@ -195,6 +195,7 @@ describe("loadDemoEvidenceSnapshot", () => {
     expect(snap.docs.every((doc) => doc.exists)).toBe(true);
     expect(snap.docs.some((doc) => doc.path === "docs/40-phase1/DEMO_FREEZE_ACCEPTANCE.md")).toBe(true);
     expect(snap.docs.some((doc) => doc.path === "docs/40-phase1/YC_DEMO_OPERATOR_CARD.md")).toBe(true);
+    expect(snap.docs.some((doc) => doc.path === "docs/20-phase0-restaurant/RESTAURANT_ARTIFACT_ANALYSIS.md")).toBe(true);
     expect(snap.readiness.verdict).toBe("ready");
   });
 });
@@ -282,6 +283,7 @@ async function seedRunbooks(root: string): Promise<void> {
     "docs/40-phase1/DEMO_CONTROL_ROOM.md",
     "docs/40-phase1/PHASE_1_QUALITY_GATE.md",
     "docs/40-phase1/PHASE_1_FOUNDER_E2E.md",
+    "docs/20-phase0-restaurant/RESTAURANT_ARTIFACT_ANALYSIS.md",
     "docs/10-coordination/phase2.md",
     "docs/50-product-areas/EXPEDIA_CONTROLLED_RETRY_RUNBOOK.md",
     "docs/50-product-areas/PHASE2_VERTICAL_REVIVAL_AUDIT.md",

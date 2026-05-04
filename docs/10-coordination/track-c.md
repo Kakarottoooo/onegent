@@ -13,6 +13,14 @@ founder-facing demo surface polish. It does not own provider/runtime/live code.
 
 Latest integrated work:
 
+- Branch `codex/track-c-demo-freeze-hardening` hardens demo acceptance docs and
+  tests: active YC demo docs now have static checks for `/dev/demo-readiness`,
+  `/dev/demo-control-room`, `scripts/check-demo-freeze.ts`, Phase 2
+  not-live-verified wording, and the no-live restaurant artifact analyzer. The
+  operator card now has a demo day checklist, and `/dev/demo-readiness` useful
+  docs surface `docs/20-phase0-restaurant/RESTAURANT_ARTIFACT_ANALYSIS.md` via
+  the read-only demo-evidence helper. No HUDDLE edit, no provider/runtime/live
+  files, and no run/retry/live controls.
 - Branch `codex/track-c-demo-operator-pack` adds
   `docs/40-phase1/YC_DEMO_OPERATOR_CARD.md` as a one-page printable operator
   checklist with route order, 30-second pitch, fallback lines, hard stops, and
