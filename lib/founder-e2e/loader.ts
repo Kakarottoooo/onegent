@@ -37,7 +37,7 @@ const FILE_PREFIX = "founder-e2e-";
 export interface FounderRunSummary {
   file: string;
   runId: string;
-  pathId: "quick" | "full";
+  pathId: "quick" | "full" | "auto";
   startedAt: string;
   updatedAt: string;
   branchSha?: string;
@@ -50,6 +50,11 @@ export interface FounderRunSummary {
   total: number;
   p0Count: number;
   p1Count: number;
+  source: "manual" | "automated";
+  runnerVerdict?: "pass" | "needs_polish" | "fail";
+  baseUrl?: string;
+  command?: string;
+  durationMs?: number;
 }
 
 export async function listFounderE2eRunSummaries(): Promise<FounderRunSummary[]> {
@@ -95,6 +100,11 @@ async function tryReadSummary(file: string): Promise<FounderRunSummary | undefin
       total: run.summary.total,
       p0Count: run.exit.p0Count,
       p1Count: run.exit.p1Count,
+      source: run.source,
+      runnerVerdict: run.runnerVerdict,
+      baseUrl: run.runnerMeta?.baseUrl,
+      command: run.runnerMeta?.command,
+      durationMs: run.runnerMeta?.durationMs,
     };
   } catch {
     return undefined;
@@ -131,9 +141,11 @@ export interface SaveFounderRunResult {
  * before writing, so saved files are internally consistent.
  */
 export async function saveFounderE2eRun(run: QaRun): Promise<SaveFounderRunResult> {
-  if (run.kind !== FOUNDER_E2E_KIND || run.schemaVersion !== FOUNDER_E2E_SCHEMA_VERSION) {
+  if (run.kind !== FOUNDER_E2E_KIND) {
     throw new Error("invalid founder QA run payload");
   }
+  // Allow legacy v1 payloads in — recompute will stamp them at the current
+  // schema version + default missing source/runnerMeta.
   const pathDef = FOUNDER_E2E_PATHS[run.pathId];
   if (!pathDef) {
     throw new Error(`unknown founder QA pathId ${run.pathId}`);
@@ -173,6 +185,6 @@ export function isFsNotFound(err: unknown): boolean {
   return code === "ENOENT";
 }
 
-export function getPathDef(pathId: "quick" | "full"): ChecklistPath {
+export function getPathDef(pathId: "quick" | "full" | "auto"): ChecklistPath {
   return FOUNDER_E2E_PATHS[pathId];
 }

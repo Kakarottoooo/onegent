@@ -643,15 +643,277 @@ const FULL_PATH: ChecklistPath = {
 };
 
 // -----------------------------------------------------------------------------
+// Auto path — autonomous runner targets these step ids 1:1.
+//
+// What the runner CAN automate (no live token, no provider):
+//   - HTTP health probe
+//   - HTML render assertions on dev-only pages and demo task surfaces
+//   - Dev-only API endpoint shape checks (template / list / traversal /
+//     bad payload)
+//   - Public PATCH guard probe (no auth — server should reject unauthenticated
+//     payment fields with 4xx regardless)
+//   - Unauthenticated /tasks/<uuid> probe (server must redirect / return
+//     sign-in card without leaking content)
+//
+// What the runner CANNOT automate (intentional skip — these need a real
+// authenticated session, real worker, or human action):
+//   - Quick A.3 cookie auth + cancel transition (needs Clerk login)
+//   - Quick A.4 inline ProfileGapCard inside chat (needs auth + NLU round trip)
+//   - Full-path Decision Room multi-user, real OTP, payment flow
+//
+// Keep step ids stable — `scripts/run-founder-e2e.mjs` references them
+// directly.
+// -----------------------------------------------------------------------------
+
+const AUTO_STEPS: ReadonlyArray<ChecklistStep> = [
+  {
+    id: "auto:health:1",
+    section: "auto.health",
+    title: "Dev server alive",
+    whatToDo: "GET / on the configured base URL.",
+    expected: "HTTP responds (any non-error status). Network reachable.",
+    warn: "If unreachable, the entire run is meaningless — nothing else can pass.",
+    surfaces: ["/"],
+    severityOnFail: "P0",
+    refs: ["AUTONOMOUS_FOUNDER_E2E.md § Server alive"],
+  },
+  {
+    id: "auto:self:1",
+    section: "auto.self",
+    title: "/dev/founder-e2e renders",
+    whatToDo: "Navigate to /dev/founder-e2e and assert the workbench heading.",
+    expected: "Page shows 'Founder QA Suite' + 'Quick path' + 'Save run'.",
+    warn: "If the workbench itself does not render, every saved run is suspect.",
+    surfaces: ["/dev/founder-e2e"],
+    severityOnFail: "P0",
+    refs: ["AUTONOMOUS_FOUNDER_E2E.md § Self-render"],
+  },
+  {
+    id: "auto:render:path-b-demo",
+    section: "auto.render",
+    title: "/dev/path-b-demo renders",
+    whatToDo: "Navigate and assert path-B fixture explorer copy.",
+    expected: "'Path B fixture explorer' + '1. Missing fields' copy present.",
+    surfaces: ["/dev/path-b-demo"],
+    severityOnFail: "P1",
+  },
+  {
+    id: "auto:render:tasks-executing",
+    section: "auto.render",
+    title: "/tasks/demo-executing renders",
+    whatToDo: "Navigate and assert running-task copy.",
+    expected: "'Buvette in West Village' + 'Running' pill present.",
+    surfaces: ["/tasks/demo-executing"],
+    severityOnFail: "P1",
+  },
+  {
+    id: "auto:render:tasks-awaiting-profile",
+    section: "auto.render",
+    title: "/tasks/demo-awaiting-profile renders ProfileGapCard",
+    whatToDo: "Navigate and assert ProfileGapCard inline copy.",
+    expected: "'Carbone tonight' + 'Need details' + ProfileGapCard inline.",
+    warn: "Modal popup instead of inline => Phase 1 #7 path B regression.",
+    surfaces: ["/tasks/demo-awaiting-profile"],
+    severityOnFail: "P0",
+  },
+  {
+    id: "auto:render:tasks-ready",
+    section: "auto.render",
+    title: "/tasks/demo-ready-for-confirmation renders",
+    whatToDo: "Navigate and assert ready-to-confirm copy.",
+    expected: "'TAO Downtown' + 'Ready to confirm' copy present.",
+    surfaces: ["/tasks/demo-ready-for-confirmation"],
+    severityOnFail: "P1",
+  },
+  {
+    id: "auto:render:tasks-failed",
+    section: "auto.render",
+    title: "/tasks/demo-failed renders",
+    whatToDo: "Navigate and assert failed-task copy.",
+    expected: "'Atomix' + 'Failed' copy present.",
+    surfaces: ["/tasks/demo-failed"],
+    severityOnFail: "P2",
+  },
+  {
+    id: "auto:render:benchmark-runs",
+    section: "auto.render",
+    title: "/dev/benchmark-runs renders",
+    whatToDo: "Navigate and assert dashboard heading.",
+    expected: "'Phase 0 benchmark runs' copy present.",
+    surfaces: ["/dev/benchmark-runs"],
+    severityOnFail: "P1",
+  },
+  {
+    id: "auto:render:profile-gap-flow",
+    section: "auto.render",
+    title: "/dev/profile-gap-flow renders",
+    whatToDo: "Navigate and assert mock pipeline copy.",
+    expected: "'Restaurant booking' + 'Profile · DOB' copy present.",
+    surfaces: ["/dev/profile-gap-flow"],
+    severityOnFail: "P1",
+  },
+  {
+    id: "auto:api:template",
+    section: "auto.api",
+    title: "GET /api/dev/founder-e2e-runs?template=quick valid run",
+    whatToDo: "Fetch template endpoint and validate run shape.",
+    expected:
+      "Response 200 with { run } where run.kind = founder-e2e-run and run.pathId = quick.",
+    warn:
+      "404 here means dev gate is off — set ENABLE_DEV_BENCHMARK_API=1 in non-dev environments.",
+    surfaces: ["/api/dev/founder-e2e-runs"],
+    severityOnFail: "P1",
+  },
+  {
+    id: "auto:api:list",
+    section: "auto.api",
+    title: "GET /api/dev/founder-e2e-runs (list)",
+    whatToDo: "Fetch list endpoint and validate response array.",
+    expected: "Response 200 with { runs: [...], total: number }.",
+    surfaces: ["/api/dev/founder-e2e-runs"],
+    severityOnFail: "P1",
+  },
+  {
+    id: "auto:api:traversal",
+    section: "auto.api",
+    title: "GET /api/dev/founder-e2e-runs?file=../escape.json rejected",
+    whatToDo: "Fetch traversal-named file via API.",
+    expected:
+      "Server returns 4xx (404 expected) without leaking files outside benchmark/runs/.",
+    warn:
+      "200 / 5xx here would mean the dev API leaked a path-traversal vector.",
+    surfaces: ["/api/dev/founder-e2e-runs"],
+    severityOnFail: "P0",
+  },
+  {
+    id: "auto:api:bad-payload",
+    section: "auto.api",
+    title: "POST /api/dev/founder-e2e-runs rejects garbage",
+    whatToDo: "Send invalid JSON / wrong schema and inspect error.",
+    expected:
+      "Server returns 400 with structured error.code (parse_error / not_object / kind_mismatch / etc).",
+    surfaces: ["/api/dev/founder-e2e-runs"],
+    severityOnFail: "P1",
+  },
+  {
+    id: "auto:security:payment-guard",
+    section: "auto.security",
+    title: "PATCH /api/v1/users/me/profile rejects payment fields",
+    whatToDo:
+      "Unauthenticated PATCH with body containing card_number/cvv. Even if auth is added later, payment must be rejected unconditionally.",
+    expected:
+      "HTTP 4xx (401 from no auth OR 4xx from payment guard); never 200.",
+    warn:
+      "Any 200 response is a P0 regulatory + security regression.",
+    surfaces: ["/api/v1/users/me/profile"],
+    severityOnFail: "P0",
+  },
+  {
+    id: "auto:security:unauthorized-task",
+    section: "auto.security",
+    title: "Unauthenticated /tasks/<fake-uuid> does not leak",
+    whatToDo: "GET /tasks/<random uuid> without cookies and inspect HTML body.",
+    expected:
+      "Page either redirects to sign-in OR renders sign-in card; no task title / content present in HTML.",
+    warn:
+      "If the page contains task title / details, ownership boundary is broken (P0 security).",
+    surfaces: ["/tasks/<uuid>"],
+    severityOnFail: "P0",
+  },
+];
+
+const AUTO_PATH: ChecklistPath = {
+  id: "auto",
+  title: "Automated runner — autonomous E2E checks",
+  description:
+    "Headless probes the autonomous runner can verify without real auth, live providers, or token spend. Mapped 1:1 to scripts/run-founder-e2e.mjs.",
+  durationMin: 1,
+  durationMax: 3,
+  sections: [
+    {
+      id: "auto.health",
+      title: "Health",
+      blurb: "Server reachability.",
+      steps: AUTO_STEPS.filter((s) => s.section === "auto.health"),
+    },
+    {
+      id: "auto.self",
+      title: "Workbench self-render",
+      blurb:
+        "The Founder QA page itself must render before any other check matters.",
+      steps: AUTO_STEPS.filter((s) => s.section === "auto.self"),
+    },
+    {
+      id: "auto.render",
+      title: "Demo render coverage",
+      blurb: "Demo task pages + dev dashboards still render.",
+      steps: AUTO_STEPS.filter((s) => s.section === "auto.render"),
+    },
+    {
+      id: "auto.api",
+      title: "Dev API contract",
+      blurb:
+        "Founder-e2e-runs API shape + traversal + bad-payload defenses.",
+      steps: AUTO_STEPS.filter((s) => s.section === "auto.api"),
+    },
+    {
+      id: "auto.security",
+      title: "Security boundaries",
+      blurb: "Payment guard + ownership boundary regressions.",
+      steps: AUTO_STEPS.filter((s) => s.section === "auto.security"),
+    },
+  ],
+};
+
+export const FOUNDER_E2E_EXIT_CRITERIA_AUTO: ReadonlyArray<ExitCriterionDefinition> = [
+  {
+    id: "auto-health",
+    title: "Dev server reachable",
+    requiresStepIds: ["auto:health:1"],
+  },
+  {
+    id: "auto-self-render",
+    title: "/dev/founder-e2e renders",
+    requiresStepIds: ["auto:self:1"],
+  },
+  {
+    id: "auto-render-core",
+    title: "Core demo task pages render",
+    requiresStepIds: [
+      "auto:render:tasks-executing",
+      "auto:render:tasks-awaiting-profile",
+      "auto:render:tasks-ready",
+    ],
+  },
+  {
+    id: "auto-api-shape",
+    title: "Dev API contract holds",
+    requiresStepIds: ["auto:api:template", "auto:api:list", "auto:api:bad-payload"],
+  },
+  {
+    id: "auto-security",
+    title: "Security boundaries hold",
+    requiresStepIds: [
+      "auto:api:traversal",
+      "auto:security:payment-guard",
+      "auto:security:unauthorized-task",
+    ],
+  },
+];
+
+// -----------------------------------------------------------------------------
 // Public registry
 // -----------------------------------------------------------------------------
 
-export const FOUNDER_E2E_PATHS: Record<"quick" | "full", ChecklistPath> = {
+export const FOUNDER_E2E_PATHS: Record<"quick" | "full" | "auto", ChecklistPath> = {
   quick: QUICK_PATH,
   full: FULL_PATH,
+  auto: AUTO_PATH,
 };
 
-export function getFounderE2ePath(pathId: "quick" | "full"): ChecklistPath {
+export function getFounderE2ePath(
+  pathId: "quick" | "full" | "auto",
+): ChecklistPath {
   return FOUNDER_E2E_PATHS[pathId];
 }
 
@@ -741,9 +1003,14 @@ export const FOUNDER_E2E_EXIT_CRITERIA_QUICK: ReadonlyArray<ExitCriterionDefinit
 ];
 
 export function getExitCriteriaForPath(
-  pathId: "quick" | "full",
+  pathId: "quick" | "full" | "auto",
 ): ReadonlyArray<ExitCriterionDefinition> {
-  return pathId === "quick"
-    ? FOUNDER_E2E_EXIT_CRITERIA_QUICK
-    : FOUNDER_E2E_EXIT_CRITERIA_FULL;
+  switch (pathId) {
+    case "quick":
+      return FOUNDER_E2E_EXIT_CRITERIA_QUICK;
+    case "full":
+      return FOUNDER_E2E_EXIT_CRITERIA_FULL;
+    case "auto":
+      return FOUNDER_E2E_EXIT_CRITERIA_AUTO;
+  }
 }

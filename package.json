@@ -18,6 +18,9 @@
     "check-drift": "npx tsx scripts/check-drift.ts",
     "smoke:phase1": "node scripts/smoke-phase1.mjs",
     "preflight:founder-e2e": "node scripts/founder-e2e-preflight.mjs",
+    "e2e:founder": "npx tsx scripts/run-founder-e2e.ts",
+    "e2e:founder:headed": "npx tsx scripts/run-founder-e2e.ts --headed",
+    "e2e:founder:json": "npx tsx scripts/run-founder-e2e.ts --json",
     "probe:resy": "npx tsx scripts/probe-resy-availability.ts"
   },
   "dependencies": {

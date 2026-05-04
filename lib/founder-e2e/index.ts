@@ -6,3 +6,4 @@
 export * from "./checklist";
 export * from "./fixtures";
 export * from "./loader";
+export * from "./runner-report";
