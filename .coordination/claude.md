@@ -11,6 +11,7 @@ Long-term decisions are in `STRATEGIC_LEDGER.md`.
 - `claude/opentable-email-preference`
 - `claude/resy-observability-suite`
 - `claude/restaurant-readiness-control-center`
+- `claude/resy-run-analysis-workbench`
 
 Additional Claude branches may be integrated after this file was written; check
 the branch merge commits for the exact set.

@@ -48,6 +48,15 @@ const PHASE_0_ROUTES: DevRoute[] = [
       "Open BEFORE asking codex to spend a live R-003 / R-030 token. If no case is recommended, generate a fresh probe with `npm run probe:resy`. Codex's runner: scripts/probe-resy-availability.ts.",
   },
   {
+    href: "/dev/resy-run-analysis",
+    title: "Resy run analysis workbench",
+    blurb:
+      "Offline analysis of the latest Phase 0A live debug. Parses [resy][strategy …] lines into a per-strategy ladder matrix, classifies failure stage (probe / slot / form / OTP / confirm), surfaces founder-input requirements (OTP / CAPTCHA), and pre-bakes the next safe single-case live command.",
+    status: "live",
+    useCase:
+      "After codex runs a live R-* case. Answers four questions: where it's stuck, which strategies tried/failed, next safe case, what founder needs to provide manually. Replaces terminal log paste.",
+  },
+  {
     href: "/dev/benchmark-runs",
     title: "Phase 0 benchmark runs",
     blurb:
