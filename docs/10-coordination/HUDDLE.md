@@ -33,6 +33,15 @@ small.
 
 ## Live Activity
 
+- 2026-05-04 codex: integrated latest sidecars onto the Phase 1/1.5
+  demo-freeze baseline. Cherry-picked Agent2
+  `codex/phase2-expedia-artifact-cli @ 4c04936` as `465ec79` and Agent3
+  `codex/track-c-demo-readiness-v2 @ fd7d231` as `07d3fc4`, without merging
+  their stale branch bases. Verified Expedia artifact CLI/analyzer tests
+  17/17, demo evidence/static guard tests 15/15, `tsc`, `check-drift`,
+  `git diff --check`, `npm run build`, full Phase 1 gate with smoke+e2e 12/12
+  (`phase1-quality-gate-2026-05-04T16-58-20-533Z.json`), and production route
+  probe 13/13.
 - 2026-05-04 codex: completed Phase 1/1.5 demo-freeze pass on integrated
   preview. Initial full gate exposed two optional demo failures: payment-field
   guard returned 500 and smoke saw an unstable old dev server. Fixed the root

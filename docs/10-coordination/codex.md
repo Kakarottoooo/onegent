@@ -2,7 +2,7 @@
 
 > **Branch**: `codex/integrated-preview-20260504`
 > **Last updated**: 2026-05-04
-> **Last commit**: pending Phase 1/1.5 demo-freeze closure
+> **Last commit**: pending sidecar integration push
 >
 > Claude reads this at session start. I write to it before each push.
 > See `CLAUDE.md` section "coordination protocol".
@@ -11,9 +11,38 @@
 
 ## Currently doing
 
-Phase 1 demo trunk stabilization on integrated preview.
+Integrated latest sidecar branches onto the Phase 1/1.5 demo-freeze baseline.
 
 Completed in latest pass:
+- Cherry-picked Agent2 `codex/phase2-expedia-artifact-cli @ 4c04936` as
+  `465ec79`, adding:
+  - `scripts/analyze-expedia-retry-artifact.ts`
+  - `docs/50-product-areas/EXPEDIA_RETRY_ARTIFACT_TEMPLATE.json`
+  - CLI helper tests for artifact-bundle analysis.
+- Cherry-picked Agent3 `codex/track-c-demo-readiness-v2 @ fd7d231` as
+  `07d3fc4`, adding:
+  - `formatDemoReadinessMarkdown()`
+  - read-only markdown export on `/dev/demo-readiness`
+  - stronger demo hard-stop tests and YC runbook ordering.
+- Avoided merging either branch head because both were based behind `4d6d991`
+  and would have reverted the optional Clerk/profile payment-field fixes.
+- Verified:
+  - Expedia artifact CLI/analyzer tests pass, 17/17.
+  - Demo evidence/static guard tests pass, 15/15.
+  - `npx tsc --noEmit --pretty false` pass.
+  - `npm run check-drift` pass.
+  - `git diff --check` pass.
+  - `npm run build` pass.
+  - Full `npm run gate:phase1 -- --allow-known-drift --include-smoke --include-e2e`
+    pass, 12/12, run
+    `phase1-quality-gate-2026-05-04T16-58-20-533Z.json`.
+  - Production `next start` probe returned 200 for 13/13 demo routes:
+    `/`, `/tasks`, `/dev`, `/dev/demo-readiness`, `/dev/demo-control-room`,
+    `/dev/runtime-forensics`, `/dev/phase1-quality-gates`, `/dev/founder-e2e`,
+    `/dev/restaurant-readiness`, `/dev/resy-run-analysis`,
+    `/developers/docs/api/v1`, `/pricing`, and `/permissions`.
+
+Previous completed pass:
 - Closed the Phase 1/1.5 demo-freeze gate on integrated preview.
 - Fixed the final P0 from the full gate:
   - `/api/v1/users/me/profile` now rejects payment fields before auth/DB work.
