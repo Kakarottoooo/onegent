@@ -377,7 +377,7 @@ NLU test count: **88 → 151 passing** (+63 cases), 1 real bug found and fixed (
 
 ## Risks + open questions
 
-1. **Computer Use cost at scale** — $1-5 per booking. With 0 paying users today this is fine, but the Browserbase roadmap's cost curves (see `PROJECT_SUMMARY.md`) need to be re-modeled for CU specifically. Likely **CU through the OpenAI API counts against the same Browserbase Pro budget logic** (i.e., scale = move toward direct browser farm where CU isn't needed, since the model can drive a local stagehand).
+1. **Computer Use cost at scale** — $1-5 per booking. With 0 paying users today this is fine, but the Browserbase roadmap's cost curves (see `docs/00-start-here/PROJECT_SUMMARY.md`) need to be re-modeled for CU specifically. Likely **CU through the OpenAI API counts against the same Browserbase Pro budget logic** (i.e., scale = move toward direct browser farm where CU isn't needed, since the model can drive a local stagehand).
 2. **Reliability of CU on hard targets** — Booking.com / Expedia have aggressive anti-bot. The Computer Use harness uses real Chromium with model-driven actions, but anti-bot sometimes flags vision models too. **Resy Essex first** because Resy reliability is a known good test case.
 3. **Adapter merge conflicts** — Once we want to delete the `legacy_stagehand` path, the `lib/booking-autopilot/` and `worker/src/booking-autopilot/` directories vanish. The 21+ `/lib/**` files that import from there need redirection — same audit as the original DELETE_WHEN plan. Codex handles.
 4. **NLU `chat.ts` was collapsed into `unified.ts`** during the v2 refactor — golden tests for unified turn require `OPENAI_API_KEY` and skip without it. Today's 38+25 new test cases use the pure router and are deterministic; the LLM-dependent tests stay skipped in CI.
@@ -386,13 +386,13 @@ NLU test count: **88 → 151 passing** (+63 cases), 1 real bug found and fixed (
 
 ## Pointers
 
-- **State doc**: `PROJECT_SUMMARY.md` — high-level position + architecture + Browserbase roadmap (this file is **transition-only**)
+- **State doc**: `docs/00-start-here/PROJECT_SUMMARY.md` — high-level position + architecture + Browserbase roadmap (this file is **transition-only**)
 - **NLU plan (completed)**: `NLU_REFACTOR_PLAN_C.md`
-- **Browser farm plan**: `BROWSER_FARM_PLAN.md`
+- **Browser farm plan**: `docs/30-provider-debug/BROWSER_FARM_PLAN.md`
 - **Trip packaging plan**: `TRIP_PACKAGING_PLAN.md`
 - **Decision Room test plan**: `DECISION_ROOM_TEST_PLAN.md`
 - **Cross-track ownership rules**: see `CLAUDE.md`'s "Booking Automation Architecture" + this file's [Ownership matrix](#ownership-matrix)
 
 ---
 
-*Maintained jointly by codex (Track A) and Claude (Track B). When Resy Essex closes via Computer Use and the branches merge, this file moves to archive and PROJECT_SUMMARY.md becomes the single source of truth again.*
+*Maintained jointly by codex (Track A) and Claude (Track B). When Resy Essex closes via Computer Use and the branches merge, this file moves to archive and docs/00-start-here/PROJECT_SUMMARY.md becomes the single source of truth again.*

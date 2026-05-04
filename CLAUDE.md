@@ -7,6 +7,29 @@ Available skills: /office-hours, /plan-ceo-review, /plan-eng-review, /plan-desig
 
 If gstack skills aren't working, run: cd .claude/skills/gstack && ./setup
 
+## Project docs entrypoint
+
+Canonical documentation now lives under `docs/`.
+
+Read these first in every non-trivial session:
+
+1. `docs/INDEX.md`
+2. `docs/00-start-here/PROJECT_SUMMARY.md`
+3. `docs/00-start-here/PHASE_STATUS.md`
+4. `docs/10-coordination/README.md`
+5. `docs/10-coordination/HUDDLE.md`
+6. `docs/10-coordination/codex.md` and `docs/10-coordination/claude.md`
+
+The old `.coordination/*.md` files are compatibility stubs. The canonical
+coordination files are in `docs/10-coordination/`.
+
+When a task changes project status, update the smallest relevant doc:
+
+- Phase/blocker change: `docs/00-start-here/PHASE_STATUS.md`
+- Codex/Claude handoff: `docs/10-coordination/*.md`
+- Long-lived decision: `docs/10-coordination/STRATEGIC_LEDGER.md`
+- Provider runtime lesson: `docs/30-provider-debug/PROVIDER_RUNTIME_DEBUG_PLAYBOOK.md`
+
 ## Language
 
 Always respond in Chinese. Never respond in Korean.
@@ -21,7 +44,7 @@ Always respond in Chinese. Never respond in Korean.
 ### 文件位置
 
 ```
-.coordination/
+docs/10-coordination/
   codex.md      ← codex 写（在 master 分支）
   claude.md     ← Claude 写（在 claude/festive-pare-f27273 分支或后续替换分支）
 ```
@@ -33,16 +56,16 @@ Always respond in Chinese. Never respond in Korean.
 ```bash
 git fetch origin
 echo "═══ codex 当前状态 (origin/master) ═══"
-git show origin/master:.coordination/codex.md 2>/dev/null || echo "(codex.md 还不存在)"
+git show origin/master:docs/10-coordination/codex.md 2>/dev/null || echo "(codex.md 还不存在)"
 echo
 echo "═══ Claude 当前状态 (本分支) ═══"
-cat .coordination/claude.md 2>/dev/null || echo "(claude.md 还不存在)"
+cat docs/10-coordination/claude.md 2>/dev/null || echo "(claude.md 还不存在)"
 ```
 
 读到的内容是判断"对方现在在干嘛 / 给我交付了什么 / 我有没有 unblock 他"
 的唯一可靠依据。**不要凭记忆判断**——上一轮 session 的状态可能已经过时。
 
-### 何时更新自己的 `.coordination/claude.md`
+### 何时更新自己的 `docs/10-coordination/claude.md`
 
 必须更新的时机（任一即触发）：
 1. **开始一个新任务**——把 "Currently doing" 改成新任务标题
@@ -51,12 +74,12 @@ cat .coordination/claude.md 2>/dev/null || echo "(claude.md 还不存在)"
 4. **解锁了对方**——记入 "Recently shipped" 并在 commit 用 `[handoff]` tag
 5. **收到对方的产出**——更新 "Blocking on codex" 把已解的项删掉
 
-更新即 commit。每次 push 代码时把 `.coordination/claude.md` 一起带上。
+更新即 commit。每次 push 代码时把 `docs/10-coordination/claude.md` 一起带上。
 **不要单独 push 状态文件**——和当时的代码改动绑在同一个 commit。
 
 ### 必须保留的章节（schema 契约）
 
-`.coordination/claude.md` 必须有这 7 个 section（H2）。codex.md 镜像。
+`docs/10-coordination/claude.md` 必须有这 7 个 section（H2）。codex.md 镜像。
 
 ```
 🟢 Currently doing             # 当前任务一句话；空闲时写 "Idle"
@@ -126,7 +149,7 @@ cat .coordination/claude.md 2>/dev/null || echo "(claude.md 还不存在)"
 
 `📍 Strategic decisions locked` 是协议的 long-term memory layer。任何
 跨 phase 影响或定方向的决策，**必须**在这里加 1 行 + 指向 canonical doc
-的指针。这样下次对方 session-start 读 `.coordination/<peer>.md` 就能
+的指针。这样下次对方 session-start 读 `docs/10-coordination/<peer>.md` 就能
 立刻看到"这些方向已经锁了，不重新讨论"。
 
 哪些算"strategic decision"（任一即记入）：
@@ -147,7 +170,7 @@ cat .coordination/claude.md 2>/dev/null || echo "(claude.md 还不存在)"
 ```
 - 2026-05-03 Phase 0 OTP transitional rule (safe_handoff + F-PROVIDER-OTP
   per-case acceptable, 4-metric gate stays strict) · Phase 0 · doc:
-  `BENCHMARK_RESTAURANT_100.md` § 7.5
+  `docs/20-phase0-restaurant/BENCHMARK_RESTAURANT_100.md` § 7.5
 ```
 
 指针格式严格：`<path>` § <section>，让对方一秒定位。
@@ -155,7 +178,7 @@ cat .coordination/claude.md 2>/dev/null || echo "(claude.md 还不存在)"
 ### Strategic decisions 的对方义务
 
 任何长期工作（非当前 phase 的 in-flight task）开始前，对方必须读
-`.coordination/<peer>.md` § 📍 Strategic decisions locked，验证：
+`docs/10-coordination/<peer>.md` § 📍 Strategic decisions locked，验证：
 - 这个工作方向有没有被 lock 过？
 - 决策标记是否跟自己即将写的代码冲突？
 - 如果冲突，先 [coord] 协商再动代码，不绕过决策默默改
@@ -170,21 +193,21 @@ cat .coordination/claude.md 2>/dev/null || echo "(claude.md 还不存在)"
 
 | Tag | 含义 |
 |---|---|
-| `[handoff]` | 这个 commit 完成了对方在等的事——交付方应该立即更新自己的 `.coordination/*.md` 把对应项移出 Blocking 并写到 Recently shipped 的"Notes for codex/claude"列 |
-| `[blocked]` | 这个 commit 创造了一个我等对方的 blocker——要同时更新 `.coordination/claude.md` 的 Blocking on codex 列 |
+| `[handoff]` | 这个 commit 完成了对方在等的事——交付方应该立即更新自己的 `docs/10-coordination/*.md` 把对应项移出 Blocking 并写到 Recently shipped 的"Notes for codex/claude"列 |
+| `[blocked]` | 这个 commit 创造了一个我等对方的 blocker——要同时更新 `docs/10-coordination/claude.md` 的 Blocking on codex 列 |
 | `[unblocked]` | 对方刚 push 的东西解了我的某个 blocker，本 commit 是对应的消费/接入 |
 | `[shared]` | 改了 shared file（lib/db.ts, schema, 协议 doc 等）——对方需要看一眼 |
-| `[coord]` | 纯协调——只更新 .coordination/*.md，没有代码 |
+| `[coord]` | 纯协调——只更新 docs/10-coordination/*.md，没有代码 |
 
 不强制——零 tag 也行；加上等于额外加固。多数 commit 不需要 tag。
 
 ### Conflict resolution
 
 理论上不会冲突（两个文件，两个分支）。如果出现：
-- 自己的 .coordination/claude.md 跟 master 上的 codex.md 不矛盾——它们各自独立，无 merge 概念
+- 自己的 docs/10-coordination/claude.md 跟 master 上的 codex.md 不矛盾——它们各自独立，无 merge 概念
 - 我 merge master 时，只会接收对方的 codex.md（它在 master 上），不会动我的 claude.md（它只在我分支上）
 
-如果未来切分支（比如 Phase 1 完成后开新 feature branch），把 `.coordination/claude.md`
+如果未来切分支（比如 Phase 1 完成后开新 feature branch），把 `docs/10-coordination/claude.md`
 跟新分支一起带过去；codex 那边知道分支名变了即可（在 codex.md 顶部 metadata 写
 "Claude branch: <new-branch-name>"，对方会看到）。
 
@@ -192,7 +215,7 @@ cat .coordination/claude.md 2>/dev/null || echo "(claude.md 还不存在)"
 
 - **codex 不更新**：我 fetch 后看 codex.md 时间戳老于 24h → 在回复里
   flag 给用户，问 codex session 是否活着，不强行假设
-- **我自己忘记更新**：用户读 `.coordination/claude.md` 看到时间戳 / 状态过时
+- **我自己忘记更新**：用户读 `docs/10-coordination/claude.md` 看到时间戳 / 状态过时
   → 用户提醒；视作 bug 修复
 - **两边状态对不上**：以 git log 实际 commit 为准（事实），状态文件是
   解读层（注释）

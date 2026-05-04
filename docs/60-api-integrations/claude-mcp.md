@@ -179,5 +179,5 @@ The access token expired. Claude.ai should silently refresh; if it doesn't, remo
 ## Reference
 
 - Package source: [`packages/mcp-server`](https://github.com/kakarottoooo/onegent/tree/master/packages/mcp-server)
-- REST API this wraps: [`docs/api/v1.md`](../api/v1.md)
+- REST API this wraps: [`docs/60-api-integrations/api-v1.md`](../api/v1.md)
 - Report bugs: https://github.com/kakarottoooo/onegent/issues

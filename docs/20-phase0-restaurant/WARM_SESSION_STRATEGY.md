@@ -1,6 +1,6 @@
 # Warm Session Strategy — Phase 0 OTP bypass
 
-> **Context**: BENCHMARK_RESTAURANT_100.md § 7.5 (Phase 0 OTP transitional rule).
+> **Context**: docs/20-phase0-restaurant/BENCHMARK_RESTAURANT_100.md § 7.5 (Phase 0 OTP transitional rule).
 > **Decision locked**: Option D — warm session first; Gmail OTP resume only as fallback.
 > **Owners**: codex (PoC implementation) · Claude (spec + observability + tests).
 > **Status**: 🔵 **BLOCKED** until R-003 reaches `F-PROVIDER-OTP` or `ready_for_confirmation` after exact-venue navigation repair.
@@ -168,7 +168,7 @@ Browserbase Pro plan offers persistent contexts via their API.
 - Designed for this exact use case (replayable sessions)
 
 **Cons**:
-- **Requires Browserbase Pro subscription** ($99/mo per the roadmap in PROJECT_SUMMARY.md "Browserbase Infra 演进路线图")
+- **Requires Browserbase Pro subscription** ($99/mo per the roadmap in docs/00-start-here/PROJECT_SUMMARY.md "Browserbase Infra 演进路线图")
 - Decision was deferred to "early stage 100-500 users" — not now
 - Locks us further into Browserbase (route B self-built farm needs migration path)
 - Computer Use executor today doesn't even use Browserbase — would need full re-plumbing
@@ -337,10 +337,10 @@ This path is harder because it requires keeping the SAME browser tab alive acros
 
 ## Pointers
 
-- **Spec**: `BENCHMARK_RESTAURANT_100.md` § 7.5 (transitional acceptance rule that triggered this strategy)
+- **Spec**: `docs/20-phase0-restaurant/BENCHMARK_RESTAURANT_100.md` § 7.5 (transitional acceptance rule that triggered this strategy)
 - **Current CU executor**: `lib/execution-v2/computer-use.ts:62` (where storageState wiring goes)
 - **Existing encryption**: `lib/encryption.ts` (per-row pattern to mirror for `state_json`)
-- **Coordination**: `.coordination/claude.md` § "Open questions for codex" (Q6-Q10 above will move there if codex wants async review)
+- **Coordination**: `docs/10-coordination/claude.md` § "Open questions for codex" (Q6-Q10 above will move there if codex wants async review)
 - **Fallback plan**: this doc § "Fallback: Gmail OTP resume"
 
 ---

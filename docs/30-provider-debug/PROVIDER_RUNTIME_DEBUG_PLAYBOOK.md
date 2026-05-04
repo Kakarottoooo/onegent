@@ -233,11 +233,11 @@ C:\Users\Gzw19\onegent-e2e-20260503
 Branch: codex/openai-chat-model-env
 
 Read first:
-- PROVIDER_RUNTIME_DEBUG_PLAYBOOK.md
-- PHASE_STATUS.md
-- PHASE_1_FOUNDER_E2E.md
-- R003_LIVE_SMOKE_RUNBOOK.md
-- .coordination/HUDDLE.md if present
+- docs/30-provider-debug/PROVIDER_RUNTIME_DEBUG_PLAYBOOK.md
+- docs/00-start-here/PHASE_STATUS.md
+- docs/40-phase1/PHASE_1_FOUNDER_E2E.md
+- docs/20-phase0-restaurant/R003_LIVE_SMOKE_RUNBOOK.md
+- docs/10-coordination/HUDDLE.md if present
 
 Do not rely on task UI logs only. For each external-provider failure, inspect:
 - booking_jobs.steps[0].error / decisionLog / params

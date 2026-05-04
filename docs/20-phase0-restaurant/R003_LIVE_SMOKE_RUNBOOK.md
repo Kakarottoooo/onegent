@@ -23,10 +23,10 @@ R-003 live smoke 一次跑会烧 OpenAI tokens（`gpt-5.5` Computer Use turn 数
 ## 0. 预置条件 — 都必须 ✅ 才允许进入 § 2 跑 live
 
 ### 0.1 Phase 0A 状态
-- [ ] 上一次 R-003 live smoke commit hash 已在 `BENCHMARK_RESTAURANT_100.md` § 4 记录
+- [ ] 上一次 R-003 live smoke commit hash 已在 `docs/20-phase0-restaurant/BENCHMARK_RESTAURANT_100.md` § 4 记录
 - [ ] 上一次 smoke 抓到的问题已 fix 并合 master
 - [ ] 没有"上次没修完的 known issue 被忽略"
-- [ ] codex 在 `.coordination/codex.md` § 🟢 Currently doing 标 "running R-003 live smoke #N"，避免 Claude 同时改 NLU/UI 制造 race
+- [ ] codex 在 `docs/10-coordination/codex.md` § 🟢 Currently doing 标 "running R-003 live smoke #N"，避免 Claude 同时改 NLU/UI 制造 race
 
 ### 0.2 Token / Budget / Auth
 - [ ] OpenAI account billing 没欠费（用户消息：2026-04-27 "OpenAI credit 已恢复"）
@@ -36,7 +36,7 @@ R-003 live smoke 一次跑会烧 OpenAI tokens（`gpt-5.5` Computer Use turn 数
 - [ ] 已人工确认本次只跑单 case。当前 runner 没有实现 `OPENAI_BUDGET_USD_PER_RUN` 硬限；成本控制靠 `--case R-003`、`--live-openai`、不传 `--confirm-suite`、8 分钟超时 kill。
 
 ### 0.3 Spec / Fixture
-- [ ] `BENCHMARK_RESTAURANT_100.md` § 4 R-003 row 当前 expectedOutcomes 包含: `ready_for_confirmation` / `safe_handoff` (含 `F-PROVIDER-OTP`) / `no_availability_correct` (Q11(a) 显式扩)
+- [ ] `docs/20-phase0-restaurant/BENCHMARK_RESTAURANT_100.md` § 4 R-003 row 当前 expectedOutcomes 包含: `ready_for_confirmation` / `safe_handoff` (含 `F-PROVIDER-OTP`) / `no_availability_correct` (Q11(a) 显式扩)
 - [ ] `benchmark/restaurant-resy-phase0.json` R-003 case 的 `start_url` 是 exact venue page（不是 `/search` —— `a0ce2ee` 修的）
 - [ ] `benchmark/restaurant-resy-phase0.json` R-003 没有强约束 visual time ladder（`2cbddfc` 修的）
 - [ ] § 7.5 OTP transitional rule 在生效（如果撞 OTP，`F-PROVIDER-OTP` per-case 是 acceptable，不算 fail）
@@ -136,7 +136,7 @@ The runner writes a report under `benchmark/runs/` automatically for non-dry run
 - Resy 卡 OTP wall（用户邮箱 / SMS code）
 - Outcome bucket = `safe_handoff`，failure taxonomy = `F-PROVIDER-OTP`
 - 按 § 7.5 transitional rule，per-case 是 acceptable，**suite-level 4-metric gate 仍要通过**
-- **下一步**: 启动 warm session PoC（`WARM_SESSION_STRATEGY.md` 3-step plan）
+- **下一步**: 启动 warm session PoC（`docs/20-phase0-restaurant/WARM_SESSION_STRATEGY.md` 3-step plan）
 
 ### 3.3 ✅ no_availability_correct （Q11(a) 显式扩）
 - R-003 venue 那个时间点真没位
@@ -171,16 +171,16 @@ The runner writes a report under `benchmark/runs/` automatically for non-dry run
 ## 5. 跑完之后
 
 ### 5.1 文档更新
-- 在 `BENCHMARK_RESTAURANT_100.md` § 4 R-003 行加一条 history entry: `2026-MM-DD live smoke #N: <outcome bucket> · commit <sha>`
-- 更新 `.coordination/codex.md` § 📦 Recently shipped + § 🟢 Currently doing
-- 如果撞 OTP → 更新 `WARM_SESSION_STRATEGY.md` 状态（从 BLOCKED → in-flight PoC）
+- 在 `docs/20-phase0-restaurant/BENCHMARK_RESTAURANT_100.md` § 4 R-003 行加一条 history entry: `2026-MM-DD live smoke #N: <outcome bucket> · commit <sha>`
+- 更新 `docs/10-coordination/codex.md` § 📦 Recently shipped + § 🟢 Currently doing
+- 如果撞 OTP → 更新 `docs/20-phase0-restaurant/WARM_SESSION_STRATEGY.md` 状态（从 BLOCKED → in-flight PoC）
 
 ### 5.2 Push artifacts
 - `benchmark/runs/R003-live-${TIMESTAMP}.json` commit 到 master（codex domain；不算入 drift）
 - 如果跑出 bug fix → 单独 commit + push
 
 ### 5.3 通知 Claude（这边）
-codex 在 `.coordination/codex.md` 的 § 📩 Acks 段加一行 → Claude session-start 看到就 update `.coordination/claude.md` 把对应 blocker 划掉。
+codex 在 `docs/10-coordination/codex.md` 的 § 📩 Acks 段加一行 → Claude session-start 看到就 update `docs/10-coordination/claude.md` 把对应 blocker 划掉。
 
 ---
 
@@ -199,10 +199,10 @@ codex 在 `.coordination/codex.md` 的 § 📩 Acks 段加一行 → Claude sess
 
 ## 7. 关联文档
 
-- `BENCHMARK_RESTAURANT_100.md` — Phase 0 spec（§ 4 R-003 row + § 7.5 OTP rule + § 7.2 acceptance gate）
-- `WARM_SESSION_STRATEGY.md` — OTP path D 的 PoC（撞 OTP 后启动）
-- `EXECUTOR_V2_PIVOT.md` — Computer Use 为什么是 default executor
-- `PHASE_STATUS.md` — Phase 0A / 0B / 1 状态总览（这个 runbook 服务 0A 的 R-003 #3）
-- `PHASE_1_E2E_SMOKE.md` — § 1.3 用到的 smoke 命令
-- `.coordination/codex.md` — codex live state（跑前后写）
-- `.coordination/claude.md` — Claude 这边对 codex 跑结果的 ack
+- `docs/20-phase0-restaurant/BENCHMARK_RESTAURANT_100.md` — Phase 0 spec（§ 4 R-003 row + § 7.5 OTP rule + § 7.2 acceptance gate）
+- `docs/20-phase0-restaurant/WARM_SESSION_STRATEGY.md` — OTP path D 的 PoC（撞 OTP 后启动）
+- `docs/30-provider-debug/EXECUTOR_V2_PIVOT.md` — Computer Use 为什么是 default executor
+- `docs/00-start-here/PHASE_STATUS.md` — Phase 0A / 0B / 1 状态总览（这个 runbook 服务 0A 的 R-003 #3）
+- `docs/40-phase1/PHASE_1_E2E_SMOKE.md` — § 1.3 用到的 smoke 命令
+- `docs/10-coordination/codex.md` — codex live state（跑前后写）
+- `docs/10-coordination/claude.md` — Claude 这边对 codex 跑结果的 ack
