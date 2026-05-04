@@ -1,7 +1,7 @@
-/**
+﻿/**
  * Refresh button for /dev/demo-control-room.
  *
- * Tiny client subcomponent — calls `router.refresh()` to re-render
+ * Tiny client subcomponent -?calls `router.refresh()` to re-render
  * the parent server component (which re-runs the loader). No live
  * runner, no provider call, no mutating fetch.
  *

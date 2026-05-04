@@ -1,4 +1,4 @@
-# Demo Control Room
+﻿# Demo Control Room
 
 > Last updated: 2026-05-04
 > Surface: `/dev/demo-control-room`
@@ -17,7 +17,7 @@ the docs they reference.
 
 Top-down on the page:
 
-1. **Verdict at a glance** — three cards:
+1. **Verdict at a glance** -?three cards:
    - Phase 1 quality gate: latest `phase1-quality-gate-*.json` verdict,
      pass/total counts, known-existing count, generation timestamp,
      duration, file path.
@@ -27,26 +27,26 @@ Top-down on the page:
    - Smoke (`smoke:phase1`): extracted from the latest gate's
      `checks[]` when present. Absent when the gate ran without
      `--include-smoke`; the card explains how to fix.
-2. **Runtime forensics quick-link** — short blurb + link to
+2. **Runtime forensics quick-link** -?short blurb + link to
    `/dev/runtime-forensics`. Use it after a demo if a booking flow
    stalls, to see the failure pre-classified into one of 8 categories.
-3. **Phase 2 vertical posture** — three vertical cards:
+3. **Phase 2 vertical posture** -?three vertical cards:
    - Expedia Flight: `candidate, not live-verified`
    - Booking.com Hotel: `needs fresh artifacts before live promises`
    - Hotels.com: `needs fresh artifacts before live promises`
    Each card has rationale + per-vertical evidence (audit doc, tests,
    provider modules, runbooks).
-4. **Safe demo script** — pre-demo checklist (5 min), happy path
+4. **Safe demo script** -?pre-demo checklist (5 min), happy path
    (numbered steps), hard stops table (OTP / payment / CAPTCHA /
    login wall / final-confirm + recovery lines), recovery phrases
    for unexpected boundaries, plus a paste-ready markdown export.
-5. **Sources + notes** — links to the canonical docs (`PHASE_1_FOUNDER_E2E`,
+5. **Sources + notes** -?links to the canonical docs (`PHASE_1_FOUNDER_E2E`,
    `PHASE2_VERTICAL_REVIVAL_AUDIT`, `HUDDLE`, `STRATEGIC_LEDGER`) plus
    loader notes about what artifacts were found / missing.
 
 ## What it does NOT do
 
-Hard rules — verified per commit and by the test suite:
+Hard rules -?verified per commit and by the test suite:
 
 - **Never invokes a runner.** The dashboard does not run the gate, the
   founder-e2e runner, the worker, or any provider. The only mutating
@@ -114,7 +114,7 @@ lib/__tests__/
    lives in the `SAFE_DEMO_SCRIPT` constant.
 2. The page reads it directly; the markdown export uses
    `formatDemoScriptMarkdown(SAFE_DEMO_SCRIPT)`.
-3. ASCII-only — no emoji. Tests enforce this.
+3. ASCII-only -?no emoji. Tests enforce this.
 
 ## Operator runbook
 
@@ -129,7 +129,7 @@ lib/__tests__/
 
 2. Open `/dev/demo-control-room`.
 3. Verify all three verdict cards are green or yellow. **Red = stop.**
-4. Skim the Phase 2 panel — confirm the Expedia phrasing matches what
+4. Skim the Phase 2 panel -?confirm the Expedia phrasing matches what
    you plan to say.
 5. Triple-click the markdown textarea to copy the safe demo script;
    paste into Slack / a deck.

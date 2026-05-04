@@ -1,5 +1,5 @@
-/**
- * /dev/demo-control-room — founder-facing demo prep dashboard.
+﻿/**
+ * /dev/demo-control-room -?founder-facing demo prep dashboard.
  *
  * READ-ONLY. Aggregates existing artifact verdicts (Phase 1 quality
  * gate, founder-e2e, smoke check from gate, Phase 2 vertical status)
@@ -7,7 +7,7 @@
  *
  * Hard rules (verified by tests / hold rules):
  *   - No live runs, no retry, no payment, no OTP, no CAPTCHA bypass.
- *   - No "run gate" / "run e2e" buttons — only `router.refresh()` to
+ *   - No "run gate" / "run e2e" buttons -?only `router.refresh()` to
  *     re-render the server component (which re-reads filesystem).
  *   - Server component reads `lib/demo-control-room/loader` directly;
  *     no new dev API.
@@ -69,7 +69,7 @@ export default async function DemoControlRoomPage() {
   );
 }
 
-/* ─── Header ──────────────────────────────────────────────────────── */
+/* ------ Header ---------------------------------------------------------------------------------------------------------------- */
 
 function Header({ generatedAt }: { generatedAt: string }) {
   return (
@@ -104,7 +104,7 @@ function Header({ generatedAt }: { generatedAt: string }) {
   );
 }
 
-/* ─── Verdict trio ────────────────────────────────────────────────── */
+/* ------ Verdict trio ---------------------------------------------------------------------------------------------------- */
 
 function VerdictRow({ snap }: { snap: DemoControlRoomSnapshot }) {
   return (
@@ -156,8 +156,8 @@ function GateCard({ snap }: { snap: DemoControlRoomSnapshot }) {
       </p>
       <p className="dcr__hint">
         Generated{" "}
-        {new Date(s.summary.generatedAt).toLocaleString()} ·{" "}
-        {formatDurationMs(s.summary.durationMs)} ·{" "}
+        {new Date(s.summary.generatedAt).toLocaleString()} -{" "}
+        {formatDurationMs(s.summary.durationMs)} -{" "}
         <code>{s.relPath}</code>
       </p>
     </VerdictCard>
@@ -197,9 +197,9 @@ function FounderE2eCard({ snap }: { snap: DemoControlRoomSnapshot }) {
         )}
       </p>
       <p className="dcr__hint">
-        Path: <code>{s.summary.pathId}</code> · Source:{" "}
-        <code>{s.summary.source}</code> · Started{" "}
-        {new Date(s.summary.startedAt).toLocaleString()} ·{" "}
+        Path: <code>{s.summary.pathId}</code> - Source:{" "}
+        <code>{s.summary.source}</code> - Started{" "}
+        {new Date(s.summary.startedAt).toLocaleString()} -{" "}
         <code>{s.relPath}</code>
       </p>
     </VerdictCard>
@@ -234,8 +234,8 @@ function SmokeCard({ snap }: { snap: DemoControlRoomSnapshot }) {
         in latest gate
       </p>
       <p className="dcr__hint">
-        Severity: <code>{smoke.severity ?? "-"}</code> · Duration:{" "}
-        {formatDurationMs(smoke.durationMs)} · {smoke.hint}
+        Severity: <code>{smoke.severity ?? "-"}</code> - Duration:{" "}
+        {formatDurationMs(smoke.durationMs)} - {smoke.hint}
       </p>
     </VerdictCard>
   );
@@ -274,7 +274,7 @@ function VerdictCard({
   );
 }
 
-/* ─── Runtime forensics block ─────────────────────────────────────── */
+/* ------ Runtime forensics block ------------------------------------------------------------------------------ */
 
 function RuntimeForensicsBlock({ snap }: { snap: DemoControlRoomSnapshot }) {
   return (
@@ -290,7 +290,7 @@ function RuntimeForensicsBlock({ snap }: { snap: DemoControlRoomSnapshot }) {
   );
 }
 
-/* ─── Phase 2 panel ───────────────────────────────────────────────── */
+/* ------ Phase 2 panel -------------------------------------------------------------------------------------------------- */
 
 function Phase2Panel({ snap }: { snap: DemoControlRoomSnapshot }) {
   return (
@@ -300,7 +300,7 @@ function Phase2Panel({ snap }: { snap: DemoControlRoomSnapshot }) {
       </h2>
       <p className="dcr__phase2-caveat">
         Phase 2 is FROZEN unless Phase 0/1 are stable. The statuses below
-        are the no-live audit verdict — do not interpret them as
+        are the no-live audit verdict -?do not interpret them as
         live-verified. Update protocol: change{" "}
         <code>docs/50-product-areas/PHASE2_VERTICAL_REVIVAL_AUDIT.md</code>{" "}
         first, then mirror in{" "}
@@ -350,12 +350,12 @@ function EvidenceItem({ link }: { link: Phase2EvidenceLink }) {
       <span className={`dcr__ev-kind dcr__ev-kind--${link.kind}`}>
         [{link.kind}]
       </span>{" "}
-      <strong>{link.label}</strong> — <code>{link.ref}</code>
+      <strong>{link.label}</strong> -?<code>{link.ref}</code>
     </li>
   );
 }
 
-/* ─── Safe demo script ────────────────────────────────────────────── */
+/* ------ Safe demo script -------------------------------------------------------------------------------------------- */
 
 function SafeDemoScriptBlock({ markdown }: { markdown: string }) {
   return (
@@ -466,7 +466,7 @@ function RecoveryPhrasesList() {
   );
 }
 
-/* ─── Source links ────────────────────────────────────────────────── */
+/* ------ Source links ---------------------------------------------------------------------------------------------------- */
 
 function SourceLinks({ snap }: { snap: DemoControlRoomSnapshot }) {
   return (
@@ -507,7 +507,7 @@ function SourceLinks({ snap }: { snap: DemoControlRoomSnapshot }) {
   );
 }
 
-/* ─── Inline styles ───────────────────────────────────────────────── */
+/* ------ Inline styles -------------------------------------------------------------------------------------------------- */
 
 function Styles() {
   return (

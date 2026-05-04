@@ -1,5 +1,5 @@
-/**
- * Phase 2 vertical-revival status — single structured source.
+﻿/**
+ * Phase 2 vertical-revival status -?single structured source.
  *
  * `/dev/demo-control-room` reads this and renders the "Phase 2"
  * panel. The canonical narrative explanation lives in
@@ -13,11 +13,11 @@
  *   2. Mirror the change here.
  *   3. The page picks it up on next render.
  *
- * Pure module — no fs, no DB, no LLM. Imported by the page server
+ * Pure module -?no fs, no DB, no LLM. Imported by the page server
  * component and by tests.
  */
 
-/* ─── Public types ────────────────────────────────────────────────── */
+/* ------ Public types ---------------------------------------------------------------------------------------------------- */
 
 export type Phase2VerticalId =
   | "expedia-flight"
@@ -66,12 +66,12 @@ export interface Phase2Vertical {
   evidence: Phase2EvidenceLink[];
 }
 
-/* ─── Display copy tables ─────────────────────────────────────────── */
+/* ------ Display copy tables -------------------------------------------------------------------------------------- */
 
 export const PHASE2_STATUS_LABEL: Record<Phase2Status, string> = {
   candidate: "Candidate, not live-verified",
   needs_fresh_artifacts: "Needs fresh artifacts before live promises",
-  frozen: "Frozen — Phase 2 gate not crossed",
+  frozen: "Frozen -?Phase 2 gate not crossed",
 };
 
 export const PHASE2_STATUS_TONE: Record<Phase2Status, Phase2Vertical["tone"]> = {
@@ -80,7 +80,7 @@ export const PHASE2_STATUS_TONE: Record<Phase2Status, Phase2Vertical["tone"]> = 
   frozen: "bad",
 };
 
-/* ─── Canonical mirror of the audit ───────────────────────────────── */
+/* ------ Canonical mirror of the audit ------------------------------------------------------------------ */
 
 export const PHASE_2_VERTICALS: ReadonlyArray<Phase2Vertical> = [
   {
@@ -183,7 +183,7 @@ export const PHASE_2_VERTICALS: ReadonlyArray<Phase2Vertical> = [
   },
 ];
 
-/* ─── Lookups ─────────────────────────────────────────────────────── */
+/* ------ Lookups -------------------------------------------------------------------------------------------------------------- */
 
 const VERTICAL_INDEX: Record<Phase2VerticalId, Phase2Vertical> = Object.freeze(
   Object.fromEntries(PHASE_2_VERTICALS.map((v) => [v.id, v])),

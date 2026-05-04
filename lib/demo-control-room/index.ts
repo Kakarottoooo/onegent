@@ -1,5 +1,5 @@
-/**
- * Demo Control Room — public surface.
+﻿/**
+ * Demo Control Room -?public surface.
  *
  * Pure types + loaders + script content. Imported by
  * `/dev/demo-control-room` page (server component) and tests.

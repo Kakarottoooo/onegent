@@ -1,4 +1,4 @@
-/**
+﻿/**
  * Demo Control Room loader.
  *
  * Composes existing artifact loaders into a single snapshot the
@@ -38,7 +38,7 @@ import {
   type Phase2Vertical,
 } from "./phase2-status";
 
-/* ─── Public types ────────────────────────────────────────────────── */
+/* ------ Public types ---------------------------------------------------------------------------------------------------- */
 
 export const DEMO_CONTROL_ROOM_SCHEMA_VERSION = 1 as const;
 
@@ -78,7 +78,7 @@ export interface FounderE2eSection {
 }
 
 export interface RuntimeForensicsLink {
-  /** Always shown — link, not data. */
+  /** Always shown -?link, not data. */
   href: string;
   /** Helper note about what the linked dashboard does. */
   description: string;
@@ -101,7 +101,7 @@ export interface DemoControlRoomSnapshot {
   notes: string[];
 }
 
-/* ─── Constants ───────────────────────────────────────────────────── */
+/* ------ Constants ---------------------------------------------------------------------------------------------------------- */
 
 const SMOKE_CHECK_ID = "smoke:phase1";
 
@@ -121,11 +121,11 @@ const SMOKE_ABSENT_HINT =
 
 const RUNTIME_FORENSICS_DESCRIPTION =
   "Read-only triage workbench for provider runtime failures. Use it after " +
-  "a demo if the booking flow stalls — it pre-classifies the failure " +
+  "a demo if the booking flow stalls -?it pre-classifies the failure " +
   "across 8 categories (legacy-shape, no-availability, OTP, checkout, " +
   "5xx, etc.) and surfaces a paste-ready bug report.";
 
-/* ─── Public API ──────────────────────────────────────────────────── */
+/* ------ Public API -------------------------------------------------------------------------------------------------------- */
 
 export async function loadDemoControlRoomSnapshot(options: {
   generatedAt?: string;
@@ -151,7 +151,7 @@ export async function loadDemoControlRoomSnapshot(options: {
   };
 }
 
-/* ─── Quality Gate ────────────────────────────────────────────────── */
+/* ------ Quality Gate ---------------------------------------------------------------------------------------------------- */
 
 async function loadQualityGateSection(
   notes: string[],
@@ -224,7 +224,7 @@ function emptySmokeSnapshot(): SmokeCheckSnapshot {
   };
 }
 
-/* ─── Founder E2E ─────────────────────────────────────────────────── */
+/* ------ Founder E2E ------------------------------------------------------------------------------------------------------ */
 
 async function loadFounderE2eSection(
   notes: string[],
@@ -254,7 +254,7 @@ async function loadFounderE2eSection(
   };
 }
 
-/* ─── Phase 2 ─────────────────────────────────────────────────────── */
+/* ------ Phase 2 -------------------------------------------------------------------------------------------------------------- */
 
 function buildPhase2Section(): Phase2Section {
   const posture = summarizePhase2Posture();
@@ -265,10 +265,10 @@ function buildPhase2Section(): Phase2Section {
   };
 }
 
-/* ─── Helpers ─────────────────────────────────────────────────────── */
+/* ------ Helpers -------------------------------------------------------------------------------------------------------------- */
 
 /**
- * Convenience accessor for the verdict tone — the dashboard uses
+ * Convenience accessor for the verdict tone -?the dashboard uses
  * this to color-code each card. Pure function, exported for tests.
  */
 export function verdictTone(
