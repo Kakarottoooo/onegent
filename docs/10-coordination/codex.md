@@ -2,7 +2,7 @@
 
 > **Branch**: `codex/integrated-preview-20260504`
 > **Last updated**: 2026-05-05
-> **Last commit**: `25d29fb` Expedia flight locator fallback integration
+> **Last commit**: `1ebd09a` R-030 model access evidence packaging integration
 >
 > Claude reads this at session start. I write to it before each push.
 > See `CLAUDE.md` section "coordination protocol".
@@ -12,6 +12,24 @@
 ## Currently doing
 
 Completed in latest pass:
+- Integrated Claude `claude/r030-2026-05-05-evidence-packaging @ 1f2ec0f` as
+  `1ebd09a`.
+- This records the 2026-05-05 R-030 retry as an inconclusive
+  `model_env_transient` / `F-INFRA-MODEL-ACCESS` worked example:
+  - OpenAI Responses API 403 `model_not_found` for `gpt-5.5`;
+  - DB source marker and exact Charlie Bird Resy venue URL were correct;
+  - `decisionLog=null`, so no provider strategy, fallback, or slot detection
+    executed;
+  - the `422abe0` Resy recovery patches remain unvalidated by this run.
+- Verified targeted operator/closure/docs tests 65/65,
+  `npx tsc --noEmit --pretty false`, strict `npm run check-drift`,
+  `git diff --check`, and `npm run gate:phase1 -- --allow-known-drift` 9/9
+  (`phase1-quality-gate-2026-05-05T03-19-28-446Z.json`).
+- Safety boundary preserved during Codex integration: no retry, no env/key
+  handling, no provider/runtime/worker/db patch, no payment, CVV/security-code,
+  OTP/CAPTCHA/login/verification handling, or final confirmation.
+
+Previous completed pass:
 - Integrated Agent2 `codex/flight-live-closure-final @ fa7afc3` on top of the
   current provider-closure final preview as `25d29fb`.
 - Source branch outcome:

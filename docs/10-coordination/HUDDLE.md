@@ -33,6 +33,19 @@ small.
 
 ## Live Activity
 
+- 2026-05-05 codex: integrated Claude
+  `claude/r030-2026-05-05-evidence-packaging @ 1f2ec0f` as `1ebd09a` on top
+  of the current integrated preview. This packages the 2026-05-05 R-030 retry
+  as an inconclusive `model_env_transient` / `F-INFRA-MODEL-ACCESS` worked
+  example: OpenAI Responses API 403 `model_not_found` for `gpt-5.5`, exact
+  Resy venue URL preserved, `decisionLog=null`, no provider decision/fallback
+  executed, and the `422abe0` Resy recovery patches remain unvalidated.
+  Verified targeted operator/closure/docs tests 65/65, `tsc`, strict
+  `check-drift`, `git diff --check`, and Phase 1 gate 9/9
+  (`phase1-quality-gate-2026-05-05T03-19-28-446Z.json`). No retry, no env/key
+  handling, no provider/runtime/worker/db patch, no payment, CVV,
+  OTP/CAPTCHA/login/verification handling, or final confirmation was performed
+  during integration.
 - 2026-05-05 codex: integrated Agent2
   `codex/flight-live-closure-final @ fa7afc3` on top of the current
   provider-closure final preview as `25d29fb`. The source branch ran exactly
