@@ -3,6 +3,7 @@ import {
   classifyExpediaFlightBlockingOverlayText,
   classifyExpediaFlightCheckoutState,
   classifyExpediaFlightSafetyBoundaryText,
+  buildExpediaCardExpirySelectCandidates,
   buildExpediaDateOfBirthSelectCandidates,
   extractExpediaFlightCandidateEvidence,
   formatExpediaFlightCandidateEvidence,
@@ -413,6 +414,14 @@ describe("Expedia flight traveler form state", () => {
       day: ["09", "9"],
       year: ["1994"],
     });
+  });
+
+  it("builds split card-expiry candidates without requiring security code", () => {
+    expect(buildExpediaCardExpirySelectCandidates("07/29")).toEqual({
+      month: ["07", "7", "July", "Jul"],
+      year: ["2029", "29"],
+    });
+    expect(buildExpediaCardExpirySelectCandidates("13/29")).toBeNull();
   });
 
   it("normalizes traveler gender only when the profile explicitly provides it", () => {

@@ -121,8 +121,10 @@ import {
 import { pickBestResySlotCandidate } from "./providers/resy-slot-detection";
 import {
   bookExpediaFlightProgrammatic,
+  fillExpediaGroupPaymentForm,
   fillExpediaGuestForm,
   inspectExpediaFlightTravelerFormState,
+  scrollExpediaCheckoutToFinalReviewBoundary,
 } from "./providers/expedia";
 import { bookTicketmasterProgrammatic } from "./providers/ticketmaster-rpa";
 import { bookSeatGeekProgrammatic } from "./providers/seatgeek-rpa";
@@ -1498,6 +1500,17 @@ The user will enter CVV and confirm payment themselves.`,
             }
           } else {
             trace(`[flight-rpa] Skipping AI audit refill because AI fill stopped: ${fillStoppedReason}`);
+          }
+
+          try {
+            trace("[flight-rpa] Running allowed Expedia payment/billing prefill; CVV/security code and final booking remain human-only");
+            await fillExpediaGroupPaymentForm(checkoutPage, effectiveFlightProfile, trace);
+            await scrollExpediaCheckoutToFinalReviewBoundary(checkoutPage, trace);
+            fillSummary = "Flight checkout reached — allowed traveler, test card, and billing details were pre-filled. Review details, enter security code, and click Complete Booking yourself.";
+          } catch (paymentPrefillErr) {
+            trace(`[flight-rpa] Payment/billing prefill error: ${(paymentPrefillErr as Error).message?.slice(0, 100)}`);
+            await scrollExpediaCheckoutToFinalReviewBoundary(checkoutPage, trace).catch(() => false);
+            fillSummary = "Flight checkout reached — review details, finish any remaining allowed fields, enter security code, and complete booking manually.";
           }
 
           const postFillScreenshot = await checkoutPage.screenshot({ type: "jpeg", quality: 55 }).catch(() => null);

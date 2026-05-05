@@ -14,6 +14,22 @@ describe("Expedia flight runtime safety guards", () => {
     expect(source).toContain("clickExpediaTravelerGender(page, gender, trace)");
   });
 
+  it("prefills allowed Expedia payment fields before the final manual boundary", () => {
+    const source = readFileSync("lib/booking-autopilot/stagehand-executor.ts", "utf8");
+
+    expect(source).toContain("fillExpediaGroupPaymentForm(checkoutPage, effectiveFlightProfile, trace)");
+    expect(source).toContain("scrollExpediaCheckoutToFinalReviewBoundary(checkoutPage, trace)");
+    expect(source).toContain("CVV/security code and final booking remain human-only");
+  });
+
+  it("does not include CVV or security-code selectors in Expedia card iframe candidates", () => {
+    const source = readFileSync("lib/booking-autopilot/providers/expedia.ts", "utf8");
+
+    expect(source).toContain("security.?code");
+    expect(source).toContain("verification.?code");
+    expect(source).toContain("final button not clicked");
+  });
+
   it("treats incomplete traveler checkout as manual review instead of retryable error", () => {
     const source = readFileSync("lib/booking-autopilot/stagehand-executor.ts", "utf8");
     const incompleteBlock = source.slice(
