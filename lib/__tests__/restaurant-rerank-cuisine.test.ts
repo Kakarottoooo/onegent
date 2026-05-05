@@ -78,4 +78,24 @@ describe("restaurant cuisine rerank", () => {
     );
     expect(result.cards.every((card) => /Japanese|Ramen/i.test(card.restaurant.cuisine))).toBe(true);
   });
+
+  it("uses a short ranker budget so fallback cards can return before the chat route timeout", async () => {
+    mockOpenaiChat.mockRejectedValueOnce(new Error("ranking timeout"));
+
+    await rankAndExplain(
+      { cuisine: "Chinese", location: "New York", party_size: 2 },
+      [
+        restaurant({
+          id: "chinese",
+          name: "Great NY Noodletown",
+          cuisine: "Chinese Restaurant",
+        }),
+      ],
+      "",
+      [],
+      "New York"
+    );
+
+    expect(mockOpenaiChat).toHaveBeenCalledWith(expect.objectContaining({ timeout_ms: 10_000 }));
+  });
 });

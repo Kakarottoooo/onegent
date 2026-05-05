@@ -15,6 +15,7 @@ const GENERIC_CUISINE_REQUESTS = new Set([
   "dinner",
   "lunch",
 ]);
+const RESTAURANT_RANKER_TIMEOUT_MS = 10_000;
 
 const CUISINE_ALIASES: Record<string, string[]> = {
   japanese: ["japanese", "sushi", "ramen", "izakaya", "omakase", "yakitori", "udon", "soba", "kaiseki", "tempura"],
@@ -434,16 +435,15 @@ Return ONLY the JSON array, no other text.`,
   // more reliable under parallel load. If it still fails we fall back to
   // SerpAPI-derived cards so the UI never shows an empty column.
   //
-  // Timeout kept strictly under trip-package's outer 45s timeout so the
-  // fallback path always has room to run (outer would otherwise kill the
-  // whole pipeline before our catch fires).
+  // Keep this short enough that the chat route can still return fallback
+  // cards after Places search and review enrichment spend their budgets.
   let text: string;
   try {
     text = await openaiChat({
       system: systemPrompt,
       messages,
       max_tokens: 4096,
-      timeout_ms: 25_000,
+      timeout_ms: RESTAURANT_RANKER_TIMEOUT_MS,
     });
   } catch (err) {
     console.warn("[rankAndExplain] openaiChat threw — using SerpAPI data directly. err:", err);

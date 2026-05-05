@@ -1,6 +1,10 @@
 import { Restaurant, ReviewSignals, GoogleReview, Hotel, Flight, AfterDinnerVenue } from "./types";
 import { buildExpediaFlightsUrl } from "./agent/planners/booking-links";
 
+const REVIEW_SIGNAL_TAVILY_TIMEOUT_MS = 4_000;
+const REVIEW_SIGNAL_MODEL_TIMEOUT_MS = 6_000;
+const TAVILY_SEARCH_TIMEOUT_MS = 6_000;
+
 // ─── Geocoding ────────────────────────────────────────────────────────────────
 
 export async function geocodeLocation(
@@ -293,6 +297,7 @@ ReviewSignals schema:
       const searchQuery = `${names} reviews ${cityFullName} noise atmosphere experience site:reddit.com OR site:yelp.com`;
       const res = await fetch("https://api.tavily.com/search", {
         method: "POST",
+        signal: AbortSignal.timeout(REVIEW_SIGNAL_TAVILY_TIMEOUT_MS),
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           api_key: process.env.TAVILY_API_KEY,
@@ -324,6 +329,7 @@ ReviewSignals schema:
   try {
     const res = await fetch(MINIMAX_API_URL, {
       method: "POST",
+      signal: AbortSignal.timeout(REVIEW_SIGNAL_MODEL_TIMEOUT_MS),
       headers: {
         "Content-Type": "application/json",
         Authorization: `Bearer ${process.env.MINIMAX_API_KEY}`,
@@ -384,6 +390,7 @@ export async function tavilySearch(
 ): Promise<{ results: string; failed: boolean }> {
   const res = await fetch("https://api.tavily.com/search", {
     method: "POST",
+    signal: AbortSignal.timeout(TAVILY_SEARCH_TIMEOUT_MS),
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
       api_key: process.env.TAVILY_API_KEY,
