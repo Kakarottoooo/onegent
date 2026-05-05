@@ -22,16 +22,18 @@ export function buildHotelTask(params: {
   checkin: string;
   checkout: string;
   adults: number;
+  rooms?: number;
   profile: BookingProfile;
   roomPreference?: string;
   breakfastIncluded?: boolean;
 }): Pick<BrowserTaskInput, "task" | "profile"> {
   const roomPref = params.roomPreference ?? params.profile.room_preference;
   const wantsBreakfast = params.breakfastIncluded ?? params.profile.breakfast_preference;
+  const rooms = Number.isFinite(params.rooms) && params.rooms && params.rooms > 0 ? params.rooms : 1;
 
   const roomInstruction = roomPref
-    ? `Prefer a ${roomPref} room type if available. `
-    : `Select the cheapest available room (preferably a standard king or queen room). `;
+    ? `Prefer a ${roomPref} room type if available after the verified hotel and dates are visible. `
+    : `Prefer the cheapest available room after the verified hotel and dates are visible. `;
 
   const breakfastInstruction = wantsBreakfast
     ? `Choose a rate that includes breakfast if available. `
@@ -39,7 +41,16 @@ export function buildHotelTask(params: {
 
   return {
     profile: params.profile,
-    task: `Find ${params.hotelName} hotel in ${params.city} and book a room for ${params.adults} adult(s), checking in ${params.checkin} and checking out ${params.checkout}. ${roomInstruction}${breakfastInstruction}Fill in the guest information completely.`,
+    task:
+      `Use only public Booking.com pages to prepare a manual hotel booking. ` +
+      `Find ${params.hotelName} in ${params.city} for ${rooms} room(s), ${params.adults} adult(s), ` +
+      `checking in ${params.checkin} and checking out ${params.checkout}. ` +
+      `Verify the hotel name, city, check-in date, check-out date, guest count, and room count before taking any booking-step action. ` +
+      `${roomInstruction}${breakfastInstruction}` +
+      `Stop at the first safe manual-review boundary and report the current page state. Do not complete the booking. ` +
+      `Hard stop immediately if you see payment, CVV/security code, card entry, login/sign-in, account verification, OTP, CAPTCHA, human verification, phone verification, credentials, or any final reserve/confirm/complete booking screen. ` +
+      `Do not enter payment details, CVV/security code, credentials, OTP, CAPTCHA, or verification information. Do not bypass any wall. ` +
+      `Do not click any final reserve, confirm, complete booking, purchase, or payment submission control.`,
   };
 }
 

@@ -230,12 +230,17 @@ function convertRestaurant(body: Record<string, unknown>): RestaurantBookingPara
 }
 
 function convertHotel(body: Record<string, unknown>): HotelBookingParams {
+  const rooms =
+    typeof body.rooms === "number" && Number.isFinite(body.rooms)
+      ? body.rooms
+      : undefined;
   return {
     hotel_name: expectString(body, "hotel_name"),
     city: expectString(body, "city"),
     checkin: expectString(body, "checkin"),
     checkout: expectString(body, "checkout"),
     adults: expectNumber(body, "adults"),
+    ...(rooms !== undefined ? { rooms } : {}),
   };
 }
 

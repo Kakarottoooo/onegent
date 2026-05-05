@@ -97,6 +97,7 @@ export interface HotelBookingParams {
   /** YYYY-MM-DD. */
   checkout: string;
   adults: number;
+  rooms?: number;
 
   // ── Optional hints ──
   star_rating?: number;

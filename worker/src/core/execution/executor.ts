@@ -388,7 +388,7 @@ function buildHotelContext(
     checkin: p.checkin,
     checkout: p.checkout,
     adults: p.adults,
-    rooms: 1,
+    rooms: p.rooms ?? 1,
   });
   const { task } = buildHotelTask({
     hotelName: p.hotel_name,
@@ -396,6 +396,7 @@ function buildHotelContext(
     checkin: p.checkin,
     checkout: p.checkout,
     adults: p.adults,
+    rooms: p.rooms ?? 1,
     profile,
     roomPreference: p.room_preference,
   });
