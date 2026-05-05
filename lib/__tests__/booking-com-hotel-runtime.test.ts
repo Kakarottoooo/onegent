@@ -5,10 +5,36 @@ import {
   captureBookingComHotelResultCandidates,
   captureBookingComRoomSelectionEvidence,
   classifyBookingComHotelRuntimeBoundary,
+  dismissBookingComSoftSignInPrompt,
+  extractBookingComStayParamsFromUrl,
+  shouldStopBookingComBeforePaymentAutomation,
   type BookingComHotelResultCandidateCapture,
 } from "@/lib/booking-autopilot/providers/booking-com";
 
 const originalGetBoundingClientRect = HTMLElement.prototype.getBoundingClientRect;
+const SAFE_MANUAL_REVIEW_PROMPT = `Use only public Booking.com pages to prepare a manual hotel booking review.
+
+Target stay:
+- Hotel: YOTEL New York Times Square
+- City: New York
+- Check-in: June 10, 2026
+- Check-out: June 12, 2026
+- Guests: 1 adult
+- Rooms: 1 room
+
+Before any booking-step action, verify that the visible page matches the exact hotel name, city, check-in date, check-out date, adult count, and room count.
+
+Proceed only through public search/detail/room-selection pages. Stop at the first safe manual-review boundary and report the current page state, URL, and visible evidence.
+
+Hard stop immediately if the page asks for or shows payment, card entry, CVV/CVC/security code, billing details, login, sign-in, account creation, account verification, OTP, SMS code, CAPTCHA, human verification, phone verification, credentials, or any final reserve, confirm, complete booking, purchase, pay, or submit control.
+
+Do not enter payment details, card details, CVV/CVC/security code, credentials, OTP, CAPTCHA, verification, or personal account information.
+
+Do not bypass login, verification, CAPTCHA, OTP, or account checks.
+
+Do not click any final reserve, confirm, complete booking, purchase, payment, or submission control.
+
+If it is unclear whether a button is final, irreversible, account-sensitive, or payment-related, stop and report the page state instead of clicking.`;
 
 describe("Booking.com hotel runtime evidence helpers", () => {
   beforeEach(() => {
@@ -128,6 +154,83 @@ describe("Booking.com hotel runtime evidence helpers", () => {
     ).toBe("login_or_captcha_boundary");
   });
 
+  it("detects the approved manual-review prompt as a Booking.com no-payment automation stop", () => {
+    expect(shouldStopBookingComBeforePaymentAutomation(SAFE_MANUAL_REVIEW_PROMPT)).toBe(true);
+    expect(
+      shouldStopBookingComBeforePaymentAutomation(
+        "Find YOTEL New York Times Square and stop before payment or final confirmation.",
+      ),
+    ).toBe(true);
+    expect(
+      shouldStopBookingComBeforePaymentAutomation(
+        "Find YOTEL New York Times Square and fill in all guest details.",
+      ),
+    ).toBe(false);
+  });
+
+  it("extracts exact YOTEL stay params from Booking.com search and direct hotel URLs", () => {
+    expect(
+      extractBookingComStayParamsFromUrl(
+        "https://www.booking.com/searchresults.html?ss=YOTEL+New+York+Times+Square+New+York&checkin_year=2026&checkin_month=6&checkin_monthday=10&checkout_year=2026&checkout_month=6&checkout_monthday=12&group_adults=1&no_rooms=1",
+      ),
+    ).toMatchObject({
+      checkin: "2026-06-10",
+      checkout: "2026-06-12",
+      adults: 1,
+      rooms: 1,
+    });
+
+    const direct = extractBookingComStayParamsFromUrl(
+      "https://www.booking.com/hotel/us/yotel-new-york-times-square.html?checkin=2026-06-10&checkout=2026-06-12&group_adults=1&no_rooms=1",
+    );
+    expect(direct.summary).toBe("checkin=2026-06-10; checkout=2026-06-12; adults=1; rooms=1");
+  });
+
+  it("dismisses only optional Booking.com member prompts with a safe close control", async () => {
+    document.body.innerHTML = `
+      <div role="dialog">
+        <p>Sign in and save money with member prices.</p>
+        <button aria-label="Close">x</button>
+        <button>Sign in</button>
+      </div>
+    `;
+    let closeClicked = false;
+    document.querySelector("[aria-label='Close']")?.addEventListener("click", () => {
+      closeClicked = true;
+    });
+
+    const traces: string[] = [];
+    const result = await dismissBookingComSoftSignInPrompt(
+      fakePage("https://www.booking.com/searchresults.html"),
+      (message) => traces.push(message),
+    );
+
+    expect(result.dismissed).toBe(true);
+    expect(closeClicked).toBe(true);
+    expect(traces.join("\n")).toContain("dismissed optional sign-in/member prompt");
+  });
+
+  it("treats account-sensitive login or verification prompts as hard stops", async () => {
+    document.body.innerHTML = `
+      <div role="dialog">
+        <p>Sign in to continue. Enter your password or verification code.</p>
+        <button aria-label="Close">x</button>
+      </div>
+    `;
+    let closeClicked = false;
+    document.querySelector("[aria-label='Close']")?.addEventListener("click", () => {
+      closeClicked = true;
+    });
+
+    const result = await dismissBookingComSoftSignInPrompt(
+      fakePage("https://www.booking.com/searchresults.html"),
+    );
+
+    expect(result.dismissed).toBe(false);
+    expect(result.reason).toBe("account-sensitive boundary visible");
+    expect(closeClicked).toBe(false);
+  });
+
   it("separates no availability, selector drift, room drift, and provider degraded signals", () => {
     const emptyResults: BookingComHotelResultCandidateCapture = {
       targetHotelName: "YOTEL New York Times Square",
@@ -180,5 +283,6 @@ function fakePage(url: string): Page {
   return {
     url: () => url,
     evaluate: async <T, A>(fn: (arg: A) => T, arg?: A): Promise<T> => fn(arg as A),
+    waitForTimeout: async () => undefined,
   } as unknown as Page;
 }

@@ -170,7 +170,7 @@ describe("analyzeHotelRetryArtifactBundle", () => {
         state: "guest_details_manual_review_reached",
       },
       {
-        line: "Booking.com hotel runtime boundary: payment_manual_review_reached - stop-before-payment instruction honored; no card fields filled.",
+        line: "Booking.com hotel runtime boundary: payment_manual_review_reached - manual-review/no-payment instruction honored; no card fields filled.",
         state: "payment_manual_review_reached",
       },
       {
