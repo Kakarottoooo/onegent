@@ -96,6 +96,7 @@ type ExpediaFlightButtonMatch = {
   x: number;
   y: number;
   inViewportBefore: boolean;
+  clickMode?: "coordinate" | "locator";
   samples: string[];
   candidateSummaries?: string[];
   matchMode?: string;
@@ -139,6 +140,20 @@ type ExpediaFlightLocatorTextLike = {
   textContent?: (options?: { timeout?: number }) => Promise<string | null>;
   innerText?: (options?: { timeout?: number }) => Promise<string | null>;
   locator?: (selector: string) => ExpediaFlightLocatorTextLike;
+};
+
+type ExpediaFlightLocatorBox = {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+};
+
+type ExpediaFlightLocatorBoxLike = {
+  boundingBox?: () => Promise<ExpediaFlightLocatorBox | null>;
+  elementHandle?: (options?: { timeout?: number }) => Promise<ExpediaFlightLocatorBoxLike | null>;
+  evaluate?: <T>(fn: (el: Element) => T | Promise<T>) => Promise<T>;
+  scrollIntoViewIfNeeded?: () => Promise<void>;
 };
 
 function parseExpediaFlightTimeToMinutes(t: string | null | undefined): number | null {
@@ -325,6 +340,71 @@ export async function readExpediaFlightLocatorCandidateLabel(
   return compactExpediaFlightLocatorLabel([ariaLabel, title, ownText, ...ancestorTexts]);
 }
 
+export async function readExpediaFlightLocatorBoundingBox(
+  item: ExpediaFlightLocatorBoxLike,
+): Promise<ExpediaFlightLocatorBox | null> {
+  if (typeof item.boundingBox === "function") {
+    const box = await item.boundingBox().catch(() => null);
+    if (isUsableExpediaFlightLocatorBox(box)) return box;
+  }
+
+  if (typeof item.elementHandle === "function") {
+    const handle = await item.elementHandle({ timeout: 800 }).catch(() => null);
+    if (handle && typeof handle.boundingBox === "function") {
+      const box = await handle.boundingBox().catch(() => null);
+      if (isUsableExpediaFlightLocatorBox(box)) return box;
+    }
+  }
+
+  if (typeof item.evaluate === "function") {
+    const box = await item.evaluate((el) => {
+      const rect = (el as HTMLElement).getBoundingClientRect();
+      if (!rect.width || !rect.height) return null;
+      return {
+        x: rect.x,
+        y: rect.y,
+        width: rect.width,
+        height: rect.height,
+      };
+    }).catch(() => null);
+    if (isUsableExpediaFlightLocatorBox(box)) return box;
+  }
+
+  return null;
+}
+
+export async function scrollExpediaFlightLocatorIntoView(
+  item: ExpediaFlightLocatorBoxLike,
+): Promise<boolean> {
+  if (typeof item.scrollIntoViewIfNeeded === "function") {
+    const ok = await item.scrollIntoViewIfNeeded()
+      .then(() => true)
+      .catch(() => false);
+    if (ok) return true;
+  }
+
+  if (typeof item.evaluate === "function") {
+    return item.evaluate((el) => {
+      (el as HTMLElement).scrollIntoView({ block: "center", inline: "center" });
+      return true;
+    }).catch(() => false);
+  }
+
+  return false;
+}
+
+function isUsableExpediaFlightLocatorBox(
+  box: ExpediaFlightLocatorBox | null | undefined,
+): box is ExpediaFlightLocatorBox {
+  return !!box &&
+    Number.isFinite(box.x) &&
+    Number.isFinite(box.y) &&
+    Number.isFinite(box.width) &&
+    Number.isFinite(box.height) &&
+    box.width > 0 &&
+    box.height > 0;
+}
+
 export function classifyExpediaFlightSafetyBoundaryText(
   rawText: string | null | undefined,
 ): string | null {
@@ -374,6 +454,118 @@ export function classifyExpediaFlightBlockingOverlayText(
     : null;
 }
 
+export function hasExpediaFlightBundlePopupText(rawText: string | null | undefined): boolean {
+  const text = normalizeExpediaFlightLoose(rawText);
+  return text.includes("car rental dates") ||
+    text.includes("explore packages") ||
+    (text.includes("bundle & save") && text.includes("includes your selected flight"));
+}
+
+export interface ExpediaFlightCheckoutStateInput {
+  currentUrl: string;
+  bodyText: string;
+  visibleInputDescriptions?: string[];
+}
+
+export interface ExpediaFlightCheckoutState {
+  onCheckout: boolean;
+  reason: string;
+  hasTravelerCopy: boolean;
+  hasTravelerFields: boolean;
+  stillOnReview: boolean;
+  stillOnSearch: boolean;
+  stillOnReviewUrl: boolean;
+  bundlePopupVisible: boolean;
+}
+
+export function classifyExpediaFlightCheckoutState(
+  input: ExpediaFlightCheckoutStateInput,
+): ExpediaFlightCheckoutState {
+  const currentUrl = normalizeExpediaFlightLoose(input.currentUrl);
+  const bodyText = normalizeExpediaFlightLoose(input.bodyText);
+  const visibleInputDescriptions = input.visibleInputDescriptions ?? [];
+  const stillOnSearch = currentUrl.includes("flights-search");
+  const stillOnReviewUrl = currentUrl.includes("flight-information");
+  const urlIsCheckout =
+    currentUrl.includes("/checkout") ||
+    currentUrl.includes("/flights-checkout");
+  const bundlePopupVisible = hasExpediaFlightBundlePopupText(bodyText);
+  const stillOnReview =
+    stillOnReviewUrl ||
+    bodyText.includes("review your trip") ||
+    bodyText.includes("skip to checkout") ||
+    bodyText.includes("next: checkout") ||
+    bodyText.includes("next: seats") ||
+    bodyText.includes("continue without choosing seats");
+  const hasTravelerCopy =
+    bodyText.includes("traveler information") ||
+    bodyText.includes("passenger information") ||
+    bodyText.includes("who's flying") ||
+    bodyText.includes("enter payment");
+  const hasTravelerFields = visibleInputDescriptions.some(desc =>
+    /first.?name|last.?name|given.?name|family.?name|surname|date.?of.?birth|birth.?date|passport|known.?traveler|tsa.?pre|phone|email/.test(desc)
+  );
+
+  if (bundlePopupVisible) {
+    return {
+      onCheckout: false,
+      reason: "bundle-popup-open",
+      hasTravelerCopy,
+      hasTravelerFields,
+      stillOnReview,
+      stillOnSearch,
+      stillOnReviewUrl,
+      bundlePopupVisible,
+    };
+  }
+  if (urlIsCheckout) {
+    return {
+      onCheckout: true,
+      reason: "checkout-url",
+      hasTravelerCopy,
+      hasTravelerFields,
+      stillOnReview,
+      stillOnSearch,
+      stillOnReviewUrl,
+      bundlePopupVisible,
+    };
+  }
+  if (stillOnSearch || stillOnReviewUrl) {
+    return {
+      onCheckout: false,
+      reason: stillOnSearch ? "still-on-flight-search" : "still-on-review-url",
+      hasTravelerCopy,
+      hasTravelerFields,
+      stillOnReview,
+      stillOnSearch,
+      stillOnReviewUrl,
+      bundlePopupVisible,
+    };
+  }
+  if ((hasTravelerCopy || hasTravelerFields) && !stillOnReview) {
+    return {
+      onCheckout: true,
+      reason: hasTravelerFields ? "traveler-fields-visible" : "traveler-copy-visible",
+      hasTravelerCopy,
+      hasTravelerFields,
+      stillOnReview,
+      stillOnSearch,
+      stillOnReviewUrl,
+      bundlePopupVisible,
+    };
+  }
+  return {
+    onCheckout: false,
+    reason: stillOnReview ? "still-on-review" : "no-checkout-signal",
+    hasTravelerCopy,
+    hasTravelerFields,
+    stillOnReview,
+    stillOnSearch,
+    stillOnReviewUrl,
+    bundlePopupVisible,
+  };
+}
+
 export function scoreExpediaFlightCandidateText(
   rawText: string,
   target: ExpediaFlightTarget,
@@ -416,13 +608,15 @@ export function scoreExpediaFlightCandidateText(
       : 1;
   const score =
     (hasFlightNumber ? 5 : 0) +
-    (hasPrice ? 3 : 0) +
-    timeScore;
+    timeScore * 2 +
+    (hasPrice ? 1 : 0);
+  const hasExactTargetTime = timeMinutes !== null && departureMinutes === timeMinutes;
+  const hasNearTargetTime = timeDelta !== null && timeDelta <= 120;
+  const hasStrongTargetIdentity = hasFlightNumber || hasExactTargetTime;
   const exactMatch =
     (!flightNumberTight || hasFlightNumber) &&
-    (!priceToken || hasPrice) &&
-    (timeMinutes === null || timeScore > 0);
-  const hasNearTargetTime = timeDelta !== null && timeDelta <= 120;
+    (timeMinutes === null || timeScore > 0) &&
+    (hasStrongTargetIdentity || !priceToken || hasPrice);
   const hasPriceFallbackWithoutTargetTime =
     timeMinutes === null && (hasPrice || (priceDelta !== null && priceDelta <= 60));
   const fallbackEligible =
@@ -430,10 +624,10 @@ export function scoreExpediaFlightCandidateText(
     hasNearTargetTime ||
     hasPriceFallbackWithoutTargetTime;
   const fallbackScore =
-    (hasFlightNumber ? 90 : 0) +
-    (hasPrice ? 40 : 0) +
-    (timeDelta !== null ? Math.max(0, 30 - Math.floor(timeDelta / 5)) : 0) +
-    (priceDelta !== null ? Math.max(0, 20 - Math.floor(priceDelta / 5)) : 0);
+    (hasFlightNumber ? 120 : 0) +
+    (hasExactTargetTime ? 100 : 0) +
+    (timeDelta !== null ? Math.max(0, 60 - Math.floor(timeDelta / 2)) : 0) +
+    (priceDelta !== null ? Math.max(0, 10 - Math.floor(priceDelta / 20)) : 0);
 
   return {
     hasAirline,
@@ -776,6 +970,99 @@ interface ExpediaGuestProfile {
   last_name?: string;
   email?: string;
   phone?: string;
+  date_of_birth?: string;
+}
+
+export interface ExpediaFlightTravelerFormState {
+  missingRequiredFields: string[];
+  filledFields: string[];
+  visibleRequiredFields: string[];
+}
+
+export interface ExpediaFlightTravelerControlSnapshot {
+  checked: boolean;
+  selectedIndex: number;
+  tagName: string;
+  text: string;
+  type: string;
+  value: string;
+}
+
+export interface ExpediaFlightTravelerFormSnapshot {
+  bodyText: string;
+  controls: ExpediaFlightTravelerControlSnapshot[];
+}
+
+export function summarizeExpediaFlightTravelerFormState(
+  snapshot: ExpediaFlightTravelerFormSnapshot,
+): ExpediaFlightTravelerFormState {
+  const controls = snapshot.controls.map(control => ({
+    ...control,
+    text: control.text.toLowerCase(),
+    type: control.type.toLowerCase(),
+    tagName: control.tagName.toLowerCase(),
+    value: control.value.trim(),
+  }));
+  const bodyText = snapshot.bodyText.toLowerCase();
+
+  const inputValue = (control: ExpediaFlightTravelerControlSnapshot): string => {
+    if (control.tagName.toLowerCase() === "select") {
+      return control.selectedIndex > 0 ? control.value.trim() : "";
+    }
+    return control.value.trim();
+  };
+
+  const hasFilled = (patterns: RegExp[]): boolean => controls.some(control =>
+    patterns.some(pattern => pattern.test(control.text)) && inputValue(control).length > 0
+  );
+  const hasVisible = (patterns: RegExp[]): boolean => controls.some(control =>
+    patterns.some(pattern => pattern.test(control.text))
+  );
+  const bodyHas = (patterns: RegExp[]): boolean => patterns.some(pattern => pattern.test(bodyText));
+  const radioChecked = (patterns: RegExp[]): boolean => {
+    const radios = controls.filter(control =>
+      control.type === "radio" && patterns.some(pattern => pattern.test(control.text))
+    );
+    return radios.length === 0 || radios.some(control => control.checked);
+  };
+
+  const visibleRequiredFields: string[] = [];
+  const missingRequiredFields: string[] = [];
+  const filledFields: string[] = [];
+  const addExpected = (label: string, patterns: RegExp[]): void => {
+    const visible = hasVisible(patterns) || bodyHas(patterns);
+    const filled = hasFilled(patterns);
+    if (visible) visibleRequiredFields.push(label);
+    if (filled) filledFields.push(label);
+    if (visible && !filled) missingRequiredFields.push(label);
+  };
+
+  addExpected("first name", [/first.?name|given.?name|forename|firstname/]);
+  addExpected("last name", [/last.?name|family.?name|surname|lastname/]);
+  addExpected("email address", [/e.?mail/]);
+  addExpected("phone number", [/phone|mobile|cellular|tel(?:ephone)?/]);
+
+  if (bodyText.includes("date of birth")) {
+    addExpected("birth month", [/\bmonth\b/]);
+    addExpected("birth day", [/\bday\b/]);
+    addExpected("birth year", [/\byear\b/]);
+  }
+
+  if (bodyText.includes("gender")) {
+    visibleRequiredFields.push("gender");
+    if (radioChecked([/gender|male|female/])) filledFields.push("gender");
+    else missingRequiredFields.push("gender");
+  }
+
+  if (bodyText.includes("who's traveling") && visibleRequiredFields.length === 0) {
+    missingRequiredFields.push("traveler form fields not detected");
+  }
+
+  return {
+    missingRequiredFields: Array.from(new Set(missingRequiredFields)),
+    filledFields: Array.from(new Set(filledFields)),
+    visibleRequiredFields: Array.from(new Set(visibleRequiredFields)),
+  };
 }
 
 /**
@@ -816,7 +1103,7 @@ export async function fillExpediaGuestForm(
   //   - Finds inputs by placeholder/type pattern (not by fragile id/name selectors)
   //   - Uses native HTMLInputElement setter to trigger React state updates
   const results = await page.evaluate(
-    ({ first, last, email, phone }: { first: string; last: string; email: string; phone: string }) => {
+    ({ first, last, email, phone, dateOfBirth }: { first: string; last: string; email: string; phone: string; dateOfBirth: string }) => {
       const nativeFill = (el: HTMLInputElement, val: string): boolean => {
         if (!val) return false;
         const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set;
@@ -827,6 +1114,34 @@ export async function fillExpediaGuestForm(
         el.dispatchEvent(new Event("change", { bubbles: true }));
         el.blur();
         return el.value === val;
+      };
+      const nativeSelect = (el: HTMLSelectElement, candidates: string[]): boolean => {
+        const normalizedCandidates = candidates.map(v => v.toLowerCase().replace(/^0+/, ""));
+        const option = Array.from(el.options).find(opt => {
+          const value = (opt.value ?? "").trim().toLowerCase().replace(/^0+/, "");
+          const text = (opt.textContent ?? "").trim().toLowerCase().replace(/^0+/, "");
+          return normalizedCandidates.includes(value) || normalizedCandidates.includes(text);
+        });
+        if (!option) return false;
+        const setter = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, "value")?.set;
+        if (setter) setter.call(el, option.value);
+        else el.value = option.value;
+        el.dispatchEvent(new Event("input", { bubbles: true }));
+        el.dispatchEvent(new Event("change", { bubbles: true }));
+        return el.value === option.value;
+      };
+      const fieldText = (el: Element): string => {
+        const id = el.getAttribute("id") ?? "";
+        const label = id ? document.querySelector<HTMLLabelElement>(`label[for="${CSS.escape(id)}"]`)?.textContent ?? "" : "";
+        return [
+          label,
+          el.getAttribute("name") ?? "",
+          el.getAttribute("id") ?? "",
+          el.getAttribute("aria-label") ?? "",
+          (el as HTMLInputElement).placeholder ?? "",
+          el.closest("label")?.textContent ?? "",
+          el.parentElement?.textContent ?? "",
+        ].join(" ").replace(/\s+/g, " ").trim().toLowerCase();
       };
 
       const allInputs = Array.from(document.querySelectorAll<HTMLInputElement>("input"));
@@ -871,6 +1186,23 @@ export async function fillExpediaGuestForm(
       );
       results.phone = phoneEl ? nativeFill(phoneEl, phone) : "not_found";
 
+      const dobParts = dateOfBirth.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+      if (dobParts) {
+        const [, yyyy, mm, dd] = dobParts;
+        const monthNames = [
+          "", "january", "february", "march", "april", "may", "june",
+          "july", "august", "september", "october", "november", "december",
+        ];
+        const visibleSelects = Array.from(document.querySelectorAll<HTMLSelectElement>("select"))
+          .filter(el => !el.disabled && (el.offsetParent !== null || el.getBoundingClientRect().width > 0));
+        const monthSelect = visibleSelects.find(el => /month/.test(fieldText(el)));
+        const daySelect = visibleSelects.find(el => /\bday\b/.test(fieldText(el)));
+        const yearSelect = visibleSelects.find(el => /\byear\b/.test(fieldText(el)));
+        results.birthMonth = monthSelect ? nativeSelect(monthSelect, [mm, String(parseInt(mm, 10)), monthNames[parseInt(mm, 10)] ?? ""]) : "not_found";
+        results.birthDay = daySelect ? nativeSelect(daySelect, [dd, String(parseInt(dd, 10))]) : "not_found";
+        results.birthYear = yearSelect ? nativeSelect(yearSelect, [yyyy]) : "not_found";
+      }
+
       return results;
     },
     {
@@ -878,6 +1210,7 @@ export async function fillExpediaGuestForm(
       last: profile.last_name ?? "",
       email: profile.email ?? "",
       phone: phoneDigits,
+      dateOfBirth: profile.date_of_birth ?? "",
     }
   ).catch((err: Error) => {
     trace(`Expedia guest fill: page.evaluate failed — ${err.message?.slice(0, 80)}`);
@@ -923,6 +1256,72 @@ export async function fillExpediaGuestForm(
  * Strategy: click "Continue booking" button, or fall back to the × close button.
  * @param waitMs - optional wait before checking (modal may render after page interaction)
  */
+export async function inspectExpediaFlightTravelerFormState(page: Page): Promise<ExpediaFlightTravelerFormState> {
+  const snapshot = await page.evaluate((): ExpediaFlightTravelerFormSnapshot => {
+    const isVisible = (el: Element): boolean => {
+      const rect = (el as HTMLElement).getBoundingClientRect();
+      const style = window.getComputedStyle(el as HTMLElement);
+      return rect.width > 0 &&
+        rect.height > 0 &&
+        style.display !== "none" &&
+        style.visibility !== "hidden" &&
+        style.opacity !== "0";
+    };
+    const fieldText = (el: Element): string => {
+      const id = el.getAttribute("id") ?? "";
+      const label = id ? document.querySelector<HTMLLabelElement>(`label[for="${CSS.escape(id)}"]`)?.textContent ?? "" : "";
+      const localText = [
+        label,
+        el.getAttribute("name") ?? "",
+        el.getAttribute("id") ?? "",
+        el.getAttribute("aria-label") ?? "",
+        el.getAttribute("autocomplete") ?? "",
+        (el as HTMLInputElement).placeholder ?? "",
+        el.closest("label")?.textContent ?? "",
+      ].join(" ").replace(/\s+/g, " ").trim().toLowerCase();
+      if (localText) return localText;
+
+      const parentText = (el.parentElement?.textContent ?? "").replace(/\s+/g, " ").trim().toLowerCase();
+      const labelFamilies = [
+        /first.?name|given.?name|forename|firstname/,
+        /last.?name|family.?name|surname|lastname/,
+        /e.?mail/,
+        /phone|mobile|cellular|tel(?:ephone)?/,
+        /country|territory/,
+        /\bmonth\b/,
+        /\bday\b/,
+        /\byear\b/,
+        /gender|male|female/,
+      ];
+      const familyMatches = labelFamilies.filter(pattern => pattern.test(parentText)).length;
+      return parentText.length <= 120 && familyMatches <= 1 ? parentText : "";
+    };
+    const controls = Array.from(document.querySelectorAll<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>(
+      'input:not([type="hidden"]), select, textarea'
+    )).filter(el => isVisible(el) && !el.disabled);
+
+    return {
+      bodyText: (document.body.textContent ?? "").toLowerCase(),
+      controls: controls.map((el) => ({
+        checked: el instanceof HTMLInputElement ? el.checked : false,
+        selectedIndex: el instanceof HTMLSelectElement ? el.selectedIndex : -1,
+        tagName: el.tagName,
+        text: fieldText(el),
+        type: el instanceof HTMLInputElement ? el.type : el.tagName.toLowerCase(),
+        value: (el.value ?? "").trim(),
+      })),
+    };
+  }).catch(() => null);
+  if (!snapshot) {
+    return {
+      missingRequiredFields: ["traveler form inspection failed"],
+      filledFields: [],
+      visibleRequiredFields: [],
+    };
+  }
+  return summarizeExpediaFlightTravelerFormState(snapshot);
+}
+
 async function dismissExpediaAlmostYoursModal(page: Page, trace: (msg: string) => void, waitMs = 0): Promise<void> {
   if (waitMs > 0) await new Promise(r => setTimeout(r, waitMs));
 
@@ -1884,6 +2283,213 @@ export interface FlightBookingProfile extends ExpediaGuestProfile {
   nationality?: string;
 }
 
+type ExpediaBundleDismissAttempt = {
+  found: boolean;
+  source: string;
+  reason: string;
+  text: string;
+};
+
+async function isExpediaFlightBundlePopupVisible(page: Page): Promise<boolean> {
+  const pageLike = page as unknown as {
+    getByText?: (text: string | RegExp, options?: { exact?: boolean }) => unknown;
+    evaluate?: <T>(fn: () => T | Promise<T>) => Promise<T>;
+  };
+
+  const visibleByText = async (text: string | RegExp, exact = false): Promise<boolean> => {
+    try {
+      const locator = pageLike.getByText?.(text, { exact }) as {
+        first?: () => unknown;
+        isVisible?: (options?: { timeout?: number }) => Promise<boolean>;
+      } | undefined;
+      const target = (locator?.first?.() ?? locator) as {
+        isVisible?: (options?: { timeout?: number }) => Promise<boolean>;
+      } | undefined;
+      if (target?.isVisible) return await target.isVisible({ timeout: 600 });
+    } catch {
+      // Fall through to DOM text scan.
+    }
+    return false;
+  };
+
+  if (
+    await visibleByText("Car rental dates", true) ||
+    await visibleByText("Explore packages", true) ||
+    await visibleByText(/bundle\s*&\s*save/i)
+  ) {
+    return true;
+  }
+
+  if (!pageLike.evaluate) return false;
+  return await pageLike.evaluate(() => {
+    const dialogs = Array.from(document.querySelectorAll<HTMLElement>('[role="dialog"], [aria-modal="true"], dialog'))
+      .filter(el => {
+        const r = el.getBoundingClientRect();
+        return r.width > 100 && r.height > 100;
+      });
+    return dialogs.some(el => {
+      const text = (el.textContent ?? "").toLowerCase();
+      return text.includes("car rental dates") ||
+        text.includes("explore packages") ||
+        (text.includes("bundle & save") && text.includes("includes your selected flight"));
+    });
+  }).catch(() => false);
+}
+
+async function dismissExpediaFlightBundlePopupWithLocator(page: Page): Promise<ExpediaBundleDismissAttempt> {
+  const pageLike = page as unknown as {
+    getByText?: (text: string | RegExp, options?: { exact?: boolean }) => unknown;
+    locator?: (selector: string) => unknown;
+    keyboard?: { press?: (key: string) => Promise<unknown> };
+  };
+
+  const clickLocator = async (rawLocator: unknown, source: string): Promise<ExpediaBundleDismissAttempt | null> => {
+    if (!rawLocator) return null;
+    const locator = rawLocator as {
+      first?: () => unknown;
+      last?: () => unknown;
+      click?: (options?: { timeout?: number; force?: boolean }) => Promise<unknown>;
+      textContent?: (options?: { timeout?: number }) => Promise<string | null>;
+    };
+    const target = (locator.last?.() ?? locator.first?.() ?? locator) as {
+      click?: (options?: { timeout?: number; force?: boolean }) => Promise<unknown>;
+      textContent?: (options?: { timeout?: number }) => Promise<string | null>;
+    };
+    if (!target.click) return null;
+    const text = await target.textContent?.({ timeout: 500 }).catch(() => "") ?? "";
+    try {
+      await target.click({ timeout: 2500 });
+      return { found: true, source, reason: "locator-clicked", text: text.trim().slice(0, 40) };
+    } catch {
+      try {
+        await target.click({ timeout: 2500, force: true });
+        return { found: true, source, reason: "locator-force-clicked", text: text.trim().slice(0, 40) };
+      } catch {
+        return null;
+      }
+    }
+  };
+
+  const textClicked = await clickLocator(
+    pageLike.getByText?.(/^\s*No,?\s+thanks\s*$/i, { exact: true }),
+    "getByText:no-thanks",
+  );
+  if (textClicked) return textClicked;
+
+  const controls = pageLike.locator?.('button, a, [role="button"]') as {
+    filter?: (options: { hasText: RegExp }) => unknown;
+  } | undefined;
+  const filteredClicked = await clickLocator(
+    controls?.filter?.({ hasText: /^\s*No,?\s+thanks\s*$/i }),
+    "locator-filter:no-thanks",
+  );
+  if (filteredClicked) return filteredClicked;
+
+  const closeClicked = await clickLocator(
+    pageLike.locator?.('#forced-choice-modal-dismiss-btn, button[aria-label*="close" i], button[title*="close" i], button[data-testid*="close" i]'),
+    "locator:close",
+  );
+  if (closeClicked) return closeClicked;
+
+  try {
+    await pageLike.keyboard?.press?.("Escape");
+    return { found: true, source: "keyboard", reason: "escape-pressed", text: "" };
+  } catch {
+    return { found: false, source: "none", reason: "no-locator-dismiss-control", text: "" };
+  }
+}
+
+type ExpediaReviewCheckoutActionResult = {
+  clicked: boolean;
+  source: string;
+  text: string;
+  visibleButtons: string[];
+  error?: string;
+};
+
+async function clickExpediaFlightReviewCheckoutAction(page: Page): Promise<ExpediaReviewCheckoutActionResult> {
+  const domResult: ExpediaReviewCheckoutActionResult = await page.evaluate(() => {
+    const allButtons = Array.from(document.querySelectorAll<HTMLElement>('button, a, [role="button"]'));
+    const visible = allButtons
+      .filter(el => {
+        const r = el.getBoundingClientRect();
+        return r.width > 0 && r.height > 0;
+      });
+    const visibleButtons = visible
+      .map(el => {
+        const r = el.getBoundingClientRect();
+        return `"${(el.textContent ?? "").trim().slice(0, 40)}"@(${Math.round(r.x)},${Math.round(r.y)})`;
+      })
+      .filter(text => !text.startsWith('""'))
+      .slice(0, 60);
+    const target = visible.find(el => {
+      const text = (el.textContent ?? "").replace(/\s+/g, " ").trim().toLowerCase();
+      const aria = (el.getAttribute("aria-label") ?? "").replace(/\s+/g, " ").trim().toLowerCase();
+      return text === "next: checkout" ||
+        text.includes("next: checkout") ||
+        text.includes("skip to checkout") ||
+        aria.includes("next: checkout") ||
+        aria.includes("skip to checkout");
+    });
+    if (!target) {
+      return { clicked: false, source: "dom", text: "", visibleButtons };
+    }
+    target.scrollIntoView({ block: "center", behavior: "auto" as ScrollBehavior });
+    const label = ((target.textContent ?? "").trim() || target.getAttribute("aria-label") || "").slice(0, 60);
+    target.click();
+    return { clicked: true, source: "dom", text: label, visibleButtons };
+  }).catch((err: Error) => ({
+    clicked: false,
+    source: "dom-error",
+    text: "",
+    visibleButtons: [] as string[],
+    error: err.message?.slice(0, 100),
+  }));
+
+  if (domResult.clicked) return domResult;
+
+  const pageLike = page as unknown as {
+    getByRole?: (role: "button" | "link", options: { name: RegExp }) => unknown;
+    getByText?: (text: string | RegExp, options?: { exact?: boolean }) => unknown;
+    locator?: (selector: string) => unknown;
+  };
+
+  const clickLocator = async (rawLocator: unknown, source: string): Promise<ExpediaReviewCheckoutActionResult | null> => {
+    if (!rawLocator) return null;
+    const locator = rawLocator as {
+      first?: () => unknown;
+      click?: (options?: { timeout?: number; force?: boolean }) => Promise<unknown>;
+      textContent?: (options?: { timeout?: number }) => Promise<string | null>;
+    };
+    const target = (locator.first?.() ?? locator) as {
+      click?: (options?: { timeout?: number; force?: boolean }) => Promise<unknown>;
+      textContent?: (options?: { timeout?: number }) => Promise<string | null>;
+    };
+    if (!target.click) return null;
+    const text = await target.textContent?.({ timeout: 500 }).catch(() => "") ?? "";
+    try {
+      await target.click({ timeout: 3000 });
+      return { clicked: true, source, text: text.trim().slice(0, 60), visibleButtons: domResult.visibleButtons, error: domResult.error };
+    } catch {
+      try {
+        await target.click({ timeout: 3000, force: true });
+        return { clicked: true, source: `${source}:force`, text: text.trim().slice(0, 60), visibleButtons: domResult.visibleButtons, error: domResult.error };
+      } catch {
+        return null;
+      }
+    }
+  };
+
+  const roleButton = await clickLocator(pageLike.getByRole?.("button", { name: /(?:next:\s*checkout|skip\s+to\s+checkout)/i }), "role:button");
+  if (roleButton) return roleButton;
+  const roleLink = await clickLocator(pageLike.getByRole?.("link", { name: /(?:next:\s*checkout|skip\s+to\s+checkout)/i }), "role:link");
+  if (roleLink) return roleLink;
+  const textLocator = await clickLocator(pageLike.getByText?.(/(?:next:\s*checkout|skip\s+to\s+checkout)/i), "text");
+  if (textLocator) return textLocator;
+
+  return domResult;
+}
+
 async function dismissExpediaFlightSoftOverlays(
   page: Page,
   trace: (msg: string) => void,
@@ -1987,19 +2593,22 @@ async function findExpediaFlightButtonWithLocatorFallback(
   }
 
   const targetButton = locator.nth(best.index);
-  const beforeBox = await targetButton.boundingBox().catch(() => null);
-  await targetButton.scrollIntoViewIfNeeded().catch(() => undefined);
+  const beforeBox = await readExpediaFlightLocatorBoundingBox(targetButton);
+  await scrollExpediaFlightLocatorIntoView(targetButton);
   await new Promise(r => setTimeout(r, 200));
-  const afterBox = await targetButton.boundingBox().catch(() => null);
+  const afterBox = await readExpediaFlightLocatorBoundingBox(targetButton);
   if (!afterBox) {
-    trace("[flight-rpa] Locator fallback found a text match but could not read its bounding box");
+    trace("[flight-rpa] Locator fallback found a text match but could not read its bounding box; will click by locator");
     return {
-      found: false,
+      found: true,
       label: best.label,
       candidates: selection.candidateCount,
       x: 0,
       y: 0,
       inViewportBefore: false,
+      clickMode: "locator",
+      matchMode: selection.matchMode,
+      matchReason: `${selection.matchReason ?? "locator fallback match"}; bounding box unavailable`,
       samples: selection.samples,
       candidateSummaries: selection.candidateSummaries,
     };
@@ -2012,6 +2621,7 @@ async function findExpediaFlightButtonWithLocatorFallback(
     x: afterBox.x + afterBox.width / 2,
     y: afterBox.y + afterBox.height / 2,
     inViewportBefore: !!beforeBox && beforeBox.y >= 0 && beforeBox.y + beforeBox.height <= 900,
+    clickMode: "coordinate",
     matchMode: selection.matchMode,
     matchReason: selection.matchReason,
     samples: selection.samples,
@@ -2046,7 +2656,7 @@ async function clickExpediaFlightButtonWithLocatorFallback(
 
   try {
     const targetButton = locator.nth(best.index);
-    await targetButton.scrollIntoViewIfNeeded().catch(() => undefined);
+    await scrollExpediaFlightLocatorIntoView(targetButton);
     await new Promise(r => setTimeout(r, 200));
     await targetButton.click({ delay: 120, timeout: 5000 });
     return {
@@ -2243,13 +2853,15 @@ async function clickExpediaFlightButtonWithDomRescan(
             : 1;
         const score =
           (hasFlightNumber ? 5 : 0) +
-          (hasPrice ? 3 : 0) +
-          timeScore;
+          timeScore * 2 +
+          (hasPrice ? 1 : 0);
+        const hasExactTargetTime = timeMinutes !== null && departureMinutes === timeMinutes;
+        const hasNearTargetTime = timeDelta !== null && timeDelta <= 120;
+        const hasStrongTargetIdentity = hasFlightNumber || hasExactTargetTime;
         const exactMatch =
           (!flightNumberTight || hasFlightNumber) &&
-          (!priceToken || hasPrice) &&
-          (timeMinutes === null || timeScore > 0);
-        const hasNearTargetTime = timeDelta !== null && timeDelta <= 120;
+          (timeMinutes === null || timeScore > 0) &&
+          (hasStrongTargetIdentity || !priceToken || hasPrice);
         const hasPriceFallbackWithoutTargetTime =
           timeMinutes === null && (hasPrice || (priceDelta !== null && priceDelta <= 60));
         const fallbackEligible =
@@ -2257,10 +2869,10 @@ async function clickExpediaFlightButtonWithDomRescan(
           hasNearTargetTime ||
           hasPriceFallbackWithoutTargetTime;
         const fallbackScore =
-          (hasFlightNumber ? 90 : 0) +
-          (hasPrice ? 40 : 0) +
-          (timeDelta !== null ? Math.max(0, 30 - Math.floor(timeDelta / 5)) : 0) +
-          (priceDelta !== null ? Math.max(0, 20 - Math.floor(priceDelta / 5)) : 0);
+          (hasFlightNumber ? 120 : 0) +
+          (hasExactTargetTime ? 100 : 0) +
+          (timeDelta !== null ? Math.max(0, 60 - Math.floor(timeDelta / 2)) : 0) +
+          (priceDelta !== null ? Math.max(0, 10 - Math.floor(priceDelta / 20)) : 0);
         return {
           btn,
           label: combined.slice(0, 140),
@@ -2660,13 +3272,15 @@ export async function bookExpediaFlightProgrammatic(
             : 1;
         const score =
           (hasFlightNumber ? 5 : 0) +
-          (hasPrice ? 3 : 0) +
-          timeScore;
+          timeScore * 2 +
+          (hasPrice ? 1 : 0);
+        const hasExactTargetTime = timeMinutes !== null && departureMinutes === timeMinutes;
+        const hasNearTargetTime = timeDelta !== null && timeDelta <= 120;
+        const hasStrongTargetIdentity = hasFlightNumber || hasExactTargetTime;
         const exactMatch =
           (!flightNumberTight || hasFlightNumber) &&
-          (!priceToken || hasPrice) &&
-          (timeMinutes === null || timeScore > 0);
-        const hasNearTargetTime = timeDelta !== null && timeDelta <= 120;
+          (timeMinutes === null || timeScore > 0) &&
+          (hasStrongTargetIdentity || !priceToken || hasPrice);
         const hasPriceFallbackWithoutTargetTime =
           timeMinutes === null && (hasPrice || (priceDelta !== null && priceDelta <= 60));
         const fallbackEligible =
@@ -2674,10 +3288,10 @@ export async function bookExpediaFlightProgrammatic(
           hasNearTargetTime ||
           hasPriceFallbackWithoutTargetTime;
         const fallbackScore =
-          (hasFlightNumber ? 90 : 0) +
-          (hasPrice ? 40 : 0) +
-          (timeDelta !== null ? Math.max(0, 30 - Math.floor(timeDelta / 5)) : 0) +
-          (priceDelta !== null ? Math.max(0, 20 - Math.floor(priceDelta / 5)) : 0);
+          (hasFlightNumber ? 120 : 0) +
+          (hasExactTargetTime ? 100 : 0) +
+          (timeDelta !== null ? Math.max(0, 60 - Math.floor(timeDelta / 2)) : 0) +
+          (priceDelta !== null ? Math.max(0, 10 - Math.floor(priceDelta / 20)) : 0);
         const r = btn.getBoundingClientRect();
         if (r.width === 0 || r.height === 0) return null;
         return {
@@ -2823,7 +3437,8 @@ export async function bookExpediaFlightProgrammatic(
     trace(`[flight-rpa] No matching flight button found (tried airline="${legTargetAirline}" price=$${legTargetPrice})`);
     return { reached_checkout: false, currentUrl: getUrl(), error: buildFlightInventoryDriftMessage(legLabel) };
   }
-  trace(`[flight-rpa] Flight match: "${found.label}" candidates=${found.candidates} inViewportBefore=${found.inViewportBefore} → scrolled, clicking@(${Math.round(found.x)},${Math.round(found.y)})`);
+  const clickMode = found.clickMode ?? "coordinate";
+  trace(`[flight-rpa] Flight match: "${found.label}" candidates=${found.candidates} inViewportBefore=${found.inViewportBefore} clickMode=${clickMode} → scrolled, clicking@(${Math.round(found.x)},${Math.round(found.y)})`);
 
   trace(`[flight-rpa] Match mode=${found.matchMode} reason="${found.matchReason}"`);
   trace(`[flight-rpa] Selected flight candidate evidence: ${formatExpediaFlightCandidateEvidence(found.label, legFlightTarget).slice(0, 260)}`);
@@ -2832,8 +3447,17 @@ export async function bookExpediaFlightProgrammatic(
   await new Promise(r => setTimeout(r, 700));
   await safeScreenshot("02-after-scroll-to-flight");
 
-  // Real mouse click (triggers React handlers reliably for off-screen scrolled elements)
-  await safeMouseClick(page, found.x, found.y);
+  // Real mouse click triggers React handlers reliably for off-screen scrolled elements.
+  // Locator fallback is used when the runtime wrapper cannot expose coordinates.
+  if (clickMode === "locator") {
+    const locatorClick = await clickExpediaFlightButtonWithLocatorFallback(page, legFlightTarget);
+    trace(
+      `[flight-rpa] Locator flight click from matched fallback: clicked=${locatorClick.clicked} candidates=${locatorClick.candidates} ` +
+      `mode=${locatorClick.matchMode ?? "none"} reason="${locatorClick.matchReason ?? locatorClick.error ?? "no match"}" label="${locatorClick.label.slice(0, 140)}"`
+    );
+  } else {
+    await safeMouseClick(page, found.x, found.y);
+  }
   await new Promise(r => setTimeout(r, 500));
   await safeScreenshot("03-after-flight-click");
 
@@ -3517,12 +4141,7 @@ export async function bookExpediaFlightProgrammatic(
   let bundlePopupDetected = false;
   for (let i = 0; i < 12; i++) {
     await new Promise(r => setTimeout(r, 500));
-    const detected = await page.evaluate(() => {
-      const t = (document.body.textContent ?? "").toLowerCase();
-      // Real bundle popup has car rental form or "Explore packages" CTA
-      return t.includes("car rental dates") || t.includes("explore packages") ||
-        (t.includes("bundle & save") && t.includes("includes your selected flight"));
-    }).catch(() => false);
+    const detected = await isExpediaFlightBundlePopupVisible(activePage);
     if (detected) { bundlePopupDetected = true; break; }
   }
 
@@ -3530,7 +4149,7 @@ export async function bookExpediaFlightProgrammatic(
   let bundleDiag: { reason: string; source: string; modalSize: string; noThanksText: string; btnHtml: string; href: string; x: number; y: number } = { reason: "", source: "", modalSize: "", noThanksText: "", btnHtml: "", href: "", x: 0, y: 0 };
   if (bundlePopupDetected) {
     await safeScreenshot("06-bundle-popup-open");
-    const result = await page.evaluate(() => {
+    const result = await activePage.evaluate(() => {
       const dialogs = Array.from(document.querySelectorAll<HTMLElement>(
         '[role="dialog"], [aria-modal="true"], dialog'
       )).filter(el => {
@@ -3628,7 +4247,7 @@ export async function bookExpediaFlightProgrammatic(
       trace(`[flight-rpa] Bundle btn html: ${bundleDiag.btnHtml.slice(0, 150)}`);
       if (!bundleDiag.reason.endsWith("dom-clicked")) {
         await new Promise(r => setTimeout(r, 400));
-        await safeMouseClick(page, bundleDiag.x, bundleDiag.y);
+        await safeMouseClick(activePage, bundleDiag.x, bundleDiag.y);
         await new Promise(r => setTimeout(r, 1500));
       } else {
         await new Promise(r => setTimeout(r, 1500));
@@ -3636,16 +4255,7 @@ export async function bookExpediaFlightProgrammatic(
       await safeScreenshot("07-after-bundle-click");
 
       // Verify dialog actually closed
-      const bundleStillOpen = await page.evaluate(() => {
-        const stillThere = Array.from(document.querySelectorAll<HTMLElement>('[role="dialog"], [aria-modal="true"], dialog'))
-          .filter(el => {
-            const r = el.getBoundingClientRect();
-            const t = (el.textContent ?? "").toLowerCase();
-            return r.width > 100 && r.height > 100 &&
-                   (t.includes("car rental") || t.includes("explore packages") || t.includes("bundle & save"));
-          });
-        return stillThere.length > 0;
-      }).catch(() => false);
+      const bundleStillOpen = await isExpediaFlightBundlePopupVisible(activePage);
       trace(`[flight-rpa] Bundle dialog still open after click: ${bundleStillOpen}`);
       bundleDismissed = !bundleStillOpen;
       if (bundleStillOpen) {
@@ -3678,16 +4288,7 @@ export async function bookExpediaFlightProgrammatic(
           }).catch(() => false);
           trace(`[flight-rpa] Bundle dismiss retry after closing date picker: clicked=${retried}`);
           await new Promise(r => setTimeout(r, 1200));
-          const bundleStillOpenAfterRetry = await page.evaluate(() => {
-            const stillThere = Array.from(document.querySelectorAll<HTMLElement>('[role="dialog"], [aria-modal="true"], dialog'))
-              .filter(el => {
-                const r = el.getBoundingClientRect();
-                const t = (el.textContent ?? "").toLowerCase();
-                return r.width > 100 && r.height > 100 &&
-                  (t.includes("car rental") || t.includes("explore packages") || t.includes("bundle & save"));
-              });
-            return stillThere.length > 0;
-          }).catch(() => false);
+          const bundleStillOpenAfterRetry = await isExpediaFlightBundlePopupVisible(activePage);
           trace(`[flight-rpa] Bundle dialog still open after retry: ${bundleStillOpenAfterRetry}`);
           bundleDismissed = !bundleStillOpenAfterRetry;
         }
@@ -3805,11 +4406,40 @@ export async function bookExpediaFlightProgrammatic(
           }
         }
       }
+    } else {
+      trace(`[flight-rpa] Bundle primary dismiss failed: reason="${bundleDiag.reason}" source=${bundleDiag.source}; trying locator fallback`);
+      const fallback = await dismissExpediaFlightBundlePopupWithLocator(activePage);
+      bundleDiag = {
+        reason: fallback.reason,
+        source: fallback.source,
+        modalSize: bundleDiag.modalSize,
+        noThanksText: fallback.text,
+        btnHtml: "",
+        href: "",
+        x: 0,
+        y: 0,
+      };
+      if (fallback.found) {
+        trace(`[flight-rpa] Bundle fallback dismiss attempted: source=${fallback.source} reason=${fallback.reason} text="${fallback.text}"`);
+        await new Promise(r => setTimeout(r, 1500));
+        await safeScreenshot("07-after-bundle-fallback-click");
+        const bundleStillOpen = await isExpediaFlightBundlePopupVisible(activePage);
+        trace(`[flight-rpa] Bundle dialog still open after fallback: ${bundleStillOpen}`);
+        bundleDismissed = !bundleStillOpen;
+      }
     }
   } else {
     trace("[flight-rpa] Bundle popup not detected (no car rental form) — skipping");
   }
   if (bundlePopupDetected && !bundleDismissed) {
+    trace(`[flight-rpa] Bundle popup not fully dismissed; reason="${bundleDiag.reason}" source=${bundleDiag.source}`);
+    await safeScreenshot("99-final-bundle-still-open");
+    return {
+      reached_checkout: false,
+      currentUrl: getUrl(),
+      activePage,
+      error: `Expedia bundle upsell remained open after dismiss attempts (${bundleDiag.source}:${bundleDiag.reason}). Stop before checkout classification.`,
+    };
     trace(`[flight-rpa] Bundle popup NOT fully dismissed — reason="${bundleDiag.reason}" source=${bundleDiag.source}`);
   }
   if (bundleDismissed) {
@@ -3894,62 +4524,37 @@ export async function bookExpediaFlightProgrammatic(
   if (!reviewFound) trace("[flight-rpa] Review page not detected after 20s");
   await new Promise(r => setTimeout(r, 600));
 
-  const skipResult = await activePage.evaluate(() => {
-    const allButtons = Array.from(document.querySelectorAll<HTMLElement>('button, a'));
-    const visibleBtns = allButtons
-      .filter(b => { const r = b.getBoundingClientRect(); return r.width > 0 && r.height > 0; })
-      .map(b => {
-        const r = b.getBoundingClientRect();
-        return `"${(b.textContent ?? "").trim().slice(0, 30)}"@(${Math.round(r.x)},${Math.round(r.y)})`;
-      })
-      .filter(t => !t.startsWith('""'))
-      .slice(0, 40);
+  const skipResult = await clickExpediaFlightReviewCheckoutAction(activePage);
 
-    const tryFind = (keywords: string[]): { kw: string; x: number; y: number } | null => {
-      for (const kw of keywords) {
-        const btn = allButtons.find(b => {
-          const t = (b.textContent ?? "").trim().toLowerCase();
-          const r = b.getBoundingClientRect();
-          return t.includes(kw) && r.width > 0 && r.height > 0;
-        });
-        if (btn) {
-          btn.scrollIntoView({ block: "center", behavior: "auto" as ScrollBehavior });
-          const r = btn.getBoundingClientRect();
-          return { kw, x: r.x + r.width / 2, y: r.y + r.height / 2 };
-        }
-      }
-      return null;
-    };
-
-    const target = tryFind(["skip to checkout", "skip to check", "next: checkout"]) ??
-                   tryFind(["next: seats"]);
-    return { target, visibleBtns };
-  }).catch(() => ({ target: null as { kw: string; x: number; y: number } | null, visibleBtns: [] as string[] }));
-
-  if (skipResult.target) {
-    trace(`[flight-rpa] Review page action: ${skipResult.target.kw} @(${Math.round(skipResult.target.x)},${Math.round(skipResult.target.y)})`);
-    await new Promise(r => setTimeout(r, 400));
-    await safeMouseClick(activePage, skipResult.target.x, skipResult.target.y);
-    await new Promise(r => setTimeout(r, 2500));
+  if (skipResult.clicked) {
+    trace(`[flight-rpa] Review page action clicked via ${skipResult.source}: "${skipResult.text}"`);
+    await new Promise(r => setTimeout(r, 3500));
+    await safeScreenshot("08-after-review-checkout-click");
   } else {
-    trace(`[flight-rpa] Review page action: no button found`);
+    trace(`[flight-rpa] Review page action: no checkout button clicked source=${skipResult.source} error=${skipResult.error ?? ""}`);
   }
   trace(`[flight-rpa] Visible buttons (40 max):`);
-  for (const t of skipResult.visibleBtns) trace(`[flight-rpa]   btn: ${t}`);
+  for (const t of skipResult.visibleButtons.slice(0, 40)) trace(`[flight-rpa]   btn: ${t}`);
 
   // ── Step 6: Handle seat selection page ────────────────────────────────────
   for (let i = 0; i < 10; i++) {
     await new Promise(r => setTimeout(r, 500));
     const onSeats = await activePage.evaluate(() => {
       const t = (document.body.textContent ?? "").toLowerCase();
-      return t.includes("choose your seats") || document.location.href.toLowerCase().includes("/seats");
+      const url = document.location.href.toLowerCase();
+      return !url.includes("flight-information") &&
+        !t.includes("review your trip") &&
+        (t.includes("choose your seats") || url.includes("/seats"));
     }).catch(() => false);
     if (onSeats) break;
   }
 
   const onSeatPage = await activePage.evaluate(() => {
     const t = (document.body.textContent ?? "").toLowerCase();
-    return t.includes("choose your seats") || document.location.href.toLowerCase().includes("/seats");
+    const url = document.location.href.toLowerCase();
+    return !url.includes("flight-information") &&
+      !t.includes("review your trip") &&
+      (t.includes("choose your seats") || url.includes("/seats"));
   }).catch(() => false);
 
   if (onSeatPage) {
@@ -4007,17 +4612,7 @@ export async function bookExpediaFlightProgrammatic(
 
   const currentUrl = getUrl();
   const checkoutSignals = await activePage.evaluate(() => {
-    const bodyText = (document.body.textContent ?? "").toLowerCase();
-    const stillOnReview =
-      bodyText.includes("skip to checkout") ||
-      bodyText.includes("next: seats") ||
-      bodyText.includes("continue without choosing seats");
-    const hasTravelerCopy =
-      bodyText.includes("traveler information") ||
-      bodyText.includes("passenger information") ||
-      bodyText.includes("who's flying") ||
-      bodyText.includes("traveler 1") ||
-      bodyText.includes("enter payment");
+    const bodyText = document.body.textContent ?? "";
     const visibleInputs = Array.from(document.querySelectorAll<HTMLInputElement>("input"))
       .filter(input => {
         const rect = input.getBoundingClientRect();
@@ -4030,16 +4625,20 @@ export async function bookExpediaFlightProgrammatic(
         input.getAttribute("aria-label") ?? "",
         input.getAttribute("autocomplete") ?? "",
       ].join(" ").toLowerCase());
-    const hasTravelerFields = visibleInputs.some(desc =>
-      /first.?name|last.?name|given.?name|family.?name|surname|date.?of.?birth|birth.?date|passport|known.?traveler|tsa.?pre|phone|email/.test(desc)
-    );
-    return { stillOnReview, hasTravelerCopy, hasTravelerFields };
-  }).catch(() => ({ stillOnReview: false, hasTravelerCopy: false, hasTravelerFields: false }));
-  const onCheckout =
-    currentUrl.includes("/checkout") || currentUrl.includes("/Checkout") ||
-    ((checkoutSignals.hasTravelerCopy || checkoutSignals.hasTravelerFields) && !checkoutSignals.stillOnReview);
+    return { bodyText, visibleInputs };
+  }).catch(() => ({ bodyText: "", visibleInputs: [] as string[] }));
+  const checkoutState = classifyExpediaFlightCheckoutState({
+    currentUrl,
+    bodyText: checkoutSignals.bodyText,
+    visibleInputDescriptions: checkoutSignals.visibleInputs,
+  });
+  trace(
+    `[flight-rpa] Checkout state: onCheckout=${checkoutState.onCheckout} reason=${checkoutState.reason} ` +
+    `stillOnSearch=${checkoutState.stillOnSearch} bundle=${checkoutState.bundlePopupVisible} ` +
+    `travelerCopy=${checkoutState.hasTravelerCopy} travelerFields=${checkoutState.hasTravelerFields}`
+  );
 
-  if (!onCheckout) {
+  if (!checkoutState.onCheckout) {
     const finalBoundary = await detectSafetyBoundary(activePage);
     if (finalBoundary) {
       trace(`[flight-rpa] Login/OTP/CAPTCHA boundary detected before checkout: ${finalBoundary}`);
@@ -4052,7 +4651,7 @@ export async function bookExpediaFlightProgrammatic(
     }
     trace(`[flight-rpa] Did not reach checkout — currentUrl=${currentUrl.slice(0, 80)}`);
     await safeScreenshot("99-final-not-checkout");
-    return { reached_checkout: false, currentUrl, error: "Could not navigate to checkout. Please book manually." };
+    return { reached_checkout: false, currentUrl, error: `Could not navigate to checkout (${checkoutState.reason}). Please book manually.` };
   }
 
   trace("[flight-rpa] Reached checkout — handing off to AI form fill in executor");

@@ -43,6 +43,14 @@ export type JobSemanticStatus =
   | "failed_recoverable"
   | "failed_terminal";
 
+export function isQueuedJobStatus(status: unknown): boolean {
+  return status === "pending" || status === "pending_local";
+}
+
+export function isActiveJobStatus(status: unknown): boolean {
+  return status === "running" || isQueuedJobStatus(status);
+}
+
 // ── Step status computation ────────────────────────────────────────────────
 
 export function computeStepSemanticStatus(step: BookingJobStep): StepSemanticStatus {
@@ -75,7 +83,7 @@ export function computeStepSemanticStatus(step: BookingJobStep): StepSemanticSta
 export function computeJobSemanticStatus(job: BookingJob): JobSemanticStatus {
   // While actually running/pending, use the DB status directly
   if (job.status === "running") return "running";
-  if (job.status === "pending" || job.status === "pending_local") return "pending";
+  if (isQueuedJobStatus(job.status)) return "pending";
 
   const stepStatuses = job.steps.map(computeStepSemanticStatus);
 

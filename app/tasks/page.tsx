@@ -13,6 +13,7 @@ import type { ScenarioMemory, PatternMemory, RelationshipProfile, RelationshipTy
 import {
   computeJobSemanticStatus,
   computeStepSemanticStatus,
+  isActiveJobStatus,
   JOB_SEMANTIC_DISPLAY,
   STEP_SEMANTIC_DISPLAY,
 } from "@/lib/status";
@@ -233,7 +234,7 @@ function SatisfactionWidget({ jobId }: { jobId: string }) {
 function WhatsNext({ job }: { job: BookingJob }) {
   const ready = job.steps.filter((s) => s.status === "done");
   const action = job.steps.filter((s) => s.actionItem);
-  const isRunning = job.status === "running" || job.status === "pending";
+  const isRunning = isActiveJobStatus(job.status);
 
   if (isRunning) return (
     <div style={{ padding: "12px 14px", borderTop: "0.5px solid var(--border, #e5e7eb)" }}>
@@ -1160,8 +1161,8 @@ function JobCard({ job, onRefresh, sessionId, onOpenLive }: { job: BookingJob; o
   useEffect(() => {
     const prev = prevStatusRef.current;
     if (
-      (job.status === "running" && prev !== "running") ||
-      (job.status === "done" && prev === "running")
+      (isActiveJobStatus(job.status) && !isActiveJobStatus(prev)) ||
+      (job.status === "done" && isActiveJobStatus(prev))
     ) {
       onOpenLive?.(job.id);
     }
@@ -1172,7 +1173,7 @@ function JobCard({ job, onRefresh, sessionId, onOpenLive }: { job: BookingJob; o
   const actionCount = job.steps.filter((s) => s.actionItem).length;
   const adjustedCount = job.steps.filter((s) => s.timeAdjusted || s.usedFallback).length;
   const replanCount = job.steps.filter((s) => s.replanAdjusted || s.replanFlagged).length;
-  const isRunning = job.status === "running" || job.status === "pending";
+  const isRunning = isActiveJobStatus(job.status);
   const isComplete = job.status === "done" || job.status === "failed";
 
   // Detect stuck "running" jobs: Vercel function timeout kills the process before
@@ -1209,7 +1210,7 @@ function JobCard({ job, onRefresh, sessionId, onOpenLive }: { job: BookingJob; o
     if (deleting) return;
     setDeleting(true);
     try {
-      const force = job.status === "running" || job.status === "pending";
+      const force = isActiveJobStatus(job.status);
       await fetch(`/api/booking-jobs/${job.id}${force ? "?force=true" : ""}`, { method: "DELETE" });
       onRefresh?.();
     } finally {
@@ -1271,12 +1272,12 @@ function JobCard({ job, onRefresh, sessionId, onOpenLive }: { job: BookingJob; o
           </div>
         </div>
         <div className="job-card__actions">
-          {(job.status === "running" || (isComplete && Date.now() - new Date(job.updated_at).getTime() < 90_000)) && (
+          {(isRunning || (isComplete && Date.now() - new Date(job.updated_at).getTime() < 90_000)) && (
             <button
               onClick={(e) => { e.stopPropagation(); onOpenLive?.(job.id); }}
-              className={`job-card__cta ${job.status === "running" ? "job-card__cta--watch" : "job-card__cta--watch-replay"}`}
+              className={`job-card__cta ${isRunning ? "job-card__cta--watch" : "job-card__cta--watch-replay"}`}
             >
-              {job.status === "running" ? "🖥️ Watch live" : "🖥️ Replay"}
+              {isRunning ? "🖥️ Watch live" : "🖥️ Replay"}
             </button>
           )}
           {job.status === "done" && doneCount > 0 && (
@@ -3058,14 +3059,14 @@ function TripsPageInner() {
   useEffect(() => { loadJobs(); }, [loadJobs]);
 
   useEffect(() => {
-    const hasRunning = jobs.some((j) => j.status === "running" || j.status === "pending");
+    const hasRunning = jobs.some((j) => isActiveJobStatus(j.status));
     if (!hasRunning) return;
     const timer = setInterval(loadJobs, 5000);
     return () => clearInterval(timer);
   }, [jobs, loadJobs]);
 
   useEffect(() => {
-    const hasRunning = jobs.some((j) => j.status === "running" || j.status === "pending");
+    const hasRunning = jobs.some((j) => isActiveJobStatus(j.status));
     if (!hasRunning) return;
     const timer = setInterval(() => setClockTick((tick) => tick + 1), 1000);
     return () => clearInterval(timer);

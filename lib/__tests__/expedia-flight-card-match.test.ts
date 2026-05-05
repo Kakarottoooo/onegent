@@ -1,12 +1,17 @@
 import { describe, expect, it } from "vitest";
 import {
   classifyExpediaFlightBlockingOverlayText,
+  classifyExpediaFlightCheckoutState,
   classifyExpediaFlightSafetyBoundaryText,
   extractExpediaFlightCandidateEvidence,
   formatExpediaFlightCandidateEvidence,
+  hasExpediaFlightBundlePopupText,
+  readExpediaFlightLocatorBoundingBox,
   readExpediaFlightLocatorCandidateLabel,
   selectExpediaFlightCandidateLabels,
   scoreExpediaFlightCandidateText,
+  scrollExpediaFlightLocatorIntoView,
+  summarizeExpediaFlightTravelerFormState,
 } from "../booking-autopilot/providers/expedia";
 
 describe("scoreExpediaFlightCandidateText", () => {
@@ -217,6 +222,33 @@ describe("Expedia flight candidate evidence", () => {
     expect(label).toContain("8:50am");
     expect(label).toContain("$152");
   });
+
+  it("reads a bounding box through an element handle when the locator wrapper has no boundingBox", async () => {
+    const box = await readExpediaFlightLocatorBoundingBox({
+      elementHandle: async () => ({
+        boundingBox: async () => ({ x: 10, y: 20, width: 120, height: 32 }),
+      }),
+    });
+
+    expect(box).toEqual({ x: 10, y: 20, width: 120, height: 32 });
+  });
+
+  it("scrolls locator wrappers through evaluate when scrollIntoViewIfNeeded is missing", async () => {
+    let scrolled = false;
+    const ok = await scrollExpediaFlightLocatorIntoView({
+      evaluate: async (fn) => {
+        scrolled = await fn({
+          scrollIntoView: () => {
+            scrolled = true;
+          },
+        } as unknown as Element);
+        return scrolled;
+      },
+    });
+
+    expect(ok).toBe(true);
+    expect(scrolled).toBe(true);
+  });
 });
 
 describe("Expedia flight candidate selection", () => {
@@ -257,6 +289,40 @@ describe("Expedia flight candidate selection", () => {
     expect(selection.candidateSummaries[0]).toContain("timeDelta=");
     expect(selection.samples[0]).toContain("9:55pm");
   });
+
+  it("prefers the target flight number and time over stale SerpAPI price hints", () => {
+    const selection = selectExpediaFlightCandidateLabels(
+      [
+        "Select flight Southwest Airlines WN 256 7:25am 8:35am MCO to BNA $152 Nonstop",
+        "Select flight Southwest Airlines WN 2515 9:55pm 11:00pm MCO to BNA $152 Nonstop",
+        "Select flight Southwest Airlines WN 3084 8:50am 9:55am MCO to BNA $241 Nonstop",
+      ],
+      target,
+      "unit",
+    );
+
+    expect(selection.selected?.index).toBe(2);
+    expect(selection.selected?.score.hasFlightNumber).toBe(true);
+    expect(selection.selected?.score.hasPrice).toBe(false);
+    expect(selection.selected?.score.exactMatch).toBe(true);
+  });
+
+  it("prefers exact target time over a stale-price card when Expedia hides the flight number", () => {
+    const selection = selectExpediaFlightCandidateLabels(
+      [
+        "Select flight Southwest Airlines 7:25am 8:35am MCO to BNA $152 Nonstop",
+        "Select flight Southwest Airlines 8:50am 9:55am MCO to BNA $241 Nonstop",
+      ],
+      target,
+      "unit",
+    );
+
+    expect(selection.selected?.index).toBe(1);
+    expect(selection.selected?.score.hasFlightNumber).toBe(false);
+    expect(selection.selected?.score.hasPrice).toBe(false);
+    expect(selection.selected?.score.fallbackEligible).toBe(true);
+    expect(selection.matchMode).toBe("fallback");
+  });
 });
 
 describe("classifyExpediaFlightSafetyBoundaryText", () => {
@@ -281,5 +347,110 @@ describe("classifyExpediaFlightBlockingOverlayText", () => {
     expect(
       classifyExpediaFlightBlockingOverlayText("Sign in to continue to checkout"),
     ).toBe("hard_safety_boundary");
+  });
+});
+
+describe("Expedia flight checkout state", () => {
+  it("does not classify a Flights-Search bundle upsell as checkout", () => {
+    const state = classifyExpediaFlightCheckoutState({
+      currentUrl: "https://www.expedia.com/Flights-Search?trip=oneway&leg1=from:MCO,to:BNA",
+      bodyText: [
+        "Bundle & Save up to $974 with flight + car package deals",
+        "Includes your selected flight",
+        "Car rental dates",
+        "Explore packages",
+        "No thanks",
+      ].join(" "),
+      visibleInputDescriptions: ["pick-up date", "drop-off date"],
+    });
+
+    expect(hasExpediaFlightBundlePopupText(state.reason)).toBe(false);
+    expect(hasExpediaFlightBundlePopupText("Car rental dates Explore packages")).toBe(true);
+    expect(state.onCheckout).toBe(false);
+    expect(state.reason).toBe("bundle-popup-open");
+  });
+
+  it("requires checkout URL or non-search traveler fields for checkout success", () => {
+    expect(
+      classifyExpediaFlightCheckoutState({
+        currentUrl: "https://www.expedia.com/Flights-Search?trip=oneway",
+        bodyText: "Traveler information Traveler 1",
+        visibleInputDescriptions: ["first name", "last name"],
+      }),
+    ).toMatchObject({ onCheckout: false, reason: "still-on-flight-search" });
+
+    expect(
+      classifyExpediaFlightCheckoutState({
+        currentUrl: "https://www.expedia.com/Flights-Checkout?cart=abc",
+        bodyText: "Traveler information Traveler 1",
+        visibleInputDescriptions: ["first name", "last name"],
+      }),
+    ).toMatchObject({ onCheckout: true, reason: "checkout-url" });
+  });
+
+  it("does not treat the Review your trip page as checkout even when it has traveler price copy", () => {
+    const state = classifyExpediaFlightCheckoutState({
+      currentUrl: "https://www.expedia.com/Flight-Information?journeyContinuationId=abc",
+      bodyText: "Review your trip Price details Traveler 1: Adult Next: Checkout",
+      visibleInputDescriptions: [],
+    });
+
+    expect(state).toMatchObject({
+      onCheckout: false,
+      reason: "still-on-review-url",
+      stillOnReview: true,
+      stillOnReviewUrl: true,
+    });
+  });
+});
+
+describe("Expedia flight traveler form state", () => {
+  it("does not treat a filled country-code select as completed traveler identity fields", () => {
+    const state = summarizeExpediaFlightTravelerFormState({
+      bodyText: [
+        "Who's traveling?",
+        "First name *",
+        "Last name *",
+        "Email address *",
+        "Country/Territory Code *",
+        "Phone number *",
+        "Gender *",
+        "Date of birth *",
+        "Month",
+        "Day",
+        "Year",
+      ].join(" "),
+      controls: [
+        { tagName: "input", type: "text", text: "first name", value: "", checked: false, selectedIndex: -1 },
+        { tagName: "input", type: "text", text: "last name", value: "", checked: false, selectedIndex: -1 },
+        { tagName: "input", type: "email", text: "email address", value: "", checked: false, selectedIndex: -1 },
+        {
+          tagName: "select",
+          type: "select",
+          text: "country territory code",
+          value: "United States of America +1",
+          checked: false,
+          selectedIndex: 1,
+        },
+        { tagName: "input", type: "tel", text: "phone number", value: "", checked: false, selectedIndex: -1 },
+        { tagName: "input", type: "radio", text: "male gender", value: "male", checked: false, selectedIndex: -1 },
+        { tagName: "input", type: "radio", text: "female gender", value: "female", checked: false, selectedIndex: -1 },
+        { tagName: "select", type: "select", text: "month", value: "", checked: false, selectedIndex: 0 },
+        { tagName: "select", type: "select", text: "day", value: "", checked: false, selectedIndex: 0 },
+        { tagName: "select", type: "select", text: "year", value: "", checked: false, selectedIndex: 0 },
+      ],
+    });
+
+    expect(state.filledFields).toEqual([]);
+    expect(state.missingRequiredFields).toEqual([
+      "first name",
+      "last name",
+      "email address",
+      "phone number",
+      "birth month",
+      "birth day",
+      "birth year",
+      "gender",
+    ]);
   });
 });

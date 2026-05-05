@@ -15,9 +15,16 @@
  */
 import { sql } from "@vercel/postgres";
 import { hostname } from "node:os";
-import { existsSync, readFileSync } from "node:fs";
-import { resolve } from "node:path";
+import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
+import { dirname, join, resolve } from "node:path";
 import { createHash } from "node:crypto";
+
+const explicitWorkerEnv = {
+  USE_WORKER_FOR: process.env.USE_WORKER_FOR,
+  POLL_INTERVAL_MS: process.env.POLL_INTERVAL_MS,
+  MAX_CONCURRENT_JOBS: process.env.MAX_CONCURRENT_JOBS,
+  WORKER_INSTANCE_ID: process.env.WORKER_INSTANCE_ID,
+};
 
 // ── Local-dev convenience: hydrate process.env from ../.env.local ──────────
 // In Docker / Railway this file doesn't exist — we silently fall through to
@@ -30,6 +37,9 @@ if (existsSync(localEnvPath)) {
     const m = line.match(/^\s*([A-Z][A-Z0-9_]*)\s*=\s*"?([^"\n]*)"?\s*$/);
     if (m) process.env[m[1]] = m[2];
   }
+}
+for (const [key, value] of Object.entries(explicitWorkerEnv)) {
+  if (value) process.env[key] = value;
 }
 
 function envFingerprint(value: string | undefined): string {
@@ -78,9 +88,14 @@ const RETRY_SCAN_INTERVAL_MS = parseInt(
 const WORKER_ID =
   process.env.WORKER_INSTANCE_ID ||
   `worker-${hostname()}-${Math.random().toString(36).slice(2, 8)}`;
+const WORKER_SCENARIO_ALLOWLIST = parseWorkerScenarioAllowlist(process.env.USE_WORKER_FOR);
+const DEV_WORKER_LOCK_ENABLED =
+  process.env.NODE_ENV !== "production" &&
+  process.env.ONEGENT_WORKER_DEV_LOCK !== "0";
 
 let shuttingDown = false;
 let activeJobs = 0;
+let releaseDevWorkerLock: (() => void) | null = null;
 
 function log(...parts: unknown[]): void {
   console.log(`[${new Date().toISOString()}] [${WORKER_ID}]`, ...parts);
@@ -95,6 +110,92 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+function parseWorkerScenarioAllowlist(raw: string | undefined): string[] {
+  if (!raw?.trim()) return [];
+  return raw
+    .split(",")
+    .map((value) => value.trim().toLowerCase())
+    .filter((value) => value.length > 0 && value !== "all" && value !== "*");
+}
+
+function workerScenarioLockKey(): string {
+  const key = WORKER_SCENARIO_ALLOWLIST.length
+    ? [...WORKER_SCENARIO_ALLOWLIST].sort().join("-")
+    : "all";
+  return key.replace(/[^a-z0-9_-]+/gi, "-").toLowerCase();
+}
+
+function devWorkerLockPath(): string {
+  const base =
+    process.env.ONEGENT_WORKER_LOCK_DIR ||
+    (process.env.LOCALAPPDATA
+      ? join(process.env.LOCALAPPDATA, "Onegent", "worker-locks")
+      : join(process.cwd(), "..", ".tmp", "worker-locks"));
+  return join(base, `worker-${workerScenarioLockKey()}.json`);
+}
+
+function processIsAlive(pid: unknown): boolean {
+  if (typeof pid !== "number" || !Number.isInteger(pid) || pid <= 0) return false;
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function tryAcquireDevWorkerLock(): boolean {
+  if (!DEV_WORKER_LOCK_ENABLED) return true;
+  const lockPath = devWorkerLockPath();
+  mkdirSync(dirname(lockPath), { recursive: true });
+
+  if (existsSync(lockPath)) {
+    try {
+      const existing = JSON.parse(readFileSync(lockPath, "utf8")) as {
+        pid?: number;
+        workerId?: string;
+        heartbeatAt?: string;
+      };
+      const heartbeatMs = existing.heartbeatAt ? Date.now() - Date.parse(existing.heartbeatAt) : Number.POSITIVE_INFINITY;
+      if (processIsAlive(existing.pid) && heartbeatMs < 120_000) {
+        log(
+          `dev worker lock held by pid=${existing.pid} worker=${existing.workerId ?? "unknown"} ` +
+            `for scenarios=${workerScenarioLockKey()}; exiting to avoid duplicate local queue consumers`,
+        );
+        return false;
+      }
+    } catch {
+      // Corrupt or stale lock: overwrite below.
+    }
+  }
+
+  const writeLock = () => {
+    writeFileSync(
+      lockPath,
+      JSON.stringify({
+        pid: process.pid,
+        workerId: WORKER_ID,
+        scenarios: WORKER_SCENARIO_ALLOWLIST,
+        heartbeatAt: new Date().toISOString(),
+      }),
+    );
+  };
+
+  writeLock();
+  const heartbeat = setInterval(writeLock, 5_000);
+  releaseDevWorkerLock = () => {
+    clearInterval(heartbeat);
+    try {
+      const existing = JSON.parse(readFileSync(lockPath, "utf8")) as { pid?: number };
+      if (existing.pid === process.pid) unlinkSync(lockPath);
+    } catch {
+      // Best-effort local hygiene only.
+    }
+  };
+  log(`acquired dev worker lock ${lockPath}`);
+  return true;
+}
+
 // ── Job claim ──────────────────────────────────────────────────────────────
 //
 // Atomic SELECT + UPDATE with FOR UPDATE SKIP LOCKED — Postgres canonical
@@ -102,6 +203,7 @@ function sleep(ms: number): Promise<void> {
 // exactly one row; no double-execution races even with N instances.
 async function claimOne(): Promise<BookingJob | null> {
   const claimableStatuses = `{${CLAIMABLE_PENDING_STATUSES.join(",")}}`;
+  const scenarioAllowlist = `{${WORKER_SCENARIO_ALLOWLIST.join(",")}}`;
   // Filter to jobs whose first step carries the lib/core/execution marker —
   // the worker only knows how to execute lib/core-shape jobs. Without this
   // filter the worker would race the in-process Vercel path (which polls
@@ -126,6 +228,10 @@ async function claimOne(): Promise<BookingJob | null> {
       SELECT id FROM booking_jobs
       WHERE status = ANY(${claimableStatuses}::text[])
         AND (steps->0->'body'->>'__source') = ${CORE_EXECUTION_SOURCE}
+        AND (
+          cardinality(${scenarioAllowlist}::text[]) = 0
+          OR lower(steps->0->'body'->>'scenario') = ANY(${scenarioAllowlist}::text[])
+        )
       ORDER BY created_at ASC
       LIMIT 1
       FOR UPDATE SKIP LOCKED
@@ -381,12 +487,17 @@ async function main(): Promise<void> {
     throw new Error("POSTGRES_URL env var is required");
   }
 
+  if (!tryAcquireDevWorkerLock()) {
+    return;
+  }
+
   log(`starting — node ${process.version} on ${process.platform}`);
   log(
     `config: poll=${POLL_INTERVAL_MS / 1000}s ` +
       `max_concurrent=${MAX_CONCURRENT_JOBS} ` +
       `step_timeout=${STEP_TIMEOUT_MS / 1000}s ` +
-      `retry_scan=${RETRY_SCAN_INTERVAL_MS / 1000}s`,
+      `retry_scan=${RETRY_SCAN_INTERVAL_MS / 1000}s ` +
+      `scenarios=${WORKER_SCENARIO_ALLOWLIST.length ? WORKER_SCENARIO_ALLOWLIST.join(",") : "all"}`,
   );
 
   await sql`SELECT 1 AS ping`;
@@ -458,6 +569,7 @@ async function main(): Promise<void> {
   } else {
     log(`graceful shutdown complete`);
   }
+  releaseDevWorkerLock?.();
   process.exit(0);
 }
 
@@ -473,5 +585,6 @@ process.on("SIGINT", () => {
 
 main().catch((err) => {
   logError("fatal error in main", err);
+  releaseDevWorkerLock?.();
   process.exit(1);
 });

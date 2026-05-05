@@ -13,8 +13,9 @@ import type { BookingJob, BookingJobStep } from "@/lib/db";
 import type { AgentAutonomySettings } from "@/lib/autonomy";
 import { randomUUID } from "crypto";
 import { getOptionalClerkUserId } from "@/lib/auth/optional-clerk-user";
-import { isCoreSupported, markStepForCore } from "@/lib/core/cend-adapter";
+import { isCoreExecutionSource, isCoreSupported, markStepForCore } from "@/lib/core/cend-adapter";
 import { canUseNoDatabaseBookingJobsFallback } from "@/lib/booking-jobs/db-errors";
+import { prepareWorkerQueueSteps } from "@/lib/booking-jobs/worker-enqueue";
 
 /** POST /api/booking-jobs — create a new background booking job */
 export async function POST(req: NextRequest) {
@@ -37,27 +38,27 @@ export async function POST(req: NextRequest) {
   const initialSteps: BookingJobStep[] = steps.map((s) => ({ ...s, status: "pending" }));
 
   // ── Dogfood: per-step dual-gate ───────────────────────────────────────────
-  // When USE_CORE_EXECUTOR_FOR_CEND is on AND we have a Clerk user (skip
-  // anonymous sessions), re-shape every supported step's body to the lib/core
-  // ExecutionParams form + stamp __source="lib/core/execution". Per-step,
-  // not per-job: a future trip mixing restaurant + activity would route
-  // restaurant through lib/core and activity through legacy. Today this
-  // entrypoint is single-step (direct-booking from chat-commit), so it's
-  // effectively all-or-nothing — but keeping the per-step branch matches
-  // create-trip and avoids drift.
+  // If this job is worker-routable, insert it in worker-ready shape immediately.
+  // Creating a core-marked row as plain "pending" leaves a race before /start
+  // can flip it to pending_local; stale workers can claim that row and fail it.
+  const workerQueue = prepareWorkerQueueSteps(initialSteps, process.env.USE_WORKER_FOR);
   const useCoreForCend = process.env.USE_CORE_EXECUTOR_FOR_CEND === "true" && !!userId;
-  const finalSteps: BookingJobStep[] = useCoreForCend
+  const finalSteps: BookingJobStep[] = workerQueue.shouldUseWorkerQueue
+    ? workerQueue.steps
+    : useCoreForCend
     ? initialSteps.map((s) => (isCoreSupported(s.type) ? markStepForCore(s) : s))
     : initialSteps;
 
   const viaCoreCount = finalSteps.filter(
-    (s) => (s.body as Record<string, unknown>).__source === "lib/core/execution",
+    (s) => isCoreExecutionSource((s.body as Record<string, unknown>).__source),
   ).length;
   if (viaCoreCount > 0) {
     console.log("[booking-jobs] dual-gate per-step", {
       jobId,
       step_count: finalSteps.length,
       via_core: viaCoreCount,
+      worker_queue: workerQueue.shouldUseWorkerQueue,
+      status: workerQueue.status ?? "pending",
     });
   }
 
@@ -68,6 +69,7 @@ export async function POST(req: NextRequest) {
     tripLabel,
     steps: finalSteps,
     autonomySettings,
+    ...(workerQueue.status ? { status: workerQueue.status } : {}),
   });
 
   return NextResponse.json({

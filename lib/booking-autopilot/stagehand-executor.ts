@@ -119,7 +119,11 @@ import {
   fillFieldsInScopes,
 } from "./shared/form-actions";
 import { pickBestResySlotCandidate } from "./providers/resy-slot-detection";
-import { bookExpediaFlightProgrammatic } from "./providers/expedia";
+import {
+  bookExpediaFlightProgrammatic,
+  fillExpediaGuestForm,
+  inspectExpediaFlightTravelerFormState,
+} from "./providers/expedia";
 import { bookTicketmasterProgrammatic } from "./providers/ticketmaster-rpa";
 import { bookSeatGeekProgrammatic } from "./providers/seatgeek-rpa";
 
@@ -1460,14 +1464,22 @@ The user will enter CVV and confirm payment themselves.`,
           // ── AI form fill: passenger info + travel documents ──────────────
           trace("[flight-rpa] Checkout reached — running AI form fill");
           const effectiveFlightProfile = buildEffectiveProfile(input.profile, input.task);
-          let fillStoppedForQuota = false;
+          let fillStoppedReason: "quota" | "model_or_env" | undefined;
           let fillSummary = "Flight passenger info pre-filled by AI — open to review and complete payment.";
+          try {
+            trace("[flight-rpa] Running Expedia direct traveler field fill before AI fallback");
+            await fillExpediaGuestForm(checkoutPage, effectiveFlightProfile, trace);
+          } catch (directFillErr) {
+            trace(`[flight-rpa] Expedia direct traveler fill error: ${(directFillErr as Error).message?.slice(0, 80)}`);
+          }
           try {
             const fillResult = await fillFlightGuestFormWithAI(stagehand, effectiveFlightProfile, trace);
             trace(`[flight-rpa] AI fill: filled=${fillResult.filled.join(",")} failed=${fillResult.failed.join(",")}`);
-            fillStoppedForQuota = fillResult.stoppedReason === "quota";
-            if (fillStoppedForQuota) {
+            fillStoppedReason = fillResult.stoppedReason;
+            if (fillStoppedReason === "quota") {
               fillSummary = "Flight checkout reached, but AI form fill stopped because the model API quota was exceeded. Review traveler details and complete payment.";
+            } else if (fillStoppedReason === "model_or_env") {
+              fillSummary = "Flight checkout reached, but AI form fill stopped because the local model/environment is unavailable. Review traveler details manually.";
             } else if (fillResult.filled.length === 0) {
               fillSummary = "Flight checkout reached — review traveler details and complete payment.";
             }
@@ -1476,7 +1488,7 @@ The user will enter CVV and confirm payment themselves.`,
             fillSummary = "Flight checkout reached — review traveler details and complete payment.";
           }
           // ── AI audit: re-fill any fields AI missed ────────────────────
-          if (!fillStoppedForQuota) {
+          if (!fillStoppedReason) {
             try {
               const auditResult = await auditAndRefillEmptyFields(stagehand, checkoutPage, effectiveFlightProfile, trace);
               trace(`[flight-rpa] Audit refill: ${auditResult.refilled.join(",") || "none"}`);
@@ -1484,11 +1496,35 @@ The user will enter CVV and confirm payment themselves.`,
               trace(`[flight-rpa] Audit error: ${(auditErr as Error).message?.slice(0, 80)}`);
             }
           } else {
-            trace("[flight-rpa] Skipping AI audit refill because the model API quota was exceeded");
+            trace(`[flight-rpa] Skipping AI audit refill because AI fill stopped: ${fillStoppedReason}`);
           }
 
           const postFillScreenshot = await checkoutPage.screenshot({ type: "jpeg", quality: 55 }).catch(() => null);
           const checkoutUrl = (() => { try { return (checkoutPage as unknown as { url: () => string }).url(); } catch { return rpaResult.currentUrl || input.startUrl; } })();
+          const travelerState = await inspectExpediaFlightTravelerFormState(checkoutPage);
+          trace(
+            `[flight-rpa] Traveler form state: filled=${travelerState.filledFields.join(",") || "none"} ` +
+            `missing=${travelerState.missingRequiredFields.join(",") || "none"}`
+          );
+
+          if (travelerState.missingRequiredFields.length > 0) {
+            if (!useCloud && input.jobId) {
+              holdBrowserOpenForManualReview(
+                `Local mode: flight checkout reached but traveler form is incomplete — keeping browser open for ${Math.round(BROWSER_KEEP_OPEN_MS / 60000)} minutes for inspection.`
+              );
+            }
+            return {
+              status: "error" as const,
+              screenshotBase64: postFillScreenshot?.toString("base64") ?? finalScreenshotBase64,
+              handoffUrl: checkoutUrl || rpaResult.currentUrl || input.startUrl,
+              sessionUrl,
+              summary: `Flight checkout reached, but traveler form still needs manual fields: ${travelerState.missingRequiredFields.join(", ")}.`,
+              error: fillStoppedReason === "model_or_env"
+                ? `Model/environment blocked traveler form fill; missing fields: ${travelerState.missingRequiredFields.join(", ")}.`
+                : `Traveler form incomplete; missing fields: ${travelerState.missingRequiredFields.join(", ")}.`,
+              debugTrace,
+            };
+          }
           // Keep the Expedia flight browser open so the user can review traveler
           // details and enter payment info. Without this call, the successful
           // paused_payment return short-circuits past the central hold at the
@@ -6485,7 +6521,7 @@ The user will enter CVV and confirm payment themselves.`,
               tel.dispatchEvent(new Event("change", { bubbles: true }));
               return true;
             }, digitsOnly).catch(() => false);
-            if (phoneFilled) trace(`[fill-form] phone filled via JS native setter (digits: ${digitsOnly})`);
+            if (phoneFilled) trace(`[fill-form] phone filled via JS native setter (digits redacted, length=${digitsOnly.length})`);
             else trace("[fill-form] phone JS fallback: input already filled or not found");
           }
 

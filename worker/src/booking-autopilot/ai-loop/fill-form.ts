@@ -17,11 +17,15 @@ type Actable = { act: (instruction: string) => Promise<unknown> };
 export type FillResult = {
   filled: string[];
   failed: string[];
-  stoppedReason?: "quota";
+  stoppedReason?: "quota" | "model_or_env";
 };
 
 function isQuotaOrBillingError(message: string): boolean {
   return /credit balance is too low|insufficient_quota|invalid.{0,20}api.{0,20}key|rate limit exceeded|payment required|quota exceeded|exceeded your current quota|credits? exhausted|billing error|billing issue|browser minutes limit/i.test(message);
+}
+
+function isModelOrEnvironmentError(message: string): boolean {
+  return /model_not_found|does not have access to model|invalid model|model .* not found|api key|OPENAI_API_KEY|project .* access/i.test(message);
 }
 
 /**
@@ -124,10 +128,7 @@ export async function fillFieldsWithAI(
 
   for (const [label, value] of Object.entries(fields)) {
     if (!value) continue;
-    const displayValue = label.toLowerCase().includes("card")
-      ? value.replace(/\d(?=\d{4})/g, "*")
-      : value;
-    trace(`[fill-form] filling "${label}" = "${displayValue}"`);
+    trace(`[fill-form] filling "${label}" (value redacted, length=${value.length})`);
 
     try {
       // Phone number: be explicit about digits-only to prevent autocomplete/AI from appending
@@ -166,6 +167,10 @@ export async function fillFieldsWithAI(
       if (isQuotaOrBillingError(msg)) {
         trace('[fill-form] Stopping further AI fill due to quota/billing error');
         return { filled, failed, stoppedReason: "quota" };
+      }
+      if (isModelOrEnvironmentError(msg)) {
+        trace("[fill-form] Stopping further AI fill due to model/environment error");
+        return { filled, failed, stoppedReason: "model_or_env" };
       }
     }
   }

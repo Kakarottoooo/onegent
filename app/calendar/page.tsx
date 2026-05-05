@@ -17,6 +17,7 @@ import { useAuth } from "@clerk/nextjs";
 import GlobalNav from "@/components/GlobalNav";
 import MonthCalendar from "@/components/MonthCalendar";
 import { buildCalendarGrid } from "@/lib/calendar-grid";
+import { isActiveJobStatus } from "@/lib/status";
 import type { ExternalCalendarEventsByDay } from "@/lib/calendar-availability";
 import type { BookingJob } from "@/lib/db";
 
@@ -76,7 +77,7 @@ export default function CalendarPage() {
   // Light polling while anything is live — mirrors /tasks behavior so the
   // calendar colors update as bookings progress.
   useEffect(() => {
-    const hasRunning = jobs.some((j) => j.status === "running" || j.status === "pending");
+    const hasRunning = jobs.some((j) => isActiveJobStatus(j.status));
     if (!hasRunning) return;
     const timer = setInterval(() => void loadJobs(), 8000);
     return () => clearInterval(timer);
