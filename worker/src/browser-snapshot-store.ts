@@ -1,4 +1,5 @@
 import { mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
+import os from "node:os";
 import path from "node:path";
 
 export interface BrowserSnapshotEntry {
@@ -29,6 +30,75 @@ function getSnapshotRoot(): string {
   return path.join(root, ".debug-screenshots", "live");
 }
 
+function getRepoRoot(): string {
+  const cwd = process.cwd();
+  return path.basename(cwd).toLowerCase() === "worker"
+    ? path.resolve(cwd, "..")
+    : cwd;
+}
+
+function parsePathList(value: string | undefined): string[] {
+  if (!value) return [];
+  return value
+    .split(path.delimiter)
+    .map((entry) => entry.trim())
+    .filter(Boolean);
+}
+
+async function discoverSiblingSnapshotRoots(primaryRoot: string): Promise<string[]> {
+  if (process.env.ONEGENT_DISABLE_SNAPSHOT_DISCOVERY === "1") return [];
+  if (
+    process.env.NODE_ENV === "production" &&
+    process.env.ONEGENT_DISCOVER_SNAPSHOT_DIRS !== "1"
+  ) {
+    return [];
+  }
+
+  const roots: string[] = [];
+  const repoRoot = getRepoRoot();
+  const parent = path.dirname(repoRoot);
+
+  async function addOnegentDirs(container: string): Promise<void> {
+    let entries;
+    try {
+      entries = await readdir(container, { withFileTypes: true });
+    } catch {
+      return;
+    }
+    for (const entry of entries) {
+      if (!entry.isDirectory()) continue;
+      if (!entry.name.toLowerCase().startsWith("onegent")) continue;
+      roots.push(path.join(container, entry.name, ".debug-screenshots", "live"));
+    }
+  }
+
+  await addOnegentDirs(parent);
+  const claudeWorktrees = path.join(os.homedir(), "onegent", ".claude", "worktrees");
+  await addOnegentDirs(claudeWorktrees);
+
+  return uniquePaths(roots).filter((root) => path.resolve(root) !== path.resolve(primaryRoot));
+}
+
+async function getSnapshotReadRoots(): Promise<string[]> {
+  const primaryRoot = getSnapshotRoot();
+  const configuredRoots = parsePathList(process.env.ONEGENT_SNAPSHOT_READ_DIRS);
+  const discoveredRoots = await discoverSiblingSnapshotRoots(primaryRoot);
+  return uniquePaths([primaryRoot, ...configuredRoots, ...discoveredRoots]);
+}
+
+function uniquePaths(paths: string[]): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const p of paths) {
+    const resolved = path.resolve(p);
+    const key = process.platform === "win32" ? resolved.toLowerCase() : resolved;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(resolved);
+  }
+  return out;
+}
+
 function safeJobId(jobId: string): string {
   return jobId.replace(/[^a-zA-Z0-9_-]/g, "_");
 }
@@ -47,7 +117,23 @@ export async function saveBrowserSnapshot(
 }
 
 export async function listBrowserSnapshots(jobId: string): Promise<BrowserSnapshotEntry[]> {
-  const dir = path.join(getSnapshotRoot(), safeJobId(jobId));
+  const safeId = safeJobId(jobId);
+  const roots = await getSnapshotReadRoots();
+  const snapshotsById = new Map<string, BrowserSnapshotEntry>();
+
+  for (const root of roots) {
+    const dir = path.join(root, safeId);
+    for (const snapshot of await readSnapshotsFromDir(dir)) {
+      snapshotsById.set(snapshot.id, snapshot);
+    }
+  }
+
+  return [...snapshotsById.values()]
+    .sort((a, b) => new Date(b.ts).getTime() - new Date(a.ts).getTime())
+    .slice(0, 40);
+}
+
+async function readSnapshotsFromDir(dir: string): Promise<BrowserSnapshotEntry[]> {
   let files: string[];
   try {
     files = await readdir(dir);
@@ -69,10 +155,7 @@ export async function listBrowserSnapshots(jobId: string): Promise<BrowserSnapsh
       }),
   );
 
-  return snapshots
-    .filter((snapshot): snapshot is BrowserSnapshotEntry => snapshot !== null)
-    .sort((a, b) => new Date(b.ts).getTime() - new Date(a.ts).getTime())
-    .slice(0, 40);
+  return snapshots.filter((snapshot): snapshot is BrowserSnapshotEntry => snapshot !== null);
 }
 
 export async function deleteBrowserSnapshots(jobId: string): Promise<void> {
