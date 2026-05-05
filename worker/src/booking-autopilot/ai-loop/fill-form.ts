@@ -63,6 +63,7 @@ function buildFlightGuestFields(p: EffectiveProfile): Record<string, string> {
   if (p.first_name) fields["first name"]   = p.first_name;
   if (p.last_name)  fields["last name"]    = p.last_name;
   if (p.phone)      fields["phone number"] = p.phone;
+  if (p.gender)     fields["gender"]       = p.gender;
   // Travel documents (flight-specific)
   if (p.date_of_birth)          fields["date of birth"]           = p.date_of_birth;
   if (p.passport_number)        fields["passport number"]         = p.passport_number;

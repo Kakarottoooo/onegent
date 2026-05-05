@@ -848,6 +848,152 @@ async function findAndFillExpediaField(
   return false;
 }
 
+async function selectExpediaTravelerOption(
+  page: Page,
+  labelTexts: string[],
+  selectors: string[],
+  candidates: string[],
+  label: string,
+  trace: (msg: string) => void,
+): Promise<boolean> {
+  const trySelect = async (locator: ReturnType<Page["locator"]>, source: string): Promise<boolean> => {
+    const count = await locator.count().catch(() => 0);
+    for (let i = 0; i < Math.min(count, 4); i++) {
+      const item = locator.nth(i);
+      if (!(await item.isVisible({ timeout: 1000 }).catch(() => false))) continue;
+      for (const candidate of candidates) {
+        const attempts: Array<string | { value: string } | { label: string }> = [
+          candidate,
+          { value: candidate },
+          { label: candidate },
+        ];
+        for (const attempt of attempts) {
+          try {
+            const selected = await item.selectOption(attempt, { timeout: 1000 });
+            if (selected.length > 0) {
+              trace(`Expedia traveler: selected ${label} via ${source}`);
+              return true;
+            }
+          } catch {
+            // Try the next value/label shape.
+          }
+        }
+      }
+    }
+    return false;
+  };
+
+  for (const labelText of labelTexts) {
+    const loc = page.getByLabel(labelText, { exact: false });
+    if (await trySelect(loc, `label "${labelText}"`)) return true;
+  }
+
+  for (const selector of selectors) {
+    const loc = page.locator(selector);
+    if (await trySelect(loc, `selector "${selector}"`)) return true;
+  }
+
+  trace(`Expedia traveler: could not select ${label}`);
+  return false;
+}
+
+async function clickExpediaTravelerGender(
+  page: Page,
+  gender: "male" | "female",
+  trace: (msg: string) => void,
+): Promise<boolean> {
+  const label = gender === "male" ? "Male" : "Female";
+  const selectors = gender === "male"
+    ? [
+        'input[type="radio"][value="male" i]',
+        'input[type="radio"][aria-label="male" i]',
+        'input[type="radio"][id*="male" i]:not([id*="female" i])',
+        'input[type="radio"][name*="male" i]:not([name*="female" i])',
+      ]
+    : [
+        'input[type="radio"][value="female" i]',
+        'input[type="radio"][aria-label="female" i]',
+        'label:has-text("Female") input[type="radio"]',
+      ];
+
+  try {
+    const loc = page.getByLabel(label, { exact: true });
+    const count = await loc.count().catch(() => 0);
+    for (let i = 0; i < Math.min(count, 3); i++) {
+      const item = loc.nth(i);
+      if (!(await item.isVisible({ timeout: 1000 }).catch(() => false))) continue;
+      await item.click({ timeout: 1000 });
+      trace(`Expedia traveler: selected gender via label "${label}"`);
+      return true;
+    }
+  } catch {
+    // Try selector fallback.
+  }
+
+  for (const selector of selectors) {
+    try {
+      const loc = page.locator(selector).first();
+      if (!(await loc.isVisible({ timeout: 1000 }).catch(() => false))) continue;
+      await loc.click({ timeout: 1000 });
+      trace(`Expedia traveler: selected gender via selector "${selector}"`);
+      return true;
+    } catch {
+      // Try next selector.
+    }
+  }
+
+  trace("Expedia traveler: could not select gender");
+  return false;
+}
+
+async function fillExpediaTravelerDobFallback(
+  page: Page,
+  dateOfBirth: string | undefined,
+  trace: (msg: string) => void,
+): Promise<void> {
+  const candidates = buildExpediaDateOfBirthSelectCandidates(dateOfBirth);
+  if (!candidates) return;
+  await selectExpediaTravelerOption(
+    page,
+    ["Month", "Birth month", "Date of birth month"],
+    [
+      'select[aria-label*="month" i]',
+      'select[name*="month" i]',
+      'select[id*="month" i]',
+      'select[data-stid*="month" i]',
+    ],
+    candidates.month,
+    "birth month",
+    trace,
+  );
+  await selectExpediaTravelerOption(
+    page,
+    ["Day", "Birth day", "Date of birth day"],
+    [
+      'select[aria-label*="day" i]',
+      'select[name*="day" i]',
+      'select[id*="day" i]',
+      'select[data-stid*="day" i]',
+    ],
+    candidates.day,
+    "birth day",
+    trace,
+  );
+  await selectExpediaTravelerOption(
+    page,
+    ["Year", "Birth year", "Date of birth year"],
+    [
+      'select[aria-label*="year" i]',
+      'select[name*="year" i]',
+      'select[id*="year" i]',
+      'select[data-stid*="year" i]',
+    ],
+    candidates.year,
+    "birth year",
+    trace,
+  );
+}
+
 async function findVisibleInScope(scope: Page | Frame, selectors: string[]): Promise<{ scope: Page | Frame; selector: string } | null> {
   for (const selector of selectors) {
     const visible = await scope.evaluate((sel) => {
@@ -970,7 +1116,38 @@ interface ExpediaGuestProfile {
   last_name?: string;
   email?: string;
   phone?: string;
+  gender?: string;
   date_of_birth?: string;
+}
+
+export function normalizeExpediaTravelerGender(value?: string): "male" | "female" | undefined {
+  const normalized = (value ?? "").trim().toLowerCase();
+  if (!normalized) return undefined;
+  if (/^(m|male|man|mr|男|男性)$/.test(normalized)) return "male";
+  if (/^(f|female|woman|ms|mrs|miss|女|女性)$/.test(normalized)) return "female";
+  return undefined;
+}
+
+export function buildExpediaDateOfBirthSelectCandidates(dateOfBirth?: string): {
+  month: string[];
+  day: string[];
+  year: string[];
+} | null {
+  const parts = (dateOfBirth ?? "").match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!parts) return null;
+  const [, yyyy, mm, dd] = parts;
+  const monthIndex = parseInt(mm, 10);
+  const dayIndex = parseInt(dd, 10);
+  const monthNames = [
+    "", "January", "February", "March", "April", "May", "June",
+    "July", "August", "September", "October", "November", "December",
+  ];
+  const monthName = monthNames[monthIndex] ?? "";
+  return {
+    month: [mm, String(monthIndex), monthName, monthName.slice(0, 3)].filter(Boolean),
+    day: [dd, String(dayIndex)],
+    year: [yyyy],
+  };
 }
 
 export interface ExpediaFlightTravelerFormState {
@@ -1023,7 +1200,7 @@ export function summarizeExpediaFlightTravelerFormState(
     const radios = controls.filter(control =>
       control.type === "radio" && patterns.some(pattern => pattern.test(control.text))
     );
-    return radios.length === 0 || radios.some(control => control.checked);
+    return radios.length > 0 && radios.some(control => control.checked);
   };
 
   const visibleRequiredFields: string[] = [];
@@ -1096,6 +1273,7 @@ export async function fillExpediaGuestForm(
   await dismissExpediaAlmostYoursModal(page, trace);
 
   const phoneDigits = (profile.phone ?? "").replace(/\D/g, "");
+  const gender = normalizeExpediaTravelerGender(profile.gender);
 
   // Fill all 4 guest fields via page.evaluate + native setter in a single pass.
   // This approach:
@@ -1103,7 +1281,7 @@ export async function fillExpediaGuestForm(
   //   - Finds inputs by placeholder/type pattern (not by fragile id/name selectors)
   //   - Uses native HTMLInputElement setter to trigger React state updates
   const results = await page.evaluate(
-    ({ first, last, email, phone, dateOfBirth }: { first: string; last: string; email: string; phone: string; dateOfBirth: string }) => {
+    ({ first, last, email, phone, dateOfBirth, gender }: { first: string; last: string; email: string; phone: string; dateOfBirth: string; gender: string }) => {
       const nativeFill = (el: HTMLInputElement, val: string): boolean => {
         if (!val) return false;
         const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set;
@@ -1129,6 +1307,13 @@ export async function fillExpediaGuestForm(
         el.dispatchEvent(new Event("input", { bubbles: true }));
         el.dispatchEvent(new Event("change", { bubbles: true }));
         return el.value === option.value;
+      };
+      const nativeCheck = (el: HTMLInputElement): boolean => {
+        if (!el || el.type !== "radio" || el.disabled) return false;
+        el.click();
+        el.dispatchEvent(new Event("input", { bubbles: true }));
+        el.dispatchEvent(new Event("change", { bubbles: true }));
+        return el.checked;
       };
       const fieldText = (el: Element): string => {
         const id = el.getAttribute("id") ?? "";
@@ -1203,6 +1388,17 @@ export async function fillExpediaGuestForm(
         results.birthYear = yearSelect ? nativeSelect(yearSelect, [yyyy]) : "not_found";
       }
 
+      if (gender) {
+        const genderRadios = Array.from(document.querySelectorAll<HTMLInputElement>('input[type="radio"]'))
+          .filter(el => !el.disabled && (el.offsetParent !== null || el.getBoundingClientRect().width > 0));
+        const genderEl = genderRadios.find(el => {
+          const text = fieldText(el);
+          if (gender === "male") return /\bmale\b/.test(text) && !/\bfemale\b/.test(text);
+          return /\bfemale\b/.test(text);
+        });
+        results.gender = genderEl ? nativeCheck(genderEl) : "not_found";
+      }
+
       return results;
     },
     {
@@ -1211,6 +1407,7 @@ export async function fillExpediaGuestForm(
       email: profile.email ?? "",
       phone: phoneDigits,
       dateOfBirth: profile.date_of_birth ?? "",
+      gender: gender ?? "",
     }
   ).catch((err: Error) => {
     trace(`Expedia guest fill: page.evaluate failed — ${err.message?.slice(0, 80)}`);
@@ -1247,6 +1444,14 @@ export async function fillExpediaGuestForm(
       ["Phone number", "Phone Number"],
       ['input[type="tel"]:not([id*="country"])'],
       phoneDigits, "phone", trace, true);
+  }
+  if ((results.birthMonth !== true || results.birthDay !== true || results.birthYear !== true) && profile.date_of_birth) {
+    trace("Expedia guest: date of birth not fully filled via evaluate - trying locator fallback");
+    await fillExpediaTravelerDobFallback(page, profile.date_of_birth, trace);
+  }
+  if (results.gender !== true && gender) {
+    trace("Expedia guest: gender not found via evaluate - trying locator fallback");
+    await clickExpediaTravelerGender(page, gender, trace);
   }
 }
 

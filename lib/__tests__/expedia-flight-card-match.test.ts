@@ -3,9 +3,11 @@ import {
   classifyExpediaFlightBlockingOverlayText,
   classifyExpediaFlightCheckoutState,
   classifyExpediaFlightSafetyBoundaryText,
+  buildExpediaDateOfBirthSelectCandidates,
   extractExpediaFlightCandidateEvidence,
   formatExpediaFlightCandidateEvidence,
   hasExpediaFlightBundlePopupText,
+  normalizeExpediaTravelerGender,
   readExpediaFlightLocatorBoundingBox,
   readExpediaFlightLocatorCandidateLabel,
   selectExpediaFlightCandidateLabels,
@@ -405,6 +407,21 @@ describe("Expedia flight checkout state", () => {
 });
 
 describe("Expedia flight traveler form state", () => {
+  it("builds DOB select candidates for split Expedia traveler dropdowns", () => {
+    expect(buildExpediaDateOfBirthSelectCandidates("1994-06-09")).toEqual({
+      month: ["06", "6", "June", "Jun"],
+      day: ["09", "9"],
+      year: ["1994"],
+    });
+  });
+
+  it("normalizes traveler gender only when the profile explicitly provides it", () => {
+    expect(normalizeExpediaTravelerGender("male")).toBe("male");
+    expect(normalizeExpediaTravelerGender("Female")).toBe("female");
+    expect(normalizeExpediaTravelerGender("")).toBeUndefined();
+    expect(normalizeExpediaTravelerGender(undefined)).toBeUndefined();
+  });
+
   it("does not treat a filled country-code select as completed traveler identity fields", () => {
     const state = summarizeExpediaFlightTravelerFormState({
       bodyText: [

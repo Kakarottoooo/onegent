@@ -10,6 +10,8 @@ describe("Expedia flight runtime safety guards", () => {
     expect(source).toContain("results.lastName !== true && profile.last_name");
     expect(source).toContain("results.email !== true && profile.email");
     expect(source).toContain("results.phone !== true && phoneDigits");
+    expect(source).toContain("fillExpediaTravelerDobFallback(page, profile.date_of_birth, trace)");
+    expect(source).toContain("clickExpediaTravelerGender(page, gender, trace)");
   });
 
   it("treats incomplete traveler checkout as manual review instead of retryable error", () => {
