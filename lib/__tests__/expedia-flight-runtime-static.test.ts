@@ -39,6 +39,15 @@ describe("Expedia flight runtime safety guards", () => {
     expect(source).toContain("scrollExpediaCheckoutToFinalReviewBoundary");
   });
 
+  it("fills Expedia billing address fields by aria/autocomplete when locators miss", () => {
+    const source = readFileSync("lib/booking-autopilot/providers/expedia.ts", "utf8");
+
+    expect(source).toContain("Expedia billing native fill");
+    expect(source).toContain("billing address-line1");
+    expect(source).toContain("billing address-level2");
+    expect(source).toContain("billing postal-code");
+  });
+
   it("does not include CVV or security-code selectors in Expedia card iframe candidates", () => {
     const source = readFileSync("lib/booking-autopilot/providers/expedia.ts", "utf8");
 

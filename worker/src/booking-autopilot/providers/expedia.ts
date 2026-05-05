@@ -1188,6 +1188,85 @@ async function fillExpediaBillingAddressFields(
   profile: ExpediaGroupProfile,
   trace: (msg: string) => void,
 ): Promise<void> {
+  const billingZip = profile.billing_zip ?? profile.zip;
+  const nativeResult = await page.evaluate(
+    ({ address, city, zip }: { address: string; city: string; zip: string }) => {
+      const nativeFill = (el: HTMLInputElement, val: string): boolean => {
+        if (!val || !el || el.disabled) return false;
+        const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set;
+        el.scrollIntoView({ block: "center", behavior: "auto" as ScrollBehavior });
+        el.focus();
+        if (setter) {
+          setter.call(el, "");
+          setter.call(el, val);
+        } else {
+          el.value = "";
+          el.value = val;
+        }
+        el.dispatchEvent(new Event("input", { bubbles: true }));
+        el.dispatchEvent(new Event("change", { bubbles: true }));
+        el.blur();
+        return el.value.trim().length > 0;
+      };
+      const isVisible = (el: HTMLElement): boolean => {
+        const rect = el.getBoundingClientRect();
+        const style = window.getComputedStyle(el);
+        return rect.width > 0 &&
+          rect.height > 0 &&
+          style.display !== "none" &&
+          style.visibility !== "hidden" &&
+          style.opacity !== "0";
+      };
+      const fieldText = (el: HTMLInputElement): string => {
+        const id = el.getAttribute("id") ?? "";
+        const label = id ? document.querySelector<HTMLLabelElement>(`label[for="${CSS.escape(id)}"]`)?.textContent ?? "" : "";
+        return [
+          label,
+          el.getAttribute("aria-label") ?? "",
+          el.getAttribute("autocomplete") ?? "",
+          el.getAttribute("placeholder") ?? "",
+          el.getAttribute("name") ?? "",
+          el.getAttribute("id") ?? "",
+          el.closest("label")?.textContent ?? "",
+        ].join(" ").replace(/\s+/g, " ").trim().toLowerCase();
+      };
+      const inputs = Array.from(document.querySelectorAll<HTMLInputElement>("input"))
+        .filter(el => {
+          const input = el as HTMLInputElement;
+          const text = fieldText(input);
+          return isVisible(input) &&
+            !input.disabled &&
+            input.type !== "hidden" &&
+            !/\bcvv\b|\bcvc\b|security.?code|verification.?code|card.?security|coupon|promo/.test(text);
+        }) as HTMLInputElement[];
+      const findInput = (patterns: RegExp[], reject: RegExp[] = []): HTMLInputElement | undefined =>
+        inputs.find(input => {
+          const text = fieldText(input);
+          return patterns.some(pattern => pattern.test(text)) &&
+            !reject.some(pattern => pattern.test(text));
+        });
+      const addressEl = findInput(
+        [/billing address.?1/, /billing address-line1/, /billing address line1/, /address line.?1/, /address-line1/, /123 main/],
+        [/address.?2/, /suite|apt|apartment/],
+      );
+      const cityEl = findInput([/\bcity\b/, /billing address-level2/, /address-level2/, /billing city/]);
+      const zipEl = findInput([/\bzip code\b/, /billing zip/, /billing postal-code/, /postal-code/, /postal code/]);
+      return {
+        address: addressEl ? nativeFill(addressEl, address) : false,
+        city: cityEl ? nativeFill(cityEl, city) : false,
+        zip: zipEl ? nativeFill(zipEl, zip) : false,
+      };
+    },
+    {
+      address: profile.address_line1 ?? "",
+      city: profile.city ?? "",
+      zip: billingZip ?? "",
+    },
+  ).catch(() => ({ address: false, city: false, zip: false }));
+  trace(
+    `Expedia billing native fill: address=${nativeResult.address} city=${nativeResult.city} zip=${nativeResult.zip}`
+  );
+
   if (profile.country) {
     const country = profile.country;
     const countryCandidates = Array.from(new Set([
@@ -1206,7 +1285,7 @@ async function fillExpediaBillingAddressFields(
     );
   }
 
-  if (profile.address_line1) {
+  if (profile.address_line1 && !nativeResult.address) {
     await findAndFillExpediaField(
       page,
       ["Billing address 1", "Billing address", "Address line 1", "Address 1"],
@@ -1217,7 +1296,7 @@ async function fillExpediaBillingAddressFields(
     );
   }
 
-  if (profile.city) {
+  if (profile.city && !nativeResult.city) {
     await findAndFillExpediaField(
       page,
       ["City", "Billing city"],
