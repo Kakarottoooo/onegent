@@ -7,6 +7,12 @@ flight, and hotel closure attempts. This protocol does not approve or start a
 live provider run. A human must separately approve one exact command before any
 live provider, OpenAI, Computer Use, or browser automation is used.
 
+Operator surface: the read-only cockpit at `/dev/provider-closure` mirrors this
+protocol per vertical (current closure posture, last known blocker, evidence
+required, hard stops, what to inspect after run, no-live CLI commands). See
+`docs/30-provider-debug/PROVIDER_CLOSURE_OPERATOR_ROOM.md` for the cockpit's
+usage doc.
+
 ## Hard Stops
 
 These stops apply to every vertical:

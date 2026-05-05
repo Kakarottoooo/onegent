@@ -1,13 +1,15 @@
 # Claude - coordination state
 
-> Branch context: working on `claude/live-transient-failure-operator-polish`,
-> based on `codex/integrated-preview-20260504 @ 0c7efca`.
+> Branch context: working on `claude/provider-closure-operator-room`,
+> based on `codex/integrated-preview-20260504 @ cad9885`.
 > Integrated preview now includes Claude Track B branches through
-> `codex/integrated-preview-20260504` post Phase 1/1.5 demo-freeze pass
-> plus the second/third/fourth sidecar batches (Phase 2 hotel audit +
-> retry analysis pack, Track C demo acceptance + freeze checker, Claude
-> multi-agent conflict protocol, Claude new-agent startup contract,
-> Goal Phase 0 restaurant artifact pack + artifact corpus).
+> `codex/integrated-preview-20260504` post the live-readiness sidecar
+> batch (Goal runtime-closure consolidation + bridge, Agent2 flight +
+> Agent3 hotel live readiness packs, Claude operator failure taxonomy
+> at `a7ed628`). The latest closure cockpit on this branch composes
+> the no-live taxonomy + closure evidence protocol + per-vertical
+> runbooks into a read-only operator surface at
+> `/dev/provider-closure`.
 > Last updated: 2026-05-04.
 > Canonical path: `docs/10-coordination/claude.md`.
 
@@ -243,14 +245,17 @@ Boundaries:
 | `claude/multi-agent-conflict-protocol` | merged via cherry-pick (`7e66950`) | Add `docs/10-coordination/MULTI_AGENT_PROTOCOL.md` (branch freshness rule, ownership map, HUDDLE discipline, goal-branch behavior, cherry-pick policy, forbidden paths). Split the docs static guard into focused files while preserving current demo/Phase 2/IA invariants. Update `docs/10-coordination/README.md` to point at the protocol. |
 | `claude/new-agent-startup-contract` | merged via cherry-pick (`8a4c5bd`) | Add `docs/10-coordination/NEW_AGENT_STARTUP_CONTRACT.md` as the 3-minute cold-start checklist for any coding agent. Cross-link from `docs/INDEX.md` and `docs/10-coordination/MULTI_AGENT_PROTOCOL.md`. Extend `lib/__tests__/docs-static-core.test.ts` with required-docs entry + new it block locking the contract's sections, key terms, and cross-links. |
 | `claude/live-operator-control-surface` | pushed, awaiting cherry-pick (`fbd701a`) | Add read-only `/dev/live-operator-checklist` page powered by pure `lib/live-operator-checklist/` (per-provider hard stops + evidence + analyzer + runbook links for restaurant / Expedia / hotel). 17 unit tests + new docs-static-core guard locking the page is read-only with no action buttons. |
-| `claude/live-transient-failure-operator-polish` | active | Add `lib/operator-failure-taxonomy/` pure module + `docs/30-provider-debug/FAILURE_TAXONOMY.md` separating model/env transient (e.g. R-030 OpenAI Responses API 500 on 2026-05-04) from provider/network degraded vs provider logic vs safe boundary. Cross-link from `docs/20-phase0-restaurant/RESTAURANT_ARTIFACT_ANALYSIS.md` and `docs/30-provider-debug/PROVIDER_RUNTIME_DEBUG_PLAYBOOK.md`. Add `lib/__tests__/operator-failure-taxonomy.test.ts` (16 cases including R-030 worked-example evidence ids) and `lib/__tests__/docs-static-operator-pages.test.ts` (5 cases) auto-discovering every `app/dev/**/*.tsx` page and forbidding run/retry/live mutating buttons + `onClick` handlers + booking-jobs/v1 mutation fetches. |
+| `claude/live-transient-failure-operator-polish` | merged via cherry-pick (`a7ed628`) | Add `lib/operator-failure-taxonomy/` pure module + `docs/30-provider-debug/FAILURE_TAXONOMY.md` separating model/env transient (e.g. R-030 OpenAI Responses API 500 on 2026-05-04) from provider/network degraded vs provider logic vs safe boundary. Cross-link from `docs/20-phase0-restaurant/RESTAURANT_ARTIFACT_ANALYSIS.md` and `docs/30-provider-debug/PROVIDER_RUNTIME_DEBUG_PLAYBOOK.md`. Add `lib/__tests__/operator-failure-taxonomy.test.ts` (16 cases including R-030 worked-example evidence ids) and `lib/__tests__/docs-static-operator-pages.test.ts` (5 cases) auto-discovering every `app/dev/**/*.tsx` page and forbidding run/retry/live mutating buttons + `onClick` handlers + booking-jobs/v1 mutation fetches. |
+| `claude/provider-closure-operator-room` | active | Add read-only `/dev/provider-closure` cockpit composing `lib/provider-closure-room/` (3-lane manifest + artifact-graceful loader) with `lib/operator-failure-taxonomy/` and the live closure evidence protocol. Three vertical lanes (restaurant / flight / hotel) each show closure posture, last known blocker, evidence required, primary runbook + supporting references, safe hard stops, what to inspect after run, no-live CLI commands, taxonomy classes, and a source-of-truth reminder. New `docs/30-provider-debug/PROVIDER_CLOSURE_OPERATOR_ROOM.md` operator usage doc; cross-linked from `LIVE_CLOSURE_EVIDENCE_PROTOCOL.md` and `docs/INDEX.md`. Loader probes `app/dev/live-operator-checklist/page.tsx` via filesystem (no hard import) so the cockpit builds even before the unmerged sidecar lands. Static guards in `docs-static-operator-pages.test.ts` lock no run/retry/live/start/resume/execute/submit verbs as button labels or onClick handlers, no mutating fetch, no `<form>`, no hard import of `lib/live-operator-checklist/`, and the explicit "No live run is authorized by this page" disclaimer. |
 
 ## Current Claude Inbox
 
 - Do not start new provider/runtime work.
 - Demo-freeze passed; new docs/UI work for Track B should reflect that
   the integrated preview now ships with `/dev/demo-control-room`,
-  `/dev/demo-readiness`, and runtime-forensics UX v2.
+  `/dev/demo-readiness`, runtime-forensics UX v2, the live closure
+  evidence protocol, the operator failure taxonomy, and the provider
+  closure operator room (`/dev/provider-closure`).
 - If assigned UI/docs/tooling, first check `docs/INDEX.md` and avoid adding
   new root markdown files.
 - If adding a dashboard or runner, update the closest runbook plus
@@ -259,6 +264,9 @@ Boundaries:
   new `docs/<category>/` paths.
 - Do not duplicate Agent3's `lib/__tests__/docs-static-guard.test.ts`
   invariants; extend it with post-freeze guards instead.
+- Operator dev pages must keep the strictest no-action-button rule:
+  no run / retry / live / start / resume / execute / submit verbs as
+  button labels or onClick handlers; only Refresh + copy + links.
 
 ## Blocking On Codex
 
