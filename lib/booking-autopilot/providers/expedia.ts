@@ -2784,31 +2784,46 @@ async function fillBillingFieldsInPaymentIframes(
     // they only land on billing inputs. The classifier already proved
     // these inputs exist (it matched the same attributes); we just use
     // those attributes as the locator instead of an index.
+    // Lead with selectors that are guaranteed unique to billing — those
+    // CANNOT collide with cc-number (which has name="creditCards[0].card_number"
+    // / id="creditCardInput") even under DOM churn or overlay layering.
+    // Live HTML evidence:
+    //   <input name="creditCards[0].street" class="billing-address-one"
+    //          data-cko-rfrr-id="FLT.CKO.BILLINGADDRESS1"
+    //          autocomplete="billing address-line1">
+    //   <input name="creditCards[0].city" class="billing-city" ...>
+    //   <input name="creditCards[0].zipcode" class="billing-zip-code" ...>
+    //   <input name="creditCards[0].card_number" id="creditCardInput" ...>
     const selectorsByKind: Record<IframeFillKind, string[]> = {
       address1: [
+        'input[name="creditCards[0].street"]',
+        'input.billing-address-one',
+        'input[data-cko-rfrr-id="FLT.CKO.BILLINGADDRESS1"]',
+        'input[data-tealeaf-name="street"]',
+        'input[autocomplete="billing address-line1"]:visible',
         'input[autocomplete="billing address-line1"]',
-        'input[autocomplete="address-line1"]',
-        'input[aria-label="Billing address 1"]',
-        'input[aria-label*="Billing address 1" i]',
-        'input[placeholder="(ex. 123 Main)"]',
       ],
       city: [
+        'input[name="creditCards[0].city"]',
+        'input.billing-city',
+        'input[data-cko-rfrr-id="FLT.CKO.BILLINGCITY"]',
+        'input[data-tealeaf-name="city"]',
+        'input[autocomplete="billing address-level2"]:visible',
         'input[autocomplete="billing address-level2"]',
-        'input[autocomplete="address-level2"]',
-        'input[aria-label="City"]',
-        'input[aria-label*="Billing city" i]',
       ],
       zip: [
+        'input[name="creditCards[0].zipcode"]',
+        'input.billing-zip-code',
+        'input[data-cko-rfrr-id="FLT.CKO.BILLINGZIPCODE"]',
+        'input[data-tealeaf-name="zipcode"]',
+        'input[autocomplete="billing postal-code"]:visible',
         'input[autocomplete="billing postal-code"]',
-        'input[autocomplete="postal-code"]',
-        'input[aria-label="ZIP code"]',
-        'input[aria-label*="Billing ZIP" i]',
-        'input[aria-label*="ZIP" i]',
       ],
       state: [
-        'input[autocomplete="billing address-level1"]',
-        'input[aria-label*="Billing state" i]',
-        'input[aria-label="State"]',
+        'select[name="creditCards[0].state"]',
+        'select.billing-state',
+        'select[data-cko-rfrr-id="FLT.CKO.BILLINGSTATE"]',
+        'input[autocomplete="billing address-level1"]:visible',
       ],
       country: [],
     };
@@ -2848,8 +2863,11 @@ async function fillBillingFieldsInPaymentIframes(
             trace(`Expedia billing iframe fill SKIP (selector "${sel}"): ${kind} matched a card-tagged element (ac="${guard.ac}", aria="${guard.aria.slice(0, 30)}") — refusing to fill`);
             continue;
           }
-          await loc.click({ clickCount: 3, timeout: 2000 }).catch(() => { /* keep trying fill */ });
-          await loc.fill(value, { timeout: 3000 });
+          // NO .click() — the CKO overlay can intercept coord-based actions
+          // and route the keystroke buffer to cc-number. force:true bypasses
+          // actionability checks; the value lands directly via native setter
+          // on the locator's element, no coord interaction.
+          await loc.fill(value, { timeout: 3000, force: true });
           await new Promise(r => setTimeout(r, 150));
           const actual = await loc.inputValue({ timeout: 1500 }).catch(() => "");
           const ok = actual.trim().length > 0;
