@@ -65,6 +65,9 @@ import {
 } from "./core/stage-signals";
 import {
   type BookingComHelpers,
+  captureBookingComHotelResultCandidates as providerCaptureBookingComHotelResultCandidates,
+  captureBookingComRoomSelectionEvidence as providerCaptureBookingComRoomSelectionEvidence,
+  classifyBookingComHotelRuntimeBoundary as providerClassifyBookingComHotelRuntimeBoundary,
   clickBookingComListingTarget as providerClickBookingComListingTarget,
   evaluateBookingComVerification as providerEvaluateBookingComVerification,
   getBookingComStageSignals as providerGetBookingComStageSignals,
@@ -5243,6 +5246,17 @@ The user will enter CVV and confirm payment themselves.`,
             }, trace);
             if (!clicked) {
               trace(`Booking.com listing: no clickable result matched "${targetHotelName}".`);
+              const candidateEvidence = await providerCaptureBookingComHotelResultCandidates(raw, targetHotelName).catch(() => null);
+              if (candidateEvidence) {
+                trace(`Booking.com hotel result candidates: ${candidateEvidence.summary}`);
+                const boundaryText = await raw.evaluate(() => document.body?.innerText ?? document.body?.textContent ?? "").catch(() => "");
+                const boundary = providerClassifyBookingComHotelRuntimeBoundary({
+                  currentUrl: raw.url(),
+                  pageText: boundaryText,
+                  resultCandidates: candidateEvidence,
+                });
+                trace(`Booking.com hotel runtime boundary: ${boundary.state} - ${boundary.reason}`);
+              }
 
               // Fallback: navigate directly to the hotel detail page using a slug-derived URL.
               // The searchresults.html endpoint is often blocked by Booking.com's headless detection,
@@ -5387,6 +5401,10 @@ The user will enter CVV and confirm payment themselves.`,
                 safeMouseClick,
                 waitForPageSignals,
               }, trace);
+              let bookingComRoomEvidence = await providerCaptureBookingComRoomSelectionEvidence(raw).catch(() => null);
+              if (bookingComRoomEvidence) {
+                trace(`Booking.com room selection evidence: ${bookingComRoomEvidence.summary}`);
+              }
               await raw.evaluate(() => document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true }))).catch(() => {});
               await new Promise((r) => setTimeout(r, 120));
 
@@ -5473,6 +5491,18 @@ The user will enter CVV and confirm payment themselves.`,
                   trace(`Booking.com: ${domSet.summary}.`);
                   trace("Booking.com: could not find or set any room quantity dropdown.");
                 }
+              }
+
+              bookingComRoomEvidence = await providerCaptureBookingComRoomSelectionEvidence(raw).catch(() => bookingComRoomEvidence);
+              if (bookingComRoomEvidence) {
+                trace(`Booking.com room selection evidence after quantity pass: ${bookingComRoomEvidence.summary}`);
+                const boundaryText = await raw.evaluate(() => document.body?.innerText ?? document.body?.textContent ?? "").catch(() => "");
+                const boundary = providerClassifyBookingComHotelRuntimeBoundary({
+                  currentUrl: raw.url(),
+                  pageText: boundaryText,
+                  roomEvidence: bookingComRoomEvidence,
+                });
+                trace(`Booking.com hotel runtime boundary: ${boundary.state} - ${boundary.reason}`);
               }
 
               // Click "I'll reserve" —?use Playwright locator click (real mouse event),
@@ -5712,9 +5742,31 @@ The user will enter CVV and confirm payment themselves.`,
                 trace(`[RPA-room] tab check failed: ${(tabErr as Error).message?.slice(0, 60)}`);
               }
 
+              bookingComRoomEvidence = await providerCaptureBookingComRoomSelectionEvidence(raw).catch(() => bookingComRoomEvidence);
+              if (bookingComRoomEvidence) {
+                const boundaryText = await raw.evaluate(() => document.body?.innerText ?? document.body?.textContent ?? "").catch(() => "");
+                const boundary = providerClassifyBookingComHotelRuntimeBoundary({
+                  currentUrl: raw.url(),
+                  pageText: boundaryText,
+                  roomEvidence: bookingComRoomEvidence,
+                });
+                trace(`Booking.com hotel runtime boundary after reserve attempt: ${boundary.state} - ${boundary.reason}`);
+              }
+
               return true; // Always return true — never let AI agent handle this on Booking.com
             } catch (e) {
               trace(`Booking.com room selection failed: ${e}`);
+              const roomEvidence = await providerCaptureBookingComRoomSelectionEvidence(raw).catch(() => null);
+              if (roomEvidence) {
+                trace(`Booking.com room selection evidence at failure: ${roomEvidence.summary}`);
+                const boundaryText = await raw.evaluate(() => document.body?.innerText ?? document.body?.textContent ?? "").catch(() => "");
+                const boundary = providerClassifyBookingComHotelRuntimeBoundary({
+                  currentUrl: raw.url(),
+                  pageText: boundaryText,
+                  roomEvidence,
+                });
+                trace(`Booking.com hotel runtime boundary: ${boundary.state} - ${boundary.reason}`);
+              }
               return true; // Still return true to prevent AI agent from taking over
             }
           }
@@ -6555,6 +6607,9 @@ The user will enter CVV and confirm payment themselves.`,
     let providerSignals = activeProvider ? await activeProvider.getStageSignals(raw, currentUrl, pageText) : null;
     let bookingComFinalPaymentDomState = providerSignals?.paymentStep ?? false;
     let bookingComGuestDetailsDomState = providerSignals?.guestDetailsStep ?? false;
+    const bookingComStopBeforePaymentRequested =
+      activeProvider?.id === "booking-com" &&
+      /\bstop\s+before\s+(payment|cvv|cvc|security code|final|confirmation|complete booking)\b/i.test(input.task);
 
     if (!bookingComFinalPaymentDomState && bookingComGuestDetailsDomState) {
       // Booking.com sometimes transitions to the final-details/payment page a beat after
@@ -6728,6 +6783,7 @@ The user will enter CVV and confirm payment themselves.`,
     }
 
     if (!bookingComFinalPaymentDomState && bookingComGuestDetailsDomState) {
+      trace("Booking.com hotel runtime boundary: guest_details_manual_review_reached - guest details page visible before payment/final confirmation.");
       trace("Booking.com final state check: still on guest-details step, so payment/card filling is not allowed yet.");
       const screenshotBase64 = `data:image/png;base64,${(await page.screenshot({ type: "png" })).toString("base64")}`;
       return {
@@ -6741,7 +6797,26 @@ The user will enter CVV and confirm payment themselves.`,
       };
     }
 
+    if (bookingComFinalPaymentDomState && activeProvider?.id === "booking-com" && bookingComStopBeforePaymentRequested) {
+      trace("Booking.com hotel runtime boundary: payment_manual_review_reached - stop-before-payment instruction honored; no card fields filled.");
+      const screenshotBase64 = `data:image/png;base64,${(await page.screenshot({ type: "png" })).toString("base64")}`;
+      holdBrowserOpenForManualReview(
+        `Local mode: Booking.com payment boundary reached - keeping browser open for ${Math.round(BROWSER_KEEP_OPEN_MS / 60000)} minutes for manual review.`
+      );
+      return {
+        status: "paused_payment",
+        screenshotBase64,
+        handoffUrl: currentUrl,
+        sessionUrl,
+        summary: "Booking.com reached the payment/final-details boundary and stopped before payment, CVV, or final confirmation.",
+        debugTrace,
+      };
+    }
+
     if (bookingComFinalPaymentDomState && activeProvider) {
+      if (activeProvider.id === "booking-com") {
+        trace("Booking.com hotel runtime boundary: payment_manual_review_reached - payment/final-details page visible before final confirmation.");
+      }
       trace("Provider final payment page confirmed after guest-details step — running final card-field fill pass.");
       reachedGuestForm = true;
 

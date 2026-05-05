@@ -63,6 +63,39 @@ patterns, and no-live runtime-forensics fixtures/tests. Hotels.com remains a
 fallback only after Booking.com is explicitly blocked. Expedia hotel should stay
 out of scope until a separate founder-approved hotel case exists.
 
+## Runtime Closure Candidate
+
+Primary closure candidate: Booking.com.
+
+Why Booking.com first:
+
+- Current code has Booking.com-specific search-result selection, direct hotel
+  URL fallback, room-list reveal, room quantity selection, guest-details
+  detection, and final payment boundary guards.
+- Current docs and no-live artifact fixtures already name Booking.com as the
+  first controlled hotel retry path.
+- Hotels.com is still a fallback path until Booking.com is explicitly blocked.
+- Expedia hotel should not be used for this closure until a separate approved
+  hotel artifact proves it is closer than Booking.com.
+
+The runtime now emits classifier-ready no-live evidence lines when a future
+approved run reaches or fails the Booking.com hotel path:
+
+- `Booking.com hotel result candidates: ...`
+- `Booking.com room selection evidence: ...`
+- `Booking.com hotel runtime boundary: ...`
+
+Expected terminal labels from those lines are:
+
+- `provider_selector_drift`
+- `room_selection_manual_review_reached`
+- `room_selection_drift`
+- `guest_details_manual_review_reached`
+- `payment_manual_review_reached`
+- `login_or_captcha_boundary`
+- `network_provider_failure`
+- `provider_no_availability`
+
 ## Preflight Environment
 
 Before a retry:
@@ -83,6 +116,21 @@ Before a retry:
 
 Do not add a runner, dashboard button, cron, automation, or one-click live
 control for this retry.
+
+## Controlled Retry Preflight
+
+Before the founder-approved retry starts, verify these exact inputs:
+
+- Prompt matches the Exact User Prompt section byte-for-byte.
+- Start params match the JSON block above.
+- Primary provider is Booking.com.
+- Worker mirror drift check passes.
+- Artifact capture is ready for DB row, worker log excerpt, provider
+  screenshots, and live snapshots.
+- The operator is watching for the hard stops above.
+
+If any input differs, do not run the retry. Update this runbook first and ask
+for founder approval for the changed case.
 
 ## Hotel Controlled Retry Decision Tree
 
