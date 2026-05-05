@@ -396,6 +396,20 @@ npx tsx scripts/analyze-provider-artifact.ts --kind expedia .tmp\expedia-retry-a
 The output is paste-ready Markdown. Paste it into the Phase 2 handoff before
 deciding whether a patch is justified.
 
+Provider Closure War Room equivalent:
+
+```powershell
+cd C:\Users\Gzw19\onegent-integrated-20260504
+npx tsx scripts/provider-closure-war-room.ts preflight --vertical flight
+npx tsx scripts/provider-closure-war-room.ts analyze --vertical flight --bundle .tmp\expedia-retry-artifact-bundle.json --markdown
+```
+
+Use the war-room report when the handoff needs a single root cause, next
+single action, regression checklist, and YC/demo claim verdict. A synthetic or
+stale bundle cannot claim flight readiness; the report must say
+`not_live_verified` or `Can claim this vertical: no` until fresh
+DB/log/screenshot evidence is present.
+
 CLI validation behavior:
 
 - Missing file: exits non-zero and reports the missing artifact path.

@@ -87,6 +87,42 @@ Use a more focused dashboard when:
 The closure cockpit is the workflow entry point. The forensic and
 readiness dashboards are the deeper-detail screens it points to.
 
+## War Room Loop
+
+The Provider Closure War Room is the terminal no-live CLI layer for the
+cockpit workflow. It converts one post-attempt bundle into:
+
+1. `ProviderClosureEvidence` for restaurant, flight, or hotel.
+2. War-room verdict:
+   `live_closed_safe_boundary`,
+   `live_blocked_provider_or_network`,
+   `live_blocked_selector_or_dom`,
+   `live_blocked_model_or_env`, `not_live_verified`, or
+   `unsafe_or_disallowed_boundary`.
+3. Root-cause recommendation.
+4. Next single safe action.
+5. Regression-test checklist.
+6. Demo-readiness verdict.
+
+Use it after DB row JSON, worker log excerpt, screenshot paths, live snapshot
+paths, and operator notes have already been collected:
+
+```powershell
+npx tsx scripts/provider-closure-war-room.ts preflight --vertical restaurant
+npx tsx scripts/provider-closure-war-room.ts preflight --vertical flight
+npx tsx scripts/provider-closure-war-room.ts preflight --vertical hotel
+npx tsx scripts/provider-closure-war-room.ts analyze --vertical <restaurant|flight|hotel> --bundle .tmp\<bundle>.json --markdown
+```
+
+The war-room CLI is read-only. It does not approve provider work, does not
+open a browser, does not call OpenAI, does not read `.env.local`, does not
+write booking state, and does not click anything.
+
+Demo-readiness is intentionally stricter than classification. A synthetic
+fixture can exercise `live_closed_safe_boundary`, but it still cannot claim a
+vertical. A claim requires a non-synthetic, fresh, minimum-evidence artifact
+with `liveAttempt: true`.
+
 ## Hard Rules For The Cockpit
 
 These rules are enforced by static guards
