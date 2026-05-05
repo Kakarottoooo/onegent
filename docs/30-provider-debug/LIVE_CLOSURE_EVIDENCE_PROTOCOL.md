@@ -45,6 +45,50 @@ The analyzer result is evidence summarization, not proof by itself. If it
 returns `insufficient_evidence`, collect more DB/log/screenshot data before
 patching or retrying.
 
+## Unified Closure Harness
+
+Use the provider closure harness when an operator has already collected the
+DB row, bounded worker log excerpt, screenshot paths, live snapshot paths, and
+notes for one restaurant, flight, or hotel attempt.
+
+```powershell
+npx tsx scripts/provider-closure.ts preflight --kind restaurant
+npx tsx scripts/provider-closure.ts preflight --kind flight
+npx tsx scripts/provider-closure.ts preflight --kind hotel
+```
+
+The harness accepts either the normalized closure schema or the older analyzer
+bundle shape used by the restaurant, Expedia, and hotel artifact analyzers.
+It normalizes provider-specific states plus the runtime-forensics classifier
+into this terminal taxonomy:
+
+- `safe_handoff`
+- `login_otp_boundary`
+- `no_availability`
+- `provider_degraded`
+- `selector_drift`
+- `model_env_transient`
+- `unsafe_blocked`
+- `insufficient_evidence`
+
+Analyze and report from an already-collected local artifact only:
+
+```powershell
+npx tsx scripts/provider-closure.ts analyze --kind flight --artifact .tmp\expedia-retry-artifact-bundle.json
+npx tsx scripts/provider-closure.ts report --kind flight --artifact .tmp\expedia-retry-artifact-bundle.json --markdown
+```
+
+The harness never reads `.env.local`, opens a browser, starts a worker, starts
+a provider run, calls OpenAI, writes booking state, or clicks anything. Treat
+its `exactNextStep` field as the operator's next safe action, then verify
+against DB/log/screenshots before patching.
+
+Synthetic example reports live under:
+
+```text
+docs/30-provider-debug/provider-closure-reports/
+```
+
 ## DB Fields
 
 Inspect these fields before reading task UI summaries:
