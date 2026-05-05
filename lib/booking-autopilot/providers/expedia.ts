@@ -2752,67 +2752,63 @@ async function fillBillingFieldsInPaymentIframes(
       }
     }
 
-    // Playwright API path. Proven to work in fillCardFieldsInPaymentIframes
-    // for card-number / cardholder-name (also inside CKO iframe). The
-    // previous frame.evaluate + native value setter implementation matched
-    // the right inputs but the React-controlled CKO inputs blanked the
-    // value as soon as the change event fired — Playwright's .fill() goes
-    // through the actual focus / dispatch sequence the input expects.
+    // SELECTOR-ONLY fill (Playwright frame.locator API path).
+    //
+    // We deliberately do NOT use `frame.locator("input").nth(idx)` with the
+    // index from evaluate(): CKO/Braintree's React iframe re-orders inputs
+    // between the evaluate snapshot and the action, and a stale .nth(idx)
+    // can resolve to the card-number input — observed live (job
+    // 723b1445...) where address1 fill leaked extra characters into the
+    // card-number field.
+    //
+    // Clean attribute selectors like `input[autocomplete="billing
+    // address-line1"]` are deterministic: they CANNOT match the card-
+    // number input (autocomplete="cc-number"), so even under DOM churn
+    // they only land on billing inputs. The classifier already proved
+    // these inputs exist (it matched the same attributes); we just use
+    // those attributes as the locator instead of an index.
+    const selectorsByKind: Record<IframeFillKind, string[]> = {
+      address1: [
+        'input[autocomplete="billing address-line1"]',
+        'input[autocomplete="address-line1"]',
+        'input[aria-label="Billing address 1"]',
+        'input[aria-label*="Billing address 1" i]',
+        'input[placeholder="(ex. 123 Main)"]',
+      ],
+      city: [
+        'input[autocomplete="billing address-level2"]',
+        'input[autocomplete="address-level2"]',
+        'input[aria-label="City"]',
+        'input[aria-label*="Billing city" i]',
+      ],
+      zip: [
+        'input[autocomplete="billing postal-code"]',
+        'input[autocomplete="postal-code"]',
+        'input[aria-label="ZIP code"]',
+        'input[aria-label*="Billing ZIP" i]',
+        'input[aria-label*="ZIP" i]',
+      ],
+      state: [
+        'input[autocomplete="billing address-level1"]',
+        'input[aria-label*="Billing state" i]',
+        'input[aria-label="State"]',
+      ],
+      country: [],
+    };
+
     const fillInputInIframe = async (
       kind: IframeFillKind,
-      indexes: number[],
+      _indexes: number[],
       value: string,
     ): Promise<boolean> => {
-      if (!value || indexes.length === 0) return false;
-      for (const idx of indexes) {
-        try {
-          const loc = frame.locator("input").nth(idx);
-          await loc.click({ clickCount: 3, timeout: 2000 }).catch(() => { /* keep trying fill */ });
-          await loc.fill(value, { timeout: 3000 });
-          await new Promise(r => setTimeout(r, 150));
-          const actual = await loc.inputValue({ timeout: 1500 }).catch(() => "");
-          const ok = actual.trim().length > 0 && actual.replace(/\s/g, "") === value.replace(/\s/g, "");
-          trace(`Expedia billing iframe fill: ${kind} = ${ok ? "OK" : (actual.trim().length > 0 ? "PARTIAL" : "EMPTY")} (frame[${frameIdx}]=${frameUrl}, idx=${idx}, valueLen=${actual.length})`);
-          if (ok || actual.trim().length > 0) return ok || actual.trim().length > 0;
-        } catch (err) {
-          trace(`Expedia billing iframe fill error: ${kind} idx=${idx} (frame[${frameIdx}]=${frameUrl}) — ${(err as Error).message?.slice(0, 80)}`);
-        }
-      }
-      // Fallback: try selector-based fill against the SAME frame using clean attribute selectors.
-      const selectorsByKind: Record<IframeFillKind, string[]> = {
-        address1: [
-          'input[autocomplete="billing address-line1"]',
-          'input[autocomplete="address-line1"]',
-          'input[aria-label="Billing address 1"]',
-          'input[aria-label*="Billing address 1" i]',
-          'input[placeholder="(ex. 123 Main)"]',
-        ],
-        city: [
-          'input[autocomplete="billing address-level2"]',
-          'input[autocomplete="address-level2"]',
-          'input[aria-label="City"]',
-          'input[aria-label*="Billing city" i]',
-        ],
-        zip: [
-          'input[autocomplete="billing postal-code"]',
-          'input[autocomplete="postal-code"]',
-          'input[aria-label="ZIP code"]',
-          'input[aria-label*="Billing ZIP" i]',
-          'input[aria-label*="ZIP" i]',
-        ],
-        state: [
-          'input[autocomplete="billing address-level1"]',
-          'input[aria-label*="Billing state" i]',
-          'input[aria-label="State"]',
-        ],
-        country: [],
-      };
+      void _indexes; // detection-only; selectors decide where we actually fill
+      if (!value) return false;
       for (const sel of selectorsByKind[kind]) {
         try {
           const loc = frame.locator(sel).first();
           const count = await loc.count().catch(() => 0);
           if (count === 0) continue;
-          await loc.click({ clickCount: 3, timeout: 2000 }).catch(() => { /* keep trying */ });
+          await loc.click({ clickCount: 3, timeout: 2000 }).catch(() => { /* keep trying fill */ });
           await loc.fill(value, { timeout: 3000 });
           await new Promise(r => setTimeout(r, 150));
           const actual = await loc.inputValue({ timeout: 1500 }).catch(() => "");
@@ -2826,12 +2822,36 @@ async function fillBillingFieldsInPaymentIframes(
       return false;
     };
 
+    // Same selector-only philosophy for selects. Country/state selects use
+    // explicit autocomplete or aria-label attributes — never collide with
+    // card-related selects. NOTE: skip selects that look like phone
+    // country-code (autocomplete=tel-country-code, aria-label="Country/
+    // Territory Code") which the classifier currently flags as country.
+    const selectSelectorsByKind: Record<"country" | "state", string[]> = {
+      country: [
+        'select[autocomplete="billing country"]',
+        'select[autocomplete="country"]',
+        'select[aria-label="Country/Territory"]:not([autocomplete*="tel" i])',
+        'select[aria-label="Country/Region"]:not([autocomplete*="tel" i])',
+        'select[aria-label="Country"]:not([autocomplete*="tel" i])',
+      ],
+      state: [
+        'select[autocomplete="billing address-level1"]',
+        'select[autocomplete="address-level1"]',
+        'select[aria-label="Billing state"]',
+        'select[aria-label="State"]',
+        'select[aria-label="State/Province"]',
+        'select[name*="state" i]',
+      ],
+    };
+
     const fillSelectInIframe = async (
       kind: IframeFillKind,
-      indexes: number[],
+      _indexes: number[],
       value: string,
     ): Promise<boolean> => {
-      if (!value || indexes.length === 0) return false;
+      void _indexes;
+      if (!value || (kind !== "country" && kind !== "state")) return false;
       const candidates = kind === "country"
         ? Array.from(new Set([
             value,
@@ -2842,19 +2862,20 @@ async function fillBillingFieldsInPaymentIframes(
             value.toLowerCase(),
           ].filter(Boolean)))
         : Array.from(new Set([value, value.toUpperCase(), value.toLowerCase()]));
-      for (const idx of indexes) {
+      for (const sel of selectSelectorsByKind[kind]) {
         for (const cand of candidates) {
           try {
-            const loc = frame.locator("select").nth(idx);
-            // selectOption accepts {value} or {label} or string (matches both)
+            const loc = frame.locator(sel).first();
+            const count = await loc.count().catch(() => 0);
+            if (count === 0) continue;
             const result = await loc.selectOption(cand, { timeout: 2000 }).catch(() => null);
             if (result === null) continue;
             const actual = await loc.inputValue({ timeout: 1500 }).catch(() => "");
             const ok = actual.trim().length > 0;
-            trace(`Expedia billing iframe fill (select): ${kind} = ${ok ? "OK" : "EMPTY"} (frame[${frameIdx}]=${frameUrl}, idx=${idx}, candidate="${cand}", valueLen=${actual.length})`);
+            trace(`Expedia billing iframe fill (select "${sel}"): ${kind} = ${ok ? "OK" : "EMPTY"} (frame[${frameIdx}]=${frameUrl}, candidate="${cand}", valueLen=${actual.length})`);
             if (ok) return true;
           } catch (err) {
-            trace(`Expedia billing iframe fill select error: ${kind} idx=${idx} candidate="${cand}" (frame[${frameIdx}]=${frameUrl}) — ${(err as Error).message?.slice(0, 60)}`);
+            trace(`Expedia billing iframe fill select error: ${kind} sel="${sel}" candidate="${cand}" (frame[${frameIdx}]=${frameUrl}) — ${(err as Error).message?.slice(0, 60)}`);
           }
         }
       }
