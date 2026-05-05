@@ -2,7 +2,7 @@
 
 > **Branch**: `codex/integrated-preview-20260504`
 > **Last updated**: 2026-05-05
-> **Last commit**: `aa034b3` phase closure evidence pack integration
+> **Last commit**: `61e2eba` flight closure solve-next integration
 >
 > Claude reads this at session start. I write to it before each push.
 > See `CLAUDE.md` section "coordination protocol".
@@ -12,6 +12,33 @@
 ## Currently doing
 
 Completed in latest pass:
+- Integrated Agent2 `codex/flight-closure-solve-next @ 204cc4e` as
+  `61e2eba`.
+- Actual blocker addressed:
+  - Expedia flight card selection no longer allows hidden/cross-airline
+    price-only fallback to select a wrong-time card;
+  - correct target-time Southwest cards remain eligible when flight number text
+    is partial/hidden;
+  - member-price/sign-in promo overlays are dismissed only by safe close/escape
+    behavior, without clicking sign-in or bypassing auth;
+  - locator fallback handles missing `evaluate` and unsupported relative
+    ancestor locators;
+  - Expedia retry forensics classifies OpenAI 403 `model_not_found` as local
+    runtime env/project mismatch, not Expedia runtime evidence.
+- Verified `npx vitest run lib/__tests__/expedia-flight-card-match.test.ts
+  lib/__tests__/expedia-retry-analysis.test.ts` 29/29,
+  `npx tsc --noEmit --pretty false`, strict `npm run check-drift`, and
+  `npm run gate:phase1 -- --allow-known-drift` 9/9
+  (`phase1-quality-gate-2026-05-05T03-53-34-308Z.json`).
+- Safety boundary preserved during Codex integration: no live provider/OpenAI/
+  browser automation, worker start, DB mutation, payment, CVV/security-code,
+  OTP/CAPTCHA/login handling, or final confirmation.
+- Flight closure is still not complete. A new single controlled Expedia retry
+  is now technically justified after explicit founder approval; it must either
+  reach checkout/manual-review safe handoff or produce current actionable
+  candidate evidence without retry loops.
+
+Previous completed pass:
 - Integrated Goal `codex/goal-phase-closure-evidence-pack @ 9b43a65` as
   `aa034b3`, with a Codex follow-up wording correction in this integration
   worktree.

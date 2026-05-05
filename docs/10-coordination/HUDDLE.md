@@ -33,6 +33,24 @@ small.
 
 ## Live Activity
 
+- 2026-05-05 codex: integrated Agent2
+  `codex/flight-closure-solve-next @ 204cc4e` as `61e2eba` on top of the
+  current integrated preview. This solves the next Expedia selector/runtime
+  blocker from the prior controlled MCO -> BNA retry: hidden/cross-airline
+  price-only fallback can no longer select the wrong target-time card, correct
+  target-time Southwest cards remain selectable when flight number text is
+  partial/hidden, member-price/sign-in promo overlays are dismissed only by
+  safe close/escape behavior, and locator fallback no longer depends on
+  `evaluate`/relative ancestor support. The runtime forensics analyzer now
+  treats OpenAI 403 `model_not_found` as local runtime env/project mismatch,
+  not Expedia provider evidence. Verified Expedia targeted tests 29/29,
+  `tsc`, strict `check-drift`, and Phase 1 gate 9/9
+  (`phase1-quality-gate-2026-05-05T03-53-34-308Z.json`). No live
+  provider/OpenAI/browser automation, worker start, DB mutation, payment,
+  CVV/security-code, OTP/CAPTCHA/login handling, or final confirmation was
+  performed during Codex integration. Flight is not closure-complete until a
+  new explicitly founder-approved single controlled retry reaches a safe
+  handoff boundary or yields actionable current evidence.
 - 2026-05-05 codex: integrated Goal
   `codex/goal-phase-closure-evidence-pack @ 9b43a65` as `aa034b3`, then
   applied a Codex integration correction to avoid stale model-access wording.
