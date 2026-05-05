@@ -66,6 +66,7 @@ Then read the task-specific section below.
 | Provider runtime bug, logs, screenshots | `docs/30-provider-debug/PROVIDER_RUNTIME_DEBUG_PLAYBOOK.md`, `docs/30-provider-debug/LIVE_CLOSURE_EVIDENCE_PROTOCOL.md` |
 | Operator failure taxonomy (model/env vs provider) | `docs/30-provider-debug/FAILURE_TAXONOMY.md` |
 | Provider closure operator cockpit (3-vertical workflow) | `docs/30-provider-debug/PROVIDER_CLOSURE_OPERATOR_ROOM.md` |
+| Provider closure acceptance criteria (pass / fail / inconclusive) | `docs/30-provider-debug/PROVIDER_CLOSURE_ACCEPTANCE.md` |
 | Computer Use / executor architecture | `docs/30-provider-debug/EXECUTOR_V2_PIVOT.md` |
 | Phase 1 founder walkthrough / task UI | `docs/40-phase1/PHASE_1_FOUNDER_E2E.md`, `docs/40-phase1/AUTONOMOUS_FOUNDER_E2E.md`, `docs/40-phase1/PHASE_1_QUALITY_GATE.md` |
 | Phase 1.5 demo readiness / control room | `docs/40-phase1/DEMO_CONTROL_ROOM.md`, `docs/40-phase1/YC_DEMO_RUNBOOK.md`, `docs/40-phase1/DEMO_FREEZE_ACCEPTANCE.md` |
@@ -182,6 +183,7 @@ release entrypoints (`AGENTS.md`, `CLAUDE.md`, `README.md`, `CHANGELOG.md`).
 | Live closure evidence protocol | `docs/30-provider-debug/LIVE_CLOSURE_EVIDENCE_PROTOCOL.md` |
 | Operator failure taxonomy | `docs/30-provider-debug/FAILURE_TAXONOMY.md` |
 | Provider closure operator room | `docs/30-provider-debug/PROVIDER_CLOSURE_OPERATOR_ROOM.md` |
+| Provider closure acceptance | `docs/30-provider-debug/PROVIDER_CLOSURE_ACCEPTANCE.md` |
 | Phase 1 founder E2E | `docs/40-phase1/PHASE_1_FOUNDER_E2E.md` |
 | Phase 1 autonomous E2E runner | `docs/40-phase1/AUTONOMOUS_FOUNDER_E2E.md` |
 | Phase 1.5 quality gate | `docs/40-phase1/PHASE_1_QUALITY_GATE.md` |

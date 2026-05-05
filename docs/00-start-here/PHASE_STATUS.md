@@ -234,6 +234,19 @@ Next step:
   `docs/50-product-areas/EXPEDIA_CONTROLLED_RETRY_RUNBOOK.md` and
   `docs/50-product-areas/HOTEL_CONTROLLED_RETRY_RUNBOOK.md`.
 
+## Provider Closure Acceptance
+
+The canonical pass / fail / inconclusive criteria for restaurant, flight, and
+hotel provider closure live in
+`docs/30-provider-debug/PROVIDER_CLOSURE_ACCEPTANCE.md`. Read this doc before
+declaring a closure attempt is closure-pass; tooling passing is not provider
+closure passing. Until the acceptance doc records verified live closure for a
+lane, every lane in `lib/provider-closure-room/lanes.ts` stays
+`liveVerified: false`. The cockpit at `/dev/provider-closure` mirrors the
+acceptance partition; the operator failure taxonomy at
+`docs/30-provider-debug/FAILURE_TAXONOMY.md` is the 4-class signal layer that
+feeds the 8-state outcome partition.
+
 ## Phase 2 - Frozen
 
 Do not expand vertical scope or add new live provider work until Phase 0,

@@ -28,9 +28,12 @@
 
 import { loadProviderClosureRoomSnapshot } from "@/lib/provider-closure-room";
 import type {
+  NextAllowedAction,
   ProviderClosureRoomSnapshot,
+  ProviderClosureTerminalOutcome,
   ProviderLaneSnapshot,
 } from "@/lib/provider-closure-room";
+import { PROVIDER_CLOSURE_TERMINAL_OUTCOME_LABEL } from "@/lib/provider-closure/schema";
 
 import { RefreshButton } from "./refresh-button";
 
@@ -163,6 +166,8 @@ function LaneCard({ laneSnap }: { laneSnap: ProviderLaneSnapshot }) {
         <ArtifactBadge total={artifacts.totalBenchmarkArtifacts} matched={artifacts.laneBenchmarkArtifacts} />
       </header>
 
+      <NotLiveVerifiedBanner liveVerified={lane.liveVerified} />
+
       <Block label="Current closure posture">
         <p className="pcr__prose">{lane.closurePosture}</p>
       </Block>
@@ -170,6 +175,14 @@ function LaneCard({ laneSnap }: { laneSnap: ProviderLaneSnapshot }) {
       <Block label="Last known blocker">
         <p className="pcr__prose">{lane.lastKnownBlocker}</p>
       </Block>
+
+      <NextActionBlock action={lane.nextSingleAllowedAction} />
+
+      <ClosureAcceptanceBlock
+        safeTerminalStates={lane.safeTerminalStates}
+        failureTerminalStates={lane.failureTerminalStates}
+        inconclusiveTerminalStates={lane.inconclusiveTerminalStates}
+      />
 
       <Block label="Latest local artifact for this lane">
         <ArtifactPanel summary={artifacts} />
@@ -250,6 +263,129 @@ function LaneCard({ laneSnap }: { laneSnap: ProviderLaneSnapshot }) {
         {lane.sourceOfTruthReminder}
       </footer>
     </article>
+  );
+}
+
+/* ------ NOT LIVE VERIFIED banner --------------------------------------------------------------------------------- */
+
+function NotLiveVerifiedBanner({ liveVerified }: { liveVerified: false }) {
+  // The type is locked to `false` by the manifest. We render the
+  // banner unconditionally - the banner exists precisely so an
+  // operator never confuses "tooling passing" with "provider
+  // closure passing".
+  void liveVerified;
+  return (
+    <div
+      className="pcr__notlive"
+      role="status"
+      aria-label="Lane is not live verified"
+    >
+      <span className="pcr__notlive-pill">NOT LIVE VERIFIED</span>
+      <span className="pcr__notlive-text">
+        Tooling passing is not provider closure passing. Closure
+        acceptance for this lane requires the criteria below plus
+        an explicit operator sign-off recorded in the acceptance
+        doc.
+      </span>
+    </div>
+  );
+}
+
+/* ------ Next single allowed action block ------------------------------------------------------------------------ */
+
+function NextActionBlock({ action }: { action: NextAllowedAction }) {
+  return (
+    <section className="pcr__block pcr__nextaction" aria-label="Next single allowed action">
+      <h3 className="pcr__block-title">Next single allowed action</h3>
+      <div className="pcr__block-body">
+        <p className="pcr__nextaction-label">{action.label}</p>
+        <p className="pcr__prose">{action.detail}</p>
+        {action.ref ? (
+          <p className="pcr__prose pcr__prose--small">
+            Reference:{" "}
+            <ReferenceLink
+              reference={{ label: action.ref, ref: action.ref }}
+            />
+          </p>
+        ) : null}
+        <p className="pcr__prose pcr__prose--muted">
+          This is the only action authorized from this lane right
+          now. No live retry is authorized from this page; any
+          live attempt requires a separate founder-approved exact
+          command.
+        </p>
+      </div>
+    </section>
+  );
+}
+
+/* ------ Closure acceptance block --------------------------------------------------------------------------------- */
+
+function ClosureAcceptanceBlock({
+  safeTerminalStates,
+  failureTerminalStates,
+  inconclusiveTerminalStates,
+}: {
+  safeTerminalStates: ProviderClosureTerminalOutcome[];
+  failureTerminalStates: ProviderClosureTerminalOutcome[];
+  inconclusiveTerminalStates: ProviderClosureTerminalOutcome[];
+}) {
+  return (
+    <section className="pcr__block pcr__acceptance" aria-label="Closure acceptance criteria">
+      <h3 className="pcr__block-title">Closure acceptance criteria</h3>
+      <div className="pcr__block-body">
+        <p className="pcr__prose pcr__prose--small">
+          Outcomes are partitioned across the 8-state taxonomy in{" "}
+          <code>lib/provider-closure/schema.ts</code>. Read the full
+          pass / fail / inconclusive criteria in{" "}
+          <code>docs/30-provider-debug/PROVIDER_CLOSURE_ACCEPTANCE.md</code>.
+        </p>
+        <div className="pcr__acceptance-grid">
+          <AcceptanceColumn
+            title="Closure passes"
+            tone="good"
+            states={safeTerminalStates}
+          />
+          <AcceptanceColumn
+            title="Closure fails"
+            tone="bad"
+            states={failureTerminalStates}
+          />
+          <AcceptanceColumn
+            title="Inconclusive (do not retry)"
+            tone="warn"
+            states={inconclusiveTerminalStates}
+          />
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function AcceptanceColumn({
+  title,
+  tone,
+  states,
+}: {
+  title: string;
+  tone: "good" | "warn" | "bad";
+  states: ProviderClosureTerminalOutcome[];
+}) {
+  return (
+    <div className={`pcr__acceptance-col pcr__acceptance-col--${tone}`}>
+      <p className="pcr__acceptance-title">{title}</p>
+      <ul className="pcr__acceptance-list">
+        {states.map((s) => (
+          <li key={s}>
+            <code>{s}</code>
+            <span className="pcr__acceptance-label">
+              {" "}
+              {PROVIDER_CLOSURE_TERMINAL_OUTCOME_LABEL[s]}
+            </span>
+          </li>
+        ))}
+      </ul>
+    </div>
   );
 }
 
@@ -692,6 +828,95 @@ function Styles() {
         white-space: pre;
       }
       .pcr__cli-cmd code { background: transparent; color: inherit; padding: 0; }
+
+      .pcr__notlive {
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+        margin: 12px 0 0;
+        padding: 10px 14px;
+        background: var(--tone-bad-bg);
+        border: 1px solid var(--tone-bad-border);
+        border-radius: 8px;
+      }
+      .pcr__notlive-pill {
+        align-self: flex-start;
+        font-size: 11px;
+        font-weight: 800;
+        letter-spacing: 0.08em;
+        color: var(--tone-bad);
+        background: rgba(185, 28, 28, 0.16);
+        padding: 3px 8px;
+        border-radius: 4px;
+      }
+      .pcr__notlive-text {
+        font-size: 12px;
+        color: var(--ink-8);
+        line-height: 1.5;
+      }
+
+      .pcr__nextaction {
+        background: var(--tone-warn-bg);
+        border: 1px solid var(--tone-warn-border);
+        border-radius: 8px;
+        padding: 10px 14px;
+      }
+      .pcr__nextaction-label {
+        margin: 0 0 4px;
+        font-size: 13px;
+        font-weight: 700;
+        color: var(--ink-9);
+      }
+
+      .pcr__acceptance {
+        background: var(--ink-1);
+        border: 1px solid var(--ink-3);
+        border-radius: 8px;
+        padding: 10px 14px;
+      }
+      .pcr__acceptance-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+        gap: 10px;
+        margin-top: 6px;
+      }
+      .pcr__acceptance-col {
+        padding: 8px 10px;
+        border-radius: 6px;
+        background: var(--card);
+        border: 1px solid var(--ink-3);
+      }
+      .pcr__acceptance-col--good { border-color: var(--tone-good-border); }
+      .pcr__acceptance-col--warn { border-color: var(--tone-warn-border); }
+      .pcr__acceptance-col--bad { border-color: var(--tone-bad-border); }
+      .pcr__acceptance-title {
+        margin: 0 0 4px;
+        font-size: 11px;
+        font-weight: 700;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+        color: var(--ink-7);
+      }
+      .pcr__acceptance-col--good .pcr__acceptance-title { color: var(--tone-good); }
+      .pcr__acceptance-col--warn .pcr__acceptance-title { color: var(--tone-warn); }
+      .pcr__acceptance-col--bad .pcr__acceptance-title { color: var(--tone-bad); }
+      .pcr__acceptance-list {
+        margin: 0;
+        padding-left: 16px;
+        font-size: 11.5px;
+        line-height: 1.55;
+        color: var(--ink-8);
+      }
+      .pcr__acceptance-list code {
+        font-family: ui-monospace, SFMono-Regular, monospace;
+        background: var(--ink-2);
+        padding: 1px 4px;
+        border-radius: 3px;
+      }
+      .pcr__acceptance-label {
+        color: var(--ink-6);
+        font-size: 11px;
+      }
 
       .pcr__lane-footer {
         margin-top: 14px;

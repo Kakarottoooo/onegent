@@ -9,6 +9,10 @@
  * Pure types - no fs, no LLM, no DB, no live provider.
  */
 
+import type { ProviderClosureTerminalOutcome } from "@/lib/provider-closure/schema";
+
+export type { ProviderClosureTerminalOutcome };
+
 export type ProviderLaneId =
   | "restaurant"
   | "flight"
@@ -89,6 +93,23 @@ export interface HardStop {
 }
 
 /**
+ * The "next single allowed action" the operator may take. The
+ * cockpit renders exactly one of these per lane so an operator
+ * cannot misread the current closure state as "ready for any
+ * action". The action MUST be a non-mutating, inspection-only,
+ * generation-only, or read-only verb.
+ */
+export interface NextAllowedAction {
+  /** Short imperative label (under ~48 chars). ASCII-only. */
+  label: string;
+  /** One sentence detail. Must include a denial verb when it
+   * describes a state where the operator must wait. */
+  detail: string;
+  /** Optional doc / page / script reference for the action. */
+  ref?: string;
+}
+
+/**
  * One static lane definition. Three exist: restaurant, flight,
  * hotel. The operator cockpit composes this with the live
  * artifact loader to render the lane card.
@@ -98,6 +119,14 @@ export interface ProviderLane {
   displayName: string;
   /** Lowercase provider key for cross-dashboard pointers. */
   providerKey: string;
+  /**
+   * Locked false until provider closure has been live-verified
+   * for this vertical AND the manifest is updated by a separate
+   * branch with founder approval. The static guard fails if any
+   * lane silently flips to true without an accompanying
+   * acceptance-doc evidence section.
+   */
+  liveVerified: false;
   /**
    * One-paragraph "what closure looks like for this lane" rationale.
    * Defines what an accepted safe outcome is.
@@ -118,6 +147,22 @@ export interface ProviderLane {
   evidenceRequired: EvidenceRequirement[];
   /** Per-lane hard stops. */
   hardStops: HardStop[];
+  /**
+   * Closure-acceptance partition. The 8-state taxonomy in
+   * `lib/provider-closure/schema.ts` MUST be partitioned across
+   * these three buckets without overlap and without omission.
+   * The static guard verifies this invariant.
+   */
+  safeTerminalStates: ProviderClosureTerminalOutcome[];
+  failureTerminalStates: ProviderClosureTerminalOutcome[];
+  inconclusiveTerminalStates: ProviderClosureTerminalOutcome[];
+  /**
+   * The single next action the operator may take from this lane
+   * right now. Must be a non-mutating verb (inspect / read / open
+   * / generate / paste). Static guard rejects retry / run / live
+   * / start / resume / execute / submit verbs.
+   */
+  nextSingleAllowedAction: NextAllowedAction;
   /** "What to inspect after run" bullets. */
   inspectAfterRun: InspectAfterRun[];
   /** CLI command blocks for the operator to copy. */

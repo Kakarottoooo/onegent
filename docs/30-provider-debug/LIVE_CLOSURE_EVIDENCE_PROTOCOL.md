@@ -11,7 +11,11 @@ Operator surface: the read-only cockpit at `/dev/provider-closure` mirrors this
 protocol per vertical (current closure posture, last known blocker, evidence
 required, hard stops, what to inspect after run, no-live CLI commands). See
 `docs/30-provider-debug/PROVIDER_CLOSURE_OPERATOR_ROOM.md` for the cockpit's
-usage doc.
+usage doc and
+`docs/30-provider-debug/PROVIDER_CLOSURE_ACCEPTANCE.md` for the canonical
+per-vertical pass / fail / inconclusive criteria. Tooling passing is not
+provider closure passing; until the acceptance doc records verified live
+closure for a lane, every lane is `liveVerified: false`.
 
 ## Hard Stops
 

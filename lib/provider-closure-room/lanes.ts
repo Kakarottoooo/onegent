@@ -20,14 +20,50 @@
 import { FAILURE_CATEGORY_KEYS } from "@/lib/operator-failure-taxonomy";
 
 import type {
-  HardStop,
+  CliCommandBlock,
   EvidenceRequirement,
+  HardStop,
   InspectAfterRun,
   LaneReference,
-  CliCommandBlock,
+  NextAllowedAction,
+  ProviderClosureTerminalOutcome,
   ProviderLane,
   ProviderLaneId,
 } from "./types";
+
+/* ------ Closure-acceptance partition (locked for all lanes) ------------------------------------------------ */
+
+/**
+ * Locked partition of the 8-state taxonomy from
+ * `lib/provider-closure/schema.ts`. All three lanes share the
+ * same partition because the partition is defined by the safety
+ * model, not by the vertical: a `safe_handoff` is closure-pass
+ * regardless of provider; an `unsafe_blocked` is closure-fail
+ * regardless of provider; transient/network/selector/missing-
+ * evidence states are inconclusive regardless of provider.
+ *
+ * Static guards verify:
+ *   1. The three sets are disjoint.
+ *   2. Their union covers all 8 ProviderClosureTerminalOutcome keys.
+ *   3. `unsafe_blocked` is in failure.
+ *   4. `safe_handoff` and `login_otp_boundary` are in safe.
+ */
+const SAFE_TERMINAL_STATES: ProviderClosureTerminalOutcome[] = [
+  "safe_handoff",
+  "login_otp_boundary",
+  "no_availability",
+];
+
+const FAILURE_TERMINAL_STATES: ProviderClosureTerminalOutcome[] = [
+  "unsafe_blocked",
+];
+
+const INCONCLUSIVE_TERMINAL_STATES: ProviderClosureTerminalOutcome[] = [
+  "provider_degraded",
+  "selector_drift",
+  "model_env_transient",
+  "insufficient_evidence",
+];
 
 /* ------ Shared hard stops (apply to every vertical) ----------------------------------------------------------- */
 
@@ -74,6 +110,7 @@ const RESTAURANT_LANE: ProviderLane = {
   id: "restaurant",
   displayName: "Restaurant / Resy + OpenTable",
   providerKey: "resy",
+  liveVerified: false,
   closurePosture:
     "Phase 0A is in flight. Closure for restaurant means at least one " +
     "Resy or OpenTable case reaches an accepted safe outcome - " +
@@ -198,6 +235,17 @@ const RESTAURANT_LANE: ProviderLane = {
     },
     ...SHARED_HARD_STOPS,
   ],
+  safeTerminalStates: SAFE_TERMINAL_STATES,
+  failureTerminalStates: FAILURE_TERMINAL_STATES,
+  inconclusiveTerminalStates: INCONCLUSIVE_TERMINAL_STATES,
+  nextSingleAllowedAction: {
+    label: "Open /dev/restaurant-readiness and inspect probe verdict",
+    detail:
+      "Open the restaurant readiness control center and read the latest " +
+      "probe verdict. Do not run a live retry until the readiness page " +
+      "explicitly recommends a probe-validated case.",
+    ref: "/dev/restaurant-readiness",
+  },
   inspectAfterRun: [
     {
       label: "Reconcile DB error vs worker log vs screenshots",
@@ -268,6 +316,7 @@ const FLIGHT_LANE: ProviderLane = {
   id: "flight",
   displayName: "Flight / Expedia",
   providerKey: "expedia",
+  liveVerified: false,
   closurePosture:
     "Phase 2 candidate, not live-verified. Closure for flight means " +
     "the Expedia retry of MCO->BNA reaches the checkout manual-review " +
@@ -385,6 +434,18 @@ const FLIGHT_LANE: ProviderLane = {
     },
     ...SHARED_HARD_STOPS,
   ],
+  safeTerminalStates: SAFE_TERMINAL_STATES,
+  failureTerminalStates: FAILURE_TERMINAL_STATES,
+  inconclusiveTerminalStates: INCONCLUSIVE_TERMINAL_STATES,
+  nextSingleAllowedAction: {
+    label: "Inspect the latest Expedia retry artifact in /dev/runtime-forensics",
+    detail:
+      "Open /dev/runtime-forensics and read the latest Expedia flight " +
+      "artifact (or generate a synthetic bundle template if none). Do not " +
+      "drive a live retry without explicit founder approval per the " +
+      "Expedia controlled retry runbook.",
+    ref: "/dev/runtime-forensics",
+  },
   inspectAfterRun: [
     {
       label: "Confirm card-scan vs fallback path in worker log",
@@ -460,6 +521,7 @@ const HOTEL_LANE: ProviderLane = {
   id: "hotel",
   displayName: "Hotel / Booking.com first, Hotels.com fallback",
   providerKey: "booking-com",
+  liveVerified: false,
   closurePosture:
     "Phase 2 needs fresh artifacts before live promises. Closure for " +
     "hotel means a Booking.com retry of YOTEL New York Times Square " +
@@ -574,6 +636,18 @@ const HOTEL_LANE: ProviderLane = {
     },
     ...SHARED_HARD_STOPS,
   ],
+  safeTerminalStates: SAFE_TERMINAL_STATES,
+  failureTerminalStates: FAILURE_TERMINAL_STATES,
+  inconclusiveTerminalStates: INCONCLUSIVE_TERMINAL_STATES,
+  nextSingleAllowedAction: {
+    label: "Generate a hotel artifact bundle template and inspect it locally",
+    detail:
+      "Generate a synthetic hotel bundle template and inspect the shape. " +
+      "Do not drive a live Booking.com retry without explicit founder " +
+      "approval per the hotel controlled retry runbook; Hotels.com is " +
+      "fallback only.",
+    ref: "docs/50-product-areas/HOTEL_CONTROLLED_RETRY_RUNBOOK.md",
+  },
   inspectAfterRun: [
     {
       label: "Confirm correct hotel selection",
@@ -683,6 +757,10 @@ function deepCloneLane(lane: ProviderLane): ProviderLane {
       (r) => ({ ...r }) as EvidenceRequirement,
     ),
     hardStops: lane.hardStops.map((r) => ({ ...r }) as HardStop),
+    safeTerminalStates: [...lane.safeTerminalStates],
+    failureTerminalStates: [...lane.failureTerminalStates],
+    inconclusiveTerminalStates: [...lane.inconclusiveTerminalStates],
+    nextSingleAllowedAction: { ...lane.nextSingleAllowedAction } as NextAllowedAction,
     inspectAfterRun: lane.inspectAfterRun.map(
       (r) => ({ ...r }) as InspectAfterRun,
     ),

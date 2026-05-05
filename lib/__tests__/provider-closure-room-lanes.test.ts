@@ -202,6 +202,13 @@ describe("provider-closure-room lanes manifest", () => {
     expect(PROVIDER_LANES[0].cliCommands.map((c) => c.label)).not.toContain(
       "MUT",
     );
+    // New fields must also be defensively cloned.
+    copy[0].safeTerminalStates.push("unsafe_blocked");
+    expect(PROVIDER_LANES[0].safeTerminalStates).not.toContain(
+      "unsafe_blocked",
+    );
+    copy[0].nextSingleAllowedAction.label = "MUT";
+    expect(PROVIDER_LANES[0].nextSingleAllowedAction.label).not.toBe("MUT");
   });
 
   it("getProviderLane returns null for unknown ids", () => {
