@@ -61,6 +61,24 @@ interface ExpediaGroupProfile {
   phone?: string;
 }
 
+type ExpediaPageWithOptionalLabels = Page & {
+  getByLabel?: (text: string, options?: { exact?: boolean }) => ReturnType<Page["locator"]>;
+};
+
+function getExpediaLabelLocator(
+  page: Page,
+  labelText: string,
+  options: { exact?: boolean },
+): ReturnType<Page["locator"]> | null {
+  const getByLabel = (page as ExpediaPageWithOptionalLabels).getByLabel;
+  if (typeof getByLabel !== "function") return null;
+  try {
+    return getByLabel.call(page, labelText, options);
+  } catch {
+    return null;
+  }
+}
+
 export interface ExpediaFlightTarget {
   airline?: string;
   price?: number;
@@ -867,7 +885,8 @@ async function findAndFillExpediaField(
   // Try getByLabel first — most robust, works regardless of id/name/placeholder
   for (const labelText of labelTexts) {
     try {
-      const loc = page.getByLabel(labelText, { exact: false });
+      const loc = getExpediaLabelLocator(page, labelText, { exact: false });
+      if (!loc) continue;
       const count = await loc.count().catch(() => 0);
       if (count === 0) continue;
       const first = loc.first();
@@ -928,7 +947,8 @@ async function selectExpediaTravelerOption(
   };
 
   for (const labelText of labelTexts) {
-    const loc = page.getByLabel(labelText, { exact: false });
+    const loc = getExpediaLabelLocator(page, labelText, { exact: false });
+    if (!loc) continue;
     if (await trySelect(loc, `label "${labelText}"`)) return true;
   }
 
@@ -961,7 +981,8 @@ async function clickExpediaTravelerGender(
       ];
 
   try {
-    const loc = page.getByLabel(label, { exact: true });
+    const loc = getExpediaLabelLocator(page, label, { exact: true });
+    if (!loc) throw new Error("getByLabel unavailable");
     const count = await loc.count().catch(() => 0);
     for (let i = 0; i < Math.min(count, 3); i++) {
       const item = loc.nth(i);
@@ -1231,6 +1252,62 @@ async function fillExpediaBillingAddressFields(
   }
 }
 
+async function scrollExpediaCheckoutToSection(
+  page: Page,
+  label: string,
+  patterns: string[],
+  trace: (msg: string) => void,
+): Promise<boolean> {
+  const scrolled = await page.evaluate(({ patterns }: { patterns: string[] }) => {
+    const regexes = patterns.map(pattern => new RegExp(pattern, "i"));
+    const isVisible = (el: HTMLElement): boolean => {
+      const rect = el.getBoundingClientRect();
+      const style = window.getComputedStyle(el);
+      return rect.width > 0 &&
+        rect.height > 0 &&
+        style.display !== "none" &&
+        style.visibility !== "hidden";
+    };
+    const fieldText = (el: HTMLElement): string => {
+      const id = el.getAttribute("id") ?? "";
+      const labelText = id ? document.querySelector<HTMLLabelElement>(`label[for="${CSS.escape(id)}"]`)?.textContent ?? "" : "";
+      return [
+        labelText,
+        el.textContent ?? "",
+        el.getAttribute("aria-label") ?? "",
+        el.getAttribute("placeholder") ?? "",
+        el.getAttribute("name") ?? "",
+        el.getAttribute("id") ?? "",
+        el.closest("label")?.textContent ?? "",
+      ].join(" ").replace(/\s+/g, " ").trim();
+    };
+    const selectors = [
+      "input:not([type='hidden'])",
+      "select",
+      "textarea",
+      "button",
+      "[role='button']",
+      "[role='radio']",
+      "label",
+      "h1",
+      "h2",
+      "h3",
+      "h4",
+    ].join(",");
+    const candidates = Array.from(document.querySelectorAll<HTMLElement>(selectors))
+      .filter(el => isVisible(el))
+      .map(el => ({ el, text: fieldText(el) }))
+      .filter(item => item.text && regexes.some(regex => regex.test(item.text)));
+    const target = candidates[0]?.el;
+    if (!target) return false;
+    target.scrollIntoView({ block: "center", behavior: "auto" as ScrollBehavior });
+    return true;
+  }, { patterns }).catch(() => false);
+  trace(`Expedia checkout scroll: ${label} section visibleTarget=${scrolled}`);
+  await new Promise(r => setTimeout(r, 650));
+  return scrolled;
+}
+
 export async function scrollExpediaCheckoutToFinalReviewBoundary(
   page: Page,
   trace: (msg: string) => void,
@@ -1274,7 +1351,8 @@ async function fillExpediaGroupPaymentField(
   if (labelTexts && labelTexts.length > 0) {
     for (const labelText of labelTexts) {
       try {
-        const locator = page.getByLabel(labelText, { exact: false });
+        const locator = getExpediaLabelLocator(page, labelText, { exact: false });
+        if (!locator) continue;
         const count = await locator.count().catch(() => 0);
         if (count === 0) continue;
         const el = locator.first();
@@ -2186,8 +2264,18 @@ export async function fillExpediaGroupPaymentForm(
 
   // Always attempt guest fill on /checkout/session (combined guest+payment page)
   trace("Expedia payment: attempting guest info fill (combined checkout page)");
-  await fillExpediaGuestForm(page, profile, trace);
+  try {
+    await fillExpediaGuestForm(page, profile, trace);
+  } catch (guestErr) {
+    trace(`Expedia payment: guest info prefill did not complete; continuing to allowed payment/billing fields (${(guestErr as Error).message?.slice(0, 80)})`);
+  }
   await new Promise(r => setTimeout(r, 400));
+  await scrollExpediaCheckoutToSection(
+    page,
+    "payment details",
+    ["Payment Details", "How would you like to pay", "Payment method", "Name on Card", "Debit/Credit card number", "Card number"],
+    trace,
+  );
 
   // Detect inline vs iframe payment (use Playwright locator for shadow DOM support)
   const inlineCardCount = await page.locator(
@@ -2296,15 +2384,12 @@ export async function fillExpediaGroupPaymentForm(
     await new Promise(r => setTimeout(r, 600));
   }
 
-  // Scroll to the card details section so fields become visible
-  await page.evaluate(() => {
-    const cardSection = Array.from(document.querySelectorAll<HTMLElement>('*')).find(el => {
-      const text = (el.textContent ?? "").trim();
-      return text.startsWith("Card details") || text.startsWith("Card number") || text.includes("0000 0000 0000");
-    });
-    if (cardSection) cardSection.scrollIntoView({ block: "center" });
-  }).catch(() => {});
-  await new Promise(r => setTimeout(r, 600));
+  await scrollExpediaCheckoutToSection(
+    page,
+    "card fields",
+    ["Name on Card", "Debit/Credit card number", "Card number", "Expiration date", "Expiry date"],
+    trace,
+  );
 
   // ── Card fields strategy ──────────────────────────────────────────────────────
   // Expedia uses Checkout.com (CKO) for payment. CKO renders card inputs inside
@@ -2676,6 +2761,12 @@ export async function fillExpediaGroupPaymentForm(
   // Dismiss it now before attempting billing ZIP fill.
   await dismissExpediaAlmostYoursModal(page, trace, 400);
 
+  await scrollExpediaCheckoutToSection(
+    page,
+    "billing address",
+    ["Billing address 1", "Billing address", "Country/Territory", "City", "State", "ZIP code", "Postal code"],
+    trace,
+  );
   await fillExpediaBillingAddressFields(page, profile, trace);
 
   // Fill billing ZIP code via page.evaluate + native setter.

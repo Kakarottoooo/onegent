@@ -22,6 +22,23 @@ describe("Expedia flight runtime safety guards", () => {
     expect(source).toContain("CVV/security code and final booking remain human-only");
   });
 
+  it("keeps Expedia payment prefill going when optional label APIs are unavailable", () => {
+    const source = readFileSync("lib/booking-autopilot/providers/expedia.ts", "utf8");
+
+    expect(source).toContain("getExpediaLabelLocator(page, labelText");
+    expect(source).toContain("guest info prefill did not complete; continuing to allowed payment/billing fields");
+  });
+
+  it("explicitly scrolls Expedia checkout through payment, billing, and final review sections", () => {
+    const source = readFileSync("lib/booking-autopilot/providers/expedia.ts", "utf8");
+
+    expect(source).toContain("scrollExpediaCheckoutToSection(");
+    expect(source).toContain('"payment details"');
+    expect(source).toContain('"card fields"');
+    expect(source).toContain('"billing address"');
+    expect(source).toContain("scrollExpediaCheckoutToFinalReviewBoundary");
+  });
+
   it("does not include CVV or security-code selectors in Expedia card iframe candidates", () => {
     const source = readFileSync("lib/booking-autopilot/providers/expedia.ts", "utf8");
 
