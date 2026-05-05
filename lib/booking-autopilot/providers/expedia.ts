@@ -2752,93 +2752,129 @@ async function fillBillingFieldsInPaymentIframes(
       }
     }
 
-    const fillInIframe = async (
+    // Playwright API path. Proven to work in fillCardFieldsInPaymentIframes
+    // for card-number / cardholder-name (also inside CKO iframe). The
+    // previous frame.evaluate + native value setter implementation matched
+    // the right inputs but the React-controlled CKO inputs blanked the
+    // value as soon as the change event fired — Playwright's .fill() goes
+    // through the actual focus / dispatch sequence the input expects.
+    const fillInputInIframe = async (
       kind: IframeFillKind,
       indexes: number[],
       value: string,
     ): Promise<boolean> => {
       if (!value || indexes.length === 0) return false;
-      // Defer to frame.evaluate so we can run the React-aware native-setter
-      // dance without depending on Stagehand-proxied locator semantics.
-      const result = await frame.evaluate(({ indexes: idxs, value: val, isSelect }: {
-        indexes: number[]; value: string; isSelect: boolean;
-      }) => {
-        const nativeSetInput = (el: HTMLInputElement, v: string): boolean => {
-          if (el.disabled || el.type === "hidden") return false;
-          const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set;
-          try { el.scrollIntoView({ block: "center", behavior: "auto" as ScrollBehavior }); } catch { /* noop */ }
-          el.focus();
-          if (setter) { setter.call(el, ""); setter.call(el, v); }
-          else { el.value = ""; el.value = v; }
-          try { el.dispatchEvent(new InputEvent("beforeinput", { bubbles: true, data: v, inputType: "insertText" })); } catch { /* noop */ }
-          el.dispatchEvent(new Event("input", { bubbles: true }));
-          el.dispatchEvent(new Event("change", { bubbles: true }));
-          el.dispatchEvent(new KeyboardEvent("keyup", { bubbles: true }));
-          el.blur();
-          return el.value.trim().length > 0;
-        };
-        const nativeSetSelect = (el: HTMLSelectElement, v: string): boolean => {
-          if (el.disabled) return false;
-          const setter = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, "value")?.set;
-          const targets = [v, v.toUpperCase(), v.toLowerCase()];
-          for (const candidate of targets) {
-            for (const opt of Array.from(el.options)) {
-              if (opt.value === candidate || opt.text === candidate || opt.text === v) {
-                if (setter) setter.call(el, opt.value); else el.value = opt.value;
-                el.dispatchEvent(new Event("input", { bubbles: true }));
-                el.dispatchEvent(new Event("change", { bubbles: true }));
-                el.blur();
-                return el.value === opt.value;
-              }
-            }
-          }
-          return false;
-        };
-        const elements = isSelect
-          ? Array.from(document.querySelectorAll<HTMLSelectElement>("select"))
-          : Array.from(document.querySelectorAll<HTMLInputElement>("input"));
-        let lastLen = 0;
-        for (const idx of idxs) {
-          const el = elements[idx];
-          if (!el) continue;
-          const ok = isSelect
-            ? nativeSetSelect(el as HTMLSelectElement, val)
-            : nativeSetInput(el as HTMLInputElement, val);
-          if (ok) {
-            lastLen = isSelect ? (el as HTMLSelectElement).value.length : (el as HTMLInputElement).value.length;
-            return { ok: true, len: lastLen };
+      for (const idx of indexes) {
+        try {
+          const loc = frame.locator("input").nth(idx);
+          await loc.click({ clickCount: 3, timeout: 2000 }).catch(() => { /* keep trying fill */ });
+          await loc.fill(value, { timeout: 3000 });
+          await new Promise(r => setTimeout(r, 150));
+          const actual = await loc.inputValue({ timeout: 1500 }).catch(() => "");
+          const ok = actual.trim().length > 0 && actual.replace(/\s/g, "") === value.replace(/\s/g, "");
+          trace(`Expedia billing iframe fill: ${kind} = ${ok ? "OK" : (actual.trim().length > 0 ? "PARTIAL" : "EMPTY")} (frame[${frameIdx}]=${frameUrl}, idx=${idx}, valueLen=${actual.length})`);
+          if (ok || actual.trim().length > 0) return ok || actual.trim().length > 0;
+        } catch (err) {
+          trace(`Expedia billing iframe fill error: ${kind} idx=${idx} (frame[${frameIdx}]=${frameUrl}) — ${(err as Error).message?.slice(0, 80)}`);
+        }
+      }
+      // Fallback: try selector-based fill against the SAME frame using clean attribute selectors.
+      const selectorsByKind: Record<IframeFillKind, string[]> = {
+        address1: [
+          'input[autocomplete="billing address-line1"]',
+          'input[autocomplete="address-line1"]',
+          'input[aria-label="Billing address 1"]',
+          'input[aria-label*="Billing address 1" i]',
+          'input[placeholder="(ex. 123 Main)"]',
+        ],
+        city: [
+          'input[autocomplete="billing address-level2"]',
+          'input[autocomplete="address-level2"]',
+          'input[aria-label="City"]',
+          'input[aria-label*="Billing city" i]',
+        ],
+        zip: [
+          'input[autocomplete="billing postal-code"]',
+          'input[autocomplete="postal-code"]',
+          'input[aria-label="ZIP code"]',
+          'input[aria-label*="Billing ZIP" i]',
+          'input[aria-label*="ZIP" i]',
+        ],
+        state: [
+          'input[autocomplete="billing address-level1"]',
+          'input[aria-label*="Billing state" i]',
+          'input[aria-label="State"]',
+        ],
+        country: [],
+      };
+      for (const sel of selectorsByKind[kind]) {
+        try {
+          const loc = frame.locator(sel).first();
+          const count = await loc.count().catch(() => 0);
+          if (count === 0) continue;
+          await loc.click({ clickCount: 3, timeout: 2000 }).catch(() => { /* keep trying */ });
+          await loc.fill(value, { timeout: 3000 });
+          await new Promise(r => setTimeout(r, 150));
+          const actual = await loc.inputValue({ timeout: 1500 }).catch(() => "");
+          const ok = actual.trim().length > 0;
+          trace(`Expedia billing iframe fill (selector "${sel}"): ${kind} = ${ok ? "OK" : "EMPTY"} (frame[${frameIdx}]=${frameUrl}, valueLen=${actual.length})`);
+          if (ok) return true;
+        } catch (err) {
+          trace(`Expedia billing iframe fill selector error: ${kind} sel="${sel}" (frame[${frameIdx}]=${frameUrl}) — ${(err as Error).message?.slice(0, 80)}`);
+        }
+      }
+      return false;
+    };
+
+    const fillSelectInIframe = async (
+      kind: IframeFillKind,
+      indexes: number[],
+      value: string,
+    ): Promise<boolean> => {
+      if (!value || indexes.length === 0) return false;
+      const candidates = kind === "country"
+        ? Array.from(new Set([
+            value,
+            value.toUpperCase() === "US" ? "United States" : "",
+            value.toUpperCase() === "USA" ? "United States" : "",
+            value.toUpperCase() === "US" ? "United States of America" : "",
+            value.toUpperCase(),
+            value.toLowerCase(),
+          ].filter(Boolean)))
+        : Array.from(new Set([value, value.toUpperCase(), value.toLowerCase()]));
+      for (const idx of indexes) {
+        for (const cand of candidates) {
+          try {
+            const loc = frame.locator("select").nth(idx);
+            // selectOption accepts {value} or {label} or string (matches both)
+            const result = await loc.selectOption(cand, { timeout: 2000 }).catch(() => null);
+            if (result === null) continue;
+            const actual = await loc.inputValue({ timeout: 1500 }).catch(() => "");
+            const ok = actual.trim().length > 0;
+            trace(`Expedia billing iframe fill (select): ${kind} = ${ok ? "OK" : "EMPTY"} (frame[${frameIdx}]=${frameUrl}, idx=${idx}, candidate="${cand}", valueLen=${actual.length})`);
+            if (ok) return true;
+          } catch (err) {
+            trace(`Expedia billing iframe fill select error: ${kind} idx=${idx} candidate="${cand}" (frame[${frameIdx}]=${frameUrl}) — ${(err as Error).message?.slice(0, 60)}`);
           }
         }
-        return { ok: false, len: 0 };
-      }, { indexes, value, isSelect: kind === "country" || (kind === "state" && selectTargets.state.includes(indexes[0])) }).catch(() => ({ ok: false, len: 0 }));
-      const safeLen = result.len;
-      trace(`Expedia billing iframe fill: ${kind} = ${result.ok ? "OK" : "EMPTY"} (frame[${frameIdx}]=${frameUrl}, valueLen=${safeLen})`);
-      return result.ok;
+      }
+      return false;
     };
 
     if (!filled.address && values.address1)
-      filled.address = await fillInIframe("address1", inputTargets.address1, values.address1);
+      filled.address = await fillInputInIframe("address1", inputTargets.address1, values.address1);
     if (!filled.city && values.city)
-      filled.city = await fillInIframe("city", inputTargets.city, values.city);
+      filled.city = await fillInputInIframe("city", inputTargets.city, values.city);
     if (!filled.zip && values.zip)
-      filled.zip = await fillInIframe("zip", inputTargets.zip, values.zip);
+      filled.zip = await fillInputInIframe("zip", inputTargets.zip, values.zip);
     if (!filled.state && values.state) {
       // Try select first; fall back to input candidates if no select option matched.
       filled.state =
-        (await fillInIframe("state", selectTargets.state, values.state)) ||
-        (await fillInIframe("state", inputTargets.state, values.state));
+        (await fillSelectInIframe("state", selectTargets.state, values.state)) ||
+        (await fillInputInIframe("state", inputTargets.state, values.state));
     }
     if (!filled.country && values.country) {
-      const countryCandidates = Array.from(new Set([
-        values.country,
-        values.country.toUpperCase() === "US" ? "United States" : "",
-        values.country.toUpperCase() === "USA" ? "United States" : "",
-        values.country.toUpperCase() === "US" ? "United States of America" : "",
-      ].filter(Boolean)));
-      for (const candidate of countryCandidates) {
-        if (filled.country) break;
-        filled.country = await fillInIframe("country", selectTargets.country, candidate);
-      }
+      filled.country = await fillSelectInIframe("country", selectTargets.country, values.country);
     }
   }
 
