@@ -100,6 +100,26 @@ describe("analyzeExpediaRetryArtifactBundle", () => {
     );
   });
 
+  it("classifies login/OTP/CAPTCHA boundaries ahead of selector drift", () => {
+    const analysis = analyzeExpediaRetryArtifactBundle({
+      job: {
+        id: "fixture-expedia-otp-boundary",
+        provider: "expedia",
+        scenario: "flight",
+        status: "failed",
+      },
+      workerLogExcerpt: [
+        "[flight-rpa] Flight candidate evidence dump: airline=Southwest departure=8:50am price=$152",
+        "[flight-rpa] Login/OTP/CAPTCHA boundary detected before checkout: OTP boundary",
+        "Expedia flight OTP boundary reached. Stop for manual intervention; do not bypass login, OTP, or CAPTCHA.",
+      ].join("\n"),
+    });
+
+    expect(analysis.state).toBe("login_or_otp_boundary");
+    expect(analysis.confidence).toBe("high");
+    expect(analysis.signals[0]?.kind).toBe("login_or_otp_boundary");
+  });
+
   it("classifies provider no-availability only when explicit availability evidence is present", () => {
     const analysis = analyzeExpediaRetryArtifactBundle({
       job: {

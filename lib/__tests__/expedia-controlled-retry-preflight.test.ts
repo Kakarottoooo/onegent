@@ -81,6 +81,7 @@ describe("Expedia controlled retry no-live preflight", () => {
       expect.arrayContaining([
         "card_scan_failed_before_fallback",
         "checkout_manual_review_reached",
+        "login_or_otp_boundary",
         "model_or_env_transient",
         "provider_no_availability",
       ]),
@@ -253,6 +254,7 @@ function makeControlledRetryBundle(
       "fallback_attempted_no_match",
       "fallback_matched_no_checkout",
       "checkout_manual_review_reached",
+      "login_or_otp_boundary",
       "network_provider_failure",
       "model_or_env_transient",
       "provider_no_availability",
