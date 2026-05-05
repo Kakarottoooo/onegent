@@ -1,7 +1,7 @@
 # HUDDLE - Shared Working Memory
 
 > Last writer: codex
-> Last updated: 2026-05-04
+> Last updated: 2026-05-05
 > Cap: 2000 words. Trim oldest Live activity first.
 
 This file is the short-term shared memory for Codex, Claude, and future coding
@@ -33,6 +33,22 @@ small.
 
 ## Live Activity
 
+- 2026-05-05 codex: integrated the provider closure acceptance/final batch on
+  a clean worktree from `origin/codex/integrated-preview-20260504 @ bcd2895`.
+  Cherry-picked Claude `claude/provider-closure-acceptance-final @ ed46abc`
+  as `c33b429`, Agent3 `codex/hotel-live-closure-final @ 12b5a0e` as
+  `7916ff1`, and Goal `codex/goal-provider-closure-war-room @ 29ebdc6` as
+  `7597b12`. This adds the canonical provider closure acceptance doc and
+  locked `liveVerified: false` lane criteria, hardens Booking.com generated
+  tasks/start prompts to stop at manual-review boundaries with `rooms=1`
+  preserved, and adds the no-live provider closure war-room CLI/library with
+  synthetic reports. Verified targeted provider-closure/operator/docs/hotel
+  tests 124/124, `tsc`, strict `check-drift`, `git diff --check`, and Phase 1
+  gate 9/9 (`phase1-quality-gate-2026-05-05T02-07-16-988Z.json`). `npm run
+  build` was attempted but blocked by local disk exhaustion (`ENOSPC`, C: had
+  about 15 MB free while webpack cache wrote); no build-code failure was
+  observed. No live provider/OpenAI/browser automation, payment, CVV,
+  OTP/CAPTCHA/login/verification handling, or final confirmation was performed.
 - 2026-05-04 codex: integrated the latest provider runtime closure batch on
   top of the Resy R-030 root-cause fix. Cherry-picked Agent2
   `codex/flight-runtime-closure @ e151f9f` as `d2629f1`, Agent3

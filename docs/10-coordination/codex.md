@@ -1,8 +1,8 @@
 # Codex - coordination state
 
 > **Branch**: `codex/integrated-preview-20260504`
-> **Last updated**: 2026-05-04
-> **Last commit**: `1700725` provider closure operator room integration
+> **Last updated**: 2026-05-05
+> **Last commit**: `7597b12` provider closure war room integration
 >
 > Claude reads this at session start. I write to it before each push.
 > See `CLAUDE.md` section "coordination protocol".
@@ -12,6 +12,31 @@
 ## Currently doing
 
 Completed in latest pass:
+- Integrated three pushed provider-closure final branches on a clean worktree
+  from `origin/codex/integrated-preview-20260504 @ bcd2895`:
+  - Claude `claude/provider-closure-acceptance-final @ ed46abc` -> `c33b429`;
+  - Agent3 `codex/hotel-live-closure-final @ 12b5a0e` -> `7916ff1`;
+  - Goal `codex/goal-provider-closure-war-room @ 29ebdc6` -> `7597b12`.
+- New integrated capabilities:
+  - canonical provider closure acceptance doc plus `/dev/provider-closure`
+    lane criteria with `liveVerified: false` locked until evidence is recorded;
+  - Booking.com generated task/start prompt no longer asks to fill payment
+    information, stops at manual review, and preserves `rooms`;
+  - no-live provider closure war-room analyzer/CLI, fixtures, synthetic reports,
+    and demo-readiness verdict output.
+- Verified targeted provider-closure/operator/docs/hotel tests 124/124,
+  `npx tsc --noEmit --pretty false`, strict `npm run check-drift`,
+  `git diff --check`, and `npm run gate:phase1 -- --allow-known-drift` 9/9
+  (`phase1-quality-gate-2026-05-05T02-07-16-988Z.json`).
+- `npm run build` was attempted but blocked by local disk exhaustion
+  (`ENOSPC`; C: had about 15 MB free while webpack cache wrote). This matches
+  Agent3's build blocker and did not expose a code/build type failure before
+  the disk write failed.
+- Safety boundary preserved: no live provider/OpenAI/browser automation,
+  payment, CVV/security-code, OTP/CAPTCHA/login/verification handling, or final
+  confirmation during this integration.
+
+Previous completed pass:
 - Integrated four pushed no-live provider closure branches on top of the Resy
   R-030 root-cause patch:
   - Agent2 `codex/flight-runtime-closure @ e151f9f` -> `d2629f1`;
