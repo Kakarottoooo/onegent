@@ -1,9 +1,11 @@
 import { describe, expect, it } from "vitest";
 import {
+  classifyExpediaFlightBlockingOverlayText,
   classifyExpediaFlightSafetyBoundaryText,
   extractExpediaFlightCandidateEvidence,
   formatExpediaFlightCandidateEvidence,
   readExpediaFlightLocatorCandidateLabel,
+  selectExpediaFlightCandidateLabels,
   scoreExpediaFlightCandidateText,
 } from "../booking-autopilot/providers/expedia";
 
@@ -201,6 +203,60 @@ describe("Expedia flight candidate evidence", () => {
     });
     expect(score.exactMatch).toBe(true);
   });
+
+  it("keeps locator fallback evidence-ready when ancestor lookup is unsupported", async () => {
+    const label = await readExpediaFlightLocatorCandidateLabel({
+      getAttribute: async (name: string) => name === "aria-label" ? "Select flight Southwest WN 3084" : null,
+      textContent: async () => "8:50am MCO to BNA $152",
+      locator: () => {
+        throw new Error("relative locator unsupported");
+      },
+    });
+
+    expect(label).toContain("Southwest WN 3084");
+    expect(label).toContain("8:50am");
+    expect(label).toContain("$152");
+  });
+});
+
+describe("Expedia flight candidate selection", () => {
+  const target = {
+    airline: "Southwest",
+    price: 152,
+    time: "08:50",
+    flightNumber: "WN 3084",
+  };
+
+  it("selects a correct-time card even when the flight number is missing", () => {
+    const selection = selectExpediaFlightCandidateLabels(
+      [
+        "Select flight Southwest Airlines 9:55pm 11:00pm MCO to BNA $152 Nonstop",
+        "Select flight Southwest Airlines 8:50am 9:55am MCO to BNA $152 Nonstop",
+      ],
+      target,
+      "unit",
+    );
+
+    expect(selection.selected?.index).toBe(1);
+    expect(selection.selected?.score.hasFlightNumber).toBe(false);
+    expect(selection.selected?.score.fallbackEligible).toBe(true);
+    expect(selection.matchMode).toBe("fallback");
+  });
+
+  it("does not select a hidden-airline price-only card at the wrong target time", () => {
+    const selection = selectExpediaFlightCandidateLabels(
+      [
+        "Select flight 9:55pm 11:00pm Orlando (MCO) - Nashville (BNA) 2h 5m Nonstop $152",
+      ],
+      target,
+      "unit",
+    );
+
+    expect(selection.selected).toBeNull();
+    expect(selection.candidateSummaries.length).toBeGreaterThan(0);
+    expect(selection.candidateSummaries[0]).toContain("timeDelta=");
+    expect(selection.samples[0]).toContain("9:55pm");
+  });
 });
 
 describe("classifyExpediaFlightSafetyBoundaryText", () => {
@@ -209,5 +265,21 @@ describe("classifyExpediaFlightSafetyBoundaryText", () => {
     expect(classifyExpediaFlightSafetyBoundaryText("Enter the verification code sent to your phone")).toBe("OTP boundary");
     expect(classifyExpediaFlightSafetyBoundaryText("Complete this CAPTCHA to prove you are not a robot")).toBe("CAPTCHA boundary");
     expect(classifyExpediaFlightSafetyBoundaryText("Sign in for member prices, or continue as guest")).toBeNull();
+  });
+});
+
+describe("classifyExpediaFlightBlockingOverlayText", () => {
+  it("treats member-price sign-in copy as a dismissable overlay, not an auth boundary", () => {
+    expect(
+      classifyExpediaFlightBlockingOverlayText(
+        "Unlock instant savings with Member Prices Sign in Learn more about One Key",
+      ),
+    ).toBe("dismissable_member_price_overlay");
+  });
+
+  it("keeps true sign-in-to-continue copy as a hard safety boundary", () => {
+    expect(
+      classifyExpediaFlightBlockingOverlayText("Sign in to continue to checkout"),
+    ).toBe("hard_safety_boundary");
   });
 });

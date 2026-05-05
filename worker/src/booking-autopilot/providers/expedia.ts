@@ -110,6 +110,20 @@ type ExpediaFlightLocatorCandidate = {
   summary: string;
 };
 
+export interface ExpediaFlightCandidateSelectionReport {
+  selected: {
+    index: number;
+    label: string;
+    score: ExpediaFlightCandidateScore;
+    summary: string;
+  } | null;
+  candidateCount: number;
+  matchMode?: string;
+  matchReason?: string;
+  samples: string[];
+  candidateSummaries: string[];
+}
+
 type ExpediaFlightCandidateSelection = {
   best: ExpediaFlightLocatorCandidate | null;
   candidateCount: number;
@@ -328,6 +342,38 @@ export function classifyExpediaFlightSafetyBoundaryText(
   return null;
 }
 
+export type ExpediaFlightOverlayClassification =
+  | "dismissable_member_price_overlay"
+  | "hard_safety_boundary";
+
+export function classifyExpediaFlightBlockingOverlayText(
+  rawText: string | null | undefined,
+): ExpediaFlightOverlayClassification | null {
+  const text = normalizeExpediaFlightLoose(rawText);
+  if (!text) return null;
+  if (classifyExpediaFlightSafetyBoundaryText(text)) {
+    return "hard_safety_boundary";
+  }
+  const mentionsMemberPromo =
+    text.includes("member prices") ||
+    text.includes("one key") ||
+    text.includes("onekeycash") ||
+    text.includes("unlock instant savings") ||
+    text.includes("sign in and book a flight");
+  const looksLikeSignInPromo =
+    /\bsign[-_\s]?in\b/.test(text) &&
+    (
+      text.includes("member") ||
+      text.includes("savings") ||
+      text.includes("one key") ||
+      text.includes("onekeycash") ||
+      text.includes("learn more")
+    );
+  return mentionsMemberPromo || looksLikeSignInPromo
+    ? "dismissable_member_price_overlay"
+    : null;
+}
+
 export function scoreExpediaFlightCandidateText(
   rawText: string,
   target: ExpediaFlightTarget,
@@ -422,6 +468,49 @@ function sortExpediaFlightCandidatesByFit(
   const bPriceDelta = b.priceDelta ?? Number.POSITIVE_INFINITY;
   if (aPriceDelta !== bPriceDelta) return aPriceDelta - bPriceDelta;
   return 0;
+}
+
+export function selectExpediaFlightCandidateLabels(
+  labels: readonly string[],
+  target: ExpediaFlightTarget,
+  prefix = "candidate labels",
+): ExpediaFlightCandidateSelectionReport {
+  const samples = labels
+    .map(label => label.replace(/\s+/g, " ").trim())
+    .filter(Boolean)
+    .slice(0, 6);
+  const candidates = labels
+    .map((label, index) => {
+      const clippedLabel = label.replace(/\s+/g, " ").trim().slice(0, 140);
+      if (!clippedLabel.toLowerCase().includes("select")) return null;
+      const score = scoreExpediaFlightCandidateText(clippedLabel, target);
+      if (!(score.hasAirline || score.exactMatch || score.fallbackEligible)) {
+        return null;
+      }
+      return {
+        index,
+        label: clippedLabel,
+        score,
+        summary: formatExpediaFlightCandidateEvidence(clippedLabel, target),
+      };
+    })
+    .filter((candidate): candidate is ExpediaFlightLocatorCandidate => candidate !== null);
+  const selection = selectExpediaFlightCandidate(candidates, samples, target, prefix);
+  return {
+    selected: selection.best
+      ? {
+          index: selection.best.index,
+          label: selection.best.label,
+          score: selection.best.score,
+          summary: selection.best.summary,
+        }
+      : null,
+    candidateCount: selection.candidateCount,
+    matchMode: selection.matchMode,
+    matchReason: selection.matchReason,
+    samples: selection.samples,
+    candidateSummaries: selection.candidateSummaries,
+  };
 }
 
 // Billing ZIP code selectors for Expedia checkout.
@@ -1795,6 +1884,88 @@ export interface FlightBookingProfile extends ExpediaGuestProfile {
   nationality?: string;
 }
 
+async function dismissExpediaFlightSoftOverlays(
+  page: Page,
+  trace: (msg: string) => void,
+  waitMs = 0,
+): Promise<void> {
+  if (waitMs > 0) await new Promise(r => setTimeout(r, waitMs));
+
+  const result = await page.evaluate(() => {
+    const normalize = (value: string | null | undefined): string =>
+      (value ?? "").toLowerCase().replace(/\s+/g, " ").trim();
+    const isVisible = (el: HTMLElement): boolean => {
+      const r = el.getBoundingClientRect();
+      return r.width > 0 && r.height > 0;
+    };
+    const hardBoundary = (text: string): boolean =>
+      /\b(sign in to continue|log in to continue|login to continue|sign in or create an account to continue|authentication required|verification code|one-time passcode|one time passcode|captcha|robot check|unusual traffic|otp)\b/i.test(text);
+    const softOverlay = (text: string): boolean =>
+      text.includes("member prices") ||
+      text.includes("one key") ||
+      text.includes("onekeycash") ||
+      text.includes("unlock instant savings") ||
+      text.includes("sign in and book a flight") ||
+      (/\bsign[-_\s]?in\b/.test(text) &&
+        (text.includes("member") || text.includes("savings") || text.includes("one key") || text.includes("onekeycash") || text.includes("learn more")));
+    const containers = Array.from(document.querySelectorAll<HTMLElement>(
+      '[role="dialog"], [aria-modal="true"], dialog, [class*="popover"], [class*="overlay"], [class*="uitk-menu"], [data-stid*="popover"], [data-testid*="popover"]'
+    )).filter(isVisible);
+    for (const container of containers) {
+      const text = normalize(container.textContent);
+      if (!text || !softOverlay(text)) continue;
+      if (hardBoundary(text)) {
+        return { status: "hard_boundary", text: text.slice(0, 120), button: "" };
+      }
+      const controls = Array.from(container.querySelectorAll<HTMLElement>('button, a, [role="button"]'))
+        .filter(isVisible);
+      const dismiss = controls.find(control => {
+        const label = normalize(
+          `${control.textContent ?? ""} ${control.getAttribute("aria-label") ?? ""} ${control.getAttribute("title") ?? ""} ${control.getAttribute("id") ?? ""}`
+        );
+        if (!label) return false;
+        if (/\bsign[-_\s]?in\b/.test(label)) return false;
+        return (
+          label === "x" ||
+          label.includes("close") ||
+          label.includes("dismiss") ||
+          label.includes("no thanks") ||
+          label.includes("not now") ||
+          label.includes("skip")
+        );
+      });
+      if (dismiss) {
+        dismiss.click();
+        const label = normalize(dismiss.textContent || dismiss.getAttribute("aria-label") || dismiss.getAttribute("title") || dismiss.getAttribute("id"));
+        return { status: "dismissed", text: text.slice(0, 120), button: label.slice(0, 60) };
+      }
+      return { status: "soft_overlay_no_button", text: text.slice(0, 120), button: "" };
+    }
+    return { status: "none", text: "", button: "" };
+  }).catch((error: Error) => ({
+    status: "error",
+    text: error.message?.slice(0, 120) ?? "unknown overlay scan error",
+    button: "",
+  }));
+
+  if (result.status === "dismissed") {
+    trace(`[flight-rpa] Dismissed soft Expedia flight overlay before card scan: button="${result.button}" text="${result.text}"`);
+    await new Promise(r => setTimeout(r, 600));
+    return;
+  }
+  if (result.status === "soft_overlay_no_button") {
+    trace(`[flight-rpa] Soft Expedia flight overlay had no safe dismiss button; pressing Escape. text="${result.text}"`);
+    await page.keyboard.press("Escape").catch(() => undefined);
+    await new Promise(r => setTimeout(r, 600));
+    return;
+  }
+  if (result.status === "hard_boundary") {
+    trace(`[flight-rpa] Expedia overlay looks like a hard safety boundary; leaving it for boundary detection. text="${result.text}"`);
+  } else if (result.status === "error") {
+    trace(`[flight-rpa] Expedia soft overlay scan failed: ${result.text}`);
+  }
+}
+
 async function findExpediaFlightButtonWithLocatorFallback(
   page: Page,
   target: ExpediaFlightTarget,
@@ -1952,12 +2123,7 @@ function selectExpediaFlightCandidate(
     .filter(candidate =>
       !candidate.score.hasAirline &&
       !candidate.score.exactMatch &&
-      (
-        candidate.score.hasFlightNumber ||
-        candidate.score.hasPrice ||
-        (candidate.score.timeDelta !== null && candidate.score.timeDelta <= 180) ||
-        (candidate.score.priceDelta !== null && candidate.score.priceDelta <= 100)
-      )
+      candidate.score.fallbackEligible
     )
     .sort((a, b) => sortExpediaFlightCandidatesByFit(target, a.score, b.score, "fallback"));
 
@@ -1972,7 +2138,9 @@ function selectExpediaFlightCandidate(
       best: null,
       candidateCount: candidates.length,
       samples,
-      candidateSummaries: candidates.slice(0, 4).map(candidate => candidate.summary),
+      candidateSummaries: candidates.length > 0
+        ? candidates.slice(0, 4).map(candidate => candidate.summary)
+        : samples.slice(0, 4).map(sample => formatExpediaFlightCandidateEvidence(sample, target)),
     };
   }
 
@@ -2152,12 +2320,7 @@ async function clickExpediaFlightButtonWithDomRescan(
       .filter(candidate =>
         !candidate.hasAirline &&
         !candidate.exactMatch &&
-        (
-          candidate.hasFlightNumber ||
-          candidate.hasPrice ||
-          (candidate.timeDelta !== null && candidate.timeDelta <= 180) ||
-          (candidate.priceDelta !== null && candidate.priceDelta <= 100)
-        )
+        candidate.fallbackEligible
       )
       .sort((a, b) => sortByTargetFit(a, b, "fallback"));
 
@@ -2343,6 +2506,7 @@ export async function bookExpediaFlightProgrammatic(
   };
 
   await enforceOneWayTripUi();
+  await dismissExpediaFlightSoftOverlays(page, trace, 300);
   trace("[flight-rpa] Waiting for flight results to load...");
   for (let i = 0; i < 20; i++) {
     await new Promise(r => setTimeout(r, 1000));
@@ -2356,6 +2520,7 @@ export async function bookExpediaFlightProgrammatic(
     if (hasResults) break;
   }
   await new Promise(r => setTimeout(r, 800));
+  await dismissExpediaFlightSoftOverlays(page, trace, 100);
   const preScanBoundary = await detectSafetyBoundary(page);
   if (preScanBoundary) {
     trace(`[flight-rpa] Login/OTP/CAPTCHA boundary detected before flight-card scan: ${preScanBoundary}`);
@@ -2576,12 +2741,7 @@ export async function bookExpediaFlightProgrammatic(
       .filter(candidate =>
         !candidate.hasAirline &&
         !candidate.exactMatch &&
-        (
-          candidate.hasFlightNumber ||
-          candidate.hasPrice ||
-          (candidate.timeDelta !== null && candidate.timeDelta <= 180) ||
-          (candidate.priceDelta !== null && candidate.priceDelta <= 100)
-        )
+        candidate.fallbackEligible
       )
       .sort((a, b) => sortByTargetFit(a, b, "fallback"));
     const best = strictCandidates[0] ?? sameAirlineFallbackCandidates[0] ?? crossAirlineFallbackCandidates[0];
