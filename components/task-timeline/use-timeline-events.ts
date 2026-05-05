@@ -197,7 +197,7 @@ export function useTimelineEvents(jobId: string | null): TimelineState {
 
 /* ─── Payload normalizers ───────────────────────────────────────────── */
 
-function extractEvents(payload: unknown): TimelineEvent[] {
+export function extractEvents(payload: unknown): TimelineEvent[] {
   if (!payload || typeof payload !== "object") return [];
   const obj = payload as Record<string, unknown>;
 
@@ -205,9 +205,13 @@ function extractEvents(payload: unknown): TimelineEvent[] {
   // executor-v2's native emission. Filter to known kinds so a future
   // backend-side new kind doesn't crash the UI.
   if (Array.isArray(obj.events) && obj.events.length > 0) {
-    return obj.events
+    const normalized = obj.events
       .map(normalizeEvent)
       .filter((e): e is TimelineEvent => e !== null);
+    if (normalized.length > 0) return normalized;
+    // Current servers may return task-timeline kinds like `job_started` or
+    // `payment_required`; this panel renders a different vocabulary. Fall
+    // through to the full job/entries adapter instead of showing "waiting".
   }
 
   // Fallback: payload.entries (raw decisionLog) — run our local adapter.

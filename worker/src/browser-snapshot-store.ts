@@ -166,9 +166,11 @@ export async function listBrowserSnapshots(jobId: string): Promise<BrowserSnapsh
     }
   }
 
-  return [...snapshotsById.values()]
-    .sort((a, b) => new Date(b.ts).getTime() - new Date(a.ts).getTime())
-    .slice(0, 40);
+  const sorted = [...snapshotsById.values()].sort(
+    (a, b) => new Date(a.ts).getTime() - new Date(b.ts).getTime(),
+  );
+
+  return sorted.slice(Math.max(0, sorted.length - 120));
 }
 
 async function readSnapshotsFromDir(dir: string): Promise<BrowserSnapshotEntry[]> {

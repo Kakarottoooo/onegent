@@ -13,6 +13,7 @@
  */
 
 import { Stagehand } from "@browserbasehq/stagehand";
+import { createHash } from "node:crypto";
 import type { Locator, Page } from "playwright";
 import type { BrowserTaskInput, BrowserTaskResult } from "./types";
 import { writeAgentLog } from "../db";
@@ -754,9 +755,42 @@ export async function runBrowserTask(
   if (input.jobId) liveLogReset(input.jobId);
 
   const debugTrace: string[] = [];
+  type SnapshotStatus = "info" | "live" | "success" | "warning" | "error";
+  type CaptureLocalSnapshot = (
+    title: string,
+    detail?: string,
+    status?: SnapshotStatus,
+    options?: { force?: boolean },
+  ) => Promise<void>;
+  let captureLocalSnapshotRef: CaptureLocalSnapshot | null = null;
+  let snapshotHeartbeat: ReturnType<typeof setInterval> | null = null;
+  let lastTraceSnapshotAt = 0;
+  const shouldSnapshotTrace = (message: string): boolean =>
+    /\b(clicked|selected|filled|checkout reached|payment gate|guest form|no availability|blocked|captcha|login|required|failed|error)\b/i.test(message);
+  const snapshotStatusForTrace = (message: string): SnapshotStatus => {
+    if (/\b(failed|error|blocked|captcha)\b/i.test(message)) return "error";
+    if (/\b(no availability|login|required)\b/i.test(message)) return "warning";
+    if (/\b(checkout reached|payment gate|guest form|filled)\b/i.test(message)) return "success";
+    return "live";
+  };
+  const snapshotTitleForTrace = (message: string): string => {
+    const cleaned = message.replace(/^\[[^\]]+\]\s*/g, "").trim();
+    return cleaned.length > 80 ? `${cleaned.slice(0, 77)}...` : cleaned || "Agent progress";
+  };
   const trace = (message: string) => {
     debugTrace.push(message);
     if (input.jobId) liveLogPush(input.jobId, message);
+    if (captureLocalSnapshotRef && shouldSnapshotTrace(message)) {
+      const nowMs = Date.now();
+      if (nowMs - lastTraceSnapshotAt >= 1_500) {
+        lastTraceSnapshotAt = nowMs;
+        void captureLocalSnapshotRef(
+          snapshotTitleForTrace(message),
+          message,
+          snapshotStatusForTrace(message),
+        );
+      }
+    }
     // Print to terminal in dev so you can follow execution without opening the DB.
     if (process.env.NODE_ENV !== "production") {
       console.log(`[stagehand] ${message}`);
@@ -955,10 +989,12 @@ export async function runBrowserTask(
     if (input.jobId) activeStagehands.set(input.jobId, { close: () => stagehand.close() });
     // v3 API: get active page from context (resolvePage is private)
     const page = stagehand.context.activePage() ?? await stagehand.context.newPage();
-    const captureLocalSnapshot = async (
+    let lastSnapshotSignature: string | null = null;
+    const captureLocalSnapshot: CaptureLocalSnapshot = async (
       title: string,
       detail?: string,
-      status: "info" | "live" | "success" | "warning" | "error" = "live",
+      status: SnapshotStatus = "live",
+      options: { force?: boolean } = {},
     ) => {
       if (!input.jobId || useCloud) return;
       try {
@@ -969,6 +1005,10 @@ export async function runBrowserTask(
           quality: 58,
           timeout: 2500,
         });
+        const url = rawSnapshotPage.url();
+        const signature = `${url}:${createHash("sha1").update(buf).digest("hex")}`;
+        if (!options.force && signature === lastSnapshotSignature) return;
+        lastSnapshotSignature = signature;
         await saveBrowserSnapshot({
           jobId: input.jobId,
           ts: new Date().toISOString(),
@@ -976,12 +1016,13 @@ export async function runBrowserTask(
           detail,
           status,
           imageBase64: buf.toString("base64"),
-          url: rawSnapshotPage.url(),
+          url,
         });
       } catch (error) {
         trace(`[snapshots] capture failed: ${(error as Error).message?.slice(0, 120)}`);
       }
     };
+    captureLocalSnapshotRef = captureLocalSnapshot;
     // Register the page in the live-view store immediately so SSE stream can
     // take screenshots during the entire booking process (not just after payment).
     // Only in local mode — Browserbase sessions have their own live view URL.
@@ -1007,7 +1048,12 @@ export async function runBrowserTask(
 
     // Navigate to the starting URL
     await page.goto(input.startUrl, { waitUntil: "domcontentloaded", timeoutMs: 30_000 });
-    await captureLocalSnapshot("Loaded booking page", getRawPage(page).url(), "live");
+    await captureLocalSnapshot("Loaded booking page", getRawPage(page).url(), "live", { force: true });
+    if (!useCloud && input.jobId) {
+      snapshotHeartbeat = setInterval(() => {
+        void captureLocalSnapshot("Progress checkpoint", undefined, "live");
+      }, 8_000);
+    }
 
     // For Booking.com search results (React SPA), wait for networkidle so JS can finish
     // fetching and rendering hotel listing cards before we check for them.
@@ -7230,6 +7276,19 @@ The user will enter CVV and confirm payment themselves.`,
       debugTrace,
     };
   } finally {
+    if (snapshotHeartbeat) {
+      clearInterval(snapshotHeartbeat);
+      snapshotHeartbeat = null;
+    }
+    if (captureLocalSnapshotRef) {
+      await captureLocalSnapshotRef(
+        "Final visual state",
+        undefined,
+        reachedGuestForm ? "success" : "info",
+        { force: true },
+      ).catch(() => {});
+    }
+
     // Safety net: if we already filled guest/payment form fields but the
     // outcome was error (or unexpected throw), keep the browser open so the
     // user can visually review what's on the page and submit manually.

@@ -94,7 +94,7 @@ describe("browser snapshot store", () => {
     });
   });
 
-  it("merges primary and read-directory snapshots newest first", async () => {
+  it("merges primary and read-directory snapshots in chronological order", async () => {
     const jobId = "job-merged";
     const primaryRoot = path.join(tempRoot, "ui", ".debug-screenshots", "live");
     const secondaryRoot = path.join(tempRoot, "worker", ".debug-screenshots", "live");
@@ -128,6 +128,31 @@ describe("browser snapshot store", () => {
     const snapshots = await listBrowserSnapshots(jobId);
 
     expect(snapshots).toHaveLength(2);
-    expect(snapshots[0].id).toBe("secondary-newer");
+    expect(snapshots.map((snapshot) => snapshot.id)).toEqual([
+      expect.stringMatching(/^[0-9]+-[0-9a-f]+$/),
+      "secondary-newer",
+    ]);
+  });
+
+  it("keeps the latest 120 snapshots without reversing the stream", async () => {
+    const jobId = "job-long-run";
+    const primaryRoot = path.join(tempRoot, "ui", ".debug-screenshots", "live");
+    process.env.ONEGENT_SNAPSHOT_DIR = primaryRoot;
+
+    for (let i = 0; i < 125; i += 1) {
+      await saveBrowserSnapshot({
+        jobId,
+        ts: new Date(Date.UTC(2026, 4, 5, 7, 0, i)).toISOString(),
+        title: `Frame ${i}`,
+        status: "live",
+        imageBase64: `frame-${i}`,
+      });
+    }
+
+    const snapshots = await listBrowserSnapshots(jobId);
+
+    expect(snapshots).toHaveLength(120);
+    expect(snapshots[0].title).toBe("Frame 5");
+    expect(snapshots.at(-1)?.title).toBe("Frame 124");
   });
 });

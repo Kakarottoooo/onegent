@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 
+import { extractEvents } from "@/components/task-timeline/use-timeline-events";
 import { describeSnapshotDiagnostics } from "@/components/task-timeline/use-snapshots";
 
 describe("task timeline snapshot diagnostics", () => {
@@ -35,5 +36,37 @@ describe("task timeline snapshot diagnostics", () => {
     });
 
     expect(message).toBeUndefined();
+  });
+
+  it("falls back to the job adapter when server timeline events use an incompatible vocabulary", () => {
+    const events = extractEvents({
+      events: [
+        {
+          id: "job-started",
+          ts: "2026-05-05T07:17:02.795Z",
+          kind: "job_started",
+          title: "Task created",
+        },
+      ],
+      job: {
+        status: "done",
+        steps: [
+          {
+            type: "restaurant",
+            status: "awaiting_confirmation",
+            decisionLog: [
+              {
+                ts: "2026-05-05T07:17:14.351Z",
+                type: "info",
+                message: "Navigating to opentable.com",
+              },
+            ],
+          },
+        ],
+      },
+    });
+
+    expect(events.length).toBeGreaterThan(0);
+    expect(events.map((event) => event.kind)).toContain("ready_for_confirmation");
   });
 });
