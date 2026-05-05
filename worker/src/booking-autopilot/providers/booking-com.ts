@@ -4296,6 +4296,36 @@ export const bookingComProvider: BrowserProvider = {
   },
 
   async setup(page: Page, context: unknown, trace: (msg: string) => void): Promise<void> {
+    // Bug 7: force-English language cookies are independent of the saved
+    // session cookies. Apply them ALWAYS so Booking.com renders in English
+    // regardless of whether a session JSON exists. (Previous code only
+    // applied them inside the `.booking-cookies.json` exists branch, so on
+    // every fresh QA run the page came up in zh-CN per Accept-Language.)
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      await (context as any).addCookies([
+        { name: "bk_lang",      value: "en-us", domain: ".booking.com", path: "/" },
+        { name: "lang",         value: "en-us", domain: ".booking.com", path: "/" },
+        { name: "selectedLang", value: "en-us", domain: ".booking.com", path: "/" },
+      ]);
+      trace("Booking.com: force-English language cookies injected (bk_lang/lang/selectedLang=en-us)");
+    } catch (err) {
+      trace(`Booking.com: language cookie injection failed: ${err} — page may render in default locale.`);
+    }
+
+    // Also send Accept-Language header so the very first request that
+    // sets cookies on the response side picks English.
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const ctxAny = context as any;
+      if (typeof ctxAny.setExtraHTTPHeaders === "function") {
+        await ctxAny.setExtraHTTPHeaders({ "Accept-Language": "en-US,en;q=0.9" });
+        trace("Booking.com: Accept-Language=en-US header set on context.");
+      }
+    } catch {
+      // Non-fatal.
+    }
+
     // Cookie injection — inject saved Booking.com session cookies into the browser context
     try {
       const cookiesPath = path.join(process.cwd(), ".booking-cookies.json");
@@ -4303,13 +4333,6 @@ export const bookingComProvider: BrowserProvider = {
         const cookies = JSON.parse(fs.readFileSync(cookiesPath, "utf-8")) as unknown[];
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         await (context as any).addCookies(cookies);
-        // Override language to English — saved cookies may have non-English preference.
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        await (context as any).addCookies([
-          { name: "bk_lang",      value: "en-us", domain: ".booking.com", path: "/" },
-          { name: "lang",         value: "en-us", domain: ".booking.com", path: "/" },
-          { name: "selectedLang", value: "en-us", domain: ".booking.com", path: "/" },
-        ]);
         trace(`Injected ${cookies.length} Booking.com session cookies from .booking-cookies.json`);
       } else {
         trace("No .booking-cookies.json found — run: node scripts/save-booking-cookies.mjs");
