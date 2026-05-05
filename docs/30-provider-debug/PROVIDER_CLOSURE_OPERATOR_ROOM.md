@@ -156,6 +156,7 @@ These rules are enforced by static guards
 | Surface | Purpose |
 | --- | --- |
 | `docs/30-provider-debug/LIVE_CLOSURE_EVIDENCE_PROTOCOL.md` | Cross-vertical evidence order, DB fields, hard stops, classifications. The cockpit's lane manifest mirrors this protocol. |
+| `docs/30-provider-debug/PROVIDER_CLOSURE_ACCEPTANCE.md` | Canonical per-vertical pass / fail / inconclusive closure criteria. Read this when deciding whether a closure attempt is closure-pass; the cockpit mirrors the partition. |
 | `docs/30-provider-debug/FAILURE_TAXONOMY.md` | Four-way operator failure taxonomy used by every lane's "What to inspect after run" step. |
 | `docs/30-provider-debug/PROVIDER_RUNTIME_DEBUG_PLAYBOOK.md` | Provider runtime debug source of truth. Cross-linked from each lane's supporting references. |
 | `docs/50-product-areas/LIVE_ARTIFACT_BRIDGE.md` | Synthetic template generator + bundle redaction protocol. The cockpit's CLI blocks reference these scripts. |
