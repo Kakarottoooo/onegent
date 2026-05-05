@@ -3,6 +3,7 @@ import {
   classifyExpediaFlightSafetyBoundaryText,
   extractExpediaFlightCandidateEvidence,
   formatExpediaFlightCandidateEvidence,
+  readExpediaFlightLocatorCandidateLabel,
   scoreExpediaFlightCandidateText,
 } from "../booking-autopilot/providers/expedia";
 
@@ -77,6 +78,32 @@ describe("scoreExpediaFlightCandidateText", () => {
     expect(score.fallbackEligible).toBe(true);
   });
 
+  it("does not use price alone when the controlled task has a different target time", () => {
+    const score = scoreExpediaFlightCandidateText(
+      [
+        "Select flight",
+        "9:55pm 11:00pm",
+        "Orlando (MCO) - Nashville (BNA)",
+        "Southwest Airlines",
+        "2h 5m Nonstop",
+        "$152",
+      ].join(" "),
+      {
+        airline: "Southwest",
+        price: 152,
+        time: "08:50",
+        flightNumber: "WN 3084",
+      },
+    );
+
+    expect(score.hasAirline).toBe(true);
+    expect(score.hasPrice).toBe(true);
+    expect(score.hasFlightNumber).toBe(false);
+    expect(score.timeDelta).toBeGreaterThan(120);
+    expect(score.exactMatch).toBe(false);
+    expect(score.fallbackEligible).toBe(false);
+  });
+
   it("rejects unrelated airline cards with no useful target overlap", () => {
     const score = scoreExpediaFlightCandidateText(
       "Select flight Delta DL 1212 Departing at 6:10 PM $418",
@@ -144,6 +171,35 @@ describe("Expedia flight candidate evidence", () => {
     expect(summary).toContain("route=MCO to BNA");
     expect(summary).toContain("price=$152");
     expect(summary).toContain('text="');
+  });
+
+  it("keeps locator fallback evidence-ready when Stagehand locator has no evaluate", async () => {
+    const label = await readExpediaFlightLocatorCandidateLabel({
+      getAttribute: async (name: string) => name === "aria-label" ? "Select flight" : null,
+      textContent: async () => "Select",
+      locator: () => ({
+        innerText: async () => [
+          "Select flight",
+          "Southwest",
+          "WN 3084",
+          "8:50am 9:55am",
+          "MCO to BNA",
+          "$152",
+        ].join(" "),
+      }),
+    });
+
+    expect(label).toContain("Southwest");
+    expect(label).toContain("WN 3084");
+    expect(label).toContain("$152");
+
+    const score = scoreExpediaFlightCandidateText(label, {
+      airline: "Southwest",
+      price: 152,
+      time: "08:50",
+      flightNumber: "WN 3084",
+    });
+    expect(score.exactMatch).toBe(true);
   });
 });
 

@@ -120,6 +120,30 @@ describe("analyzeExpediaRetryArtifactBundle", () => {
     expect(analysis.signals[0]?.kind).toBe("login_or_otp_boundary");
   });
 
+  it("does not treat hard-stop checklist notes as observed login/OTP/CAPTCHA boundaries", () => {
+    const analysis = analyzeExpediaRetryArtifactBundle({
+      job: {
+        id: "fixture-expedia-hard-stop-note",
+        provider: "expedia",
+        scenario: "flight",
+        status: "failed",
+      },
+      workerLogExcerpt: [
+        "[flight-rpa] Flight-card DOM scan failed: StagehandEvalError: Uncaught",
+        "[flight-rpa] Trying locator fallback for flight-card scan",
+        "[flight-rpa] Unexpected error: item.evaluate is not a function",
+      ].join("\n"),
+      notes: [
+        "Stopped before any payment, CVV, login/OTP/CAPTCHA bypass, or final purchase.",
+      ],
+    });
+
+    expect(analysis.state).toBe("fallback_attempted_no_match");
+    expect(analysis.signals.map((signal) => signal.kind)).not.toContain(
+      "login_or_otp_boundary",
+    );
+  });
+
   it("classifies provider no-availability only when explicit availability evidence is present", () => {
     const analysis = analyzeExpediaRetryArtifactBundle({
       job: {

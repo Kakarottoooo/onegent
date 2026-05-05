@@ -433,6 +433,72 @@ worker log plus screenshots. Do not patch provider selectors from task UI copy
 or from analyzer output alone; patch only when those artifacts prove the
 selector/runtime root cause.
 
+## Latest Controlled Retry Evidence
+
+Run:
+
+- Branch: `codex/flight-live-closure-final`
+- Base: `origin/codex/integrated-preview-20260504 @ bcd2895`
+- One founder-authorized Expedia MCO -> BNA retry ran on
+  2026-05-04 America/Chicago / 2026-05-05 UTC.
+- Job id: `2c5065b2-c5e2-4822-83f1-125af645d3cd`.
+- Session id: `codex-flight-live-closure-final-20260504-203055`.
+
+Source-of-truth checks:
+
+- DB/API step shape had source marker `lib/core/execution-local-c2110aa34d`,
+  `scenario=flight`, and params `MCO/BNA/2026-06-01/1/economy` with target
+  hints `Southwest`, `08:50`, `WN 3084`, `$152`.
+- Worker log entered the Expedia programmatic flight path, captured
+  `01-search-results`, logged `Flight-card DOM scan failed:
+  StagehandEvalError: Uncaught`, attempted locator fallback, then failed with
+  `item.evaluate is not a function`.
+- Screenshot evidence exists under:
+  `C:\Users\Gzw19\onegent-integrated-20260504\worker\.debug-screenshots\flight-rpa-1777944673127`,
+  `...\flight-rpa-1777944711935`,
+  `...\flight-rpa-1777944747504`.
+- Live snapshot evidence exists under:
+  `C:\Users\Gzw19\onegent-integrated-20260504\.debug-screenshots\live\2c5065b2-c5e2-4822-83f1-125af645d3cd\*.json`.
+- Sanitized local analyzer bundle:
+  `C:\Users\Gzw19\onegent-integrated-20260504\.tmp\flight-live-closure-final-evidence-bundle.json`.
+
+Provider closure report:
+
+```powershell
+npx tsx scripts/provider-closure.ts report --kind flight --artifact .tmp\flight-live-closure-final-evidence-bundle.json --markdown
+```
+
+Result:
+
+- Outcome: `selector_drift`.
+- Provider state: `fallback_attempted_no_match`.
+- Root cause: Expedia flight locator fallback assumed `item.evaluate(...)` was
+  available after primary DOM scan failure. The live Stagehand locator wrapper
+  did not expose that method.
+- The failure is not routing/job shape because source marker, scenario, params,
+  start URL, and worker routing were correct.
+- No payment, CVV/security-code, OTP/CAPTCHA/login bypass, or final
+  booking/purchase confirmation occurred.
+
+Patch status:
+
+- Runtime now reads locator fallback text by capability: `evaluate` when
+  present, then `aria-label`, text/innerText, and nearby ancestor text.
+- Runtime no longer treats price alone as an eligible fallback when the
+  controlled task has a target departure time. This avoids selecting a visible
+  Southwest `$152` card at a wrong time when `08:50` / `WN 3084` is the target.
+- Analyzer ignores hard-stop checklist notes such as "no OTP/CAPTCHA/login
+  bypass" when deciding whether an observed login/OTP/CAPTCHA boundary was
+  reached.
+
+Next retry:
+
+- Do not rerun live without a new explicit founder approval.
+- If approved, run exactly one Expedia MCO -> BNA controlled retry. The next
+  retry should either reach a safe checkout/manual-review/login/OTP boundary,
+  classify no availability/provider degradation, or produce candidate evidence
+  without the `item.evaluate` crash.
+
 ## Success Taxonomy
 
 Acceptable retry outcomes:
