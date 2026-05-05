@@ -2975,7 +2975,6 @@ function TripsPageInner() {
   const searchParams = useSearchParams();
   const [jobs, setJobs] = useState<BookingJob[]>([]);
   const [loading, setLoading] = useState(true);
-  const [, setClockTick] = useState(0);
   const [clearingAll, setClearingAll] = useState(false);
   const [showRestaurantForm, setShowRestaurantForm] = useState(false);
   const [workspaceView, setWorkspaceView] = useState<TaskWorkspaceView>("queue");
@@ -3064,13 +3063,6 @@ function TripsPageInner() {
     const timer = setInterval(loadJobs, 5000);
     return () => clearInterval(timer);
   }, [jobs, loadJobs]);
-
-  useEffect(() => {
-    const hasRunning = jobs.some((j) => isActiveJobStatus(j.status));
-    if (!hasRunning) return;
-    const timer = setInterval(() => setClockTick((tick) => tick + 1), 1000);
-    return () => clearInterval(timer);
-  }, [jobs]);
 
   useEffect(() => {
     if (selectedJobId && jobs.some((j) => j.id === selectedJobId)) return;
