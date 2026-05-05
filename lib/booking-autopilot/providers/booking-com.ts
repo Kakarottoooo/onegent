@@ -2800,9 +2800,12 @@ export async function fillBookingComGuestForm(
           text.includes("phone number") ||
           text.includes("mobile number") ||
           text.includes("telephone") ||
-          text.includes("鐢佃瘽鍙风爜") ||
-          text.includes("鎵嬫铏熺⒓") ||
-          text.includes("鎵嬫満鍙风爜")
+          text.includes("电话号码") ||
+          text.includes("电话") ||
+          text.includes("手机号码") ||
+          text.includes("手机") ||
+          text.includes("電話號碼") ||
+          text.includes("手機號碼")
         );
       };
       const isVisible = (element: Element | null): element is HTMLElement => {
@@ -3081,7 +3084,7 @@ export async function fillBookingComGuestForm(
   if (familyName) {
     const ok =
       await fillBySelector(['input[autocomplete="family-name"]', 'input[name*="last" i]', 'input[id*="last" i]'], familyName, "Last name") ||
-      await fillByLabelText(["Last name", "Family name", "Surname", "濮?", "濮?(鎷奸煶/鑻辫)"], familyName, "Last name");
+      await fillByLabelText(["Last name", "Family name", "Surname", "姓", "姓（拼音/英语）"], familyName, "Last name");
     if (!ok) traceLog("Booking.com: could not find Last name field");
   }
 
@@ -3090,7 +3093,7 @@ export async function fillBookingComGuestForm(
   if (p.email) {
     const ok =
       await fillBySelector(['input[autocomplete="email"]', 'input[type="email"]', 'input[name*="email" i]'], p.email, "Email") ||
-      await fillByLabelText(["Email address", "Email", "E-mail", "鐢靛瓙閭鍦板潃"], p.email, "Email");
+      await fillByLabelText(["Email address", "Email", "E-mail", "电子邮箱地址"], p.email, "Email");
     if (!ok) traceLog("Booking.com: could not find Email field");
   }
 
@@ -3101,6 +3104,7 @@ export async function fillBookingComGuestForm(
       'select[autocomplete="country"]',
       'select[name*="country" i]',
       'select[id*="country" i]',
+      'select[name="cc1"]',
     ];
     let countrySet = false;
     for (const sel of countrySelectors) {
@@ -3126,7 +3130,7 @@ export async function fillBookingComGuestForm(
       }
     }
     if (!countrySet) {
-      for (const labelText of ["Country/Region", "Country", "鍥藉/鍦板尯"]) {
+      for (const labelText of ["Country/Region", "Country", "国家/地区", "国家", "地区", "國家/地區", "國家"]) {
         try {
           const sel = rawPage.getByLabel(labelText, { exact: false }).first();
           const tag = await sel.evaluate((e) => e.tagName.toLowerCase()).catch(() => "");
@@ -3154,7 +3158,7 @@ export async function fillBookingComGuestForm(
     const digitsOnly = p.phone.replace(/\D/g, "").replace(/^1/, "");
 
     try {
-      const phoneLabel = rawPage.locator("label").filter({ hasText: /Phone number|鎵嬫満鍙风爜|鐢佃瘽鍙风爜/i }).first();
+      const phoneLabel = rawPage.locator("label").filter({ hasText: /Phone\s*number|Mobile\s*number|电话号码|手机号码|电话|手机|電話號碼|手機號碼/i }).first();
       if (await phoneLabel.isVisible({ timeout: 800 }).catch(() => false)) {
         const phoneSection = phoneLabel.locator("xpath=ancestor::div[position()<=3]").last();
         const codeSelect = phoneSection.locator("select").first();
@@ -3174,8 +3178,8 @@ export async function fillBookingComGuestForm(
 
     const ok =
       await fillPhoneFieldInPhoneSection(digitsOnly) ||
-      await fillBySelector(['input[type="tel"]', 'input[autocomplete="tel"]', 'input[name*="phone" i]', 'input[id*="phone" i]'], digitsOnly, "Phone") ||
-      await fillByLabelText(["Phone number", "Mobile number", "鐢佃瘽鍙风爜", "鎵嬫満鍙风爜"], digitsOnly, "Phone");
+      await fillBySelector(['input[type="tel"]', 'input[autocomplete*="tel"]', 'input[name*="phone" i]', 'input[id*="phone" i]'], digitsOnly, "Phone") ||
+      await fillByLabelText(["Phone number", "Mobile number", "电话号码", "手机号码", "电话", "手机", "電話號碼", "手機號碼"], digitsOnly, "Phone");
     if (!ok) traceLog("Booking.com: could not find Phone number input");
     await rawPage.waitForTimeout(300).catch(() => {});
   }
@@ -4172,6 +4176,28 @@ export async function clickBookingComListingTarget(
 }
 
 // ─── BrowserProvider wrapper ───────────────────────────────────────────────
+
+/**
+ * Bug 5a+5b (P1, observed live): the existing fillBookingComGuestForm contains
+ * mojibake-corrupted Chinese label patterns (bytes that look like "鐢佃瘽鍙风爜",
+ * "鍥藉/鍦板尯", "濮?", etc — GBK-decoded UTF-8). Real zh-CN Booking.com pages
+ * never match these, so on the Chinese checkout the Country select and Phone
+ * input stay empty — blocking the submit-readiness check from clicking
+ * "下一步：最终信息". These detectors use clean UTF-8 patterns plus traditional
+ * Chinese variants and are exported for unit testing.
+ */
+const PHONE_LABEL_RE = /(phone\s*number|mobile\s*number|telephone|tel\b|手机号码|手機號碼|手机|手機|电话号码|電話號碼|电话|電話)/i;
+const COUNTRY_LABEL_RE = /(country\s*\/\s*region|country|region|国家\s*\/\s*地区|国家|地区|國家\s*\/\s*地區|國家|地區)/i;
+
+export function bookingComLabelLooksLikePhone(text: string): boolean {
+  if (!text) return false;
+  return PHONE_LABEL_RE.test(text);
+}
+
+export function bookingComLabelLooksLikeCountry(text: string): boolean {
+  if (!text) return false;
+  return COUNTRY_LABEL_RE.test(text);
+}
 
 /**
  * Bug 4 (P1, observed live): Booking.com's checkout flow has TWO sequential
