@@ -552,3 +552,54 @@ CVV, OTP/CAPTCHA/login bypass, or final confirmation path was exercised. If
 founder later approves one retry, DB row plus worker log plus screenshots plus
 benchmark artifact remain the source of truth before any selector/runtime
 patch.
+
+## Expedia Flight Runtime Closure
+
+Agent branch:
+
+- `codex/flight-runtime-closure`
+- Base: `origin/codex/integrated-preview-20260504 @ cad9885`
+- Worktree: `C:\Users\Gzw19\onegent-flight-runtime-closure`
+
+Scope:
+
+- Expedia flight runtime only.
+- No restaurant/hotel provider logic touched.
+- No live provider run, OpenAI live call, payment/CVV, OTP/CAPTCHA/login bypass,
+  or final booking confirmation.
+
+Runtime changes:
+
+- Hardened Expedia flight card evidence capture in
+  `lib/booking-autopilot/providers/expedia.ts` and worker mirror.
+- Candidate traces now include structured airline/time/route/price/flight-number
+  evidence where available, with text fallback when the flight number is hidden.
+- If coordinate click on the matched card does not open the fare modal, runtime
+  retries the same target via DOM rescan and then Playwright locator fallback,
+  logging candidate evidence for both paths.
+- Added login/OTP/CAPTCHA safety-boundary detection before card scan and before
+  final checkout classification. It stops for manual intervention and does not
+  bypass auth or verification.
+- Expedia retry analyzer now recognizes `login_or_otp_boundary`.
+
+No-live preflight:
+
+- Added `scripts/preflight-expedia-controlled-flight.ts`.
+- It only accepts the exact MCO -> BNA 2026-06-01 controlled task and refuses
+  broad-run flags such as `--all`, `--provider`, `--kind`, or `--live`.
+- It checks env names without printing values, exact prompt/start URL,
+  hard-stop coverage, and expected artifact paths.
+
+Validation:
+
+- `npx vitest run lib/__tests__/expedia-flight-card-match.test.ts lib/__tests__/expedia-retry-analysis.test.ts lib/__tests__/expedia-controlled-retry-preflight.test.ts lib/__tests__/preflight-expedia-controlled-flight-cli.test.ts`:
+  pass, 30/30.
+- `npx vitest run lib/__tests__/expedia-flight-card-match.test.ts lib/__tests__/expedia-retry-analysis.test.ts lib/__tests__/expedia-controlled-retry-preflight.test.ts lib/__tests__/preflight-expedia-controlled-flight-cli.test.ts lib/__tests__/runtime-forensics-classifier.test.ts lib/__tests__/runtime-forensics-report.test.ts`:
+  pass, 152/152.
+- `npm run build:mcp`: pass; needed before TypeScript in the clean worktree.
+- `npx tsc --noEmit --pretty false`: pass.
+- `npm run check-drift`: pass.
+- `git diff --check`: pass.
+- `npm run gate:phase1 -- --allow-known-drift`: pass, 9/9.
+- `npx tsx scripts/preflight-expedia-controlled-flight.ts --confirm-one-controlled-retry --prompt "帮我订一个6月1号从奥兰多飞 Nashville 的机票，一个人" --start-url "https://www.expedia.com/Flights-Search?trip=oneway&leg1=from:MCO,to:BNA,departure:2026-06-01TANYT&passengers=adults:1&options=cabinclass:coach&mode=search"`:
+  pass with placeholder env names and no env values printed.

@@ -78,6 +78,17 @@ export interface ExpediaFlightCandidateScore {
   priceDelta: number | null;
 }
 
+export interface ExpediaFlightCandidateEvidence {
+  label: string;
+  airline: string | null;
+  departureTime: string | null;
+  arrivalTime: string | null;
+  route: string | null;
+  price: string | null;
+  flightNumber: string | null;
+  score?: ExpediaFlightCandidateScore;
+}
+
 type ExpediaFlightButtonMatch = {
   found: boolean;
   label: string;
@@ -86,9 +97,26 @@ type ExpediaFlightButtonMatch = {
   y: number;
   inViewportBefore: boolean;
   samples: string[];
+  candidateSummaries?: string[];
   matchMode?: string;
   matchReason?: string;
   evalError?: string;
+};
+
+type ExpediaFlightLocatorCandidate = {
+  index: number;
+  label: string;
+  score: ExpediaFlightCandidateScore;
+  summary: string;
+};
+
+type ExpediaFlightCandidateSelection = {
+  best: ExpediaFlightLocatorCandidate | null;
+  candidateCount: number;
+  matchMode?: string;
+  matchReason?: string;
+  samples: string[];
+  candidateSummaries: string[];
 };
 
 function parseExpediaFlightTimeToMinutes(t: string | null | undefined): number | null {
@@ -117,6 +145,107 @@ function extractExpediaFlightPrices(text: string): number[] {
   return Array.from(text.matchAll(/\$([\d,]+)/g))
     .map(match => Number.parseInt((match[1] ?? "").replace(/,/g, ""), 10))
     .filter(value => Number.isFinite(value));
+}
+
+const EXPEDIA_FLIGHT_AIRLINE_HINTS = [
+  "Southwest Airlines",
+  "Southwest",
+  "American Airlines",
+  "American",
+  "Delta Air Lines",
+  "Delta",
+  "United Airlines",
+  "United",
+  "Spirit Airlines",
+  "Spirit",
+  "Frontier Airlines",
+  "Frontier",
+  "JetBlue",
+  "Alaska Airlines",
+  "Alaska",
+];
+
+export function extractExpediaFlightCandidateEvidence(
+  rawText: string,
+  target: ExpediaFlightTarget = {},
+): ExpediaFlightCandidateEvidence {
+  const label = rawText.replace(/\s+/g, " ").trim().slice(0, 180);
+  const loose = normalizeExpediaFlightLoose(rawText);
+  const targetAirline = normalizeExpediaFlightLoose(target.airline);
+  const airline =
+    target.airline && targetAirline && loose.includes(targetAirline.split(" ")[0] ?? "")
+      ? target.airline
+      : EXPEDIA_FLIGHT_AIRLINE_HINTS.find(hint => loose.includes(hint.toLowerCase())) ?? null;
+  const times = Array.from(rawText.matchAll(/\b(\d{1,2}:\d{2}\s*(?:am|pm)?)\b/gi))
+    .map(match => (match[1] ?? "").replace(/\s+/g, "").toLowerCase())
+    .filter(Boolean);
+  const prices = extractExpediaFlightPrices(rawText);
+  const flightNumber =
+    (rawText.match(/\b([A-Z]{1,3})\s?(\d{2,4})\b/)?.slice(1, 3).join(" ") ?? "")
+      .trim()
+      .replace(/\s+/, " ") ||
+    null;
+  const route =
+    rawText.match(/\b[A-Z]{3}\b\s*(?:to|-|->)\s*\b[A-Z]{3}\b/i)?.[0] ??
+    rawText.match(/[A-Z][A-Za-z .']+\([A-Z]{3}\)\s*(?:to|-|->)\s*[A-Z][A-Za-z .']+\([A-Z]{3}\)/)?.[0] ??
+    null;
+  const score = Object.keys(target).length > 0
+    ? scoreExpediaFlightCandidateText(rawText, target)
+    : undefined;
+
+  return {
+    label,
+    airline,
+    departureTime: times[0] ?? null,
+    arrivalTime: times[1] ?? null,
+    route,
+    price: prices.length > 0 ? `$${prices[0]}` : null,
+    flightNumber,
+    ...(score ? { score } : {}),
+  };
+}
+
+export function formatExpediaFlightCandidateEvidence(
+  rawText: string,
+  target: ExpediaFlightTarget = {},
+): string {
+  const evidence = extractExpediaFlightCandidateEvidence(rawText, target);
+  const score = evidence.score;
+  const parts = [
+    `airline=${evidence.airline ?? "unknown"}`,
+    `departure=${evidence.departureTime ?? "unknown"}`,
+    `arrival=${evidence.arrivalTime ?? "unknown"}`,
+    `route=${evidence.route ?? "unknown"}`,
+    `price=${evidence.price ?? "unknown"}`,
+    `flightNumber=${evidence.flightNumber ?? "hidden"}`,
+  ];
+  if (score) {
+    parts.push(
+      `score=${score.score}`,
+      `fallbackScore=${score.fallbackScore}`,
+      `timeDelta=${score.timeDelta ?? "unknown"}`,
+      `priceDelta=${score.priceDelta ?? "unknown"}`,
+    );
+  }
+  parts.push(`text="${evidence.label}"`);
+  return parts.join(" ");
+}
+
+export function classifyExpediaFlightSafetyBoundaryText(
+  rawText: string | null | undefined,
+): string | null {
+  const text = normalizeExpediaFlightLoose(rawText);
+  if (!text) return null;
+  if (/\b(captcha|robot check|are you a robot|unusual traffic)\b/i.test(text)) {
+    return "CAPTCHA boundary";
+  }
+  if (/\b(verification code|one-time passcode|one time passcode|enter code|verify it'?s you|two-factor|2fa|otp)\b/i.test(text)) {
+    return "OTP boundary";
+  }
+  if (/\b(sign in to continue|log in to continue|login to continue|sign in or create an account to continue|authentication required)\b/i.test(text)) {
+    return "login boundary";
+  }
+  return null;
 }
 
 export function scoreExpediaFlightCandidateText(
@@ -1589,13 +1718,117 @@ async function findExpediaFlightButtonWithLocatorFallback(
   target: ExpediaFlightTarget,
   trace: (msg: string) => void,
 ): Promise<ExpediaFlightButtonMatch> {
+  const { selection, locator } = await collectExpediaFlightLocatorCandidates(page, target);
+  const best = selection.best;
+  if (!best) {
+    return {
+      found: false,
+      label: "",
+      candidates: selection.candidateCount,
+      x: 0,
+      y: 0,
+      inViewportBefore: false,
+      samples: selection.samples,
+      candidateSummaries: selection.candidateSummaries,
+    };
+  }
+
+  const targetButton = locator.nth(best.index);
+  const beforeBox = await targetButton.boundingBox().catch(() => null);
+  await targetButton.scrollIntoViewIfNeeded().catch(() => undefined);
+  await new Promise(r => setTimeout(r, 200));
+  const afterBox = await targetButton.boundingBox().catch(() => null);
+  if (!afterBox) {
+    trace("[flight-rpa] Locator fallback found a text match but could not read its bounding box");
+    return {
+      found: false,
+      label: best.label,
+      candidates: selection.candidateCount,
+      x: 0,
+      y: 0,
+      inViewportBefore: false,
+      samples: selection.samples,
+      candidateSummaries: selection.candidateSummaries,
+    };
+  }
+
+  return {
+    found: true,
+    label: best.label,
+    candidates: selection.candidateCount,
+    x: afterBox.x + afterBox.width / 2,
+    y: afterBox.y + afterBox.height / 2,
+    inViewportBefore: !!beforeBox && beforeBox.y >= 0 && beforeBox.y + beforeBox.height <= 900,
+    matchMode: selection.matchMode,
+    matchReason: selection.matchReason,
+    samples: selection.samples,
+    candidateSummaries: selection.candidateSummaries,
+  };
+}
+
+async function clickExpediaFlightButtonWithLocatorFallback(
+  page: Page,
+  target: ExpediaFlightTarget,
+): Promise<{
+  clicked: boolean;
+  label: string;
+  candidates: number;
+  matchMode?: string;
+  matchReason?: string;
+  samples: string[];
+  candidateSummaries: string[];
+  error?: string;
+}> {
+  const { selection, locator } = await collectExpediaFlightLocatorCandidates(page, target);
+  const best = selection.best;
+  if (!best) {
+    return {
+      clicked: false,
+      label: "",
+      candidates: selection.candidateCount,
+      samples: selection.samples,
+      candidateSummaries: selection.candidateSummaries,
+    };
+  }
+
+  try {
+    const targetButton = locator.nth(best.index);
+    await targetButton.scrollIntoViewIfNeeded().catch(() => undefined);
+    await new Promise(r => setTimeout(r, 200));
+    await targetButton.click({ delay: 120, timeout: 5000 });
+    return {
+      clicked: true,
+      label: best.label,
+      candidates: selection.candidateCount,
+      matchMode: selection.matchMode,
+      matchReason: selection.matchReason,
+      samples: selection.samples,
+      candidateSummaries: selection.candidateSummaries,
+    };
+  } catch (error) {
+    return {
+      clicked: false,
+      label: best.label,
+      candidates: selection.candidateCount,
+      matchMode: selection.matchMode,
+      matchReason: selection.matchReason,
+      samples: selection.samples,
+      candidateSummaries: selection.candidateSummaries,
+      error: (error as Error).message?.slice(0, 120) ?? "unknown locator click error",
+    };
+  }
+}
+
+async function collectExpediaFlightLocatorCandidates(
+  page: Page,
+  target: ExpediaFlightTarget,
+): Promise<{
+  locator: ReturnType<Page["locator"]>;
+  selection: ExpediaFlightCandidateSelection;
+}> {
   const locator = page.locator('button, [role="button"]');
   const count = await locator.count().catch(() => 0);
-  const candidates: Array<{
-    index: number;
-    label: string;
-    score: ExpediaFlightCandidateScore;
-  }> = [];
+  const candidates: ExpediaFlightLocatorCandidate[] = [];
   const samples: string[] = [];
 
   for (let index = 0; index < Math.min(count, 250); index++) {
@@ -1611,10 +1844,25 @@ async function findExpediaFlightButtonWithLocatorFallback(
     if (samples.length < 6) samples.push(label.slice(0, 140));
     const score = scoreExpediaFlightCandidateText(label, target);
     if (score.hasAirline || score.exactMatch || score.fallbackEligible) {
-      candidates.push({ index, label: label.slice(0, 140), score });
+      const clippedLabel = label.slice(0, 140);
+      candidates.push({
+        index,
+        label: clippedLabel,
+        score,
+        summary: formatExpediaFlightCandidateEvidence(clippedLabel, target),
+      });
     }
   }
 
+  return { locator, selection: selectExpediaFlightCandidate(candidates, samples, target, "locator fallback") };
+}
+
+function selectExpediaFlightCandidate(
+  candidates: ExpediaFlightLocatorCandidate[],
+  samples: string[],
+  target: ExpediaFlightTarget,
+  prefix: string,
+): ExpediaFlightCandidateSelection {
   const airlineCandidates = candidates.filter(candidate => candidate.score.hasAirline);
   const strictCandidates = airlineCandidates
     .filter(candidate => candidate.score.exactMatch)
@@ -1635,55 +1883,248 @@ async function findExpediaFlightButtonWithLocatorFallback(
     )
     .sort((a, b) => sortExpediaFlightCandidatesByFit(target, a.score, b.score, "fallback"));
 
-  const best = strictCandidates[0] ?? sameAirlineFallbackCandidates[0] ?? crossAirlineFallbackCandidates[0];
+  const orderedCandidates = [
+    ...strictCandidates,
+    ...sameAirlineFallbackCandidates,
+    ...crossAirlineFallbackCandidates,
+  ];
+  const best = orderedCandidates[0] ?? null;
   if (!best) {
     return {
-      found: false,
-      label: "",
-      candidates: 0,
-      x: 0,
-      y: 0,
-      inViewportBefore: false,
+      best: null,
+      candidateCount: candidates.length,
       samples,
-    };
-  }
-
-  const targetButton = locator.nth(best.index);
-  const beforeBox = await targetButton.boundingBox().catch(() => null);
-  await targetButton.scrollIntoViewIfNeeded().catch(() => undefined);
-  await new Promise(r => setTimeout(r, 200));
-  const afterBox = await targetButton.boundingBox().catch(() => null);
-  if (!afterBox) {
-    trace("[flight-rpa] Locator fallback found a text match but could not read its bounding box");
-    return {
-      found: false,
-      label: best.label,
-      candidates: candidates.length,
-      x: 0,
-      y: 0,
-      inViewportBefore: false,
-      samples,
+      candidateSummaries: candidates.slice(0, 4).map(candidate => candidate.summary),
     };
   }
 
   return {
-    found: true,
-    label: best.label,
-    candidates: candidates.length,
-    x: afterBox.x + afterBox.width / 2,
-    y: afterBox.y + afterBox.height / 2,
-    inViewportBefore: !!beforeBox && beforeBox.y >= 0 && beforeBox.y + beforeBox.height <= 900,
+    best,
+    candidateCount: candidates.length,
     matchMode: strictCandidates[0]
-      ? "locator_fallback"
+      ? prefix.replace(/\s+/g, "_")
       : sameAirlineFallbackCandidates[0]
         ? "fallback"
         : "cross_airline_fallback",
     matchReason: strictCandidates[0]
-      ? "locator fallback exact target fit"
+      ? `${prefix} exact target fit`
       : sameAirlineFallbackCandidates[0]
-        ? `locator fallback same airline timeDelta=${best.score.timeDelta ?? "?"} priceDelta=${best.score.priceDelta ?? "?"}`
-        : `locator fallback cross-airline timeDelta=${best.score.timeDelta ?? "?"} priceDelta=${best.score.priceDelta ?? "?"}`,
-    samples: candidates.slice(0, 4).map(candidate => candidate.label),
+        ? `${prefix} same airline timeDelta=${best.score.timeDelta ?? "?"} priceDelta=${best.score.priceDelta ?? "?"}`
+        : `${prefix} cross-airline timeDelta=${best.score.timeDelta ?? "?"} priceDelta=${best.score.priceDelta ?? "?"}`,
+    samples: orderedCandidates.slice(0, 4).map(candidate => candidate.label),
+    candidateSummaries: orderedCandidates.slice(0, 4).map(candidate => candidate.summary),
+  };
+}
+
+async function clickExpediaFlightButtonWithDomRescan(
+  page: Page,
+  target: ExpediaFlightTarget,
+): Promise<{
+  clicked: boolean;
+  label: string;
+  candidates: number;
+  matchMode?: string;
+  matchReason?: string;
+  samples: string[];
+  candidateSummaries: string[];
+  error?: string;
+}> {
+  const result = await page.evaluate(({ airline, price, time, flightNumber }: ExpediaFlightTarget) => {
+    const parseTimeToMinutes = (t: string | null | undefined): number | null => {
+      if (!t) return null;
+      const raw = t.trim().toLowerCase();
+      const match = raw.match(/(\d{1,2}):(\d{2})\s*(am|pm)?/i);
+      if (!match) return null;
+      let hour = parseInt(match[1], 10);
+      const minute = parseInt(match[2], 10);
+      const suffix = match[3]?.toLowerCase() ?? null;
+      if (suffix === "pm" && hour < 12) hour += 12;
+      if (suffix === "am" && hour === 12) hour = 0;
+      if (!suffix && hour === 24) hour = 0;
+      return hour * 60 + minute;
+    };
+    const normalizeLoose = (s: string | null | undefined): string =>
+      (s ?? "").toLowerCase().replace(/\s+/g, " ").trim();
+    const normalizeTight = (s: string | null | undefined): string =>
+      (s ?? "").toLowerCase().replace(/[^a-z0-9]/g, "");
+    const extractPrices = (text: string): number[] =>
+      Array.from(text.matchAll(/\$([\d,]+)/g))
+        .map(match => Number.parseInt((match[1] ?? "").replace(/,/g, ""), 10))
+        .filter(value => Number.isFinite(value));
+    const timeMinutes = parseTimeToMinutes(time);
+    const airlineLoose = normalizeLoose(airline);
+    const airlineWord = airlineLoose.split(" ")[0] ?? "";
+    const flightNumberTight = normalizeTight(flightNumber);
+    const flightDigits = (flightNumber ?? "").replace(/\D/g, "");
+    const priceToken = typeof price === "number" ? `$${price}` : "";
+
+    const selectableCandidates = Array.from(document.querySelectorAll<HTMLElement>('button, [role="button"]'))
+      .map(btn => {
+        const label = normalizeLoose((btn.getAttribute("aria-label") ?? "") + " " + (btn.textContent ?? ""));
+        if (!label.includes("select")) return null;
+        const container = btn.closest('li, article, section, [data-test-id], [data-stid], [class*="uitk-card"], [class*="offer-card"], [class*="result"]');
+        const context = normalizeLoose(container?.textContent ?? btn.parentElement?.textContent ?? "");
+        const combined = `${label} ${context}`.trim();
+        const combinedTight = normalizeTight(combined);
+        const rect = btn.getBoundingClientRect();
+        if (rect.width === 0 || rect.height === 0) return null;
+        const hasAirline = !airlineWord || combined.includes(airlineWord) || combined.includes(airlineLoose);
+        const visiblePrices = extractPrices(combined);
+        const priceDelta =
+          typeof price === "number" && visiblePrices.length > 0
+            ? Math.min(...visiblePrices.map(value => Math.abs(value - price)))
+            : null;
+        const hasPrice = !priceToken || combined.includes(priceToken) || priceDelta === 0;
+        const hasFlightNumber =
+          !flightNumberTight ||
+          combinedTight.includes(flightNumberTight) ||
+          (flightDigits.length >= 3 && combinedTight.includes(flightDigits));
+        const departureMatch =
+          combined.match(/departing at (\d{1,2}:\d{2}\s*(?:am|pm)?)/i) ??
+          combined.match(/\b(\d{1,2}:\d{2}\s*(?:am|pm)?)\b/i);
+        const departureMinutes = parseTimeToMinutes(departureMatch?.[1] ?? null);
+        const timeDelta =
+          timeMinutes !== null && departureMinutes !== null
+            ? Math.abs(departureMinutes - timeMinutes)
+            : null;
+        const timeScore =
+          timeMinutes !== null
+            ? departureMinutes === timeMinutes
+              ? 4
+              : departureMinutes !== null && Math.abs(departureMinutes - timeMinutes) <= 5
+                ? 2
+                : 0
+            : 1;
+        const score =
+          (hasFlightNumber ? 5 : 0) +
+          (hasPrice ? 3 : 0) +
+          timeScore;
+        const exactMatch =
+          (!flightNumberTight || hasFlightNumber) &&
+          (!priceToken || hasPrice) &&
+          (timeMinutes === null || timeScore > 0);
+        const fallbackEligible =
+          hasFlightNumber ||
+          hasPrice ||
+          (timeDelta !== null && timeDelta <= 120) ||
+          (priceDelta !== null && priceDelta <= 60);
+        const fallbackScore =
+          (hasFlightNumber ? 90 : 0) +
+          (hasPrice ? 40 : 0) +
+          (timeDelta !== null ? Math.max(0, 30 - Math.floor(timeDelta / 5)) : 0) +
+          (priceDelta !== null ? Math.max(0, 20 - Math.floor(priceDelta / 5)) : 0);
+        return {
+          btn,
+          label: combined.slice(0, 140),
+          hasAirline,
+          exactMatch,
+          fallbackEligible,
+          hasFlightNumber,
+          hasPrice,
+          score,
+          fallbackScore,
+          departureMinutes: departureMinutes ?? -1,
+          timeDelta,
+          priceDelta,
+        };
+      })
+      .filter(Boolean) as Array<{
+        btn: HTMLElement;
+        label: string;
+        hasAirline: boolean;
+        exactMatch: boolean;
+        fallbackEligible: boolean;
+        hasFlightNumber: boolean;
+        hasPrice: boolean;
+        score: number;
+        fallbackScore: number;
+        departureMinutes: number;
+        timeDelta: number | null;
+        priceDelta: number | null;
+      }>;
+
+    const sortByTargetFit = (
+      a: { score: number; fallbackScore: number; departureMinutes: number; priceDelta: number | null },
+      b: { score: number; fallbackScore: number; departureMinutes: number; priceDelta: number | null },
+      mode: "strict" | "fallback",
+    ) => {
+      if (mode === "strict" && b.score !== a.score) return b.score - a.score;
+      if (mode === "fallback" && b.fallbackScore !== a.fallbackScore) return b.fallbackScore - a.fallbackScore;
+      if (timeMinutes !== null) {
+        const aDelta = a.departureMinutes >= 0 ? Math.abs(a.departureMinutes - timeMinutes) : Number.POSITIVE_INFINITY;
+        const bDelta = b.departureMinutes >= 0 ? Math.abs(b.departureMinutes - timeMinutes) : Number.POSITIVE_INFINITY;
+        if (aDelta !== bDelta) return aDelta - bDelta;
+      }
+      const aPriceDelta = a.priceDelta ?? Number.POSITIVE_INFINITY;
+      const bPriceDelta = b.priceDelta ?? Number.POSITIVE_INFINITY;
+      if (aPriceDelta !== bPriceDelta) return aPriceDelta - bPriceDelta;
+      return 0;
+    };
+
+    const airlineCandidates = selectableCandidates.filter(candidate => candidate.hasAirline);
+    const strictCandidates = airlineCandidates
+      .filter(candidate => candidate.exactMatch)
+      .sort((a, b) => sortByTargetFit(a, b, "strict"));
+    const sameAirlineFallbackCandidates = airlineCandidates
+      .filter(candidate => !candidate.exactMatch && candidate.fallbackEligible)
+      .sort((a, b) => sortByTargetFit(a, b, "fallback"));
+    const crossAirlineFallbackCandidates = selectableCandidates
+      .filter(candidate =>
+        !candidate.hasAirline &&
+        !candidate.exactMatch &&
+        (
+          candidate.hasFlightNumber ||
+          candidate.hasPrice ||
+          (candidate.timeDelta !== null && candidate.timeDelta <= 180) ||
+          (candidate.priceDelta !== null && candidate.priceDelta <= 100)
+        )
+      )
+      .sort((a, b) => sortByTargetFit(a, b, "fallback"));
+
+    const best = strictCandidates[0] ?? sameAirlineFallbackCandidates[0] ?? crossAirlineFallbackCandidates[0];
+    const samples = [...strictCandidates, ...sameAirlineFallbackCandidates, ...crossAirlineFallbackCandidates]
+      .slice(0, 4)
+      .map(candidate => candidate.label);
+    if (!best) {
+      return {
+        clicked: false,
+        label: "",
+        candidates: 0,
+        samples: selectableCandidates.slice(0, 6).map(candidate => candidate.label),
+      };
+    }
+
+    best.btn.scrollIntoView({ block: "center", behavior: "auto" as ScrollBehavior });
+    best.btn.click();
+    return {
+      clicked: true,
+      label: best.label,
+      candidates: strictCandidates.length + sameAirlineFallbackCandidates.length + crossAirlineFallbackCandidates.length,
+      matchMode: strictCandidates[0]
+        ? "dom_rescan"
+        : sameAirlineFallbackCandidates[0]
+          ? "dom_rescan_fallback"
+          : "dom_rescan_cross_airline_fallback",
+      matchReason: strictCandidates[0]
+        ? "DOM rescan exact target fit"
+        : sameAirlineFallbackCandidates[0]
+          ? `DOM rescan same airline timeDelta=${best.timeDelta ?? "?"} priceDelta=${best.priceDelta ?? "?"}`
+          : `DOM rescan cross-airline timeDelta=${best.timeDelta ?? "?"} priceDelta=${best.priceDelta ?? "?"}`,
+      samples,
+    };
+  }, target).catch((error: Error) => ({
+    clicked: false,
+    label: "",
+    candidates: 0,
+    samples: [] as string[],
+    error: error.message?.slice(0, 120) ?? "unknown DOM rescan click error",
+  }));
+
+  return {
+    ...result,
+    candidateSummaries: (result.samples ?? []).map(sample =>
+      formatExpediaFlightCandidateEvidence(sample, target)
+    ),
   };
 }
 
@@ -1719,6 +2160,11 @@ export async function bookExpediaFlightProgrammatic(
     } catch (err) {
       trace(`[flight-rpa] screenshot(${label}) failed: ${(err as Error).message?.slice(0, 80)}`);
     }
+  };
+
+  const detectSafetyBoundary = async (targetPage: Page = activePage): Promise<string | null> => {
+    const bodyText = await targetPage.evaluate(() => document.body.textContent ?? "").catch(() => "");
+    return classifyExpediaFlightSafetyBoundaryText(bodyText);
   };
 
   // ── Step 1: Wait for flight results ───────────────────────────────────────
@@ -1830,6 +2276,16 @@ export async function bookExpediaFlightProgrammatic(
     if (hasResults) break;
   }
   await new Promise(r => setTimeout(r, 800));
+  const preScanBoundary = await detectSafetyBoundary(page);
+  if (preScanBoundary) {
+    trace(`[flight-rpa] Login/OTP/CAPTCHA boundary detected before flight-card scan: ${preScanBoundary}`);
+    await safeScreenshot("01b-safety-boundary-before-card-scan");
+    return {
+      reached_checkout: false,
+      currentUrl: getUrl(),
+      error: `Expedia flight ${preScanBoundary} reached. Stop for manual intervention; do not bypass login, OTP, or CAPTCHA.`,
+    };
+  }
 
   // ── Roundtrip detection + leg loop setup ────────────────────────────────
   // Expedia URL pattern:
@@ -1884,6 +2340,13 @@ export async function bookExpediaFlightProgrammatic(
   // ── Step 2: Find, scroll to, and click the target flight card ─────────────
   trace(`[flight-rpa] Searching for flight: airline="${legTargetAirline}" price=$${legTargetPrice} time="${legTargetDepartureTime}" flightNo="${legTargetFlightNumber}"`);
   await safeScreenshot("01-search-results");
+
+  const legFlightTarget: ExpediaFlightTarget = {
+    airline: legTargetAirline,
+    price: legTargetPrice,
+    time: legTargetDepartureTime,
+    flightNumber: legTargetFlightNumber,
+  };
 
   let found: ExpediaFlightButtonMatch = await page.evaluate(({ airline, price, time, flightNumber }: { airline?: string; price?: number; time?: string; flightNumber?: string }) => {
     const parseTimeToMinutes = (t: string | null | undefined): number | null => {
@@ -2072,7 +2535,7 @@ export async function bookExpediaFlightProgrammatic(
           : `cross-airline fallback timeDelta=${best.timeDelta ?? "?"} priceDelta=${best.priceDelta ?? "?"}`,
       samples: [...strictCandidates, ...sameAirlineFallbackCandidates, ...crossAirlineFallbackCandidates].slice(0, 4).map(c => c.label),
     };
-  }, { airline: legTargetAirline, price: legTargetPrice, time: legTargetDepartureTime, flightNumber: legTargetFlightNumber })
+  }, legFlightTarget)
     .catch((err: Error) => ({
       found: false,
       label: "",
@@ -2089,18 +2552,26 @@ export async function bookExpediaFlightProgrammatic(
   if ("evalError" in found && found.evalError) {
     trace(`[flight-rpa] Flight-card DOM scan failed: ${found.evalError}`);
     trace("[flight-rpa] Trying locator fallback for flight-card scan");
-    const fallback = await findExpediaFlightButtonWithLocatorFallback(page, {
-      airline: legTargetAirline,
-      price: legTargetPrice,
-      time: legTargetDepartureTime,
-      flightNumber: legTargetFlightNumber,
-    }, trace);
+    const fallback = await findExpediaFlightButtonWithLocatorFallback(page, legFlightTarget, trace);
     if (fallback.found) {
       trace(`[flight-rpa] Locator fallback matched flight card: "${fallback.label}"`);
       found = fallback;
     } else if (fallback.samples.length > 0) {
-      found = { ...found, samples: fallback.samples };
+      found = {
+        ...found,
+        samples: fallback.samples,
+        candidateSummaries: fallback.candidateSummaries,
+      };
     }
+  }
+
+  const candidateSummaries = (
+    found.candidateSummaries?.length
+      ? found.candidateSummaries
+      : (found.samples ?? []).map(sample => formatExpediaFlightCandidateEvidence(sample, legFlightTarget))
+  ).slice(0, 4);
+  if (candidateSummaries.length > 0) {
+    trace(`[flight-rpa] Flight candidate evidence dump: ${candidateSummaries.map(summary => summary.slice(0, 220)).join(" || ")}`);
   }
 
   if (!found.found) {
@@ -2113,6 +2584,7 @@ export async function bookExpediaFlightProgrammatic(
   trace(`[flight-rpa] Flight match: "${found.label}" candidates=${found.candidates} inViewportBefore=${found.inViewportBefore} → scrolled, clicking@(${Math.round(found.x)},${Math.round(found.y)})`);
 
   trace(`[flight-rpa] Match mode=${found.matchMode} reason="${found.matchReason}"`);
+  trace(`[flight-rpa] Selected flight candidate evidence: ${formatExpediaFlightCandidateEvidence(found.label, legFlightTarget).slice(0, 260)}`);
 
   // Let the browser settle after scrollIntoView
   await new Promise(r => setTimeout(r, 700));
@@ -2125,15 +2597,53 @@ export async function bookExpediaFlightProgrammatic(
 
   // ── Step 3: Wait for fare modal ("Select fare to <city>") then pick cheapest ─
   // The fare modal has a heading containing "Select fare to" and shows multiple fare tiers.
+  const waitForFareModalOpen = async (): Promise<boolean> => {
+    for (let i = 0; i < 20; i++) {   // up to 10s
+      await new Promise(r => setTimeout(r, 500));
+      const found = await page.evaluate(() => {
+        const t = (document.body.textContent ?? "").toLowerCase();
+        return t.includes("select fare to") || t.includes("select your fare");
+      }).catch(() => false);
+      if (found) return true;
+    }
+    return false;
+  };
+
   trace("[flight-rpa] Waiting for fare selection modal...");
-  let fareModalFound = false;
-  for (let i = 0; i < 20; i++) {   // up to 10s
-    await new Promise(r => setTimeout(r, 500));
-    const found = await page.evaluate(() => {
-      const t = (document.body.textContent ?? "").toLowerCase();
-      return t.includes("select fare to") || t.includes("select your fare");
-    }).catch(() => false);
-    if (found) { fareModalFound = true; break; }
+  let fareModalFound = await waitForFareModalOpen();
+  if (!fareModalFound) {
+    trace("[flight-rpa] Fare modal did not open after coordinate click - retrying selected flight via DOM rescan");
+    await safeScreenshot("03b-flight-click-no-fare-modal");
+    const domRetry = await clickExpediaFlightButtonWithDomRescan(page, legFlightTarget);
+    trace(
+      `[flight-rpa] DOM rescan flight click: clicked=${domRetry.clicked} candidates=${domRetry.candidates} ` +
+      `mode=${domRetry.matchMode ?? "none"} reason="${domRetry.matchReason ?? domRetry.error ?? "no match"}" label="${domRetry.label.slice(0, 140)}"`
+    );
+    if (domRetry.candidateSummaries.length > 0) {
+      trace(`[flight-rpa] DOM rescan candidate evidence: ${domRetry.candidateSummaries.map(summary => summary.slice(0, 220)).join(" || ")}`);
+    }
+    if (domRetry.clicked) {
+      await new Promise(r => setTimeout(r, 700));
+      await safeScreenshot("03c-after-dom-rescan-flight-click");
+      fareModalFound = await waitForFareModalOpen();
+    }
+  }
+
+  if (!fareModalFound) {
+    trace("[flight-rpa] Fare modal still absent - retrying selected flight via Playwright locator fallback");
+    const locatorRetry = await clickExpediaFlightButtonWithLocatorFallback(page, legFlightTarget);
+    trace(
+      `[flight-rpa] Locator flight click retry: clicked=${locatorRetry.clicked} candidates=${locatorRetry.candidates} ` +
+      `mode=${locatorRetry.matchMode ?? "none"} reason="${locatorRetry.matchReason ?? locatorRetry.error ?? "no match"}" label="${locatorRetry.label.slice(0, 140)}"`
+    );
+    if (locatorRetry.candidateSummaries.length > 0) {
+      trace(`[flight-rpa] Locator click candidate evidence: ${locatorRetry.candidateSummaries.map(summary => summary.slice(0, 220)).join(" || ")}`);
+    }
+    if (locatorRetry.clicked) {
+      await new Promise(r => setTimeout(r, 700));
+      await safeScreenshot("03d-after-locator-flight-click");
+      fareModalFound = await waitForFareModalOpen();
+    }
   }
 
   if (fareModalFound) {
@@ -3288,6 +3798,16 @@ export async function bookExpediaFlightProgrammatic(
     ((checkoutSignals.hasTravelerCopy || checkoutSignals.hasTravelerFields) && !checkoutSignals.stillOnReview);
 
   if (!onCheckout) {
+    const finalBoundary = await detectSafetyBoundary(activePage);
+    if (finalBoundary) {
+      trace(`[flight-rpa] Login/OTP/CAPTCHA boundary detected before checkout: ${finalBoundary}`);
+      await safeScreenshot("99-final-safety-boundary");
+      return {
+        reached_checkout: false,
+        currentUrl,
+        error: `Expedia flight ${finalBoundary} reached. Stop for manual intervention; do not bypass login, OTP, or CAPTCHA.`,
+      };
+    }
     trace(`[flight-rpa] Did not reach checkout — currentUrl=${currentUrl.slice(0, 80)}`);
     await safeScreenshot("99-final-not-checkout");
     return { reached_checkout: false, currentUrl, error: "Could not navigate to checkout. Please book manually." };

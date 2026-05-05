@@ -13,6 +13,7 @@ export type ExpediaRetryState =
   | "fallback_attempted_no_match"
   | "fallback_matched_no_checkout"
   | "checkout_manual_review_reached"
+  | "login_or_otp_boundary"
   | "model_or_env_transient"
   | "network_provider_failure"
   | "provider_no_availability"
@@ -24,6 +25,7 @@ type SignalKind =
   | "fallback_matched"
   | "no_match"
   | "checkout_reached"
+  | "login_or_otp_boundary"
   | "model_or_env_transient"
   | "network_provider_failure"
   | "provider_no_availability";
@@ -35,6 +37,7 @@ export const EXPEDIA_RETRY_STATE_LABEL: Record<ExpediaRetryState, string> = {
   fallback_attempted_no_match: "Fallback attempted but no match",
   fallback_matched_no_checkout: "Fallback matched but did not reach checkout",
   checkout_manual_review_reached: "Checkout/manual-review reached",
+  login_or_otp_boundary: "Login/OTP/CAPTCHA boundary",
   model_or_env_transient: "Model/env transient",
   network_provider_failure: "Network/provider failure",
   provider_no_availability: "Provider no availability",
@@ -166,6 +169,21 @@ const SIGNAL_PATTERNS: SignalPattern[] = [
     rx: /\b(payment[-_\s]?wall|cvv[-_\s]?gate|stop[-_\s]?at[-_\s]?cvv)\b/i,
   },
   {
+    kind: "login_or_otp_boundary",
+    label: "login boundary",
+    rx: /\b(sign[-_\s]?in|log[-_\s]?in|login|authentication)\b.{0,80}\b(continue|required|boundary|manual intervention)\b/i,
+  },
+  {
+    kind: "login_or_otp_boundary",
+    label: "OTP boundary",
+    rx: /\b(otp|one[-_\s]?time passcode|verification code|verify it'?s you|two[-_\s]?factor|2fa)\b/i,
+  },
+  {
+    kind: "login_or_otp_boundary",
+    label: "CAPTCHA boundary",
+    rx: /\b(captcha|robot check|are you a robot|unusual traffic)\b/i,
+  },
+  {
     kind: "model_or_env_transient",
     label: "OpenAI Responses API 5xx",
     rx: /\bOpenAI\b.*\bResponses?\s+API\b.*\b5\d{2}\b/i,
@@ -265,6 +283,7 @@ export function analyzeExpediaRetryArtifactBundle(
   const has = (kind: SignalKind) => signals.some((s) => s.kind === kind);
 
   const hasCheckout = has("checkout_reached");
+  const hasLoginOrOtpBoundary = has("login_or_otp_boundary");
   const hasModelOrEnv = has("model_or_env_transient");
   const hasNetwork = has("network_provider_failure");
   const hasCardScanFailed = has("card_scan_failed");
@@ -276,6 +295,8 @@ export function analyzeExpediaRetryArtifactBundle(
   let state: ExpediaRetryState;
   if (hasCheckout) {
     state = "checkout_manual_review_reached";
+  } else if (hasLoginOrOtpBoundary) {
+    state = "login_or_otp_boundary";
   } else if (hasModelOrEnv) {
     state = "model_or_env_transient";
   } else if (hasNetwork) {
@@ -480,6 +501,7 @@ function classifyConfidence(
 ): "high" | "medium" | "low" {
   switch (state) {
     case "checkout_manual_review_reached":
+    case "login_or_otp_boundary":
     case "model_or_env_transient":
     case "network_provider_failure":
     case "provider_no_availability":
@@ -522,6 +544,8 @@ function nextActionForState(state: ExpediaRetryState): string {
       return "Inspect the fare modal and checkout transition evidence. Patch fare-modal or checkout-boundary detection only after screenshot confirmation.";
     case "checkout_manual_review_reached":
       return "Count as demo-useful safe progress. Preserve the hard stop before payment, CVV, OTP, CAPTCHA, login bypass, or final confirmation.";
+    case "login_or_otp_boundary":
+      return "Treat as a safety boundary. Stop for manual intervention; do not bypass login, OTP, CAPTCHA, or authentication prompts.";
     case "model_or_env_transient":
       return "Treat as model/env transient. Preserve provider selector evidence, but do not patch Expedia selectors from a model/API outage alone.";
     case "network_provider_failure":
@@ -537,20 +561,22 @@ function signalRank(kind: SignalKind): number {
   switch (kind) {
     case "checkout_reached":
       return 0;
-    case "model_or_env_transient":
+    case "login_or_otp_boundary":
       return 1;
-    case "network_provider_failure":
+    case "model_or_env_transient":
       return 2;
-    case "fallback_matched":
+    case "network_provider_failure":
       return 3;
-    case "fallback_attempted":
+    case "fallback_matched":
       return 4;
-    case "card_scan_failed":
+    case "fallback_attempted":
       return 5;
-    case "no_match":
+    case "card_scan_failed":
       return 6;
-    case "provider_no_availability":
+    case "no_match":
       return 7;
+    case "provider_no_availability":
+      return 8;
   }
 }
 

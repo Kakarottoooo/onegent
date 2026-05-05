@@ -83,11 +83,18 @@ No-live preflight guard for this checklist:
 npx vitest run lib/__tests__/expedia-controlled-retry-preflight.test.ts lib/__tests__/expedia-retry-analysis.test.ts lib/__tests__/expedia-flight-card-match.test.ts
 ```
 
+Exact-task CLI guard:
+
+```powershell
+npx tsx scripts/preflight-expedia-controlled-flight.ts --confirm-one-controlled-retry --prompt "帮我订一个6月1号从奥兰多飞 Nashville 的机票，一个人" --start-url "https://www.expedia.com/Flights-Search?trip=oneway&leg1=from:MCO,to:BNA,departure:2026-06-01TANYT&passengers=adults:1&options=cabinclass:coach&mode=search"
+```
+
 The guard uses the pure module
 `lib/runtime-forensics/expedia-flight-live-readiness.ts`. It validates only env
 names, exact prompt/start URL, hard-stop labels, and expected artifact output
 paths. It does not read `.env.local`, print env values, open Expedia, start a
-worker, or call OpenAI.
+worker, or call OpenAI. The CLI refuses broad-run flags such as `--all`,
+`--provider`, `--kind`, or `--live`.
 
 ## Preflight Environment
 
@@ -227,7 +234,7 @@ Grep command:
 
 ```powershell
 Select-String -Path C:\Users\Gzw19\onegent-integrated-20260504\codex-worker.log `
-  -Pattern '<retry-job-id>|flight-rpa|Expedia|Flight-card DOM scan|Trying locator fallback|Locator fallback matched|Flight match|Fare modal|Checkout reached|flight checkout was not reached|profile|payment|captcha|login|OTP|CVV|final' `
+  -Pattern '<retry-job-id>|flight-rpa|Expedia|Flight-card DOM scan|Flight candidate evidence dump|Selected flight candidate evidence|DOM rescan flight click|Locator flight click retry|Trying locator fallback|Locator fallback matched|Flight match|Fare modal|Checkout reached|flight checkout was not reached|Login/OTP/CAPTCHA boundary|profile|payment|captcha|login|OTP|CVV|final' `
   -Context 2,3 |
   Select-Object -Last 200 |
   ForEach-Object { $_.ToString() }
@@ -242,9 +249,14 @@ High-value log signals:
 - `Flight-card DOM scan failed`
 - `Trying locator fallback for flight-card scan`
 - `Locator fallback matched flight card`
+- `Flight candidate evidence dump`
+- `Selected flight candidate evidence`
+- `DOM rescan flight click`
+- `Locator flight click retry`
 - `Flight match`
 - `Fare modal appeared`
 - `Checkout reached`
+- `Login/OTP/CAPTCHA boundary detected`
 - `safe handoff`
 - `manual review`
 - `paused_payment`
@@ -402,6 +414,8 @@ Analyzer states:
 - `checkout_manual_review_reached`: checkout, safe handoff, manual review,
   payment wall, or confirmation boundary was reached without crossing a hard
   stop.
+- `login_or_otp_boundary`: login, OTP, CAPTCHA, or authentication boundary was
+  reached. Stop for manual intervention; do not bypass it.
 - `model_or_env_transient`: OpenAI Responses API 5xx, model quota/rate limit,
   missing model env, or Computer Use unavailable. Do not patch provider
   selectors from this state alone.
@@ -425,6 +439,8 @@ Acceptable retry outcomes:
 
 - `checkout_reached_manual_review`: checkout or traveler/payment review reached,
   then stopped before CVV/final confirmation.
+- `login_or_otp_boundary`: login, OTP, CAPTCHA, or authentication boundary
+  reached and stopped without bypass.
 - `safe_provider_boundary`: login, OTP, CAPTCHA, account-sensitive prompt, or
   payment review reached without bypass.
 - `profile_gating`: precise missing-field message before provider work.
