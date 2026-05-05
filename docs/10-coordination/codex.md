@@ -2,7 +2,7 @@
 
 > **Branch**: `codex/integrated-preview-20260504`
 > **Last updated**: 2026-05-04
-> **Last commit**: pending Resy R-030 controlled live closure patch
+> **Last commit**: pending live-readiness sidecar integration push
 >
 > Claude reads this at session start. I write to it before each push.
 > See `CLAUDE.md` section "coordination protocol".
@@ -11,10 +11,38 @@
 
 ## Currently doing
 
-Closed the current Resy R-030 controlled-live investigation loop on the Phase
-1/1.5 demo-freeze baseline without running another live attempt after patching.
+Integrated the latest no-live runtime closure sidecar batch after the Resy
+R-030 patch, without branch-head merging older bases.
 
 Completed in latest pass:
+- Cherry-picked Agent2 `codex/flight-live-readiness-pack-v2 @ d4d42a8` as
+  `5aabb36`.
+- Cherry-picked Agent3 `codex/hotel-live-readiness-pack-v2 @ c2021bb` as
+  `084a1d6`.
+- Cherry-picked Goal `codex/goal-runtime-closure-consolidation @ d42c8dc` as
+  `bd5d15b`.
+- Cherry-picked Goal bridge commit `b8cfd8a` as `bb641b7`.
+- Cherry-picked Claude `claude/live-transient-failure-operator-polish @
+  3e8dc3f` as `a7ed628`.
+- Resolved integration conflicts by preserving:
+  - current Resy R-030 runtime fixes from `e215fe4`;
+  - current artifact corpus counts: 31 total fixtures, split restaurant 10,
+    Expedia 8, hotel 13;
+  - stricter OpenAI Responses API 5xx classification as
+    `model_or_env_blocked`, with provider/network 5xx alternative suppressed.
+- Verified:
+  - targeted runtime/flight/hotel/artifact/operator tests pass, 209/209;
+  - artifact bundle templates for restaurant, Expedia, and hotel pass;
+  - `npx tsx scripts/list-artifact-fixtures.ts` pass, 31 fixtures;
+  - `npx tsc --noEmit --pretty false` pass;
+  - `npm run check-drift` pass;
+  - `git diff --check` pass;
+  - `npm run gate:phase1 -- --allow-known-drift` pass, 9/9, run
+    `phase1-quality-gate-2026-05-05T00-13-50-528Z.json`.
+- Safety boundary preserved: no live provider/OpenAI run, payment, CVV,
+  OTP/CAPTCHA/login bypass, final confirmation, or live retry.
+
+Previous completed pass:
 - Ran founder-approved Resy R-030 live benchmark twice:
   - first run failed before provider with OpenAI Responses API 500
     (`req_ce42a48137424a938a7893b131416d28`);

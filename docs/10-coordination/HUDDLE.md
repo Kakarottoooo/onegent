@@ -33,6 +33,21 @@ small.
 
 ## Live Activity
 
+- 2026-05-04 codex: integrated latest no-live runtime closure sidecar batch
+  after the Resy R-030 patch. Cherry-picked Agent2
+  `codex/flight-live-readiness-pack-v2 @ d4d42a8` as `5aabb36`, Agent3
+  `codex/hotel-live-readiness-pack-v2 @ c2021bb` as `084a1d6`, Goal
+  `codex/goal-runtime-closure-consolidation @ d42c8dc` as `bd5d15b`, Goal
+  bridge commit `b8cfd8a` as `bb641b7`, and Claude
+  `claude/live-transient-failure-operator-polish @ 3e8dc3f` as `a7ed628`.
+  Resolved conflicts by preserving current Resy runtime fixes, current
+  31-fixture corpus counts, and the stricter OpenAI Responses API 5xx
+  classification. Verified targeted runtime/flight/hotel/artifact/operator
+  tests 209/209, artifact bundle templates for restaurant/Expedia/hotel,
+  fixture inventory 31, `tsc`, `check-drift`, `git diff --check`, and Phase 1
+  gate 9/9 (`phase1-quality-gate-2026-05-05T00-13-50-528Z.json`). No live
+  provider/OpenAI run, payment, CVV, OTP/CAPTCHA/login bypass, final
+  confirmation, or live retry was performed.
 - 2026-05-04 codex: ran founder-approved controlled Resy R-030 live closure
   on integrated preview. First run failed before provider with OpenAI Responses
   API 500 (`req_ce42a48137424a938a7893b131416d28`), now classified as

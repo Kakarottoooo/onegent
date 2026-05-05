@@ -21,12 +21,28 @@ Do not enter Phase 2 yet. Stabilize Phase 0, Phase 1, and Phase 1.5 first.
 
 - Integrated preview branch: `codex/integrated-preview-20260504` (canonical;
   contains all merged Phase 0/1/1.5 work plus Phase 2 audit/runbooks).
+- 2026-05-04 runtime closure integration:
+  - Resy R-030 controlled live investigation is closed for this pass. The
+    follow-up patch is merged into integrated preview: OpenAI Responses API 5xx
+    is classified as `model_or_env_blocked`, Resy slugs/stage detection are
+    current, Resy time-preserving deep links are hardened, and the slot
+    detector no longer treats the top time filter as a bookable slot.
+  - Agent2 flight, Agent3 hotel, Goal evidence bridge, and Claude operator
+    failure taxonomy no-live packs are integrated. Current synthetic artifact
+    corpus is 31 fixtures: restaurant 10, Expedia 8, hotel 13.
+  - Latest quick gate:
+    `npm run gate:phase1 -- --allow-known-drift` passed 9/9 at
+    `phase1-quality-gate-2026-05-05T00-13-50-528Z.json`.
 - Historical side branches now folded into integrated preview:
   `codex/openai-chat-model-env` (runtime/debug),
   `codex/expedia-flight-card-fallback` (Expedia visible-card fallback),
   `codex/phase2-expedia-retry-analysis-pack`,
   `codex/phase2-expedia-artifact-cli`,
   `codex/phase2-hotel-artifact-audit`,
+  `codex/flight-live-readiness-pack-v2`,
+  `codex/hotel-live-readiness-pack-v2`,
+  `codex/goal-runtime-closure-consolidation`,
+  `claude/live-transient-failure-operator-polish`,
   `codex/track-c-demo-readiness`,
   `codex/track-c-demo-readiness-v2`,
   `codex/track-c-demo-acceptance-pack`.

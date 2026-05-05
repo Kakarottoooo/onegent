@@ -55,7 +55,7 @@ const OPENAI_RESPONSES_API_5XX_PATTERNS = [
  * appear ONLY in one specific failure mode.
  */
 const PATTERN_RULES: ReadonlyArray<PatternRule> = [
-  // — legacy_shape_missing_source — top priority, P0
+  // legacy_shape_missing_source - top priority, P0
   {
     rx: /Worker received legacy[-\s]shape step/i,
     cls: "legacy_shape_missing_source",
@@ -86,7 +86,7 @@ const PATTERN_RULES: ReadonlyArray<PatternRule> = [
     weight: 0.8,
     label: "executor marker missing",
   },
-  // — provider_no_availability
+  // provider_no_availability
   {
     rx: /no\s+(target[-_\s]+)?(window\s+)?(slots?|availability|times|reservations?)/i,
     cls: "provider_no_availability",
@@ -117,7 +117,7 @@ const PATTERN_RULES: ReadonlyArray<PatternRule> = [
     weight: 0.6,
     label: "sold out",
   },
-  // — provider_form_incomplete
+  // provider_form_incomplete
   {
     rx: /(guest[-_\s]?)?form\s+(incomplete|partially\s+filled|not\s+fully\s+filled)/i,
     cls: "provider_form_incomplete",
@@ -148,7 +148,7 @@ const PATTERN_RULES: ReadonlyArray<PatternRule> = [
     weight: 0.7,
     label: "name field empty/missing",
   },
-  // — otp_or_login_required
+  // otp_or_login_required
   {
     rx: /\botp\b|\bone[-\s]?time\s?(password|code)\b/i,
     cls: "otp_or_login_required",
@@ -185,7 +185,7 @@ const PATTERN_RULES: ReadonlyArray<PatternRule> = [
     weight: 0.95,
     label: "F-PROVIDER-OTP code",
   },
-  // — checkout_reached_manual_review
+  // checkout_reached_manual_review
   {
     rx: /ready[-_\s]?for[-_\s]?confirmation/i,
     cls: "checkout_reached_manual_review",
@@ -222,7 +222,7 @@ const PATTERN_RULES: ReadonlyArray<PatternRule> = [
     weight: 0.8,
     label: "stop at CVV",
   },
-  // — model_or_env_blocked
+  // model_or_env_blocked
   {
     rx: /openai[-_\s]?(rate[-_\s]?limit|429|quota|billing)/i,
     cls: "model_or_env_blocked",
@@ -265,7 +265,7 @@ const PATTERN_RULES: ReadonlyArray<PatternRule> = [
     weight: 0.8,
     label: "token guard / confirm-suite gate",
   },
-  // — network_or_provider_5xx
+  // network_or_provider_5xx
   {
     rx: /\b5\d{2}\b\s*(error|response|status)/i,
     cls: "network_or_provider_5xx",
@@ -507,7 +507,7 @@ export function decisionLogTextOf(entry: DecisionLogEntryLike | null | undefined
     try {
       parts.push(typeof entry.data === "string" ? entry.data : JSON.stringify(entry.data));
     } catch {
-      /* ignore — circular or unserializable */
+      /* ignore - circular or unserializable */
     }
   }
   return parts.join(" | ");
