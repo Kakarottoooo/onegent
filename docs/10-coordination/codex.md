@@ -2,7 +2,7 @@
 
 > **Branch**: `codex/integrated-preview-20260504`
 > **Last updated**: 2026-05-05
-> **Last commit**: `61e2eba` flight closure solve-next integration
+> **Last commit**: `f863a82` hotel closure solve-next integration
 >
 > Claude reads this at session start. I write to it before each push.
 > See `CLAUDE.md` section "coordination protocol".
@@ -12,6 +12,33 @@
 ## Currently doing
 
 Completed in latest pass:
+- Integrated Agent3 `codex/hotel-closure-solve-next @ 2f962d2` as `f863a82`.
+- Actual blocker addressed:
+  - generated hotel tasks now use a structured Booking.com manual-review
+    prompt with exact hotel/date/adult/room evidence;
+  - Booking.com runtime detects no-payment/manual-review intent without
+    relying on the old `stop before payment` regex;
+  - both normal checkout and independent payment-gate paths skip Booking.com
+    card-field fill when manual-review/no-payment intent is active;
+  - exact Booking.com stay params are logged before listing/room selection;
+  - optional member/sign-in promos are dismissed only through safe close
+    controls, while login/verification/CAPTCHA prompts remain hard stops.
+- Verified `npx vitest run lib/__tests__/booking-com-hotel-runtime.test.ts
+  lib/__tests__/hotel-live-readiness.test.ts
+  lib/__tests__/hotel-retry-analysis.test.ts
+  lib/__tests__/hotel-task-builder.test.ts` 34/34,
+  `npx tsc --noEmit --pretty false`, strict `npm run check-drift`,
+  `git diff --check`, and `npm run gate:phase1 -- --allow-known-drift` 9/9
+  (`phase1-quality-gate-2026-05-05T04-02-34-398Z.json`).
+- Safety boundary preserved during Codex integration: no live provider/OpenAI/
+  browser automation, worker start, DB mutation, payment, CVV/security-code,
+  OTP/CAPTCHA/login handling, or final confirmation.
+- Hotel closure is still not complete. A new single controlled Booking.com
+  retry is now technically justified after explicit founder approval; it must
+  either reach a safe manual-review handoff or produce current actionable
+  evidence without retry loops.
+
+Previous completed pass:
 - Integrated Agent2 `codex/flight-closure-solve-next @ 204cc4e` as
   `61e2eba`.
 - Actual blocker addressed:

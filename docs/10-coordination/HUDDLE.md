@@ -33,6 +33,23 @@ small.
 
 ## Live Activity
 
+- 2026-05-05 codex: integrated Agent3
+  `codex/hotel-closure-solve-next @ 2f962d2` as `f863a82` on top of the
+  current integrated preview. This solves the next Booking.com no-payment /
+  manual-review runtime blocker: generated hotel tasks now carry a structured
+  manual-review prompt, Booking.com runtime detects the safer no-payment
+  intent without depending on the old `stop before payment` regex, both normal
+  checkout and independent payment-gate paths skip Booking.com card-field fill
+  under that intent, exact stay params are logged for evidence, and optional
+  member/sign-in promos are dismissed only with safe close controls. Verified
+  hotel targeted tests 34/34, `tsc`, strict `check-drift`, `git diff --check`,
+  and Phase 1 gate 9/9
+  (`phase1-quality-gate-2026-05-05T04-02-34-398Z.json`). No live
+  provider/OpenAI/browser automation, worker start, DB mutation, payment,
+  CVV/security-code, OTP/CAPTCHA/login handling, or final confirmation was
+  performed during Codex integration. Hotel is not closure-complete until a
+  new explicitly founder-approved single controlled Booking.com retry reaches
+  a safe handoff boundary or yields actionable current evidence.
 - 2026-05-05 codex: integrated Agent2
   `codex/flight-closure-solve-next @ 204cc4e` as `61e2eba` on top of the
   current integrated preview. This solves the next Expedia selector/runtime
