@@ -19,8 +19,7 @@ export default clerkEnabled ? protectedProxy : function proxy() {
 };
 
 export const config = {
-  matcher: [
-    "/((?!_next|[^?]*\\.(?:html?|css|js(?!on)|jpe?g|webp|png|gif|svg|ttf|woff2?|ico|csv|docx?|xlsx?|zip|webmanifest)).*)",
-    "/(api|trpc)(.*)",
-  ],
+  // Keep the proxy off page navigations/static assets. Clerk's auth() still
+  // needs the proxy on API routes, but page clicks should not pay this cost.
+  matcher: ["/api/:path*"],
 };
