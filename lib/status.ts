@@ -120,7 +120,7 @@ export interface StatusDisplay {
 export const JOB_SEMANTIC_DISPLAY: Record<JobSemanticStatus, StatusDisplay> = {
   pending:                  { label: "Queued",                        color: "var(--text-muted, #aaa)",      animate: false },
   running:                  { label: "Agent working…",                color: "var(--gold, #D4A34B)",          animate: true  },
-  awaiting_payment:         { label: "Ready for payment — enter CVC", color: "rgba(22,163,74,0.85)",          animate: false },
+  awaiting_payment:         { label: "Ready to review - confirm on site", color: "rgba(22,163,74,0.85)",      animate: false },
   succeeded_first_try:      { label: "All done — first try",          color: "rgba(22,163,74,0.85)",          animate: false },
   succeeded_with_adjustment:{ label: "Done — with smart adjustments", color: "rgba(22,163,74,0.7)",           animate: false },
   partially_completed:      { label: "Partial — action needed",       color: "rgba(234,179,8,0.9)",           animate: false },

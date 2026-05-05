@@ -68,7 +68,7 @@ function TaskWorkspaceSwitch({
 function classifyTaskWorkspace(job: BookingJob): TaskWorkspaceView {
   const sem = computeJobSemanticStatus(job);
   if (sem === "pending" || sem === "running" || sem === "retrying") return "live";
-  if (sem === "blocked_needs_user_input" || sem === "awaiting_payment" || sem === "partially_completed") return "queue";
+  if (sem === "blocked_needs_user_input" || sem === "partially_completed") return "queue";
   return "history";
 }
 
@@ -1236,7 +1236,7 @@ function JobCard({ job, onRefresh, sessionId, onOpenLive }: { job: BookingJob; o
             animation: statusDisplay.animate ? "jobpulse 1.4s ease-in-out infinite" : "none",
           }}
         />
-        <div style={{ flex: 1, minWidth: 0 }}>
+        <div className="job-card__summary">
           <p className="job-card__title">{job.trip_label}</p>
           <div className="job-card__meta-row">
             <span
@@ -1270,87 +1270,89 @@ function JobCard({ job, onRefresh, sessionId, onOpenLive }: { job: BookingJob; o
             </span>
           </div>
         </div>
-        {(job.status === "running" || (isComplete && Date.now() - new Date(job.updated_at).getTime() < 90_000)) && (
-          <button
-            onClick={(e) => { e.stopPropagation(); onOpenLive?.(job.id); }}
-            className={`job-card__cta ${job.status === "running" ? "job-card__cta--watch" : "job-card__cta--watch-replay"}`}
-          >
-            {job.status === "running" ? "🖥️ Watch live" : "🖥️ Replay"}
-          </button>
-        )}
-        {job.status === "done" && doneCount > 0 && (
-          <button
-            onClick={(e) => { e.stopPropagation(); openAll(); }}
-            className="job-card__cta job-card__cta--open-all"
-          >
-            Open all →
-          </button>
-        )}
-        {job.status === "done" && (() => {
-          // own_share is attached server-side in /api/booking-jobs when the
-          // signed-in user owns this job. Type isn't on BookingJob since
-          // the shape comes from the API layer; pull it via a local cast.
-          const ownShare = (job as BookingJob & {
-            own_share?: { slug: string; view_count: number; visibility: string } | null;
-          }).own_share;
-          if (ownShare) {
-            return (
-              <a
-                href={`/s/${ownShare.slug}`}
-                target="_blank"
-                rel="noopener noreferrer"
-                onClick={(e) => e.stopPropagation()}
-                className="job-card__cta job-card__cta--open-all"
-                title="Open public share page"
-                style={{ color: "var(--gold-text, #5A4416)" }}
-              >
-                ↗ Shared · {ownShare.view_count}{" "}
-                {ownShare.view_count === 1 ? "view" : "views"}
-              </a>
-            );
-          }
-          return (
+        <div className="job-card__actions">
+          {(job.status === "running" || (isComplete && Date.now() - new Date(job.updated_at).getTime() < 90_000)) && (
             <button
-              onClick={(e) => { e.stopPropagation(); setShareOpen(true); }}
-              className="job-card__cta job-card__cta--open-all"
-              title="Share this trip"
+              onClick={(e) => { e.stopPropagation(); onOpenLive?.(job.id); }}
+              className={`job-card__cta ${job.status === "running" ? "job-card__cta--watch" : "job-card__cta--watch-replay"}`}
             >
-              ↗ Share
+              {job.status === "running" ? "🖥️ Watch live" : "🖥️ Replay"}
             </button>
-          );
-        })()}
-        {job.status === "done" && (
+          )}
+          {job.status === "done" && doneCount > 0 && (
+            <button
+              onClick={(e) => { e.stopPropagation(); openAll(); }}
+              className="job-card__cta job-card__cta--open-all"
+            >
+              Open all →
+            </button>
+          )}
+          {job.status === "done" && (() => {
+            // own_share is attached server-side in /api/booking-jobs when the
+            // signed-in user owns this job. Type isn't on BookingJob since
+            // the shape comes from the API layer; pull it via a local cast.
+            const ownShare = (job as BookingJob & {
+              own_share?: { slug: string; view_count: number; visibility: string } | null;
+            }).own_share;
+            if (ownShare) {
+              return (
+                <a
+                  href={`/s/${ownShare.slug}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  onClick={(e) => e.stopPropagation()}
+                  className="job-card__cta job-card__cta--open-all"
+                  title="Open public share page"
+                  style={{ color: "var(--gold-text, #5A4416)" }}
+                >
+                  ↗ Shared · {ownShare.view_count}{" "}
+                  {ownShare.view_count === 1 ? "view" : "views"}
+                </a>
+              );
+            }
+            return (
+              <button
+                onClick={(e) => { e.stopPropagation(); setShareOpen(true); }}
+                className="job-card__cta job-card__cta--open-all"
+                title="Share this trip"
+              >
+                ↗ Share
+              </button>
+            );
+          })()}
+          {job.status === "done" && (
+            <button
+              onClick={(e) => { e.stopPropagation(); setAddToTripOpen(true); }}
+              className="job-card__cta job-card__cta--open-all"
+              title="Group this booking into a trip"
+            >
+              🧳 Add to trip
+            </button>
+          )}
+          {isStuck && (
+            <button
+              onClick={handleResetStuck}
+              disabled={resetting}
+              title="Job appears stuck — click to reset and retry"
+              className="job-card__cta job-card__cta--reset"
+            >
+              {resetting ? "Starting…" : "↺ Reset & Retry"}
+            </button>
+          )}
+          <span style={{ position: "relative" }}>
+            <ModifyTaskButton job={job} onRefresh={onRefresh} />
+          </span>
+          <span className="job-card__expand">{expanded ? "▲" : "▼"}</span>
           <button
-            onClick={(e) => { e.stopPropagation(); setAddToTripOpen(true); }}
-            className="job-card__cta job-card__cta--open-all"
-            title="Group this booking into a trip"
+            onClick={handleDelete}
+            disabled={deleting}
+            title={isRunning ? "Force remove this running trip" : "Delete trip record"}
+            className={`job-card__delete${isRunning ? " job-card__delete--running" : ""}`}
+            style={{ opacity: deleting ? 0.4 : 1 }}
           >
-            🧳 Add to trip
+            🗑
           </button>
-        )}
-        {isStuck && (
-          <button
-            onClick={handleResetStuck}
-            disabled={resetting}
-            title="Job appears stuck — click to reset and retry"
-            className="job-card__cta job-card__cta--reset"
-          >
-            {resetting ? "Starting…" : "↺ Reset & Retry"}
-          </button>
-        )}
-        <span style={{ position: "relative" }}>
-          <ModifyTaskButton job={job} onRefresh={onRefresh} />
-        </span>
-        <span className="job-card__expand">{expanded ? "▲" : "▼"}</span>
-        <button
-          onClick={handleDelete}
-          disabled={deleting}
-          title={isRunning ? "Force remove this running trip" : "Delete trip record"}
-          className={`job-card__delete${isRunning ? " job-card__delete--running" : ""}`}
-          style={{ opacity: deleting ? 0.4 : 1 }}
-        >
-          🗑
-        </button>
+        </div>
       </div>
 
       {expanded && (
@@ -3155,6 +3157,24 @@ function TripsPageInner() {
   const liveJob = jobs.find((j) => j.id === liveJobId);
   const rightPct = liveJobId ? (100 - splitPct) : 0;
 
+  useEffect(() => {
+    const explicitView = searchParams.get("view");
+    const focusId = searchParams.get("focus");
+    if (loading || explicitView || focusId || workspaceView !== "queue") return;
+    if (queueJobs.length === 0 && liveJobs.length === 0 && historyJobs.length > 0) {
+      setWorkspaceView("history");
+      router.replace("/tasks?view=history", { scroll: false });
+    }
+  }, [
+    loading,
+    searchParams,
+    workspaceView,
+    queueJobs.length,
+    liveJobs.length,
+    historyJobs.length,
+    router,
+  ]);
+
   function focusJob(jobId: string) {
     setSelectedJobId(jobId);
     jobRefs.current[jobId]?.scrollIntoView({ behavior: "smooth", block: "start" });
@@ -3557,7 +3577,7 @@ function TripsPageInner() {
             <TaskTimelinePanel
               key={liveViewKey}
               jobId={liveJobId}
-              title={liveJob?.trip_label ? `🖥️ Agent — ${liveJob.trip_label}` : "🖥️ Agent"}
+              title={liveJob?.trip_label ? `Agent — ${liveJob.trip_label}` : "Agent"}
               subtitle={liveJob?.trip_label ? undefined : "Live run"}
               onClose={() => { liveJobIdRef.current = null; setLiveJobId(null); }}
             />
