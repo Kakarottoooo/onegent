@@ -69,6 +69,92 @@ type ExpediaBillingAddressFillResult = {
   state: boolean;
 };
 
+export type ExpediaBillingInputKind = "address1" | "city" | "zip" | "state" | "country" | null;
+
+export interface ExpediaBillingInputDescriptor {
+  ariaLabel?: string;
+  autocomplete?: string;
+  placeholder?: string;
+  id?: string;
+  name?: string;
+  dataTealeafName?: string;
+  dataCkoRfrrId?: string;
+  tag?: "input" | "select";
+}
+
+/**
+ * Pure classifier for Expedia checkout billing inputs. Operates on attribute
+ * snapshots so it can run in node (vitest) and inside `frame.evaluate(...)`.
+ *
+ * The matcher is biased toward the `billing ` autocomplete prefix that
+ * Expedia's CKO/Braintree iframe inputs use ("billing address-line1",
+ * "billing address-level2", "billing postal-code"). It ALSO accepts the
+ * non-prefixed variants seen in legacy inline forms.
+ *
+ * Returns `null` when the descriptor matches no billing field, address line
+ * 2 / suite / apartment / cvv / cvc / promo / coupon / card number; the
+ * caller MUST treat null as "do not fill".
+ */
+export function classifyExpediaBillingInputKind(
+  desc: ExpediaBillingInputDescriptor,
+): ExpediaBillingInputKind {
+  const ariaLabel = (desc.ariaLabel ?? "").toLowerCase();
+  const autocomplete = (desc.autocomplete ?? "").toLowerCase();
+  const placeholder = (desc.placeholder ?? "").toLowerCase();
+  const id = (desc.id ?? "").toLowerCase();
+  const name = (desc.name ?? "").toLowerCase();
+  const dataTealeaf = (desc.dataTealeafName ?? "").toLowerCase();
+  const dataCko = (desc.dataCkoRfrrId ?? "").toLowerCase();
+  const tag = desc.tag ?? "input";
+  const blob = `${ariaLabel} ${autocomplete} ${placeholder} ${id} ${name} ${dataTealeaf} ${dataCko}`;
+
+  // Hard-rejects: never auto-fill these even if they otherwise look like billing fields.
+  if (/\bcvv\b|\bcvc\b|security.?code|verification.?code|card.?security/.test(blob)) return null;
+  if (/coupon|promo|gift.?card/.test(blob)) return null;
+  if (/credit.?card.?number|debit.?credit.?card.?number|card.?number/.test(blob)) return null;
+  // Explicit "address line 2 / suite / apartment" — separate from billing address 1.
+  if (/address.?line.?2|address.?2|\bsuite\b|\bapt\b|\bapartment\b|ex\.?\s*suite/.test(blob)) return null;
+
+  // Country / state are <select>; skip when called with an <input>-only descriptor.
+  if (
+    autocomplete === "billing country" || autocomplete === "country" ||
+    /\bcountry\/territory\b|\bcountry\/region\b/.test(blob) ||
+    /billing.?country|country.?code/.test(blob) ||
+    (tag === "select" && /\bcountry\b/.test(blob))
+  ) return "country";
+
+  if (
+    autocomplete === "billing address-level1" || autocomplete === "address-level1" ||
+    /billing.?state|state\/province/.test(blob) ||
+    (tag === "select" && /\bstate\b/.test(blob)) ||
+    (tag === "input" && /\bbilling state\b/.test(blob))
+  ) return "state";
+
+  if (
+    autocomplete === "billing address-line1" || autocomplete === "address-line1" ||
+    /creditcards\[\d+\]\.street|billing-address-one|billingaddress1|flt\.cko\.billingaddress1/.test(blob) ||
+    /billing.?address.?1|billing.?address.?line.?1|address.?line.?1/.test(blob) ||
+    (tag === "input" && /\bstreet\b/.test(blob)) ||
+    /\bex\.?\s*123 main\b|123 main/.test(blob)
+  ) return "address1";
+
+  if (
+    autocomplete === "billing address-level2" || autocomplete === "address-level2" ||
+    /creditcards\[\d+\]\.city|billing-city|flt\.cko\.billingcity/.test(blob) ||
+    /billing.?city/.test(blob) ||
+    (tag === "input" && /\bcity\b/.test(blob))
+  ) return "city";
+
+  if (
+    autocomplete === "billing postal-code" || autocomplete === "postal-code" ||
+    /creditcards\[\d+\]\.zipcode|billing-zip-code|flt\.cko\.billingzipcode/.test(blob) ||
+    /billing.?zip|billing.?postal/.test(blob) ||
+    /\bzip code\b|\bzip\b|\bzipcode\b|postal.?code/.test(blob)
+  ) return "zip";
+
+  return null;
+}
+
 export type ExpediaPaymentPrefillResult = {
   complete: boolean;
   missing: string[];
@@ -1601,6 +1687,37 @@ async function fillExpediaBillingAddressFields(
   ).catch(() => ({ address: false, city: false, zip: false }));
   trace(`Expedia billing exact field fill: address=${exactResult.address} city=${exactResult.city} zip=${exactResult.zip}`);
 
+  // ── Iframe fallback ─────────────────────────────────────────────────────
+  // The CKO/Braintree iframe holds inputs with `aria-label="Billing address 1"`,
+  // `City`, `ZIP code`, `State`, `Country/Territory` that the main-page
+  // strategies above cannot reach. Run the iframe filler ONLY for fields
+  // that still appear empty so we don't blindly overwrite a successful fill.
+  const needIframeFill =
+    (profile.address_line1 ? !(directResult.address.ok || nativeResult.address || exactResult.address) : false) ||
+    (profile.city ? !(directResult.city.ok || nativeResult.city || exactResult.city) : false) ||
+    (billingZip ? !(directResult.zip.ok || nativeResult.zip || exactResult.zip) : false) ||
+    (profile.state ? !stateSelected : false) ||
+    (profile.country ? !countrySelected : false);
+  let iframeResult = { address: false, city: false, zip: false, state: false, country: false };
+  if (needIframeFill) {
+    iframeResult = await fillBillingFieldsInPaymentIframes(
+      page,
+      {
+        address1: profile.address_line1 && !(directResult.address.ok || nativeResult.address || exactResult.address)
+          ? profile.address_line1 : undefined,
+        city: profile.city && !(directResult.city.ok || nativeResult.city || exactResult.city)
+          ? profile.city : undefined,
+        zip: billingZip && !(directResult.zip.ok || nativeResult.zip || exactResult.zip)
+          ? billingZip : undefined,
+        state: profile.state && !stateSelected ? profile.state : undefined,
+        country: profile.country && !countrySelected ? profile.country : undefined,
+      },
+      trace,
+    );
+  } else {
+    trace("Expedia billing iframe scan: skipped — main-page strategies already filled all fields");
+  }
+
   const verified = await page.evaluate(() => {
     const fieldText = (el: HTMLInputElement | HTMLSelectElement): string => {
       const id = el.getAttribute("id") ?? "";
@@ -1654,15 +1771,87 @@ async function fillExpediaBillingAddressFields(
     };
   }).catch(() => ({ address: false, city: false, zip: false, country: false, state: false }));
 
+  // ── Iframe verify pass ──────────────────────────────────────────────────
+  // Walk every non-main frame and check for billing inputs/selects whose
+  // value is non-empty. Mirrors the main-page `verified` block above but
+  // scoped to each frame; safe even when frame.url() throws (handled in
+  // try/catch). Counts ANY non-empty match — main-page or iframe — toward
+  // the final boolean for that field.
+  let iframeVerified = { address: false, city: false, zip: false, state: false, country: false };
+  try {
+    const allFrames = page.frames();
+    for (const frame of allFrames) {
+      if (frame === page.mainFrame()) continue;
+      const subset = await frame.evaluate(() => {
+        const fieldText = (el: HTMLInputElement | HTMLSelectElement): string => {
+          const id = el.getAttribute("id") ?? "";
+          const label = id ? document.querySelector<HTMLLabelElement>(`label[for="${CSS.escape(id)}"]`)?.textContent ?? "" : "";
+          return [
+            label,
+            el.className,
+            el.getAttribute("aria-label") ?? "",
+            el.getAttribute("autocomplete") ?? "",
+            el.getAttribute("placeholder") ?? "",
+            el.getAttribute("name") ?? "",
+            id,
+            el.getAttribute("data-tealeaf-name") ?? "",
+            el.getAttribute("data-cko-rfrr-id") ?? "",
+            el.closest("label")?.textContent ?? "",
+          ].join(" ").replace(/\s+/g, " ").trim().toLowerCase();
+        };
+        const inputs = Array.from(document.querySelectorAll<HTMLInputElement>("input"))
+          .filter(el => !el.disabled && el.type !== "hidden");
+        const selects = Array.from(document.querySelectorAll<HTMLSelectElement>("select"))
+          .filter(el => !el.disabled);
+        const hasInput = (patterns: RegExp[], reject: RegExp[] = []): boolean =>
+          inputs.some(input => {
+            const text = fieldText(input);
+            return input.value.trim().length > 0 &&
+              patterns.some(pattern => pattern.test(text)) &&
+              !reject.some(pattern => pattern.test(text));
+          });
+        const hasSelect = (patterns: RegExp[]): boolean =>
+          selects.some(select => {
+            const text = fieldText(select);
+            return select.value.trim().length > 0 &&
+              select.selectedIndex > 0 &&
+              patterns.some(pattern => pattern.test(text));
+          });
+        return {
+          address: hasInput(
+            [/creditcards\[\d+\]\.street/, /billing-address-one/, /billingaddress1/, /\bstreet\b/, /billing address.?1/, /billing address-line1/, /billing address line.?1/, /address line.?1/, /address-line1/, /123 main/],
+            [/address.?2/, /suite|apt|apartment/],
+          ),
+          city: hasInput([/creditcards\[\d+\]\.city/, /billing-city/, /\bcity\b/, /billing address-level2/, /address-level2/, /billing city/]),
+          zip: hasInput([/creditcards\[\d+\]\.zipcode/, /billing-zip-code/, /\bzipcode\b/, /\bzip code\b/, /billing zip/, /billing postal-code/, /postal-code/, /postal code/]),
+          country: hasSelect([/country\/territory/, /country\/region/, /\bcountry\b/]),
+          state: hasSelect([/\bstate\b/, /province/, /billing state/]) ||
+            hasInput([/\bstate\b/, /province/, /billing state/]),
+        };
+      }).catch(() => ({ address: false, city: false, zip: false, country: false, state: false }));
+      iframeVerified = {
+        address: iframeVerified.address || subset.address,
+        city: iframeVerified.city || subset.city,
+        zip: iframeVerified.zip || subset.zip,
+        state: iframeVerified.state || subset.state,
+        country: iframeVerified.country || subset.country,
+      };
+    }
+  } catch {
+    // Frames disappeared mid-walk (navigation, modal teardown). Already-collected
+    // iframeVerified is what we got.
+  }
+
   const result = {
-    address: nativeResult.address || exactResult.address || verified.address,
-    city: nativeResult.city || exactResult.city || verified.city,
-    zip: nativeResult.zip || exactResult.zip || verified.zip,
-    country: countrySelected || verified.country,
-    state: stateSelected || verified.state,
+    address: directResult.address.ok || nativeResult.address || exactResult.address || iframeResult.address || verified.address || iframeVerified.address,
+    city: directResult.city.ok || nativeResult.city || exactResult.city || iframeResult.city || verified.city || iframeVerified.city,
+    zip: directResult.zip.ok || nativeResult.zip || exactResult.zip || iframeResult.zip || verified.zip || iframeVerified.zip,
+    country: countrySelected || iframeResult.country || verified.country || iframeVerified.country,
+    state: stateSelected || iframeResult.state || verified.state || iframeVerified.state,
   };
   trace(
-    `Expedia billing verify: address=${result.address} city=${result.city} zip=${result.zip} country=${result.country} state=${result.state}`
+    `Expedia billing verify: address=${result.address} city=${result.city} zip=${result.zip} country=${result.country} state=${result.state} ` +
+    `(iframe contributed: address=${iframeResult.address || iframeVerified.address} city=${iframeResult.city || iframeVerified.city} zip=${iframeResult.zip || iframeVerified.zip})`
   );
   return result;
 }
@@ -2442,6 +2631,222 @@ async function dismissExpediaAlmostYoursModal(page: Page, trace: (msg: string) =
   } else {
     trace("Expedia: 'almost yours' modal present but could not dismiss — continuing anyway");
   }
+}
+
+/**
+ * Iframe-aware billing-fields filler.
+ *
+ * The Expedia checkout payment widget (Checkout.com / Braintree) renders
+ * billing address inputs inside the same cross-origin payment iframe as the
+ * card-number / cardholder-name fields. The main-page locator strategies
+ * never see those inputs, so they show up as `aria-label="Billing address 1"`
+ * inside frame[N] of page.frames(). This helper walks every non-main frame,
+ * matches each input via `classifyExpediaBillingInputKind`, and fills with
+ * the React-friendly native-setter dance used by the main-page filler.
+ *
+ * NEVER fills CVV/security-code or card-number — `classifyExpediaBillingInputKind`
+ * returns null for those. Returns a partial map of which kinds were filled in
+ * any iframe. Caller merges with the main-page direct/native/exact results.
+ *
+ * Trace lines:
+ *  - "Expedia billing iframe scan: N non-main frames"
+ *  - "Expedia billing iframe match: <kind> via <attr>=<value> (frame=<url>)"
+ *  - "Expedia billing iframe fill: <kind> = OK|EMPTY (got len=N)"
+ *  - "Expedia billing iframe summary: address=B city=B zip=B state=B country=B"
+ */
+async function fillBillingFieldsInPaymentIframes(
+  page: Page,
+  values: { address1?: string; city?: string; zip?: string; state?: string; country?: string },
+  trace: (msg: string) => void,
+): Promise<{ address: boolean; city: boolean; zip: boolean; state: boolean; country: boolean }> {
+  const filled = { address: false, city: false, zip: false, state: false, country: false };
+  if (!values.address1 && !values.city && !values.zip && !values.state && !values.country) {
+    trace("Expedia billing iframe scan: no values to fill — skipping");
+    return filled;
+  }
+
+  const getFrameUrl = (f: Frame): string => {
+    try { return f.url(); } catch { return "(url-error)"; }
+  };
+
+  const allFrames = page.frames();
+  const nonMainFrames = allFrames.filter(f => f !== page.mainFrame());
+  trace(`Expedia billing iframe scan: ${nonMainFrames.length} non-main frame(s) (total ${allFrames.length})`);
+
+  for (let frameIdx = 0; frameIdx < nonMainFrames.length; frameIdx++) {
+    const frame = nonMainFrames[frameIdx];
+    const frameUrl = getFrameUrl(frame).slice(0, 40);
+
+    const inputs = await frame.evaluate(() => {
+      return Array.from(document.querySelectorAll<HTMLInputElement>("input")).map((el, i) => ({
+        i,
+        type: el.type || "text",
+        id: el.id || "",
+        name: el.name || "",
+        placeholder: el.placeholder || "",
+        autocomplete: el.autocomplete || "",
+        ariaLabel: el.getAttribute("aria-label") || "",
+        dataTealeafName: el.getAttribute("data-tealeaf-name") || "",
+        dataCkoRfrrId: el.getAttribute("data-cko-rfrr-id") || "",
+        disabled: el.disabled,
+      }));
+    }).catch(() => [] as Array<{
+      i: number; type: string; id: string; name: string;
+      placeholder: string; autocomplete: string; ariaLabel: string;
+      dataTealeafName: string; dataCkoRfrrId: string; disabled: boolean;
+    }>);
+
+    if (inputs.length === 0) continue;
+
+    const selects = await frame.evaluate(() => {
+      return Array.from(document.querySelectorAll<HTMLSelectElement>("select")).map((el, i) => ({
+        i,
+        id: el.id || "",
+        name: el.name || "",
+        autocomplete: el.autocomplete || "",
+        ariaLabel: el.getAttribute("aria-label") || "",
+        dataTealeafName: el.getAttribute("data-tealeaf-name") || "",
+        dataCkoRfrrId: el.getAttribute("data-cko-rfrr-id") || "",
+        disabled: el.disabled,
+      }));
+    }).catch(() => [] as Array<{
+      i: number; id: string; name: string; autocomplete: string;
+      ariaLabel: string; dataTealeafName: string; dataCkoRfrrId: string;
+      disabled: boolean;
+    }>);
+
+    type IframeFillKind = "address1" | "city" | "zip" | "state" | "country";
+    const inputTargets: Record<IframeFillKind, number[]> = {
+      address1: [], city: [], zip: [], state: [], country: [],
+    };
+    const selectTargets: Record<IframeFillKind, number[]> = {
+      address1: [], city: [], zip: [], state: [], country: [],
+    };
+
+    for (const inp of inputs) {
+      if (inp.disabled || inp.type === "hidden") continue;
+      const kind = classifyExpediaBillingInputKind({
+        ariaLabel: inp.ariaLabel, autocomplete: inp.autocomplete, placeholder: inp.placeholder,
+        id: inp.id, name: inp.name, dataTealeafName: inp.dataTealeafName, dataCkoRfrrId: inp.dataCkoRfrrId,
+        tag: "input",
+      });
+      if (kind && (kind === "address1" || kind === "city" || kind === "zip" || kind === "state")) {
+        inputTargets[kind].push(inp.i);
+        const attrSummary = inp.autocomplete ? `autocomplete=${inp.autocomplete}`
+          : inp.ariaLabel ? `aria-label=${inp.ariaLabel.slice(0, 30)}`
+          : inp.placeholder ? `placeholder=${inp.placeholder.slice(0, 30)}`
+          : `id=${inp.id.slice(0, 30)}`;
+        trace(`Expedia billing iframe match: ${kind} via ${attrSummary} (frame[${frameIdx}]=${frameUrl})`);
+      }
+    }
+    for (const sel of selects) {
+      if (sel.disabled) continue;
+      const kind = classifyExpediaBillingInputKind({
+        ariaLabel: sel.ariaLabel, autocomplete: sel.autocomplete,
+        id: sel.id, name: sel.name, dataTealeafName: sel.dataTealeafName, dataCkoRfrrId: sel.dataCkoRfrrId,
+        tag: "select",
+      });
+      if (kind === "country" || kind === "state") {
+        selectTargets[kind].push(sel.i);
+        trace(`Expedia billing iframe match: ${kind} (select) via aria-label=${sel.ariaLabel.slice(0, 30)} autocomplete=${sel.autocomplete} (frame[${frameIdx}]=${frameUrl})`);
+      }
+    }
+
+    const fillInIframe = async (
+      kind: IframeFillKind,
+      indexes: number[],
+      value: string,
+    ): Promise<boolean> => {
+      if (!value || indexes.length === 0) return false;
+      // Defer to frame.evaluate so we can run the React-aware native-setter
+      // dance without depending on Stagehand-proxied locator semantics.
+      const result = await frame.evaluate(({ indexes: idxs, value: val, isSelect }: {
+        indexes: number[]; value: string; isSelect: boolean;
+      }) => {
+        const nativeSetInput = (el: HTMLInputElement, v: string): boolean => {
+          if (el.disabled || el.type === "hidden") return false;
+          const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set;
+          try { el.scrollIntoView({ block: "center", behavior: "auto" as ScrollBehavior }); } catch { /* noop */ }
+          el.focus();
+          if (setter) { setter.call(el, ""); setter.call(el, v); }
+          else { el.value = ""; el.value = v; }
+          try { el.dispatchEvent(new InputEvent("beforeinput", { bubbles: true, data: v, inputType: "insertText" })); } catch { /* noop */ }
+          el.dispatchEvent(new Event("input", { bubbles: true }));
+          el.dispatchEvent(new Event("change", { bubbles: true }));
+          el.dispatchEvent(new KeyboardEvent("keyup", { bubbles: true }));
+          el.blur();
+          return el.value.trim().length > 0;
+        };
+        const nativeSetSelect = (el: HTMLSelectElement, v: string): boolean => {
+          if (el.disabled) return false;
+          const setter = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, "value")?.set;
+          const targets = [v, v.toUpperCase(), v.toLowerCase()];
+          for (const candidate of targets) {
+            for (const opt of Array.from(el.options)) {
+              if (opt.value === candidate || opt.text === candidate || opt.text === v) {
+                if (setter) setter.call(el, opt.value); else el.value = opt.value;
+                el.dispatchEvent(new Event("input", { bubbles: true }));
+                el.dispatchEvent(new Event("change", { bubbles: true }));
+                el.blur();
+                return el.value === opt.value;
+              }
+            }
+          }
+          return false;
+        };
+        const elements = isSelect
+          ? Array.from(document.querySelectorAll<HTMLSelectElement>("select"))
+          : Array.from(document.querySelectorAll<HTMLInputElement>("input"));
+        let lastLen = 0;
+        for (const idx of idxs) {
+          const el = elements[idx];
+          if (!el) continue;
+          const ok = isSelect
+            ? nativeSetSelect(el as HTMLSelectElement, val)
+            : nativeSetInput(el as HTMLInputElement, val);
+          if (ok) {
+            lastLen = isSelect ? (el as HTMLSelectElement).value.length : (el as HTMLInputElement).value.length;
+            return { ok: true, len: lastLen };
+          }
+        }
+        return { ok: false, len: 0 };
+      }, { indexes, value, isSelect: kind === "country" || (kind === "state" && selectTargets.state.includes(indexes[0])) }).catch(() => ({ ok: false, len: 0 }));
+      const safeLen = result.len;
+      trace(`Expedia billing iframe fill: ${kind} = ${result.ok ? "OK" : "EMPTY"} (frame[${frameIdx}]=${frameUrl}, valueLen=${safeLen})`);
+      return result.ok;
+    };
+
+    if (!filled.address && values.address1)
+      filled.address = await fillInIframe("address1", inputTargets.address1, values.address1);
+    if (!filled.city && values.city)
+      filled.city = await fillInIframe("city", inputTargets.city, values.city);
+    if (!filled.zip && values.zip)
+      filled.zip = await fillInIframe("zip", inputTargets.zip, values.zip);
+    if (!filled.state && values.state) {
+      // Try select first; fall back to input candidates if no select option matched.
+      filled.state =
+        (await fillInIframe("state", selectTargets.state, values.state)) ||
+        (await fillInIframe("state", inputTargets.state, values.state));
+    }
+    if (!filled.country && values.country) {
+      const countryCandidates = Array.from(new Set([
+        values.country,
+        values.country.toUpperCase() === "US" ? "United States" : "",
+        values.country.toUpperCase() === "USA" ? "United States" : "",
+        values.country.toUpperCase() === "US" ? "United States of America" : "",
+      ].filter(Boolean)));
+      for (const candidate of countryCandidates) {
+        if (filled.country) break;
+        filled.country = await fillInIframe("country", selectTargets.country, candidate);
+      }
+    }
+  }
+
+  trace(
+    `Expedia billing iframe summary: address=${filled.address} city=${filled.city} zip=${filled.zip} ` +
+    `state=${filled.state} country=${filled.country}`
+  );
+  return filled;
 }
 
 /**
@@ -3309,12 +3714,13 @@ export async function fillExpediaGroupPaymentForm(
         if (filled) return true;
       }
     }
-    // Also check iframes (including cross-origin payment processor frames)
+    // Also check iframes (including cross-origin payment processor frames).
+    // Do NOT skip on empty/about:blank URL — Checkout.com renders inputs into
+    // about:srcdoc/about:blank frames where url() throws or returns "".
     for (const frame of page.frames()) {
       if (frame === page.mainFrame()) continue;
-      const rawUrl: unknown = frame.url;
-      const frameUrl = (typeof rawUrl === "function" ? (rawUrl as () => string)() : (rawUrl as string) ?? "").toLowerCase();
-      if (!frameUrl || frameUrl === "about:blank") continue;
+      let frameUrl = "";
+      try { frameUrl = frame.url().toLowerCase(); } catch { frameUrl = "(url-error)"; }
       for (const sel of selectors) {
         const val = await frame.evaluate((s) => {
           const el = document.querySelector<HTMLInputElement>(s);
@@ -3322,7 +3728,7 @@ export async function fillExpediaGroupPaymentForm(
         }, sel).catch(() => null);
         if (val !== null) {
           foundAny = true;
-          trace(`Expedia payment verify (iframe ${frameUrl.slice(0, 40)}): ${fieldName} = "${val.length > 0 ? "[filled]" : "[empty]"}"`);
+          trace(`Expedia payment verify (iframe ${frameUrl.slice(0, 40) || "[no-url]"}): ${fieldName} = "${val.length > 0 ? "[filled]" : "[empty]"}"`);
           if (val.length > 0) return true;
         }
       }
