@@ -100,6 +100,30 @@ describe("analyzeExpediaRetryArtifactBundle", () => {
     );
   });
 
+  it("classifies OpenAI 403 model_not_found as env/project mismatch, not Expedia runtime evidence", () => {
+    const analysis = analyzeExpediaRetryArtifactBundle({
+      job: {
+        id: "fixture-expedia-openai-model-not-found",
+        provider: "expedia",
+        scenario: "flight",
+        status: "failed",
+      },
+      workerLogExcerpt: [
+        "[flight-rpa] Starting programmatic flight booking",
+        "OpenAI Responses API error 403 model_not_found: project does not have access to model gpt-5.5",
+        "[flight-rpa] Flight-card DOM scan failed: StagehandEvalError: Uncaught",
+      ].join("\n"),
+    });
+
+    expect(analysis.state).toBe("model_or_env_transient");
+    expect(analysis.signals.map((signal) => signal.kind)).toEqual(
+      expect.arrayContaining([
+        "model_or_env_transient",
+        "card_scan_failed",
+      ]),
+    );
+  });
+
   it("classifies login/OTP/CAPTCHA boundaries ahead of selector drift", () => {
     const analysis = analyzeExpediaRetryArtifactBundle({
       job: {

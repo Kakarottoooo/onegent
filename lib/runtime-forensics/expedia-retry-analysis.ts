@@ -200,6 +200,11 @@ const SIGNAL_PATTERNS: SignalPattern[] = [
   },
   {
     kind: "model_or_env_transient",
+    label: "OpenAI project/model mismatch",
+    rx: /\b(model_not_found|model[-_\s]?not[-_\s]?found|does not have access to model|403\b.*\bmodel)\b/i,
+  },
+  {
+    kind: "model_or_env_transient",
     label: "missing OpenAI env",
     rx: /\bOPENAI_API_KEY\b.*\b(required|missing|not set)\b/i,
   },
