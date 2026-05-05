@@ -28,10 +28,11 @@ Safety boundary:
 
 Codex branch:
 
-- `codex/hotel-runtime-closure`
+- `codex/hotel-live-closure-final`
 - Base: latest `origin/codex/integrated-preview-20260504`.
-- Scope: Booking.com hotel runtime closure toward a safe manual boundary, with
-  worker mirror sync and no live provider run.
+- Scope: Booking.com hotel closure end-to-end toward a safe manual boundary,
+  with no live provider run unless the founder explicitly approves exactly one
+  Booking.com retry in the active thread.
 
 Closure choice:
 
@@ -45,20 +46,24 @@ Closure choice:
 
 Runtime hardening in progress:
 
-- Add classifier-ready Booking.com hotel result candidate capture.
-- Add room-selection evidence capture for room cards, quantity dropdowns,
-  selected rooms, reserve controls, guest-details, payment boundary,
-  login/CAPTCHA, and no availability.
-- Emit `Booking.com hotel runtime boundary: ...` lines so the post-live hotel
-  analyzer can classify future approved runs from DB/log/screenshots.
-- Honor the exact controlled retry prompt's stop-before-payment wording by
-  stopping at the Booking.com payment boundary without filling card fields.
+- Current integrated preview already includes classifier-ready Booking.com hotel
+  result candidate capture, room-selection evidence capture, and
+  `Booking.com hotel runtime boundary: ...` labels.
+- This branch replaces the hotel controlled prompt and generated hotel runtime
+  task with a stricter public-Booking.com manual-prep prompt: verify hotel,
+  city, dates, guest count, and room count first; stop at the first safe
+  manual-review boundary; do not enter payment/card, credentials, OTP/CAPTCHA,
+  verification, or final reserve/confirmation controls.
+- No-live `provider-closure.ts preflight --kind hotel`, hotel template
+  generation, provider closure fixture analyze/report, and hotel artifact
+  analyzer fixture classification completed before any live attempt.
 
 Controlled retry remains the exact YOTEL New York Times Square Booking.com case
 in `docs/50-product-areas/HOTEL_CONTROLLED_RETRY_RUNBOOK.md`.
 
-No live provider, OpenAI live call, payment, CVV, OTP/CAPTCHA/login bypass, or
-final confirmation is authorized by this branch.
+No live provider, OpenAI live call, payment, CVV/security-code,
+OTP/CAPTCHA/login/verification handling, or final confirmation is authorized by
+this branch without separate exact founder approval.
 
 ## Latest Expedia Evidence
 

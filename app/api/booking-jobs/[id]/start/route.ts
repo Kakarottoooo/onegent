@@ -611,6 +611,7 @@ async function runUniversalStep(
     const hCheckin = resolvedBody.checkin as string | undefined;
     const hCheckout = resolvedBody.checkout as string | undefined;
     const hAdults = (resolvedBody.adults as number | undefined) ?? 2;
+    const hRooms = (resolvedBody.rooms as number | undefined) ?? 1;
 
     if (hName) {
       // Use the canonical URL builder so checkin/checkout/group_adults are
@@ -626,16 +627,24 @@ async function runUniversalStep(
           checkin: hCheckin,
           checkout: hCheckout,
           adults: hAdults,
-          rooms: 1,
+          rooms: hRooms,
         }),
       };
 
       if (!resolvedBody.task) {
-        const checkinStr = hCheckin ? ` Check in ${hCheckin}.` : "";
-        const checkoutStr = hCheckout ? ` Check out ${hCheckout}.` : "";
+        const { buildHotelTask } = await import("@/lib/booking-autopilot/core/task-builders");
+        const { task } = buildHotelTask({
+          hotelName: hName,
+          city: hCity,
+          checkin: hCheckin ?? "",
+          checkout: hCheckout ?? "",
+          adults: hAdults,
+          rooms: hRooms,
+          profile: (resolvedBody.profile ?? { first_name: "", last_name: "", email: "", phone: "" }) as Parameters<typeof buildHotelTask>[0]["profile"],
+        });
         resolvedBody = {
           ...resolvedBody,
-          task: `Find ${hName}${hCity ? ` in ${hCity}` : ""} on Booking.com.${checkinStr}${checkoutStr} Select the cheapest available room for ${hAdults} adult${hAdults !== 1 ? "s" : ""}. Fill in all guest details and payment information. Stop before entering CVV or clicking the final payment confirmation button.`,
+          task,
         };
       }
     }

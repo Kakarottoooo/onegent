@@ -21,9 +21,24 @@ const UNIFIED_ANALYZER_PATH = path.join(
 );
 
 const EXACT_PROMPT = [
-  "Book one room at YOTEL New York Times Square in New York from June 10, 2026",
-  "to June 12, 2026 for 1 adult. Stop before payment, CVV, login, OTP, CAPTCHA,",
-  "or final booking confirmation.",
+  "Use only public Booking.com pages to prepare a manual hotel booking. Find",
+  "YOTEL New York Times Square in New York for one room, one adult, June 10, 2026",
+  "to June 12, 2026.",
+  "",
+  "Verify the hotel name, city, check-in date, check-out date, guest count, and",
+  "room count before taking any booking-step action.",
+  "",
+  "Stop at the first safe manual-review boundary and report the current page",
+  "state. Do not complete the booking.",
+  "",
+  "Hard stop immediately if you see payment, CVV/security code, card entry,",
+  "login/sign-in, account verification, OTP, CAPTCHA, human verification, phone",
+  "verification, credentials, or any final reserve/confirm/complete booking",
+  "screen.",
+  "",
+  "Do not enter payment details, CVV/security code, credentials, OTP, CAPTCHA, or",
+  "verification information. Do not bypass any wall. Do not click any final",
+  "reserve, confirm, complete booking, purchase, or payment submission control.",
 ].join("\n");
 
 const EXPECTED_PARAMS = {
@@ -55,6 +70,10 @@ describe("hotel live readiness docs", () => {
       "Payment submission or final purchase/reserve confirmation.",
       "CVV request.",
       "OTP, CAPTCHA, phone verification, or login wall.",
+      "Use only public Booking.com pages to prepare a manual hotel booking.",
+      "Stop at the first safe manual-review boundary",
+      "Do not complete the booking.",
+      "Do not enter payment details, CVV/security code, credentials, OTP, CAPTCHA, or\nverification information.",
       "Never bypass OTP, CAPTCHA, login, or account checks.",
       "Never enter CVV.",
       "Never\nclick final booking, reserve, purchase, or confirmation.",

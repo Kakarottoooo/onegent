@@ -28,9 +28,24 @@ Use this product-level prompt only after founder approval for exactly one hotel
 retry:
 
 ```text
-Book one room at YOTEL New York Times Square in New York from June 10, 2026
-to June 12, 2026 for 1 adult. Stop before payment, CVV, login, OTP, CAPTCHA,
-or final booking confirmation.
+Use only public Booking.com pages to prepare a manual hotel booking. Find
+YOTEL New York Times Square in New York for one room, one adult, June 10, 2026
+to June 12, 2026.
+
+Verify the hotel name, city, check-in date, check-out date, guest count, and
+room count before taking any booking-step action.
+
+Stop at the first safe manual-review boundary and report the current page
+state. Do not complete the booking.
+
+Hard stop immediately if you see payment, CVV/security code, card entry,
+login/sign-in, account verification, OTP, CAPTCHA, human verification, phone
+verification, credentials, or any final reserve/confirm/complete booking
+screen.
+
+Do not enter payment details, CVV/security code, credentials, OTP, CAPTCHA, or
+verification information. Do not bypass any wall. Do not click any final
+reserve, confirm, complete booking, purchase, or payment submission control.
 ```
 
 Expected hotel params:
@@ -312,6 +327,20 @@ When inspecting screenshots, answer:
 
 Use `/dev/runtime-forensics` after evidence exists. Include fixtures only for
 synthetic examples; do not treat fixtures as real evidence.
+
+Before any live attempt, run the no-live closure preflight:
+
+```powershell
+npx tsx scripts/provider-closure.ts preflight --kind hotel
+```
+
+After a filled post-live artifact exists, the provider closure CLI can produce
+the normalized closure report without opening a browser or starting a worker:
+
+```powershell
+npx tsx scripts/provider-closure.ts analyze --kind hotel --artifact .tmp\hotel-artifact-bundle.json
+npx tsx scripts/provider-closure.ts report --kind hotel --artifact .tmp\hotel-artifact-bundle.json --markdown
+```
 
 This branch adds a no-live synthetic hotel fixture:
 
