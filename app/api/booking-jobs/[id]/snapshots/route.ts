@@ -1,6 +1,9 @@
 import { NextResponse } from "next/server";
 import { getBookingJob } from "@/lib/db";
-import { listBrowserSnapshots } from "@/lib/browser-snapshot-store";
+import {
+  listBrowserSnapshots,
+  toBrowserSnapshotListEntry,
+} from "@/lib/browser-snapshot-store";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -14,7 +17,12 @@ export async function GET(_req: Request, { params }: Params) {
     return NextResponse.json({ error: "Job not found" }, { status: 404 });
   }
 
-  const snapshots = await listBrowserSnapshots(id);
+  const snapshots = (await listBrowserSnapshots(id)).map((snapshot) =>
+    toBrowserSnapshotListEntry(
+      snapshot,
+      `/api/booking-jobs/${encodeURIComponent(id)}/snapshots/${encodeURIComponent(snapshot.id)}/image`,
+    ),
+  );
   return NextResponse.json({
     jobId: id,
     count: snapshots.length,

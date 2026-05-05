@@ -94,6 +94,8 @@ function SnapshotCard({ snap, index, highlighted, onZoom }: CardProps) {
           src={snap.src}
           alt={snap.label ?? `Snapshot ${index + 1}`}
           className="task-timeline__snapshot-image"
+          loading={index < 2 ? "eager" : "lazy"}
+          decoding="async"
           draggable={false}
         />
         <span className="task-timeline__snapshot-zoom-hint" aria-hidden>
@@ -146,6 +148,7 @@ function SnapshotLightbox({ snap, onClose }: LightboxProps) {
           src={snap.src}
           alt={snap.label ?? "Snapshot"}
           className="task-timeline__lightbox-image"
+          decoding="async"
           draggable={false}
         />
         <div className="task-timeline__lightbox-meta">

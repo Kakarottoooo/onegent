@@ -4,8 +4,10 @@ import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import {
+  getBrowserSnapshot,
   listBrowserSnapshots,
   saveBrowserSnapshot,
+  toBrowserSnapshotListEntry,
   type BrowserSnapshotEntry,
 } from "@/lib/browser-snapshot-store";
 
@@ -154,5 +156,43 @@ describe("browser snapshot store", () => {
     expect(snapshots).toHaveLength(120);
     expect(snapshots[0].title).toBe("Frame 5");
     expect(snapshots.at(-1)?.title).toBe("Frame 124");
+  });
+
+  it("reads one snapshot by id for image endpoints", async () => {
+    const jobId = "job-single-image";
+    process.env.ONEGENT_SNAPSHOT_DIR = path.join(tempRoot, "shared");
+
+    const saved = await saveBrowserSnapshot({
+      jobId,
+      ts: "2026-05-05T06:33:00.000Z",
+      title: "Single",
+      status: "live",
+      imageBase64: "image-payload",
+    });
+
+    await expect(getBrowserSnapshot(jobId, saved.id)).resolves.toMatchObject({
+      id: saved.id,
+      imageBase64: "image-payload",
+    });
+  });
+
+  it("can project list entries without embedding base64 images", () => {
+    const entry = toBrowserSnapshotListEntry(
+      {
+        id: "snapshot-1",
+        jobId: "job-1",
+        ts: "2026-05-05T06:34:00.000Z",
+        title: "Projected",
+        status: "live",
+        imageBase64: "large-base64",
+      },
+      "/api/booking-jobs/job-1/snapshots/snapshot-1/image",
+    );
+
+    expect(entry).toMatchObject({
+      id: "snapshot-1",
+      src: "/api/booking-jobs/job-1/snapshots/snapshot-1/image",
+    });
+    expect("imageBase64" in entry).toBe(false);
   });
 });

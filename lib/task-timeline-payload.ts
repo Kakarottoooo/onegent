@@ -23,6 +23,8 @@ export const TERMINAL_JOB_STATUSES = new Set([
   "succeeded",
 ]);
 
+const MAX_TRACE_ENTRIES = 200;
+
 export interface TraceSnapshot {
   entries: LiveLogLineEntry[];
   closed: boolean;
@@ -43,7 +45,7 @@ export interface JobTimelinePayload {
 }
 
 async function readTrace(jobId: string, job: BookingJob): Promise<TraceSnapshot> {
-  const liveEntries = liveLogGet(jobId, 0);
+  const liveEntries = liveLogGet(jobId, 0).slice(-MAX_TRACE_ENTRIES);
   if (liveEntries.length > 0) {
     return {
       entries: liveEntries,
@@ -56,7 +58,7 @@ async function readTrace(jobId: string, job: BookingJob): Promise<TraceSnapshot>
   const auditRows = await getAgentLogs({
     jobId,
     source: "audit",
-    limit: 500,
+    limit: MAX_TRACE_ENTRIES,
   });
 
   const entries = [...auditRows].reverse().map((row) => {

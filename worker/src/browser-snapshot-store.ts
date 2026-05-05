@@ -18,6 +18,10 @@ export interface BrowserSnapshotEntry {
   };
 }
 
+export type BrowserSnapshotListEntry = Omit<BrowserSnapshotEntry, "imageBase64"> & {
+  src: string;
+};
+
 function getSnapshotRoot(): string {
   if (process.env.ONEGENT_SNAPSHOT_DIR) {
     return process.env.ONEGENT_SNAPSHOT_DIR;
@@ -171,6 +175,44 @@ export async function listBrowserSnapshots(jobId: string): Promise<BrowserSnapsh
   );
 
   return sorted.slice(Math.max(0, sorted.length - 120));
+}
+
+export async function getBrowserSnapshot(
+  jobId: string,
+  snapshotId: string,
+): Promise<BrowserSnapshotEntry | null> {
+  const safeId = safeJobId(jobId);
+  const roots = await getSnapshotReadRoots();
+  const fileName = safeSnapshotFileName(snapshotId);
+  if (!fileName) return null;
+
+  for (const root of roots) {
+    const filePath = path.join(root, safeId, `${fileName}.json`);
+    try {
+      return JSON.parse(await readFile(filePath, "utf8")) as BrowserSnapshotEntry;
+    } catch {
+      // Try the next configured/shared root.
+    }
+  }
+
+  return null;
+}
+
+export function toBrowserSnapshotListEntry(
+  snapshot: BrowserSnapshotEntry,
+  src: string,
+): BrowserSnapshotListEntry {
+  const { imageBase64: _imageBase64, ...rest } = snapshot;
+  return {
+    ...rest,
+    src,
+  };
+}
+
+function safeSnapshotFileName(snapshotId: string): string | null {
+  if (!/^[a-zA-Z0-9_.-]+$/.test(snapshotId)) return null;
+  if (snapshotId.includes("..")) return null;
+  return snapshotId;
 }
 
 async function readSnapshotsFromDir(dir: string): Promise<BrowserSnapshotEntry[]> {

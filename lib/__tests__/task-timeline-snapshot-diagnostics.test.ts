@@ -38,13 +38,39 @@ describe("task timeline snapshot diagnostics", () => {
     expect(message).toBeUndefined();
   });
 
-  it("falls back to the job adapter when server timeline events use an incompatible vocabulary", () => {
+  it("maps slim server task-timeline events without requiring full job payloads", () => {
     const events = extractEvents({
       events: [
         {
           id: "job-started",
           ts: "2026-05-05T07:17:02.795Z",
           kind: "job_started",
+          title: "Task created",
+          detail: "Navigating to opentable.com",
+        },
+        {
+          id: "payment-required",
+          ts: "2026-05-05T07:17:14.351Z",
+          kind: "payment_required",
+          title: "Waiting for final confirmation",
+        },
+      ],
+      closed: true,
+    });
+
+    expect(events.map((event) => event.kind)).toEqual([
+      "opened_site",
+      "ready_for_confirmation",
+    ]);
+  });
+
+  it("falls back to the job adapter when server timeline events are unknown", () => {
+    const events = extractEvents({
+      events: [
+        {
+          id: "job-started",
+          ts: "2026-05-05T07:17:02.795Z",
+          kind: "future_backend_kind",
           title: "Task created",
         },
       ],
