@@ -378,6 +378,135 @@ Low-value requests:
 - Asking for full terminal logs when the local log file is accessible.
 - Asking the user to manually rerun a command Codex can run.
 
+## 6.5 Stuck job recovery (manual, founder approval required)
+
+A Phase 0 retry can leave a `booking_jobs` row stuck in
+`status='running' / steps[0].status='pending'` when the in-process
+executor finishes but the terminal DB write hits a transient Neon
+`ConnectTimeoutError`, or when the runner's polling GET hits a 5xx
+mid-flight and gives up before the executor finalizes. The runner
+now classifies this case as `F-INFRA-DB-TRANSIENT` /
+`model_env_transient`, but the DB row still needs manual
+reconciliation if it never receives a terminal write.
+
+This section is the **read-only diagnostic + exact UPDATE template**
+for that case. The audit reads artifacts only; the UPDATE must be
+run by the founder (or someone with explicit founder approval) after
+confirming the screenshots show the run reached a safe boundary or
+never reached the provider.
+
+### 1. No-live audit first
+
+Run the artifact-side audit:
+
+```ts
+import { auditStuckJobsInDir, renderStuckJobAuditMarkdown } from "@/lib/runtime-forensics/stuck-job-audit";
+
+const result = await auditStuckJobsInDir("benchmark/runs");
+console.log(renderStuckJobAuditMarkdown(result));
+```
+
+The audit returns each `phase0-resy-*.json` report whose case
+matches the DB-transient pattern (failed_unknown + transient infra
+signature, or explicit `F-INFRA-DB-*` taxonomy code). It does NOT
+read the database, open a browser, or call OpenAI.
+
+### 2. Confirm safety boundary from screenshots
+
+For each matched case, open the per-job screenshot directory under
+`.debug-screenshots/live/<job-id>/` and walk the screenshot trail.
+Required confirmations before proceeding:
+
+- The browser stayed on the public provider URL or never opened.
+- No payment / CVV / OTP / SMS / phone-verification / CAPTCHA /
+  login-bypass / final-confirm page was reached.
+- The screenshot status field never shows `safety_violation_detected`
+  in the corresponding benchmark report.
+
+If any of these fail, do NOT run the manual cleanup; escalate to
+provider runtime debug instead.
+
+### 3. Confirm the row is actually stuck
+
+Read-only DB query (does not mutate):
+
+```ts
+import fs from "node:fs";
+for (const line of fs.readFileSync(".env.local", "utf8").split(/\r?\n/)) {
+  const m = line.match(/^\s*([^#=]+)=(.*)\s*$/);
+  if (m && !process.env[m[1]]) process.env[m[1]] = m[2].replace(/^["']|["']$/g, "");
+}
+const { sql } = await import("@vercel/postgres");
+const rows = await sql`
+  select id, status, created_at, updated_at, steps, task_id
+  from booking_jobs
+  where id = '<job-id>'
+  limit 1
+`;
+console.log(JSON.stringify(rows.rows[0], null, 2));
+```
+
+The row is stuck when:
+
+- `status === 'running'`
+- `steps[0].status === 'pending'`
+- `updated_at` was last set close to `created_at` (no later writes)
+- `steps[0].error`, `terminalReason`, `terminalCode`, `decisionLog`
+  are all null
+- The corresponding benchmark report shows the run actually
+  finished or aborted (so the row is genuinely abandoned).
+
+### 4. Manual cleanup SQL (DO NOT run without founder approval)
+
+The exact UPDATE to mark a confirmed-stuck row terminal:
+
+```sql
+-- Manual stuck-job recovery for DB-transient infra blip.
+-- Founder must approve this exact statement before execution.
+-- Replace <job-id> with the confirmed stuck job id.
+update booking_jobs
+set status = 'failed',
+    updated_at = now(),
+    steps = jsonb_set(
+      jsonb_set(
+        jsonb_set(
+          steps,
+          '{0,status}',
+          '"error"'::jsonb
+        ),
+        '{0,terminalCode}',
+        '"infra_db_transient_lost_terminal_write"'::jsonb
+      ),
+      '{0,terminalReason}',
+      '"Phase 0 stuck job recovery: in-process executor finished but terminal DB write was lost to a transient Neon ConnectTimeoutError. Reconciled manually after artifact audit."'::jsonb
+    )
+where id = '<job-id>'
+  and status = 'running'
+  and (steps -> 0 ->> 'status') = 'pending';
+```
+
+After running:
+
+- Re-query the row to confirm `status='failed'` and `steps[0].error`
+  populated.
+- Add the cleanup timestamp + reviewer name to the matching
+  benchmark report's `notes` field, or create a sidecar note in
+  `.tmp/<job-id>-cleanup-note.txt` (gitignored) for the audit
+  trail.
+
+### 5. Do NOT
+
+- Do NOT run the UPDATE on a row that lacks artifact evidence the
+  run reached a safe boundary or never reached the provider.
+- Do NOT mutate `task_id`, `current_booking_job_id`, `created_at`,
+  or any non-step column.
+- Do NOT batch-update multiple rows; one job at a time.
+- Do NOT skip the audit step. The audit is the only no-live record
+  that the row really is stuck on a DB-transient infra blip.
+- Do NOT classify the recovered row as `no_availability` or any
+  Resy / OpenTable provider state. The recovered terminalCode is
+  always `infra_db_transient_lost_terminal_write`.
+
 ## 7. Handoff Prompt For A New Agent Session
 
 Use this if context is too long and a new agent needs to continue:
