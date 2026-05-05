@@ -156,6 +156,64 @@ export interface BookingComVerificationResult {
   paymentFieldVerification: { cardholder: boolean; cardNumber: boolean; cardExpiry: boolean };
 }
 
+export type BookingComHotelRuntimeBoundary =
+  | "payment_manual_review_reached"
+  | "guest_details_manual_review_reached"
+  | "room_selection_manual_review_reached"
+  | "login_or_captcha_boundary"
+  | "provider_no_availability"
+  | "provider_selector_drift"
+  | "room_selection_drift"
+  | "network_provider_failure"
+  | "insufficient_evidence";
+
+export interface BookingComHotelResultCandidate {
+  index: number;
+  title: string;
+  href: string;
+  cta: string;
+  score: number;
+  matchedTarget: boolean;
+  visible: boolean;
+  snippet: string;
+}
+
+export interface BookingComHotelResultCandidateCapture {
+  targetHotelName: string;
+  normalizedTarget: string;
+  candidateCount: number;
+  targetVisible: boolean;
+  targetHref: string | null;
+  candidates: BookingComHotelResultCandidate[];
+  summary: string;
+}
+
+export interface BookingComRoomSelectionEvidence {
+  roomSectionVisible: boolean;
+  roomCardCount: number;
+  roomQuantitySelectCount: number;
+  selectedRoomCount: number;
+  reserveControlVisible: boolean;
+  guestDetailsVisible: boolean;
+  paymentBoundaryVisible: boolean;
+  loginOrCaptchaVisible: boolean;
+  noAvailabilityVisible: boolean;
+  selectorDriftLikely: boolean;
+  summary: string;
+}
+
+export interface BookingComHotelRuntimeBoundaryClassification {
+  state: BookingComHotelRuntimeBoundary;
+  reason: string;
+}
+
+export interface BookingComHotelRuntimeBoundaryInput {
+  currentUrl?: string | null;
+  pageText?: string | null;
+  resultCandidates?: BookingComHotelResultCandidateCapture | null;
+  roomEvidence?: BookingComRoomSelectionEvidence | null;
+}
+
 type BookingComGuestFieldKey =
   | "full_name"
   | "first_name"
@@ -204,6 +262,187 @@ const BOOKING_COM_OPTIONAL_GUEST_FIELD_PATTERNS = [
   "flight for my trip",
   "promo code",
 ];
+
+const BOOKING_COM_HOTEL_RUNTIME_IGNORED_TOKENS = new Set([
+  "hotel",
+  "hotels",
+  "the",
+  "by",
+  "and",
+  "a",
+  "an",
+]);
+
+function normalizeHotelRuntimeText(value: string): string {
+  return value
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function getBookingComHotelTargetTokens(targetHotelName: string): string[] {
+  return normalizeHotelRuntimeText(targetHotelName)
+    .split(" ")
+    .map((token) => token.trim())
+    .filter((token) => token.length >= 3 && !BOOKING_COM_HOTEL_RUNTIME_IGNORED_TOKENS.has(token));
+}
+
+export function summarizeBookingComHotelResultCandidateCapture(
+  capture: BookingComHotelResultCandidateCapture,
+): string {
+  const top = capture.candidates.slice(0, 3).map((candidate) => {
+    const title = clipDiagnosticText(candidate.title || candidate.snippet || "(untitled)", 80);
+    return `${title} score=${candidate.score}${candidate.matchedTarget ? " target" : ""}`;
+  });
+  return [
+    `candidates=${capture.candidateCount}`,
+    `targetVisible=${capture.targetVisible}`,
+    capture.targetHref ? `targetHref=${clipDiagnosticText(capture.targetHref, 120)}` : "targetHref=none",
+    top.length > 0 ? `top=${top.join(" | ")}` : "top=none",
+  ].join("; ");
+}
+
+export function summarizeBookingComRoomSelectionEvidence(
+  evidence: Omit<BookingComRoomSelectionEvidence, "summary">,
+): string {
+  return [
+    `roomSectionVisible=${evidence.roomSectionVisible}`,
+    `roomCardCount=${evidence.roomCardCount}`,
+    `roomQuantitySelectCount=${evidence.roomQuantitySelectCount}`,
+    `selectedRoomCount=${evidence.selectedRoomCount}`,
+    `reserveControlVisible=${evidence.reserveControlVisible}`,
+    `guestDetailsVisible=${evidence.guestDetailsVisible}`,
+    `paymentBoundaryVisible=${evidence.paymentBoundaryVisible}`,
+    `loginOrCaptchaVisible=${evidence.loginOrCaptchaVisible}`,
+    `noAvailabilityVisible=${evidence.noAvailabilityVisible}`,
+    `selectorDriftLikely=${evidence.selectorDriftLikely}`,
+  ].join("; ");
+}
+
+export function classifyBookingComHotelRuntimeBoundary(
+  input: BookingComHotelRuntimeBoundaryInput,
+): BookingComHotelRuntimeBoundaryClassification {
+  const currentUrl = (input.currentUrl ?? "").toLowerCase();
+  const pageText = (input.pageText ?? "").toLowerCase().replace(/\s+/g, " ").trim();
+  const resultCandidates = input.resultCandidates ?? null;
+  const roomEvidence = input.roomEvidence ?? null;
+
+  if (
+    roomEvidence?.loginOrCaptchaVisible ||
+    /\b(captcha|otp|phone verification|two[-\s]?factor|2fa)\b/.test(pageText) ||
+    /\b(sign in|log in|login)\b.{0,80}\b(required|to continue|wall|prompt)\b/.test(pageText) ||
+    /\b(bot detection|security check|verify you are human|are you a robot|automated access)\b/.test(pageText)
+  ) {
+    return {
+      state: "login_or_captcha_boundary",
+      reason: "Login, OTP, CAPTCHA, phone verification, or bot-check boundary is visible.",
+    };
+  }
+
+  if (
+    roomEvidence?.paymentBoundaryVisible ||
+    (isBookingComCheckoutUrl(currentUrl) && containsAny(pageText, [
+      "your payment details",
+      "payment method",
+      "credit or debit card",
+      "card number",
+      "security code",
+      "cvv",
+      "complete booking",
+      "confirm and pay",
+    ]))
+  ) {
+    return {
+      state: "payment_manual_review_reached",
+      reason: "Payment or final confirmation controls are visible; stop for manual review before CVV, payment, or final confirmation.",
+    };
+  }
+
+  if (
+    roomEvidence?.guestDetailsVisible ||
+    (isBookingComCheckoutUrl(currentUrl) && containsAny(pageText, [
+      "enter your details",
+      "your details",
+      "first name",
+      "last name",
+      "email address",
+      "phone number",
+      "next: final details",
+    ]))
+  ) {
+    return {
+      state: "guest_details_manual_review_reached",
+      reason: "Guest-details step is visible before payment/final confirmation.",
+    };
+  }
+
+  if (
+    roomEvidence?.noAvailabilityVisible ||
+    containsAny(pageText, [
+      "sold out",
+      "fully booked",
+      "no rooms available",
+      "no availability",
+      "no rates available",
+      "unavailable for your dates",
+      "no properties match",
+      "no available properties",
+    ]) ||
+    (resultCandidates && resultCandidates.candidateCount === 0 && isBookingComSearchResultsUrl(currentUrl))
+  ) {
+    return {
+      state: "provider_no_availability",
+      reason: "Booking.com shows no matching available inventory for the approved hotel/dates.",
+    };
+  }
+
+  if (resultCandidates?.targetVisible) {
+    return {
+      state: "provider_selector_drift",
+      reason: "Target hotel candidate is visible but runtime did not reach the property detail page.",
+    };
+  }
+
+  if (roomEvidence?.roomSectionVisible && (
+    roomEvidence.roomCardCount > 0 ||
+    roomEvidence.roomQuantitySelectCount > 0 ||
+    roomEvidence.selectedRoomCount > 0 ||
+    roomEvidence.reserveControlVisible
+  )) {
+    return {
+      state: "room_selection_manual_review_reached",
+      reason: "Room inventory or reserve controls are visible on the hotel detail page.",
+    };
+  }
+
+  if (
+    roomEvidence?.selectorDriftLikely ||
+    (currentUrl.includes("booking.com/hotel/") && !currentUrl.includes("booking.com/book") && containsAny(pageText, [
+      "room type",
+      "select rooms",
+      "reserve",
+      "availability",
+    ]))
+  ) {
+    return {
+      state: "room_selection_drift",
+      reason: "Hotel detail page is present but room/card controls were not selectable.",
+    };
+  }
+
+  if (/\b(500|502|503|504|gateway timeout|temporarily unavailable|something went wrong|net::err_)\b/i.test(pageText)) {
+    return {
+      state: "network_provider_failure",
+      reason: "Booking.com or the browser reported a degraded provider/network response.",
+    };
+  }
+
+  return {
+    state: "insufficient_evidence",
+    reason: "No known Booking.com hotel runtime boundary was visible in the captured evidence.",
+  };
+}
 
 function isBookingComCheckoutUrl(currentUrl: string): boolean {
   return currentUrl.includes("secure.booking.com/book") || currentUrl.includes("booking.com/book");
@@ -482,6 +721,311 @@ export async function isBookingComFinalPaymentDomState(rawPage: Page, currentUrl
 
     return (hasPaymentTextSignals && hasVisiblePaymentControls) || cardLikeInputs;
   }).catch(() => false);
+}
+
+export async function captureBookingComHotelResultCandidates(
+  rawPage: Page,
+  targetHotelName: string,
+): Promise<BookingComHotelResultCandidateCapture> {
+  const normalizedTarget = normalizeHotelRuntimeText(targetHotelName);
+  const targetTokens = getBookingComHotelTargetTokens(targetHotelName);
+
+  const candidates = await rawPage.evaluate(
+    ({ normalizedTarget, targetTokens }) => {
+      const titleSelector = [
+        "[data-testid='titleLink']",
+        "a[data-testid='titleLink']",
+        "a[data-testid*='title-link']",
+        "[data-testid='title']",
+        "[data-testid*='title']",
+        "a[href*='/hotel/']",
+        "div[role='heading']",
+        "span[role='heading']",
+        "h1",
+        "h2",
+        "h3",
+      ].join(", ");
+      const cardSelector = [
+        "[data-testid='card']",
+        "[data-testid='property-card']",
+        "[data-testid*='property-card']",
+        "[data-testid='search-card']",
+        "[data-testid*='search-card']",
+        ".sr_property_block",
+        "[data-testid='property-card-desktop']",
+      ].join(", ");
+      const normalize = (value: string) =>
+        value.toLowerCase().replace(/[^a-z0-9]+/g, " ").replace(/\s+/g, " ").trim();
+      const cleanTitle = (value: string) =>
+        normalize(
+          value
+            .replace(/opens in new window/gi, " ")
+            .replace(/\(\s*hotel\s*\)/gi, " ")
+            .replace(/\bfeatured\b/gi, " "),
+        );
+      const scoreText = (value: string) => {
+        const normalized = cleanTitle(value);
+        if (!normalized || !normalizedTarget || targetTokens.length === 0) return 0;
+        if (normalized === normalizedTarget) return 5000;
+        if (normalized.startsWith(`${normalizedTarget} `)) return 4200;
+        if (normalized.endsWith(` ${normalizedTarget}`)) return 4000;
+        const words = normalized.split(" ").filter(Boolean);
+        const matched = targetTokens.filter((token) => words.includes(token)).length;
+        if (matched < targetTokens.length) return 0;
+        const targetWordSet = new Set(targetTokens);
+        const genericExtras = new Set([
+          "hotel",
+          "hotels",
+          "the",
+          "by",
+          "and",
+          "a",
+          "an",
+          "new",
+          "window",
+          "open",
+          "opens",
+          "in",
+          "featured",
+          "deal",
+          "deals",
+          "property",
+          "properties",
+          "us",
+        ]);
+        const hasMeaningfulExtras = words
+          .filter((token) => !targetWordSet.has(token))
+          .some((token) => !genericExtras.has(token));
+        return hasMeaningfulExtras ? 0 : 1500;
+      };
+      const isVisible = (element: Element | null): element is HTMLElement => {
+        if (!(element instanceof HTMLElement)) return false;
+        const style = window.getComputedStyle(element);
+        const rect = element.getBoundingClientRect();
+        const jsdomLike =
+          rect.width === 0 &&
+          rect.height === 0 &&
+          window.navigator.userAgent.toLowerCase().includes("jsdom");
+        return (
+          style.display !== "none" &&
+          style.visibility !== "hidden" &&
+          !element.hidden &&
+          (rect.width > 0 && rect.height > 0 || jsdomLike)
+        );
+      };
+      const getNearestHref = (element: Element | null) => {
+        if (!element) return "";
+        const directAnchor =
+          element instanceof HTMLAnchorElement
+            ? element
+            : (element.closest("a[href]") as HTMLAnchorElement | null);
+        return directAnchor?.href ?? "";
+      };
+      const getCtaText = (container: Element) => Array.from(container.querySelectorAll("button, a, [role='button']"))
+        .map((element) => (element.textContent ?? "").replace(/\s+/g, " ").trim())
+        .filter(Boolean)
+        .slice(0, 2)
+        .join(" | ");
+
+      const seen = new Set<string>();
+      const containers = Array.from(document.querySelectorAll(`${cardSelector}, a[href*='/hotel/']`));
+      return containers
+        .map((container, index) => {
+          if (!isVisible(container)) return null;
+          const titleNode =
+            container.querySelector(titleSelector) ??
+            (container.matches(titleSelector) ? container : null) ??
+            container.querySelector("a[href*='/hotel/'], a, h1, h2, h3");
+          const title = (titleNode?.textContent ?? container.textContent ?? "").replace(/\s+/g, " ").trim();
+          const snippet = (container.textContent ?? title).replace(/\s+/g, " ").trim().slice(0, 220);
+          const href = getNearestHref(titleNode ?? container);
+          const cta = getCtaText(container);
+          const score = Math.max(scoreText(title), scoreText(snippet));
+          const key = `${cleanTitle(title)}|${href}`;
+          if (seen.has(key)) return null;
+          seen.add(key);
+          return {
+            index,
+            title: title.slice(0, 180),
+            href,
+            cta: cta.slice(0, 120),
+            score,
+            matchedTarget: score >= 1500,
+            visible: true,
+            snippet,
+          };
+        })
+        .filter((value): value is BookingComHotelResultCandidate => Boolean(value))
+        .sort((left, right) => right.score - left.score || left.index - right.index)
+        .slice(0, 12);
+    },
+    { normalizedTarget, targetTokens },
+  ).catch(() => [] as BookingComHotelResultCandidate[]);
+
+  const target = candidates.find((candidate) => candidate.matchedTarget) ?? null;
+  const capture: BookingComHotelResultCandidateCapture = {
+    targetHotelName,
+    normalizedTarget,
+    candidateCount: candidates.length,
+    targetVisible: Boolean(target),
+    targetHref: target?.href || null,
+    candidates,
+    summary: "",
+  };
+  capture.summary = summarizeBookingComHotelResultCandidateCapture(capture);
+  return capture;
+}
+
+export async function captureBookingComRoomSelectionEvidence(
+  rawPage: Page,
+): Promise<BookingComRoomSelectionEvidence> {
+  const rawEvidence = await rawPage.evaluate(() => {
+    const normalize = (value: string) => value.toLowerCase().replace(/\s+/g, " ").trim();
+    const isVisible = (element: Element | null): element is HTMLElement => {
+      if (!(element instanceof HTMLElement)) return false;
+      const style = window.getComputedStyle(element);
+      const rect = element.getBoundingClientRect();
+      const jsdomLike =
+        rect.width === 0 &&
+        rect.height === 0 &&
+        window.navigator.userAgent.toLowerCase().includes("jsdom");
+      return (
+        style.display !== "none" &&
+        style.visibility !== "hidden" &&
+        !element.hidden &&
+        (rect.width > 0 && rect.height > 0 || jsdomLike)
+      );
+    };
+    const bodyText = normalize(document.body?.innerText ?? document.body?.textContent ?? "");
+    const roomRoot =
+      document.querySelector("#hp_availability_tempcontainer") ||
+      document.querySelector(".hprt-table") ||
+      document.querySelector("[data-testid*='rooms']") ||
+      document.querySelector("[class*='room-list']") ||
+      document.querySelector("[class*='roomType']");
+    const roomSectionVisible = Boolean(roomRoot && isVisible(roomRoot)) ||
+      bodyText.includes("select a room type") ||
+      bodyText.includes("select rooms") ||
+      bodyText.includes("room type");
+    const roomCardCount = Array.from(document.querySelectorAll([
+      "#hp_availability_tempcontainer tr",
+      ".hprt-table tr",
+      "[data-testid*='room']",
+      "[class*='room']",
+      "[class*='hprt']",
+    ].join(", ")))
+      .filter((element) => {
+        if (!isVisible(element)) return false;
+        const text = normalize(element.textContent ?? "");
+        return (
+          text.includes("room") ||
+          text.includes("sleeps") ||
+          text.includes("bed") ||
+          text.includes("reserve") ||
+          /\$\s*\d/.test(element.textContent ?? "")
+        );
+      })
+      .length;
+    const roomSelects = Array.from(document.querySelectorAll("select"))
+      .filter((select): select is HTMLSelectElement => {
+        if (!(select instanceof HTMLSelectElement) || !isVisible(select)) return false;
+        const values = Array.from(select.options).map((option) => option.value);
+        return values.includes("0") && values.includes("1");
+      });
+    const selectedRoomCount = roomSelects.filter((select) => select.value && select.value !== "0").length;
+    const reserveControlVisible = Array.from(document.querySelectorAll("button, a, [role='button']"))
+      .some((element) => {
+        if (!isVisible(element)) return false;
+        const text = normalize(element.textContent ?? "");
+        return (
+          text === "reserve" ||
+          text.includes("i'll reserve") ||
+          text.includes("i will reserve") ||
+          text.includes("reserve now") ||
+          text.includes("show prices") ||
+          text.includes("select your room") ||
+          text.includes("check availability") ||
+          text.includes("see availability")
+        );
+      });
+    const guestDetailsVisible = [
+      "enter your details",
+      "your details",
+      "first name",
+      "last name",
+      "email address",
+      "phone number",
+      "next: final details",
+    ].some((signal) => bodyText.includes(signal));
+    const paymentBoundaryVisible = [
+      "your payment details",
+      "payment method",
+      "credit or debit card",
+      "card number",
+      "security code",
+      "cvv",
+      "complete booking",
+      "confirm and pay",
+    ].some((signal) => bodyText.includes(signal));
+    const loginOrCaptchaVisible = [
+      "captcha",
+      "otp",
+      "phone verification",
+      "verify you are human",
+      "are you a robot",
+      "security check",
+      "bot detection",
+      "sign in to continue",
+      "log in to continue",
+    ].some((signal) => bodyText.includes(signal));
+    const noAvailabilityVisible = [
+      "sold out",
+      "fully booked",
+      "no rooms available",
+      "no availability",
+      "no rates available",
+      "unavailable for your dates",
+      "no properties match",
+      "no available properties",
+    ].some((signal) => bodyText.includes(signal));
+    const selectorDriftLikely =
+      roomSectionVisible &&
+      roomSelects.length === 0 &&
+      !reserveControlVisible &&
+      !guestDetailsVisible &&
+      !paymentBoundaryVisible &&
+      !loginOrCaptchaVisible &&
+      !noAvailabilityVisible;
+
+    return {
+      roomSectionVisible,
+      roomCardCount,
+      roomQuantitySelectCount: roomSelects.length,
+      selectedRoomCount,
+      reserveControlVisible,
+      guestDetailsVisible,
+      paymentBoundaryVisible,
+      loginOrCaptchaVisible,
+      noAvailabilityVisible,
+      selectorDriftLikely,
+    };
+  }).catch(() => ({
+    roomSectionVisible: false,
+    roomCardCount: 0,
+    roomQuantitySelectCount: 0,
+    selectedRoomCount: 0,
+    reserveControlVisible: false,
+    guestDetailsVisible: false,
+    paymentBoundaryVisible: false,
+    loginOrCaptchaVisible: false,
+    noAvailabilityVisible: false,
+    selectorDriftLikely: false,
+  }));
+
+  return {
+    ...rawEvidence,
+    summary: summarizeBookingComRoomSelectionEvidence(rawEvidence),
+  };
 }
 
 async function markBookingComPaymentFieldsInScope(

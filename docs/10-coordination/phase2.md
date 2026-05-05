@@ -28,24 +28,34 @@ Safety boundary:
 
 Codex branch:
 
-- `codex/hotel-live-readiness-pack-v2`
+- `codex/hotel-runtime-closure`
 - Base: latest `origin/codex/integrated-preview-20260504`.
-- Scope: no-live hotel live-readiness classification, post-live artifact
-  bundle template, and docs/tests only.
+- Scope: Booking.com hotel runtime closure toward a safe manual boundary, with
+  worker mirror sync and no live provider run.
 
-Follow-up from `codex/hotel-controlled-runtime-closure @ 10192569`:
+Closure choice:
 
-- The previous branch was not yet present in the latest integrated tip, so this
-  branch carries forward the useful no-live analyzer split for
-  `room_selection_manual_review_reached` and the hotel controlled retry
-  decision tree.
-- Adds post-live hotel triage buckets for provider selector drift, room/card
-  scan drift, checkout/manual boundary, model/env transient,
-  network/provider degraded, and no availability.
-- Adds a hotel artifact template at
-  `docs/50-product-areas/HOTEL_RETRY_ARTIFACT_TEMPLATE.json` and keeps the
-  runbook pointed at the unified no-live artifact analyzer:
-  `scripts/analyze-provider-artifact.ts --kind hotel`.
+- Booking.com is the primary hotel closure candidate because current code and
+  docs already contain Booking.com URL construction, hotel result matching,
+  direct hotel URL fallback, room-list reveal, room quantity selection,
+  guest-details detection, and payment-boundary guards.
+- Hotels.com remains fallback only after Booking.com is explicitly blocked.
+- Expedia hotel remains out of scope until a separate approved hotel artifact
+  proves it is closer than Booking.com.
+
+Runtime hardening in progress:
+
+- Add classifier-ready Booking.com hotel result candidate capture.
+- Add room-selection evidence capture for room cards, quantity dropdowns,
+  selected rooms, reserve controls, guest-details, payment boundary,
+  login/CAPTCHA, and no availability.
+- Emit `Booking.com hotel runtime boundary: ...` lines so the post-live hotel
+  analyzer can classify future approved runs from DB/log/screenshots.
+- Honor the exact controlled retry prompt's stop-before-payment wording by
+  stopping at the Booking.com payment boundary without filling card fields.
+
+Controlled retry remains the exact YOTEL New York Times Square Booking.com case
+in `docs/50-product-areas/HOTEL_CONTROLLED_RETRY_RUNBOOK.md`.
 
 No live provider, OpenAI live call, payment, CVV, OTP/CAPTCHA/login bypass, or
 final confirmation is authorized by this branch.

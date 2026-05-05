@@ -152,6 +152,11 @@ const SIGNAL_PATTERNS: SignalPattern[] = [
   },
   {
     kind: "payment_boundary",
+    label: "Booking.com runtime payment boundary",
+    rx: /\bpayment_manual_review_reached\b/i,
+  },
+  {
+    kind: "payment_boundary",
     label: "checkout reached",
     rx: /\bcheckout\s+(page\s+)?(visible|reached|loaded)\b/i,
   },
@@ -177,6 +182,11 @@ const SIGNAL_PATTERNS: SignalPattern[] = [
   },
   {
     kind: "guest_details_reached",
+    label: "Booking.com runtime guest-details boundary",
+    rx: /\bguest_details_manual_review_reached\b/i,
+  },
+  {
+    kind: "guest_details_reached",
     label: "contact details reached",
     rx: /\bcontact details\s+(page|form)\s+(visible|reached|loaded)\b/i,
   },
@@ -197,6 +207,11 @@ const SIGNAL_PATTERNS: SignalPattern[] = [
   },
   {
     kind: "room_selection_reached",
+    label: "Booking.com runtime room-selection boundary",
+    rx: /\broom_selection_manual_review_reached\b/i,
+  },
+  {
+    kind: "room_selection_reached",
     label: "room quantity selected",
     rx: /\bselected room quantity\b|\broom quantity\s+(selected|set|updated)\b/i,
   },
@@ -209,6 +224,11 @@ const SIGNAL_PATTERNS: SignalPattern[] = [
     kind: "login_or_captcha",
     label: "login or sign-in wall",
     rx: /\b(login|sign[-\s]?in)\s+(wall|required|prompt|modal)\b/i,
+  },
+  {
+    kind: "login_or_captcha",
+    label: "Booking.com runtime login/CAPTCHA boundary",
+    rx: /\blogin_or_captcha_boundary\b/i,
   },
   {
     kind: "login_or_captcha",
@@ -271,9 +291,19 @@ const SIGNAL_PATTERNS: SignalPattern[] = [
     rx: /\b(provider|booking\.com|hotels\.com)\s+(unreachable|down|unavailable|timed out)\b/i,
   },
   {
+    kind: "network_provider_failure",
+    label: "Booking.com runtime provider/network failure",
+    rx: /\bnetwork_provider_failure\b/i,
+  },
+  {
     kind: "provider_no_availability",
     label: "hotel sold out or fully booked",
     rx: /\b(sold[-\s]?out|fully booked|no rooms? available|no availability)\b/i,
+  },
+  {
+    kind: "provider_no_availability",
+    label: "Booking.com runtime no availability",
+    rx: /\bprovider_no_availability\b/i,
   },
   {
     kind: "provider_no_availability",
@@ -284,6 +314,11 @@ const SIGNAL_PATTERNS: SignalPattern[] = [
     kind: "provider_selector_drift",
     label: "target hotel visible but not selected",
     rx: /\b(target hotel|hotel card|hotel result)\b.*\b(visible|found)\b.*\b(not selected|not clicked|selection failed)\b/i,
+  },
+  {
+    kind: "provider_selector_drift",
+    label: "Booking.com runtime provider selector drift",
+    rx: /\bprovider_selector_drift\b/i,
   },
   {
     kind: "provider_selector_drift",
@@ -299,6 +334,11 @@ const SIGNAL_PATTERNS: SignalPattern[] = [
     kind: "room_selection_drift",
     label: "room card or selector drift",
     rx: /\b(room|rate|hotel)\s+(card|selection|select button|selected room)\s+(missing|not found|drift|failed)\b/i,
+  },
+  {
+    kind: "room_selection_drift",
+    label: "Booking.com runtime room selection drift",
+    rx: /\broom_selection_drift\b/i,
   },
   {
     kind: "room_selection_drift",

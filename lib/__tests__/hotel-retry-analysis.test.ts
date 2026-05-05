@@ -155,6 +155,46 @@ describe("analyzeHotelRetryArtifactBundle", () => {
     expect(analysis.nextAction).toContain("Do not patch hotel provider selectors");
   });
 
+  it("classifies explicit Booking.com runtime boundary log lines", () => {
+    const cases: Array<{ line: string; state: HotelRetryState }> = [
+      {
+        line: "Booking.com hotel runtime boundary: provider_selector_drift - Target hotel candidate is visible but runtime did not reach the property detail page.",
+        state: "provider_selector_drift",
+      },
+      {
+        line: "Booking.com hotel runtime boundary: room_selection_manual_review_reached - Room inventory or reserve controls are visible on the hotel detail page.",
+        state: "room_selection_manual_review_reached",
+      },
+      {
+        line: "Booking.com hotel runtime boundary: guest_details_manual_review_reached - Guest-details step is visible before payment/final confirmation.",
+        state: "guest_details_manual_review_reached",
+      },
+      {
+        line: "Booking.com hotel runtime boundary: payment_manual_review_reached - stop-before-payment instruction honored; no card fields filled.",
+        state: "payment_manual_review_reached",
+      },
+      {
+        line: "Booking.com hotel runtime boundary: network_provider_failure - Booking.com or the browser reported a degraded provider/network response.",
+        state: "network_provider_failure",
+      },
+    ];
+
+    for (const { line, state } of cases) {
+      const analysis = analyzeHotelRetryArtifactBundle({
+        job: {
+          id: `fixture-hotel-${state}`,
+          provider: "booking-com",
+          scenario: "hotel",
+          status: "failed",
+        },
+        workerLogExcerpt: line,
+      });
+
+      expect(analysis.state, line).toBe(state);
+      expect(analysis.signals.length, line).toBeGreaterThan(0);
+    }
+  });
+
   it("returns insufficient evidence for bundles without known signals", () => {
     const analysis = analyzeHotelRetryArtifactBundle({
       job: {
