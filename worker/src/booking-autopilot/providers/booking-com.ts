@@ -3112,12 +3112,24 @@ export async function fillBookingComGuestForm(
         const el = rawPage.locator(sel).first();
         if (!await el.isVisible({ timeout: 600 }).catch(() => false)) continue;
         const set = await el.evaluate((s: HTMLSelectElement) => {
-          const opt = Array.from(s.options).find((o) =>
-            o.text.toLowerCase().includes("united states") || o.value.toLowerCase() === "us"
-          );
+          const opt = Array.from(s.options).find((o) => {
+            const text = o.text.toLowerCase();
+            const val = o.value.toLowerCase();
+            return (
+              text.includes("united states") ||
+              text === "美国" ||
+              text === "美國" ||
+              val === "us" ||
+              val === "usa" ||
+              val === "united states" ||
+              val === "united_states"
+            );
+          });
           if (!opt) return false;
           s.value = opt.value;
           s.dispatchEvent(new Event("change", { bubbles: true }));
+          s.dispatchEvent(new Event("input", { bubbles: true }));
+          s.dispatchEvent(new Event("blur", { bubbles: true }));
           return true;
         });
         if (set) {
@@ -3130,6 +3142,54 @@ export async function fillBookingComGuestForm(
       }
     }
     if (!countrySet) {
+      // Last-resort: scan ALL visible <select> elements for one whose options
+      // include a US-like entry (Chinese 美国 / English / value=us). This rescues
+      // localized Booking.com pages where neither autocomplete=country nor
+      // name=cc1 nor a country label was findable.
+      try {
+        const setViaScan = await rawPage.evaluate(() => {
+          const isVisible = (el: HTMLElement) => {
+            const style = window.getComputedStyle(el);
+            return (
+              style.display !== "none" &&
+              style.visibility !== "hidden" &&
+              !el.hidden &&
+              (el.offsetWidth > 0 || el.offsetHeight > 0 || el.getClientRects().length > 0)
+            );
+          };
+          for (const s of Array.from(document.querySelectorAll<HTMLSelectElement>("select"))) {
+            if (!isVisible(s)) continue;
+            // Skip selects that are clearly phone country codes (option text "+1" pattern)
+            if (s.options.length > 0 && /\+\d{1,4}\b/.test(s.options[0].text || "")) continue;
+            const opt = Array.from(s.options).find((o) => {
+              const text = (o.text || "").toLowerCase();
+              const val = (o.value || "").toLowerCase();
+              return (
+                text.includes("united states") ||
+                text === "美国" ||
+                text === "美國" ||
+                val === "us" ||
+                val === "usa"
+              );
+            });
+            if (!opt) continue;
+            s.value = opt.value;
+            s.dispatchEvent(new Event("change", { bubbles: true }));
+            s.dispatchEvent(new Event("input", { bubbles: true }));
+            s.dispatchEvent(new Event("blur", { bubbles: true }));
+            return true;
+          }
+          return false;
+        }).catch(() => false);
+        if (setViaScan) {
+          countrySet = true;
+          traceLog("Booking.com: set Country via visible-select option scan (US match)");
+        }
+      } catch {
+        // Non-fatal.
+      }
+    }
+    if (!countrySet) {
       for (const labelText of ["Country/Region", "Country", "国家/地区", "国家", "地区", "國家/地區", "國家"]) {
         try {
           const sel = rawPage.getByLabel(labelText, { exact: false }).first();
@@ -3137,7 +3197,9 @@ export async function fillBookingComGuestForm(
           if (tag !== "select") continue;
           if (!await sel.isVisible({ timeout: 600 }).catch(() => false)) continue;
           await sel.selectOption({ label: "United States" }).catch(() =>
-            sel.selectOption({ value: "us" })
+            sel.selectOption({ label: "美国" }).catch(() =>
+              sel.selectOption({ value: "us" })
+            )
           ).catch(() => {});
           traceLog(`Booking.com: set Country/Region via getByLabel("${labelText}")`);
           countrySet = true;
