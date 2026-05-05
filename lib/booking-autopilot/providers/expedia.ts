@@ -760,6 +760,10 @@ export function selectExpediaFlightCandidateLabels(
 // can overwrite the filled value with a full address suggestion. Use explicit id/name/placeholder
 // selectors only, which are more stable and specific.
 const EXPEDIA_BILLING_ZIP_SELECTORS = [
+  'input[name="creditCards[0].zipcode"]',
+  'input.billing-zip-code',
+  'input[data-tealeaf-name="zipcode"]',
+  'input[data-cko-rfrr-id="FLT.CKO.BILLINGZIPCODE"]',
   // Confirmed from live Expedia checkout debug (id="payment_zip_code")
   'input[id="payment_zip_code"]',
   'input[autocomplete="billing postal-code"]',
@@ -772,6 +776,10 @@ const EXPEDIA_BILLING_ZIP_SELECTORS = [
 ];
 
 const EXPEDIA_BILLING_ADDRESS1_SELECTORS = [
+  'input[name="creditCards[0].street"]',
+  'input.billing-address-one',
+  'input[data-tealeaf-name="street"]',
+  'input[data-cko-rfrr-id="FLT.CKO.BILLINGADDRESS1"]',
   'input[autocomplete="billing address-line1"]',
   'input[autocomplete="address-line1"]',
   'input[id*="billingAddressLine1" i]',
@@ -786,6 +794,10 @@ const EXPEDIA_BILLING_ADDRESS1_SELECTORS = [
 ];
 
 const EXPEDIA_BILLING_CITY_SELECTORS = [
+  'input[name="creditCards[0].city"]',
+  'input.billing-city',
+  'input[data-tealeaf-name="city"]',
+  'input[data-cko-rfrr-id="FLT.CKO.BILLINGCITY"]',
   'input[autocomplete="billing address-level2"]',
   'input[autocomplete="address-level2"]',
   'input[id*="billingCity" i]',
@@ -1366,11 +1378,14 @@ async function fillExpediaBillingAddressFields(
         const label = id ? document.querySelector<HTMLLabelElement>(`label[for="${CSS.escape(id)}"]`)?.textContent ?? "" : "";
         return [
           label,
+          el.className,
           el.getAttribute("aria-label") ?? "",
           el.getAttribute("autocomplete") ?? "",
           el.getAttribute("placeholder") ?? "",
           el.getAttribute("name") ?? "",
           el.getAttribute("id") ?? "",
+          el.getAttribute("data-tealeaf-name") ?? "",
+          el.getAttribute("data-cko-rfrr-id") ?? "",
           el.closest("label")?.textContent ?? "",
         ].join(" ").replace(/\s+/g, " ").trim().toLowerCase();
       };
@@ -1383,18 +1398,21 @@ async function fillExpediaBillingAddressFields(
         if (kind === "address") {
           if (autocomplete === "billing address-line1") score += 100;
           if (autocomplete === "address-line1") score += 80;
+          if (/creditcards\[\d+\]\.street|billing-address-one|billingaddress1|flt\.cko\.billingaddress1|\bstreet\b/.test(text)) score += 120;
           if (/billing address\s*1|billing address-line1|billing address line\s*1|address line\s*1|address-line1|123 main/.test(text)) score += 60;
           if (/address\s*2|suite|apt|apartment/.test(text)) score -= 100;
         }
         if (kind === "city") {
           if (autocomplete === "billing address-level2") score += 100;
           if (autocomplete === "address-level2") score += 80;
+          if (/creditcards\[\d+\]\.city|billing-city|flt\.cko\.billingcity/.test(text)) score += 120;
           if (/\bcity\b|billing city|address-level2|address level\s*2/.test(text)) score += 60;
           if (/country|state|province|zip|postal|phone|card/.test(text)) score -= 100;
         }
         if (kind === "zip") {
           if (autocomplete === "billing postal-code") score += 100;
           if (autocomplete === "postal-code") score += 80;
+          if (/creditcards\[\d+\]\.zipcode|billing-zip-code|flt\.cko\.billingzipcode|\bzipcode\b/.test(text)) score += 120;
           if (/\bzip code\b|billing zip|billing postal-code|postal-code|postal code/.test(text)) score += 60;
           if (/security|cvv|cvc|card number/.test(text)) score -= 100;
         }
@@ -1502,17 +1520,101 @@ async function fillExpediaBillingAddressFields(
     }
   }
 
+  const exactResult = await page.evaluate(
+    ({ address, city, zip }: { address: string; city: string; zip: string }) => {
+      const nativeFill = (el: HTMLInputElement, value: string): boolean => {
+        if (!value || !el || el.disabled || el.type === "hidden") return false;
+        const rect = el.getBoundingClientRect();
+        const style = window.getComputedStyle(el);
+        if (rect.width <= 0 || rect.height <= 0 || style.display === "none" || style.visibility === "hidden") return false;
+        const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set;
+        el.scrollIntoView({ block: "center", behavior: "auto" as ScrollBehavior });
+        el.focus();
+        if (setter) {
+          setter.call(el, "");
+          setter.call(el, value);
+        } else {
+          el.value = "";
+          el.value = value;
+        }
+        try {
+          el.dispatchEvent(new InputEvent("beforeinput", { bubbles: true, data: value, inputType: "insertText" }));
+        } catch {
+          // InputEvent construction is not available in every embedded browser.
+        }
+        el.dispatchEvent(new Event("input", { bubbles: true }));
+        el.dispatchEvent(new Event("change", { bubbles: true }));
+        el.dispatchEvent(new KeyboardEvent("keyup", { bubbles: true }));
+        el.dispatchEvent(new FocusEvent("blur", { bubbles: true }));
+        el.blur();
+        return el.value.trim().replace(/\s+/g, " ") === value.trim().replace(/\s+/g, " ");
+      };
+      const fillByExactSelectors = (selectors: string[], value: string): boolean => {
+        const matches: HTMLInputElement[] = [];
+        const seen = new Set<HTMLInputElement>();
+        for (const selector of selectors) {
+          for (const input of Array.from(document.querySelectorAll<HTMLInputElement>(selector))) {
+            if (!seen.has(input)) {
+              seen.add(input);
+              matches.push(input);
+            }
+          }
+        }
+        for (const input of matches.reverse()) {
+          if (nativeFill(input, value)) return true;
+        }
+        return false;
+      };
+      return {
+        address: fillByExactSelectors([
+          'input[name="creditCards[0].street"]',
+          "input.billing-address-one",
+          'input[data-tealeaf-name="street"]',
+          'input[data-cko-rfrr-id="FLT.CKO.BILLINGADDRESS1"]',
+          'input[autocomplete="billing address-line1"]',
+          'input[aria-label="Billing address 1"]',
+        ], address),
+        city: fillByExactSelectors([
+          'input[name="creditCards[0].city"]',
+          "input.billing-city",
+          'input[data-tealeaf-name="city"]',
+          'input[data-cko-rfrr-id="FLT.CKO.BILLINGCITY"]',
+          'input[autocomplete="billing address-level2"]',
+          'input[aria-label="City"]',
+        ], city),
+        zip: fillByExactSelectors([
+          'input[name="creditCards[0].zipcode"]',
+          "input.billing-zip-code",
+          'input[data-tealeaf-name="zipcode"]',
+          'input[data-cko-rfrr-id="FLT.CKO.BILLINGZIPCODE"]',
+          'input[autocomplete="billing postal-code"]',
+          'input[aria-label="ZIP code"]',
+          'input[aria-label="Billing ZIP code"]',
+        ], zip),
+      };
+    },
+    {
+      address: profile.address_line1 ?? "",
+      city: profile.city ?? "",
+      zip: billingZip ?? "",
+    },
+  ).catch(() => ({ address: false, city: false, zip: false }));
+  trace(`Expedia billing exact field fill: address=${exactResult.address} city=${exactResult.city} zip=${exactResult.zip}`);
+
   const verified = await page.evaluate(() => {
     const fieldText = (el: HTMLInputElement | HTMLSelectElement): string => {
       const id = el.getAttribute("id") ?? "";
       const label = id ? document.querySelector<HTMLLabelElement>(`label[for="${CSS.escape(id)}"]`)?.textContent ?? "" : "";
       return [
         label,
+        el.className,
         el.getAttribute("aria-label") ?? "",
         el.getAttribute("autocomplete") ?? "",
         el.getAttribute("placeholder") ?? "",
         el.getAttribute("name") ?? "",
         id,
+        el.getAttribute("data-tealeaf-name") ?? "",
+        el.getAttribute("data-cko-rfrr-id") ?? "",
         el.closest("label")?.textContent ?? "",
       ].join(" ").replace(/\s+/g, " ").trim().toLowerCase();
     };
@@ -1541,11 +1643,11 @@ async function fillExpediaBillingAddressFields(
       });
     return {
       address: hasInput(
-        [/billing address.?1/, /billing address-line1/, /billing address line.?1/, /address line.?1/, /address-line1/, /123 main/],
+        [/creditcards\[\d+\]\.street/, /billing-address-one/, /billingaddress1/, /\bstreet\b/, /billing address.?1/, /billing address-line1/, /billing address line.?1/, /address line.?1/, /address-line1/, /123 main/],
         [/address.?2/, /suite|apt|apartment/],
       ),
-      city: hasInput([/\bcity\b/, /billing address-level2/, /address-level2/, /billing city/]),
-      zip: hasInput([/\bzip code\b/, /billing zip/, /billing postal-code/, /postal-code/, /postal code/]),
+      city: hasInput([/creditcards\[\d+\]\.city/, /billing-city/, /\bcity\b/, /billing address-level2/, /address-level2/, /billing city/]),
+      zip: hasInput([/creditcards\[\d+\]\.zipcode/, /billing-zip-code/, /\bzipcode\b/, /\bzip code\b/, /billing zip/, /billing postal-code/, /postal-code/, /postal code/]),
       country: hasSelect([/country\/territory/, /country\/region/, /\bcountry\b/]),
       state: hasSelect([/\bstate\b/, /province/, /billing state/]) ||
         hasInput([/\bstate\b/, /province/, /billing state/]),
@@ -1553,9 +1655,9 @@ async function fillExpediaBillingAddressFields(
   }).catch(() => ({ address: false, city: false, zip: false, country: false, state: false }));
 
   const result = {
-    address: nativeResult.address || verified.address,
-    city: nativeResult.city || verified.city,
-    zip: nativeResult.zip || verified.zip,
+    address: nativeResult.address || exactResult.address || verified.address,
+    city: nativeResult.city || exactResult.city || verified.city,
+    zip: nativeResult.zip || exactResult.zip || verified.zip,
     country: countrySelected || verified.country,
     state: stateSelected || verified.state,
   };
@@ -1587,10 +1689,14 @@ async function scrollExpediaCheckoutToSection(
       return [
         labelText,
         el.textContent ?? "",
+        el.className,
         el.getAttribute("aria-label") ?? "",
+        el.getAttribute("autocomplete") ?? "",
         el.getAttribute("placeholder") ?? "",
         el.getAttribute("name") ?? "",
         el.getAttribute("id") ?? "",
+        el.getAttribute("data-tealeaf-name") ?? "",
+        el.getAttribute("data-cko-rfrr-id") ?? "",
         el.closest("label")?.textContent ?? "",
       ].join(" ").replace(/\s+/g, " ").trim();
     };
@@ -3121,7 +3227,19 @@ export async function fillExpediaGroupPaymentForm(
   await scrollExpediaCheckoutToSection(
     page,
     "billing address",
-    ["Billing address 1", "Billing address", "Country/Territory", "City", "State", "ZIP code", "Postal code"],
+    [
+      "Billing address 1",
+      "Billing address",
+      "Country/Territory",
+      "City",
+      "State",
+      "ZIP code",
+      "Postal code",
+      "creditCards",
+      "billing-address-one",
+      "billing-city",
+      "billing-zip-code",
+    ],
     trace,
   );
   const billingFillResult = await fillExpediaBillingAddressFields(page, profile, trace);

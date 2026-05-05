@@ -55,6 +55,18 @@ describe("Expedia flight runtime safety guards", () => {
     expect(source).toContain("Expedia payment profile fields");
   });
 
+  it("targets current Expedia creditCards billing field names directly", () => {
+    const source = readFileSync("lib/booking-autopilot/providers/expedia.ts", "utf8");
+
+    expect(source).toContain('input[name="creditCards[0].street"]');
+    expect(source).toContain('input[name="creditCards[0].city"]');
+    expect(source).toContain('input[name="creditCards[0].zipcode"]');
+    expect(source).toContain("billing-address-one");
+    expect(source).toContain("billing-city");
+    expect(source).toContain("billing-zip-code");
+    expect(source).toContain("Expedia billing exact field fill");
+  });
+
   it("does not mark Expedia billing prefill complete when allowed billing fields are missing", () => {
     const source = readFileSync("lib/booking-autopilot/providers/expedia.ts", "utf8");
 
