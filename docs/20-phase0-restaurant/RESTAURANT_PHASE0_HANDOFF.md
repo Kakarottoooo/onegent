@@ -2,7 +2,7 @@
 
 > Purpose: let a fresh Codex/Claude session continue the restaurant execution work without relying on chat history.
 > Scope: Resy + OpenTable restaurant booking execution, Phase 0A/0B, debug/observability, and coordination.
-> Last updated: 2026-05-04 by Codex on `codex/openai-chat-model-env`.
+> Last updated: 2026-05-05 by Codex on `codex/phase-closure-orchestration-20260505`.
 
 ---
 
@@ -12,7 +12,7 @@
 
 Onegent is currently proving that a travel task runtime can complete a real restaurant reservation flow safely. The active wedge is restaurant booking, not hotels/flights/activities.
 
-The immediate milestone is:
+The immediate Phase 0A milestone is now met through OpenTable:
 
 ```text
 restaurant request
@@ -23,29 +23,28 @@ restaurant request
 -> accurate task UI state + audit trail
 ```
 
-Do not expand to Phase 2 verticals until Phase 0/1 is closed.
+2026-05-05 Sirrah OpenTable dogfood reached final review /
+`ready_for_confirmation` with phone filled and stopped before
+`Complete reservation` (`job=3bbe2ac4-c4cd-409f-8c11-6a83d2f81485`).
+Do not expand Phase 2 promises yet; Phase 0B may now broaden restaurant
+fixtures and Phase 1 still needs human walkthrough acceptance.
 
 ### Phase Status
 
 | Phase | Status | Meaning |
 |---|---:|---|
-| Phase 0A Resy single-provider closure | ~60-70% | Resy runner exists, R-003 is correctly classified as no availability, but fill/OTP closure still needs a live slot case. |
-| Phase 0B Restaurant v1 | ~30-40% | OpenTable can reach phone OTP/review in some cases; Resy still needs fill closure. |
+| Phase 0A Restaurant provider closure | Closed | OpenTable Sirrah reached safe final-review handoff; no final confirmation clicked. |
+| Phase 0B Restaurant v1 | Entry gate met | Broaden OpenTable-first fixtures; keep Resy as provider/network/IP follow-up. |
 | Phase 1 Task/UI runtime | ~90-95% | Task UI, ProfileGapCard, homepage inline profile gap, benchmark dashboard mostly landed. |
 | Phase 1.5 stability/observability | Starting | Need probe-first workflow, artifact viewers, trace capture, clearer task states. |
 | Phase 2+ | Frozen | No hotel/flight/activity implementation until restaurant and Phase 1 user path are stable. |
 
 ### Latest Codex Finding
 
-R-003 Buvette is not currently useful for Resy fill/OTP testing. A no-token Resy availability probe found exact venue `buvette-nyc`, but zero target-window slots. The next Resy live-fill candidate should be `R-030` Charlie Bird.
-
-Recommended next live command, only after explicit approval:
-
-```powershell
-npx tsx scripts\run-phase0-resy-benchmark.ts --case R-030 --live-openai --allow-failures
-```
-
-Do not rerun R-003 to test filling. R-003 is currently useful only as a no-availability classification case.
+Sirrah/OpenTable is the current Phase 0A positive closure evidence. Resy R-030
+remains useful only as a follow-up provider/network diagnostic because the
+founder observed Wi-Fi/IP availability differences versus mobile data. Do not
+force Resy as the Phase 0A gate.
 
 ---
 

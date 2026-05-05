@@ -144,14 +144,20 @@ describe("provider-closure-acceptance lane manifest invariants", () => {
     }
   });
 
-  it("every lane is liveVerified: false until acceptance doc records evidence", () => {
-    // Lockfile-style guard. To flip a lane to true, the acceptance
-    // doc must contain a non-empty "Verified live closure" section
-    // for that lane (currently every lane records "None.").
+  it("liveVerified true is allowed only with acceptance-doc evidence", () => {
+    const doc = read(ACCEPTANCE_DOC_REL);
     for (const lane of PROVIDER_LANES) {
-      expect(lane.liveVerified, `${lane.id} must remain liveVerified false`).toBe(
-        false,
-      );
+      if (lane.liveVerified) {
+        expect(
+          doc,
+          `${lane.id} liveVerified true requires accepted evidence`,
+        ).toMatch(new RegExp(`${lane.displayName.split(" / ")[0]}[\\s\\S]+accepted closure`, "i"));
+      } else {
+        expect(
+          doc,
+          `${lane.id} liveVerified false should still have a None marker`,
+        ).toMatch(new RegExp(`${lane.displayName.split(" / ")[0]}[\\s\\S]+None\\.`, "i"));
+      }
     }
   });
 });
@@ -194,24 +200,19 @@ describe("provider-closure-acceptance doc structure", () => {
     expect(nextCount).toBeGreaterThanOrEqual(3);
   });
 
-  it("acceptance doc has a 'Verified live closure' section per vertical, all currently 'None'", () => {
+  it("acceptance doc has a 'Verified live closure' section per vertical", () => {
     const doc = read(ACCEPTANCE_DOC_REL);
     const verifiedCount =
       (doc.match(/###\s+Verified live closure/g) ?? []).length;
     expect(verifiedCount).toBeGreaterThanOrEqual(3);
-    // Every section must currently say "None." (or similar) until a
-    // founder-approved live closure flips a lane.
     const verifiedSections = doc.split(/###\s+Verified live closure/);
-    // First chunk is everything before the first Verified section.
     const after = verifiedSections.slice(1);
     expect(after.length).toBeGreaterThanOrEqual(3);
-    for (let i = 0; i < after.length; i += 1) {
-      const section = after[i].split(/^##\s|^###\s/m)[0] ?? "";
-      expect(
-        section,
-        `Verified live closure section ${i} must still say "None." until evidence is recorded`,
-      ).toMatch(/None\./);
-    }
+    expect(after[0]).toMatch(/OpenTable Sirrah safe handoff/);
+    expect(after[0]).toMatch(/accepted closure/);
+    expect(after[0]).not.toMatch(/None\./);
+    expect(after[1]).toMatch(/None\./);
+    expect(after[2]).toMatch(/None\./);
   });
 
   it("acceptance doc lists the 8-state taxonomy verbatim", () => {

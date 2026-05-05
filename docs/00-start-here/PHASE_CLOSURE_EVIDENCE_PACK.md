@@ -13,9 +13,9 @@ confirmation.
 
 ## Bottom Line
 
-Phase 1 and Phase 1.5 are demo-freeze passed, but not phase-closed by
-documentation or tooling alone. Phase 0A is blocked by unvalidated Resy
-provider-path closure. Phase 2 remains frozen and not live verified.
+Phase 0A is closed via OpenTable safe handoff. Phase 1 and Phase 1.5 are
+demo-freeze passed, but still need human acceptance to close. Phase 2 remains
+frozen and not live verified.
 
 Closure claim rule: tooling integrated is not provider closure proven, and docs,
 fixtures, and green no-live tests do not close a phase by themselves. Do not
@@ -27,17 +27,16 @@ verified live closure section for that lane.
 
 | Phase | Status | Closure verdict | Blocking / closure evidence | Closure unblock plan | Next single allowed action | Hard-stop reminder |
 | --- | --- | --- | --- | --- | --- | --- |
-| Phase 0A | Blocked on Resy provider-path validation | `blocked` | Resy R-030 patch remains unvalidated by a successful provider-path run; the current closure-status anchor is the 2026-05-05 R-030 OpenAI Responses API 403 `model_not_found` runtime env/project mismatch, not provider pass/fail. | Runtime env/project blocker first: install/verify the intended gpt-5.5-enabled OpenAI env for the worktree, pass a no-provider model-access preflight, then the founder approves exactly one probe-selected Resy retry. No further Resy code change is justified unless that clean run reaches a provider DOM/data failure. | Open `/dev/restaurant-readiness`, inspect the probe-selected case, and prepare one fresh artifact bundle only; do not run live without separate exact founder approval. | Stop before payment, final reservation, OTP/CAPTCHA/login handling, account verification, and human verification. |
+| Phase 0A | Closed via OpenTable safe handoff | `closed` | OpenTable Sirrah live dogfood on 2026-05-05 reached the final review boundary with phone filled and stopped before `Complete reservation`. DB/log/operator evidence is recorded in Provider Closure Acceptance. | Phase 0B can broaden OpenTable-first restaurant fixtures. Resy remains a provider/network/IP follow-up lane and should use the probe/readiness flow before any future controlled attempt. | Review the Sirrah OpenTable evidence, then prepare a Phase 0B OpenTable-first fixture plan; do not click final confirmation. | Stop before payment, final reservation, OTP/CAPTCHA/login handling, account verification, and human verification. |
 | Phase 1 | Demo-freeze passed | `blocked` | Phase 1 gate, smoke, and autonomous founder E2E are recorded as passing, but Phase 1 still lists the founder manual E2E walkthrough as the final acceptance check. Documentation and tooling alone do not close the phase. | External founder-acceptance blocker: founder runs the manual E2E walkthrough on the intended integrated preview and records pass/fail. If it fails, the smallest code fix is the single UI/API/runtime gap exposed by that walkthrough; no current code fix is inferable from docs alone. | Have the founder or operator perform the manual walkthrough acceptance step and record the result; keep provider execution out of this phase-level pack. | Do not turn Phase 1 demo readiness into provider, payment, OTP/CAPTCHA/login, or final-confirm automation. |
 | Phase 1.5 | Demo-freeze passed | `blocked` | Quality gate, demo-control surfaces, runtime forensics, and demo-readiness evidence are passed for the freeze, but that is observability/QA readiness. It is not phase closure from docs, fixtures, or tooling alone. | External QA/founder acceptance blocker: rerun or read the latest Phase 1.5 gate, route dogfood, and demo-control evidence on the intended integrated preview, then record an explicit acceptance note. If a gate fails, fix only the smallest surfaced polish/import/build issue. | Record the Phase 1.5 acceptance result after the latest no-live gates are read or rerun; do not add mutating controls. | Do not add run/retry/live buttons or any mutating provider control to QA dashboards. |
-| Phase 2 | Frozen, not demo-promised | `frozen` | Agent2 Expedia and Agent3 hotel hardening are integrated, Claude acceptance keeps lanes `liveVerified: false`, and Goal war-room reports are no-live/synthetic; no provider closure acceptance evidence records live verification. | Cannot be closed by more docs, fixtures, or tooling. Founder must approve one exact controlled live retry for a chosen lane after reading Provider Closure Acceptance; Expedia's MCO -> BNA / Southwest case and Booking.com's YOTEL case are the named candidates. Only a fresh accepted artifact can unblock the lane. | Read Provider Closure Acceptance and inspect local artifacts; only a separately founder-approved single controlled retry can create new closure evidence. | No Phase 2 provider promise, broad suite, payment/CVV, OTP/CAPTCHA/login handling, verification handling, or final confirmation. |
+| Phase 2 | Frozen, not demo-promised | `frozen` | Agent2 Expedia and Agent3 hotel hardening are integrated, but flight and hotel lanes remain `liveVerified: false`; Goal war-room reports are no-live/synthetic and cannot prove Phase 2 provider closure. | Cannot be closed by more docs, fixtures, or tooling. Founder must approve one exact controlled live retry for a chosen lane after reading Provider Closure Acceptance; Expedia's MCO -> BNA / Southwest case and Booking.com's YOTEL case are the named candidates. Only a fresh accepted artifact can unblock the lane. | Read Provider Closure Acceptance and inspect local artifacts; only a separately founder-approved single controlled retry can create new closure evidence. | No Phase 2 provider promise, broad suite, payment/CVV, OTP/CAPTCHA/login handling, verification handling, or final confirmation. |
 
 ## Closure Proof Required
 
-- **Phase 0A** - A non-synthetic provider-path artifact bundle recorded in
-  Provider Closure Acceptance with `safe_handoff`, `login_otp_boundary`,
-  `ready_for_confirmation`, or correct `no_availability`, plus operator
-  sign-off.
+- **Phase 0A** - Recorded: OpenTable Sirrah non-synthetic provider-path
+  evidence with `safe_handoff` / `ready_for_confirmation`, DB row, agent logs,
+  local snapshot path, human screenshot, and operator sign-off.
 - **Phase 1** - Founder manual walkthrough sign-off, or a named blocker with
   the exact smallest code/runtime owner if the walkthrough fails.
 - **Phase 1.5** - Explicit QA/founder acceptance of the latest integrated
@@ -49,8 +48,7 @@ verified live closure section for that lane.
 ## Evidence Checks
 
 - `pass` - Canonical integrated preview SHA is `63837d9`.
-- `pass` - Phase 0A remains not closed because Resy has no successful
-  provider-path closure artifact.
+- `pass` - Phase 0A is closed by OpenTable Sirrah safe handoff evidence.
 - `pass` - Latest R-030 runtime env/project mismatch is `model_env_transient` /
   `F-INFRA-MODEL-ACCESS`, not provider pass/fail.
 - `pass` - Phase 1 remains demo-freeze passed but still needs human acceptance.
@@ -62,7 +60,8 @@ verified live closure section for that lane.
   Expedia and hotel hardening.
 - `pass` - Agent2 Expedia closure evidence is integrated but not closure-pass.
 - `pass` - Agent3 hotel hardening is integrated but still `liveVerified: false`.
-- `pass` - Claude acceptance criteria lock `liveVerified: false` until evidence.
+- `pass` - Claude acceptance criteria now records restaurant evidence and keeps
+  remaining lanes gated.
 - `pass` - Goal war-room exists but synthetic reports cannot prove live
   readiness.
 
@@ -77,7 +76,8 @@ verified live closure section for that lane.
   acceptance remains unverified.
 - **Claude** - Provider closure acceptance:
   `claude/provider-closure-acceptance-final @ ed46abc` integrated as `c33b429`;
-  every provider lane stays `liveVerified: false` until evidence is recorded.
+  restaurant now records accepted OpenTable evidence while flight/hotel remain
+  gated until evidence is recorded.
 - **Goal** - Provider Closure War Room:
   `codex/goal-provider-closure-war-room @ 29ebdc6` integrated as `7597b12`;
   war-room reports are no-live evidence tooling and synthetic reports cannot
@@ -101,7 +101,7 @@ verified live closure section for that lane.
   one new R-030 attempt.
 
 This is runtime env/project blocked evidence, not a Resy provider pass/fail.
-It cannot close Phase 0A.
+It does not affect the OpenTable Phase 0A closure.
 
 ## Hard Stops
 

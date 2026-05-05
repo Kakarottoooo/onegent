@@ -109,28 +109,23 @@ const SOURCE_OF_TRUTH_REMINDER =
 const RESTAURANT_LANE: ProviderLane = {
   id: "restaurant",
   displayName: "Restaurant / Resy + OpenTable",
-  providerKey: "resy",
-  liveVerified: false,
+  providerKey: "opentable",
+  liveVerified: true,
   closurePosture:
-    "Phase 0A is in flight. Closure for restaurant means at least one " +
-    "Resy or OpenTable case reaches an accepted safe outcome - " +
-    "ready_for_confirmation, safe_handoff, OTP/login required, or a " +
-    "correct no-availability classification - without bypassing OTP, " +
-    "login, CAPTCHA, payment, or final confirmation. OpenTable can " +
-    "reach the safe contact boundary. Resy has not yet closed a live " +
-    "fill/OTP path. The next attempt must be probe-selected, not blind.",
+    "Phase 0A is closed through OpenTable. The accepted Sirrah live " +
+    "dogfood reached the OpenTable final review boundary with the phone " +
+    "field filled and stopped before Complete reservation. Restaurant " +
+    "closure still means a safe terminal outcome - ready_for_confirmation, " +
+    "safe_handoff, OTP/login required, or correct no-availability - " +
+    "without bypassing OTP, login, CAPTCHA, payment, or final confirmation.",
   lastKnownBlocker:
-    "Resy R-030 (2026-05-04 controlled retry) closed without booking. " +
-    "First run died before provider with OpenAI Responses API 500 " +
-    "(req_ce42a48137424a938a7893b131416d28) - now classified as " +
-    "model_or_env_blocked, not a Resy regression. Retry reached " +
-    "Resy/Charlie Bird safely but ended no_availability_correct " +
-    "while the public probe still showed matching slots; screenshots " +
-    "showed the venue page loaded but no visible slot cards. No-live " +
-    "patches landed: slot detector no longer treats the top time " +
-    "filter as a slot, Resy slugs/stage detection are current, and " +
-    "Resy deep links preserve time. Next attempt requires a fresh " +
-    "probe-recommended case, not a re-run of R-030.",
+    "No blocking issue remains for Phase 0A. Accepted evidence: OpenTable " +
+    "Sirrah job 3bbe2ac4-c4cd-409f-8c11-6a83d2f81485, status done, " +
+    "step awaiting_confirmation, final audit message 'Reservation form " +
+    "filled for Sirrah. Open the link to confirm.' Resy R-030 remains a " +
+    "provider/network/IP follow-up lane; founder observed Wi-Fi vs mobile " +
+    "data availability differences, so Resy no longer blocks the restaurant " +
+    "wedge.",
   primaryRunbook: {
     label: "R-003 live smoke runbook",
     ref: "docs/20-phase0-restaurant/R003_LIVE_SMOKE_RUNBOOK.md",
@@ -239,12 +234,11 @@ const RESTAURANT_LANE: ProviderLane = {
   failureTerminalStates: FAILURE_TERMINAL_STATES,
   inconclusiveTerminalStates: INCONCLUSIVE_TERMINAL_STATES,
   nextSingleAllowedAction: {
-    label: "Open /dev/restaurant-readiness and inspect probe verdict",
+    label: "Review Sirrah evidence and prepare Phase 0B plan",
     detail:
-      "Open the restaurant readiness control center and read the latest " +
-      "probe verdict. Do not run a live retry until the readiness page " +
-      "explicitly recommends a probe-validated case.",
-    ref: "/dev/restaurant-readiness",
+      "Review the accepted Sirrah OpenTable evidence before broadening " +
+      "OpenTable-first restaurant fixtures. Do not click final confirmation.",
+    ref: "docs/30-provider-debug/PROVIDER_CLOSURE_ACCEPTANCE.md",
   },
   inspectAfterRun: [
     {

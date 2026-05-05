@@ -1,7 +1,7 @@
 # Phase Status - single-source overview
 
 > For: founder, Codex, Claude, and future agents.
-> Last updated: 2026-05-04.
+> Last updated: 2026-05-05.
 > Read after: `docs/INDEX.md`, `docs/00-start-here/PROJECT_SUMMARY.md`,
 > and `docs/10-coordination/HUDDLE.md`.
 
@@ -11,8 +11,8 @@ Do not enter Phase 2 yet. Stabilize Phase 0, Phase 1, and Phase 1.5 first.
 
 | Phase | Status | Current gate |
 | --- | --- | --- |
-| Phase 0A - Restaurant provider closure | In flight, about 85% | Resy still needs a probe-selected live fill/OTP/safe-handoff run. |
-| Phase 0B - Restaurant v1 coverage | Gated | Start after 0A proves at least one real fill/OTP or safe handoff path. |
+| Phase 0A - Restaurant provider closure | Closed via OpenTable safe handoff | Sirrah OpenTable live run reached final review with phone filled and stopped before `Complete reservation`. |
+| Phase 0B - Restaurant v1 coverage | Entry gate met | Broaden OpenTable-first restaurant fixtures; keep Resy as provider/network follow-up, not a Phase 0A blocker. |
 | Phase 1 - First paying user path | Demo-freeze passed | Full Phase 1 gate with smoke and autonomous founder E2E passes 12/12; manual founder walkthrough remains the human acceptance gate. |
 | Phase 1.5 - QA and polish | Demo-freeze passed | Quality gate, dev workbenches, production build, and production route probe are passing. |
 | Phase 2 - Vertical expansion | Runtime closure hardening, not demo-promised | Expedia flight and Booking.com hotel have no-live runtime closure packs integrated; both still need controlled live revalidation before demo promises. |
@@ -56,6 +56,25 @@ Do not enter Phase 2 yet. Stabilize Phase 0, Phase 1, and Phase 1.5 first.
   - Latest quick gate:
     `npm run gate:phase1 -- --allow-known-drift` passed 9/9 at
     `phase1-quality-gate-2026-05-05T01-02-45-537Z.json`.
+- 2026-05-05 OpenTable restaurant live closure:
+  - Founder dogfood request: "book Sirrah in New York next Thursday at 8pm
+    for 1 person".
+  - Job `3bbe2ac4-c4cd-409f-8c11-6a83d2f81485`, session
+    `6a5946f9-48ae-487c-a443-ccc78c6327f2`.
+  - DB terminal state: `booking_jobs.status=done`,
+    `steps[0].status=awaiting_confirmation`, request params Sirrah / New York
+    / `2026-05-14` / `20:00` / 1 person.
+  - Agent logs ids `2782`-`2785`; final message:
+    "Reservation form filled for Sirrah. Open the link to confirm.";
+    details `type=job_paused_payment`, `status=paused_payment`.
+  - Provider state: OpenTable booking details page showed Sirrah, Thu May 14,
+    8:00 PM, 1 person, phone filled, and final `Complete reservation` visible
+    but not clicked.
+  - Safety: no final reservation click, no payment/CVV/card data, no
+    OTP/SMS code entry, no CAPTCHA/login bypass, no account-sensitive action.
+  - Verdict: accepted `safe_handoff` / `ready_for_confirmation`. Phase 0A is
+    closed via OpenTable; Resy remains a provider/network/IP-limited follow-up
+    lane, not the Phase 0A gate.
 - Historical side branches now folded into integrated preview:
   `codex/openai-chat-model-env` (runtime/debug),
   `codex/expedia-flight-card-fallback` (Expedia visible-card fallback),
@@ -119,6 +138,9 @@ payment, OTP, CAPTCHA, or account-sensitive actions automatically.
 
 Completed:
 
+- OpenTable Sirrah live dogfood reached final review / ready-for-confirmation
+  with phone filled, then stopped before `Complete reservation`
+  (`job=3bbe2ac4-c4cd-409f-8c11-6a83d2f81485`).
 - OpenTable can reach checkout/contact boundaries and stop before final submit.
 - Resy probe-first protocol exists and is represented in dev dashboards.
 - Restaurant readiness surfaces exist:
@@ -129,12 +151,14 @@ Completed:
   - `/dev/resy-probe-runs`
   - `/dev/resy-run-analysis`
 
-Still open:
+Still open / non-blocking follow-up:
 
-- Resy has not closed a live fill/OTP path. Do not broad-run the suite.
-- The next Resy live action should be a single controlled retry of the
-  probe-selected case after the duplicate-fallback/slot-control patch, with
-  the same hard stops and fresh artifact capture.
+- Resy has not closed a live fill/OTP path. Based on founder local testing,
+  Resy availability can differ by Wi-Fi/IP versus mobile data, so treat Resy
+  as a provider/network follow-up lane rather than the Phase 0A gate.
+- The next Resy live action, if needed, should be a single controlled retry of
+  a probe-selected case after network conditions are known-good, with the same
+  hard stops and fresh artifact capture.
 - Before any Resy live spend, use the probe/readiness flow to pick one case
   with real target-window availability.
 - Treat repeated Resy API 500s or desktop/mobile network differences as
@@ -150,7 +174,9 @@ Entry gate:
 - At least one readiness-recommended Resy case reaches fill/OTP/safe handoff,
   or OpenTable provides an equivalent safe contact/confirmation boundary.
 
-Do not start broad fixture burn until that entry gate is met.
+Entry gate is met by the 2026-05-05 Sirrah OpenTable safe handoff. Phase 0B
+can now broaden OpenTable-first restaurant fixtures while keeping the same hard
+stops and treating Resy as a non-blocking follow-up lane.
 
 ## Phase 1 - First Paying User Path
 
@@ -241,8 +267,9 @@ hotel provider closure live in
 `docs/30-provider-debug/PROVIDER_CLOSURE_ACCEPTANCE.md`. Read this doc before
 declaring a closure attempt is closure-pass; tooling passing is not provider
 closure passing. Until the acceptance doc records verified live closure for a
-lane, every lane in `lib/provider-closure-room/lanes.ts` stays
-`liveVerified: false`. The cockpit at `/dev/provider-closure` mirrors the
+lane, that lane in `lib/provider-closure-room/lanes.ts` stays
+`liveVerified: false`. Restaurant/OpenTable now has accepted Sirrah evidence;
+flight and hotel remain not live verified. The cockpit at `/dev/provider-closure` mirrors the
 acceptance partition; the operator failure taxonomy at
 `docs/30-provider-debug/FAILURE_TAXONOMY.md` is the 4-class signal layer that
 feeds the 8-state outcome partition.

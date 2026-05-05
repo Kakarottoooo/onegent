@@ -22,7 +22,7 @@ describe("phase closure evidence pack doc", () => {
     const doc = read(PACK_REL);
 
     const requiredRows = [
-      /\| Phase 0A \| Blocked on Resy provider-path validation \| `blocked` \|/,
+      /\| Phase 0A \| Closed via OpenTable safe handoff \| `closed` \|/,
       /\| Phase 1 \| Demo-freeze passed \| `blocked` \|/,
       /\| Phase 1\.5 \| Demo-freeze passed \| `blocked` \|/,
       /\| Phase 2 \| Frozen, not demo-promised \| `frozen` \|/,
@@ -40,7 +40,7 @@ describe("phase closure evidence pack doc", () => {
     const doc = read(PACK_REL);
 
     expect(doc).toContain("Closure unblock plan");
-    expect(doc).toContain("Runtime env/project blocker first");
+    expect(doc).toContain("Phase 0B can broaden OpenTable-first restaurant fixtures");
     expect(doc).toContain("External founder-acceptance blocker");
     expect(doc).toContain("External QA/founder acceptance blocker");
     expect(doc).toContain("Cannot be closed by more docs, fixtures, or tooling");
@@ -66,7 +66,7 @@ describe("phase closure evidence pack doc", () => {
     expect(doc).toContain("not a Resy provider regression");
   });
 
-  it("does not claim live verification without an explicit denial or condition", () => {
+  it("keeps live-verified wording denied outside the acceptance evidence", () => {
     const doc = read(PACK_REL);
     const liveVerifiedLines = doc
       .split(/\r?\n/)

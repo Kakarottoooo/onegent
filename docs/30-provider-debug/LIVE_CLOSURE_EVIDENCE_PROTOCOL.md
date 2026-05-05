@@ -1,6 +1,6 @@
 # Live Closure Evidence Protocol
 
-Last updated: 2026-05-04
+Last updated: 2026-05-05
 
 Scope: no-live post-run evidence handling for the next controlled restaurant,
 flight, and hotel closure attempts. This protocol does not approve or start a
@@ -15,7 +15,9 @@ usage doc and
 `docs/30-provider-debug/PROVIDER_CLOSURE_ACCEPTANCE.md` for the canonical
 per-vertical pass / fail / inconclusive criteria. Tooling passing is not
 provider closure passing; until the acceptance doc records verified live
-closure for a lane, every lane is `liveVerified: false`.
+closure for a lane, that lane remains `liveVerified: false`. Phase 0A
+restaurant now has accepted OpenTable evidence in the acceptance doc; flight
+and hotel remain not live verified.
 
 ## Hard Stops
 

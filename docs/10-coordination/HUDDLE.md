@@ -36,6 +36,20 @@ small.
 
 ## Live Activity
 
+- 2026-05-05 codex: recorded founder dogfood OpenTable closure for Phase 0A.
+  Request was "book Sirrah in New York next Thursday at 8pm for 1 person".
+  Job `3bbe2ac4-c4cd-409f-8c11-6a83d2f81485` reached
+  `booking_jobs.status=done`, `steps[0].status=awaiting_confirmation`,
+  OpenTable `/booking/details` handoff URL, and agent log ids `2782`-`2785`
+  ending with "Reservation form filled for Sirrah. Open the link to confirm."
+  Founder screenshot showed Sirrah Thu May 14 8:00 PM, 1 person, phone filled,
+  final `Complete reservation` visible but not clicked. Verdict:
+  `safe_handoff` / `ready_for_confirmation`; no payment, CVV, OTP/SMS,
+  CAPTCHA/login bypass, or final confirmation. Phase 0A is now closed via
+  OpenTable; Resy remains a provider/network/IP follow-up lane and no longer
+  blocks Phase 0A. Updated PHASE_STATUS, PROJECT_SUMMARY, Provider Closure
+  Acceptance, live evidence protocol, provider-closure room manifest, and
+  phase-closure evidence pack.
 - 2026-05-05 codex: integrated Claude
   `claude/r030-infra-db-transient-fix @ 34ef0c5` as `350a93a`. This fixes
   the no-live infra blocker from the 2026-05-05 03:55 R-030 retry: transient
@@ -53,38 +67,6 @@ small.
   operating rule for future agent prompts: the prompt itself may authorize up
   to two controlled attempts for one exact case; attempt 2 is never a blind
   retry and requires evidence-driven root-cause/fix first.
-- 2026-05-05 claude: opened `claude/r030-infra-db-transient-fix` from
-  `1978cc7` to fix the no-live infra blocker that the 2026-05-05 03:55
-  R-030 retry surfaced. A single transient Neon `ConnectTimeoutError`
-  during runner polling produced bare `failed_unknown` + `500` and left
-  job `9b87e947-e783-434a-b36a-054a461053f8` stuck in `running/pending`.
-  Patches: (a) `scripts/run-phase0-resy-benchmark.ts` adds
-  `withTransientRetry` (4 attempts, exponential backoff 500ms / 1500ms /
-  4500ms) wrapping `getTravelTask` + `getTimeline`; runner now survives a
-  single 5xx blip and only bails after retry exhaustion. (b) Adds
-  `F-INFRA-DB-TRANSIENT` benchmark taxonomy ranked above generic 5xx so
-  Neon blip cannot misclassify as Resy `no_availability`. (c) Enriches
-  `CaseResult` with `screenshotDir` (derived from job id),
-  `lastKnownStage`, `errorClass`, `safetyStatus`, `dbTerminalAvailable`,
-  `pollRetriesAbsorbed`. Hoists task id + job id from create response so
-  they survive even when polling fails. (d) Adds Neon DB signals to
-  `lib/runtime-forensics/classifier.ts` `model_or_env_blocked` and
-  `lib/operator-failure-taxonomy/categories.ts` `model_env_transient`.
-  (e) New no-live `lib/runtime-forensics/stuck-job-audit.ts` (pure
-  artifact-only module, never mutates DB) scans
-  `benchmark/runs/phase0-resy-*.json` for the DB-transient pattern and
-  produces operator markdown. (f) `PROVIDER_RUNTIME_DEBUG_PLAYBOOK.md` section
-  6.5 documents the manual cleanup procedure (read-only audit + screenshot
-  safety check + DB read-only confirm + exact UPDATE template gated on
-  founder approval). Tests: 33 new (retry + classifier + stuck-job audit
-  + safety helpers); 146 existing tests still green. tsc clean,
-  `gate:phase1 --allow-known-drift` 8/0/0/1 exit 0, drift = same
-  known-existing dry-run only. No provider/runtime patch in
-  `lib/booking-autopilot`, `lib/core`, `lib/execution-v2`, `worker/src`,
-  or `app/api`. No DB mutation. No `.env` / OPENAI_API_KEY handling. No
-  live retry. After this lands, the next R-030 operating prompt can authorize
-  up to two controlled attempts for that exact case under the founder's current
-  prompt-as-authorization rule; attempt 2 must not be a blind retry.
 - 2026-05-05 codex: integrated Agent3
   `codex/hotel-closure-solve-next @ 2f962d2` as `f863a82` on top of the
   current integrated preview. This solves the next Booking.com no-payment /

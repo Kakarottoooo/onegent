@@ -23,15 +23,15 @@ describe("phase closure evidence pack", () => {
     });
 
     expect(pack.canonicalIntegratedPreviewShortSha).toBe("63837d9");
-    expect(pack.providerClosureLiveVerifiedEvidencePresent).toBe(false);
+    expect(pack.providerClosureLiveVerifiedEvidencePresent).toBe(true);
 
     const phase0a = phase(pack, "Phase 0A");
-    expect(phase0a.closureVerdict).toBe("blocked");
-    expect(phase0a.status).toContain("Blocked");
+    expect(phase0a.closureVerdict).toBe("closed");
+    expect(phase0a.status).toContain("OpenTable");
     expect(phase0a.blockingEvidence).toContain(
-      "Resy R-030 patch remains unvalidated",
+      "OpenTable Sirrah live dogfood",
     );
-    expect(phase0a.blockingEvidence).toContain("runtime env/project mismatch");
+    expect(phase0a.blockingEvidence).toContain("Provider Closure Acceptance");
 
     const phase1 = phase(pack, "Phase 1");
     expect(phase1.closureVerdict).toBe("blocked");
@@ -51,7 +51,7 @@ describe("phase closure evidence pack", () => {
     expect(phase2.blockingEvidence).toContain("Agent2 Expedia");
     expect(phase2.blockingEvidence).toContain("Agent3 hotel");
     expect(phase2.blockingEvidence).toContain("Goal war-room");
-    expect(phase2.blockingEvidence).toContain("liveVerified false");
+    expect(phase2.blockingEvidence).toContain("flight and hotel lanes remain");
     expect(phase2.closureUnblockPlan).toContain("Cannot be closed by more docs");
   });
 
@@ -65,9 +65,7 @@ describe("phase closure evidence pack", () => {
       expect(item.closureUnblockPlan.length).toBeGreaterThan(80);
       expect(item.closureProofRequired.length).toBeGreaterThan(40);
     }
-    expect(phase(pack, "Phase 0A").closureUnblockPlan).toContain(
-      "Runtime env/project blocker",
-    );
+    expect(phase(pack, "Phase 0A").closureUnblockPlan).toContain("Phase 0B");
     expect(phase(pack, "Phase 1").closureProofRequired).toContain(
       "Founder manual walkthrough sign-off",
     );
@@ -114,7 +112,7 @@ describe("phase closure evidence pack", () => {
       "selector_drift",
     );
     expect(pack.integrationAnchors.find((a) => a.owner === "Claude")?.evidence).toContain(
-      "liveVerified: false",
+      "OpenTable evidence",
     );
     expect(pack.integrationAnchors.find((a) => a.owner === "Goal")?.evidence).toContain(
       "synthetic reports cannot prove closure",
@@ -124,10 +122,10 @@ describe("phase closure evidence pack", () => {
     );
   });
 
-  it("does not allow live-verified claims without acceptance evidence", () => {
+  it("allows restaurant closure only because acceptance evidence exists", () => {
     const docs = readDocs();
     expect(hasProviderClosureAcceptanceEvidence(docs.providerClosureAcceptance)).toBe(
-      false,
+      true,
     );
 
     const pack = buildPhaseClosureEvidencePack({
@@ -136,6 +134,8 @@ describe("phase closure evidence pack", () => {
     });
     const markdown = formatPhaseClosureEvidencePackMarkdown(pack);
 
+    expect(markdown).toContain("Phase 0A");
+    expect(markdown).toContain("Closed via OpenTable");
     expect(markdown).toContain("not live verified");
     expect(markdown).toContain(
       "docs / fixtures / green no-live tests do not close a phase",

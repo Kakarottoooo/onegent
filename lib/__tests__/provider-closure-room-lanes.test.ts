@@ -215,14 +215,19 @@ describe("provider-closure-room lanes manifest", () => {
     expect(getProviderLane("nope" as ProviderLaneId)).toBeNull();
   });
 
-  it("restaurant lane preserves the canonical R-030 OpenAI 500 anchor", () => {
+  it("restaurant lane records the accepted OpenTable Sirrah closure", () => {
     const lane = getProviderLane("restaurant");
     expect(lane).not.toBeNull();
-    const blob = lane!.lastKnownBlocker.toLowerCase();
-    expect(blob).toContain("r-030");
-    expect(blob).toContain("openai");
-    expect(blob).toContain("model_or_env_blocked");
-    expect(blob).toContain("req_ce42a48137424a938a7893b131416d28");
+    expect(lane!.providerKey).toBe("opentable");
+    expect(lane!.liveVerified).toBe(true);
+    const blob =
+      `${lane!.closurePosture}\n${lane!.lastKnownBlocker}\n${lane!.nextSingleAllowedAction.detail}`.toLowerCase();
+    expect(blob).toContain("sirrah");
+    expect(blob).toContain("opentable");
+    expect(blob).toContain("3bbe2ac4-c4cd-409f-8c11-6a83d2f81485");
+    expect(blob).toContain("awaiting_confirmation");
+    expect(blob).toContain("complete reservation");
+    expect(blob).toContain("phase 0a");
   });
 
   it("flight lane preserves the canonical Expedia MCO->BNA / WN 3084 anchor", () => {

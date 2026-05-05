@@ -268,12 +268,26 @@ function LaneCard({ laneSnap }: { laneSnap: ProviderLaneSnapshot }) {
 
 /* ------ NOT LIVE VERIFIED banner --------------------------------------------------------------------------------- */
 
-function NotLiveVerifiedBanner({ liveVerified }: { liveVerified: false }) {
-  // The type is locked to `false` by the manifest. We render the
-  // banner unconditionally - the banner exists precisely so an
-  // operator never confuses "tooling passing" with "provider
-  // closure passing".
-  void liveVerified;
+function NotLiveVerifiedBanner({ liveVerified }: { liveVerified: boolean }) {
+  if (liveVerified) {
+    return (
+      <div
+        className="pcr__notlive pcr__notlive--verified"
+        role="status"
+        aria-label="Lane has accepted live closure evidence"
+      >
+        <span className="pcr__notlive-pill pcr__notlive-pill--verified">
+          LIVE VERIFIED
+        </span>
+        <span className="pcr__notlive-text">
+          This lane has accepted live closure evidence recorded in the
+          acceptance doc. Do not click final confirmation; use this lane
+          to review evidence and plan the next broader phase.
+        </span>
+      </div>
+    );
+  }
+
   return (
     <div
       className="pcr__notlive"
@@ -853,6 +867,14 @@ function Styles() {
         font-size: 12px;
         color: var(--ink-8);
         line-height: 1.5;
+      }
+      .pcr__notlive--verified {
+        background: var(--tone-good-bg);
+        border-color: var(--tone-good-border);
+      }
+      .pcr__notlive-pill--verified {
+        color: var(--tone-good);
+        background: rgba(22, 163, 74, 0.16);
       }
 
       .pcr__nextaction {

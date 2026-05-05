@@ -57,6 +57,28 @@ Next safe step (founder-only): install/verify the intended
 model-access preflight. Only after that, founder may explicitly
 approve exactly one new R-030 attempt.
 
+The 2026-05-05 Sirrah OpenTable dogfood is the accepted Phase 0A
+positive worked example. It reached the OpenTable final review page,
+filled the phone number, and stopped before the final
+`Complete reservation` button. Evidence:
+
+- Job `3bbe2ac4-c4cd-409f-8c11-6a83d2f81485`
+- Session `6a5946f9-48ae-487c-a443-ccc78c6327f2`
+- Request: Sirrah, New York, `2026-05-14`, `20:00`, 1 person
+- DB `booking_jobs.status`: `done`
+- DB `steps[0].status`: `awaiting_confirmation`
+- DB `steps[0].handoff_url`: OpenTable `/booking/details?...`
+- Agent logs `2782`-`2785`; final message:
+  "Reservation form filled for Sirrah. Open the link to confirm."
+- Local snapshot:
+  `%LOCALAPPDATA%\Onegent\snapshots\live\3bbe2ac4-c4cd-409f-8c11-6a83d2f81485\1777965439235-4c4a06.json`
+- Founder screenshot: Sirrah Thu May 14, 8:00 PM, 1 person, phone filled,
+  final `Complete reservation` visible but not clicked
+
+Classification: `safe_manual_review_reached` / `safe_handoff`. This closes
+Phase 0A through OpenTable. It does not validate Resy, but Resy is now a
+provider/network/IP follow-up lane rather than the Phase 0A gate.
+
 ## Safety Boundary
 
 Hard stops:

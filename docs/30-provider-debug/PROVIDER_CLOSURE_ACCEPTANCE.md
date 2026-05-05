@@ -84,16 +84,35 @@ do not patch from a task UI summary alone.
 
 ### Next single allowed action
 
-Open `/dev/restaurant-readiness` and inspect the latest probe
-verdict. Do not run a live retry until the readiness page
-explicitly recommends a probe-validated case.
+Review the Sirrah OpenTable artifact bundle below before broadening
+restaurant coverage. Do not click final reservation confirmation.
 
 ### Verified live closure
 
-None. Lane is `liveVerified: false` until a founder-approved live
-attempt produces a `safe_handoff` / `login_otp_boundary` /
-`no_availability` artifact bundle plus an operator sign-off
-recorded here.
+2026-05-05 OpenTable Sirrah safe handoff - accepted closure.
+
+- Outcome: `safe_handoff` / `ready_for_confirmation`.
+- Operator sign-off: founder observed OpenTable opened, selected Sirrah,
+  filled the phone number, and stopped at `Complete reservation`.
+- Job: `3bbe2ac4-c4cd-409f-8c11-6a83d2f81485`.
+- Session: `6a5946f9-48ae-487c-a443-ccc78c6327f2`.
+- Provider: OpenTable.
+- Request: Sirrah in New York, Thu 2026-05-14, 8:00 PM, 1 person.
+- DB: `booking_jobs.status=done`; `steps[0].status=awaiting_confirmation`;
+  `steps[0].body.__source=lib/core/execution-local-c2110aa34d`;
+  `steps[0].handoff_url` is OpenTable `/booking/details?...`.
+- Agent logs: ids `2782`-`2785`; final audit message is
+  `Reservation form filled for Sirrah. Open the link to confirm.`;
+  details `type=job_paused_payment`, `status=paused_payment`.
+- Local snapshot: `%LOCALAPPDATA%\Onegent\snapshots\live\3bbe2ac4-c4cd-409f-8c11-6a83d2f81485\1777965439235-4c4a06.json`.
+- Human screenshot: OpenTable final review page shows Sirrah, Thu May 14,
+  8:00 PM, 1 person, phone filled, and the final `Complete reservation`
+  button visible but not clicked.
+- Safety: no final reservation click, no payment/CVV/card data, no OTP/SMS
+  code entry, no CAPTCHA/login bypass, and no account-sensitive action.
+
+This closes Phase 0A through OpenTable. Resy remains a provider/network/IP
+limited follow-up lane and is not required to block Phase 0A.
 
 Inconclusive datapoints (do not flip `liveVerified`):
 

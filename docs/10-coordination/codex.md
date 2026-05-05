@@ -2,7 +2,7 @@
 
 > **Branch**: `codex/integrated-preview-20260504`
 > **Last updated**: 2026-05-05
-> **Last commit**: `350a93a` R-030 DB transient evidence reliability
+> **Last commit**: this pass - Phase 0A OpenTable Sirrah closure evidence
 >
 > Claude reads this at session start. I write to it before each push.
 > See `CLAUDE.md` section "coordination protocol".
@@ -12,6 +12,27 @@
 ## Currently doing
 
 Completed in latest pass:
+- Recorded founder dogfood OpenTable closure for Phase 0A:
+  - request: "book Sirrah in New York next Thursday at 8pm for 1 person";
+  - job `3bbe2ac4-c4cd-409f-8c11-6a83d2f81485`, session
+    `6a5946f9-48ae-487c-a443-ccc78c6327f2`;
+  - DB: `booking_jobs.status=done`,
+    `steps[0].status=awaiting_confirmation`, OpenTable `/booking/details`
+    `handoff_url`, params Sirrah / New York / `2026-05-14` / `20:00` / 1;
+  - logs: agent log ids `2782`-`2785`; final message
+    "Reservation form filled for Sirrah. Open the link to confirm.";
+  - founder screenshot: Sirrah Thu May 14 8:00 PM, 1 person, phone filled,
+    final `Complete reservation` visible but not clicked.
+- Verdict: accepted `safe_handoff` / `ready_for_confirmation`. No payment,
+  CVV/card data, OTP/SMS code entry, CAPTCHA/login bypass, or final
+  confirmation. Phase 0A is now closed via OpenTable; Resy remains a
+  provider/network/IP follow-up lane, not the Phase 0A blocker.
+- Updated `PHASE_STATUS.md`, `PROJECT_SUMMARY.md`,
+  `PHASE_CLOSURE_EVIDENCE_PACK.md`, `PROVIDER_CLOSURE_ACCEPTANCE.md`,
+  `LIVE_CLOSURE_EVIDENCE_PROTOCOL.md`, provider-closure room manifest, and
+  tests/phase-closure evidence logic.
+
+Previous completed pass:
 - Integrated Claude `claude/r030-infra-db-transient-fix @ 34ef0c5` as
   `350a93a`.
 - Actual blocker addressed:

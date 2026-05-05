@@ -1,6 +1,6 @@
 # Provider Closure Operator Room
 
-Last updated: 2026-05-04
+Last updated: 2026-05-05
 
 Scope: read-only operator cockpit at `/dev/provider-closure` that
 organizes restaurant, flight, and hotel closure work into a single
@@ -27,6 +27,11 @@ retry must stop.
 
 In every lane, payment, CVV, OTP, CAPTCHA, login bypass, and final
 confirmation are forbidden.
+
+Current restaurant status: Phase 0A is closed through the 2026-05-05 Sirrah
+OpenTable safe handoff recorded in
+`docs/30-provider-debug/PROVIDER_CLOSURE_ACCEPTANCE.md`. Resy remains a
+provider/network/IP follow-up lane, not the Phase 0A gate.
 
 ## Cockpit Layout
 

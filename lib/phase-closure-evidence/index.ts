@@ -131,16 +131,16 @@ export function buildPhaseClosureEvidencePack(
     {
       id: "phase-0a",
       phase: "Phase 0A",
-      status: "Blocked on Resy provider-path validation",
-      closureVerdict: "blocked",
+      status: "Closed via OpenTable safe handoff",
+      closureVerdict: "closed",
       blockingEvidence:
-        "Resy R-030 patch remains unvalidated by a successful provider-path run; the current closure-status anchor is the 2026-05-05 R-030 OpenAI Responses API 403 model_not_found runtime env/project mismatch, not provider pass/fail.",
+        "OpenTable Sirrah live dogfood on 2026-05-05 reached the final review boundary with phone filled and stopped before Complete reservation. DB/log/operator evidence is recorded in Provider Closure Acceptance.",
       closureUnblockPlan:
-        "Runtime env/project blocker first: install/verify the intended gpt-5.5-enabled OpenAI env for the worktree, pass a no-provider model-access preflight, then the founder approves exactly one probe-selected Resy retry. No further Resy code change is justified unless that clean run reaches a provider DOM/data failure.",
+        "Phase 0B can broaden OpenTable-first restaurant fixtures. Resy remains a provider/network/IP follow-up lane and should use the probe/readiness flow before any future controlled attempt.",
       closureProofRequired:
-        "A non-synthetic provider-path artifact bundle recorded in Provider Closure Acceptance with `safe_handoff`, `login_otp_boundary`, `ready_for_confirmation`, or correct `no_availability`, plus operator sign-off.",
+        "Recorded: OpenTable Sirrah non-synthetic provider-path evidence with `safe_handoff` / `ready_for_confirmation`, DB row, agent logs, local snapshot path, human screenshot, and operator sign-off.",
       nextSingleAllowedAction:
-        "Open `/dev/restaurant-readiness`, inspect the probe-selected case, and only prepare one fresh artifact bundle; do not run live without separate exact founder approval.",
+        "Review the Sirrah OpenTable evidence, then prepare a Phase 0B OpenTable-first fixture plan; do not click final confirmation.",
       hardStopReminder:
         "Stop before payment, final reservation, OTP/CAPTCHA/login handling, account verification, and human verification.",
       evidenceRefs: [
@@ -199,7 +199,7 @@ export function buildPhaseClosureEvidencePack(
       status: "Frozen, not demo-promised",
       closureVerdict: "frozen",
       blockingEvidence:
-        "Agent2 Expedia and Agent3 hotel hardening are integrated, Claude acceptance keeps lanes liveVerified false, and Goal war-room reports are no-live/synthetic; no provider closure acceptance evidence records live verification.",
+        "Agent2 Expedia and Agent3 hotel hardening are integrated, but flight and hotel lanes remain liveVerified false; Goal war-room reports are no-live/synthetic and cannot prove Phase 2 provider closure.",
       closureUnblockPlan:
         "Cannot be closed by more docs, fixtures, or tooling. Founder must approve one exact controlled live retry for a chosen lane after reading Provider Closure Acceptance; Expedia's MCO -> BNA/Southwest case and Booking.com's YOTEL case are the named candidates. Only a fresh accepted artifact can unblock the lane.",
       closureProofRequired:
@@ -235,7 +235,7 @@ export function buildPhaseClosureEvidencePack(
     integrationAnchors: buildIntegrationAnchors(),
     hardStops: [...PHASE_CLOSURE_HARD_STOPS],
     summary:
-      "Phase 1 and Phase 1.5 are demo-freeze passed, but not phase-closed by documentation or tooling alone. Phase 0A is blocked by unvalidated Resy provider-path closure; Phase 2 remains frozen and not live verified.",
+      "Phase 0A is closed via OpenTable safe handoff. Phase 1 and Phase 1.5 are demo-freeze passed, but still need human acceptance to close. Phase 2 remains frozen and not live verified.",
   };
 }
 
@@ -294,7 +294,7 @@ export function formatPhaseClosureEvidencePackMarkdown(
   lines.push(`- Label: ${pack.latestR030Evidence.label}`);
   lines.push(`- Takeaway: ${pack.latestR030Evidence.takeaway}`);
   lines.push("");
-  lines.push("This is runtime env/project blocked evidence, not a Resy provider pass/fail. It cannot close Phase 0A.");
+  lines.push("This is runtime env/project blocked evidence, not a Resy provider pass/fail. It does not affect the OpenTable Phase 0A closure.");
   lines.push("");
   lines.push("## Hard Stops");
   lines.push("");
@@ -338,12 +338,12 @@ function buildEvidenceChecks(
       source: "git/origin integrated preview",
     },
     {
-      key: "phase-0a-resy-open",
+      key: "phase-0a-opentable-closed",
       label:
-        "Phase 0A remains not closed because Resy has no successful provider-path closure artifact",
+        "Phase 0A is closed by OpenTable Sirrah safe handoff evidence",
       passed:
-        /Resy has not closed a live fill\/OTP path/i.test(documents.phaseStatus) &&
-        /Verified live closure[\s\S]{0,220}None\./i.test(
+        /Phase 0A[\s\S]{0,120}Closed via OpenTable/i.test(documents.phaseStatus) &&
+        /OpenTable Sirrah safe handoff[\s\S]{0,120}accepted closure/i.test(
           documents.providerClosureAcceptance,
         ),
       source: PHASE_CLOSURE_REQUIRED_DOCS.phaseStatus,
@@ -405,7 +405,9 @@ function buildEvidenceChecks(
           documents.phaseStatus,
         ) &&
         /not live[- ]verified/i.test(documents.demoFreezeAcceptance) &&
-        !context.hasVerifiedLiveClosure,
+        /flight and hotel remain not live verified/i.test(
+          documents.providerClosureAcceptance + documents.phaseStatus,
+        ),
       source: PHASE_CLOSURE_REQUIRED_DOCS.demoFreezeAcceptance,
     },
     {
@@ -428,10 +430,10 @@ function buildEvidenceChecks(
     },
     {
       key: "claude-acceptance-anchor",
-      label: "Claude acceptance criteria lock liveVerified false until evidence",
+      label: "Claude acceptance criteria now records restaurant evidence and keeps remaining lanes gated",
       passed:
         /provider-closure-acceptance-final/i.test(allCoord) &&
-        /liveVerified: false/i.test(allCoord) &&
+        context.hasVerifiedLiveClosure &&
         /Tooling passing is not provider closure passing/i.test(
           documents.providerClosureAcceptance,
         ),
@@ -472,7 +474,7 @@ function buildIntegrationAnchors(): PhaseClosureIntegrationAnchor[] {
       owner: "Claude",
       label: "Provider closure acceptance",
       evidence:
-        "`claude/provider-closure-acceptance-final @ ed46abc` integrated as `c33b429`; every provider lane stays `liveVerified: false` until evidence is recorded.",
+        "`claude/provider-closure-acceptance-final @ ed46abc` integrated as `c33b429`; restaurant now records accepted OpenTable evidence while flight/hotel remain gated until evidence is recorded.",
     },
     {
       owner: "Goal",

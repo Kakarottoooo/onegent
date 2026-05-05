@@ -120,13 +120,12 @@ export interface ProviderLane {
   /** Lowercase provider key for cross-dashboard pointers. */
   providerKey: string;
   /**
-   * Locked false until provider closure has been live-verified
-   * for this vertical AND the manifest is updated by a separate
-   * branch with founder approval. The static guard fails if any
-   * lane silently flips to true without an accompanying
-   * acceptance-doc evidence section.
+   * True only after provider closure has accepted evidence for this
+   * vertical AND the manifest is updated with the matching
+   * acceptance-doc evidence section. The static guard fails if any
+   * lane flips to true without evidence.
    */
-  liveVerified: false;
+  liveVerified: boolean;
   /**
    * One-paragraph "what closure looks like for this lane" rationale.
    * Defines what an accepted safe outcome is.

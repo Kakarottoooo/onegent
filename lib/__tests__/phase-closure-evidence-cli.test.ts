@@ -36,7 +36,7 @@ describe("phase closure evidence CLI", () => {
     expect(markdown).toContain("Phase 2 remains frozen");
   });
 
-  it("prints JSON without claiming live verification", async () => {
+  it("prints JSON with restaurant closure evidence present", async () => {
     const output: string[] = [];
     const exitCode = await runPhaseClosureEvidenceCli(["--json"], {
       getCanonicalSha: () => CANONICAL_PHASE_CLOSURE_BASE_SHA,
@@ -48,7 +48,7 @@ describe("phase closure evidence CLI", () => {
 
     expect(exitCode).toBe(0);
     const parsed = JSON.parse(output.join("\n"));
-    expect(parsed.providerClosureLiveVerifiedEvidencePresent).toBe(false);
+    expect(parsed.providerClosureLiveVerifiedEvidencePresent).toBe(true);
     expect(parsed.phases.find((p: { phase: string }) => p.phase === "Phase 2").closureVerdict).toBe(
       "frozen",
     );
