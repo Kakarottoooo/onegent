@@ -51,6 +51,12 @@ Signals:
 - Computer Use unavailable / model not enabled for this account.
 - Chromium / Playwright launch error before any navigation started.
 - `--live-openai` not set / `ONEGENT_ALLOW_LIVE_OPENAI=1` missing.
+- Neon DB `ConnectTimeoutError` / `NeonDbError` / `fetch failed` /
+  `error connecting to database` from the app API route during
+  runner polling or terminal write. Bare 5xx from
+  `/api/v1/travel-tasks/<taskId>` with no provider / OpenAI
+  context: classify as DB / fetch infra blip, NOT as Resy
+  no-availability. Phase 0 runner code: `F-INFRA-DB-TRANSIENT`.
 
 Do next:
 

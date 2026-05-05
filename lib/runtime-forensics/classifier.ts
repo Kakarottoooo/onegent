@@ -265,6 +265,35 @@ const PATTERN_RULES: ReadonlyArray<PatternRule> = [
     weight: 0.8,
     label: "token guard / confirm-suite gate",
   },
+  // Neon / DB transient (Vercel Postgres / Neon serverless connection
+  // failures). These manifest as bare 5xx from API routes that read
+  // booking_jobs or travel_tasks; classifying them as
+  // model_or_env_blocked keeps the operator from misreading an infra
+  // blip as a Resy / OpenTable / Expedia / hotel regression.
+  {
+    rx: /connect\s*timeout\s*error|connecttimeouterror/i,
+    cls: "model_or_env_blocked",
+    weight: 0.95,
+    label: "Neon DB connect timeout (infra transient)",
+  },
+  {
+    rx: /neon\s*db\s*error|neondberror/i,
+    cls: "model_or_env_blocked",
+    weight: 0.95,
+    label: "NeonDbError (infra transient)",
+  },
+  {
+    rx: /error\s+connecting\s+to\s+database/i,
+    cls: "model_or_env_blocked",
+    weight: 0.9,
+    label: "DB connection error (infra transient)",
+  },
+  {
+    rx: /\bfetch\s+failed\b/i,
+    cls: "model_or_env_blocked",
+    weight: 0.7,
+    label: "Node fetch lower-layer failure (infra transient)",
+  },
   // network_or_provider_5xx
   {
     rx: /\b5\d{2}\b\s*(error|response|status)/i,

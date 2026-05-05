@@ -45,9 +45,9 @@ const MODEL_ENV_TRANSIENT: FailureCategory = {
   key: "model_env_transient",
   label: "Model / env transient",
   oneLine:
-    "OpenAI / Computer Use / model API returned a 5xx, rate-limit, timeout, or model-not-available error before the provider was reached.",
+    "OpenAI / Computer Use / model API / database / runtime env returned a 5xx, timeout, connect-failure, or service-unavailable error before or around the provider step.",
   severity: "wait",
-  relatedClasses: ["model_or_env_blocked"],
+  relatedClasses: ["model_or_env_blocked", "infra_db_transient"],
   signals: [
     "OpenAI Responses API 500 server_error.",
     "OpenAI rate-limit 429 / quota exhausted.",
@@ -55,6 +55,8 @@ const MODEL_ENV_TRANSIENT: FailureCategory = {
     "Computer Use unavailable / model not enabled for this account.",
     "chromium / Playwright launch error before navigation started.",
     "Token guard / `--live-openai` not set / `ONEGENT_ALLOW_LIVE_OPENAI=1` missing.",
+    "Neon DB ConnectTimeoutError / NeonDbError / 'fetch failed' / 'error connecting to database' from app API route during runner polling or terminal write.",
+    "Bare 500 Internal Server Error from /api/v1/travel-tasks/<taskId> with no provider / OpenAI / chromium signal in the stack: classify as DB / fetch infra blip.",
   ],
   nextActions: [
     "Treat the run as inconclusive about provider health. Do not log a Resy / OpenTable / Expedia regression.",
@@ -67,6 +69,7 @@ const MODEL_ENV_TRANSIENT: FailureCategory = {
     "Do not file a provider regression bug.",
     "Do not blind-retry in a tight loop; OpenAI 5xx and rate-limit are usually transient and self-correct.",
     "Do not assume a Phase 0 provider boundary regressed; the run never reached the provider.",
+    "Do not classify a Neon `ConnectTimeoutError` or 'fetch failed' as Resy `no_availability`; it is an infra DB transient, not a provider closure result.",
   ],
 };
 
