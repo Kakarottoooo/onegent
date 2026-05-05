@@ -1,6 +1,6 @@
 # Provider Closure Acceptance
 
-Last updated: 2026-05-04
+Last updated: 2026-05-05
 
 Scope: canonical pass / fail / inconclusive criteria for restaurant,
 flight, and hotel provider closure. Read this in under five minutes
@@ -94,6 +94,23 @@ None. Lane is `liveVerified: false` until a founder-approved live
 attempt produces a `safe_handoff` / `login_otp_boundary` /
 `no_availability` artifact bundle plus an operator sign-off
 recorded here.
+
+Inconclusive datapoints (do not flip `liveVerified`):
+
+- 2026-05-04 R-030 retry -- OpenAI Responses API 500 server_error
+  before any provider step. Class `model_env_transient`. Job
+  `77f70121-4460-4bcd-974d-999360221cde`. Report
+  `benchmark/runs/phase0-resy-2026-05-04T19-14-37-472Z.json`. Not a
+  Resy regression.
+- 2026-05-05 R-030 retry -- OpenAI Responses API 403 model_not_found
+  (project does not have access to gpt-5.5). Class
+  `model_env_transient` / `F-INFRA-MODEL-ACCESS`. Job
+  `f66f9e63-d2d0-43fe-940b-8fc0329ca5ef`. Report
+  `benchmark/runs/phase0-resy-2026-05-05T02-08-50-530Z.json`.
+  Browser opened exact Resy venue URL but `decisionLog=null`; the
+  `422abe0` Resy recovery patches remain unvalidated by this run.
+  Not a Resy regression. No payment / CVV / OTP / SMS / login /
+  final confirmation touched.
 
 ## Flight - Expedia
 

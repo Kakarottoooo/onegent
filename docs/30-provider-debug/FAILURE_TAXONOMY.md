@@ -1,6 +1,6 @@
 # Operator Failure Taxonomy
 
-> Last updated: 2026-05-04
+> Last updated: 2026-05-05
 > For: anyone reading the result of a controlled live retry, founder
 > debug session, or benchmark run.
 > Read time: 4 minutes.
@@ -206,6 +206,39 @@ Evidence:
 Takeaway:    Inconclusive about Resy fill/OTP closure. Re-run R-030
              once the OpenAI window stabilizes; do not patch Resy
              code based on this evidence.
+```
+
+## Worked example: R-030 OpenAI 403 model_not_found (2026-05-05)
+
+```text
+Category:       model_env_transient (F-INFRA-MODEL-ACCESS)
+Story:          A second authorized R-030 Resy retry against the same
+                baseline that contained the 422abe0 Resy recovery
+                patches. Browser opened the exact Resy venue URL
+                (date=2026-05-08, seats=2, time=2000) but no provider
+                decision was made: decisionLog is null. Failed in 9
+                seconds with OpenAI Responses API 403 model_not_found
+                because the OpenAI project did not have access to
+                gpt-5.5 (Computer Use). None of the 422abe0 patches
+                executed; they remain unvalidated by this run.
+Evidence:
+  Task id:           caa90661-ceb1-4753-aedc-be6282322a62
+  Job id:            f66f9e63-d2d0-43fe-940b-8fc0329ca5ef
+  Failure mode:      OpenAI Responses API 403 model_not_found gpt-5.5
+  DB __source:       lib/core/execution-local-c2110aa34d
+                     (M5 gate stamped correctly)
+  DB handoff_url:    exact venue URL preserved
+  DB decisionLog:    null
+  Job lifetime:      9 seconds (created 02:08:36 -> error 02:08:45)
+  Benchmark:         benchmark/runs/phase0-resy-2026-05-05T02-08-50-530Z.json
+  Safety boundary:   no payment / CVV / OTP / SMS / phone-verification /
+                     CAPTCHA / login bypass / final confirmation touched.
+Takeaway:       Inconclusive, not closure pass and not closure fail.
+                Not a Resy provider regression. The 422abe0 patches
+                remain unvalidated. The next safe step is for the
+                founder to fix OpenAI project / model access out of
+                band, then explicitly approve exactly one new R-030
+                attempt; do not patch Resy code based on this evidence.
 ```
 
 ## How to use this taxonomy in a real triage

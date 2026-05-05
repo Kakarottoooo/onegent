@@ -255,8 +255,60 @@ const R030_OPENAI_500: WorkedExample = {
     "This is a model_env_transient failure, not a Resy provider regression. The run is inconclusive about Resy fill/OTP closure. The next clean retry can use the same R-030 case once the OpenAI 500 window passes; do not patch Resy code based on this evidence.",
 };
 
+const R030_OPENAI_403_MODEL_NOT_FOUND: WorkedExample = {
+  id: "r030-openai-403-model-not-found-2026-05-05",
+  title:
+    "R-030 Resy retry on 2026-05-05 -- OpenAI 403 model_not_found, no gpt-5.5 access",
+  category: "model_env_transient",
+  story:
+    "A second authorized R-030 Resy retry against the same baseline that contained the 422abe0 Resy recovery patches. The browser opened the exact Resy venue URL (date=2026-05-08, seats=2, time=2000) but no provider decision was made. The run failed in nine seconds with an OpenAI Responses API 403 model_not_found because the OpenAI project did not have access to gpt-5.5 (Computer Use). decisionLog is null. None of the 422abe0 patches (skip duplicate fallback, preserve exact venue URL, reject bare time controls, separate listing-stall from F-AVAIL-NONE) executed; they remain unvalidated by this run.",
+  evidence: Object.freeze([
+    Object.freeze({
+      label: "Task id",
+      value: "caa90661-ceb1-4753-aedc-be6282322a62",
+    }),
+    Object.freeze({
+      label: "Job id",
+      value: "f66f9e63-d2d0-43fe-940b-8fc0329ca5ef",
+    }),
+    Object.freeze({
+      label: "Failure mode",
+      value: "OpenAI Responses API 403 model_not_found gpt-5.5",
+    }),
+    Object.freeze({
+      label: "DB __source marker",
+      value: "lib/core/execution-local-c2110aa34d (M5 gate stamped correctly)",
+    }),
+    Object.freeze({
+      label: "DB handoff_url",
+      value:
+        "https://resy.com/cities/new-york-ny/venues/charlie-bird?date=2026-05-08&seats=2&time=2000 (exact venue URL preserved)",
+    }),
+    Object.freeze({
+      label: "DB decisionLog",
+      value: "null (no provider decision recorded)",
+    }),
+    Object.freeze({
+      label: "Job lifetime",
+      value: "9 seconds (created 2026-05-05T02:08:36 -> error 02:08:45)",
+    }),
+    Object.freeze({
+      label: "Benchmark report",
+      value: "benchmark/runs/phase0-resy-2026-05-05T02-08-50-530Z.json",
+    }),
+    Object.freeze({
+      label: "Safety boundary",
+      value:
+        "No payment / CVV / OTP / SMS / phone-verification / CAPTCHA / login bypass / final confirmation touched.",
+    }),
+  ]),
+  takeaway:
+    "This is a model_env_transient failure (F-INFRA-MODEL-ACCESS), not a Resy provider regression and not a validation of the 422abe0 patches. Closure outcome is inconclusive, not closure pass and not closure fail. The next safe step is for the founder to fix OpenAI project / model access out of band, then explicitly approve exactly one new R-030 attempt; do not patch Resy code based on this evidence.",
+};
+
 export const WORKED_EXAMPLES: ReadonlyArray<WorkedExample> = Object.freeze([
   R030_OPENAI_500,
+  R030_OPENAI_403_MODEL_NOT_FOUND,
 ]);
 
 export function listWorkedExamples(): WorkedExample[] {

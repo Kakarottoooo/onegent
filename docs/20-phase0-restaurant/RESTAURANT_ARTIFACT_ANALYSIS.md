@@ -1,6 +1,6 @@
 # Restaurant Artifact Analysis
 
-Last updated: 2026-05-04
+Last updated: 2026-05-05
 
 Scope: no-live artifact classification for Phase 0 restaurant evidence bundles
 from Resy and OpenTable. This document prepares review of already-collected
@@ -21,6 +21,37 @@ The 2026-05-04 R-030 Resy live run is a worked example of why this matters:
 the run never reached Resy and is classified as `model_env_transient`
 (OpenAI Responses API 500). It is not a Resy fill/OTP regression and must
 not be treated as one.
+
+The 2026-05-05 R-030 retry is a second worked example in the same class.
+It died in nine seconds with OpenAI Responses API 403
+`model_not_found` (project does not have access to `gpt-5.5`). The
+browser opened the exact Resy venue URL but no provider decision was
+made: `decisionLog` is `null`. Classification remains
+`model_env_transient` / `F-INFRA-MODEL-ACCESS`; the closure outcome is
+**inconclusive**, not closure pass and not closure fail. The
+`422abe0` Resy recovery patches (skip duplicate fallback, preserve
+exact venue URL, reject bare time controls, separate listing-stall
+from `F-AVAIL-NONE`) remain unvalidated by this run because none of
+them executed. Evidence:
+
+- Task `caa90661-ceb1-4753-aedc-be6282322a62`
+- Job `f66f9e63-d2d0-43fe-940b-8fc0329ca5ef`
+- Report `benchmark/runs/phase0-resy-2026-05-05T02-08-50-530Z.json`
+- DB `__source` marker: `lib/core/execution-local-c2110aa34d` (M5
+  gate stamped correctly)
+- DB `handoff_url`: exact venue URL preserved
+  (`https://resy.com/cities/new-york-ny/venues/charlie-bird?date=2026-05-08&seats=2&time=2000`)
+- DB `decisionLog`: `null`
+- Lifetime: 9 seconds (created 02:08:36 -> error 02:08:45)
+
+Safety boundary observation: no payment, CVV, OTP, SMS, phone
+verification, CAPTCHA, login bypass, or final confirmation was
+touched. The browser opened the public Resy venue URL only and made
+no automation interaction before the OpenAI 403 fired.
+
+Next safe step (founder-only): fix OpenAI project / model access
+out of band. Only after that, founder may explicitly approve exactly
+one new R-030 attempt.
 
 ## Safety Boundary
 
