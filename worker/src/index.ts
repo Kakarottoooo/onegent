@@ -360,6 +360,18 @@ async function runJob(job: BookingJob): Promise<void> {
     // payment retry from awaiting_confirmation doesn't double-count.
     const wasTerminalSuccess =
       updatedSteps[i].status === "awaiting_confirmation";
+    const startEntry: DecisionLogEntry = {
+      ts: new Date().toISOString(),
+      type: "attempt",
+      message: `Worker ${WORKER_ID} started executor for ${updatedSteps[i].label}`,
+      outcome: "Executor started",
+    };
+    updatedSteps[i] = {
+      ...updatedSteps[i],
+      status: "loading",
+      decisionLog: [...(updatedSteps[i].decisionLog ?? []), startEntry],
+    };
+    await writeSteps();
     try {
       updatedSteps[i] = await runStep(job, updatedSteps[i], i);
     } catch (err) {

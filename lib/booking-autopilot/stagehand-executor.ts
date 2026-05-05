@@ -1514,14 +1514,11 @@ The user will enter CVV and confirm payment themselves.`,
               );
             }
             return {
-              status: "error" as const,
+              status: "paused_payment" as const,
               screenshotBase64: postFillScreenshot?.toString("base64") ?? finalScreenshotBase64,
               handoffUrl: checkoutUrl || rpaResult.currentUrl || input.startUrl,
               sessionUrl,
-              summary: `Flight checkout reached, but traveler form still needs manual fields: ${travelerState.missingRequiredFields.join(", ")}.`,
-              error: fillStoppedReason === "model_or_env"
-                ? `Model/environment blocked traveler form fill; missing fields: ${travelerState.missingRequiredFields.join(", ")}.`
-                : `Traveler form incomplete; missing fields: ${travelerState.missingRequiredFields.join(", ")}.`,
+              summary: `Flight checkout reached; traveler details need manual review: ${travelerState.missingRequiredFields.join(", ")}.`,
               debugTrace,
             };
           }

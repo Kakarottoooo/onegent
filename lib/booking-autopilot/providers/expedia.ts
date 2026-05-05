@@ -1220,28 +1220,28 @@ export async function fillExpediaGuestForm(
   trace(`Expedia guest fill results: ${JSON.stringify(results)}`);
 
   // Fallback for any field that wasn't found via page.evaluate: try findAndFillExpediaField
-  if (results.firstName === "not_found" && profile.first_name) {
+  if (results.firstName !== true && profile.first_name) {
     trace("Expedia guest: first name not found via evaluate — trying locator fallback");
     await findAndFillExpediaField(page,
       ["First name", "First Name", "Given name"],
       ['input[placeholder*="John"]', 'input[autocomplete="given-name"]', 'input[placeholder*="First name"]'],
       profile.first_name, "first name", trace);
   }
-  if (results.lastName === "not_found" && profile.last_name) {
+  if (results.lastName !== true && profile.last_name) {
     trace("Expedia guest: last name not found via evaluate — trying locator fallback");
     await findAndFillExpediaField(page,
       ["Last name", "Last Name", "Family name"],
       ['input[placeholder*="Smith"]', 'input[autocomplete="family-name"]', 'input[placeholder*="Last name"]'],
       profile.last_name, "last name", trace);
   }
-  if (results.email === "not_found" && profile.email) {
+  if (results.email !== true && profile.email) {
     trace("Expedia guest: email not found via evaluate — trying locator fallback");
     await findAndFillExpediaField(page,
       ["Email address", "Email"],
       ['input[type="email"]', 'input[autocomplete="email"]'],
       profile.email, "email", trace);
   }
-  if (results.phone === "not_found" && phoneDigits) {
+  if (results.phone !== true && phoneDigits) {
     trace("Expedia guest: phone not found via evaluate — trying locator fallback");
     await findAndFillExpediaField(page,
       ["Phone number", "Phone Number"],
