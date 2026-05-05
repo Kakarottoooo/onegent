@@ -340,6 +340,20 @@ The command only reads the local JSON bundle and prints paste-ready Markdown.
 It does not start a worker, open a provider, read the database, or click
 anything.
 
+Provider Closure War Room equivalent:
+
+```powershell
+cd C:\Users\Gzw19\onegent-integrated-20260504
+npx tsx scripts/provider-closure-war-room.ts preflight --vertical hotel
+npx tsx scripts/provider-closure-war-room.ts analyze --vertical hotel --bundle .tmp\hotel-retry-artifact-bundle.json --markdown
+```
+
+Use the war-room report when the handoff needs a single root cause, next
+single action, regression checklist, and YC/demo claim verdict. A synthetic or
+stale bundle cannot claim hotel readiness; the report must say
+`not_live_verified` or `Can claim this vertical: no` until fresh
+DB/log/screenshot evidence is present.
+
 ## Post-Live Artifact Bundle Template
 
 Use this template only after a founder-approved hotel retry has already

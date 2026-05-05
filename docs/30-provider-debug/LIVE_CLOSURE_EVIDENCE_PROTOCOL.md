@@ -95,6 +95,77 @@ Synthetic example reports live under:
 docs/30-provider-debug/provider-closure-reports/
 ```
 
+## Provider Closure War Room
+
+Use the war-room CLI when the operator needs the full closed loop:
+preflight checklist, artifact ingestion, normalized evidence object,
+classification, root-cause recommendation, regression checklist, and demo
+readiness verdict.
+
+```powershell
+npx tsx scripts/provider-closure-war-room.ts preflight --vertical restaurant
+npx tsx scripts/provider-closure-war-room.ts preflight --vertical flight
+npx tsx scripts/provider-closure-war-room.ts preflight --vertical hotel
+```
+
+The war-room bundle wraps the existing artifact shape and adds:
+
+- `vertical`: `restaurant`, `flight`, or `hotel`.
+- `liveAttempt`: explicit marker that the evidence came from one
+  human-approved attempt.
+- `evidenceCapturedAt`: ISO timestamp used for freshness checks.
+- `dbRow`: copied `booking_jobs` row JSON.
+- `workerLogExcerpt` and `workerLogPath`.
+- `screenshotManifest.paths`.
+- `screenshotManifest.liveSnapshots`.
+- `notes`.
+
+Analyze a filled local bundle:
+
+```powershell
+npx tsx scripts/provider-closure-war-room.ts analyze --vertical flight --bundle .tmp\expedia-retry-artifact-bundle.json --markdown
+```
+
+Summarize bundled synthetic fixtures and check demo posture:
+
+```powershell
+npx tsx scripts/provider-closure-war-room.ts summarize --all
+npx tsx scripts/provider-closure-war-room.ts demo-verdict
+```
+
+War-room verdicts:
+
+- `live_closed_safe_boundary`: a fresh, minimum-evidence live artifact reached
+  an accepted safe boundary.
+- `live_blocked_provider_or_network`: provider/network evidence blocked the
+  attempt before selector conclusions are reliable.
+- `live_blocked_selector_or_dom`: screenshots/logs point to selector, DOM,
+  matching, or boundary-detection drift.
+- `live_blocked_model_or_env`: OpenAI Responses API, Computer Use, model, or
+  local environment evidence failed separately from provider selectors.
+- `not_live_verified`: synthetic, stale, placeholder, missing
+  `liveAttempt`, missing `evidenceCapturedAt`, incomplete DB/log/screenshot
+  evidence, or lower-level `insufficient_evidence`.
+- `unsafe_or_disallowed_boundary`: payment, CVV/security-code, account
+  verification, human verification, login bypass, or final confirmation
+  boundary was crossed or attempted by automation.
+
+`ProviderClosureEvidence` is the normalized object for every vertical. It
+contains the provider kind, job/task ids, DB row, worker log excerpt, worker
+log path, screenshot paths, live snapshot paths, freshness status, minimum
+evidence flags, and the lower-level closure analyzer output.
+
+YC/demo claim rule: a vertical is claimable only when a non-synthetic, fresh,
+minimum-evidence artifact has `liveAttempt: true` and verdict
+`live_closed_safe_boundary`. Synthetic fixtures, old analyzer fixtures, and
+task UI summaries alone must remain `not live verified` for demo purposes.
+
+Synthetic war-room reports live under:
+
+```text
+docs/30-provider-debug/provider-closure-war-room/
+```
+
 ## DB Fields
 
 Inspect these fields before reading task UI summaries:
