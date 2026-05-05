@@ -33,6 +33,23 @@ small.
 
 ## Live Activity
 
+- 2026-05-05 codex: integrated Agent2
+  `codex/flight-live-closure-final @ fa7afc3` on top of the current
+  provider-closure final preview as `25d29fb`. The source branch ran exactly
+  one founder-authorized Expedia MCO -> BNA controlled retry and stopped safely
+  before checkout/manual review; evidence classified the result as
+  `selector_drift` because the locator fallback hit `item.evaluate is not a
+  function`. The patch hardens Expedia flight locator fallback text collection
+  without requiring `evaluate`, prevents price-only wrong-time fallback
+  selection, mirrors the provider change into the worker, and updates Expedia
+  retry analysis so hard-stop checklist notes do not mask selector/runtime
+  failures. Verified targeted Expedia/runtime/provider-closure tests 166/166,
+  `tsc`, strict `check-drift`, `git diff --check`, and Phase 1 gate 9/9
+  (`phase1-quality-gate-2026-05-05T02-16-00-971Z.json`). `npm run build` was
+  not rerun in this integration pass because the same local C: disk `ENOSPC`
+  blocker remains. No live provider/OpenAI/browser automation, payment,
+  CVV/security-code, OTP/CAPTCHA/login bypass, or final confirmation was
+  performed by codex during integration.
 - 2026-05-05 codex: integrated the provider closure acceptance/final batch on
   a clean worktree from `origin/codex/integrated-preview-20260504 @ bcd2895`.
   Cherry-picked Claude `claude/provider-closure-acceptance-final @ ed46abc`

@@ -2,7 +2,7 @@
 
 > **Branch**: `codex/integrated-preview-20260504`
 > **Last updated**: 2026-05-05
-> **Last commit**: `7597b12` provider closure war room integration
+> **Last commit**: `25d29fb` Expedia flight locator fallback integration
 >
 > Claude reads this at session start. I write to it before each push.
 > See `CLAUDE.md` section "coordination protocol".
@@ -12,6 +12,33 @@
 ## Currently doing
 
 Completed in latest pass:
+- Integrated Agent2 `codex/flight-live-closure-final @ fa7afc3` on top of the
+  current provider-closure final preview as `25d29fb`.
+- Source branch outcome:
+  - exactly one founder-authorized Expedia MCO -> BNA retry was run by Agent2;
+  - it failed before checkout/manual review with provider/runtime selector
+    drift, not routing/job-shape failure;
+  - no payment, CVV/security-code, OTP/CAPTCHA/login bypass, or final
+    confirmation occurred.
+- Patch integrated:
+  - Expedia flight locator fallback now reads candidate text by capability
+    (`evaluate` when available, then attributes/text/ancestor text);
+  - price-only wrong-time fallback selection is blocked when a target departure
+    time is present;
+  - worker provider mirror is byte-aligned;
+  - Expedia retry analyzer ignores hard-stop checklist notes when detecting
+    observed login/OTP/CAPTCHA boundaries.
+- Verified `npx vitest run` for Expedia/runtime/provider-closure targeted tests
+  166/166, `npx tsc --noEmit --pretty false`, strict `npm run check-drift`,
+  `git diff --check`, and `npm run gate:phase1 -- --allow-known-drift` 9/9
+  (`phase1-quality-gate-2026-05-05T02-16-00-971Z.json`).
+- `npm run build` was not rerun in this pass because the local C: disk `ENOSPC`
+  blocker remains from the previous integration attempt.
+- Safety boundary preserved during Codex integration: no live provider/OpenAI/
+  browser automation, payment, CVV/security-code, OTP/CAPTCHA/login bypass, or
+  final confirmation.
+
+Previous completed pass:
 - Integrated three pushed provider-closure final branches on a clean worktree
   from `origin/codex/integrated-preview-20260504 @ bcd2895`:
   - Claude `claude/provider-closure-acceptance-final @ ed46abc` -> `c33b429`;
