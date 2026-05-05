@@ -28,8 +28,8 @@ Safety boundary:
 
 Codex branch:
 
-- `codex/hotel-live-closure-final`
-- Base: latest `origin/codex/integrated-preview-20260504`.
+- `codex/hotel-closure-solve-next`
+- Base: `origin/codex/integrated-preview-20260504` at `63837d9`.
 - Scope: Booking.com hotel closure end-to-end toward a safe manual boundary,
   with no live provider run unless the founder explicitly approves exactly one
   Booking.com retry in the active thread.
@@ -49,11 +49,15 @@ Runtime hardening in progress:
 - Current integrated preview already includes classifier-ready Booking.com hotel
   result candidate capture, room-selection evidence capture, and
   `Booking.com hotel runtime boundary: ...` labels.
-- This branch replaces the hotel controlled prompt and generated hotel runtime
-  task with a stricter public-Booking.com manual-prep prompt: verify hotel,
-  city, dates, guest count, and room count first; stop at the first safe
-  manual-review boundary; do not enter payment/card, credentials, OTP/CAPTCHA,
-  verification, or final reserve/confirmation controls.
+- This branch hardens the runtime path so the stricter public-Booking.com
+  manual-review prompt stops before Booking.com guest/payment automation,
+  including payment gates reached outside the normal guest-form branch.
+- This branch logs Booking.com stay params from search/detail URLs so a future
+  controlled retry can prove check-in, check-out, adult count, and room count
+  stayed aligned with the approved YOTEL task.
+- This branch only dismisses optional member/sign-in promos when a safe close
+  control is visible; login, verification, OTP, CAPTCHA, phone verification,
+  password, or other account-sensitive walls remain hard stops.
 - No-live `provider-closure.ts preflight --kind hotel`, hotel template
   generation, provider closure fixture analyze/report, and hotel artifact
   analyzer fixture classification completed before any live attempt.

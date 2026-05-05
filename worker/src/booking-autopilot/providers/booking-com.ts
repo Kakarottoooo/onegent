@@ -214,6 +214,20 @@ export interface BookingComHotelRuntimeBoundaryInput {
   roomEvidence?: BookingComRoomSelectionEvidence | null;
 }
 
+export interface BookingComStayParamsEvidence {
+  checkin: string | null;
+  checkout: string | null;
+  adults: number | null;
+  rooms: number | null;
+  summary: string;
+}
+
+export interface BookingComSoftSignInPromptResult {
+  dismissed: boolean;
+  reason: string;
+  clickedText?: string;
+}
+
 type BookingComGuestFieldKey =
   | "full_name"
   | "first_name"
@@ -318,6 +332,228 @@ export function summarizeBookingComRoomSelectionEvidence(
     `noAvailabilityVisible=${evidence.noAvailabilityVisible}`,
     `selectorDriftLikely=${evidence.selectorDriftLikely}`,
   ].join("; ");
+}
+
+function parsePositiveInteger(value: string | null): number | null {
+  if (!value) return null;
+  const parsed = Number.parseInt(value, 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+}
+
+function dateFromBookingComSplitParams(params: URLSearchParams, prefix: "checkin" | "checkout"): string | null {
+  const year = params.get(`${prefix}_year`);
+  const month = params.get(`${prefix}_month`);
+  const day = params.get(`${prefix}_monthday`);
+  if (!year || !month || !day) return null;
+  if (!/^\d{4}$/.test(year)) return null;
+  const monthNumber = Number.parseInt(month, 10);
+  const dayNumber = Number.parseInt(day, 10);
+  if (!Number.isFinite(monthNumber) || monthNumber < 1 || monthNumber > 12) return null;
+  if (!Number.isFinite(dayNumber) || dayNumber < 1 || dayNumber > 31) return null;
+  return `${year}-${String(monthNumber).padStart(2, "0")}-${String(dayNumber).padStart(2, "0")}`;
+}
+
+export function extractBookingComStayParamsFromUrl(url: string): BookingComStayParamsEvidence {
+  const empty: BookingComStayParamsEvidence = {
+    checkin: null,
+    checkout: null,
+    adults: null,
+    rooms: null,
+    summary: "checkin=unknown; checkout=unknown; adults=unknown; rooms=unknown",
+  };
+
+  try {
+    const parsed = new URL(url);
+    const params = parsed.searchParams;
+    const checkin = params.get("checkin") ?? dateFromBookingComSplitParams(params, "checkin");
+    const checkout = params.get("checkout") ?? dateFromBookingComSplitParams(params, "checkout");
+    const adults = parsePositiveInteger(params.get("group_adults"));
+    const rooms = parsePositiveInteger(params.get("no_rooms"));
+    const evidence: BookingComStayParamsEvidence = {
+      checkin,
+      checkout,
+      adults,
+      rooms,
+      summary: [
+        `checkin=${checkin ?? "unknown"}`,
+        `checkout=${checkout ?? "unknown"}`,
+        `adults=${adults ?? "unknown"}`,
+        `rooms=${rooms ?? "unknown"}`,
+      ].join("; "),
+    };
+    return evidence;
+  } catch {
+    return empty;
+  }
+}
+
+export function shouldStopBookingComBeforePaymentAutomation(task: string): boolean {
+  const normalized = task.toLowerCase().replace(/\s+/g, " ").trim();
+  if (!normalized) return false;
+
+  if (/\bstop\s+before\s+(payment|cvv|cvc|security code|final|confirmation|complete booking)\b/.test(normalized)) {
+    return true;
+  }
+
+  const manualReviewIntent = containsAny(normalized, [
+    "manual hotel booking review",
+    "manual hotel booking",
+    "manual-review boundary",
+    "manual review boundary",
+    "safe manual-review boundary",
+    "safe manual review boundary",
+    "public booking.com pages",
+    "public search/detail/room-selection pages",
+  ]);
+
+  const paymentHardStopIntent =
+    containsAny(normalized, [
+      "do not enter payment",
+      "do not enter card",
+      "do not click any final reserve",
+      "do not click any final reserve, confirm",
+      "do not click any final",
+      "payment submission control",
+      "card entry",
+      "cvv/cvc/security code",
+      "cvv/security code",
+      "billing details",
+      "final reserve",
+      "complete booking",
+      "final booking confirmation",
+      "hard stop immediately",
+      "if it is unclear whether a button is final",
+    ]) ||
+    /hard stop.{0,220}(payment|card entry|cvv|cvc|security code|billing|final reserve|complete booking|purchase|pay|submit)/.test(normalized);
+
+  const completionStopIntent =
+    /\bdo not complete (the )?booking\b/.test(normalized) ||
+    /\bstop at the first safe manual[-\s]review boundary\b/.test(normalized);
+
+  return manualReviewIntent && (paymentHardStopIntent || completionStopIntent);
+}
+
+export async function dismissBookingComSoftSignInPrompt(
+  rawPage: Page,
+  traceLog: (msg: string) => void = () => {},
+): Promise<BookingComSoftSignInPromptResult> {
+  const result: BookingComSoftSignInPromptResult = await rawPage.evaluate(() => {
+    const normalize = (value: string) => value.toLowerCase().replace(/\s+/g, " ").trim();
+    const isVisible = (element: Element | null): element is HTMLElement => {
+      if (!(element instanceof HTMLElement)) return false;
+      const style = window.getComputedStyle(element);
+      const rect = element.getBoundingClientRect();
+      const jsdomLike =
+        rect.width === 0 &&
+        rect.height === 0 &&
+        window.navigator.userAgent.toLowerCase().includes("jsdom");
+      return (
+        style.display !== "none" &&
+        style.visibility !== "hidden" &&
+        !element.hidden &&
+        (rect.width > 0 && rect.height > 0 || jsdomLike)
+      );
+    };
+
+    const bodyText = normalize(document.body?.innerText ?? document.body?.textContent ?? "");
+    const accountSensitiveSignals = [
+      "sign in to continue",
+      "log in to continue",
+      "login required",
+      "sign in required",
+      "account verification",
+      "verify your account",
+      "verification code",
+      "enter your password",
+      "password",
+      "otp",
+      "sms code",
+      "captcha",
+      "human verification",
+      "phone verification",
+      "verify you are human",
+    ];
+    if (accountSensitiveSignals.some((signal) => bodyText.includes(signal))) {
+      return { dismissed: false, reason: "account-sensitive boundary visible" };
+    }
+
+    const optionalSignals = [
+      "sign in and save",
+      "sign in, save money",
+      "sign in to save",
+      "save money",
+      "member prices",
+      "genius",
+      "unlock",
+      "create an account to",
+      "log in for member prices",
+      "one click away from cheaper prices",
+    ];
+    const hasOptionalPrompt = optionalSignals.some((signal) => bodyText.includes(signal));
+    if (!hasOptionalPrompt) {
+      return { dismissed: false, reason: "no optional sign-in prompt visible" };
+    }
+
+    const promptScopes = Array.from(
+      document.querySelectorAll<HTMLElement>("[role='dialog'], [aria-modal='true'], div, section")
+    )
+      .filter((element) => isVisible(element))
+      .filter((element) => {
+        const text = normalize(element.textContent ?? "");
+        return optionalSignals.some((signal) => text.includes(signal));
+      })
+      .sort((left, right) => {
+        const leftArea = left.getBoundingClientRect().width * left.getBoundingClientRect().height;
+        const rightArea = right.getBoundingClientRect().width * right.getBoundingClientRect().height;
+        return leftArea - rightArea;
+      });
+
+    const scopes = promptScopes.length > 0 ? promptScopes : [document.body as HTMLElement];
+    const closeTextExact = new Set(["close", "dismiss", "no thanks", "not now", "maybe later", "skip", "x", "×"]);
+    const unsafeActionSignals = ["sign in", "log in", "register", "create account", "create an account", "join", "unlock"];
+
+    for (const scope of scopes) {
+      const controls = Array.from(scope.querySelectorAll<HTMLElement>("button, [role='button'], a"));
+      for (const control of controls) {
+        if (!isVisible(control)) continue;
+        const visibleText = normalize(control.textContent ?? "");
+        const ariaLabel = normalize(control.getAttribute("aria-label") ?? "");
+        const title = normalize(control.getAttribute("title") ?? "");
+        const combined = [visibleText, ariaLabel, title].filter(Boolean).join(" ");
+        if (!combined) continue;
+        if (unsafeActionSignals.some((signal) => combined.includes(signal))) continue;
+        const isCloseControl =
+          closeTextExact.has(visibleText) ||
+          closeTextExact.has(ariaLabel) ||
+          closeTextExact.has(title) ||
+          ariaLabel.includes("close") ||
+          title.includes("close") ||
+          visibleText.includes("no thanks") ||
+          visibleText.includes("not now") ||
+          visibleText.includes("maybe later") ||
+          visibleText.includes("dismiss");
+        if (!isCloseControl) continue;
+        control.click();
+        return {
+          dismissed: true,
+          reason: "dismissed optional sign-in/member prompt",
+          clickedText: visibleText || ariaLabel || title,
+        };
+      }
+    }
+
+    return { dismissed: false, reason: "optional sign-in prompt visible but no safe close control found" };
+  }).catch(() => ({ dismissed: false, reason: "soft sign-in prompt check failed" }));
+
+  if (result.dismissed) {
+    const waitForTimeout = (rawPage as { waitForTimeout?: (timeout: number) => Promise<unknown> }).waitForTimeout;
+    if (typeof waitForTimeout === "function") {
+      await waitForTimeout.call(rawPage, 300).catch(() => {});
+    }
+    traceLog(`Booking.com sign-in prompt: ${result.reason}${result.clickedText ? ` via "${result.clickedText}"` : ""}.`);
+  }
+
+  return result;
 }
 
 export function classifyBookingComHotelRuntimeBoundary(

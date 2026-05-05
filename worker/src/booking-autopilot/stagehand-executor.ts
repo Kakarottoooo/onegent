@@ -69,10 +69,13 @@ import {
   captureBookingComRoomSelectionEvidence as providerCaptureBookingComRoomSelectionEvidence,
   classifyBookingComHotelRuntimeBoundary as providerClassifyBookingComHotelRuntimeBoundary,
   clickBookingComListingTarget as providerClickBookingComListingTarget,
+  dismissBookingComSoftSignInPrompt as providerDismissBookingComSoftSignInPrompt,
   evaluateBookingComVerification as providerEvaluateBookingComVerification,
+  extractBookingComStayParamsFromUrl as providerExtractBookingComStayParamsFromUrl,
   getBookingComStageSignals as providerGetBookingComStageSignals,
   revealBookingComRoomSelection as providerRevealBookingComRoomSelection,
   setBookingComRoomQuantity as providerSetBookingComRoomQuantity,
+  shouldStopBookingComBeforePaymentAutomation as providerShouldStopBookingComBeforePaymentAutomation,
 } from "./providers/booking-com";
 import {
   determineFinalOutcome,
@@ -5173,6 +5176,13 @@ The user will enter CVV and confirm payment themselves.`,
               : startProvider?.id === "resy-com" ? "resy.com"
               : startProvider?.id === "yelp-com" ? "yelp.com"
               : input.startUrl.match(/^https?:\/\/([^/]+)/)?.[1] ?? undefined;
+            if (bookingComContext) {
+              trace(`Booking.com stay params evidence before AI listing: ${providerExtractBookingComStayParamsFromUrl(input.startUrl).summary}`);
+              await providerDismissBookingComSoftSignInPrompt(raw, trace).catch(() => ({
+                dismissed: false,
+                reason: "soft sign-in prompt check failed",
+              }));
+            }
             const result = await clickTargetListingAI(stagehand, targetHotelName ?? "", trace, 5, startDomainHint, requestedDates);
             if (result === "no_availability") return false;
             if (result === "clicked") {
@@ -5231,6 +5241,12 @@ The user will enter CVV and confirm payment themselves.`,
               trace("[RPA] Booking.com listing: target hotel name could not be parsed from the task.");
               return false;
             }
+            const stayParamsEvidence = providerExtractBookingComStayParamsFromUrl(input.startUrl);
+            trace(`Booking.com stay params evidence before listing: ${stayParamsEvidence.summary}`);
+            await providerDismissBookingComSoftSignInPrompt(raw, trace).catch(() => ({
+              dismissed: false,
+              reason: "soft sign-in prompt check failed",
+            }));
             trace(`[RPA] Booking.com listing: clicking target "${targetHotelName}" via RPA.`);
             const clicked = await providerClickBookingComListingTarget(raw, targetHotelName, {
               normalizeText,
@@ -5264,6 +5280,7 @@ The user will enter CVV and confirm payment themselves.`,
               const directUrl = buildBookingComDirectHotelUrl(targetHotelName, input.startUrl);
               if (directUrl) {
                 trace(`Booking.com listing: trying direct hotel URL: ${directUrl}`);
+                trace(`Booking.com direct hotel URL stay params: ${providerExtractBookingComStayParamsFromUrl(directUrl).summary}`);
                 try {
                   await raw.goto(directUrl, { waitUntil: "domcontentloaded", timeout: 25_000 });
                   await raw.waitForLoadState("networkidle", { timeout: 12_000 }).catch(() => {});
@@ -5310,6 +5327,13 @@ The user will enter CVV and confirm payment themselves.`,
           // Booking.com gets AI path when AI_LOOP_LISTING=true, otherwise uses RPA fallback.
           // selectRoomAI handles Expedia's two-click Reserve flow (Reserve → modal → Reserve).
           if (process.env.AI_LOOP_LISTING === "true" || !bookingComContext) {
+            if (bookingComContext) {
+              trace(`Booking.com stay params evidence before AI room selection: ${providerExtractBookingComStayParamsFromUrl(raw.url() || input.startUrl).summary}`);
+              await providerDismissBookingComSoftSignInPrompt(raw, trace).catch(() => ({
+                dismissed: false,
+                reason: "soft sign-in prompt check failed",
+              }));
+            }
             const result = await selectRoomAI(stagehand, trace, roomPreference);
             if (result === "no_availability") return false;
 
@@ -5389,6 +5413,11 @@ The user will enter CVV and confirm payment themselves.`,
             try {
               trace("[RPA] Booking.com room_selection: using RPA selectOption + JS click.");
               const beforeUrl = raw.url();
+              trace(`Booking.com stay params evidence before room selection: ${providerExtractBookingComStayParamsFromUrl(beforeUrl || input.startUrl).summary}`);
+              await providerDismissBookingComSoftSignInPrompt(raw, trace).catch(() => ({
+                dismissed: false,
+                reason: "soft sign-in prompt check failed",
+              }));
               await providerRevealBookingComRoomSelection(raw, {
                 normalizeText,
                 normalizeLooseText,
@@ -6319,6 +6348,36 @@ The user will enter CVV and confirm payment themselves.`,
       // Use input.startUrl as the authoritative Booking.com check —?currentUrl may be a
       // non-booking.com URL resolved from an analytics/tracking iframe by resolveCurrentUrl().
       const provider = getProvider(currentUrl) ?? getProvider(rawPageUrl) ?? (bookingComPageOpen ? getProvider(input.startUrl) : null);
+      const bookingComManualReviewRequested =
+        provider?.id === "booking-com" &&
+        providerShouldStopBookingComBeforePaymentAutomation(input.task);
+      if (
+        bookingComManualReviewRequested &&
+        (isBookingComCheckout || assessment.stage === "checkout_form" || assessment.stage === "payment_gate")
+      ) {
+        const boundaryText = await raw.evaluate(() => document.body?.innerText ?? document.body?.textContent ?? "").catch(() => pageText);
+        const boundary = providerClassifyBookingComHotelRuntimeBoundary({
+          currentUrl: rawPageUrl || currentUrl,
+          pageText: boundaryText,
+        });
+        trace(`Booking.com hotel runtime boundary: ${boundary.state} - ${boundary.reason}`);
+        trace("Booking.com manual-review instruction honored before guest/payment automation; no personal, payment, CVV, or final-confirmation fields filled.");
+        const screenshotBase64 = `data:image/png;base64,${(await page.screenshot({ type: "png" })).toString("base64")}`;
+        holdBrowserOpenForManualReview(
+          `Local mode: Booking.com manual-review boundary reached - keeping browser open for ${Math.round(BROWSER_KEEP_OPEN_MS / 60000)} minutes for manual review.`
+        );
+        return {
+          status: boundary.state === "payment_manual_review_reached" ? "paused_payment" : "error",
+          screenshotBase64,
+          handoffUrl: rawPageUrl || currentUrl,
+          sessionUrl,
+          summary: boundary.state === "payment_manual_review_reached"
+            ? "Booking.com reached the payment/final-details boundary and stopped before payment, CVV, card entry, or final confirmation."
+            : "Booking.com reached the guest-details/manual-review boundary and stopped before entering personal details, payment, CVV, or final confirmation.",
+          ...(boundary.state === "payment_manual_review_reached" ? {} : { error: boundary.reason }),
+          debugTrace,
+        };
+      }
       if (provider && assessment.stage === "checkout_form") {
         // Dismiss any modals that appeared after navigation (e.g. Expedia "This booking is almost yours!")
         const preFormDismissed = await dismissBlockingModals(raw).catch(() => "");
@@ -6514,9 +6573,13 @@ The user will enter CVV and confirm payment themselves.`,
       }
 
       if (provider && assessment.stage === "payment_gate") {
-        trace("[RPA] Provider payment page — running card-field fill.");
-        await provider?.fillPaymentForm?.(raw, p, bookingComHelpers, trace);
-        await new Promise((resolve) => setTimeout(resolve, 800));
+        if (provider.id === "booking-com" && providerShouldStopBookingComBeforePaymentAutomation(input.task)) {
+          trace("[RPA] Booking.com payment gate reached under manual-review instructions — skipping card-field fill.");
+        } else {
+          trace("[RPA] Provider payment page — running card-field fill.");
+          await provider?.fillPaymentForm?.(raw, p, bookingComHelpers, trace);
+          await new Promise((resolve) => setTimeout(resolve, 800));
+        }
       }
       if (provider && !["checkout_form", "payment_gate"].includes(assessment.stage)) {
         trace(`Provider checkout is open at stage=${assessment.stage}; skipping guest-form override until stage is clearer.`);
@@ -6597,9 +6660,13 @@ The user will enter CVV and confirm payment themselves.`,
     if (!onGuestForm && assessment.stage === "payment_gate") {
       const paymentProvider = getProvider(currentUrl) ?? getProvider(raw.url());
       if (paymentProvider?.fillPaymentForm) {
-        trace("[RPA] Payment gate detected outside onGuestForm — running provider fillPaymentForm.");
-        await paymentProvider.fillPaymentForm(raw, p, bookingComHelpers, trace);
-        await new Promise((resolve) => setTimeout(resolve, 800));
+        if (paymentProvider.id === "booking-com" && providerShouldStopBookingComBeforePaymentAutomation(input.task)) {
+          trace("[RPA] Booking.com payment gate detected outside onGuestForm — manual-review instructions forbid card-field fill.");
+        } else {
+          trace("[RPA] Payment gate detected outside onGuestForm — running provider fillPaymentForm.");
+          await paymentProvider.fillPaymentForm(raw, p, bookingComHelpers, trace);
+          await new Promise((resolve) => setTimeout(resolve, 800));
+        }
       }
     }
 
@@ -6609,7 +6676,7 @@ The user will enter CVV and confirm payment themselves.`,
     let bookingComGuestDetailsDomState = providerSignals?.guestDetailsStep ?? false;
     const bookingComStopBeforePaymentRequested =
       activeProvider?.id === "booking-com" &&
-      /\bstop\s+before\s+(payment|cvv|cvc|security code|final|confirmation|complete booking)\b/i.test(input.task);
+      providerShouldStopBookingComBeforePaymentAutomation(input.task);
 
     if (!bookingComFinalPaymentDomState && bookingComGuestDetailsDomState) {
       // Booking.com sometimes transitions to the final-details/payment page a beat after
@@ -6798,7 +6865,7 @@ The user will enter CVV and confirm payment themselves.`,
     }
 
     if (bookingComFinalPaymentDomState && activeProvider?.id === "booking-com" && bookingComStopBeforePaymentRequested) {
-      trace("Booking.com hotel runtime boundary: payment_manual_review_reached - stop-before-payment instruction honored; no card fields filled.");
+      trace("Booking.com hotel runtime boundary: payment_manual_review_reached - manual-review/no-payment instruction honored; no card fields filled.");
       const screenshotBase64 = `data:image/png;base64,${(await page.screenshot({ type: "png" })).toString("base64")}`;
       holdBrowserOpenForManualReview(
         `Local mode: Booking.com payment boundary reached - keeping browser open for ${Math.round(BROWSER_KEEP_OPEN_MS / 60000)} minutes for manual review.`
