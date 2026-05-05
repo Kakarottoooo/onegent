@@ -2,6 +2,45 @@ import { HotelIntent, MultilingualQueryContext } from "../../types";
 import { minimaxChat } from "../../minimax";
 import { resolveLocationHint } from "../../nlu";
 
+const YYYY_MM_DD = /^(\d{4})-(\d{2})-(\d{2})$/;
+
+// Defense in depth for Bug 1 (P0): MiniMax LLM frequently returns past years
+// when the user gives a bare month/day without a year. SerpApi rejects past
+// dates with 400 → user sees "no hotels found" — false negative.
+// If the parsed date is strictly earlier than today, bump it forward by whole
+// years until it is today-or-later. This matches what humans almost always
+// mean when they omit a year: the next future occurrence of that month/day.
+export function bumpPastDateToNextOccurrence<T extends string | null | undefined>(
+  dateStr: T,
+  today: Date,
+): T {
+  if (dateStr == null || dateStr === "") return dateStr;
+  const m = (dateStr as string).match(YYYY_MM_DD);
+  if (!m) return dateStr;
+  const year = Number(m[1]);
+  const month = Number(m[2]);
+  const day = Number(m[3]);
+  if (month < 1 || month > 12 || day < 1 || day > 31) return dateStr;
+  // Reject malformed dates that JS would silently coerce (e.g., 2026-02-31).
+  const probe = new Date(Date.UTC(year, month - 1, day));
+  if (
+    probe.getUTCFullYear() !== year ||
+    probe.getUTCMonth() !== month - 1 ||
+    probe.getUTCDate() !== day
+  ) {
+    return dateStr;
+  }
+
+  const todayUtc = Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), today.getUTCDate());
+  let bumpedYear = year;
+  while (Date.UTC(bumpedYear, month - 1, day) < todayUtc) {
+    bumpedYear += 1;
+  }
+  if (bumpedYear === year) return dateStr;
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${bumpedYear}-${pad(month)}-${pad(day)}` as T;
+}
+
 export async function parseHotelIntent(
   userMessage: string,
   cityFullName: string,
@@ -51,7 +90,9 @@ Return JSON with these fields (omit fields that aren't mentioned):
   "children_count": number of children if mentioned — else omit
 }
 
-For relative dates: "tonight" = today, "tomorrow" = tomorrow, "next Friday" = nearest upcoming Friday, "2 nights" sets nights=2 and check_out = check_in + 2 days.`,
+For relative dates: "tonight" = today, "tomorrow" = tomorrow, "next Friday" = nearest upcoming Friday, "2 nights" sets nights=2 and check_out = check_in + 2 days.
+
+If the user gives a month/day without a year (e.g. "5月20号", "May 20", "12/24"), choose the NEXT FUTURE OCCURRENCE relative to today's date above: use the current year if that month/day has not yet passed, otherwise use the next year. Never emit a date in the past.`,
       },
     ],
   });
@@ -65,6 +106,16 @@ For relative dates: "tonight" = today, "tomorrow" = tomorrow, "next Friday" = ne
   }
   try {
     const parsed = JSON.parse(jsonMatch[0]);
+    // Bug 1 (P0) defense in depth: bump past dates to next future occurrence
+    // BEFORE the nights→check_out derivation so a past check_in doesn't drag
+    // the computed check_out into the past too.
+    const today = new Date();
+    if (typeof parsed.check_in === "string") {
+      parsed.check_in = bumpPastDateToNextOccurrence(parsed.check_in, today);
+    }
+    if (typeof parsed.check_out === "string") {
+      parsed.check_out = bumpPastDateToNextOccurrence(parsed.check_out, today);
+    }
     // If nights given but no check_out, compute it
     if (parsed.check_in && parsed.nights && !parsed.check_out) {
       const d = new Date(parsed.check_in);
