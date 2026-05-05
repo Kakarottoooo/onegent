@@ -27,11 +27,19 @@ export interface SnapshotsState {
   snapshots: ExecutionSnapshot[];
   loadState: "idle" | "loading" | "ready" | "empty" | "error";
   errorMessage?: string;
+  diagnostics?: SnapshotDiagnostics;
 }
 
 export interface UseSnapshotsOpts {
   /** When true, hook stops polling. Use after `timeline.closed === true`. */
   paused?: boolean;
+}
+
+export interface SnapshotDiagnostics {
+  source: "canonical" | "compat" | "none";
+  canonicalStatus?: number;
+  compatStatus?: number;
+  usedFallback: boolean;
 }
 
 export function useSnapshots(
@@ -55,11 +63,12 @@ export function useSnapshots(
     async function fetchOnce() {
       if (cancelled) return;
       try {
-        const snapshots = await fetchSnapshotsWithFallback(jobId!);
+        const result = await fetchSnapshotsWithFallback(jobId!);
         if (cancelled) return;
         setState({
-          snapshots,
-          loadState: snapshots.length === 0 ? "empty" : "ready",
+          snapshots: result.snapshots,
+          loadState: result.snapshots.length === 0 ? "empty" : "ready",
+          diagnostics: result.diagnostics,
         });
       } catch (err) {
         if (cancelled) return;
@@ -69,6 +78,7 @@ export function useSnapshots(
           ...prev,
           loadState: "error",
           errorMessage: err instanceof Error ? err.message : "Could not load snapshots.",
+          diagnostics: normalizeSnapshotError(err),
         }));
       } finally {
         if (!cancelled && !opts.paused) {
@@ -91,14 +101,28 @@ export function useSnapshots(
 
 /* ─── Endpoint dance ───────────────────────────────────────────────── */
 
-async function fetchSnapshotsWithFallback(jobId: string): Promise<ExecutionSnapshot[]> {
+interface SnapshotFetchResult {
+  snapshots: ExecutionSnapshot[];
+  diagnostics: SnapshotDiagnostics;
+}
+
+async function fetchSnapshotsWithFallback(jobId: string): Promise<SnapshotFetchResult> {
+  let canonicalStatus: number | undefined;
   // 1. Canonical path
   try {
     const res = await fetch(`/api/booking-jobs/${jobId}/snapshots`, {
       headers: { Accept: "application/json" },
     });
+    canonicalStatus = res.status;
     if (res.ok) {
-      return parseSnapshotsResponse(await res.json());
+      return {
+        snapshots: parseSnapshotsResponse(await res.json()),
+        diagnostics: {
+          source: "canonical",
+          canonicalStatus,
+          usedFallback: false,
+        },
+      };
     }
     // 404 / 501 — fall through. Other errors: throw.
     if (res.status !== 404 && res.status !== 501) {
@@ -114,7 +138,56 @@ async function fetchSnapshotsWithFallback(jobId: string): Promise<ExecutionSnaps
     headers: { Accept: "application/json" },
   });
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
-  return parseSnapshotsResponse(await res.json());
+  return {
+    snapshots: parseSnapshotsResponse(await res.json()),
+    diagnostics: {
+      source: "compat",
+      canonicalStatus,
+      compatStatus: res.status,
+      usedFallback: true,
+    },
+  };
+}
+
+export function describeSnapshotDiagnostics(
+  jobId: string | null,
+  diagnostics?: SnapshotDiagnostics,
+): string | undefined {
+  if (!jobId || !diagnostics) return undefined;
+  if (diagnostics.source === "canonical" && diagnostics.canonicalStatus === 200) {
+    return "The job is attached, but no browser screenshots have been saved yet. If the provider page is already open, check whether the executor reached the snapshot capture step.";
+  }
+  if (
+    diagnostics.source === "compat" &&
+    diagnostics.canonicalStatus === 404 &&
+    diagnostics.compatStatus === 200
+  ) {
+    return `This page cannot find job ${jobId} in the current booking-jobs API, and the fallback live snapshot store is empty. You may be viewing a task created by a different local port, worktree, or database environment.`;
+  }
+  if (
+    diagnostics.source === "compat" &&
+    diagnostics.canonicalStatus === 501 &&
+    diagnostics.compatStatus === 200
+  ) {
+    return "The canonical snapshot endpoint is not available on this server yet, and the fallback live snapshot store is empty.";
+  }
+  if (diagnostics.source === "compat" && diagnostics.compatStatus === 200) {
+    return "The fallback live snapshot store is attached, but it has no screenshots for this job yet.";
+  }
+  if (diagnostics.source === "none") {
+    return "Could not attach to the browser snapshot stream for this task.";
+  }
+  return undefined;
+}
+
+function normalizeSnapshotError(err: unknown): SnapshotDiagnostics {
+  const message = err instanceof Error ? err.message : "";
+  const statusMatch = message.match(/^HTTP (\d{3})$/);
+  return {
+    source: "none",
+    compatStatus: statusMatch ? Number(statusMatch[1]) : undefined,
+    usedFallback: true,
+  };
 }
 
 /* ─── Response shape normalizer ────────────────────────────────────── */
