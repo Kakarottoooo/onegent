@@ -20,16 +20,26 @@ The product is not a generic browser bot. It is a user-facing agent that:
 
 ## Active Worktree
 
-Most recent canonical worktree is the integrated preview:
+The current canonical code line is now `master` after the provider-closure
+integration was folded into GitHub:
 
 ```text
-C:\Users\Gzw19\onegent-integrated-20260504
-branch: codex/integrated-preview-20260504
+C:\Users\Gzw19\onegent
+branch: master
+head: origin/master @ 19a14a9
 ```
 
-Older worktrees (`C:\Users\Gzw19\onegent` root, `onegent-e2e-20260503` for
-provider/runtime debugging) may be stale or dirty. Verify before using any of
-them for tests.
+The integration source worktree that produced the verified closure build was:
+
+```text
+C:\Users\Gzw19\onegent-provider-closure-integration-20260505
+branch: codex/phase-closure-orchestration-20260505
+head: 0394c8c
+```
+
+Other worktrees may contain stale agents, logs, or branch-local experiments.
+Use `master` for the next product/performance pass unless the founder assigns a
+specific lane worktree.
 
 ## Phase Snapshot
 
@@ -38,10 +48,10 @@ Read `docs/00-start-here/PHASE_STATUS.md` for the detailed table. Short version:
 | Phase | Status | Notes |
 |---|---|---|
 | Phase 0A | Closed via OpenTable | Sirrah OpenTable live dogfood reached final review with phone filled and stopped before final confirmation. |
-| Phase 0B | Entry gate met | Broaden OpenTable-first restaurant fixtures; keep Resy as a provider/network follow-up lane. |
-| Phase 1 | Demo-freeze passed | Phase 1 gate with smoke + autonomous founder E2E is 12/12; production build is clean; production route probe is 13/13. Founder manual walkthrough is the remaining human acceptance gate. |
-| Phase 1.5 | Demo-freeze passed | Quality gate, Founder E2E, Runtime Forensics, Demo Control Room, and Track C Demo Readiness are all read-only and integrated. |
-| Phase 2 | Frozen, under audit | Expedia flight is the only candidate, not live verified. Booking.com / Hotels.com need fresh artifacts before any live promise. |
+| Phase 0B | Deferred to batch coverage | Initial restaurant closure is enough for now. Multi-case OpenTable-first coverage comes after each scenario has a stable single-case path. |
+| Phase 1 | Initial founder path accepted | Founder dogfood has covered restaurant, hotel, flight, and activity-shaped user prompts through the UI/task/log/screenshot surfaces. Remaining work is bug-fix and performance polish. |
+| Phase 1.5 | OK | Quality gate and debug/readiness surfaces are integrated; use them as regression tools rather than blockers. |
+| Phase 2 | Initial hotel + flight closure achieved | Booking.com hotel and Expedia flight have reached useful human-review boundaries in founder dogfood. Do not broaden until performance and multi-case coverage are measured. |
 
 ## Current Runtime Reality
 
@@ -51,8 +61,13 @@ Read `docs/00-start-here/PHASE_STATUS.md` for the detailed table. Short version:
 - Resy uses Computer Use and provider-specific logic. Availability and IP/network
   behavior can block useful live tests before code is involved; it no longer
   blocks Phase 0A now that OpenTable has closed the restaurant wedge.
-- Expedia flight provider is now worker-routed correctly, but flight card
-  matching still needs runtime hardening when visible cards are not clicked.
+- Expedia flight is now an initial closed lane for founder dogfood: worker
+  routing, card selection, checkout progression, screenshot stream, and task
+  status are good enough for the single-case path. Treat new failures as normal
+  product bugs to patch from logs and screenshots.
+- Booking.com hotel is now an initial closed lane for founder dogfood after the
+  language, guest-form, and manual-review fixes. Treat new failures as normal
+  product bugs to patch from current artifacts.
 - Provider task cards intentionally compress logs. Debugging must use DB
   evidence, worker logs, and screenshots. See
   `docs/30-provider-debug/PROVIDER_RUNTIME_DEBUG_PLAYBOOK.md`.
@@ -67,6 +82,10 @@ The shared coordination home is `docs/10-coordination/`.
 
 ## Where To Look Next
 
+- Next near-term priority: performance. The app is usable but page/session
+  transitions feel slow in local dogfood. Profile `/`, `/tasks`, room/session
+  switching, snapshot polling, and task history queries before adding more
+  provider scope.
 - Need to know what phase is blocked: `docs/00-start-here/PHASE_STATUS.md`
 - Need the new agent read order: `docs/INDEX.md` § "New Agent Read Order"
 - Need to continue restaurant execution: `docs/20-phase0-restaurant/RESTAURANT_PHASE0_HANDOFF.md`

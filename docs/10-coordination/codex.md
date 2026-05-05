@@ -11,6 +11,20 @@
 
 ## Currently doing
 
+Current status after founder dogfood consolidation:
+- Canonical code line is `master @ 19a14a9`, which includes the provider
+  closure integration branch `codex/phase-closure-orchestration-20260505 @
+  0394c8c`.
+- Founder confirms the single-case product paths for restaurant/OpenTable,
+  Expedia flight, and Booking.com hotel have reached useful human-review
+  closure for dogfood. Phase 1 main path has also been exercised with real
+  user phrasing across restaurant, hotel, flight, and activity-shaped flows.
+- Phase 1.5 is not currently blocking. Phase 0B and broad Phase 2 coverage
+  should wait until performance and navigation latency improve.
+- Next Codex priority: make the app feel fast. Profile page/session switching,
+  `/tasks`, snapshot polling, task history query volume, and any unnecessary
+  route-level data fetching before running 5/10/20-case coverage batches.
+
 Completed in latest pass:
 - Recorded founder dogfood OpenTable closure for Phase 0A:
   - request: "book Sirrah in New York next Thursday at 8pm for 1 person";
