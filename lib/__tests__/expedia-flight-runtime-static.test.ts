@@ -14,13 +14,13 @@ describe("Expedia flight runtime safety guards", () => {
     expect(source).toContain("clickExpediaTravelerGender(page, gender, trace)");
   });
 
-  it("prioritizes Expedia billing prefill before the final manual boundary", () => {
+  it("prefills allowed Expedia payment fields before the final manual boundary", () => {
     const source = readFileSync("lib/booking-autopilot/stagehand-executor.ts", "utf8");
 
     expect(source).toContain("const paymentPrefill = await fillExpediaGroupPaymentForm(checkoutPage, effectiveFlightProfile, trace)");
     expect(source).toContain("scrollExpediaCheckoutToFinalReviewBoundary(checkoutPage, trace)");
     expect(source).toContain("manual review needed for");
-    expect(source).toContain("Payment card details, security code, and Complete Booking remain human-only");
+    expect(source).toContain("CVV/security code and Complete Booking remain human-only");
   });
 
   it("keeps Expedia payment prefill going when optional label APIs are unavailable", () => {
@@ -30,10 +30,12 @@ describe("Expedia flight runtime safety guards", () => {
     expect(source).toContain("guest info prefill did not complete; continuing to allowed payment/billing fields");
   });
 
-  it("explicitly scrolls Expedia checkout through billing and final review sections", () => {
+  it("explicitly scrolls Expedia checkout through payment, billing, and final review sections", () => {
     const source = readFileSync("lib/booking-autopilot/providers/expedia.ts", "utf8");
 
     expect(source).toContain("scrollExpediaCheckoutToSection(");
+    expect(source).toContain('"payment details"');
+    expect(source).toContain('"card fields"');
     expect(source).toContain('"billing address"');
     expect(source).toContain("scrollExpediaCheckoutToFinalReviewBoundary");
   });
@@ -45,6 +47,8 @@ describe("Expedia flight runtime safety guards", () => {
     expect(source).toContain("billing address-line1");
     expect(source).toContain("billing address-level2");
     expect(source).toContain("billing postal-code");
+    expect(source).toContain("Expedia billing direct fill");
+    expect(source).toContain("fillBySelectors");
     expect(source).toContain("addressCandidates");
     expect(source).toContain("b.index - a.index");
     expect(source).toContain("Expedia billing verify");
@@ -56,11 +60,18 @@ describe("Expedia flight runtime safety guards", () => {
 
     expect(source).toContain("export type ExpediaPaymentPrefillResult");
     expect(source).toContain("complete: missing.length === 0");
-    expect(source).toContain("const shouldPrefillCard = false");
-    expect(source).toContain("billing address is current closure priority");
+    expect(source).toContain("const shouldPrefillCard = true");
     expect(source).toContain('"billing address 1"');
     expect(source).toContain('"billing city"');
     expect(source).toContain('"billing ZIP"');
+  });
+
+  it("keeps Expedia traveler phone country code on US when filling contact details", () => {
+    const source = readFileSync("lib/booking-autopilot/providers/expedia.ts", "utf8");
+
+    expect(source).toContain("phoneCountryCode");
+    expect(source).toContain("United States of America +1");
+    expect(source).toContain("phone country code");
   });
 
   it("does not include CVV or security-code selectors in Expedia card iframe candidates", () => {

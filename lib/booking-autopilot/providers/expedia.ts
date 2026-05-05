@@ -1225,8 +1225,97 @@ async function fillExpediaBillingAddressFields(
   trace: (msg: string) => void,
 ): Promise<ExpediaBillingAddressFillResult> {
   const billingZip = profile.billing_zip ?? profile.zip;
-  const nativeResult = await page.evaluate(
-    ({ address, city, zip }: { address: string; city: string; zip: string }) => {
+  const directResult = await page.evaluate(
+    ({
+      address,
+      city,
+      zip,
+      addressSelectors,
+      citySelectors,
+      zipSelectors,
+    }: {
+      address: string;
+      city: string;
+      zip: string;
+      addressSelectors: string[];
+      citySelectors: string[];
+      zipSelectors: string[];
+    }) => {
+      const nativeFill = (el: HTMLInputElement, val: string): boolean => {
+        if (!val || !el || el.disabled || el.type === "hidden") return false;
+        const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set;
+        el.scrollIntoView({ block: "center", behavior: "auto" as ScrollBehavior });
+        el.focus();
+        if (setter) {
+          setter.call(el, "");
+          setter.call(el, val);
+        } else {
+          el.value = "";
+          el.value = val;
+        }
+        try {
+          el.dispatchEvent(new InputEvent("beforeinput", { bubbles: true, data: val, inputType: "insertText" }));
+        } catch {
+          // Older embedded browsers may not support InputEvent construction.
+        }
+        el.dispatchEvent(new Event("input", { bubbles: true }));
+        el.dispatchEvent(new Event("change", { bubbles: true }));
+        el.dispatchEvent(new KeyboardEvent("keyup", { bubbles: true }));
+        el.blur();
+        return el.value.trim().replace(/\s+/g, " ") === val.trim().replace(/\s+/g, " ");
+      };
+      const fillBySelectors = (selectors: string[], value: string): { ok: boolean; count: number } => {
+        let ok = false;
+        let count = 0;
+        for (const selector of selectors) {
+          let matches: HTMLInputElement[] = [];
+          try {
+            matches = Array.from(document.querySelectorAll<HTMLInputElement>(selector));
+          } catch {
+            continue;
+          }
+          for (const input of matches.reverse()) {
+            count += 1;
+            ok = nativeFill(input, value) || ok;
+          }
+        }
+        return { ok, count };
+      };
+      return {
+        address: fillBySelectors(addressSelectors, address),
+        city: fillBySelectors(citySelectors, city),
+        zip: fillBySelectors(zipSelectors, zip),
+      };
+    },
+    {
+      address: profile.address_line1 ?? "",
+      city: profile.city ?? "",
+      zip: billingZip ?? "",
+      addressSelectors: EXPEDIA_BILLING_ADDRESS1_SELECTORS,
+      citySelectors: EXPEDIA_BILLING_CITY_SELECTORS,
+      zipSelectors: EXPEDIA_BILLING_ZIP_SELECTORS,
+    },
+  ).catch(() => ({
+    address: { ok: false, count: 0 },
+    city: { ok: false, count: 0 },
+    zip: { ok: false, count: 0 },
+  }));
+  trace(
+    `Expedia billing direct fill: address=${directResult.address.ok} city=${directResult.city.ok} zip=${directResult.zip.ok} ` +
+    `matches=${directResult.address.count}/${directResult.city.count}/${directResult.zip.count}`
+  );
+
+  const nativeResult = directResult.address.ok && directResult.city.ok && directResult.zip.ok
+    ? {
+        address: directResult.address.ok,
+        city: directResult.city.ok,
+        zip: directResult.zip.ok,
+        addressCandidates: directResult.address.count,
+        cityCandidates: directResult.city.count,
+        zipCandidates: directResult.zip.count,
+      }
+    : await page.evaluate(
+      ({ address, city, zip }: { address: string; city: string; zip: string }) => {
       const result = {
         address: false,
         city: false,
@@ -1329,20 +1418,20 @@ async function fillExpediaBillingAddressFields(
       result.city = fillBestInput("city", city);
       result.zip = fillBestInput("zip", zip);
       return result;
-    },
-    {
-      address: profile.address_line1 ?? "",
-      city: profile.city ?? "",
-      zip: billingZip ?? "",
-    },
-  ).catch(() => ({
-    address: false,
-    city: false,
-    zip: false,
-    addressCandidates: 0,
-    cityCandidates: 0,
-    zipCandidates: 0,
-  }));
+      },
+      {
+        address: profile.address_line1 ?? "",
+        city: profile.city ?? "",
+        zip: billingZip ?? "",
+      },
+    ).catch(() => ({
+      address: false,
+      city: false,
+      zip: false,
+      addressCandidates: 0,
+      cityCandidates: 0,
+      zipCandidates: 0,
+    }));
   trace(
     `Expedia billing native fill: address=${nativeResult.address} city=${nativeResult.city} zip=${nativeResult.zip} ` +
     `candidates=${nativeResult.addressCandidates}/${nativeResult.cityCandidates}/${nativeResult.zipCandidates}`
@@ -1952,6 +2041,15 @@ export async function fillExpediaGuestForm(
       );
       results.phone = phoneEl ? nativeFill(phoneEl, phone) : "not_found";
 
+      const visibleSelectsForContact = Array.from(document.querySelectorAll<HTMLSelectElement>("select"))
+        .filter(el => !el.disabled && (el.offsetParent !== null || el.getBoundingClientRect().width > 0));
+      const phoneCountrySelect = visibleSelectsForContact.find(el =>
+        /country\/territory code|country code|phone country|telephone country|region code/.test(fieldText(el))
+      );
+      results.phoneCountryCode = phoneCountrySelect
+        ? nativeSelect(phoneCountrySelect, ["United States of America +1", "United States +1", "United States", "+1", "1", "US", "USA"])
+        : "not_found";
+
       const dobParts = dateOfBirth.match(/^(\d{4})-(\d{2})-(\d{2})$/);
       if (dobParts) {
         const [, yyyy, mm, dd] = dobParts;
@@ -2025,6 +2123,21 @@ export async function fillExpediaGuestForm(
       ["Phone number", "Phone Number"],
       ['input[type="tel"]:not([id*="country"])'],
       phoneDigits, "phone", trace, true);
+  }
+  if (results.phoneCountryCode !== true) {
+    await selectExpediaTravelerOption(
+      page,
+      ["Country/Territory Code", "Country code", "Phone country"],
+      [
+        'select[aria-label*="Country/Territory Code" i]',
+        'select[aria-label*="country code" i]',
+        'select[name*="country" i][name*="code" i]',
+        'select[id*="country" i][id*="code" i]',
+      ],
+      ["United States of America +1", "United States +1", "United States", "+1", "1", "US", "USA"],
+      "phone country code",
+      trace,
+    );
   }
   if ((results.birthMonth !== true || results.birthDay !== true || results.birthYear !== true) && profile.date_of_birth) {
     trace("Expedia guest: date of birth not fully filled via evaluate - trying locator fallback");
@@ -2506,10 +2619,10 @@ export async function fillExpediaGroupPaymentForm(
   }
   await new Promise(r => setTimeout(r, 400));
 
-  // Current product QA priority: prefill traveler/contact plus billing address,
-  // then stop for human payment review. Card number/expiry are intentionally
-  // left to the user together with CVV/security code and final confirmation.
-  const shouldPrefillCard = false;
+  // Current product QA priority: billing must be verified before handoff, while
+  // allowed test card fields may still be prefilled. CVV/security code and final
+  // confirmation remain human-only.
+  const shouldPrefillCard = true;
   if (shouldPrefillCard) {
   await scrollExpediaCheckoutToSection(
     page,
@@ -3067,14 +3180,15 @@ export async function fillExpediaGroupPaymentForm(
   const verifyField = async (selectors: string[], fieldName: string): Promise<boolean> => {
     let foundAny = false;
     for (const sel of selectors) {
-      const val = await page.evaluate((s) => {
-        const el = document.querySelector<HTMLInputElement | HTMLSelectElement>(s);
-        return el ? el.value : null;
+      const values = await page.evaluate((s) => {
+        return Array.from(document.querySelectorAll<HTMLInputElement | HTMLSelectElement>(s))
+          .map(el => el.value ?? null);
       }, sel).catch(() => null);
-      if (val !== null) {
+      if (values && values.length > 0) {
         foundAny = true;
-        trace(`Expedia payment verify: ${fieldName} = "${val.length > 0 ? "[filled]" : "[empty]"}"`);
-        if (val.length > 0) return true;
+        const filled = values.some(val => (val ?? "").trim().length > 0);
+        trace(`Expedia payment verify: ${fieldName} via "${sel}" = "${filled ? "[filled]" : "[empty]"}"`);
+        if (filled) return true;
       }
     }
     // Also check iframes (including cross-origin payment processor frames)
