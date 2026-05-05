@@ -217,10 +217,13 @@ Story:          A second authorized R-030 Resy retry against the same
                 patches. Browser opened the exact Resy venue URL
                 (date=2026-05-08, seats=2, time=2000) but no provider
                 decision was made: decisionLog is null. Failed in 9
-                seconds with OpenAI Responses API 403 model_not_found
-                because the OpenAI project did not have access to
-                gpt-5.5 (Computer Use). None of the 422abe0 patches
-                executed; they remain unvalidated by this run.
+                seconds with OpenAI Responses API 403 model_not_found.
+                The founder later confirmed the intended OpenAI project
+                has gpt-5.5 access and budget, so the evidence points
+                to a runtime env/project mismatch in the Claude worktree
+                (wrong/stale project key or inherited env), not global
+                model access loss. None of the 422abe0 patches executed;
+                they remain unvalidated by this run.
 Evidence:
   Task id:           caa90661-ceb1-4753-aedc-be6282322a62
   Job id:            f66f9e63-d2d0-43fe-940b-8fc0329ca5ef
@@ -236,9 +239,11 @@ Evidence:
 Takeaway:       Inconclusive, not closure pass and not closure fail.
                 Not a Resy provider regression. The 422abe0 patches
                 remain unvalidated. The next safe step is for the
-                founder to fix OpenAI project / model access out of
-                band, then explicitly approve exactly one new R-030
-                attempt; do not patch Resy code based on this evidence.
+                intended gpt-5.5-enabled runtime env to be installed
+                and verified with a no-provider model-access preflight,
+                then the founder can explicitly approve exactly one new
+                R-030 attempt; do not patch Resy code based on this
+                evidence.
 ```
 
 ## How to use this taxonomy in a real triage

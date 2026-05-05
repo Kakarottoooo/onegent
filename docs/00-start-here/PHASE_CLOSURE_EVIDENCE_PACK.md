@@ -27,7 +27,7 @@ verified live closure section for that lane.
 
 | Phase | Status | Closure verdict | Blocking / closure evidence | Closure unblock plan | Next single allowed action | Hard-stop reminder |
 | --- | --- | --- | --- | --- | --- | --- |
-| Phase 0A | Blocked on Resy provider-path validation | `blocked` | Resy R-030 patch remains unvalidated by a successful provider-path run; the current closure-status anchor is the 2026-05-05 R-030 OpenAI Responses API 403 `model_not_found` model/env access blocker, not provider pass/fail. | External/model-access blocker first: founder or model/env owner fixes OpenAI project access to gpt-5.5 / Computer Use, then the founder approves exactly one probe-selected Resy retry. No further Resy code change is justified unless that clean run reaches a provider DOM/data failure. | Open `/dev/restaurant-readiness`, inspect the probe-selected case, and prepare one fresh artifact bundle only; do not run live without separate exact founder approval. | Stop before payment, final reservation, OTP/CAPTCHA/login handling, account verification, and human verification. |
+| Phase 0A | Blocked on Resy provider-path validation | `blocked` | Resy R-030 patch remains unvalidated by a successful provider-path run; the current closure-status anchor is the 2026-05-05 R-030 OpenAI Responses API 403 `model_not_found` runtime env/project mismatch, not provider pass/fail. | Runtime env/project blocker first: install/verify the intended gpt-5.5-enabled OpenAI env for the worktree, pass a no-provider model-access preflight, then the founder approves exactly one probe-selected Resy retry. No further Resy code change is justified unless that clean run reaches a provider DOM/data failure. | Open `/dev/restaurant-readiness`, inspect the probe-selected case, and prepare one fresh artifact bundle only; do not run live without separate exact founder approval. | Stop before payment, final reservation, OTP/CAPTCHA/login handling, account verification, and human verification. |
 | Phase 1 | Demo-freeze passed | `blocked` | Phase 1 gate, smoke, and autonomous founder E2E are recorded as passing, but Phase 1 still lists the founder manual E2E walkthrough as the final acceptance check. Documentation and tooling alone do not close the phase. | External founder-acceptance blocker: founder runs the manual E2E walkthrough on the intended integrated preview and records pass/fail. If it fails, the smallest code fix is the single UI/API/runtime gap exposed by that walkthrough; no current code fix is inferable from docs alone. | Have the founder or operator perform the manual walkthrough acceptance step and record the result; keep provider execution out of this phase-level pack. | Do not turn Phase 1 demo readiness into provider, payment, OTP/CAPTCHA/login, or final-confirm automation. |
 | Phase 1.5 | Demo-freeze passed | `blocked` | Quality gate, demo-control surfaces, runtime forensics, and demo-readiness evidence are passed for the freeze, but that is observability/QA readiness. It is not phase closure from docs, fixtures, or tooling alone. | External QA/founder acceptance blocker: rerun or read the latest Phase 1.5 gate, route dogfood, and demo-control evidence on the intended integrated preview, then record an explicit acceptance note. If a gate fails, fix only the smallest surfaced polish/import/build issue. | Record the Phase 1.5 acceptance result after the latest no-live gates are read or rerun; do not add mutating controls. | Do not add run/retry/live buttons or any mutating provider control to QA dashboards. |
 | Phase 2 | Frozen, not demo-promised | `frozen` | Agent2 Expedia and Agent3 hotel hardening are integrated, Claude acceptance keeps lanes `liveVerified: false`, and Goal war-room reports are no-live/synthetic; no provider closure acceptance evidence records live verification. | Cannot be closed by more docs, fixtures, or tooling. Founder must approve one exact controlled live retry for a chosen lane after reading Provider Closure Acceptance; Expedia's MCO -> BNA / Southwest case and Booking.com's YOTEL case are the named candidates. Only a fresh accepted artifact can unblock the lane. | Read Provider Closure Acceptance and inspect local artifacts; only a separately founder-approved single controlled retry can create new closure evidence. | No Phase 2 provider promise, broad suite, payment/CVV, OTP/CAPTCHA/login handling, verification handling, or final confirmation. |
@@ -51,7 +51,7 @@ verified live closure section for that lane.
 - `pass` - Canonical integrated preview SHA is `63837d9`.
 - `pass` - Phase 0A remains not closed because Resy has no successful
   provider-path closure artifact.
-- `pass` - Latest R-030 model-access blocker is `model_env_transient` /
+- `pass` - Latest R-030 runtime env/project mismatch is `model_env_transient` /
   `F-INFRA-MODEL-ACCESS`, not provider pass/fail.
 - `pass` - Phase 1 remains demo-freeze passed but still needs human acceptance.
 - `pass` - Phase 1 is not closed from tooling alone because founder manual E2E
@@ -82,25 +82,26 @@ verified live closure section for that lane.
   `codex/goal-provider-closure-war-room @ 29ebdc6` integrated as `7597b12`;
   war-room reports are no-live evidence tooling and synthetic reports cannot
   prove closure.
-- **Codex** - R-030 model-access blocker: latest R-030 OpenAI Responses API 403
+- **Codex** - R-030 runtime env/project mismatch: latest R-030 OpenAI Responses API 403
   `model_not_found` is preserved as `model_env_transient` /
   `F-INFRA-MODEL-ACCESS`, not a Resy provider regression.
 
-## R-030 Model-Access Blocker
+## R-030 Runtime Env/Project Mismatch
 
 - Evidence id: `r030-openai-403-model-not-found-2026-05-05`
 - Category: `model_env_transient`
-- Label: R-030 Resy retry on 2026-05-05 - OpenAI 403 `model_not_found`, no
-  gpt-5.5 access.
+- Label: R-030 Resy retry on 2026-05-05 - OpenAI 403 `model_not_found` from
+  runtime env/project mismatch.
 - Takeaway: this is a `model_env_transient` failure
   (`F-INFRA-MODEL-ACCESS`), not a Resy provider regression and not validation of
   the `422abe0` Resy recovery patches. Closure outcome is inconclusive, not
   closure pass and not closure fail. The next safe step is for the founder to
-  fix OpenAI project / model access out of band, then explicitly approve exactly
+  install/verify the intended gpt-5.5-enabled runtime env for the worktree,
+  pass a no-provider model-access preflight, then explicitly approve exactly
   one new R-030 attempt.
 
-This is infra/model access blocked evidence, not a Resy provider pass/fail. It
-cannot close Phase 0A.
+This is runtime env/project blocked evidence, not a Resy provider pass/fail.
+It cannot close Phase 0A.
 
 ## Hard Stops
 

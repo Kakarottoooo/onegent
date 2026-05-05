@@ -40,7 +40,7 @@ describe("phase closure evidence pack doc", () => {
     const doc = read(PACK_REL);
 
     expect(doc).toContain("Closure unblock plan");
-    expect(doc).toContain("External/model-access blocker first");
+    expect(doc).toContain("Runtime env/project blocker first");
     expect(doc).toContain("External founder-acceptance blocker");
     expect(doc).toContain("External QA/founder acceptance blocker");
     expect(doc).toContain("Cannot be closed by more docs, fixtures, or tooling");

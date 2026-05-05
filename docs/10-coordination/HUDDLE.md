@@ -33,6 +33,24 @@ small.
 
 ## Live Activity
 
+- 2026-05-05 codex: integrated Goal
+  `codex/goal-phase-closure-evidence-pack @ 9b43a65` as `aa034b3`, then
+  applied a Codex integration correction to avoid stale model-access wording.
+  The new no-live phase closure evidence pack adds
+  `docs/00-start-here/PHASE_CLOSURE_EVIDENCE_PACK.md`,
+  `lib/phase-closure-evidence/**`, and `scripts/phase-closure-evidence.ts`.
+  It keeps Phase 0A blocked on unvalidated Resy provider-path closure, Phase
+  1/1.5 demo-freeze passed but not phase-closed without explicit human
+  acceptance, and Phase 2 frozen/not live verified. Integration correction:
+  the 2026-05-05 R-030 403 is now described as a Claude worktree runtime
+  env/project mismatch because the founder confirmed the intended OpenAI
+  project has `gpt-5.5` access and budget; it is still
+  `model_env_transient` / `F-INFRA-MODEL-ACCESS`, not a Resy provider
+  regression. Verified phase-closure/docs tests 28/28, phase-closure CLI JSON,
+  `tsc`, strict `check-drift`, `git diff --check`, and Phase 1 gate 9/9
+  (`phase1-quality-gate-2026-05-05T03-45-44-658Z.json`). No live
+  provider/OpenAI/browser automation, worker start, DB mutation, payment,
+  OTP/CAPTCHA/login handling, or final confirmation was performed.
 - 2026-05-05 codex: integrated Claude
   `claude/r030-2026-05-05-evidence-packaging @ 1f2ec0f` as `1ebd09a` on top
   of the current integrated preview. This packages the 2026-05-05 R-030 retry

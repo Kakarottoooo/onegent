@@ -31,7 +31,7 @@ describe("phase closure evidence pack", () => {
     expect(phase0a.blockingEvidence).toContain(
       "Resy R-030 patch remains unvalidated",
     );
-    expect(phase0a.blockingEvidence).toContain("model/env access blocker");
+    expect(phase0a.blockingEvidence).toContain("runtime env/project mismatch");
 
     const phase1 = phase(pack, "Phase 1");
     expect(phase1.closureVerdict).toBe("blocked");
@@ -66,7 +66,7 @@ describe("phase closure evidence pack", () => {
       expect(item.closureProofRequired.length).toBeGreaterThan(40);
     }
     expect(phase(pack, "Phase 0A").closureUnblockPlan).toContain(
-      "model-access blocker",
+      "Runtime env/project blocker",
     );
     expect(phase(pack, "Phase 1").closureProofRequired).toContain(
       "Founder manual walkthrough sign-off",
@@ -107,7 +107,7 @@ describe("phase closure evidence pack", () => {
         "Hotel live closure final",
         "Provider closure acceptance",
         "Provider Closure War Room",
-        "R-030 model-access blocker",
+        "R-030 runtime env/project mismatch",
       ]),
     );
     expect(pack.integrationAnchors.find((a) => a.owner === "Agent2")?.evidence).toContain(

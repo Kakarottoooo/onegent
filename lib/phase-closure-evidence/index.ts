@@ -134,9 +134,9 @@ export function buildPhaseClosureEvidencePack(
       status: "Blocked on Resy provider-path validation",
       closureVerdict: "blocked",
       blockingEvidence:
-        "Resy R-030 patch remains unvalidated by a successful provider-path run; the current closure-status anchor is the 2026-05-05 R-030 OpenAI Responses API 403 model_not_found model/env access blocker, not provider pass/fail.",
+        "Resy R-030 patch remains unvalidated by a successful provider-path run; the current closure-status anchor is the 2026-05-05 R-030 OpenAI Responses API 403 model_not_found runtime env/project mismatch, not provider pass/fail.",
       closureUnblockPlan:
-        "External/model-access blocker first: founder or model/env owner fixes OpenAI project access to gpt-5.5 / Computer Use, then the founder approves exactly one probe-selected Resy retry. No further Resy code change is justified unless that clean run reaches a provider DOM/data failure.",
+        "Runtime env/project blocker first: install/verify the intended gpt-5.5-enabled OpenAI env for the worktree, pass a no-provider model-access preflight, then the founder approves exactly one probe-selected Resy retry. No further Resy code change is justified unless that clean run reaches a provider DOM/data failure.",
       closureProofRequired:
         "A non-synthetic provider-path artifact bundle recorded in Provider Closure Acceptance with `safe_handoff`, `login_otp_boundary`, `ready_for_confirmation`, or correct `no_availability`, plus operator sign-off.",
       nextSingleAllowedAction:
@@ -287,14 +287,14 @@ export function formatPhaseClosureEvidencePackMarkdown(
     lines.push(`- **${anchor.owner}** - ${anchor.label}: ${anchor.evidence}`);
   }
   lines.push("");
-  lines.push("## R-030 Model-Access Blocker");
+  lines.push("## R-030 Runtime Env/Project Mismatch");
   lines.push("");
   lines.push(`- Evidence id: \`${pack.latestR030Evidence.evidenceId}\``);
   lines.push(`- Category: \`${pack.latestR030Evidence.category}\``);
   lines.push(`- Label: ${pack.latestR030Evidence.label}`);
   lines.push(`- Takeaway: ${pack.latestR030Evidence.takeaway}`);
   lines.push("");
-  lines.push("This is infra/model access blocked evidence, not a Resy provider pass/fail. It cannot close Phase 0A.");
+  lines.push("This is runtime env/project blocked evidence, not a Resy provider pass/fail. It cannot close Phase 0A.");
   lines.push("");
   lines.push("## Hard Stops");
   lines.push("");
@@ -351,7 +351,7 @@ function buildEvidenceChecks(
     {
       key: "r030-model-env",
       label:
-        "Latest R-030 model-access blocker is model_env_transient / infra blocked, not provider pass/fail",
+        "Latest R-030 runtime env/project mismatch is model_env_transient / infra blocked, not provider pass/fail",
       passed:
         r030.category === "model_env_transient" &&
         (/OpenAI Responses API[\s\S]{0,80}403[\s\S]{0,80}model_not_found/i.test(
@@ -362,7 +362,7 @@ function buildEvidenceChecks(
           )) &&
         /F-INFRA-MODEL-ACCESS/i.test(r030.takeaway) &&
         /not a Resy provider regression/i.test(r030.takeaway) &&
-        /2026-05-05 R-030 retry[\s\S]{0,220}model_env_transient/i.test(
+        /2026-05-05 R-030 retry[\s\S]{0,360}model_env_transient/i.test(
           documents.providerClosureAcceptance,
         ),
       source: "lib/operator-failure-taxonomy/categories.ts",
@@ -482,7 +482,7 @@ function buildIntegrationAnchors(): PhaseClosureIntegrationAnchor[] {
     },
     {
       owner: "Codex",
-      label: "R-030 model-access blocker",
+      label: "R-030 runtime env/project mismatch",
       evidence:
         "Latest R-030 OpenAI Responses API 403 `model_not_found` is preserved as `model_env_transient` / `F-INFRA-MODEL-ACCESS`, not a Resy provider regression.",
     },

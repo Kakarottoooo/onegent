@@ -258,10 +258,10 @@ const R030_OPENAI_500: WorkedExample = {
 const R030_OPENAI_403_MODEL_NOT_FOUND: WorkedExample = {
   id: "r030-openai-403-model-not-found-2026-05-05",
   title:
-    "R-030 Resy retry on 2026-05-05 -- OpenAI 403 model_not_found, no gpt-5.5 access",
+    "R-030 Resy retry on 2026-05-05 -- OpenAI 403 model_not_found from runtime env/project mismatch",
   category: "model_env_transient",
   story:
-    "A second authorized R-030 Resy retry against the same baseline that contained the 422abe0 Resy recovery patches. The browser opened the exact Resy venue URL (date=2026-05-08, seats=2, time=2000) but no provider decision was made. The run failed in nine seconds with an OpenAI Responses API 403 model_not_found because the OpenAI project did not have access to gpt-5.5 (Computer Use). decisionLog is null. None of the 422abe0 patches (skip duplicate fallback, preserve exact venue URL, reject bare time controls, separate listing-stall from F-AVAIL-NONE) executed; they remain unvalidated by this run.",
+    "A second authorized R-030 Resy retry against the same baseline that contained the 422abe0 Resy recovery patches. The browser opened the exact Resy venue URL (date=2026-05-08, seats=2, time=2000) but no provider decision was made. The run failed in nine seconds with an OpenAI Responses API 403 model_not_found because the running Claude worktree process used an OpenAI project/key or inherited env that was not the intended gpt-5.5-enabled project. decisionLog is null. None of the 422abe0 patches (skip duplicate fallback, preserve exact venue URL, reject bare time controls, separate listing-stall from F-AVAIL-NONE) executed; they remain unvalidated by this run.",
   evidence: Object.freeze([
     Object.freeze({
       label: "Task id",
@@ -303,7 +303,7 @@ const R030_OPENAI_403_MODEL_NOT_FOUND: WorkedExample = {
     }),
   ]),
   takeaway:
-    "This is a model_env_transient failure (F-INFRA-MODEL-ACCESS), not a Resy provider regression and not a validation of the 422abe0 patches. Closure outcome is inconclusive, not closure pass and not closure fail. The next safe step is for the founder to fix OpenAI project / model access out of band, then explicitly approve exactly one new R-030 attempt; do not patch Resy code based on this evidence.",
+    "This is a model_env_transient failure (F-INFRA-MODEL-ACCESS), not a Resy provider regression and not a validation of the 422abe0 patches. Closure outcome is inconclusive, not closure pass and not closure fail. The next safe step is to install/verify the intended gpt-5.5-enabled runtime env for the worktree and pass a no-provider model-access preflight, then the founder may explicitly approve exactly one new R-030 attempt; do not patch Resy code based on this evidence.",
 };
 
 export const WORKED_EXAMPLES: ReadonlyArray<WorkedExample> = Object.freeze([

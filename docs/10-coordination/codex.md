@@ -2,7 +2,7 @@
 
 > **Branch**: `codex/integrated-preview-20260504`
 > **Last updated**: 2026-05-05
-> **Last commit**: `1ebd09a` R-030 model access evidence packaging integration
+> **Last commit**: `aa034b3` phase closure evidence pack integration
 >
 > Claude reads this at session start. I write to it before each push.
 > See `CLAUDE.md` section "coordination protocol".
@@ -12,6 +12,31 @@
 ## Currently doing
 
 Completed in latest pass:
+- Integrated Goal `codex/goal-phase-closure-evidence-pack @ 9b43a65` as
+  `aa034b3`, with a Codex follow-up wording correction in this integration
+  worktree.
+- New integrated capability:
+  - `docs/00-start-here/PHASE_CLOSURE_EVIDENCE_PACK.md`;
+  - `lib/phase-closure-evidence/**`;
+  - `scripts/phase-closure-evidence.ts`.
+- The pack reports Phase 0A blocked on unvalidated Resy provider-path closure,
+  Phase 1/1.5 demo-freeze passed but not phase-closed without explicit human
+  acceptance, and Phase 2 frozen/not live verified.
+- Integration correction: the 2026-05-05 R-030 403 is now described as a
+  Claude worktree runtime env/project mismatch, because the founder confirmed
+  the intended OpenAI project has `gpt-5.5` access and budget. It remains
+  `model_env_transient` / `F-INFRA-MODEL-ACCESS`, not a Resy provider
+  regression and not validation of `422abe0`.
+- Verified targeted phase-closure/docs tests 28/28,
+  `npx tsx scripts/phase-closure-evidence.ts --json`,
+  `npx tsc --noEmit --pretty false`, strict `npm run check-drift`,
+  `git diff --check`, and `npm run gate:phase1 -- --allow-known-drift` 9/9
+  (`phase1-quality-gate-2026-05-05T03-45-44-658Z.json`).
+- Safety boundary preserved: no live provider/OpenAI/browser automation,
+  worker start, DB mutation, payment, OTP/CAPTCHA/login handling, or final
+  confirmation.
+
+Previous completed pass:
 - Integrated Claude `claude/r030-2026-05-05-evidence-packaging @ 1f2ec0f` as
   `1ebd09a`.
 - This records the 2026-05-05 R-030 retry as an inconclusive

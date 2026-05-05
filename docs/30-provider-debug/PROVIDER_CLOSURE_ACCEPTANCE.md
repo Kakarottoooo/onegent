@@ -102,8 +102,10 @@ Inconclusive datapoints (do not flip `liveVerified`):
   `77f70121-4460-4bcd-974d-999360221cde`. Report
   `benchmark/runs/phase0-resy-2026-05-04T19-14-37-472Z.json`. Not a
   Resy regression.
-- 2026-05-05 R-030 retry -- OpenAI Responses API 403 model_not_found
-  (project does not have access to gpt-5.5). Class
+- 2026-05-05 R-030 retry -- OpenAI Responses API 403 model_not_found.
+  Founder confirmed the intended OpenAI project has gpt-5.5 access and
+  budget, so this is tracked as a runtime env/project mismatch in the
+  Claude worktree, not global model access loss. Class
   `model_env_transient` / `F-INFRA-MODEL-ACCESS`. Job
   `f66f9e63-d2d0-43fe-940b-8fc0329ca5ef`. Report
   `benchmark/runs/phase0-resy-2026-05-05T02-08-50-530Z.json`.

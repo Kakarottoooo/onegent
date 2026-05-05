@@ -24,9 +24,12 @@ not be treated as one.
 
 The 2026-05-05 R-030 retry is a second worked example in the same class.
 It died in nine seconds with OpenAI Responses API 403
-`model_not_found` (project does not have access to `gpt-5.5`). The
-browser opened the exact Resy venue URL but no provider decision was
-made: `decisionLog` is `null`. Classification remains
+`model_not_found`. The founder later confirmed the intended OpenAI
+project has `gpt-5.5` access and budget, so this points to a runtime
+env/project mismatch in the Claude worktree (wrong/stale project key
+or inherited env), not global model access loss. The browser opened
+the exact Resy venue URL but no provider decision was made:
+`decisionLog` is `null`. Classification remains
 `model_env_transient` / `F-INFRA-MODEL-ACCESS`; the closure outcome is
 **inconclusive**, not closure pass and not closure fail. The
 `422abe0` Resy recovery patches (skip duplicate fallback, preserve
@@ -49,9 +52,10 @@ verification, CAPTCHA, login bypass, or final confirmation was
 touched. The browser opened the public Resy venue URL only and made
 no automation interaction before the OpenAI 403 fired.
 
-Next safe step (founder-only): fix OpenAI project / model access
-out of band. Only after that, founder may explicitly approve exactly
-one new R-030 attempt.
+Next safe step (founder-only): install/verify the intended
+`gpt-5.5`-enabled runtime env for the worktree and pass a no-provider
+model-access preflight. Only after that, founder may explicitly
+approve exactly one new R-030 attempt.
 
 ## Safety Boundary
 
