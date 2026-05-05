@@ -1504,9 +1504,15 @@ The user will enter CVV and confirm payment themselves.`,
 
           try {
             trace("[flight-rpa] Running allowed Expedia payment/billing prefill; CVV/security code and final booking remain human-only");
-            await fillExpediaGroupPaymentForm(checkoutPage, effectiveFlightProfile, trace);
-            await scrollExpediaCheckoutToFinalReviewBoundary(checkoutPage, trace);
-            fillSummary = "Flight checkout reached — allowed traveler, test card, and billing details were pre-filled. Review details, enter security code, and click Complete Booking yourself.";
+            const paymentPrefill = await fillExpediaGroupPaymentForm(checkoutPage, effectiveFlightProfile, trace);
+            const finalBoundaryVisible = await scrollExpediaCheckoutToFinalReviewBoundary(checkoutPage, trace);
+            trace(
+              `[flight-rpa] Expedia payment/billing prefill state: complete=${paymentPrefill.complete} ` +
+              `missing=${paymentPrefill.missing.join(",") || "none"} finalBoundaryVisible=${finalBoundaryVisible}`
+            );
+            fillSummary = paymentPrefill.complete
+              ? "Flight checkout reached — allowed traveler, test card, and billing details were pre-filled. Review details, enter security code, and click Complete Booking yourself."
+              : `Flight checkout reached — manual review needed for: ${paymentPrefill.missing.join(", ")}. CVV/security code and Complete Booking remain human-only.`;
           } catch (paymentPrefillErr) {
             trace(`[flight-rpa] Payment/billing prefill error: ${(paymentPrefillErr as Error).message?.slice(0, 100)}`);
             await scrollExpediaCheckoutToFinalReviewBoundary(checkoutPage, trace).catch(() => false);

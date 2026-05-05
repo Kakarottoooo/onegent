@@ -421,6 +421,10 @@ describe("Expedia flight traveler form state", () => {
       month: ["07", "7", "July", "Jul"],
       year: ["2029", "29"],
     });
+    expect(buildExpediaCardExpirySelectCandidates("0130")).toEqual({
+      month: ["01", "1", "January", "Jan"],
+      year: ["2030", "30"],
+    });
     expect(buildExpediaCardExpirySelectCandidates("13/29")).toBeNull();
   });
 

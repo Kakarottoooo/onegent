@@ -61,6 +61,31 @@ interface ExpediaGroupProfile {
   phone?: string;
 }
 
+type ExpediaBillingAddressFillResult = {
+  address: boolean;
+  city: boolean;
+  zip: boolean;
+  country: boolean;
+  state: boolean;
+};
+
+export type ExpediaPaymentPrefillResult = {
+  complete: boolean;
+  missing: string[];
+  filled: {
+    cardName: boolean;
+    cardNumber: boolean;
+    cardExpiry: boolean;
+    billingAddress1: boolean;
+    billingCity: boolean;
+    billingZip: boolean;
+    billingCountry: boolean;
+    billingState: boolean;
+    securityCodeEmpty: boolean;
+    finalButtonVisible: boolean;
+  };
+};
+
 type ExpediaPageWithOptionalLabels = Page & {
   getByLabel?: (text: string, options?: { exact?: boolean }) => ReturnType<Page["locator"]>;
 };
@@ -737,6 +762,8 @@ export function selectExpediaFlightCandidateLabels(
 const EXPEDIA_BILLING_ZIP_SELECTORS = [
   // Confirmed from live Expedia checkout debug (id="payment_zip_code")
   'input[id="payment_zip_code"]',
+  'input[autocomplete="billing postal-code"]',
+  'input[autocomplete="postal-code"]',
   'input[id*="billingZip"], input[id*="billing-zip"], input[id*="BillingZip"]',
   'input[name*="billingZip"], input[name*="billing-zip"]',
   'input[placeholder*="ZIP code"], input[placeholder*="Zip code"], input[placeholder*="Postal code"]',
@@ -745,6 +772,8 @@ const EXPEDIA_BILLING_ZIP_SELECTORS = [
 ];
 
 const EXPEDIA_BILLING_ADDRESS1_SELECTORS = [
+  'input[autocomplete="billing address-line1"]',
+  'input[autocomplete="address-line1"]',
   'input[id*="billingAddressLine1" i]',
   'input[id*="billing-address-line-1" i]',
   'input[id*="addressLine1" i]',
@@ -757,6 +786,8 @@ const EXPEDIA_BILLING_ADDRESS1_SELECTORS = [
 ];
 
 const EXPEDIA_BILLING_CITY_SELECTORS = [
+  'input[autocomplete="billing address-level2"]',
+  'input[autocomplete="address-level2"]',
   'input[id*="billingCity" i]',
   'input[id*="billing-city" i]',
   'input[id*="city" i]',
@@ -1083,7 +1114,12 @@ async function fillExpediaSplitCardExpiry(
       const option = Array.from(el.options).find(opt => {
         const value = (opt.value ?? "").trim().toLowerCase().replace(/^0+/, "");
         const text = (opt.textContent ?? "").trim().toLowerCase().replace(/^0+/, "");
-        return normalizedCandidates.includes(value) || normalizedCandidates.includes(text);
+        return normalizedCandidates.some(candidate =>
+          value === candidate ||
+          text === candidate ||
+          value.includes(candidate) ||
+          text.includes(candidate)
+        );
       });
       if (!option) return false;
       const setter = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, "value")?.set;
@@ -1187,10 +1223,11 @@ async function fillExpediaBillingAddressFields(
   page: Page,
   profile: ExpediaGroupProfile,
   trace: (msg: string) => void,
-): Promise<void> {
+): Promise<ExpediaBillingAddressFillResult> {
   const billingZip = profile.billing_zip ?? profile.zip;
   const nativeResult = await page.evaluate(
     ({ address, city, zip }: { address: string; city: string; zip: string }) => {
+      const result = { address: false, city: false, zip: false };
       const nativeFill = (el: HTMLInputElement, val: string): boolean => {
         if (!val || !el || el.disabled) return false;
         const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set;
@@ -1203,19 +1240,29 @@ async function fillExpediaBillingAddressFields(
           el.value = "";
           el.value = val;
         }
+        try {
+          el.dispatchEvent(new InputEvent("beforeinput", { bubbles: true, data: val, inputType: "insertText" }));
+        } catch {
+          // Older embedded browsers may not support InputEvent construction.
+        }
         el.dispatchEvent(new Event("input", { bubbles: true }));
         el.dispatchEvent(new Event("change", { bubbles: true }));
+        el.dispatchEvent(new KeyboardEvent("keyup", { bubbles: true }));
         el.blur();
         return el.value.trim().length > 0;
       };
-      const isVisible = (el: HTMLElement): boolean => {
+      const isUsable = (el: HTMLInputElement): boolean => {
         const rect = el.getBoundingClientRect();
         const style = window.getComputedStyle(el);
+        const text = fieldText(el);
         return rect.width > 0 &&
           rect.height > 0 &&
           style.display !== "none" &&
           style.visibility !== "hidden" &&
-          style.opacity !== "0";
+          style.opacity !== "0" &&
+          !el.disabled &&
+          el.type !== "hidden" &&
+          !/\bcvv\b|\bcvc\b|security.?code|verification.?code|card.?security|coupon|promo|gift.?card|credit.?card.?number|debit.?credit.?card.?number|card.?number/.test(text);
       };
       const fieldText = (el: HTMLInputElement): string => {
         const id = el.getAttribute("id") ?? "";
@@ -1231,31 +1278,44 @@ async function fillExpediaBillingAddressFields(
         ].join(" ").replace(/\s+/g, " ").trim().toLowerCase();
       };
       const inputs = Array.from(document.querySelectorAll<HTMLInputElement>("input"))
-        .filter(el => {
-          const input = el as HTMLInputElement;
-          const text = fieldText(input);
-          return isVisible(input) &&
-            !input.disabled &&
-            input.type !== "hidden" &&
-            !/\bcvv\b|\bcvc\b|security.?code|verification.?code|card.?security|coupon|promo/.test(text);
-        }) as HTMLInputElement[];
-      const findInput = (patterns: RegExp[], reject: RegExp[] = []): HTMLInputElement | undefined =>
-        inputs.find(input => {
-          const text = fieldText(input);
-          return patterns.some(pattern => pattern.test(text)) &&
-            !reject.some(pattern => pattern.test(text));
-        });
-      const addressEl = findInput(
-        [/billing address.?1/, /billing address-line1/, /billing address line1/, /address line.?1/, /address-line1/, /123 main/],
-        [/address.?2/, /suite|apt|apartment/],
-      );
-      const cityEl = findInput([/\bcity\b/, /billing address-level2/, /address-level2/, /billing city/]);
-      const zipEl = findInput([/\bzip code\b/, /billing zip/, /billing postal-code/, /postal-code/, /postal code/]);
-      return {
-        address: addressEl ? nativeFill(addressEl, address) : false,
-        city: cityEl ? nativeFill(cityEl, city) : false,
-        zip: zipEl ? nativeFill(zipEl, zip) : false,
+        .filter(isUsable);
+      const scoreInput = (input: HTMLInputElement, kind: "address" | "city" | "zip"): number => {
+        const text = fieldText(input);
+        const autocomplete = (input.getAttribute("autocomplete") ?? "").toLowerCase();
+        let score = 0;
+        if (kind === "address") {
+          if (autocomplete === "billing address-line1") score += 100;
+          if (autocomplete === "address-line1") score += 80;
+          if (/billing address\s*1|billing address-line1|billing address line\s*1|address line\s*1|address-line1|123 main/.test(text)) score += 60;
+          if (/address\s*2|suite|apt|apartment/.test(text)) score -= 100;
+        }
+        if (kind === "city") {
+          if (autocomplete === "billing address-level2") score += 100;
+          if (autocomplete === "address-level2") score += 80;
+          if (/\bcity\b|billing city|address-level2|address level\s*2/.test(text)) score += 60;
+          if (/country|state|province|zip|postal|phone|card/.test(text)) score -= 100;
+        }
+        if (kind === "zip") {
+          if (autocomplete === "billing postal-code") score += 100;
+          if (autocomplete === "postal-code") score += 80;
+          if (/\bzip code\b|billing zip|billing postal-code|postal-code|postal code/.test(text)) score += 60;
+          if (/security|cvv|cvc|card number/.test(text)) score -= 100;
+        }
+        return score;
       };
+      const pickInput = (kind: "address" | "city" | "zip"): HTMLInputElement | undefined =>
+        inputs
+          .map(input => ({ input, score: scoreInput(input, kind) }))
+          .filter(candidate => candidate.score > 0)
+          .sort((a, b) => b.score - a.score)[0]?.input;
+
+      const addressEl = pickInput("address");
+      const cityEl = pickInput("city");
+      const zipEl = pickInput("zip");
+      result.address = addressEl ? nativeFill(addressEl, address) : false;
+      result.city = cityEl ? nativeFill(cityEl, city) : false;
+      result.zip = zipEl ? nativeFill(zipEl, zip) : false;
+      return result;
     },
     {
       address: profile.address_line1 ?? "",
@@ -1267,6 +1327,7 @@ async function fillExpediaBillingAddressFields(
     `Expedia billing native fill: address=${nativeResult.address} city=${nativeResult.city} zip=${nativeResult.zip}`
   );
 
+  let countrySelected = false;
   if (profile.country) {
     const country = profile.country;
     const countryCandidates = Array.from(new Set([
@@ -1275,7 +1336,7 @@ async function fillExpediaBillingAddressFields(
       country.toUpperCase() === "USA" ? "United States of America" : "",
       country.toLowerCase() === "united states" ? "United States of America" : "",
     ].filter(Boolean)));
-    await selectExpediaTravelerOption(
+    countrySelected = await selectExpediaTravelerOption(
       page,
       ["Country/Territory", "Country/Region", "Country"],
       EXPEDIA_BILLING_COUNTRY_SELECTORS,
@@ -1307,10 +1368,11 @@ async function fillExpediaBillingAddressFields(
     );
   }
 
+  let stateSelected = false;
   if (profile.state) {
     const state = profile.state;
     const stateCandidates = Array.from(new Set([state, state.toUpperCase()]));
-    const selected = await selectExpediaTravelerOption(
+    stateSelected = await selectExpediaTravelerOption(
       page,
       ["State", "Billing state", "State/Province"],
       EXPEDIA_BILLING_STATE_SELECTORS,
@@ -1318,7 +1380,7 @@ async function fillExpediaBillingAddressFields(
       "billing state",
       trace,
     );
-    if (!selected) {
+    if (!stateSelected) {
       await findAndFillExpediaField(
         page,
         ["State", "Billing state", "State/Province"],
@@ -1329,6 +1391,68 @@ async function fillExpediaBillingAddressFields(
       );
     }
   }
+
+  const verified = await page.evaluate(() => {
+    const fieldText = (el: HTMLInputElement | HTMLSelectElement): string => {
+      const id = el.getAttribute("id") ?? "";
+      const label = id ? document.querySelector<HTMLLabelElement>(`label[for="${CSS.escape(id)}"]`)?.textContent ?? "" : "";
+      return [
+        label,
+        el.getAttribute("aria-label") ?? "",
+        el.getAttribute("autocomplete") ?? "",
+        el.getAttribute("placeholder") ?? "",
+        el.getAttribute("name") ?? "",
+        id,
+        el.closest("label")?.textContent ?? "",
+      ].join(" ").replace(/\s+/g, " ").trim().toLowerCase();
+    };
+    const isVisible = (el: HTMLElement): boolean => {
+      const rect = el.getBoundingClientRect();
+      const style = window.getComputedStyle(el);
+      return rect.width > 0 && rect.height > 0 && style.display !== "none" && style.visibility !== "hidden";
+    };
+    const inputs = Array.from(document.querySelectorAll<HTMLInputElement>("input"))
+      .filter(el => isVisible(el) && !el.disabled && el.type !== "hidden");
+    const selects = Array.from(document.querySelectorAll<HTMLSelectElement>("select"))
+      .filter(el => isVisible(el) && !el.disabled);
+    const hasInput = (patterns: RegExp[], reject: RegExp[] = []): boolean =>
+      inputs.some(input => {
+        const text = fieldText(input);
+        return input.value.trim().length > 0 &&
+          patterns.some(pattern => pattern.test(text)) &&
+          !reject.some(pattern => pattern.test(text));
+      });
+    const hasSelect = (patterns: RegExp[]): boolean =>
+      selects.some(select => {
+        const text = fieldText(select);
+        return select.value.trim().length > 0 &&
+          select.selectedIndex > 0 &&
+          patterns.some(pattern => pattern.test(text));
+      });
+    return {
+      address: hasInput(
+        [/billing address.?1/, /billing address-line1/, /billing address line.?1/, /address line.?1/, /address-line1/, /123 main/],
+        [/address.?2/, /suite|apt|apartment/],
+      ),
+      city: hasInput([/\bcity\b/, /billing address-level2/, /address-level2/, /billing city/]),
+      zip: hasInput([/\bzip code\b/, /billing zip/, /billing postal-code/, /postal-code/, /postal code/]),
+      country: hasSelect([/country\/territory/, /country\/region/, /\bcountry\b/]),
+      state: hasSelect([/\bstate\b/, /province/, /billing state/]) ||
+        hasInput([/\bstate\b/, /province/, /billing state/]),
+    };
+  }).catch(() => ({ address: false, city: false, zip: false, country: false, state: false }));
+
+  const result = {
+    address: nativeResult.address || verified.address,
+    city: nativeResult.city || verified.city,
+    zip: nativeResult.zip || verified.zip,
+    country: countrySelected || verified.country,
+    state: stateSelected || verified.state,
+  };
+  trace(
+    `Expedia billing verify: address=${result.address} city=${result.city} zip=${result.zip} country=${result.country} state=${result.state}`
+  );
+  return result;
 }
 
 async function scrollExpediaCheckoutToSection(
@@ -1566,7 +1690,9 @@ export function buildExpediaCardExpirySelectCandidates(cardExpiry?: string): {
   month: string[];
   year: string[];
 } | null {
-  const parts = (cardExpiry ?? "").trim().match(/^(\d{1,2})\D+(\d{2}|\d{4})$/);
+  const raw = (cardExpiry ?? "").trim();
+  const parts = raw.match(/^(\d{1,2})\D+(\d{2}|\d{4})$/) ??
+    raw.replace(/\D/g, "").match(/^(\d{2})(\d{2}|\d{4})$/);
   if (!parts) return null;
   const monthIndex = parseInt(parts[1], 10);
   if (!Number.isFinite(monthIndex) || monthIndex < 1 || monthIndex > 12) return null;
@@ -2296,7 +2422,7 @@ export async function fillExpediaGroupPaymentForm(
   page: Page,
   profile: ExpediaGroupProfile,
   trace: (msg: string) => void
-): Promise<void> {
+): Promise<ExpediaPaymentPrefillResult> {
   // Wait for the checkout page to fully render before interacting.
   // Expedia's React checkout lazy-renders card fields and modals after initial page load.
   trace("Expedia payment: waiting for checkout page to fully render...");
@@ -2315,6 +2441,15 @@ export async function fillExpediaGroupPaymentForm(
   // Extra settle time after DOM appears (React effects / autocomplete / animation)
   await new Promise(r => setTimeout(r, 800));
   trace("Expedia payment: page settled — proceeding with modal dismiss and form fill");
+
+  const billingZip = profile.billing_zip ?? profile.zip;
+  const safeLength = (value: string | undefined) => value?.length ?? 0;
+  trace(
+    `Expedia payment profile fields: cardName=${safeLength(profile.card_name) > 0} ` +
+    `cardNumberLen=${safeLength(profile.card_number)} cardExpiry=${safeLength(profile.card_expiry) > 0} ` +
+    `addressLen=${safeLength(profile.address_line1)} cityLen=${safeLength(profile.city)} ` +
+    `state=${safeLength(profile.state) > 0} zipLen=${safeLength(billingZip)}`
+  );
 
   // Dismiss the "This booking is almost yours!" nudge modal if present
   await dismissExpediaAlmostYoursModal(page, trace);
@@ -2846,13 +2981,12 @@ export async function fillExpediaGroupPaymentForm(
     ["Billing address 1", "Billing address", "Country/Territory", "City", "State", "ZIP code", "Postal code"],
     trace,
   );
-  await fillExpediaBillingAddressFields(page, profile, trace);
+  const billingFillResult = await fillExpediaBillingAddressFields(page, profile, trace);
 
   // Fill billing ZIP code via page.evaluate + native setter.
   // Uses the same technique as guest form filling (which we know works on Stagehand proxy).
   // locator.evaluate() is not available on Stagehand proxy, so we must use page.evaluate()
   // with document.querySelector to trigger React's state update.
-  const billingZip = profile.billing_zip ?? profile.zip;
   if (billingZip) {
     const zipFilled = await page.evaluate(({ zip, selectors }: { zip: string; selectors: string[] }) => {
       const nativeFill = (el: HTMLInputElement, v: string): boolean => {
@@ -2886,6 +3020,7 @@ export async function fillExpediaGroupPaymentForm(
     }, { zip: billingZip, selectors: EXPEDIA_BILLING_ZIP_SELECTORS }).catch(() => false);
 
     if (zipFilled) {
+      billingFillResult.zip = true;
       trace(`Expedia payment: filled billing ZIP via page.evaluate (length=${billingZip.length})`);
     } else {
       trace("Expedia payment: billing ZIP page.evaluate failed — trying locator fallback");
@@ -2897,11 +3032,12 @@ export async function fillExpediaGroupPaymentForm(
     trace("Expedia payment: no billing ZIP in profile — skipping");
   }
 
-  // Verification pass
+  // Verification pass. This drives the user-facing task status: do not claim the
+  // allowed checkout details are complete unless the fields actually hold values.
   const verifyField = async (selectors: string[], fieldName: string): Promise<boolean> => {
     for (const sel of selectors) {
       const val = await page.evaluate((s) => {
-        const el = document.querySelector<HTMLInputElement>(s);
+        const el = document.querySelector<HTMLInputElement | HTMLSelectElement>(s);
         return el ? el.value : null;
       }, sel).catch(() => null);
       if (val !== null) {
@@ -2930,10 +3066,140 @@ export async function fillExpediaGroupPaymentForm(
     return false;
   };
 
+  const verifySplitExpiryField = async (): Promise<boolean> => {
+    const result = await page.evaluate(() => {
+      const isVisible = (el: HTMLElement): boolean => {
+        const rect = el.getBoundingClientRect();
+        const style = window.getComputedStyle(el);
+        return rect.width > 0 && rect.height > 0 && style.display !== "none" && style.visibility !== "hidden";
+      };
+      const fieldText = (el: HTMLSelectElement): string => {
+        const id = el.getAttribute("id") ?? "";
+        const label = id ? document.querySelector<HTMLLabelElement>(`label[for="${CSS.escape(id)}"]`)?.textContent ?? "" : "";
+        return [
+          label,
+          el.getAttribute("aria-label") ?? "",
+          el.getAttribute("autocomplete") ?? "",
+          el.getAttribute("name") ?? "",
+          id,
+          el.closest("label")?.textContent ?? "",
+          el.parentElement?.textContent ?? "",
+        ].join(" ").replace(/\s+/g, " ").trim().toLowerCase();
+      };
+      const visibleSelects = Array.from(document.querySelectorAll<HTMLSelectElement>("select"))
+        .filter(el => isVisible(el) && !el.disabled);
+      const hasSelected = (select: HTMLSelectElement) => select.value.trim().length > 0 && select.selectedIndex > 0;
+      const month = visibleSelects.some(select =>
+        hasSelected(select) &&
+        /(cc-exp-month|expiration month|expiry month|month)/.test(fieldText(select))
+      );
+      const year = visibleSelects.some(select =>
+        hasSelected(select) &&
+        /(cc-exp-year|expiration year|expiry year|year)/.test(fieldText(select))
+      );
+      if (month && year) return { month, year };
+
+      const labels = Array.from(document.querySelectorAll<HTMLElement>("label, div, span, p"))
+        .filter(isVisible)
+        .filter(el => /expiration date|expiry date|expiration|expiry/i.test((el.textContent ?? "").replace(/\s+/g, " ")))
+        .map(el => el.getBoundingClientRect())
+        .sort((a, b) => a.top - b.top);
+      const labelRect = labels[0];
+      if (!labelRect) return { month, year };
+      const nearby = visibleSelects
+        .filter(select => {
+          const rect = select.getBoundingClientRect();
+          return rect.top >= labelRect.top - 8 && rect.top <= labelRect.bottom + 180;
+        })
+        .sort((a, b) => {
+          const ar = a.getBoundingClientRect();
+          const br = b.getBoundingClientRect();
+          return ar.top === br.top ? ar.left - br.left : ar.top - br.top;
+        });
+      return {
+        month: month || Boolean(nearby[0] && hasSelected(nearby[0])),
+        year: year || Boolean(nearby[1] && hasSelected(nearby[1])),
+      };
+    }).catch(() => ({ month: false, year: false }));
+    trace(`Expedia payment verify: split expiry month=${result.month} year=${result.year}`);
+    return result.month && result.year;
+  };
+
+  const verifySecurityCodeEmpty = async (): Promise<boolean> => {
+    const result = await page.evaluate(() => {
+      const fieldText = (el: HTMLInputElement): string => {
+        const id = el.getAttribute("id") ?? "";
+        const label = id ? document.querySelector<HTMLLabelElement>(`label[for="${CSS.escape(id)}"]`)?.textContent ?? "" : "";
+        return [
+          label,
+          el.getAttribute("aria-label") ?? "",
+          el.getAttribute("autocomplete") ?? "",
+          el.getAttribute("placeholder") ?? "",
+          el.getAttribute("name") ?? "",
+          id,
+          el.closest("label")?.textContent ?? "",
+        ].join(" ").replace(/\s+/g, " ").trim().toLowerCase();
+      };
+      const securityInputs = Array.from(document.querySelectorAll<HTMLInputElement>("input"))
+        .filter(input => /\bcvv\b|\bcvc\b|security.?code|card.?security/.test(fieldText(input)));
+      return {
+        count: securityInputs.length,
+        empty: securityInputs.every(input => input.value.trim().length === 0),
+      };
+    }).catch(() => ({ count: 0, empty: true }));
+    trace(`Expedia payment verify: security-code fields=${result.count} empty=${result.empty}`);
+    return result.empty;
+  };
+
   const nameOk = profile.card_name ? await verifyField(EXPEDIA_GROUP_CARD_NAME_SELECTORS, "cardholder name") : true;
   const numberOk = profile.card_number ? await verifyField(EXPEDIA_GROUP_CARD_NUMBER_SELECTORS, "card number") : true;
-  const expiryOk = profile.card_expiry ? await verifyField(EXPEDIA_GROUP_CARD_EXPIRY_SELECTORS, "expiry") : true;
-  trace(`Expedia payment verification: name=${nameOk}, cardNumber=${numberOk}, expiry=${expiryOk}`);
+  const expiryOk = profile.card_expiry
+    ? (await verifyField(EXPEDIA_GROUP_CARD_EXPIRY_SELECTORS, "expiry")) || (await verifySplitExpiryField())
+    : true;
+  const addressOk = profile.address_line1
+    ? billingFillResult.address || await verifyField(EXPEDIA_BILLING_ADDRESS1_SELECTORS, "billing address 1")
+    : true;
+  const cityOk = profile.city
+    ? billingFillResult.city || await verifyField(EXPEDIA_BILLING_CITY_SELECTORS, "billing city")
+    : true;
+  const zipOk = billingZip
+    ? billingFillResult.zip || await verifyField(EXPEDIA_BILLING_ZIP_SELECTORS, "billing ZIP")
+    : true;
+  const countryOk = profile.country ? billingFillResult.country : true;
+  const stateOk = profile.state ? billingFillResult.state : true;
+  const securityCodeEmpty = await verifySecurityCodeEmpty();
+  const missing = [
+    ...(nameOk ? [] : ["cardholder name"]),
+    ...(numberOk ? [] : ["card number"]),
+    ...(expiryOk ? [] : ["expiration date"]),
+    ...(addressOk ? [] : ["billing address 1"]),
+    ...(cityOk ? [] : ["billing city"]),
+    ...(zipOk ? [] : ["billing ZIP"]),
+    ...(countryOk ? [] : ["billing country"]),
+    ...(stateOk ? [] : ["billing state"]),
+    ...(securityCodeEmpty ? [] : ["security code must stay empty"]),
+  ];
+  trace(
+    `Expedia payment verification: name=${nameOk}, cardNumber=${numberOk}, expiry=${expiryOk}, ` +
+    `address=${addressOk}, city=${cityOk}, zip=${zipOk}, country=${countryOk}, state=${stateOk}, ` +
+    `securityCodeEmpty=${securityCodeEmpty}, missing=${missing.join(",") || "none"}`
+  );
+  return {
+    complete: missing.length === 0,
+    missing,
+    filled: {
+      cardName: nameOk,
+      cardNumber: numberOk,
+      cardExpiry: expiryOk,
+      billingAddress1: addressOk,
+      billingCity: cityOk,
+      billingZip: zipOk,
+      billingCountry: countryOk,
+      billingState: stateOk,
+      securityCodeEmpty,
+      finalButtonVisible: false,
+    },
+  };
 }
 
 // ── Programmatic Expedia flight booking ────────────────────────────────────────

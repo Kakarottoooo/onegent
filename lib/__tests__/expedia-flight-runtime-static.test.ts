@@ -17,8 +17,9 @@ describe("Expedia flight runtime safety guards", () => {
   it("prefills allowed Expedia payment fields before the final manual boundary", () => {
     const source = readFileSync("lib/booking-autopilot/stagehand-executor.ts", "utf8");
 
-    expect(source).toContain("fillExpediaGroupPaymentForm(checkoutPage, effectiveFlightProfile, trace)");
+    expect(source).toContain("const paymentPrefill = await fillExpediaGroupPaymentForm(checkoutPage, effectiveFlightProfile, trace)");
     expect(source).toContain("scrollExpediaCheckoutToFinalReviewBoundary(checkoutPage, trace)");
+    expect(source).toContain("manual review needed for");
     expect(source).toContain("CVV/security code and final booking remain human-only");
   });
 
@@ -46,6 +47,18 @@ describe("Expedia flight runtime safety guards", () => {
     expect(source).toContain("billing address-line1");
     expect(source).toContain("billing address-level2");
     expect(source).toContain("billing postal-code");
+    expect(source).toContain("Expedia billing verify");
+    expect(source).toContain("Expedia payment profile fields");
+  });
+
+  it("does not mark Expedia payment prefill complete when allowed billing fields are missing", () => {
+    const source = readFileSync("lib/booking-autopilot/providers/expedia.ts", "utf8");
+
+    expect(source).toContain("export type ExpediaPaymentPrefillResult");
+    expect(source).toContain("complete: missing.length === 0");
+    expect(source).toContain('"billing address 1"');
+    expect(source).toContain('"billing city"');
+    expect(source).toContain('"billing ZIP"');
   });
 
   it("does not include CVV or security-code selectors in Expedia card iframe candidates", () => {
