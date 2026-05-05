@@ -237,4 +237,124 @@ describe("docs static guard - operator dev pages", () => {
       "PROVIDER_RUNTIME_DEBUG_PLAYBOOK must reference FAILURE_TAXONOMY in its triage steps",
     ).toContain("docs/30-provider-debug/FAILURE_TAXONOMY.md");
   });
+
+  it("/dev/provider-closure cockpit obeys the strictest no-action-button rule", () => {
+    // The provider-closure cockpit has a tighter rule than the
+    // generic dev-page guard above: any of the verbs run / retry /
+    // live / start / resume / execute / submit, in either an
+    // onClick handler or a button-like JSX label, are forbidden.
+    // The page is allowed: Refresh button (router.refresh()), copy
+    // text, links. Documentation/explanation prose is allowed when
+    // the surrounding line is in a denial window.
+    const relPath = "app/dev/provider-closure/page.tsx";
+    expect(
+      existsSync(path.join(ROOT, relPath)),
+      `${relPath} must exist for provider closure cockpit guards`,
+    ).toBe(true);
+
+    const source = stripCodeComments(read(relPath));
+    const lines = source.split(/\r?\n/);
+
+    // Forbidden JSX button labels (the visible text inside a
+    // <button>...</button> element). We capture the token after
+    // the opening tag heuristically and check it does not start
+    // with one of the forbidden imperatives.
+    const forbiddenButtonLabel =
+      /<button[^>]*>\s*(Run|Retry|Live|Start|Resume|Execute|Submit)\b/;
+    expect(
+      source,
+      `${relPath} must not render a button labeled with run/retry/live/start/resume/execute/submit`,
+    ).not.toMatch(forbiddenButtonLabel);
+
+    // Forbidden onClick handlers - any handler whose name implies a
+    // mutating action.
+    const forbiddenOnClick =
+      /onClick\s*=\s*\{[^}]*\b(run|retry|resume|start|execute|submit|live)[A-Z]\w*/;
+    expect(
+      source,
+      `${relPath} must not wire a mutating onClick (run/retry/resume/start/execute/submit/live verbs)`,
+    ).not.toMatch(forbiddenOnClick);
+
+    // Forbidden mutating fetch calls - any fetch with method POST/PUT/PATCH/DELETE.
+    const mutatingFetch =
+      /fetch\([^)]{0,240}method\s*[:=]\s*["'`](?:POST|PUT|PATCH|DELETE)/i;
+    expect(
+      source,
+      `${relPath} must not issue a mutating fetch`,
+    ).not.toMatch(mutatingFetch);
+
+    // Form actions are forbidden too - the cockpit has no forms.
+    expect(
+      source,
+      `${relPath} must not contain a <form> element`,
+    ).not.toMatch(/<form\b/);
+
+    // Page must surface the canonical no-live disclaimer phrase.
+    expect(
+      source,
+      `${relPath} must contain the explicit no-live disclaimer`,
+    ).toMatch(/No live run is\s+authorized by this page/);
+
+    // Imports must not pull from the unmerged sidecar
+    // `lib/live-operator-checklist/**` so the page builds on
+    // integrated preview even before that branch is cherry-picked.
+    expect(
+      source,
+      `${relPath} must not hard-import lib/live-operator-checklist/`,
+    ).not.toMatch(/from\s+["'][^"']*lib\/live-operator-checklist/);
+  });
+
+  it("provider-closure-room module + canonical doc + landing card are present", () => {
+    // Pure module
+    expect(
+      existsSync(path.join(ROOT, "lib/provider-closure-room/types.ts")),
+    ).toBe(true);
+    expect(
+      existsSync(path.join(ROOT, "lib/provider-closure-room/lanes.ts")),
+    ).toBe(true);
+    expect(
+      existsSync(path.join(ROOT, "lib/provider-closure-room/loader.ts")),
+    ).toBe(true);
+    expect(
+      existsSync(path.join(ROOT, "lib/provider-closure-room/index.ts")),
+    ).toBe(true);
+
+    // Canonical operator-room doc
+    expect(
+      existsSync(
+        path.join(
+          ROOT,
+          "docs/30-provider-debug/PROVIDER_CLOSURE_OPERATOR_ROOM.md",
+        ),
+      ),
+    ).toBe(true);
+
+    // Landing card on /dev
+    const landing = read("app/dev/page.tsx");
+    expect(
+      landing,
+      "/dev landing must list /dev/provider-closure",
+    ).toContain("/dev/provider-closure");
+    expect(landing).toContain("Provider Closure Operator Room");
+
+    // LIVE_CLOSURE_EVIDENCE_PROTOCOL must cross-link to the new doc
+    const evidenceProtocol = read(
+      "docs/30-provider-debug/LIVE_CLOSURE_EVIDENCE_PROTOCOL.md",
+    );
+    expect(
+      evidenceProtocol,
+      "LIVE_CLOSURE_EVIDENCE_PROTOCOL must cross-link to PROVIDER_CLOSURE_OPERATOR_ROOM",
+    ).toContain(
+      "docs/30-provider-debug/PROVIDER_CLOSURE_OPERATOR_ROOM.md",
+    );
+
+    // INDEX must list the new doc
+    const index = read("docs/INDEX.md");
+    expect(
+      index,
+      "docs/INDEX.md must reference PROVIDER_CLOSURE_OPERATOR_ROOM.md",
+    ).toContain(
+      "docs/30-provider-debug/PROVIDER_CLOSURE_OPERATOR_ROOM.md",
+    );
+  });
 });

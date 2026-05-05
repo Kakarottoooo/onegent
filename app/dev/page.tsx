@@ -30,6 +30,15 @@ interface DocLink {
 
 const PHASE_0_ROUTES: DevRoute[] = [
   {
+    href: "/dev/provider-closure",
+    title: "Provider Closure Operator Room",
+    blurb:
+      "Read-only cockpit for restaurant, flight, and hotel closure work. Three vertical lanes show the current closure posture, last known blocker, evidence required before any next live attempt, primary runbook + supporting references, safe hard stops, what to inspect after run, copy-ready no-live CLI commands, and the operator failure taxonomy classes used by each lane. No run / retry / live / start / resume / execute / submit buttons - only Refresh, copy text, and links. No live run is authorized by this page.",
+    status: "live",
+    useCase:
+      "Open this before a founder-approved controlled retry on Resy / Expedia / Booking.com, or when you are reviewing post-run evidence. No live run is authorized by this page. Pair with /dev/runtime-forensics for forensic classification and the per-lane runbook for the exact retry checklist.",
+  },
+  {
     href: "/dev/demo-readiness",
     title: "Demo Readiness",
     blurb:
