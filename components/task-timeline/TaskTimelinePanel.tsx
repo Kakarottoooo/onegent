@@ -163,6 +163,7 @@ export default function TaskTimelinePanel({
               <SnapshotStream
                 snapshots={snapshots}
                 focusId={focusSnapshotId}
+                emptyMessage={emptyMessage}
               />
             </section>
           </div>

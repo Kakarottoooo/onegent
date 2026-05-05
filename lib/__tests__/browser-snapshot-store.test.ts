@@ -13,6 +13,7 @@ describe("browser snapshot store", () => {
   const originalSnapshotDir = process.env.ONEGENT_SNAPSHOT_DIR;
   const originalReadDirs = process.env.ONEGENT_SNAPSHOT_READ_DIRS;
   const originalDisableDiscovery = process.env.ONEGENT_DISABLE_SNAPSHOT_DISCOVERY;
+  const originalLocalAppData = process.env.LOCALAPPDATA;
   let tempRoot: string;
 
   beforeEach(async () => {
@@ -30,7 +31,33 @@ describe("browser snapshot store", () => {
     } else {
       process.env.ONEGENT_DISABLE_SNAPSHOT_DISCOVERY = originalDisableDiscovery;
     }
+    if (originalLocalAppData === undefined) delete process.env.LOCALAPPDATA;
+    else process.env.LOCALAPPDATA = originalLocalAppData;
     await rm(tempRoot, { recursive: true, force: true });
+  });
+
+  it("uses a user-local shared snapshot root by default", async () => {
+    const jobId = "job-shared-default";
+    delete process.env.ONEGENT_SNAPSHOT_DIR;
+    delete process.env.ONEGENT_SNAPSHOT_READ_DIRS;
+    process.env.LOCALAPPDATA = tempRoot;
+
+    await saveBrowserSnapshot({
+      jobId,
+      ts: "2026-05-05T06:32:00.000Z",
+      title: "Shared",
+      status: "live",
+      imageBase64: "shared",
+    });
+
+    const snapshots = await listBrowserSnapshots(jobId);
+
+    expect(snapshots).toHaveLength(1);
+    expect(snapshots[0]).toMatchObject({
+      jobId,
+      title: "Shared",
+      imageBase64: "shared",
+    });
   });
 
   it("reads snapshots from configured cross-worktree read directories", async () => {

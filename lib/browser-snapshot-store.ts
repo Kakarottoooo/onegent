@@ -23,6 +23,15 @@ function getSnapshotRoot(): string {
     return process.env.ONEGENT_SNAPSHOT_DIR;
   }
 
+  return getDefaultSharedSnapshotRoot();
+}
+
+function getDefaultSharedSnapshotRoot(): string {
+  const base = process.env.LOCALAPPDATA || path.join(os.homedir(), ".onegent");
+  return path.join(base, "Onegent", "snapshots", "live");
+}
+
+function getLegacyWorktreeSnapshotRoot(): string {
   const cwd = process.cwd();
   const root = path.basename(cwd).toLowerCase() === "worker"
     ? path.resolve(cwd, "..")
@@ -79,11 +88,40 @@ async function discoverSiblingSnapshotRoots(primaryRoot: string): Promise<string
   return uniquePaths(roots).filter((root) => path.resolve(root) !== path.resolve(primaryRoot));
 }
 
+let discoveryCache:
+  | {
+      primaryRoot: string;
+      expiresAt: number;
+      roots: string[];
+    }
+  | null = null;
+const DISCOVERY_CACHE_MS = 60_000;
+
+async function getCachedDiscoveredRoots(primaryRoot: string): Promise<string[]> {
+  const now = Date.now();
+  if (
+    discoveryCache &&
+    discoveryCache.primaryRoot === primaryRoot &&
+    discoveryCache.expiresAt > now
+  ) {
+    return discoveryCache.roots;
+  }
+
+  const roots = await discoverSiblingSnapshotRoots(primaryRoot);
+  discoveryCache = {
+    primaryRoot,
+    expiresAt: now + DISCOVERY_CACHE_MS,
+    roots,
+  };
+  return roots;
+}
+
 async function getSnapshotReadRoots(): Promise<string[]> {
   const primaryRoot = getSnapshotRoot();
   const configuredRoots = parsePathList(process.env.ONEGENT_SNAPSHOT_READ_DIRS);
-  const discoveredRoots = await discoverSiblingSnapshotRoots(primaryRoot);
-  return uniquePaths([primaryRoot, ...configuredRoots, ...discoveredRoots]);
+  const legacyRoot = getLegacyWorktreeSnapshotRoot();
+  const discoveredRoots = await getCachedDiscoveredRoots(primaryRoot);
+  return uniquePaths([primaryRoot, ...configuredRoots, legacyRoot, ...discoveredRoots]);
 }
 
 function uniquePaths(paths: string[]): string[] {
