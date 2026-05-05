@@ -22,6 +22,14 @@ Do not enter Phase 2 yet. Stabilize Phase 0, Phase 1, and Phase 1.5 first.
 - Integrated preview branch: `codex/integrated-preview-20260504` (canonical;
   contains all merged Phase 0/1/1.5 work plus Phase 2 audit/runbooks).
 - 2026-05-04 runtime closure integration:
+  - A follow-up founder-approved R-030 controlled live run found the remaining
+    Resy blocker in recovery/selector logic, not payment/OTP/final-submit
+    logic. The stored step had the exact Charlie Bird venue URL, but recovery
+    launched a duplicate Resy city-search fallback and the slot detector
+    accepted a bare time filter control. Integrated fixes now prevent duplicate
+    Resy fallback, preserve exact Resy venue URLs in fallback, reject bare
+    time controls without availability context, and classify listing stalls as
+    DOM/data failures instead of true no availability.
   - Resy R-030 controlled live investigation is closed for this pass. The
     follow-up patch is merged into integrated preview: OpenAI Responses API 5xx
     is classified as `model_or_env_blocked`, Resy slugs/stage detection are
@@ -32,7 +40,7 @@ Do not enter Phase 2 yet. Stabilize Phase 0, Phase 1, and Phase 1.5 first.
     corpus is 31 fixtures: restaurant 10, Expedia 8, hotel 13.
   - Latest quick gate:
     `npm run gate:phase1 -- --allow-known-drift` passed 9/9 at
-    `phase1-quality-gate-2026-05-05T00-13-50-528Z.json`.
+    `phase1-quality-gate-2026-05-05T01-02-45-537Z.json`.
 - Historical side branches now folded into integrated preview:
   `codex/openai-chat-model-env` (runtime/debug),
   `codex/expedia-flight-card-fallback` (Expedia visible-card fallback),
@@ -108,7 +116,10 @@ Completed:
 
 Still open:
 
-- Resy has not closed a live fill/OTP path. Do not blind-run the same case.
+- Resy has not closed a live fill/OTP path. Do not broad-run the suite.
+- The next Resy live action should be a single controlled retry of the
+  probe-selected case after the duplicate-fallback/slot-control patch, with
+  the same hard stops and fresh artifact capture.
 - Before any Resy live spend, use the probe/readiness flow to pick one case
   with real target-window availability.
 - Treat repeated Resy API 500s or desktop/mobile network differences as

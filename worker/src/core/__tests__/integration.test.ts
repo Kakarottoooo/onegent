@@ -263,6 +263,44 @@ describe("runExecutionJobWithRecovery · integration", () => {
     expect(mockedRunBrowserTask).toHaveBeenCalledTimes(1);
   });
 
+  it("does not run duplicate Resy provider fallback when the primary request already targets Resy", async () => {
+    const exactResyUrl =
+      "https://resy.com/cities/new-york-ny/venues/charlie-bird?date=2026-05-08&seats=2&time=2000";
+    mockedRunBrowserTask.mockResolvedValueOnce(
+      makeTaskResult({
+        status: "no_availability",
+        summary: "No matching availability was found for the requested booking.",
+      }),
+    );
+
+    const result = await runExecutionJobWithRecovery(
+      {
+        ...RESTAURANT_REQUEST,
+        request: {
+          scenario: "restaurant",
+          params: {
+            restaurant_name: "Charlie Bird",
+            city: "New York",
+            date: "2026-05-08",
+            time: "20:00",
+            covers: 2,
+            startUrl: exactResyUrl,
+          },
+        },
+        consent: {
+          allowTimeAdjustment: false,
+          allowedProviders: ["resy-com"],
+          maxRetries: 1,
+        },
+      },
+      { jobId: "test-resy-primary-no-duplicate-fallback", userId: null, stepIndex: 0 },
+    );
+
+    expect(result.status).toBe("no_availability");
+    expect(mockedRunBrowserTask).toHaveBeenCalledTimes(1);
+    expect(mockedRunBrowserTask.mock.calls[0][0].startUrl).toBe(exactResyUrl);
+  });
+
   it('"not found on OpenTable" skips Phase 2, enters Phase 3 provider chain', async () => {
     // Phase 1: OpenTable reports venue not indexed.
     // Phase 3: Resy also fails to find it. Website fallback has no Places data.

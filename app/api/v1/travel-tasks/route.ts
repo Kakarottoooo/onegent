@@ -145,7 +145,7 @@ export async function POST(req: NextRequest) {
   );
 }
 
-export async function runTravelTaskAttempt(params: {
+async function runTravelTaskAttempt(params: {
   taskId: string;
   jobId: string;
   execution: ExecutionJobRequest;

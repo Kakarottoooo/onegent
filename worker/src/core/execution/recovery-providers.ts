@@ -151,7 +151,9 @@ async function tryResy(
   );
   const resySlug = cityToResySlug(p.city || "nashville");
   const resyTime = p.time.replace(":", "");
-  const resyUrl = `https://resy.com/cities/${resySlug}?date=${p.date}&seats=${p.covers}&time=${resyTime}&query=${encodeURIComponent(p.restaurant_name)}`;
+  const resyUrl =
+    normalizeExplicitResyStartUrl(p.startUrl, p.date, p.covers, p.time) ??
+    `https://resy.com/cities/${resySlug}?date=${p.date}&seats=${p.covers}&time=${resyTime}&query=${encodeURIComponent(p.restaurant_name)}`;
 
   const { task } = buildRestaurantTask({
     restaurantName: p.restaurant_name,
@@ -336,6 +338,34 @@ function isDeliveryPlatform(url: string): boolean {
     );
   } catch {
     return false;
+  }
+}
+
+function normalizeExplicitResyStartUrl(
+  startUrl: string | undefined,
+  date: string,
+  covers: number,
+  time: string,
+): string | null {
+  if (!startUrl) return null;
+
+  try {
+    const url = new URL(startUrl);
+    const host = url.hostname.toLowerCase();
+    if (host !== "resy.com" && !host.endsWith(".resy.com")) return null;
+
+    const segments = url.pathname.split("/").filter(Boolean);
+    const isVenueDetail =
+      segments[0] === "cities" &&
+      (segments.includes("venues") || segments.length >= 3);
+    if (!isVenueDetail) return null;
+
+    url.searchParams.set("date", date);
+    url.searchParams.set("seats", String(covers));
+    url.searchParams.set("time", time.replace(":", ""));
+    return url.toString();
+  } catch {
+    return null;
   }
 }
 

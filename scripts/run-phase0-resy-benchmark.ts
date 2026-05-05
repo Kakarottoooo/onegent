@@ -1,6 +1,7 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { randomUUID } from "node:crypto";
+import { pathToFileURL } from "node:url";
 import {
   PHASE0_REPORT_KIND,
   PHASE0_REPORT_SCHEMA_VERSION,
@@ -472,7 +473,7 @@ function inferSevereTaxonomy(text: string): string | undefined {
   return undefined;
 }
 
-function inferFailureTaxonomy(
+export function inferFailureTaxonomy(
   task: PublicTask | undefined,
   text: string,
   timedOut: boolean,
@@ -481,6 +482,8 @@ function inferFailureTaxonomy(
   if (terminalCode === "needs_profile_data" || task?.state === "awaiting_profile") return "F-DATA-PROFILE";
   if (terminalCode === "needs_login" || task?.state === "awaiting_login") return "F-PROVIDER-LOGIN";
   if (terminalCode === "needs_otp" || task?.state === "awaiting_otp") return "F-PROVIDER-OTP";
+  if (/auth_backend_unavailable|unable to verify api key|503 service unavailable/i.test(text)) return "F-INFRA-AUTH";
+  if (/still on a listing\/date-selection page|no progress .*listing|slot clicked .*stage reassessment/i.test(text)) return "F-DATA-DOM";
   if (terminalCode === "no_availability" || NO_AVAILABILITY_PATTERN.test(text)) return "F-AVAIL-NONE";
   if (terminalCode === "captcha" || /captcha|access denied|akamai|blocked/.test(text)) return "F-PROVIDER-CAPTCHA";
   if (/model_not_found|does not have access to model|computer-use-preview/.test(text)) return "F-INFRA-MODEL-ACCESS";
@@ -495,7 +498,7 @@ function inferFailureTaxonomy(
   return undefined;
 }
 
-function classifyResult(
+export function classifyResult(
   testCase: BenchmarkCase,
   taskResponse: TaskResponse | undefined,
   timeline: TimelineResponse | undefined,
@@ -562,11 +565,12 @@ function classifyResult(
     });
   }
   if (state === "failed" && (terminalCode === "no_availability" || NO_AVAILABILITY_PATTERN.test(text))) {
+    const taxonomyCode = inferFailureTaxonomy(task, text, false) ?? "F-AVAIL-NONE";
     return finishResult(testCase, {
       task,
       durationMs,
-      outcome: "no_availability_correct",
-      taxonomyCode: inferFailureTaxonomy(task, text, false) ?? "F-AVAIL-NONE",
+      outcome: taxonomyCode === "F-AVAIL-NONE" ? "no_availability_correct" : "failed_with_clear_reason",
+      taxonomyCode,
     });
   }
   if (state === "failed" || state === "cancelled") {
@@ -819,7 +823,13 @@ async function main(): Promise<void> {
   }
 }
 
-main().catch((err) => {
-  console.error(err instanceof Error ? err.message : String(err));
-  process.exit(1);
-});
+const invokedAsScript = process.argv[1]
+  ? import.meta.url === pathToFileURL(process.argv[1]).href
+  : false;
+
+if (invokedAsScript) {
+  main().catch((err) => {
+    console.error(err instanceof Error ? err.message : String(err));
+    process.exit(1);
+  });
+}

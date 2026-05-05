@@ -164,13 +164,32 @@ export async function runExecutionJobWithRecovery(
     }
 
     // ── Phase 3: provider fallback chain (Resy → Google Places website) ──
-    const phase3 = await tryProviderFallbackChain(
-      request,
-      ctx,
-      policy,
-      attemptsAfter,
-    );
-    if (phase3) return phase3;
+    //
+    // If the caller explicitly started on Resy, Phase 1 already exercised the
+    // Resy surface. Re-entering Phase 3 would construct a fresh Resy city-search
+    // URL and can hide the real failure behind a duplicate provider attempt.
+    const explicitProvider = explicitRestaurantStartProvider(request);
+    if (explicitProvider === "resy-com") {
+      const startUrl =
+        request.request.scenario === "restaurant"
+          ? request.request.params.startUrl
+          : undefined;
+      await writeAudit({
+        jobId: ctx.jobId,
+        type: "provider_fallback",
+        stepIndex: ctx.stepIndex,
+        message: "Skipping provider fallback because the primary request already targeted Resy",
+        details: { providerId: explicitProvider, startUrl },
+      });
+    } else {
+      const phase3 = await tryProviderFallbackChain(
+        request,
+        ctx,
+        policy,
+        attemptsAfter,
+      );
+      if (phase3) return phase3;
+    }
   }
 
   // ── Phase 4 (all failed) ──
@@ -457,6 +476,24 @@ function rewriteIsoDateTime(value: string | null, time: string): string | null {
   const match = /^(\d{4}-\d{2}-\d{2})T\d{1,2}:\d{2}(?::\d{2})?/.exec(value);
   if (!match) return null;
   return `${match[1]}T${time}:00`;
+}
+
+function explicitRestaurantStartProvider(
+  request: ExecutionJobRequest,
+): "opentable-com" | "resy-com" | null {
+  if (request.request.scenario !== "restaurant") return null;
+  const startUrl = request.request.params.startUrl;
+  if (!startUrl) return null;
+
+  try {
+    const host = new URL(startUrl).hostname.toLowerCase();
+    if (host === "resy.com" || host.endsWith(".resy.com")) return "resy-com";
+    if (host === "opentable.com" || host.endsWith(".opentable.com")) return "opentable-com";
+  } catch {
+    return null;
+  }
+
+  return null;
 }
 
 function parseTimeToMinutes(hhmm: string): number {

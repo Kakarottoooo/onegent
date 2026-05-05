@@ -66,6 +66,34 @@ describe("Resy slot detection", () => {
     expect(result).toEqual({ ok: false, reason: "filter-control" });
   });
 
+  it("rejects the live R-030 bare time leaf with no availability context", () => {
+    const result = explainResySlotCandidate(
+      candidate({
+        text: "8:00 PM",
+        tagName: "DIV",
+        parentText: "8:00 PM",
+      }),
+      20 * 60,
+      60,
+    );
+
+    expect(result).toEqual({ ok: false, reason: "bare-time-control" });
+  });
+
+  it("accepts a bare time button when its surrounding text says it is an available slot", () => {
+    const result = explainResySlotCandidate(
+      candidate({
+        text: "8:00 PM",
+        tagName: "BUTTON",
+        parentText: "Available reservations 8:00 PM Dining Room",
+      }),
+      20 * 60,
+      60,
+    );
+
+    expect(result.ok).toBe(true);
+  });
+
   it("chooses the closest real availability slot and ignores controls", () => {
     const hit = pickBestResySlotCandidate(
       [

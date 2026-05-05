@@ -33,6 +33,26 @@ small.
 
 ## Live Activity
 
+- 2026-05-04 codex: ran a founder-approved single controlled Resy R-030 live
+  closure attempt on integrated preview. The run stayed inside safety bounds
+  and stopped before payment, CVV, OTP/CAPTCHA/login bypass, or final
+  confirmation. Evidence: task `63ff8d7c-3629-4245-a948-2b7e1d5e15ff`, job
+  `e6674a7c-444a-4807-9acc-4983cd3e27f4`, report
+  `benchmark/runs/phase0-resy-2026-05-05T00-44-47-385Z.json`, screenshots under
+  `.debug-screenshots/live/e6674a7c-444a-4807-9acc-4983cd3e27f4`. Root cause:
+  the stored step had the exact Charlie Bird Resy venue URL, but recovery
+  treated the failed Resy primary as if OpenTable had failed and launched a
+  duplicate Resy city-search fallback; the fallback then clicked a bare
+  `DIV "8:00 PM"` time control and the benchmark classified the listing stall
+  as `no_availability_correct`. Patched no-live root causes: recovery now skips
+  duplicate Resy fallback when the primary request already targets Resy, Resy
+  fallback preserves exact venue URLs when present, Resy slot detection rejects
+  bare time controls without availability context, and Phase 0 benchmark
+  taxonomy reports auth/backend and listing-stall failures separately from true
+  no availability. Verified focused tests 34/34, R-030 dry-run exact URL,
+  `tsc`, `check-drift`, `git diff --check`, and Phase 1 gate 9/9
+  (`phase1-quality-gate-2026-05-05T01-02-45-537Z.json`). No extra live retry
+  after the patch.
 - 2026-05-04 codex: integrated latest no-live runtime closure sidecar batch
   after the Resy R-030 patch. Cherry-picked Agent2
   `codex/flight-live-readiness-pack-v2 @ d4d42a8` as `5aabb36`, Agent3

@@ -48,6 +48,22 @@ function hasFilterControlNoise(text: string): boolean {
   return false;
 }
 
+function hasAvailabilityContext(text: string): boolean {
+  return /\b(bar|counter|dining|indoor|outdoor|patio|table|seats?|reservation|availability|available|time slot|timeslot)\b/.test(text);
+}
+
+function isInteractiveCandidate(candidate: ResySlotCandidateMeta): boolean {
+  const tag = candidate.tagName?.toUpperCase();
+  const role = candidate.role?.toLowerCase();
+  return Boolean(
+    candidate.href ||
+      tag === "A" ||
+      tag === "BUTTON" ||
+      role === "button" ||
+      role === "link",
+  );
+}
+
 export function explainResySlotCandidate(
   candidate: ResySlotCandidateMeta,
   requestedMinutes: number,
@@ -74,6 +90,12 @@ export function explainResySlotCandidate(
   ].filter(Boolean).join(" "));
 
   if (hasFilterControlNoise(combined)) return { ok: false, reason: "filter-control" };
+  if (/^\d{1,2}:\d{2}\s*(AM|PM)$/i.test(text) && !hasAvailabilityContext(combined)) {
+    return { ok: false, reason: "bare-time-control" };
+  }
+  if (!isInteractiveCandidate(candidate) && !hasAvailabilityContext(combined)) {
+    return { ok: false, reason: "non-interactive-time" };
+  }
 
   return {
     ok: true,
