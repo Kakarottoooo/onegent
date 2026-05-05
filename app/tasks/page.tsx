@@ -444,7 +444,7 @@ function NeedsHelpCard({ step, onManualLink, jobId, stepIndex, onRefresh }: {
         ...(Object.keys(patchBody).length > 0 ? { patchBody } : {}),
       }),
     }).catch(() => {});
-    fetch(`/api/booking-jobs/${jobId}/start`, { method: "POST" }).catch(() => {});
+    fetch(`/api/booking-jobs/${jobId}/start?executor=inline`, { method: "POST" }).catch(() => {});
     setTimeout(() => onRefresh?.(), 800);
   }
 
@@ -572,7 +572,7 @@ function RestaurantTimePicker({
       });
       if (createRes.ok) {
         const { jobId: newJobId } = await createRes.json();
-        fetch(`/api/booking-jobs/${newJobId}/start`, { method: "POST" }).catch(() => {});
+        fetch(`/api/booking-jobs/${newJobId}/start?executor=inline`, { method: "POST" }).catch(() => {});
         onBooked();
       }
     } finally {
@@ -628,7 +628,7 @@ function RetryScheduler({ step, stepIndex, jobId, onScheduled }: {
         ...(Object.keys(patchBody).length > 0 ? { patchBody } : {}),
       }),
     }).catch(() => {});
-    fetch(`/api/booking-jobs/${jobId}/start`, { method: "POST" }).catch(() => {});
+    fetch(`/api/booking-jobs/${jobId}/start?executor=inline`, { method: "POST" }).catch(() => {});
     setTimeout(() => { setRetrying(false); onScheduled(); }, 800);
   }
 
@@ -1186,7 +1186,7 @@ function JobCard({ job, onRefresh, sessionId, onOpenLive }: { job: BookingJob; o
     setResetting(true);
     try {
       // POST to start again — start/route.ts detects stuck jobs and auto-resets them
-      await fetch(`/api/booking-jobs/${job.id}/start`, { method: "POST" });
+      await fetch(`/api/booking-jobs/${job.id}/start?executor=inline`, { method: "POST" });
       onRefresh?.();
     } finally {
       setResetting(false);

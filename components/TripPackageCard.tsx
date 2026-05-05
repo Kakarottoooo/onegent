@@ -383,7 +383,7 @@ export default function TripPackageCard(props: TripPackageCardProps) {
         return;
       }
       // Fire-and-forget /start with keepalive so navigation doesn't abort.
-      fetch(`/api/booking-jobs/${data.jobId}/start`, {
+      fetch(`/api/booking-jobs/${data.jobId}/start?executor=inline`, {
         method: "POST",
         keepalive: true,
       }).catch(() => {});

@@ -75,7 +75,7 @@ export function computeStepSemanticStatus(step: BookingJobStep): StepSemanticSta
 export function computeJobSemanticStatus(job: BookingJob): JobSemanticStatus {
   // While actually running/pending, use the DB status directly
   if (job.status === "running") return "running";
-  if (job.status === "pending") return "pending";
+  if (job.status === "pending" || job.status === "pending_local") return "pending";
 
   const stepStatuses = job.steps.map(computeStepSemanticStatus);
 

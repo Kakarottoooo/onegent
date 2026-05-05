@@ -111,7 +111,7 @@ export default function RestaurantStepCard({
 
       const { jobId } = await createRes.json();
       // Kick off the job in background
-      fetch(`/api/booking-jobs/${jobId}/start`, { method: "POST" }).catch(
+      fetch(`/api/booking-jobs/${jobId}/start?executor=inline`, { method: "POST" }).catch(
         () => {}
       );
 

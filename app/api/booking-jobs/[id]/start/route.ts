@@ -1366,9 +1366,12 @@ async function runUniversalStep(
 
 // ── Route handler ──────────────────────────────────────────────────────────
 
-export async function POST(_req: NextRequest, { params }: Params) {
+export async function POST(req: NextRequest, { params }: Params) {
   const { id } = await params;
   console.log(`[start] POST /api/booking-jobs/${id}/start invoked at ${new Date().toISOString()}`);
+  const forceInlineExecutor =
+    process.env.NODE_ENV !== "production" &&
+    req.nextUrl.searchParams.get("executor") === "inline";
 
   if (inFlightJobStarts.has(id)) {
     const existingJob = await getBookingJob(id);
@@ -1459,6 +1462,7 @@ export async function POST(_req: NextRequest, { params }: Params) {
   } = await import(
     "@/lib/core/cend-adapter"
   );
+  let executionSteps: BookingJobStep[] = job.steps;
   const routeDecision = job.steps.map((step) => {
     const body = step.body as Record<string, unknown> | undefined;
     return {
@@ -1508,24 +1512,31 @@ export async function POST(_req: NextRequest, { params }: Params) {
       }
     });
     await updateBookingJobSteps(id, stampedSteps);
-    // Round-3 phantom isolation: enqueue with `pending_local` (in dev) so
-    // phantom's hardcoded `WHERE status='pending'` claimOne SQL cannot
-    // see this row. Local worker filters on PENDING_QUEUE_STATUS.
-    if (job.status !== PENDING_QUEUE_STATUS) {
-      await updateBookingJobStatus(id, PENDING_QUEUE_STATUS as "pending");
+    executionSteps = stampedSteps;
+    if (forceInlineExecutor) {
+      console.log(
+        `[start] ${id} forcing inline executor for local manual QA (auto-stamped ${stampedCount}/${job.steps.length})`,
+      );
+    } else {
+      // Round-3 phantom isolation: enqueue with `pending_local` (in dev) so
+      // phantom's hardcoded `WHERE status='pending'` claimOne SQL cannot
+      // see this row. Local worker filters on PENDING_QUEUE_STATUS.
+      if (job.status !== PENDING_QUEUE_STATUS) {
+        await updateBookingJobStatus(id, PENDING_QUEUE_STATUS as "pending");
+      }
+      console.log(
+        `[start] ${id} routed to worker (auto-stamped ${stampedCount}/${job.steps.length}, status=${PENDING_QUEUE_STATUS})`,
+      );
+      return NextResponse.json(
+        {
+          jobId: id,
+          status: PENDING_QUEUE_STATUS,
+          steps: stampedSteps,
+          routedToWorker: true,
+        },
+        { status: 202 },
+      );
     }
-    console.log(
-      `[start] ${id} routed to worker (auto-stamped ${stampedCount}/${job.steps.length}, status=${PENDING_QUEUE_STATUS})`,
-    );
-    return NextResponse.json(
-      {
-        jobId: id,
-        status: PENDING_QUEUE_STATUS,
-        steps: stampedSteps,
-        routedToWorker: true,
-      },
-      { status: 202 },
-    );
   }
 
   // Use the autonomy settings saved at job-creation time, fall back to defaults
@@ -1551,7 +1562,7 @@ export async function POST(_req: NextRequest, { params }: Params) {
   // bias is currently only applied in the legacy recovery loop.
   void profile;
 
-  const steps: BookingJobStep[] = [...job.steps];
+  const steps: BookingJobStep[] = [...executionSteps];
 
   // Serialize DB writes from concurrent onProgress callbacks. Each step has
   // its own browser context running in parallel; their progress callbacks would

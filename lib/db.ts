@@ -1788,7 +1788,7 @@ export interface BookingJob {
   session_id: string;
   user_id: string | null;
   trip_label: string;
-  status: "pending" | "running" | "done" | "failed";
+  status: "pending" | "pending_local" | "running" | "done" | "failed";
   steps: BookingJobStep[];
   /** User-configured autonomy settings at the time this job was created. */
   autonomy_settings: import("./autonomy").AgentAutonomySettings | null;
@@ -1813,7 +1813,7 @@ export async function createBookingJob(params: {
   tripLabel: string;
   steps: BookingJobStep[];
   autonomySettings?: import("./autonomy").AgentAutonomySettings | null;
-  status?: BookingJob["status"] | "pending_local";
+  status?: BookingJob["status"];
 }): Promise<BookingJob> {
   await ensureBookingJobsTable();
   const stepsJson = JSON.stringify(params.steps);
@@ -1871,6 +1871,12 @@ export async function updateBookingJobStatus(
     await sql`
       UPDATE booking_jobs
       SET status = ${status}, updated_at = NOW(), completed_at = ${completedAt.toISOString()}
+      WHERE id = ${id}
+    `;
+  } else if (status === "pending" || status === "pending_local" || status === "running") {
+    await sql`
+      UPDATE booking_jobs
+      SET status = ${status}, updated_at = NOW(), completed_at = NULL
       WHERE id = ${id}
     `;
   } else {

@@ -152,7 +152,7 @@ export default function FlightCard({ card, index, bookingContext, onJobCreated, 
 
       if (createRes.ok) {
         const { jobId } = await createRes.json();
-        fetch(`/api/booking-jobs/${jobId}/start`, { method: "POST" }).catch(() => {});
+        fetch(`/api/booking-jobs/${jobId}/start?executor=inline`, { method: "POST" }).catch(() => {});
         onJobCreated?.(jobId);
       }
     } catch {

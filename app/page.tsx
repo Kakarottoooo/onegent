@@ -1173,7 +1173,7 @@ function HomeInner() {
     travelDocSavedAtRef.current = Date.now();
 
     // Restart the booking job
-    await fetch(`/api/booking-jobs/${req.jobId}/start`, { method: "POST" }).catch(() => {});
+    await fetch(`/api/booking-jobs/${req.jobId}/start?executor=inline`, { method: "POST" }).catch(() => {});
 
     chat.injectAssistantMessage(
       `Got it — travel documents saved. Retrying your flight booking now…`
@@ -1858,7 +1858,7 @@ function HomeInner() {
       return;
     }
     const { jobId } = (await createRes.json()) as { jobId: string };
-    void fetch(`/api/booking-jobs/${jobId}/start`, { method: "POST" }).catch(
+    void fetch(`/api/booking-jobs/${jobId}/start?executor=inline`, { method: "POST" }).catch(
       () => {}
     );
     // Land on the Live tab with this job focused so the user sees execution

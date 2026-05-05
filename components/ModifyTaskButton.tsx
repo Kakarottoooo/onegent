@@ -111,7 +111,7 @@ export function ModifyTaskButton({
     setRunning(true);
     setError(null);
     try {
-      const res = await fetch(`/api/booking-jobs/${job.id}/start`, {
+      const res = await fetch(`/api/booking-jobs/${job.id}/start?executor=inline`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: "{}",

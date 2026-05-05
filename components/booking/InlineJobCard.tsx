@@ -242,7 +242,7 @@ export default function InlineJobCard({ jobId, onNeedsTravelDocs, onDeleted }: I
     if (resetting || !job) return;
     setResetting(true);
     try {
-      await fetch(`/api/booking-jobs/${job.id}/start`, { method: "POST" });
+      await fetch(`/api/booking-jobs/${job.id}/start?executor=inline`, { method: "POST" });
       handleJobRestarted();
     } finally {
       setResetting(false);
