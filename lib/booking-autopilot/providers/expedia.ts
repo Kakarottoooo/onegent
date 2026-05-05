@@ -119,6 +119,14 @@ type ExpediaFlightCandidateSelection = {
   candidateSummaries: string[];
 };
 
+type ExpediaFlightLocatorTextLike = {
+  evaluate?: <T>(fn: (el: Element) => T | Promise<T>) => Promise<T>;
+  getAttribute?: (name: string) => Promise<string | null>;
+  textContent?: (options?: { timeout?: number }) => Promise<string | null>;
+  innerText?: (options?: { timeout?: number }) => Promise<string | null>;
+  locator?: (selector: string) => ExpediaFlightLocatorTextLike;
+};
+
 function parseExpediaFlightTimeToMinutes(t: string | null | undefined): number | null {
   if (!t) return null;
   const raw = t.trim().toLowerCase();
@@ -231,6 +239,78 @@ export function formatExpediaFlightCandidateEvidence(
   return parts.join(" ");
 }
 
+async function readExpediaFlightLocatorText(
+  locator: ExpediaFlightLocatorTextLike | null | undefined,
+): Promise<string> {
+  if (!locator) return "";
+  if (typeof locator.innerText === "function") {
+    const text = await locator.innerText({ timeout: 800 }).catch(() => null);
+    if (text) return text;
+  }
+  if (typeof locator.textContent === "function") {
+    const text = await locator.textContent({ timeout: 800 }).catch(() => null);
+    if (text) return text;
+  }
+  return "";
+}
+
+function compactExpediaFlightLocatorLabel(parts: Array<string | null | undefined>): string {
+  return parts
+    .filter(Boolean)
+    .join(" ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+export async function readExpediaFlightLocatorCandidateLabel(
+  item: ExpediaFlightLocatorTextLike,
+): Promise<string> {
+  if (typeof item.evaluate === "function") {
+    const evaluated = await item.evaluate((btn) => {
+      const element = btn as Element;
+      const container = element.closest('li, article, section, [data-test-id], [data-stid], [class*="uitk-card"], [class*="offer-card"], [class*="result"]');
+      const htmlElement = element as HTMLElement;
+      const context = container?.textContent ?? htmlElement.parentElement?.textContent ?? "";
+      return `${element.getAttribute("aria-label") ?? ""} ${htmlElement.textContent ?? ""} ${context}`.replace(/\s+/g, " ").trim();
+    }).catch(() => "");
+    if (evaluated) return evaluated;
+  }
+
+  const ariaLabel =
+    typeof item.getAttribute === "function"
+      ? await item.getAttribute("aria-label").catch(() => null)
+      : null;
+  const title =
+    typeof item.getAttribute === "function"
+      ? await item.getAttribute("title").catch(() => null)
+      : null;
+  const ownText = await readExpediaFlightLocatorText(item);
+  const ancestorTexts: string[] = [];
+
+  if (typeof item.locator === "function") {
+    for (const selector of [
+      'xpath=ancestor-or-self::li[1]',
+      'xpath=ancestor-or-self::article[1]',
+      'xpath=ancestor-or-self::section[1]',
+      'xpath=ancestor::*[contains(@class, "uitk-card")][1]',
+      'xpath=ancestor::*[contains(@class, "offer-card")][1]',
+      'xpath=ancestor::*[contains(@class, "result")][1]',
+    ]) {
+      const nestedLocator = (() => {
+        try {
+          return item.locator?.(selector);
+        } catch {
+          return null;
+        }
+      })();
+      const text = await readExpediaFlightLocatorText(nestedLocator);
+      if (text) ancestorTexts.push(text);
+    }
+  }
+
+  return compactExpediaFlightLocatorLabel([ariaLabel, title, ownText, ...ancestorTexts]);
+}
+
 export function classifyExpediaFlightSafetyBoundaryText(
   rawText: string | null | undefined,
 ): string | null {
@@ -296,11 +376,13 @@ export function scoreExpediaFlightCandidateText(
     (!flightNumberTight || hasFlightNumber) &&
     (!priceToken || hasPrice) &&
     (timeMinutes === null || timeScore > 0);
+  const hasNearTargetTime = timeDelta !== null && timeDelta <= 120;
+  const hasPriceFallbackWithoutTargetTime =
+    timeMinutes === null && (hasPrice || (priceDelta !== null && priceDelta <= 60));
   const fallbackEligible =
     hasFlightNumber ||
-    hasPrice ||
-    (timeDelta !== null && timeDelta <= 120) ||
-    (priceDelta !== null && priceDelta <= 60);
+    hasNearTargetTime ||
+    hasPriceFallbackWithoutTargetTime;
   const fallbackScore =
     (hasFlightNumber ? 90 : 0) +
     (hasPrice ? 40 : 0) +
@@ -1835,11 +1917,7 @@ async function collectExpediaFlightLocatorCandidates(
     const item = locator.nth(index);
     const visible = await item.isVisible().catch(() => false);
     if (!visible) continue;
-    const label = await item.evaluate((btn) => {
-      const container = btn.closest('li, article, section, [data-test-id], [data-stid], [class*="uitk-card"], [class*="offer-card"], [class*="result"]');
-      const context = container?.textContent ?? btn.parentElement?.textContent ?? "";
-      return `${btn.getAttribute("aria-label") ?? ""} ${btn.textContent ?? ""} ${context}`.replace(/\s+/g, " ").trim();
-    }).catch(() => "");
+    const label = await readExpediaFlightLocatorCandidateLabel(item);
     if (!label.toLowerCase().includes("select")) continue;
     if (samples.length < 6) samples.push(label.slice(0, 140));
     const score = scoreExpediaFlightCandidateText(label, target);
@@ -2003,11 +2081,13 @@ async function clickExpediaFlightButtonWithDomRescan(
           (!flightNumberTight || hasFlightNumber) &&
           (!priceToken || hasPrice) &&
           (timeMinutes === null || timeScore > 0);
+        const hasNearTargetTime = timeDelta !== null && timeDelta <= 120;
+        const hasPriceFallbackWithoutTargetTime =
+          timeMinutes === null && (hasPrice || (priceDelta !== null && priceDelta <= 60));
         const fallbackEligible =
           hasFlightNumber ||
-          hasPrice ||
-          (timeDelta !== null && timeDelta <= 120) ||
-          (priceDelta !== null && priceDelta <= 60);
+          hasNearTargetTime ||
+          hasPriceFallbackWithoutTargetTime;
         const fallbackScore =
           (hasFlightNumber ? 90 : 0) +
           (hasPrice ? 40 : 0) +
@@ -2421,11 +2501,13 @@ export async function bookExpediaFlightProgrammatic(
           (!flightNumberTight || hasFlightNumber) &&
           (!priceToken || hasPrice) &&
           (timeMinutes === null || timeScore > 0);
+        const hasNearTargetTime = timeDelta !== null && timeDelta <= 120;
+        const hasPriceFallbackWithoutTargetTime =
+          timeMinutes === null && (hasPrice || (priceDelta !== null && priceDelta <= 60));
         const fallbackEligible =
           hasFlightNumber ||
-          hasPrice ||
-          (timeDelta !== null && timeDelta <= 120) ||
-          (priceDelta !== null && priceDelta <= 60);
+          hasNearTargetTime ||
+          hasPriceFallbackWithoutTargetTime;
         const fallbackScore =
           (hasFlightNumber ? 90 : 0) +
           (hasPrice ? 40 : 0) +

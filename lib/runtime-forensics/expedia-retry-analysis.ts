@@ -474,6 +474,9 @@ function collectSignals(entries: TextEntry[]): ExpediaRetryEvidenceSignal[] {
       ) {
         continue;
       }
+      if (isHardStopChecklistBoundaryMention(pattern, entry)) {
+        continue;
+      }
       const key = `${pattern.kind}|${entry.label}|${pattern.label}|${excerpt}`;
       if (seen.has(key)) continue;
       seen.add(key);
@@ -488,6 +491,20 @@ function collectSignals(entries: TextEntry[]): ExpediaRetryEvidenceSignal[] {
   }
 
   return signals.sort((a, b) => signalRank(a.kind) - signalRank(b.kind));
+}
+
+function isHardStopChecklistBoundaryMention(
+  pattern: SignalPattern,
+  entry: TextEntry,
+): boolean {
+  if (pattern.kind !== "login_or_otp_boundary" || entry.source !== "note") {
+    return false;
+  }
+  const text = entry.text.toLowerCase();
+  return (
+    /\b(no|without|do not|stop before|hard stops?|bypass)\b/.test(text) &&
+    /\b(login|otp|captcha|verification|payment|cvv|final purchase|final confirmation)\b/.test(text)
+  );
 }
 
 function classifyConfidence(

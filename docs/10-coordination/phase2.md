@@ -618,3 +618,96 @@ Validation:
 - `npm run gate:phase1 -- --allow-known-drift`: pass, 9/9.
 - `npx tsx scripts/preflight-expedia-controlled-flight.ts --confirm-one-controlled-retry --prompt "帮我订一个6月1号从奥兰多飞 Nashville 的机票，一个人" --start-url "https://www.expedia.com/Flights-Search?trip=oneway&leg1=from:MCO,to:BNA,departure:2026-06-01TANYT&passengers=adults:1&options=cabinclass:coach&mode=search"`:
   pass with placeholder env names and no env values printed.
+
+## Flight Live Closure Final
+
+Agent branch:
+
+- `codex/flight-live-closure-final`
+- Base: `origin/codex/integrated-preview-20260504 @ bcd2895`
+- Scope: Expedia flight provider/runtime and runtime-forensics only.
+
+Controlled live evidence:
+
+- Exactly one founder-authorized Expedia MCO -> BNA retry was run on
+  2026-05-04 America/Chicago / 2026-05-05 UTC.
+- Job id: `2c5065b2-c5e2-4822-83f1-125af645d3cd`.
+- Session id: `codex-flight-live-closure-final-20260504-203055`.
+- Source marker: `lib/core/execution-local-c2110aa34d`.
+- Params: `origin=MCO`, `dest=BNA`, `date=2026-06-01`,
+  `passengers=1`, `cabin_class=economy`, `targetAirline=Southwest`,
+  `targetDepartureTime=08:50`, `targetFlightNumber=WN 3084`,
+  `targetPrice=152`.
+- Handoff URL matched the exact Expedia one-way search URL from the runbook.
+- Outcome: failed before fare modal, checkout, or manual-review boundary.
+- Hard stops: no payment, CVV/security-code, OTP/CAPTCHA/login bypass, or
+  final booking/purchase confirmation occurred.
+
+Source-of-truth artifacts:
+
+- DB/API row snapshot:
+  `C:\Users\Gzw19\onegent-integrated-20260504\.tmp\flight-live-closure-final-final-job-api.json`
+- Worker log:
+  `C:\Users\Gzw19\onegent-integrated-20260504\codex-worker.log`
+- Worker screenshot directories:
+  `C:\Users\Gzw19\onegent-integrated-20260504\worker\.debug-screenshots\flight-rpa-1777944673127`,
+  `...\flight-rpa-1777944711935`,
+  `...\flight-rpa-1777944747504`
+- Live snapshots:
+  `C:\Users\Gzw19\onegent-integrated-20260504\.debug-screenshots\live\2c5065b2-c5e2-4822-83f1-125af645d3cd\*.json`
+- Sanitized provider closure artifact:
+  `C:\Users\Gzw19\onegent-integrated-20260504\.tmp\flight-live-closure-final-evidence-bundle.json`
+
+Failure class:
+
+- Provider closure report classified the sanitized bundle as
+  `selector_drift`, provider state `fallback_attempted_no_match`.
+- This is not routing/job shape: source marker, scenario, params, start URL,
+  and worker flight routing were correct, and the worker entered
+  `bookExpediaFlightProgrammatic`.
+- The exact runtime fault was the locator fallback calling
+  `item.evaluate(...)` after the primary DOM scan failed. In the live worker
+  locator shape, `item.evaluate` was not available, so the run aborted with
+  `item.evaluate is not a function`.
+- Latest screenshot also showed a visible Southwest `$152` card at `9:55pm`,
+  not the target `08:50` / `WN 3084` hint. The runtime should not select a
+  price-only wrong-time fallback card.
+
+Patch:
+
+- Expedia flight locator fallback now reads candidate text by capability:
+  `evaluate` when available, then `aria-label`, text/innerText, and nearby
+  ancestor text. This keeps candidate evidence available when Stagehand locator
+  wrappers do not expose `evaluate`.
+- Expedia flight fallback matching no longer treats price alone as sufficient
+  when a target departure time is present. It requires flight number evidence
+  or a nearby target time before selecting a fallback candidate.
+- Worker mirror was updated with the same Expedia flight runtime changes.
+- Expedia retry analyzer now ignores hard-stop checklist notes such as
+  "no OTP/CAPTCHA/login bypass" when classifying observed provider boundary
+  signals, so safety checklist text does not mask selector/runtime failures.
+
+Validation:
+
+- `npx tsx scripts/preflight-expedia-controlled-flight.ts --confirm-one-controlled-retry --prompt <exact controlled prompt> --start-url <exact Expedia URL>`:
+  pass; env names only, values omitted.
+- `npx tsx scripts/provider-closure.ts preflight --kind flight`: pass.
+- `npx tsx scripts/provider-closure.ts report --kind flight --artifact .tmp\flight-live-closure-final-evidence-bundle.json --markdown`:
+  pass; outcome `selector_drift`, provider state `fallback_attempted_no_match`.
+- `npx vitest run lib/__tests__/expedia-retry-analysis.test.ts lib/__tests__/expedia-flight-card-match.test.ts`:
+  pass, 23/23.
+- `npx vitest run lib/__tests__/expedia-flight-card-match.test.ts lib/__tests__/expedia-retry-analysis.test.ts lib/__tests__/expedia-controlled-retry-preflight.test.ts lib/__tests__/preflight-expedia-controlled-flight-cli.test.ts lib/__tests__/runtime-forensics-classifier.test.ts lib/__tests__/runtime-forensics-report.test.ts lib/__tests__/provider-closure-analysis.test.ts lib/__tests__/provider-closure-cli.test.ts`:
+  pass, 166/166.
+- `npx tsc --noEmit --pretty false`: pass.
+- `npm run check-drift`: pass.
+- `git diff --check`: pass.
+- `npm run gate:phase1 -- --allow-known-drift`: pass, 9/9.
+
+Next live retry guidance:
+
+- Do not rerun live from this branch without a new explicit founder approval.
+- If approved, run only the single Expedia MCO -> BNA controlled retry from the
+  runbook. Do not run a broad flight suite.
+- The next retry should either reach a safe checkout/manual-review/login/OTP
+  boundary, classify no availability/provider degradation, or produce candidate
+  evidence without the `item.evaluate` crash.
