@@ -14,7 +14,7 @@ export const metadata = {
 };
 
 async function loadDoc(): Promise<string> {
-  const filePath = path.join(process.cwd(), "docs", "oauth.md");
+  const filePath = path.join(process.cwd(), "docs", "60-api-integrations", "oauth.md");
   return readFile(filePath, "utf8");
 }
 

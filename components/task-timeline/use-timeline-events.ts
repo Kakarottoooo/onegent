@@ -130,7 +130,7 @@ export function useTimelineEvents(jobId: string | null): TimelineState {
       if (cancelled) return;
       try {
         const res = await fetch(
-          `/api/booking-jobs/${jobId}/timeline-events?format=json`,
+          `/api/booking-jobs/${jobId}/timeline-events?format=json&slim=1`,
           { headers: { Accept: "application/json" } },
         );
         if (res.ok) {
@@ -197,7 +197,7 @@ export function useTimelineEvents(jobId: string | null): TimelineState {
 
 /* ─── Payload normalizers ───────────────────────────────────────────── */
 
-function extractEvents(payload: unknown): TimelineEvent[] {
+export function extractEvents(payload: unknown): TimelineEvent[] {
   if (!payload || typeof payload !== "object") return [];
   const obj = payload as Record<string, unknown>;
 
@@ -205,9 +205,13 @@ function extractEvents(payload: unknown): TimelineEvent[] {
   // executor-v2's native emission. Filter to known kinds so a future
   // backend-side new kind doesn't crash the UI.
   if (Array.isArray(obj.events) && obj.events.length > 0) {
-    return obj.events
+    const normalized = obj.events
       .map(normalizeEvent)
       .filter((e): e is TimelineEvent => e !== null);
+    if (normalized.length > 0) return normalized;
+    // Current servers may return task-timeline kinds like `job_started` or
+    // `payment_required`; this panel renders a different vocabulary. Fall
+    // through to the full job/entries adapter instead of showing "waiting".
   }
 
   // Fallback: payload.entries (raw decisionLog) — run our local adapter.
@@ -233,10 +237,19 @@ function normalizeEvent(raw: unknown): TimelineEvent | null {
   const ts = (r.ts ?? r.timestamp ?? r.created_at) as string | undefined;
   const kindRaw = (r.kind ?? r.type) as string | undefined;
   if (!ts || !kindRaw) return null;
-  if (!VALID_KINDS.has(kindRaw as TimelineEventKind)) return null;
 
   const data = (r.data ?? r.payload) as TimelineEvent["data"];
   const snapshotId = (r.snapshot_id ?? r.snapshotId) as string | undefined;
+  if (!VALID_KINDS.has(kindRaw as TimelineEventKind)) {
+    const mapped = mapTaskTimelineKind(kindRaw, r);
+    if (!mapped) return null;
+    return {
+      ts: String(ts),
+      kind: mapped,
+      data: taskTimelineData(r, mapped),
+      snapshotId,
+    };
+  }
 
   return {
     ts: String(ts),
@@ -244,6 +257,61 @@ function normalizeEvent(raw: unknown): TimelineEvent | null {
     data,
     snapshotId,
   };
+}
+
+function mapTaskTimelineKind(
+  kind: string,
+  event: Record<string, unknown>,
+): TimelineEventKind | null {
+  const text = `${String(event.title ?? "")} ${String(event.detail ?? "")}`.toLowerCase();
+  switch (kind) {
+    case "job_started":
+    case "step_started":
+      return "opened_site";
+    case "search_loaded":
+      return "searching";
+    case "form_filled":
+      return "filling_form";
+    case "checkout_reached":
+    case "payment_required":
+    case "job_completed":
+      return "ready_for_confirmation";
+    case "fallback_used":
+    case "retry":
+      return "fallback_started";
+    case "blocked":
+      return text.includes("login") || text.includes("sign in") ? "needs_login" : "failed";
+    case "user_attention":
+    case "job_failed":
+      if (text.includes("no availability")) return "no_availability";
+      if (text.includes("otp") || text.includes("verification")) return "needs_otp";
+      if (text.includes("login") || text.includes("sign in")) return "needs_login";
+      return "failed";
+    case "step_result":
+      return event.status === "success" ? "ready_for_confirmation" : null;
+    case "trace":
+      return "searching";
+    default:
+      return null;
+  }
+}
+
+function taskTimelineData(
+  event: Record<string, unknown>,
+  kind: TimelineEventKind,
+): TimelineEvent["data"] {
+  const title = typeof event.title === "string" ? event.title : undefined;
+  const detail = typeof event.detail === "string" ? event.detail : undefined;
+  const label = detail || title;
+  if (kind === "opened_site") {
+    const domain = label?.match(/\b([a-z0-9-]+\.)+[a-z]{2,}\b/i)?.[0];
+    return domain ? { domain } : undefined;
+  }
+  if (kind === "found_target") return label ? { label } : undefined;
+  if (kind === "fallback_started") return label ? { reason: label } : undefined;
+  if (kind === "failed" || kind === "no_availability") return label ? { reason: label } : undefined;
+  if (kind === "needs_otp") return { channel: "verification" };
+  return undefined;
 }
 
 function extractSummary(payload: unknown): string | null {

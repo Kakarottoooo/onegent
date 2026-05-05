@@ -4,6 +4,7 @@ export interface BookingProfile {
   last_name: string;
   email: string;
   phone: string;
+  gender?: string;
   // Billing address
   address_line1?: string;
   city?: string;

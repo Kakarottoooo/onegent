@@ -3,8 +3,8 @@
  * Generates minimal valid PNG icons for PWA manifest.
  * No external dependencies — uses only Node.js built-ins.
  *
- * Icon design: gold (#C9A84C) background, white "F" lettermark.
- * The "F" is rendered as filled rectangles to avoid needing a font renderer.
+ * Icon design: deep navy background with cream ring + horizon mark.
+ * The mark is rendered with pixel math to avoid needing a font renderer.
  */
 
 import { deflateSync } from "zlib";
@@ -85,37 +85,38 @@ function buildPNG(pixels, size) {
 // ─── Icon pixel drawing ─────────────────────────────────────────────────────
 
 /**
- * Returns an array of [r,g,b] pixels for a size×size icon:
- * - Gold background (#C9A84C)
- * - Rounded white rectangle as an "F" lettermark
+ * Returns an array of [r,g,b] pixels for a square icon:
+ * - Deep navy background
+ * - Cream Onegent ring + horizon mark
  */
 function drawIcon(size) {
-  const GOLD = [0xc9, 0xa8, 0x4c];
-  const WHITE = [0xff, 0xff, 0xff];
+  const NAVY_1 = [0x0a, 0x0e, 0x1a];
+  const NAVY_2 = [0x1a, 0x22, 0x38];
+  const CREAM = [0xf5, 0xe6, 0xc8];
 
-  const pixels = Array.from({ length: size * size }, () => [...GOLD]);
+  const pixels = [];
+  const center = (size - 1) / 2;
+  const outerRadius = size * 0.315;
+  const innerRadius = size * 0.275;
+  const lineHeight = Math.max(8, Math.round(size * 0.039));
+  const lineTop = center - lineHeight / 2;
+  const lineLeft = size * 0.11;
+  const lineRight = size * 0.89;
 
-  function fillRect(x0, y0, w, h) {
-    for (let y = y0; y < y0 + h; y++) {
-      for (let x = x0; x < x0 + w; x++) {
-        if (x >= 0 && x < size && y >= 0 && y < size) {
-          pixels[y * size + x] = [...WHITE];
-        }
-      }
+  for (let y = 0; y < size; y++) {
+    for (let x = 0; x < size; x++) {
+      const t = (x + y) / (2 * (size - 1));
+      const bg = NAVY_1.map((v, i) => Math.round(v + (NAVY_2[i] - v) * t));
+      const dx = x - center;
+      const dy = y - center;
+      const dist = Math.sqrt(dx * dx + dy * dy);
+      const inRing = dist >= innerRadius && dist <= outerRadius;
+      const inHorizon =
+        x >= lineLeft && x <= lineRight && y >= lineTop && y <= lineTop + lineHeight;
+
+      pixels.push(inRing || inHorizon ? [...CREAM] : bg);
     }
   }
-
-  // Draw "F" as white rectangles, proportional to icon size
-  const margin = Math.round(size * 0.28);
-  const stroke = Math.max(2, Math.round(size * 0.1));
-  const height = size - margin * 2;
-
-  // Vertical bar of F
-  fillRect(margin, margin, stroke, height);
-  // Top horizontal bar
-  fillRect(margin, margin, Math.round(size * 0.42), stroke);
-  // Middle horizontal bar (shorter)
-  fillRect(margin, Math.round(size * 0.48), Math.round(size * 0.32), stroke);
 
   return pixels;
 }

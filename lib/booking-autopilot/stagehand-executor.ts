@@ -13,6 +13,7 @@
  */
 
 import { Stagehand } from "@browserbasehq/stagehand";
+import { createHash } from "node:crypto";
 import type { Locator, Page } from "playwright";
 import type { BrowserTaskInput, BrowserTaskResult } from "./types";
 import { writeAgentLog } from "../db";
@@ -65,11 +66,18 @@ import {
 } from "./core/stage-signals";
 import {
   type BookingComHelpers,
+  captureBookingComHotelResultCandidates as providerCaptureBookingComHotelResultCandidates,
+  captureBookingComRoomSelectionEvidence as providerCaptureBookingComRoomSelectionEvidence,
+  classifyBookingComHotelRuntimeBoundary as providerClassifyBookingComHotelRuntimeBoundary,
   clickBookingComListingTarget as providerClickBookingComListingTarget,
+  dismissBookingComSoftSignInPrompt as providerDismissBookingComSoftSignInPrompt,
   evaluateBookingComVerification as providerEvaluateBookingComVerification,
+  extractBookingComStayParamsFromUrl as providerExtractBookingComStayParamsFromUrl,
   getBookingComStageSignals as providerGetBookingComStageSignals,
   revealBookingComRoomSelection as providerRevealBookingComRoomSelection,
   setBookingComRoomQuantity as providerSetBookingComRoomQuantity,
+  shouldStopBookingComBeforePaymentAutomation as providerShouldStopBookingComBeforePaymentAutomation,
+  shouldRunBookingComGuestFormDespitePaymentGate,
 } from "./providers/booking-com";
 import {
   determineFinalOutcome,
@@ -110,7 +118,14 @@ import {
   clickAgreementCheckboxes,
   fillFieldsInScopes,
 } from "./shared/form-actions";
-import { bookExpediaFlightProgrammatic } from "./providers/expedia";
+import { pickBestResySlotCandidate } from "./providers/resy-slot-detection";
+import {
+  bookExpediaFlightProgrammatic,
+  fillExpediaGroupPaymentForm,
+  fillExpediaGuestForm,
+  inspectExpediaFlightTravelerFormState,
+  scrollExpediaCheckoutToFinalReviewBoundary,
+} from "./providers/expedia";
 import { bookTicketmasterProgrammatic } from "./providers/ticketmaster-rpa";
 import { bookSeatGeekProgrammatic } from "./providers/seatgeek-rpa";
 
@@ -257,6 +272,57 @@ function extractOpenTableDateTextFromUrl(url: string): string {
   }
 }
 
+function extractOpenTableSearchTerm(url: string | undefined): string | undefined {
+  if (!url) return undefined;
+  try {
+    const parsed = new URL(url);
+    return parsed.searchParams.get("term")?.trim() || undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+const VENUE_MATCH_STOP_WORDS = new Set([
+  "a",
+  "an",
+  "and",
+  "at",
+  "book",
+  "city",
+  "for",
+  "in",
+  "new",
+  "ny",
+  "nyc",
+  "of",
+  "restaurant",
+  "reservation",
+  "table",
+  "the",
+  "york",
+]);
+
+function venueMatchWords(value: string): string[] {
+  return normalizeLooseText(value)
+    .split(" ")
+    .map((word) => word.trim())
+    .filter((word) => word.length >= 2 && !VENUE_MATCH_STOP_WORDS.has(word));
+}
+
+function venueNameMatchesTarget(target: string | undefined, seen: string | undefined): boolean {
+  const targetWords = venueMatchWords(target ?? "");
+  const seenText = normalizeLooseText(seen ?? "");
+  if (targetWords.length === 0 || !seenText) return false;
+
+  const distinctiveWords = targetWords.filter((word) => word.length >= 3);
+  const requiredWords = distinctiveWords.length > 0 ? distinctiveWords : targetWords;
+  const matched = requiredWords.filter((word) => seenText.split(" ").includes(word) || seenText.includes(word)).length;
+  const ratio = matched / requiredWords.length;
+
+  if (requiredWords.length === 1) return matched === 1;
+  return matched >= 1 && ratio >= 0.6;
+}
+
 async function readOpenTableBookingSummary(page: Page): Promise<{
   restaurant: string;
   dateText: string;
@@ -341,9 +407,7 @@ async function validateOpenTableBookingTarget(
 
   const summary = await readOpenTableBookingSummary(page);
   const reasons: string[] = [];
-  const normalizedRestaurant = normalizeLooseText(targetRestaurant ?? "");
-  const normalizedSeenRestaurant = normalizeLooseText(summary.restaurant);
-  if (targetRestaurant && normalizedSeenRestaurant && !normalizedSeenRestaurant.includes(normalizedRestaurant.slice(0, Math.min(normalizedRestaurant.length, 12)))) {
+  if (targetRestaurant && summary.restaurant && !venueNameMatchesTarget(targetRestaurant, summary.restaurant)) {
     reasons.push(`restaurant="${summary.restaurant || "unknown"}"`);
   }
 
@@ -697,9 +761,42 @@ export async function runBrowserTask(
   if (input.jobId) liveLogReset(input.jobId);
 
   const debugTrace: string[] = [];
+  type SnapshotStatus = "info" | "live" | "success" | "warning" | "error";
+  type CaptureLocalSnapshot = (
+    title: string,
+    detail?: string,
+    status?: SnapshotStatus,
+    options?: { force?: boolean },
+  ) => Promise<void>;
+  let captureLocalSnapshotRef: CaptureLocalSnapshot | null = null;
+  let snapshotHeartbeat: ReturnType<typeof setInterval> | null = null;
+  let lastTraceSnapshotAt = 0;
+  const shouldSnapshotTrace = (message: string): boolean =>
+    /\b(clicked|selected|filled|checkout reached|payment gate|guest form|no availability|blocked|captcha|login|required|failed|error)\b/i.test(message);
+  const snapshotStatusForTrace = (message: string): SnapshotStatus => {
+    if (/\b(failed|error|blocked|captcha)\b/i.test(message)) return "error";
+    if (/\b(no availability|login|required)\b/i.test(message)) return "warning";
+    if (/\b(checkout reached|payment gate|guest form|filled)\b/i.test(message)) return "success";
+    return "live";
+  };
+  const snapshotTitleForTrace = (message: string): string => {
+    const cleaned = message.replace(/^\[[^\]]+\]\s*/g, "").trim();
+    return cleaned.length > 80 ? `${cleaned.slice(0, 77)}...` : cleaned || "Agent progress";
+  };
   const trace = (message: string) => {
     debugTrace.push(message);
     if (input.jobId) liveLogPush(input.jobId, message);
+    if (captureLocalSnapshotRef && shouldSnapshotTrace(message)) {
+      const nowMs = Date.now();
+      if (nowMs - lastTraceSnapshotAt >= 1_500) {
+        lastTraceSnapshotAt = nowMs;
+        void captureLocalSnapshotRef(
+          snapshotTitleForTrace(message),
+          message,
+          snapshotStatusForTrace(message),
+        );
+      }
+    }
     // Print to terminal in dev so you can follow execution without opening the DB.
     if (process.env.NODE_ENV !== "production") {
       console.log(`[stagehand] ${message}`);
@@ -898,10 +995,12 @@ export async function runBrowserTask(
     if (input.jobId) activeStagehands.set(input.jobId, { close: () => stagehand.close() });
     // v3 API: get active page from context (resolvePage is private)
     const page = stagehand.context.activePage() ?? await stagehand.context.newPage();
-    const captureLocalSnapshot = async (
+    let lastSnapshotSignature: string | null = null;
+    const captureLocalSnapshot: CaptureLocalSnapshot = async (
       title: string,
       detail?: string,
-      status: "info" | "live" | "success" | "warning" | "error" = "live",
+      status: SnapshotStatus = "live",
+      options: { force?: boolean } = {},
     ) => {
       if (!input.jobId || useCloud) return;
       try {
@@ -912,6 +1011,10 @@ export async function runBrowserTask(
           quality: 58,
           timeout: 2500,
         });
+        const url = rawSnapshotPage.url();
+        const signature = `${url}:${createHash("sha1").update(buf).digest("hex")}`;
+        if (!options.force && signature === lastSnapshotSignature) return;
+        lastSnapshotSignature = signature;
         await saveBrowserSnapshot({
           jobId: input.jobId,
           ts: new Date().toISOString(),
@@ -919,12 +1022,13 @@ export async function runBrowserTask(
           detail,
           status,
           imageBase64: buf.toString("base64"),
-          url: rawSnapshotPage.url(),
+          url,
         });
       } catch (error) {
         trace(`[snapshots] capture failed: ${(error as Error).message?.slice(0, 120)}`);
       }
     };
+    captureLocalSnapshotRef = captureLocalSnapshot;
     // Register the page in the live-view store immediately so SSE stream can
     // take screenshots during the entire booking process (not just after payment).
     // Only in local mode — Browserbase sessions have their own live view URL.
@@ -950,7 +1054,12 @@ export async function runBrowserTask(
 
     // Navigate to the starting URL
     await page.goto(input.startUrl, { waitUntil: "domcontentloaded", timeoutMs: 30_000 });
-    await captureLocalSnapshot("Loaded booking page", getRawPage(page).url(), "live");
+    await captureLocalSnapshot("Loaded booking page", getRawPage(page).url(), "live", { force: true });
+    if (!useCloud && input.jobId) {
+      snapshotHeartbeat = setInterval(() => {
+        void captureLocalSnapshot("Progress checkpoint", undefined, "live");
+      }, 8_000);
+    }
 
     // For Booking.com search results (React SPA), wait for networkidle so JS can finish
     // fetching and rendering hotel listing cards before we check for them.
@@ -1326,6 +1435,7 @@ The user will enter CVV and confirm payment themselves.`,
           last_name: input.profile.last_name,
           email: input.profile.email,
           phone: input.profile.phone,
+          gender: input.profile.gender,
           date_of_birth: input.profile.date_of_birth,
           passport_number: input.profile.passport_number,
           passport_expiry: input.profile.passport_expiry,
@@ -1357,14 +1467,22 @@ The user will enter CVV and confirm payment themselves.`,
           // ── AI form fill: passenger info + travel documents ──────────────
           trace("[flight-rpa] Checkout reached — running AI form fill");
           const effectiveFlightProfile = buildEffectiveProfile(input.profile, input.task);
-          let fillStoppedForQuota = false;
+          let fillStoppedReason: "quota" | "model_or_env" | undefined;
           let fillSummary = "Flight passenger info pre-filled by AI — open to review and complete payment.";
+          try {
+            trace("[flight-rpa] Running Expedia direct traveler field fill before AI fallback");
+            await fillExpediaGuestForm(checkoutPage, effectiveFlightProfile, trace);
+          } catch (directFillErr) {
+            trace(`[flight-rpa] Expedia direct traveler fill error: ${(directFillErr as Error).message?.slice(0, 80)}`);
+          }
           try {
             const fillResult = await fillFlightGuestFormWithAI(stagehand, effectiveFlightProfile, trace);
             trace(`[flight-rpa] AI fill: filled=${fillResult.filled.join(",")} failed=${fillResult.failed.join(",")}`);
-            fillStoppedForQuota = fillResult.stoppedReason === "quota";
-            if (fillStoppedForQuota) {
+            fillStoppedReason = fillResult.stoppedReason;
+            if (fillStoppedReason === "quota") {
               fillSummary = "Flight checkout reached, but AI form fill stopped because the model API quota was exceeded. Review traveler details and complete payment.";
+            } else if (fillStoppedReason === "model_or_env") {
+              fillSummary = "Flight checkout reached, but AI form fill stopped because the local model/environment is unavailable. Review traveler details manually.";
             } else if (fillResult.filled.length === 0) {
               fillSummary = "Flight checkout reached — review traveler details and complete payment.";
             }
@@ -1373,7 +1491,7 @@ The user will enter CVV and confirm payment themselves.`,
             fillSummary = "Flight checkout reached — review traveler details and complete payment.";
           }
           // ── AI audit: re-fill any fields AI missed ────────────────────
-          if (!fillStoppedForQuota) {
+          if (!fillStoppedReason) {
             try {
               const auditResult = await auditAndRefillEmptyFields(stagehand, checkoutPage, effectiveFlightProfile, trace);
               trace(`[flight-rpa] Audit refill: ${auditResult.refilled.join(",") || "none"}`);
@@ -1381,11 +1499,49 @@ The user will enter CVV and confirm payment themselves.`,
               trace(`[flight-rpa] Audit error: ${(auditErr as Error).message?.slice(0, 80)}`);
             }
           } else {
-            trace("[flight-rpa] Skipping AI audit refill because the model API quota was exceeded");
+            trace(`[flight-rpa] Skipping AI audit refill because AI fill stopped: ${fillStoppedReason}`);
+          }
+
+          try {
+            trace("[flight-rpa] Running allowed Expedia payment/billing prefill; CVV/security code and final booking remain human-only");
+            const paymentPrefill = await fillExpediaGroupPaymentForm(checkoutPage, effectiveFlightProfile, trace);
+            const finalBoundaryVisible = await scrollExpediaCheckoutToFinalReviewBoundary(checkoutPage, trace);
+            trace(
+              `[flight-rpa] Expedia payment/billing prefill state: complete=${paymentPrefill.complete} ` +
+              `missing=${paymentPrefill.missing.join(",") || "none"} finalBoundaryVisible=${finalBoundaryVisible}`
+            );
+            fillSummary = paymentPrefill.complete
+              ? "Flight checkout reached — allowed traveler, test card, and billing details were pre-filled. Review details, enter security code, and click Complete Booking yourself."
+              : `Flight checkout reached — manual review needed for: ${paymentPrefill.missing.join(", ")}. CVV/security code and Complete Booking remain human-only.`;
+          } catch (paymentPrefillErr) {
+            trace(`[flight-rpa] Payment/billing prefill error: ${(paymentPrefillErr as Error).message?.slice(0, 100)}`);
+            await scrollExpediaCheckoutToFinalReviewBoundary(checkoutPage, trace).catch(() => false);
+            fillSummary = "Flight checkout reached — review details, finish any remaining allowed fields, enter security code, and complete booking manually.";
           }
 
           const postFillScreenshot = await checkoutPage.screenshot({ type: "jpeg", quality: 55 }).catch(() => null);
           const checkoutUrl = (() => { try { return (checkoutPage as unknown as { url: () => string }).url(); } catch { return rpaResult.currentUrl || input.startUrl; } })();
+          const travelerState = await inspectExpediaFlightTravelerFormState(checkoutPage);
+          trace(
+            `[flight-rpa] Traveler form state: filled=${travelerState.filledFields.join(",") || "none"} ` +
+            `missing=${travelerState.missingRequiredFields.join(",") || "none"}`
+          );
+
+          if (travelerState.missingRequiredFields.length > 0) {
+            if (!useCloud && input.jobId) {
+              holdBrowserOpenForManualReview(
+                `Local mode: flight checkout reached but traveler form is incomplete — keeping browser open for ${Math.round(BROWSER_KEEP_OPEN_MS / 60000)} minutes for inspection.`
+              );
+            }
+            return {
+              status: "paused_payment" as const,
+              screenshotBase64: postFillScreenshot?.toString("base64") ?? finalScreenshotBase64,
+              handoffUrl: checkoutUrl || rpaResult.currentUrl || input.startUrl,
+              sessionUrl,
+              summary: `Flight checkout reached; traveler details need manual review: ${travelerState.missingRequiredFields.join(", ")}.`,
+              debugTrace,
+            };
+          }
           // Keep the Expedia flight browser open so the user can review traveler
           // details and enter payment info. Without this call, the successful
           // paused_payment return short-circuits past the central hold at the
@@ -1633,6 +1789,10 @@ The user will enter CVV and confirm payment themselves.`,
       targetHotelFromTask ||
       targetHotelFromStartUrl ||
       targetHotelFromCurrentUrl;
+    const targetRestaurantName =
+      startProvider?.id === "opentable-com" || startProvider?.id === "resy-com" || startProvider?.id === "yelp-com"
+        ? targetHotelName || extractOpenTableSearchTerm(input.startUrl) || extractOpenTableSearchTerm(currentUrl)
+        : undefined;
     const targetHotelSource =
       targetHotelFromTask ? "task" :
       targetHotelFromStartUrl ? "startUrl" :
@@ -1644,6 +1804,9 @@ The user will enter CVV and confirm payment themselves.`,
     );
     if (targetCity) {
       trace(`Target city: ${targetCity}`);
+    }
+    if (targetRestaurantName) {
+      trace(`Target restaurant: ${targetRestaurantName}`);
     }
 
     // Extract room type preference from the task text.
@@ -4556,11 +4719,112 @@ The user will enter CVV and confirm payment themselves.`,
 
               // Stagehand's locator shim does not support Playwright's
               // locator.filter({ hasText }) yet. Scan the OpenTable page-level
-              // slot controls and rely on the existing post-click booking target
-              // validation to reject a wrong restaurant if the search page
-              // returns unrelated cards.
-              const targetCardCount = 0;
-              const slotHits = await collectOpenTableSlots("page", raw);
+              // slot controls only when we cannot identify result cards. If OT
+              // returns an unrelated result whose review text mentions the
+              // requested venue (Buvette -> Sirrah), page-level slot clicks can
+              // book the wrong restaurant. Prefer exact title-card matches.
+              const exactOpenTableTarget = targetRestaurantName ?? targetHotelName;
+              const exactTargetSlot = exactOpenTableTarget
+                ? await raw.evaluate(
+                    ({ target, reqMins, maxDiffMins }: { target: string; reqMins: number; maxDiffMins: number }) => {
+                      const stopWords = new Set(["a", "an", "and", "at", "book", "city", "for", "in", "new", "ny", "nyc", "of", "restaurant", "reservation", "table", "the", "york"]);
+                      const normalize = (value: string) => value.toLowerCase().replace(/[^a-z0-9]+/g, " ").replace(/\s+/g, " ").trim();
+                      const venueWords = (value: string) => normalize(value).split(" ").filter((word) => word.length >= 2 && !stopWords.has(word));
+                      const venueMatches = (seen: string) => {
+                        const words = venueWords(target);
+                        const seenNorm = normalize(seen);
+                        if (!words.length || !seenNorm) return false;
+                        const distinctive = words.filter((word) => word.length >= 3);
+                        const required = distinctive.length ? distinctive : words;
+                        const matched = required.filter((word) => seenNorm.split(" ").includes(word) || seenNorm.includes(word)).length;
+                        return required.length === 1 ? matched === 1 : matched >= 1 && matched / required.length >= 0.6;
+                      };
+                      const parseT = (text: string): number | null => {
+                        const m = text.match(/(\d{1,2}):(\d{2})\s*(AM|PM)/i);
+                        if (!m) return null;
+                        let h = parseInt(m[1], 10);
+                        if (m[3].toUpperCase() === "PM" && h < 12) h += 12;
+                        if (m[3].toUpperCase() === "AM" && h === 12) h = 0;
+                        return h * 60 + parseInt(m[2], 10);
+                      };
+                      const isVisible = (el: Element) => {
+                        const r = (el as HTMLElement).getBoundingClientRect();
+                        return r.width > 0 && r.height > 0;
+                      };
+                      const titleElements = Array.from(document.querySelectorAll<HTMLElement>(
+                        'a[href*="/r/"], h2, h3, [data-test*="restaurant" i], [data-testid*="restaurant" i], [class*="restaurant" i]'
+                      )).filter((el) => {
+                        const text = (el.textContent ?? "").trim().replace(/\s+/g, " ");
+                        return isVisible(el) && text.length >= 2 && text.length <= 80 && !parseT(text) && !/opentable|featured|reviews?|booked \d+/i.test(text);
+                      });
+                      const seenNames = Array.from(new Set(titleElements.map((el) => (el.textContent ?? "").trim().replace(/\s+/g, " ")).filter(Boolean))).slice(0, 8);
+                      const matchedTitle = titleElements.find((el) => venueMatches((el.textContent ?? "").trim()));
+                      if (!matchedTitle) {
+                        return seenNames.length > 0
+                          ? { status: "no_match" as const, seenNames }
+                          : { status: "no_titles" as const, seenNames };
+                      }
+
+                      let scope: HTMLElement = matchedTitle;
+                      for (let i = 0; i < 5; i += 1) {
+                        const parent = scope.closest<HTMLElement>('article, li, section, [data-test*="restaurant-card" i], [data-testid*="restaurant-card" i], [class*="card" i], [class*="result" i]') ?? scope.parentElement;
+                        if (!parent || parent === scope) break;
+                        scope = parent;
+                        const hasSlot = Array.from(scope.querySelectorAll<HTMLElement>('a, button, [role="button"], [data-test^="time-slot-"]'))
+                          .some((el) => isVisible(el) && parseT((el.textContent ?? "").trim()) !== null);
+                        if (hasSlot) break;
+                      }
+
+                      const slots = Array.from(scope.querySelectorAll<HTMLElement>('a, button, [role="button"], [data-test^="time-slot-"]'))
+                        .map((el) => {
+                          const text = (el.textContent ?? "").trim().replace(/\s+/g, " ").replace(/\*$/, "");
+                          const minutes = parseT(text);
+                          return !isVisible(el) || minutes === null || Math.abs(minutes - reqMins) > maxDiffMins
+                            ? null
+                            : { el, text, minutes };
+                        })
+                        .filter((item): item is { el: HTMLElement; text: string; minutes: number } => item !== null)
+                        .sort((a, b) => Math.abs(a.minutes - reqMins) - Math.abs(b.minutes - reqMins));
+                      const best = slots[0];
+                      if (!best) {
+                        return { status: "no_slot" as const, seenNames, matchedName: (matchedTitle.textContent ?? "").trim().replace(/\s+/g, " ") };
+                      }
+                      best.el.scrollIntoView({ block: "center" });
+                      const rect = best.el.getBoundingClientRect();
+                      return {
+                        status: "slot" as const,
+                        seenNames,
+                        matchedName: (matchedTitle.textContent ?? "").trim().replace(/\s+/g, " "),
+                        text: best.text.slice(0, 20),
+                        minutes: best.minutes,
+                        x: Math.round(rect.left + rect.width / 2),
+                        y: Math.round(rect.top + rect.height / 2),
+                      };
+                    },
+                    { target: exactOpenTableTarget, reqMins: requestedMinutes, maxDiffMins: timeWindowMins },
+                  ).catch((error) => ({ status: "error" as const, reason: (error as Error).message?.slice(0, 120) }))
+                : null;
+              if (exactTargetSlot?.status === "no_match") {
+                trace(`[opentable] exact venue guard: "${exactOpenTableTarget}" not found in result titles (${exactTargetSlot.seenNames.join(" | ") || "none"}) — refusing to click unrelated slots`);
+                return false;
+              }
+              if (exactTargetSlot?.status === "no_slot") {
+                trace(`[opentable] exact venue guard: matched "${exactTargetSlot.matchedName}", but no time slot in ±${timeWindowMins} min — refusing other restaurants' slots`);
+                return false;
+              }
+              if (exactTargetSlot?.status === "error") {
+                trace(`[opentable] exact venue guard failed: ${exactTargetSlot.reason}`);
+              }
+
+              const targetCardCount = exactTargetSlot?.status === "slot" ? 1 : 0;
+              const slotHits = exactTargetSlot?.status === "slot"
+                ? [{
+                    text: exactTargetSlot.text,
+                    minutes: exactTargetSlot.minutes,
+                    scope: `target-card "${exactTargetSlot.matchedName}"`,
+                    click: () => sh(raw).click(exactTargetSlot.x, exactTargetSlot.y),
+                  }]
+                : await collectOpenTableSlots("page", raw);
 
               const slotDiag = slotHits
                 .slice(0, 8)
@@ -4647,7 +4911,7 @@ The user will enter CVV and confirm payment themselves.`,
                   // Avoid booking the wrong restaurant (e.g. from "you may also like" cards).
                   // OpenTable booking pages show restaurant name in specific elements near the
                   // booking header — NOT in generic page headings like "You're almost done!".
-                  if (targetHotelName) {
+                  if (exactOpenTableTarget) {
                     const pageRestaurant = await raw.evaluate(() => {
                       // OpenTable booking pages show the restaurant name near the top,
                       // separate from the page's action heading (h1: "You're almost done!").
@@ -4676,12 +4940,12 @@ The user will enter CVV and confirm payment themselves.`,
                       return normaliseQuotes(document.title.replace(/\s*[-|].*$/, "").trim()).slice(0, 80);
                     }).catch(() => "");
                     const normalize = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, " ").replace(/\s+/g, " ").trim();
-                    const targetWords = normalize(targetHotelName).split(" ").filter(w => w.length > 3);
+                    const targetWords = venueMatchWords(exactOpenTableTarget).filter(w => w.length > 2);
                     const pageWords = normalize(pageRestaurant);
                     const matched = targetWords.filter(w => pageWords.includes(w)).length;
                     const matchRatio = targetWords.length > 0 ? matched / targetWords.length : 1;
                     if (pageRestaurant && matchRatio < 0.4) {
-                      trace(`[opentable] wrong restaurant on booking page: "${pageRestaurant}" (target: "${targetHotelName}") — going back`);
+                      trace(`[opentable] wrong restaurant on booking page: "${pageRestaurant}" (target: "${exactOpenTableTarget}") — going back`);
                       await raw.evaluate(() => window.history.back()).catch(() => {});
                       await new Promise(r => setTimeout(r, 1000));
                       return false; // retry the listing stage
@@ -4731,7 +4995,7 @@ The user will enter CVV and confirm payment themselves.`,
                   });
                   if (match) { match.click(); return true; }
                   return false;
-                }, targetHotelName ?? "").catch(() => false);
+                }, exactOpenTableTarget ?? "").catch(() => false);
 
                 if (cardClicked) {
                   trace("[opentable] clicked restaurant card — waiting for detail page");
@@ -4880,21 +5144,50 @@ The user will enter CVV and confirm payment themselves.`,
                 }
               }
 
-              const resySlotCoords = await raw.evaluate(({ reqMins, maxDiff }: { reqMins: number; maxDiff: number }) => {
-                const isVisible = (el: Element) => { const r = (el as HTMLElement).getBoundingClientRect(); return r.width > 0 && r.height > 0; };
-                const parseT = (text: string) => { const m = text.match(/(\d{1,2}):(\d{2})\s*(AM|PM)/i); if (!m) return null; let h = parseInt(m[1], 10); const min = parseInt(m[2], 10); if (m[3].toUpperCase() === "PM" && h < 12) h += 12; if (m[3].toUpperCase() === "AM" && h === 12) h = 0; return h * 60 + min; };
-                const isTimeText = (t: string) => /^\d{1,2}:\d{2}\s*(AM|PM)$/i.test(t.trim());
-                const allEls = [...Array.from(document.querySelectorAll<HTMLElement>('a[href], button, [role="button"], [role="link"]')),
-                                ...Array.from(document.querySelectorAll<HTMLElement>('*')).filter(el => isTimeText((el.textContent ?? '').trim()) && el.children.length === 0 && isVisible(el))];
-                const candidates = [...new Set(allEls)].filter(el => { if (!isVisible(el)) return false; const t = parseT((el.textContent ?? '').trim()); return t !== null && Math.abs(t - reqMins) <= maxDiff; });
-                if (!candidates.length) return { x: -1, y: -1, text: '', diag: 'none' };
-                const best = candidates.sort((a, b) => Math.abs((parseT((a.textContent ?? '').trim()) ?? Infinity) - reqMins) - Math.abs((parseT((b.textContent ?? '').trim()) ?? Infinity) - reqMins))[0];
-                best.scrollIntoView({ block: "center" });
-                const r = best.getBoundingClientRect();
-                return { x: Math.round(r.left + r.width / 2), y: Math.round(r.top + r.height / 2), text: (best.textContent ?? '').trim().slice(0, 20), diag: best.tagName };
-              }, { reqMins: reqMins2, maxDiff: timeWindowMins }).catch(() => null);
+              const resySlotCandidates = await raw.evaluate(() => {
+                const isVisible = (el: HTMLElement) => {
+                  const r = el.getBoundingClientRect();
+                  if (r.width <= 0 || r.height <= 0) return false;
+                  const style = window.getComputedStyle(el);
+                  return style.display !== "none" && style.visibility !== "hidden" && style.opacity !== "0";
+                };
+                const seen = new Set<HTMLElement>();
+                const elements = [
+                  ...Array.from(document.querySelectorAll<HTMLElement>('a[href], button, [role="button"], [role="link"]')),
+                  ...Array.from(document.querySelectorAll<HTMLElement>("*"))
+                    .filter((el) => /^\d{1,2}:\d{2}\s*(AM|PM)$/i.test((el.textContent ?? "").trim())),
+                ].filter((el) => {
+                  if (seen.has(el)) return false;
+                  seen.add(el);
+                  return isVisible(el);
+                });
 
-              if (resySlotCoords?.diag) trace(`[resy] time slot diag: ${resySlotCoords.diag} "${resySlotCoords.text}"`);
+                return elements.map((el) => {
+                  const rect = el.getBoundingClientRect();
+                  const parent = el.closest<HTMLElement>(
+                    'article, li, section, form, [role="dialog"], [data-testid], [class*="Reservation" i], [class*="Availability" i], [class*="Search" i]',
+                  ) ?? el.parentElement;
+                  return {
+                    text: (el.textContent ?? "").trim().replace(/\s+/g, " "),
+                    ariaLabel: el.getAttribute("aria-label") ?? undefined,
+                    href: el instanceof HTMLAnchorElement ? el.href : undefined,
+                    tagName: el.tagName,
+                    role: el.getAttribute("role") ?? undefined,
+                    testId: el.getAttribute("data-testid") ?? el.getAttribute("data-test") ?? undefined,
+                    className: typeof el.className === "string" ? el.className : undefined,
+                    parentText: (parent?.textContent ?? "").trim().replace(/\s+/g, " ").slice(0, 180),
+                    x: Math.round(rect.left + rect.width / 2),
+                    y: Math.round(rect.top + rect.height / 2),
+                    width: Math.round(rect.width),
+                    height: Math.round(rect.height),
+                    disabled: el.hasAttribute("disabled") || el.getAttribute("aria-disabled") === "true",
+                  };
+                });
+              }).catch(() => []);
+
+              const resySlotCoords = pickBestResySlotCandidate(resySlotCandidates, reqMins2, timeWindowMins);
+
+              if (resySlotCoords?.tagName) trace(`[resy] time slot diag: ${resySlotCoords.tagName} "${resySlotCoords.text}"`);
 
               const resySlotClicked = resySlotCoords && resySlotCoords.x > 0
                 ? await sh(raw).click(resySlotCoords.x, resySlotCoords.y).then(() => resySlotCoords.text).catch(() => null)
@@ -4983,6 +5276,13 @@ The user will enter CVV and confirm payment themselves.`,
               : startProvider?.id === "resy-com" ? "resy.com"
               : startProvider?.id === "yelp-com" ? "yelp.com"
               : input.startUrl.match(/^https?:\/\/([^/]+)/)?.[1] ?? undefined;
+            if (bookingComContext) {
+              trace(`Booking.com stay params evidence before AI listing: ${providerExtractBookingComStayParamsFromUrl(input.startUrl).summary}`);
+              await providerDismissBookingComSoftSignInPrompt(raw, trace).catch(() => ({
+                dismissed: false,
+                reason: "soft sign-in prompt check failed",
+              }));
+            }
             const result = await clickTargetListingAI(stagehand, targetHotelName ?? "", trace, 5, startDomainHint, requestedDates);
             if (result === "no_availability") return false;
             if (result === "clicked") {
@@ -5041,6 +5341,12 @@ The user will enter CVV and confirm payment themselves.`,
               trace("[RPA] Booking.com listing: target hotel name could not be parsed from the task.");
               return false;
             }
+            const stayParamsEvidence = providerExtractBookingComStayParamsFromUrl(input.startUrl);
+            trace(`Booking.com stay params evidence before listing: ${stayParamsEvidence.summary}`);
+            await providerDismissBookingComSoftSignInPrompt(raw, trace).catch(() => ({
+              dismissed: false,
+              reason: "soft sign-in prompt check failed",
+            }));
             trace(`[RPA] Booking.com listing: clicking target "${targetHotelName}" via RPA.`);
             const clicked = await providerClickBookingComListingTarget(raw, targetHotelName, {
               normalizeText,
@@ -5056,6 +5362,17 @@ The user will enter CVV and confirm payment themselves.`,
             }, trace);
             if (!clicked) {
               trace(`Booking.com listing: no clickable result matched "${targetHotelName}".`);
+              const candidateEvidence = await providerCaptureBookingComHotelResultCandidates(raw, targetHotelName).catch(() => null);
+              if (candidateEvidence) {
+                trace(`Booking.com hotel result candidates: ${candidateEvidence.summary}`);
+                const boundaryText = await raw.evaluate(() => document.body?.innerText ?? document.body?.textContent ?? "").catch(() => "");
+                const boundary = providerClassifyBookingComHotelRuntimeBoundary({
+                  currentUrl: raw.url(),
+                  pageText: boundaryText,
+                  resultCandidates: candidateEvidence,
+                });
+                trace(`Booking.com hotel runtime boundary: ${boundary.state} - ${boundary.reason}`);
+              }
 
               // Fallback: navigate directly to the hotel detail page using a slug-derived URL.
               // The searchresults.html endpoint is often blocked by Booking.com's headless detection,
@@ -5063,6 +5380,7 @@ The user will enter CVV and confirm payment themselves.`,
               const directUrl = buildBookingComDirectHotelUrl(targetHotelName, input.startUrl);
               if (directUrl) {
                 trace(`Booking.com listing: trying direct hotel URL: ${directUrl}`);
+                trace(`Booking.com direct hotel URL stay params: ${providerExtractBookingComStayParamsFromUrl(directUrl).summary}`);
                 try {
                   await raw.goto(directUrl, { waitUntil: "domcontentloaded", timeout: 25_000 });
                   await raw.waitForLoadState("networkidle", { timeout: 12_000 }).catch(() => {});
@@ -5109,6 +5427,13 @@ The user will enter CVV and confirm payment themselves.`,
           // Booking.com gets AI path when AI_LOOP_LISTING=true, otherwise uses RPA fallback.
           // selectRoomAI handles Expedia's two-click Reserve flow (Reserve → modal → Reserve).
           if (process.env.AI_LOOP_LISTING === "true" || !bookingComContext) {
+            if (bookingComContext) {
+              trace(`Booking.com stay params evidence before AI room selection: ${providerExtractBookingComStayParamsFromUrl(raw.url() || input.startUrl).summary}`);
+              await providerDismissBookingComSoftSignInPrompt(raw, trace).catch(() => ({
+                dismissed: false,
+                reason: "soft sign-in prompt check failed",
+              }));
+            }
             const result = await selectRoomAI(stagehand, trace, roomPreference);
             if (result === "no_availability") return false;
 
@@ -5188,6 +5513,11 @@ The user will enter CVV and confirm payment themselves.`,
             try {
               trace("[RPA] Booking.com room_selection: using RPA selectOption + JS click.");
               const beforeUrl = raw.url();
+              trace(`Booking.com stay params evidence before room selection: ${providerExtractBookingComStayParamsFromUrl(beforeUrl || input.startUrl).summary}`);
+              await providerDismissBookingComSoftSignInPrompt(raw, trace).catch(() => ({
+                dismissed: false,
+                reason: "soft sign-in prompt check failed",
+              }));
               await providerRevealBookingComRoomSelection(raw, {
                 normalizeText,
                 normalizeLooseText,
@@ -5200,6 +5530,10 @@ The user will enter CVV and confirm payment themselves.`,
                 safeMouseClick,
                 waitForPageSignals,
               }, trace);
+              let bookingComRoomEvidence = await providerCaptureBookingComRoomSelectionEvidence(raw).catch(() => null);
+              if (bookingComRoomEvidence) {
+                trace(`Booking.com room selection evidence: ${bookingComRoomEvidence.summary}`);
+              }
               await raw.evaluate(() => document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true }))).catch(() => {});
               await new Promise((r) => setTimeout(r, 120));
 
@@ -5286,6 +5620,18 @@ The user will enter CVV and confirm payment themselves.`,
                   trace(`Booking.com: ${domSet.summary}.`);
                   trace("Booking.com: could not find or set any room quantity dropdown.");
                 }
+              }
+
+              bookingComRoomEvidence = await providerCaptureBookingComRoomSelectionEvidence(raw).catch(() => bookingComRoomEvidence);
+              if (bookingComRoomEvidence) {
+                trace(`Booking.com room selection evidence after quantity pass: ${bookingComRoomEvidence.summary}`);
+                const boundaryText = await raw.evaluate(() => document.body?.innerText ?? document.body?.textContent ?? "").catch(() => "");
+                const boundary = providerClassifyBookingComHotelRuntimeBoundary({
+                  currentUrl: raw.url(),
+                  pageText: boundaryText,
+                  roomEvidence: bookingComRoomEvidence,
+                });
+                trace(`Booking.com hotel runtime boundary: ${boundary.state} - ${boundary.reason}`);
               }
 
               // Click "I'll reserve" —?use Playwright locator click (real mouse event),
@@ -5525,9 +5871,31 @@ The user will enter CVV and confirm payment themselves.`,
                 trace(`[RPA-room] tab check failed: ${(tabErr as Error).message?.slice(0, 60)}`);
               }
 
+              bookingComRoomEvidence = await providerCaptureBookingComRoomSelectionEvidence(raw).catch(() => bookingComRoomEvidence);
+              if (bookingComRoomEvidence) {
+                const boundaryText = await raw.evaluate(() => document.body?.innerText ?? document.body?.textContent ?? "").catch(() => "");
+                const boundary = providerClassifyBookingComHotelRuntimeBoundary({
+                  currentUrl: raw.url(),
+                  pageText: boundaryText,
+                  roomEvidence: bookingComRoomEvidence,
+                });
+                trace(`Booking.com hotel runtime boundary after reserve attempt: ${boundary.state} - ${boundary.reason}`);
+              }
+
               return true; // Always return true — never let AI agent handle this on Booking.com
             } catch (e) {
               trace(`Booking.com room selection failed: ${e}`);
+              const roomEvidence = await providerCaptureBookingComRoomSelectionEvidence(raw).catch(() => null);
+              if (roomEvidence) {
+                trace(`Booking.com room selection evidence at failure: ${roomEvidence.summary}`);
+                const boundaryText = await raw.evaluate(() => document.body?.innerText ?? document.body?.textContent ?? "").catch(() => "");
+                const boundary = providerClassifyBookingComHotelRuntimeBoundary({
+                  currentUrl: raw.url(),
+                  pageText: boundaryText,
+                  roomEvidence,
+                });
+                trace(`Booking.com hotel runtime boundary: ${boundary.state} - ${boundary.reason}`);
+              }
               return true; // Still return true to prevent AI agent from taking over
             }
           }
@@ -5900,7 +6268,7 @@ The user will enter CVV and confirm payment themselves.`,
       /\bmake a reservation\b/i.test(input.task);
 
     if (currentUrl.toLowerCase().includes("opentable.com/booking/")) {
-      const otTargetCheck = await validateOpenTableBookingTarget(raw, input.task, targetHotelName, trace);
+      const otTargetCheck = await validateOpenTableBookingTarget(raw, input.task, targetRestaurantName ?? targetHotelName, trace);
       if (!otTargetCheck.ok) {
         const screenshotBase64 = `data:image/png;base64,${(await page.screenshot({ type: "png" })).toString("base64")}`;
         return {
@@ -6080,6 +6448,36 @@ The user will enter CVV and confirm payment themselves.`,
       // Use input.startUrl as the authoritative Booking.com check —?currentUrl may be a
       // non-booking.com URL resolved from an analytics/tracking iframe by resolveCurrentUrl().
       const provider = getProvider(currentUrl) ?? getProvider(rawPageUrl) ?? (bookingComPageOpen ? getProvider(input.startUrl) : null);
+      const bookingComManualReviewRequested =
+        provider?.id === "booking-com" &&
+        providerShouldStopBookingComBeforePaymentAutomation(input.task);
+      if (
+        bookingComManualReviewRequested &&
+        (isBookingComCheckout || assessment.stage === "checkout_form" || assessment.stage === "payment_gate")
+      ) {
+        const boundaryText = await raw.evaluate(() => document.body?.innerText ?? document.body?.textContent ?? "").catch(() => pageText);
+        const boundary = providerClassifyBookingComHotelRuntimeBoundary({
+          currentUrl: rawPageUrl || currentUrl,
+          pageText: boundaryText,
+        });
+        trace(`Booking.com hotel runtime boundary: ${boundary.state} - ${boundary.reason}`);
+        trace("Booking.com manual-review instruction honored before guest/payment automation; no personal, payment, CVV, or final-confirmation fields filled.");
+        const screenshotBase64 = `data:image/png;base64,${(await page.screenshot({ type: "png" })).toString("base64")}`;
+        holdBrowserOpenForManualReview(
+          `Local mode: Booking.com manual-review boundary reached - keeping browser open for ${Math.round(BROWSER_KEEP_OPEN_MS / 60000)} minutes for manual review.`
+        );
+        return {
+          status: boundary.state === "payment_manual_review_reached" ? "paused_payment" : "error",
+          screenshotBase64,
+          handoffUrl: rawPageUrl || currentUrl,
+          sessionUrl,
+          summary: boundary.state === "payment_manual_review_reached"
+            ? "Booking.com reached the payment/final-details boundary and stopped before payment, CVV, card entry, or final confirmation."
+            : "Booking.com reached the guest-details/manual-review boundary and stopped before entering personal details, payment, CVV, or final confirmation.",
+          ...(boundary.state === "payment_manual_review_reached" ? {} : { error: boundary.reason }),
+          debugTrace,
+        };
+      }
       if (provider && assessment.stage === "checkout_form") {
         // Dismiss any modals that appeared after navigation (e.g. Expedia "This booking is almost yours!")
         const preFormDismissed = await dismissBlockingModals(raw).catch(() => "");
@@ -6140,7 +6538,7 @@ The user will enter CVV and confirm payment themselves.`,
               tel.dispatchEvent(new Event("change", { bubbles: true }));
               return true;
             }, digitsOnly).catch(() => false);
-            if (phoneFilled) trace(`[fill-form] phone filled via JS native setter (digits: ${digitsOnly})`);
+            if (phoneFilled) trace(`[fill-form] phone filled via JS native setter (digits redacted, length=${digitsOnly.length})`);
             else trace("[fill-form] phone JS fallback: input already filled or not found");
           }
 
@@ -6275,9 +6673,38 @@ The user will enter CVV and confirm payment themselves.`,
       }
 
       if (provider && assessment.stage === "payment_gate") {
-        trace("[RPA] Provider payment page — running card-field fill.");
-        await provider?.fillPaymentForm?.(raw, p, bookingComHelpers, trace);
-        await new Promise((resolve) => setTimeout(resolve, 800));
+        // Bug 4: Booking.com Step 2 (个人信息 / guest details) shares the
+        // /book.html URL with Step 3 (payment) and gets misclassified as
+        // payment_gate. The discriminator is the payment iframe — Step 2
+        // does not have one. When we see payment_gate without a payment
+        // iframe on Booking.com, fall back to fillGuestForm so the user
+        // does not land on an empty 姓/名/email form.
+        const hasPaymentIframe = provider.id === "booking-com"
+          ? await raw.evaluate(() =>
+              !!document.querySelector(
+                'iframe[src*="paymentcomponent.booking.com"], iframe[src*="payment"]',
+              ),
+            ).catch(() => false)
+          : true;
+        if (
+          shouldRunBookingComGuestFormDespitePaymentGate({
+            providerId: provider.id,
+            stage: assessment.stage,
+            hasPaymentIframe,
+          }) &&
+          provider.fillGuestForm
+        ) {
+          trace("[RPA] Booking.com page classified as payment_gate but no payment iframe detected — running fillGuestForm (Step 2 guest details page).");
+          const enrichedHelpers = { ...bookingComHelpers, stagehand, rawPage: raw, autonomy: input.autonomySettings };
+          await provider.fillGuestForm(raw, p, enrichedHelpers, trace);
+          await new Promise((resolve) => setTimeout(resolve, 600));
+        } else if (provider.id === "booking-com" && providerShouldStopBookingComBeforePaymentAutomation(input.task)) {
+          trace("[RPA] Booking.com payment gate reached under manual-review instructions — skipping card-field fill.");
+        } else {
+          trace("[RPA] Provider payment page — running card-field fill.");
+          await provider?.fillPaymentForm?.(raw, p, bookingComHelpers, trace);
+          await new Promise((resolve) => setTimeout(resolve, 800));
+        }
       }
       if (provider && !["checkout_form", "payment_gate"].includes(assessment.stage)) {
         trace(`Provider checkout is open at stage=${assessment.stage}; skipping guest-form override until stage is clearer.`);
@@ -6358,9 +6785,13 @@ The user will enter CVV and confirm payment themselves.`,
     if (!onGuestForm && assessment.stage === "payment_gate") {
       const paymentProvider = getProvider(currentUrl) ?? getProvider(raw.url());
       if (paymentProvider?.fillPaymentForm) {
-        trace("[RPA] Payment gate detected outside onGuestForm — running provider fillPaymentForm.");
-        await paymentProvider.fillPaymentForm(raw, p, bookingComHelpers, trace);
-        await new Promise((resolve) => setTimeout(resolve, 800));
+        if (paymentProvider.id === "booking-com" && providerShouldStopBookingComBeforePaymentAutomation(input.task)) {
+          trace("[RPA] Booking.com payment gate detected outside onGuestForm — manual-review instructions forbid card-field fill.");
+        } else {
+          trace("[RPA] Payment gate detected outside onGuestForm — running provider fillPaymentForm.");
+          await paymentProvider.fillPaymentForm(raw, p, bookingComHelpers, trace);
+          await new Promise((resolve) => setTimeout(resolve, 800));
+        }
       }
     }
 
@@ -6368,6 +6799,9 @@ The user will enter CVV and confirm payment themselves.`,
     let providerSignals = activeProvider ? await activeProvider.getStageSignals(raw, currentUrl, pageText) : null;
     let bookingComFinalPaymentDomState = providerSignals?.paymentStep ?? false;
     let bookingComGuestDetailsDomState = providerSignals?.guestDetailsStep ?? false;
+    const bookingComStopBeforePaymentRequested =
+      activeProvider?.id === "booking-com" &&
+      providerShouldStopBookingComBeforePaymentAutomation(input.task);
 
     if (!bookingComFinalPaymentDomState && bookingComGuestDetailsDomState) {
       // Booking.com sometimes transitions to the final-details/payment page a beat after
@@ -6461,6 +6895,57 @@ The user will enter CVV and confirm payment themselves.`,
       }
 
       await new Promise(r => setTimeout(r, 700));
+      const openTableBlockingDinerFields = activeProvider?.id === "opentable-com"
+        ? await raw.evaluate(() => {
+            const isShown = (el: HTMLElement): boolean => {
+              if (el.hidden || !el.isConnected) return false;
+              const rect = el.getBoundingClientRect();
+              if (rect.width === 0 || rect.height === 0) return false;
+              const style = window.getComputedStyle(el);
+              return style.display !== "none" && style.visibility !== "hidden" && style.opacity !== "0";
+            };
+            const classify = (input: HTMLInputElement): string | null => {
+              const haystack = [
+                input.type,
+                input.placeholder,
+                input.getAttribute("aria-label"),
+                input.id,
+                input.name,
+                input.autocomplete,
+              ].join(" ").toLowerCase();
+              if (haystack.includes("country") || haystack.includes("code")) return null;
+              if (haystack.includes("first") || haystack.includes("given-name")) return "first name";
+              if (haystack.includes("last") || haystack.includes("family-name")) return "last name";
+              if (input.type === "email" || haystack.includes("email")) return "email";
+              if (input.type === "tel" || haystack.includes("phone") || haystack.includes("tel")) return "phone";
+              return null;
+            };
+            return Array.from(document.querySelectorAll<HTMLInputElement>("input"))
+              .filter((input) => input.type !== "hidden" && input.type !== "checkbox" && input.type !== "radio" && !input.disabled && isShown(input))
+              .map((input) => ({ field: classify(input), value: input.value.trim() }))
+              .filter((entry): entry is { field: string; value: string } => !!entry.field)
+              .filter((entry) => entry.value.length === 0)
+              .map((entry) => entry.field);
+          }).catch(() => [] as string[])
+        : [];
+      if (openTableBlockingDinerFields.length > 0) {
+        const uniqueFields = Array.from(new Set(openTableBlockingDinerFields));
+        trace(`[opentable] blocking ready handoff: visible diner field(s) still empty: ${uniqueFields.join(", ")}`);
+        const screenshotBase64 = `data:image/png;base64,${(await page.screenshot({ type: "png" })).toString("base64")}`;
+        const afterUrl = raw.url();
+        holdBrowserOpenForManualReview(
+          `Local mode: OpenTable still needs diner details (${uniqueFields.join(", ")}) — keeping browser open for ${Math.round(BROWSER_KEEP_OPEN_MS / 60000)} minutes for manual completion.`
+        );
+        return {
+          status: "error",
+          screenshotBase64,
+          handoffUrl: afterUrl,
+          sessionUrl,
+          summary: `OpenTable still needs diner details (${uniqueFields.join(", ")}). Fill them manually on the open page, then complete the reservation.`,
+          error: `OpenTable diner form incomplete: ${uniqueFields.join(", ")}`,
+          debugTrace,
+        };
+      }
       const screenshotBase64 = `data:image/png;base64,${(await page.screenshot({ type: "png" })).toString("base64")}`;
       const afterUrl = raw.url();
       // Check if form was submitted successfully (URL changed to confirmation)
@@ -6490,6 +6975,7 @@ The user will enter CVV and confirm payment themselves.`,
     }
 
     if (!bookingComFinalPaymentDomState && bookingComGuestDetailsDomState) {
+      trace("Booking.com hotel runtime boundary: guest_details_manual_review_reached - guest details page visible before payment/final confirmation.");
       trace("Booking.com final state check: still on guest-details step, so payment/card filling is not allowed yet.");
       const screenshotBase64 = `data:image/png;base64,${(await page.screenshot({ type: "png" })).toString("base64")}`;
       return {
@@ -6503,7 +6989,26 @@ The user will enter CVV and confirm payment themselves.`,
       };
     }
 
+    if (bookingComFinalPaymentDomState && activeProvider?.id === "booking-com" && bookingComStopBeforePaymentRequested) {
+      trace("Booking.com hotel runtime boundary: payment_manual_review_reached - manual-review/no-payment instruction honored; no card fields filled.");
+      const screenshotBase64 = `data:image/png;base64,${(await page.screenshot({ type: "png" })).toString("base64")}`;
+      holdBrowserOpenForManualReview(
+        `Local mode: Booking.com payment boundary reached - keeping browser open for ${Math.round(BROWSER_KEEP_OPEN_MS / 60000)} minutes for manual review.`
+      );
+      return {
+        status: "paused_payment",
+        screenshotBase64,
+        handoffUrl: currentUrl,
+        sessionUrl,
+        summary: "Booking.com reached the payment/final-details boundary and stopped before payment, CVV, or final confirmation.",
+        debugTrace,
+      };
+    }
+
     if (bookingComFinalPaymentDomState && activeProvider) {
+      if (activeProvider.id === "booking-com") {
+        trace("Booking.com hotel runtime boundary: payment_manual_review_reached - payment/final-details page visible before final confirmation.");
+      }
       trace("Provider final payment page confirmed after guest-details step — running final card-field fill pass.");
       reachedGuestForm = true;
 
@@ -6795,10 +7300,15 @@ The user will enter CVV and confirm payment themselves.`,
     }
 
     trace(`Executor threw an unexpected error: ${error}`);
+    const guestFormIncomplete = error.toLowerCase().includes("opentable_guest_form_incomplete");
+    const isOpenTableGuestFormError =
+      input.startUrl?.toLowerCase().includes("opentable.com") ||
+      debugTrace.some((entry) => entry.toLowerCase().includes("[opentable]"));
+
     // If the guest/payment form was already filled before the throw, don't
     // mark the whole step as hard-error — the user can visually review the
     // browser (kept open by the safety net) and submit manually.
-    if (reachedGuestForm) {
+    if (reachedGuestForm && !guestFormIncomplete && !isOpenTableGuestFormError) {
       trace("reachedGuestForm=true at throw — returning paused_payment so UI treats this as awaiting manual confirmation.");
       return {
         status: "paused_payment",
@@ -6808,6 +7318,9 @@ The user will enter CVV and confirm payment themselves.`,
         debugTrace,
       };
     }
+    if (reachedGuestForm && isOpenTableGuestFormError) {
+      trace("OpenTable guest-form error occurred after reaching the form — not returning paused_payment.");
+    }
     return {
       status: "error",
       handoffUrl: input.startUrl,
@@ -6816,12 +7329,25 @@ The user will enter CVV and confirm payment themselves.`,
       debugTrace,
     };
   } finally {
+    if (snapshotHeartbeat) {
+      clearInterval(snapshotHeartbeat);
+      snapshotHeartbeat = null;
+    }
+    if (captureLocalSnapshotRef) {
+      await captureLocalSnapshotRef(
+        "Final visual state",
+        undefined,
+        reachedGuestForm ? "success" : "info",
+        { force: true },
+      ).catch(() => {});
+    }
+
     // Safety net: if we already filled guest/payment form fields but the
     // outcome was error (or unexpected throw), keep the browser open so the
     // user can visually review what's on the page and submit manually.
-    // Mirrors the paused_payment TTL (15 min).
+    // Mirrors the paused_payment TTL (60 min).
     if (!keepBrowserOpen && reachedGuestForm && !useCloud && input.jobId) {
-      holdBrowserOpenForManualReview("Safety net: guest form was reached — keeping browser open 15 min for manual review/submit.");
+      holdBrowserOpenForManualReview(`Safety net: guest form was reached — keeping browser open for ${Math.round(BROWSER_KEEP_OPEN_MS / 60000)} minutes for manual review/submit.`);
     }
 
     if (!keepBrowserOpen) {

@@ -1,0 +1,73 @@
+{
+  "id": "fixture-expedia-checkout-reached",
+  "taskId": "fixture-task-fl-002",
+  "sessionId": "fixture-session-fl-002",
+  "provider": "expedia",
+  "scenario": "FL-CHECKOUT",
+  "status": "ready_for_confirmation",
+  "errorMessage": null,
+  "terminalReason": "SAFE_HANDOFF_AT_CVV",
+  "terminalCode": "SAFE_HANDOFF",
+  "createdAt": "2026-05-04T20:00:00Z",
+  "updatedAt": "2026-05-04T20:03:18Z",
+  "params": {
+    "origin": "MCO",
+    "destination": "BNA",
+    "outboundDate": "2026-06-01",
+    "carrier": "Southwest",
+    "flightNumber": "WN 3084",
+    "passengers": 1
+  },
+  "steps": [
+    {
+      "name": "search-flights",
+      "type": "provider.scan",
+      "__source": "lib/core/execution",
+      "timestamp": "2026-05-04T20:00:18Z"
+    },
+    {
+      "name": "select-flight",
+      "type": "provider.click",
+      "__source": "lib/core/execution",
+      "timestamp": "2026-05-04T20:01:05Z"
+    },
+    {
+      "name": "fill-traveler-form",
+      "type": "provider.fill",
+      "__source": "lib/core/execution",
+      "timestamp": "2026-05-04T20:02:30Z"
+    },
+    {
+      "name": "checkout-payment-wall",
+      "type": "provider.confirm",
+      "__source": "lib/core/execution",
+      "timestamp": "2026-05-04T20:03:18Z"
+    }
+  ],
+  "decisionLog": [
+    {
+      "at": "2026-05-04T20:01:05Z",
+      "level": "info",
+      "event": "flight_selected",
+      "message": "selected Southwest WN 3084 MCO -> BNA"
+    },
+    {
+      "at": "2026-05-04T20:02:30Z",
+      "level": "info",
+      "event": "form_filled",
+      "message": "traveler form filled (name, dob, email)"
+    },
+    {
+      "at": "2026-05-04T20:03:18Z",
+      "level": "info",
+      "event": "safe_handoff",
+      "message": "reached checkout / payment wall - stop at CVV per safety policy"
+    },
+    {
+      "at": "2026-05-04T20:03:18Z",
+      "level": "info",
+      "event": "verdict",
+      "message": "ready_for_confirmation - awaiting human confirm"
+    }
+  ]
+}

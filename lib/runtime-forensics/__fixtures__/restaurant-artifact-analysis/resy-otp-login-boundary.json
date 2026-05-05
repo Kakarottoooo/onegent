@@ -1,0 +1,35 @@
+{
+  "job": {
+    "id": "fixture-restaurant-resy-otp-login",
+    "taskId": "fixture-task-restaurant-resy-otp-login",
+    "provider": "resy",
+    "scenario": "R-030",
+    "status": "safe_handoff",
+    "terminalReason": "F-PROVIDER-OTP",
+    "steps": [
+      {
+        "name": "resy-review",
+        "type": "restaurant",
+        "__source": "lib/core/execution-local-fixture",
+        "error": "Resy OTP verification code required before final review."
+      }
+    ],
+    "params": {
+      "venue": "Charlie Bird",
+      "date": "2026-05-08",
+      "time": "20:00",
+      "partySize": 2
+    }
+  },
+  "workerLogExcerpt": "[resy] guest form reached\n[resy] OTP verification code required; stopping without bypass\n[resy] safe handoff for founder code entry",
+  "workerLogPath": "codex-worker.log",
+  "screenshotPaths": [
+    "worker/.debug-screenshots/resy-fixture-otp/03-otp-boundary.jpg"
+  ],
+  "liveSnapshotPaths": [
+    ".debug-screenshots/live/fixture-restaurant-resy-otp-login/snapshot.json"
+  ],
+  "notes": [
+    "Synthetic no-live fixture. OTP/login is an expected hard stop."
+  ]
+}

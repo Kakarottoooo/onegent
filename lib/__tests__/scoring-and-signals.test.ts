@@ -323,6 +323,23 @@ describe("fetchReviewSignals", () => {
     expect(result.size).toBe(0);
   });
 
+  it("bounds review enrichment network calls with abort signals", async () => {
+    const { fetchReviewSignals } = await import("../tools");
+    mockFetch
+      .mockResolvedValueOnce(makeTavilyResponse([{ title: "Review", content: "Good food" }]))
+      .mockResolvedValueOnce(makeMiniMaxResponse("{}"));
+
+    const restaurant = {
+      id: "r1", name: "The Table", cuisine: "American", price: "$$",
+      rating: 4.2, review_count: 150, address: "5 Main St", is_closed: false,
+    };
+
+    await fetchReviewSignals([restaurant], "dinner", "Chicago, IL");
+
+    expect(mockFetch.mock.calls[0]?.[1]).toEqual(expect.objectContaining({ signal: expect.any(AbortSignal) }));
+    expect(mockFetch.mock.calls[1]?.[1]).toEqual(expect.objectContaining({ signal: expect.any(AbortSignal) }));
+  });
+
   it("uses google_reviews when available instead of fetching Tavily", async () => {
     const { fetchReviewSignals } = await import("../tools");
 

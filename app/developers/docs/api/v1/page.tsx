@@ -13,7 +13,7 @@ export const metadata = {
 };
 
 async function loadDoc(): Promise<string> {
-  const filePath = path.join(process.cwd(), "docs", "api", "v1.md");
+  const filePath = path.join(process.cwd(), "docs", "60-api-integrations", "api-v1.md");
   return readFile(filePath, "utf8");
 }
 

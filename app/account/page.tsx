@@ -8,7 +8,7 @@ import {
   AgentModelTab,
   BookingProfileTab,
   ControlsSettingsTab,
-} from "@/app/permissions/page";
+} from "@/app/account/_components/SettingsTabs";
 import { BillingTab } from "./_components/BillingTab";
 import {
   EditorialCard,

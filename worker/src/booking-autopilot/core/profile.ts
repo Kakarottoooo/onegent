@@ -6,6 +6,7 @@ export type EffectiveProfile = {
   last_name?: string;
   email?: string;
   phone?: string;
+  gender?: string;
   address_line1?: string;
   city?: string;
   state?: string;
@@ -121,6 +122,7 @@ export function buildEffectiveProfile(
     last_name: profile.last_name || splitName.last_name,
     email: profile.email || extractTaskField(task, "Email"),
     phone: profile.phone || extractTaskField(task, "Phone"),
+    gender: profile.gender || extractTaskField(task, "Gender"),
     address_line1: profile.address_line1 || extractTaskField(task, "Street"),
     city: profile.city || extractTaskField(task, "City"),
     state: profile.state || extractTaskField(task, "State"),

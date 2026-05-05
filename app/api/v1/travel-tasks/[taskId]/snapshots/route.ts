@@ -5,7 +5,10 @@ import {
   requireApiActor,
 } from "@/lib/api-auth/require-api-actor";
 import { getTravelTask } from "@/lib/core";
-import { listBrowserSnapshots } from "@/lib/browser-snapshot-store";
+import {
+  listBrowserSnapshots,
+  toBrowserSnapshotListEntry,
+} from "@/lib/browser-snapshot-store";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -40,7 +43,12 @@ export async function GET(
     });
   }
 
-  const snapshots = await listBrowserSnapshots(task.current_booking_job_id);
+  const snapshots = (await listBrowserSnapshots(task.current_booking_job_id)).map((snapshot) =>
+    toBrowserSnapshotListEntry(
+      snapshot,
+      `/api/v1/travel-tasks/${encodeURIComponent(task.id)}/snapshots/${encodeURIComponent(snapshot.id)}/image`,
+    ),
+  );
   return NextResponse.json({
     taskId: task.id,
     jobId: task.current_booking_job_id,

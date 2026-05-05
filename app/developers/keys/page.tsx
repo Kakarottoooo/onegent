@@ -13,7 +13,18 @@ interface RevealState {
   env: "live" | "test";
 }
 
+const clerkEnabled =
+  process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY?.startsWith("pk_") &&
+  process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY !== "pk_test_placeholder";
+
 export default function KeysDashboardPage() {
+  if (!clerkEnabled) {
+    return <KeysAuthUnavailable />;
+  }
+  return <KeysDashboardWithClerk />;
+}
+
+function KeysDashboardWithClerk() {
   const { isSignedIn, isLoaded } = useUser();
   const [keys, setKeys] = useState<KeyRow[] | null>(null);
   const [creating, setCreating] = useState(false);
@@ -192,6 +203,33 @@ export default function KeysDashboardPage() {
         />
       )}
     </>
+  );
+}
+
+function KeysAuthUnavailable() {
+  return (
+    <section className="dev-dashboard-section">
+      <div className="dev-dashboard-header">
+        <div className="dev-dashboard-title-block">
+          <span className="dev-eyebrow" style={{ color: "var(--accent)" }}>
+            Auth not configured
+          </span>
+          <h1 className="dev-dashboard-title">Your API keys live here.</h1>
+          <p className="dev-dashboard-subtitle">
+            Configure Clerk publishable keys to mint and manage account-scoped API keys.
+          </p>
+        </div>
+      </div>
+      <div className="dev-empty-state">
+        <div className="dev-empty-state-glyph">
+          <KeyIcon />
+        </div>
+        <h2 className="dev-empty-state-title">API keys are unavailable here</h2>
+        <p className="dev-empty-state-desc">
+          This build is running without Clerk, so developer account controls are disabled.
+        </p>
+      </div>
+    </section>
   );
 }
 

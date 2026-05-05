@@ -11,9 +11,11 @@ import {
 } from "@/lib/db";
 import type { BookingJob, BookingJobStep } from "@/lib/db";
 import type { AgentAutonomySettings } from "@/lib/autonomy";
-import { auth } from "@clerk/nextjs/server";
 import { randomUUID } from "crypto";
-import { isCoreSupported, markStepForCore } from "@/lib/core/cend-adapter";
+import { getOptionalClerkUserId } from "@/lib/auth/optional-clerk-user";
+import { isCoreExecutionSource, isCoreSupported, markStepForCore } from "@/lib/core/cend-adapter";
+import { canUseNoDatabaseBookingJobsFallback } from "@/lib/booking-jobs/db-errors";
+import { prepareWorkerQueueSteps } from "@/lib/booking-jobs/worker-enqueue";
 
 /** POST /api/booking-jobs — create a new background booking job */
 export async function POST(req: NextRequest) {
@@ -30,33 +32,33 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "steps required" }, { status: 400 });
   }
 
-  const { userId } = await auth();
+  const userId = await getOptionalClerkUserId();
   const jobId = randomUUID();
 
   const initialSteps: BookingJobStep[] = steps.map((s) => ({ ...s, status: "pending" }));
 
   // ── Dogfood: per-step dual-gate ───────────────────────────────────────────
-  // When USE_CORE_EXECUTOR_FOR_CEND is on AND we have a Clerk user (skip
-  // anonymous sessions), re-shape every supported step's body to the lib/core
-  // ExecutionParams form + stamp __source="lib/core/execution". Per-step,
-  // not per-job: a future trip mixing restaurant + activity would route
-  // restaurant through lib/core and activity through legacy. Today this
-  // entrypoint is single-step (direct-booking from chat-commit), so it's
-  // effectively all-or-nothing — but keeping the per-step branch matches
-  // create-trip and avoids drift.
+  // If this job is worker-routable, insert it in worker-ready shape immediately.
+  // Creating a core-marked row as plain "pending" leaves a race before /start
+  // can flip it to pending_local; stale workers can claim that row and fail it.
+  const workerQueue = prepareWorkerQueueSteps(initialSteps, process.env.USE_WORKER_FOR);
   const useCoreForCend = process.env.USE_CORE_EXECUTOR_FOR_CEND === "true" && !!userId;
-  const finalSteps: BookingJobStep[] = useCoreForCend
+  const finalSteps: BookingJobStep[] = workerQueue.shouldUseWorkerQueue
+    ? workerQueue.steps
+    : useCoreForCend
     ? initialSteps.map((s) => (isCoreSupported(s.type) ? markStepForCore(s) : s))
     : initialSteps;
 
   const viaCoreCount = finalSteps.filter(
-    (s) => (s.body as Record<string, unknown>).__source === "lib/core/execution",
+    (s) => isCoreExecutionSource((s.body as Record<string, unknown>).__source),
   ).length;
   if (viaCoreCount > 0) {
     console.log("[booking-jobs] dual-gate per-step", {
       jobId,
       step_count: finalSteps.length,
       via_core: viaCoreCount,
+      worker_queue: workerQueue.shouldUseWorkerQueue,
+      status: workerQueue.status ?? "pending",
     });
   }
 
@@ -67,6 +69,7 @@ export async function POST(req: NextRequest) {
     tripLabel,
     steps: finalSteps,
     autonomySettings,
+    ...(workerQueue.status ? { status: workerQueue.status } : {}),
   });
 
   return NextResponse.json({
@@ -87,12 +90,21 @@ export async function GET(req: NextRequest) {
   if (!sessionId) {
     return NextResponse.json({ error: "session_id required" }, { status: 400 });
   }
-  const { userId } = await auth();
+  const userId = await getOptionalClerkUserId();
 
-  const [sessionJobs, userJobs] = await Promise.all([
-    getBookingJobsBySession(sessionId),
-    userId ? getBookingJobsByUser(userId) : Promise.resolve([] as BookingJob[]),
-  ]);
+  let sessionJobs: BookingJob[];
+  let userJobs: BookingJob[];
+  try {
+    [sessionJobs, userJobs] = await Promise.all([
+      getBookingJobsBySession(sessionId),
+      userId ? getBookingJobsByUser(userId) : Promise.resolve([] as BookingJob[]),
+    ]);
+  } catch (err) {
+    if (canUseNoDatabaseBookingJobsFallback(err)) {
+      return NextResponse.json({ jobs: [] });
+    }
+    throw err;
+  }
 
   const byId = new Map<string, BookingJob>();
   for (const j of sessionJobs) byId.set(j.id, j);
@@ -142,12 +154,21 @@ export async function DELETE(req: NextRequest) {
   if (!sessionId) {
     return NextResponse.json({ error: "session_id required" }, { status: 400 });
   }
-  const { userId } = await auth();
+  const userId = await getOptionalClerkUserId();
 
-  const [sessionJobs, userJobs] = await Promise.all([
-    getBookingJobsBySession(sessionId),
-    userId ? getBookingJobsByUser(userId) : Promise.resolve([] as BookingJob[]),
-  ]);
+  let sessionJobs: BookingJob[];
+  let userJobs: BookingJob[];
+  try {
+    [sessionJobs, userJobs] = await Promise.all([
+      getBookingJobsBySession(sessionId),
+      userId ? getBookingJobsByUser(userId) : Promise.resolve([] as BookingJob[]),
+    ]);
+  } catch (err) {
+    if (canUseNoDatabaseBookingJobsFallback(err)) {
+      return NextResponse.json({ deleted: true, count: 0 });
+    }
+    throw err;
+  }
   const allJobIds = Array.from(
     new Set([...sessionJobs, ...userJobs].map((j) => j.id))
   );

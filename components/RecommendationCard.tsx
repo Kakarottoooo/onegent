@@ -155,7 +155,7 @@ export default function RecommendationCard({
       });
       if (createRes.ok) {
         const { jobId } = await createRes.json();
-        fetch(`/api/booking-jobs/${jobId}/start`, { method: "POST" }).catch(() => {});
+        fetch(`/api/booking-jobs/${jobId}/start?executor=inline`, { method: "POST" }).catch(() => {});
         router.push(`/tasks?view=live&focus=${encodeURIComponent(jobId)}`);
       }
     } catch {

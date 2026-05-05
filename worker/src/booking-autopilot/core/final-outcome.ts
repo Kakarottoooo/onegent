@@ -390,14 +390,14 @@ export function determineFinalOutcome(
     trace("Final state check confirmed the run reached the payment gate before CVV/final submit.");
     const manualStepHint =
       cardTypeRequired && !cardTypeSelected
-        ? "card details are filled - select your card type and enter CVC to complete."
-        : "card details are filled - enter CVC to complete.";
+        ? "review the page, select your card type if needed, and complete the final site step."
+        : "review the page and complete the final site step.";
     return {
       status: "paused_payment",
       screenshotBase64,
       handoffUrl,
       sessionUrl,
-      summary: resultMessage || `Reached payment page - ${manualStepHint}`,
+      summary: resultMessage || `Reached final confirmation page - ${manualStepHint}`,
       debugTrace,
     };
   }

@@ -78,6 +78,23 @@ const inFlightJobStarts = new Set<string>();
 function now() { return new Date().toISOString(); }
 function sleep(ms: number) { return new Promise<void>((r) => setTimeout(r, ms)); }
 
+function resetStepForWorkerEnqueue(step: BookingJobStep): BookingJobStep {
+  const nextBody = { ...(step.body as Record<string, unknown>) };
+  delete nextBody.__lastExecutionStatus;
+
+  return {
+    ...step,
+    body: nextBody,
+    status: "pending",
+    error: undefined,
+    decisionLog: undefined,
+    handoff_url: undefined,
+    session_url: undefined,
+    attemptCount: undefined,
+    actionItem: undefined,
+  };
+}
+
 function looksLikeSyntheticProfileValue(field: string, value: string | undefined): boolean {
   if (!value) return false;
   const normalized = value.trim().toLowerCase();
@@ -417,6 +434,7 @@ async function runUniversalStepViaCore(
   const stepStatus: BookingJobStep["status"] =
     result.status === "paused_payment" ||
     result.status === "needs_otp" ||
+    result.status === "needs_profile_data" ||
     result.status === "ready_for_confirmation"
       ? "awaiting_confirmation"
       : result.status === "completed"
@@ -425,12 +443,21 @@ async function runUniversalStepViaCore(
       ? "no_availability"
       : "error";
 
+  const stepError =
+    result.status === "error" ||
+    result.status === "captcha" ||
+    result.status === "needs_login"
+      ? result.error ?? step.error
+      : result.status === "needs_profile_data"
+      ? result.profileGap?.message ?? result.error
+      : undefined;
+
   return {
     ...step,
     status: stepStatus,
     handoff_url: result.handoffUrl ?? step.handoff_url,
     session_url: result.sessionUrl ?? step.session_url,
-    error: result.error ?? step.error,
+    error: stepError,
     attemptCount: result.attemptCount ?? step.attemptCount,
     usedFallback: result.usedFallback ?? step.usedFallback,
     decisionLog: result.decisionLog,
@@ -584,6 +611,7 @@ async function runUniversalStep(
     const hCheckin = resolvedBody.checkin as string | undefined;
     const hCheckout = resolvedBody.checkout as string | undefined;
     const hAdults = (resolvedBody.adults as number | undefined) ?? 2;
+    const hRooms = (resolvedBody.rooms as number | undefined) ?? 1;
 
     if (hName) {
       // Use the canonical URL builder so checkin/checkout/group_adults are
@@ -599,16 +627,24 @@ async function runUniversalStep(
           checkin: hCheckin,
           checkout: hCheckout,
           adults: hAdults,
-          rooms: 1,
+          rooms: hRooms,
         }),
       };
 
       if (!resolvedBody.task) {
-        const checkinStr = hCheckin ? ` Check in ${hCheckin}.` : "";
-        const checkoutStr = hCheckout ? ` Check out ${hCheckout}.` : "";
+        const { buildHotelTask } = await import("@/lib/booking-autopilot/core/task-builders");
+        const { task } = buildHotelTask({
+          hotelName: hName,
+          city: hCity,
+          checkin: hCheckin ?? "",
+          checkout: hCheckout ?? "",
+          adults: hAdults,
+          rooms: hRooms,
+          profile: (resolvedBody.profile ?? { first_name: "", last_name: "", email: "", phone: "" }) as Parameters<typeof buildHotelTask>[0]["profile"],
+        });
         resolvedBody = {
           ...resolvedBody,
-          task: `Find ${hName}${hCity ? ` in ${hCity}` : ""} on Booking.com.${checkinStr}${checkoutStr} Select the cheapest available room for ${hAdults} adult${hAdults !== 1 ? "s" : ""}. Fill in all guest details and payment information. Stop before entering CVV or clicking the final payment confirmation button.`,
+          task,
         };
       }
     }
@@ -1139,7 +1175,8 @@ async function runUniversalStep(
           // Try Resy if not already tried
           if (!platformsTried.includes("resy")) {
             const resySlug = cityToResySlug(rCity || "nashville");
-            const resyUrl = `https://resy.com/cities/${resySlug}?date=${rDate}&seats=${rCovers}&query=${encodeURIComponent(rName)}`;
+            const resyTime = rTime.replace(":", "");
+            const resyUrl = `https://resy.com/cities/${resySlug}?date=${rDate}&seats=${rCovers}&time=${resyTime}&query=${encodeURIComponent(rName)}`;
             log.push({ ts: now(), type: "attempt", message: `Not found on OpenTable — trying Resy`, outcome: "Retrying" });
             await onProgress({ ...step, status: "loading", decisionLog: [...log] });
 
@@ -1329,9 +1366,12 @@ async function runUniversalStep(
 
 // ── Route handler ──────────────────────────────────────────────────────────
 
-export async function POST(_req: NextRequest, { params }: Params) {
+export async function POST(req: NextRequest, { params }: Params) {
   const { id } = await params;
   console.log(`[start] POST /api/booking-jobs/${id}/start invoked at ${new Date().toISOString()}`);
+  const forceInlineExecutor =
+    process.env.NODE_ENV !== "production" &&
+    req.nextUrl.searchParams.get("executor") === "inline";
 
   if (inFlightJobStarts.has(id)) {
     const existingJob = await getBookingJob(id);
@@ -1422,6 +1462,7 @@ export async function POST(_req: NextRequest, { params }: Params) {
   } = await import(
     "@/lib/core/cend-adapter"
   );
+  let executionSteps: BookingJobStep[] = job.steps;
   const routeDecision = job.steps.map((step) => {
     const body = step.body as Record<string, unknown> | undefined;
     return {
@@ -1449,45 +1490,53 @@ export async function POST(_req: NextRequest, { params }: Params) {
     const stampedSteps = job.steps.map((step) => {
       const body = step.body as Record<string, unknown> | undefined;
       if (isCoreExecutionSource(body?.__source)) {
-        if (body?.__source === CORE_EXECUTION_SOURCE) return step;
-        stampedCount += 1;
-        return {
-          ...step,
-          body: {
-            ...body,
-            __source: CORE_EXECUTION_SOURCE,
-          },
-        };
+        const restampedStep =
+          body?.__source === CORE_EXECUTION_SOURCE
+            ? step
+            : {
+                ...step,
+                body: {
+                  ...body,
+                  __source: CORE_EXECUTION_SOURCE,
+                },
+              };
+        if (body?.__source !== CORE_EXECUTION_SOURCE) stampedCount += 1;
+        return resetStepForWorkerEnqueue(restampedStep);
       }
       if (!_isCoreSupported(step.type)) return step;
       try {
         stampedCount += 1;
-        return markStepForCore(step);
+        return resetStepForWorkerEnqueue(markStepForCore(step));
       } catch {
         return step;
       }
     });
-    if (stampedCount > 0) {
-      await updateBookingJobSteps(id, stampedSteps);
+    await updateBookingJobSteps(id, stampedSteps);
+    executionSteps = stampedSteps;
+    if (forceInlineExecutor) {
+      console.log(
+        `[start] ${id} forcing inline executor for local manual QA (auto-stamped ${stampedCount}/${job.steps.length})`,
+      );
+    } else {
+      // Round-3 phantom isolation: enqueue with `pending_local` (in dev) so
+      // phantom's hardcoded `WHERE status='pending'` claimOne SQL cannot
+      // see this row. Local worker filters on PENDING_QUEUE_STATUS.
+      if (job.status !== PENDING_QUEUE_STATUS) {
+        await updateBookingJobStatus(id, PENDING_QUEUE_STATUS as "pending");
+      }
+      console.log(
+        `[start] ${id} routed to worker (auto-stamped ${stampedCount}/${job.steps.length}, status=${PENDING_QUEUE_STATUS})`,
+      );
+      return NextResponse.json(
+        {
+          jobId: id,
+          status: PENDING_QUEUE_STATUS,
+          steps: stampedSteps,
+          routedToWorker: true,
+        },
+        { status: 202 },
+      );
     }
-    // Round-3 phantom isolation: enqueue with `pending_local` (in dev) so
-    // phantom's hardcoded `WHERE status='pending'` claimOne SQL cannot
-    // see this row. Local worker filters on PENDING_QUEUE_STATUS.
-    if (job.status !== PENDING_QUEUE_STATUS) {
-      await updateBookingJobStatus(id, PENDING_QUEUE_STATUS as "pending");
-    }
-    console.log(
-      `[start] ${id} routed to worker (auto-stamped ${stampedCount}/${job.steps.length}, status=${PENDING_QUEUE_STATUS})`,
-    );
-    return NextResponse.json(
-      {
-        jobId: id,
-        status: PENDING_QUEUE_STATUS,
-        steps: stampedSteps,
-        routedToWorker: true,
-      },
-      { status: 202 },
-    );
   }
 
   // Use the autonomy settings saved at job-creation time, fall back to defaults
@@ -1513,7 +1562,7 @@ export async function POST(_req: NextRequest, { params }: Params) {
   // bias is currently only applied in the legacy recovery loop.
   void profile;
 
-  const steps: BookingJobStep[] = [...job.steps];
+  const steps: BookingJobStep[] = [...executionSteps];
 
   // Serialize DB writes from concurrent onProgress callbacks. Each step has
   // its own browser context running in parallel; their progress callbacks would

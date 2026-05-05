@@ -1,0 +1,112 @@
+{
+  "job": {
+    "id": "fixture-expedia-retry-job",
+    "taskId": "fixture-expedia-retry-task",
+    "provider": "expedia",
+    "scenario": "flight",
+    "status": "failed",
+    "errorMessage": "Synthetic fixture: fallback ran but did not find a matching Expedia flight card.",
+    "terminalReason": "synthetic_no_live_fixture",
+    "terminalCode": "SYNTHETIC_FIXTURE",
+    "steps": [
+      {
+        "type": "flight",
+        "status": "error",
+        "error": "Synthetic fixture: fallback ran but did not find a matching Expedia flight card.",
+        "__source": "lib/core/execution-local-fixture",
+        "body": {
+          "scenario": "flight",
+          "params": {
+            "origin": "MCO",
+            "dest": "BNA",
+            "date": "2026-06-01",
+            "passengers": 1,
+            "cabin_class": "economy",
+            "targetAirline": "Southwest",
+            "targetDepartureTime": "08:50",
+            "targetFlightNumber": "WN 3084",
+            "targetPrice": 152
+          }
+        }
+      }
+    ],
+    "params": {
+      "origin": "MCO",
+      "dest": "BNA",
+      "date": "2026-06-01",
+      "passengers": 1,
+      "cabin_class": "economy",
+      "targetAirline": "Southwest",
+      "targetDepartureTime": "08:50",
+      "targetFlightNumber": "WN 3084",
+      "targetPrice": 152
+    }
+  },
+  "dbRow": {
+    "id": "fixture-expedia-retry-job",
+    "task_id": "fixture-expedia-retry-task",
+    "trip_label": "Synthetic Southwest MCO->BNA 2026-06-01",
+    "status": "failed",
+    "created_at": "2026-05-04T00:00:00.000Z",
+    "updated_at": "2026-05-04T00:05:00.000Z",
+    "steps": [
+      {
+        "type": "flight",
+        "status": "error",
+        "error": "Synthetic fixture: paste steps[0].error here.",
+        "terminalReason": "synthetic_no_live_fixture",
+        "terminalCode": "SYNTHETIC_FIXTURE",
+        "handoff_url": "https://www.expedia.com/Flights-Search?trip=oneway&leg1=from:MCO,to:BNA,departure:2026-06-01TANYT&passengers=adults:1&options=cabinclass:coach&mode=search",
+        "body": {
+          "__source": "lib/core/execution-local-fixture",
+          "scenario": "flight",
+          "params": {
+            "origin": "MCO",
+            "dest": "BNA",
+            "date": "2026-06-01",
+            "passengers": 1,
+            "cabin_class": "economy",
+            "targetAirline": "Southwest",
+            "targetDepartureTime": "08:50",
+            "targetFlightNumber": "WN 3084",
+            "targetPrice": 152
+          }
+        },
+        "decisionLog": [
+          {
+            "event": "synthetic",
+            "message": "Paste the bounded post-retry decision log tail here."
+          }
+        ],
+        "profileGap": null
+      }
+    ]
+  },
+  "workerLogExcerpt": "[flight-rpa] Flight-card DOM scan failed: StagehandEvalError: synthetic fixture\n[flight-rpa] Trying locator fallback for flight-card scan\n[flight-rpa] no matching flight button found\n[flight-rpa] flight checkout was not reached",
+  "workerLogPath": "C:\\Users\\Gzw19\\onegent-integrated-20260504\\codex-worker.log",
+  "benchmarkReportPath": "C:\\Users\\Gzw19\\onegent-integrated-20260504\\benchmark\\runs\\<retry-run-id>.json",
+  "screenshotPaths": [
+    "C:\\Users\\Gzw19\\onegent-integrated-20260504\\worker\\.debug-screenshots\\flight-rpa-*",
+    "C:\\Users\\Gzw19\\onegent-integrated-20260504\\worker\\.debug-screenshots\\flight-rpa-fixture\\01-search-results.jpg"
+  ],
+  "liveSnapshotPaths": [
+    "C:\\Users\\Gzw19\\onegent-integrated-20260504\\.debug-screenshots\\live\\<retry-job-id>\\*.json",
+    "C:\\Users\\Gzw19\\onegent-integrated-20260504\\.debug-screenshots\\live\\fixture-expedia-retry-job\\snapshot.json"
+  ],
+  "expectedClassificationTaxonomy": [
+    "card_scan_failed_before_fallback",
+    "fallback_attempted_no_match",
+    "fallback_matched_no_checkout",
+    "checkout_manual_review_reached",
+    "login_or_otp_boundary",
+    "model_or_env_transient",
+    "network_provider_failure",
+    "provider_no_availability",
+    "insufficient_evidence"
+  ],
+  "notes": [
+    "Synthetic template only. Replace every fixture value with post-retry evidence after founder approval.",
+    "Source of truth is the DB row, codex-worker.log excerpt, screenshots, live snapshots, and benchmark report path.",
+    "No payment, CVV, OTP/CAPTCHA/login bypass, or final booking confirmation."
+  ]
+}

@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { deriveRole } from "@/app/api/decision-session/[id]/route";
+import { deriveRole } from "@/lib/decision-session/role";
 import type { DecisionSession } from "@/lib/db";
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────

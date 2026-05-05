@@ -59,6 +59,8 @@ next-env.d.ts
 .next-dev.log
 .playwright-cli/
 benchmark/runs/*.json
+benchmark/runs/*.md
+benchmark/runs/founder-e2e-assets/
 .claude/worktrees/
 .context/
 .debug-screenshots/
@@ -67,4 +69,8 @@ benchmark/runs/*.json
 .claude/skills/gstack/
 dev.log
 dev.log~
+phase1-dev.log
 scripts/ralph/.last-branch
+# Local QA evidence (never commit; per-attempt timestamped logs)
+logs/
+worker.log

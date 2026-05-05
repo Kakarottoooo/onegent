@@ -1,0 +1,35 @@
+{
+  "job": {
+    "id": "fixture-restaurant-opentable-phone-otp",
+    "taskId": "fixture-task-restaurant-opentable-phone-otp",
+    "provider": "opentable",
+    "scenario": "OT-PHONE",
+    "status": "safe_handoff",
+    "terminalReason": "otp_or_login_required",
+    "steps": [
+      {
+        "name": "opentable-review",
+        "type": "restaurant",
+        "__source": "lib/core/execution-local-fixture",
+        "error": "OpenTable phone verification gate reached."
+      }
+    ],
+    "params": {
+      "venue": "Synthetic Bistro",
+      "date": "2026-05-08",
+      "time": "19:30",
+      "partySize": 2
+    }
+  },
+  "workerLogExcerpt": "[opentable] phoneNumber input visible beside complete reservation button\n[opentable] phone verification gate reached; keeping browser open for handoff\n[opentable] no final confirmation click",
+  "workerLogPath": "codex-worker.log",
+  "screenshotPaths": [
+    "worker/.debug-screenshots/opentable-fixture-phone-otp/03-phone-gate.jpg"
+  ],
+  "liveSnapshotPaths": [
+    ".debug-screenshots/live/fixture-restaurant-opentable-phone-otp/snapshot.json"
+  ],
+  "notes": [
+    "Synthetic no-live fixture. Phone/OTP handoff is safe only if final confirmation is not clicked."
+  ]
+}

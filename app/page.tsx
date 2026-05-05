@@ -858,6 +858,9 @@ function HomeInner() {
   }[]>([]);
   // Full contacts list, for the @-mention picker on the chat input.
   const [allContacts, setAllContacts] = useState<MentionContact[]>([]);
+  const contactsUserIdRef = useRef<string | null>(null);
+  const recentContactsLoadedRef = useRef(false);
+  const allContactsLoadedRef = useRef(false);
   // user_ids currently @-mentioned in the input. Resolved live from text
   // by MentionPicker; we just hold the latest value.
   const [mentionedUserIds, setMentionedUserIds] = useState<string[]>([]);
@@ -887,15 +890,69 @@ function HomeInner() {
   // into existing constraints instead of starting fresh — keeps refresh /
   // sidebar-switch from feeling like the agent has amnesia.
   const lastNluStateRef = useRef<unknown | null>(null);
+  const hasMessages = chat.messages.length > 0;
+
+  const loadRecentContacts = useCallback(async () => {
+    if (recentContactsLoadedRef.current) return;
+    recentContactsLoadedRef.current = true;
+    try {
+      const response = await fetch("/api/contacts/recent");
+      const data: { contacts?: typeof recentContacts } = response.ok
+        ? await response.json()
+        : { contacts: [] };
+      setRecentContacts(data.contacts ?? []);
+    } catch {
+      recentContactsLoadedRef.current = false;
+      setRecentContacts([]);
+    }
+  }, []);
+
+  const loadAllContacts = useCallback(async () => {
+    if (allContactsLoadedRef.current) return;
+    allContactsLoadedRef.current = true;
+    try {
+      const response = await fetch("/api/contacts");
+      const data: {
+        contacts?: Array<{
+          contact_user_id: string;
+          nickname: string | null;
+          profile_code: string | null;
+          username?: string | null;
+          display_name: string | null;
+          avatar_url: string | null;
+        }>;
+      } = response.ok ? await response.json() : { contacts: [] };
+      const list: MentionContact[] = (data.contacts ?? []).map((contact) => ({
+        user_id: contact.contact_user_id,
+        username: contact.username ?? null,
+        display_name: contact.display_name ?? contact.nickname ?? null,
+        avatar_url: contact.avatar_url ?? null,
+        profile_code: contact.profile_code ?? null,
+      }));
+      setAllContacts(list);
+    } catch {
+      allContactsLoadedRef.current = false;
+      setAllContacts([]);
+    }
+  }, []);
 
   // Load recent jobs for home page strip
   useEffect(() => {
     const sid = chat.getSessionId();
     if (!sid) return;
-    fetch(`/api/booking-jobs?session_id=${encodeURIComponent(sid)}`)
-      .then((r) => r.ok ? r.json() : null)
-      .then((d) => { if (d?.jobs) setRecentJobs(d.jobs.slice(0, 3)); })
-      .catch(() => {});
+    let cancelled = false;
+    const timer = window.setTimeout(() => {
+      fetch(`/api/booking-jobs?session_id=${encodeURIComponent(sid)}`)
+        .then((r) => r.ok ? r.json() : null)
+        .then((d) => {
+          if (!cancelled && d?.jobs) setRecentJobs(d.jobs.slice(0, 3));
+        })
+        .catch(() => {});
+    }, 600);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -909,40 +966,35 @@ function HomeInner() {
   // Quietly empty when signed-out or contacts list is empty — never shown
   // as a placeholder/empty state.
   useEffect(() => {
-    if (!auth.isSignedIn) { setRecentContacts([]); return; }
-    fetch("/api/contacts/recent")
-      .then((r) => (r.ok ? r.json() : { contacts: [] }))
-      .then((d: { contacts?: typeof recentContacts }) => {
-        setRecentContacts(d.contacts ?? []);
-      })
-      .catch(() => setRecentContacts([]));
-  }, [auth.isSignedIn]);
+    if (!auth.isSignedIn) {
+      contactsUserIdRef.current = null;
+      recentContactsLoadedRef.current = false;
+      allContactsLoadedRef.current = false;
+      setRecentContacts([]);
+      setAllContacts([]);
+      return;
+    }
+    if (contactsUserIdRef.current !== auth.userId) {
+      contactsUserIdRef.current = auth.userId;
+      recentContactsLoadedRef.current = false;
+      allContactsLoadedRef.current = false;
+      setRecentContacts([]);
+      setAllContacts([]);
+    }
+    if (hasMessages) return;
+    const timer = window.setTimeout(() => {
+      void loadRecentContacts();
+    }, 900);
+    return () => window.clearTimeout(timer);
+  }, [auth.isSignedIn, auth.userId, hasMessages, loadRecentContacts]);
 
-  // Full contacts list for the @-mention picker. Cheap (~one row per friend),
-  // fetched once per sign-in. The picker fuzzy-matches client-side.
+  // Full contacts list for the @-mention picker. It is not needed for the
+  // default home page, so load it only when the user starts a mention.
   useEffect(() => {
-    if (!auth.isSignedIn) { setAllContacts([]); return; }
-    fetch("/api/contacts")
-      .then((r) => (r.ok ? r.json() : { contacts: [] }))
-      .then((d: { contacts?: Array<{
-        contact_user_id: string;
-        nickname: string | null;
-        profile_code: string | null;
-        username?: string | null;
-        display_name: string | null;
-        avatar_url: string | null;
-      }> }) => {
-        const list: MentionContact[] = (d.contacts ?? []).map((c) => ({
-          user_id: c.contact_user_id,
-          username: c.username ?? null,
-          display_name: c.display_name ?? c.nickname ?? null,
-          avatar_url: c.avatar_url ?? null,
-          profile_code: c.profile_code ?? null,
-        }));
-        setAllContacts(list);
-      })
-      .catch(() => setAllContacts([]));
-  }, [auth.isSignedIn]);
+    if (!auth.isSignedIn) return;
+    if (!chat.input.includes("@")) return;
+    void loadAllContacts();
+  }, [auth.isSignedIn, auth.userId, chat.input, loadAllContacts]);
 
   // Phase 3.3c: Feedback loop — called when user rates a restaurant card
   function handleCardFeedback(record: FeedbackRecord) {
@@ -994,14 +1046,21 @@ function HomeInner() {
   // 3c-3: Check for pending post-experience feedback prompts on mount
   useEffect(() => {
     const sessionId = chat.getSessionId();
-    fetch(`/api/feedback-prompts?session_id=${encodeURIComponent(sessionId)}`)
-      .then((r) => r.ok ? r.json() : null)
-      .then((data) => {
-        if (data?.prompts?.length) {
-          setPendingFeedbackPrompts(data.prompts);
-        }
-      })
-      .catch(() => {});
+    let cancelled = false;
+    const timer = window.setTimeout(() => {
+      fetch(`/api/feedback-prompts?session_id=${encodeURIComponent(sessionId)}`)
+        .then((r) => r.ok ? r.json() : null)
+        .then((data) => {
+          if (!cancelled && data?.prompts?.length) {
+            setPendingFeedbackPrompts(data.prompts);
+          }
+        })
+        .catch(() => {});
+    }, 1000);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -1024,7 +1083,6 @@ function HomeInner() {
     chatInputRef.current = chat.input;
   }, [chat.input]);
 
-  const hasMessages = chat.messages.length > 0;
   const lastUserQuery =
     [...chat.messages].reverse().find((m) => m.role === "user")?.content ?? "";
   const hasCategoryResults =
@@ -1173,7 +1231,7 @@ function HomeInner() {
     travelDocSavedAtRef.current = Date.now();
 
     // Restart the booking job
-    await fetch(`/api/booking-jobs/${req.jobId}/start`, { method: "POST" }).catch(() => {});
+    await fetch(`/api/booking-jobs/${req.jobId}/start?executor=inline`, { method: "POST" }).catch(() => {});
 
     chat.injectAssistantMessage(
       `Got it — travel documents saved. Retrying your flight booking now…`
@@ -1858,7 +1916,7 @@ function HomeInner() {
       return;
     }
     const { jobId } = (await createRes.json()) as { jobId: string };
-    void fetch(`/api/booking-jobs/${jobId}/start`, { method: "POST" }).catch(
+    void fetch(`/api/booking-jobs/${jobId}/start?executor=inline`, { method: "POST" }).catch(
       () => {}
     );
     // Land on the Live tab with this job focused so the user sees execution
@@ -3277,13 +3335,12 @@ function HomeInner() {
         >
           <div className="max-w-2xl md:max-w-3xl lg:max-w-4xl mx-auto w-full px-4 md:px-6 lg:px-8 py-6">
 
-            {!hasMessages && !activeSessionId && !activeRoomId ? (
-              /* Welcome / Hero State — only on the truly fresh "/" page,
-                 never during a sidebar switch transition. While messages
-                 are loading from cache or DB, hasMessages is briefly
-                 false; rendering the hero there would flash the
-                 homepage every switch. We just render nothing in that
-                 in-between frame instead. */
+            {!hasMessages && !activeRoomId && (!activeSessionId || replayedSessionIds.current.has(activeSessionId)) ? (
+              /* Welcome / Hero State. During a cold session switch, wait
+                 until replay confirms whether messages exist so the homepage
+                 does not flash over a loading thread. If a saved solo draft
+                 is genuinely empty, show the welcome surface instead of a
+                 blank middle pane. */
               <div className="flex flex-col items-center justify-center min-h-[60vh] text-center">
                 {/* Eyebrow — matches the gold-soft pill used on every other
                     main-nav page (/pricing, /account, /rooms, /tasks etc) so

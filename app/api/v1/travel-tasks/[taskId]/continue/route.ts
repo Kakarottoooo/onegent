@@ -20,8 +20,8 @@ import {
   type ExecutionJobRequest,
 } from "@/lib/core";
 import { ExecutionJobRequestSchema } from "@/lib/api-v1/schemas";
+import { runTravelTaskAttempt } from "@/lib/api-v1/run-travel-task-attempt";
 import { parseProfilePatch, upsertDefaultBookingProfile } from "@/lib/profile-patch";
-import { runTravelTaskAttempt } from "../../route";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";

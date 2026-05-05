@@ -15,9 +15,10 @@ interface Props {
   snapshots: ExecutionSnapshot[];
   /** Optional id to scroll into view on mount/update. */
   focusId?: string;
+  emptyMessage?: string;
 }
 
-export default function SnapshotStream({ snapshots, focusId }: Props) {
+export default function SnapshotStream({ snapshots, focusId, emptyMessage }: Props) {
   const [zoomedId, setZoomedId] = useState<string | null>(null);
   const zoomed = snapshots.find((s) => s.id === zoomedId) ?? null;
 
@@ -33,7 +34,7 @@ export default function SnapshotStream({ snapshots, focusId }: Props) {
       <div className="task-timeline__snapshots-empty">
         <p className="task-timeline__snapshots-empty-line">No snapshots yet.</p>
         <p className="task-timeline__snapshots-empty-sub">
-          Screenshots will appear as the agent navigates.
+          {emptyMessage ?? "Screenshots will appear as the agent navigates."}
         </p>
       </div>
     );
@@ -93,6 +94,8 @@ function SnapshotCard({ snap, index, highlighted, onZoom }: CardProps) {
           src={snap.src}
           alt={snap.label ?? `Snapshot ${index + 1}`}
           className="task-timeline__snapshot-image"
+          loading={index < 2 ? "eager" : "lazy"}
+          decoding="async"
           draggable={false}
         />
         <span className="task-timeline__snapshot-zoom-hint" aria-hidden>
@@ -145,6 +148,7 @@ function SnapshotLightbox({ snap, onClose }: LightboxProps) {
           src={snap.src}
           alt={snap.label ?? "Snapshot"}
           className="task-timeline__lightbox-image"
+          decoding="async"
           draggable={false}
         />
         <div className="task-timeline__lightbox-meta">

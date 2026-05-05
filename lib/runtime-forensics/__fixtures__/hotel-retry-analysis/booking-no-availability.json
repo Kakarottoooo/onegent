@@ -1,0 +1,37 @@
+{
+  "job": {
+    "id": "fixture-hotel-no-availability",
+    "taskId": "fixture-task-hotel-no-availability",
+    "provider": "booking-com",
+    "scenario": "hotel",
+    "status": "failed",
+    "terminalReason": "Provider returned no rooms available for the approved hotel and dates.",
+    "steps": [
+      {
+        "name": "book-hotel",
+        "type": "hotel",
+        "__source": "lib/core/execution-local-fixture",
+        "error": "YOTEL New York Times Square fully booked for 2026-06-10 to 2026-06-12."
+      }
+    ],
+    "params": {
+      "city": "New York",
+      "checkIn": "2026-06-10",
+      "checkOut": "2026-06-12",
+      "adults": 1,
+      "rooms": 1,
+      "hotelName": "YOTEL New York Times Square"
+    }
+  },
+  "workerLogExcerpt": "[booking-com] Target hotel visible\n[booking-com] no rooms available for selected dates\n[booking-com] target hotel unavailable; stopping without retry loop",
+  "workerLogPath": "codex-worker.log",
+  "screenshotPaths": [
+    "worker/.debug-screenshots/booking-com-fixture-no-availability/01-hotel-detail.jpg"
+  ],
+  "liveSnapshotPaths": [
+    ".debug-screenshots/live/fixture-hotel-no-availability/snapshot.json"
+  ],
+  "notes": [
+    "Synthetic no-live fixture. Inventory was unavailable; no payment, login, OTP, CAPTCHA, or confirmation boundary was crossed."
+  ]
+}

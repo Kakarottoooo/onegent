@@ -60,7 +60,7 @@ export function AutopilotRunnerModal({ open, steps, tripLabel, onClose }: Props)
     setBgSent(true);
 
     // Fire-and-forget the start endpoint — keepalive keeps it alive if page closes
-    fetch(`/api/booking-jobs/${jobId}/start`, {
+    fetch(`/api/booking-jobs/${jobId}/start?executor=inline`, {
       method: "POST",
       keepalive: true,
     }).catch(() => {});

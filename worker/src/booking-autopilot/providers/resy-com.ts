@@ -1,4 +1,4 @@
-import type { Page } from "playwright";
+import type { Frame, Page } from "playwright";
 import { registerProvider } from "./registry";
 import type { BrowserProvider, ProviderStageSignals } from "./types";
 import { fillGuestFormWithAI, auditAndRefillEmptyFields } from "../ai-loop/fill-form";
@@ -13,11 +13,98 @@ interface ResyProfile {
   phone?: string;
 }
 
+type ResyInteractionScope = {
+  label: string;
+  locator: Page["locator"] | Frame["locator"];
+  evaluate: Page["evaluate"] | Frame["evaluate"];
+};
+
+type ResyPhoneFillResult = {
+  ok: boolean;
+  step: string;
+  filled?: boolean;
+  strategy: string;
+};
+
+type ResyGuestFillResult = {
+  strategy: string;
+  firstName: boolean | string;
+  lastName: boolean | string;
+  email: boolean | string;
+  phone: boolean | string;
+};
+
+function getResyInteractionScopes(page: Page): ResyInteractionScope[] {
+  const scopes: ResyInteractionScope[] = [
+    {
+      label: "main",
+      locator: page.locator.bind(page),
+      evaluate: page.evaluate.bind(page),
+    },
+  ];
+
+  const frames = typeof page.frames === "function" ? page.frames() : [];
+  const mainFrame = typeof page.mainFrame === "function" ? page.mainFrame() : null;
+  for (const frame of frames) {
+    if (mainFrame && frame === mainFrame) continue;
+    const url = frame.url?.() ?? "";
+    const name = frame.name?.() ?? "";
+    scopes.push({
+      label: `frame:${name || url.slice(0, 60) || "unnamed"}`,
+      locator: frame.locator.bind(frame),
+      evaluate: frame.evaluate.bind(frame),
+    });
+  }
+
+  return scopes;
+}
+
+function normalizeResyPhone(profilePhone: string | undefined): string {
+  const phoneDigits = (profilePhone ?? "").replace(/\D/g, "");
+  return phoneDigits.length === 11 && phoneDigits.startsWith("1")
+    ? phoneDigits.slice(1)
+    : phoneDigits.slice(-10);
+}
+
+async function probeResyOtpAcrossScopes(page: Page): Promise<{ otpText: boolean; sixSmallInputs: boolean; scope: string }> {
+  for (const scope of getResyInteractionScopes(page)) {
+    const probe = await scope.evaluate(() => {
+      const text = (document.body?.innerText ?? "").toLowerCase();
+      const otpText =
+        text.includes("check your mobile phone") ||
+        text.includes("we sent a 6-digit") ||
+        text.includes("6-digit confirmation code") ||
+        text.includes("verification code") ||
+        text.includes("enter verification code");
+      const isShown = (el: HTMLElement): boolean => {
+        if (el.hidden || !el.isConnected) return false;
+        const r = el.getBoundingClientRect();
+        if (r.width === 0 || r.height === 0) return false;
+        const s = window.getComputedStyle(el);
+        return s.display !== "none" && s.visibility !== "hidden";
+      };
+      const inputs = Array.from(document.querySelectorAll<HTMLInputElement>("input"))
+        .filter(el => el.type !== "hidden" && !el.disabled && isShown(el));
+      const sixSmallInputs = inputs.filter(el => {
+        const ml = el.maxLength;
+        return ml === 1 || (el.type === "tel" && el.size > 0 && el.size <= 2);
+      }).length >= 4;
+      return { otpText, sixSmallInputs };
+    }).catch(() => ({ otpText: false, sixSmallInputs: false }));
+
+    if (probe.otpText || probe.sixSmallInputs) {
+      return { ...probe, scope: scope.label };
+    }
+  }
+
+  return { otpText: false, sixSmallInputs: false, scope: "none" };
+}
+
 /** Map app city IDs (from lib/cities.ts) to Resy city slugs */
 export const RESY_CITY_SLUGS: Record<string, string> = {
-  nashville:     "nash",
-  new_york:      "nyc",
-  "new-york":    "nyc",
+  nashville:     "nashville-tn",
+  new_york:      "new-york-ny",
+  "new-york":    "new-york-ny",
   los_angeles:   "la",
   "los-angeles": "la",
   chicago:       "chi",
@@ -89,6 +176,161 @@ export function cityToResySlug(city: string): string {
 export type ResyConfirmationNext = "guest_form" | "mobile_verify" | "timeout" | "not_clicked";
 
 export async function clickResyConfirmationModal(
+  page: Page,
+  trace: (msg: string) => void
+): Promise<{ clicked: boolean; reason: string; nextStage: ResyConfirmationNext }> {
+  const detectNextStage = async (): Promise<ResyConfirmationNext> => {
+    for (const scope of getResyInteractionScopes(page)) {
+      const detected = await scope.evaluate(() => {
+        const text = (document.body?.innerText ?? "").toLowerCase();
+        const inputs = Array.from(document.querySelectorAll<HTMLInputElement>("input"))
+          .filter(el => el.type !== "hidden" && !el.disabled);
+        const hasGuest = inputs.some(el => {
+          const ph = (el.placeholder || "").toLowerCase();
+          const lbl = (el.getAttribute("aria-label") || "").toLowerCase();
+          return ph.includes("first") || ph.includes("last") ||
+            lbl.includes("first") || lbl.includes("last") ||
+            el.type === "email" || ph.includes("email") || lbl.includes("email");
+        });
+        const hasMobile =
+          text.includes("mobile phone number to verify") ||
+          text.includes("phone number to verify") ||
+          inputs.some(el => {
+            const ph = (el.placeholder || "").toLowerCase();
+            const lbl = (el.getAttribute("aria-label") || "").toLowerCase();
+            return el.type === "tel" || ph.includes("mobile") || lbl.includes("mobile");
+          });
+        return { hasGuest, hasMobile };
+      }).catch(() => ({ hasGuest: false, hasMobile: false }));
+      if (detected.hasGuest) return "guest_form";
+      if (detected.hasMobile) return "mobile_verify";
+    }
+    return "timeout";
+  };
+
+  const modalState = await page.evaluate(() => {
+    const text = (document.body?.innerText ?? "").toLowerCase();
+    const hasModalHeading = text.includes("complete your reservation");
+    const hasReserveButton = Array.from(document.querySelectorAll<HTMLElement>('button, [role="button"]'))
+      .some(el => /reserve now/i.test((el.textContent ?? "").trim()));
+    const inputs = Array.from(document.querySelectorAll<HTMLInputElement>("input"))
+      .filter(el => el.type !== "hidden" && !el.disabled);
+    const hasNameInputs = inputs.some(el => {
+      const ph = (el.placeholder || "").toLowerCase();
+      const lbl = (el.getAttribute("aria-label") || "").toLowerCase();
+      return ph.includes("first") || ph.includes("last") || lbl.includes("first") || lbl.includes("last");
+    });
+    return { hasModalHeading, hasReserveButton, hasNameInputs };
+  }).catch(() => ({ hasModalHeading: false, hasReserveButton: false, hasNameInputs: false }));
+
+  if (!modalState.hasModalHeading || modalState.hasNameInputs || !modalState.hasReserveButton) {
+    return {
+      clicked: false,
+      reason: `not on confirmation modal (modalHeading=${modalState.hasModalHeading} hasNameInputs=${modalState.hasNameInputs} hasReserveButton=${modalState.hasReserveButton})`,
+      nextStage: "not_clicked",
+    };
+  }
+
+  const clickStrategies: Array<() => Promise<{ ok: boolean; step: string }>> = [
+    async () => {
+      const reserveBtn = page.locator(
+        'button:has-text("Reserve Now"), [role="button"]:has-text("Reserve Now")'
+      ).first();
+      const visible = await reserveBtn.isVisible({ timeout: 750 }).catch(() => false);
+      if (!visible) return { ok: false, step: "button-not-visible" };
+      await reserveBtn.scrollIntoViewIfNeeded({ timeout: 1000 }).catch(() => undefined);
+      await reserveBtn.click({ timeout: 2500 });
+      return { ok: true, step: "clicked" };
+    },
+    async () => {
+      const reserveBtn = page.getByRole("button", { name: /reserve now/i }).first();
+      const visible = await reserveBtn.isVisible({ timeout: 750 }).catch(() => false);
+      if (!visible) return { ok: false, step: "role-not-visible" };
+      await reserveBtn.scrollIntoViewIfNeeded({ timeout: 1000 }).catch(() => undefined);
+      await reserveBtn.click({ timeout: 2500 });
+      return { ok: true, step: "clicked" };
+    },
+    async () => page.evaluate(() => {
+      const isShown = (el: HTMLElement): boolean => {
+        const r = el.getBoundingClientRect();
+        if (r.width === 0 || r.height === 0) return false;
+        const s = window.getComputedStyle(el);
+        return s.display !== "none" && s.visibility !== "hidden";
+      };
+      const btn = Array.from(document.querySelectorAll<HTMLElement>('button, [role="button"]'))
+        .find(el => isShown(el) && /reserve now/i.test((el.textContent ?? "").trim()));
+      if (!btn) return { ok: false, step: "dom-button-not-found" };
+      btn.scrollIntoView({ block: "center" });
+      btn.click();
+      return { ok: true, step: "clicked" };
+    }),
+    async () => {
+      for (const scope of getResyInteractionScopes(page).filter(s => s.label !== "main")) {
+        const result = await scope.evaluate(() => {
+          const isShown = (el: HTMLElement): boolean => {
+            const r = el.getBoundingClientRect();
+            if (r.width === 0 || r.height === 0) return false;
+            const s = window.getComputedStyle(el);
+            return s.display !== "none" && s.visibility !== "hidden";
+          };
+          const btn = Array.from(document.querySelectorAll<HTMLElement>('button, [role="button"]'))
+            .find(el => isShown(el) && /reserve now/i.test((el.textContent ?? "").trim()));
+          if (!btn) return { ok: false, step: "frame-button-not-found" };
+          btn.scrollIntoView({ block: "center" });
+          btn.click();
+          return { ok: true, step: "clicked" };
+        }).catch(() => ({ ok: false, step: "frame-evaluate-error" }));
+        if (result.ok) return result;
+      }
+      return { ok: false, step: "no-frame-button" };
+    },
+  ];
+  const strategyNames = [
+    "rs-confirm-01-locator",
+    "rs-confirm-02-role",
+    "rs-confirm-03-dom-main",
+    "rs-confirm-04-dom-frame",
+  ];
+
+  let clickOk = false;
+  let lastStep = "not-run";
+  for (let i = 0; i < clickStrategies.length; i += 1) {
+    const name = strategyNames[i] ?? `rs-confirm-${i + 1}`;
+    const result = await clickStrategies[i]().catch((e: Error) => ({
+      ok: false,
+      step: `error:${e.message?.slice(0, 80)}`,
+    }));
+    lastStep = result.step;
+    trace(`[resy][strategy ${name}] ok=${result.ok} step=${result.step}`);
+    if (result.ok) {
+      clickOk = true;
+      break;
+    }
+  }
+
+  if (!clickOk) {
+    return { clicked: false, reason: `click failed:${lastStep}`, nextStage: "not_clicked" };
+  }
+
+  trace("[resy] clickResyConfirmationModal: clicked Reserve Now - waiting for next modal");
+  for (let i = 0; i < 20; i += 1) {
+    await new Promise(r => setTimeout(r, 500));
+    const nextStage = await detectNextStage();
+    if (nextStage === "guest_form") {
+      trace(`[resy] clickResyConfirmationModal: guest-form modal appeared after ${(i + 1) * 500}ms`);
+      return { clicked: true, reason: "form-modal-visible", nextStage: "guest_form" };
+    }
+    if (nextStage === "mobile_verify") {
+      trace(`[resy] clickResyConfirmationModal: mobile-verify modal appeared after ${(i + 1) * 500}ms`);
+      return { clicked: true, reason: "mobile-verify-visible", nextStage: "mobile_verify" };
+    }
+  }
+
+  trace("[resy] clickResyConfirmationModal: clicked but no follow-up modal in 10s");
+  return { clicked: true, reason: "form-modal-timeout", nextStage: "timeout" };
+}
+
+export async function clickResyConfirmationModalLegacy(
   page: Page,
   trace: (msg: string) => void
 ): Promise<{ clicked: boolean; reason: string; nextStage: ResyConfirmationNext }> {
@@ -187,6 +429,201 @@ export async function fillResyMobileNumberAndStopAtOtp(
   profile: { phone?: string },
   trace: (msg: string) => void,
 ): Promise<{ filled: boolean; reachedOtp: boolean; reason: string }> {
+  const phoneTen = normalizeResyPhone(profile.phone);
+  if (!phoneTen) {
+    trace("[resy] fillResyMobileNumber: profile.phone empty - cannot continue");
+    return { filled: false, reachedOtp: false, reason: "no-phone-on-profile" };
+  }
+
+  const phoneInputSelector = [
+    'input[type="tel"]',
+    'input[autocomplete="tel"]',
+    'input[placeholder*="phone" i]',
+    'input[placeholder*="mobile" i]',
+    'input[aria-label*="phone" i]',
+    'input[aria-label*="mobile" i]',
+  ].join(", ");
+
+  const clickContinueWithScope = async (scope: ResyInteractionScope, strategy: string): Promise<boolean> => {
+    const continueBtn = scope.locator(
+      'button:has-text("Continue"), [role="button"]:has-text("Continue")',
+    ).first();
+    const buttonVisible = await continueBtn.isVisible({ timeout: 1000 }).catch(() => false);
+    if (!buttonVisible) {
+      trace(`[resy][strategy ${strategy}] Continue button not visible`);
+      return false;
+    }
+    await continueBtn.scrollIntoViewIfNeeded({ timeout: 1000 }).catch(() => undefined);
+    await continueBtn.click({ timeout: 2500 });
+    return true;
+  };
+
+  const fillWithLocatorScope = async (
+    scope: ResyInteractionScope,
+    strategy: string,
+  ): Promise<ResyPhoneFillResult> => {
+    const phoneInput = scope.locator(phoneInputSelector).first();
+    const visible = await phoneInput.isVisible({ timeout: 1000 }).catch(() => false);
+    if (!visible) return { ok: false, step: "input-not-visible", filled: false, strategy };
+
+    await phoneInput.scrollIntoViewIfNeeded({ timeout: 1000 }).catch(() => undefined);
+    await phoneInput.fill(phoneTen, { timeout: 2500 });
+    const valueDigits = (await phoneInput.inputValue({ timeout: 1000 }).catch(() => "")).replace(/\D/g, "");
+    const verified = valueDigits.endsWith(phoneTen);
+    trace(`[resy][strategy ${strategy}] typed phone verified=${verified} valueDigits=${valueDigits.length} scope=${scope.label}`);
+    if (!verified) return { ok: false, step: "input-unverified", filled: valueDigits.length > 0, strategy };
+
+    const clicked = await clickContinueWithScope(scope, strategy);
+    return { ok: clicked, step: clicked ? "clicked" : "continue-not-visible", filled: true, strategy };
+  };
+
+  const fillWithDomScope = async (
+    scope: ResyInteractionScope,
+    strategy: string,
+  ): Promise<ResyPhoneFillResult> => scope.evaluate((digits: string) => {
+    const isShown = (el: HTMLElement): boolean => {
+      if (el.hidden || !el.isConnected) return false;
+      const r = el.getBoundingClientRect();
+      if (r.width === 0 || r.height === 0) return false;
+      const s = window.getComputedStyle(el);
+      return s.display !== "none" && s.visibility !== "hidden" && s.opacity !== "0";
+    };
+    const inputs = Array.from(document.querySelectorAll<HTMLInputElement>("input"))
+      .filter(el => el.type !== "hidden" && !el.disabled && isShown(el));
+    const phoneInput = inputs.find(el => {
+      const ph = (el.placeholder || "").toLowerCase();
+      const lbl = (el.getAttribute("aria-label") || "").toLowerCase();
+      const id = (el.id || "").toLowerCase();
+      return el.type === "tel" || ph.includes("mobile") || ph.includes("phone") ||
+        lbl.includes("mobile") || lbl.includes("phone") || id.includes("phone");
+    });
+    if (!phoneInput) return { ok: false, step: "find-input", filled: false };
+
+    const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value")?.set;
+    phoneInput.focus();
+    setter?.call(phoneInput, "");
+    setter?.call(phoneInput, digits);
+    if (!setter) phoneInput.value = digits;
+    phoneInput.dispatchEvent(new Event("input", { bubbles: true }));
+    phoneInput.dispatchEvent(new Event("change", { bubbles: true }));
+    phoneInput.dispatchEvent(new KeyboardEvent("keyup", { bubbles: true, key: "0" }));
+    phoneInput.dispatchEvent(new Event("blur", { bubbles: true }));
+
+    const valueDigits = phoneInput.value.replace(/\D/g, "");
+    if (!valueDigits.endsWith(digits)) {
+      return { ok: false, step: `verify:${valueDigits.length}`, filled: valueDigits.length > 0 };
+    }
+
+    const continueBtn = Array.from(document.querySelectorAll<HTMLElement>('button, [role="button"]'))
+      .find(b => isShown(b) && /^\s*continue\s*$/i.test((b.textContent ?? "").trim()));
+    if (!continueBtn) return { ok: false, step: "find-button", filled: true };
+    continueBtn.scrollIntoView({ block: "center" });
+    continueBtn.click();
+    return { ok: true, step: "clicked", filled: true };
+  }, phoneTen)
+    .then(result => ({ ...result, strategy }))
+    .catch((e: Error) => ({ ok: false, step: `error:${e.message?.slice(0, 80)}`, filled: false, strategy }));
+
+  const fillWithMouseKeyboard = async (strategy: string): Promise<ResyPhoneFillResult> => {
+    const target = await page.evaluate(() => {
+      const isShown = (el: HTMLElement): boolean => {
+        if (el.hidden || !el.isConnected) return false;
+        const r = el.getBoundingClientRect();
+        if (r.width === 0 || r.height === 0) return false;
+        const s = window.getComputedStyle(el);
+        return s.display !== "none" && s.visibility !== "hidden" && s.opacity !== "0";
+      };
+      const inputs = Array.from(document.querySelectorAll<HTMLInputElement>("input"))
+        .filter(el => el.type !== "hidden" && !el.disabled && isShown(el));
+      const input = inputs.find(el => {
+        const ph = (el.placeholder || "").toLowerCase();
+        const lbl = (el.getAttribute("aria-label") || "").toLowerCase();
+        const id = (el.id || "").toLowerCase();
+        return el.type === "tel" || ph.includes("phone") || ph.includes("mobile") ||
+          lbl.includes("phone") || lbl.includes("mobile") || id.includes("phone");
+      });
+      if (!input) return null;
+      input.scrollIntoView({ block: "center" });
+      const r = input.getBoundingClientRect();
+      return { x: r.left + Math.min(24, r.width / 2), y: r.top + r.height / 2 };
+    }).catch(() => null);
+    if (!target) return { ok: false, step: "target-not-found", filled: false, strategy };
+
+    await page.mouse.click(target.x, target.y);
+    await page.keyboard.press(process.platform === "darwin" ? "Meta+A" : "Control+A").catch(() => undefined);
+    await page.keyboard.type(phoneTen, { delay: 20 });
+    const verified = await page.evaluate((digits: string) => {
+      const inputs = Array.from(document.querySelectorAll<HTMLInputElement>("input"));
+      return inputs.some(el => el.value.replace(/\D/g, "").endsWith(digits));
+    }, phoneTen).catch(() => false);
+    if (!verified) return { ok: false, step: "keyboard-unverified", filled: true, strategy };
+
+    const clicked = await page.evaluate(() => {
+      const isShown = (el: HTMLElement): boolean => {
+        const r = el.getBoundingClientRect();
+        if (r.width === 0 || r.height === 0) return false;
+        const s = window.getComputedStyle(el);
+        return s.display !== "none" && s.visibility !== "hidden";
+      };
+      const btn = Array.from(document.querySelectorAll<HTMLElement>('button, [role="button"]'))
+        .find(b => isShown(b) && /^\s*continue\s*$/i.test((b.textContent ?? "").trim()));
+      if (!btn) return false;
+      btn.click();
+      return true;
+    }).catch(() => false);
+    return { ok: clicked, step: clicked ? "clicked" : "continue-not-found", filled: true, strategy };
+  };
+
+  const strategies: Array<() => Promise<ResyPhoneFillResult>> = [];
+  const scopes = getResyInteractionScopes(page);
+  const main = scopes[0];
+  strategies.push(() => fillWithLocatorScope(main, "rs-phone-01-locator-main"));
+  for (const scope of scopes.slice(1)) {
+    strategies.push(() => fillWithLocatorScope(scope, "rs-phone-02-locator-frame"));
+  }
+  strategies.push(() => fillWithDomScope(main, "rs-phone-03-dom-main"));
+  for (const scope of scopes.slice(1)) {
+    strategies.push(() => fillWithDomScope(scope, "rs-phone-04-dom-frame"));
+  }
+  strategies.push(() => fillWithMouseKeyboard("rs-phone-05-mouse-keyboard"));
+
+  let last: ResyPhoneFillResult = { ok: false, step: "not-run", filled: false, strategy: "none" };
+  for (const runStrategy of strategies) {
+    const result = await runStrategy().catch((e: Error) => ({
+      ok: false,
+      step: `throw:${e.message?.slice(0, 80)}`,
+      filled: false,
+      strategy: "unknown",
+    }));
+    last = result;
+    trace(`[resy][strategy ${result.strategy}] ok=${result.ok} step=${result.step} filled=${Boolean(result.filled)}`);
+    if (result.ok) break;
+  }
+
+  if (!last.ok) {
+    trace(`[resy] fillResyMobileNumber: all strategies failed at ${last.strategy}:${last.step}`);
+    return { filled: Boolean(last.filled), reachedOtp: false, reason: `step:${last.strategy}:${last.step}` };
+  }
+
+  trace(`[resy] fillResyMobileNumber: phone filled via ${last.strategy} (${phoneTen.length} digits) + Continue clicked - polling for OTP screen`);
+  for (let i = 0; i < 16; i += 1) {
+    await new Promise(r => setTimeout(r, 500));
+    const otpProbe = await probeResyOtpAcrossScopes(page);
+    if (otpProbe.otpText || otpProbe.sixSmallInputs) {
+      trace(`[resy] fillResyMobileNumber: phone otp gate reached after ${(i + 1) * 500}ms (otpText=${otpProbe.otpText} sixInputs=${otpProbe.sixSmallInputs} scope=${otpProbe.scope})`);
+      return { filled: true, reachedOtp: true, reason: "otp-screen-detected" };
+    }
+  }
+
+  trace("[resy] fillResyMobileNumber: filled phone but OTP screen not detected within 8s");
+  return { filled: true, reachedOtp: false, reason: "otp-screen-timeout" };
+}
+
+export async function fillResyMobileNumberAndStopAtOtpLegacy(
+  page: Page,
+  profile: { phone?: string },
+  trace: (msg: string) => void,
+): Promise<{ filled: boolean; reachedOtp: boolean; reason: string }> {
   const phoneRaw = (profile.phone ?? "").trim();
   if (!phoneRaw) {
     trace("[resy] fillResyMobileNumber: profile.phone empty — cannot continue");
@@ -200,10 +637,53 @@ export async function fillResyMobileNumberAndStopAtOtp(
     ? phoneDigits.slice(1)
     : phoneDigits.slice(-10);
 
-  // Find phone input via DOM, set value via native setter, dispatch input
-  // events. Then locate Continue button and click. This is programmatic
-  // (no AI) and fast.
-  const fillResult = await page.evaluate((digits: string) => {
+  type ResyPhoneFillResult = { ok: boolean; step: string; filled?: boolean };
+
+  const fillWithLocator = async (): Promise<ResyPhoneFillResult> => {
+    const phoneInput = page.locator(
+      [
+        'input[type="tel"]',
+        'input[autocomplete="tel"]',
+        'input[placeholder*="phone" i]',
+        'input[placeholder*="mobile" i]',
+        'input[aria-label*="phone" i]',
+        'input[aria-label*="mobile" i]',
+      ].join(", "),
+    ).first();
+    const visible = await phoneInput.isVisible({ timeout: 1500 }).catch(() => false);
+    if (!visible) {
+      trace("[resy][strategy rs-phone-01-locator] phone input not visible");
+      return { ok: false, step: "locator-input-not-visible", filled: false };
+    }
+
+    await phoneInput.scrollIntoViewIfNeeded({ timeout: 1500 }).catch(() => undefined);
+    await phoneInput.fill(phoneTen, { timeout: 3000 }).catch((e: Error) => {
+      trace(`[resy][strategy rs-phone-01-locator] fill failed (${e.message?.slice(0, 80)})`);
+      throw e;
+    });
+
+    const valueDigits = (await phoneInput.inputValue({ timeout: 1000 }).catch(() => "")).replace(/\D/g, "");
+    const verified = valueDigits.endsWith(phoneTen);
+    trace(`[resy][strategy rs-phone-01-locator] typed phone verified=${verified} valueDigits=${valueDigits.length}`);
+    if (!verified) {
+      return { ok: false, step: "locator-input-unverified", filled: valueDigits.length > 0 };
+    }
+
+    const continueBtn = page.locator(
+      'button:has-text("Continue"), [role="button"]:has-text("Continue")',
+    ).first();
+    const buttonVisible = await continueBtn.isVisible({ timeout: 1500 }).catch(() => false);
+    if (!buttonVisible) {
+      trace("[resy][strategy rs-phone-01-locator] Continue button not visible after verified phone fill");
+      return { ok: false, step: "locator-button-not-visible", filled: true };
+    }
+    await continueBtn.scrollIntoViewIfNeeded({ timeout: 1500 }).catch(() => undefined);
+    await continueBtn.click({ timeout: 3000 });
+    trace("[resy][strategy rs-phone-01-locator] Continue clicked");
+    return { ok: true, step: "locator-clicked", filled: true };
+  };
+
+  const fillWithDom = async (): Promise<ResyPhoneFillResult> => page.evaluate((digits: string) => {
     const isShown = (el: HTMLElement): boolean => {
       if (el.hidden || !el.isConnected) return false;
       const r = el.getBoundingClientRect();
@@ -234,6 +714,17 @@ export async function fillResyMobileNumberAndStopAtOtp(
     continueBtn.click();
     return { ok: true, step: "clicked", filled: true };
   }, phoneTen).catch((e: Error) => ({ ok: false, step: `error:${e.message?.slice(0, 60)}`, filled: false }));
+
+  let fillResult = await fillWithLocator().catch((e: Error) => ({
+    ok: false,
+    step: `locator-error:${e.message?.slice(0, 60)}`,
+    filled: false,
+  }));
+  if (!fillResult.ok) {
+    trace(`[resy][strategy rs-phone-01-locator] failed at ${fillResult.step}; falling back to DOM direct`);
+    fillResult = await fillWithDom();
+    trace(`[resy][strategy rs-phone-02-dom-direct] ok=${fillResult.ok} step=${fillResult.step} filled=${Boolean(fillResult.filled)}`);
+  }
 
   if (!fillResult.ok) {
     trace(`[resy] fillResyMobileNumber: failed at ${fillResult.step}`);
@@ -295,7 +786,7 @@ export const resyProvider: BrowserProvider = {
 
     // Search results: resy.com/cities/{slug} with query params but NO venue slug
     const searchResults =
-      /resy\.com\/cities\/[a-z]+(\?|$)/.test(lowerUrl) &&
+      /resy\.com\/cities\/[a-z0-9-]+(\?|$)/.test(lowerUrl) &&
       !lowerUrl.includes("/venues/") &&
       !lowerUrl.includes("/restaurant/");
 
@@ -303,7 +794,7 @@ export const resyProvider: BrowserProvider = {
     const restaurantDetail =
       lowerUrl.includes("/venues/") ||
       lowerUrl.includes("/restaurant/") ||
-      /resy\.com\/cities\/[a-z]+\/[a-z0-9-]+(\?|$)/.test(lowerUrl);
+      /resy\.com\/cities\/[a-z0-9-]+\/[a-z0-9-]+(\?|$)/.test(lowerUrl);
 
     // Booking form: /book in URL OR reservation form visible (name/email/phone inputs)
     const isBookingUrl = lowerUrl.includes("/book") || lowerUrl.includes("/reservation");

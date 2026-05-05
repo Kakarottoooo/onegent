@@ -9,7 +9,18 @@ import {
   type ConnectedAppRow,
 } from "./_components/ConnectedAppCard";
 
+const clerkEnabled =
+  process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY?.startsWith("pk_") &&
+  process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY !== "pk_test_placeholder";
+
 export default function ConnectedAppsDashboardPage() {
+  if (!clerkEnabled) {
+    return <ConnectedAppsAuthUnavailable />;
+  }
+  return <ConnectedAppsDashboardWithClerk />;
+}
+
+function ConnectedAppsDashboardWithClerk() {
   const { isSignedIn, isLoaded } = useUser();
   const [apps, setApps] = useState<ConnectedAppRow[] | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -159,6 +170,33 @@ export default function ConnectedAppsDashboardPage() {
           </div>
         </>
       )}
+    </section>
+  );
+}
+
+function ConnectedAppsAuthUnavailable() {
+  return (
+    <section className="dev-dashboard-section">
+      <div className="dev-dashboard-header">
+        <div className="dev-dashboard-title-block">
+          <span className="dev-eyebrow" style={{ color: "var(--accent)" }}>
+            Auth not configured
+          </span>
+          <h1 className="dev-dashboard-title">Apps with access to your account.</h1>
+          <p className="dev-dashboard-subtitle">
+            Configure Clerk publishable keys to manage connected apps in this environment.
+          </p>
+        </div>
+      </div>
+      <div className="dev-empty-state">
+        <div className="dev-empty-state-glyph">
+          <PlugIcon />
+        </div>
+        <h2 className="dev-empty-state-title">Connected apps are unavailable here</h2>
+        <p className="dev-empty-state-desc">
+          This build is running without Clerk, so account-scoped OAuth controls are disabled.
+        </p>
+      </div>
     </section>
   );
 }

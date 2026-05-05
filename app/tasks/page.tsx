@@ -13,6 +13,7 @@ import type { ScenarioMemory, PatternMemory, RelationshipProfile, RelationshipTy
 import {
   computeJobSemanticStatus,
   computeStepSemanticStatus,
+  isActiveJobStatus,
   JOB_SEMANTIC_DISPLAY,
   STEP_SEMANTIC_DISPLAY,
 } from "@/lib/status";
@@ -68,7 +69,7 @@ function TaskWorkspaceSwitch({
 function classifyTaskWorkspace(job: BookingJob): TaskWorkspaceView {
   const sem = computeJobSemanticStatus(job);
   if (sem === "pending" || sem === "running" || sem === "retrying") return "live";
-  if (sem === "blocked_needs_user_input" || sem === "awaiting_payment" || sem === "partially_completed") return "queue";
+  if (sem === "blocked_needs_user_input" || sem === "partially_completed") return "queue";
   return "history";
 }
 
@@ -143,7 +144,7 @@ function stepStatusLabel(step: BookingJobStep): string {
   }
   if (step.retryScheduledFor) return `Retry scheduled for ${formatTime(step.retryScheduledFor)}`;
   if (step.actionItem) return "Needs your choice";
-  if (step.status === "awaiting_confirmation") return "Ready for payment — enter CVC";
+  if (step.status === "awaiting_confirmation") return "Ready to review — confirm on site";
   if (step.status === "loading") return "Agent working…";
   if (step.status === "no_availability") {
     const err = (step.error ?? "").toLowerCase();
@@ -233,7 +234,7 @@ function SatisfactionWidget({ jobId }: { jobId: string }) {
 function WhatsNext({ job }: { job: BookingJob }) {
   const ready = job.steps.filter((s) => s.status === "done");
   const action = job.steps.filter((s) => s.actionItem);
-  const isRunning = job.status === "running" || job.status === "pending";
+  const isRunning = isActiveJobStatus(job.status);
 
   if (isRunning) return (
     <div style={{ padding: "12px 14px", borderTop: "0.5px solid var(--border, #e5e7eb)" }}>
@@ -444,7 +445,7 @@ function NeedsHelpCard({ step, onManualLink, jobId, stepIndex, onRefresh }: {
         ...(Object.keys(patchBody).length > 0 ? { patchBody } : {}),
       }),
     }).catch(() => {});
-    fetch(`/api/booking-jobs/${jobId}/start`, { method: "POST" }).catch(() => {});
+    fetch(`/api/booking-jobs/${jobId}/start?executor=inline`, { method: "POST" }).catch(() => {});
     setTimeout(() => onRefresh?.(), 800);
   }
 
@@ -572,7 +573,7 @@ function RestaurantTimePicker({
       });
       if (createRes.ok) {
         const { jobId: newJobId } = await createRes.json();
-        fetch(`/api/booking-jobs/${newJobId}/start`, { method: "POST" }).catch(() => {});
+        fetch(`/api/booking-jobs/${newJobId}/start?executor=inline`, { method: "POST" }).catch(() => {});
         onBooked();
       }
     } finally {
@@ -628,7 +629,7 @@ function RetryScheduler({ step, stepIndex, jobId, onScheduled }: {
         ...(Object.keys(patchBody).length > 0 ? { patchBody } : {}),
       }),
     }).catch(() => {});
-    fetch(`/api/booking-jobs/${jobId}/start`, { method: "POST" }).catch(() => {});
+    fetch(`/api/booking-jobs/${jobId}/start?executor=inline`, { method: "POST" }).catch(() => {});
     setTimeout(() => { setRetrying(false); onScheduled(); }, 800);
   }
 
@@ -1022,12 +1023,12 @@ function InterventionBanner({ step, jobId, onOpenLive }: { step: BookingJobStep;
   const color = isPaymentWait ? "rgba(22,163,74,0.85)" : "rgba(220,38,38,0.8)";
   const bg = isPaymentWait ? "rgba(22,163,74,0.06)" : "rgba(220,38,38,0.05)";
   const border = isPaymentWait ? "rgba(22,163,74,0.25)" : "rgba(220,38,38,0.2)";
-  const emoji = isPaymentWait ? "💳" : "🔑";
-  const title = isPaymentWait ? "Agent paused — ready for payment" : "Agent needs your help";
+  const emoji = isPaymentWait ? "🖥️" : "🔑";
+  const title = isPaymentWait ? "Agent paused — ready for your review" : "Agent needs your help";
   const subtitle = isPaymentWait
     ? hasCloudSession
-      ? "The agent filled everything in. Tap below to open the payment page and enter your CVC."
-      : "The agent filled everything in. Open the link to enter payment and confirm."
+      ? "The agent filled what it can. Open the page, review the details, and complete the final site step yourself."
+      : "The agent filled what it can. Watch the live browser, review the details, and complete the final site step yourself."
     : "The site requires your login. Open the link, sign in, then the agent can continue.";
 
   return (
@@ -1052,7 +1053,7 @@ function InterventionBanner({ step, jobId, onOpenLive }: { step: BookingJobStep;
                 className="intervention__btn"
                 style={{ background: color }}
               >
-                💳 Enter CVC →
+                🖥️ Open page →
               </a>
             )}
             {isPaymentWait && !hasCloudSession && (
@@ -1102,11 +1103,10 @@ function InterventionBanner({ step, jobId, onOpenLive }: { step: BookingJobStep;
                   className="intervention-modal__cta"
                   style={{ background: color, color: "#fff" }}
                 >
-                  💳 Open payment page →
+                  🖥️ Open page →
                 </a>
                 <p className="intervention-modal__caption">
-                  Opens in a cloud browser — card details are already filled in.<br />
-                  Just enter your CVC and confirm.
+                  Opens in a cloud browser. Review the details and complete the final site step yourself.
                 </p>
               </>
             ) : step.handoff_url && (step.handoff_url.includes("basket_id=") || step.handoff_url.includes("secure.booking.com/book")) ? (
@@ -1161,8 +1161,8 @@ function JobCard({ job, onRefresh, sessionId, onOpenLive }: { job: BookingJob; o
   useEffect(() => {
     const prev = prevStatusRef.current;
     if (
-      (job.status === "running" && prev !== "running") ||
-      (job.status === "done" && prev === "running")
+      (isActiveJobStatus(job.status) && !isActiveJobStatus(prev)) ||
+      (job.status === "done" && isActiveJobStatus(prev))
     ) {
       onOpenLive?.(job.id);
     }
@@ -1173,7 +1173,7 @@ function JobCard({ job, onRefresh, sessionId, onOpenLive }: { job: BookingJob; o
   const actionCount = job.steps.filter((s) => s.actionItem).length;
   const adjustedCount = job.steps.filter((s) => s.timeAdjusted || s.usedFallback).length;
   const replanCount = job.steps.filter((s) => s.replanAdjusted || s.replanFlagged).length;
-  const isRunning = job.status === "running" || job.status === "pending";
+  const isRunning = isActiveJobStatus(job.status);
   const isComplete = job.status === "done" || job.status === "failed";
 
   // Detect stuck "running" jobs: Vercel function timeout kills the process before
@@ -1187,7 +1187,7 @@ function JobCard({ job, onRefresh, sessionId, onOpenLive }: { job: BookingJob; o
     setResetting(true);
     try {
       // POST to start again — start/route.ts detects stuck jobs and auto-resets them
-      await fetch(`/api/booking-jobs/${job.id}/start`, { method: "POST" });
+      await fetch(`/api/booking-jobs/${job.id}/start?executor=inline`, { method: "POST" });
       onRefresh?.();
     } finally {
       setResetting(false);
@@ -1195,7 +1195,9 @@ function JobCard({ job, onRefresh, sessionId, onOpenLive }: { job: BookingJob; o
   }
 
   const semanticStatus = computeJobSemanticStatus(job);
-  const statusDisplay = JOB_SEMANTIC_DISPLAY[semanticStatus];
+  const statusDisplay = semanticStatus === "awaiting_payment"
+    ? { ...JOB_SEMANTIC_DISPLAY[semanticStatus], label: "Ready to review — confirm on site" }
+    : JOB_SEMANTIC_DISPLAY[semanticStatus];
 
   function openAll() {
     for (const s of job.steps.filter((s) => s.status === "done" && s.handoff_url)) {
@@ -1208,7 +1210,7 @@ function JobCard({ job, onRefresh, sessionId, onOpenLive }: { job: BookingJob; o
     if (deleting) return;
     setDeleting(true);
     try {
-      const force = job.status === "running" || job.status === "pending";
+      const force = isActiveJobStatus(job.status);
       await fetch(`/api/booking-jobs/${job.id}${force ? "?force=true" : ""}`, { method: "DELETE" });
       onRefresh?.();
     } finally {
@@ -1235,7 +1237,7 @@ function JobCard({ job, onRefresh, sessionId, onOpenLive }: { job: BookingJob; o
             animation: statusDisplay.animate ? "jobpulse 1.4s ease-in-out infinite" : "none",
           }}
         />
-        <div style={{ flex: 1, minWidth: 0 }}>
+        <div className="job-card__summary">
           <p className="job-card__title">{job.trip_label}</p>
           <div className="job-card__meta-row">
             <span
@@ -1269,87 +1271,89 @@ function JobCard({ job, onRefresh, sessionId, onOpenLive }: { job: BookingJob; o
             </span>
           </div>
         </div>
-        {(job.status === "running" || (isComplete && Date.now() - new Date(job.updated_at).getTime() < 90_000)) && (
-          <button
-            onClick={(e) => { e.stopPropagation(); onOpenLive?.(job.id); }}
-            className={`job-card__cta ${job.status === "running" ? "job-card__cta--watch" : "job-card__cta--watch-replay"}`}
-          >
-            {job.status === "running" ? "🖥️ Watch live" : "🖥️ Replay"}
-          </button>
-        )}
-        {job.status === "done" && doneCount > 0 && (
-          <button
-            onClick={(e) => { e.stopPropagation(); openAll(); }}
-            className="job-card__cta job-card__cta--open-all"
-          >
-            Open all →
-          </button>
-        )}
-        {job.status === "done" && (() => {
-          // own_share is attached server-side in /api/booking-jobs when the
-          // signed-in user owns this job. Type isn't on BookingJob since
-          // the shape comes from the API layer; pull it via a local cast.
-          const ownShare = (job as BookingJob & {
-            own_share?: { slug: string; view_count: number; visibility: string } | null;
-          }).own_share;
-          if (ownShare) {
-            return (
-              <a
-                href={`/s/${ownShare.slug}`}
-                target="_blank"
-                rel="noopener noreferrer"
-                onClick={(e) => e.stopPropagation()}
-                className="job-card__cta job-card__cta--open-all"
-                title="Open public share page"
-                style={{ color: "var(--gold-text, #5A4416)" }}
-              >
-                ↗ Shared · {ownShare.view_count}{" "}
-                {ownShare.view_count === 1 ? "view" : "views"}
-              </a>
-            );
-          }
-          return (
+        <div className="job-card__actions">
+          {(isRunning || (isComplete && Date.now() - new Date(job.updated_at).getTime() < 90_000)) && (
             <button
-              onClick={(e) => { e.stopPropagation(); setShareOpen(true); }}
-              className="job-card__cta job-card__cta--open-all"
-              title="Share this trip"
+              onClick={(e) => { e.stopPropagation(); onOpenLive?.(job.id); }}
+              className={`job-card__cta ${isRunning ? "job-card__cta--watch" : "job-card__cta--watch-replay"}`}
             >
-              ↗ Share
+              {isRunning ? "🖥️ Watch live" : "🖥️ Replay"}
             </button>
-          );
-        })()}
-        {job.status === "done" && (
+          )}
+          {job.status === "done" && doneCount > 0 && (
+            <button
+              onClick={(e) => { e.stopPropagation(); openAll(); }}
+              className="job-card__cta job-card__cta--open-all"
+            >
+              Open all →
+            </button>
+          )}
+          {job.status === "done" && (() => {
+            // own_share is attached server-side in /api/booking-jobs when the
+            // signed-in user owns this job. Type isn't on BookingJob since
+            // the shape comes from the API layer; pull it via a local cast.
+            const ownShare = (job as BookingJob & {
+              own_share?: { slug: string; view_count: number; visibility: string } | null;
+            }).own_share;
+            if (ownShare) {
+              return (
+                <a
+                  href={`/s/${ownShare.slug}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  onClick={(e) => e.stopPropagation()}
+                  className="job-card__cta job-card__cta--open-all"
+                  title="Open public share page"
+                  style={{ color: "var(--gold-text, #5A4416)" }}
+                >
+                  ↗ Shared · {ownShare.view_count}{" "}
+                  {ownShare.view_count === 1 ? "view" : "views"}
+                </a>
+              );
+            }
+            return (
+              <button
+                onClick={(e) => { e.stopPropagation(); setShareOpen(true); }}
+                className="job-card__cta job-card__cta--open-all"
+                title="Share this trip"
+              >
+                ↗ Share
+              </button>
+            );
+          })()}
+          {job.status === "done" && (
+            <button
+              onClick={(e) => { e.stopPropagation(); setAddToTripOpen(true); }}
+              className="job-card__cta job-card__cta--open-all"
+              title="Group this booking into a trip"
+            >
+              🧳 Add to trip
+            </button>
+          )}
+          {isStuck && (
+            <button
+              onClick={handleResetStuck}
+              disabled={resetting}
+              title="Job appears stuck — click to reset and retry"
+              className="job-card__cta job-card__cta--reset"
+            >
+              {resetting ? "Starting…" : "↺ Reset & Retry"}
+            </button>
+          )}
+          <span style={{ position: "relative" }}>
+            <ModifyTaskButton job={job} onRefresh={onRefresh} />
+          </span>
+          <span className="job-card__expand">{expanded ? "▲" : "▼"}</span>
           <button
-            onClick={(e) => { e.stopPropagation(); setAddToTripOpen(true); }}
-            className="job-card__cta job-card__cta--open-all"
-            title="Group this booking into a trip"
+            onClick={handleDelete}
+            disabled={deleting}
+            title={isRunning ? "Force remove this running trip" : "Delete trip record"}
+            className={`job-card__delete${isRunning ? " job-card__delete--running" : ""}`}
+            style={{ opacity: deleting ? 0.4 : 1 }}
           >
-            🧳 Add to trip
+            🗑
           </button>
-        )}
-        {isStuck && (
-          <button
-            onClick={handleResetStuck}
-            disabled={resetting}
-            title="Job appears stuck — click to reset and retry"
-            className="job-card__cta job-card__cta--reset"
-          >
-            {resetting ? "Starting…" : "↺ Reset & Retry"}
-          </button>
-        )}
-        <span style={{ position: "relative" }}>
-          <ModifyTaskButton job={job} onRefresh={onRefresh} />
-        </span>
-        <span className="job-card__expand">{expanded ? "▲" : "▼"}</span>
-        <button
-          onClick={handleDelete}
-          disabled={deleting}
-          title={isRunning ? "Force remove this running trip" : "Delete trip record"}
-          className={`job-card__delete${isRunning ? " job-card__delete--running" : ""}`}
-          style={{ opacity: deleting ? 0.4 : 1 }}
-        >
-          🗑
-        </button>
+        </div>
       </div>
 
       {expanded && (
@@ -2971,7 +2975,6 @@ function TripsPageInner() {
   const searchParams = useSearchParams();
   const [jobs, setJobs] = useState<BookingJob[]>([]);
   const [loading, setLoading] = useState(true);
-  const [, setClockTick] = useState(0);
   const [clearingAll, setClearingAll] = useState(false);
   const [showRestaurantForm, setShowRestaurantForm] = useState(false);
   const [workspaceView, setWorkspaceView] = useState<TaskWorkspaceView>("queue");
@@ -3055,18 +3058,11 @@ function TripsPageInner() {
   useEffect(() => { loadJobs(); }, [loadJobs]);
 
   useEffect(() => {
-    const hasRunning = jobs.some((j) => j.status === "running" || j.status === "pending");
+    const hasRunning = jobs.some((j) => isActiveJobStatus(j.status));
     if (!hasRunning) return;
     const timer = setInterval(loadJobs, 5000);
     return () => clearInterval(timer);
   }, [jobs, loadJobs]);
-
-  useEffect(() => {
-    const hasRunning = jobs.some((j) => j.status === "running" || j.status === "pending");
-    if (!hasRunning) return;
-    const timer = setInterval(() => setClockTick((tick) => tick + 1), 1000);
-    return () => clearInterval(timer);
-  }, [jobs]);
 
   useEffect(() => {
     if (selectedJobId && jobs.some((j) => j.id === selectedJobId)) return;
@@ -3153,6 +3149,24 @@ function TripsPageInner() {
 
   const liveJob = jobs.find((j) => j.id === liveJobId);
   const rightPct = liveJobId ? (100 - splitPct) : 0;
+
+  useEffect(() => {
+    const explicitView = searchParams.get("view");
+    const focusId = searchParams.get("focus");
+    if (loading || explicitView || focusId || workspaceView !== "queue") return;
+    if (queueJobs.length === 0 && liveJobs.length === 0 && historyJobs.length > 0) {
+      setWorkspaceView("history");
+      router.replace("/tasks?view=history", { scroll: false });
+    }
+  }, [
+    loading,
+    searchParams,
+    workspaceView,
+    queueJobs.length,
+    liveJobs.length,
+    historyJobs.length,
+    router,
+  ]);
 
   function focusJob(jobId: string) {
     setSelectedJobId(jobId);
@@ -3317,7 +3331,9 @@ function TripsPageInner() {
                               )}
                             </div>
                             <div style={{ marginTop: 2, fontFamily: "var(--font-dm-sans)", fontSize: 11, color: "var(--text-secondary,#666)" }}>
-                              {JOB_SEMANTIC_DISPLAY[computeJobSemanticStatus(job)].label}
+                              {computeJobSemanticStatus(job) === "awaiting_payment"
+                                ? "Ready to review — confirm on site"
+                                : JOB_SEMANTIC_DISPLAY[computeJobSemanticStatus(job)].label}
                             </div>
                           </button>
                         );
@@ -3554,7 +3570,7 @@ function TripsPageInner() {
             <TaskTimelinePanel
               key={liveViewKey}
               jobId={liveJobId}
-              title={liveJob?.trip_label ? `🖥️ Agent — ${liveJob.trip_label}` : "🖥️ Agent"}
+              title={liveJob?.trip_label ? `Agent — ${liveJob.trip_label}` : "Agent"}
               subtitle={liveJob?.trip_label ? undefined : "Live run"}
               onClose={() => { liveJobIdRef.current = null; setLiveJobId(null); }}
             />

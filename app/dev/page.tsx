@@ -30,13 +30,103 @@ interface DocLink {
 
 const PHASE_0_ROUTES: DevRoute[] = [
   {
+    href: "/dev/provider-closure",
+    title: "Provider Closure Operator Room",
+    blurb:
+      "Read-only cockpit for restaurant, flight, and hotel closure work. Three vertical lanes show the current closure posture, last known blocker, evidence required before any next live attempt, primary runbook + supporting references, safe hard stops, what to inspect after run, copy-ready no-live CLI commands, and the operator failure taxonomy classes used by each lane. No run / retry / live / start / resume / execute / submit buttons - only Refresh, copy text, and links. No live run is authorized by this page.",
+    status: "live",
+    useCase:
+      "Open this before a founder-approved controlled retry on Resy / Expedia / Booking.com, or when you are reviewing post-run evidence. No live run is authorized by this page. Pair with /dev/runtime-forensics for forensic classification and the per-lane runbook for the exact retry checklist.",
+  },
+  {
+    href: "/dev/demo-readiness",
+    title: "Demo Readiness",
+    blurb:
+      "Compact read-only pre-demo summary for Track C. Aggregates latest Phase 1 gate, founder-e2e, smoke, runtime-forensics artifact counts, hard stops, route order, and useful docs links. This is a small go/no-go supplement that points to Demo Control Room for the full script and dashboard.",
+    status: "live",
+    useCase:
+      "Open this first before a YC/founder demo when you need a quick readiness verdict. No run, retry, provider, payment, OTP, CAPTCHA, or final-confirm controls.",
+  },
+  {
+    href: "/dev/demo-control-room",
+    title: "Demo Control Room (founder-facing)",
+    blurb:
+      "Read-only single-screen aggregator for demo prep. Surfaces the latest Phase 1 quality-gate verdict, founder-e2e verdict, smoke check (extracted from gate), runtime-forensics deep link, Phase 2 vertical posture (Expedia candidate, Booking.com + Hotels.com need fresh artifacts), plus a baked-in safe demo script (pre-demo checklist, happy path, hard stops, recovery phrases). Pure server component — no live runs, no retry, no payment, no OTP, no CAPTCHA bypass. Manual `Refresh now` button re-renders against the latest artifacts.",
+    status: "live",
+    useCase:
+      "Open this BEFORE every founder demo. Confirm three verdicts are green/yellow, copy the safe demo script, bookmark `/dev/runtime-forensics` for fallback. Source of truth is still the underlying benchmark/runs artifacts; this is a focused founder-facing summary.",
+  },
+  {
+    href: "/dev/runtime-forensics",
+    title: "Provider Runtime Forensics workbench",
+    blurb:
+      "Read-only triage workbench. Pre-classifies provider failures across 8 categories (legacy-shape missing __source / no-availability / form-incomplete / OTP / checkout-reached / model-blocked / 5xx / unknown) by parsing benchmark/runs/*.json + debug-screenshots + an optional codex-worker.log excerpt. P0 red-flag for the legacy-shape worker-gating bug. NO live runs, NO retry. V1 is artifact-based; DB live lookup is future codex domain.",
+    status: "live",
+    useCase:
+      "First stop for any 'worker / provider / Expedia / Resy / OpenTable just failed' triage. Gives you classification + matched signals + step shape audit + paste-ready bug report. Source of truth is still DB + worker log + screenshots — see PROVIDER_RUNTIME_DEBUG_PLAYBOOK.md.",
+  },
+  {
+    href: "/dev/restaurant-readiness",
+    title: "Restaurant readiness control center",
+    blurb:
+      "One-page go/no-go before burning a live restaurant case. Aggregates latest Resy probe, latest Phase 0 benchmark, and latest worker debug artifacts into a single verdict (READY / DO NOT BURN / NEEDS PROBE) plus pre-baked single-case live command. No 'run live' button — only copy.",
+    status: "live",
+    useCase:
+      "FIRST STOP before any live R-* token spend. Single screen verdict + recommended case command. Drill into /dev/resy-probe-runs / /dev/benchmark-runs / /dev/debug-artifacts when you need source-of-truth detail.",
+  },
+  {
+    href: "/dev/resy-probe-runs",
+    title: "Resy availability probe runs",
+    blurb:
+      "Cheap no-token probe of Resy availability for Phase 0 fixture cases. Recommended-case card + per-case detail drawer (date/time/covers, exact venue match, slots table, blocker signals) + copy-paste live command. Probe-first: don't burn an OpenAI token unless this dashboard says use_for_live_fill_test.",
+    status: "live",
+    useCase:
+      "Open BEFORE asking codex to spend a live R-003 / R-030 token. If no case is recommended, generate a fresh probe with `npm run probe:resy`. Codex's runner: scripts/probe-resy-availability.ts.",
+  },
+  {
+    href: "/dev/resy-run-analysis",
+    title: "Resy run analysis workbench",
+    blurb:
+      "Offline analysis of the latest Phase 0A live debug. Parses [resy][strategy …] lines into a per-strategy ladder matrix, classifies failure stage (probe / slot / form / OTP / confirm), surfaces founder-input requirements (OTP / CAPTCHA), and pre-bakes the next safe single-case live command.",
+    status: "live",
+    useCase:
+      "After codex runs a live R-* case. Answers four questions: where it's stuck, which strategies tried/failed, next safe case, what founder needs to provide manually. Replaces terminal log paste.",
+  },
+  {
+    href: "/dev/founder-e2e",
+    title: "Founder QA Suite (Phase 1.5)",
+    blurb:
+      "Runnable, recordable, replayable PHASE_1_FOUNDER_E2E checklist. Quick path (10 min) + Full path (60-90 min). Mark each step pass/fail/blocker, fill artifacts, export Markdown bug report or JSON. Saved runs at benchmark/runs/founder-e2e-*.json.",
+    status: "live",
+    useCase:
+      "Run before declaring Phase 1 #8 done. Quick path = first-pass smoke, Full path = sign-off. No live providers, no token spend.",
+  },
+  {
+    href: "/dev/phase1-quality-gates",
+    title: "Phase 1 Quality Gate",
+    blurb:
+      "One-command verdict (npm run gate:phase1) on whether today's build keeps Phase 1 shippable. tsc + targeted vitest + check-drift + optional smoke + autonomous founder e2e. Reads JSON from /api/dev/phase1-quality-gates. No tokens, no providers, no payments.",
+    status: "live",
+    useCase:
+      "Run before pushing a Track B branch. Read the verdict + paste-ready markdown report; route P0/P1 fails to the right side (codex vs Claude) per PHASE_1_QUALITY_GATE.md.",
+  },
+  {
     href: "/dev/benchmark-runs",
     title: "Phase 0 benchmark runs",
     blurb:
-      "Live consumer of codex's /api/dev/benchmark-runs. Headline metrics + 8-bucket distribution + failure taxonomy chart + per-case drawer + GateBreakdown analyzer + Validator paste panel. Single source of truth for run results.",
+      "Live consumer of codex's /api/dev/benchmark-runs. Headline metrics + 8-bucket distribution + failure taxonomy chart + per-case drawer + GateBreakdown analyzer + Validator paste panel + ArtifactRail (taskId / timeline / strategy log + cross-dashboard pointers).",
     status: "live",
     useCase:
-      "Open this when codex pushes a new benchmark/runs/*.json. Paste the JSON into Validator if you want shape pre-check before reading.",
+      "Open this when codex pushes a new benchmark/runs/*.json. Click a case to see ArtifactRail + cross-dashboard links to probe / debug-screenshots.",
+  },
+  {
+    href: "/dev/debug-artifacts",
+    title: "Debug artifacts viewer",
+    blurb:
+      "Reads worker/.debug-screenshots/<provider>/<run>/. summary.json + page.png lightbox + sandboxed page.html iframe. Newest-first with per-provider 'Latest run' shortcut. Captures land here when the worker hits a terminal failure.",
+    status: "live",
+    useCase:
+      "Open after a failed live run. Pair with /dev/benchmark-runs (run report) and /dev/resy-probe-runs (was the case probe-validated?) to triangulate root cause.",
   },
 ];
 

@@ -2,6 +2,16 @@
 
 **Live:** [onegent.one](https://onegent.one/)
 
+## Project Docs
+
+Start here for current project state, phase status, handoffs, provider debugging,
+and archived plans:
+
+- [docs/INDEX.md](./docs/INDEX.md)
+- [docs/00-start-here/PROJECT_SUMMARY.md](./docs/00-start-here/PROJECT_SUMMARY.md)
+- [docs/00-start-here/PHASE_STATUS.md](./docs/00-start-here/PHASE_STATUS.md)
+- [docs/10-coordination/README.md](./docs/10-coordination/README.md)
+
 AI 决策代理——把"搜索 → 比较 → 筛选 → 推荐 → 执行 → 反馈 → 学习"整条链路交给 agent 自动完成，用户只做最终批准。
 
 ---
@@ -64,10 +74,10 @@ npm run dev
 
 必需环境变量：`ANTHROPIC_API_KEY` · `POSTGRES_URL` · `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY` · `CLERK_SECRET_KEY` · `GOOGLE_PLACES_API_KEY`
 
-完整环境变量列表见 `PROJECT_SUMMARY.md`。
+完整环境变量列表见 `docs/00-start-here/PROJECT_SUMMARY.md`。
 
 ---
 
 ## 文档
 
-详细架构、执行流程、数据库表结构、版本历史 → [`PROJECT_SUMMARY.md`](./PROJECT_SUMMARY.md)
+详细架构、执行流程、数据库表结构、版本历史 → [`docs/00-start-here/PROJECT_SUMMARY.md`](./docs/00-start-here/PROJECT_SUMMARY.md)

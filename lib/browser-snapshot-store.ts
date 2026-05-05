@@ -1,4 +1,5 @@
 import { mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
+import os from "node:os";
 import path from "node:path";
 
 export interface BrowserSnapshotEntry {
@@ -17,16 +18,127 @@ export interface BrowserSnapshotEntry {
   };
 }
 
+export type BrowserSnapshotListEntry = Omit<BrowserSnapshotEntry, "imageBase64"> & {
+  src: string;
+};
+
 function getSnapshotRoot(): string {
   if (process.env.ONEGENT_SNAPSHOT_DIR) {
     return process.env.ONEGENT_SNAPSHOT_DIR;
   }
 
+  return getDefaultSharedSnapshotRoot();
+}
+
+function getDefaultSharedSnapshotRoot(): string {
+  const base = process.env.LOCALAPPDATA || path.join(os.homedir(), ".onegent");
+  return path.join(base, "Onegent", "snapshots", "live");
+}
+
+function getLegacyWorktreeSnapshotRoot(): string {
   const cwd = process.cwd();
   const root = path.basename(cwd).toLowerCase() === "worker"
     ? path.resolve(cwd, "..")
     : cwd;
   return path.join(root, ".debug-screenshots", "live");
+}
+
+function getRepoRoot(): string {
+  const cwd = process.cwd();
+  return path.basename(cwd).toLowerCase() === "worker"
+    ? path.resolve(cwd, "..")
+    : cwd;
+}
+
+function parsePathList(value: string | undefined): string[] {
+  if (!value) return [];
+  return value
+    .split(path.delimiter)
+    .map((entry) => entry.trim())
+    .filter(Boolean);
+}
+
+async function discoverSiblingSnapshotRoots(primaryRoot: string): Promise<string[]> {
+  if (process.env.ONEGENT_DISABLE_SNAPSHOT_DISCOVERY === "1") return [];
+  if (
+    process.env.NODE_ENV === "production" &&
+    process.env.ONEGENT_DISCOVER_SNAPSHOT_DIRS !== "1"
+  ) {
+    return [];
+  }
+
+  const roots: string[] = [];
+  const repoRoot = getRepoRoot();
+  const parent = path.dirname(repoRoot);
+
+  async function addOnegentDirs(container: string): Promise<void> {
+    let entries;
+    try {
+      entries = await readdir(container, { withFileTypes: true });
+    } catch {
+      return;
+    }
+    for (const entry of entries) {
+      if (!entry.isDirectory()) continue;
+      if (!entry.name.toLowerCase().startsWith("onegent")) continue;
+      roots.push(path.join(container, entry.name, ".debug-screenshots", "live"));
+    }
+  }
+
+  await addOnegentDirs(parent);
+  const claudeWorktrees = path.join(os.homedir(), "onegent", ".claude", "worktrees");
+  await addOnegentDirs(claudeWorktrees);
+
+  return uniquePaths(roots).filter((root) => path.resolve(root) !== path.resolve(primaryRoot));
+}
+
+let discoveryCache:
+  | {
+      primaryRoot: string;
+      expiresAt: number;
+      roots: string[];
+    }
+  | null = null;
+const DISCOVERY_CACHE_MS = 60_000;
+
+async function getCachedDiscoveredRoots(primaryRoot: string): Promise<string[]> {
+  const now = Date.now();
+  if (
+    discoveryCache &&
+    discoveryCache.primaryRoot === primaryRoot &&
+    discoveryCache.expiresAt > now
+  ) {
+    return discoveryCache.roots;
+  }
+
+  const roots = await discoverSiblingSnapshotRoots(primaryRoot);
+  discoveryCache = {
+    primaryRoot,
+    expiresAt: now + DISCOVERY_CACHE_MS,
+    roots,
+  };
+  return roots;
+}
+
+async function getSnapshotReadRoots(): Promise<string[]> {
+  const primaryRoot = getSnapshotRoot();
+  const configuredRoots = parsePathList(process.env.ONEGENT_SNAPSHOT_READ_DIRS);
+  const legacyRoot = getLegacyWorktreeSnapshotRoot();
+  const discoveredRoots = await getCachedDiscoveredRoots(primaryRoot);
+  return uniquePaths([primaryRoot, ...configuredRoots, legacyRoot, ...discoveredRoots]);
+}
+
+function uniquePaths(paths: string[]): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const p of paths) {
+    const resolved = path.resolve(p);
+    const key = process.platform === "win32" ? resolved.toLowerCase() : resolved;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(resolved);
+  }
+  return out;
 }
 
 function safeJobId(jobId: string): string {
@@ -47,7 +159,63 @@ export async function saveBrowserSnapshot(
 }
 
 export async function listBrowserSnapshots(jobId: string): Promise<BrowserSnapshotEntry[]> {
-  const dir = path.join(getSnapshotRoot(), safeJobId(jobId));
+  const safeId = safeJobId(jobId);
+  const roots = await getSnapshotReadRoots();
+  const snapshotsById = new Map<string, BrowserSnapshotEntry>();
+
+  for (const root of roots) {
+    const dir = path.join(root, safeId);
+    for (const snapshot of await readSnapshotsFromDir(dir)) {
+      snapshotsById.set(snapshot.id, snapshot);
+    }
+  }
+
+  const sorted = [...snapshotsById.values()].sort(
+    (a, b) => new Date(a.ts).getTime() - new Date(b.ts).getTime(),
+  );
+
+  return sorted.slice(Math.max(0, sorted.length - 120));
+}
+
+export async function getBrowserSnapshot(
+  jobId: string,
+  snapshotId: string,
+): Promise<BrowserSnapshotEntry | null> {
+  const safeId = safeJobId(jobId);
+  const roots = await getSnapshotReadRoots();
+  const fileName = safeSnapshotFileName(snapshotId);
+  if (!fileName) return null;
+
+  for (const root of roots) {
+    const filePath = path.join(root, safeId, `${fileName}.json`);
+    try {
+      return JSON.parse(await readFile(filePath, "utf8")) as BrowserSnapshotEntry;
+    } catch {
+      // Try the next configured/shared root.
+    }
+  }
+
+  return null;
+}
+
+export function toBrowserSnapshotListEntry(
+  snapshot: BrowserSnapshotEntry,
+  src: string,
+): BrowserSnapshotListEntry {
+  const { imageBase64: _imageBase64, ...rest } = snapshot;
+  return {
+    ...rest,
+    src,
+  };
+}
+
+function safeSnapshotFileName(snapshotId: string): string | null {
+  if (!/^[a-zA-Z0-9_.-]+$/.test(snapshotId)) return null;
+  if (snapshotId.includes("..")) return null;
+  return snapshotId;
+}
+
+async function readSnapshotsFromDir(dir: string): Promise<BrowserSnapshotEntry[]> {
   let files: string[];
   try {
     files = await readdir(dir);
@@ -69,10 +237,7 @@ export async function listBrowserSnapshots(jobId: string): Promise<BrowserSnapsh
       }),
   );
 
-  return snapshots
-    .filter((snapshot): snapshot is BrowserSnapshotEntry => snapshot !== null)
-    .sort((a, b) => new Date(b.ts).getTime() - new Date(a.ts).getTime())
-    .slice(0, 40);
+  return snapshots.filter((snapshot): snapshot is BrowserSnapshotEntry => snapshot !== null);
 }
 
 export async function deleteBrowserSnapshots(jobId: string): Promise<void> {

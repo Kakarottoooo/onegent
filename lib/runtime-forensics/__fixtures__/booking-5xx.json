@@ -1,0 +1,55 @@
+{
+  "id": "fixture-booking-5xx",
+  "taskId": "fixture-task-htl-001",
+  "sessionId": "fixture-session-htl-001",
+  "provider": "booking-com",
+  "scenario": "HTL-NETWORK",
+  "status": "failed",
+  "errorMessage": "ECONNRESET reading https://www.booking.com/searchresults.html during availability scan",
+  "terminalReason": "PROVIDER_5XX",
+  "terminalCode": "NETWORK_5XX",
+  "createdAt": "2026-05-04T21:00:00Z",
+  "updatedAt": "2026-05-04T21:00:42Z",
+  "params": {
+    "city": "Tokyo",
+    "checkIn": "2026-07-10",
+    "checkOut": "2026-07-13",
+    "guests": 2
+  },
+  "steps": [
+    {
+      "name": "search-availability",
+      "type": "provider.scan",
+      "__source": "lib/core/execution",
+      "timestamp": "2026-05-04T21:00:32Z",
+      "error": "fetch failed: ECONNRESET (gateway timeout 504 status response from upstream)"
+    },
+    {
+      "name": "retry-1",
+      "type": "provider.retry",
+      "__source": "lib/core/execution",
+      "timestamp": "2026-05-04T21:00:38Z",
+      "error": "net::ERR_CONNECTION_RESET on retry; provider unreachable"
+    }
+  ],
+  "decisionLog": [
+    {
+      "at": "2026-05-04T21:00:32Z",
+      "level": "error",
+      "event": "fetch_failed",
+      "message": "ECONNRESET to www.booking.com - retrying with backoff"
+    },
+    {
+      "at": "2026-05-04T21:00:38Z",
+      "level": "error",
+      "event": "retry_failed",
+      "message": "503 server error response after 6s wait; net::ERR_CONNECTION_RESET"
+    },
+    {
+      "at": "2026-05-04T21:00:42Z",
+      "level": "error",
+      "event": "verdict",
+      "message": "PROVIDER_5XX - giving up after 2 attempts; provider unreachable"
+    }
+  ]
+}

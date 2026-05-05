@@ -64,7 +64,34 @@ const PAYMENT_FIELDS = new Set([
   "card_expiry",
   "card_name",
   "billing_address",
+  "cvv",
+  "cvc",
+  "card_cvv",
+  "card_cvc",
+  "security_code",
 ]);
+
+export function findProfilePaymentFields(raw: unknown): string[] {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return [];
+  const source = raw as Record<string, unknown>;
+  return Object.keys(source).filter((key) => PAYMENT_FIELDS.has(key));
+}
+
+export function paymentFieldsError(fields: string[]): ProfilePatchParseResult {
+  const errors: Record<string, string> = {};
+  for (const field of fields) {
+    errors[field] =
+      "Payment fields are not allowed on the profile endpoint. Use the secure permissions/settings flow.";
+  }
+  return {
+    ok: false,
+    error: {
+      code: "invalid_profile_patch",
+      message: "Profile patch contains payment fields.",
+      fields: errors,
+    },
+  };
+}
 
 export function parseProfilePatch(raw: unknown): ProfilePatchParseResult {
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
@@ -84,7 +111,8 @@ export function parseProfilePatch(raw: unknown): ProfilePatchParseResult {
 
   for (const key of Object.keys(source)) {
     if (PAYMENT_FIELDS.has(key)) {
-      errors[key] = "Payment fields must be managed from the secure permissions/settings flow.";
+      errors[key] =
+        "Payment fields are not allowed on the profile endpoint. Use the secure permissions/settings flow.";
       continue;
     }
     if (!ALLOWED_FIELDS.has(key)) {

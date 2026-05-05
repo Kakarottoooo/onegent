@@ -3,7 +3,7 @@
 import { Suspense, useEffect, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import GlobalNav from "@/components/GlobalNav";
-import { LearnedSettingsTab } from "@/app/permissions/page";
+import { LearnedSettingsTab } from "@/app/account/_components/SettingsTabs";
 import { usePreferences } from "@/app/hooks/usePreferences";
 import type { DiscoveredPreference } from "@/lib/types";
 import type { PatternMemory, RelationshipProfile, ScenarioMemory } from "@/lib/memory";

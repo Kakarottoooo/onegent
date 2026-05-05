@@ -26,7 +26,7 @@ const store: Map<string, ActiveSession> =
   globalThis.__browserSessionStore ??
   (globalThis.__browserSessionStore = new Map<string, ActiveSession>());
 
-const TTL_MS = 15 * 60 * 1000; // 15 minutes
+const TTL_MS = 60 * 60 * 1000; // 60 minutes
 
 export const browserSessionStore = {
   /** Store a static Page reference. */

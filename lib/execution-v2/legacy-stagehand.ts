@@ -60,8 +60,25 @@ function isTerminalStatus(s: ExecutionJobStatus): boolean {
   );
 }
 
-function buildSummaryLog(trace: string[] | undefined, createdAt: string): DecisionLogEntry[] {
+export function buildSummaryLog(trace: string[] | undefined, createdAt: string): DecisionLogEntry[] {
   if (!trace?.length) return [];
+  const baseTs = Date.parse(createdAt);
+  const entries = trace.slice(-40).map((message, index): DecisionLogEntry => {
+    const normalized = message.replace(/^\[[^\]]+\]\s*/g, "").trim();
+    const lower = normalized.toLowerCase();
+    const type: DecisionLogEntry["type"] =
+      /\b(failed|error|blocked|captcha|missing|required|incomplete)\b/.test(lower)
+        ? "failed"
+        : /\b(reached|filled|selected|clicked|dismissed|checkout)\b/.test(lower)
+        ? "attempt"
+        : "info";
+    return {
+      ts: new Date(baseTs + index * 1000).toISOString(),
+      type,
+      message: normalized.slice(0, 180) || "Executor trace",
+      outcome: "Executor trace",
+    };
+  });
   return [
     {
       ts: createdAt,
@@ -69,5 +86,6 @@ function buildSummaryLog(trace: string[] | undefined, createdAt: string): Decisi
       message: `Executor trace (${trace.length} entries)`,
       outcome: trace[trace.length - 1]?.slice(0, 120),
     },
+    ...entries,
   ];
 }

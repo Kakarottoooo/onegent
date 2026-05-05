@@ -1,0 +1,41 @@
+{
+  "id": "fixture-expedia-legacy-shape",
+  "taskId": "fixture-task-fl-001",
+  "sessionId": "fixture-session-fl-001",
+  "provider": "expedia",
+  "scenario": "FL-LEGACY",
+  "status": "failed",
+  "errorMessage": "Worker received legacy-shape step: missing __source marker. Step lacks __source field; M5 force-gate must stamp before enqueue.",
+  "terminalReason": "WORKER_REJECT_LEGACY_SHAPE",
+  "terminalCode": "LEGACY_SHAPE",
+  "createdAt": "2026-05-04T19:00:00Z",
+  "updatedAt": "2026-05-04T19:00:08Z",
+  "params": {
+    "origin": "MCO",
+    "destination": "BNA",
+    "outboundDate": "2026-06-01",
+    "passengers": 1
+  },
+  "steps": [
+    {
+      "name": "search-flights",
+      "type": "provider.scan",
+      "timestamp": "2026-05-04T19:00:05Z",
+      "error": "Worker received legacy-shape step: missing __source marker"
+    }
+  ],
+  "decisionLog": [
+    {
+      "at": "2026-05-04T19:00:05Z",
+      "level": "error",
+      "event": "worker_reject",
+      "message": "step lacks __source - executor marker missing - rejecting at queue boundary"
+    },
+    {
+      "at": "2026-05-04T19:00:08Z",
+      "level": "error",
+      "event": "verdict",
+      "message": "WORKER_REJECT_LEGACY_SHAPE - upstream M5 gate failed to stamp"
+    }
+  ]
+}

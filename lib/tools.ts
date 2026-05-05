@@ -1,6 +1,10 @@
 import { Restaurant, ReviewSignals, GoogleReview, Hotel, Flight, AfterDinnerVenue } from "./types";
 import { buildExpediaFlightsUrl } from "./agent/planners/booking-links";
 
+const REVIEW_SIGNAL_TAVILY_TIMEOUT_MS = 4_000;
+const REVIEW_SIGNAL_MODEL_TIMEOUT_MS = 6_000;
+const TAVILY_SEARCH_TIMEOUT_MS = 6_000;
+
 // ─── Geocoding ────────────────────────────────────────────────────────────────
 
 export async function geocodeLocation(
@@ -293,6 +297,7 @@ ReviewSignals schema:
       const searchQuery = `${names} reviews ${cityFullName} noise atmosphere experience site:reddit.com OR site:yelp.com`;
       const res = await fetch("https://api.tavily.com/search", {
         method: "POST",
+        signal: AbortSignal.timeout(REVIEW_SIGNAL_TAVILY_TIMEOUT_MS),
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           api_key: process.env.TAVILY_API_KEY,
@@ -324,6 +329,7 @@ ReviewSignals schema:
   try {
     const res = await fetch(MINIMAX_API_URL, {
       method: "POST",
+      signal: AbortSignal.timeout(REVIEW_SIGNAL_MODEL_TIMEOUT_MS),
       headers: {
         "Content-Type": "application/json",
         Authorization: `Bearer ${process.env.MINIMAX_API_KEY}`,
@@ -384,6 +390,7 @@ export async function tavilySearch(
 ): Promise<{ results: string; failed: boolean }> {
   const res = await fetch("https://api.tavily.com/search", {
     method: "POST",
+    signal: AbortSignal.timeout(TAVILY_SEARCH_TIMEOUT_MS),
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
       api_key: process.env.TAVILY_API_KEY,
@@ -407,6 +414,17 @@ export async function tavilySearch(
 
 // ─── Phase 7.2: Hotel Search via SerpApi ─────────────────────────────────────
 
+export interface HotelSearchResult {
+  hotels: Hotel[];
+  /**
+   * Bug 2 (P1 systemic): when the upstream provider rejects the request or
+   * errors out, downstream code used to see a silently empty array — making
+   * "no hotels found" indistinguishable from a real empty result. This field
+   * carries the cause forward so the chat layer can surface the right reason.
+   */
+  providerError: string | null;
+}
+
 export async function searchHotels(params: {
   location: string;
   check_in?: string;
@@ -414,11 +432,11 @@ export async function searchHotels(params: {
   guests?: number;
   hotel_class?: number;
   maxResults?: number;
-}): Promise<Hotel[]> {
+}): Promise<HotelSearchResult> {
   const apiKey = process.env.SERPAPI_KEY;
   if (!apiKey) {
     console.warn("SERPAPI_KEY not set, returning empty hotel results");
-    return [];
+    return { hotels: [], providerError: "SERPAPI_KEY not set" };
   }
 
   const today = new Date();
@@ -453,18 +471,18 @@ export async function searchHotels(params: {
     const res = await fetch(urlStr, { signal: AbortSignal.timeout(15_000) });
     if (!res.ok) {
       console.warn("SerpApi hotel search failed:", res.status);
-      return [];
+      return { hotels: [], providerError: `SerpApi HTTP ${res.status}` };
     }
     const data = await res.json();
     if (data.error) {
       console.warn("[searchHotels] SerpAPI error:", data.error);
-      return [];
+      return { hotels: [], providerError: `SerpApi: ${String(data.error).slice(0, 120)}` };
     }
     const properties: Array<Record<string, unknown>> = data.properties ?? [];
     console.log(`[searchHotels] got ${properties.length} properties (keys: ${Object.keys(data).join(",")})`);
 
 
-    return properties.slice(0, params.maxResults ?? 20).map((p, i): Hotel => {
+    const hotels = properties.slice(0, params.maxResults ?? 20).map((p, i): Hotel => {
       const prices = p.rate_per_night as Record<string, unknown> | undefined;
       const pricePerNight = prices?.extracted_lowest
         ? Number(prices.extracted_lowest)
@@ -541,9 +559,11 @@ export async function searchHotels(params: {
         lng: (p.gps_coordinates as Record<string, number> | undefined)?.longitude,
       };
     });
+    return { hotels, providerError: null };
   } catch (err) {
     console.warn("searchHotels error:", err);
-    return [];
+    const message = err instanceof Error ? err.message : String(err);
+    return { hotels: [], providerError: `searchHotels exception: ${message.slice(0, 120)}` };
   }
 }
 

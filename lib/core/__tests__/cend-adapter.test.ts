@@ -145,7 +145,7 @@ describe("markStepForCore — restaurant", () => {
 
   it("throws on missing required field (covers as string, not number)", () => {
     expect(() => markStepForCore(restaurantStep({ covers: "two" }))).toThrow(
-      /missing required number field "covers\|party_size"/,
+      /missing required number field "covers"/,
     );
   });
 });

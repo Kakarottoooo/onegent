@@ -1,0 +1,63 @@
+{
+  "job": {
+    "id": "fixture-hotel-retry-job",
+    "taskId": "fixture-hotel-retry-task",
+    "provider": "booking-com",
+    "scenario": "hotel",
+    "status": "failed",
+    "errorMessage": "Synthetic fixture: replace with the post-live hotel retry terminal error.",
+    "terminalReason": "synthetic_no_live_fixture",
+    "terminalCode": "SYNTHETIC_FIXTURE",
+    "steps": [
+      {
+        "name": "book-hotel",
+        "type": "hotel",
+        "status": "error",
+        "error": "Synthetic fixture: replace with steps[0].error from booking_jobs.",
+        "__source": "lib/core/execution-local-fixture",
+        "body": {
+          "scenario": "hotel",
+          "params": {
+            "scenario": "hotel",
+            "hotel_name": "YOTEL New York Times Square",
+            "city": "New York",
+            "checkin": "2026-06-10",
+            "checkout": "2026-06-12",
+            "adults": 1,
+            "rooms": 1
+          }
+        }
+      }
+    ],
+    "params": {
+      "scenario": "hotel",
+      "hotel_name": "YOTEL New York Times Square",
+      "city": "New York",
+      "checkin": "2026-06-10",
+      "checkout": "2026-06-12",
+      "adults": 1,
+      "rooms": 1
+    }
+  },
+  "dbRow": {
+    "id": "fixture-hotel-retry-job",
+    "task_id": "fixture-hotel-retry-task",
+    "trip_label": "Synthetic YOTEL New York Times Square 2026-06-10",
+    "status": "failed",
+    "created_at": "2026-05-04T00:00:00.000Z",
+    "updated_at": "2026-05-04T00:05:00.000Z"
+  },
+  "workerLogExcerpt": "[booking-com] Synthetic fixture only. Replace with bounded codex-worker.log lines for the approved retry.",
+  "workerLogPath": "C:\\Users\\Gzw19\\onegent-integrated-20260504\\codex-worker.log",
+  "screenshotPaths": [
+    "C:\\Users\\Gzw19\\onegent-integrated-20260504\\worker\\.debug-screenshots\\booking-com-fixture\\01-search-results.jpg"
+  ],
+  "liveSnapshotPaths": [
+    "C:\\Users\\Gzw19\\onegent-integrated-20260504\\.debug-screenshots\\live\\fixture-hotel-retry-job\\snapshot.json"
+  ],
+  "notes": [
+    "Synthetic template only. Replace every fixture value with post-retry evidence after founder approval.",
+    "Record whether the terminal evidence is provider selector drift, room/card scan drift, checkout/manual boundary, model/env transient, network/provider degraded, no availability, or insufficient evidence.",
+    "No payment, CVV, OTP, CAPTCHA, account prompt, or final confirmation was completed for this template."
+  ]
+}

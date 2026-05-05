@@ -180,6 +180,31 @@ describe("buildDeepLinkEnrichmentForStep", () => {
     expect(out!.actionItem.options[0].label).toBe("Continue on Resy");
   });
 
+  it("preserves Resy venue detail links with Resy time query format", () => {
+    const out = buildDeepLinkEnrichmentForStep(
+      makeStep({ body: { ...makeStep().body, startUrl: "https://resy.com/cities/new-york-ny/venues/charlie-bird" } }),
+      "msg",
+    );
+
+    expect(out!.handoff_url).toContain("resy.com/cities/new-york-ny/venues/charlie-bird");
+    expect(out!.handoff_url).toContain("date=2026-05-12");
+    expect(out!.handoff_url).toContain("seats=2");
+    expect(out!.handoff_url).toContain("time=1900");
+  });
+
+  it("uses a current Resy city search fallback with date seats and time", () => {
+    const out = buildDeepLinkEnrichmentForStep(
+      makeStep({ body: { ...makeStep().body, startUrl: "https://resy.com/cities/new-york-ny" } }),
+      "msg",
+    );
+
+    expect(out!.handoff_url).toContain("resy.com/cities/new-york-ny?");
+    expect(out!.handoff_url).toContain("date=2026-05-12");
+    expect(out!.handoff_url).toContain("seats=2");
+    expect(out!.handoff_url).toContain("time=1900");
+    expect(out!.handoff_url).toContain("query=L%27Artusi");
+  });
+
   it("defaults party_size to 2 when covers is not a number", () => {
     const out = buildDeepLinkEnrichmentForStep(
       makeStep({

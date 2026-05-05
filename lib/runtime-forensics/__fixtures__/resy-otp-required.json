@@ -1,0 +1,74 @@
+{
+  "id": "fixture-resy-otp-required",
+  "taskId": "fixture-task-resy-002",
+  "sessionId": "fixture-session-resy-002",
+  "provider": "resy",
+  "scenario": "R-007",
+  "status": "ready_for_confirmation",
+  "errorMessage": "phone verification required: awaiting OTP",
+  "terminalReason": "F-PROVIDER-OTP",
+  "terminalCode": "F-PROVIDER-OTP",
+  "createdAt": "2026-05-04T17:00:00Z",
+  "updatedAt": "2026-05-04T17:01:33Z",
+  "params": {
+    "restaurant": "Carbone",
+    "city": "New York",
+    "date": "2026-06-20",
+    "time": "20:30",
+    "partySize": 4,
+    "phone": "+10000000000"
+  },
+  "steps": [
+    {
+      "name": "search-availability",
+      "type": "provider.scan",
+      "__source": "lib/core/execution",
+      "timestamp": "2026-05-04T17:00:08Z"
+    },
+    {
+      "name": "select-slot",
+      "type": "provider.click",
+      "__source": "lib/core/execution",
+      "timestamp": "2026-05-04T17:00:42Z"
+    },
+    {
+      "name": "fill-guest-form",
+      "type": "provider.fill",
+      "__source": "lib/core/execution",
+      "timestamp": "2026-05-04T17:01:15Z"
+    },
+    {
+      "name": "phone-verification",
+      "type": "provider.otp",
+      "__source": "lib/core/execution",
+      "timestamp": "2026-05-04T17:01:33Z",
+      "error": "awaiting OTP - phone verification required (one-time code sent to +1***0000)"
+    }
+  ],
+  "decisionLog": [
+    {
+      "at": "2026-05-04T17:00:08Z",
+      "level": "info",
+      "event": "scan_started",
+      "message": "warm-session strategy selected"
+    },
+    {
+      "at": "2026-05-04T17:00:42Z",
+      "level": "info",
+      "event": "slot_selected",
+      "message": "selected slot 2026-06-20 20:30"
+    },
+    {
+      "at": "2026-05-04T17:01:33Z",
+      "level": "warn",
+      "event": "phone_verify_required",
+      "message": "phone verification page reached; awaiting one-time code (SMS)"
+    },
+    {
+      "at": "2026-05-04T17:01:33Z",
+      "level": "info",
+      "event": "safe_handoff",
+      "message": "safe handoff to user - OTP page open, browser kept warm"
+    }
+  ]
+}

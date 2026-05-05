@@ -1,0 +1,40 @@
+{
+  "job": {
+    "id": "fixture-expedia-card-scan-before-fallback",
+    "taskId": "fixture-task-expedia-card-scan-before-fallback",
+    "provider": "expedia",
+    "scenario": "flight",
+    "status": "failed",
+    "errorMessage": "Found a matching outbound earlier, but Expedia no longer shows that exact option.",
+    "steps": [
+      {
+        "name": "book-flight",
+        "type": "flight",
+        "__source": "lib/core/execution-local-fixture",
+        "error": "Found a matching outbound earlier, but Expedia no longer shows that exact option."
+      }
+    ],
+    "params": {
+      "origin": "MCO",
+      "dest": "BNA",
+      "date": "2026-06-01",
+      "passengers": 1,
+      "cabin_class": "economy",
+      "targetAirline": "Southwest",
+      "targetDepartureTime": "08:50",
+      "targetFlightNumber": "WN 3084",
+      "targetPrice": 152
+    }
+  },
+  "workerLogExcerpt": "[flight-rpa] Expedia Flight detected: agent.execute disabled\n[flight-rpa] Flight-card DOM scan failed: StagehandEvalError: Uncaught\n[flight-rpa] no matching flight button found\n[flight-rpa] job failed after not reaching checkout",
+  "workerLogPath": "codex-worker.log",
+  "screenshotPaths": [
+    "worker/.debug-screenshots/flight-rpa-fixture-card-scan/01-search-results.jpg"
+  ],
+  "liveSnapshotPaths": [
+    ".debug-screenshots/live/fixture-expedia-card-scan-before-fallback/snapshot.json"
+  ],
+  "notes": [
+    "Synthetic no-live fixture. Target card is visible, but no fallback log follows the DOM scan failure."
+  ]
+}

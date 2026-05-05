@@ -26,7 +26,7 @@ import SnapshotStream from "./SnapshotStream";
 import StatusBanner from "./StatusBanner";
 import TimelineEventList from "./TimelineEventList";
 import { useTimelineEvents } from "./use-timeline-events";
-import { useSnapshots } from "./use-snapshots";
+import { describeSnapshotDiagnostics, useSnapshots } from "./use-snapshots";
 import type {
   TaskTimelinePanelProps,
   TimelineEvent,
@@ -59,7 +59,7 @@ export default function TaskTimelinePanel({
   const liveSnapshots = useSnapshots(demo ? null : jobId, {
     paused: liveTimeline.closed,
   });
-  const { events, snapshots, status, loadState, errorMessage } = useMemo(() => {
+  const { events, snapshots, status, loadState, errorMessage, emptyMessage } = useMemo(() => {
     if (demo) {
       const fxEvents = FIXTURE_EVENTS[demo];
       // Only attach snapshots when there are events to attach them to
@@ -73,16 +73,31 @@ export default function TaskTimelinePanel({
         status: computed,
         loadState: fxEvents.length === 0 ? ("empty" as const) : ("ready" as const),
         errorMessage: undefined,
+        emptyMessage: undefined,
       };
     }
+    const snapshotDiagnosticMessage = describeSnapshotDiagnostics(
+      jobId,
+      liveSnapshots.diagnostics,
+    );
+    const combinedLoadState =
+      liveTimeline.loadState === "empty" && liveSnapshots.snapshots.length > 0
+        ? ("ready" as const)
+        : liveTimeline.loadState === "empty" && liveSnapshots.loadState === "error"
+          ? ("error" as const)
+          : liveTimeline.loadState;
     return {
       events: liveTimeline.events,
       snapshots: liveSnapshots.snapshots,
       status: statusFromLatestEvent(latestEventKind(liveTimeline.events)) as TimelineStatus,
-      loadState: liveTimeline.loadState,
-      errorMessage: liveTimeline.errorMessage ?? liveSnapshots.errorMessage,
+      loadState: combinedLoadState,
+      errorMessage:
+        liveTimeline.errorMessage ??
+        liveSnapshots.errorMessage ??
+        snapshotDiagnosticMessage,
+      emptyMessage: snapshotDiagnosticMessage,
     };
-  }, [demo, liveTimeline, liveSnapshots]);
+  }, [demo, jobId, liveTimeline, liveSnapshots]);
 
   // Cross-column linking: clicking a timeline event scrolls the snapshot
   // panel to the matching snapshot, and vice versa.
@@ -132,7 +147,7 @@ export default function TaskTimelinePanel({
         {loadState === "error" && (
           <IdleState message={errorMessage ?? "Could not load this run."} />
         )}
-        {loadState === "empty" && <IdleState />}
+        {loadState === "empty" && <IdleState message={emptyMessage} />}
         {(loadState === "ready" || (demo && events.length > 0)) && (
           <div className="task-timeline__columns">
             <section className="task-timeline__column task-timeline__column--events">
@@ -148,6 +163,7 @@ export default function TaskTimelinePanel({
               <SnapshotStream
                 snapshots={snapshots}
                 focusId={focusSnapshotId}
+                emptyMessage={emptyMessage}
               />
             </section>
           </div>

@@ -5,6 +5,71 @@ import { CITIES, DEFAULT_CITY } from "../../cities";
 import { RankedItemArraySchema } from "../../schemas";
 import { computeWeightedScore, DEFAULT_WEIGHTS, formatSessionPreferences } from "../composer/scoring";
 
+const GENERIC_CUISINE_REQUESTS = new Set([
+  "any",
+  "anything",
+  "open",
+  "restaurant",
+  "restaurants",
+  "food",
+  "dinner",
+  "lunch",
+]);
+const RESTAURANT_RANKER_TIMEOUT_MS = 10_000;
+
+const CUISINE_ALIASES: Record<string, string[]> = {
+  japanese: ["japanese", "sushi", "ramen", "izakaya", "omakase", "yakitori", "udon", "soba", "kaiseki", "tempura"],
+  chinese: ["chinese", "szechuan", "sichuan", "cantonese", "dim sum", "hot pot", "shanghainese", "hunan"],
+  italian: ["italian", "pizza", "pizzeria", "pasta", "trattoria", "osteria"],
+  french: ["french", "bistro", "brasserie"],
+  mexican: ["mexican", "taco", "taqueria"],
+  korean: ["korean", "bbq", "barbecue", "soju"],
+  thai: ["thai"],
+  indian: ["indian", "curry", "tandoori"],
+  mediterranean: ["mediterranean", "greek", "turkish", "lebanese"],
+  vietnamese: ["vietnamese", "pho", "banh mi"],
+};
+
+function normalizeCuisineText(value: string | undefined): string {
+  return (value ?? "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function getCuisineMatchTerms(cuisine: string | undefined): string[] {
+  const normalized = normalizeCuisineText(cuisine);
+  if (!normalized || GENERIC_CUISINE_REQUESTS.has(normalized)) return [];
+
+  const directTerms = normalized
+    .split(" ")
+    .filter((term) => term.length > 2 && !GENERIC_CUISINE_REQUESTS.has(term));
+  const aliases = CUISINE_ALIASES[normalized] ?? [];
+  return Array.from(new Set([normalized, ...directTerms, ...aliases].map(normalizeCuisineText))).filter(Boolean);
+}
+
+function cuisineMatchesRestaurant(restaurant: Restaurant, cuisine: string | undefined): boolean {
+  const terms = getCuisineMatchTerms(cuisine);
+  if (terms.length === 0) return true;
+
+  const reviewText = restaurant.google_reviews?.map((review) => review.text).join(" ") ?? "";
+  const haystack = normalizeCuisineText(
+    [restaurant.cuisine, restaurant.name, restaurant.description, restaurant.address, reviewText]
+      .filter(Boolean)
+      .join(" ")
+  );
+  return terms.some((term) => haystack.includes(term));
+}
+
+function filterCuisineAlignedRestaurants(restaurants: Restaurant[], cuisine: string | undefined): Restaurant[] {
+  const terms = getCuisineMatchTerms(cuisine);
+  if (terms.length === 0) return restaurants;
+
+  const aligned = restaurants.filter((restaurant) => cuisineMatchesRestaurant(restaurant, cuisine));
+  return aligned.length > 0 ? aligned : restaurants;
+}
+
 // ─── Layer 2+3: Search & Collect (parallel) ──────────────────────────────────
 
 export async function gatherCandidates(
@@ -119,11 +184,12 @@ export async function gatherCandidates(
       merged.push(r);
     }
   }
+  const cuisineAligned = filterCuisineAlignedRestaurants(merged, requirements.cuisine);
 
   // Phase 4.4: Three-stage funnel
   // Stage 1 (Recall): pool of 30-60 raw candidates → we have merged (up to 40)
   // Stage 2 (Pre-filter): remove rating < 3.5 AND review_count < 30; sort by score, take top 15
-  const preFiltered = merged
+  const preFiltered = cuisineAligned
     .filter((r) => r.rating >= 3.5 && r.review_count >= 30)
     .sort((a, b) => b.rating * Math.log(b.review_count + 1) - a.rating * Math.log(a.review_count + 1))
     .slice(0, 15);
@@ -221,13 +287,15 @@ function buildFallbackRestaurantCards(
 
       const whyParts = [
         `${restaurant.rating.toFixed(1)} rating from ${restaurant.review_count} reviews`,
+        requirements.cuisine && cuisineMatchesRestaurant(restaurant, requirements.cuisine)
+          ? `matches your ${requirements.cuisine} cuisine request`
+          : null,
         requirements.purpose === "date"
           ? reviewSignals?.date_suitability
             ? `date-night fit looks strong from review signals`
             : `works as a solid date-night default`
           : null,
         reviewSignals?.noise_level === "quiet" ? "reviews suggest an easier-to-talk-over room" : null,
-        requirements.cuisine ? `still aligned with your ${requirements.cuisine} ask` : null,
       ].filter((item): item is string => Boolean(item));
 
       const redFlag = reviewSignals?.red_flags[0];
@@ -273,7 +341,8 @@ export async function rankAndExplain(
   profileContext?: string,
   customWeights?: Partial<typeof DEFAULT_WEIGHTS>
 ): Promise<{ cards: RecommendationCard[]; suggested_refinements: string[] }> {
-  const restaurantList = restaurants
+  const candidateRestaurants = filterCuisineAlignedRestaurants(restaurants, requirements.cuisine);
+  const restaurantList = candidateRestaurants
     .map((r, i) => {
       const signals = r.review_signals;
       let signalLine = "";
@@ -354,7 +423,7 @@ Return ONLY the JSON array, no other text.`,
     : DEFAULT_WEIGHTS;
   const fallbackResult = buildFallbackRestaurantCards(
     requirements,
-    restaurants,
+    candidateRestaurants,
     effectiveWeights
   );
 
@@ -366,16 +435,15 @@ Return ONLY the JSON array, no other text.`,
   // more reliable under parallel load. If it still fails we fall back to
   // SerpAPI-derived cards so the UI never shows an empty column.
   //
-  // Timeout kept strictly under trip-package's outer 45s timeout so the
-  // fallback path always has room to run (outer would otherwise kill the
-  // whole pipeline before our catch fires).
+  // Keep this short enough that the chat route can still return fallback
+  // cards after Places search and review enrichment spend their budgets.
   let text: string;
   try {
     text = await openaiChat({
       system: systemPrompt,
       messages,
       max_tokens: 4096,
-      timeout_ms: 25_000,
+      timeout_ms: RESTAURANT_RANKER_TIMEOUT_MS,
     });
   } catch (err) {
     console.warn("[rankAndExplain] openaiChat threw — using SerpAPI data directly. err:", err);
@@ -410,7 +478,7 @@ Return ONLY the JSON array, no other text.`,
     restaurant: Restaurant;
   };
   const cards: MappedItem[] = parsed.data
-    .filter((item) => item.restaurant_index < restaurants.length)
+    .filter((item) => item.restaurant_index < candidateRestaurants.length)
     .map((item): MappedItem => {
       if (item.scoring) {
         const weighted_total = computeWeightedScore(item.scoring, effectiveWeights);
@@ -418,13 +486,13 @@ Return ONLY the JSON array, no other text.`,
           ...item,
           score: weighted_total,
           scoring: { ...item.scoring, weighted_total },
-          restaurant: restaurants[item.restaurant_index],
+          restaurant: candidateRestaurants[item.restaurant_index],
         };
       }
       return {
         ...item,
         scoring: undefined,
-        restaurant: restaurants[item.restaurant_index],
+        restaurant: candidateRestaurants[item.restaurant_index],
       };
     })
     .sort((a, b) => {

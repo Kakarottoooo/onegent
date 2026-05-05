@@ -5,12 +5,64 @@ import { computeWeightedScore, HOTEL_DEFAULT_WEIGHTS } from "../composer/scoring
 
 // ─── Phase 7.2: Hotel Pipeline ───────────────────────────────────────────────
 
+/**
+ * Bug 2 (P1 systemic): when 0 hotels come back we must NOT silently translate
+ * that into "没有找到符合条件的酒店" — the cause may be a parser bug
+ * (past-year dates), a provider outage, or a genuine empty result. The chat
+ * response carries the kind so the UI can decide whether to apologise, offer
+ * a date suggestion, or back off and retry.
+ */
+export type HotelSearchFailureReason =
+  | "dates_in_past"
+  | "invalid_date_range"
+  | "provider_error"
+  | "genuine_no_results";
+
+const HOTEL_YYYY_MM_DD = /^(\d{4})-(\d{2})-(\d{2})$/;
+
+function dateAtUtcMidnight(d: Date): number {
+  return Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate());
+}
+
+export function classifyHotelSearchFailure(input: {
+  checkIn: string | null | undefined;
+  checkOut: string | null | undefined;
+  today: Date;
+  hotelCount: number;
+  providerError: string | null;
+}): HotelSearchFailureReason | null {
+  if (input.hotelCount > 0) return null;
+  const todayUtc = dateAtUtcMidnight(input.today);
+
+  const parseDay = (s: string | null | undefined): number | null => {
+    if (!s) return null;
+    const m = s.match(HOTEL_YYYY_MM_DD);
+    if (!m) return null;
+    return Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
+  };
+
+  const ci = parseDay(input.checkIn);
+  const co = parseDay(input.checkOut);
+
+  // Past-date is the most actionable cause; surface it ahead of provider errors.
+  if (ci !== null && ci < todayUtc) return "dates_in_past";
+  if (co !== null && co < todayUtc) return "dates_in_past";
+  if (ci !== null && co !== null && co <= ci) return "invalid_date_range";
+
+  if (input.providerError) return "provider_error";
+  return "genuine_no_results";
+}
+
 export async function runHotelPipeline(
   intent: HotelIntent,
   conversationHistory: Array<{ role: "user" | "assistant"; content: string }>,
   cityFullName: string,
-): Promise<{ hotelRecommendations: HotelRecommendationCard[]; suggested_refinements: string[] }> {
-  let hotels = await searchHotels({
+): Promise<{
+  hotelRecommendations: HotelRecommendationCard[];
+  suggested_refinements: string[];
+  hotelSearchFailureReason: HotelSearchFailureReason | null;
+}> {
+  const firstResult = await searchHotels({
     location: intent.location ?? cityFullName,
     check_in: intent.check_in,
     check_out: intent.check_out,
@@ -18,21 +70,39 @@ export async function runHotelPipeline(
     hotel_class: intent.star_rating,
     maxResults: 20,
   });
+  let hotels = firstResult.hotels;
+  let providerError = firstResult.providerError;
 
   // If star-class filter returned empty, retry without filter (SerpAPI hotel_class can be overly strict)
   if (hotels.length === 0 && intent.star_rating) {
     console.warn(`[runHotelPipeline] hotel_class=${intent.star_rating} returned 0 results — retrying without star filter`);
-    hotels = await searchHotels({
+    const retry = await searchHotels({
       location: intent.location ?? cityFullName,
       check_in: intent.check_in,
       check_out: intent.check_out,
       guests: intent.guests,
       maxResults: 20,
     });
+    hotels = retry.hotels;
+    providerError = retry.providerError ?? providerError;
   }
 
   if (hotels.length === 0) {
-    return { hotelRecommendations: [], suggested_refinements: [] };
+    const reason = classifyHotelSearchFailure({
+      checkIn: intent.check_in,
+      checkOut: intent.check_out,
+      today: new Date(),
+      hotelCount: 0,
+      providerError,
+    });
+    if (reason) {
+      console.warn(`[runHotelPipeline] 0 results — reason=${reason} providerError=${providerError ?? "(none)"}`);
+    }
+    return {
+      hotelRecommendations: [],
+      suggested_refinements: [],
+      hotelSearchFailureReason: reason,
+    };
   }
 
   // Pre-filter: rating >= 3.5 and some reviews
@@ -146,26 +216,26 @@ Return ONLY the JSON array.`,
       };
     });
     console.log(`[runHotelPipeline] fallback cards=${fallbackCards.length}`);
-    return { hotelRecommendations: fallbackCards, suggested_refinements: [] };
+    return { hotelRecommendations: fallbackCards, suggested_refinements: [], hotelSearchFailureReason: null };
   }
 
   console.log(`[runHotelPipeline] openai response length=${text.length} snippet=${text.slice(0, 120).replace(/\n/g, " ")}`);
   const jsonMatch = text.match(/\[[\s\S]*\]/);
   if (!jsonMatch) {
     console.warn("[runHotelPipeline] no JSON array in openai response");
-    return { hotelRecommendations: [], suggested_refinements: [] };
+    return { hotelRecommendations: [], suggested_refinements: [], hotelSearchFailureReason: null };
   }
 
   let raw: unknown;
   try {
     raw = JSON.parse(jsonMatch[0]);
   } catch {
-    return { hotelRecommendations: [], suggested_refinements: [] };
+    return { hotelRecommendations: [], suggested_refinements: [], hotelSearchFailureReason: null };
   }
 
   if (!Array.isArray(raw)) {
     console.warn("[runHotelPipeline] parsed JSON is not an array:", typeof raw);
-    return { hotelRecommendations: [], suggested_refinements: [] };
+    return { hotelRecommendations: [], suggested_refinements: [], hotelSearchFailureReason: null };
   }
   console.log(`[runHotelPipeline] AI returned ${(raw as unknown[]).length} hotel picks`);
 
@@ -195,5 +265,5 @@ Return ONLY the JSON array.`,
     .map((card, i) => ({ ...card, rank: i + 1 }));
 
   console.log(`[runHotelPipeline] final cards=${cards.length}`);
-  return { hotelRecommendations: cards, suggested_refinements };
+  return { hotelRecommendations: cards, suggested_refinements, hotelSearchFailureReason: null };
 }

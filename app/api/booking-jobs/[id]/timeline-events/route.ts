@@ -9,6 +9,13 @@ type Params = { params: Promise<{ id: string }> };
 const STREAM_INTERVAL_MS = 1_200;
 const STREAM_MAX_MS = 60_000;
 
+type TimelinePayload = NonNullable<Awaited<ReturnType<typeof buildJobTimelinePayload>>>;
+
+function toSlimTimelinePayload(payload: TimelinePayload) {
+  const { job: _job, entries: _entries, ...slim } = payload;
+  return slim;
+}
+
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -25,7 +32,9 @@ export async function GET(req: NextRequest, { params }: Params) {
     if (!payload) {
       return NextResponse.json({ error: "Job not found" }, { status: 404 });
     }
-    return NextResponse.json(payload);
+    return NextResponse.json(url.searchParams.get("slim") === "1"
+      ? toSlimTimelinePayload(payload)
+      : payload);
   }
 
   const encoder = new TextEncoder();
@@ -49,9 +58,10 @@ export async function GET(req: NextRequest, { params }: Params) {
           break;
         }
 
-        const serialized = JSON.stringify(payload);
+        const streamPayload = toSlimTimelinePayload(payload);
+        const serialized = JSON.stringify(streamPayload);
         if (serialized !== lastSerialized) {
-          send("timeline", payload);
+          send("timeline", streamPayload);
           lastSerialized = serialized;
         } else {
           controller.enqueue(encoder.encode(": heartbeat\n\n"));

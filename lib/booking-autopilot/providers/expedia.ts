@@ -48,6 +48,10 @@ interface ExpediaGroupProfile {
   card_name?: string;
   card_number?: string;
   card_expiry?: string;
+  address_line1?: string;
+  city?: string;
+  state?: string;
+  country?: string;
   billing_zip?: string;
   zip?: string; // fallback alias from BookingProfile
   // Guest fields (needed when checkout page combines guest info + payment on one page)
@@ -57,19 +61,770 @@ interface ExpediaGroupProfile {
   phone?: string;
 }
 
+type ExpediaBillingAddressFillResult = {
+  address: boolean;
+  city: boolean;
+  zip: boolean;
+  country: boolean;
+  state: boolean;
+};
+
+export type ExpediaPaymentPrefillResult = {
+  complete: boolean;
+  missing: string[];
+  filled: {
+    cardName: boolean;
+    cardNumber: boolean;
+    cardExpiry: boolean;
+    billingAddress1: boolean;
+    billingCity: boolean;
+    billingZip: boolean;
+    billingCountry: boolean;
+    billingState: boolean;
+    securityCodeEmpty: boolean;
+    finalButtonVisible: boolean;
+  };
+};
+
+type ExpediaPageWithOptionalLabels = Page & {
+  getByLabel?: (text: string, options?: { exact?: boolean }) => ReturnType<Page["locator"]>;
+};
+
+function getExpediaLabelLocator(
+  page: Page,
+  labelText: string,
+  options: { exact?: boolean },
+): ReturnType<Page["locator"]> | null {
+  const getByLabel = (page as ExpediaPageWithOptionalLabels).getByLabel;
+  if (typeof getByLabel !== "function") return null;
+  try {
+    return getByLabel.call(page, labelText, options);
+  } catch {
+    return null;
+  }
+}
+
+export interface ExpediaFlightTarget {
+  airline?: string;
+  price?: number;
+  time?: string;
+  flightNumber?: string;
+}
+
+export interface ExpediaFlightCandidateScore {
+  hasAirline: boolean;
+  score: number;
+  exactMatch: boolean;
+  fallbackEligible: boolean;
+  fallbackScore: number;
+  hasPrice: boolean;
+  hasFlightNumber: boolean;
+  timeScore: number;
+  departureMinutes: number;
+  timeDelta: number | null;
+  priceDelta: number | null;
+}
+
+export interface ExpediaFlightCandidateEvidence {
+  label: string;
+  airline: string | null;
+  departureTime: string | null;
+  arrivalTime: string | null;
+  route: string | null;
+  price: string | null;
+  flightNumber: string | null;
+  score?: ExpediaFlightCandidateScore;
+}
+
+type ExpediaFlightButtonMatch = {
+  found: boolean;
+  label: string;
+  candidates: number;
+  x: number;
+  y: number;
+  inViewportBefore: boolean;
+  clickMode?: "coordinate" | "locator";
+  samples: string[];
+  candidateSummaries?: string[];
+  matchMode?: string;
+  matchReason?: string;
+  evalError?: string;
+};
+
+type ExpediaFlightLocatorCandidate = {
+  index: number;
+  label: string;
+  score: ExpediaFlightCandidateScore;
+  summary: string;
+};
+
+export interface ExpediaFlightCandidateSelectionReport {
+  selected: {
+    index: number;
+    label: string;
+    score: ExpediaFlightCandidateScore;
+    summary: string;
+  } | null;
+  candidateCount: number;
+  matchMode?: string;
+  matchReason?: string;
+  samples: string[];
+  candidateSummaries: string[];
+}
+
+type ExpediaFlightCandidateSelection = {
+  best: ExpediaFlightLocatorCandidate | null;
+  candidateCount: number;
+  matchMode?: string;
+  matchReason?: string;
+  samples: string[];
+  candidateSummaries: string[];
+};
+
+type ExpediaFlightLocatorTextLike = {
+  evaluate?: <T>(fn: (el: Element) => T | Promise<T>) => Promise<T>;
+  getAttribute?: (name: string) => Promise<string | null>;
+  textContent?: (options?: { timeout?: number }) => Promise<string | null>;
+  innerText?: (options?: { timeout?: number }) => Promise<string | null>;
+  locator?: (selector: string) => ExpediaFlightLocatorTextLike;
+};
+
+type ExpediaFlightLocatorBox = {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+};
+
+type ExpediaFlightLocatorBoxLike = {
+  boundingBox?: () => Promise<ExpediaFlightLocatorBox | null>;
+  elementHandle?: (options?: { timeout?: number }) => Promise<ExpediaFlightLocatorBoxLike | null>;
+  evaluate?: <T>(fn: (el: Element) => T | Promise<T>) => Promise<T>;
+  scrollIntoViewIfNeeded?: () => Promise<void>;
+};
+
+function parseExpediaFlightTimeToMinutes(t: string | null | undefined): number | null {
+  if (!t) return null;
+  const raw = t.trim().toLowerCase();
+  const match = raw.match(/(\d{1,2}):(\d{2})\s*(am|pm)?/i);
+  if (!match) return null;
+  let hour = parseInt(match[1], 10);
+  const minute = parseInt(match[2], 10);
+  const suffix = match[3]?.toLowerCase() ?? null;
+  if (suffix === "pm" && hour < 12) hour += 12;
+  if (suffix === "am" && hour === 12) hour = 0;
+  if (!suffix && hour === 24) hour = 0;
+  return hour * 60 + minute;
+}
+
+function normalizeExpediaFlightLoose(s: string | null | undefined): string {
+  return (s ?? "").toLowerCase().replace(/\s+/g, " ").trim();
+}
+
+function normalizeExpediaFlightTight(s: string | null | undefined): string {
+  return (s ?? "").toLowerCase().replace(/[^a-z0-9]/g, "");
+}
+
+function extractExpediaFlightPrices(text: string): number[] {
+  return Array.from(text.matchAll(/\$([\d,]+)/g))
+    .map(match => Number.parseInt((match[1] ?? "").replace(/,/g, ""), 10))
+    .filter(value => Number.isFinite(value));
+}
+
+const EXPEDIA_FLIGHT_AIRLINE_HINTS = [
+  "Southwest Airlines",
+  "Southwest",
+  "American Airlines",
+  "American",
+  "Delta Air Lines",
+  "Delta",
+  "United Airlines",
+  "United",
+  "Spirit Airlines",
+  "Spirit",
+  "Frontier Airlines",
+  "Frontier",
+  "JetBlue",
+  "Alaska Airlines",
+  "Alaska",
+];
+
+export function extractExpediaFlightCandidateEvidence(
+  rawText: string,
+  target: ExpediaFlightTarget = {},
+): ExpediaFlightCandidateEvidence {
+  const label = rawText.replace(/\s+/g, " ").trim().slice(0, 180);
+  const loose = normalizeExpediaFlightLoose(rawText);
+  const targetAirline = normalizeExpediaFlightLoose(target.airline);
+  const airline =
+    target.airline && targetAirline && loose.includes(targetAirline.split(" ")[0] ?? "")
+      ? target.airline
+      : EXPEDIA_FLIGHT_AIRLINE_HINTS.find(hint => loose.includes(hint.toLowerCase())) ?? null;
+  const times = Array.from(rawText.matchAll(/\b(\d{1,2}:\d{2}\s*(?:am|pm)?)\b/gi))
+    .map(match => (match[1] ?? "").replace(/\s+/g, "").toLowerCase())
+    .filter(Boolean);
+  const prices = extractExpediaFlightPrices(rawText);
+  const flightNumber =
+    (rawText.match(/\b([A-Z]{1,3})\s?(\d{2,4})\b/)?.slice(1, 3).join(" ") ?? "")
+      .trim()
+      .replace(/\s+/, " ") ||
+    null;
+  const route =
+    rawText.match(/\b[A-Z]{3}\b\s*(?:to|-|->)\s*\b[A-Z]{3}\b/i)?.[0] ??
+    rawText.match(/[A-Z][A-Za-z .']+\([A-Z]{3}\)\s*(?:to|-|->)\s*[A-Z][A-Za-z .']+\([A-Z]{3}\)/)?.[0] ??
+    null;
+  const score = Object.keys(target).length > 0
+    ? scoreExpediaFlightCandidateText(rawText, target)
+    : undefined;
+
+  return {
+    label,
+    airline,
+    departureTime: times[0] ?? null,
+    arrivalTime: times[1] ?? null,
+    route,
+    price: prices.length > 0 ? `$${prices[0]}` : null,
+    flightNumber,
+    ...(score ? { score } : {}),
+  };
+}
+
+export function formatExpediaFlightCandidateEvidence(
+  rawText: string,
+  target: ExpediaFlightTarget = {},
+): string {
+  const evidence = extractExpediaFlightCandidateEvidence(rawText, target);
+  const score = evidence.score;
+  const parts = [
+    `airline=${evidence.airline ?? "unknown"}`,
+    `departure=${evidence.departureTime ?? "unknown"}`,
+    `arrival=${evidence.arrivalTime ?? "unknown"}`,
+    `route=${evidence.route ?? "unknown"}`,
+    `price=${evidence.price ?? "unknown"}`,
+    `flightNumber=${evidence.flightNumber ?? "hidden"}`,
+  ];
+  if (score) {
+    parts.push(
+      `score=${score.score}`,
+      `fallbackScore=${score.fallbackScore}`,
+      `timeDelta=${score.timeDelta ?? "unknown"}`,
+      `priceDelta=${score.priceDelta ?? "unknown"}`,
+    );
+  }
+  parts.push(`text="${evidence.label}"`);
+  return parts.join(" ");
+}
+
+async function readExpediaFlightLocatorText(
+  locator: ExpediaFlightLocatorTextLike | null | undefined,
+): Promise<string> {
+  if (!locator) return "";
+  if (typeof locator.innerText === "function") {
+    const text = await locator.innerText({ timeout: 800 }).catch(() => null);
+    if (text) return text;
+  }
+  if (typeof locator.textContent === "function") {
+    const text = await locator.textContent({ timeout: 800 }).catch(() => null);
+    if (text) return text;
+  }
+  return "";
+}
+
+function compactExpediaFlightLocatorLabel(parts: Array<string | null | undefined>): string {
+  return parts
+    .filter(Boolean)
+    .join(" ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+export async function readExpediaFlightLocatorCandidateLabel(
+  item: ExpediaFlightLocatorTextLike,
+): Promise<string> {
+  if (typeof item.evaluate === "function") {
+    const evaluated = await item.evaluate((btn) => {
+      const element = btn as Element;
+      const container = element.closest('li, article, section, [data-test-id], [data-stid], [class*="uitk-card"], [class*="offer-card"], [class*="result"]');
+      const htmlElement = element as HTMLElement;
+      const context = container?.textContent ?? htmlElement.parentElement?.textContent ?? "";
+      return `${element.getAttribute("aria-label") ?? ""} ${htmlElement.textContent ?? ""} ${context}`.replace(/\s+/g, " ").trim();
+    }).catch(() => "");
+    if (evaluated) return evaluated;
+  }
+
+  const ariaLabel =
+    typeof item.getAttribute === "function"
+      ? await item.getAttribute("aria-label").catch(() => null)
+      : null;
+  const title =
+    typeof item.getAttribute === "function"
+      ? await item.getAttribute("title").catch(() => null)
+      : null;
+  const ownText = await readExpediaFlightLocatorText(item);
+  const ancestorTexts: string[] = [];
+
+  if (typeof item.locator === "function") {
+    for (const selector of [
+      'xpath=ancestor-or-self::li[1]',
+      'xpath=ancestor-or-self::article[1]',
+      'xpath=ancestor-or-self::section[1]',
+      'xpath=ancestor::*[contains(@class, "uitk-card")][1]',
+      'xpath=ancestor::*[contains(@class, "offer-card")][1]',
+      'xpath=ancestor::*[contains(@class, "result")][1]',
+    ]) {
+      const nestedLocator = (() => {
+        try {
+          return item.locator?.(selector);
+        } catch {
+          return null;
+        }
+      })();
+      const text = await readExpediaFlightLocatorText(nestedLocator);
+      if (text) ancestorTexts.push(text);
+    }
+  }
+
+  return compactExpediaFlightLocatorLabel([ariaLabel, title, ownText, ...ancestorTexts]);
+}
+
+export async function readExpediaFlightLocatorBoundingBox(
+  item: ExpediaFlightLocatorBoxLike,
+): Promise<ExpediaFlightLocatorBox | null> {
+  if (typeof item.boundingBox === "function") {
+    const box = await item.boundingBox().catch(() => null);
+    if (isUsableExpediaFlightLocatorBox(box)) return box;
+  }
+
+  if (typeof item.elementHandle === "function") {
+    const handle = await item.elementHandle({ timeout: 800 }).catch(() => null);
+    if (handle && typeof handle.boundingBox === "function") {
+      const box = await handle.boundingBox().catch(() => null);
+      if (isUsableExpediaFlightLocatorBox(box)) return box;
+    }
+  }
+
+  if (typeof item.evaluate === "function") {
+    const box = await item.evaluate((el) => {
+      const rect = (el as HTMLElement).getBoundingClientRect();
+      if (!rect.width || !rect.height) return null;
+      return {
+        x: rect.x,
+        y: rect.y,
+        width: rect.width,
+        height: rect.height,
+      };
+    }).catch(() => null);
+    if (isUsableExpediaFlightLocatorBox(box)) return box;
+  }
+
+  return null;
+}
+
+export async function scrollExpediaFlightLocatorIntoView(
+  item: ExpediaFlightLocatorBoxLike,
+): Promise<boolean> {
+  if (typeof item.scrollIntoViewIfNeeded === "function") {
+    const ok = await item.scrollIntoViewIfNeeded()
+      .then(() => true)
+      .catch(() => false);
+    if (ok) return true;
+  }
+
+  if (typeof item.evaluate === "function") {
+    return item.evaluate((el) => {
+      (el as HTMLElement).scrollIntoView({ block: "center", inline: "center" });
+      return true;
+    }).catch(() => false);
+  }
+
+  return false;
+}
+
+function isUsableExpediaFlightLocatorBox(
+  box: ExpediaFlightLocatorBox | null | undefined,
+): box is ExpediaFlightLocatorBox {
+  return !!box &&
+    Number.isFinite(box.x) &&
+    Number.isFinite(box.y) &&
+    Number.isFinite(box.width) &&
+    Number.isFinite(box.height) &&
+    box.width > 0 &&
+    box.height > 0;
+}
+
+export function classifyExpediaFlightSafetyBoundaryText(
+  rawText: string | null | undefined,
+): string | null {
+  const text = normalizeExpediaFlightLoose(rawText);
+  if (!text) return null;
+  if (/\b(captcha|robot check|are you a robot|unusual traffic)\b/i.test(text)) {
+    return "CAPTCHA boundary";
+  }
+  if (/\b(verification code|one-time passcode|one time passcode|enter code|verify it'?s you|two-factor|2fa|otp)\b/i.test(text)) {
+    return "OTP boundary";
+  }
+  if (/\b(sign in to continue|log in to continue|login to continue|sign in or create an account to continue|authentication required)\b/i.test(text)) {
+    return "login boundary";
+  }
+  return null;
+}
+
+export type ExpediaFlightOverlayClassification =
+  | "dismissable_member_price_overlay"
+  | "hard_safety_boundary";
+
+export function classifyExpediaFlightBlockingOverlayText(
+  rawText: string | null | undefined,
+): ExpediaFlightOverlayClassification | null {
+  const text = normalizeExpediaFlightLoose(rawText);
+  if (!text) return null;
+  if (classifyExpediaFlightSafetyBoundaryText(text)) {
+    return "hard_safety_boundary";
+  }
+  const mentionsMemberPromo =
+    text.includes("member prices") ||
+    text.includes("one key") ||
+    text.includes("onekeycash") ||
+    text.includes("unlock instant savings") ||
+    text.includes("sign in and book a flight");
+  const looksLikeSignInPromo =
+    /\bsign[-_\s]?in\b/.test(text) &&
+    (
+      text.includes("member") ||
+      text.includes("savings") ||
+      text.includes("one key") ||
+      text.includes("onekeycash") ||
+      text.includes("learn more")
+    );
+  return mentionsMemberPromo || looksLikeSignInPromo
+    ? "dismissable_member_price_overlay"
+    : null;
+}
+
+export function hasExpediaFlightBundlePopupText(rawText: string | null | undefined): boolean {
+  const text = normalizeExpediaFlightLoose(rawText);
+  return text.includes("car rental dates") ||
+    text.includes("explore packages") ||
+    (text.includes("bundle & save") && text.includes("includes your selected flight"));
+}
+
+export interface ExpediaFlightCheckoutStateInput {
+  currentUrl: string;
+  bodyText: string;
+  visibleInputDescriptions?: string[];
+}
+
+export interface ExpediaFlightCheckoutState {
+  onCheckout: boolean;
+  reason: string;
+  hasTravelerCopy: boolean;
+  hasTravelerFields: boolean;
+  stillOnReview: boolean;
+  stillOnSearch: boolean;
+  stillOnReviewUrl: boolean;
+  bundlePopupVisible: boolean;
+}
+
+export function classifyExpediaFlightCheckoutState(
+  input: ExpediaFlightCheckoutStateInput,
+): ExpediaFlightCheckoutState {
+  const currentUrl = normalizeExpediaFlightLoose(input.currentUrl);
+  const bodyText = normalizeExpediaFlightLoose(input.bodyText);
+  const visibleInputDescriptions = input.visibleInputDescriptions ?? [];
+  const stillOnSearch = currentUrl.includes("flights-search");
+  const stillOnReviewUrl = currentUrl.includes("flight-information");
+  const urlIsCheckout =
+    currentUrl.includes("/checkout") ||
+    currentUrl.includes("/flights-checkout");
+  const bundlePopupVisible = hasExpediaFlightBundlePopupText(bodyText);
+  const stillOnReview =
+    stillOnReviewUrl ||
+    bodyText.includes("review your trip") ||
+    bodyText.includes("skip to checkout") ||
+    bodyText.includes("next: checkout") ||
+    bodyText.includes("next: seats") ||
+    bodyText.includes("continue without choosing seats");
+  const hasTravelerCopy =
+    bodyText.includes("traveler information") ||
+    bodyText.includes("passenger information") ||
+    bodyText.includes("who's flying") ||
+    bodyText.includes("enter payment");
+  const hasTravelerFields = visibleInputDescriptions.some(desc =>
+    /first.?name|last.?name|given.?name|family.?name|surname|date.?of.?birth|birth.?date|passport|known.?traveler|tsa.?pre|phone|email/.test(desc)
+  );
+
+  if (bundlePopupVisible) {
+    return {
+      onCheckout: false,
+      reason: "bundle-popup-open",
+      hasTravelerCopy,
+      hasTravelerFields,
+      stillOnReview,
+      stillOnSearch,
+      stillOnReviewUrl,
+      bundlePopupVisible,
+    };
+  }
+  if (urlIsCheckout) {
+    return {
+      onCheckout: true,
+      reason: "checkout-url",
+      hasTravelerCopy,
+      hasTravelerFields,
+      stillOnReview,
+      stillOnSearch,
+      stillOnReviewUrl,
+      bundlePopupVisible,
+    };
+  }
+  if (stillOnSearch || stillOnReviewUrl) {
+    return {
+      onCheckout: false,
+      reason: stillOnSearch ? "still-on-flight-search" : "still-on-review-url",
+      hasTravelerCopy,
+      hasTravelerFields,
+      stillOnReview,
+      stillOnSearch,
+      stillOnReviewUrl,
+      bundlePopupVisible,
+    };
+  }
+  if ((hasTravelerCopy || hasTravelerFields) && !stillOnReview) {
+    return {
+      onCheckout: true,
+      reason: hasTravelerFields ? "traveler-fields-visible" : "traveler-copy-visible",
+      hasTravelerCopy,
+      hasTravelerFields,
+      stillOnReview,
+      stillOnSearch,
+      stillOnReviewUrl,
+      bundlePopupVisible,
+    };
+  }
+  return {
+    onCheckout: false,
+    reason: stillOnReview ? "still-on-review" : "no-checkout-signal",
+    hasTravelerCopy,
+    hasTravelerFields,
+    stillOnReview,
+    stillOnSearch,
+    stillOnReviewUrl,
+    bundlePopupVisible,
+  };
+}
+
+export function scoreExpediaFlightCandidateText(
+  rawText: string,
+  target: ExpediaFlightTarget,
+): ExpediaFlightCandidateScore {
+  const combined = normalizeExpediaFlightLoose(rawText);
+  const combinedTight = normalizeExpediaFlightTight(combined);
+  const timeMinutes = parseExpediaFlightTimeToMinutes(target.time);
+  const airlineLoose = normalizeExpediaFlightLoose(target.airline);
+  const airlineWord = airlineLoose.split(" ")[0] ?? "";
+  const flightNumberTight = normalizeExpediaFlightTight(target.flightNumber);
+  const flightDigits = (target.flightNumber ?? "").replace(/\D/g, "");
+  const priceToken = typeof target.price === "number" ? `$${target.price}` : "";
+
+  const hasAirline = !airlineWord || combined.includes(airlineWord) || combined.includes(airlineLoose);
+  const visiblePrices = extractExpediaFlightPrices(combined);
+  const priceDelta =
+    typeof target.price === "number" && visiblePrices.length > 0
+      ? Math.min(...visiblePrices.map(value => Math.abs(value - target.price!)))
+      : null;
+  const hasPrice = !priceToken || combined.includes(priceToken) || priceDelta === 0;
+  const hasFlightNumber =
+    !flightNumberTight ||
+    combinedTight.includes(flightNumberTight) ||
+    (flightDigits.length >= 3 && combinedTight.includes(flightDigits));
+  const departureMatch =
+    combined.match(/departing at (\d{1,2}:\d{2}\s*(?:am|pm)?)/i) ??
+    combined.match(/\b(\d{1,2}:\d{2}\s*(?:am|pm)?)\b/i);
+  const departureMinutes = parseExpediaFlightTimeToMinutes(departureMatch?.[1] ?? null);
+  const timeDelta =
+    timeMinutes !== null && departureMinutes !== null
+      ? Math.abs(departureMinutes - timeMinutes)
+      : null;
+  const timeScore =
+    timeMinutes !== null
+      ? departureMinutes === timeMinutes
+        ? 4
+        : departureMinutes !== null && Math.abs(departureMinutes - timeMinutes) <= 5
+          ? 2
+          : 0
+      : 1;
+  const score =
+    (hasFlightNumber ? 5 : 0) +
+    timeScore * 2 +
+    (hasPrice ? 1 : 0);
+  const hasExactTargetTime = timeMinutes !== null && departureMinutes === timeMinutes;
+  const hasNearTargetTime = timeDelta !== null && timeDelta <= 120;
+  const hasStrongTargetIdentity = hasFlightNumber || hasExactTargetTime;
+  const exactMatch =
+    (!flightNumberTight || hasFlightNumber) &&
+    (timeMinutes === null || timeScore > 0) &&
+    (hasStrongTargetIdentity || !priceToken || hasPrice);
+  const hasPriceFallbackWithoutTargetTime =
+    timeMinutes === null && (hasPrice || (priceDelta !== null && priceDelta <= 60));
+  const fallbackEligible =
+    hasFlightNumber ||
+    hasNearTargetTime ||
+    hasPriceFallbackWithoutTargetTime;
+  const fallbackScore =
+    (hasFlightNumber ? 120 : 0) +
+    (hasExactTargetTime ? 100 : 0) +
+    (timeDelta !== null ? Math.max(0, 60 - Math.floor(timeDelta / 2)) : 0) +
+    (priceDelta !== null ? Math.max(0, 10 - Math.floor(priceDelta / 20)) : 0);
+
+  return {
+    hasAirline,
+    score,
+    exactMatch,
+    fallbackEligible,
+    fallbackScore,
+    hasPrice,
+    hasFlightNumber,
+    timeScore,
+    departureMinutes: departureMinutes ?? -1,
+    timeDelta,
+    priceDelta,
+  };
+}
+
+function sortExpediaFlightCandidatesByFit(
+  target: ExpediaFlightTarget,
+  a: ExpediaFlightCandidateScore,
+  b: ExpediaFlightCandidateScore,
+  mode: "strict" | "fallback",
+): number {
+  if (mode === "strict" && b.score !== a.score) return b.score - a.score;
+  if (mode === "fallback" && b.fallbackScore !== a.fallbackScore) return b.fallbackScore - a.fallbackScore;
+  const timeMinutes = parseExpediaFlightTimeToMinutes(target.time);
+  if (timeMinutes !== null) {
+    const aDelta = a.departureMinutes >= 0 ? Math.abs(a.departureMinutes - timeMinutes) : Number.POSITIVE_INFINITY;
+    const bDelta = b.departureMinutes >= 0 ? Math.abs(b.departureMinutes - timeMinutes) : Number.POSITIVE_INFINITY;
+    if (aDelta !== bDelta) return aDelta - bDelta;
+  }
+  const aPriceDelta = a.priceDelta ?? Number.POSITIVE_INFINITY;
+  const bPriceDelta = b.priceDelta ?? Number.POSITIVE_INFINITY;
+  if (aPriceDelta !== bPriceDelta) return aPriceDelta - bPriceDelta;
+  return 0;
+}
+
+export function selectExpediaFlightCandidateLabels(
+  labels: readonly string[],
+  target: ExpediaFlightTarget,
+  prefix = "candidate labels",
+): ExpediaFlightCandidateSelectionReport {
+  const samples = labels
+    .map(label => label.replace(/\s+/g, " ").trim())
+    .filter(Boolean)
+    .slice(0, 6);
+  const candidates = labels
+    .map((label, index) => {
+      const clippedLabel = label.replace(/\s+/g, " ").trim().slice(0, 140);
+      if (!clippedLabel.toLowerCase().includes("select")) return null;
+      const score = scoreExpediaFlightCandidateText(clippedLabel, target);
+      if (!(score.hasAirline || score.exactMatch || score.fallbackEligible)) {
+        return null;
+      }
+      return {
+        index,
+        label: clippedLabel,
+        score,
+        summary: formatExpediaFlightCandidateEvidence(clippedLabel, target),
+      };
+    })
+    .filter((candidate): candidate is ExpediaFlightLocatorCandidate => candidate !== null);
+  const selection = selectExpediaFlightCandidate(candidates, samples, target, prefix);
+  return {
+    selected: selection.best
+      ? {
+          index: selection.best.index,
+          label: selection.best.label,
+          score: selection.best.score,
+          summary: selection.best.summary,
+        }
+      : null,
+    candidateCount: selection.candidateCount,
+    matchMode: selection.matchMode,
+    matchReason: selection.matchReason,
+    samples: selection.samples,
+    candidateSummaries: selection.candidateSummaries,
+  };
+}
+
 // Billing ZIP code selectors for Expedia checkout.
 // NOTE: "autocomplete=postal-code" is intentionally omitted — Expedia checkout pages often
 // have multiple fields with that attribute (including street address), and browser autocomplete
 // can overwrite the filled value with a full address suggestion. Use explicit id/name/placeholder
 // selectors only, which are more stable and specific.
 const EXPEDIA_BILLING_ZIP_SELECTORS = [
+  'input[name="creditCards[0].zipcode"]',
+  'input.billing-zip-code',
+  'input[data-tealeaf-name="zipcode"]',
+  'input[data-cko-rfrr-id="FLT.CKO.BILLINGZIPCODE"]',
   // Confirmed from live Expedia checkout debug (id="payment_zip_code")
   'input[id="payment_zip_code"]',
+  'input[autocomplete="billing postal-code"]',
+  'input[autocomplete="postal-code"]',
   'input[id*="billingZip"], input[id*="billing-zip"], input[id*="BillingZip"]',
   'input[name*="billingZip"], input[name*="billing-zip"]',
   'input[placeholder*="ZIP code"], input[placeholder*="Zip code"], input[placeholder*="Postal code"]',
   'input[aria-label*="Billing ZIP"], input[aria-label*="ZIP code"], input[aria-label*="ZIP Code"]',
   'input[id*="zipCode"], input[id*="zip-code"], input[name*="zipCode"]',
+];
+
+const EXPEDIA_BILLING_ADDRESS1_SELECTORS = [
+  'input[name="creditCards[0].street"]',
+  'input.billing-address-one',
+  'input[data-tealeaf-name="street"]',
+  'input[data-cko-rfrr-id="FLT.CKO.BILLINGADDRESS1"]',
+  'input[autocomplete="billing address-line1"]',
+  'input[autocomplete="address-line1"]',
+  'input[id*="billingAddressLine1" i]',
+  'input[id*="billing-address-line-1" i]',
+  'input[id*="addressLine1" i]',
+  'input[name*="billingAddressLine1" i]',
+  'input[name*="addressLine1" i]',
+  'input[placeholder*="123 Main" i]',
+  'input[placeholder*="Billing address" i]',
+  'input[aria-label*="Billing address 1" i]',
+  'input[aria-label*="Address line 1" i]',
+];
+
+const EXPEDIA_BILLING_CITY_SELECTORS = [
+  'input[name="creditCards[0].city"]',
+  'input.billing-city',
+  'input[data-tealeaf-name="city"]',
+  'input[data-cko-rfrr-id="FLT.CKO.BILLINGCITY"]',
+  'input[autocomplete="billing address-level2"]',
+  'input[autocomplete="address-level2"]',
+  'input[id*="billingCity" i]',
+  'input[id*="billing-city" i]',
+  'input[id*="city" i]',
+  'input[name*="billingCity" i]',
+  'input[name*="city" i]',
+  'input[aria-label*="City" i]',
+];
+
+const EXPEDIA_BILLING_STATE_SELECTORS = [
+  'select[id*="billingState" i]',
+  'select[id*="billing-state" i]',
+  'select[id*="state" i]',
+  'select[name*="billingState" i]',
+  'select[name*="state" i]',
+  'select[aria-label*="State" i]',
+];
+
+const EXPEDIA_BILLING_COUNTRY_SELECTORS = [
+  'select[id*="billingCountry" i]',
+  'select[id*="billing-country" i]',
+  'select[id*="country" i]',
+  'select[name*="billingCountry" i]',
+  'select[name*="country" i]',
+  'select[aria-label*="Country" i]',
+  'select[aria-label*="Country/Territory" i]',
 ];
 
 /**
@@ -173,7 +928,8 @@ async function findAndFillExpediaField(
   // Try getByLabel first — most robust, works regardless of id/name/placeholder
   for (const labelText of labelTexts) {
     try {
-      const loc = page.getByLabel(labelText, { exact: false });
+      const loc = getExpediaLabelLocator(page, labelText, { exact: false });
+      if (!loc) continue;
       const count = await loc.count().catch(() => 0);
       if (count === 0) continue;
       const first = loc.first();
@@ -196,6 +952,797 @@ async function findAndFillExpediaField(
 
   trace(`Expedia fill: "${label}" — no matching visible field found`);
   return false;
+}
+
+async function selectExpediaTravelerOption(
+  page: Page,
+  labelTexts: string[],
+  selectors: string[],
+  candidates: string[],
+  label: string,
+  trace: (msg: string) => void,
+): Promise<boolean> {
+  const trySelect = async (locator: ReturnType<Page["locator"]>, source: string): Promise<boolean> => {
+    const count = await locator.count().catch(() => 0);
+    for (let i = 0; i < Math.min(count, 4); i++) {
+      const item = locator.nth(i);
+      if (!(await item.isVisible({ timeout: 1000 }).catch(() => false))) continue;
+      for (const candidate of candidates) {
+        const attempts: Array<string | { value: string } | { label: string }> = [
+          candidate,
+          { value: candidate },
+          { label: candidate },
+        ];
+        for (const attempt of attempts) {
+          try {
+            const selected = await item.selectOption(attempt, { timeout: 1000 });
+            if (selected.length > 0) {
+              trace(`Expedia traveler: selected ${label} via ${source}`);
+              return true;
+            }
+          } catch {
+            // Try the next value/label shape.
+          }
+        }
+      }
+    }
+    return false;
+  };
+
+  for (const labelText of labelTexts) {
+    const loc = getExpediaLabelLocator(page, labelText, { exact: false });
+    if (!loc) continue;
+    if (await trySelect(loc, `label "${labelText}"`)) return true;
+  }
+
+  for (const selector of selectors) {
+    const loc = page.locator(selector);
+    if (await trySelect(loc, `selector "${selector}"`)) return true;
+  }
+
+  trace(`Expedia traveler: could not select ${label}`);
+  return false;
+}
+
+async function clickExpediaTravelerGender(
+  page: Page,
+  gender: "male" | "female",
+  trace: (msg: string) => void,
+): Promise<boolean> {
+  const label = gender === "male" ? "Male" : "Female";
+  const selectors = gender === "male"
+    ? [
+        'input[type="radio"][value="male" i]',
+        'input[type="radio"][aria-label="male" i]',
+        'input[type="radio"][id*="male" i]:not([id*="female" i])',
+        'input[type="radio"][name*="male" i]:not([name*="female" i])',
+      ]
+    : [
+        'input[type="radio"][value="female" i]',
+        'input[type="radio"][aria-label="female" i]',
+        'label:has-text("Female") input[type="radio"]',
+      ];
+
+  try {
+    const loc = getExpediaLabelLocator(page, label, { exact: true });
+    if (!loc) throw new Error("getByLabel unavailable");
+    const count = await loc.count().catch(() => 0);
+    for (let i = 0; i < Math.min(count, 3); i++) {
+      const item = loc.nth(i);
+      if (!(await item.isVisible({ timeout: 1000 }).catch(() => false))) continue;
+      await item.click({ timeout: 1000 });
+      trace(`Expedia traveler: selected gender via label "${label}"`);
+      return true;
+    }
+  } catch {
+    // Try selector fallback.
+  }
+
+  for (const selector of selectors) {
+    try {
+      const loc = page.locator(selector).first();
+      if (!(await loc.isVisible({ timeout: 1000 }).catch(() => false))) continue;
+      await loc.click({ timeout: 1000 });
+      trace(`Expedia traveler: selected gender via selector "${selector}"`);
+      return true;
+    } catch {
+      // Try next selector.
+    }
+  }
+
+  trace("Expedia traveler: could not select gender");
+  return false;
+}
+
+async function fillExpediaTravelerDobFallback(
+  page: Page,
+  dateOfBirth: string | undefined,
+  trace: (msg: string) => void,
+): Promise<void> {
+  const candidates = buildExpediaDateOfBirthSelectCandidates(dateOfBirth);
+  if (!candidates) return;
+  await selectExpediaTravelerOption(
+    page,
+    ["Month", "Birth month", "Date of birth month"],
+    [
+      'select[aria-label*="month" i]',
+      'select[name*="month" i]',
+      'select[id*="month" i]',
+      'select[data-stid*="month" i]',
+    ],
+    candidates.month,
+    "birth month",
+    trace,
+  );
+  await selectExpediaTravelerOption(
+    page,
+    ["Day", "Birth day", "Date of birth day"],
+    [
+      'select[aria-label*="day" i]',
+      'select[name*="day" i]',
+      'select[id*="day" i]',
+      'select[data-stid*="day" i]',
+    ],
+    candidates.day,
+    "birth day",
+    trace,
+  );
+  await selectExpediaTravelerOption(
+    page,
+    ["Year", "Birth year", "Date of birth year"],
+    [
+      'select[aria-label*="year" i]',
+      'select[name*="year" i]',
+      'select[id*="year" i]',
+      'select[data-stid*="year" i]',
+    ],
+    candidates.year,
+    "birth year",
+    trace,
+  );
+}
+
+async function fillExpediaSplitCardExpiry(
+  page: Page,
+  cardExpiry: string | undefined,
+  trace: (msg: string) => void,
+): Promise<boolean> {
+  const candidates = buildExpediaCardExpirySelectCandidates(cardExpiry);
+  if (!candidates) return false;
+
+  const evaluateResult = await page.evaluate(({ month, year }: { month: string[]; year: string[] }) => {
+    const isVisible = (el: HTMLElement): boolean => {
+      const rect = el.getBoundingClientRect();
+      const style = window.getComputedStyle(el);
+      return rect.width > 0 &&
+        rect.height > 0 &&
+        style.display !== "none" &&
+        style.visibility !== "hidden" &&
+        style.opacity !== "0" &&
+        !("disabled" in el && Boolean((el as HTMLSelectElement).disabled));
+    };
+    const nativeSelect = (el: HTMLSelectElement, candidates: string[]): boolean => {
+      const normalizedCandidates = candidates.map(v => v.toLowerCase().replace(/^0+/, ""));
+      const option = Array.from(el.options).find(opt => {
+        const value = (opt.value ?? "").trim().toLowerCase().replace(/^0+/, "");
+        const text = (opt.textContent ?? "").trim().toLowerCase().replace(/^0+/, "");
+        return normalizedCandidates.some(candidate =>
+          value === candidate ||
+          text === candidate ||
+          value.includes(candidate) ||
+          text.includes(candidate)
+        );
+      });
+      if (!option) return false;
+      const setter = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, "value")?.set;
+      if (setter) setter.call(el, option.value);
+      else el.value = option.value;
+      el.dispatchEvent(new Event("input", { bubbles: true }));
+      el.dispatchEvent(new Event("change", { bubbles: true }));
+      return el.value === option.value;
+    };
+    const visibleSelects = Array.from(document.querySelectorAll<HTMLSelectElement>("select"))
+      .filter(isVisible)
+      .map(el => {
+        const rect = el.getBoundingClientRect();
+        const id = el.getAttribute("id") ?? "";
+        const label = id ? document.querySelector<HTMLLabelElement>(`label[for="${CSS.escape(id)}"]`)?.textContent ?? "" : "";
+        const text = [
+          label,
+          el.getAttribute("name") ?? "",
+          id,
+          el.getAttribute("aria-label") ?? "",
+          el.getAttribute("autocomplete") ?? "",
+          el.closest("label")?.textContent ?? "",
+          el.parentElement?.textContent ?? "",
+        ].join(" ").replace(/\s+/g, " ").trim().toLowerCase();
+        return { el, rect, text };
+      });
+
+    let monthSelect = visibleSelects.find(({ text }) =>
+      /(expir|expiry|expiration|cc-exp).{0,30}month|month.{0,30}(expir|expiry|expiration|cc-exp)/.test(text)
+    )?.el;
+    let yearSelect = visibleSelects.find(({ text }) =>
+      /(expir|expiry|expiration|cc-exp).{0,30}year|year.{0,30}(expir|expiry|expiration|cc-exp)/.test(text)
+    )?.el;
+
+    if (!monthSelect || !yearSelect) {
+      const labels = Array.from(document.querySelectorAll<HTMLElement>("label, div, span, p"))
+        .filter(isVisible)
+        .filter(el => /expiration date|expiry date|expiration|expiry/i.test((el.textContent ?? "").replace(/\s+/g, " ")))
+        .map(el => el.getBoundingClientRect())
+        .sort((a, b) => a.top - b.top);
+      const labelRect = labels[0];
+      if (labelRect) {
+        const nearby = visibleSelects
+          .filter(({ rect }) => rect.top >= labelRect.top - 4 && rect.top <= labelRect.bottom + 140)
+          .sort((a, b) => a.rect.top === b.rect.top ? a.rect.left - b.rect.left : a.rect.top - b.rect.top);
+        monthSelect = monthSelect ?? nearby[0]?.el;
+        yearSelect = yearSelect ?? nearby[1]?.el;
+      }
+    }
+
+    return {
+      month: monthSelect ? nativeSelect(monthSelect, month) : false,
+      year: yearSelect ? nativeSelect(yearSelect, year) : false,
+    };
+  }, { month: candidates.month, year: candidates.year }).catch(() => ({ month: false, year: false }));
+
+  if (evaluateResult.month || evaluateResult.year) {
+    trace(`Expedia payment: selected split expiry month=${evaluateResult.month} year=${evaluateResult.year}`);
+  }
+
+  let monthOk = evaluateResult.month;
+  let yearOk = evaluateResult.year;
+
+  if (!monthOk) {
+    monthOk = await selectExpediaTravelerOption(
+      page,
+      ["Expiration Month", "Expiry Month", "Card expiration month"],
+      [
+        'select[autocomplete="cc-exp-month"]',
+        'select[aria-label*="expiration month" i]',
+        'select[aria-label*="expiry month" i]',
+        'select[name*="exp" i][name*="month" i]',
+        'select[id*="exp" i][id*="month" i]',
+      ],
+      candidates.month,
+      "expiration month",
+      trace,
+    );
+  }
+  if (!yearOk) {
+    yearOk = await selectExpediaTravelerOption(
+      page,
+      ["Expiration Year", "Expiry Year", "Card expiration year"],
+      [
+        'select[autocomplete="cc-exp-year"]',
+        'select[aria-label*="expiration year" i]',
+        'select[aria-label*="expiry year" i]',
+        'select[name*="exp" i][name*="year" i]',
+        'select[id*="exp" i][id*="year" i]',
+      ],
+      candidates.year,
+      "expiration year",
+      trace,
+    );
+  }
+
+  return monthOk && yearOk;
+}
+
+async function fillExpediaBillingAddressFields(
+  page: Page,
+  profile: ExpediaGroupProfile,
+  trace: (msg: string) => void,
+): Promise<ExpediaBillingAddressFillResult> {
+  const billingZip = profile.billing_zip ?? profile.zip;
+  const directResult = await page.evaluate(
+    ({
+      address,
+      city,
+      zip,
+      addressSelectors,
+      citySelectors,
+      zipSelectors,
+    }: {
+      address: string;
+      city: string;
+      zip: string;
+      addressSelectors: string[];
+      citySelectors: string[];
+      zipSelectors: string[];
+    }) => {
+      const nativeFill = (el: HTMLInputElement, val: string): boolean => {
+        if (!val || !el || el.disabled || el.type === "hidden") return false;
+        const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set;
+        el.scrollIntoView({ block: "center", behavior: "auto" as ScrollBehavior });
+        el.focus();
+        if (setter) {
+          setter.call(el, "");
+          setter.call(el, val);
+        } else {
+          el.value = "";
+          el.value = val;
+        }
+        try {
+          el.dispatchEvent(new InputEvent("beforeinput", { bubbles: true, data: val, inputType: "insertText" }));
+        } catch {
+          // Older embedded browsers may not support InputEvent construction.
+        }
+        el.dispatchEvent(new Event("input", { bubbles: true }));
+        el.dispatchEvent(new Event("change", { bubbles: true }));
+        el.dispatchEvent(new KeyboardEvent("keyup", { bubbles: true }));
+        el.blur();
+        return el.value.trim().replace(/\s+/g, " ") === val.trim().replace(/\s+/g, " ");
+      };
+      const fillBySelectors = (selectors: string[], value: string): { ok: boolean; count: number } => {
+        let ok = false;
+        let count = 0;
+        for (const selector of selectors) {
+          let matches: HTMLInputElement[] = [];
+          try {
+            matches = Array.from(document.querySelectorAll<HTMLInputElement>(selector));
+          } catch {
+            continue;
+          }
+          for (const input of matches.reverse()) {
+            count += 1;
+            ok = nativeFill(input, value) || ok;
+          }
+        }
+        return { ok, count };
+      };
+      return {
+        address: fillBySelectors(addressSelectors, address),
+        city: fillBySelectors(citySelectors, city),
+        zip: fillBySelectors(zipSelectors, zip),
+      };
+    },
+    {
+      address: profile.address_line1 ?? "",
+      city: profile.city ?? "",
+      zip: billingZip ?? "",
+      addressSelectors: EXPEDIA_BILLING_ADDRESS1_SELECTORS,
+      citySelectors: EXPEDIA_BILLING_CITY_SELECTORS,
+      zipSelectors: EXPEDIA_BILLING_ZIP_SELECTORS,
+    },
+  ).catch(() => ({
+    address: { ok: false, count: 0 },
+    city: { ok: false, count: 0 },
+    zip: { ok: false, count: 0 },
+  }));
+  trace(
+    `Expedia billing direct fill: address=${directResult.address.ok} city=${directResult.city.ok} zip=${directResult.zip.ok} ` +
+    `matches=${directResult.address.count}/${directResult.city.count}/${directResult.zip.count}`
+  );
+
+  const nativeResult = directResult.address.ok && directResult.city.ok && directResult.zip.ok
+    ? {
+        address: directResult.address.ok,
+        city: directResult.city.ok,
+        zip: directResult.zip.ok,
+        addressCandidates: directResult.address.count,
+        cityCandidates: directResult.city.count,
+        zipCandidates: directResult.zip.count,
+      }
+    : await page.evaluate(
+      ({ address, city, zip }: { address: string; city: string; zip: string }) => {
+      const result = {
+        address: false,
+        city: false,
+        zip: false,
+        addressCandidates: 0,
+        cityCandidates: 0,
+        zipCandidates: 0,
+      };
+      const nativeFill = (el: HTMLInputElement, val: string): boolean => {
+        if (!val || !el || el.disabled) return false;
+        const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set;
+        el.scrollIntoView({ block: "center", behavior: "auto" as ScrollBehavior });
+        el.focus();
+        if (setter) {
+          setter.call(el, "");
+          setter.call(el, val);
+        } else {
+          el.value = "";
+          el.value = val;
+        }
+        try {
+          el.dispatchEvent(new InputEvent("beforeinput", { bubbles: true, data: val, inputType: "insertText" }));
+        } catch {
+          // Older embedded browsers may not support InputEvent construction.
+        }
+        el.dispatchEvent(new Event("input", { bubbles: true }));
+        el.dispatchEvent(new Event("change", { bubbles: true }));
+        el.dispatchEvent(new KeyboardEvent("keyup", { bubbles: true }));
+        el.blur();
+        return el.value.trim().replace(/\s+/g, " ") === val.trim().replace(/\s+/g, " ");
+      };
+      const isUsable = (el: HTMLInputElement): boolean => {
+        const rect = el.getBoundingClientRect();
+        const style = window.getComputedStyle(el);
+        const text = fieldText(el);
+        const hasExplicitBillingAutocomplete = /^billing\s+(address-line1|address-level2|postal-code)$/i
+          .test(el.getAttribute("autocomplete") ?? "");
+        return (hasExplicitBillingAutocomplete || (rect.width > 0 && rect.height > 0)) &&
+          style.display !== "none" &&
+          style.visibility !== "hidden" &&
+          style.opacity !== "0" &&
+          !el.disabled &&
+          el.type !== "hidden" &&
+          !/\bcvv\b|\bcvc\b|security.?code|verification.?code|card.?security|coupon|promo|gift.?card|credit.?card.?number|debit.?credit.?card.?number|card.?number/.test(text);
+      };
+      const fieldText = (el: HTMLInputElement): string => {
+        const id = el.getAttribute("id") ?? "";
+        const label = id ? document.querySelector<HTMLLabelElement>(`label[for="${CSS.escape(id)}"]`)?.textContent ?? "" : "";
+        return [
+          label,
+          el.className,
+          el.getAttribute("aria-label") ?? "",
+          el.getAttribute("autocomplete") ?? "",
+          el.getAttribute("placeholder") ?? "",
+          el.getAttribute("name") ?? "",
+          el.getAttribute("id") ?? "",
+          el.getAttribute("data-tealeaf-name") ?? "",
+          el.getAttribute("data-cko-rfrr-id") ?? "",
+          el.closest("label")?.textContent ?? "",
+        ].join(" ").replace(/\s+/g, " ").trim().toLowerCase();
+      };
+      const inputs = Array.from(document.querySelectorAll<HTMLInputElement>("input"))
+        .filter(isUsable);
+      const scoreInput = (input: HTMLInputElement, kind: "address" | "city" | "zip"): number => {
+        const text = fieldText(input);
+        const autocomplete = (input.getAttribute("autocomplete") ?? "").toLowerCase();
+        let score = 0;
+        if (kind === "address") {
+          if (autocomplete === "billing address-line1") score += 100;
+          if (autocomplete === "address-line1") score += 80;
+          if (/creditcards\[\d+\]\.street|billing-address-one|billingaddress1|flt\.cko\.billingaddress1|\bstreet\b/.test(text)) score += 120;
+          if (/billing address\s*1|billing address-line1|billing address line\s*1|address line\s*1|address-line1|123 main/.test(text)) score += 60;
+          if (/address\s*2|suite|apt|apartment/.test(text)) score -= 100;
+        }
+        if (kind === "city") {
+          if (autocomplete === "billing address-level2") score += 100;
+          if (autocomplete === "address-level2") score += 80;
+          if (/creditcards\[\d+\]\.city|billing-city|flt\.cko\.billingcity/.test(text)) score += 120;
+          if (/\bcity\b|billing city|address-level2|address level\s*2/.test(text)) score += 60;
+          if (/country|state|province|zip|postal|phone|card/.test(text)) score -= 100;
+        }
+        if (kind === "zip") {
+          if (autocomplete === "billing postal-code") score += 100;
+          if (autocomplete === "postal-code") score += 80;
+          if (/creditcards\[\d+\]\.zipcode|billing-zip-code|flt\.cko\.billingzipcode|\bzipcode\b/.test(text)) score += 120;
+          if (/\bzip code\b|billing zip|billing postal-code|postal-code|postal code/.test(text)) score += 60;
+          if (/security|cvv|cvc|card number/.test(text)) score -= 100;
+        }
+        return score;
+      };
+      const fillBestInput = (kind: "address" | "city" | "zip", value: string): boolean => {
+        const candidates = inputs
+          .map((input, index) => ({ input, index, score: scoreInput(input, kind) }))
+          .filter(candidate => candidate.score > 0)
+          .sort((a, b) => b.score === a.score ? b.index - a.index : b.score - a.score);
+        if (kind === "address") result.addressCandidates = candidates.length;
+        if (kind === "city") result.cityCandidates = candidates.length;
+        if (kind === "zip") result.zipCandidates = candidates.length;
+        for (const candidate of candidates) {
+          if (nativeFill(candidate.input, value)) return true;
+        }
+        return false;
+      };
+
+      result.address = fillBestInput("address", address);
+      result.city = fillBestInput("city", city);
+      result.zip = fillBestInput("zip", zip);
+      return result;
+      },
+      {
+        address: profile.address_line1 ?? "",
+        city: profile.city ?? "",
+        zip: billingZip ?? "",
+      },
+    ).catch(() => ({
+      address: false,
+      city: false,
+      zip: false,
+      addressCandidates: 0,
+      cityCandidates: 0,
+      zipCandidates: 0,
+    }));
+  trace(
+    `Expedia billing native fill: address=${nativeResult.address} city=${nativeResult.city} zip=${nativeResult.zip} ` +
+    `candidates=${nativeResult.addressCandidates}/${nativeResult.cityCandidates}/${nativeResult.zipCandidates}`
+  );
+
+  let countrySelected = false;
+  if (profile.country) {
+    const country = profile.country;
+    const countryCandidates = Array.from(new Set([
+      country,
+      country.toUpperCase() === "US" ? "United States of America" : "",
+      country.toUpperCase() === "USA" ? "United States of America" : "",
+      country.toLowerCase() === "united states" ? "United States of America" : "",
+    ].filter(Boolean)));
+    countrySelected = await selectExpediaTravelerOption(
+      page,
+      ["Country/Territory", "Country/Region", "Country"],
+      EXPEDIA_BILLING_COUNTRY_SELECTORS,
+      countryCandidates,
+      "billing country",
+      trace,
+    );
+  }
+
+  if (profile.address_line1 && !nativeResult.address) {
+    await findAndFillExpediaField(
+      page,
+      ["Billing address 1", "Billing address", "Address line 1", "Address 1"],
+      EXPEDIA_BILLING_ADDRESS1_SELECTORS,
+      profile.address_line1,
+      "billing address 1",
+      trace,
+    );
+  }
+
+  if (profile.city && !nativeResult.city) {
+    await findAndFillExpediaField(
+      page,
+      ["City", "Billing city"],
+      EXPEDIA_BILLING_CITY_SELECTORS,
+      profile.city,
+      "billing city",
+      trace,
+    );
+  }
+
+  let stateSelected = false;
+  if (profile.state) {
+    const state = profile.state;
+    const stateCandidates = Array.from(new Set([state, state.toUpperCase()]));
+    stateSelected = await selectExpediaTravelerOption(
+      page,
+      ["State", "Billing state", "State/Province"],
+      EXPEDIA_BILLING_STATE_SELECTORS,
+      stateCandidates,
+      "billing state",
+      trace,
+    );
+    if (!stateSelected) {
+      await findAndFillExpediaField(
+        page,
+        ["State", "Billing state", "State/Province"],
+        EXPEDIA_BILLING_STATE_SELECTORS.map(selector => selector.replace(/^select/, "input")),
+        state,
+        "billing state",
+        trace,
+      );
+    }
+  }
+
+  const exactResult = await page.evaluate(
+    ({ address, city, zip }: { address: string; city: string; zip: string }) => {
+      const nativeFill = (el: HTMLInputElement, value: string): boolean => {
+        if (!value || !el || el.disabled || el.type === "hidden") return false;
+        const rect = el.getBoundingClientRect();
+        const style = window.getComputedStyle(el);
+        if (rect.width <= 0 || rect.height <= 0 || style.display === "none" || style.visibility === "hidden") return false;
+        const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set;
+        el.scrollIntoView({ block: "center", behavior: "auto" as ScrollBehavior });
+        el.focus();
+        if (setter) {
+          setter.call(el, "");
+          setter.call(el, value);
+        } else {
+          el.value = "";
+          el.value = value;
+        }
+        try {
+          el.dispatchEvent(new InputEvent("beforeinput", { bubbles: true, data: value, inputType: "insertText" }));
+        } catch {
+          // InputEvent construction is not available in every embedded browser.
+        }
+        el.dispatchEvent(new Event("input", { bubbles: true }));
+        el.dispatchEvent(new Event("change", { bubbles: true }));
+        el.dispatchEvent(new KeyboardEvent("keyup", { bubbles: true }));
+        el.dispatchEvent(new FocusEvent("blur", { bubbles: true }));
+        el.blur();
+        return el.value.trim().replace(/\s+/g, " ") === value.trim().replace(/\s+/g, " ");
+      };
+      const fillByExactSelectors = (selectors: string[], value: string): boolean => {
+        const matches: HTMLInputElement[] = [];
+        const seen = new Set<HTMLInputElement>();
+        for (const selector of selectors) {
+          for (const input of Array.from(document.querySelectorAll<HTMLInputElement>(selector))) {
+            if (!seen.has(input)) {
+              seen.add(input);
+              matches.push(input);
+            }
+          }
+        }
+        for (const input of matches.reverse()) {
+          if (nativeFill(input, value)) return true;
+        }
+        return false;
+      };
+      return {
+        address: fillByExactSelectors([
+          'input[name="creditCards[0].street"]',
+          "input.billing-address-one",
+          'input[data-tealeaf-name="street"]',
+          'input[data-cko-rfrr-id="FLT.CKO.BILLINGADDRESS1"]',
+          'input[autocomplete="billing address-line1"]',
+          'input[aria-label="Billing address 1"]',
+        ], address),
+        city: fillByExactSelectors([
+          'input[name="creditCards[0].city"]',
+          "input.billing-city",
+          'input[data-tealeaf-name="city"]',
+          'input[data-cko-rfrr-id="FLT.CKO.BILLINGCITY"]',
+          'input[autocomplete="billing address-level2"]',
+          'input[aria-label="City"]',
+        ], city),
+        zip: fillByExactSelectors([
+          'input[name="creditCards[0].zipcode"]',
+          "input.billing-zip-code",
+          'input[data-tealeaf-name="zipcode"]',
+          'input[data-cko-rfrr-id="FLT.CKO.BILLINGZIPCODE"]',
+          'input[autocomplete="billing postal-code"]',
+          'input[aria-label="ZIP code"]',
+          'input[aria-label="Billing ZIP code"]',
+        ], zip),
+      };
+    },
+    {
+      address: profile.address_line1 ?? "",
+      city: profile.city ?? "",
+      zip: billingZip ?? "",
+    },
+  ).catch(() => ({ address: false, city: false, zip: false }));
+  trace(`Expedia billing exact field fill: address=${exactResult.address} city=${exactResult.city} zip=${exactResult.zip}`);
+
+  const verified = await page.evaluate(() => {
+    const fieldText = (el: HTMLInputElement | HTMLSelectElement): string => {
+      const id = el.getAttribute("id") ?? "";
+      const label = id ? document.querySelector<HTMLLabelElement>(`label[for="${CSS.escape(id)}"]`)?.textContent ?? "" : "";
+      return [
+        label,
+        el.className,
+        el.getAttribute("aria-label") ?? "",
+        el.getAttribute("autocomplete") ?? "",
+        el.getAttribute("placeholder") ?? "",
+        el.getAttribute("name") ?? "",
+        id,
+        el.getAttribute("data-tealeaf-name") ?? "",
+        el.getAttribute("data-cko-rfrr-id") ?? "",
+        el.closest("label")?.textContent ?? "",
+      ].join(" ").replace(/\s+/g, " ").trim().toLowerCase();
+    };
+    const isVisible = (el: HTMLElement): boolean => {
+      const rect = el.getBoundingClientRect();
+      const style = window.getComputedStyle(el);
+      return rect.width > 0 && rect.height > 0 && style.display !== "none" && style.visibility !== "hidden";
+    };
+    const inputs = Array.from(document.querySelectorAll<HTMLInputElement>("input"))
+      .filter(el => isVisible(el) && !el.disabled && el.type !== "hidden");
+    const selects = Array.from(document.querySelectorAll<HTMLSelectElement>("select"))
+      .filter(el => isVisible(el) && !el.disabled);
+    const hasInput = (patterns: RegExp[], reject: RegExp[] = []): boolean =>
+      inputs.some(input => {
+        const text = fieldText(input);
+        return input.value.trim().length > 0 &&
+          patterns.some(pattern => pattern.test(text)) &&
+          !reject.some(pattern => pattern.test(text));
+      });
+    const hasSelect = (patterns: RegExp[]): boolean =>
+      selects.some(select => {
+        const text = fieldText(select);
+        return select.value.trim().length > 0 &&
+          select.selectedIndex > 0 &&
+          patterns.some(pattern => pattern.test(text));
+      });
+    return {
+      address: hasInput(
+        [/creditcards\[\d+\]\.street/, /billing-address-one/, /billingaddress1/, /\bstreet\b/, /billing address.?1/, /billing address-line1/, /billing address line.?1/, /address line.?1/, /address-line1/, /123 main/],
+        [/address.?2/, /suite|apt|apartment/],
+      ),
+      city: hasInput([/creditcards\[\d+\]\.city/, /billing-city/, /\bcity\b/, /billing address-level2/, /address-level2/, /billing city/]),
+      zip: hasInput([/creditcards\[\d+\]\.zipcode/, /billing-zip-code/, /\bzipcode\b/, /\bzip code\b/, /billing zip/, /billing postal-code/, /postal-code/, /postal code/]),
+      country: hasSelect([/country\/territory/, /country\/region/, /\bcountry\b/]),
+      state: hasSelect([/\bstate\b/, /province/, /billing state/]) ||
+        hasInput([/\bstate\b/, /province/, /billing state/]),
+    };
+  }).catch(() => ({ address: false, city: false, zip: false, country: false, state: false }));
+
+  const result = {
+    address: nativeResult.address || exactResult.address || verified.address,
+    city: nativeResult.city || exactResult.city || verified.city,
+    zip: nativeResult.zip || exactResult.zip || verified.zip,
+    country: countrySelected || verified.country,
+    state: stateSelected || verified.state,
+  };
+  trace(
+    `Expedia billing verify: address=${result.address} city=${result.city} zip=${result.zip} country=${result.country} state=${result.state}`
+  );
+  return result;
+}
+
+async function scrollExpediaCheckoutToSection(
+  page: Page,
+  label: string,
+  patterns: string[],
+  trace: (msg: string) => void,
+): Promise<boolean> {
+  const scrolled = await page.evaluate(({ patterns }: { patterns: string[] }) => {
+    const regexes = patterns.map(pattern => new RegExp(pattern, "i"));
+    const isVisible = (el: HTMLElement): boolean => {
+      const rect = el.getBoundingClientRect();
+      const style = window.getComputedStyle(el);
+      return rect.width > 0 &&
+        rect.height > 0 &&
+        style.display !== "none" &&
+        style.visibility !== "hidden";
+    };
+    const fieldText = (el: HTMLElement): string => {
+      const id = el.getAttribute("id") ?? "";
+      const labelText = id ? document.querySelector<HTMLLabelElement>(`label[for="${CSS.escape(id)}"]`)?.textContent ?? "" : "";
+      return [
+        labelText,
+        el.textContent ?? "",
+        el.className,
+        el.getAttribute("aria-label") ?? "",
+        el.getAttribute("autocomplete") ?? "",
+        el.getAttribute("placeholder") ?? "",
+        el.getAttribute("name") ?? "",
+        el.getAttribute("id") ?? "",
+        el.getAttribute("data-tealeaf-name") ?? "",
+        el.getAttribute("data-cko-rfrr-id") ?? "",
+        el.closest("label")?.textContent ?? "",
+      ].join(" ").replace(/\s+/g, " ").trim();
+    };
+    const selectors = [
+      "input:not([type='hidden'])",
+      "select",
+      "textarea",
+      "button",
+      "[role='button']",
+      "[role='radio']",
+      "label",
+      "h1",
+      "h2",
+      "h3",
+      "h4",
+    ].join(",");
+    const candidates = Array.from(document.querySelectorAll<HTMLElement>(selectors))
+      .filter(el => isVisible(el))
+      .map(el => ({ el, text: fieldText(el) }))
+      .filter(item => item.text && regexes.some(regex => regex.test(item.text)));
+    const target = candidates[0]?.el;
+    if (!target) return false;
+    target.scrollIntoView({ block: "center", behavior: "auto" as ScrollBehavior });
+    return true;
+  }, { patterns }).catch(() => false);
+  trace(`Expedia checkout scroll: ${label} section visibleTarget=${scrolled}`);
+  await new Promise(r => setTimeout(r, 650));
+  return scrolled;
+}
+
+export async function scrollExpediaCheckoutToFinalReviewBoundary(
+  page: Page,
+  trace: (msg: string) => void,
+): Promise<boolean> {
+  const visible = await page.evaluate(() => {
+    const candidates = Array.from(document.querySelectorAll<HTMLElement>("button, [role='button'], a"))
+      .filter(el => /complete booking|review and book|book your trip/i.test((el.textContent ?? "").replace(/\s+/g, " ")));
+    const target = candidates.find(el => /complete booking/i.test(el.textContent ?? "")) ?? candidates.at(-1);
+    if (!target) return false;
+    target.scrollIntoView({ block: "center" });
+    const rect = target.getBoundingClientRect();
+    return rect.top >= 0 && rect.bottom <= window.innerHeight;
+  }).catch(() => false);
+  trace(`Expedia payment boundary: Complete Booking visible=${visible}; final button not clicked`);
+  await new Promise(r => setTimeout(r, 500));
+  return visible;
 }
 
 async function findVisibleInScope(scope: Page | Frame, selectors: string[]): Promise<{ scope: Page | Frame; selector: string } | null> {
@@ -223,7 +1770,8 @@ async function fillExpediaGroupPaymentField(
   if (labelTexts && labelTexts.length > 0) {
     for (const labelText of labelTexts) {
       try {
-        const locator = page.getByLabel(labelText, { exact: false });
+        const locator = getExpediaLabelLocator(page, labelText, { exact: false });
+        if (!locator) continue;
         const count = await locator.count().catch(() => 0);
         if (count === 0) continue;
         const el = locator.first();
@@ -267,7 +1815,7 @@ async function fillExpediaGroupPaymentField(
         return el ? el.value : "";
       }, inlineMatch.selector).catch(() => "");
       if (filled !== value) {
-        trace(`Expedia payment: ${label} mismatch after fill (got "${filled.slice(0, 30)}") — retrying with keyboard`);
+        trace(`Expedia payment: ${label} mismatch after fill (value length=${filled.length}) - retrying with keyboard`);
         // Fallback: triple-click + keyboard type to avoid autocomplete
         await page.click(inlineMatch.selector, { clickCount: 3 }).catch(() => {});
         await page.keyboard.type(value, { delay: 40 });
@@ -277,7 +1825,7 @@ async function fillExpediaGroupPaymentField(
           const el = document.querySelector<HTMLInputElement>(sel);
           return el ? el.value : "";
         }, inlineMatch.selector).catch(() => "");
-        trace(`Expedia payment: ${label} after keyboard retry = "${filled2.slice(0, 30)}"`);
+        trace(`Expedia payment: ${label} after keyboard retry length=${filled2.length}`);
       } else {
         trace(`Expedia payment: filled ${label} inline OK`);
       }
@@ -320,6 +1868,154 @@ interface ExpediaGuestProfile {
   last_name?: string;
   email?: string;
   phone?: string;
+  gender?: string;
+  date_of_birth?: string;
+}
+
+export function normalizeExpediaTravelerGender(value?: string): "male" | "female" | undefined {
+  const normalized = (value ?? "").trim().toLowerCase();
+  if (!normalized) return undefined;
+  if (/^(m|male|man|mr|男|男性)$/.test(normalized)) return "male";
+  if (/^(f|female|woman|ms|mrs|miss|女|女性)$/.test(normalized)) return "female";
+  return undefined;
+}
+
+export function buildExpediaDateOfBirthSelectCandidates(dateOfBirth?: string): {
+  month: string[];
+  day: string[];
+  year: string[];
+} | null {
+  const parts = (dateOfBirth ?? "").match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!parts) return null;
+  const [, yyyy, mm, dd] = parts;
+  const monthIndex = parseInt(mm, 10);
+  const dayIndex = parseInt(dd, 10);
+  const monthNames = [
+    "", "January", "February", "March", "April", "May", "June",
+    "July", "August", "September", "October", "November", "December",
+  ];
+  const monthName = monthNames[monthIndex] ?? "";
+  return {
+    month: [mm, String(monthIndex), monthName, monthName.slice(0, 3)].filter(Boolean),
+    day: [dd, String(dayIndex)],
+    year: [yyyy],
+  };
+}
+
+export function buildExpediaCardExpirySelectCandidates(cardExpiry?: string): {
+  month: string[];
+  year: string[];
+} | null {
+  const raw = (cardExpiry ?? "").trim();
+  const parts = raw.match(/^(\d{1,2})\D+(\d{2}|\d{4})$/) ??
+    raw.replace(/\D/g, "").match(/^(\d{2})(\d{2}|\d{4})$/);
+  if (!parts) return null;
+  const monthIndex = parseInt(parts[1], 10);
+  if (!Number.isFinite(monthIndex) || monthIndex < 1 || monthIndex > 12) return null;
+  const fullYear = parts[2].length === 2 ? `20${parts[2]}` : parts[2];
+  const shortYear = fullYear.slice(-2);
+  const mm = String(monthIndex).padStart(2, "0");
+  const monthNames = [
+    "", "January", "February", "March", "April", "May", "June",
+    "July", "August", "September", "October", "November", "December",
+  ];
+  const monthName = monthNames[monthIndex] ?? "";
+  return {
+    month: [mm, String(monthIndex), monthName, monthName.slice(0, 3)].filter(Boolean),
+    year: [fullYear, shortYear],
+  };
+}
+
+export interface ExpediaFlightTravelerFormState {
+  missingRequiredFields: string[];
+  filledFields: string[];
+  visibleRequiredFields: string[];
+}
+
+export interface ExpediaFlightTravelerControlSnapshot {
+  checked: boolean;
+  selectedIndex: number;
+  tagName: string;
+  text: string;
+  type: string;
+  value: string;
+}
+
+export interface ExpediaFlightTravelerFormSnapshot {
+  bodyText: string;
+  controls: ExpediaFlightTravelerControlSnapshot[];
+}
+
+export function summarizeExpediaFlightTravelerFormState(
+  snapshot: ExpediaFlightTravelerFormSnapshot,
+): ExpediaFlightTravelerFormState {
+  const controls = snapshot.controls.map(control => ({
+    ...control,
+    text: control.text.toLowerCase(),
+    type: control.type.toLowerCase(),
+    tagName: control.tagName.toLowerCase(),
+    value: control.value.trim(),
+  }));
+  const bodyText = snapshot.bodyText.toLowerCase();
+
+  const inputValue = (control: ExpediaFlightTravelerControlSnapshot): string => {
+    if (control.tagName.toLowerCase() === "select") {
+      return control.selectedIndex > 0 ? control.value.trim() : "";
+    }
+    return control.value.trim();
+  };
+
+  const hasFilled = (patterns: RegExp[]): boolean => controls.some(control =>
+    patterns.some(pattern => pattern.test(control.text)) && inputValue(control).length > 0
+  );
+  const hasVisible = (patterns: RegExp[]): boolean => controls.some(control =>
+    patterns.some(pattern => pattern.test(control.text))
+  );
+  const bodyHas = (patterns: RegExp[]): boolean => patterns.some(pattern => pattern.test(bodyText));
+  const radioChecked = (patterns: RegExp[]): boolean => {
+    const radios = controls.filter(control =>
+      control.type === "radio" && patterns.some(pattern => pattern.test(control.text))
+    );
+    return radios.length > 0 && radios.some(control => control.checked);
+  };
+
+  const visibleRequiredFields: string[] = [];
+  const missingRequiredFields: string[] = [];
+  const filledFields: string[] = [];
+  const addExpected = (label: string, patterns: RegExp[]): void => {
+    const visible = hasVisible(patterns) || bodyHas(patterns);
+    const filled = hasFilled(patterns);
+    if (visible) visibleRequiredFields.push(label);
+    if (filled) filledFields.push(label);
+    if (visible && !filled) missingRequiredFields.push(label);
+  };
+
+  addExpected("first name", [/first.?name|given.?name|forename|firstname/]);
+  addExpected("last name", [/last.?name|family.?name|surname|lastname/]);
+  addExpected("email address", [/e.?mail/]);
+  addExpected("phone number", [/phone|mobile|cellular|tel(?:ephone)?/]);
+
+  if (bodyText.includes("date of birth")) {
+    addExpected("birth month", [/\bmonth\b/]);
+    addExpected("birth day", [/\bday\b/]);
+    addExpected("birth year", [/\byear\b/]);
+  }
+
+  if (bodyText.includes("gender")) {
+    visibleRequiredFields.push("gender");
+    if (radioChecked([/gender|male|female/])) filledFields.push("gender");
+    else missingRequiredFields.push("gender");
+  }
+
+  if (bodyText.includes("who's traveling") && visibleRequiredFields.length === 0) {
+    missingRequiredFields.push("traveler form fields not detected");
+  }
+
+  return {
+    missingRequiredFields: Array.from(new Set(missingRequiredFields)),
+    filledFields: Array.from(new Set(filledFields)),
+    visibleRequiredFields: Array.from(new Set(visibleRequiredFields)),
+  };
 }
 
 /**
@@ -353,6 +2049,7 @@ export async function fillExpediaGuestForm(
   await dismissExpediaAlmostYoursModal(page, trace);
 
   const phoneDigits = (profile.phone ?? "").replace(/\D/g, "");
+  const gender = normalizeExpediaTravelerGender(profile.gender);
 
   // Fill all 4 guest fields via page.evaluate + native setter in a single pass.
   // This approach:
@@ -360,7 +2057,7 @@ export async function fillExpediaGuestForm(
   //   - Finds inputs by placeholder/type pattern (not by fragile id/name selectors)
   //   - Uses native HTMLInputElement setter to trigger React state updates
   const results = await page.evaluate(
-    ({ first, last, email, phone }: { first: string; last: string; email: string; phone: string }) => {
+    ({ first, last, email, phone, dateOfBirth, gender }: { first: string; last: string; email: string; phone: string; dateOfBirth: string; gender: string }) => {
       const nativeFill = (el: HTMLInputElement, val: string): boolean => {
         if (!val) return false;
         const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set;
@@ -371,6 +2068,41 @@ export async function fillExpediaGuestForm(
         el.dispatchEvent(new Event("change", { bubbles: true }));
         el.blur();
         return el.value === val;
+      };
+      const nativeSelect = (el: HTMLSelectElement, candidates: string[]): boolean => {
+        const normalizedCandidates = candidates.map(v => v.toLowerCase().replace(/^0+/, ""));
+        const option = Array.from(el.options).find(opt => {
+          const value = (opt.value ?? "").trim().toLowerCase().replace(/^0+/, "");
+          const text = (opt.textContent ?? "").trim().toLowerCase().replace(/^0+/, "");
+          return normalizedCandidates.includes(value) || normalizedCandidates.includes(text);
+        });
+        if (!option) return false;
+        const setter = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, "value")?.set;
+        if (setter) setter.call(el, option.value);
+        else el.value = option.value;
+        el.dispatchEvent(new Event("input", { bubbles: true }));
+        el.dispatchEvent(new Event("change", { bubbles: true }));
+        return el.value === option.value;
+      };
+      const nativeCheck = (el: HTMLInputElement): boolean => {
+        if (!el || el.type !== "radio" || el.disabled) return false;
+        el.click();
+        el.dispatchEvent(new Event("input", { bubbles: true }));
+        el.dispatchEvent(new Event("change", { bubbles: true }));
+        return el.checked;
+      };
+      const fieldText = (el: Element): string => {
+        const id = el.getAttribute("id") ?? "";
+        const label = id ? document.querySelector<HTMLLabelElement>(`label[for="${CSS.escape(id)}"]`)?.textContent ?? "" : "";
+        return [
+          label,
+          el.getAttribute("name") ?? "",
+          el.getAttribute("id") ?? "",
+          el.getAttribute("aria-label") ?? "",
+          (el as HTMLInputElement).placeholder ?? "",
+          el.closest("label")?.textContent ?? "",
+          el.parentElement?.textContent ?? "",
+        ].join(" ").replace(/\s+/g, " ").trim().toLowerCase();
       };
 
       const allInputs = Array.from(document.querySelectorAll<HTMLInputElement>("input"));
@@ -415,6 +2147,43 @@ export async function fillExpediaGuestForm(
       );
       results.phone = phoneEl ? nativeFill(phoneEl, phone) : "not_found";
 
+      const visibleSelectsForContact = Array.from(document.querySelectorAll<HTMLSelectElement>("select"))
+        .filter(el => !el.disabled && (el.offsetParent !== null || el.getBoundingClientRect().width > 0));
+      const phoneCountrySelect = visibleSelectsForContact.find(el =>
+        /country\/territory code|country code|phone country|telephone country|region code/.test(fieldText(el))
+      );
+      results.phoneCountryCode = phoneCountrySelect
+        ? nativeSelect(phoneCountrySelect, ["United States of America +1", "United States +1", "United States", "+1", "1", "US", "USA"])
+        : "not_found";
+
+      const dobParts = dateOfBirth.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+      if (dobParts) {
+        const [, yyyy, mm, dd] = dobParts;
+        const monthNames = [
+          "", "january", "february", "march", "april", "may", "june",
+          "july", "august", "september", "october", "november", "december",
+        ];
+        const visibleSelects = Array.from(document.querySelectorAll<HTMLSelectElement>("select"))
+          .filter(el => !el.disabled && (el.offsetParent !== null || el.getBoundingClientRect().width > 0));
+        const monthSelect = visibleSelects.find(el => /month/.test(fieldText(el)));
+        const daySelect = visibleSelects.find(el => /\bday\b/.test(fieldText(el)));
+        const yearSelect = visibleSelects.find(el => /\byear\b/.test(fieldText(el)));
+        results.birthMonth = monthSelect ? nativeSelect(monthSelect, [mm, String(parseInt(mm, 10)), monthNames[parseInt(mm, 10)] ?? ""]) : "not_found";
+        results.birthDay = daySelect ? nativeSelect(daySelect, [dd, String(parseInt(dd, 10))]) : "not_found";
+        results.birthYear = yearSelect ? nativeSelect(yearSelect, [yyyy]) : "not_found";
+      }
+
+      if (gender) {
+        const genderRadios = Array.from(document.querySelectorAll<HTMLInputElement>('input[type="radio"]'))
+          .filter(el => !el.disabled && (el.offsetParent !== null || el.getBoundingClientRect().width > 0));
+        const genderEl = genderRadios.find(el => {
+          const text = fieldText(el);
+          if (gender === "male") return /\bmale\b/.test(text) && !/\bfemale\b/.test(text);
+          return /\bfemale\b/.test(text);
+        });
+        results.gender = genderEl ? nativeCheck(genderEl) : "not_found";
+      }
+
       return results;
     },
     {
@@ -422,6 +2191,8 @@ export async function fillExpediaGuestForm(
       last: profile.last_name ?? "",
       email: profile.email ?? "",
       phone: phoneDigits,
+      dateOfBirth: profile.date_of_birth ?? "",
+      gender: gender ?? "",
     }
   ).catch((err: Error) => {
     trace(`Expedia guest fill: page.evaluate failed — ${err.message?.slice(0, 80)}`);
@@ -431,33 +2202,56 @@ export async function fillExpediaGuestForm(
   trace(`Expedia guest fill results: ${JSON.stringify(results)}`);
 
   // Fallback for any field that wasn't found via page.evaluate: try findAndFillExpediaField
-  if (results.firstName === "not_found" && profile.first_name) {
+  if (results.firstName !== true && profile.first_name) {
     trace("Expedia guest: first name not found via evaluate — trying locator fallback");
     await findAndFillExpediaField(page,
       ["First name", "First Name", "Given name"],
       ['input[placeholder*="John"]', 'input[autocomplete="given-name"]', 'input[placeholder*="First name"]'],
       profile.first_name, "first name", trace);
   }
-  if (results.lastName === "not_found" && profile.last_name) {
+  if (results.lastName !== true && profile.last_name) {
     trace("Expedia guest: last name not found via evaluate — trying locator fallback");
     await findAndFillExpediaField(page,
       ["Last name", "Last Name", "Family name"],
       ['input[placeholder*="Smith"]', 'input[autocomplete="family-name"]', 'input[placeholder*="Last name"]'],
       profile.last_name, "last name", trace);
   }
-  if (results.email === "not_found" && profile.email) {
+  if (results.email !== true && profile.email) {
     trace("Expedia guest: email not found via evaluate — trying locator fallback");
     await findAndFillExpediaField(page,
       ["Email address", "Email"],
       ['input[type="email"]', 'input[autocomplete="email"]'],
       profile.email, "email", trace);
   }
-  if (results.phone === "not_found" && phoneDigits) {
+  if (results.phone !== true && phoneDigits) {
     trace("Expedia guest: phone not found via evaluate — trying locator fallback");
     await findAndFillExpediaField(page,
       ["Phone number", "Phone Number"],
       ['input[type="tel"]:not([id*="country"])'],
       phoneDigits, "phone", trace, true);
+  }
+  if (results.phoneCountryCode !== true) {
+    await selectExpediaTravelerOption(
+      page,
+      ["Country/Territory Code", "Country code", "Phone country"],
+      [
+        'select[aria-label*="Country/Territory Code" i]',
+        'select[aria-label*="country code" i]',
+        'select[name*="country" i][name*="code" i]',
+        'select[id*="country" i][id*="code" i]',
+      ],
+      ["United States of America +1", "United States +1", "United States", "+1", "1", "US", "USA"],
+      "phone country code",
+      trace,
+    );
+  }
+  if ((results.birthMonth !== true || results.birthDay !== true || results.birthYear !== true) && profile.date_of_birth) {
+    trace("Expedia guest: date of birth not fully filled via evaluate - trying locator fallback");
+    await fillExpediaTravelerDobFallback(page, profile.date_of_birth, trace);
+  }
+  if (results.gender !== true && gender) {
+    trace("Expedia guest: gender not found via evaluate - trying locator fallback");
+    await clickExpediaTravelerGender(page, gender, trace);
   }
 }
 
@@ -467,6 +2261,72 @@ export async function fillExpediaGuestForm(
  * Strategy: click "Continue booking" button, or fall back to the × close button.
  * @param waitMs - optional wait before checking (modal may render after page interaction)
  */
+export async function inspectExpediaFlightTravelerFormState(page: Page): Promise<ExpediaFlightTravelerFormState> {
+  const snapshot = await page.evaluate((): ExpediaFlightTravelerFormSnapshot => {
+    const isVisible = (el: Element): boolean => {
+      const rect = (el as HTMLElement).getBoundingClientRect();
+      const style = window.getComputedStyle(el as HTMLElement);
+      return rect.width > 0 &&
+        rect.height > 0 &&
+        style.display !== "none" &&
+        style.visibility !== "hidden" &&
+        style.opacity !== "0";
+    };
+    const fieldText = (el: Element): string => {
+      const id = el.getAttribute("id") ?? "";
+      const label = id ? document.querySelector<HTMLLabelElement>(`label[for="${CSS.escape(id)}"]`)?.textContent ?? "" : "";
+      const localText = [
+        label,
+        el.getAttribute("name") ?? "",
+        el.getAttribute("id") ?? "",
+        el.getAttribute("aria-label") ?? "",
+        el.getAttribute("autocomplete") ?? "",
+        (el as HTMLInputElement).placeholder ?? "",
+        el.closest("label")?.textContent ?? "",
+      ].join(" ").replace(/\s+/g, " ").trim().toLowerCase();
+      if (localText) return localText;
+
+      const parentText = (el.parentElement?.textContent ?? "").replace(/\s+/g, " ").trim().toLowerCase();
+      const labelFamilies = [
+        /first.?name|given.?name|forename|firstname/,
+        /last.?name|family.?name|surname|lastname/,
+        /e.?mail/,
+        /phone|mobile|cellular|tel(?:ephone)?/,
+        /country|territory/,
+        /\bmonth\b/,
+        /\bday\b/,
+        /\byear\b/,
+        /gender|male|female/,
+      ];
+      const familyMatches = labelFamilies.filter(pattern => pattern.test(parentText)).length;
+      return parentText.length <= 120 && familyMatches <= 1 ? parentText : "";
+    };
+    const controls = Array.from(document.querySelectorAll<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>(
+      'input:not([type="hidden"]), select, textarea'
+    )).filter(el => isVisible(el) && !el.disabled);
+
+    return {
+      bodyText: (document.body.textContent ?? "").toLowerCase(),
+      controls: controls.map((el) => ({
+        checked: el instanceof HTMLInputElement ? el.checked : false,
+        selectedIndex: el instanceof HTMLSelectElement ? el.selectedIndex : -1,
+        tagName: el.tagName,
+        text: fieldText(el),
+        type: el instanceof HTMLInputElement ? el.type : el.tagName.toLowerCase(),
+        value: (el.value ?? "").trim(),
+      })),
+    };
+  }).catch(() => null);
+  if (!snapshot) {
+    return {
+      missingRequiredFields: ["traveler form inspection failed"],
+      filledFields: [],
+      visibleRequiredFields: [],
+    };
+  }
+  return summarizeExpediaFlightTravelerFormState(snapshot);
+}
+
 async function dismissExpediaAlmostYoursModal(page: Page, trace: (msg: string) => void, waitMs = 0): Promise<void> {
   if (waitMs > 0) await new Promise(r => setTimeout(r, waitMs));
 
@@ -653,7 +2513,11 @@ async function fillCardFieldsInPaymentIframes(
       }))
     ).catch(() => [] as Array<{ i: number; type: string; id: string; placeholder: string; autocomplete: string; ariaLabel: string }>);
 
-    const candidateInputs = inputs.filter(d => d.type !== "hidden");
+    const candidateInputs = inputs.filter(d => {
+      if (d.type === "hidden") return false;
+      const combined = `${d.id} ${d.placeholder} ${d.autocomplete} ${d.ariaLabel}`.toLowerCase();
+      return !/\bcvv\b|\bcvc\b|security.?code|verification.?code|card.?security/.test(combined);
+    });
     if (candidateInputs.length === 0) continue;
 
     trace(`Expedia card: frame (${frameUrl.slice(0, 60)}) has ${candidateInputs.length} input(s)`);
@@ -798,7 +2662,7 @@ export async function fillExpediaGroupPaymentForm(
   page: Page,
   profile: ExpediaGroupProfile,
   trace: (msg: string) => void
-): Promise<void> {
+): Promise<ExpediaPaymentPrefillResult> {
   // Wait for the checkout page to fully render before interacting.
   // Expedia's React checkout lazy-renders card fields and modals after initial page load.
   trace("Expedia payment: waiting for checkout page to fully render...");
@@ -817,6 +2681,15 @@ export async function fillExpediaGroupPaymentForm(
   // Extra settle time after DOM appears (React effects / autocomplete / animation)
   await new Promise(r => setTimeout(r, 800));
   trace("Expedia payment: page settled — proceeding with modal dismiss and form fill");
+
+  const billingZip = profile.billing_zip ?? profile.zip;
+  const safeLength = (value: string | undefined) => value?.length ?? 0;
+  trace(
+    `Expedia payment profile fields: cardName=${safeLength(profile.card_name) > 0} ` +
+    `cardNumberLen=${safeLength(profile.card_number)} cardExpiry=${safeLength(profile.card_expiry) > 0} ` +
+    `addressLen=${safeLength(profile.address_line1)} cityLen=${safeLength(profile.city)} ` +
+    `state=${safeLength(profile.state) > 0} zipLen=${safeLength(billingZip)}`
+  );
 
   // Dismiss the "This booking is almost yours!" nudge modal if present
   await dismissExpediaAlmostYoursModal(page, trace);
@@ -845,8 +2718,24 @@ export async function fillExpediaGroupPaymentForm(
 
   // Always attempt guest fill on /checkout/session (combined guest+payment page)
   trace("Expedia payment: attempting guest info fill (combined checkout page)");
-  await fillExpediaGuestForm(page, profile, trace);
+  try {
+    await fillExpediaGuestForm(page, profile, trace);
+  } catch (guestErr) {
+    trace(`Expedia payment: guest info prefill did not complete; continuing to allowed payment/billing fields (${(guestErr as Error).message?.slice(0, 80)})`);
+  }
   await new Promise(r => setTimeout(r, 400));
+
+  // Current product QA priority: billing must be verified before handoff, while
+  // allowed test card fields may still be prefilled. CVV/security code and final
+  // confirmation remain human-only.
+  const shouldPrefillCard = true;
+  if (shouldPrefillCard) {
+  await scrollExpediaCheckoutToSection(
+    page,
+    "payment details",
+    ["Payment Details", "How would you like to pay", "Payment method", "Name on Card", "Debit/Credit card number", "Card number"],
+    trace,
+  );
 
   // Detect inline vs iframe payment (use Playwright locator for shadow DOM support)
   const inlineCardCount = await page.locator(
@@ -955,15 +2844,12 @@ export async function fillExpediaGroupPaymentForm(
     await new Promise(r => setTimeout(r, 600));
   }
 
-  // Scroll to the card details section so fields become visible
-  await page.evaluate(() => {
-    const cardSection = Array.from(document.querySelectorAll<HTMLElement>('*')).find(el => {
-      const text = (el.textContent ?? "").trim();
-      return text.startsWith("Card details") || text.startsWith("Card number") || text.includes("0000 0000 0000");
-    });
-    if (cardSection) cardSection.scrollIntoView({ block: "center" });
-  }).catch(() => {});
-  await new Promise(r => setTimeout(r, 600));
+  await scrollExpediaCheckoutToSection(
+    page,
+    "card fields",
+    ["Name on Card", "Debit/Credit card number", "Card number", "Expiration date", "Expiry date"],
+    trace,
+  );
 
   // ── Card fields strategy ──────────────────────────────────────────────────────
   // Expedia uses Checkout.com (CKO) for payment. CKO renders card inputs inside
@@ -1066,7 +2952,11 @@ export async function fillExpediaGroupPaymentForm(
               x: r.x, y: r.y, w: r.width, h: r.height,
             };
           })
-          .filter(b => b.w > 0 && b.h > 0 && b.h < 120); // card fields are short (<120px tall)
+          .filter(b => {
+            if (!(b.w > 0 && b.h > 0 && b.h < 120)) return false;
+            const text = `${b.id} ${b.frameName} ${b.src}`;
+            return !/\bcvv\b|\bcvc\b|security.?code|verification.?code|card.?security/.test(text);
+          }); // card fields are short (<120px tall)
       }).catch(() => [] as Array<{ id: string; frameName: string; src: string; x: number; y: number; w: number; h: number }>);
 
       trace(`CKO visible iframes: ${ckoIframes.length} short iframes found`);
@@ -1312,6 +3202,10 @@ export async function fillExpediaGroupPaymentForm(
     }
   }
   if (!iframeFilledFields.expiry && profile.card_expiry) {
+    const splitExpiryOk = await fillExpediaSplitCardExpiry(page, profile.card_expiry, trace);
+    if (splitExpiryOk) iframeFilledFields.expiry = true;
+  }
+  if (!iframeFilledFields.expiry && profile.card_expiry) {
     trace("Expedia payment: card expiry not filled via iframe — trying inline selector");
     // First: precise placeholder-based evaluate fill (Hotels.com inline form)
     const expOk = await nativeFillInline('input[placeholder="MM/YY"]', profile.card_expiry, "expiry date");
@@ -1326,12 +3220,34 @@ export async function fillExpediaGroupPaymentForm(
   // "This booking is almost yours!" modal appears AFTER card fields are filled.
   // Dismiss it now before attempting billing ZIP fill.
   await dismissExpediaAlmostYoursModal(page, trace, 400);
+  } else {
+    trace("Expedia payment: skipping card prefill; billing address is current closure priority");
+  }
+
+  await scrollExpediaCheckoutToSection(
+    page,
+    "billing address",
+    [
+      "Billing address 1",
+      "Billing address",
+      "Country/Territory",
+      "City",
+      "State",
+      "ZIP code",
+      "Postal code",
+      "creditCards",
+      "billing-address-one",
+      "billing-city",
+      "billing-zip-code",
+    ],
+    trace,
+  );
+  const billingFillResult = await fillExpediaBillingAddressFields(page, profile, trace);
 
   // Fill billing ZIP code via page.evaluate + native setter.
   // Uses the same technique as guest form filling (which we know works on Stagehand proxy).
   // locator.evaluate() is not available on Stagehand proxy, so we must use page.evaluate()
   // with document.querySelector to trigger React's state update.
-  const billingZip = profile.billing_zip ?? profile.zip;
   if (billingZip) {
     const zipFilled = await page.evaluate(({ zip, selectors }: { zip: string; selectors: string[] }) => {
       const nativeFill = (el: HTMLInputElement, v: string): boolean => {
@@ -1365,7 +3281,8 @@ export async function fillExpediaGroupPaymentForm(
     }, { zip: billingZip, selectors: EXPEDIA_BILLING_ZIP_SELECTORS }).catch(() => false);
 
     if (zipFilled) {
-      trace(`Expedia payment: filled billing ZIP "${billingZip}" via page.evaluate`);
+      billingFillResult.zip = true;
+      trace(`Expedia payment: filled billing ZIP via page.evaluate (length=${billingZip.length})`);
     } else {
       trace("Expedia payment: billing ZIP page.evaluate failed — trying locator fallback");
       await findAndFillExpediaField(page,
@@ -1376,16 +3293,20 @@ export async function fillExpediaGroupPaymentForm(
     trace("Expedia payment: no billing ZIP in profile — skipping");
   }
 
-  // Verification pass
+  // Verification pass. This drives the user-facing task status: do not claim the
+  // allowed checkout details are complete unless the fields actually hold values.
   const verifyField = async (selectors: string[], fieldName: string): Promise<boolean> => {
+    let foundAny = false;
     for (const sel of selectors) {
-      const val = await page.evaluate((s) => {
-        const el = document.querySelector<HTMLInputElement>(s);
-        return el ? el.value : null;
+      const values = await page.evaluate((s) => {
+        return Array.from(document.querySelectorAll<HTMLInputElement | HTMLSelectElement>(s))
+          .map(el => el.value ?? null);
       }, sel).catch(() => null);
-      if (val !== null) {
-        trace(`Expedia payment verify: ${fieldName} = "${val.length > 0 ? "[filled]" : "[empty]"}"`);
-        return val.length > 0;
+      if (values && values.length > 0) {
+        foundAny = true;
+        const filled = values.some(val => (val ?? "").trim().length > 0);
+        trace(`Expedia payment verify: ${fieldName} via "${sel}" = "${filled ? "[filled]" : "[empty]"}"`);
+        if (filled) return true;
       }
     }
     // Also check iframes (including cross-origin payment processor frames)
@@ -1400,19 +3321,158 @@ export async function fillExpediaGroupPaymentForm(
           return el ? el.value : null;
         }, sel).catch(() => null);
         if (val !== null) {
+          foundAny = true;
           trace(`Expedia payment verify (iframe ${frameUrl.slice(0, 40)}): ${fieldName} = "${val.length > 0 ? "[filled]" : "[empty]"}"`);
-          return val.length > 0;
+          if (val.length > 0) return true;
         }
       }
+    }
+    if (foundAny) {
+      trace(`Expedia payment verify: ${fieldName} field(s) found but empty`);
+      return false;
     }
     trace(`Expedia payment verify: ${fieldName} field not found`);
     return false;
   };
 
-  const nameOk = profile.card_name ? await verifyField(EXPEDIA_GROUP_CARD_NAME_SELECTORS, "cardholder name") : true;
-  const numberOk = profile.card_number ? await verifyField(EXPEDIA_GROUP_CARD_NUMBER_SELECTORS, "card number") : true;
-  const expiryOk = profile.card_expiry ? await verifyField(EXPEDIA_GROUP_CARD_EXPIRY_SELECTORS, "expiry") : true;
-  trace(`Expedia payment verification: name=${nameOk}, cardNumber=${numberOk}, expiry=${expiryOk}`);
+  const verifySplitExpiryField = async (): Promise<boolean> => {
+    const result = await page.evaluate(() => {
+      const isVisible = (el: HTMLElement): boolean => {
+        const rect = el.getBoundingClientRect();
+        const style = window.getComputedStyle(el);
+        return rect.width > 0 && rect.height > 0 && style.display !== "none" && style.visibility !== "hidden";
+      };
+      const fieldText = (el: HTMLSelectElement): string => {
+        const id = el.getAttribute("id") ?? "";
+        const label = id ? document.querySelector<HTMLLabelElement>(`label[for="${CSS.escape(id)}"]`)?.textContent ?? "" : "";
+        return [
+          label,
+          el.getAttribute("aria-label") ?? "",
+          el.getAttribute("autocomplete") ?? "",
+          el.getAttribute("name") ?? "",
+          id,
+          el.closest("label")?.textContent ?? "",
+          el.parentElement?.textContent ?? "",
+        ].join(" ").replace(/\s+/g, " ").trim().toLowerCase();
+      };
+      const visibleSelects = Array.from(document.querySelectorAll<HTMLSelectElement>("select"))
+        .filter(el => isVisible(el) && !el.disabled);
+      const hasSelected = (select: HTMLSelectElement) => select.value.trim().length > 0 && select.selectedIndex > 0;
+      const month = visibleSelects.some(select =>
+        hasSelected(select) &&
+        /(cc-exp-month|expiration month|expiry month|month)/.test(fieldText(select))
+      );
+      const year = visibleSelects.some(select =>
+        hasSelected(select) &&
+        /(cc-exp-year|expiration year|expiry year|year)/.test(fieldText(select))
+      );
+      if (month && year) return { month, year };
+
+      const labels = Array.from(document.querySelectorAll<HTMLElement>("label, div, span, p"))
+        .filter(isVisible)
+        .filter(el => /expiration date|expiry date|expiration|expiry/i.test((el.textContent ?? "").replace(/\s+/g, " ")))
+        .map(el => el.getBoundingClientRect())
+        .sort((a, b) => a.top - b.top);
+      const labelRect = labels[0];
+      if (!labelRect) return { month, year };
+      const nearby = visibleSelects
+        .filter(select => {
+          const rect = select.getBoundingClientRect();
+          return rect.top >= labelRect.top - 8 && rect.top <= labelRect.bottom + 180;
+        })
+        .sort((a, b) => {
+          const ar = a.getBoundingClientRect();
+          const br = b.getBoundingClientRect();
+          return ar.top === br.top ? ar.left - br.left : ar.top - br.top;
+        });
+      return {
+        month: month || Boolean(nearby[0] && hasSelected(nearby[0])),
+        year: year || Boolean(nearby[1] && hasSelected(nearby[1])),
+      };
+    }).catch(() => ({ month: false, year: false }));
+    trace(`Expedia payment verify: split expiry month=${result.month} year=${result.year}`);
+    return result.month && result.year;
+  };
+
+  const verifySecurityCodeEmpty = async (): Promise<boolean> => {
+    const result = await page.evaluate(() => {
+      const fieldText = (el: HTMLInputElement): string => {
+        const id = el.getAttribute("id") ?? "";
+        const label = id ? document.querySelector<HTMLLabelElement>(`label[for="${CSS.escape(id)}"]`)?.textContent ?? "" : "";
+        return [
+          label,
+          el.getAttribute("aria-label") ?? "",
+          el.getAttribute("autocomplete") ?? "",
+          el.getAttribute("placeholder") ?? "",
+          el.getAttribute("name") ?? "",
+          id,
+          el.closest("label")?.textContent ?? "",
+        ].join(" ").replace(/\s+/g, " ").trim().toLowerCase();
+      };
+      const securityInputs = Array.from(document.querySelectorAll<HTMLInputElement>("input"))
+        .filter(input => /\bcvv\b|\bcvc\b|security.?code|card.?security/.test(fieldText(input)));
+      return {
+        count: securityInputs.length,
+        empty: securityInputs.every(input => input.value.trim().length === 0),
+      };
+    }).catch(() => ({ count: 0, empty: true }));
+    trace(`Expedia payment verify: security-code fields=${result.count} empty=${result.empty}`);
+    return result.empty;
+  };
+
+  const nameOk = shouldPrefillCard && profile.card_name
+    ? await verifyField(EXPEDIA_GROUP_CARD_NAME_SELECTORS, "cardholder name")
+    : true;
+  const numberOk = shouldPrefillCard && profile.card_number
+    ? await verifyField(EXPEDIA_GROUP_CARD_NUMBER_SELECTORS, "card number")
+    : true;
+  const expiryOk = shouldPrefillCard && profile.card_expiry
+    ? (await verifyField(EXPEDIA_GROUP_CARD_EXPIRY_SELECTORS, "expiry")) || (await verifySplitExpiryField())
+    : true;
+  const addressOk = profile.address_line1
+    ? billingFillResult.address || await verifyField(EXPEDIA_BILLING_ADDRESS1_SELECTORS, "billing address 1")
+    : true;
+  const cityOk = profile.city
+    ? billingFillResult.city || await verifyField(EXPEDIA_BILLING_CITY_SELECTORS, "billing city")
+    : true;
+  const zipOk = billingZip
+    ? billingFillResult.zip || await verifyField(EXPEDIA_BILLING_ZIP_SELECTORS, "billing ZIP")
+    : true;
+  const countryOk = profile.country ? billingFillResult.country : true;
+  const stateOk = profile.state ? billingFillResult.state : true;
+  const securityCodeEmpty = await verifySecurityCodeEmpty();
+  const missing = [
+    ...(nameOk ? [] : ["cardholder name"]),
+    ...(numberOk ? [] : ["card number"]),
+    ...(expiryOk ? [] : ["expiration date"]),
+    ...(addressOk ? [] : ["billing address 1"]),
+    ...(cityOk ? [] : ["billing city"]),
+    ...(zipOk ? [] : ["billing ZIP"]),
+    ...(countryOk ? [] : ["billing country"]),
+    ...(stateOk ? [] : ["billing state"]),
+    ...(securityCodeEmpty ? [] : ["security code must stay empty"]),
+  ];
+  trace(
+    `Expedia payment verification: cardPrefill=${shouldPrefillCard}, name=${nameOk}, cardNumber=${numberOk}, expiry=${expiryOk}, ` +
+    `address=${addressOk}, city=${cityOk}, zip=${zipOk}, country=${countryOk}, state=${stateOk}, ` +
+    `securityCodeEmpty=${securityCodeEmpty}, missing=${missing.join(",") || "none"}`
+  );
+  return {
+    complete: missing.length === 0,
+    missing,
+    filled: {
+      cardName: shouldPrefillCard && nameOk,
+      cardNumber: shouldPrefillCard && numberOk,
+      cardExpiry: shouldPrefillCard && expiryOk,
+      billingAddress1: addressOk,
+      billingCity: cityOk,
+      billingZip: zipOk,
+      billingCountry: countryOk,
+      billingState: stateOk,
+      securityCodeEmpty,
+      finalButtonVisible: false,
+    },
+  };
 }
 
 // ── Programmatic Expedia flight booking ────────────────────────────────────────
@@ -1426,6 +3486,706 @@ export interface FlightBookingProfile extends ExpediaGuestProfile {
   passport_country?: string;
   known_traveler_number?: string;
   nationality?: string;
+}
+
+type ExpediaBundleDismissAttempt = {
+  found: boolean;
+  source: string;
+  reason: string;
+  text: string;
+};
+
+async function isExpediaFlightBundlePopupVisible(page: Page): Promise<boolean> {
+  const pageLike = page as unknown as {
+    getByText?: (text: string | RegExp, options?: { exact?: boolean }) => unknown;
+    evaluate?: <T>(fn: () => T | Promise<T>) => Promise<T>;
+  };
+
+  const visibleByText = async (text: string | RegExp, exact = false): Promise<boolean> => {
+    try {
+      const locator = pageLike.getByText?.(text, { exact }) as {
+        first?: () => unknown;
+        isVisible?: (options?: { timeout?: number }) => Promise<boolean>;
+      } | undefined;
+      const target = (locator?.first?.() ?? locator) as {
+        isVisible?: (options?: { timeout?: number }) => Promise<boolean>;
+      } | undefined;
+      if (target?.isVisible) return await target.isVisible({ timeout: 600 });
+    } catch {
+      // Fall through to DOM text scan.
+    }
+    return false;
+  };
+
+  if (
+    await visibleByText("Car rental dates", true) ||
+    await visibleByText("Explore packages", true) ||
+    await visibleByText(/bundle\s*&\s*save/i)
+  ) {
+    return true;
+  }
+
+  if (!pageLike.evaluate) return false;
+  return await pageLike.evaluate(() => {
+    const dialogs = Array.from(document.querySelectorAll<HTMLElement>('[role="dialog"], [aria-modal="true"], dialog'))
+      .filter(el => {
+        const r = el.getBoundingClientRect();
+        return r.width > 100 && r.height > 100;
+      });
+    return dialogs.some(el => {
+      const text = (el.textContent ?? "").toLowerCase();
+      return text.includes("car rental dates") ||
+        text.includes("explore packages") ||
+        (text.includes("bundle & save") && text.includes("includes your selected flight"));
+    });
+  }).catch(() => false);
+}
+
+async function dismissExpediaFlightBundlePopupWithLocator(page: Page): Promise<ExpediaBundleDismissAttempt> {
+  const pageLike = page as unknown as {
+    getByText?: (text: string | RegExp, options?: { exact?: boolean }) => unknown;
+    locator?: (selector: string) => unknown;
+    keyboard?: { press?: (key: string) => Promise<unknown> };
+  };
+
+  const clickLocator = async (rawLocator: unknown, source: string): Promise<ExpediaBundleDismissAttempt | null> => {
+    if (!rawLocator) return null;
+    const locator = rawLocator as {
+      first?: () => unknown;
+      last?: () => unknown;
+      click?: (options?: { timeout?: number; force?: boolean }) => Promise<unknown>;
+      textContent?: (options?: { timeout?: number }) => Promise<string | null>;
+    };
+    const target = (locator.last?.() ?? locator.first?.() ?? locator) as {
+      click?: (options?: { timeout?: number; force?: boolean }) => Promise<unknown>;
+      textContent?: (options?: { timeout?: number }) => Promise<string | null>;
+    };
+    if (!target.click) return null;
+    const text = await target.textContent?.({ timeout: 500 }).catch(() => "") ?? "";
+    try {
+      await target.click({ timeout: 2500 });
+      return { found: true, source, reason: "locator-clicked", text: text.trim().slice(0, 40) };
+    } catch {
+      try {
+        await target.click({ timeout: 2500, force: true });
+        return { found: true, source, reason: "locator-force-clicked", text: text.trim().slice(0, 40) };
+      } catch {
+        return null;
+      }
+    }
+  };
+
+  const textClicked = await clickLocator(
+    pageLike.getByText?.(/^\s*No,?\s+thanks\s*$/i, { exact: true }),
+    "getByText:no-thanks",
+  );
+  if (textClicked) return textClicked;
+
+  const controls = pageLike.locator?.('button, a, [role="button"]') as {
+    filter?: (options: { hasText: RegExp }) => unknown;
+  } | undefined;
+  const filteredClicked = await clickLocator(
+    controls?.filter?.({ hasText: /^\s*No,?\s+thanks\s*$/i }),
+    "locator-filter:no-thanks",
+  );
+  if (filteredClicked) return filteredClicked;
+
+  const closeClicked = await clickLocator(
+    pageLike.locator?.('#forced-choice-modal-dismiss-btn, button[aria-label*="close" i], button[title*="close" i], button[data-testid*="close" i]'),
+    "locator:close",
+  );
+  if (closeClicked) return closeClicked;
+
+  try {
+    await pageLike.keyboard?.press?.("Escape");
+    return { found: true, source: "keyboard", reason: "escape-pressed", text: "" };
+  } catch {
+    return { found: false, source: "none", reason: "no-locator-dismiss-control", text: "" };
+  }
+}
+
+type ExpediaReviewCheckoutActionResult = {
+  clicked: boolean;
+  source: string;
+  text: string;
+  visibleButtons: string[];
+  error?: string;
+};
+
+async function clickExpediaFlightReviewCheckoutAction(page: Page): Promise<ExpediaReviewCheckoutActionResult> {
+  const domResult: ExpediaReviewCheckoutActionResult = await page.evaluate(() => {
+    const allButtons = Array.from(document.querySelectorAll<HTMLElement>('button, a, [role="button"]'));
+    const visible = allButtons
+      .filter(el => {
+        const r = el.getBoundingClientRect();
+        return r.width > 0 && r.height > 0;
+      });
+    const visibleButtons = visible
+      .map(el => {
+        const r = el.getBoundingClientRect();
+        return `"${(el.textContent ?? "").trim().slice(0, 40)}"@(${Math.round(r.x)},${Math.round(r.y)})`;
+      })
+      .filter(text => !text.startsWith('""'))
+      .slice(0, 60);
+    const target = visible.find(el => {
+      const text = (el.textContent ?? "").replace(/\s+/g, " ").trim().toLowerCase();
+      const aria = (el.getAttribute("aria-label") ?? "").replace(/\s+/g, " ").trim().toLowerCase();
+      return text === "next: checkout" ||
+        text.includes("next: checkout") ||
+        text.includes("skip to checkout") ||
+        aria.includes("next: checkout") ||
+        aria.includes("skip to checkout");
+    });
+    if (!target) {
+      return { clicked: false, source: "dom", text: "", visibleButtons };
+    }
+    target.scrollIntoView({ block: "center", behavior: "auto" as ScrollBehavior });
+    const label = ((target.textContent ?? "").trim() || target.getAttribute("aria-label") || "").slice(0, 60);
+    target.click();
+    return { clicked: true, source: "dom", text: label, visibleButtons };
+  }).catch((err: Error) => ({
+    clicked: false,
+    source: "dom-error",
+    text: "",
+    visibleButtons: [] as string[],
+    error: err.message?.slice(0, 100),
+  }));
+
+  if (domResult.clicked) return domResult;
+
+  const pageLike = page as unknown as {
+    getByRole?: (role: "button" | "link", options: { name: RegExp }) => unknown;
+    getByText?: (text: string | RegExp, options?: { exact?: boolean }) => unknown;
+    locator?: (selector: string) => unknown;
+  };
+
+  const clickLocator = async (rawLocator: unknown, source: string): Promise<ExpediaReviewCheckoutActionResult | null> => {
+    if (!rawLocator) return null;
+    const locator = rawLocator as {
+      first?: () => unknown;
+      click?: (options?: { timeout?: number; force?: boolean }) => Promise<unknown>;
+      textContent?: (options?: { timeout?: number }) => Promise<string | null>;
+    };
+    const target = (locator.first?.() ?? locator) as {
+      click?: (options?: { timeout?: number; force?: boolean }) => Promise<unknown>;
+      textContent?: (options?: { timeout?: number }) => Promise<string | null>;
+    };
+    if (!target.click) return null;
+    const text = await target.textContent?.({ timeout: 500 }).catch(() => "") ?? "";
+    try {
+      await target.click({ timeout: 3000 });
+      return { clicked: true, source, text: text.trim().slice(0, 60), visibleButtons: domResult.visibleButtons, error: domResult.error };
+    } catch {
+      try {
+        await target.click({ timeout: 3000, force: true });
+        return { clicked: true, source: `${source}:force`, text: text.trim().slice(0, 60), visibleButtons: domResult.visibleButtons, error: domResult.error };
+      } catch {
+        return null;
+      }
+    }
+  };
+
+  const roleButton = await clickLocator(pageLike.getByRole?.("button", { name: /(?:next:\s*checkout|skip\s+to\s+checkout)/i }), "role:button");
+  if (roleButton) return roleButton;
+  const roleLink = await clickLocator(pageLike.getByRole?.("link", { name: /(?:next:\s*checkout|skip\s+to\s+checkout)/i }), "role:link");
+  if (roleLink) return roleLink;
+  const textLocator = await clickLocator(pageLike.getByText?.(/(?:next:\s*checkout|skip\s+to\s+checkout)/i), "text");
+  if (textLocator) return textLocator;
+
+  return domResult;
+}
+
+async function dismissExpediaFlightSoftOverlays(
+  page: Page,
+  trace: (msg: string) => void,
+  waitMs = 0,
+): Promise<void> {
+  if (waitMs > 0) await new Promise(r => setTimeout(r, waitMs));
+
+  const result = await page.evaluate(() => {
+    const normalize = (value: string | null | undefined): string =>
+      (value ?? "").toLowerCase().replace(/\s+/g, " ").trim();
+    const isVisible = (el: HTMLElement): boolean => {
+      const r = el.getBoundingClientRect();
+      return r.width > 0 && r.height > 0;
+    };
+    const hardBoundary = (text: string): boolean =>
+      /\b(sign in to continue|log in to continue|login to continue|sign in or create an account to continue|authentication required|verification code|one-time passcode|one time passcode|captcha|robot check|unusual traffic|otp)\b/i.test(text);
+    const softOverlay = (text: string): boolean =>
+      text.includes("member prices") ||
+      text.includes("one key") ||
+      text.includes("onekeycash") ||
+      text.includes("unlock instant savings") ||
+      text.includes("sign in and book a flight") ||
+      (/\bsign[-_\s]?in\b/.test(text) &&
+        (text.includes("member") || text.includes("savings") || text.includes("one key") || text.includes("onekeycash") || text.includes("learn more")));
+    const containers = Array.from(document.querySelectorAll<HTMLElement>(
+      '[role="dialog"], [aria-modal="true"], dialog, [class*="popover"], [class*="overlay"], [class*="uitk-menu"], [data-stid*="popover"], [data-testid*="popover"]'
+    )).filter(isVisible);
+    for (const container of containers) {
+      const text = normalize(container.textContent);
+      if (!text || !softOverlay(text)) continue;
+      if (hardBoundary(text)) {
+        return { status: "hard_boundary", text: text.slice(0, 120), button: "" };
+      }
+      const controls = Array.from(container.querySelectorAll<HTMLElement>('button, a, [role="button"]'))
+        .filter(isVisible);
+      const dismiss = controls.find(control => {
+        const label = normalize(
+          `${control.textContent ?? ""} ${control.getAttribute("aria-label") ?? ""} ${control.getAttribute("title") ?? ""} ${control.getAttribute("id") ?? ""}`
+        );
+        if (!label) return false;
+        if (/\bsign[-_\s]?in\b/.test(label)) return false;
+        return (
+          label === "x" ||
+          label.includes("close") ||
+          label.includes("dismiss") ||
+          label.includes("no thanks") ||
+          label.includes("not now") ||
+          label.includes("skip")
+        );
+      });
+      if (dismiss) {
+        dismiss.click();
+        const label = normalize(dismiss.textContent || dismiss.getAttribute("aria-label") || dismiss.getAttribute("title") || dismiss.getAttribute("id"));
+        return { status: "dismissed", text: text.slice(0, 120), button: label.slice(0, 60) };
+      }
+      return { status: "soft_overlay_no_button", text: text.slice(0, 120), button: "" };
+    }
+    return { status: "none", text: "", button: "" };
+  }).catch((error: Error) => ({
+    status: "error",
+    text: error.message?.slice(0, 120) ?? "unknown overlay scan error",
+    button: "",
+  }));
+
+  if (result.status === "dismissed") {
+    trace(`[flight-rpa] Dismissed soft Expedia flight overlay before card scan: button="${result.button}" text="${result.text}"`);
+    await new Promise(r => setTimeout(r, 600));
+    return;
+  }
+  if (result.status === "soft_overlay_no_button") {
+    trace(`[flight-rpa] Soft Expedia flight overlay had no safe dismiss button; pressing Escape. text="${result.text}"`);
+    await page.keyboard.press("Escape").catch(() => undefined);
+    await new Promise(r => setTimeout(r, 600));
+    return;
+  }
+  if (result.status === "hard_boundary") {
+    trace(`[flight-rpa] Expedia overlay looks like a hard safety boundary; leaving it for boundary detection. text="${result.text}"`);
+  } else if (result.status === "error") {
+    trace(`[flight-rpa] Expedia soft overlay scan failed: ${result.text}`);
+  }
+}
+
+async function findExpediaFlightButtonWithLocatorFallback(
+  page: Page,
+  target: ExpediaFlightTarget,
+  trace: (msg: string) => void,
+): Promise<ExpediaFlightButtonMatch> {
+  const { selection, locator } = await collectExpediaFlightLocatorCandidates(page, target);
+  const best = selection.best;
+  if (!best) {
+    return {
+      found: false,
+      label: "",
+      candidates: selection.candidateCount,
+      x: 0,
+      y: 0,
+      inViewportBefore: false,
+      samples: selection.samples,
+      candidateSummaries: selection.candidateSummaries,
+    };
+  }
+
+  const targetButton = locator.nth(best.index);
+  const beforeBox = await readExpediaFlightLocatorBoundingBox(targetButton);
+  await scrollExpediaFlightLocatorIntoView(targetButton);
+  await new Promise(r => setTimeout(r, 200));
+  const afterBox = await readExpediaFlightLocatorBoundingBox(targetButton);
+  if (!afterBox) {
+    trace("[flight-rpa] Locator fallback found a text match but could not read its bounding box; will click by locator");
+    return {
+      found: true,
+      label: best.label,
+      candidates: selection.candidateCount,
+      x: 0,
+      y: 0,
+      inViewportBefore: false,
+      clickMode: "locator",
+      matchMode: selection.matchMode,
+      matchReason: `${selection.matchReason ?? "locator fallback match"}; bounding box unavailable`,
+      samples: selection.samples,
+      candidateSummaries: selection.candidateSummaries,
+    };
+  }
+
+  return {
+    found: true,
+    label: best.label,
+    candidates: selection.candidateCount,
+    x: afterBox.x + afterBox.width / 2,
+    y: afterBox.y + afterBox.height / 2,
+    inViewportBefore: !!beforeBox && beforeBox.y >= 0 && beforeBox.y + beforeBox.height <= 900,
+    clickMode: "coordinate",
+    matchMode: selection.matchMode,
+    matchReason: selection.matchReason,
+    samples: selection.samples,
+    candidateSummaries: selection.candidateSummaries,
+  };
+}
+
+async function clickExpediaFlightButtonWithLocatorFallback(
+  page: Page,
+  target: ExpediaFlightTarget,
+): Promise<{
+  clicked: boolean;
+  label: string;
+  candidates: number;
+  matchMode?: string;
+  matchReason?: string;
+  samples: string[];
+  candidateSummaries: string[];
+  error?: string;
+}> {
+  const { selection, locator } = await collectExpediaFlightLocatorCandidates(page, target);
+  const best = selection.best;
+  if (!best) {
+    return {
+      clicked: false,
+      label: "",
+      candidates: selection.candidateCount,
+      samples: selection.samples,
+      candidateSummaries: selection.candidateSummaries,
+    };
+  }
+
+  try {
+    const targetButton = locator.nth(best.index);
+    await scrollExpediaFlightLocatorIntoView(targetButton);
+    await new Promise(r => setTimeout(r, 200));
+    await targetButton.click({ delay: 120, timeout: 5000 });
+    return {
+      clicked: true,
+      label: best.label,
+      candidates: selection.candidateCount,
+      matchMode: selection.matchMode,
+      matchReason: selection.matchReason,
+      samples: selection.samples,
+      candidateSummaries: selection.candidateSummaries,
+    };
+  } catch (error) {
+    return {
+      clicked: false,
+      label: best.label,
+      candidates: selection.candidateCount,
+      matchMode: selection.matchMode,
+      matchReason: selection.matchReason,
+      samples: selection.samples,
+      candidateSummaries: selection.candidateSummaries,
+      error: (error as Error).message?.slice(0, 120) ?? "unknown locator click error",
+    };
+  }
+}
+
+async function collectExpediaFlightLocatorCandidates(
+  page: Page,
+  target: ExpediaFlightTarget,
+): Promise<{
+  locator: ReturnType<Page["locator"]>;
+  selection: ExpediaFlightCandidateSelection;
+}> {
+  const locator = page.locator('button, [role="button"]');
+  const count = await locator.count().catch(() => 0);
+  const candidates: ExpediaFlightLocatorCandidate[] = [];
+  const samples: string[] = [];
+
+  for (let index = 0; index < Math.min(count, 250); index++) {
+    const item = locator.nth(index);
+    const visible = await item.isVisible().catch(() => false);
+    if (!visible) continue;
+    const label = await readExpediaFlightLocatorCandidateLabel(item);
+    if (!label.toLowerCase().includes("select")) continue;
+    if (samples.length < 6) samples.push(label.slice(0, 140));
+    const score = scoreExpediaFlightCandidateText(label, target);
+    if (score.hasAirline || score.exactMatch || score.fallbackEligible) {
+      const clippedLabel = label.slice(0, 140);
+      candidates.push({
+        index,
+        label: clippedLabel,
+        score,
+        summary: formatExpediaFlightCandidateEvidence(clippedLabel, target),
+      });
+    }
+  }
+
+  return { locator, selection: selectExpediaFlightCandidate(candidates, samples, target, "locator fallback") };
+}
+
+function selectExpediaFlightCandidate(
+  candidates: ExpediaFlightLocatorCandidate[],
+  samples: string[],
+  target: ExpediaFlightTarget,
+  prefix: string,
+): ExpediaFlightCandidateSelection {
+  const airlineCandidates = candidates.filter(candidate => candidate.score.hasAirline);
+  const strictCandidates = airlineCandidates
+    .filter(candidate => candidate.score.exactMatch)
+    .sort((a, b) => sortExpediaFlightCandidatesByFit(target, a.score, b.score, "strict"));
+  const sameAirlineFallbackCandidates = airlineCandidates
+    .filter(candidate => !candidate.score.exactMatch && candidate.score.fallbackEligible)
+    .sort((a, b) => sortExpediaFlightCandidatesByFit(target, a.score, b.score, "fallback"));
+  const crossAirlineFallbackCandidates = candidates
+    .filter(candidate =>
+      !candidate.score.hasAirline &&
+      !candidate.score.exactMatch &&
+      candidate.score.fallbackEligible
+    )
+    .sort((a, b) => sortExpediaFlightCandidatesByFit(target, a.score, b.score, "fallback"));
+
+  const orderedCandidates = [
+    ...strictCandidates,
+    ...sameAirlineFallbackCandidates,
+    ...crossAirlineFallbackCandidates,
+  ];
+  const best = orderedCandidates[0] ?? null;
+  if (!best) {
+    return {
+      best: null,
+      candidateCount: candidates.length,
+      samples,
+      candidateSummaries: candidates.length > 0
+        ? candidates.slice(0, 4).map(candidate => candidate.summary)
+        : samples.slice(0, 4).map(sample => formatExpediaFlightCandidateEvidence(sample, target)),
+    };
+  }
+
+  return {
+    best,
+    candidateCount: candidates.length,
+    matchMode: strictCandidates[0]
+      ? prefix.replace(/\s+/g, "_")
+      : sameAirlineFallbackCandidates[0]
+        ? "fallback"
+        : "cross_airline_fallback",
+    matchReason: strictCandidates[0]
+      ? `${prefix} exact target fit`
+      : sameAirlineFallbackCandidates[0]
+        ? `${prefix} same airline timeDelta=${best.score.timeDelta ?? "?"} priceDelta=${best.score.priceDelta ?? "?"}`
+        : `${prefix} cross-airline timeDelta=${best.score.timeDelta ?? "?"} priceDelta=${best.score.priceDelta ?? "?"}`,
+    samples: orderedCandidates.slice(0, 4).map(candidate => candidate.label),
+    candidateSummaries: orderedCandidates.slice(0, 4).map(candidate => candidate.summary),
+  };
+}
+
+async function clickExpediaFlightButtonWithDomRescan(
+  page: Page,
+  target: ExpediaFlightTarget,
+): Promise<{
+  clicked: boolean;
+  label: string;
+  candidates: number;
+  matchMode?: string;
+  matchReason?: string;
+  samples: string[];
+  candidateSummaries: string[];
+  error?: string;
+}> {
+  const result = await page.evaluate(({ airline, price, time, flightNumber }: ExpediaFlightTarget) => {
+    const parseTimeToMinutes = (t: string | null | undefined): number | null => {
+      if (!t) return null;
+      const raw = t.trim().toLowerCase();
+      const match = raw.match(/(\d{1,2}):(\d{2})\s*(am|pm)?/i);
+      if (!match) return null;
+      let hour = parseInt(match[1], 10);
+      const minute = parseInt(match[2], 10);
+      const suffix = match[3]?.toLowerCase() ?? null;
+      if (suffix === "pm" && hour < 12) hour += 12;
+      if (suffix === "am" && hour === 12) hour = 0;
+      if (!suffix && hour === 24) hour = 0;
+      return hour * 60 + minute;
+    };
+    const normalizeLoose = (s: string | null | undefined): string =>
+      (s ?? "").toLowerCase().replace(/\s+/g, " ").trim();
+    const normalizeTight = (s: string | null | undefined): string =>
+      (s ?? "").toLowerCase().replace(/[^a-z0-9]/g, "");
+    const extractPrices = (text: string): number[] =>
+      Array.from(text.matchAll(/\$([\d,]+)/g))
+        .map(match => Number.parseInt((match[1] ?? "").replace(/,/g, ""), 10))
+        .filter(value => Number.isFinite(value));
+    const timeMinutes = parseTimeToMinutes(time);
+    const airlineLoose = normalizeLoose(airline);
+    const airlineWord = airlineLoose.split(" ")[0] ?? "";
+    const flightNumberTight = normalizeTight(flightNumber);
+    const flightDigits = (flightNumber ?? "").replace(/\D/g, "");
+    const priceToken = typeof price === "number" ? `$${price}` : "";
+
+    const selectableCandidates = Array.from(document.querySelectorAll<HTMLElement>('button, [role="button"]'))
+      .map(btn => {
+        const label = normalizeLoose((btn.getAttribute("aria-label") ?? "") + " " + (btn.textContent ?? ""));
+        if (!label.includes("select")) return null;
+        const container = btn.closest('li, article, section, [data-test-id], [data-stid], [class*="uitk-card"], [class*="offer-card"], [class*="result"]');
+        const context = normalizeLoose(container?.textContent ?? btn.parentElement?.textContent ?? "");
+        const combined = `${label} ${context}`.trim();
+        const combinedTight = normalizeTight(combined);
+        const rect = btn.getBoundingClientRect();
+        if (rect.width === 0 || rect.height === 0) return null;
+        const hasAirline = !airlineWord || combined.includes(airlineWord) || combined.includes(airlineLoose);
+        const visiblePrices = extractPrices(combined);
+        const priceDelta =
+          typeof price === "number" && visiblePrices.length > 0
+            ? Math.min(...visiblePrices.map(value => Math.abs(value - price)))
+            : null;
+        const hasPrice = !priceToken || combined.includes(priceToken) || priceDelta === 0;
+        const hasFlightNumber =
+          !flightNumberTight ||
+          combinedTight.includes(flightNumberTight) ||
+          (flightDigits.length >= 3 && combinedTight.includes(flightDigits));
+        const departureMatch =
+          combined.match(/departing at (\d{1,2}:\d{2}\s*(?:am|pm)?)/i) ??
+          combined.match(/\b(\d{1,2}:\d{2}\s*(?:am|pm)?)\b/i);
+        const departureMinutes = parseTimeToMinutes(departureMatch?.[1] ?? null);
+        const timeDelta =
+          timeMinutes !== null && departureMinutes !== null
+            ? Math.abs(departureMinutes - timeMinutes)
+            : null;
+        const timeScore =
+          timeMinutes !== null
+            ? departureMinutes === timeMinutes
+              ? 4
+              : departureMinutes !== null && Math.abs(departureMinutes - timeMinutes) <= 5
+                ? 2
+                : 0
+            : 1;
+        const score =
+          (hasFlightNumber ? 5 : 0) +
+          timeScore * 2 +
+          (hasPrice ? 1 : 0);
+        const hasExactTargetTime = timeMinutes !== null && departureMinutes === timeMinutes;
+        const hasNearTargetTime = timeDelta !== null && timeDelta <= 120;
+        const hasStrongTargetIdentity = hasFlightNumber || hasExactTargetTime;
+        const exactMatch =
+          (!flightNumberTight || hasFlightNumber) &&
+          (timeMinutes === null || timeScore > 0) &&
+          (hasStrongTargetIdentity || !priceToken || hasPrice);
+        const hasPriceFallbackWithoutTargetTime =
+          timeMinutes === null && (hasPrice || (priceDelta !== null && priceDelta <= 60));
+        const fallbackEligible =
+          hasFlightNumber ||
+          hasNearTargetTime ||
+          hasPriceFallbackWithoutTargetTime;
+        const fallbackScore =
+          (hasFlightNumber ? 120 : 0) +
+          (hasExactTargetTime ? 100 : 0) +
+          (timeDelta !== null ? Math.max(0, 60 - Math.floor(timeDelta / 2)) : 0) +
+          (priceDelta !== null ? Math.max(0, 10 - Math.floor(priceDelta / 20)) : 0);
+        return {
+          btn,
+          label: combined.slice(0, 140),
+          hasAirline,
+          exactMatch,
+          fallbackEligible,
+          hasFlightNumber,
+          hasPrice,
+          score,
+          fallbackScore,
+          departureMinutes: departureMinutes ?? -1,
+          timeDelta,
+          priceDelta,
+        };
+      })
+      .filter(Boolean) as Array<{
+        btn: HTMLElement;
+        label: string;
+        hasAirline: boolean;
+        exactMatch: boolean;
+        fallbackEligible: boolean;
+        hasFlightNumber: boolean;
+        hasPrice: boolean;
+        score: number;
+        fallbackScore: number;
+        departureMinutes: number;
+        timeDelta: number | null;
+        priceDelta: number | null;
+      }>;
+
+    const sortByTargetFit = (
+      a: { score: number; fallbackScore: number; departureMinutes: number; priceDelta: number | null },
+      b: { score: number; fallbackScore: number; departureMinutes: number; priceDelta: number | null },
+      mode: "strict" | "fallback",
+    ) => {
+      if (mode === "strict" && b.score !== a.score) return b.score - a.score;
+      if (mode === "fallback" && b.fallbackScore !== a.fallbackScore) return b.fallbackScore - a.fallbackScore;
+      if (timeMinutes !== null) {
+        const aDelta = a.departureMinutes >= 0 ? Math.abs(a.departureMinutes - timeMinutes) : Number.POSITIVE_INFINITY;
+        const bDelta = b.departureMinutes >= 0 ? Math.abs(b.departureMinutes - timeMinutes) : Number.POSITIVE_INFINITY;
+        if (aDelta !== bDelta) return aDelta - bDelta;
+      }
+      const aPriceDelta = a.priceDelta ?? Number.POSITIVE_INFINITY;
+      const bPriceDelta = b.priceDelta ?? Number.POSITIVE_INFINITY;
+      if (aPriceDelta !== bPriceDelta) return aPriceDelta - bPriceDelta;
+      return 0;
+    };
+
+    const airlineCandidates = selectableCandidates.filter(candidate => candidate.hasAirline);
+    const strictCandidates = airlineCandidates
+      .filter(candidate => candidate.exactMatch)
+      .sort((a, b) => sortByTargetFit(a, b, "strict"));
+    const sameAirlineFallbackCandidates = airlineCandidates
+      .filter(candidate => !candidate.exactMatch && candidate.fallbackEligible)
+      .sort((a, b) => sortByTargetFit(a, b, "fallback"));
+    const crossAirlineFallbackCandidates = selectableCandidates
+      .filter(candidate =>
+        !candidate.hasAirline &&
+        !candidate.exactMatch &&
+        candidate.fallbackEligible
+      )
+      .sort((a, b) => sortByTargetFit(a, b, "fallback"));
+
+    const best = strictCandidates[0] ?? sameAirlineFallbackCandidates[0] ?? crossAirlineFallbackCandidates[0];
+    const samples = [...strictCandidates, ...sameAirlineFallbackCandidates, ...crossAirlineFallbackCandidates]
+      .slice(0, 4)
+      .map(candidate => candidate.label);
+    if (!best) {
+      return {
+        clicked: false,
+        label: "",
+        candidates: 0,
+        samples: selectableCandidates.slice(0, 6).map(candidate => candidate.label),
+      };
+    }
+
+    best.btn.scrollIntoView({ block: "center", behavior: "auto" as ScrollBehavior });
+    best.btn.click();
+    return {
+      clicked: true,
+      label: best.label,
+      candidates: strictCandidates.length + sameAirlineFallbackCandidates.length + crossAirlineFallbackCandidates.length,
+      matchMode: strictCandidates[0]
+        ? "dom_rescan"
+        : sameAirlineFallbackCandidates[0]
+          ? "dom_rescan_fallback"
+          : "dom_rescan_cross_airline_fallback",
+      matchReason: strictCandidates[0]
+        ? "DOM rescan exact target fit"
+        : sameAirlineFallbackCandidates[0]
+          ? `DOM rescan same airline timeDelta=${best.timeDelta ?? "?"} priceDelta=${best.priceDelta ?? "?"}`
+          : `DOM rescan cross-airline timeDelta=${best.timeDelta ?? "?"} priceDelta=${best.priceDelta ?? "?"}`,
+      samples,
+    };
+  }, target).catch((error: Error) => ({
+    clicked: false,
+    label: "",
+    candidates: 0,
+    samples: [] as string[],
+    error: error.message?.slice(0, 120) ?? "unknown DOM rescan click error",
+  }));
+
+  return {
+    ...result,
+    candidateSummaries: (result.samples ?? []).map(sample =>
+      formatExpediaFlightCandidateEvidence(sample, target)
+    ),
+  };
 }
 
 export async function bookExpediaFlightProgrammatic(
@@ -1460,6 +4220,11 @@ export async function bookExpediaFlightProgrammatic(
     } catch (err) {
       trace(`[flight-rpa] screenshot(${label}) failed: ${(err as Error).message?.slice(0, 80)}`);
     }
+  };
+
+  const detectSafetyBoundary = async (targetPage: Page = activePage): Promise<string | null> => {
+    const bodyText = await targetPage.evaluate(() => document.body.textContent ?? "").catch(() => "");
+    return classifyExpediaFlightSafetyBoundaryText(bodyText);
   };
 
   // ── Step 1: Wait for flight results ───────────────────────────────────────
@@ -1507,7 +4272,7 @@ export async function bookExpediaFlightProgrammatic(
           return text === "one-way" && r.width > 0 && r.height > 0;
         });
       if (!target) return false;
-      target.scrollIntoView({ block: "center", behavior: "instant" as ScrollBehavior });
+      target.scrollIntoView({ block: "center", behavior: "auto" as ScrollBehavior });
       target.click();
       return true;
     }).catch(() => false);
@@ -1558,6 +4323,7 @@ export async function bookExpediaFlightProgrammatic(
   };
 
   await enforceOneWayTripUi();
+  await dismissExpediaFlightSoftOverlays(page, trace, 300);
   trace("[flight-rpa] Waiting for flight results to load...");
   for (let i = 0; i < 20; i++) {
     await new Promise(r => setTimeout(r, 1000));
@@ -1571,6 +4337,17 @@ export async function bookExpediaFlightProgrammatic(
     if (hasResults) break;
   }
   await new Promise(r => setTimeout(r, 800));
+  await dismissExpediaFlightSoftOverlays(page, trace, 100);
+  const preScanBoundary = await detectSafetyBoundary(page);
+  if (preScanBoundary) {
+    trace(`[flight-rpa] Login/OTP/CAPTCHA boundary detected before flight-card scan: ${preScanBoundary}`);
+    await safeScreenshot("01b-safety-boundary-before-card-scan");
+    return {
+      reached_checkout: false,
+      currentUrl: getUrl(),
+      error: `Expedia flight ${preScanBoundary} reached. Stop for manual intervention; do not bypass login, OTP, or CAPTCHA.`,
+    };
+  }
 
   // ── Roundtrip detection + leg loop setup ────────────────────────────────
   // Expedia URL pattern:
@@ -1626,7 +4403,14 @@ export async function bookExpediaFlightProgrammatic(
   trace(`[flight-rpa] Searching for flight: airline="${legTargetAirline}" price=$${legTargetPrice} time="${legTargetDepartureTime}" flightNo="${legTargetFlightNumber}"`);
   await safeScreenshot("01-search-results");
 
-  const found = await page.evaluate(({ airline, price, time, flightNumber }: { airline?: string; price?: number; time?: string; flightNumber?: string }) => {
+  const legFlightTarget: ExpediaFlightTarget = {
+    airline: legTargetAirline,
+    price: legTargetPrice,
+    time: legTargetDepartureTime,
+    flightNumber: legTargetFlightNumber,
+  };
+
+  let found: ExpediaFlightButtonMatch = await page.evaluate(({ airline, price, time, flightNumber }: { airline?: string; price?: number; time?: string; flightNumber?: string }) => {
     const parseTimeToMinutes = (t: string | null | undefined): number | null => {
       if (!t) return null;
       const raw = t.trim().toLowerCase();
@@ -1693,22 +4477,26 @@ export async function bookExpediaFlightProgrammatic(
             : 1;
         const score =
           (hasFlightNumber ? 5 : 0) +
-          (hasPrice ? 3 : 0) +
-          timeScore;
+          timeScore * 2 +
+          (hasPrice ? 1 : 0);
+        const hasExactTargetTime = timeMinutes !== null && departureMinutes === timeMinutes;
+        const hasNearTargetTime = timeDelta !== null && timeDelta <= 120;
+        const hasStrongTargetIdentity = hasFlightNumber || hasExactTargetTime;
         const exactMatch =
           (!flightNumberTight || hasFlightNumber) &&
-          (!priceToken || hasPrice) &&
-          (timeMinutes === null || timeScore > 0);
+          (timeMinutes === null || timeScore > 0) &&
+          (hasStrongTargetIdentity || !priceToken || hasPrice);
+        const hasPriceFallbackWithoutTargetTime =
+          timeMinutes === null && (hasPrice || (priceDelta !== null && priceDelta <= 60));
         const fallbackEligible =
           hasFlightNumber ||
-          hasPrice ||
-          (timeDelta !== null && timeDelta <= 120) ||
-          (priceDelta !== null && priceDelta <= 60);
+          hasNearTargetTime ||
+          hasPriceFallbackWithoutTargetTime;
         const fallbackScore =
-          (hasFlightNumber ? 90 : 0) +
-          (hasPrice ? 40 : 0) +
-          (timeDelta !== null ? Math.max(0, 30 - Math.floor(timeDelta / 5)) : 0) +
-          (priceDelta !== null ? Math.max(0, 20 - Math.floor(priceDelta / 5)) : 0);
+          (hasFlightNumber ? 120 : 0) +
+          (hasExactTargetTime ? 100 : 0) +
+          (timeDelta !== null ? Math.max(0, 60 - Math.floor(timeDelta / 2)) : 0) +
+          (priceDelta !== null ? Math.max(0, 10 - Math.floor(priceDelta / 20)) : 0);
         const r = btn.getBoundingClientRect();
         if (r.width === 0 || r.height === 0) return null;
         return {
@@ -1772,12 +4560,7 @@ export async function bookExpediaFlightProgrammatic(
       .filter(candidate =>
         !candidate.hasAirline &&
         !candidate.exactMatch &&
-        (
-          candidate.hasFlightNumber ||
-          candidate.hasPrice ||
-          (candidate.timeDelta !== null && candidate.timeDelta <= 180) ||
-          (candidate.priceDelta !== null && candidate.priceDelta <= 100)
-        )
+        candidate.fallbackEligible
       )
       .sort((a, b) => sortByTargetFit(a, b, "fallback"));
     const best = strictCandidates[0] ?? sameAirlineFallbackCandidates[0] ?? crossAirlineFallbackCandidates[0];
@@ -1791,7 +4574,7 @@ export async function bookExpediaFlightProgrammatic(
 
     const rectBefore = best.btn.getBoundingClientRect();
     const inViewportBefore = rectBefore.top >= 0 && rectBefore.bottom <= window.innerHeight;
-    best.btn.scrollIntoView({ block: "center", behavior: "instant" as ScrollBehavior });
+    best.btn.scrollIntoView({ block: "center", behavior: "auto" as ScrollBehavior });
     // Return viewport-relative center (after scroll). Need to re-read rect after scroll.
     const rectAfter = best.btn.getBoundingClientRect();
     return {
@@ -1813,7 +4596,44 @@ export async function bookExpediaFlightProgrammatic(
           : `cross-airline fallback timeDelta=${best.timeDelta ?? "?"} priceDelta=${best.priceDelta ?? "?"}`,
       samples: [...strictCandidates, ...sameAirlineFallbackCandidates, ...crossAirlineFallbackCandidates].slice(0, 4).map(c => c.label),
     };
-  }, { airline: legTargetAirline, price: legTargetPrice, time: legTargetDepartureTime, flightNumber: legTargetFlightNumber });
+  }, legFlightTarget)
+    .catch((err: Error) => ({
+      found: false,
+      label: "",
+      candidates: 0,
+      x: 0,
+      y: 0,
+      inViewportBefore: false,
+      samples: [] as string[],
+      matchMode: undefined,
+      matchReason: undefined,
+      evalError: err.message?.slice(0, 160) ?? "unknown evaluate error",
+    }));
+
+  if ("evalError" in found && found.evalError) {
+    trace(`[flight-rpa] Flight-card DOM scan failed: ${found.evalError}`);
+    trace("[flight-rpa] Trying locator fallback for flight-card scan");
+    const fallback = await findExpediaFlightButtonWithLocatorFallback(page, legFlightTarget, trace);
+    if (fallback.found) {
+      trace(`[flight-rpa] Locator fallback matched flight card: "${fallback.label}"`);
+      found = fallback;
+    } else if (fallback.samples.length > 0) {
+      found = {
+        ...found,
+        samples: fallback.samples,
+        candidateSummaries: fallback.candidateSummaries,
+      };
+    }
+  }
+
+  const candidateSummaries = (
+    found.candidateSummaries?.length
+      ? found.candidateSummaries
+      : (found.samples ?? []).map(sample => formatExpediaFlightCandidateEvidence(sample, legFlightTarget))
+  ).slice(0, 4);
+  if (candidateSummaries.length > 0) {
+    trace(`[flight-rpa] Flight candidate evidence dump: ${candidateSummaries.map(summary => summary.slice(0, 220)).join(" || ")}`);
+  }
 
   if (!found.found) {
     if (Array.isArray((found as { samples?: string[] }).samples) && (found as { samples?: string[] }).samples!.length > 0) {
@@ -1822,30 +4642,79 @@ export async function bookExpediaFlightProgrammatic(
     trace(`[flight-rpa] No matching flight button found (tried airline="${legTargetAirline}" price=$${legTargetPrice})`);
     return { reached_checkout: false, currentUrl: getUrl(), error: buildFlightInventoryDriftMessage(legLabel) };
   }
-  trace(`[flight-rpa] Flight match: "${found.label}" candidates=${found.candidates} inViewportBefore=${found.inViewportBefore} → scrolled, clicking@(${Math.round(found.x)},${Math.round(found.y)})`);
+  const clickMode = found.clickMode ?? "coordinate";
+  trace(`[flight-rpa] Flight match: "${found.label}" candidates=${found.candidates} inViewportBefore=${found.inViewportBefore} clickMode=${clickMode} → scrolled, clicking@(${Math.round(found.x)},${Math.round(found.y)})`);
 
   trace(`[flight-rpa] Match mode=${found.matchMode} reason="${found.matchReason}"`);
+  trace(`[flight-rpa] Selected flight candidate evidence: ${formatExpediaFlightCandidateEvidence(found.label, legFlightTarget).slice(0, 260)}`);
 
   // Let the browser settle after scrollIntoView
   await new Promise(r => setTimeout(r, 700));
   await safeScreenshot("02-after-scroll-to-flight");
 
-  // Real mouse click (triggers React handlers reliably for off-screen scrolled elements)
-  await safeMouseClick(page, found.x, found.y);
+  // Real mouse click triggers React handlers reliably for off-screen scrolled elements.
+  // Locator fallback is used when the runtime wrapper cannot expose coordinates.
+  if (clickMode === "locator") {
+    const locatorClick = await clickExpediaFlightButtonWithLocatorFallback(page, legFlightTarget);
+    trace(
+      `[flight-rpa] Locator flight click from matched fallback: clicked=${locatorClick.clicked} candidates=${locatorClick.candidates} ` +
+      `mode=${locatorClick.matchMode ?? "none"} reason="${locatorClick.matchReason ?? locatorClick.error ?? "no match"}" label="${locatorClick.label.slice(0, 140)}"`
+    );
+  } else {
+    await safeMouseClick(page, found.x, found.y);
+  }
   await new Promise(r => setTimeout(r, 500));
   await safeScreenshot("03-after-flight-click");
 
   // ── Step 3: Wait for fare modal ("Select fare to <city>") then pick cheapest ─
   // The fare modal has a heading containing "Select fare to" and shows multiple fare tiers.
+  const waitForFareModalOpen = async (): Promise<boolean> => {
+    for (let i = 0; i < 20; i++) {   // up to 10s
+      await new Promise(r => setTimeout(r, 500));
+      const found = await page.evaluate(() => {
+        const t = (document.body.textContent ?? "").toLowerCase();
+        return t.includes("select fare to") || t.includes("select your fare");
+      }).catch(() => false);
+      if (found) return true;
+    }
+    return false;
+  };
+
   trace("[flight-rpa] Waiting for fare selection modal...");
-  let fareModalFound = false;
-  for (let i = 0; i < 20; i++) {   // up to 10s
-    await new Promise(r => setTimeout(r, 500));
-    const found = await page.evaluate(() => {
-      const t = (document.body.textContent ?? "").toLowerCase();
-      return t.includes("select fare to") || t.includes("select your fare");
-    }).catch(() => false);
-    if (found) { fareModalFound = true; break; }
+  let fareModalFound = await waitForFareModalOpen();
+  if (!fareModalFound) {
+    trace("[flight-rpa] Fare modal did not open after coordinate click - retrying selected flight via DOM rescan");
+    await safeScreenshot("03b-flight-click-no-fare-modal");
+    const domRetry = await clickExpediaFlightButtonWithDomRescan(page, legFlightTarget);
+    trace(
+      `[flight-rpa] DOM rescan flight click: clicked=${domRetry.clicked} candidates=${domRetry.candidates} ` +
+      `mode=${domRetry.matchMode ?? "none"} reason="${domRetry.matchReason ?? domRetry.error ?? "no match"}" label="${domRetry.label.slice(0, 140)}"`
+    );
+    if (domRetry.candidateSummaries.length > 0) {
+      trace(`[flight-rpa] DOM rescan candidate evidence: ${domRetry.candidateSummaries.map(summary => summary.slice(0, 220)).join(" || ")}`);
+    }
+    if (domRetry.clicked) {
+      await new Promise(r => setTimeout(r, 700));
+      await safeScreenshot("03c-after-dom-rescan-flight-click");
+      fareModalFound = await waitForFareModalOpen();
+    }
+  }
+
+  if (!fareModalFound) {
+    trace("[flight-rpa] Fare modal still absent - retrying selected flight via Playwright locator fallback");
+    const locatorRetry = await clickExpediaFlightButtonWithLocatorFallback(page, legFlightTarget);
+    trace(
+      `[flight-rpa] Locator flight click retry: clicked=${locatorRetry.clicked} candidates=${locatorRetry.candidates} ` +
+      `mode=${locatorRetry.matchMode ?? "none"} reason="${locatorRetry.matchReason ?? locatorRetry.error ?? "no match"}" label="${locatorRetry.label.slice(0, 140)}"`
+    );
+    if (locatorRetry.candidateSummaries.length > 0) {
+      trace(`[flight-rpa] Locator click candidate evidence: ${locatorRetry.candidateSummaries.map(summary => summary.slice(0, 220)).join(" || ")}`);
+    }
+    if (locatorRetry.clicked) {
+      await new Promise(r => setTimeout(r, 700));
+      await safeScreenshot("03d-after-locator-flight-click");
+      fareModalFound = await waitForFareModalOpen();
+    }
   }
 
   if (fareModalFound) {
@@ -1909,7 +4778,7 @@ export async function bookExpediaFlightProgrammatic(
       }
 
       const target = selectBtns[0];
-      target.scrollIntoView({ block: "center", behavior: "instant" as ScrollBehavior });
+      target.scrollIntoView({ block: "center", behavior: "auto" as ScrollBehavior });
       const r = target.getBoundingClientRect();
       return {
         found: true,
@@ -1988,7 +4857,7 @@ export async function bookExpediaFlightProgrammatic(
         const target = withPrices[0]?.btn ?? selectBtns[0];
         if (!target) return { x: 0, y: 0, reason: "no select btn", elAtPoint: "", elText: "", modalRect: "" };
 
-        target.scrollIntoView({ block: "center", behavior: "instant" as ScrollBehavior });
+        target.scrollIntoView({ block: "center", behavior: "auto" as ScrollBehavior });
         const r = target.getBoundingClientRect();
         const cx = r.x + r.width / 2;
         const cy = r.y + r.height / 2;
@@ -2082,7 +4951,7 @@ export async function bookExpediaFlightProgrammatic(
             });
           const target = candidates[0];
           if (!target) return false;
-          target.scrollIntoView({ block: "center", behavior: "instant" as ScrollBehavior });
+          target.scrollIntoView({ block: "center", behavior: "auto" as ScrollBehavior });
           target.click();
           return true;
         }, selector).catch(() => false);
@@ -2107,7 +4976,7 @@ export async function bookExpediaFlightProgrammatic(
             });
           const target = candidates[0];
           if (!target) return false;
-          target.scrollIntoView({ block: "center", behavior: "instant" as ScrollBehavior });
+          target.scrollIntoView({ block: "center", behavior: "auto" as ScrollBehavior });
           target.focus();
           return document.activeElement === target;
         }, selector).catch(() => false);
@@ -2266,7 +5135,7 @@ export async function bookExpediaFlightProgrammatic(
             return label.includes("select") && label.includes("flight") && (airlineLower === "" || label.includes(airlineLower));
           });
           if (!target) return { found: false, x: 0, y: 0 };
-          target.scrollIntoView({ block: "center", behavior: "instant" as ScrollBehavior });
+          target.scrollIntoView({ block: "center", behavior: "auto" as ScrollBehavior });
           const r = target.getBoundingClientRect();
           return { found: true, x: r.x + r.width / 2, y: r.y + r.height / 2 };
         }, { airline: (legTargetAirline ?? "").toLowerCase() })
@@ -2321,7 +5190,7 @@ export async function bookExpediaFlightProgrammatic(
           });
           const target = withPrices[0]?.btn;
           if (!target) return { x: 0, y: 0, price: 0 };
-          target.scrollIntoView({ block: "center", behavior: "instant" as ScrollBehavior });
+          target.scrollIntoView({ block: "center", behavior: "auto" as ScrollBehavior });
           const r = target.getBoundingClientRect();
           return { x: r.x + r.width / 2, y: r.y + r.height / 2, price: withPrices[0]?.effectivePrice ?? 0 };
         }, legTargetPrice).catch(() => ({ x: 0, y: 0, price: 0 }));
@@ -2431,7 +5300,7 @@ export async function bookExpediaFlightProgrammatic(
             return t === kw || t.startsWith(kw + " ") || t.includes(kw);
           });
           if (btn) {
-            btn.scrollIntoView({ block: "center", behavior: "instant" as ScrollBehavior });
+            btn.scrollIntoView({ block: "center", behavior: "auto" as ScrollBehavior });
             const r = btn.getBoundingClientRect();
             return {
               found: true,
@@ -2477,12 +5346,7 @@ export async function bookExpediaFlightProgrammatic(
   let bundlePopupDetected = false;
   for (let i = 0; i < 12; i++) {
     await new Promise(r => setTimeout(r, 500));
-    const detected = await page.evaluate(() => {
-      const t = (document.body.textContent ?? "").toLowerCase();
-      // Real bundle popup has car rental form or "Explore packages" CTA
-      return t.includes("car rental dates") || t.includes("explore packages") ||
-        (t.includes("bundle & save") && t.includes("includes your selected flight"));
-    }).catch(() => false);
+    const detected = await isExpediaFlightBundlePopupVisible(activePage);
     if (detected) { bundlePopupDetected = true; break; }
   }
 
@@ -2490,7 +5354,7 @@ export async function bookExpediaFlightProgrammatic(
   let bundleDiag: { reason: string; source: string; modalSize: string; noThanksText: string; btnHtml: string; href: string; x: number; y: number } = { reason: "", source: "", modalSize: "", noThanksText: "", btnHtml: "", href: "", x: 0, y: 0 };
   if (bundlePopupDetected) {
     await safeScreenshot("06-bundle-popup-open");
-    const result = await page.evaluate(() => {
+    const result = await activePage.evaluate(() => {
       const dialogs = Array.from(document.querySelectorAll<HTMLElement>(
         '[role="dialog"], [aria-modal="true"], dialog'
       )).filter(el => {
@@ -2559,7 +5423,7 @@ export async function bookExpediaFlightProgrammatic(
         return { found: false, reason: "no dismiss button in modal", source, modalSize: size, noThanksText: "", btnHtml: "", href: "", x: 0, y: 0 };
       }
 
-      dismissBtn.scrollIntoView({ block: "center", behavior: "instant" as ScrollBehavior });
+      dismissBtn.scrollIntoView({ block: "center", behavior: "auto" as ScrollBehavior });
       const clicked = (() => {
         try {
           dismissBtn.click();
@@ -2588,7 +5452,7 @@ export async function bookExpediaFlightProgrammatic(
       trace(`[flight-rpa] Bundle btn html: ${bundleDiag.btnHtml.slice(0, 150)}`);
       if (!bundleDiag.reason.endsWith("dom-clicked")) {
         await new Promise(r => setTimeout(r, 400));
-        await safeMouseClick(page, bundleDiag.x, bundleDiag.y);
+        await safeMouseClick(activePage, bundleDiag.x, bundleDiag.y);
         await new Promise(r => setTimeout(r, 1500));
       } else {
         await new Promise(r => setTimeout(r, 1500));
@@ -2596,16 +5460,7 @@ export async function bookExpediaFlightProgrammatic(
       await safeScreenshot("07-after-bundle-click");
 
       // Verify dialog actually closed
-      const bundleStillOpen = await page.evaluate(() => {
-        const stillThere = Array.from(document.querySelectorAll<HTMLElement>('[role="dialog"], [aria-modal="true"], dialog'))
-          .filter(el => {
-            const r = el.getBoundingClientRect();
-            const t = (el.textContent ?? "").toLowerCase();
-            return r.width > 100 && r.height > 100 &&
-                   (t.includes("car rental") || t.includes("explore packages") || t.includes("bundle & save"));
-          });
-        return stillThere.length > 0;
-      }).catch(() => false);
+      const bundleStillOpen = await isExpediaFlightBundlePopupVisible(activePage);
       trace(`[flight-rpa] Bundle dialog still open after click: ${bundleStillOpen}`);
       bundleDismissed = !bundleStillOpen;
       if (bundleStillOpen) {
@@ -2638,16 +5493,7 @@ export async function bookExpediaFlightProgrammatic(
           }).catch(() => false);
           trace(`[flight-rpa] Bundle dismiss retry after closing date picker: clicked=${retried}`);
           await new Promise(r => setTimeout(r, 1200));
-          const bundleStillOpenAfterRetry = await page.evaluate(() => {
-            const stillThere = Array.from(document.querySelectorAll<HTMLElement>('[role="dialog"], [aria-modal="true"], dialog'))
-              .filter(el => {
-                const r = el.getBoundingClientRect();
-                const t = (el.textContent ?? "").toLowerCase();
-                return r.width > 100 && r.height > 100 &&
-                  (t.includes("car rental") || t.includes("explore packages") || t.includes("bundle & save"));
-              });
-            return stillThere.length > 0;
-          }).catch(() => false);
+          const bundleStillOpenAfterRetry = await isExpediaFlightBundlePopupVisible(activePage);
           trace(`[flight-rpa] Bundle dialog still open after retry: ${bundleStillOpenAfterRetry}`);
           bundleDismissed = !bundleStillOpenAfterRetry;
         }
@@ -2701,7 +5547,7 @@ export async function bookExpediaFlightProgrammatic(
 
             const target = withPrices[0]?.btn;
             if (!target) return false;
-            target.scrollIntoView({ block: "center", behavior: "instant" as ScrollBehavior });
+            target.scrollIntoView({ block: "center", behavior: "auto" as ScrollBehavior });
             target.click();
             return true;
           }).catch(() => false);
@@ -2765,11 +5611,40 @@ export async function bookExpediaFlightProgrammatic(
           }
         }
       }
+    } else {
+      trace(`[flight-rpa] Bundle primary dismiss failed: reason="${bundleDiag.reason}" source=${bundleDiag.source}; trying locator fallback`);
+      const fallback = await dismissExpediaFlightBundlePopupWithLocator(activePage);
+      bundleDiag = {
+        reason: fallback.reason,
+        source: fallback.source,
+        modalSize: bundleDiag.modalSize,
+        noThanksText: fallback.text,
+        btnHtml: "",
+        href: "",
+        x: 0,
+        y: 0,
+      };
+      if (fallback.found) {
+        trace(`[flight-rpa] Bundle fallback dismiss attempted: source=${fallback.source} reason=${fallback.reason} text="${fallback.text}"`);
+        await new Promise(r => setTimeout(r, 1500));
+        await safeScreenshot("07-after-bundle-fallback-click");
+        const bundleStillOpen = await isExpediaFlightBundlePopupVisible(activePage);
+        trace(`[flight-rpa] Bundle dialog still open after fallback: ${bundleStillOpen}`);
+        bundleDismissed = !bundleStillOpen;
+      }
     }
   } else {
     trace("[flight-rpa] Bundle popup not detected (no car rental form) — skipping");
   }
   if (bundlePopupDetected && !bundleDismissed) {
+    trace(`[flight-rpa] Bundle popup not fully dismissed; reason="${bundleDiag.reason}" source=${bundleDiag.source}`);
+    await safeScreenshot("99-final-bundle-still-open");
+    return {
+      reached_checkout: false,
+      currentUrl: getUrl(),
+      activePage,
+      error: `Expedia bundle upsell remained open after dismiss attempts (${bundleDiag.source}:${bundleDiag.reason}). Stop before checkout classification.`,
+    };
     trace(`[flight-rpa] Bundle popup NOT fully dismissed — reason="${bundleDiag.reason}" source=${bundleDiag.source}`);
   }
   if (bundleDismissed) {
@@ -2854,62 +5729,37 @@ export async function bookExpediaFlightProgrammatic(
   if (!reviewFound) trace("[flight-rpa] Review page not detected after 20s");
   await new Promise(r => setTimeout(r, 600));
 
-  const skipResult = await activePage.evaluate(() => {
-    const allButtons = Array.from(document.querySelectorAll<HTMLElement>('button, a'));
-    const visibleBtns = allButtons
-      .filter(b => { const r = b.getBoundingClientRect(); return r.width > 0 && r.height > 0; })
-      .map(b => {
-        const r = b.getBoundingClientRect();
-        return `"${(b.textContent ?? "").trim().slice(0, 30)}"@(${Math.round(r.x)},${Math.round(r.y)})`;
-      })
-      .filter(t => !t.startsWith('""'))
-      .slice(0, 40);
+  const skipResult = await clickExpediaFlightReviewCheckoutAction(activePage);
 
-    const tryFind = (keywords: string[]): { kw: string; x: number; y: number } | null => {
-      for (const kw of keywords) {
-        const btn = allButtons.find(b => {
-          const t = (b.textContent ?? "").trim().toLowerCase();
-          const r = b.getBoundingClientRect();
-          return t.includes(kw) && r.width > 0 && r.height > 0;
-        });
-        if (btn) {
-          btn.scrollIntoView({ block: "center", behavior: "instant" as ScrollBehavior });
-          const r = btn.getBoundingClientRect();
-          return { kw, x: r.x + r.width / 2, y: r.y + r.height / 2 };
-        }
-      }
-      return null;
-    };
-
-    const target = tryFind(["skip to checkout", "skip to check", "next: checkout"]) ??
-                   tryFind(["next: seats"]);
-    return { target, visibleBtns };
-  }).catch(() => ({ target: null as { kw: string; x: number; y: number } | null, visibleBtns: [] as string[] }));
-
-  if (skipResult.target) {
-    trace(`[flight-rpa] Review page action: ${skipResult.target.kw} @(${Math.round(skipResult.target.x)},${Math.round(skipResult.target.y)})`);
-    await new Promise(r => setTimeout(r, 400));
-    await safeMouseClick(activePage, skipResult.target.x, skipResult.target.y);
-    await new Promise(r => setTimeout(r, 2500));
+  if (skipResult.clicked) {
+    trace(`[flight-rpa] Review page action clicked via ${skipResult.source}: "${skipResult.text}"`);
+    await new Promise(r => setTimeout(r, 3500));
+    await safeScreenshot("08-after-review-checkout-click");
   } else {
-    trace(`[flight-rpa] Review page action: no button found`);
+    trace(`[flight-rpa] Review page action: no checkout button clicked source=${skipResult.source} error=${skipResult.error ?? ""}`);
   }
   trace(`[flight-rpa] Visible buttons (40 max):`);
-  for (const t of skipResult.visibleBtns) trace(`[flight-rpa]   btn: ${t}`);
+  for (const t of skipResult.visibleButtons.slice(0, 40)) trace(`[flight-rpa]   btn: ${t}`);
 
   // ── Step 6: Handle seat selection page ────────────────────────────────────
   for (let i = 0; i < 10; i++) {
     await new Promise(r => setTimeout(r, 500));
     const onSeats = await activePage.evaluate(() => {
       const t = (document.body.textContent ?? "").toLowerCase();
-      return t.includes("choose your seats") || document.location.href.toLowerCase().includes("/seats");
+      const url = document.location.href.toLowerCase();
+      return !url.includes("flight-information") &&
+        !t.includes("review your trip") &&
+        (t.includes("choose your seats") || url.includes("/seats"));
     }).catch(() => false);
     if (onSeats) break;
   }
 
   const onSeatPage = await activePage.evaluate(() => {
     const t = (document.body.textContent ?? "").toLowerCase();
-    return t.includes("choose your seats") || document.location.href.toLowerCase().includes("/seats");
+    const url = document.location.href.toLowerCase();
+    return !url.includes("flight-information") &&
+      !t.includes("review your trip") &&
+      (t.includes("choose your seats") || url.includes("/seats"));
   }).catch(() => false);
 
   if (onSeatPage) {
@@ -2941,7 +5791,7 @@ export async function bookExpediaFlightProgrammatic(
         continueTarget: null as { x: number; y: number; text: string } | null,
       };
     }
-    continueBtn.scrollIntoView({ block: "center", behavior: "instant" as ScrollBehavior });
+    continueBtn.scrollIntoView({ block: "center", behavior: "auto" as ScrollBehavior });
     const rect = continueBtn.getBoundingClientRect();
     return {
       hasSeatConfirm:
@@ -2967,17 +5817,7 @@ export async function bookExpediaFlightProgrammatic(
 
   const currentUrl = getUrl();
   const checkoutSignals = await activePage.evaluate(() => {
-    const bodyText = (document.body.textContent ?? "").toLowerCase();
-    const stillOnReview =
-      bodyText.includes("skip to checkout") ||
-      bodyText.includes("next: seats") ||
-      bodyText.includes("continue without choosing seats");
-    const hasTravelerCopy =
-      bodyText.includes("traveler information") ||
-      bodyText.includes("passenger information") ||
-      bodyText.includes("who's flying") ||
-      bodyText.includes("traveler 1") ||
-      bodyText.includes("enter payment");
+    const bodyText = document.body.textContent ?? "";
     const visibleInputs = Array.from(document.querySelectorAll<HTMLInputElement>("input"))
       .filter(input => {
         const rect = input.getBoundingClientRect();
@@ -2990,19 +5830,33 @@ export async function bookExpediaFlightProgrammatic(
         input.getAttribute("aria-label") ?? "",
         input.getAttribute("autocomplete") ?? "",
       ].join(" ").toLowerCase());
-    const hasTravelerFields = visibleInputs.some(desc =>
-      /first.?name|last.?name|given.?name|family.?name|surname|date.?of.?birth|birth.?date|passport|known.?traveler|tsa.?pre|phone|email/.test(desc)
-    );
-    return { stillOnReview, hasTravelerCopy, hasTravelerFields };
-  }).catch(() => ({ stillOnReview: false, hasTravelerCopy: false, hasTravelerFields: false }));
-  const onCheckout =
-    currentUrl.includes("/checkout") || currentUrl.includes("/Checkout") ||
-    ((checkoutSignals.hasTravelerCopy || checkoutSignals.hasTravelerFields) && !checkoutSignals.stillOnReview);
+    return { bodyText, visibleInputs };
+  }).catch(() => ({ bodyText: "", visibleInputs: [] as string[] }));
+  const checkoutState = classifyExpediaFlightCheckoutState({
+    currentUrl,
+    bodyText: checkoutSignals.bodyText,
+    visibleInputDescriptions: checkoutSignals.visibleInputs,
+  });
+  trace(
+    `[flight-rpa] Checkout state: onCheckout=${checkoutState.onCheckout} reason=${checkoutState.reason} ` +
+    `stillOnSearch=${checkoutState.stillOnSearch} bundle=${checkoutState.bundlePopupVisible} ` +
+    `travelerCopy=${checkoutState.hasTravelerCopy} travelerFields=${checkoutState.hasTravelerFields}`
+  );
 
-  if (!onCheckout) {
+  if (!checkoutState.onCheckout) {
+    const finalBoundary = await detectSafetyBoundary(activePage);
+    if (finalBoundary) {
+      trace(`[flight-rpa] Login/OTP/CAPTCHA boundary detected before checkout: ${finalBoundary}`);
+      await safeScreenshot("99-final-safety-boundary");
+      return {
+        reached_checkout: false,
+        currentUrl,
+        error: `Expedia flight ${finalBoundary} reached. Stop for manual intervention; do not bypass login, OTP, or CAPTCHA.`,
+      };
+    }
     trace(`[flight-rpa] Did not reach checkout — currentUrl=${currentUrl.slice(0, 80)}`);
     await safeScreenshot("99-final-not-checkout");
-    return { reached_checkout: false, currentUrl, error: "Could not navigate to checkout. Please book manually." };
+    return { reached_checkout: false, currentUrl, error: `Could not navigate to checkout (${checkoutState.reason}). Please book manually.` };
   }
 
   trace("[flight-rpa] Reached checkout — handing off to AI form fill in executor");

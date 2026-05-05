@@ -9,12 +9,21 @@
  *
  * Env:
  *   - `OPENAI_API_KEY` (required)
+ *   - `OPENAI_CHAT_MODEL` (optional override for restricted local projects)
  *   - We default to `gpt-4o-mini` — cheap, fast, and already used by Stagehand
  *     for its act() loops so no new billing setup is needed.
  */
 const OPENAI_API_URL = "https://api.openai.com/v1/chat/completions";
-const DEFAULT_MODEL = "gpt-4o-mini";
+const DEFAULT_MODEL = process.env.OPENAI_CHAT_MODEL ?? "gpt-4o-mini";
 const DEFAULT_TIMEOUT_MS = 30_000;
+
+function usesMaxCompletionTokens(model: string): boolean {
+  return /^(gpt-5|o[134])(?:[.-]|$)/.test(model);
+}
+
+function usesDefaultTemperatureOnly(model: string): boolean {
+  return /^(gpt-5|o[134])(?:[.-]|$)/.test(model);
+}
 
 export async function openaiChat(params: {
   system?: string;
@@ -33,6 +42,15 @@ export async function openaiChat(params: {
     ? [{ role: "system" as const, content: params.system }, ...params.messages]
     : params.messages;
 
+  const model = params.model ?? DEFAULT_MODEL;
+  const tokenBudget = params.max_tokens ?? 1024;
+  const tokenParam = usesMaxCompletionTokens(model)
+    ? { max_completion_tokens: tokenBudget }
+    : { max_tokens: tokenBudget };
+  const temperatureParam = usesDefaultTemperatureOnly(model)
+    ? {}
+    : { temperature: 0.2 };
+
   let res: Response;
   try {
     res = await fetch(OPENAI_API_URL, {
@@ -42,10 +60,10 @@ export async function openaiChat(params: {
         Authorization: `Bearer ${apiKey}`,
       },
       body: JSON.stringify({
-        model: params.model ?? DEFAULT_MODEL,
+        model,
         messages,
-        max_tokens: params.max_tokens ?? 1024,
-        temperature: 0.2,
+        ...tokenParam,
+        ...temperatureParam,
         ...(params.response_format ? { response_format: params.response_format } : {}),
       }),
       signal: AbortSignal.timeout(params.timeout_ms ?? DEFAULT_TIMEOUT_MS),

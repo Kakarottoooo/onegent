@@ -37,7 +37,8 @@ import {
   type BookingJobStep,
 } from "@/lib/db";
 import { buildExpediaFlightsUrl } from "@/lib/agent/planners/booking-links";
-import { isCoreSupported, markStepForCore } from "@/lib/core/cend-adapter";
+import { isCoreExecutionSource, isCoreSupported, markStepForCore } from "@/lib/core/cend-adapter";
+import { prepareWorkerQueueSteps } from "@/lib/booking-jobs/worker-enqueue";
 import type {
   TripPackage,
   TripSelection,
@@ -192,13 +193,16 @@ export async function POST(req: NextRequest) {
   // Per-step (not per-trip) means a hotel + flight + restaurant + activity
   // trip routes the first three through lib/core and activity through legacy.
   // Single env-var kill-switch preserves one-flag rollback.
+  const workerQueue = prepareWorkerQueueSteps(steps, process.env.USE_WORKER_FOR);
   const useCoreForCend = process.env.USE_CORE_EXECUTOR_FOR_CEND === "true";
-  const finalSteps: BookingJobStep[] = useCoreForCend
+  const finalSteps: BookingJobStep[] = workerQueue.shouldUseWorkerQueue
+    ? workerQueue.steps
+    : useCoreForCend
     ? steps.map((s) => (isCoreSupported(s.type) ? markStepForCore(s) : s))
     : steps;
 
   const viaCoreCount = finalSteps.filter(
-    (s) => (s.body as Record<string, unknown>).__source === "lib/core/execution",
+    (s) => isCoreExecutionSource((s.body as Record<string, unknown>).__source),
   ).length;
 
   console.log("[create-trip] built steps", {
@@ -207,6 +211,8 @@ export async function POST(req: NextRequest) {
     step_types: finalSteps.map((s) => s.type),
     step_count: finalSteps.length,
     via_core: viaCoreCount,
+    worker_queue: workerQueue.shouldUseWorkerQueue,
+    status: workerQueue.status ?? "pending",
   });
 
   const job = await createBookingJob({
@@ -215,6 +221,7 @@ export async function POST(req: NextRequest) {
     userId,
     tripLabel,
     steps: finalSteps,
+    ...(workerQueue.status ? { status: workerQueue.status } : {}),
   });
 
   return NextResponse.json({

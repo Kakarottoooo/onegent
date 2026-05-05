@@ -3,6 +3,9 @@ import { browserSessionStore } from "@/lib/browser-session-store";
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
+const FRAME_INTERVAL_MS = 250;
+const JPEG_QUALITY = 45;
+
 export async function GET(
   _req: Request,
   { params }: { params: Promise<{ jobId: string }> }
@@ -51,7 +54,7 @@ export async function GET(
             break;
           }
 
-          const buf = await livePage.screenshot({ type: "jpeg", quality: 50, timeout: 2500 });
+          const buf = await livePage.screenshot({ type: "jpeg", quality: JPEG_QUALITY, timeout: 2500 });
           const b64 = buf.toString("base64");
           framesSent++;
           if (framesSent === 1) {
@@ -93,7 +96,7 @@ export async function GET(
           continue;
         }
 
-        await new Promise((r) => setTimeout(r, 80));
+        await new Promise((r) => setTimeout(r, FRAME_INTERVAL_MS));
       }
 
       try { controller.close(); } catch { /* already closed */ }

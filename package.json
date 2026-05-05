@@ -8,7 +8,7 @@
   "scripts": {
     "dev": "next dev",
     "prebuild": "npm run build:mcp",
-    "build": "next build",
+    "build": "next build --webpack",
     "postbuild": "node scripts/inject-sw-version.mjs",
     "start": "next start",
     "lint": "eslint",
@@ -16,7 +16,14 @@
     "test:coverage": "vitest run --coverage",
     "build:mcp": "npm run build -w @onegent/mcp-server",
     "check-drift": "npx tsx scripts/check-drift.ts",
-    "smoke:phase1": "node scripts/smoke-phase1.mjs"
+    "smoke:phase1": "node scripts/smoke-phase1.mjs",
+    "preflight:founder-e2e": "node scripts/founder-e2e-preflight.mjs",
+    "e2e:founder": "npx tsx scripts/run-founder-e2e.ts",
+    "e2e:founder:headed": "npx tsx scripts/run-founder-e2e.ts --headed",
+    "e2e:founder:json": "npx tsx scripts/run-founder-e2e.ts --json",
+    "probe:resy": "npx tsx scripts/probe-resy-availability.ts",
+    "gate:phase1": "npx tsx scripts/run-phase1-quality-gate.ts",
+    "gate:phase1:json": "npx tsx scripts/run-phase1-quality-gate.ts --json"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.79.0",

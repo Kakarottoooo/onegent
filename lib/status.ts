@@ -43,6 +43,14 @@ export type JobSemanticStatus =
   | "failed_recoverable"
   | "failed_terminal";
 
+export function isQueuedJobStatus(status: unknown): boolean {
+  return status === "pending" || status === "pending_local";
+}
+
+export function isActiveJobStatus(status: unknown): boolean {
+  return status === "running" || isQueuedJobStatus(status);
+}
+
 // ── Step status computation ────────────────────────────────────────────────
 
 export function computeStepSemanticStatus(step: BookingJobStep): StepSemanticStatus {
@@ -75,7 +83,7 @@ export function computeStepSemanticStatus(step: BookingJobStep): StepSemanticSta
 export function computeJobSemanticStatus(job: BookingJob): JobSemanticStatus {
   // While actually running/pending, use the DB status directly
   if (job.status === "running") return "running";
-  if (job.status === "pending") return "pending";
+  if (isQueuedJobStatus(job.status)) return "pending";
 
   const stepStatuses = job.steps.map(computeStepSemanticStatus);
 
@@ -120,7 +128,7 @@ export interface StatusDisplay {
 export const JOB_SEMANTIC_DISPLAY: Record<JobSemanticStatus, StatusDisplay> = {
   pending:                  { label: "Queued",                        color: "var(--text-muted, #aaa)",      animate: false },
   running:                  { label: "Agent working…",                color: "var(--gold, #D4A34B)",          animate: true  },
-  awaiting_payment:         { label: "Ready for payment — enter CVC", color: "rgba(22,163,74,0.85)",          animate: false },
+  awaiting_payment:         { label: "Ready to review - confirm on site", color: "rgba(22,163,74,0.85)",      animate: false },
   succeeded_first_try:      { label: "All done — first try",          color: "rgba(22,163,74,0.85)",          animate: false },
   succeeded_with_adjustment:{ label: "Done — with smart adjustments", color: "rgba(22,163,74,0.7)",           animate: false },
   partially_completed:      { label: "Partial — action needed",       color: "rgba(234,179,8,0.9)",           animate: false },

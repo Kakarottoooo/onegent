@@ -40,7 +40,7 @@ function isAllowed(slug: string): slug is AllowedSlug {
 }
 
 async function loadDoc(slug: AllowedSlug): Promise<string> {
-  const filePath = path.join(process.cwd(), "docs", "integrations", `${slug}.md`);
+  const filePath = path.join(process.cwd(), "docs", "60-api-integrations", `${slug}.md`);
   return readFile(filePath, "utf8");
 }
 

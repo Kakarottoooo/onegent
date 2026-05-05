@@ -5,6 +5,7 @@ import type { BookingJob, BookingJobStep } from "@/lib/db";
 import {
   computeJobSemanticStatus,
   computeStepSemanticStatus,
+  isActiveJobStatus,
   JOB_SEMANTIC_DISPLAY,
   STEP_SEMANTIC_DISPLAY,
 } from "@/lib/status";
@@ -48,7 +49,7 @@ function stepStatusLabel(step: BookingJobStep): string {
   }
   if (step.retryScheduledFor) return "Retry scheduled";
   if (step.actionItem) return "Needs your choice";
-  if (step.status === "awaiting_confirmation") return "Ready for payment — enter CVC";
+  if (step.status === "awaiting_confirmation") return "Ready to review — confirm on site";
   if (step.status === "loading") return "Agent working…";
   if (step.status === "no_availability") return "No availability found";
   if (step.status === "error") {
@@ -229,7 +230,7 @@ export default function InlineJobCard({ jobId, onNeedsTravelDocs, onDeleted }: I
     if (deleting || !job) return;
     setDeleting(true);
     try {
-      const force = job.status === "running" || job.status === "pending";
+      const force = isActiveJobStatus(job.status);
       await fetch(`/api/booking-jobs/${job.id}${force ? "?force=true" : ""}`, { method: "DELETE" });
       onDeleted?.(jobId);
     } finally {
@@ -242,7 +243,7 @@ export default function InlineJobCard({ jobId, onNeedsTravelDocs, onDeleted }: I
     if (resetting || !job) return;
     setResetting(true);
     try {
-      await fetch(`/api/booking-jobs/${job.id}/start`, { method: "POST" });
+      await fetch(`/api/booking-jobs/${job.id}/start?executor=inline`, { method: "POST" });
       handleJobRestarted();
     } finally {
       setResetting(false);
@@ -263,9 +264,11 @@ export default function InlineJobCard({ jobId, onNeedsTravelDocs, onDeleted }: I
   }
 
   const semanticStatus = computeJobSemanticStatus(job);
-  const statusDisplay = JOB_SEMANTIC_DISPLAY[semanticStatus];
+  const statusDisplay = semanticStatus === "awaiting_payment"
+    ? { ...JOB_SEMANTIC_DISPLAY[semanticStatus], label: "Ready to review — confirm on site" }
+    : JOB_SEMANTIC_DISPLAY[semanticStatus];
   const doneCount = job.steps.filter((s) => s.status === "done").length;
-  const isRunning = job.status === "running" || job.status === "pending";
+  const isRunning = isActiveJobStatus(job.status);
   const isComplete = job.status === "done" || job.status === "failed";
   const isStuck = job.status === "running" &&
     Date.now() - new Date(job.updated_at).getTime() > 7 * 60 * 1000;
@@ -296,15 +299,15 @@ export default function InlineJobCard({ jobId, onNeedsTravelDocs, onDeleted }: I
           </div>
         </div>
 
-        {(job.status === "running" || (isComplete && Date.now() - new Date(job.updated_at).getTime() < 90_000)) && (
+        {(isRunning || (isComplete && Date.now() - new Date(job.updated_at).getTime() < 90_000)) && (
           <a
-            href={`/tasks?view=${job.status === "running" ? "live" : "history"}&focus=${job.id}`}
+            href={`/tasks?view=${isRunning ? "live" : "history"}&focus=${job.id}`}
             target="_blank"
             rel="noopener noreferrer"
             onClick={(e) => e.stopPropagation()}
-            style={{ flexShrink: 0, padding: "5px 10px", borderRadius: 8, border: "1px solid var(--gold,#D4A34B)", backgroundColor: "transparent", color: job.status === "running" ? "var(--gold,#D4A34B)" : "rgba(212,163,75,0.5)", fontFamily: "var(--font-dm-sans)", fontSize: 11, fontWeight: 600, whiteSpace: "nowrap", textDecoration: "none", display: "inline-block" }}
+            style={{ flexShrink: 0, padding: "5px 10px", borderRadius: 8, border: "1px solid var(--gold,#D4A34B)", backgroundColor: "transparent", color: isRunning ? "var(--gold,#D4A34B)" : "rgba(212,163,75,0.5)", fontFamily: "var(--font-dm-sans)", fontSize: 11, fontWeight: 600, whiteSpace: "nowrap", textDecoration: "none", display: "inline-block" }}
           >
-            {job.status === "running" ? "🖥 Watch" : "🖥 Replay"}
+            {isRunning ? "🖥 Watch" : "🖥 Replay"}
           </a>
         )}
 
@@ -335,7 +338,7 @@ export default function InlineJobCard({ jobId, onNeedsTravelDocs, onDeleted }: I
           ))}
           <div style={{ textAlign: "right", paddingTop: 4 }}>
             <a
-              href={`/tasks?view=${job.status === "running" ? "live" : isComplete ? "history" : "queue"}&focus=${job.id}`}
+              href={`/tasks?view=${isRunning ? "live" : isComplete ? "history" : "queue"}&focus=${job.id}`}
               target="_blank"
               rel="noopener noreferrer"
               style={{ fontFamily: "var(--font-dm-sans)", fontSize: 11, color: "var(--text-muted,#aaa)", textDecoration: "none" }}

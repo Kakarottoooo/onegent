@@ -32,6 +32,48 @@ type ClickResult = "clicked" | "not_found" | "no_availability";
 type RoomResult  = "selected" | "no_availability";
 
 /**
+ * Classify the cause of a stagehand.act() failure so callers can emit an
+ * accurate trace / decisionLog entry instead of falsely labelling LLM-platform
+ * problems as "no_availability".
+ *
+ * Live-observed cause we want to never misclassify again: the OpenAI project
+ * tied to OPENAI_API_KEY lacked access to gpt-4o-mini, and the catch handler
+ * returned no_availability — the literal opposite of the truth (rooms WERE
+ * available; the LLM call to identify the Reserve button is what failed).
+ */
+export type ActErrorKind = "platform" | "transient" | "unknown";
+export interface ActErrorClassification {
+  kind: ActErrorKind;
+  reason: string;
+}
+
+const PLATFORM_ERROR_PATTERNS: Array<[RegExp, string]> = [
+  [/does not have access to model/i, "model access denied for this OpenAI project"],
+  [/insufficient_quota|exceeded your current quota/i, "OpenAI quota exhausted"],
+  [/rate.?limit|429\b/i, "OpenAI rate limit"],
+  [/Could not resolve authentication method|invalid api key|incorrect api key/i, "OpenAI authentication failed"],
+  [/\b401\b/i, "OpenAI 401 unauthorised"],
+  [/\b403\b/i, "OpenAI 403 forbidden"],
+];
+
+const TRANSIENT_ERROR_PATTERNS: Array<[RegExp, string]> = [
+  [/ECONNRESET|ECONNREFUSED|EPIPE|ENETUNREACH/i, "TCP connection error"],
+  [/ENOTFOUND|EAI_AGAIN/i, "DNS resolution failed"],
+  [/network\s*timeout|fetch\s*failed/i, "network request failed"],
+];
+
+export function classifyActError(err: unknown): ActErrorClassification {
+  const msg = err instanceof Error ? err.message ?? "" : typeof err === "string" ? err : "";
+  for (const [re, reason] of PLATFORM_ERROR_PATTERNS) {
+    if (re.test(msg)) return { kind: "platform", reason };
+  }
+  for (const [re, reason] of TRANSIENT_ERROR_PATTERNS) {
+    if (re.test(msg)) return { kind: "transient", reason };
+  }
+  return { kind: "unknown", reason: msg ? `act() failed: ${msg.slice(0, 120)}` : "act() failed" };
+}
+
+/**
  * Find and click a hotel by name in a search results listing page.
  *
  * Strategy:
@@ -496,7 +538,8 @@ export async function selectRoomAI(
     );
     trace("[find-listing] clicked reserve/book via act()");
   } catch (actErr) {
-    trace(`[find-listing] act() reserve failed: ${(actErr as Error).message?.slice(0, 80)}`);
+    const actClass = classifyActError(actErr);
+    trace(`[find-listing] act() reserve failed (${actClass.kind}): ${actClass.reason}`);
 
     // JS click fallback
     const clicked = await page.evaluate(() => {
@@ -504,7 +547,7 @@ export async function selectRoomAI(
         const r = el.getBoundingClientRect();
         return r.width > 0 && r.height > 0 && (el as HTMLElement).offsetParent !== null;
       }
-      const pattern = /i.?ll reserve|reserve|book now|view prices|check prices|select room/i;
+      const pattern = /i.?ll reserve|reserve|book now|view prices|check prices|select room|预订|預訂|订房|立即预订|马上预订/i;
       const btn = Array.from(document.querySelectorAll<HTMLElement>('button, a, [role="button"]'))
         .find(el => isVisible(el) && pattern.test((el.textContent ?? "").trim()));
       if (btn) {
@@ -516,7 +559,17 @@ export async function selectRoomAI(
     }).catch(() => false);
 
     if (!clicked) {
-      trace("[find-listing] could not click reserve — no_availability");
+      // Emit the correct cause: a platform/transient LLM failure must NOT be
+      // labelled "no_availability" — that is a business outcome and pollutes
+      // runtime-forensics taxonomy. Return value stays the same so downstream
+      // executor flow is unchanged for now; only the trace tells the truth.
+      if (actClass.kind === "platform") {
+        trace(`[find-listing] reserve click skipped — platform error: ${actClass.reason}`);
+      } else if (actClass.kind === "transient") {
+        trace(`[find-listing] reserve click skipped — transient error: ${actClass.reason}`);
+      } else {
+        trace("[find-listing] could not click reserve — no_availability");
+      }
       return "no_availability";
     }
     trace("[find-listing] JS fallback click on reserve button worked");
