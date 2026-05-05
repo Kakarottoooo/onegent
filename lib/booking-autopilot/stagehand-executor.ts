@@ -76,6 +76,7 @@ import {
   revealBookingComRoomSelection as providerRevealBookingComRoomSelection,
   setBookingComRoomQuantity as providerSetBookingComRoomQuantity,
   shouldStopBookingComBeforePaymentAutomation as providerShouldStopBookingComBeforePaymentAutomation,
+  shouldRunBookingComGuestFormDespitePaymentGate,
 } from "./providers/booking-com";
 import {
   determineFinalOutcome,
@@ -6573,7 +6574,32 @@ The user will enter CVV and confirm payment themselves.`,
       }
 
       if (provider && assessment.stage === "payment_gate") {
-        if (provider.id === "booking-com" && providerShouldStopBookingComBeforePaymentAutomation(input.task)) {
+        // Bug 4: Booking.com Step 2 (个人信息 / guest details) shares the
+        // /book.html URL with Step 3 (payment) and gets misclassified as
+        // payment_gate. The discriminator is the payment iframe — Step 2
+        // does not have one. When we see payment_gate without a payment
+        // iframe on Booking.com, fall back to fillGuestForm so the user
+        // does not land on an empty 姓/名/email form.
+        const hasPaymentIframe = provider.id === "booking-com"
+          ? await raw.evaluate(() =>
+              !!document.querySelector(
+                'iframe[src*="paymentcomponent.booking.com"], iframe[src*="payment"]',
+              ),
+            ).catch(() => false)
+          : true;
+        if (
+          shouldRunBookingComGuestFormDespitePaymentGate({
+            providerId: provider.id,
+            stage: assessment.stage,
+            hasPaymentIframe,
+          }) &&
+          provider.fillGuestForm
+        ) {
+          trace("[RPA] Booking.com page classified as payment_gate but no payment iframe detected — running fillGuestForm (Step 2 guest details page).");
+          const enrichedHelpers = { ...bookingComHelpers, stagehand, rawPage: raw, autonomy: input.autonomySettings };
+          await provider.fillGuestForm(raw, p, enrichedHelpers, trace);
+          await new Promise((resolve) => setTimeout(resolve, 600));
+        } else if (provider.id === "booking-com" && providerShouldStopBookingComBeforePaymentAutomation(input.task)) {
           trace("[RPA] Booking.com payment gate reached under manual-review instructions — skipping card-field fill.");
         } else {
           trace("[RPA] Provider payment page — running card-field fill.");

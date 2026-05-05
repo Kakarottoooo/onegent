@@ -4173,6 +4173,33 @@ export async function clickBookingComListingTarget(
 
 // ─── BrowserProvider wrapper ───────────────────────────────────────────────
 
+/**
+ * Bug 4 (P1, observed live): Booking.com's checkout flow has TWO sequential
+ * pages under the same /book.html URL — Step 2 (个人信息: 姓/名/email/phone/
+ * address) and Step 3 (payment: card iframe). assessBookingStage classifies
+ * both as `payment_gate` because the URL matches /book.html, so the executor's
+ * `payment_gate` branch runs fillPaymentForm — which finds no card iframe on
+ * Step 2 — and SKIPS fillGuestForm entirely because that path is gated on
+ * stage === "checkout_form". Result: user lands on the 个人信息 form with
+ * every field still empty.
+ *
+ * The discriminator is the presence of the Booking.com payment iframe
+ * (paymentcomponent.booking.com). Step 2 has no such iframe; Step 3 does.
+ * When stage=payment_gate but no payment iframe is present, the executor
+ * should run fillGuestForm before (or instead of) fillPaymentForm.
+ */
+export function shouldRunBookingComGuestFormDespitePaymentGate(input: {
+  providerId: string | null | undefined;
+  stage: string;
+  hasPaymentIframe: boolean;
+}): boolean {
+  return (
+    input.providerId === "booking-com" &&
+    input.stage === "payment_gate" &&
+    input.hasPaymentIframe === false
+  );
+}
+
 export const bookingComProvider: BrowserProvider = {
   id: "booking-com",
 
