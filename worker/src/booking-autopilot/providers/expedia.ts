@@ -2673,6 +2673,23 @@ async function fillBillingFieldsInPaymentIframes(
   const nonMainFrames = allFrames.filter(f => f !== page.mainFrame());
   trace(`Expedia billing iframe scan: ${nonMainFrames.length} non-main frame(s) (total ${allFrames.length})`);
 
+  // Snapshot cc-number across all non-main frames BEFORE any billing fill.
+  // If any value changes after this function returns, this trace pins the
+  // source: either main-page strategies above, or my iframe fill below.
+  const snapshotCardNumberValues = async (when: string): Promise<void> => {
+    for (let i = 0; i < nonMainFrames.length; i++) {
+      const f = nonMainFrames[i];
+      const len = await f.evaluate(() => {
+        const el = document.querySelector<HTMLInputElement>('input[autocomplete="cc-number"], input[id="creditCardInput"]');
+        return el ? el.value.length : -1;
+      }).catch(() => -1);
+      if (len > 0) trace(`Expedia billing iframe ${when}-snapshot: frame[${i}] cc-number valueLen=${len}`);
+      else if (len === 0) trace(`Expedia billing iframe ${when}-snapshot: frame[${i}] cc-number present but empty`);
+      // -1 = no cc-number element in this frame — skip silently
+    }
+  };
+  await snapshotCardNumberValues("pre");
+
   for (let frameIdx = 0; frameIdx < nonMainFrames.length; frameIdx++) {
     const frame = nonMainFrames[frameIdx];
     const frameUrl = getFrameUrl(frame).slice(0, 40);
@@ -2796,6 +2813,24 @@ async function fillBillingFieldsInPaymentIframes(
       country: [],
     };
 
+    // Safety guard: before every .fill(), read the matched element's REAL
+    // autocomplete + aria-label and reject if it looks card-related. The
+    // CKO iframe holds billing inputs AND cc-number/cc-name in the same
+    // frame; if Playwright's .first() ever resolves to a card-tagged
+    // element under DOM churn, we MUST NOT fill it.
+    const verifyTargetIsBilling = async (sel: string): Promise<{ safe: boolean; ac: string; aria: string }> => {
+      const attrs = await frame.evaluate((s: string) => {
+        const el = document.querySelector<HTMLInputElement>(s);
+        if (!el) return { ac: "", aria: "" };
+        return {
+          ac: (el.getAttribute("autocomplete") ?? "").toLowerCase(),
+          aria: (el.getAttribute("aria-label") ?? "").toLowerCase(),
+        };
+      }, sel).catch(() => ({ ac: "", aria: "" }));
+      const cardish = /cc-|credit.?card|card.?number|cardholder|card holder|debit.?card|cvv|cvc|security.?code/.test(`${attrs.ac} ${attrs.aria}`);
+      return { safe: !cardish, ac: attrs.ac, aria: attrs.aria };
+    };
+
     const fillInputInIframe = async (
       kind: IframeFillKind,
       _indexes: number[],
@@ -2808,12 +2843,17 @@ async function fillBillingFieldsInPaymentIframes(
           const loc = frame.locator(sel).first();
           const count = await loc.count().catch(() => 0);
           if (count === 0) continue;
+          const guard = await verifyTargetIsBilling(sel);
+          if (!guard.safe) {
+            trace(`Expedia billing iframe fill SKIP (selector "${sel}"): ${kind} matched a card-tagged element (ac="${guard.ac}", aria="${guard.aria.slice(0, 30)}") — refusing to fill`);
+            continue;
+          }
           await loc.click({ clickCount: 3, timeout: 2000 }).catch(() => { /* keep trying fill */ });
           await loc.fill(value, { timeout: 3000 });
           await new Promise(r => setTimeout(r, 150));
           const actual = await loc.inputValue({ timeout: 1500 }).catch(() => "");
           const ok = actual.trim().length > 0;
-          trace(`Expedia billing iframe fill (selector "${sel}"): ${kind} = ${ok ? "OK" : "EMPTY"} (frame[${frameIdx}]=${frameUrl}, valueLen=${actual.length})`);
+          trace(`Expedia billing iframe fill (selector "${sel}"): ${kind} = ${ok ? "OK" : "EMPTY"} (frame[${frameIdx}]=${frameUrl}, ac="${guard.ac}", valueLen=${actual.length})`);
           if (ok) return true;
         } catch (err) {
           trace(`Expedia billing iframe fill selector error: ${kind} sel="${sel}" (frame[${frameIdx}]=${frameUrl}) — ${(err as Error).message?.slice(0, 80)}`);
@@ -2899,6 +2939,7 @@ async function fillBillingFieldsInPaymentIframes(
     }
   }
 
+  await snapshotCardNumberValues("post");
   trace(
     `Expedia billing iframe summary: address=${filled.address} city=${filled.city} zip=${filled.zip} ` +
     `state=${filled.state} country=${filled.country}`
