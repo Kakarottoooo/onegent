@@ -2853,6 +2853,11 @@ async function fillBillingFieldsInPaymentIframes(
     ): Promise<boolean> => {
       void _indexes; // detection-only; selectors decide where we actually fill
       if (!value) return false;
+      // frame.evaluate-based native setter. Bypasses Playwright's
+      // .fill() internal flow entirely — no element.focus(), no
+      // actionability path, no keystroke buffer. This is the ONLY known
+      // path that does not pollute cc-number under CKO overlay layout
+      // (commit 8590569's force:true fill still polluted: pre=16 post=23).
       for (const sel of selectorsByKind[kind]) {
         try {
           const loc = frame.locator(sel).first();
@@ -2863,16 +2868,49 @@ async function fillBillingFieldsInPaymentIframes(
             trace(`Expedia billing iframe fill SKIP (selector "${sel}"): ${kind} matched a card-tagged element (ac="${guard.ac}", aria="${guard.aria.slice(0, 30)}") — refusing to fill`);
             continue;
           }
-          // NO .click() — the CKO overlay can intercept coord-based actions
-          // and route the keystroke buffer to cc-number. force:true bypasses
-          // actionability checks; the value lands directly via native setter
-          // on the locator's element, no coord interaction.
-          await loc.fill(value, { timeout: 3000, force: true });
-          await new Promise(r => setTimeout(r, 150));
-          const actual = await loc.inputValue({ timeout: 1500 }).catch(() => "");
-          const ok = actual.trim().length > 0;
-          trace(`Expedia billing iframe fill (selector "${sel}"): ${kind} = ${ok ? "OK" : "EMPTY"} (frame[${frameIdx}]=${frameUrl}, ac="${guard.ac}", valueLen=${actual.length})`);
-          if (ok) return true;
+          const result = await frame.evaluate(({ selector, val }: { selector: string; val: string }) => {
+            const els = Array.from(document.querySelectorAll<HTMLInputElement>(selector));
+            if (els.length === 0) return { ok: false, len: 0, attempted: 0, reason: "no-match" };
+            // Hard reject: if any matched element looks card-tagged, abort entirely.
+            for (const el of els) {
+              const ac = (el.getAttribute("autocomplete") ?? "").toLowerCase();
+              const aria = (el.getAttribute("aria-label") ?? "").toLowerCase();
+              const name = (el.getAttribute("name") ?? "").toLowerCase();
+              if (/cc-|card[_-]?number|cardholder|cvv|cvc|security[_-]?code/.test(`${ac} ${aria} ${name}`)) {
+                return { ok: false, len: 0, attempted: 0, reason: "card-tagged" };
+              }
+            }
+            // Visible-first ordering: prefer an element with a real bbox.
+            els.sort((a, b) => {
+              const ar = a.getBoundingClientRect();
+              const br = b.getBoundingClientRect();
+              const aVis = ar.width > 0 && ar.height > 0 ? 1 : 0;
+              const bVis = br.width > 0 && br.height > 0 ? 1 : 0;
+              return bVis - aVis;
+            });
+            const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set;
+            let attempted = 0;
+            for (const el of els) {
+              if (el.disabled || el.type === "hidden") continue;
+              attempted += 1;
+              try { el.scrollIntoView({ block: "center", behavior: "auto" as ScrollBehavior }); } catch { /* noop */ }
+              if (setter) { setter.call(el, ""); setter.call(el, val); }
+              else { el.value = ""; el.value = val; }
+              try { el.dispatchEvent(new InputEvent("beforeinput", { bubbles: true, data: val, inputType: "insertText" })); } catch { /* noop */ }
+              el.dispatchEvent(new Event("input", { bubbles: true }));
+              el.dispatchEvent(new Event("change", { bubbles: true }));
+              el.dispatchEvent(new KeyboardEvent("keyup", { bubbles: true }));
+              // CKO listens for blur to trigger fieldValidation — fire it.
+              el.dispatchEvent(new FocusEvent("blur", { bubbles: true }));
+              if (el.value.trim().length > 0) {
+                return { ok: true, len: el.value.length, attempted, reason: "" };
+              }
+            }
+            return { ok: false, len: 0, attempted, reason: "value-cleared-by-react" };
+          }, { selector: sel, val: value }).catch(err => ({ ok: false, len: 0, attempted: 0, reason: `evaluate-error:${(err as Error).message?.slice(0, 40)}` }));
+          const reason = result.ok ? "" : ` reason=${result.reason}`;
+          trace(`Expedia billing iframe fill (selector "${sel}"): ${kind} = ${result.ok ? "OK" : "EMPTY"} (frame[${frameIdx}]=${frameUrl}, attempted=${result.attempted}, valueLen=${result.len}${reason})`);
+          if (result.ok) return true;
         } catch (err) {
           trace(`Expedia billing iframe fill selector error: ${kind} sel="${sel}" (frame[${frameIdx}]=${frameUrl}) — ${(err as Error).message?.slice(0, 80)}`);
         }
@@ -2921,20 +2959,31 @@ async function fillBillingFieldsInPaymentIframes(
           ].filter(Boolean)))
         : Array.from(new Set([value, value.toUpperCase(), value.toLowerCase()]));
       for (const sel of selectSelectorsByKind[kind]) {
-        for (const cand of candidates) {
-          try {
-            const loc = frame.locator(sel).first();
-            const count = await loc.count().catch(() => 0);
-            if (count === 0) continue;
-            const result = await loc.selectOption(cand, { timeout: 2000 }).catch(() => null);
-            if (result === null) continue;
-            const actual = await loc.inputValue({ timeout: 1500 }).catch(() => "");
-            const ok = actual.trim().length > 0;
-            trace(`Expedia billing iframe fill (select "${sel}"): ${kind} = ${ok ? "OK" : "EMPTY"} (frame[${frameIdx}]=${frameUrl}, candidate="${cand}", valueLen=${actual.length})`);
-            if (ok) return true;
-          } catch (err) {
-            trace(`Expedia billing iframe fill select error: ${kind} sel="${sel}" candidate="${cand}" (frame[${frameIdx}]=${frameUrl}) — ${(err as Error).message?.slice(0, 60)}`);
-          }
+        try {
+          const result = await frame.evaluate(({ selector, candidates: cands }: { selector: string; candidates: string[] }) => {
+            const els = Array.from(document.querySelectorAll<HTMLSelectElement>(selector));
+            if (els.length === 0) return { ok: false, candidate: "", reason: "no-match" };
+            const setter = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, "value")?.set;
+            for (const el of els) {
+              if (el.disabled) continue;
+              for (const cand of cands) {
+                for (const opt of Array.from(el.options)) {
+                  if (opt.value === cand || opt.text === cand || opt.value.toLowerCase() === cand.toLowerCase() || opt.text.toLowerCase() === cand.toLowerCase()) {
+                    if (setter) setter.call(el, opt.value); else el.value = opt.value;
+                    el.dispatchEvent(new Event("input", { bubbles: true }));
+                    el.dispatchEvent(new Event("change", { bubbles: true }));
+                    el.dispatchEvent(new FocusEvent("blur", { bubbles: true }));
+                    if (el.value === opt.value) return { ok: true, candidate: cand, reason: "" };
+                  }
+                }
+              }
+            }
+            return { ok: false, candidate: "", reason: "no-option-matched" };
+          }, { selector: sel, candidates }).catch(err => ({ ok: false, candidate: "", reason: `evaluate-error:${(err as Error).message?.slice(0, 40)}` }));
+          trace(`Expedia billing iframe fill (select "${sel}"): ${kind} = ${result.ok ? "OK" : "EMPTY"} (frame[${frameIdx}]=${frameUrl}, candidate="${result.candidate}", reason=${result.reason})`);
+          if (result.ok) return true;
+        } catch (err) {
+          trace(`Expedia billing iframe fill select error: ${kind} sel="${sel}" (frame[${frameIdx}]=${frameUrl}) — ${(err as Error).message?.slice(0, 60)}`);
         }
       }
       return false;
