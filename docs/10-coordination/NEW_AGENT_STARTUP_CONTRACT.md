@@ -40,6 +40,21 @@ Record the base SHA you started from in your first commit message or
 in your own coordination file. Codex uses that SHA when deciding
 between cherry-pick and merge.
 
+### Local Env For Fresh Worktrees
+
+Fresh Git worktrees do not copy `.env.local`. For controlled product
+workflow QA that needs local configuration, link the canonical local
+env file into the new worktree without printing values:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts\link-local-env.ps1
+```
+
+The helper creates `.env.local` as a hardlink from the canonical local
+env source when possible, prints only variable-name presence, and never
+prints configuration values. If `.env.local` already exists, it no-ops
+unless explicitly run with `-Force`.
+
 ## 2. Who Edits HUDDLE vs Track Files
 
 The fastest way to create avoidable merge conflicts is to have every

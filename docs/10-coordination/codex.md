@@ -2,7 +2,7 @@
 
 > **Branch**: `codex/integrated-preview-20260504`
 > **Last updated**: 2026-05-05
-> **Last commit**: `f863a82` hotel closure solve-next integration
+> **Last commit**: `350a93a` R-030 DB transient evidence reliability
 >
 > Claude reads this at session start. I write to it before each push.
 > See `CLAUDE.md` section "coordination protocol".
@@ -12,6 +12,32 @@
 ## Currently doing
 
 Completed in latest pass:
+- Integrated Claude `claude/r030-infra-db-transient-fix @ 34ef0c5` as
+  `350a93a`.
+- Actual blocker addressed:
+  - the Phase 0 Resy benchmark runner now retries transient API/DB polling
+    failures with bounded backoff;
+  - exhausted Neon/DB polling failures classify as `F-INFRA-DB-TRANSIENT` /
+    `model_env_transient`, not Resy no-availability;
+  - benchmark reports preserve task id, job id, screenshot directory,
+    last-known stage, safety status, DB-terminal availability, and absorbed
+    poll retry count even when terminal DB fields are unavailable;
+  - new artifact-only stuck-job audit module detects DB-transient orphan
+    patterns without mutating DB;
+  - runtime/operator forensics classify Neon `ConnectTimeoutError` and related
+    fetch/DB errors as infra transient.
+- Verified targeted retry/audit/forensics/docs tests 167/167,
+  `npx tsc --noEmit --pretty false`, strict `npm run check-drift` with no
+  drift, and `npm run gate:phase1 -- --allow-known-drift` 9/9
+  (`phase1-quality-gate-2026-05-05T04-38-38-846Z.json`).
+- Safety boundary preserved during Codex integration: no live provider/OpenAI/
+  browser automation, worker start, DB mutation, env value handling, payment,
+  verification handling, or final confirmation.
+- Founder operating rule for future agent prompts: the prompt itself may
+  authorize up to two controlled attempts for one exact case; attempt 2 is not
+  a blind retry and requires evidence-driven root-cause/fix first.
+
+Previous completed pass:
 - Integrated Agent3 `codex/hotel-closure-solve-next @ 2f962d2` as `f863a82`.
 - Actual blocker addressed:
   - generated hotel tasks now use a structured Booking.com manual-review

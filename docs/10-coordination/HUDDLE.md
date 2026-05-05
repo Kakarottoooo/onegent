@@ -1,6 +1,6 @@
 # HUDDLE - Shared Working Memory
 
-> Last writer: claude
+> Last writer: codex
 > Last updated: 2026-05-05
 > Cap: 2000 words. Trim oldest Live activity first.
 
@@ -26,6 +26,9 @@ small.
   `docs/50-product-areas/`, or dedicated app/lib code areas, not root docs.
 - If a branch adds a new operational dashboard or QA runner, update
   `docs/00-start-here/PHASE_STATUS.md` and the closest runbook.
+- Fresh worktrees do not inherit `.env.local`; use
+  `scripts/link-local-env.ps1` to hardlink the canonical local env file
+  without printing values before controlled workflow QA.
 
 ## Active Locks
 
@@ -33,6 +36,23 @@ small.
 
 ## Live Activity
 
+- 2026-05-05 codex: integrated Claude
+  `claude/r030-infra-db-transient-fix @ 34ef0c5` as `350a93a`. This fixes
+  the no-live infra blocker from the 2026-05-05 03:55 R-030 retry: transient
+  Neon/DB polling failures now get bounded retry/backoff, preserve task/job id
+  plus screenshot directory and last-known stage in the Phase 0 Resy benchmark
+  report, and classify as `F-INFRA-DB-TRANSIENT` / `model_env_transient`
+  instead of `failed_unknown` or Resy no-availability. It also adds the
+  artifact-only stuck-job audit module and documents a manual cleanup procedure
+  that does not mutate DB automatically. Codex validation on integrated preview:
+  targeted retry/audit/forensics/docs tests 167/167, `tsc`, strict
+  `check-drift` with no drift, and Phase 1 gate 9/9
+  (`phase1-quality-gate-2026-05-05T04-38-38-846Z.json`). No live provider,
+  browser, worker, OpenAI, DB mutation, env value handling, payment,
+  verification handling, or final confirmation was performed. Current founder
+  operating rule for future agent prompts: the prompt itself may authorize up
+  to two controlled attempts for one exact case; attempt 2 is never a blind
+  retry and requires evidence-driven root-cause/fix first.
 - 2026-05-05 claude: opened `claude/r030-infra-db-transient-fix` from
   `1978cc7` to fix the no-live infra blocker that the 2026-05-05 03:55
   R-030 retry surfaced. A single transient Neon `ConnectTimeoutError`
@@ -53,7 +73,7 @@ small.
   (e) New no-live `lib/runtime-forensics/stuck-job-audit.ts` (pure
   artifact-only module, never mutates DB) scans
   `benchmark/runs/phase0-resy-*.json` for the DB-transient pattern and
-  produces operator markdown. (f) `PROVIDER_RUNTIME_DEBUG_PLAYBOOK.md` §
+  produces operator markdown. (f) `PROVIDER_RUNTIME_DEBUG_PLAYBOOK.md` section
   6.5 documents the manual cleanup procedure (read-only audit + screenshot
   safety check + DB read-only confirm + exact UPDATE template gated on
   founder approval). Tests: 33 new (retry + classifier + stuck-job audit
@@ -62,9 +82,9 @@ small.
   known-existing dry-run only. No provider/runtime patch in
   `lib/booking-autopilot`, `lib/core`, `lib/execution-v2`, `worker/src`,
   or `app/api`. No DB mutation. No `.env` / OPENAI_API_KEY handling. No
-  live retry. After this lands, prepare but do not run the next R-030
-  attempt; founder must explicitly say "yes, run exactly one R-030
-  controlled retry".
+  live retry. After this lands, the next R-030 operating prompt can authorize
+  up to two controlled attempts for that exact case under the founder's current
+  prompt-as-authorization rule; attempt 2 must not be a blind retry.
 - 2026-05-05 codex: integrated Agent3
   `codex/hotel-closure-solve-next @ 2f962d2` as `f863a82` on top of the
   current integrated preview. This solves the next Booking.com no-payment /
