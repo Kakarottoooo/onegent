@@ -1318,7 +1318,7 @@ async function fillExpediaGroupPaymentField(
         return el ? el.value : "";
       }, inlineMatch.selector).catch(() => "");
       if (filled !== value) {
-        trace(`Expedia payment: ${label} mismatch after fill (got "${filled.slice(0, 30)}") — retrying with keyboard`);
+        trace(`Expedia payment: ${label} mismatch after fill (value length=${filled.length}) - retrying with keyboard`);
         // Fallback: triple-click + keyboard type to avoid autocomplete
         await page.click(inlineMatch.selector, { clickCount: 3 }).catch(() => {});
         await page.keyboard.type(value, { delay: 40 });
@@ -1328,7 +1328,7 @@ async function fillExpediaGroupPaymentField(
           const el = document.querySelector<HTMLInputElement>(sel);
           return el ? el.value : "";
         }, inlineMatch.selector).catch(() => "");
-        trace(`Expedia payment: ${label} after keyboard retry = "${filled2.slice(0, 30)}"`);
+        trace(`Expedia payment: ${label} after keyboard retry length=${filled2.length}`);
       } else {
         trace(`Expedia payment: filled ${label} inline OK`);
       }
