@@ -1227,7 +1227,14 @@ async function fillExpediaBillingAddressFields(
   const billingZip = profile.billing_zip ?? profile.zip;
   const nativeResult = await page.evaluate(
     ({ address, city, zip }: { address: string; city: string; zip: string }) => {
-      const result = { address: false, city: false, zip: false };
+      const result = {
+        address: false,
+        city: false,
+        zip: false,
+        addressCandidates: 0,
+        cityCandidates: 0,
+        zipCandidates: 0,
+      };
       const nativeFill = (el: HTMLInputElement, val: string): boolean => {
         if (!val || !el || el.disabled) return false;
         const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set;
@@ -1249,14 +1256,15 @@ async function fillExpediaBillingAddressFields(
         el.dispatchEvent(new Event("change", { bubbles: true }));
         el.dispatchEvent(new KeyboardEvent("keyup", { bubbles: true }));
         el.blur();
-        return el.value.trim().length > 0;
+        return el.value.trim().replace(/\s+/g, " ") === val.trim().replace(/\s+/g, " ");
       };
       const isUsable = (el: HTMLInputElement): boolean => {
         const rect = el.getBoundingClientRect();
         const style = window.getComputedStyle(el);
         const text = fieldText(el);
-        return rect.width > 0 &&
-          rect.height > 0 &&
+        const hasExplicitBillingAutocomplete = /^billing\s+(address-line1|address-level2|postal-code)$/i
+          .test(el.getAttribute("autocomplete") ?? "");
+        return (hasExplicitBillingAutocomplete || (rect.width > 0 && rect.height > 0)) &&
           style.display !== "none" &&
           style.visibility !== "hidden" &&
           style.opacity !== "0" &&
@@ -1303,18 +1311,23 @@ async function fillExpediaBillingAddressFields(
         }
         return score;
       };
-      const pickInput = (kind: "address" | "city" | "zip"): HTMLInputElement | undefined =>
-        inputs
-          .map(input => ({ input, score: scoreInput(input, kind) }))
+      const fillBestInput = (kind: "address" | "city" | "zip", value: string): boolean => {
+        const candidates = inputs
+          .map((input, index) => ({ input, index, score: scoreInput(input, kind) }))
           .filter(candidate => candidate.score > 0)
-          .sort((a, b) => b.score - a.score)[0]?.input;
+          .sort((a, b) => b.score === a.score ? b.index - a.index : b.score - a.score);
+        if (kind === "address") result.addressCandidates = candidates.length;
+        if (kind === "city") result.cityCandidates = candidates.length;
+        if (kind === "zip") result.zipCandidates = candidates.length;
+        for (const candidate of candidates) {
+          if (nativeFill(candidate.input, value)) return true;
+        }
+        return false;
+      };
 
-      const addressEl = pickInput("address");
-      const cityEl = pickInput("city");
-      const zipEl = pickInput("zip");
-      result.address = addressEl ? nativeFill(addressEl, address) : false;
-      result.city = cityEl ? nativeFill(cityEl, city) : false;
-      result.zip = zipEl ? nativeFill(zipEl, zip) : false;
+      result.address = fillBestInput("address", address);
+      result.city = fillBestInput("city", city);
+      result.zip = fillBestInput("zip", zip);
       return result;
     },
     {
@@ -1322,9 +1335,17 @@ async function fillExpediaBillingAddressFields(
       city: profile.city ?? "",
       zip: billingZip ?? "",
     },
-  ).catch(() => ({ address: false, city: false, zip: false }));
+  ).catch(() => ({
+    address: false,
+    city: false,
+    zip: false,
+    addressCandidates: 0,
+    cityCandidates: 0,
+    zipCandidates: 0,
+  }));
   trace(
-    `Expedia billing native fill: address=${nativeResult.address} city=${nativeResult.city} zip=${nativeResult.zip}`
+    `Expedia billing native fill: address=${nativeResult.address} city=${nativeResult.city} zip=${nativeResult.zip} ` +
+    `candidates=${nativeResult.addressCandidates}/${nativeResult.cityCandidates}/${nativeResult.zipCandidates}`
   );
 
   let countrySelected = false;
@@ -2484,6 +2505,12 @@ export async function fillExpediaGroupPaymentForm(
     trace(`Expedia payment: guest info prefill did not complete; continuing to allowed payment/billing fields (${(guestErr as Error).message?.slice(0, 80)})`);
   }
   await new Promise(r => setTimeout(r, 400));
+
+  // Current product QA priority: prefill traveler/contact plus billing address,
+  // then stop for human payment review. Card number/expiry are intentionally
+  // left to the user together with CVV/security code and final confirmation.
+  const shouldPrefillCard = false;
+  if (shouldPrefillCard) {
   await scrollExpediaCheckoutToSection(
     page,
     "payment details",
@@ -2974,6 +3001,9 @@ export async function fillExpediaGroupPaymentForm(
   // "This booking is almost yours!" modal appears AFTER card fields are filled.
   // Dismiss it now before attempting billing ZIP fill.
   await dismissExpediaAlmostYoursModal(page, trace, 400);
+  } else {
+    trace("Expedia payment: skipping card prefill; billing address is current closure priority");
+  }
 
   await scrollExpediaCheckoutToSection(
     page,
@@ -3035,14 +3065,16 @@ export async function fillExpediaGroupPaymentForm(
   // Verification pass. This drives the user-facing task status: do not claim the
   // allowed checkout details are complete unless the fields actually hold values.
   const verifyField = async (selectors: string[], fieldName: string): Promise<boolean> => {
+    let foundAny = false;
     for (const sel of selectors) {
       const val = await page.evaluate((s) => {
         const el = document.querySelector<HTMLInputElement | HTMLSelectElement>(s);
         return el ? el.value : null;
       }, sel).catch(() => null);
       if (val !== null) {
+        foundAny = true;
         trace(`Expedia payment verify: ${fieldName} = "${val.length > 0 ? "[filled]" : "[empty]"}"`);
-        return val.length > 0;
+        if (val.length > 0) return true;
       }
     }
     // Also check iframes (including cross-origin payment processor frames)
@@ -3057,10 +3089,15 @@ export async function fillExpediaGroupPaymentForm(
           return el ? el.value : null;
         }, sel).catch(() => null);
         if (val !== null) {
+          foundAny = true;
           trace(`Expedia payment verify (iframe ${frameUrl.slice(0, 40)}): ${fieldName} = "${val.length > 0 ? "[filled]" : "[empty]"}"`);
-          return val.length > 0;
+          if (val.length > 0) return true;
         }
       }
+    }
+    if (foundAny) {
+      trace(`Expedia payment verify: ${fieldName} field(s) found but empty`);
+      return false;
     }
     trace(`Expedia payment verify: ${fieldName} field not found`);
     return false;
@@ -3151,9 +3188,13 @@ export async function fillExpediaGroupPaymentForm(
     return result.empty;
   };
 
-  const nameOk = profile.card_name ? await verifyField(EXPEDIA_GROUP_CARD_NAME_SELECTORS, "cardholder name") : true;
-  const numberOk = profile.card_number ? await verifyField(EXPEDIA_GROUP_CARD_NUMBER_SELECTORS, "card number") : true;
-  const expiryOk = profile.card_expiry
+  const nameOk = shouldPrefillCard && profile.card_name
+    ? await verifyField(EXPEDIA_GROUP_CARD_NAME_SELECTORS, "cardholder name")
+    : true;
+  const numberOk = shouldPrefillCard && profile.card_number
+    ? await verifyField(EXPEDIA_GROUP_CARD_NUMBER_SELECTORS, "card number")
+    : true;
+  const expiryOk = shouldPrefillCard && profile.card_expiry
     ? (await verifyField(EXPEDIA_GROUP_CARD_EXPIRY_SELECTORS, "expiry")) || (await verifySplitExpiryField())
     : true;
   const addressOk = profile.address_line1
@@ -3180,7 +3221,7 @@ export async function fillExpediaGroupPaymentForm(
     ...(securityCodeEmpty ? [] : ["security code must stay empty"]),
   ];
   trace(
-    `Expedia payment verification: name=${nameOk}, cardNumber=${numberOk}, expiry=${expiryOk}, ` +
+    `Expedia payment verification: cardPrefill=${shouldPrefillCard}, name=${nameOk}, cardNumber=${numberOk}, expiry=${expiryOk}, ` +
     `address=${addressOk}, city=${cityOk}, zip=${zipOk}, country=${countryOk}, state=${stateOk}, ` +
     `securityCodeEmpty=${securityCodeEmpty}, missing=${missing.join(",") || "none"}`
   );
@@ -3188,9 +3229,9 @@ export async function fillExpediaGroupPaymentForm(
     complete: missing.length === 0,
     missing,
     filled: {
-      cardName: nameOk,
-      cardNumber: numberOk,
-      cardExpiry: expiryOk,
+      cardName: shouldPrefillCard && nameOk,
+      cardNumber: shouldPrefillCard && numberOk,
+      cardExpiry: shouldPrefillCard && expiryOk,
       billingAddress1: addressOk,
       billingCity: cityOk,
       billingZip: zipOk,

@@ -1503,7 +1503,7 @@ The user will enter CVV and confirm payment themselves.`,
           }
 
           try {
-            trace("[flight-rpa] Running allowed Expedia payment/billing prefill; CVV/security code and final booking remain human-only");
+            trace("[flight-rpa] Running allowed Expedia billing prefill; payment card, CVV/security code, and final booking remain human-only");
             const paymentPrefill = await fillExpediaGroupPaymentForm(checkoutPage, effectiveFlightProfile, trace);
             const finalBoundaryVisible = await scrollExpediaCheckoutToFinalReviewBoundary(checkoutPage, trace);
             trace(
@@ -1511,12 +1511,12 @@ The user will enter CVV and confirm payment themselves.`,
               `missing=${paymentPrefill.missing.join(",") || "none"} finalBoundaryVisible=${finalBoundaryVisible}`
             );
             fillSummary = paymentPrefill.complete
-              ? "Flight checkout reached — allowed traveler, test card, and billing details were pre-filled. Review details, enter security code, and click Complete Booking yourself."
-              : `Flight checkout reached — manual review needed for: ${paymentPrefill.missing.join(", ")}. CVV/security code and Complete Booking remain human-only.`;
+              ? "Flight checkout reached — traveler/contact and billing address details were pre-filled. Payment card details, security code, and Complete Booking remain human-only."
+              : `Flight checkout reached — manual review needed for: ${paymentPrefill.missing.join(", ")}. Payment card details, security code, and Complete Booking remain human-only.`;
           } catch (paymentPrefillErr) {
             trace(`[flight-rpa] Payment/billing prefill error: ${(paymentPrefillErr as Error).message?.slice(0, 100)}`);
             await scrollExpediaCheckoutToFinalReviewBoundary(checkoutPage, trace).catch(() => false);
-            fillSummary = "Flight checkout reached — review details, finish any remaining allowed fields, enter security code, and complete booking manually.";
+            fillSummary = "Flight checkout reached — review details and finish any remaining billing fields manually. Payment card details, security code, and Complete Booking remain human-only.";
           }
 
           const postFillScreenshot = await checkoutPage.screenshot({ type: "jpeg", quality: 55 }).catch(() => null);
@@ -1549,7 +1549,7 @@ The user will enter CVV and confirm payment themselves.`,
           // — making the flight tab "flash closed" right after checkout.
           if (!useCloud && input.jobId) {
             holdBrowserOpenForManualReview(
-              `Local mode: flight checkout reached — keeping browser open for ${Math.round(BROWSER_KEEP_OPEN_MS / 60000)} minutes to review traveler details and complete payment.`
+              `Local mode: flight checkout reached — keeping browser open for ${Math.round(BROWSER_KEEP_OPEN_MS / 60000)} minutes to review traveler/contact and billing details.`
             );
           }
           return {
