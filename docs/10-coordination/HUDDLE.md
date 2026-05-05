@@ -33,6 +33,19 @@ small.
 
 ## Live Activity
 
+- 2026-05-04 codex: integrated the latest provider runtime closure batch on
+  top of the Resy R-030 root-cause fix. Cherry-picked Agent2
+  `codex/flight-runtime-closure @ e151f9f` as `d2629f1`, Agent3
+  `codex/hotel-runtime-closure @ 3e22fb0` as `b6451fa`, Goal
+  `codex/goal-provider-closure-harness @ 6a5890c` as `adeecfa`, and Claude
+  `claude/provider-closure-operator-room @ 51d9726` as `1700725`. This adds
+  Expedia flight card-click hardening and exact-task preflight, Booking.com
+  hotel runtime boundary classification, a shared no-live provider closure CLI,
+  and `/dev/provider-closure` as the three-lane operator cockpit. Verified
+  targeted tests 138/138, `tsc`, `check-drift`, Phase 1 gate 9/9
+  (`phase1-quality-gate-2026-05-05T01-13-12-289Z.json`), and `npm run build`.
+  No live provider/OpenAI call, payment, CVV, OTP/CAPTCHA/login bypass, final
+  confirmation, or extra live retry was performed during this integration.
 - 2026-05-04 codex: ran a founder-approved single controlled Resy R-030 live
   closure attempt on integrated preview. The run stayed inside safety bounds
   and stopped before payment, CVV, OTP/CAPTCHA/login bypass, or final

@@ -15,12 +15,27 @@ Do not enter Phase 2 yet. Stabilize Phase 0, Phase 1, and Phase 1.5 first.
 | Phase 0B - Restaurant v1 coverage | Gated | Start after 0A proves at least one real fill/OTP or safe handoff path. |
 | Phase 1 - First paying user path | Demo-freeze passed | Full Phase 1 gate with smoke and autonomous founder E2E passes 12/12; manual founder walkthrough remains the human acceptance gate. |
 | Phase 1.5 - QA and polish | Demo-freeze passed | Quality gate, dev workbenches, production build, and production route probe are passing. |
-| Phase 2 - Vertical expansion | Frozen, under audit | Old hotel/flight paths exist, but need current artifact/live-safe revalidation before demo promises. |
+| Phase 2 - Vertical expansion | Runtime closure hardening, not demo-promised | Expedia flight and Booking.com hotel have no-live runtime closure packs integrated; both still need controlled live revalidation before demo promises. |
 
 ## Current Verified State
 
 - Integrated preview branch: `codex/integrated-preview-20260504` (canonical;
   contains all merged Phase 0/1/1.5 work plus Phase 2 audit/runbooks).
+- 2026-05-04 provider closure integration:
+  - Integrated Agent2 `codex/flight-runtime-closure`, Agent3
+    `codex/hotel-runtime-closure`, Goal `codex/goal-provider-closure-harness`,
+    and Claude `claude/provider-closure-operator-room`.
+  - Expedia flight now has card-click/runtime hardening, candidate evidence,
+    and exact-task preflight tooling for the MCO -> BNA controlled retry.
+  - Booking.com hotel now has runtime boundary classification and safer
+    payment-boundary behavior for controlled hotel closure attempts.
+  - Shared `scripts/provider-closure.ts` and `/dev/provider-closure` provide a
+    no-live preflight/analyze/operator cockpit for restaurant, flight, and
+    hotel closure work.
+  - Latest quick gate:
+    `npm run gate:phase1 -- --allow-known-drift` passed 9/9 at
+    `phase1-quality-gate-2026-05-05T01-13-12-289Z.json`, and
+    `npm run build` passed with `/dev/provider-closure` registered.
 - 2026-05-04 runtime closure integration:
   - A follow-up founder-approved R-030 controlled live run found the remaining
     Resy blocker in recovery/selector logic, not payment/OTP/final-submit

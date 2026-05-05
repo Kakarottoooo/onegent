@@ -2,7 +2,7 @@
 
 > **Branch**: `codex/integrated-preview-20260504`
 > **Last updated**: 2026-05-04
-> **Last commit**: pending Resy R-030 live root-cause patch push
+> **Last commit**: `1700725` provider closure operator room integration
 >
 > Claude reads this at session start. I write to it before each push.
 > See `CLAUDE.md` section "coordination protocol".
@@ -12,6 +12,29 @@
 ## Currently doing
 
 Completed in latest pass:
+- Integrated four pushed no-live provider closure branches on top of the Resy
+  R-030 root-cause patch:
+  - Agent2 `codex/flight-runtime-closure @ e151f9f` -> `d2629f1`;
+  - Agent3 `codex/hotel-runtime-closure @ 3e22fb0` -> `b6451fa`;
+  - Goal `codex/goal-provider-closure-harness @ 6a5890c` -> `adeecfa`;
+  - Claude `claude/provider-closure-operator-room @ 51d9726` -> `1700725`.
+- New integrated capabilities:
+  - Expedia flight runtime closure hardening, visible-card evidence, click
+    retry ladder, exact-task preflight CLI;
+  - Booking.com hotel runtime boundary classification and safer stop-before-
+    payment behavior;
+  - shared provider closure schema/preflight/analyze/report CLI;
+  - `/dev/provider-closure` operator cockpit linking restaurant, flight, and
+    hotel closure evidence.
+- Verified targeted closure/runtime tests 138/138, `npx tsc --noEmit --pretty
+  false`, `npm run check-drift`, `npm run gate:phase1 -- --allow-known-drift`
+  9/9 (`phase1-quality-gate-2026-05-05T01-13-12-289Z.json`), and
+  `npm run build`.
+- Safety boundary preserved: no live provider/OpenAI call, payment, CVV,
+  OTP/CAPTCHA/login bypass, final confirmation, or extra live retry during this
+  integration.
+
+Previous completed pass:
 - Ran a founder-approved single controlled Resy R-030 live closure attempt:
   task `63ff8d7c-3629-4245-a948-2b7e1d5e15ff`, job
   `e6674a7c-444a-4807-9acc-4983cd3e27f4`, report
