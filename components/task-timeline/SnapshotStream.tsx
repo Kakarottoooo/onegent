@@ -94,7 +94,7 @@ function SnapshotCard({ snap, index, highlighted, onZoom }: CardProps) {
           src={snap.src}
           alt={snap.label ?? `Snapshot ${index + 1}`}
           className="task-timeline__snapshot-image"
-          loading={index < 2 ? "eager" : "lazy"}
+          loading="lazy"
           decoding="async"
           draggable={false}
         />

@@ -72,6 +72,26 @@ The performance pass on 2026-05-06 adds:
 This reduces the old homepage waterfall where the Sidebar fetched rooms and
 sessions separately while the homepage also fetched recent booking jobs.
 
+The Tasks workspace now follows the same shape split:
+
+- `/api/booking-jobs/summary` returns only counters for queue/live/history
+  chrome.
+- `/api/booking-jobs/compact-list` returns compact task rows only: ids,
+  labels, status flags, step/action counts, provider/scenario hints, and share
+  metadata. It deliberately omits `steps`, `decisionLog`, profiles, logs, and
+  screenshot data.
+- `/api/booking-jobs/[id]` remains the detail endpoint for exactly one opened
+  task. `/tasks` calls it only when the user expands, focuses, or modifies a
+  task.
+- `/api/booking-jobs/[id]/timeline-events` and
+  `/api/booking-jobs/[id]/snapshots` are loaded only by the visible live/details
+  panel. Snapshot responses are metadata plus image URLs; image bytes load from
+  the image route only when the snapshot card is visible or selected.
+
+This keeps route navigation from waiting on large `booking_jobs.steps` JSON,
+decision logs, agent logs, or screenshot streams for tasks the user has not
+opened.
+
 ### Data Layer
 
 Postgres/Neon is the source of truth for durable product state:
@@ -133,6 +153,19 @@ Current performance principles:
 5. Keep provider execution out of render paths. Browser/worker work should not
    block route navigation.
 
+Tasks-specific runtime rules:
+
+1. Initial `/tasks` render starts only the compact list and summary reads.
+2. Expanding one row fetches that single task detail and caches/dedupes it by
+   job id.
+3. Active expanded rows may poll their detail; completed/history rows do not
+   poll detail unless the user reopens or mutates them.
+4. The live timeline panel owns timeline and snapshot polling, and polling
+   stops when the timeline reports a closed run.
+5. Future performance checks can use
+   `npx tsx scripts/measure-app-performance.ts --base-url http://127.0.0.1:3000 --session-id <sid> [--job-id <id>]`
+   to record endpoint latency and response bytes.
+
 ## Strengths
 
 - The product has a clear execution loop from chat to task to review.
@@ -149,7 +182,7 @@ Current performance principles:
 - `app/page.tsx` is still a large client component. It increases compile cost,
   bundle size, and route transition latency.
 - Some routes still return heavy rows by default. More `summary/list/detail`
-  split work is needed.
+  split work is needed outside the Tasks workspace.
 - Local development can become slow when multiple Next dev servers, workers,
   and browser executors are left running.
 - Provider sites are brittle. Runtime code must be evidence-driven and
@@ -159,8 +192,8 @@ Current performance principles:
 
 ## Near-Term Architecture Priorities
 
-1. Finish compact read models for task list and task detail so `/tasks` never
-   pulls full job payloads for rows.
+1. Continue migrating non-Tasks surfaces that still call full booking-job list
+   APIs when compact rows would be enough.
 2. Split `app/page.tsx` into smaller route-level and feature-level components.
 3. Lazy-load heavy cards and modals only when the user reaches that state.
 4. Add app-shell performance marks around route transitions, bootstrap, sidebar
