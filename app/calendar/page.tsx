@@ -11,7 +11,7 @@
  * same landing as "Book this trip" — consistent mental model.
  */
 
-import { useState, useEffect, useCallback, useMemo } from "react";
+import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useAuth } from "@clerk/nextjs";
 import GlobalNav from "@/components/GlobalNav";
@@ -21,6 +21,29 @@ import { isActiveJobStatus } from "@/lib/status";
 import type { ExternalCalendarEventsByDay } from "@/lib/calendar-availability";
 import type { BookingJob } from "@/lib/db";
 
+type GoogleMonthResponse = {
+  connected?: boolean;
+  busy_counts?: Record<string, number>;
+  events_by_day?: ExternalCalendarEventsByDay;
+  event_count?: number;
+  account_email?: string | null;
+  last_synced_at?: string | null;
+  error?: string;
+};
+
+type GoogleMonthPayload = GoogleMonthResponse & {
+  ok: boolean;
+  status: number;
+};
+
+const BOOKING_JOBS_CACHE_MS = 5000;
+const GOOGLE_MONTH_CACHE_MS = 60000;
+
+const bookingJobsCache = new Map<string, { data: BookingJob[]; expiresAt: number }>();
+const bookingJobsInflight = new Map<string, Promise<BookingJob[]>>();
+const googleMonthCache = new Map<string, { data: GoogleMonthPayload; expiresAt: number }>();
+const googleMonthInflight = new Map<string, Promise<GoogleMonthPayload>>();
+
 function getSessionId(): string {
   if (typeof window === "undefined") return "";
   let sid = localStorage.getItem("session_id");
@@ -29,6 +52,75 @@ function getSessionId(): string {
     localStorage.setItem("session_id", sid);
   }
   return sid;
+}
+
+async function fetchBookingJobsCached(sessionId: string): Promise<BookingJob[]> {
+  const now = Date.now();
+  const cached = bookingJobsCache.get(sessionId);
+  if (cached && cached.expiresAt > now) return cached.data;
+
+  const existing = bookingJobsInflight.get(sessionId);
+  if (existing) return existing;
+
+  const request = fetch(`/api/booking-jobs?session_id=${encodeURIComponent(sessionId)}`)
+    .then(async (res) => {
+      if (!res.ok) return [];
+      const data = (await res.json()) as { jobs?: BookingJob[] };
+      const jobs = data.jobs ?? [];
+      bookingJobsCache.set(sessionId, {
+        data: jobs,
+        expiresAt: Date.now() + BOOKING_JOBS_CACHE_MS,
+      });
+      return jobs;
+    })
+    .finally(() => {
+      bookingJobsInflight.delete(sessionId);
+    });
+
+  bookingJobsInflight.set(sessionId, request);
+  return request;
+}
+
+async function fetchGoogleMonthCached(
+  year: number,
+  month: number,
+  force: boolean,
+): Promise<GoogleMonthPayload> {
+  const monthKey = `${year}-${month}`;
+  const inflightKey = `${force ? "force" : "read"}:${monthKey}`;
+  const now = Date.now();
+
+  if (!force) {
+    const cached = googleMonthCache.get(monthKey);
+    if (cached && cached.expiresAt > now) return cached.data;
+  }
+
+  const existing = googleMonthInflight.get(inflightKey);
+  if (existing) return existing;
+
+  const url = `/api/calendar/google/month?year=${year}&month=${month}${force ? "&force=1" : ""}`;
+  const request = fetch(url, { cache: "no-store" })
+    .then(async (res) => {
+      const data = (await res.json().catch(() => ({}))) as GoogleMonthResponse;
+      const payload: GoogleMonthPayload = {
+        ...data,
+        ok: res.ok,
+        status: res.status,
+      };
+      if (res.ok) {
+        googleMonthCache.set(monthKey, {
+          data: payload,
+          expiresAt: Date.now() + GOOGLE_MONTH_CACHE_MS,
+        });
+      }
+      return payload;
+    })
+    .finally(() => {
+      googleMonthInflight.delete(inflightKey);
+    });
+
+  googleMonthInflight.set(inflightKey, request);
+  return request;
 }
 
 export default function CalendarPage() {
@@ -44,6 +136,7 @@ export default function CalendarPage() {
   const [googleEventCount, setGoogleEventCount] = useState(0);
   const [googleSyncing, setGoogleSyncing] = useState(false);
   const [googleError, setGoogleError] = useState<string | null>(null);
+  const latestGoogleMonthKeyRef = useRef<string>("");
 
   // Anchor = first day of the viewed month. Use local-TZ constructor so the
   // grid matches the user's wall clock rather than UTC.
@@ -56,13 +149,7 @@ export default function CalendarPage() {
     const sid = getSessionId();
     if (!sid) return;
     try {
-      const res = await fetch(`/api/booking-jobs?session_id=${encodeURIComponent(sid)}`);
-      if (!res.ok) {
-        setJobs([]);
-        return;
-      }
-      const data = (await res.json()) as { jobs?: BookingJob[] };
-      setJobs(data.jobs ?? []);
+      setJobs(await fetchBookingJobsCached(sid));
     } catch {
       setJobs([]);
     } finally {
@@ -101,19 +188,16 @@ export default function CalendarPage() {
 
       if (opts.force) setGoogleSyncing(true);
       setGoogleError(null);
+      const year = anchor.getFullYear();
+      const month = anchor.getMonth();
+      const monthKey = `${year}-${month}`;
+      latestGoogleMonthKeyRef.current = monthKey;
       try {
-        const url = `/api/calendar/google/month?year=${anchor.getFullYear()}&month=${anchor.getMonth()}${opts.force ? "&force=1" : ""}`;
-        const res = await fetch(url, { cache: "no-store" });
-        const data = (await res.json().catch(() => ({}))) as {
-          connected?: boolean;
-          busy_counts?: Record<string, number>;
-          events_by_day?: ExternalCalendarEventsByDay;
-          event_count?: number;
-          account_email?: string | null;
-          last_synced_at?: string | null;
-          error?: string;
-        };
-        if (!res.ok) {
+        const data = await fetchGoogleMonthCached(year, month, !!opts.force);
+        if (latestGoogleMonthKeyRef.current !== monthKey) {
+          return data.last_synced_at ?? null;
+        }
+        if (!data.ok) {
           throw new Error(data.error ?? "Couldn't sync Google Calendar.");
         }
 
