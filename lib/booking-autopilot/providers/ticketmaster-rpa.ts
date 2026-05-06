@@ -110,8 +110,14 @@ async function readTicketmasterStageSnapshot(page: Page): Promise<TicketmasterSt
     const hasSubtotal = /subtotal/i.test(document.body?.innerText ?? "");
     const buttons = Array.from(document.querySelectorAll<HTMLElement>('button, [role="button"]'))
       .filter(isVisible);
-    const reservePattern = /^\s*reserve tickets\s*$|^\s*continue to checkout\s*$|^\s*reserve\s*$/i;
-    const reserveBtn = buttons.find(el => reservePattern.test((el.textContent ?? "").trim()));
+    // startsWith semantics — TM renders Reserve buttons with a trailing
+    // chevron / arrow icon. Anchored regex would miss "Reserve Tickets >".
+    const reserveBtn = buttons.find(el => {
+      const t = (el.textContent ?? "").trim().toLowerCase();
+      return t.startsWith("reserve tickets") ||
+        t.startsWith("continue to checkout") ||
+        t === "reserve" || t.startsWith("reserve ");
+    });
     const hasReserveButton = !!reserveBtn;
     const reserveEnabled = !!reserveBtn && !(
       reserveBtn.hasAttribute("disabled") ||
@@ -424,17 +430,57 @@ async function clickFirstAvailableSlotWithLocators(page: Page, trace: TraceFn): 
   return false;
 }
 
+// startsWith semantics — "Find Tickets >" / "Find Tickets ›" / "Find Tickets❯"
+// all match because TM renders the button label as text + chevron icon
+// (sometimes a literal ">", sometimes a unicode arrow, sometimes SVG).
+// The previous anchored regex /^\s*(find tickets...)\s*$/i missed all
+// trailing-character variants — observed live with the screenshot showing
+// "Find Tickets >".
+function looksLikeFindTicketsLabel(label: string): boolean {
+  const trimmed = label.trim().toLowerCase();
+  if (!trimmed) return false;
+  return ["find tickets", "buy tickets", "get tickets"].some(p => trimmed.startsWith(p));
+}
+
 async function clickFindTicketsWithLocators(page: Page, trace: TraceFn): Promise<boolean> {
+  // Strategy A: Playwright :has-text() — substring-based, no regex. The
+  // most reliable path when the button text has trailing chevrons/arrows.
+  const hasTextSelectors = [
+    'button:has-text("Find Tickets")',
+    'a:has-text("Find Tickets")',
+    '[role="button"]:has-text("Find Tickets")',
+    '[role="link"]:has-text("Find Tickets")',
+    'button:has-text("Buy Tickets")',
+    'a:has-text("Buy Tickets")',
+    'button:has-text("Get Tickets")',
+  ];
+  for (const sel of hasTextSelectors) {
+    try {
+      const loc = page.locator(sel).first();
+      const count = await loc.count().catch(() => 0);
+      if (count === 0) continue;
+      const visible = await locatorLooksVisible(loc);
+      if (!visible) continue;
+      await safeScrollIntoView(loc);
+      await loc.click({ timeout: 2000, force: true });
+      trace(`[tm-rpa] Clicked Find Tickets via :has-text("${sel}")`);
+      return true;
+    } catch (err) {
+      trace(`[tm-rpa] Find Tickets :has-text strategy error sel="${sel}" — ${(err as Error).message?.slice(0, 60)}`);
+    }
+  }
+
+  // Strategy B: scan all clickables, match via startsWith.
   const controls = page.locator('a, button, [role="button"], [role="link"]');
   const count = Math.min(await controls.count().catch(() => 0), 180);
   for (let i = 0; i < count; i++) {
     const item = controls.nth(i);
     if (!(await locatorLooksVisible(item))) continue;
     const label = await locatorLabel(item);
-    if (!/^\s*(find tickets|buy tickets|get tickets)\s*$/i.test(label)) continue;
+    if (!looksLikeFindTicketsLabel(label)) continue;
     await safeScrollIntoView(item);
     await item.click({ timeout: 2000, force: true });
-    trace(`[tm-rpa] Clicked Find Tickets via locator: "${label.slice(0, 80)}"`);
+    trace(`[tm-rpa] Clicked Find Tickets via locator scan: "${label.slice(0, 80)}"`);
     return true;
   }
   return false;
@@ -710,8 +756,9 @@ async function clickFirstAvailableSlot(page: Page, trace: TraceFn): Promise<bool
  * button. We wait for it to appear then click it.
  */
 async function clickFindTickets(page: Page, trace: TraceFn): Promise<boolean> {
-  // Wait up to 8s for the button to render in the sidebar.
-  const deadline = Date.now() + 8000;
+  // Wait up to 16s for the button to render in the sidebar (TM renders
+  // the panel asynchronously — 8s was not enough on slower hosts).
+  const deadline = Date.now() + 16000;
   while (Date.now() < deadline) {
     const clicked = await page.evaluate(() => {
       const isVisible = (el: Element): boolean => {
@@ -720,8 +767,12 @@ async function clickFindTickets(page: Page, trace: TraceFn): Promise<boolean> {
       };
       const selector = 'a, button, [role="button"], [role="link"]';
       const nodes = Array.from(document.querySelectorAll<HTMLElement>(selector)).filter(isVisible);
-      const pattern = /^\s*(find tickets|buy tickets|get tickets)\s*$/i;
-      const candidate = nodes.find(el => pattern.test((el.textContent ?? "").trim()));
+      // startsWith semantics — handles "Find Tickets >" / "Find Tickets ›"
+      // / "Find Tickets❯" (the button has a chevron icon after the label).
+      const candidate = nodes.find(el => {
+        const t = (el.textContent ?? "").trim().toLowerCase();
+        return t.startsWith("find tickets") || t.startsWith("buy tickets") || t.startsWith("get tickets");
+      });
       if (candidate) {
         candidate.scrollIntoView({ behavior: "auto", block: "center" });
         candidate.click();
@@ -739,7 +790,7 @@ async function clickFindTickets(page: Page, trace: TraceFn): Promise<boolean> {
     }
     await page.waitForTimeout(400);
   }
-  trace("[tm-rpa] Find Tickets button not found within 8s");
+  trace("[tm-rpa] Find Tickets button not found within 16s");
   return false;
 }
 
@@ -795,8 +846,12 @@ async function clickReserveTickets(page: Page, trace: TraceFn): Promise<boolean>
         };
         const btns = Array.from(document.querySelectorAll<HTMLElement>("button, [role='button']"))
           .filter(isVisible);
-        const pattern = /^\s*reserve tickets\s*$|^\s*continue to checkout\s*$|^\s*reserve\s*$/i;
-        const btn = btns.find(el => pattern.test((el.textContent ?? "").trim()));
+        const btn = btns.find(el => {
+          const t = (el.textContent ?? "").trim().toLowerCase();
+          return t.startsWith("reserve tickets") ||
+            t.startsWith("continue to checkout") ||
+            t === "reserve" || t.startsWith("reserve ");
+        });
         if (!btn) return false;
         btn.scrollIntoView({ behavior: "auto", block: "center" });
         btn.click();
