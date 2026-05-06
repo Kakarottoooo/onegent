@@ -1651,18 +1651,25 @@ The user will enter CVV and confirm payment themselves.`,
           // Fall through — do NOT return. Normal recovery loop will detect
           // guestDetailsStep via provider.getStageSignals and fill the form.
         } else {
-          if (rpaResult.handoff_ready) {
+          // Sign-in / account boundary is a USER-ACTION handoff, not a
+          // failure. The UI should render "Ready for review — continue
+          // on site" so the user can sign in manually in the live browser.
+          if (rpaResult.handoff_ready || rpaResult.needs_login) {
             if (!useCloud && input.jobId) {
               holdBrowserOpenForManualReview(
                 `Local mode: Ticketmaster page is ready for review — keeping browser open for ${Math.round(BROWSER_KEEP_OPEN_MS / 60000)} minutes.`
               );
             }
+            const summary = rpaResult.summary
+              ?? (rpaResult.needs_login
+                ? "Ticketmaster needs you to sign in to continue. Open the live browser — we won't enter account details for you."
+                : "Ticketmaster page is ready for review. Continue in the browser.");
             return {
               status: "paused_payment" as const,
               screenshotBase64: finalScreenshotBase64,
               handoffUrl: rpaResult.currentUrl || input.startUrl,
               sessionUrl,
-              summary: rpaResult.summary ?? "Ticketmaster page is ready for review. Continue in the browser.",
+              summary,
               debugTrace,
             };
           }
@@ -1672,13 +1679,11 @@ The user will enter CVV and confirm payment themselves.`,
             );
           }
           return {
-            status: rpaResult.needs_login ? "error" as const : "error" as const,
+            status: "error" as const,
             screenshotBase64: finalScreenshotBase64,
             handoffUrl: rpaResult.currentUrl || input.startUrl,
             sessionUrl,
-            summary: rpaResult.needs_login
-              ? "Ticketmaster wants you to sign in. Run `node scripts/save-ticketmaster-cookies.mjs` to refresh your saved session, then try again."
-              : (rpaResult.error ?? "Couldn't reach Ticketmaster checkout. Open the link to finish manually."),
+            summary: rpaResult.error ?? "Couldn't reach Ticketmaster checkout. Open the link to finish manually.",
             error: rpaResult.error ?? "Ticketmaster RPA did not reach checkout.",
             debugTrace,
           };

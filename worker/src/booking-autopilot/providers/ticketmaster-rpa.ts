@@ -33,6 +33,126 @@ export interface TargetDateTime {
   time?: string;       // "7:00 PM" — optional
 }
 
+// ── Stage classifier ────────────────────────────────────────────────────────
+// Used to route the main flow and to emit clean trace lines. Each stage maps
+// to a deterministic outcome:
+//   artist_calendar   → click target slot OR stop with "select showtime"
+//   event_seat_map    → poll Reserve Tickets; user selects seat in browser
+//   ticket_selected   → Reserve Tickets enabled; click and continue
+//   account           → hand off to user (sign-in / create-account boundary)
+//   checkout          → handed off to existing guest/payment pipeline
+//   unknown           → caller decides
+export type TicketmasterStage =
+  | "artist_calendar"
+  | "event_seat_map"
+  | "ticket_selected"
+  | "account"
+  | "checkout"
+  | "unknown";
+
+export interface TicketmasterStageSnapshot {
+  url: string;
+  hasSeatMap: boolean;
+  hasYourTicketsPanel: boolean;
+  hasSubtotal: boolean;
+  hasReserveButton: boolean;
+  reserveEnabled: boolean;
+  hasSeatSelection: boolean;
+  hasSignInHeading: boolean;
+  hasEmailInput: boolean;
+}
+
+/**
+ * Pure stage classifier — operates on a DOM snapshot so it can be unit-tested
+ * without a live browser. Caller collects the snapshot via page.evaluate.
+ */
+export function classifyTicketmasterStage(
+  snap: TicketmasterStageSnapshot,
+): TicketmasterStage {
+  const url = snap.url.toLowerCase();
+  // Account stage: highest priority — never proceed past this boundary even
+  // if other DOM signals are present (Ticketmaster sometimes layers a sign-in
+  // overlay over the seat map).
+  if (
+    /\/auth\.|auth\.ticketmaster|\.ticketmaster\.[^/]+\/identity\b|\/login\b|\/signin\b|create.?account/i.test(url) ||
+    snap.hasSignInHeading ||
+    (snap.hasEmailInput && /sign.?in|create.?account|checkout/i.test(url))
+  ) {
+    return "account";
+  }
+  if (/checkout\.ticketmaster|\.ticketmaster\.[^/]+\/checkout\b|payments\.ticketmaster/i.test(url)) {
+    return "checkout";
+  }
+  if (snap.hasReserveButton && snap.reserveEnabled && snap.hasSeatSelection) {
+    return "ticket_selected";
+  }
+  if (snap.hasSeatMap || snap.hasYourTicketsPanel || snap.hasReserveButton || /\/event\//i.test(url)) {
+    return "event_seat_map";
+  }
+  if (/\/artist\/|\/attraction\/|\/.+-tickets\//i.test(url)) {
+    return "artist_calendar";
+  }
+  return "unknown";
+}
+
+async function readTicketmasterStageSnapshot(page: Page): Promise<TicketmasterStageSnapshot> {
+  const url = (() => { try { return page.url(); } catch { return ""; } })();
+  const dom = await page.evaluate(() => {
+    const isVisible = (el: Element): boolean => {
+      const r = (el as HTMLElement).getBoundingClientRect();
+      return r.width > 0 && r.height > 0;
+    };
+    const hasSeatMap = !!document.querySelector(
+      'canvas, [data-testid*="seat" i], iframe[src*="seat" i], [class*="seat-map" i]'
+    );
+    const allText = (document.body?.innerText ?? "").toLowerCase();
+    const hasYourTicketsPanel = /your tickets/i.test(document.body?.innerText ?? "");
+    const hasSubtotal = /subtotal/i.test(document.body?.innerText ?? "");
+    const buttons = Array.from(document.querySelectorAll<HTMLElement>('button, [role="button"]'))
+      .filter(isVisible);
+    const reservePattern = /^\s*reserve tickets\s*$|^\s*continue to checkout\s*$|^\s*reserve\s*$/i;
+    const reserveBtn = buttons.find(el => reservePattern.test((el.textContent ?? "").trim()));
+    const hasReserveButton = !!reserveBtn;
+    const reserveEnabled = !!reserveBtn && !(
+      reserveBtn.hasAttribute("disabled") ||
+      reserveBtn.getAttribute("aria-disabled") === "true" ||
+      (reserveBtn as HTMLButtonElement).disabled
+    );
+    // "Seat selected" signal: a section/row/seat label rendered in the
+    // right-hand Your Tickets panel — TM uses elements like
+    //   "Section 100", "Row C", "Seat 3" or "100/C/3" patterns.
+    const hasSeatSelection =
+      /section\s+\w+.*\brow\s+\w+|\brow\s+\w+.*\bseat\s+\d+|sec(?:tion)?\s*\d+\s*[\/,]\s*row/i.test(allText) ||
+      /\bsection\b.*\bseat\b/i.test(allText.slice(0, 4000));
+    const hasSignInHeading = !!Array.from(
+      document.querySelectorAll<HTMLElement>('h1, h2, h3, [role="heading"]')
+    ).find(el => /sign in or create account|sign in|create account/i.test((el.textContent ?? "").trim()));
+    const hasEmailInput = !!document.querySelector(
+      'input[type="email"], input[name="email" i], input[id*="email" i], input[autocomplete="email"]'
+    );
+    return {
+      hasSeatMap,
+      hasYourTicketsPanel,
+      hasSubtotal,
+      hasReserveButton,
+      reserveEnabled,
+      hasSeatSelection,
+      hasSignInHeading,
+      hasEmailInput,
+    };
+  }).catch(() => ({
+    hasSeatMap: false,
+    hasYourTicketsPanel: false,
+    hasSubtotal: false,
+    hasReserveButton: false,
+    reserveEnabled: false,
+    hasSeatSelection: false,
+    hasSignInHeading: false,
+    hasEmailInput: false,
+  }));
+  return { url, ...dom };
+}
+
 const MONTH_NAMES = [
   "january", "february", "march", "april", "may", "june",
   "july", "august", "september", "october", "november", "december",
@@ -122,8 +242,16 @@ async function locatorLabel(locator: Locator): Promise<string> {
 }
 
 async function locatorLooksVisible(locator: Locator): Promise<boolean> {
-  const box = await locator.boundingBox({ timeout: 300 }).catch(() => null);
-  return !!box && box.width >= 24 && box.height >= 16;
+  // Stagehand v3 proxy strips locator.boundingBox(); calling it throws
+  // "boundingBox is not a function" synchronously and crashes the RPA.
+  // locator.evaluate() IS exposed — read the bbox client-side via that.
+  const ok = await locator
+    .evaluate((el) => {
+      const r = (el as HTMLElement).getBoundingClientRect();
+      return r.width >= 24 && r.height >= 16;
+    })
+    .catch(() => false);
+  return ok === true;
 }
 
 function targetSlotScore(label: string, target: TargetDateTime): number {
@@ -568,59 +696,117 @@ async function hasTicketmasterSeatSelectionSurface(page: Page): Promise<boolean>
   }).catch(() => false);
 }
 
-/**
- * Poll the "Reserve Tickets" button. Ticketmaster disables it until seats
- * are selected. We give the user up to 10min to pick seats — long enough for
- * anyone, short enough that abandoned sessions don't hang forever.
- */
-async function pollReserveTickets(page: Page, trace: TraceFn, timeoutMs = 8 * 60 * 1000): Promise<boolean> {
-  const deadline = Date.now() + timeoutMs;
-  let lastLog = 0;
-  while (Date.now() < deadline) {
-    const state = await page.evaluate(() => {
-      const isVisible = (el: Element): boolean => {
-        const r = (el as HTMLElement).getBoundingClientRect();
-        return r.width > 0 && r.height > 0;
-      };
-      const btns = Array.from(document.querySelectorAll<HTMLButtonElement>("button, [role='button']"))
-        .filter(isVisible);
-      const pattern = /reserve tickets|checkout|continue to checkout/i;
-      const btn = btns.find(el => pattern.test((el.textContent ?? "").trim()));
-      if (!btn) return { present: false, enabled: false };
-      const disabled = btn.hasAttribute("disabled") ||
-        btn.getAttribute("aria-disabled") === "true" ||
-        (btn as HTMLButtonElement).disabled;
-      return { present: true, enabled: !disabled };
-    }).catch(() => ({ present: false, enabled: false }));
+type ReserveAttempt = "evaluate" | "locator-click" | "locator-evaluate";
 
-    if (state.present && state.enabled) {
-      trace("[tm-rpa] Reserve Tickets enabled — clicking");
-      const clicked = await page.evaluate(() => {
+/**
+ * Multi-strategy click for the Reserve Tickets button. Each strategy is
+ * traced once with kind + outcome; subsequent attempts only fire if the
+ * previous returns false. Order is cheapest-first (DOM evaluate) → richest
+ * (Playwright locator with full event chain).
+ */
+async function clickReserveTickets(page: Page, trace: TraceFn): Promise<boolean> {
+  const strategies: Array<{ kind: ReserveAttempt; fn: () => Promise<boolean> }> = [
+    {
+      kind: "evaluate",
+      fn: () => page.evaluate(() => {
         const isVisible = (el: Element): boolean => {
           const r = (el as HTMLElement).getBoundingClientRect();
           return r.width > 0 && r.height > 0;
         };
-        const btns = Array.from(document.querySelectorAll<HTMLButtonElement>("button, [role='button']"))
+        const btns = Array.from(document.querySelectorAll<HTMLElement>("button, [role='button']"))
           .filter(isVisible);
-        const pattern = /reserve tickets|checkout|continue to checkout/i;
+        const pattern = /^\s*reserve tickets\s*$|^\s*continue to checkout\s*$|^\s*reserve\s*$/i;
         const btn = btns.find(el => pattern.test((el.textContent ?? "").trim()));
         if (!btn) return false;
         btn.scrollIntoView({ behavior: "auto", block: "center" });
         btn.click();
         return true;
-      }).catch(() => false);
-      return clicked;
-    }
+      }).catch(() => false),
+    },
+    {
+      kind: "locator-click",
+      fn: async () => {
+        const loc = page.locator('button:has-text("Reserve Tickets"), [role="button"]:has-text("Reserve Tickets")').first();
+        const count = await loc.count().catch(() => 0);
+        if (count === 0) return false;
+        const visible = await locatorLooksVisible(loc);
+        if (!visible) return false;
+        await loc.scrollIntoViewIfNeeded({ timeout: 800 }).catch(() => {});
+        await loc.click({ timeout: 2000, force: true }).catch(() => {});
+        return true;
+      },
+    },
+    {
+      kind: "locator-evaluate",
+      fn: async () => {
+        const loc = page.locator('button:has-text("Reserve Tickets"), [role="button"]:has-text("Reserve Tickets")').first();
+        const count = await loc.count().catch(() => 0);
+        if (count === 0) return false;
+        const ok = await loc.evaluate((el) => {
+          if ((el as HTMLButtonElement).disabled) return false;
+          (el as HTMLElement).scrollIntoView({ behavior: "auto", block: "center" });
+          (el as HTMLElement).click();
+          return true;
+        }).catch(() => false);
+        return ok === true;
+      },
+    },
+  ];
+  for (const s of strategies) {
+    const ok = await s.fn();
+    trace(`[tm-rpa] Reserve click strategy=${s.kind} → ${ok ? "OK" : "miss"}`);
+    if (ok) return true;
+  }
+  return false;
+}
 
-    // Heartbeat log every 30s so the user sees we're still waiting.
+/**
+ * Poll the "Reserve Tickets" button. Ticketmaster disables it until seats
+ * are selected. We give the user up to 10min to pick seats — long enough for
+ * anyone, short enough that abandoned sessions don't hang forever.
+ *
+ * Returns one of:
+ *   "clicked"     — button became enabled and we clicked it
+ *   "account"     — page transitioned to sign-in / create-account boundary
+ *                   while waiting (user hit Reserve manually OR TM forces auth)
+ *   "timeout"     — neither happened within timeoutMs
+ */
+async function pollReserveTickets(
+  page: Page,
+  trace: TraceFn,
+  timeoutMs = 8 * 60 * 1000,
+): Promise<"clicked" | "account" | "timeout"> {
+  const deadline = Date.now() + timeoutMs;
+  let lastLog = 0;
+  while (Date.now() < deadline) {
+    const snap = await readTicketmasterStageSnapshot(page);
+    const stage = classifyTicketmasterStage(snap);
+
+    // Account stage gets priority — abandon polling immediately.
+    if (stage === "account") {
+      trace(`[tm-rpa] Reserve poll: account boundary reached (url=${snap.url.slice(0, 100)}) — stopping`);
+      return "account";
+    }
+    if (snap.hasReserveButton && snap.reserveEnabled) {
+      trace(`[tm-rpa] Reserve enabled (url=${snap.url.slice(0, 100)} yourTickets=${snap.hasYourTicketsPanel} subtotal=${snap.hasSubtotal} seatSel=${snap.hasSeatSelection}) — clicking`);
+      const ok = await clickReserveTickets(page, trace);
+      if (ok) return "clicked";
+      // Click failed (rare); keep polling.
+    }
     if (Date.now() - lastLog > 20000) {
-      trace(`[tm-rpa] Waiting for user to select seats… Reserve Tickets ${state.present ? "visible but disabled" : "not yet rendered"}`);
+      trace(
+        `[tm-rpa] Reserve poll: stage=${stage} ` +
+        `url=${snap.url.slice(0, 80)} ` +
+        `yourTickets=${snap.hasYourTicketsPanel} subtotal=${snap.hasSubtotal} ` +
+        `reserve=${snap.hasReserveButton ? (snap.reserveEnabled ? "enabled" : "disabled") : "absent"} ` +
+        `seatSelected=${snap.hasSeatSelection}`
+      );
       lastLog = Date.now();
     }
     await page.waitForTimeout(2000);
   }
   trace("[tm-rpa] Reserve Tickets poll timed out (8 min)");
-  return false;
+  return "timeout";
 }
 
 /**
@@ -825,18 +1011,20 @@ export async function bookTicketmasterProgrammatic(
 
   trace(`[tm-rpa] Starting Ticketmaster RPA. Current URL: ${getUrl().slice(0, 140)}`);
 
-  // Auth gate (cookies may have expired).
-  if (getUrl().includes("auth.ticketmaster")) {
-    trace("[tm-rpa] Landed on auth URL — waiting for user sign-in");
-    const ok = await waitForAuthClear(page, trace);
-    if (!ok) {
-      return {
-        reached_checkout: false,
-        currentUrl: getUrl(),
-        needs_login: true,
-        error: "User did not sign in within 10 minutes.",
-      };
-    }
+  // Initial stage assessment — if we landed on the account/sign-in page,
+  // immediately hand off to user. Do NOT block 10 minutes.
+  const startSnap = await readTicketmasterStageSnapshot(page);
+  const startStage = classifyTicketmasterStage(startSnap);
+  trace(`[tm-rpa] Initial stage: ${startStage} (yourTickets=${startSnap.hasYourTicketsPanel} reserve=${startSnap.hasReserveButton}/${startSnap.reserveEnabled} seatMap=${startSnap.hasSeatMap})`);
+  if (startStage === "account") {
+    return {
+      reached_checkout: false,
+      currentUrl: getUrl(),
+      activePage: page,
+      needs_login: true,
+      handoff_ready: true,
+      summary: "Ticketmaster needs you to sign in to continue. Open the live browser to complete sign-in — we won't enter account details for you.",
+    };
   }
 
   const target = parseTargetDateTime(task);
@@ -880,15 +1068,18 @@ export async function bookTicketmasterProgrammatic(
   }
 
   // Auth gate mid-flow (clicking Find Tickets can trigger sign-in).
-  if (getUrl().includes("auth.ticketmaster")) {
-    trace("[tm-rpa] Auth redirect during navigation — waiting for sign-in");
-    const ok = await waitForAuthClear(page, trace);
-    if (!ok) {
+  // Treat as a handoff boundary, not a 10-min blocker.
+  {
+    const midSnap = await readTicketmasterStageSnapshot(page);
+    if (classifyTicketmasterStage(midSnap) === "account") {
+      trace("[tm-rpa] Auth boundary mid-flow (post Find-Tickets) — handing off");
       return {
         reached_checkout: false,
         currentUrl: getUrl(),
+        activePage: page,
         needs_login: true,
-        error: "User did not sign in within 10 minutes.",
+        handoff_ready: true,
+        summary: "Ticketmaster prompted for sign-in after the calendar selection. Open the live browser to sign in — we won't enter account details for you.",
       };
     }
   }
@@ -906,8 +1097,18 @@ export async function bookTicketmasterProgrammatic(
     trace(`[tm-rpa] Ticket options surface not confirmed yet; watching for Reserve/Continue: ${getUrl().slice(0, 140)}`);
   }
 
-  const reserved = await pollReserveTickets(page, trace);
-  if (!reserved) {
+  const pollResult = await pollReserveTickets(page, trace);
+  if (pollResult === "account") {
+    return {
+      reached_checkout: false,
+      currentUrl: getUrl(),
+      activePage: page,
+      needs_login: true,
+      handoff_ready: true,
+      summary: "Ticketmaster moved to the sign-in / create-account step. Open the live browser to sign in — we won't enter account details for you.",
+    };
+  }
+  if (pollResult === "timeout") {
     return {
       reached_checkout: false,
       currentUrl: getUrl(),
@@ -920,16 +1121,19 @@ export async function bookTicketmasterProgrammatic(
   }
 
   // After Reserve Tickets, Ticketmaster may push us through a final auth step.
+  // Same boundary policy: hand off, do NOT block 10 minutes.
   await page.waitForTimeout(1500);
-  if (getUrl().includes("auth.ticketmaster")) {
-    trace("[tm-rpa] Post-reserve auth redirect — waiting for sign-in");
-    const ok = await waitForAuthClear(page, trace);
-    if (!ok) {
+  {
+    const postReserveSnap = await readTicketmasterStageSnapshot(page);
+    if (classifyTicketmasterStage(postReserveSnap) === "account") {
+      trace("[tm-rpa] Post-reserve auth boundary — handing off");
       return {
         reached_checkout: false,
         currentUrl: getUrl(),
+        activePage: page,
         needs_login: true,
-        error: "Sign-in required after Reserve Tickets but user did not complete it.",
+        handoff_ready: true,
+        summary: "Ticketmaster needs you to sign in or create an account before payment. Open the live browser — we won't enter account details for you.",
       };
     }
   }
