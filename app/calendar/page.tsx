@@ -18,6 +18,7 @@ import GlobalNav from "@/components/GlobalNav";
 import MonthCalendar from "@/components/MonthCalendar";
 import { buildCalendarGrid } from "@/lib/calendar-grid";
 import { isActiveJobStatus } from "@/lib/status";
+import { buildTaskWorkspaceHref } from "@/lib/booking-jobs/workspace";
 import type { ExternalCalendarEventsByDay } from "@/lib/calendar-availability";
 import type { BookingJob } from "@/lib/db";
 
@@ -180,7 +181,7 @@ export default function CalendarPage() {
   }
 
   function handleEventClick(jobId: string) {
-    router.push(`/tasks?focus=${encodeURIComponent(jobId)}&view=live`);
+    router.push(buildTaskWorkspaceHref(jobId, "live", "evidence"));
   }
 
   async function disconnectGoogleCalendar() {

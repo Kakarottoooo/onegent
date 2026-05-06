@@ -9,6 +9,10 @@ import {
   JOB_SEMANTIC_DISPLAY,
   STEP_SEMANTIC_DISPLAY,
 } from "@/lib/status";
+import {
+  getTaskEvidenceHref,
+  getTaskWorkspaceHref,
+} from "@/lib/booking-jobs/workspace";
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
 
@@ -301,9 +305,7 @@ export default function InlineJobCard({ jobId, onNeedsTravelDocs, onDeleted }: I
 
         {(isRunning || (isComplete && Date.now() - new Date(job.updated_at).getTime() < 90_000)) && (
           <a
-            href={`/tasks?view=${isRunning ? "live" : "history"}&focus=${job.id}`}
-            target="_blank"
-            rel="noopener noreferrer"
+            href={getTaskEvidenceHref(job)}
             onClick={(e) => e.stopPropagation()}
             style={{ flexShrink: 0, padding: "5px 10px", borderRadius: 8, border: "1px solid var(--gold,#D4A34B)", backgroundColor: "transparent", color: isRunning ? "var(--gold,#D4A34B)" : "rgba(212,163,75,0.5)", fontFamily: "var(--font-dm-sans)", fontSize: 11, fontWeight: 600, whiteSpace: "nowrap", textDecoration: "none", display: "inline-block" }}
           >
@@ -338,9 +340,7 @@ export default function InlineJobCard({ jobId, onNeedsTravelDocs, onDeleted }: I
           ))}
           <div style={{ textAlign: "right", paddingTop: 4 }}>
             <a
-              href={`/tasks?view=${isRunning ? "live" : isComplete ? "history" : "queue"}&focus=${job.id}`}
-              target="_blank"
-              rel="noopener noreferrer"
+              href={getTaskWorkspaceHref(job)}
               style={{ fontFamily: "var(--font-dm-sans)", fontSize: 11, color: "var(--text-muted,#aaa)", textDecoration: "none" }}
             >
               View full details in Tasks →

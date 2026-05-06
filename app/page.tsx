@@ -52,6 +52,7 @@ import {
   type RoomReplaySnapshot,
   type SessionReplaySnapshot,
 } from "@/lib/chat-replay";
+import { buildTaskWorkspaceHref } from "@/lib/booking-jobs/workspace";
 import { useRouter } from "next/navigation";
 import "@/components/chat.css";
 
@@ -1986,7 +1987,7 @@ function HomeInner() {
     // Land on the Live tab with this job focused so the user sees execution
     // progress immediately. Without focus+view=live the page defaults to the
     // Queue tab and the just-started run is hidden one click away.
-    router.push(`/tasks?view=live&focus=${encodeURIComponent(jobId)}`);
+    router.push(buildTaskWorkspaceHref(jobId, "live", "evidence"));
   }
 
   async function submitInlineBookingProfile() {

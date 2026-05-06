@@ -22,6 +22,7 @@
 
 import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
+import { buildTaskWorkspaceHref } from "@/lib/booking-jobs/workspace";
 import type {
   TripPackage,
   TripSelection,
@@ -388,10 +389,7 @@ export default function TripPackageCard(props: TripPackageCardProps) {
         keepalive: true,
       }).catch(() => {});
       props.onBooked?.(data.jobId);
-      // view=live lands on the Live tab so the user sees the agent's real-time
-      // actions (not the Queue tab's static task list). Matches the mental
-      // model: "I just clicked Book, show me what's happening now."
-      router.push(`/tasks?focus=${encodeURIComponent(data.jobId)}&view=live`);
+      router.push(buildTaskWorkspaceHref(data.jobId, "live", "evidence"));
     } catch {
       setSubmitError("Network error — please try again.");
     } finally {

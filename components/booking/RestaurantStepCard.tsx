@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { getBrowserModelForStagehand } from "@/lib/agent-model-config";
+import { buildTaskWorkspaceHref } from "@/lib/booking-jobs/workspace";
 
 interface RestaurantStepCardProps {
   /** Optional default city pre-filled from trip context */
@@ -116,7 +117,7 @@ export default function RestaurantStepCard({
       );
 
       onCreated?.(jobId);
-      router.push(`/tasks?view=live&focus=${encodeURIComponent(jobId)}`);
+      router.push(buildTaskWorkspaceHref(jobId, "live", "evidence"));
     } catch (err) {
       setError(
         err instanceof Error ? err.message : "Something went wrong. Try again."

@@ -18,6 +18,7 @@ import type {
 } from "@/lib/db";
 import type { RecommendationCard, FlightRecommendationCard, ActivityRecommendationCard } from "@/lib/types";
 import { extractOptions, resolveAcceptedOption, tallyVotes } from "@/lib/rooms/proposal-shape";
+import { buildTaskWorkspaceHref } from "@/lib/booking-jobs/workspace";
 import { CARD, CARD_MUTED, CTA, CTA_GHOST, PAGE } from "@/app/_ui/tokens";
 import { EyebrowLabel } from "@/app/_shared/editorial";
 import GlobalNav from "@/components/GlobalNav";
@@ -3019,7 +3020,7 @@ function AcceptedBlock({
                 {clearing ? "Resetting…" : "🔄 Retry booking"}
               </button>
               <button
-                onClick={() => router.push(`/tasks?view=live&focus=${encodeURIComponent(bookingJobId)}`)}
+                onClick={() => router.push(buildTaskWorkspaceHref(bookingJobId, "live", "evidence"))}
                 className={`flex-1 py-2.5 ${CTA_GHOST}`}
               >
                 View log →
@@ -3045,7 +3046,7 @@ function AcceptedBlock({
           {isPayer && (
             <div className="flex gap-2">
               <button
-                onClick={() => router.push(`/tasks?view=live&focus=${encodeURIComponent(bookingJobId)}`)}
+                onClick={() => router.push(buildTaskWorkspaceHref(bookingJobId, "live", "evidence"))}
                 className={`flex-1 py-2.5 ${CTA}`}
               >
                 Open Tasks →
@@ -3074,7 +3075,7 @@ function AcceptedBlock({
           </p>
           {isPayer && (
             <button
-              onClick={() => router.push(`/tasks?view=live&focus=${encodeURIComponent(bookingJobId)}`)}
+              onClick={() => router.push(buildTaskWorkspaceHref(bookingJobId, "live", "evidence"))}
               className={`w-full py-2.5 ${CTA_GHOST}`}
             >
               View details →
@@ -3097,7 +3098,7 @@ function AcceptedBlock({
         </p>
         {isPayer && (
           <button
-            onClick={() => router.push(`/tasks?view=live&focus=${encodeURIComponent(bookingJobId)}`)}
+            onClick={() => router.push(buildTaskWorkspaceHref(bookingJobId, "live", "evidence"))}
             className={`w-full py-2.5 ${CTA}`}
           >
             View booking status →
@@ -3166,7 +3167,7 @@ function AcceptedBlock({
         return;
       }
       const { job_id } = await res.json() as { job_id: string };
-      router.push(`/tasks?view=live&focus=${encodeURIComponent(job_id)}`);
+      router.push(buildTaskWorkspaceHref(job_id, "live", "evidence"));
     } finally {
       setStarting(false);
     }

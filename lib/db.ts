@@ -1,6 +1,7 @@
 import { sql, db } from "@vercel/postgres";
 import { createHash, createHmac, randomBytes, randomUUID } from "node:crypto";
 import { encrypt, decrypt } from "./encryption";
+import type { BookingJobCompactRow } from "./booking-jobs/read-model";
 
 export { sql };
 
@@ -1854,6 +1855,112 @@ export async function getBookingJobsByUser(userId: string, limit = 20): Promise<
   await ensureBookingJobsTable();
   const result = await sql<BookingJob>`
     SELECT * FROM booking_jobs
+    WHERE user_id = ${userId}
+    ORDER BY created_at DESC
+    LIMIT ${limit}
+  `;
+  return result.rows;
+}
+
+export async function getBookingJobCompactRowsBySession(
+  sessionId: string,
+  limit = 100,
+): Promise<BookingJobCompactRow[]> {
+  await ensureBookingJobsTable();
+  const result = await sql<BookingJobCompactRow>`
+    SELECT
+      id,
+      session_id,
+      user_id,
+      trip_label,
+      status,
+      COALESCE(plan_version, 1)::int AS plan_version,
+      created_at,
+      updated_at,
+      completed_at,
+      COALESCE(jsonb_array_length(steps), 0)::int AS step_count,
+      COALESCE((
+        SELECT count(*)::int
+        FROM jsonb_array_elements(steps) AS s(step)
+        WHERE step->>'status' IN ('done', 'awaiting_confirmation')
+      ), 0)::int AS ready_step_count,
+      COALESCE((
+        SELECT count(*)::int
+        FROM jsonb_array_elements(steps) AS s(step)
+        WHERE step ? 'actionItem'
+      ), 0)::int AS action_count,
+      steps->0->>'type' AS first_step_type,
+      steps->0->>'emoji' AS first_step_emoji,
+      steps->0->>'label' AS first_step_label,
+      COALESCE((
+        SELECT step->>'status'
+        FROM jsonb_array_elements(steps) WITH ORDINALITY AS s(step, ord)
+        WHERE COALESCE(step->>'status', '') <> 'pending'
+        ORDER BY ord DESC
+        LIMIT 1
+      ), steps->0->>'status') AS latest_step_status,
+      COALESCE((
+        SELECT bool_or(NULLIF(step->>'handoff_url', '') IS NOT NULL)
+        FROM jsonb_array_elements(steps) AS s(step)
+      ), false) AS has_handoff_url,
+      COALESCE((
+        SELECT bool_or(NULLIF(step->>'session_url', '') IS NOT NULL)
+        FROM jsonb_array_elements(steps) AS s(step)
+      ), false) AS has_session_url
+    FROM booking_jobs
+    WHERE session_id = ${sessionId}
+    ORDER BY created_at DESC
+    LIMIT ${limit}
+  `;
+  return result.rows;
+}
+
+export async function getBookingJobCompactRowsByUser(
+  userId: string,
+  limit = 100,
+): Promise<BookingJobCompactRow[]> {
+  await ensureBookingJobsTable();
+  const result = await sql<BookingJobCompactRow>`
+    SELECT
+      id,
+      session_id,
+      user_id,
+      trip_label,
+      status,
+      COALESCE(plan_version, 1)::int AS plan_version,
+      created_at,
+      updated_at,
+      completed_at,
+      COALESCE(jsonb_array_length(steps), 0)::int AS step_count,
+      COALESCE((
+        SELECT count(*)::int
+        FROM jsonb_array_elements(steps) AS s(step)
+        WHERE step->>'status' IN ('done', 'awaiting_confirmation')
+      ), 0)::int AS ready_step_count,
+      COALESCE((
+        SELECT count(*)::int
+        FROM jsonb_array_elements(steps) AS s(step)
+        WHERE step ? 'actionItem'
+      ), 0)::int AS action_count,
+      steps->0->>'type' AS first_step_type,
+      steps->0->>'emoji' AS first_step_emoji,
+      steps->0->>'label' AS first_step_label,
+      COALESCE((
+        SELECT step->>'status'
+        FROM jsonb_array_elements(steps) WITH ORDINALITY AS s(step, ord)
+        WHERE COALESCE(step->>'status', '') <> 'pending'
+        ORDER BY ord DESC
+        LIMIT 1
+      ), steps->0->>'status') AS latest_step_status,
+      COALESCE((
+        SELECT bool_or(NULLIF(step->>'handoff_url', '') IS NOT NULL)
+        FROM jsonb_array_elements(steps) AS s(step)
+      ), false) AS has_handoff_url,
+      COALESCE((
+        SELECT bool_or(NULLIF(step->>'session_url', '') IS NOT NULL)
+        FROM jsonb_array_elements(steps) AS s(step)
+      ), false) AS has_session_url
+    FROM booking_jobs
     WHERE user_id = ${userId}
     ORDER BY created_at DESC
     LIMIT ${limit}

@@ -4,6 +4,7 @@ import { Suspense, useState, useEffect, useCallback, useMemo, useRef } from "rea
 import { useRouter, useSearchParams } from "next/navigation";
 import dynamic from "next/dynamic";
 import type { BookingJob, BookingJobStep, DecisionLogEntry, AgentFeedbackStats } from "@/lib/db";
+import type { BookingJobListItem } from "@/lib/booking-jobs/read-model";
 import {
   buildFlightInventoryDriftManualMessage,
   isFlightInventoryDriftError,
@@ -18,6 +19,13 @@ import {
   JOB_SEMANTIC_DISPLAY,
   STEP_SEMANTIC_DISPLAY,
 } from "@/lib/status";
+import {
+  getTaskEvidenceHref,
+  getTaskWorkspaceHref,
+  taskWorkspaceViewForJob,
+  type TaskWorkspaceView,
+} from "@/lib/booking-jobs/workspace";
+import { fetchTaskCompactList, fetchTaskDetail, invalidateTaskData } from "./task-data-client";
 import GlobalNav from "@/components/GlobalNav";
 import { ModifyTaskButton } from "@/components/ModifyTaskButton";
 import { getBrowserModelForStagehand } from "@/lib/agent-model-config";
@@ -48,8 +56,6 @@ function getSessionId(): string {
   return id;
 }
 
-type TaskWorkspaceView = "queue" | "live" | "history";
-
 const TASK_WORKSPACE_TABS: Array<{ id: TaskWorkspaceView; label: string }> = [
   { id: "queue", label: "Queue" },
   { id: "live", label: "Live" },
@@ -79,37 +85,21 @@ function TaskWorkspaceSwitch({
   );
 }
 
-function classifyTaskWorkspace(job: BookingJob): TaskWorkspaceView {
-  const sem = computeJobSemanticStatus(job);
-  if (sem === "pending" || sem === "running" || sem === "retrying") return "live";
-  if (sem === "blocked_needs_user_input" || sem === "partially_completed") return "queue";
-  return "history";
-}
-
-function buildJobsRenderSignature(jobs: BookingJob[]): string {
+function buildJobsRenderSignature(jobs: BookingJobListItem[]): string {
   return jobs
     .map((job) => {
-      const steps = job.steps
-        .map((step, index) => [
-          index,
-          step.type,
-          step.label,
-          step.status,
-          step.error ?? "",
-          step.handoff_url ?? "",
-          step.session_url ?? "",
-          step.actionItem?.message ?? "",
-          step.decisionLog?.length ?? 0,
-        ].join(":"))
-        .join(",");
       return [
         job.id,
         job.trip_label,
         job.status,
         job.created_at,
         job.updated_at,
-        job.steps.length,
-        steps,
+        job.step_count,
+        job.ready_step_count,
+        job.action_count,
+        job.latest_step_status ?? "",
+        job.has_handoff_url ? "handoff" : "",
+        job.has_session_url ? "session" : "",
       ].join("|");
     })
     .join(";");
@@ -1191,6 +1181,117 @@ function InterventionBanner({ step, jobId, onOpenLive }: { step: BookingJobStep;
 
 // ── Job card ───────────────────────────────────────────────────────────────────
 
+function CompactJobCard({
+  job,
+  loading,
+  onLoadDetail,
+  onDelete,
+  onOpenLive,
+}: {
+  job: BookingJobListItem;
+  loading: boolean;
+  onLoadDetail: (jobId: string) => void;
+  onDelete: (jobId: string, force?: boolean) => Promise<void>;
+  onOpenLive: (jobId: string) => void;
+}) {
+  const isRunning = job.status === "running";
+  const isComplete = job.status === "done" || job.status === "failed";
+  const isQueued = job.status === "pending" || job.status === "pending_local";
+  const evidence = getTaskEvidenceHref(job);
+  const details = getTaskWorkspaceHref(job);
+  const dotColor = isRunning
+    ? "var(--gold, #D4A34B)"
+    : isQueued
+      ? "var(--text-muted, #aaa)"
+      : job.status === "done"
+        ? "rgba(22,163,74,0.85)"
+        : "rgba(220,38,38,0.75)";
+
+  return (
+    <div className={`job-card${isComplete && job.status === "done" ? " job-card--succeeded" : ""}`}>
+      <div onClick={() => onLoadDetail(job.id)} className="job-card__header">
+        <div
+          className="job-card__status-dot"
+          style={{
+            backgroundColor: dotColor,
+            animation: isRunning ? "jobpulse 1.4s ease-in-out infinite" : "none",
+          }}
+        />
+        <div className="job-card__summary">
+          <p className="job-card__title">{job.trip_label}</p>
+          <div className="job-card__meta-row">
+            <span
+              className="job-card__meta-item job-card__meta-item--strong"
+              style={{ color: dotColor }}
+            >
+              {job.latest_status_label}
+            </span>
+            <span className="job-card__meta-item">
+              {job.ready_step_count}/{job.step_count} ready
+            </span>
+            {job.action_count > 0 && (
+              <span className="job-card__meta-item job-card__meta-item--alert">
+                {job.action_count} need{job.action_count > 1 ? "" : "s"} decision
+              </span>
+            )}
+            <span className="job-card__meta-item job-card__meta-item--muted">
+              {formatDate(job.created_at)}
+            </span>
+          </div>
+        </div>
+        <div className="job-card__actions">
+          <button
+            type="button"
+            onClick={(event) => {
+              event.stopPropagation();
+              onOpenLive(job.id);
+            }}
+            className={`job-card__cta ${isRunning ? "job-card__cta--watch" : "job-card__cta--watch-replay"}`}
+            title={isRunning ? "Watch current evidence" : "Open saved evidence"}
+          >
+            {isRunning ? "Watch" : "Evidence"}
+          </button>
+          <a
+            href={details}
+            onClick={(event) => {
+              event.preventDefault();
+              event.stopPropagation();
+              onLoadDetail(job.id);
+            }}
+            className="job-card__cta job-card__cta--open-all"
+          >
+            {loading ? "Loading..." : "Details"}
+          </a>
+          <a
+            href={evidence}
+            onClick={(event) => event.stopPropagation()}
+            className="sr-only"
+          >
+            Open task evidence
+          </a>
+          <button
+            onClick={(event) => {
+              event.stopPropagation();
+              onDelete(job.id, isRunning);
+            }}
+            title={isRunning ? "Force remove this running task" : "Delete task record"}
+            className={`job-card__delete${isRunning ? " job-card__delete--running" : ""}`}
+          >
+            🗑
+          </button>
+        </div>
+      </div>
+      <div className="job-card__body" style={{ padding: "10px 16px 16px" }}>
+        <p className="job-card__section-label job-card__section-label--muted">
+          {loading
+            ? "Loading task detail..."
+            : "Compact task row loaded. Open Details to load logs and step evidence."}
+        </p>
+      </div>
+    </div>
+  );
+}
+
 function JobCard({ job, onRefresh, sessionId, onOpenLive }: { job: BookingJob; onRefresh?: () => void; sessionId: string; onOpenLive?: (jobId: string) => void }) {
   const [expanded, setExpanded] = useState(job.status !== "pending");
   const [deleting, setDeleting] = useState(false);
@@ -1230,6 +1331,7 @@ function JobCard({ job, onRefresh, sessionId, onOpenLive }: { job: BookingJob; o
     try {
       // POST to start again — start/route.ts detects stuck jobs and auto-resets them
       await fetch(`/api/booking-jobs/${job.id}/start?executor=inline`, { method: "POST" });
+      invalidateTaskData(job.id);
       onRefresh?.();
     } finally {
       setResetting(false);
@@ -1254,6 +1356,7 @@ function JobCard({ job, onRefresh, sessionId, onOpenLive }: { job: BookingJob; o
     try {
       const force = isActiveJobStatus(job.status);
       await fetch(`/api/booking-jobs/${job.id}${force ? "?force=true" : ""}`, { method: "DELETE" });
+      invalidateTaskData(job.id);
       onRefresh?.();
     } finally {
       setDeleting(false);
@@ -1670,7 +1773,7 @@ function MonitoringWorkspacePanel({
   onDeleteJob,
 }: {
   sessionId: string;
-  jobs: BookingJob[];
+  jobs: Array<Pick<BookingJobListItem, "id" | "trip_label">>;
   onOpenJob: (jobId: string) => void;
   onDeleteJob: (jobId: string) => Promise<boolean>;
 }) {
@@ -3015,7 +3118,9 @@ function InsightsPanel({ sessionId }: { sessionId: string }) {
 function TripsPageInner() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const [jobs, setJobs] = useState<BookingJob[]>([]);
+  const [jobs, setJobs] = useState<BookingJobListItem[]>([]);
+  const [jobDetails, setJobDetails] = useState<Record<string, BookingJob>>({});
+  const [detailLoading, setDetailLoading] = useState<Record<string, boolean>>({});
   const [loading, setLoading] = useState(true);
   const [clearingAll, setClearingAll] = useState(false);
   const [showRestaurantForm, setShowRestaurantForm] = useState(false);
@@ -3033,6 +3138,7 @@ function TripsPageInner() {
   const dragHandleRef = useRef<HTMLDivElement>(null);
   const jobRefs = useRef<Record<string, HTMLDivElement | null>>({});
   const jobsRequestRef = useRef<AbortController | null>(null);
+  const detailRequestRef = useRef<Record<string, AbortController>>({});
   const jobsSignatureRef = useRef("");
   // Track current liveJobId in a ref so openLive can read it without closure staleness
   const liveJobIdRef = useRef<string | null>(null);
@@ -3077,22 +3183,46 @@ function TripsPageInner() {
 
   const sessionId = typeof window !== "undefined" ? getSessionId() : "";
 
+  const loadJobDetail = useCallback(async (jobId: string) => {
+    if (!jobId || jobDetails[jobId] || detailLoading[jobId]) return;
+    const controller = new AbortController();
+    detailRequestRef.current[jobId]?.abort();
+    detailRequestRef.current[jobId] = controller;
+    setDetailLoading((prev) => ({ ...prev, [jobId]: true }));
+    try {
+      const job = await fetchTaskDetail(jobId, controller.signal);
+      setJobDetails((prev) => ({ ...prev, [jobId]: job }));
+    } catch (err) {
+      if (!(err instanceof DOMException && err.name === "AbortError")) {
+        /* ignore detail polling failures */
+      }
+    } finally {
+      if (detailRequestRef.current[jobId] === controller) {
+        delete detailRequestRef.current[jobId];
+      }
+      setDetailLoading((prev) => ({ ...prev, [jobId]: false }));
+    }
+  }, [detailLoading, jobDetails]);
+
   const loadJobs = useCallback(async () => {
     const sid = getSessionId();
     jobsRequestRef.current?.abort();
     const controller = new AbortController();
     jobsRequestRef.current = controller;
     try {
-      const res = await fetch(`/api/booking-jobs?session_id=${encodeURIComponent(sid)}`, {
-        cache: "no-store",
-        signal: controller.signal,
-      });
-      const data = await res.json();
-      const nextJobs = data.jobs ?? [];
+      const { jobs: nextJobs } = await fetchTaskCompactList(sid, controller.signal);
       const nextSignature = buildJobsRenderSignature(nextJobs);
       if (jobsSignatureRef.current !== nextSignature) {
         jobsSignatureRef.current = nextSignature;
         setJobs(nextJobs);
+        setJobDetails((prev) => {
+          const ids = new Set(nextJobs.map((job) => job.id));
+          const next: Record<string, BookingJob> = {};
+          for (const [id, job] of Object.entries(prev)) {
+            if (ids.has(id)) next[id] = job;
+          }
+          return next;
+        });
       }
     } catch (err) {
       if (!(err instanceof DOMException && err.name === "AbortError")) {
@@ -3113,8 +3243,10 @@ function TripsPageInner() {
     setClearingAll(true);
     try {
       await fetch(`/api/booking-jobs?session_id=${encodeURIComponent(sid)}`, { method: "DELETE" });
+      invalidateTaskData();
       jobsSignatureRef.current = "";
       setJobs([]);
+      setJobDetails({});
     } finally {
       setClearingAll(false);
     }
@@ -3122,11 +3254,14 @@ function TripsPageInner() {
 
   useEffect(() => {
     loadJobs();
-    return () => jobsRequestRef.current?.abort();
+    return () => {
+      jobsRequestRef.current?.abort();
+      Object.values(detailRequestRef.current).forEach((controller) => controller.abort());
+    };
   }, [loadJobs]);
 
   useEffect(() => {
-    const hasRunning = jobs.some((j) => isActiveJobStatus(j.status));
+    const hasRunning = jobs.some((j) => j.status === "running");
     if (!hasRunning) return;
     const refreshWhenVisible = () => {
       if (document.visibilityState === "visible") {
@@ -3147,15 +3282,22 @@ function TripsPageInner() {
   }, [jobs, selectedJobId]);
 
   useEffect(() => {
+    if (!selectedJobId) return;
+    loadJobDetail(selectedJobId);
+  }, [loadJobDetail, selectedJobId]);
+
+  useEffect(() => {
     const view = searchParams.get("view");
     const focusId = searchParams.get("focus");
+    const panel = searchParams.get("panel");
     const nextView: TaskWorkspaceView =
       view === "live" || view === "history" ? view : "queue";
     setWorkspaceView(nextView);
 
     if (focusId) {
       setSelectedJobId(focusId);
-      if (nextView === "live") {
+      loadJobDetail(focusId);
+      if (nextView === "live" || panel === "evidence") {
         openLive(focusId);
       } else {
         liveJobIdRef.current = null;
@@ -3168,7 +3310,18 @@ function TripsPageInner() {
       liveJobIdRef.current = null;
       setLiveJobId(null);
     }
-  }, [searchParams, openLive]);
+  }, [loadJobDetail, searchParams, openLive]);
+
+  useEffect(() => {
+    const explicitView = searchParams.get("view");
+    const focusId = searchParams.get("focus");
+    if (explicitView || !focusId) return;
+    const focusedJob = jobs.find((job) => job.id === focusId);
+    if (!focusedJob) return;
+    const view = taskWorkspaceViewForJob(focusedJob);
+    setWorkspaceView(view);
+    router.replace(getTaskWorkspaceHref(focusedJob), { scroll: false });
+  }, [jobs, router, searchParams]);
 
   const setWorkspaceViewAndUrl = useCallback((next: TaskWorkspaceView) => {
     setWorkspaceView(next);
@@ -3184,9 +3337,9 @@ function TripsPageInner() {
     visibleActionTotal,
     actionTotal,
   } = useMemo(() => {
-    const nextQueueJobs = jobs.filter((job) => classifyTaskWorkspace(job) === "queue");
-    const nextLiveJobs = jobs.filter((job) => classifyTaskWorkspace(job) === "live");
-    const nextHistoryJobs = jobs.filter((job) => classifyTaskWorkspace(job) === "history");
+    const nextQueueJobs = jobs.filter((job) => taskWorkspaceViewForJob(job) === "queue");
+    const nextLiveJobs = jobs.filter((job) => taskWorkspaceViewForJob(job) === "live");
+    const nextHistoryJobs = jobs.filter((job) => taskWorkspaceViewForJob(job) === "history");
     const nextVisibleJobs =
       workspaceView === "live"
         ? nextLiveJobs
@@ -3198,8 +3351,8 @@ function TripsPageInner() {
       liveJobs: nextLiveJobs,
       historyJobs: nextHistoryJobs,
       visibleJobs: nextVisibleJobs,
-      visibleActionTotal: nextVisibleJobs.reduce((n, j) => n + j.steps.filter((s) => s.actionItem).length, 0),
-      actionTotal: jobs.reduce((n, j) => n + j.steps.filter((s) => s.actionItem).length, 0),
+      visibleActionTotal: nextVisibleJobs.reduce((n, j) => n + j.action_count, 0),
+      actionTotal: jobs.reduce((n, j) => n + j.action_count, 0),
     };
   }, [jobs, workspaceView]);
   const renderedJobs = workspaceView === "live" ? visibleJobs : visibleJobs.slice(0, visibleLimit);
@@ -3413,7 +3566,7 @@ function TripsPageInner() {
                     <div className="flex flex-col gap-1 max-h-[52vh] overflow-y-auto pr-1">
                       {jumpJobs.map((job) => {
                         const isSelected = selectedJobId === job.id;
-                        const blockedCount = job.steps.filter((s) => s.actionItem).length;
+                        const blockedCount = job.action_count;
                         return (
                           <button
                             key={job.id}
@@ -3438,9 +3591,7 @@ function TripsPageInner() {
                               )}
                             </div>
                             <div style={{ marginTop: 2, fontFamily: "var(--font-dm-sans)", fontSize: 11, color: "var(--text-secondary,#666)" }}>
-                              {computeJobSemanticStatus(job) === "awaiting_payment"
-                                ? "Ready to review — confirm on site"
-                                : JOB_SEMANTIC_DISPLAY[computeJobSemanticStatus(job)].label}
+                              {job.latest_status_label}
                             </div>
                           </button>
                         );
@@ -3568,14 +3719,21 @@ function TripsPageInner() {
               sessionId={sessionId}
               jobs={jobs}
               onOpenJob={(jobId) => {
-                setWorkspaceViewAndUrl("queue");
+                const job = jobs.find((candidate) => candidate.id === jobId);
+                setWorkspaceViewAndUrl(job ? taskWorkspaceViewForJob(job) : "queue");
                 requestAnimationFrame(() => focusJob(jobId));
               }}
               onDeleteJob={async (jobId) => {
                 try {
                   const res = await fetch(`/api/booking-jobs/${jobId}`, { method: "DELETE" });
                   if (res.ok) {
+                    invalidateTaskData(jobId);
                     setJobs((prev) => prev.filter((j) => j.id !== jobId));
+                    setJobDetails((prev) => {
+                      const next = { ...prev };
+                      delete next[jobId];
+                      return next;
+                    });
                     return true;
                   }
                   const body = await res.json().catch(() => ({} as { error?: string }));
@@ -3599,7 +3757,9 @@ function TripsPageInner() {
             </div>
           )}
 
-          {renderedJobs.map((job) => (
+          {renderedJobs.map((job) => {
+            const detailJob = jobDetails[job.id];
+            return (
             <div
               key={job.id}
               className="task-job-shell"
@@ -3615,10 +3775,33 @@ function TripsPageInner() {
             >
               {/* D1 Itinerary calendar — only for multi-step jobs. Gives the user
                   a "what's happening when" view while the parallel pipelines run. */}
-              {job.steps.length >= 2 && <TripItineraryCalendar job={job} />}
-              <JobCard job={job} onRefresh={loadJobs} sessionId={sessionId} onOpenLive={openLive} />
+              {detailJob?.steps.length >= 2 && <TripItineraryCalendar job={detailJob} />}
+              {detailJob ? (
+                <JobCard job={detailJob} onRefresh={loadJobs} sessionId={sessionId} onOpenLive={openLive} />
+              ) : (
+                <CompactJobCard
+                  job={job}
+                  loading={Boolean(detailLoading[job.id])}
+                  onLoadDetail={(jobId) => {
+                    setSelectedJobId(jobId);
+                    loadJobDetail(jobId);
+                  }}
+                  onOpenLive={openLive}
+                  onDelete={async (jobId, force) => {
+                    await fetch(`/api/booking-jobs/${jobId}${force ? "?force=true" : ""}`, { method: "DELETE" });
+                    invalidateTaskData(jobId);
+                    setJobs((prev) => prev.filter((candidate) => candidate.id !== jobId));
+                    setJobDetails((prev) => {
+                      const next = { ...prev };
+                      delete next[jobId];
+                      return next;
+                    });
+                  }}
+                />
+              )}
             </div>
-          ))}
+            );
+          })}
 
           {hasMoreVisibleJobs && (
             <button

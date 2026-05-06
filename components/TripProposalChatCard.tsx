@@ -20,6 +20,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
+import { buildTaskWorkspaceHref } from "@/lib/booking-jobs/workspace";
 import type {
   TripPackage,
   HotelRecommendationCard,
@@ -556,7 +557,7 @@ export default function TripProposalChatCard(props: TripProposalChatCardProps) {
   const isExecuting = !!data.room.booking_job_id;
   if (isExecuting) {
     const taskUrl = data.room.booking_job_id
-      ? `/tasks?focus=${encodeURIComponent(data.room.booking_job_id)}&view=live`
+      ? buildTaskWorkspaceHref(data.room.booking_job_id, "live", "evidence")
       : "/tasks";
     return (
       <div style={WRAPPER}>
