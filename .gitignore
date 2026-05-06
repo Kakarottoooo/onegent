@@ -74,3 +74,6 @@ scripts/ralph/.last-branch
 # Local QA evidence (never commit; per-attempt timestamped logs)
 logs/
 worker.log
+
+# Local browser-harness / spike scratch (per-host, never commit)
+.tmp/
