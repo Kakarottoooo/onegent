@@ -20,6 +20,8 @@ export interface TicketmasterRpaResult {
   currentUrl: string;
   activePage?: Page;
   needs_login?: boolean;
+  handoff_ready?: boolean;
+  summary?: string;
   error?: string;
 }
 
@@ -555,6 +557,17 @@ async function waitForEventPage(page: Page, trace: TraceFn, timeoutMs = 15000): 
   return false;
 }
 
+export function isTicketmasterTicketOptionsPage(url: string): boolean {
+  const lower = url.toLowerCase();
+  return /ticketmaster\./i.test(lower) && lower.includes("/event/");
+}
+
+async function hasTicketmasterSeatSelectionSurface(page: Page): Promise<boolean> {
+  return page.evaluate(() => {
+    return !!document.querySelector('canvas, [data-testid*="seat" i], iframe[src*="seat" i], [class*="seat-map" i]');
+  }).catch(() => false);
+}
+
 /**
  * Poll the "Reserve Tickets" button. Ticketmaster disables it until seats
  * are selected. We give the user up to 10min to pick seats — long enough for
@@ -880,16 +893,31 @@ export async function bookTicketmasterProgrammatic(
     }
   }
 
-  // Layer 1B: wait for user to pick seats, then auto-click Reserve Tickets.
-  // If we never made it to /event/, still poll in case user navigated manually.
-  const reserved = await pollReserveTickets(page, trace);
-  if (!reserved) {
+  // Layer 1B: stop once the ticket selection surface is available. Picking a
+  // specific ticket can change price, section, and timing in ways the user
+  // should review directly, so this path produces a clean handoff instead of
+  // waiting for 10 minutes and later marking the task failed.
+  const ticketOptionsReady =
+    isTicketmasterTicketOptionsPage(getUrl()) ||
+    await hasTicketmasterSeatSelectionSurface(page);
+  if (ticketOptionsReady) {
+    trace(`[tm-rpa] Ticket options page ready: ${getUrl().slice(0, 140)}`);
     return {
       reached_checkout: false,
       currentUrl: getUrl(),
-      error: "User did not select seats within 10 minutes (Reserve Tickets never clicked).",
+      activePage: page,
+      handoff_ready: true,
+      summary: "Ticketmaster page is ready for review. Choose the ticket option in the browser to continue.",
     };
   }
+
+  trace(`[tm-rpa] Ticket options were not reached. Current URL: ${getUrl().slice(0, 140)}`);
+  return {
+    reached_checkout: false,
+    currentUrl: getUrl(),
+    handoff_ready: true,
+    summary: "Ticketmaster opened, but the specific ticket options were not selected automatically. Review the page in the browser to continue.",
+  };
 
   // After Reserve Tickets, Ticketmaster may push us through a final auth step.
   await page.waitForTimeout(1500);

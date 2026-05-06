@@ -921,7 +921,9 @@ export async function runBrowserTask(
   // persistent userDataDir, Playwright can't spawn a new Chrome against the
   // same profile — the child exits and the requested CDP port never binds
   // (manifests as ECONNREFUSED 127.0.0.1:<port>). Kill stale siblings first.
-  if (!useCloud && shouldUseRealChrome(input.startUrl)) {
+  const useRealChrome = !useCloud && shouldUseRealChrome(input.startUrl);
+
+  if (useRealChrome) {
     await ensureUserDataDirFree(resolveRealChromeUserDataDir(), trace);
   }
 
@@ -948,11 +950,11 @@ export async function runBrowserTask(
         // Opt-in: route specific providers (e.g. SeatGeek) to the user's real
         // Chrome with a persistent profile to bypass DataDome-style bot
         // fingerprinting. Other providers keep the default Playwright path.
-        ...(shouldUseRealChrome(input.startUrl) && buildRealChromeLaunchOptions(trace)),
+        ...(useRealChrome && buildRealChromeLaunchOptions(trace)),
       },
     }),
   });
-  if (!useCloud && shouldUseRealChrome(input.startUrl)) {
+  if (useRealChrome) {
     trace(`[real-chrome] Activated for startUrl matching USE_REAL_CHROME_FOR="${process.env.USE_REAL_CHROME_FOR}"`);
   }
 
@@ -995,13 +997,23 @@ export async function runBrowserTask(
     if (input.jobId) activeStagehands.set(input.jobId, { close: () => stagehand.close() });
     // v3 API: get active page from context (resolvePage is private)
     const page = stagehand.context.activePage() ?? await stagehand.context.newPage();
-    if (!useCloud) {
-      const viewportWidth = Number(process.env.ONEGENT_BROWSER_VIEWPORT_WIDTH) || 1365;
-      const viewportHeight = Number(process.env.ONEGENT_BROWSER_VIEWPORT_HEIGHT) || 900;
+    if (!useCloud && !useRealChrome) {
+      const envViewportWidth = Number(process.env.ONEGENT_BROWSER_VIEWPORT_WIDTH);
+      const envViewportHeight = Number(process.env.ONEGENT_BROWSER_VIEWPORT_HEIGHT);
+      const screenSize = (!envViewportWidth || !envViewportHeight)
+        ? await getRawPage(page).evaluate(() => ({
+          width: window.screen?.availWidth || window.outerWidth || window.innerWidth,
+          height: window.screen?.availHeight || window.outerHeight || window.innerHeight,
+        })).catch(() => null)
+        : null;
+      const viewportWidth = envViewportWidth || Math.max(1365, Math.min(1920, Math.floor(screenSize?.width || 1600)));
+      const viewportHeight = envViewportHeight || Math.max(900, Math.min(1080, Math.floor(screenSize?.height || 1000)));
       await getRawPage(page)
         .setViewportSize({ width: viewportWidth, height: viewportHeight })
         .then(() => trace(`[viewport] local viewport set to ${viewportWidth}x${viewportHeight}`))
         .catch((error: Error) => trace(`[viewport] setViewportSize skipped: ${error.message?.slice(0, 120)}`));
+    } else if (useRealChrome) {
+      trace("[viewport] real Chrome uses native window viewport (no fixed Playwright viewport)");
     }
     let lastSnapshotSignature: string | null = null;
     const captureLocalSnapshot: CaptureLocalSnapshot = async (
@@ -1634,6 +1646,21 @@ The user will enter CVV and confirm payment themselves.`,
           // Fall through — do NOT return. Normal recovery loop will detect
           // guestDetailsStep via provider.getStageSignals and fill the form.
         } else {
+          if (rpaResult.handoff_ready) {
+            if (!useCloud && input.jobId) {
+              holdBrowserOpenForManualReview(
+                `Local mode: Ticketmaster page is ready for review — keeping browser open for ${Math.round(BROWSER_KEEP_OPEN_MS / 60000)} minutes.`
+              );
+            }
+            return {
+              status: "paused_payment" as const,
+              screenshotBase64: finalScreenshotBase64,
+              handoffUrl: rpaResult.currentUrl || input.startUrl,
+              sessionUrl,
+              summary: rpaResult.summary ?? "Ticketmaster page is ready for review. Continue in the browser.",
+              debugTrace,
+            };
+          }
           if (!useCloud && input.jobId) {
             holdBrowserOpenForManualReview(
               `Local mode: Ticketmaster RPA did not reach checkout — keeping browser open for ${Math.round(BROWSER_KEEP_OPEN_MS / 60000)} minutes for manual review/continue.`

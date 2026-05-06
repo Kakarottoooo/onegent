@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 
-import { parseTargetDateTime } from "@/lib/booking-autopilot/providers/ticketmaster-rpa";
+import {
+  isTicketmasterTicketOptionsPage,
+  parseTargetDateTime,
+} from "@/lib/booking-autopilot/providers/ticketmaster-rpa";
 
 describe("Ticketmaster target date parsing", () => {
   it("parses full activity task dates with year and time", () => {
@@ -29,5 +32,10 @@ describe("Ticketmaster target date parsing", () => {
 
   it("does not pretend abbreviated dateless display text has a target year", () => {
     expect(parseTargetDateTime("Tue, Jun 2, 7:00 PM")).toBeNull();
+  });
+
+  it("recognizes Ticketmaster event pages as user-review ticket options", () => {
+    expect(isTicketmasterTicketOptionsPage("https://www.ticketmaster.com/event/Z7r9jZ1A7jJ7w")).toBe(true);
+    expect(isTicketmasterTicketOptionsPage("https://www.ticketmaster.com/the-lion-king-new-york-ny-tickets/artist/1039581")).toBe(false);
   });
 });
