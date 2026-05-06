@@ -2027,10 +2027,19 @@ The user will enter CVV and confirm payment themselves.`,
           /opentable\.com\/(?:r\/[^/?#]+|[a-z0-9][a-z0-9-]*(?:\?|$|\/?$))/i.test(raw.url()) &&
           !/opentable\.com\/(?:s\?|booking\/|restaurants\/|search\?|account\/|user\/signup|login)/i.test(raw.url());
 
+        const bookingComBoundary = /booking\.com/i.test(raw.url())
+          ? providerClassifyBookingComHotelRuntimeBoundary({
+              currentUrl: raw.url(),
+              pageText: earlyText,
+            })
+          : null;
+
         if (hasTimeSlots) {
           trace(`Pre-AI fast path: matched "${matchedSignal}" but visible time-slot buttons exist — false positive, continuing.`);
         } else if (onOpenTableDetailPage) {
           trace(`Pre-AI fast path: matched "${matchedSignal}" on OpenTable detail page but no visible slots yet — letting detail-page slot picker scroll/probe before fallback.`);
+        } else if (bookingComBoundary && bookingComBoundary.state !== "provider_no_availability") {
+          trace(`Pre-AI fast path: matched "${matchedSignal}" on Booking.com, but boundary=${bookingComBoundary.state} (${bookingComBoundary.reason}) — continuing instead of terminal no_availability.`);
         } else {
           // ── User insight (run 6 dig): "Not available on OpenTable" pages
           // should NOT just return no_availability — the venue may exist on
@@ -2047,7 +2056,11 @@ The user will enter CVV and confirm payment themselves.`,
           //     C2 time ladder (±15/30/60 min) is the right fallback.
           const isVenueNotOnPlatform = VENUE_NOT_ON_PLATFORM_SIGNALS.some((sig) => earlyText.includes(sig));
           const venueLabel = targetHotelName ?? "This venue";
-          const platformLabel = /resy\.com/i.test(raw.url()) ? "Resy" : "OpenTable";
+          const platformLabel = /booking\.com/i.test(raw.url())
+            ? "Booking.com"
+            : /resy\.com/i.test(raw.url())
+              ? "Resy"
+              : "OpenTable";
 
           // When OT renders the alt-day banner ("Next available is Sun, May 10
           // [11:15 AM] [11:30 AM] ..."), pull it out so the summary can give

@@ -228,6 +228,75 @@ export interface BookingComSoftSignInPromptResult {
   clickedText?: string;
 }
 
+const BOOKING_COM_DETAIL_NO_AVAILABILITY_SIGNALS = [
+  "sold out",
+  "fully booked",
+  "no rooms available",
+  "no availability",
+  "no rates available",
+  "unavailable for your dates",
+  "not available for your dates",
+  "we don't have availability",
+  "we do not have availability",
+];
+
+const BOOKING_COM_SEARCH_EMPTY_OR_DEGRADED_SIGNALS = [
+  "no properties match",
+  "no available properties",
+  "no properties available",
+  "no results for your search",
+  "there are no results",
+  "sorry, there are no results",
+  "we couldn't find any properties",
+  "couldn't find properties",
+  "0 properties",
+  "0 results",
+];
+
+function isBookingComHotelDetailUrl(currentUrl: string): boolean {
+  return (
+    currentUrl.includes("booking.com/hotel/") &&
+    !currentUrl.includes("booking.com/searchresults") &&
+    !currentUrl.includes("secure.booking.com") &&
+    !currentUrl.includes("booking.com/book")
+  );
+}
+
+function hasVerifiedBookingComNoAvailabilityEvidence(
+  currentUrl: string,
+  pageText: string,
+  roomEvidence: BookingComRoomSelectionEvidence | null,
+): boolean {
+  const hasExplicitNoAvailability =
+    roomEvidence?.noAvailabilityVisible === true ||
+    containsAny(pageText, BOOKING_COM_DETAIL_NO_AVAILABILITY_SIGNALS);
+  if (!hasExplicitNoAvailability) return false;
+
+  return (
+    isBookingComHotelDetailUrl(currentUrl) ||
+    roomEvidence?.roomSectionVisible === true
+  );
+}
+
+function hasAmbiguousBookingComAvailabilityFailure(
+  currentUrl: string,
+  pageText: string,
+  resultCandidates: BookingComHotelResultCandidateCapture | null,
+  roomEvidence: BookingComRoomSelectionEvidence | null,
+): boolean {
+  const searchUrl = isBookingComSearchResultsUrl(currentUrl);
+  const searchEmpty =
+    containsAny(pageText, BOOKING_COM_SEARCH_EMPTY_OR_DEGRADED_SIGNALS) ||
+    (resultCandidates?.candidateCount === 0 && searchUrl);
+
+  if (searchUrl && searchEmpty) return true;
+
+  const unscopedNoAvailability =
+    containsAny(pageText, BOOKING_COM_DETAIL_NO_AVAILABILITY_SIGNALS) ||
+    roomEvidence?.noAvailabilityVisible === true;
+  return unscopedNoAvailability && !hasVerifiedBookingComNoAvailabilityEvidence(currentUrl, pageText, roomEvidence);
+}
+
 type BookingComGuestFieldKey =
   | "full_name"
   | "first_name"
@@ -613,23 +682,17 @@ export function classifyBookingComHotelRuntimeBoundary(
     };
   }
 
-  if (
-    roomEvidence?.noAvailabilityVisible ||
-    containsAny(pageText, [
-      "sold out",
-      "fully booked",
-      "no rooms available",
-      "no availability",
-      "no rates available",
-      "unavailable for your dates",
-      "no properties match",
-      "no available properties",
-    ]) ||
-    (resultCandidates && resultCandidates.candidateCount === 0 && isBookingComSearchResultsUrl(currentUrl))
-  ) {
+  if (hasVerifiedBookingComNoAvailabilityEvidence(currentUrl, pageText, roomEvidence)) {
     return {
       state: "provider_no_availability",
-      reason: "Booking.com shows no matching available inventory for the approved hotel/dates.",
+      reason: "Booking.com hotel detail or room-selection evidence explicitly shows no rooms for the approved hotel/dates.",
+    };
+  }
+
+  if (hasAmbiguousBookingComAvailabilityFailure(currentUrl, pageText, resultCandidates, roomEvidence)) {
+    return {
+      state: "network_provider_failure",
+      reason: "Booking.com returned empty or unscoped availability evidence; do not terminal no-availability without trying another hotel provider or collecting hotel-detail evidence.",
     };
   }
 

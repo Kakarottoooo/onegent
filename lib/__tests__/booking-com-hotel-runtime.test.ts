@@ -248,7 +248,65 @@ describe("Booking.com hotel runtime evidence helpers", () => {
         pageText: "No properties match your search. No rooms available.",
         resultCandidates: emptyResults,
       }).state,
-    ).toBe("provider_no_availability");
+    ).toBe("network_provider_failure");
+
+    const verifiedNoAvailability = classifyBookingComHotelRuntimeBoundary({
+      currentUrl: "https://www.booking.com/hotel/us/yotel-new-york.html?checkin=2026-06-10&checkout=2026-06-12",
+      pageText: "YOTEL New York Times Square. This property is sold out and unavailable for your dates.",
+      roomEvidence: {
+        roomSectionVisible: false,
+        roomCardCount: 0,
+        roomQuantitySelectCount: 0,
+        selectedRoomCount: 0,
+        reserveControlVisible: false,
+        guestDetailsVisible: false,
+        paymentBoundaryVisible: false,
+        loginOrCaptchaVisible: false,
+        noAvailabilityVisible: true,
+        selectorDriftLikely: false,
+        summary: "noAvailabilityVisible=true",
+      },
+    });
+    expect(verifiedNoAvailability.state).toBe("provider_no_availability");
+    expect(verifiedNoAvailability.reason).toContain("hotel detail");
+
+    const unscopedNoAvailability = classifyBookingComHotelRuntimeBoundary({
+      currentUrl: "https://www.booking.com/searchresults.html?ss=New%20York",
+      pageText: "No availability. No properties match your search.",
+      roomEvidence: {
+        roomSectionVisible: false,
+        roomCardCount: 0,
+        roomQuantitySelectCount: 0,
+        selectedRoomCount: 0,
+        reserveControlVisible: false,
+        guestDetailsVisible: false,
+        paymentBoundaryVisible: false,
+        loginOrCaptchaVisible: false,
+        noAvailabilityVisible: true,
+        selectorDriftLikely: false,
+        summary: "noAvailabilityVisible=true",
+      },
+    });
+    expect(unscopedNoAvailability.state).toBe("network_provider_failure");
+
+    const driftOnlyNoAvailability = classifyBookingComHotelRuntimeBoundary({
+      currentUrl: "https://www.booking.com/searchresults.html?ss=New%20York",
+      pageText: "No availability. No properties match your search.",
+      roomEvidence: {
+        roomSectionVisible: false,
+        roomCardCount: 0,
+        roomQuantitySelectCount: 0,
+        selectedRoomCount: 0,
+        reserveControlVisible: false,
+        guestDetailsVisible: false,
+        paymentBoundaryVisible: false,
+        loginOrCaptchaVisible: false,
+        noAvailabilityVisible: true,
+        selectorDriftLikely: true,
+        summary: "selectorDriftLikely=true; noAvailabilityVisible=true",
+      },
+    });
+    expect(driftOnlyNoAvailability.state).toBe("network_provider_failure");
 
     expect(
       classifyBookingComHotelRuntimeBoundary({

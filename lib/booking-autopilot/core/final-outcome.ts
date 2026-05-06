@@ -1,5 +1,8 @@
 import type { BrowserTaskResult } from "../types";
-import type { BookingComVerificationResult } from "../providers/booking-com";
+import {
+  classifyBookingComHotelRuntimeBoundary,
+  type BookingComVerificationResult,
+} from "../providers/booking-com";
 
 /**
  * Signals that the venue is NOT on this booking platform at all (or the page
@@ -160,6 +163,23 @@ function inferHitPaymentGate(agentMessage: string, assessment: FinalOutcomeAsses
   );
 }
 
+function isBookingComFinalOutcomeUrl(url: string): boolean {
+  const lower = url.toLowerCase();
+  return lower.includes("booking.com") || lower.includes("secure.booking.com");
+}
+
+function classifyBookingComFinalAvailabilityClaim(input: {
+  handoffUrl: string;
+  startUrl: string;
+  pageText: string;
+  resultMessage?: string;
+}) {
+  return classifyBookingComHotelRuntimeBoundary({
+    currentUrl: input.handoffUrl || input.startUrl,
+    pageText: `${input.pageText ?? ""} ${input.resultMessage ?? ""}`,
+  });
+}
+
 export function determineFinalOutcome(
   input: FinalOutcomeInput,
   trace: (message: string) => void
@@ -224,17 +244,17 @@ export function determineFinalOutcome(
   // Detect Booking.com city/region/country redirect — happens when the hotel name can't be
   // found in search, redirecting to a destination overview page instead of search results.
   const bookingCityRedirect =
-    /booking\.com\/(city|region|country|district)\//i.test(handoffUrl) ||
-    /booking\.com\/searchresults\.html.*no_rooms/i.test(handoffUrl);
+    /booking\.com\/(city|region|country|district)\//i.test(handoffUrl);
 
   if (bookingCityRedirect) {
-    trace(`Final state check: Booking.com redirected to city/region page — hotel not findable via search (url="${handoffUrl}").`);
+    trace(`Final state check: Booking.com redirected to city/region page; hotel-specific availability evidence is missing (url="${handoffUrl}").`);
     return {
-      status: "no_availability",
+      status: "error",
       screenshotBase64,
       handoffUrl: startUrl,
       sessionUrl,
-      summary: "This property wasn't found in Booking.com search results — it may not be listed or available for the requested dates.",
+      summary: "Booking.com returned a generic city/region page instead of hotel-specific availability. Try another hotel provider before treating this as no availability.",
+      error: "Booking.com generic city/region redirect - no hotel-detail no-availability evidence.",
       debugTrace,
     };
   }
@@ -295,6 +315,27 @@ export function determineFinalOutcome(
       /unavailable on our site|not available|sold out|fully booked/i.test(agentMessage);
 
     if (listingUnavailable) {
+      if (isBookingComFinalOutcomeUrl(handoffUrl) || isBookingComFinalOutcomeUrl(startUrl)) {
+        const bookingBoundary = classifyBookingComFinalAvailabilityClaim({
+          handoffUrl,
+          startUrl,
+          pageText: assessment.pageText,
+          resultMessage: agentMessage,
+        });
+        if (bookingBoundary.state !== "provider_no_availability") {
+          trace(`Booking.com listing availability claim lacked hotel-detail evidence; boundary=${bookingBoundary.state} - ${bookingBoundary.reason}`);
+          return {
+            status: "error",
+            screenshotBase64,
+            handoffUrl,
+            sessionUrl,
+            summary: "Booking.com did not provide hotel-specific no-availability evidence. Try Expedia or Hotels.com before marking the hotel unavailable.",
+            error: bookingBoundary.reason,
+            debugTrace,
+          };
+        }
+      }
+
       trace("Final state check found that the listing page matched the target hotel but showed it as unavailable for the requested stay.");
       return {
         status: "no_availability",
@@ -310,6 +351,26 @@ export function determineFinalOutcome(
   if (stalledAtDateSelection || stalledAtRoomSelection) {
     const noRooms = containsAny(assessment.pageText, NO_AVAILABILITY_SIGNALS) ||
       /no (rooms?|availability|vacancies|rates?)|sold out|fully booked|not available/i.test(agentMessage);
+    if (noRooms && (isBookingComFinalOutcomeUrl(handoffUrl) || isBookingComFinalOutcomeUrl(startUrl))) {
+      const bookingBoundary = classifyBookingComFinalAvailabilityClaim({
+        handoffUrl,
+        startUrl,
+        pageText: assessment.pageText,
+        resultMessage: agentMessage,
+      });
+      if (bookingBoundary.state !== "provider_no_availability") {
+        trace(`Booking.com room/date availability claim lacked hotel-detail evidence; boundary=${bookingBoundary.state} - ${bookingBoundary.reason}`);
+        return {
+          status: "error",
+          screenshotBase64,
+          handoffUrl,
+          sessionUrl,
+          summary: "Booking.com did not provide enough hotel-specific evidence to call this no availability.",
+          error: bookingBoundary.reason,
+          debugTrace,
+        };
+      }
+    }
     trace(
       stalledAtDateSelection
         ? "Final state check shows the run still stopped at the booking widget date-selection gate."
@@ -431,6 +492,27 @@ export function determineFinalOutcome(
     lowerResultMessage.includes("fully booked");
 
   if (noAvailability) {
+    if (isBookingComFinalOutcomeUrl(handoffUrl) || isBookingComFinalOutcomeUrl(startUrl)) {
+      const bookingBoundary = classifyBookingComFinalAvailabilityClaim({
+        handoffUrl,
+        startUrl,
+        pageText: assessment.pageText,
+        resultMessage,
+      });
+      if (bookingBoundary.state !== "provider_no_availability") {
+        trace(`Booking.com no-availability claim lacked hotel-detail evidence; boundary=${bookingBoundary.state} - ${bookingBoundary.reason}`);
+        return {
+          status: "error",
+          screenshotBase64,
+          handoffUrl,
+          sessionUrl,
+          summary: "Booking.com returned unverified availability evidence without hotel-specific proof. Try another hotel provider before treating this as no availability.",
+          error: bookingBoundary.reason,
+          debugTrace,
+        };
+      }
+    }
+
     trace("Agent confirmed there was no availability for the requested stay.");
     return {
       status: "no_availability",
