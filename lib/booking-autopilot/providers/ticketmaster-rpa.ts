@@ -232,6 +232,30 @@ export function parseTargetDateTime(task: string): TargetDateTime | null {
   };
 }
 
+async function safeScrollIntoView(locator: Locator): Promise<void> {
+  // Stagehand v3 strips locator.scrollIntoViewIfNeeded — observed live:
+  // "best.locator.scrollIntoViewIfNeeded is not a function" → caller crash.
+  // Try Playwright's native first; fall back to locator.evaluate scrollIntoView;
+  // last resort: silently skip (click({force:true}) handles offscreen).
+  const loc = locator as unknown as {
+    scrollIntoViewIfNeeded?: (opts?: { timeout?: number }) => Promise<void>;
+    evaluate?: (fn: (el: Element) => void) => Promise<void>;
+  };
+  try {
+    if (typeof loc.scrollIntoViewIfNeeded === "function") {
+      await loc.scrollIntoViewIfNeeded({ timeout: 800 }).catch(() => { /* ignore */ });
+      return;
+    }
+    if (typeof loc.evaluate === "function") {
+      await loc.evaluate((el: Element) => {
+        (el as HTMLElement).scrollIntoView({ behavior: "auto", block: "center" });
+      }).catch(() => { /* ignore */ });
+    }
+  } catch {
+    // any sync throw — caller can still click({force:true})
+  }
+}
+
 async function locatorLabel(locator: Locator): Promise<string> {
   // Same defensive pattern as locatorLooksVisible — Stagehand v3 may
   // strip textContent / getAttribute on certain locator depths. Type-
@@ -335,7 +359,7 @@ async function openCalendarViewWithLocators(page: Page, trace: TraceFn): Promise
     const label = await locatorLabel(item);
     const lower = label.toLowerCase();
     if (!lower.includes("calendar") || lower.includes("add to calendar")) continue;
-    await item.scrollIntoViewIfNeeded({ timeout: 800 }).catch(() => {});
+    await safeScrollIntoView(item);
     await item.click({ timeout: 1500, force: true }).catch(() => {});
     trace(`[tm-rpa] Opened calendar view via locator: "${label.slice(0, 80)}"`);
     await page.waitForTimeout(700);
@@ -372,7 +396,7 @@ async function clickCalendarSlotWithLocators(page: Page, target: TargetDateTime,
     trace(`[tm-rpa] Locator slot scan found no target; samples=${JSON.stringify(samples)}`);
     return false;
   }
-  await best.locator.scrollIntoViewIfNeeded({ timeout: 1000 }).catch(() => {});
+  await safeScrollIntoView(best.locator);
   await best.locator.click({ timeout: 2000, force: true });
   trace(`[tm-rpa] Calendar slot clicked via locator: "${best.label.slice(0, 100)}" score=${best.score}`);
   return true;
@@ -391,7 +415,7 @@ async function clickFirstAvailableSlotWithLocators(page: Page, trace: TraceFn): 
       samples.push(label.slice(0, 100));
     }
     if (!/^\s*\d{1,2}:\d{2}\s*(am|pm)\b/i.test(label)) continue;
-    await item.scrollIntoViewIfNeeded({ timeout: 1000 }).catch(() => {});
+    await safeScrollIntoView(item);
     await item.click({ timeout: 2000, force: true });
     trace(`[tm-rpa] Fallback slot clicked via locator: "${label.slice(0, 100)}"`);
     return true;
@@ -408,7 +432,7 @@ async function clickFindTicketsWithLocators(page: Page, trace: TraceFn): Promise
     if (!(await locatorLooksVisible(item))) continue;
     const label = await locatorLabel(item);
     if (!/^\s*(find tickets|buy tickets|get tickets)\s*$/i.test(label)) continue;
-    await item.scrollIntoViewIfNeeded({ timeout: 1000 }).catch(() => {});
+    await safeScrollIntoView(item);
     await item.click({ timeout: 2000, force: true });
     trace(`[tm-rpa] Clicked Find Tickets via locator: "${label.slice(0, 80)}"`);
     return true;
@@ -460,7 +484,7 @@ async function clickMonthNavWithLocators(page: Page, wantNext: boolean, trace: T
     if (!(await locatorLooksVisible(item))) continue;
     const label = (await locatorLabel(item)).toLowerCase();
     if (!labels.some((needle) => label === needle || label.includes(needle))) continue;
-    await item.scrollIntoViewIfNeeded({ timeout: 800 }).catch(() => {});
+    await safeScrollIntoView(item);
     await item.click({ timeout: 1500, force: true });
     trace(`[tm-rpa] Month nav clicked via locator: "${label.slice(0, 80)}"`);
     return true;
@@ -787,7 +811,7 @@ async function clickReserveTickets(page: Page, trace: TraceFn): Promise<boolean>
         if (count === 0) return false;
         const visible = await locatorLooksVisible(loc);
         if (!visible) return false;
-        await loc.scrollIntoViewIfNeeded({ timeout: 800 }).catch(() => {});
+        await safeScrollIntoView(loc);
         await loc.click({ timeout: 2000, force: true }).catch(() => {});
         return true;
       },
