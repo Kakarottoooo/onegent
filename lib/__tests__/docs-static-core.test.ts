@@ -165,6 +165,12 @@ describe("docs static guard - core", () => {
     expect(systemDesign).toContain("docs/30-provider-debug/RUNTIME_MIRROR_GUIDE.md");
     expect(bugInbox).toContain("DOG-005");
     expect(bugInbox).toContain("Lion King");
+    expect(bugInbox).toContain("NLU fixture");
+    expect(bugInbox).toContain("Benchmark case");
+    expect(bugInbox).toContain("zh-activity-lion-king-trip-shaped");
+    expect(bugInbox).toContain("activity-lion-king-zh-routing");
+    expect(systemDesign).toContain("scripts/internal-benchmark.ts --mode no-live");
+    expect(systemDesign).toContain("does not prove live model extraction");
     expect(mirrorGuide).toContain("lib/booking-autopilot/**");
     expect(mirrorGuide).toContain("worker/src/booking-autopilot/**");
     expect(mirrorGuide).toContain("npm run check-drift");
