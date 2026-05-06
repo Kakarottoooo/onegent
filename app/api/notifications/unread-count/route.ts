@@ -11,5 +11,8 @@ export async function GET() {
   const { userId } = await auth();
   if (!userId) return NextResponse.json({ count: 0 });
   const count = await getUnreadNotificationCount(userId);
-  return NextResponse.json({ count });
+  return NextResponse.json(
+    { count },
+    { headers: { "Cache-Control": "private, max-age=15, stale-while-revalidate=45" } },
+  );
 }

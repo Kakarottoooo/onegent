@@ -6,14 +6,51 @@ import { useAuthState } from "@/app/contexts/AuthContext";
 
 type LearnFromFavorite = (card: RecommendationCard) => void;
 
+function loadLocalFavorites(): Set<string> {
+  try {
+    const saved = localStorage.getItem("restaurant-favorites");
+    return saved ? new Set(JSON.parse(saved)) : new Set<string>();
+  } catch {
+    return new Set<string>();
+  }
+}
+
+function scheduleIdleWork(callback: () => void, delayMs = 900): () => void {
+  if (typeof window === "undefined") return () => {};
+  let idleId: number | null = null;
+  const timer = window.setTimeout(() => {
+    const idleWindow = window as Window & {
+      requestIdleCallback?: (cb: IdleRequestCallback, opts?: IdleRequestOptions) => number;
+      cancelIdleCallback?: (id: number) => void;
+    };
+    if (idleWindow.requestIdleCallback) {
+      idleId = idleWindow.requestIdleCallback(callback, { timeout: 1500 });
+    } else {
+      callback();
+    }
+  }, delayMs);
+  return () => {
+    window.clearTimeout(timer);
+    if (idleId !== null) {
+      const idleWindow = window as Window & { cancelIdleCallback?: (id: number) => void };
+      idleWindow.cancelIdleCallback?.(idleId);
+    }
+  };
+}
+
 export function useFavorites(learnFromFavorite?: LearnFromFavorite) {
-  const [favorites, setFavorites] = useState<Set<string>>(new Set());
+  const [favorites, setFavorites] = useState<Set<string>>(() =>
+    typeof window === "undefined" ? new Set<string>() : loadLocalFavorites()
+  );
   const { isSignedIn } = useAuthState();
 
   useEffect(() => {
+    setFavorites(loadLocalFavorites());
     if (isSignedIn) {
-      // Load favorites from cloud
-      fetch("/api/user/favorites")
+      return scheduleIdleWork(() => {
+        // Load favorites from cloud after first paint; local cache is enough
+        // for initial render.
+        fetch("/api/user/favorites")
         .then((r) => r.json())
         .then((data) => {
           if (data.favorites) {
@@ -23,19 +60,10 @@ export function useFavorites(learnFromFavorite?: LearnFromFavorite) {
             localStorage.setItem("restaurant-favorites", JSON.stringify([...ids]));
           }
         })
-        .catch(() => {
-          // Fall back to local
-          try {
-            const saved = localStorage.getItem("restaurant-favorites");
-            if (saved) setFavorites(new Set(JSON.parse(saved)));
-          } catch {}
-        });
-    } else {
-      try {
-        const saved = localStorage.getItem("restaurant-favorites");
-        if (saved) setFavorites(new Set(JSON.parse(saved)));
-      } catch {}
+        .catch(() => {});
+      }, 1200);
     }
+    return undefined;
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isSignedIn]);
 

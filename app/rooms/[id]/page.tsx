@@ -21,18 +21,24 @@ import { extractOptions, resolveAcceptedOption, tallyVotes } from "@/lib/rooms/p
 import { CARD, CARD_MUTED, CTA, CTA_GHOST, PAGE } from "@/app/_ui/tokens";
 import { EyebrowLabel } from "@/app/_shared/editorial";
 import GlobalNav from "@/components/GlobalNav";
-import PhotoCarousel from "@/components/PhotoCarousel";
-import FlightCard from "@/components/FlightCard";
-import ActivityCard from "@/components/ActivityCard";
-import {
-  DRTimelineList,
-  deriveDREventsFromSnapshot,
-  type DRTimelineInputs,
-} from "@/components/dr-timeline";
+import { deriveDREventsFromSnapshot } from "@/components/dr-timeline/derive-events";
+import type { DRTimelineInputs } from "@/components/dr-timeline/types";
 
 // Leaflet pulls in `window` — force client-only so the room detail page (a
 // server component by default) doesn't choke during SSR.
 const MapView = dynamic(() => import("@/components/MapView"), { ssr: false });
+const PhotoCarousel = dynamic(() => import("@/components/PhotoCarousel"), {
+  loading: () => null,
+});
+const FlightCard = dynamic(() => import("@/components/FlightCard"), {
+  loading: () => null,
+});
+const ActivityCard = dynamic(() => import("@/components/ActivityCard"), {
+  loading: () => null,
+});
+const DRTimelineList = dynamic(() => import("@/components/dr-timeline/DRTimelineList"), {
+  loading: () => null,
+});
 
 type MyConstraint = {
   budget_max?: number;
@@ -2907,17 +2913,26 @@ function AcceptedBlock({
     bookingJobId ? "loading" : null
   );
   const [clearing, setClearing] = useState(false);
+  const liveJobSignatureRef = useRef("");
 
   useEffect(() => {
-    if (!bookingJobId) { setLiveJob(null); return; }
+    if (!bookingJobId) {
+      liveJobSignatureRef.current = "";
+      setLiveJob(null);
+      return;
+    }
     let cancelled = false;
     let timer: ReturnType<typeof setInterval> | null = null;
     async function poll() {
+      if (typeof document !== "undefined" && document.visibilityState !== "visible") return;
       try {
         const res = await fetch(`/api/booking-jobs/${bookingJobId}`);
         if (cancelled) return;
         if (res.status === 404) {
-          setLiveJob("missing");
+          if (liveJobSignatureRef.current !== "missing") {
+            liveJobSignatureRef.current = "missing";
+            setLiveJob("missing");
+          }
           if (timer) clearInterval(timer);
           // Auto-clean: tell the server to drop the dangling reference so
           // refreshing the room state renders the date form again.
@@ -2930,7 +2945,11 @@ function AcceptedBlock({
         }
         if (!res.ok) return;
         const { job } = await res.json() as { job: LiveJob };
-        setLiveJob(job);
+        const nextSignature = `${job.id}:${job.status}:${job.steps.map((step, index) => `${index}:${step.status}:${step.error ?? ""}`).join("|")}`;
+        if (liveJobSignatureRef.current !== nextSignature) {
+          liveJobSignatureRef.current = nextSignature;
+          setLiveJob(job);
+        }
         // Stop polling once terminal.
         if ((job.status === "done" || job.status === "failed") && timer) {
           clearInterval(timer);
@@ -2939,7 +2958,17 @@ function AcceptedBlock({
     }
     poll();
     timer = setInterval(poll, 4000);
-    return () => { cancelled = true; if (timer) clearInterval(timer); };
+    function pollWhenVisible() {
+      if (document.visibilityState === "visible") {
+        poll();
+      }
+    }
+    document.addEventListener("visibilitychange", pollWhenVisible);
+    return () => {
+      cancelled = true;
+      document.removeEventListener("visibilitychange", pollWhenVisible);
+      if (timer) clearInterval(timer);
+    };
   }, [bookingJobId, roomId, isPayer, refresh]);
 
   async function retryBooking() {
@@ -3456,6 +3485,7 @@ function ChatPanel({
   const [text, setText] = useState("");
   const [sending, setSending] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
+  const messagesSignatureRef = useRef("");
 
   const memberShort = useMemo(() => {
     const map: Record<string, string> = {};
@@ -3466,22 +3496,38 @@ function ChatPanel({
   }, [members, memberProfiles]);
 
   const fetchMessages = useCallback(async () => {
+    if (typeof document !== "undefined" && document.visibilityState !== "visible") return;
     try {
       const res = await fetch(`/api/rooms/${roomId}/messages`);
       if (!res.ok) return;
       const data = await res.json() as { messages: DecisionRoomMessage[] };
-      setMessages(data.messages);
+      const nextSignature = data.messages
+        .map((message) => `${message.id}:${message.created_at}:${message.content.length}`)
+        .join("|");
+      if (messagesSignatureRef.current !== nextSignature) {
+        messagesSignatureRef.current = nextSignature;
+        setMessages(data.messages);
+      }
     } catch { /* noop */ }
   }, [roomId]);
 
   useEffect(() => {
     fetchMessages();
     const i = setInterval(fetchMessages, 4000);
-    return () => clearInterval(i);
+    function refreshWhenVisible() {
+      if (document.visibilityState === "visible") {
+        fetchMessages();
+      }
+    }
+    document.addEventListener("visibilitychange", refreshWhenVisible);
+    return () => {
+      clearInterval(i);
+      document.removeEventListener("visibilitychange", refreshWhenVisible);
+    };
   }, [fetchMessages]);
 
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
+    bottomRef.current?.scrollIntoView({ behavior: "auto", block: "end" });
   }, [messages.length]);
 
   async function send() {

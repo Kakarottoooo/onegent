@@ -17,7 +17,7 @@
  * tick to refresh after creating a new room / session.
  */
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/app/hooks/useAuth";
 import type { DecisionRoomWithMembership } from "@/lib/db";
@@ -78,6 +78,41 @@ export interface SidebarProps {
 const SIDEBAR_WIDTH = 260;
 const SIDEBAR_COLLAPSED_WIDTH = 44;
 const COLLAPSED_STORAGE_KEY = "onegent.sidebar.collapsed";
+const SIDEBAR_CACHE_PREFIX = "onegent.sidebar.cache.v1:";
+
+type SidebarCache = {
+  rooms: DecisionRoomWithMembership[];
+  sessions: SessionRow[];
+};
+
+function sidebarCacheKey(userId: string | null | undefined): string | null {
+  return userId ? `${SIDEBAR_CACHE_PREFIX}${userId}` : null;
+}
+
+function readSidebarCache(userId: string | null | undefined): SidebarCache | null {
+  const key = sidebarCacheKey(userId);
+  if (!key || typeof window === "undefined") return null;
+  try {
+    const raw = window.sessionStorage.getItem(key);
+    return raw ? JSON.parse(raw) as SidebarCache : null;
+  } catch {
+    return null;
+  }
+}
+
+function writeSidebarCache(userId: string | null | undefined, cache: SidebarCache) {
+  const key = sidebarCacheKey(userId);
+  if (!key || typeof window === "undefined") return;
+  try {
+    window.sessionStorage.setItem(key, JSON.stringify(cache));
+  } catch {
+    // Cache is only a perceived-speed optimization.
+  }
+}
+
+function sidebarSignature(items: Array<{ id: string; updated_at?: string | null; title?: string | null }>): string {
+  return items.map((item) => `${item.id}:${item.updated_at ?? ""}:${item.title ?? ""}`).join("|");
+}
 
 export default function Sidebar({ activeSessionId, activeRoomId, reloadTick }: SidebarProps) {
   const { isSignedIn, userId } = useAuth();
@@ -88,6 +123,8 @@ export default function Sidebar({ activeSessionId, activeRoomId, reloadTick }: S
   const [menu, setMenu] = useState<ContextMenuState | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [localReloadTick, setLocalReloadTick] = useState(0);
+  const roomsSignatureRef = useRef("");
+  const sessionsSignatureRef = useRef("");
   // Collapse state persists across reloads. Default expanded; hydrate from
   // localStorage on mount to avoid SSR mismatch.
   const [collapsed, setCollapsed] = useState<boolean>(false);
@@ -113,23 +150,41 @@ export default function Sidebar({ activeSessionId, activeRoomId, reloadTick }: S
   }
 
   const load = useCallback(async () => {
+    if (!userId) return;
     try {
       const [roomsRes, sessionsRes] = await Promise.all([
         fetch("/api/rooms?include_invited=1"),
         fetch("/api/chat/sessions"),
       ]);
+      let cacheRooms: DecisionRoomWithMembership[] | null = null;
+      let cacheSessions: SessionRow[] | null = null;
       if (roomsRes.ok) {
         const data = await roomsRes.json();
-        setRooms(data.rooms ?? []);
+        const nextRooms = data.rooms ?? [];
+        cacheRooms = nextRooms;
+        const nextSignature = sidebarSignature(nextRooms);
+        if (roomsSignatureRef.current !== nextSignature) {
+          roomsSignatureRef.current = nextSignature;
+          setRooms(nextRooms);
+        }
       }
       if (sessionsRes.ok) {
         const data = await sessionsRes.json();
-        setSessions(data.sessions ?? []);
+        const nextSessions = data.sessions ?? [];
+        cacheSessions = nextSessions;
+        const nextSignature = sidebarSignature(nextSessions);
+        if (sessionsSignatureRef.current !== nextSignature) {
+          sessionsSignatureRef.current = nextSignature;
+          setSessions(nextSessions);
+        }
+      }
+      if (cacheRooms && cacheSessions) {
+        writeSidebarCache(userId, { rooms: cacheRooms, sessions: cacheSessions });
       }
     } catch {
       // swallow — sidebar is best-effort UX
     }
-  }, []);
+  }, [userId]);
 
   useEffect(() => {
     if (!isSignedIn) {
@@ -137,8 +192,15 @@ export default function Sidebar({ activeSessionId, activeRoomId, reloadTick }: S
       setSessions([]);
       return;
     }
+    const cached = readSidebarCache(userId);
+    if (cached) {
+      roomsSignatureRef.current = sidebarSignature(cached.rooms);
+      sessionsSignatureRef.current = sidebarSignature(cached.sessions);
+      setRooms(cached.rooms);
+      setSessions(cached.sessions);
+    }
     load();
-  }, [isSignedIn, reloadTick, localReloadTick, load]);
+  }, [isSignedIn, reloadTick, localReloadTick, load, userId]);
 
   // Keep the sidebar fresh so creator-side deletions, new DMs creating
   // invited rooms, etc. show up without a manual refresh. Polls every 30s
@@ -296,6 +358,10 @@ export default function Sidebar({ activeSessionId, activeRoomId, reloadTick }: S
     router.push(`/?session_id=${session.id}`);
   }
 
+  function prefetchHref(href: string) {
+    router.prefetch(href);
+  }
+
   const Inner = (
     <div
       style={{
@@ -395,6 +461,15 @@ export default function Sidebar({ activeSessionId, activeRoomId, reloadTick }: S
                   title={r.title}
                   active={isActive}
                   onClick={() => goRoom(r)}
+                  onPrefetch={() =>
+                    prefetchHref(
+                      r.member_status === "invited"
+                        ? "/rooms"
+                        : r.flow === "chat"
+                          ? `/?room_id=${r.id}`
+                          : `/rooms/${r.id}`,
+                    )
+                  }
                   dimmed={busyId === r.id}
                 />
               );
@@ -407,6 +482,15 @@ export default function Sidebar({ activeSessionId, activeRoomId, reloadTick }: S
                 subtitle={isInvited ? "Invited · tap to accept" : undefined}
                 active={isActive}
                 onClick={() => goRoom(r)}
+                onPrefetch={() =>
+                  prefetchHref(
+                    r.member_status === "invited"
+                      ? "/rooms"
+                      : r.flow === "chat"
+                        ? `/?room_id=${r.id}`
+                        : `/rooms/${r.id}`,
+                  )
+                }
                 onContextMenu={(e) => openRoomMenu(r, e)}
                 dimmed={busyId === r.id}
               />
@@ -430,6 +514,9 @@ export default function Sidebar({ activeSessionId, activeRoomId, reloadTick }: S
                 title={s.title || "Untitled"}
                 active={activeSessionId === s.id}
                 onClick={() => goSession(s)}
+                onPrefetch={() =>
+                  prefetchHref(s.upgraded_room_id ? `/?room_id=${s.upgraded_room_id}` : `/?session_id=${s.id}`)
+                }
                 dimmed={busyId === s.id}
               />
             ) : (
@@ -440,6 +527,9 @@ export default function Sidebar({ activeSessionId, activeRoomId, reloadTick }: S
                 subtitle={sessionSubtitle(s, false)}
                 active={activeSessionId === s.id}
                 onClick={() => goSession(s)}
+                onPrefetch={() =>
+                  prefetchHref(s.upgraded_room_id ? `/?room_id=${s.upgraded_room_id}` : `/?session_id=${s.id}`)
+                }
                 onContextMenu={(e) => openSessionMenu(s, e)}
                 dimmed={busyId === s.id}
               />
@@ -461,6 +551,9 @@ export default function Sidebar({ activeSessionId, activeRoomId, reloadTick }: S
                 subtitle={sessionSubtitle(s, true)}
                 active={activeSessionId === s.id}
                 onClick={() => goSession(s)}
+                onPrefetch={() =>
+                  prefetchHref(s.upgraded_room_id ? `/?room_id=${s.upgraded_room_id}` : `/?session_id=${s.id}`)
+                }
                 onContextMenu={(e) => openSessionMenu(s, e)}
                 dimmed={busyId === s.id}
               />
@@ -682,6 +775,7 @@ function SidebarRow({
   active,
   onClick,
   onContextMenu,
+  onPrefetch,
   dimmed,
 }: {
   icon: string;
@@ -690,6 +784,7 @@ function SidebarRow({
   active?: boolean;
   onClick: () => void;
   onContextMenu?: (e: React.MouseEvent) => void;
+  onPrefetch?: () => void;
   dimmed?: boolean;
 }) {
   return (
@@ -717,6 +812,7 @@ function SidebarRow({
         lineHeight: 1.3,
       }}
       onMouseEnter={(e) => {
+        onPrefetch?.();
         if (!active) e.currentTarget.style.background = "rgba(255,255,255,0.04)";
       }}
       onMouseLeave={(e) => {
@@ -764,12 +860,14 @@ function IconOnlyRow({
   title,
   active,
   onClick,
+  onPrefetch,
   dimmed,
 }: {
   icon: string;
   title: string;
   active?: boolean;
   onClick: () => void;
+  onPrefetch?: () => void;
   dimmed?: boolean;
 }) {
   return (
@@ -796,6 +894,7 @@ function IconOnlyRow({
         justifyContent: "center",
       }}
       onMouseEnter={(e) => {
+        onPrefetch?.();
         if (!active) e.currentTarget.style.background = "rgba(255,255,255,0.04)";
       }}
       onMouseLeave={(e) => {

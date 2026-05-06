@@ -34,6 +34,31 @@
   background: var(--bg);
 }
 
+.task-job-shell {
+  content-visibility: auto;
+  contain-intrinsic-size: 360px;
+}
+
+.task-show-more {
+  align-self: center;
+  min-width: 220px;
+  padding: 10px 16px;
+  border-radius: var(--radius-pill);
+  border: 1px solid var(--border);
+  background: var(--card-2);
+  color: var(--ink-7);
+  font-family: var(--font-dm-sans);
+  font-size: var(--text-sm);
+  font-weight: 700;
+  cursor: pointer;
+  box-shadow: var(--shadow-1);
+}
+
+.task-show-more:hover {
+  border-color: rgba(201, 168, 76, 0.4);
+  color: var(--ink-8);
+}
+
 .task-page__eyebrow {
   font-family: var(--font-dm-sans);
   font-size: var(--text-xs);

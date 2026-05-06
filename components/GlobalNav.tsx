@@ -30,6 +30,29 @@ function getSessionId() {
   return localStorage.getItem("session_id") ?? "";
 }
 
+function scheduleIdleWork(callback: () => void, delayMs = 900): () => void {
+  if (typeof window === "undefined") return () => {};
+  let idleId: number | null = null;
+  const timer = window.setTimeout(() => {
+    const idleWindow = window as Window & {
+      requestIdleCallback?: (cb: IdleRequestCallback, opts?: IdleRequestOptions) => number;
+      cancelIdleCallback?: (id: number) => void;
+    };
+    if (idleWindow.requestIdleCallback) {
+      idleId = idleWindow.requestIdleCallback(callback, { timeout: 1500 });
+    } else {
+      callback();
+    }
+  }, delayMs);
+  return () => {
+    window.clearTimeout(timer);
+    if (idleId !== null) {
+      const idleWindow = window as Window & { cancelIdleCallback?: (id: number) => void };
+      idleWindow.cancelIdleCallback?.(idleId);
+    }
+  };
+}
+
 export default function GlobalNav({ active }: Props) {
   const router = useRouter();
   const [actionCount, setActionCount] = useState(0);
@@ -40,22 +63,30 @@ export default function GlobalNav({ active }: Props) {
   const [accountMenuOpen, setAccountMenuOpen] = useState(false);
 
   useEffect(() => {
+    if (active === "tasks") return;
     const sid = getSessionId();
     if (!sid) return;
+    let cancelled = false;
 
-    fetch(`/api/booking-jobs?session_id=${encodeURIComponent(sid)}`)
-      .then((r) => (r.ok ? r.json() : null))
-      .then((d) => {
-        if (!d?.jobs) return;
-        const actions = d.jobs.reduce(
-          (n: number, j: { steps?: { actionItem?: unknown }[] }) =>
-            n + (j.steps?.filter((s) => s.actionItem).length ?? 0),
-          0,
-        );
-        setActionCount(actions);
-      })
-      .catch(() => {});
-  }, []);
+    const cancelIdle = scheduleIdleWork(() => {
+      fetch(`/api/booking-jobs?session_id=${encodeURIComponent(sid)}&scope=session&lean=1&limit=20`)
+        .then((r) => (r.ok ? r.json() : null))
+        .then((d) => {
+          if (cancelled || !d?.jobs) return;
+          const actions = d.jobs.reduce(
+            (n: number, j: { steps?: { actionItem?: unknown }[] }) =>
+              n + (j.steps?.filter((s) => s.actionItem).length ?? 0),
+            0,
+          );
+          setActionCount(actions);
+        })
+        .catch(() => {});
+    });
+    return () => {
+      cancelled = true;
+      cancelIdle();
+    };
+  }, [active]);
 
   useEffect(() => {
     if (!auth.isSignedIn) {
@@ -78,7 +109,9 @@ export default function GlobalNav({ active }: Props) {
       }
     }
 
-    void loadAccountProfile();
+    const cancelIdle = scheduleIdleWork(() => {
+      void loadAccountProfile();
+    }, 1200);
 
     const refresh = () => {
       void loadAccountProfile();
@@ -86,6 +119,7 @@ export default function GlobalNav({ active }: Props) {
     window.addEventListener("onegent-account-updated", refresh);
     return () => {
       cancelled = true;
+      cancelIdle();
       window.removeEventListener("onegent-account-updated", refresh);
     };
   }, [auth.isSignedIn]);

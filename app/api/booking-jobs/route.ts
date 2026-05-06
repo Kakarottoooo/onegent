@@ -90,14 +90,19 @@ export async function GET(req: NextRequest) {
   if (!sessionId) {
     return NextResponse.json({ error: "session_id required" }, { status: 400 });
   }
+  const lean = req.nextUrl.searchParams.get("lean") === "1";
+  const scope = req.nextUrl.searchParams.get("scope");
+  const limitRaw = req.nextUrl.searchParams.get("limit");
+  const limit = limitRaw ? Math.max(1, Math.min(100, Number(limitRaw) || 0)) : null;
   const userId = await getOptionalClerkUserId();
+  const includeUserJobs = scope !== "session";
 
   let sessionJobs: BookingJob[];
   let userJobs: BookingJob[];
   try {
     [sessionJobs, userJobs] = await Promise.all([
       getBookingJobsBySession(sessionId),
-      userId ? getBookingJobsByUser(userId) : Promise.resolve([] as BookingJob[]),
+      includeUserJobs && userId ? getBookingJobsByUser(userId) : Promise.resolve([] as BookingJob[]),
     ]);
   } catch (err) {
     if (canUseNoDatabaseBookingJobsFallback(err)) {
@@ -109,9 +114,17 @@ export async function GET(req: NextRequest) {
   const byId = new Map<string, BookingJob>();
   for (const j of sessionJobs) byId.set(j.id, j);
   for (const j of userJobs) if (!byId.has(j.id)) byId.set(j.id, j);
-  const jobs = [...byId.values()].sort(
+  const sortedJobs = [...byId.values()].sort(
     (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
   );
+  const jobs = limit ? sortedJobs.slice(0, limit) : sortedJobs;
+
+  if (lean) {
+    return NextResponse.json(
+      { jobs: jobs.map((j) => ({ ...j, own_share: null })) },
+      { headers: { "Cache-Control": "private, max-age=3, stale-while-revalidate=10" } },
+    );
+  }
 
   // Attach `own_share` for the signed-in owner so /tasks can show
   // "Shared · X views" instead of a Share button when an artifact already

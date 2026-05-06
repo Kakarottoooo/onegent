@@ -67,5 +67,8 @@ export async function GET(req: NextRequest) {
   // preserve legacy behavior — only joined rooms.
   const includeInvited = req.nextUrl.searchParams.get("include_invited") === "1";
   const rooms = await listMyDecisionRooms(userId, { archived, includeInvited });
-  return NextResponse.json({ rooms });
+  return NextResponse.json(
+    { rooms },
+    { headers: { "Cache-Control": "private, max-age=8, stale-while-revalidate=30" } },
+  );
 }

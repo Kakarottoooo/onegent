@@ -29,8 +29,33 @@ function saveToStorage<T>(key: string, value: T): void {
   }
 }
 
+function scheduleIdleWork(callback: () => void, delayMs = 1200): () => void {
+  if (typeof window === "undefined") return () => {};
+  let idleId: number | null = null;
+  const timer = window.setTimeout(() => {
+    const idleWindow = window as Window & {
+      requestIdleCallback?: (cb: IdleRequestCallback, opts?: IdleRequestOptions) => number;
+      cancelIdleCallback?: (id: number) => void;
+    };
+    if (idleWindow.requestIdleCallback) {
+      idleId = idleWindow.requestIdleCallback(callback, { timeout: 1500 });
+    } else {
+      callback();
+    }
+  }, delayMs);
+  return () => {
+    window.clearTimeout(timer);
+    if (idleId !== null) {
+      const idleWindow = window as Window & { cancelIdleCallback?: (id: number) => void };
+      idleWindow.cancelIdleCallback?.(idleId);
+    }
+  };
+}
+
 export function useSubscriptions() {
-  const [subscriptions, setSubscriptions] = useState<WatchSubscription[]>([]);
+  const [subscriptions, setSubscriptions] = useState<WatchSubscription[]>(() =>
+    loadFromStorage<WatchSubscription[]>(SUBS_KEY, [])
+  );
   const [newMatches, setNewMatches] = useState<SubscriptionMatch[]>([]);
   const [checked, setChecked] = useState(false);
 
@@ -49,11 +74,13 @@ export function useSubscriptions() {
 
     const seenIds = loadFromStorage<string[]>(SEEN_KEY, []);
 
-    fetch("/api/subscriptions/check", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ subscriptions: subs, seen_product_ids: seenIds }),
-    })
+    return scheduleIdleWork(() => {
+      if (typeof document !== "undefined" && document.visibilityState !== "visible") return;
+      fetch("/api/subscriptions/check", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ subscriptions: subs, seen_product_ids: seenIds }),
+      })
       .then((r) => r.json())
       .then((data: { matches?: SubscriptionMatch[] }) => {
         const matches: SubscriptionMatch[] = data.matches ?? [];
@@ -68,6 +95,7 @@ export function useSubscriptions() {
       .catch(() => {
         // silent — notification is best-effort
       });
+    });
   }, [checked]);
 
   const addSubscription = useCallback((intent: SubscriptionIntent): WatchSubscription | null => {

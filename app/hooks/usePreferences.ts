@@ -278,28 +278,37 @@ function syncProfileToCloud(profile: UserPreferenceProfile) {
   }).catch(() => {});
 }
 
+function scheduleIdleWork(callback: () => void, delayMs = 900): () => void {
+  if (typeof window === "undefined") return () => {};
+  let idleId: number | null = null;
+  const timer = window.setTimeout(() => {
+    const idleWindow = window as Window & {
+      requestIdleCallback?: (cb: IdleRequestCallback, opts?: IdleRequestOptions) => number;
+      cancelIdleCallback?: (id: number) => void;
+    };
+    if (idleWindow.requestIdleCallback) {
+      idleId = idleWindow.requestIdleCallback(callback, { timeout: 1500 });
+    } else {
+      callback();
+    }
+  }, delayMs);
+  return () => {
+    window.clearTimeout(timer);
+    if (idleId !== null) {
+      const idleWindow = window as Window & { cancelIdleCallback?: (id: number) => void };
+      idleWindow.cancelIdleCallback?.(idleId);
+    }
+  };
+}
+
 export function usePreferences() {
-  const [profile, setProfile] = useState<UserPreferenceProfile>(DEFAULT_PROFILE);
+  const [profile, setProfile] = useState<UserPreferenceProfile>(() =>
+    typeof window === "undefined" ? DEFAULT_PROFILE : loadProfile()
+  );
   const [learnedWeights, setLearnedWeights] = useState<LearnedWeights | null>(null);
   const { isSignedIn } = useAuthState();
 
   useEffect(() => {
-    if (isSignedIn) {
-      fetch("/api/user/profile")
-        .then((r) => r.json())
-        .then((data) => {
-          if (data.profile) {
-            const merged = migrateProfile({ ...DEFAULT_PROFILE, ...data.profile });
-            setProfile(merged);
-            saveProfile(merged);
-          } else {
-            setProfile(loadProfile());
-          }
-        })
-        .catch(() => setProfile(loadProfile()));
-    } else {
-      setProfile(loadProfile());
-    }
     try {
       const raw = localStorage.getItem(LEARNED_WEIGHTS_KEY);
       if (raw) {
@@ -307,6 +316,26 @@ export function usePreferences() {
         setLearnedWeights(parsed);
       }
     } catch {}
+
+    if (isSignedIn) {
+      const cancelIdle = scheduleIdleWork(() => {
+        fetch("/api/user/profile")
+          .then((r) => r.json())
+          .then((data) => {
+            if (data.profile) {
+              const merged = migrateProfile({ ...DEFAULT_PROFILE, ...data.profile });
+              setProfile(merged);
+              saveProfile(merged);
+            } else {
+              setProfile(loadProfile());
+            }
+          })
+          .catch(() => setProfile(loadProfile()));
+      }, 1000);
+      return cancelIdle;
+    }
+    setProfile(loadProfile());
+    return undefined;
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isSignedIn]);
 
@@ -468,17 +497,19 @@ export function usePreferences() {
   }, []);
 
   useEffect(() => {
-    try {
-      const raw = localStorage.getItem(FEEDBACK_KEY);
-      if (!raw) return;
-      const records: FeedbackRecord[] = JSON.parse(raw);
-      const unsatisfied = records.filter((r) => !r.satisfied && r.issues?.length);
-      if (unsatisfied.length >= 3) {
-        for (const rec of unsatisfied.slice(0, 5)) {
-          learnFromFeedback(rec);
+    return scheduleIdleWork(() => {
+      try {
+        const raw = localStorage.getItem(FEEDBACK_KEY);
+        if (!raw) return;
+        const records: FeedbackRecord[] = JSON.parse(raw);
+        const unsatisfied = records.filter((r) => !r.satisfied && r.issues?.length);
+        if (unsatisfied.length >= 3) {
+          for (const rec of unsatisfied.slice(0, 5)) {
+            learnFromFeedback(rec);
+          }
         }
-      }
-    } catch {}
+      } catch {}
+    }, 1600);
   }, [learnFromFeedback]);
 
   return {

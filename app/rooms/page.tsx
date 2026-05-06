@@ -1,7 +1,8 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useAuth } from "@/app/hooks/useAuth";
 import type { DecisionRoom, DecisionRoomWithMembership } from "@/lib/db";
 import { CARD, CTA, PAGE } from "@/app/_ui/tokens";
@@ -30,6 +31,35 @@ type RoomContextMenuState = {
   x: number;
   y: number;
 } | null;
+
+const ROOMS_CACHE_PREFIX = "onegent.rooms.list.v1:";
+
+function roomsCacheKey(tab: Tab, userId: string | null | undefined): string {
+  return `${ROOMS_CACHE_PREFIX}${userId ?? "anonymous"}:${tab}`;
+}
+
+function roomSignature(rooms: DecisionRoomWithMembership[]): string {
+  return rooms.map((room) => `${room.id}:${room.updated_at}:${room.status}:${room.member_status}`).join("|");
+}
+
+function readRoomsCache(tab: Tab, userId: string | null | undefined): DecisionRoomWithMembership[] | null {
+  if (typeof window === "undefined") return null;
+  try {
+    const raw = window.sessionStorage.getItem(roomsCacheKey(tab, userId));
+    return raw ? JSON.parse(raw) as DecisionRoomWithMembership[] : null;
+  } catch {
+    return null;
+  }
+}
+
+function writeRoomsCache(tab: Tab, userId: string | null | undefined, rooms: DecisionRoomWithMembership[]) {
+  if (typeof window === "undefined") return;
+  try {
+    window.sessionStorage.setItem(roomsCacheKey(tab, userId), JSON.stringify(rooms));
+  } catch {
+    // Best-effort perceived-speed cache.
+  }
+}
 
 function TabSwitch({
   tab,
@@ -61,6 +91,7 @@ function TabSwitch({
 
 export default function RoomsListPage() {
   const { isSignedIn, userId } = useAuth();
+  const router = useRouter();
   const [tab, setTab] = useState<Tab>("active");
   const [rooms, setRooms] = useState<DecisionRoomWithMembership[] | null>(null);
   const [acceptBusyId, setAcceptBusyId] = useState<string | null>(null);
@@ -69,6 +100,7 @@ export default function RoomsListPage() {
   const [menu, setMenu] = useState<RoomContextMenuState>(null);
   const [actionBusyId, setActionBusyId] = useState<string | null>(null);
   const [bulkDeleteBusy, setBulkDeleteBusy] = useState(false);
+  const roomsSignatureRef = useRef("");
   const menuIsCreator = menu?.room.creator_id === userId;
   const menuCanArchive = !!(
     menuIsCreator &&
@@ -84,7 +116,14 @@ export default function RoomsListPage() {
   useEffect(() => {
     if (!isSignedIn) return;
     let cancelled = false;
-    setRooms(null);
+    const cached = readRoomsCache(tab, userId);
+    if (cached) {
+      roomsSignatureRef.current = roomSignature(cached);
+      setRooms(cached);
+    } else {
+      roomsSignatureRef.current = "";
+      setRooms(null);
+    }
     setError(null);
     (async () => {
       try {
@@ -94,7 +133,15 @@ export default function RoomsListPage() {
         const res = await fetch(url);
         if (!res.ok) throw new Error();
         const data = (await res.json()) as { rooms: DecisionRoomWithMembership[] };
-        if (!cancelled) setRooms(data.rooms);
+        const nextRooms = data.rooms ?? [];
+        if (!cancelled) {
+          writeRoomsCache(tab, userId, nextRooms);
+          const nextSignature = roomSignature(nextRooms);
+          if (roomsSignatureRef.current !== nextSignature) {
+            roomsSignatureRef.current = nextSignature;
+            setRooms(nextRooms);
+          }
+        }
       } catch {
         if (!cancelled) setError("We couldn't load your rooms. Please refresh.");
       }
@@ -102,7 +149,7 @@ export default function RoomsListPage() {
     return () => {
       cancelled = true;
     };
-  }, [isSignedIn, tab, reloadTick]);
+  }, [isSignedIn, tab, reloadTick, userId]);
 
   useEffect(() => {
     if (!menu) return;
@@ -136,9 +183,9 @@ export default function RoomsListPage() {
       // Navigate based on the room's flow — chat-flow rooms live on the
       // homepage; classic rooms render the legacy form UI.
       if (room.flow === "chat") {
-        window.location.href = `/?room_id=${room.id}`;
+        router.push(`/?room_id=${room.id}`);
       } else {
-        window.location.href = `/rooms/${room.id}`;
+        router.push(`/rooms/${room.id}`);
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Couldn't accept the invite.");

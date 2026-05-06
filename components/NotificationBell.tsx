@@ -28,6 +28,29 @@ interface NotifRow {
 
 const POLL_MS = 45_000;
 
+function scheduleIdleWork(callback: () => void): () => void {
+  if (typeof window === "undefined") return () => {};
+  let idleId: number | null = null;
+  const timer = window.setTimeout(() => {
+    const idleWindow = window as Window & {
+      requestIdleCallback?: (cb: IdleRequestCallback, opts?: IdleRequestOptions) => number;
+      cancelIdleCallback?: (id: number) => void;
+    };
+    if (idleWindow.requestIdleCallback) {
+      idleId = idleWindow.requestIdleCallback(callback, { timeout: 2000 });
+    } else {
+      callback();
+    }
+  }, 1500);
+  return () => {
+    window.clearTimeout(timer);
+    if (idleId !== null) {
+      const idleWindow = window as Window & { cancelIdleCallback?: (id: number) => void };
+      idleWindow.cancelIdleCallback?.(idleId);
+    }
+  };
+}
+
 export default function NotificationBell() {
   const auth = useAuth();
   const router = useRouter();
@@ -46,6 +69,7 @@ export default function NotificationBell() {
     }
     let cancelled = false;
     async function tick() {
+      if (typeof document !== "undefined" && document.visibilityState !== "visible") return;
       try {
         const res = await fetch("/api/notifications/unread-count");
         if (!res.ok) return;
@@ -55,10 +79,16 @@ export default function NotificationBell() {
         /* silent */
       }
     }
-    void tick();
+    const cancelIdle = scheduleIdleWork(() => void tick());
     pollRef.current = setInterval(() => void tick(), POLL_MS);
+    const onVisible = () => {
+      if (document.visibilityState === "visible") void tick();
+    };
+    document.addEventListener("visibilitychange", onVisible);
     return () => {
       cancelled = true;
+      cancelIdle();
+      document.removeEventListener("visibilitychange", onVisible);
       if (pollRef.current) clearInterval(pollRef.current);
     };
   }, [auth.isSignedIn]);

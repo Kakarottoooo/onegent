@@ -16,6 +16,7 @@ export function useRoomState(roomId: string | null) {
 
   const fetchSnapshot = useCallback(async (force = false) => {
     if (!roomId) return;
+    if (!force && typeof document !== "undefined" && document.visibilityState !== "visible") return;
     try {
       const url = force || versionRef.current === null
         ? `/api/rooms/${roomId}/state`
@@ -39,8 +40,17 @@ export function useRoomState(roomId: string | null) {
   useEffect(() => {
     if (!roomId) return;
     fetchSnapshot(true);
-    const interval = setInterval(() => fetchSnapshot(false), 3000);
-    return () => clearInterval(interval);
+    const interval = setInterval(() => fetchSnapshot(false), 5000);
+    function refreshWhenVisible() {
+      if (document.visibilityState === "visible") {
+        fetchSnapshot(false);
+      }
+    }
+    document.addEventListener("visibilitychange", refreshWhenVisible);
+    return () => {
+      clearInterval(interval);
+      document.removeEventListener("visibilitychange", refreshWhenVisible);
+    };
   }, [roomId, fetchSnapshot]);
 
   return {

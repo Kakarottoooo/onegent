@@ -59,9 +59,11 @@ export function useTimelineEvents(jobId: string | null): TimelineState {
   // refs so cleanup can read the latest values without re-running the effect
   const esRef = useRef<EventSource | null>(null);
   const pollTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const signatureRef = useRef("");
 
   useEffect(() => {
     if (!jobId) {
+      signatureRef.current = "";
       setState({
         events: [],
         summary: null,
@@ -74,18 +76,25 @@ export function useTimelineEvents(jobId: string | null): TimelineState {
 
     let cancelled = false;
     let useFallback = false;
+    signatureRef.current = "";
 
     function applyPayload(payload: unknown, source: TimelineSource) {
       if (cancelled) return;
       const events = extractEvents(payload);
       const summary = extractSummary(payload);
       const closed = extractClosed(payload);
-      setState({
+      const nextState: TimelineState = {
         events,
         summary,
         closed,
         source,
         loadState: events.length === 0 && !closed ? "empty" : "ready",
+      };
+      const nextSignature = buildTimelineSignature(nextState);
+      if (signatureRef.current === nextSignature) return;
+      signatureRef.current = nextSignature;
+      setState({
+        ...nextState,
       });
     }
 
@@ -128,6 +137,10 @@ export function useTimelineEvents(jobId: string | null): TimelineState {
     /* ── 2. Polling fallback (?format=json) ─────────────────────── */
     async function pollOnce() {
       if (cancelled) return;
+      if (typeof document !== "undefined" && document.visibilityState !== "visible") {
+        pollTimerRef.current = setTimeout(pollOnce, POLLING_INTERVAL_MS);
+        return;
+      }
       try {
         const res = await fetch(
           `/api/booking-jobs/${jobId}/timeline-events?format=json&slim=1`,
@@ -183,8 +196,17 @@ export function useTimelineEvents(jobId: string | null): TimelineState {
 
     startSSE();
 
+    function handleVisibilityChange() {
+      if (document.visibilityState !== "visible" || !useFallback) return;
+      if (pollTimerRef.current) clearTimeout(pollTimerRef.current);
+      pollOnce();
+    }
+
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+
     return () => {
       cancelled = true;
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
       esRef.current?.close();
       esRef.current = null;
       if (pollTimerRef.current) clearTimeout(pollTimerRef.current);
@@ -196,6 +218,18 @@ export function useTimelineEvents(jobId: string | null): TimelineState {
 }
 
 /* ─── Payload normalizers ───────────────────────────────────────────── */
+
+function buildTimelineSignature(state: TimelineState): string {
+  return [
+    state.source,
+    state.closed ? "closed" : "open",
+    state.loadState,
+    state.summary ?? "",
+    state.events
+      .map((event) => `${event.ts}:${event.kind}:${event.snapshotId ?? ""}`)
+      .join("|"),
+  ].join(";");
+}
 
 export function extractEvents(payload: unknown): TimelineEvent[] {
   if (!payload || typeof payload !== "object") return [];

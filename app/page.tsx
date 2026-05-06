@@ -4,22 +4,13 @@ import { useRef, useEffect, useState, useCallback, Suspense } from "react";
 import { useSearchParams } from "next/navigation";
 import dynamic from "next/dynamic";
 import Link from "next/link";
-import RecommendationCard from "@/components/RecommendationCard";
-import HotelCard from "@/components/HotelCard";
-import FlightCard from "@/components/FlightCard";
-import InlineBookingProfileGate from "@/components/booking/InlineBookingProfileGate";
-import InlineJobCard, { type TravelDocRequest } from "@/components/booking/InlineJobCard";
-import { ProfileGapCard } from "@/components/profile-gap";
+import type { TravelDocRequest } from "@/components/booking/InlineJobCard";
 import type { GapSavePayload } from "@/components/profile-gap/types";
 import {
   commitResponseToDecisionInput,
   decideProfileGap,
 } from "@/lib/profile-gap-decision";
 import { makeProfileGapOnSave } from "@/lib/profile-gap-on-save";
-import ActivityCard from "@/components/ActivityCard";
-import ScenarioPlanView from "@/components/ScenarioPlanView";
-import FeedbackPromptCard from "@/components/FeedbackPromptCard";
-import DateRangePicker from "@/components/DateRangePicker";
 import { CITIES_SORTED } from "@/lib/cities";
 import { useChat, LOADING_STEPS } from "@/app/hooks/useChat";
 import { useSubscriptions } from "@/app/hooks/useSubscriptions";
@@ -34,16 +25,13 @@ import { useVoiceInput } from "@/app/hooks/useVoiceInput";
 import { useAuth } from "@/app/hooks/useAuth";
 import { PlanAction, PlanLinkAction, RecommendationCard as CardType, PostExperienceFeedback, FeedbackRecord, Message } from "@/lib/types";
 import type { FeedbackPromptItem } from "@/app/api/feedback-prompts/route";
-import ConfirmCard, { type CommitResponse } from "@/components/ConfirmCard";
-import TripPackageCard from "@/components/TripPackageCard";
-import TripProposalChatCard from "@/components/TripProposalChatCard";
-import ScenarioProposalChatCard from "@/components/ScenarioProposalChatCard";
+import type { CommitResponse } from "@/components/ConfirmCard";
 import type { TripPackage } from "@/lib/types";
 import type { TripIntentState } from "@/lib/agent/trip-intent-state";
 import { useLanguage } from "@/app/hooks/useLanguage";
 import GlobalNav from "@/components/GlobalNav";
 import Sidebar from "@/components/Sidebar";
-import MentionPicker, { type MentionContact } from "@/components/MentionPicker";
+import type { MentionContact } from "@/components/MentionPicker";
 import {
   looksLikeRecommendationAsk,
   getFallbackQuickPicks,
@@ -95,6 +83,51 @@ type InlineBookingProfileState = {
 
 // Leaflet is not SSR-compatible
 const MapView = dynamic(() => import("@/components/MapView"), { ssr: false });
+const RecommendationCard = dynamic(() => import("@/components/RecommendationCard"), {
+  loading: () => null,
+});
+const HotelCard = dynamic(() => import("@/components/HotelCard"), {
+  loading: () => null,
+});
+const FlightCard = dynamic(() => import("@/components/FlightCard"), {
+  loading: () => null,
+});
+const ActivityCard = dynamic(() => import("@/components/ActivityCard"), {
+  loading: () => null,
+});
+const InlineBookingProfileGate = dynamic(() => import("@/components/booking/InlineBookingProfileGate"), {
+  loading: () => null,
+});
+const InlineJobCard = dynamic(() => import("@/components/booking/InlineJobCard"), {
+  loading: () => null,
+});
+const ProfileGapCard = dynamic(() => import("@/components/profile-gap").then((mod) => mod.ProfileGapCard), {
+  loading: () => null,
+});
+const ScenarioPlanView = dynamic(() => import("@/components/ScenarioPlanView"), {
+  loading: () => null,
+});
+const FeedbackPromptCard = dynamic(() => import("@/components/FeedbackPromptCard"), {
+  loading: () => null,
+});
+const DateRangePicker = dynamic(() => import("@/components/DateRangePicker"), {
+  loading: () => null,
+});
+const ConfirmCard = dynamic(() => import("@/components/ConfirmCard"), {
+  loading: () => null,
+});
+const TripPackageCard = dynamic(() => import("@/components/TripPackageCard"), {
+  loading: () => null,
+});
+const TripProposalChatCard = dynamic(() => import("@/components/TripProposalChatCard"), {
+  loading: () => null,
+});
+const ScenarioProposalChatCard = dynamic(() => import("@/components/ScenarioProposalChatCard"), {
+  loading: () => null,
+});
+const MentionPicker = dynamic(() => import("@/components/MentionPicker"), {
+  loading: () => null,
+});
 
 const DEFAULT_EXAMPLES = [
   "Romantic dinner for two, ~$80/person, quiet, no chains, Manhattan",
@@ -134,6 +167,29 @@ const WEIGHT_LABELS: Record<string, string> = {
   location_convenience: "Location",
   preference_match: "Preference match",
 };
+
+function scheduleIdleWork(callback: () => void, delayMs = 900): () => void {
+  if (typeof window === "undefined") return () => {};
+  let idleId: number | null = null;
+  const timer = window.setTimeout(() => {
+    const idleWindow = window as Window & {
+      requestIdleCallback?: (cb: IdleRequestCallback, opts?: IdleRequestOptions) => number;
+      cancelIdleCallback?: (id: number) => void;
+    };
+    if (idleWindow.requestIdleCallback) {
+      idleId = idleWindow.requestIdleCallback(callback, { timeout: 1500 });
+    } else {
+      callback();
+    }
+  }, delayMs);
+  return () => {
+    window.clearTimeout(timer);
+    if (idleId !== null) {
+      const idleWindow = window as Window & { cancelIdleCallback?: (id: number) => void };
+      idleWindow.cancelIdleCallback?.(idleId);
+    }
+  };
+}
 
 function HomeInner() {
   const { profile, updateProfile, learnFromFavorite, learnFromSearch, resetProfile, learnedWeights, learnWeightsFromFeedback, learnFromFeedback, learnFromAgentResponse, updateDiscoveredPreference, removeDiscoveredPreference } =
@@ -941,24 +997,27 @@ function HomeInner() {
     const sid = chat.getSessionId();
     if (!sid) return;
     let cancelled = false;
-    const timer = window.setTimeout(() => {
-      fetch(`/api/booking-jobs?session_id=${encodeURIComponent(sid)}`)
+    const cancelIdle = scheduleIdleWork(() => {
+      if (typeof document !== "undefined" && document.visibilityState !== "visible") return;
+      fetch(`/api/booking-jobs?session_id=${encodeURIComponent(sid)}&scope=session&lean=1&limit=3`)
         .then((r) => r.ok ? r.json() : null)
         .then((d) => {
           if (!cancelled && d?.jobs) setRecentJobs(d.jobs.slice(0, 3));
         })
         .catch(() => {});
-    }, 600);
+    }, 900);
     return () => {
       cancelled = true;
-      window.clearTimeout(timer);
+      cancelIdle();
     };
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // Phase 4.6: Call learnWeightsFromFeedback on mount
   useEffect(() => {
-    learnWeightsFromFeedback();
+    return scheduleIdleWork(() => {
+      learnWeightsFromFeedback();
+    }, 1400);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -982,10 +1041,11 @@ function HomeInner() {
       setAllContacts([]);
     }
     if (hasMessages) return;
-    const timer = window.setTimeout(() => {
+    const cancelIdle = scheduleIdleWork(() => {
+      if (typeof document !== "undefined" && document.visibilityState !== "visible") return;
       void loadRecentContacts();
-    }, 900);
-    return () => window.clearTimeout(timer);
+    }, 1200);
+    return cancelIdle;
   }, [auth.isSignedIn, auth.userId, hasMessages, loadRecentContacts]);
 
   // Full contacts list for the @-mention picker. It is not needed for the
@@ -1011,8 +1071,11 @@ function HomeInner() {
   // Phase 5.3: Migrate localStorage data to cloud after sign-in
   useEffect(() => {
     if (auth.isSignedIn) {
-      auth.migrateLocalDataToCloud();
+      return scheduleIdleWork(() => {
+        auth.migrateLocalDataToCloud();
+      }, 1800);
     }
+    return undefined;
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [auth.isSignedIn]);
 
@@ -1047,7 +1110,8 @@ function HomeInner() {
   useEffect(() => {
     const sessionId = chat.getSessionId();
     let cancelled = false;
-    const timer = window.setTimeout(() => {
+    const cancelIdle = scheduleIdleWork(() => {
+      if (typeof document !== "undefined" && document.visibilityState !== "visible") return;
       fetch(`/api/feedback-prompts?session_id=${encodeURIComponent(sessionId)}`)
         .then((r) => r.ok ? r.json() : null)
         .then((data) => {
@@ -1056,10 +1120,10 @@ function HomeInner() {
           }
         })
         .catch(() => {});
-    }, 1000);
+    }, 1600);
     return () => {
       cancelled = true;
-      window.clearTimeout(timer);
+      cancelIdle();
     };
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);

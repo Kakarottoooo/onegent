@@ -51,25 +51,42 @@ export function useSnapshots(
     loadState: jobId ? "loading" : "idle",
   });
   const pollTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const signatureRef = useRef("");
 
   useEffect(() => {
     if (!jobId) {
+      signatureRef.current = "";
       setState({ snapshots: [], loadState: "idle" });
       return;
     }
 
     let cancelled = false;
+    signatureRef.current = "";
+
+    function scheduleNext() {
+      if (!cancelled && !opts.paused) {
+        pollTimerRef.current = setTimeout(fetchOnce, POLL_INTERVAL_MS);
+      }
+    }
 
     async function fetchOnce() {
       if (cancelled) return;
+      if (typeof document !== "undefined" && document.visibilityState !== "visible") {
+        scheduleNext();
+        return;
+      }
       try {
         const result = await fetchSnapshotsWithFallback(jobId!);
         if (cancelled) return;
-        setState({
-          snapshots: result.snapshots,
-          loadState: result.snapshots.length === 0 ? "empty" : "ready",
-          diagnostics: result.diagnostics,
-        });
+        const nextSignature = buildSnapshotsSignature(result.snapshots, result.diagnostics);
+        if (signatureRef.current !== nextSignature) {
+          signatureRef.current = nextSignature;
+          setState({
+            snapshots: result.snapshots,
+            loadState: result.snapshots.length === 0 ? "empty" : "ready",
+            diagnostics: result.diagnostics,
+          });
+        }
       } catch (err) {
         if (cancelled) return;
         setState((prev) => ({
@@ -81,22 +98,41 @@ export function useSnapshots(
           diagnostics: normalizeSnapshotError(err),
         }));
       } finally {
-        if (!cancelled && !opts.paused) {
-          pollTimerRef.current = setTimeout(fetchOnce, POLL_INTERVAL_MS);
-        }
+        scheduleNext();
       }
     }
 
     fetchOnce();
 
+    function handleVisibilityChange() {
+      if (document.visibilityState !== "visible") return;
+      if (pollTimerRef.current) clearTimeout(pollTimerRef.current);
+      fetchOnce();
+    }
+
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+
     return () => {
       cancelled = true;
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
       if (pollTimerRef.current) clearTimeout(pollTimerRef.current);
       pollTimerRef.current = null;
     };
   }, [jobId, opts.paused]);
 
   return state;
+}
+
+function buildSnapshotsSignature(
+  snapshots: ExecutionSnapshot[],
+  diagnostics?: SnapshotDiagnostics,
+): string {
+  return [
+    diagnostics?.source ?? "none",
+    diagnostics?.canonicalStatus ?? "",
+    diagnostics?.compatStatus ?? "",
+    snapshots.map((snapshot) => `${snapshot.id}:${snapshot.ts}:${snapshot.src.length}`).join("|"),
+  ].join(";");
 }
 
 /* ─── Endpoint dance ───────────────────────────────────────────────── */

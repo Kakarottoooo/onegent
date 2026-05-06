@@ -1,7 +1,8 @@
 ﻿"use client";
 
-import { Suspense, useState, useEffect, useCallback, useRef } from "react";
+import { Suspense, useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
+import dynamic from "next/dynamic";
 import type { BookingJob, BookingJobStep, DecisionLogEntry, AgentFeedbackStats } from "@/lib/db";
 import {
   buildFlightInventoryDriftManualMessage,
@@ -18,14 +19,26 @@ import {
   STEP_SEMANTIC_DISPLAY,
 } from "@/lib/status";
 import GlobalNav from "@/components/GlobalNav";
-import TripItineraryCalendar from "@/components/TripItineraryCalendar";
-import RestaurantStepCard from "@/components/booking/RestaurantStepCard";
-import { TaskTimelinePanel } from "@/components/task-timeline";
-import ShareTripModal from "@/components/ShareTripModal";
-import AddToTripModal from "@/components/AddToTripModal";
 import { ModifyTaskButton } from "@/components/ModifyTaskButton";
 import { getBrowserModelForStagehand } from "@/lib/agent-model-config";
 import "./tasks.css";
+
+const TripItineraryCalendar = dynamic(() => import("@/components/TripItineraryCalendar"), {
+  loading: () => null,
+});
+const RestaurantStepCard = dynamic(() => import("@/components/booking/RestaurantStepCard"), {
+  loading: () => null,
+});
+const TaskTimelinePanel = dynamic(
+  () => import("@/components/task-timeline").then((mod) => mod.TaskTimelinePanel),
+  { loading: () => null },
+);
+const ShareTripModal = dynamic(() => import("@/components/ShareTripModal"), {
+  loading: () => null,
+});
+const AddToTripModal = dynamic(() => import("@/components/AddToTripModal"), {
+  loading: () => null,
+});
 
 
 function getSessionId(): string {
@@ -71,6 +84,35 @@ function classifyTaskWorkspace(job: BookingJob): TaskWorkspaceView {
   if (sem === "pending" || sem === "running" || sem === "retrying") return "live";
   if (sem === "blocked_needs_user_input" || sem === "partially_completed") return "queue";
   return "history";
+}
+
+function buildJobsRenderSignature(jobs: BookingJob[]): string {
+  return jobs
+    .map((job) => {
+      const steps = job.steps
+        .map((step, index) => [
+          index,
+          step.type,
+          step.label,
+          step.status,
+          step.error ?? "",
+          step.handoff_url ?? "",
+          step.session_url ?? "",
+          step.actionItem?.message ?? "",
+          step.decisionLog?.length ?? 0,
+        ].join(":"))
+        .join(",");
+      return [
+        job.id,
+        job.trip_label,
+        job.status,
+        job.created_at,
+        job.updated_at,
+        job.steps.length,
+        steps,
+      ].join("|");
+    })
+    .join(";");
 }
 
 function timeAgo(iso: string | null | undefined): string {
@@ -2978,6 +3020,7 @@ function TripsPageInner() {
   const [clearingAll, setClearingAll] = useState(false);
   const [showRestaurantForm, setShowRestaurantForm] = useState(false);
   const [workspaceView, setWorkspaceView] = useState<TaskWorkspaceView>("queue");
+  const [visibleLimit, setVisibleLimit] = useState(24);
 
   // ── Live panel state ──────────────────────────────────────────────────────────
   const [liveJobId, setLiveJobId] = useState<string | null>(null);
@@ -2989,6 +3032,8 @@ function TripsPageInner() {
   const livePanelRef = useRef<HTMLDivElement>(null);
   const dragHandleRef = useRef<HTMLDivElement>(null);
   const jobRefs = useRef<Record<string, HTMLDivElement | null>>({});
+  const jobsRequestRef = useRef<AbortController | null>(null);
+  const jobsSignatureRef = useRef("");
   // Track current liveJobId in a ref so openLive can read it without closure staleness
   const liveJobIdRef = useRef<string | null>(null);
   const [selectedJobId, setSelectedJobId] = useState<string | null>(null);
@@ -3034,12 +3079,31 @@ function TripsPageInner() {
 
   const loadJobs = useCallback(async () => {
     const sid = getSessionId();
+    jobsRequestRef.current?.abort();
+    const controller = new AbortController();
+    jobsRequestRef.current = controller;
     try {
-      const res = await fetch(`/api/booking-jobs?session_id=${encodeURIComponent(sid)}`);
+      const res = await fetch(`/api/booking-jobs?session_id=${encodeURIComponent(sid)}`, {
+        cache: "no-store",
+        signal: controller.signal,
+      });
       const data = await res.json();
-      setJobs(data.jobs ?? []);
-    } catch { /* ignore */ }
-    finally { setLoading(false); }
+      const nextJobs = data.jobs ?? [];
+      const nextSignature = buildJobsRenderSignature(nextJobs);
+      if (jobsSignatureRef.current !== nextSignature) {
+        jobsSignatureRef.current = nextSignature;
+        setJobs(nextJobs);
+      }
+    } catch (err) {
+      if (!(err instanceof DOMException && err.name === "AbortError")) {
+        /* ignore transient polling failures */
+      }
+    } finally {
+      if (jobsRequestRef.current === controller) {
+        jobsRequestRef.current = null;
+      }
+      setLoading(false);
+    }
   }, []);
 
   async function handleClearAll() {
@@ -3049,19 +3113,32 @@ function TripsPageInner() {
     setClearingAll(true);
     try {
       await fetch(`/api/booking-jobs?session_id=${encodeURIComponent(sid)}`, { method: "DELETE" });
+      jobsSignatureRef.current = "";
       setJobs([]);
     } finally {
       setClearingAll(false);
     }
   }
 
-  useEffect(() => { loadJobs(); }, [loadJobs]);
+  useEffect(() => {
+    loadJobs();
+    return () => jobsRequestRef.current?.abort();
+  }, [loadJobs]);
 
   useEffect(() => {
     const hasRunning = jobs.some((j) => isActiveJobStatus(j.status));
     if (!hasRunning) return;
-    const timer = setInterval(loadJobs, 5000);
-    return () => clearInterval(timer);
+    const refreshWhenVisible = () => {
+      if (document.visibilityState === "visible") {
+        loadJobs();
+      }
+    };
+    const timer = setInterval(refreshWhenVisible, 7000);
+    document.addEventListener("visibilitychange", refreshWhenVisible);
+    return () => {
+      clearInterval(timer);
+      document.removeEventListener("visibilitychange", refreshWhenVisible);
+    };
   }, [jobs, loadJobs]);
 
   useEffect(() => {
@@ -3099,17 +3176,35 @@ function TripsPageInner() {
     router.replace(href, { scroll: false });
   }, [router]);
 
-  const queueJobs = jobs.filter((job) => classifyTaskWorkspace(job) === "queue");
-  const liveJobs = jobs.filter((job) => classifyTaskWorkspace(job) === "live");
-  const historyJobs = jobs.filter((job) => classifyTaskWorkspace(job) === "history");
-  const visibleJobs =
-    workspaceView === "live"
-      ? liveJobs
-      : workspaceView === "history"
-        ? historyJobs
-        : queueJobs;
-  const visibleActionTotal = visibleJobs.reduce((n, j) => n + j.steps.filter((s) => s.actionItem).length, 0);
-  const actionTotal = jobs.reduce((n, j) => n + j.steps.filter((s) => s.actionItem).length, 0);
+  const {
+    queueJobs,
+    liveJobs,
+    historyJobs,
+    visibleJobs,
+    visibleActionTotal,
+    actionTotal,
+  } = useMemo(() => {
+    const nextQueueJobs = jobs.filter((job) => classifyTaskWorkspace(job) === "queue");
+    const nextLiveJobs = jobs.filter((job) => classifyTaskWorkspace(job) === "live");
+    const nextHistoryJobs = jobs.filter((job) => classifyTaskWorkspace(job) === "history");
+    const nextVisibleJobs =
+      workspaceView === "live"
+        ? nextLiveJobs
+        : workspaceView === "history"
+          ? nextHistoryJobs
+          : nextQueueJobs;
+    return {
+      queueJobs: nextQueueJobs,
+      liveJobs: nextLiveJobs,
+      historyJobs: nextHistoryJobs,
+      visibleJobs: nextVisibleJobs,
+      visibleActionTotal: nextVisibleJobs.reduce((n, j) => n + j.steps.filter((s) => s.actionItem).length, 0),
+      actionTotal: jobs.reduce((n, j) => n + j.steps.filter((s) => s.actionItem).length, 0),
+    };
+  }, [jobs, workspaceView]);
+  const renderedJobs = workspaceView === "live" ? visibleJobs : visibleJobs.slice(0, visibleLimit);
+  const jumpJobs = visibleJobs.slice(0, 60);
+  const hasMoreVisibleJobs = renderedJobs.length < visibleJobs.length;
   const workspaceCopy =
     workspaceView === "live"
       ? {
@@ -3147,8 +3242,20 @@ function TripsPageInner() {
                 : `${queueJobs.length} task${queueJobs.length === 1 ? "" : "s"} in queue.`,
           };
 
-  const liveJob = jobs.find((j) => j.id === liveJobId);
+  const liveJob = useMemo(() => jobs.find((j) => j.id === liveJobId), [jobs, liveJobId]);
   const rightPct = liveJobId ? (100 - splitPct) : 0;
+
+  useEffect(() => {
+    setVisibleLimit(24);
+  }, [workspaceView]);
+
+  useEffect(() => {
+    if (!selectedJobId || workspaceView === "live") return;
+    const selectedIndex = visibleJobs.findIndex((job) => job.id === selectedJobId);
+    if (selectedIndex >= visibleLimit) {
+      setVisibleLimit(Math.ceil((selectedIndex + 1) / 24) * 24);
+    }
+  }, [selectedJobId, visibleJobs, visibleLimit, workspaceView]);
 
   useEffect(() => {
     const explicitView = searchParams.get("view");
@@ -3304,7 +3411,7 @@ function TripsPageInner() {
                       marginBottom: 12,
                     }}>Jump to task</p>
                     <div className="flex flex-col gap-1 max-h-[52vh] overflow-y-auto pr-1">
-                      {visibleJobs.map((job) => {
+                      {jumpJobs.map((job) => {
                         const isSelected = selectedJobId === job.id;
                         const blockedCount = job.steps.filter((s) => s.actionItem).length;
                         return (
@@ -3492,9 +3599,10 @@ function TripsPageInner() {
             </div>
           )}
 
-          {visibleJobs.map((job) => (
+          {renderedJobs.map((job) => (
             <div
               key={job.id}
+              className="task-job-shell"
               ref={(node) => {
                 jobRefs.current[job.id] = node;
               }}
@@ -3511,6 +3619,16 @@ function TripsPageInner() {
               <JobCard job={job} onRefresh={loadJobs} sessionId={sessionId} onOpenLive={openLive} />
             </div>
           ))}
+
+          {hasMoreVisibleJobs && (
+            <button
+              type="button"
+              className="task-show-more"
+              onClick={() => setVisibleLimit((limit) => limit + 24)}
+            >
+              Show {Math.min(24, visibleJobs.length - renderedJobs.length)} more tasks
+            </button>
+          )}
 
           {/* Agent Insights — always show at the bottom */}
           {!loading && sessionId && workspaceView === "queue" && (

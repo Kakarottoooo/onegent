@@ -14,7 +14,10 @@ export async function GET() {
   const { userId } = await auth();
   if (!userId) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   const sessions = await listMyChatSessions(userId);
-  return NextResponse.json({ sessions });
+  return NextResponse.json(
+    { sessions },
+    { headers: { "Cache-Control": "private, max-age=8, stale-while-revalidate=30" } },
+  );
 }
 
 export async function POST(req: NextRequest) {
