@@ -140,6 +140,43 @@ The worker layer must stay single-owner per queue in local development. Multiple
 stale workers against one DB queue can produce confusing evidence, stale code
 paths, and duplicated attempts.
 
+### Execution Layer V2
+
+Execution Layer V2 is the no-live architecture skeleton for keeping multiple
+executor layers under the same task runtime. It does not replace the current v1
+provider adapters yet. It defines a shared contract in `lib/execution-layer/**`
+so task ownership, attempts, evidence, logs, screenshots, `decisionLog`, status,
+and manual-review checkpoints remain independent of the executor layer.
+
+Layer names are explicit:
+
+- L1 `provider_adapter`: current provider-specific runtime paths.
+- L2 `browser_harness`: future adaptive Browser Harness subprocess/JSONL bridge.
+- L3 `computer_use`: future visual executor fallback, represented but disabled
+  in the no-live skeleton.
+
+The no-live `LayerOrchestrator` starts with L1 and consumes mocked executor
+results. It escalates from L1 to L2 only when the L1 result reports
+evidence-backed runtime drift:
+
+- `selector_drift`
+- `progress_stall`
+- `iframe_miss`
+- `click_miss`
+- `field_fill_miss`
+- `unknown_page_mutation`
+
+It does not escalate for true no availability with evidence. It also does not
+blindly escalate provider/network/session/model blocks; those remain classified
+terminal outcomes such as `provider_degraded`, `network_blocked`,
+`session_blocked`, or `model_env_blocked`.
+
+The Browser Harness bridge is contract-only for now. The expected subprocess
+shape is JSONL events carrying `taskId`, `jobId`, `attemptId`, `planVersion`,
+`provider`, `layer`, `stage`, `severity`, and `message`. Patch proposals can
+describe discovered selectors, strategy, evidence, and suggested tests, but
+`canAutoApply` is always `false` and production provider mutation is forbidden.
+
 ### Evidence Layer
 
 Every execution lane should leave enough evidence for debugging without asking
@@ -150,9 +187,14 @@ the founder to manually copy browser text:
 - App and worker logs: timestamped and tied to a worker instance.
 - Screenshot stream: step-level visual evidence.
 - Current provider URL and stage signals.
+- V2 `ExecutionEvent` records: normalized event stream across L1/L2/L3 with
+  task/job/attempt identity preserved.
 
 The task UI should show both a compact status card and a detail surface with
 timeline plus screenshots. Screenshots are product evidence, not decoration.
+Execution Layer V2 uses an event-driven screenshot policy: open page, stage
+transition, before/after meaningful action, failure, layer escalation, and
+terminal checkpoint. It does not propose per-second screenshots.
 
 ## Performance Model
 

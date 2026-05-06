@@ -69,7 +69,7 @@ Then read the task-specific section below.
 | Operator failure taxonomy (model/env vs provider) | `docs/30-provider-debug/FAILURE_TAXONOMY.md` |
 | Provider closure operator cockpit (3-vertical workflow) | `docs/30-provider-debug/PROVIDER_CLOSURE_OPERATOR_ROOM.md` |
 | Provider closure acceptance criteria (pass / fail / inconclusive) | `docs/30-provider-debug/PROVIDER_CLOSURE_ACCEPTANCE.md` |
-| Computer Use / executor architecture | `docs/30-provider-debug/EXECUTOR_V2_PIVOT.md` |
+| Computer Use / executor architecture | `docs/30-provider-debug/EXECUTOR_V2_PIVOT.md`, `docs/30-provider-debug/EXECUTION_LAYER_V2_BROWSER_HARNESS_PLAN.md` |
 | Phase 1 founder walkthrough / task UI | `docs/40-phase1/PHASE_1_FOUNDER_E2E.md`, `docs/40-phase1/AUTONOMOUS_FOUNDER_E2E.md`, `docs/40-phase1/PHASE_1_QUALITY_GATE.md` |
 | Founder dogfood bugs | `docs/40-dogfood/BUG_INBOX.md` |
 | Phase 1.5 demo readiness / control room | `docs/40-phase1/DEMO_CONTROL_ROOM.md`, `docs/40-phase1/YC_DEMO_RUNBOOK.md`, `docs/40-phase1/DEMO_FREEZE_ACCEPTANCE.md` |
