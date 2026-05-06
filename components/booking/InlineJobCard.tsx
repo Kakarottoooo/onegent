@@ -9,6 +9,7 @@ import {
   JOB_SEMANTIC_DISPLAY,
   STEP_SEMANTIC_DISPLAY,
 } from "@/lib/status";
+import { taskDetailsHref, taskEvidenceAction } from "@/lib/booking-jobs/workspace";
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
 
@@ -272,8 +273,8 @@ export default function InlineJobCard({ jobId, onNeedsTravelDocs, onDeleted, onW
   const doneCount = job.steps.filter((s) => s.status === "done").length;
   const isRunning = isActiveJobStatus(job.status);
   const isComplete = job.status === "done" || job.status === "failed";
-  const detailsView = isRunning ? "live" : isComplete ? "history" : "queue";
-  const detailsHref = `/tasks?view=${detailsView}&focus=${job.id}`;
+  const evidenceAction = taskEvidenceAction(job);
+  const detailsHref = taskDetailsHref(job);
   const isStuck = job.status === "running" &&
     Date.now() - new Date(job.updated_at).getTime() > 7 * 60 * 1000;
 
@@ -303,26 +304,20 @@ export default function InlineJobCard({ jobId, onNeedsTravelDocs, onDeleted, onW
           </div>
         </div>
 
-        {(isRunning || (isComplete && Date.now() - new Date(job.updated_at).getTime() < 90_000)) && (
-          <button
-            type="button"
-            onClick={(e) => {
-              e.stopPropagation();
-              if (onWatch) {
-                onWatch(job.id, job.trip_label);
-                return;
-              }
-              window.open(
-                `/tasks?view=${isRunning ? "live" : "history"}&focus=${job.id}`,
-                "_blank",
-                "noopener,noreferrer",
-              );
-            }}
-            style={{ flexShrink: 0, padding: "5px 10px", borderRadius: 8, border: "1px solid var(--gold,#D4A34B)", backgroundColor: "transparent", color: isRunning ? "var(--gold,#D4A34B)" : "rgba(212,163,75,0.5)", fontFamily: "var(--font-dm-sans)", fontSize: 11, fontWeight: 600, whiteSpace: "nowrap", cursor: "pointer" }}
-          >
-            {isRunning ? "🖥 Watch" : "🖥 Replay"}
-          </button>
-        )}
+        <button
+          type="button"
+          onClick={(e) => {
+            e.stopPropagation();
+            if (onWatch) {
+              onWatch(job.id, job.trip_label);
+              return;
+            }
+            window.open(evidenceAction.href, "_blank", "noopener,noreferrer");
+          }}
+          style={{ flexShrink: 0, padding: "5px 10px", borderRadius: 8, border: "1px solid var(--gold,#D4A34B)", backgroundColor: "transparent", color: isRunning ? "var(--gold,#D4A34B)" : "rgba(212,163,75,0.72)", fontFamily: "var(--font-dm-sans)", fontSize: 11, fontWeight: 600, whiteSpace: "nowrap", cursor: "pointer" }}
+        >
+          {evidenceAction.label}
+        </button>
 
         <a
           href={detailsHref}

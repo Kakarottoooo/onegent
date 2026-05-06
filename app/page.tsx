@@ -4,22 +4,14 @@ import { useRef, useEffect, useState, useCallback, Suspense } from "react";
 import { useSearchParams } from "next/navigation";
 import dynamic from "next/dynamic";
 import Link from "next/link";
-import RecommendationCard from "@/components/RecommendationCard";
-import HotelCard from "@/components/HotelCard";
-import FlightCard from "@/components/FlightCard";
-import InlineBookingProfileGate from "@/components/booking/InlineBookingProfileGate";
-import InlineJobCard, { type TravelDocRequest } from "@/components/booking/InlineJobCard";
-import { ProfileGapCard } from "@/components/profile-gap";
+import type { TravelDocRequest } from "@/components/booking/InlineJobCard";
+import type { InlineTaskWatchState } from "@/components/chat/InlineTaskWatchPanel";
 import type { GapSavePayload } from "@/components/profile-gap/types";
 import {
   commitResponseToDecisionInput,
   decideProfileGap,
 } from "@/lib/profile-gap-decision";
 import { makeProfileGapOnSave } from "@/lib/profile-gap-on-save";
-import ActivityCard from "@/components/ActivityCard";
-import ScenarioPlanView from "@/components/ScenarioPlanView";
-import FeedbackPromptCard from "@/components/FeedbackPromptCard";
-import DateRangePicker from "@/components/DateRangePicker";
 import { CITIES_SORTED } from "@/lib/cities";
 import { useChat, LOADING_STEPS } from "@/app/hooks/useChat";
 import { useSubscriptions } from "@/app/hooks/useSubscriptions";
@@ -34,10 +26,7 @@ import { useVoiceInput } from "@/app/hooks/useVoiceInput";
 import { useAuth } from "@/app/hooks/useAuth";
 import { PlanAction, PlanLinkAction, RecommendationCard as CardType, PostExperienceFeedback, FeedbackRecord, Message } from "@/lib/types";
 import type { FeedbackPromptItem } from "@/app/api/feedback-prompts/route";
-import ConfirmCard, { type CommitResponse } from "@/components/ConfirmCard";
-import TripPackageCard from "@/components/TripPackageCard";
-import TripProposalChatCard from "@/components/TripProposalChatCard";
-import ScenarioProposalChatCard from "@/components/ScenarioProposalChatCard";
+import type { CommitResponse } from "@/components/ConfirmCard";
 import type { TripPackage } from "@/lib/types";
 import type { TripIntentState } from "@/lib/agent/trip-intent-state";
 import { useLanguage } from "@/app/hooks/useLanguage";
@@ -98,14 +87,42 @@ type InlineBookingProfileState = {
 
 // Leaflet is not SSR-compatible
 const MapView = dynamic(() => import("@/components/MapView"), { ssr: false });
-const TaskTimelinePanel = dynamic(() => import("@/components/task-timeline/TaskTimelinePanel"), {
+const RecommendationCard = dynamic(() => import("@/components/RecommendationCard"), { loading: LazySurfaceFallback });
+const HotelCard = dynamic(() => import("@/components/HotelCard"), { loading: LazySurfaceFallback });
+const FlightCard = dynamic(() => import("@/components/FlightCard"), { loading: LazySurfaceFallback });
+const ActivityCard = dynamic(() => import("@/components/ActivityCard"), { loading: LazySurfaceFallback });
+const InlineJobCard = dynamic(() => import("@/components/booking/InlineJobCard"), { loading: LazySurfaceFallback });
+const InlineBookingProfileGate = dynamic(() => import("@/components/booking/InlineBookingProfileGate"), { loading: () => null });
+const ProfileGapCard = dynamic(() => import("@/components/profile-gap").then((m) => m.ProfileGapCard), { loading: LazySurfaceFallback });
+const ScenarioPlanView = dynamic(() => import("@/components/ScenarioPlanView"), { loading: LazySurfaceFallback });
+const FeedbackPromptCard = dynamic(() => import("@/components/FeedbackPromptCard"), { loading: LazySurfaceFallback });
+const DateRangePicker = dynamic(() => import("@/components/DateRangePicker"), { loading: LazySurfaceFallback });
+const ConfirmCard = dynamic(() => import("@/components/ConfirmCard"), { loading: LazySurfaceFallback });
+const TripPackageCard = dynamic(() => import("@/components/TripPackageCard"), { loading: LazySurfaceFallback });
+const TripProposalChatCard = dynamic(() => import("@/components/TripProposalChatCard"), { loading: LazySurfaceFallback });
+const ScenarioProposalChatCard = dynamic(() => import("@/components/ScenarioProposalChatCard"), { loading: LazySurfaceFallback });
+const InlineTaskWatchPanel = dynamic(() => import("@/components/chat/InlineTaskWatchPanel"), {
   ssr: false,
   loading: () => (
-    <div style={{ padding: 16, color: "#f8fafc", fontSize: 13 }}>
-      Loading task timeline...
+    <div className="chat-task-watch-panel" style={{ padding: 16, color: "#f8fafc", fontSize: 13 }}>
+      Loading task observer...
     </div>
   ),
 });
+
+function LazySurfaceFallback() {
+  return (
+    <div
+      aria-hidden
+      style={{
+        minHeight: 88,
+        borderRadius: 16,
+        border: "0.5px solid var(--border, #e5e7eb)",
+        background: "var(--card, #fff)",
+      }}
+    />
+  );
+}
 
 const DEFAULT_EXAMPLES = [
   "Romantic dinner for two, ~$80/person, quiet, no chains, Manhattan",
@@ -890,7 +907,7 @@ function HomeInner() {
   const [recentJobs, setRecentJobs] = useState<AppBootstrapRecentJob[]>([]);
   // Inline booking task cards rendered below results
   const [inlineItems, setInlineItems] = useState<{ type: "job"; jobId: string }[]>([]);
-  const [inlineWatchPanel, setInlineWatchPanel] = useState<{ jobId: string; title: string } | null>(null);
+  const [inlineWatchPanel, setInlineWatchPanel] = useState<InlineTaskWatchState | null>(null);
   const [inlineWatchKey, setInlineWatchKey] = useState(0);
   const inlineWatchJobIdRef = useRef<string | null>(null);
   const openInlineWatchPanel = useCallback((jobId: string, title: string) => {
@@ -4553,22 +4570,11 @@ function HomeInner() {
       </div>
 
       {inlineWatchPanel && (
-        <>
-          <button
-            type="button"
-            aria-label="Close task observer"
-            className="chat-task-watch-backdrop"
-            onClick={closeInlineWatchPanel}
-          />
-          <div className="chat-task-watch-panel">
-            <TaskTimelinePanel
-              key={inlineWatchKey}
-              jobId={inlineWatchPanel.jobId}
-              title={inlineWatchPanel.title}
-              onClose={closeInlineWatchPanel}
-            />
-          </div>
-        </>
+        <InlineTaskWatchPanel
+          panel={inlineWatchPanel}
+          panelKey={inlineWatchKey}
+          onClose={closeInlineWatchPanel}
+        />
       )}
 
       <InlineBookingProfileGate

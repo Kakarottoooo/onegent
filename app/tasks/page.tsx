@@ -5,6 +5,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import dynamic from "next/dynamic";
 import type { BookingJob, BookingJobStep, DecisionLogEntry, AgentFeedbackStats } from "@/lib/db";
 import type { BookingJobListItem, BookingJobsSummary } from "@/lib/booking-jobs/read-model";
+import { taskDetailsHref, taskEvidenceAction, taskWorkspaceViewForJob } from "@/lib/booking-jobs/workspace";
 import {
   buildFlightInventoryDriftManualMessage,
   isFlightInventoryDriftError,
@@ -1216,6 +1217,7 @@ function JobCard({
   onRefresh,
   sessionId,
   onOpenLive,
+  onOpenDetails,
 }: {
   job: BookingJobListItem;
   detailJob?: BookingJob;
@@ -1223,6 +1225,7 @@ function JobCard({
   onRefresh?: () => void;
   sessionId: string;
   onOpenLive?: (jobId: string) => void;
+  onOpenDetails?: (jobId: string) => void;
 }) {
   const [expanded, setExpanded] = useState(false);
   const [detailLoading, setDetailLoading] = useState(false);
@@ -1283,6 +1286,7 @@ function JobCard({
     : job.replan_count;
   const isRunning = isActiveJobStatus(job.status);
   const isComplete = job.status === "done" || job.status === "failed";
+  const evidenceAction = taskEvidenceAction(job);
 
   // Detect stuck "running" jobs: Vercel function timeout kills the process before
   // updateBookingJobStatus() runs, leaving the job permanently in "running" state.
@@ -1393,14 +1397,13 @@ function JobCard({
           </div>
         </div>
         <div className="job-card__actions">
-          {(isRunning || (isComplete && Date.now() - new Date(job.updated_at).getTime() < 90_000)) && (
-            <button
-              onClick={(e) => { e.stopPropagation(); onOpenLive?.(job.id); }}
-              className={`job-card__cta ${isRunning ? "job-card__cta--watch" : "job-card__cta--watch-replay"}`}
-            >
-              {isRunning ? "🖥️ Watch live" : "🖥️ Replay"}
-            </button>
-          )}
+          <button
+            onClick={(e) => { e.stopPropagation(); onOpenLive?.(job.id); }}
+            className={`job-card__cta ${isRunning ? "job-card__cta--watch" : "job-card__cta--watch-replay"}`}
+            title={isRunning ? "Open live task evidence" : "Open saved logs and snapshots"}
+          >
+            {evidenceAction.label === "Watch" ? "Watch" : "Evidence"}
+          </button>
           {job.status === "done" && doneCount > 0 && (
             <button
               onClick={(e) => { e.stopPropagation(); void openAll(); }}
@@ -1465,14 +1468,14 @@ function JobCard({
             {fullJob ? (
               <ModifyTaskButton job={fullJob} onRefresh={onRefresh} />
             ) : (
-              <button
-                type="button"
-                onClick={(e) => { e.stopPropagation(); setExpanded(true); void ensureDetail(); }}
+              <a
+                href={taskDetailsHref(job)}
+                onClick={(e) => { e.preventDefault(); e.stopPropagation(); onOpenDetails?.(job.id); setExpanded(true); void ensureDetail(); }}
                 className="job-card__cta job-card__cta--open-all"
                 title="Load task details"
               >
                 Details
-              </button>
+              </a>
             )}
           </span>
           <span className="job-card__expand">{expanded ? "▲" : "▼"}</span>
@@ -3135,6 +3138,7 @@ function TripsPageInner() {
   // Track current liveJobId in a ref so openLive can read it without closure staleness
   const liveJobIdRef = useRef<string | null>(null);
   const [selectedJobId, setSelectedJobId] = useState<string | null>(null);
+  const lastFocusScrollRef = useRef<string | null>(null);
 
   const openLive = useCallback((jobId: string) => {
     if (liveJobIdRef.current !== jobId) {
@@ -3247,25 +3251,40 @@ function TripsPageInner() {
     const focusId = searchParams.get("focus");
     const nextView: TaskWorkspaceView =
       view === "live" || view === "history" ? view : "queue";
-    setWorkspaceView(nextView);
 
     if (focusId) {
+      const focusedJob = jobs.find((job) => job.id === focusId);
+      const focusedView = focusedJob ? taskWorkspaceViewForJob(focusedJob) : nextView;
+      const focusScrollKey = `${focusedView}:${focusId}`;
+      const shouldScrollToFocus = lastFocusScrollRef.current !== focusScrollKey;
+      setWorkspaceView(focusedView);
       setSelectedJobId(focusId);
-      if (nextView === "live") {
+      lastFocusScrollRef.current = focusScrollKey;
+      if (focusedJob && view !== focusedView) {
+        router.replace(`/tasks?view=${focusedView}&focus=${encodeURIComponent(focusId)}`, { scroll: false });
+      }
+      if (focusedView === "live") {
         openLive(focusId);
       } else {
         liveJobIdRef.current = null;
         setLiveJobId(null);
         void loadJobDetail(focusId);
-        requestAnimationFrame(() => {
-          jobRefs.current[focusId]?.scrollIntoView({ behavior: "smooth", block: "start" });
-        });
+        if (shouldScrollToFocus) {
+          requestAnimationFrame(() => {
+            jobRefs.current[focusId]?.scrollIntoView({ behavior: "smooth", block: "start" });
+          });
+        }
       }
     } else if (nextView !== "live") {
+      lastFocusScrollRef.current = null;
+      setWorkspaceView(nextView);
       liveJobIdRef.current = null;
       setLiveJobId(null);
+    } else {
+      lastFocusScrollRef.current = null;
+      setWorkspaceView(nextView);
     }
-  }, [searchParams, openLive, loadJobDetail]);
+  }, [searchParams, jobs, router, openLive, loadJobDetail]);
 
   const setWorkspaceViewAndUrl = useCallback((next: TaskWorkspaceView) => {
     setWorkspaceView(next);
@@ -3343,7 +3362,11 @@ function TripsPageInner() {
   ]);
 
   function focusJob(jobId: string) {
+    const job = jobs.find((candidate) => candidate.id === jobId);
+    const nextView = job ? taskWorkspaceViewForJob(job) : workspaceView;
+    setWorkspaceView(nextView);
     setSelectedJobId(jobId);
+    router.replace(`/tasks?view=${nextView}&focus=${encodeURIComponent(jobId)}`, { scroll: false });
     void loadJobDetail(jobId);
     jobRefs.current[jobId]?.scrollIntoView({ behavior: "smooth", block: "start" });
   }
@@ -3695,6 +3718,7 @@ function TripsPageInner() {
                   onRefresh={() => void refreshTask(job.id)}
                   sessionId={sessionId}
                   onOpenLive={openLive}
+                  onOpenDetails={focusJob}
                 />
               </div>
             );
