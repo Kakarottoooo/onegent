@@ -53,6 +53,17 @@ export type InternalBenchmarkReport = {
   results: InternalBenchmarkCaseResult[];
 };
 
+export type InternalBenchmarkGateOptions = {
+  minSuccessRate?: number;
+  minArtifactCompletenessRate?: number;
+  maxFailureCounts?: Partial<Record<InternalBenchmarkFailureClass, number>>;
+};
+
+export type InternalBenchmarkGateResult = {
+  pass: boolean;
+  errors: string[];
+};
+
 const ZERO_FAILURES: Record<InternalBenchmarkFailureClass, number> = {
   none: 0,
   routing_mismatch: 0,
@@ -308,4 +319,41 @@ export function renderInternalBenchmarkMarkdown(report: InternalBenchmarkReport)
   }
 
   return lines.join("\n");
+}
+
+export function evaluateInternalBenchmarkGate(
+  report: InternalBenchmarkReport,
+  options: InternalBenchmarkGateOptions,
+): InternalBenchmarkGateResult {
+  const errors: string[] = [];
+  if (
+    typeof options.minSuccessRate === "number" &&
+    report.summary.successRate < options.minSuccessRate
+  ) {
+    errors.push(
+      `successRate ${pct(report.summary.successRate)} is below required ${pct(options.minSuccessRate)}`,
+    );
+  }
+  if (
+    typeof options.minArtifactCompletenessRate === "number" &&
+    report.summary.artifactCompletenessRate < options.minArtifactCompletenessRate
+  ) {
+    errors.push(
+      `artifactCompleteness ${pct(report.summary.artifactCompletenessRate)} is below required ${pct(options.minArtifactCompletenessRate)}`,
+    );
+  }
+
+  for (const [failureClass, maxAllowed] of Object.entries(options.maxFailureCounts ?? {})) {
+    if (typeof maxAllowed !== "number") continue;
+    const actual =
+      report.summary.byFailureClass[failureClass as InternalBenchmarkFailureClass] ?? 0;
+    if (actual > maxAllowed) {
+      errors.push(`${failureClass} count ${actual} exceeds allowed ${maxAllowed}`);
+    }
+  }
+
+  return {
+    pass: errors.length === 0,
+    errors,
+  };
 }

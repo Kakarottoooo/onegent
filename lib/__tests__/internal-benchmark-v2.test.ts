@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  evaluateInternalBenchmarkGate,
   renderInternalBenchmarkMarkdown,
   runInternalNoLiveBenchmark,
   selectInternalBenchmarkCases,
@@ -36,5 +37,30 @@ describe("internal benchmark v2", () => {
     expect(markdown).toContain("# Internal Benchmark v2");
     expect(markdown).toContain("Failure Taxonomy");
     expect(markdown).toContain("Cases");
+  });
+
+  it("can fail as a regression gate when configured thresholds are missed", () => {
+    const report = runInternalNoLiveBenchmark({ vertical: "all", count: 10 });
+
+    expect(
+      evaluateInternalBenchmarkGate(report, {
+        minSuccessRate: 0.6,
+        minArtifactCompletenessRate: 0.9,
+        maxFailureCounts: {
+          routing_mismatch: 0,
+          provider_simulated_block: 2,
+        },
+      }),
+    ).toEqual({ pass: true, errors: [] });
+
+    const failed = evaluateInternalBenchmarkGate(report, {
+      minSuccessRate: 0.8,
+      maxFailureCounts: {
+        provider_simulated_block: 0,
+      },
+    });
+    expect(failed.pass).toBe(false);
+    expect(failed.errors.join(" ")).toContain("successRate");
+    expect(failed.errors.join(" ")).toContain("provider_simulated_block");
   });
 });
