@@ -1691,6 +1691,8 @@ export async function ensureBookingJobsTable(): Promise<void> {
       `.catch(() => {});
       await sql`CREATE INDEX IF NOT EXISTS booking_jobs_session_idx ON booking_jobs (session_id)`;
       await sql`CREATE INDEX IF NOT EXISTS booking_jobs_user_idx ON booking_jobs (user_id) WHERE user_id IS NOT NULL`;
+      await sql`CREATE INDEX IF NOT EXISTS booking_jobs_session_created_idx ON booking_jobs (session_id, created_at DESC)`;
+      await sql`CREATE INDEX IF NOT EXISTS booking_jobs_user_created_idx ON booking_jobs (user_id, created_at DESC) WHERE user_id IS NOT NULL`;
     })().catch((err) => {
       bookingJobsTableReady = null;
       throw err;
@@ -1806,6 +1808,19 @@ export interface BookingJob {
   completed_at: string | null;
 }
 
+export interface BookingJobSummary {
+  id: string;
+  session_id: string;
+  user_id: string | null;
+  trip_label: string;
+  status: BookingJob["status"];
+  step_count: number;
+  action_count: number;
+  created_at: string;
+  updated_at: string;
+  completed_at: string | null;
+}
+
 export async function createBookingJob(params: {
   id: string;
   sessionId: string;
@@ -1846,6 +1861,37 @@ export async function getBookingJobsBySession(sessionId: string, limit = 20): Pr
   return result.rows;
 }
 
+export async function getBookingJobSummariesBySession(
+  sessionId: string,
+  limit = 20,
+): Promise<BookingJobSummary[]> {
+  await ensureBookingJobsTable();
+  const result = await sql<BookingJobSummary>`
+    SELECT
+      id,
+      session_id,
+      user_id,
+      trip_label,
+      status,
+      jsonb_array_length(steps)::int AS step_count,
+      COALESCE((
+        SELECT COUNT(*)::int
+        FROM jsonb_array_elements(steps) AS step
+        WHERE step ? 'actionItem'
+          AND step->'actionItem' IS NOT NULL
+          AND step->'actionItem' <> 'null'::jsonb
+      ), 0)::int AS action_count,
+      created_at,
+      updated_at,
+      completed_at
+    FROM booking_jobs
+    WHERE session_id = ${sessionId}
+    ORDER BY created_at DESC
+    LIMIT ${limit}
+  `;
+  return result.rows;
+}
+
 /**
  * Jobs owned by a user regardless of session_id — recovers Decision Room
  * bookings whose session_id was a one-off random UUID.
@@ -1854,6 +1900,37 @@ export async function getBookingJobsByUser(userId: string, limit = 20): Promise<
   await ensureBookingJobsTable();
   const result = await sql<BookingJob>`
     SELECT * FROM booking_jobs
+    WHERE user_id = ${userId}
+    ORDER BY created_at DESC
+    LIMIT ${limit}
+  `;
+  return result.rows;
+}
+
+export async function getBookingJobSummariesByUser(
+  userId: string,
+  limit = 20,
+): Promise<BookingJobSummary[]> {
+  await ensureBookingJobsTable();
+  const result = await sql<BookingJobSummary>`
+    SELECT
+      id,
+      session_id,
+      user_id,
+      trip_label,
+      status,
+      jsonb_array_length(steps)::int AS step_count,
+      COALESCE((
+        SELECT COUNT(*)::int
+        FROM jsonb_array_elements(steps) AS step
+        WHERE step ? 'actionItem'
+          AND step->'actionItem' IS NOT NULL
+          AND step->'actionItem' <> 'null'::jsonb
+      ), 0)::int AS action_count,
+      created_at,
+      updated_at,
+      completed_at
+    FROM booking_jobs
     WHERE user_id = ${userId}
     ORDER BY created_at DESC
     LIMIT ${limit}

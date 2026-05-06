@@ -62,7 +62,7 @@ async function fetchBookingJobsCached(sessionId: string): Promise<BookingJob[]> 
   const existing = bookingJobsInflight.get(sessionId);
   if (existing) return existing;
 
-  const request = fetch(`/api/booking-jobs?session_id=${encodeURIComponent(sessionId)}`)
+  const request = fetch(`/api/booking-jobs/list?session_id=${encodeURIComponent(sessionId)}`)
     .then(async (res) => {
       if (!res.ok) return [];
       const data = (await res.json()) as { jobs?: BookingJob[] };

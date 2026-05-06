@@ -47,14 +47,11 @@ async function fetchActionCountCached(sessionId: string): Promise<number> {
   const existing = actionCountInflight.get(sessionId);
   if (existing) return existing;
 
-  const request = fetch(`/api/booking-jobs?session_id=${encodeURIComponent(sessionId)}`)
+  const request = fetch(`/api/booking-jobs/summary?session_id=${encodeURIComponent(sessionId)}`)
     .then(async (r) => {
       if (!r.ok) return 0;
-      const d = (await r.json()) as { jobs?: { steps?: { actionItem?: unknown }[] }[] };
-      const count = (d.jobs ?? []).reduce(
-        (n, j) => n + (j.steps?.filter((s) => s.actionItem).length ?? 0),
-        0,
-      );
+      const d = (await r.json()) as { summary?: { action_count?: number } };
+      const count = d.summary?.action_count ?? 0;
       actionCountCache.set(sessionId, {
         count,
         expiresAt: Date.now() + ACTION_COUNT_CACHE_MS,

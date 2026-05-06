@@ -3035,7 +3035,7 @@ function TripsPageInner() {
   const loadJobs = useCallback(async () => {
     const sid = getSessionId();
     try {
-      const res = await fetch(`/api/booking-jobs?session_id=${encodeURIComponent(sid)}`);
+      const res = await fetch(`/api/booking-jobs/list?session_id=${encodeURIComponent(sid)}&include_share=1`);
       const data = await res.json();
       setJobs(data.jobs ?? []);
     } catch { /* ignore */ }

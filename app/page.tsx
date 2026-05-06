@@ -961,7 +961,7 @@ function HomeInner() {
     if (!sid) return;
     let cancelled = false;
     const timer = window.setTimeout(() => {
-      fetch(`/api/booking-jobs?session_id=${encodeURIComponent(sid)}`)
+      fetch(`/api/booking-jobs/list?session_id=${encodeURIComponent(sid)}`)
         .then((r) => r.ok ? r.json() : null)
         .then((d) => {
           if (!cancelled && d?.jobs) setRecentJobs(d.jobs.slice(0, 3));
