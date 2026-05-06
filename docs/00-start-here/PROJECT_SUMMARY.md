@@ -76,6 +76,8 @@ The shared coordination home is `docs/10-coordination/`.
   `docs/40-phase1/DEMO_CONTROL_ROOM.md`,
   `docs/40-phase1/YC_DEMO_RUNBOOK.md`,
   `docs/40-phase1/DEMO_FREEZE_ACCEPTANCE.md`
+- Need to triage founder dogfood bugs:
+  `docs/40-dogfood/BUG_INBOX.md`
 - Need to plan a Phase 2 controlled retry:
   `docs/50-product-areas/EXPEDIA_CONTROLLED_RETRY_RUNBOOK.md`,
   `docs/50-product-areas/HOTEL_VERTICAL_REVIVAL_AUDIT.md`,

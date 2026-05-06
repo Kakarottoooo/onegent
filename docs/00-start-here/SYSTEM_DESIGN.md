@@ -174,6 +174,9 @@ Current performance principles:
 6. Keep common client bundles lean. Task timelines, notification inbox lists,
    contact DM panes, and screenshot streams are lazy surfaces, not app-shell
    imports.
+7. Keep homepage result families lazy. Restaurant, hotel, flight, activity,
+   trip-package, confirmation, profile-gap, and inline task observer surfaces
+   should not inflate the first chat/composer bundle before any result exists.
 
 Tasks-specific runtime rules:
 
@@ -184,7 +187,11 @@ Tasks-specific runtime rules:
    poll detail unless the user reopens or mutates them.
 4. The live timeline panel owns timeline and snapshot polling, and polling
    stops when the timeline reports a closed run.
-5. Future performance checks can use
+5. Chat cards and `/tasks` share the same focus href logic:
+   `/tasks?view=<queue|live|history>&focus=<jobId>`. Active tasks open as
+   Watch; terminal tasks open as Evidence so completed screenshots and logs
+   remain discoverable.
+6. Future performance checks can use
    `npx tsx scripts/measure-app-performance.ts --base-url http://127.0.0.1:3000 --session-id <sid> [--job-id <id>]`
   to record endpoint latency and response bytes.
 
@@ -212,8 +219,9 @@ Calendar-specific runtime rules:
 
 ## Weaknesses And Tradeoffs
 
-- `app/page.tsx` is still a large client component. It increases compile cost,
-  bundle size, and route transition latency.
+- `app/page.tsx` is still a large client component, but heavy result surfaces
+  are now split behind dynamic imports. Further work should extract state hooks
+  and presentational chat sections rather than adding more logic to the page.
 - Some detail routes still return heavy rows by default. The list surfaces for
   Tasks, Rooms, Contacts, and Calendar now have compact entry paths, but deeper
   detail panels can still be split further.
@@ -221,6 +229,9 @@ Calendar-specific runtime rules:
   and browser executors are left running.
 - Provider sites are brittle. Runtime code must be evidence-driven and
   provider-specific.
+- Runtime provider code is mirrored between `lib/booking-autopilot/**` and
+  `worker/src/booking-autopilot/**`. Follow
+  `docs/30-provider-debug/RUNTIME_MIRROR_GUIDE.md` before editing either side.
 - Docs and coordination state are strong, but the number of branches/worktrees
   can make it easy to test the wrong code unless process ownership is checked.
 
@@ -230,10 +241,12 @@ Calendar-specific runtime rules:
    precomputed event read models if calendar usage grows.
 2. Split `app/page.tsx` into smaller route-level and feature-level components.
 3. Lazy-load heavy cards and modals only when the user reaches that state.
-4. Add app-shell performance marks around route transitions, bootstrap, sidebar
+4. Expand `scripts/eval-nlu-routing.ts` and `scripts/internal-benchmark.ts`
+   with every founder dogfood routing failure before changing planner behavior.
+5. Add app-shell performance marks around route transitions, bootstrap, sidebar
    hydration, and task detail open.
-5. Keep one active local dev server and one worker for the current lane.
-6. Continue storing screenshot/log artifacts under job ids so task details are
+6. Keep one active local dev server and one worker for the current lane.
+7. Continue storing screenshot/log artifacts under job ids so task details are
    portable across routes and ports.
 
 ## Change Checklist For Future Agents
