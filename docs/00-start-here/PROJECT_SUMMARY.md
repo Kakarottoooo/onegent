@@ -80,6 +80,7 @@ The shared coordination home is `docs/10-coordination/`.
   `docs/40-dogfood/BUG_INBOX.md`
 - Need to expand no-live NLU / benchmark coverage:
   `scripts/eval-nlu-routing.ts`,
+  `scripts/eval-live-extractor.ts --vertical all --count 120 --gate`,
   `scripts/internal-benchmark.ts --vertical all --mode no-live`, and
   `docs/40-dogfood/BUG_INBOX.md` fixture/case mappings.
 - Need to plan a Phase 2 controlled retry:

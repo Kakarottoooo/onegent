@@ -212,15 +212,24 @@ NLU and internal-benchmark rules:
    regression matrix. It starts from prebuilt `IntentState` objects and proves
    deterministic routing, constraint preservation, and confirm-card selection.
    It does not prove live model extraction.
-2. `scripts/eval-nlu-routing.ts` is the local smoke command for routing
+2. `lib/agent/nlu-v2/live-extractor-eval.ts` is the raw-utterance no-live
+   extractor harness. It runs raw text through a deterministic parser,
+   `coerceIntentState`, activity normalizer, and router so dogfood phrases can
+   be regression-tested without OpenAI calls. It still does not prove live LLM
+   extraction accuracy.
+3. `scripts/eval-nlu-routing.ts` is the local smoke command for routing
    fixtures. Add every founder dogfood routing failure there before changing
    planner behavior.
-3. `scripts/internal-benchmark.ts --mode no-live` is the only implemented
+4. `scripts/eval-live-extractor.ts --vertical all --count 120 --gate` is the
+   local smoke command for raw utterance constraints, including activity vs
+   trip, hotel date/budget, restaurant cuisine, flight route/date, refine,
+   profile edit, ambiguous, and chitchat cases.
+5. `scripts/internal-benchmark.ts --mode no-live` is the only implemented
    internal benchmark mode. `small-live` and `live` remain future modes that
    require separate human approval and provider evidence.
-4. Internal benchmark failures should name one owner: `nlu`, `planner`,
+6. Internal benchmark failures should name one owner: `nlu`, `planner`,
    `task-workspace`, `provider-runtime`, or `product/manual-boundary`.
-5. Benchmark success is not provider closure. A vertical is provider-proven
+7. Benchmark success is not provider closure. A vertical is provider-proven
    only when runtime evidence, DB fields, logs, screenshots, and safe terminal
    status are captured by the provider-closure process.
 
