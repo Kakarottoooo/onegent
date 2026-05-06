@@ -36,6 +36,10 @@ import { buildDateNightFallbackIntent } from "./agent/planners/date-night";
 import { parseConcertEventIntent } from "./agent/parse/concert-event";
 import { runConcertEventPlanner } from "./agent/planners/concert-event";
 import { ConcertEventIntent } from "./types";
+import {
+  buildConfirmedIntentFromConstraints,
+  buildConfirmedQueryContext,
+} from "./agent/confirmed-constraints";
 
 export function applyCategoryHintOverride(
   queryContext: MultilingualQueryContext,
@@ -68,7 +72,8 @@ export async function runAgent(
   sessionId?: string,
   userId?: string,
   pinned_plan_id?: string,
-  categoryHintOverride?: CategoryType
+  categoryHintOverride?: CategoryType,
+  confirmedConstraints?: Record<string, unknown>
 ): Promise<{
   requirements:
     | UserRequirements
@@ -106,11 +111,19 @@ export async function runAgent(
   const city = CITIES[cityId] ?? CITIES[DEFAULT_CITY];
   const cityFullName = gpsCoords ? "your current location" : city.fullName;
 
+  const hasConfirmedConstraints = !!categoryHintOverride && !!confirmedConstraints;
   const userPreferences =
-    userId || sessionId
+    !hasConfirmedConstraints && (userId || sessionId)
       ? await getUserPreferences(sessionId ?? "", userId).catch(() => ({}))
       : {};
-  const queryContext = await analyzeMultilingualQuery(userMessage, cityFullName, userPreferences, { pinned_plan_id, conversationHistory });
+  const queryContext = hasConfirmedConstraints
+    ? buildConfirmedQueryContext(
+        userMessage,
+        categoryHintOverride,
+        confirmedConstraints,
+        cityFullName,
+      )
+    : await analyzeMultilingualQuery(userMessage, cityFullName, userPreferences, { pinned_plan_id, conversationHistory });
   applyCategoryHintOverride(queryContext, categoryHintOverride);
 
   function buildBaseResult(
@@ -464,7 +477,12 @@ export async function runAgent(
   }
 
   // Layer 1: Parse intent (with session preferences + profile context)
-  const intent = await parseIntent(
+  const confirmedIntent = buildConfirmedIntentFromConstraints(
+    categoryHintOverride,
+    confirmedConstraints,
+    cityFullName,
+  );
+  const intent = confirmedIntent ?? await parseIntent(
     userMessage,
     cityFullName,
     queryContext,

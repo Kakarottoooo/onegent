@@ -1797,6 +1797,7 @@ function HomeInner() {
         chat.sendMessage(query, undefined, {
           skipUserPush: true,
           ...(hint ? { categoryHint: hint } : {}),
+          ...(payload.constraints ? { confirmedConstraints: payload.constraints } : {}),
         });
       }
     }

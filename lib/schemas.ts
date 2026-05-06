@@ -39,6 +39,11 @@ export const ChatRequestSchema = z.object({
    * deterministically.
    */
   category_hint: z.enum(["restaurant", "hotel", "flight", "activity"]).optional(),
+  /**
+   * Structured fields from the confirm card. The legacy /api/chat search path
+   * can use these to avoid reparsing a confirmed hotel/flight/activity request.
+   */
+  confirmed_constraints: z.record(z.string(), z.unknown()).optional(),
 });
 
 // ─── AI Response Schemas ───────────────────────────────────────────────────────

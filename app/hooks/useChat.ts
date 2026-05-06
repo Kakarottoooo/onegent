@@ -214,7 +214,11 @@ export function useChat({
     async (
       text: string,
       pinnedPlanId?: string,
-      opts?: { skipUserPush?: boolean; categoryHint?: "restaurant" | "hotel" | "flight" | "activity" }
+      opts?: {
+        skipUserPush?: boolean;
+        categoryHint?: "restaurant" | "hotel" | "flight" | "activity";
+        confirmedConstraints?: Record<string, unknown>;
+      }
     ) => {
       if (!text.trim() || loading) return;
 
@@ -306,6 +310,7 @@ export function useChat({
             user_id: userId ?? undefined,
             pinned_plan_id: pinnedPlanId ?? undefined,
             category_hint: opts?.categoryHint ?? undefined,
+            confirmed_constraints: opts?.confirmedConstraints ?? undefined,
           }),
         });
 

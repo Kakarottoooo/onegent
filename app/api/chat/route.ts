@@ -81,7 +81,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Invalid request.", issues: body.error.issues }, { status: 400 });
   }
 
-  const { message, history, city, gpsCoords, nearLocation, sessionPreferences, profileContext, customWeights, session_id, pinned_plan_id, category_hint } = body.data;
+  const { message, history, city, gpsCoords, nearLocation, sessionPreferences, profileContext, customWeights, session_id, pinned_plan_id, category_hint, confirmed_constraints } = body.data;
   // Derive userId from Clerk server-side auth — never trust client-supplied user_id
   const { userId: user_id } = await auth().catch(() => ({ userId: null }));
   const request_id = crypto.randomUUID();
@@ -101,8 +101,12 @@ export async function POST(req: NextRequest) {
         const chunk = `data: ${JSON.stringify(data)}\n\n`;
         controller.enqueue(new TextEncoder().encode(chunk));
       }
+      const keepAlive = setInterval(() => {
+        sendEvent({ type: "status", request_id, stage: "working", category: category_hint ?? null });
+      }, 15_000);
 
       try {
+        sendEvent({ type: "status", request_id, stage: "started", category: category_hint ?? null });
         const result = await withTimeout(
           runAgent(
             message,
@@ -121,7 +125,8 @@ export async function POST(req: NextRequest) {
             session_id ?? undefined,
             user_id ?? undefined,
             pinned_plan_id ?? undefined,
-            category_hint ?? undefined
+            category_hint ?? undefined,
+            confirmed_constraints
           ),
           AGENT_TIMEOUT_MS
         );
@@ -189,6 +194,7 @@ export async function POST(req: NextRequest) {
         }));
         sendEvent({ type: "error", error: classifyError(error) });
       } finally {
+        clearInterval(keepAlive);
         controller.close();
       }
     },
