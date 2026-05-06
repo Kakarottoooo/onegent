@@ -20,7 +20,14 @@
 import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/app/hooks/useAuth";
-import type { DecisionRoomWithMembership } from "@/lib/db";
+import { fetchAppBootstrapCached } from "@/components/app-bootstrap-client";
+import type {
+  AppBootstrapSidebarRoom,
+  AppBootstrapSidebarSession,
+} from "@/lib/app-bootstrap";
+
+type DecisionRoomWithMembership = AppBootstrapSidebarRoom;
+type SessionRow = AppBootstrapSidebarSession;
 
 interface ContextMenuState {
   kind: "room" | "session";
@@ -30,7 +37,7 @@ interface ContextMenuState {
   session?: SessionRow;
 }
 
-interface SessionRow {
+interface DeprecatedSessionRow {
   id: string;
   title: string;
   upgraded_room_id: string | null;
@@ -65,6 +72,15 @@ function sessionSubtitle(s: SessionRow, isCompleted: boolean): string | undefine
   if (s.destination) return s.destination;
   if (isCompleted) return "Completed";
   return undefined;
+}
+
+function currentSessionIdFromStorage(): string | null {
+  if (typeof window === "undefined") return null;
+  try {
+    return window.localStorage.getItem("session_id");
+  } catch {
+    return null;
+  }
 }
 
 export interface SidebarProps {
@@ -112,20 +128,11 @@ export default function Sidebar({ activeSessionId, activeRoomId, reloadTick }: S
     });
   }
 
-  const load = useCallback(async () => {
+  const load = useCallback(async (force = false) => {
     try {
-      const [roomsRes, sessionsRes] = await Promise.all([
-        fetch("/api/rooms?include_invited=1"),
-        fetch("/api/chat/sessions"),
-      ]);
-      if (roomsRes.ok) {
-        const data = await roomsRes.json();
-        setRooms(data.rooms ?? []);
-      }
-      if (sessionsRes.ok) {
-        const data = await sessionsRes.json();
-        setSessions(data.sessions ?? []);
-      }
+      const data = await fetchAppBootstrapCached(currentSessionIdFromStorage(), { force });
+      setRooms(data.sidebar.rooms ?? []);
+      setSessions(data.sidebar.sessions ?? []);
     } catch {
       // swallow — sidebar is best-effort UX
     }
@@ -137,7 +144,7 @@ export default function Sidebar({ activeSessionId, activeRoomId, reloadTick }: S
       setSessions([]);
       return;
     }
-    load();
+    load(Boolean(reloadTick) || localReloadTick > 0);
   }, [isSignedIn, reloadTick, localReloadTick, load]);
 
   // Keep the sidebar fresh so creator-side deletions, new DMs creating
@@ -147,11 +154,11 @@ export default function Sidebar({ activeSessionId, activeRoomId, reloadTick }: S
     if (!isSignedIn) return;
     const tick = () => {
       if (typeof document !== "undefined" && document.visibilityState !== "visible") return;
-      load();
+      load(true);
     };
     const interval = setInterval(tick, 30_000);
     const onVisible = () => {
-      if (document.visibilityState === "visible") load();
+      if (document.visibilityState === "visible") load(true);
     };
     document.addEventListener("visibilitychange", onVisible);
     return () => {

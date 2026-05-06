@@ -4005,6 +4005,13 @@ export interface DecisionRoomWithMembership extends DecisionRoom {
   member_status: "joined" | "invited";
 }
 
+export type DecisionRoomSidebarRow = Pick<
+  DecisionRoom,
+  "id" | "type" | "title" | "status" | "creator_id" | "flow" | "created_at" | "updated_at"
+> & {
+  member_status: "joined" | "invited";
+};
+
 export async function listMyDecisionRooms(
   userId: string,
   opts: { archived?: boolean; includeInvited?: boolean } = {}
@@ -4047,6 +4054,58 @@ export async function listMyDecisionRooms(
       AND r.status NOT IN ('done', 'abandoned')
     ORDER BY r.updated_at DESC
     LIMIT 100
+  `;
+  return result.rows;
+}
+
+export async function listMyDecisionRoomSidebarRows(
+  userId: string,
+  opts: { includeInvited?: boolean; limit?: number } = {},
+): Promise<DecisionRoomSidebarRow[]> {
+  await ensureDecisionRoomTables();
+  const limit = Math.max(1, Math.min(100, Math.floor(opts.limit ?? 30)));
+
+  if (opts.includeInvited) {
+    const result = await sql<DecisionRoomSidebarRow>`
+      SELECT
+        r.id,
+        r.type,
+        r.title,
+        r.status,
+        r.creator_id,
+        r.flow,
+        r.created_at,
+        r.updated_at,
+        m.status AS member_status
+      FROM decision_rooms r
+      JOIN decision_room_members m ON m.room_id = r.id
+      WHERE m.user_id = ${userId}
+        AND m.status IN ('joined', 'invited')
+        AND r.status NOT IN ('done', 'abandoned')
+      ORDER BY (m.status = 'invited') DESC, r.updated_at DESC
+      LIMIT ${limit}
+    `;
+    return result.rows;
+  }
+
+  const result = await sql<DecisionRoomSidebarRow>`
+    SELECT
+      r.id,
+      r.type,
+      r.title,
+      r.status,
+      r.creator_id,
+      r.flow,
+      r.created_at,
+      r.updated_at,
+      m.status AS member_status
+    FROM decision_rooms r
+    JOIN decision_room_members m ON m.room_id = r.id
+    WHERE m.user_id = ${userId}
+      AND m.status = 'joined'
+      AND r.status NOT IN ('done', 'abandoned')
+    ORDER BY r.updated_at DESC
+    LIMIT ${limit}
   `;
   return result.rows;
 }
@@ -6244,6 +6303,30 @@ export async function listMyChatSessions(userId: string): Promise<ChatSession[]>
     WHERE user_id = ${userId}
     ORDER BY updated_at DESC
     LIMIT 100
+  `;
+  return result.rows;
+}
+
+export async function listMyChatSessionRows(userId: string, limit = 30): Promise<ChatSession[]> {
+  await ensureChatSessionsTable();
+  const rowLimit = Math.max(1, Math.min(100, Math.floor(limit)));
+  const result = await sql<ChatSession>`
+    SELECT
+      id,
+      user_id,
+      title,
+      upgraded_room_id,
+      upgraded_plan_id,
+      upgraded_trip_id,
+      destination,
+      scenario,
+      completed_at,
+      created_at,
+      updated_at
+    FROM chat_sessions
+    WHERE user_id = ${userId}
+    ORDER BY updated_at DESC
+    LIMIT ${rowLimit}
   `;
   return result.rows;
 }

@@ -1,6 +1,6 @@
 # Onegent Docs Index
 
-Last updated: 2026-05-04
+Last updated: 2026-05-06
 
 This is the entrypoint for any new Codex, Claude, or other coding-agent session.
 Do not start by reading every markdown file. Read the smallest set that matches
@@ -60,6 +60,7 @@ Then read the task-specific section below.
 | Task | Read |
 |---|---|
 | Project overview or onboarding | `docs/00-start-here/` |
+| System design / architecture | `docs/00-start-here/SYSTEM_DESIGN.md` |
 | Current phase / what to do next | `docs/00-start-here/PHASE_STATUS.md` |
 | Codex / Claude / Track C handoff | `docs/10-coordination/README.md`, then `docs/10-coordination/*.md` |
 | Restaurant Phase 0 / Resy / OpenTable | `docs/20-phase0-restaurant/` |
@@ -166,6 +167,7 @@ release entrypoints (`AGENTS.md`, `CLAUDE.md`, `README.md`, `CHANGELOG.md`).
 | Purpose | Canonical file |
 |---|---|
 | Project summary | `docs/00-start-here/PROJECT_SUMMARY.md` |
+| System design | `docs/00-start-here/SYSTEM_DESIGN.md` |
 | Phase status | `docs/00-start-here/PHASE_STATUS.md` |
 | Full historical project summary | `docs/90-archive/history/PROJECT_SUMMARY_FULL_2026-05-03.md` |
 | Coordination root | `docs/10-coordination/README.md` |

@@ -44,6 +44,8 @@ import type { TripIntentState } from "@/lib/agent/trip-intent-state";
 import { useLanguage } from "@/app/hooks/useLanguage";
 import GlobalNav from "@/components/GlobalNav";
 import Sidebar from "@/components/Sidebar";
+import { fetchAppBootstrapCached } from "@/components/app-bootstrap-client";
+import type { AppBootstrapRecentJob } from "@/lib/app-bootstrap";
 import MentionPicker, { type MentionContact } from "@/components/MentionPicker";
 import {
   looksLikeRecommendationAsk,
@@ -876,7 +878,7 @@ function HomeInner() {
   // (404/403 → room is gone). Three seconds is enough to read and matches
   // the mentionToast cadence so the UI feels coherent.
   const [roomGoneToast, setRoomGoneToast] = useState<string | null>(null);
-  const [recentJobs, setRecentJobs] = useState<{ id: string; trip_label: string; status: string; created_at: string }[]>([]);
+  const [recentJobs, setRecentJobs] = useState<AppBootstrapRecentJob[]>([]);
   // Inline booking task cards rendered below results
   const [inlineItems, setInlineItems] = useState<{ type: "job"; jobId: string }[]>([]);
   const [inlineWatchPanel, setInlineWatchPanel] = useState<{ jobId: string; title: string } | null>(null);
@@ -961,13 +963,12 @@ function HomeInner() {
     if (!sid) return;
     let cancelled = false;
     const timer = window.setTimeout(() => {
-      fetch(`/api/booking-jobs/list?session_id=${encodeURIComponent(sid)}`)
-        .then((r) => r.ok ? r.json() : null)
+      fetchAppBootstrapCached(sid)
         .then((d) => {
-          if (!cancelled && d?.jobs) setRecentJobs(d.jobs.slice(0, 3));
+          if (!cancelled) setRecentJobs(d.recent_jobs ?? []);
         })
         .catch(() => {});
-    }, 600);
+    }, 150);
     return () => {
       cancelled = true;
       window.clearTimeout(timer);
