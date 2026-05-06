@@ -573,7 +573,7 @@ async function hasTicketmasterSeatSelectionSurface(page: Page): Promise<boolean>
  * are selected. We give the user up to 10min to pick seats — long enough for
  * anyone, short enough that abandoned sessions don't hang forever.
  */
-async function pollReserveTickets(page: Page, trace: TraceFn, timeoutMs = 10 * 60 * 1000): Promise<boolean> {
+async function pollReserveTickets(page: Page, trace: TraceFn, timeoutMs = 8 * 60 * 1000): Promise<boolean> {
   const deadline = Date.now() + timeoutMs;
   let lastLog = 0;
   while (Date.now() < deadline) {
@@ -613,13 +613,13 @@ async function pollReserveTickets(page: Page, trace: TraceFn, timeoutMs = 10 * 6
     }
 
     // Heartbeat log every 30s so the user sees we're still waiting.
-    if (Date.now() - lastLog > 30000) {
+    if (Date.now() - lastLog > 20000) {
       trace(`[tm-rpa] Waiting for user to select seats… Reserve Tickets ${state.present ? "visible but disabled" : "not yet rendered"}`);
       lastLog = Date.now();
     }
     await page.waitForTimeout(2000);
   }
-  trace("[tm-rpa] Reserve Tickets poll timed out (10 min)");
+  trace("[tm-rpa] Reserve Tickets poll timed out (8 min)");
   return false;
 }
 
@@ -893,31 +893,31 @@ export async function bookTicketmasterProgrammatic(
     }
   }
 
-  // Layer 1B: stop once the ticket selection surface is available. Picking a
-  // specific ticket can change price, section, and timing in ways the user
-  // should review directly, so this path produces a clean handoff instead of
-  // waiting for 10 minutes and later marking the task failed.
+  // Layer 1B: keep watching while the user chooses a ticket option. Once the
+  // Reserve/Continue button becomes enabled, click it and continue to the next
+  // page. If no selection happens within the bounded wait, return a clean
+  // reviewable state instead of timing out the worker step.
   const ticketOptionsReady =
     isTicketmasterTicketOptionsPage(getUrl()) ||
     await hasTicketmasterSeatSelectionSurface(page);
   if (ticketOptionsReady) {
-    trace(`[tm-rpa] Ticket options page ready: ${getUrl().slice(0, 140)}`);
+    trace(`[tm-rpa] Ticket options page ready; waiting for user ticket selection: ${getUrl().slice(0, 140)}`);
+  } else {
+    trace(`[tm-rpa] Ticket options surface not confirmed yet; watching for Reserve/Continue: ${getUrl().slice(0, 140)}`);
+  }
+
+  const reserved = await pollReserveTickets(page, trace);
+  if (!reserved) {
     return {
       reached_checkout: false,
       currentUrl: getUrl(),
       activePage: page,
       handoff_ready: true,
-      summary: "Ticketmaster page is ready for review. Choose the ticket option in the browser to continue.",
+      summary: ticketOptionsReady
+        ? "Ticketmaster is waiting for a ticket option. Choose an option in the browser to continue."
+        : "Ticketmaster opened, but the ticket options were not selected automatically. Review the browser page to continue.",
     };
   }
-
-  trace(`[tm-rpa] Ticket options were not reached. Current URL: ${getUrl().slice(0, 140)}`);
-  return {
-    reached_checkout: false,
-    currentUrl: getUrl(),
-    handoff_ready: true,
-    summary: "Ticketmaster opened, but the specific ticket options were not selected automatically. Review the page in the browser to continue.",
-  };
 
   // After Reserve Tickets, Ticketmaster may push us through a final auth step.
   await page.waitForTimeout(1500);

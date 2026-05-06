@@ -1024,7 +1024,9 @@ export async function runBrowserTask(
     ) => {
       if (!input.jobId || useCloud) return;
       try {
-        const activePage = stagehand.context.activePage() ?? page;
+        const ctx = stagehand.context;
+        if (!ctx) return;
+        const activePage = ctx.activePage() ?? page;
         const rawSnapshotPage = getRawPage(activePage);
         const buf = await rawSnapshotPage.screenshot({
           type: "jpeg",
@@ -1045,7 +1047,10 @@ export async function runBrowserTask(
           url,
         });
       } catch (error) {
-        trace(`[snapshots] capture failed: ${(error as Error).message?.slice(0, 120)}`);
+        const message = `[snapshots] capture failed: ${(error as Error).message?.slice(0, 120)}`;
+        debugTrace.push(message);
+        if (input.jobId) liveLogPush(input.jobId, message);
+        console.warn(`[stagehand] ${message}`);
       }
     };
     captureLocalSnapshotRef = captureLocalSnapshot;
