@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { getBrowserModelForStagehand } from "@/lib/agent-model-config";
+import { taskDetailsHref } from "@/lib/booking-jobs/workspace";
 
 interface RestaurantStepCardProps {
   /** Optional default city pre-filled from trip context */
@@ -117,7 +118,7 @@ export default function RestaurantStepCard({
 
       onCreated?.(jobId);
       if (!onCreated) {
-        router.push(`/tasks?view=live&focus=${encodeURIComponent(jobId)}`);
+        router.push(taskDetailsHref({ id: jobId, status: "running" }));
       }
     } catch (err) {
       setError(

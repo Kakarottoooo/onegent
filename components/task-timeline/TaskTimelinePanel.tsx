@@ -25,6 +25,10 @@ import { ConnectingState, IdleState } from "./EmptyStates";
 import SnapshotStream from "./SnapshotStream";
 import StatusBanner from "./StatusBanner";
 import TimelineEventList from "./TimelineEventList";
+import {
+  TASK_TIMELINE_HEADER_GLYPH,
+  normalizeTaskTimelineTitle,
+} from "./title";
 import { useTimelineEvents } from "./use-timeline-events";
 import { describeSnapshotDiagnostics, useSnapshots } from "./use-snapshots";
 import type {
@@ -106,7 +110,7 @@ export default function TaskTimelinePanel({
   );
 
   const headerTitle = title ?? FIXTURE_PANEL_LABELS.title;
-  const displayTitle = headerTitle.replace(/^\s*(?:🖥️|🖥|💻)\s*/u, "");
+  const displayTitle = normalizeTaskTimelineTitle(headerTitle);
   const headerSubtitle = subtitle ?? (demo ? FIXTURE_PANEL_LABELS.subtitle : undefined);
   const bannerDetail = bannerDetailFor(events, status);
 
@@ -120,7 +124,9 @@ export default function TaskTimelinePanel({
       <header className="task-timeline__header">
         <div className="task-timeline__header-text">
           <p className="task-timeline__header-title">
-            <span className="task-timeline__header-glyph" aria-hidden>🖥️</span>
+            <span className="task-timeline__header-glyph" aria-hidden>
+              {TASK_TIMELINE_HEADER_GLYPH}
+            </span>
             {displayTitle}
           </p>
           {headerSubtitle && (

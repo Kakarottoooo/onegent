@@ -47,6 +47,7 @@ import type {
 import type { ChatMessage } from "@/lib/llm-client";
 import { loadAgentModelConfig } from "@/lib/agent-model-config";
 import {
+  INLINE_BOOKING_JOB_CONTENT,
   buildRoomReplaySnapshot,
   buildSessionReplaySnapshot,
   type InlineBookingProfileSnapshot,
@@ -423,6 +424,7 @@ function HomeInner() {
       prev !== "none"; // "none → session:X" is session creation, not a switch
     if (isRealSwitch) {
       setInlineItems([]);
+      setHiddenReplayedJobIds(new Set());
       closeInlineWatchPanel();
       // Evict the previous thread first so its replay-set flag doesn't
       // wedge a future return-visit. (Switching A→B→A would leave A
@@ -907,6 +909,10 @@ function HomeInner() {
   const [recentJobs, setRecentJobs] = useState<AppBootstrapRecentJob[]>([]);
   // Inline booking task cards rendered below results
   const [inlineItems, setInlineItems] = useState<{ type: "job"; jobId: string }[]>([]);
+  const [hiddenReplayedJobIds, setHiddenReplayedJobIds] = useState<Set<string>>(
+    () => new Set(),
+  );
+  const inlineJobMarkerIdsRef = useRef<Set<string>>(new Set());
   const [inlineWatchPanel, setInlineWatchPanel] = useState<InlineTaskWatchState | null>(null);
   const [inlineWatchKey, setInlineWatchKey] = useState(0);
   const inlineWatchJobIdRef = useRef<string | null>(null);
@@ -924,6 +930,25 @@ function HomeInner() {
     inlineWatchJobIdRef.current = null;
     setInlineWatchPanel(null);
   }, []);
+  const recordInlineBookingJob = useCallback((jobId: string) => {
+    const normalized = jobId.trim();
+    if (!normalized) return;
+    setInlineItems((prev) =>
+      prev.some((item) => item.jobId === normalized)
+        ? prev
+        : [...prev, { type: "job", jobId: normalized }],
+    );
+    if (inlineJobMarkerIdsRef.current.has(normalized)) return;
+    inlineJobMarkerIdsRef.current.add(normalized);
+    void persistThreadMessage({
+      role: "assistant",
+      content: INLINE_BOOKING_JOB_CONTENT,
+      meta_json: {
+        kind: "inline_booking_job",
+        job_id: normalized,
+      },
+    });
+  }, [persistThreadMessage]);
   // When set, the next chat message is intercepted as a travel-doc reply
   const [pendingTravelDoc, setPendingTravelDoc] = useState<TravelDocRequest | null>(null);
   // Timestamp of last successful travel doc save — blocks re-trigger for 10s
@@ -1969,7 +1994,7 @@ function HomeInner() {
     void fetch(`/api/booking-jobs/${jobId}/start?executor=inline`, { method: "POST" }).catch(
       () => {}
     );
-    setInlineItems((prev) => [...prev, { type: "job", jobId }]);
+    recordInlineBookingJob(jobId);
   }
 
   async function submitInlineBookingProfile() {
@@ -2600,7 +2625,7 @@ function HomeInner() {
     </div>
   );
 
-  const currentTaskSessionId = activeRoomId ?? activeSessionId ?? null;
+  const currentTaskSessionId = activeRoomId ?? activeSessionId ?? chat.getSessionId();
 
   return (
     <div style={{ display: "flex", height: "100dvh" }}>
@@ -3852,7 +3877,28 @@ function HomeInner() {
                       </div>
                     ) : (
                       <div className="chat-msg--assistant-stack">
-                        <p className="chat-msg chat-msg--assistant">{msg.content}</p>
+                        {msg.content.trim().length > 0 && (
+                          <p className="chat-msg chat-msg--assistant">{msg.content}</p>
+                        )}
+                        {msg.bookingJobId && !hiddenReplayedJobIds.has(msg.bookingJobId) && (
+                          <InlineJobCard
+                            jobId={msg.bookingJobId}
+                            onWatch={openInlineWatchPanel}
+                            onDeleted={(id) =>
+                              setHiddenReplayedJobIds((prev) => {
+                                const next = new Set(prev);
+                                next.add(id);
+                                return next;
+                              })
+                            }
+                            onNeedsTravelDocs={(req) => {
+                              setPendingTravelDoc(req);
+                              chat.injectAssistantMessage(
+                                "To book this flight, I need your travel documents. Could you please share your **date of birth** (YYYY-MM-DD) and **passport number**? For example: \"2001-09-05, passport EJ2676174\""
+                              );
+                            }}
+                          />
+                        )}
                         {/* Phase 1 #7 path B — inline ProfileGapCard.
                             Triggered when /api/chat/commit direct_booking
                             response includes profile_gap (canonical 13-field
@@ -3896,7 +3942,7 @@ function HomeInner() {
                                 checkOut={chat.hotelDates?.check_out}
                                 guests={chat.hotelDates?.guests}
                                 sessionId={currentTaskSessionId}
-                                onJobCreated={(jobId) => setInlineItems((prev) => [...prev, { type: "job", jobId }])}
+                                onJobCreated={recordInlineBookingJob}
                               />
                             ))}
                           </div>
@@ -3911,7 +3957,7 @@ function HomeInner() {
                                 index={ci}
                                 bookingContext={chat.flightBookingContext}
                                 sessionId={currentTaskSessionId}
-                                onJobCreated={(jobId) => setInlineItems((prev) => [...prev, { type: "job", jobId }])}
+                                onJobCreated={recordInlineBookingJob}
                               />
                             ))}
                           </div>
@@ -3925,7 +3971,7 @@ function HomeInner() {
                                 card={card}
                                 index={ci}
                                 sessionId={currentTaskSessionId}
-                                onJobCreated={(jobId) => setInlineItems((prev) => [...prev, { type: "job", jobId }])}
+                                onJobCreated={recordInlineBookingJob}
                               />
                             ))}
                           </div>
@@ -3957,7 +4003,7 @@ function HomeInner() {
                                   }}
                                   isComparing={isComparing(card)}
                                   onFeedback={handleCardFeedback}
-                                  onJobCreated={(jobId) => setInlineItems((prev) => [...prev, { type: "job", jobId }])}
+                                  onJobCreated={recordInlineBookingJob}
                                 />
                               ))}
                             </div>
@@ -4159,7 +4205,7 @@ function HomeInner() {
                     sessionId={currentTaskSessionId ?? chat.getSessionId()}
                     errors={tripFlow.errors}
                     onBooked={(jobId) => {
-                      setInlineItems((prev) => [...prev, { type: "job", jobId }]);
+                      recordInlineBookingJob(jobId);
                       setTripFlow(null);
                     }}
                   />
@@ -4501,7 +4547,7 @@ function HomeInner() {
           {/* New chat button — only show when there's conversation history */}
           {hasMessages && (
             <button
-              onClick={() => { chat.clearChat(); setInlineItems([]); setPendingTravelDoc(null); nluHistoryRef.current = []; lastNluStateRef.current = null; }}
+              onClick={() => { chat.clearChat(); setInlineItems([]); setHiddenReplayedJobIds(new Set()); setPendingTravelDoc(null); nluHistoryRef.current = []; lastNluStateRef.current = null; }}
               title="Start a new conversation"
               className="chat-newchat"
               aria-label="Start a new conversation"

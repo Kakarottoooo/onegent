@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { RecommendationCard as CardType, FeedbackRecord } from "@/lib/types";
 import PhotoCarousel from "@/components/PhotoCarousel";
 import { getBrowserModelForStagehand } from "@/lib/agent-model-config";
+import { taskDetailsHref } from "@/lib/booking-jobs/workspace";
 import "./cards.css";
 
 interface Props {
@@ -164,7 +165,7 @@ export default function RecommendationCard({
         fetch(`/api/booking-jobs/${jobId}/start?executor=inline`, { method: "POST" }).catch(() => {});
         onJobCreated?.(jobId);
         if (!onJobCreated) {
-          router.push(`/tasks?view=live&focus=${encodeURIComponent(jobId)}`);
+          router.push(taskDetailsHref({ id: jobId, status: "running" }));
         }
       }
     } catch {

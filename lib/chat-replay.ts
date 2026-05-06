@@ -67,11 +67,19 @@ interface InlineBookingProfileMetaJson {
   gate?: InlineBookingProfileSnapshot | null;
 }
 
+export const INLINE_BOOKING_JOB_CONTENT = "__inline_booking_job__";
+
+interface InlineBookingJobMetaJson {
+  kind: "inline_booking_job";
+  job_id: string;
+}
+
 type ReplayMetaJson =
   | { kind?: string; proposal_id?: string }
   | SearchCardsMetaJson
   | PendingConfirmMetaJson
   | InlineBookingProfileMetaJson
+  | InlineBookingJobMetaJson
   | Record<string, unknown>
   | null;
 
@@ -126,6 +134,15 @@ function isInlineBookingProfileMeta(meta: ReplayMetaJson): meta is InlineBooking
   return !!meta && typeof meta === "object" && (meta as { kind?: unknown }).kind === "inline_booking_profile_state";
 }
 
+function isInlineBookingJobMeta(meta: ReplayMetaJson): meta is InlineBookingJobMetaJson {
+  return (
+    !!meta &&
+    typeof meta === "object" &&
+    (meta as { kind?: unknown }).kind === "inline_booking_job" &&
+    typeof (meta as { job_id?: unknown }).job_id === "string"
+  );
+}
+
 /** Reconstruct an inline-rendered Message from a persisted row, hydrating
  *  any search-card payload that was saved alongside the text bubble. The
  *  base shape stays identical for plain-text rows so the rest of the
@@ -136,6 +153,9 @@ function rowToMessage(
   meta: ReplayMetaJson,
 ): Message | null {
   if (isPendingConfirmMeta(meta) || isInlineBookingProfileMeta(meta)) return null;
+  if (isInlineBookingJobMeta(meta)) {
+    return { role, content: "", bookingJobId: meta.job_id };
+  }
   const base: Message = { role, content };
   if (!isSearchCardsMeta(meta)) return base;
   if (meta.cards) base.cards = meta.cards;
@@ -156,7 +176,11 @@ export function buildSessionReplaySnapshot(params: {
   const nluHistory: ChatMessage[] = rows
     .filter((row) => {
       const meta = row.meta_json ?? null;
-      return !isPendingConfirmMeta(meta) && !isInlineBookingProfileMeta(meta);
+      return (
+        !isPendingConfirmMeta(meta) &&
+        !isInlineBookingProfileMeta(meta) &&
+        !isInlineBookingJobMeta(meta)
+      );
     })
     .slice(-20)
     .map((row) => ({
@@ -231,6 +255,7 @@ export function buildRoomReplaySnapshot(rows?: RoomReplayRow[] | null): RoomRepl
     if (msg) messages.push(msg);
 
     if (row.role === "user" || row.role === "assistant") {
+      if (isInlineBookingJobMeta(meta)) continue;
       nluHistory.push({ role: row.role, content: row.content });
     }
   }

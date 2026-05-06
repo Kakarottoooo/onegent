@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  INLINE_BOOKING_JOB_CONTENT,
   buildRoomReplaySnapshot,
   buildSessionReplaySnapshot,
 } from "@/lib/chat-replay";
@@ -188,5 +189,67 @@ describe("chat replay snapshots", () => {
     expect(snapshot.messages).toHaveLength(2);
     expect(snapshot.messages[1].hotelCards).toHaveLength(3);
     expect(snapshot.messages[1].category).toBe("hotel");
+  });
+
+  it("rebuilds inline booking task cards without polluting session NLU history", () => {
+    const snapshot = buildSessionReplaySnapshot({
+      session: { title: "Book Sirrah" },
+      messages: [
+        {
+          id: "1",
+          role: "user",
+          content: "Book Sirrah next Thursday",
+          created_at: "2026-05-06T00:00:00Z",
+        },
+        {
+          id: "2",
+          role: "assistant",
+          content: INLINE_BOOKING_JOB_CONTENT,
+          meta_json: {
+            kind: "inline_booking_job",
+            job_id: "job_sirrah_123",
+          },
+          created_at: "2026-05-06T00:00:01Z",
+        },
+      ],
+    });
+
+    expect(snapshot.messages).toEqual([
+      { role: "user", content: "Book Sirrah next Thursday" },
+      { role: "assistant", content: "", bookingJobId: "job_sirrah_123" },
+    ]);
+    expect(snapshot.nluHistory).toEqual([
+      { role: "user", content: "Book Sirrah next Thursday" },
+    ]);
+  });
+
+  it("rebuilds inline booking task cards without polluting room NLU history", () => {
+    const snapshot = buildRoomReplaySnapshot([
+      {
+        id: "1",
+        role: "user",
+        content: "Book a Broadway show",
+        meta_json: null,
+        created_at: "2026-05-06T00:00:00Z",
+      },
+      {
+        id: "2",
+        role: "assistant",
+        content: INLINE_BOOKING_JOB_CONTENT,
+        meta_json: {
+          kind: "inline_booking_job",
+          job_id: "job_lion_king_123",
+        },
+        created_at: "2026-05-06T00:00:01Z",
+      },
+    ]);
+
+    expect(snapshot.messages).toEqual([
+      { role: "user", content: "Book a Broadway show" },
+      { role: "assistant", content: "", bookingJobId: "job_lion_king_123" },
+    ]);
+    expect(snapshot.nluHistory).toEqual([
+      { role: "user", content: "Book a Broadway show" },
+    ]);
   });
 });
