@@ -37,13 +37,17 @@ function mergeRowsById<T extends { id: string; created_at: string }>(rows: T[]):
 export async function getVisibleBookingJobs(params: {
   sessionId: string;
   userId?: string | null;
+  includeUserJobs?: boolean;
   includeShares?: boolean;
   limit?: number;
 }): Promise<VisibleBookingJob[]> {
   const limit = params.limit ?? 20;
+  const includeUserJobs = params.includeUserJobs ?? true;
   const [sessionJobs, userJobs] = await Promise.all([
     getBookingJobsBySession(params.sessionId, limit),
-    params.userId ? getBookingJobsByUser(params.userId, limit) : Promise.resolve([] as BookingJob[]),
+    includeUserJobs && params.userId
+      ? getBookingJobsByUser(params.userId, limit)
+      : Promise.resolve([] as BookingJob[]),
   ]);
   const jobs = mergeRowsById([...sessionJobs, ...userJobs]) as VisibleBookingJob[];
 
@@ -75,12 +79,14 @@ export async function getVisibleBookingJobs(params: {
 export async function getVisibleBookingJobSummaries(params: {
   sessionId: string;
   userId?: string | null;
+  includeUserJobs?: boolean;
   limit?: number;
 }): Promise<BookingJobSummary[]> {
   const limit = params.limit ?? 20;
+  const includeUserJobs = params.includeUserJobs ?? true;
   const [sessionJobs, userJobs] = await Promise.all([
     getBookingJobSummariesBySession(params.sessionId, limit),
-    params.userId
+    includeUserJobs && params.userId
       ? getBookingJobSummariesByUser(params.userId, limit)
       : Promise.resolve([] as BookingJobSummary[]),
   ]);

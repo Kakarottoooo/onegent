@@ -20,6 +20,8 @@ interface Props {
   onFeedback?: (record: FeedbackRecord) => void;
   /** Called after a task job is created so the parent can render the inline task card. */
   onJobCreated?: (jobId: string) => void;
+  /** Current chat/room session for the task. Falls back to legacy local session only outside chat. */
+  sessionId?: string | null;
   /** Hide the "Reserve with Agent" booking CTA. Used inside multi-party
    *  proposal cards where booking has to wait for the group's vote winner
    *  + payer-only confirmation. Aligns with FlightCard/ActivityCard
@@ -83,6 +85,7 @@ export default function RecommendationCard({
   isComparing,
   onFeedback,
   onJobCreated,
+  sessionId,
   hideBookingActions = false,
 }: Props) {
   const router = useRouter();
@@ -120,8 +123,8 @@ export default function RecommendationCard({
   async function proceedWithProfile(profile: { id: number; first_name: string; last_name: string; email: string; phone: string }) {
     localStorage.setItem("active_profile_id", String(profile.id));
     try {
-      const sessionId = localStorage.getItem("session_id") ?? crypto.randomUUID();
-      if (!localStorage.getItem("session_id")) localStorage.setItem("session_id", sessionId);
+      const bookingSessionId = sessionId?.trim() || localStorage.getItem("session_id") || crypto.randomUUID();
+      if (!localStorage.getItem("session_id")) localStorage.setItem("session_id", bookingSessionId);
       const agentModel = getBrowserModelForStagehand() ?? undefined;
 
       const otUrl = `https://www.opentable.com/s?term=${encodeURIComponent(card.restaurant.name)}&covers=${resCovers}&dateTime=${resDate}T${resTime}:00`;
@@ -154,7 +157,7 @@ export default function RecommendationCard({
       const createRes = await fetch("/api/booking-jobs", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ session_id: sessionId, trip_label: card.restaurant.name, steps: [step] }),
+        body: JSON.stringify({ session_id: bookingSessionId, trip_label: card.restaurant.name, steps: [step] }),
       });
       if (createRes.ok) {
         const { jobId } = await createRes.json();

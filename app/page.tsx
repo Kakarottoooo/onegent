@@ -398,6 +398,8 @@ function HomeInner() {
       prev !== ctx &&
       prev !== "none"; // "none → session:X" is session creation, not a switch
     if (isRealSwitch) {
+      setInlineItems([]);
+      closeInlineWatchPanel();
       // Evict the previous thread first so its replay-set flag doesn't
       // wedge a future return-visit. (Switching A→B→A would leave A
       // blank if its flag stayed set.) Encoded prev as "room:X" /
@@ -1900,7 +1902,10 @@ function HomeInner() {
     profile: MinimalBookingProfile
   ) {
     const sessionId =
-      localStorage.getItem("session_id") ?? crypto.randomUUID();
+      activeRoomIdRef.current ??
+      activeSessionIdRef.current ??
+      localStorage.getItem("session_id") ??
+      crypto.randomUUID();
     if (!localStorage.getItem("session_id")) {
       localStorage.setItem("session_id", sessionId);
     }
@@ -2569,6 +2574,8 @@ function HomeInner() {
       )}
     </div>
   );
+
+  const currentTaskSessionId = activeRoomId ?? activeSessionId ?? null;
 
   return (
     <div style={{ display: "flex", height: "100dvh" }}>
@@ -3863,6 +3870,7 @@ function HomeInner() {
                                 checkIn={chat.hotelDates?.check_in}
                                 checkOut={chat.hotelDates?.check_out}
                                 guests={chat.hotelDates?.guests}
+                                sessionId={currentTaskSessionId}
                                 onJobCreated={(jobId) => setInlineItems((prev) => [...prev, { type: "job", jobId }])}
                               />
                             ))}
@@ -3877,6 +3885,7 @@ function HomeInner() {
                                 card={card}
                                 index={ci}
                                 bookingContext={chat.flightBookingContext}
+                                sessionId={currentTaskSessionId}
                                 onJobCreated={(jobId) => setInlineItems((prev) => [...prev, { type: "job", jobId }])}
                               />
                             ))}
@@ -3890,6 +3899,7 @@ function HomeInner() {
                                 key={`${card.activity.id}-${card.group}`}
                                 card={card}
                                 index={ci}
+                                sessionId={currentTaskSessionId}
                                 onJobCreated={(jobId) => setInlineItems((prev) => [...prev, { type: "job", jobId }])}
                               />
                             ))}
@@ -3915,6 +3925,7 @@ function HomeInner() {
                                   }}
                                   nearLocationLabel={location.nearLocation || undefined}
                                   currentQuery={lastUserQuery}
+                                  sessionId={currentTaskSessionId}
                                   onCompare={() => {
                                     toggleCompare(card);
                                     setCompareOpen(true);
@@ -4120,7 +4131,7 @@ function HomeInner() {
                 {tripFlow?.phase === "ready" && (
                   <TripPackageCard
                     pkg={tripFlow.pkg}
-                    sessionId={chat.getSessionId()}
+                    sessionId={currentTaskSessionId ?? chat.getSessionId()}
                     errors={tripFlow.errors}
                     onBooked={(jobId) => {
                       setInlineItems((prev) => [...prev, { type: "job", jobId }]);

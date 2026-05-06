@@ -37,11 +37,12 @@ interface ActivityCardProps {
   card: ActivityRecommendationCard;
   index: number;
   hideBookingActions?: boolean;
+  sessionId?: string | null;
   /** Called after a booking job is created — inject inline task card */
   onJobCreated?: (jobId: string) => void;
 }
 
-export default function ActivityCard({ card, index, hideBookingActions, onJobCreated }: ActivityCardProps) {
+export default function ActivityCard({ card, index, hideBookingActions, sessionId, onJobCreated }: ActivityCardProps) {
   const { activity, group, why_recommended } = card;
   // Per-source loading state keyed by provider so clicking one button doesn't freeze another.
   const [bookingByProvider, setBookingByProvider] = useState<Record<string, boolean>>({});
@@ -93,7 +94,8 @@ export default function ActivityCard({ card, index, hideBookingActions, onJobCre
   ) {
     localStorage.setItem("active_profile_id", String(profile.id));
     try {
-      const sessionId = localStorage.getItem("session_id") ?? crypto.randomUUID();
+      const bookingSessionId = sessionId?.trim() || localStorage.getItem("session_id") || crypto.randomUUID();
+      if (!localStorage.getItem("session_id")) localStorage.setItem("session_id", bookingSessionId);
       const savedModel = getBrowserModelAsLegacy();
       const agentModel = savedModel.model ? savedModel : undefined;
 
@@ -157,7 +159,7 @@ export default function ActivityCard({ card, index, hideBookingActions, onJobCre
       const createRes = await fetch("/api/booking-jobs", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ session_id: sessionId, trip_label: activity.title, steps: [step] }),
+        body: JSON.stringify({ session_id: bookingSessionId, trip_label: activity.title, steps: [step] }),
       });
       if (createRes.ok) {
         const { jobId } = await createRes.json();

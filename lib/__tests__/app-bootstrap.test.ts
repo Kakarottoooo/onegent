@@ -88,7 +88,12 @@ describe("app bootstrap read model", () => {
 
     expect(mockedRooms).toHaveBeenCalledWith("user-1", { includeInvited: true, limit: 40 });
     expect(mockedSessions).toHaveBeenCalledWith("user-1", 60);
-    expect(mockedJobs).toHaveBeenCalledWith({ sessionId: "session-1", userId: "user-1", limit: 30 });
+    expect(mockedJobs).toHaveBeenCalledWith({
+      sessionId: "session-1",
+      userId: "user-1",
+      limit: 30,
+      includeUserJobs: false,
+    });
     expect(data.sidebar.rooms).toHaveLength(1);
     expect(data.sidebar.sessions).toHaveLength(1);
     expect(data.recent_jobs.map((row) => row.id)).toEqual(["job-1", "job-2", "job-3"]);
@@ -105,7 +110,12 @@ describe("app bootstrap read model", () => {
 
     expect(mockedRooms).not.toHaveBeenCalled();
     expect(mockedSessions).not.toHaveBeenCalled();
-    expect(mockedJobs).toHaveBeenCalledWith({ sessionId: "session-1", userId: null, limit: 30 });
+    expect(mockedJobs).toHaveBeenCalledWith({
+      sessionId: "session-1",
+      userId: null,
+      limit: 30,
+      includeUserJobs: false,
+    });
   });
 
   it("keeps the bootstrap best effort when one source fails", async () => {

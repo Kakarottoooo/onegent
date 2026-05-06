@@ -130,13 +130,13 @@ export default function Sidebar({ activeSessionId, activeRoomId, reloadTick }: S
 
   const load = useCallback(async (force = false) => {
     try {
-      const data = await fetchAppBootstrapCached(currentSessionIdFromStorage(), { force });
+      const data = await fetchAppBootstrapCached(activeSessionId ?? currentSessionIdFromStorage(), { force });
       setRooms(data.sidebar.rooms ?? []);
       setSessions(data.sidebar.sessions ?? []);
     } catch {
       // swallow — sidebar is best-effort UX
     }
-  }, []);
+  }, [activeSessionId]);
 
   useEffect(() => {
     if (!isSignedIn) {

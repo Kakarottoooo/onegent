@@ -76,7 +76,7 @@ export async function getAppBootstrapData(params: {
   const bookingJobsPromise = sessionId
     ? bestEffort(
         "booking job summaries",
-        getVisibleBookingJobSummaries({ sessionId, userId, limit: 30 }),
+        getVisibleBookingJobSummaries({ sessionId, userId, limit: 30, includeUserJobs: false }),
         [] as BookingJobSummary[],
       )
     : Promise.resolve([] as BookingJobSummary[]);
