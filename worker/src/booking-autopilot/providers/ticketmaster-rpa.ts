@@ -376,11 +376,19 @@ async function openCalendarViewWithLocators(page: Page, trace: TraceFn): Promise
 }
 
 async function clickCalendarSlotWithLocators(page: Page, target: TargetDateTime, trace: TraceFn): Promise<boolean> {
+  // HARD wallclock budget: this loop iterated 260 elements at ~600ms each
+  // under Stagehand's stripped-locator timeouts → 156s hang per call,
+  // pushing the worker step to 600s timeout. Cap the budget at 6s.
+  const deadline = Date.now() + 6000;
   const controls = page.locator('a, button, [role="button"], [role="link"]');
-  const count = Math.min(await controls.count().catch(() => 0), 260);
+  const count = Math.min(await controls.count().catch(() => 0), 80);
   let best: { locator: Locator; label: string; score: number } | null = null;
   const samples: string[] = [];
   for (let i = 0; i < count; i++) {
+    if (Date.now() > deadline) {
+      trace(`[tm-rpa] Locator slot scan budget exceeded at i=${i}/${count}`);
+      break;
+    }
     const item = controls.nth(i);
     if (!(await locatorLooksVisible(item))) continue;
     const label = await locatorLabel(item);
@@ -409,10 +417,16 @@ async function clickCalendarSlotWithLocators(page: Page, target: TargetDateTime,
 }
 
 async function clickFirstAvailableSlotWithLocators(page: Page, trace: TraceFn): Promise<boolean> {
+  // Same 6s wallclock budget — see clickCalendarSlotWithLocators.
+  const deadline = Date.now() + 6000;
   const controls = page.locator('a, button, [role="button"], [role="link"]');
-  const count = Math.min(await controls.count().catch(() => 0), 260);
+  const count = Math.min(await controls.count().catch(() => 0), 80);
   const samples: string[] = [];
   for (let i = 0; i < count; i++) {
+    if (Date.now() > deadline) {
+      trace(`[tm-rpa] First-slot locator scan budget exceeded at i=${i}/${count}`);
+      break;
+    }
     const item = controls.nth(i);
     if (!(await locatorLooksVisible(item))) continue;
     const label = await locatorLabel(item);
@@ -721,11 +735,118 @@ async function navigateToTargetMonth(page: Page, target: TargetDateTime, trace: 
 }
 
 /**
+ * String-based page.evaluate that bypasses tsx function serialization.
+ *
+ * tsx (the worker's TS runtime) injects helper variables into transpiled
+ * function bodies in some configurations — when those functions are then
+ * serialized via Function.prototype.toString and shipped to Stagehand's
+ * page.evaluate, the helpers reference globals that don't exist in the
+ * page context, throwing "StagehandEvalError: Uncaught" — observed live
+ * for cookie dismiss / clickCalendarSlot / clickFirstAvailableSlot.
+ *
+ * Passing the source as a STRING bypasses the function-to-string path
+ * entirely; the page evaluates raw JS without tsx's helper injection.
+ *
+ * Also: evaluate-side el.click() seems to compound the StagehandEvalError
+ * (the OpenTable provider's comment in stagehand-executor.ts:4720 documents
+ * this). So we ONLY tag the winner with a data-attr inside evaluate, and
+ * click via Playwright locator afterwards — separating concerns.
+ */
+async function evaluateAndTagBestSlot(
+  page: Page,
+  target: TargetDateTime,
+  pickName: string,
+): Promise<{ tagged: boolean; label: string; candidates: number; score: number }> {
+  const args = {
+    monthName: target.monthName,
+    monthShort: target.monthName.slice(0, 3),
+    day: target.day,
+    year: target.year,
+    time: target.time ?? "",
+    pickName,
+    minScore: target.time ? 7 : 6,
+  };
+  // String-based source — no tsx transpilation, no function serialization.
+  // Each var is read from the JSON-injected `args` object.
+  const source = `
+(function() {
+  var args = ${JSON.stringify(args)};
+  var monthLower = args.monthName.toLowerCase();
+  var monthShort = args.monthShort.toLowerCase();
+  var dayStr = String(args.day);
+  var dayPadded = dayStr.length === 1 ? "0" + dayStr : dayStr;
+  var timeLower = (args.time || "").toLowerCase();
+  var nodes = Array.from(document.querySelectorAll('a, button, [role="button"], [role="link"]'));
+  var best = null;
+  var candidates = 0;
+  for (var i = 0; i < nodes.length; i++) {
+    var el = nodes[i];
+    var rect = el.getBoundingClientRect();
+    if (rect.width <= 0 || rect.height <= 0) continue;
+    if (el.offsetWidth < 30 || el.offsetHeight < 20) continue;
+    candidates++;
+    var text = (el.textContent || "").toLowerCase().replace(/\\s+/g, " ").trim();
+    var aria = (el.getAttribute("aria-label") || "").toLowerCase();
+    var combined = text + " " + aria;
+    if (!combined.trim()) continue;
+    var score = 0;
+    if (combined.indexOf(monthLower) >= 0 || combined.indexOf(monthShort) >= 0) score += 3;
+    var dayRx = new RegExp("\\\\b" + dayStr + "(st|nd|rd|th)?\\\\b|\\\\b" + dayPadded + "\\\\b");
+    if (dayRx.test(combined)) score += 3;
+    if (timeLower && combined.indexOf(timeLower) >= 0) score += 2;
+    if (combined.indexOf(String(args.year)) >= 0) score += 1;
+    if (score >= args.minScore && (!best || score > best.score)) {
+      best = { el: el, score: score, label: text.slice(0, 80) };
+    }
+  }
+  if (!best) return { tagged: false, label: "", candidates: candidates, score: 0 };
+  // Clear any prior tag (re-runs).
+  var prior = document.querySelectorAll('[data-onegent-tm-pick="' + args.pickName + '"]');
+  for (var j = 0; j < prior.length; j++) prior[j].removeAttribute("data-onegent-tm-pick");
+  best.el.setAttribute("data-onegent-tm-pick", args.pickName);
+  return { tagged: true, label: best.label, candidates: candidates, score: best.score };
+})()
+`;
+  const r = await page.evaluate(source).catch(() => null);
+  if (!r || typeof r !== "object") {
+    return { tagged: false, label: "", candidates: 0, score: 0 };
+  }
+  const obj = r as { tagged?: boolean; label?: string; candidates?: number; score?: number };
+  return {
+    tagged: obj.tagged === true,
+    label: obj.label ?? "",
+    candidates: obj.candidates ?? 0,
+    score: obj.score ?? 0,
+  };
+}
+
+/**
  * Click the calendar/event slot that matches the target date (and time if
  * provided). Ticketmaster attraction pages list events as <a> or <button>
  * elements; we match by day number + month name in the visible text.
  */
 async function clickCalendarSlot(page: Page, target: TargetDateTime, trace: TraceFn): Promise<boolean> {
+  // Strategy 1: string-based evaluate scan + tag, then locator click.
+  // Bypasses both StagehandEvalError AND slow 260-locator iteration.
+  const tag = await evaluateAndTagBestSlot(page, target, "calendar-slot");
+  trace(`[tm-rpa] Calendar slot scan: tagged=${tag.tagged} candidates=${tag.candidates} score=${tag.score} label="${tag.label.slice(0, 80)}"`);
+  if (tag.tagged) {
+    try {
+      const loc = page.locator('[data-onegent-tm-pick="calendar-slot"]').first();
+      const count = await loc.count().catch(() => 0);
+      if (count > 0) {
+        await safeScrollIntoView(loc);
+        await loc.click({ timeout: 2500, force: true });
+        trace(`[tm-rpa] Calendar slot clicked via tag locator: "${tag.label.slice(0, 80)}" score=${tag.score}`);
+        return true;
+      }
+    } catch (err) {
+      trace(`[tm-rpa] Calendar slot tag locator click failed: ${(err as Error).message?.slice(0, 80)}`);
+    }
+  }
+
+  // Strategy 2: legacy function-based evaluate (kept for graceful degradation;
+  // may still hit StagehandEvalError but won't crash thanks to .catch).
   const result = await page.evaluate(
     ({ monthName, day, year, time }: { monthName: string; day: number; year: number; time?: string }) => {
       const isVisible = (el: Element): boolean => {
