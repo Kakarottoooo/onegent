@@ -1,3 +1,4 @@
+import { writeFileSync } from "node:fs";
 import {
   evaluateInternalBenchmarkGate,
   renderInternalBenchmarkMarkdown,
@@ -60,24 +61,33 @@ if (hasFlag("--gate")) {
   gate = evaluateInternalBenchmarkGate(report, {
     minSuccessRate: readRateArg("--min-success-rate"),
     minArtifactCompletenessRate: readRateArg("--min-artifact-completeness"),
+    maxRoutingMismatch: readCountArg("--max-routing-mismatch"),
+    maxOwnerUnassigned: readCountArg("--max-owner-unassigned"),
     maxFailureCounts: {
-      routing_mismatch: readCountArg("--max-routing-mismatch"),
-      unsafe_boundary: readCountArg("--max-unsafe-boundary"),
-      artifact_incomplete: readCountArg("--max-artifact-incomplete"),
-      simulated_provider_block: readCountArg("--max-provider-simulated-block"),
+      nlu_wrong_vertical: readCountArg("--max-nlu-wrong-vertical"),
+      nlu_constraint_lost: readCountArg("--max-nlu-constraint-lost"),
+      task_workspace_artifact_incomplete: readCountArg("--max-artifact-incomplete"),
+      provider_simulated_block: readCountArg("--max-provider-simulated-block"),
+      manual_boundary_expected: readCountArg("--max-manual-boundary"),
+      unsupported_request: readCountArg("--max-unsupported-request"),
+      stale_session_or_provider_degraded: readCountArg("--max-stale-session-or-provider-degraded"),
+      performance_budget_exceeded: readCountArg("--max-performance-budget-exceeded"),
     },
   });
 }
 
+const output = hasFlag("--json")
+  ? JSON.stringify(withGate(report, gate), null, 2)
+  : renderInternalBenchmarkMarkdown(report) + renderGate(gate);
+const outputPath = readArg("--output", "");
+if (outputPath) {
+  writeFileSync(outputPath, output, "utf8");
+}
+
 if (hasFlag("--json")) {
-  console.log(JSON.stringify(withGate(report, gate), null, 2));
+  console.log(output);
 } else {
-  console.log(renderInternalBenchmarkMarkdown(report));
-  if (gate) {
-    console.log("");
-    console.log("## Gate");
-    console.log(gate.pass ? "PASS" : `FAIL\n- ${gate.errors.join("\n- ")}`);
-  }
+  console.log(output);
 }
 
 if (gate && !gate.pass) {
@@ -90,4 +100,9 @@ function withGate(
   gateResult: ReturnType<typeof evaluateInternalBenchmarkGate> | null,
 ): InternalBenchmarkReport | (InternalBenchmarkReport & { gate: NonNullable<typeof gateResult> }) {
   return gateResult ? { ...report, gate: gateResult } : report;
+}
+
+function renderGate(gateResult: ReturnType<typeof evaluateInternalBenchmarkGate> | null): string {
+  if (!gateResult) return "";
+  return `\n\n## Gate\n${gateResult.pass ? "PASS" : `FAIL\n- ${gateResult.errors.join("\n- ")}`}`;
 }

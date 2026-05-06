@@ -11,30 +11,48 @@ export type InternalBenchmarkFutureMode = "small-live" | "live";
 
 export type InternalBenchmarkFailureClass =
   | "none"
-  | "routing_mismatch"
-  | "missing_required_field"
-  | "constraint_lost"
-  | "artifact_incomplete"
-  | "simulated_provider_block"
+  | "nlu_wrong_vertical"
+  | "nlu_constraint_lost"
+  | "planner_missing_required_field"
+  | "provider_simulated_block"
+  | "task_workspace_artifact_incomplete"
   | "manual_boundary_expected"
   | "unsupported_request"
-  | "unsafe_boundary";
+  | "stale_session_or_provider_degraded"
+  | "performance_budget_exceeded";
 
 export type InternalBenchmarkOwner =
   | "nlu"
   | "planner"
   | "task-workspace"
   | "provider-runtime"
-  | "product/manual-boundary";
+  | "product/manual-boundary"
+  | "unassigned";
+
+export type InternalBenchmarkExpectedOutcome =
+  | "pass"
+  | "expected_clarification"
+  | "expected_manual_boundary"
+  | "expected_blocker";
+
+export type InternalBenchmarkArtifactExpectations = {
+  syntheticMarker: boolean;
+  fixtureIdPresent: boolean;
+  taskEvidence: boolean;
+  logs: boolean;
+  screenshots: boolean;
+};
 
 export type InternalBenchmarkCase = {
   id: string;
   vertical: InternalBenchmarkVertical;
   title: string;
+  expectedOutcome: InternalBenchmarkExpectedOutcome;
   fixtureId?: string;
   expectedPass: boolean;
   expectedFailureClass: InternalBenchmarkFailureClass;
   artifactComplete: boolean;
+  artifactExpectations: InternalBenchmarkArtifactExpectations;
   suggestedOwner: InternalBenchmarkOwner;
   dogfoodId?: string;
   durationMs?: number;
@@ -57,6 +75,16 @@ export type InternalBenchmarkTopFailedCase = {
   title: string;
 };
 
+export type InternalBenchmarkOwnerRecommendation = {
+  owner: InternalBenchmarkOwner;
+  failedCases: number;
+};
+
+export type InternalBenchmarkDogfoodMapping = {
+  dogfoodId: string;
+  caseIds: string[];
+};
+
 export type InternalBenchmarkSummary = {
   mode: InternalBenchmarkMode;
   vertical: InternalBenchmarkVerticalArg;
@@ -66,6 +94,8 @@ export type InternalBenchmarkSummary = {
   successRate: number;
   averageDurationMs: number | null;
   artifactCompletenessRate: number;
+  routingMismatchCount: number;
+  ownerUnassignedCount: number;
   byVertical: Record<InternalBenchmarkVertical, number>;
   byFailureClass: Record<InternalBenchmarkFailureClass, number>;
   bySuggestedOwner: Record<InternalBenchmarkOwner, number>;
@@ -74,6 +104,8 @@ export type InternalBenchmarkSummary = {
 export type InternalBenchmarkReport = {
   summary: InternalBenchmarkSummary;
   topFailedCases: InternalBenchmarkTopFailedCase[];
+  dogfoodMapping: InternalBenchmarkDogfoodMapping[];
+  nextRecommendedOwners: InternalBenchmarkOwnerRecommendation[];
   results: InternalBenchmarkCaseResult[];
   notes: string[];
 };
@@ -81,6 +113,8 @@ export type InternalBenchmarkReport = {
 export type InternalBenchmarkGateOptions = {
   minSuccessRate?: number;
   minArtifactCompletenessRate?: number;
+  maxRoutingMismatch?: number;
+  maxOwnerUnassigned?: number;
   maxFailureCounts?: Partial<Record<InternalBenchmarkFailureClass, number>>;
 };
 
@@ -99,14 +133,15 @@ export type InternalBenchmarkGateResult = {
 
 const ZERO_FAILURES: Record<InternalBenchmarkFailureClass, number> = {
   none: 0,
-  routing_mismatch: 0,
-  missing_required_field: 0,
-  constraint_lost: 0,
-  artifact_incomplete: 0,
-  simulated_provider_block: 0,
+  nlu_wrong_vertical: 0,
+  nlu_constraint_lost: 0,
+  planner_missing_required_field: 0,
+  provider_simulated_block: 0,
+  task_workspace_artifact_incomplete: 0,
   manual_boundary_expected: 0,
   unsupported_request: 0,
-  unsafe_boundary: 0,
+  stale_session_or_provider_degraded: 0,
+  performance_budget_exceeded: 0,
 };
 
 const ZERO_VERTICALS: Record<InternalBenchmarkVertical, number> = {
@@ -123,297 +158,364 @@ const ZERO_OWNERS: Record<InternalBenchmarkOwner, number> = {
   "task-workspace": 0,
   "provider-runtime": 0,
   "product/manual-boundary": 0,
+  unassigned: 0,
+};
+
+const COMPLETE_ARTIFACTS: InternalBenchmarkArtifactExpectations = {
+  syntheticMarker: true,
+  fixtureIdPresent: true,
+  taskEvidence: true,
+  logs: true,
+  screenshots: true,
+};
+
+const INCOMPLETE_ARTIFACTS: InternalBenchmarkArtifactExpectations = {
+  syntheticMarker: true,
+  fixtureIdPresent: true,
+  taskEvidence: true,
+  logs: true,
+  screenshots: false,
 };
 
 export const INTERNAL_BENCHMARK_MODE_NOTES = [
-  "no-live mode runs deterministic routing fixtures and simulated artifact completeness only.",
-  "small-live and live modes are intentionally documented future modes; this runner refuses them.",
+  "no-live mode runs deterministic routing fixtures, simulated artifact contracts, and owner/failure metadata only.",
+  "small-live and live modes are documented future modes; this runner refuses them.",
   "Provider closure still requires separate runtime evidence, logs, screenshots, and human approval.",
 ] as const;
 
-export const INTERNAL_BENCHMARK_CASES: InternalBenchmarkCase[] = [
-  {
-    id: "restaurant-japanese-routing",
-    vertical: "restaurant",
-    title: "Japanese restaurant request keeps cuisine as a hard constraint",
-    fixtureId: "zh-restaurant-japanese-complete",
-    expectedPass: true,
-    expectedFailureClass: "none",
-    artifactComplete: true,
-    suggestedOwner: "nlu",
-    dogfoodId: "DOG-009",
-    durationMs: 1200,
+export const INTERNAL_BENCHMARK_CASES: InternalBenchmarkCase[] = buildInternalBenchmarkCases();
+
+function buildInternalBenchmarkCases(): InternalBenchmarkCase[] {
+  return [
+    ...buildVerticalCorpus("restaurant", {
+      passFixtures: [
+        "zh-restaurant-japanese-complete",
+        "zh-restaurant-chinese-complete",
+        "en-restaurant-sushi-nyc",
+        "en-restaurant-direct-carbone",
+        "en-restaurant-room-named-member",
+        "en-restaurant-vegan-budget",
+        "en-restaurant-any-cuisine",
+        "en-restaurant-dietary-shellfish",
+      ],
+      missingFixtures: ["en-restaurant-missing-cuisine", "en-restaurant-missing-time"],
+      dogfoodId: "DOG-009",
+      providerTitle: "Restaurant provider simulated no-availability/network boundary",
+    }),
+    ...buildVerticalCorpus("hotel", {
+      passFixtures: [
+        "zh-hotel-complete",
+        "en-hotel-nyc-budget",
+        "en-hotel-nights-satisfy-checkout",
+        "en-hotel-direct-pierre",
+        "en-hotel-guests-star-rating",
+        "en-hotel-neighborhood",
+        "en-hotel-budget-date",
+      ],
+      missingFixtures: ["en-hotel-missing-checkout", "en-hotel-missing-city"],
+      dogfoodId: "DOG-010",
+      providerTitle: "Booking.com simulated selector/network blocker",
+    }),
+    ...buildVerticalCorpus("flight", {
+      passFixtures: [
+        "zh-flight-complete",
+        "en-flight-bna-nyc-oneway",
+        "en-flight-roundtrip",
+        "en-flight-business-passengers",
+        "en-flight-avoid-red-eye",
+        "en-flight-sfo-lax",
+        "en-flight-family-passengers",
+      ],
+      missingFixtures: ["en-flight-missing-origin", "en-flight-missing-date"],
+      providerTitle: "Expedia simulated card/provider blocker",
+    }),
+    ...buildVerticalCorpus("activity", {
+      passFixtures: [
+        "zh-activity-hamilton-complete",
+        "en-activity-hamilton-complete",
+        "en-activity-knicks",
+        "en-activity-concert-budget",
+        "en-activity-two-tickets",
+        "en-activity-exhibition",
+        "en-activity-comedy",
+        "zh-activity-lion-king-trip-shaped",
+        "en-activity-lion-king-trip-shaped",
+      ],
+      missingFixtures: ["en-activity-missing-date", "en-activity-missing-city"],
+      dogfoodId: "DOG-005",
+      providerTitle: "Ticketing provider simulated manual/provider boundary",
+    }),
+    ...buildTripAndMetaCorpus(),
+  ];
+}
+
+function buildVerticalCorpus(
+  vertical: Exclude<InternalBenchmarkVertical, "trip">,
+  config: {
+    passFixtures: string[];
+    missingFixtures: string[];
+    dogfoodId?: string;
+    providerTitle: string;
   },
-  {
-    id: "restaurant-chinese-routing",
-    vertical: "restaurant",
-    title: "Chinese restaurant request keeps cuisine as a hard constraint",
-    fixtureId: "zh-restaurant-chinese-complete",
-    expectedPass: true,
-    expectedFailureClass: "none",
-    artifactComplete: true,
-    suggestedOwner: "nlu",
-    dogfoodId: "DOG-009",
-    durationMs: 1160,
-  },
-  {
-    id: "restaurant-missing-cuisine",
-    vertical: "restaurant",
-    title: "Restaurant without cuisine asks for the cuisine slot instead of running broad search",
-    fixtureId: "en-restaurant-missing-cuisine",
+): InternalBenchmarkCase[] {
+  const cases: InternalBenchmarkCase[] = [];
+  for (let i = 0; i < 28; i += 1) {
+    const fixtureId = config.passFixtures[i % config.passFixtures.length];
+    cases.push(makeCase({
+      id: `${vertical}-route-pass-${pad(i + 1)}`,
+      vertical,
+      title: `${vertical} routing pass fixture ${fixtureId}`,
+      expectedOutcome: "pass",
+      fixtureId,
+      expectedPass: true,
+      failureClass: "none",
+      owner: i % 5 === 0 ? "planner" : "nlu",
+      dogfoodId: config.dogfoodId,
+      durationMs: 700 + i * 12,
+    }));
+  }
+  for (let i = 0; i < 4; i += 1) {
+    const fixtureId = config.missingFixtures[i % config.missingFixtures.length];
+    cases.push(makeCase({
+      id: `${vertical}-planner-missing-${pad(i + 1)}`,
+      vertical,
+      title: `${vertical} expected clarification fixture ${fixtureId}`,
+      expectedOutcome: "expected_clarification",
+      fixtureId,
+      expectedPass: false,
+      failureClass: "planner_missing_required_field",
+      owner: "planner",
+      dogfoodId: config.dogfoodId,
+      durationMs: 900 + i * 30,
+    }));
+  }
+  for (let i = 0; i < 2; i += 1) {
+    cases.push(makeCase({
+      id: `${vertical}-artifact-incomplete-${pad(i + 1)}`,
+      vertical,
+      title: `${vertical} artifact contract missing screenshot/log metadata`,
+      expectedOutcome: "expected_blocker",
+      expectedPass: false,
+      failureClass: "task_workspace_artifact_incomplete",
+      owner: "task-workspace",
+      dogfoodId: "DOG-004",
+      artifactComplete: false,
+      artifacts: INCOMPLETE_ARTIFACTS,
+      durationMs: 1000 + i * 40,
+    }));
+  }
+  for (let i = 0; i < 2; i += 1) {
+    cases.push(makeCase({
+      id: `${vertical}-provider-simulated-${pad(i + 1)}`,
+      vertical,
+      title: config.providerTitle,
+      expectedOutcome: "expected_blocker",
+      expectedPass: false,
+      failureClass: i === 0 ? "provider_simulated_block" : "stale_session_or_provider_degraded",
+      owner: "provider-runtime",
+      dogfoodId: vertical === "hotel" ? "DOG-007" : undefined,
+      durationMs: 1500 + i * 120,
+    }));
+  }
+  cases.push(makeCase({
+    id: `${vertical}-manual-boundary-01`,
+    vertical,
+    title: `${vertical} safe manual/final-confirm boundary remains product-owned`,
+    expectedOutcome: "expected_manual_boundary",
     expectedPass: false,
-    expectedFailureClass: "missing_required_field",
-    artifactComplete: true,
-    suggestedOwner: "planner",
-    dogfoodId: "DOG-009",
+    failureClass: "manual_boundary_expected",
+    owner: "product/manual-boundary",
+    durationMs: 1300,
+  }));
+  cases.push(makeCase({
+    id: `${vertical}-performance-budget-01`,
+    vertical,
+    title: `${vertical} no-live performance budget simulated regression`,
+    expectedOutcome: "expected_blocker",
+    expectedPass: false,
+    failureClass: "performance_budget_exceeded",
+    owner: "task-workspace",
+    durationMs: 2600,
+  }));
+  cases.push(makeCase({
+    id: `${vertical}-unsupported-01`,
+    vertical,
+    title: `${vertical} unsupported adjacent request stays out of provider runtime`,
+    expectedOutcome: "expected_blocker",
+    expectedPass: false,
+    failureClass: "unsupported_request",
+    owner: "product/manual-boundary",
+    durationMs: 650,
+  }));
+  cases.push(makeCase({
+    id: `${vertical}-route-pass-extra-01`,
+    vertical,
+    title: `${vertical} extra routing pass to keep 40-case balance`,
+    expectedOutcome: "pass",
+    fixtureId: config.passFixtures[0],
+    expectedPass: true,
+    failureClass: "none",
+    owner: "nlu",
+    dogfoodId: config.dogfoodId,
     durationMs: 780,
-  },
-  {
-    id: "restaurant-artifact-missing-screenshot",
-    vertical: "restaurant",
-    title: "Restaurant evidence bundle missing screenshot manifest",
-    expectedPass: false,
-    expectedFailureClass: "artifact_incomplete",
-    artifactComplete: false,
-    suggestedOwner: "task-workspace",
-    dogfoodId: "DOG-004",
-    durationMs: 800,
-  },
-  {
-    id: "hotel-nyc-budget-routing",
-    vertical: "hotel",
-    title: "Hotel date and budget request reaches confirm card",
-    fixtureId: "zh-hotel-complete",
-    expectedPass: true,
-    expectedFailureClass: "none",
-    artifactComplete: true,
-    suggestedOwner: "nlu",
-    dogfoodId: "DOG-010",
-    durationMs: 1000,
-  },
-  {
-    id: "hotel-nights-checkout-routing",
-    vertical: "hotel",
-    title: "Hotel nights count satisfies checkout requirement",
-    fixtureId: "en-hotel-nights-satisfy-checkout",
-    expectedPass: true,
-    expectedFailureClass: "none",
-    artifactComplete: true,
-    suggestedOwner: "planner",
-    durationMs: 980,
-  },
-  {
-    id: "hotel-missing-checkout",
-    vertical: "hotel",
-    title: "Hotel with no checkout or nights asks for checkout",
-    fixtureId: "en-hotel-missing-checkout",
-    expectedPass: false,
-    expectedFailureClass: "missing_required_field",
-    artifactComplete: true,
-    suggestedOwner: "planner",
-    dogfoodId: "DOG-010",
-    durationMs: 920,
-  },
-  {
-    id: "hotel-booking-provider-simulated-block",
-    vertical: "hotel",
-    title: "Booking.com selector drift stays a simulated provider blocker",
-    expectedPass: false,
-    expectedFailureClass: "simulated_provider_block",
-    artifactComplete: true,
-    suggestedOwner: "provider-runtime",
-    dogfoodId: "DOG-007",
-    durationMs: 1600,
-  },
-  {
-    id: "flight-bna-nyc-routing",
-    vertical: "flight",
-    title: "Flight origin and destination request reaches confirm card",
-    fixtureId: "zh-flight-complete",
-    expectedPass: true,
-    expectedFailureClass: "none",
-    artifactComplete: true,
-    suggestedOwner: "nlu",
-    durationMs: 900,
-  },
-  {
-    id: "flight-roundtrip-routing",
-    vertical: "flight",
-    title: "Round-trip date constraints survive routing",
-    fixtureId: "en-flight-roundtrip",
-    expectedPass: true,
-    expectedFailureClass: "none",
-    artifactComplete: true,
-    suggestedOwner: "nlu",
-    durationMs: 950,
-  },
-  {
-    id: "flight-missing-origin",
-    vertical: "flight",
-    title: "Flight with destination and date still asks origin",
-    fixtureId: "en-flight-missing-origin",
-    expectedPass: false,
-    expectedFailureClass: "missing_required_field",
-    artifactComplete: true,
-    suggestedOwner: "planner",
-    durationMs: 870,
-  },
-  {
-    id: "flight-unsafe-final-confirm-boundary",
-    vertical: "flight",
-    title: "Flight checkout final-confirm boundary remains unsafe",
-    expectedPass: false,
-    expectedFailureClass: "unsafe_boundary",
-    artifactComplete: true,
-    suggestedOwner: "product/manual-boundary",
-    durationMs: 1500,
-  },
-  {
-    id: "activity-lion-king-zh-routing",
-    vertical: "activity",
-    title: "Chinese Lion King request routes to activity tickets",
-    fixtureId: "zh-activity-lion-king-trip-shaped",
-    expectedPass: true,
-    expectedFailureClass: "none",
-    artifactComplete: true,
-    suggestedOwner: "nlu",
-    dogfoodId: "DOG-005",
-    durationMs: 850,
-  },
-  {
-    id: "activity-lion-king-en-routing",
-    vertical: "activity",
-    title: "English Lion King request routes to activity tickets",
-    fixtureId: "en-activity-lion-king-trip-shaped",
-    expectedPass: true,
-    expectedFailureClass: "none",
-    artifactComplete: true,
-    suggestedOwner: "nlu",
-    dogfoodId: "DOG-005",
-    durationMs: 820,
-  },
-  {
-    id: "activity-ticketmaster-simulated-handoff",
-    vertical: "activity",
-    title: "Ticketmaster-style manual handoff remains simulated until live evidence exists",
-    expectedPass: false,
-    expectedFailureClass: "manual_boundary_expected",
-    artifactComplete: true,
-    suggestedOwner: "product/manual-boundary",
-    dogfoodId: "DOG-006",
-    durationMs: 1400,
-  },
-  {
-    id: "activity-provider-simulated-block",
-    vertical: "activity",
-    title: "Activity provider network/degraded case remains simulated",
-    expectedPass: false,
-    expectedFailureClass: "simulated_provider_block",
-    artifactComplete: true,
-    suggestedOwner: "provider-runtime",
-    dogfoodId: "DOG-006",
-    durationMs: 1320,
-  },
-  {
-    id: "trip-all-verticals-routing",
+  }));
+  return cases;
+}
+
+function buildTripAndMetaCorpus(): InternalBenchmarkCase[] {
+  const cases: InternalBenchmarkCase[] = [];
+  const passFixtures = [
+    "en-trip-complete",
+    "zh-trip-complete",
+    "en-trip-lion-king-explicit-trip",
+    "en-composite-restaurant-activity",
+    "en-composite-hotel-flight",
+    "en-room-trip-named-members",
+    "en-ambiguous-travel-category",
+    "zh-ambiguous-destination-only",
+    "en-profile-edit-email",
+    "en-profile-edit-empty-patch",
+    "en-refine-existing-generic",
+    "zh-refine-budget-generic",
+  ];
+  for (let i = 0; i < 28; i += 1) {
+    const fixtureId = passFixtures[i % passFixtures.length];
+    cases.push(makeCase({
+      id: `trip-meta-route-pass-${pad(i + 1)}`,
+      vertical: "trip",
+      title: `trip/composite/ambiguous/profile/refine fixture ${fixtureId}`,
+      expectedOutcome: "pass",
+      fixtureId,
+      expectedPass: true,
+      failureClass: "none",
+      owner: fixtureId.includes("profile") || fixtureId.includes("refine") ? "planner" : "nlu",
+      dogfoodId: fixtureId.includes("lion-king") ? "DOG-005" : undefined,
+      durationMs: 900 + i * 15,
+    }));
+  }
+  for (let i = 0; i < 4; i += 1) {
+    const fixtureId = i % 2 === 0 ? "en-trip-missing-travelers" : "en-trip-missing-date-range";
+    cases.push(makeCase({
+      id: `trip-meta-planner-missing-${pad(i + 1)}`,
+      vertical: "trip",
+      title: `trip expected clarification fixture ${fixtureId}`,
+      expectedOutcome: "expected_clarification",
+      fixtureId,
+      expectedPass: false,
+      failureClass: "planner_missing_required_field",
+      owner: "planner",
+      durationMs: 1100,
+    }));
+  }
+  for (let i = 0; i < 2; i += 1) {
+    cases.push(makeCase({
+      id: `trip-meta-artifact-incomplete-${pad(i + 1)}`,
+      vertical: "trip",
+      title: "trip/task workspace evidence contract missing artifact metadata",
+      expectedOutcome: "expected_blocker",
+      expectedPass: false,
+      failureClass: "task_workspace_artifact_incomplete",
+      owner: "task-workspace",
+      dogfoodId: i === 0 ? "DOG-002" : "DOG-003",
+      artifactComplete: false,
+      artifacts: INCOMPLETE_ARTIFACTS,
+      durationMs: 900,
+    }));
+  }
+  cases.push(makeCase({
+    id: "trip-meta-manual-boundary-01",
     vertical: "trip",
-    title: "Full trip package keeps trip path instead of single vertical",
+    title: "trip package manual approval boundary remains product-owned",
+    expectedOutcome: "expected_manual_boundary",
+    expectedPass: false,
+    failureClass: "manual_boundary_expected",
+    owner: "product/manual-boundary",
+    durationMs: 1200,
+  }));
+  cases.push(makeCase({
+    id: "trip-meta-unsupported-01",
+    vertical: "trip",
+    title: "unsupported cruise/passport adjacent request stays out of provider runtime",
+    expectedOutcome: "expected_blocker",
+    expectedPass: false,
+    failureClass: "unsupported_request",
+    owner: "product/manual-boundary",
+    durationMs: 760,
+  }));
+  cases.push(makeCase({
+    id: "trip-meta-stale-session-01",
+    vertical: "trip",
+    title: "stale source session or degraded provider state stays classified",
+    expectedOutcome: "expected_blocker",
+    expectedPass: false,
+    failureClass: "stale_session_or_provider_degraded",
+    owner: "task-workspace",
+    dogfoodId: "DOG-002",
+    durationMs: 1700,
+  }));
+  cases.push(makeCase({
+    id: "trip-meta-performance-01",
+    vertical: "trip",
+    title: "trip/composite performance budget simulated regression",
+    expectedOutcome: "expected_blocker",
+    expectedPass: false,
+    failureClass: "performance_budget_exceeded",
+    owner: "task-workspace",
+    durationMs: 2900,
+  }));
+  cases.push(makeCase({
+    id: "trip-meta-provider-simulated-01",
+    vertical: "trip",
+    title: "trip package provider dependency simulated blocker",
+    expectedOutcome: "expected_blocker",
+    expectedPass: false,
+    failureClass: "provider_simulated_block",
+    owner: "provider-runtime",
+    durationMs: 1600,
+  }));
+  cases.push(makeCase({
+    id: "trip-meta-route-pass-extra-01",
+    vertical: "trip",
+    title: "trip extra route pass to keep 40-case balance",
+    expectedOutcome: "pass",
     fixtureId: "en-trip-complete",
     expectedPass: true,
-    expectedFailureClass: "none",
-    artifactComplete: true,
-    suggestedOwner: "planner",
-    durationMs: 1800,
-  },
-  {
-    id: "trip-lion-king-explicit-trip",
-    vertical: "trip",
-    title: "Explicit full trip with Lion King remains trip, not activity-only",
-    fixtureId: "en-trip-lion-king-explicit-trip",
-    expectedPass: true,
-    expectedFailureClass: "none",
-    artifactComplete: true,
-    suggestedOwner: "nlu",
-    dogfoodId: "DOG-005",
-    durationMs: 1760,
-  },
-  {
-    id: "trip-missing-travelers",
-    vertical: "trip",
-    title: "Trip package missing travelers asks for traveler count",
-    fixtureId: "en-trip-missing-travelers",
-    expectedPass: false,
-    expectedFailureClass: "missing_required_field",
-    artifactComplete: true,
-    suggestedOwner: "planner",
-    durationMs: 1100,
-  },
-  {
-    id: "trip-unsupported-cruise-request",
-    vertical: "trip",
-    title: "Unsupported cruise/package request stays a product boundary",
-    expectedPass: false,
-    expectedFailureClass: "unsupported_request",
-    artifactComplete: true,
-    suggestedOwner: "product/manual-boundary",
-    durationMs: 900,
-  },
-  {
-    id: "restaurant-direct-booking-routing",
-    vertical: "restaurant",
-    title: "Named restaurant request keeps direct-booking metadata",
-    fixtureId: "en-restaurant-direct-carbone",
-    expectedPass: true,
-    expectedFailureClass: "none",
-    artifactComplete: true,
-    suggestedOwner: "nlu",
-    durationMs: 930,
-  },
-  {
-    id: "hotel-direct-booking-routing",
-    vertical: "hotel",
-    title: "Named hotel request keeps direct-booking metadata",
-    fixtureId: "en-hotel-direct-pierre",
-    expectedPass: true,
-    expectedFailureClass: "none",
-    artifactComplete: true,
-    suggestedOwner: "nlu",
-    durationMs: 990,
-  },
-  {
-    id: "flight-business-passenger-routing",
-    vertical: "flight",
-    title: "Business-class passenger constraints survive routing",
-    fixtureId: "en-flight-business-passengers",
-    expectedPass: true,
-    expectedFailureClass: "none",
-    artifactComplete: true,
-    suggestedOwner: "nlu",
-    durationMs: 960,
-  },
-  {
-    id: "activity-sports-ticket-routing",
-    vertical: "activity",
-    title: "Sports ticket request routes as activity",
-    fixtureId: "en-activity-knicks",
-    expectedPass: true,
-    expectedFailureClass: "none",
-    artifactComplete: true,
-    suggestedOwner: "nlu",
-    durationMs: 880,
-  },
-  {
-    id: "tasks-completed-evidence-consistency",
-    vertical: "trip",
-    title: "Completed task evidence must stay discoverable from source session",
-    expectedPass: true,
-    expectedFailureClass: "none",
-    artifactComplete: true,
-    suggestedOwner: "task-workspace",
-    dogfoodId: "DOG-002",
-    durationMs: 700,
-  },
-];
+    failureClass: "none",
+    owner: "planner",
+    durationMs: 980,
+  }));
+  return cases;
+}
+
+function makeCase(params: {
+  id: string;
+  vertical: InternalBenchmarkVertical;
+  title: string;
+  expectedOutcome: InternalBenchmarkExpectedOutcome;
+  fixtureId?: string;
+  expectedPass: boolean;
+  failureClass: InternalBenchmarkFailureClass;
+  owner: InternalBenchmarkOwner;
+  dogfoodId?: string;
+  artifactComplete?: boolean;
+  artifacts?: InternalBenchmarkArtifactExpectations;
+  durationMs?: number;
+}): InternalBenchmarkCase {
+  return {
+    id: params.id,
+    vertical: params.vertical,
+    title: params.title,
+    expectedOutcome: params.expectedOutcome,
+    ...(params.fixtureId ? { fixtureId: params.fixtureId } : {}),
+    expectedPass: params.expectedPass,
+    expectedFailureClass: params.failureClass,
+    artifactComplete: params.artifactComplete ?? true,
+    artifactExpectations: params.artifacts ?? COMPLETE_ARTIFACTS,
+    suggestedOwner: params.owner,
+    ...(params.dogfoodId ? { dogfoodId: params.dogfoodId } : {}),
+    durationMs: params.durationMs,
+  };
+}
 
 function byFixtureId(): Map<string, NluRoutingFixture> {
   return new Map(NLU_ROUTING_FIXTURES.map((fixture) => [fixture.id, fixture]));
@@ -423,17 +525,12 @@ export function selectInternalBenchmarkCases(params: {
   vertical: InternalBenchmarkVerticalArg;
   count: number;
 }): InternalBenchmarkCase[] {
-  const count = Math.max(1, Math.min(50, Math.floor(params.count)));
   const filtered =
     params.vertical === "all"
       ? INTERNAL_BENCHMARK_CASES
       : INTERNAL_BENCHMARK_CASES.filter((item) => item.vertical === params.vertical);
-
-  const out: InternalBenchmarkCase[] = [];
-  for (let i = 0; i < count && filtered.length > 0; i += 1) {
-    out.push(filtered[i % filtered.length]);
-  }
-  return out;
+  const count = Math.max(1, Math.min(Math.floor(params.count), filtered.length));
+  return filtered.slice(0, count);
 }
 
 export function runInternalNoLiveBenchmark(params: {
@@ -453,7 +550,7 @@ export function runInternalNoLiveBenchmark(params: {
     const routeResult = fixture ? evaluateNluRoutingMatrix([fixture])[0] : null;
     const routePass = routeResult?.pass ?? null;
     const pass = testCase.expectedPass && testCase.artifactComplete && (routePass ?? true);
-    const failureClass = classifyFailure(testCase, routePass);
+    const failureClass = classifyFailure(testCase, routeResult?.notes ?? [], routePass);
 
     return {
       ...testCase,
@@ -469,6 +566,8 @@ export function runInternalNoLiveBenchmark(params: {
   return {
     summary: summarizeInternalBenchmark(params.vertical, mode, results),
     topFailedCases: topFailedCases(results),
+    dogfoodMapping: dogfoodMapping(results),
+    nextRecommendedOwners: nextRecommendedOwners(results),
     results,
     notes: [...INTERNAL_BENCHMARK_MODE_NOTES],
   };
@@ -476,14 +575,15 @@ export function runInternalNoLiveBenchmark(params: {
 
 function classifyFailure(
   testCase: InternalBenchmarkCase,
+  routeNotes: string[],
   routePass: boolean | null,
 ): InternalBenchmarkFailureClass {
   if (routePass === false) {
-    return testCase.expectedFailureClass === "constraint_lost"
-      ? "constraint_lost"
-      : "routing_mismatch";
+    return routeNotes.some((note) => note.startsWith("scenario expected"))
+      ? "nlu_wrong_vertical"
+      : "nlu_constraint_lost";
   }
-  if (!testCase.artifactComplete) return "artifact_incomplete";
+  if (!testCase.artifactComplete) return "task_workspace_artifact_incomplete";
   if (testCase.expectedPass) return "none";
   return testCase.expectedFailureClass;
 }
@@ -522,6 +622,8 @@ export function summarizeInternalBenchmark(
     successRate: total === 0 ? 0 : pass / total,
     averageDurationMs: durationCount === 0 ? null : Math.round(durationTotal / durationCount),
     artifactCompletenessRate: total === 0 ? 0 : artifactComplete / total,
+    routingMismatchCount: byFailureClass.nlu_wrong_vertical + byFailureClass.nlu_constraint_lost,
+    ownerUnassignedCount: bySuggestedOwner.unassigned,
     byVertical,
     byFailureClass,
     bySuggestedOwner,
@@ -531,7 +633,7 @@ export function summarizeInternalBenchmark(
 function topFailedCases(results: InternalBenchmarkCaseResult[]): InternalBenchmarkTopFailedCase[] {
   return results
     .filter((result) => !result.pass)
-    .slice(0, 10)
+    .slice(0, 12)
     .map((result) => ({
       id: result.id,
       vertical: result.vertical,
@@ -539,6 +641,26 @@ function topFailedCases(results: InternalBenchmarkCaseResult[]): InternalBenchma
       suggestedOwner: result.suggestedOwner,
       title: result.title,
     }));
+}
+
+function dogfoodMapping(results: InternalBenchmarkCaseResult[]): InternalBenchmarkDogfoodMapping[] {
+  const map = new Map<string, string[]>();
+  for (const result of results) {
+    if (!result.dogfoodId) continue;
+    map.set(result.dogfoodId, [...(map.get(result.dogfoodId) ?? []), result.id]);
+  }
+  return [...map.entries()].map(([dogfoodId, caseIds]) => ({ dogfoodId, caseIds }));
+}
+
+function nextRecommendedOwners(results: InternalBenchmarkCaseResult[]): InternalBenchmarkOwnerRecommendation[] {
+  const counts = { ...ZERO_OWNERS };
+  for (const result of results) {
+    if (!result.pass) counts[result.suggestedOwner] += 1;
+  }
+  return Object.entries(counts)
+    .filter(([, failedCases]) => failedCases > 0)
+    .sort((a, b) => b[1] - a[1])
+    .map(([owner, failedCases]) => ({ owner: owner as InternalBenchmarkOwner, failedCases }));
 }
 
 function pct(value: number): string {
@@ -559,6 +681,8 @@ export function renderInternalBenchmarkMarkdown(report: InternalBenchmarkReport)
     `Fail: ${summary.fail}`,
     `Success rate: ${pct(summary.successRate)}`,
     `Artifact completeness: ${pct(summary.artifactCompletenessRate)}`,
+    `Routing mismatch: ${summary.routingMismatchCount}`,
+    `Owner unassigned: ${summary.ownerUnassignedCount}`,
     `Average duration: ${summary.averageDurationMs == null ? "-" : `${summary.averageDurationMs}ms`}`,
     "",
     "## By Vertical",
@@ -580,6 +704,18 @@ export function renderInternalBenchmarkMarkdown(report: InternalBenchmarkReport)
   for (const [key, value] of Object.entries(summary.bySuggestedOwner)) {
     if (value > 0) lines.push(`| \`${key}\` | ${value} |`);
   }
+
+  lines.push("", "## Next Recommended Owners", "", "| Owner | Failed cases |", "| --- | ---: |");
+  for (const item of report.nextRecommendedOwners) {
+    lines.push(`| \`${item.owner}\` | ${item.failedCases} |`);
+  }
+  if (report.nextRecommendedOwners.length === 0) lines.push("| - | 0 |");
+
+  lines.push("", "## Dogfood Mapping", "", "| DOG | Case count |", "| --- | ---: |");
+  for (const item of report.dogfoodMapping) {
+    lines.push(`| \`${item.dogfoodId}\` | ${item.caseIds.length} |`);
+  }
+  if (report.dogfoodMapping.length === 0) lines.push("| - | 0 |");
 
   lines.push("", "## Top Failed Cases", "", "| Case | Vertical | Failure | Owner |", "| --- | --- | --- | --- |");
   for (const result of report.topFailedCases) {
@@ -625,6 +761,22 @@ export function evaluateInternalBenchmarkGate(
       expected: options.minArtifactCompletenessRate,
     });
   }
+  if (typeof options.maxRoutingMismatch === "number") {
+    checks.push({
+      name: "max_routing_mismatch",
+      pass: report.summary.routingMismatchCount <= options.maxRoutingMismatch,
+      actual: report.summary.routingMismatchCount,
+      expected: options.maxRoutingMismatch,
+    });
+  }
+  if (typeof options.maxOwnerUnassigned === "number") {
+    checks.push({
+      name: "max_owner_unassigned",
+      pass: report.summary.ownerUnassignedCount <= options.maxOwnerUnassigned,
+      actual: report.summary.ownerUnassignedCount,
+      expected: options.maxOwnerUnassigned,
+    });
+  }
 
   for (const [failureClass, maxAllowed] of Object.entries(options.maxFailureCounts ?? {})) {
     if (typeof maxAllowed !== "number") continue;
@@ -655,5 +807,15 @@ function formatGateError(check: InternalBenchmarkGateCheck): string {
   if (check.name === "min_artifact_completeness") {
     return `artifactCompleteness ${pct(check.actual)} is below required ${pct(check.expected)}`;
   }
+  if (check.name === "max_routing_mismatch") {
+    return `routing mismatch count ${check.actual} exceeds allowed ${check.expected}`;
+  }
+  if (check.name === "max_owner_unassigned") {
+    return `owner unassigned count ${check.actual} exceeds allowed ${check.expected}`;
+  }
   return `${check.name.replace(/^max_/, "")} count ${check.actual} exceeds allowed ${check.expected}`;
+}
+
+function pad(value: number): string {
+  return String(value).padStart(2, "0");
 }

@@ -225,8 +225,10 @@ NLU and internal-benchmark rules:
    trip, hotel date/budget, restaurant cuisine, flight route/date, refine,
    profile edit, ambiguous, and chitchat cases.
 5. `scripts/internal-benchmark.ts --mode no-live` is the only implemented
-   internal benchmark mode. `small-live` and `live` remain future modes that
-   require separate human approval and provider evidence.
+   internal benchmark mode. Its corpus has 200+ structured cases split across
+   restaurant, hotel, flight, activity, and trip/composite/ambiguous/profile/
+   refine buckets, with artifact expectations, failure classes, dogfood
+   mappings, and suggested owners.
 6. Internal benchmark failures should name one owner: `nlu`, `planner`,
    `task-workspace`, `provider-runtime`, or `product/manual-boundary`.
 7. Benchmark success is not provider closure. A vertical is provider-proven
