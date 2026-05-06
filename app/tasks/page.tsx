@@ -3,6 +3,7 @@
 import { Suspense, useState, useEffect, useCallback, useRef } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import type { BookingJob, BookingJobStep, DecisionLogEntry, AgentFeedbackStats } from "@/lib/db";
+import type { BookingJobListItem, BookingJobsSummary } from "@/lib/booking-jobs/read-model";
 import {
   buildFlightInventoryDriftManualMessage,
   isFlightInventoryDriftError,
@@ -25,6 +26,13 @@ import ShareTripModal from "@/components/ShareTripModal";
 import AddToTripModal from "@/components/AddToTripModal";
 import { ModifyTaskButton } from "@/components/ModifyTaskButton";
 import { getBrowserModelForStagehand } from "@/lib/agent-model-config";
+import {
+  fetchTaskDetail,
+  fetchTaskList,
+  fetchTaskSummary,
+  invalidateTaskDetail,
+  invalidateTaskList,
+} from "./task-data-client";
 import "./tasks.css";
 
 
@@ -66,7 +74,8 @@ function TaskWorkspaceSwitch({
   );
 }
 
-function classifyTaskWorkspace(job: BookingJob): TaskWorkspaceView {
+function classifyTaskWorkspace(job: BookingJob | BookingJobListItem): TaskWorkspaceView {
+  if ("workspace" in job) return job.workspace;
   const sem = computeJobSemanticStatus(job);
   if (sem === "pending" || sem === "running" || sem === "retrying") return "live";
   if (sem === "blocked_needs_user_input" || sem === "partially_completed") return "queue";
@@ -1149,13 +1158,83 @@ function InterventionBanner({ step, jobId, onOpenLive }: { step: BookingJobStep;
 
 // ── Job card ───────────────────────────────────────────────────────────────────
 
-function JobCard({ job, onRefresh, sessionId, onOpenLive }: { job: BookingJob; onRefresh?: () => void; sessionId: string; onOpenLive?: (jobId: string) => void }) {
-  const [expanded, setExpanded] = useState(job.status !== "pending");
+function compactStatusDisplay(job: BookingJobListItem) {
+  if (job.active) {
+    return {
+      label: job.latest_status_label,
+      color: "var(--gold, #D4A34B)",
+      animate: true,
+    };
+  }
+  if (job.awaiting_confirmation_count > 0) {
+    return {
+      label: job.latest_status_label,
+      color: "rgba(22,163,74,0.85)",
+      animate: false,
+    };
+  }
+  if (job.action_count > 0) {
+    return {
+      label: job.latest_status_label,
+      color: "rgba(234,88,12,0.85)",
+      animate: false,
+    };
+  }
+  if (job.failed) {
+    return {
+      label: job.latest_status_label,
+      color: "rgba(220,38,38,0.75)",
+      animate: false,
+    };
+  }
+  if (job.completed) {
+    return {
+      label: job.latest_status_label,
+      color: "rgba(22,163,74,0.75)",
+      animate: false,
+    };
+  }
+  return {
+    label: job.latest_status_label,
+    color: "rgba(107,114,128,0.85)",
+    animate: false,
+  };
+}
+
+function JobCard({
+  job,
+  detailJob,
+  onLoadDetail,
+  onRefresh,
+  sessionId,
+  onOpenLive,
+}: {
+  job: BookingJobListItem;
+  detailJob?: BookingJob;
+  onLoadDetail?: (jobId: string, force?: boolean) => Promise<BookingJob | null>;
+  onRefresh?: () => void;
+  sessionId: string;
+  onOpenLive?: (jobId: string) => void;
+}) {
+  const [expanded, setExpanded] = useState(false);
+  const [detailLoading, setDetailLoading] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [resetting, setResetting] = useState(false);
   const [shareOpen, setShareOpen] = useState(false);
   const [addToTripOpen, setAddToTripOpen] = useState(false);
   const prevStatusRef = useRef(job.status);
+  const fullJob = detailJob;
+
+  const ensureDetail = useCallback(async (force = false) => {
+    if (fullJob && !force) return fullJob;
+    if (!onLoadDetail) return null;
+    setDetailLoading(!fullJob);
+    try {
+      return await onLoadDetail(job.id, force);
+    } finally {
+      setDetailLoading(false);
+    }
+  }, [fullJob, job.id, onLoadDetail]);
 
   // Auto-open live panel when job transitions to "running" or "done".
   useEffect(() => {
@@ -1169,10 +1248,31 @@ function JobCard({ job, onRefresh, sessionId, onOpenLive }: { job: BookingJob; o
     prevStatusRef.current = job.status;
   }, [job.status, onOpenLive]);
 
-  const doneCount = job.steps.filter((s) => s.status === "done").length;
-  const actionCount = job.steps.filter((s) => s.actionItem).length;
-  const adjustedCount = job.steps.filter((s) => s.timeAdjusted || s.usedFallback).length;
-  const replanCount = job.steps.filter((s) => s.replanAdjusted || s.replanFlagged).length;
+  useEffect(() => {
+    if (!expanded || !isActiveJobStatus(job.status)) return;
+    void ensureDetail(true);
+    const timer = setInterval(() => {
+      void ensureDetail(true);
+    }, 5000);
+    return () => clearInterval(timer);
+  }, [expanded, ensureDetail, job.status]);
+
+  const doneCount = fullJob
+    ? fullJob.steps.filter((s) => s.status === "done").length
+    : job.done_count;
+  const awaitingConfirmationCount = fullJob
+    ? fullJob.steps.filter((s) => s.status === "awaiting_confirmation").length
+    : job.awaiting_confirmation_count;
+  const readyCount = doneCount + awaitingConfirmationCount;
+  const actionCount = fullJob
+    ? fullJob.steps.filter((s) => s.actionItem).length
+    : job.action_count;
+  const adjustedCount = fullJob
+    ? fullJob.steps.filter((s) => s.timeAdjusted || s.usedFallback).length
+    : job.adjusted_count;
+  const replanCount = fullJob
+    ? fullJob.steps.filter((s) => s.replanAdjusted || s.replanFlagged).length
+    : job.replan_count;
   const isRunning = isActiveJobStatus(job.status);
   const isComplete = job.status === "done" || job.status === "failed";
 
@@ -1194,13 +1294,17 @@ function JobCard({ job, onRefresh, sessionId, onOpenLive }: { job: BookingJob; o
     }
   }
 
-  const semanticStatus = computeJobSemanticStatus(job);
-  const statusDisplay = semanticStatus === "awaiting_payment"
-    ? { ...JOB_SEMANTIC_DISPLAY[semanticStatus], label: "Ready to review — confirm on site" }
-    : JOB_SEMANTIC_DISPLAY[semanticStatus];
+  const semanticStatus = fullJob ? computeJobSemanticStatus(fullJob) : null;
+  const statusDisplay = fullJob && semanticStatus
+    ? semanticStatus === "awaiting_payment"
+      ? { ...JOB_SEMANTIC_DISPLAY[semanticStatus], label: "Ready to review — confirm on site" }
+      : JOB_SEMANTIC_DISPLAY[semanticStatus]
+    : compactStatusDisplay(job);
 
-  function openAll() {
-    for (const s of job.steps.filter((s) => s.status === "done" && s.handoff_url)) {
+  async function openAll() {
+    const loadedJob = fullJob ?? await ensureDetail();
+    if (!loadedJob) return;
+    for (const s of loadedJob.steps.filter((s) => s.status === "done" && s.handoff_url)) {
       window.open(s.handoff_url!, "_blank");
     }
   }
@@ -1219,9 +1323,9 @@ function JobCard({ job, onRefresh, sessionId, onOpenLive }: { job: BookingJob; o
   }
 
   const jobCardClass = `job-card${
-    semanticStatus === "blocked_needs_user_input" || semanticStatus === "partially_completed"
+    semanticStatus === "blocked_needs_user_input" || semanticStatus === "partially_completed" || job.action_count > 0
       ? " job-card--needs-action"
-      : semanticStatus.startsWith("succeeded")
+      : semanticStatus?.startsWith("succeeded") || (job.completed && job.action_count === 0)
       ? " job-card--succeeded"
       : ""
   }`;
@@ -1229,7 +1333,16 @@ function JobCard({ job, onRefresh, sessionId, onOpenLive }: { job: BookingJob; o
   return (
     <div className={jobCardClass}>
       {/* Header */}
-      <div onClick={() => setExpanded((e) => !e)} className="job-card__header">
+      <div
+        onClick={() => {
+          setExpanded((e) => {
+            const next = !e;
+            if (next) void ensureDetail();
+            return next;
+          });
+        }}
+        className="job-card__header"
+      >
         <div
           className="job-card__status-dot"
           style={{
@@ -1248,7 +1361,7 @@ function JobCard({ job, onRefresh, sessionId, onOpenLive }: { job: BookingJob; o
             </span>
             {isComplete && (
               <span className="job-card__meta-item">
-                {doneCount}/{job.steps.length} ready
+                {readyCount}/{job.step_count} ready
               </span>
             )}
             {adjustedCount > 0 && (
@@ -1282,7 +1395,7 @@ function JobCard({ job, onRefresh, sessionId, onOpenLive }: { job: BookingJob; o
           )}
           {job.status === "done" && doneCount > 0 && (
             <button
-              onClick={(e) => { e.stopPropagation(); openAll(); }}
+              onClick={(e) => { e.stopPropagation(); void openAll(); }}
               className="job-card__cta job-card__cta--open-all"
             >
               Open all →
@@ -1292,7 +1405,7 @@ function JobCard({ job, onRefresh, sessionId, onOpenLive }: { job: BookingJob; o
             // own_share is attached server-side in /api/booking-jobs when the
             // signed-in user owns this job. Type isn't on BookingJob since
             // the shape comes from the API layer; pull it via a local cast.
-            const ownShare = (job as BookingJob & {
+            const ownShare = (job as BookingJobListItem & {
               own_share?: { slug: string; view_count: number; visibility: string } | null;
             }).own_share;
             if (ownShare) {
@@ -1341,7 +1454,18 @@ function JobCard({ job, onRefresh, sessionId, onOpenLive }: { job: BookingJob; o
             </button>
           )}
           <span style={{ position: "relative" }}>
-            <ModifyTaskButton job={job} onRefresh={onRefresh} />
+            {fullJob ? (
+              <ModifyTaskButton job={fullJob} onRefresh={onRefresh} />
+            ) : (
+              <button
+                type="button"
+                onClick={(e) => { e.stopPropagation(); setExpanded(true); void ensureDetail(); }}
+                className="job-card__cta job-card__cta--open-all"
+                title="Load task details"
+              >
+                Details
+              </button>
+            )}
           </span>
           <span className="job-card__expand">{expanded ? "▲" : "▼"}</span>
           <button
@@ -1358,6 +1482,14 @@ function JobCard({ job, onRefresh, sessionId, onOpenLive }: { job: BookingJob; o
 
       {expanded && (
         <>
+          {detailLoading && !fullJob && (
+            <div className="job-card__body">
+              <p className="job-card__section-label job-card__section-label--muted">
+                Loading task details...
+              </p>
+            </div>
+          )}
+          {fullJob && (
           <div className="job-card__body">
             {/* Tier: needs decision (floated to top) */}
             {actionCount > 0 && (
@@ -1365,8 +1497,8 @@ function JobCard({ job, onRefresh, sessionId, onOpenLive }: { job: BookingJob; o
                 <p className="job-card__section-label job-card__section-label--alert">
                   Needs your decision
                 </p>
-                {job.steps.filter((s) => s.actionItem).map((step, i) => (
-                  <StepCard key={`a-${i}`} step={step} stepIndex={job.steps.indexOf(step)} jobId={job.id} onRefresh={onRefresh} onOpenLive={() => onOpenLive?.(job.id)} />
+                {fullJob.steps.filter((s) => s.actionItem).map((step, i) => (
+                  <StepCard key={`a-${i}`} step={step} stepIndex={fullJob.steps.indexOf(step)} jobId={job.id} onRefresh={onRefresh} onOpenLive={() => onOpenLive?.(job.id)} />
                 ))}
                 <div style={{ height: 2 }} />
               </>
@@ -1377,12 +1509,13 @@ function JobCard({ job, onRefresh, sessionId, onOpenLive }: { job: BookingJob; o
                 Other steps
               </p>
             )}
-            {job.steps.filter((s) => !s.actionItem).map((step, i) => (
-              <StepCard key={`s-${i}`} step={step} stepIndex={job.steps.indexOf(step)} jobId={job.id} onRefresh={onRefresh} onOpenLive={() => onOpenLive?.(job.id)} />
+            {fullJob.steps.filter((s) => !s.actionItem).map((step, i) => (
+              <StepCard key={`s-${i}`} step={step} stepIndex={fullJob.steps.indexOf(step)} jobId={job.id} onRefresh={onRefresh} onOpenLive={() => onOpenLive?.(job.id)} />
             ))}
           </div>
+          )}
 
-          <WhatsNext job={job} />
+          {fullJob && <WhatsNext job={fullJob} />}
 
           {/* Active monitors — show after job completes */}
           {isComplete && (
@@ -1628,7 +1761,7 @@ function MonitoringWorkspacePanel({
   onDeleteJob,
 }: {
   sessionId: string;
-  jobs: BookingJob[];
+  jobs: BookingJobListItem[];
   onOpenJob: (jobId: string) => void;
   onDeleteJob: (jobId: string) => Promise<boolean>;
 }) {
@@ -2973,7 +3106,9 @@ function InsightsPanel({ sessionId }: { sessionId: string }) {
 function TripsPageInner() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const [jobs, setJobs] = useState<BookingJob[]>([]);
+  const [jobs, setJobs] = useState<BookingJobListItem[]>([]);
+  const [jobDetails, setJobDetails] = useState<Record<string, BookingJob>>({});
+  const [taskSummary, setTaskSummary] = useState<BookingJobsSummary | null>(null);
   const [loading, setLoading] = useState(true);
   const [clearingAll, setClearingAll] = useState(false);
   const [showRestaurantForm, setShowRestaurantForm] = useState(false);
@@ -3032,15 +3167,40 @@ function TripsPageInner() {
 
   const sessionId = typeof window !== "undefined" ? getSessionId() : "";
 
-  const loadJobs = useCallback(async () => {
+  const loadJobs = useCallback(async (opts: { force?: boolean } = {}) => {
     const sid = getSessionId();
     try {
-      const res = await fetch(`/api/booking-jobs/list?session_id=${encodeURIComponent(sid)}&include_share=1`);
-      const data = await res.json();
-      setJobs(data.jobs ?? []);
+      if (opts.force) invalidateTaskList(sid);
+      const [nextJobs, nextSummary] = await Promise.all([
+        fetchTaskList(sid, { includeShare: true, limit: 60, force: opts.force }),
+        fetchTaskSummary(sid, { force: opts.force }),
+      ]);
+      setJobs(nextJobs);
+      setTaskSummary(nextSummary);
     } catch { /* ignore */ }
     finally { setLoading(false); }
   }, []);
+
+  const loadJobDetail = useCallback(async (jobId: string, force = false) => {
+    try {
+      if (force) invalidateTaskDetail(jobId);
+      const job = await fetchTaskDetail(jobId, { force });
+      setJobDetails((prev) => ({ ...prev, [jobId]: job }));
+      return job;
+    } catch {
+      return null;
+    }
+  }, []);
+
+  const refreshTask = useCallback(async (jobId?: string) => {
+    const sid = getSessionId();
+    invalidateTaskList(sid);
+    if (jobId) invalidateTaskDetail(jobId);
+    await loadJobs({ force: true });
+    if (jobId && jobDetails[jobId]) {
+      await loadJobDetail(jobId, true);
+    }
+  }, [jobDetails, loadJobDetail, loadJobs]);
 
   async function handleClearAll() {
     const sid = getSessionId();
@@ -3050,6 +3210,9 @@ function TripsPageInner() {
     try {
       await fetch(`/api/booking-jobs?session_id=${encodeURIComponent(sid)}`, { method: "DELETE" });
       setJobs([]);
+      setJobDetails({});
+      invalidateTaskDetail();
+      invalidateTaskList(sid);
     } finally {
       setClearingAll(false);
     }
@@ -3060,7 +3223,9 @@ function TripsPageInner() {
   useEffect(() => {
     const hasRunning = jobs.some((j) => isActiveJobStatus(j.status));
     if (!hasRunning) return;
-    const timer = setInterval(loadJobs, 5000);
+    const timer = setInterval(() => {
+      void loadJobs({ force: true });
+    }, 5000);
     return () => clearInterval(timer);
   }, [jobs, loadJobs]);
 
@@ -3083,6 +3248,7 @@ function TripsPageInner() {
       } else {
         liveJobIdRef.current = null;
         setLiveJobId(null);
+        void loadJobDetail(focusId);
         requestAnimationFrame(() => {
           jobRefs.current[focusId]?.scrollIntoView({ behavior: "smooth", block: "start" });
         });
@@ -3091,7 +3257,7 @@ function TripsPageInner() {
       liveJobIdRef.current = null;
       setLiveJobId(null);
     }
-  }, [searchParams, openLive]);
+  }, [searchParams, openLive, loadJobDetail]);
 
   const setWorkspaceViewAndUrl = useCallback((next: TaskWorkspaceView) => {
     setWorkspaceView(next);
@@ -3108,8 +3274,8 @@ function TripsPageInner() {
       : workspaceView === "history"
         ? historyJobs
         : queueJobs;
-  const visibleActionTotal = visibleJobs.reduce((n, j) => n + j.steps.filter((s) => s.actionItem).length, 0);
-  const actionTotal = jobs.reduce((n, j) => n + j.steps.filter((s) => s.actionItem).length, 0);
+  const visibleActionTotal = visibleJobs.reduce((n, j) => n + j.action_count, 0);
+  const actionTotal = taskSummary?.action_count ?? jobs.reduce((n, j) => n + j.action_count, 0);
   const workspaceCopy =
     workspaceView === "live"
       ? {
@@ -3170,6 +3336,7 @@ function TripsPageInner() {
 
   function focusJob(jobId: string) {
     setSelectedJobId(jobId);
+    void loadJobDetail(jobId);
     jobRefs.current[jobId]?.scrollIntoView({ behavior: "smooth", block: "start" });
   }
 
@@ -3306,7 +3473,7 @@ function TripsPageInner() {
                     <div className="flex flex-col gap-1 max-h-[52vh] overflow-y-auto pr-1">
                       {visibleJobs.map((job) => {
                         const isSelected = selectedJobId === job.id;
-                        const blockedCount = job.steps.filter((s) => s.actionItem).length;
+                        const blockedCount = job.action_count;
                         return (
                           <button
                             key={job.id}
@@ -3331,9 +3498,7 @@ function TripsPageInner() {
                               )}
                             </div>
                             <div style={{ marginTop: 2, fontFamily: "var(--font-dm-sans)", fontSize: 11, color: "var(--text-secondary,#666)" }}>
-                              {computeJobSemanticStatus(job) === "awaiting_payment"
-                                ? "Ready to review — confirm on site"
-                                : JOB_SEMANTIC_DISPLAY[computeJobSemanticStatus(job)].label}
+                              {job.latest_status_label}
                             </div>
                           </button>
                         );
@@ -3441,7 +3606,7 @@ function TripsPageInner() {
             <RestaurantStepCard
               onCreated={() => {
                 setShowRestaurantForm(false);
-                loadJobs();
+                void loadJobs({ force: true });
               }}
             />
           )}
@@ -3469,6 +3634,12 @@ function TripsPageInner() {
                   const res = await fetch(`/api/booking-jobs/${jobId}`, { method: "DELETE" });
                   if (res.ok) {
                     setJobs((prev) => prev.filter((j) => j.id !== jobId));
+                    setJobDetails((prev) => {
+                      const next = { ...prev };
+                      delete next[jobId];
+                      return next;
+                    });
+                    invalidateTaskDetail(jobId);
                     return true;
                   }
                   const body = await res.json().catch(() => ({} as { error?: string }));
@@ -3492,25 +3663,34 @@ function TripsPageInner() {
             </div>
           )}
 
-          {visibleJobs.map((job) => (
-            <div
-              key={job.id}
-              ref={(node) => {
-                jobRefs.current[job.id] = node;
-              }}
-              onClickCapture={() => setSelectedJobId(job.id)}
-              style={{
-                borderRadius: 18,
-                boxShadow: selectedJobId === job.id ? "0 0 0 2px rgba(212,163,75,0.22)" : "none",
-                transition: "box-shadow 0.18s ease",
-              }}
-            >
-              {/* D1 Itinerary calendar — only for multi-step jobs. Gives the user
-                  a "what's happening when" view while the parallel pipelines run. */}
-              {job.steps.length >= 2 && <TripItineraryCalendar job={job} />}
-              <JobCard job={job} onRefresh={loadJobs} sessionId={sessionId} onOpenLive={openLive} />
-            </div>
-          ))}
+          {visibleJobs.map((job) => {
+            const detailJob = jobDetails[job.id];
+            return (
+              <div
+                key={job.id}
+                ref={(node) => {
+                  jobRefs.current[job.id] = node;
+                }}
+                onClickCapture={() => setSelectedJobId(job.id)}
+                style={{
+                  borderRadius: 18,
+                  boxShadow: selectedJobId === job.id ? "0 0 0 2px rgba(212,163,75,0.22)" : "none",
+                  transition: "box-shadow 0.18s ease",
+                }}
+              >
+                {/* D1 Itinerary calendar — only after a multi-step task detail is open. */}
+                {detailJob && detailJob.steps.length >= 2 && <TripItineraryCalendar job={detailJob} />}
+                <JobCard
+                  job={job}
+                  detailJob={detailJob}
+                  onLoadDetail={loadJobDetail}
+                  onRefresh={() => void refreshTask(job.id)}
+                  sessionId={sessionId}
+                  onOpenLive={openLive}
+                />
+              </div>
+            );
+          })}
 
           {/* Agent Insights — always show at the bottom */}
           {!loading && sessionId && workspaceView === "queue" && (

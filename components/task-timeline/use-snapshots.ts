@@ -22,6 +22,10 @@ import { useEffect, useRef, useState } from "react";
 import type { ExecutionSnapshot } from "./types";
 
 const POLL_INTERVAL_MS = 3_000;
+const SNAPSHOT_CACHE_MS = 2_000;
+
+const snapshotCache = new Map<string, { data: SnapshotFetchResult; expiresAt: number }>();
+const snapshotInflight = new Map<string, Promise<SnapshotFetchResult>>();
 
 export interface SnapshotsState {
   snapshots: ExecutionSnapshot[];
@@ -107,6 +111,28 @@ interface SnapshotFetchResult {
 }
 
 async function fetchSnapshotsWithFallback(jobId: string): Promise<SnapshotFetchResult> {
+  const cached = snapshotCache.get(jobId);
+  if (cached && cached.expiresAt > Date.now()) return cached.data;
+  const existing = snapshotInflight.get(jobId);
+  if (existing) return existing;
+
+  const request = fetchSnapshotsUncached(jobId)
+    .then((result) => {
+      snapshotCache.set(jobId, {
+        data: result,
+        expiresAt: Date.now() + SNAPSHOT_CACHE_MS,
+      });
+      return result;
+    })
+    .finally(() => {
+      snapshotInflight.delete(jobId);
+    });
+
+  snapshotInflight.set(jobId, request);
+  return request;
+}
+
+async function fetchSnapshotsUncached(jobId: string): Promise<SnapshotFetchResult> {
   let canonicalStatus: number | undefined;
   // 1. Canonical path
   try {

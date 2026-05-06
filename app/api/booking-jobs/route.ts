@@ -77,7 +77,8 @@ export async function POST(req: NextRequest) {
  * Backward-compatible list route.
  * New high-traffic readers should prefer:
  * - /api/booking-jobs/summary for counts
- * - /api/booking-jobs/list for list cards
+ * - /api/booking-jobs/compact-list for list cards
+ * - /api/booking-jobs/list for legacy full-job readers
  * - /api/booking-jobs/[id] for detail polling
  */
 export async function GET(req: NextRequest) {

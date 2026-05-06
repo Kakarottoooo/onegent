@@ -1821,6 +1821,18 @@ export interface BookingJobSummary {
   completed_at: string | null;
 }
 
+export interface BookingJobListRow extends BookingJobSummary {
+  done_count: number;
+  awaiting_confirmation_count: number;
+  adjusted_count: number;
+  replan_count: number;
+  primary_step_type: string | null;
+  primary_step_label: string | null;
+  primary_step_status: string | null;
+  primary_start_url: string | null;
+  scenario: string | null;
+}
+
 export async function createBookingJob(params: {
   id: string;
   sessionId: string;
@@ -1892,6 +1904,72 @@ export async function getBookingJobSummariesBySession(
   return result.rows;
 }
 
+export async function getBookingJobListRowsBySession(
+  sessionId: string,
+  limit = 50,
+): Promise<BookingJobListRow[]> {
+  await ensureBookingJobsTable();
+  const result = await sql<BookingJobListRow>`
+    SELECT
+      id,
+      session_id,
+      user_id,
+      trip_label,
+      status,
+      jsonb_array_length(steps)::int AS step_count,
+      COALESCE((
+        SELECT COUNT(*)::int
+        FROM jsonb_array_elements(steps) AS step
+        WHERE step ? 'actionItem'
+          AND step->'actionItem' IS NOT NULL
+          AND step->'actionItem' <> 'null'::jsonb
+      ), 0)::int AS action_count,
+      COALESCE((
+        SELECT COUNT(*)::int
+        FROM jsonb_array_elements(steps) AS step
+        WHERE step->>'status' = 'done'
+      ), 0)::int AS done_count,
+      COALESCE((
+        SELECT COUNT(*)::int
+        FROM jsonb_array_elements(steps) AS step
+        WHERE step->>'status' = 'awaiting_confirmation'
+      ), 0)::int AS awaiting_confirmation_count,
+      COALESCE((
+        SELECT COUNT(*)::int
+        FROM jsonb_array_elements(steps) AS step
+        WHERE step->>'timeAdjusted' = 'true'
+          OR step->>'usedFallback' = 'true'
+      ), 0)::int AS adjusted_count,
+      COALESCE((
+        SELECT COUNT(*)::int
+        FROM jsonb_array_elements(steps) AS step
+        WHERE step->>'replanAdjusted' = 'true'
+          OR step->>'replanFlagged' = 'true'
+      ), 0)::int AS replan_count,
+      steps->0->>'type' AS primary_step_type,
+      steps->0->>'label' AS primary_step_label,
+      steps->0->>'status' AS primary_step_status,
+      COALESCE(
+        steps->0->'body'->>'startUrl',
+        steps->0->'body'->'params'->>'startUrl',
+        steps->0->>'handoff_url'
+      ) AS primary_start_url,
+      COALESCE(
+        steps->0->'body'->>'scenario',
+        steps->0->'body'->'params'->>'scenario',
+        steps->0->>'type'
+      ) AS scenario,
+      created_at,
+      updated_at,
+      completed_at
+    FROM booking_jobs
+    WHERE session_id = ${sessionId}
+    ORDER BY created_at DESC
+    LIMIT ${limit}
+  `;
+  return result.rows;
+}
+
 /**
  * Jobs owned by a user regardless of session_id — recovers Decision Room
  * bookings whose session_id was a one-off random UUID.
@@ -1927,6 +2005,72 @@ export async function getBookingJobSummariesByUser(
           AND step->'actionItem' IS NOT NULL
           AND step->'actionItem' <> 'null'::jsonb
       ), 0)::int AS action_count,
+      created_at,
+      updated_at,
+      completed_at
+    FROM booking_jobs
+    WHERE user_id = ${userId}
+    ORDER BY created_at DESC
+    LIMIT ${limit}
+  `;
+  return result.rows;
+}
+
+export async function getBookingJobListRowsByUser(
+  userId: string,
+  limit = 50,
+): Promise<BookingJobListRow[]> {
+  await ensureBookingJobsTable();
+  const result = await sql<BookingJobListRow>`
+    SELECT
+      id,
+      session_id,
+      user_id,
+      trip_label,
+      status,
+      jsonb_array_length(steps)::int AS step_count,
+      COALESCE((
+        SELECT COUNT(*)::int
+        FROM jsonb_array_elements(steps) AS step
+        WHERE step ? 'actionItem'
+          AND step->'actionItem' IS NOT NULL
+          AND step->'actionItem' <> 'null'::jsonb
+      ), 0)::int AS action_count,
+      COALESCE((
+        SELECT COUNT(*)::int
+        FROM jsonb_array_elements(steps) AS step
+        WHERE step->>'status' = 'done'
+      ), 0)::int AS done_count,
+      COALESCE((
+        SELECT COUNT(*)::int
+        FROM jsonb_array_elements(steps) AS step
+        WHERE step->>'status' = 'awaiting_confirmation'
+      ), 0)::int AS awaiting_confirmation_count,
+      COALESCE((
+        SELECT COUNT(*)::int
+        FROM jsonb_array_elements(steps) AS step
+        WHERE step->>'timeAdjusted' = 'true'
+          OR step->>'usedFallback' = 'true'
+      ), 0)::int AS adjusted_count,
+      COALESCE((
+        SELECT COUNT(*)::int
+        FROM jsonb_array_elements(steps) AS step
+        WHERE step->>'replanAdjusted' = 'true'
+          OR step->>'replanFlagged' = 'true'
+      ), 0)::int AS replan_count,
+      steps->0->>'type' AS primary_step_type,
+      steps->0->>'label' AS primary_step_label,
+      steps->0->>'status' AS primary_step_status,
+      COALESCE(
+        steps->0->'body'->>'startUrl',
+        steps->0->'body'->'params'->>'startUrl',
+        steps->0->>'handoff_url'
+      ) AS primary_start_url,
+      COALESCE(
+        steps->0->'body'->>'scenario',
+        steps->0->'body'->'params'->>'scenario',
+        steps->0->>'type'
+      ) AS scenario,
       created_at,
       updated_at,
       completed_at

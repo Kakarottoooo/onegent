@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
-import type { BookingJobSummary } from "@/lib/db";
-import { summarizeBookingJobs } from "@/lib/booking-jobs/read-model";
+import type { BookingJobListRow, BookingJobSummary } from "@/lib/db";
+import {
+  buildBookingJobListItem,
+  classifyBookingJobListItem,
+  summarizeBookingJobs,
+} from "@/lib/booking-jobs/read-model";
 
 function summaryRow(overrides: Partial<BookingJobSummary> = {}): BookingJobSummary {
   return {
@@ -14,6 +18,22 @@ function summaryRow(overrides: Partial<BookingJobSummary> = {}): BookingJobSumma
     created_at: "2026-05-05T00:00:00.000Z",
     updated_at: "2026-05-05T00:00:00.000Z",
     completed_at: null,
+    ...overrides,
+  };
+}
+
+function listRow(overrides: Partial<BookingJobListRow> = {}): BookingJobListRow {
+  return {
+    ...summaryRow(),
+    done_count: 0,
+    awaiting_confirmation_count: 0,
+    adjusted_count: 0,
+    replan_count: 0,
+    primary_step_type: "restaurant",
+    primary_step_label: "Book Fumo",
+    primary_step_status: "pending",
+    primary_start_url: "https://www.opentable.com/r/fumo-soho-new-york",
+    scenario: "restaurant",
     ...overrides,
   };
 }
@@ -56,5 +76,42 @@ describe("summarizeBookingJobs", () => {
       failed_count: 0,
       latest_updated_at: null,
     });
+  });
+});
+
+describe("booking job compact list rows", () => {
+  it("builds a compact task row without heavy detail fields", () => {
+    const item = buildBookingJobListItem(listRow({
+      id: "compact-1",
+      status: "done",
+      step_count: 2,
+      done_count: 1,
+      awaiting_confirmation_count: 1,
+      action_count: 0,
+      adjusted_count: 1,
+      replan_count: 1,
+    }));
+
+    expect(item).toMatchObject({
+      id: "compact-1",
+      step_count: 2,
+      done_count: 1,
+      awaiting_confirmation_count: 1,
+      adjusted_count: 1,
+      replan_count: 1,
+      provider: "opentable",
+      workspace: "queue",
+      latest_status_label: "Ready to review - confirm on site",
+    });
+    expect(item).not.toHaveProperty("steps");
+    expect(item).not.toHaveProperty("decisionLog");
+    expect(item).not.toHaveProperty("autonomy_settings");
+    expect(JSON.stringify(item)).not.toContain("profile");
+  });
+
+  it("classifies active, action, and historical rows without full steps", () => {
+    expect(classifyBookingJobListItem(listRow({ status: "running" }))).toBe("live");
+    expect(classifyBookingJobListItem(listRow({ status: "failed", action_count: 1 }))).toBe("queue");
+    expect(classifyBookingJobListItem(listRow({ status: "done", step_count: 1, done_count: 1 }))).toBe("history");
   });
 });
