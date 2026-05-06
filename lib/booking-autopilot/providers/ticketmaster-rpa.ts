@@ -11,7 +11,7 @@
  * and wait for the user to sign in (URL leaves the auth domain). Cookies from
  * .ticketmaster-cookies.json usually prevent this, but it's a safety net.
  */
-import type { Locator, Page } from "playwright";
+import type { Frame, Locator, Page } from "playwright";
 
 type TraceFn = (msg: string) => void;
 
@@ -456,37 +456,127 @@ function looksLikeFindTicketsLabel(label: string): boolean {
   return ["find tickets", "buy tickets", "get tickets"].some(p => trimmed.startsWith(p));
 }
 
-async function clickFindTicketsWithLocators(page: Page, trace: TraceFn): Promise<boolean> {
-  // Strategy A: Playwright :has-text() — substring-based, no regex. The
-  // most reliable path when the button text has trailing chevrons/arrows.
-  const hasTextSelectors = [
-    'button:has-text("Find Tickets")',
+// Frame label helper for traces — keeps lines compact.
+function frameLabel(frame: Frame, mainFrame: Frame): string {
+  if (frame === mainFrame) return "main";
+  try {
+    const url = frame.url();
+    return url ? url.slice(0, 60) : "subframe";
+  } catch {
+    return "subframe";
+  }
+}
+
+// Build the list of frames to scan: main first, then any same-page iframes.
+// TM mounts the events listing widget (where "Find Tickets" lives) inside an
+// iframe; without this, page.locator never finds the anchor.
+function getScanFrames(page: Page): { main: Frame; all: Frame[] } {
+  const main = page.mainFrame();
+  const others = page.frames().filter((f) => f !== main);
+  return { main, all: [main, ...others] };
+}
+
+// Strategy A: scan a frame for <a href="...event/..."> with "Find Tickets" text.
+// Returns the absolute URL ready for page.goto, or null. Bypasses React onClick
+// / styled-components click chain entirely — deterministic.
+async function findFindTicketsHrefInFrame(
+  frame: Frame,
+  trace: TraceFn,
+  label: string
+): Promise<string | null> {
+  const sels = [
     'a:has-text("Find Tickets")',
+    'a:has-text("Buy Tickets")',
+    'a:has-text("Get Tickets")',
+  ];
+  for (const sel of sels) {
+    try {
+      const anchors = frame.locator(sel);
+      const total = await anchors.count().catch(() => 0);
+      const cap = Math.min(total, 5);
+      for (let i = 0; i < cap; i++) {
+        const a = anchors.nth(i);
+        const href = await a.getAttribute("href").catch(() => null);
+        if (href && /\/event\//i.test(href)) {
+          if (href.startsWith("http")) return href;
+          return `https://www.ticketmaster.com${href.startsWith("/") ? href : `/${href}`}`;
+        }
+      }
+    } catch (err) {
+      trace(
+        `[tm-rpa] Find Tickets anchor error sel="${sel}" frame=${label} — ${
+          (err as Error).message?.slice(0, 60) ?? ""
+        }`
+      );
+    }
+  }
+  return null;
+}
+
+// Strategy B: per-frame click via :has-text + role/tag selectors. Handles
+// button-shaped CTAs (Buy/Get Tickets) where href is absent.
+async function clickFindTicketsInFrame(
+  frame: Frame,
+  trace: TraceFn,
+  label: string
+): Promise<boolean> {
+  const sels = [
+    'button:has-text("Find Tickets")',
     '[role="button"]:has-text("Find Tickets")',
     '[role="link"]:has-text("Find Tickets")',
+    'a:has-text("Find Tickets")',
     'button:has-text("Buy Tickets")',
     'a:has-text("Buy Tickets")',
     'button:has-text("Get Tickets")',
   ];
-  for (const sel of hasTextSelectors) {
+  for (const sel of sels) {
     try {
-      const loc = page.locator(sel).first();
+      const loc = frame.locator(sel).first();
       const count = await loc.count().catch(() => 0);
       if (count === 0) continue;
       const visible = await locatorLooksVisible(loc);
       if (!visible) continue;
       await safeScrollIntoView(loc);
       await loc.click({ timeout: 2000, force: true });
-      trace(`[tm-rpa] Clicked Find Tickets via :has-text("${sel}")`);
+      trace(`[tm-rpa] Clicked Find Tickets via ${sel} (frame=${label})`);
       return true;
     } catch (err) {
-      trace(`[tm-rpa] Find Tickets :has-text strategy error sel="${sel}" — ${(err as Error).message?.slice(0, 60)}`);
+      trace(
+        `[tm-rpa] Find Tickets click error sel="${sel}" frame=${label} — ${
+          (err as Error).message?.slice(0, 60) ?? ""
+        }`
+      );
     }
   }
+  return false;
+}
 
-  // Strategy B: scan all clickables, match via startsWith.
-  const controls = page.locator('a, button, [role="button"], [role="link"]');
-  const count = Math.min(await controls.count().catch(() => 0), 180);
+async function clickFindTicketsWithLocators(page: Page, trace: TraceFn): Promise<boolean> {
+  const { main, all } = getScanFrames(page);
+
+  for (const frame of all) {
+    const label = frameLabel(frame, main);
+
+    // Strategy A: deterministic navigation via <a href="...event/...">
+    const href = await findFindTicketsHrefInFrame(frame, trace, label);
+    if (href) {
+      trace(`[tm-rpa] Find Tickets: navigating to ${href.slice(0, 100)} (frame=${label})`);
+      try {
+        await page.goto(href, { waitUntil: "domcontentloaded", timeout: 15000 });
+      } catch (err) {
+        trace(`[tm-rpa] Find Tickets goto error: ${(err as Error).message?.slice(0, 60)}`);
+      }
+      return true;
+    }
+
+    // Strategy B: per-frame click via :has-text
+    if (await clickFindTicketsInFrame(frame, trace, label)) return true;
+  }
+
+  // Strategy C: main-frame label scan (covers cases where text is split
+  // across nested spans / buttons without href). Cap raised from 180 to 320.
+  const controls = main.locator('a, button, [role="button"], [role="link"]');
+  const count = Math.min(await controls.count().catch(() => 0), 320);
   for (let i = 0; i < count; i++) {
     const item = controls.nth(i);
     if (!(await locatorLooksVisible(item))) continue;
@@ -498,6 +588,26 @@ async function clickFindTicketsWithLocators(page: Page, trace: TraceFn): Promise
     return true;
   }
   return false;
+}
+
+// Per-frame DOM dump — fires once when the 16s deadline expires so the next
+// iteration has visibility into what the page actually looks like. Uses
+// string-source evaluate to bypass tsx + Stagehand serialization issues.
+async function dumpFindTicketsDiagnostic(page: Page, trace: TraceFn): Promise<void> {
+  const { main, all } = getScanFrames(page);
+  trace(`[tm-rpa] Find Tickets dump: ${all.length} frames`);
+  const source =
+    "JSON.stringify((function(){var isVis=function(el){var r=el.getBoundingClientRect();return r.width>0&&r.height>0;};return Array.from(document.querySelectorAll('button, a, [role=\"button\"], [role=\"link\"]')).filter(isVis).slice(0,30).map(function(el){var href=(el.tagName==='A'?(el.getAttribute('href')||''):'');return ((el.textContent||'').replace(/\\s+/g,' ').trim().slice(0,50))+(href?(' ['+href.slice(0,60)+']'):'');});})())";
+  for (const frame of all) {
+    const label = frameLabel(frame, main);
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const dump = await (frame.evaluate as any)(source).catch(() => null);
+      if (dump) trace(`[tm-rpa] FT[${label}]: ${String(dump).slice(0, 700)}`);
+    } catch {
+      /* ignore */
+    }
+  }
 }
 
 function parseMonthYearText(text: string): { monthIndex: number; year: number } | null {
@@ -1009,6 +1119,9 @@ async function clickFindTickets(page: Page, trace: TraceFn): Promise<boolean> {
     }
     await page.waitForTimeout(400);
   }
+  // Deadline reached — fire diagnostic dump exactly once so the next iteration
+  // has visibility into iframe topology + actual button labels on the page.
+  await dumpFindTicketsDiagnostic(page, trace);
   trace("[tm-rpa] Find Tickets button not found within 16s");
   return false;
 }
