@@ -149,4 +149,29 @@ describe("docs static guard - core", () => {
       "MULTI_AGENT_PROTOCOL must cross-link to the startup contract",
     ).toContain("docs/10-coordination/NEW_AGENT_STARTUP_CONTRACT.md");
   });
+
+  it("keeps dogfood and runtime mirror docs discoverable", () => {
+    const index = read("docs/INDEX.md");
+    const projectSummary = read("docs/00-start-here/PROJECT_SUMMARY.md");
+    const systemDesign = read("docs/00-start-here/SYSTEM_DESIGN.md");
+    const bugInbox = read("docs/40-dogfood/BUG_INBOX.md");
+    const mirrorGuide = read("docs/30-provider-debug/RUNTIME_MIRROR_GUIDE.md");
+
+    expect(index).toContain("docs/40-dogfood/BUG_INBOX.md");
+    expect(index).toContain("docs/30-provider-debug/RUNTIME_MIRROR_GUIDE.md");
+    expect(projectSummary).toContain("docs/40-dogfood/BUG_INBOX.md");
+    expect(systemDesign).toContain("docs/30-provider-debug/RUNTIME_MIRROR_GUIDE.md");
+    expect(bugInbox).toContain("DOG-005");
+    expect(bugInbox).toContain("Lion King");
+    expect(bugInbox).toContain("NLU fixture");
+    expect(bugInbox).toContain("Benchmark case");
+    expect(bugInbox).toContain("zh-activity-lion-king-trip-shaped");
+    expect(bugInbox).toContain("activity-route-pass-08");
+    expect(systemDesign).toContain("scripts/internal-benchmark.ts --mode no-live");
+    expect(systemDesign).toContain("200+ structured cases");
+    expect(systemDesign).toContain("does not prove live model extraction");
+    expect(mirrorGuide).toContain("lib/booking-autopilot/**");
+    expect(mirrorGuide).toContain("worker/src/booking-autopilot/**");
+    expect(mirrorGuide).toContain("npm run check-drift");
+  });
 });
