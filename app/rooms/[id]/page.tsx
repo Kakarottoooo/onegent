@@ -29,6 +29,7 @@ import {
   deriveDREventsFromSnapshot,
   type DRTimelineInputs,
 } from "@/components/dr-timeline";
+import { getTaskWorkspaceHref } from "@/lib/booking-jobs/workspace";
 
 // Leaflet pulls in `window` — force client-only so the room detail page (a
 // server component by default) doesn't choke during SSR.
@@ -2990,7 +2991,7 @@ function AcceptedBlock({
                 {clearing ? "Resetting…" : "🔄 Retry booking"}
               </button>
               <button
-                onClick={() => router.push(`/tasks?view=live&focus=${encodeURIComponent(bookingJobId)}`)}
+                onClick={() => router.push(getTaskWorkspaceHref({ id: bookingJobId, status: "failed" }))}
                 className={`flex-1 py-2.5 ${CTA_GHOST}`}
               >
                 View log →
@@ -3016,7 +3017,11 @@ function AcceptedBlock({
           {isPayer && (
             <div className="flex gap-2">
               <button
-                onClick={() => router.push(`/tasks?view=live&focus=${encodeURIComponent(bookingJobId)}`)}
+                onClick={() => router.push(getTaskWorkspaceHref({
+                  id: bookingJobId,
+                  status: "done",
+                  awaiting_confirmation_count: 1,
+                }))}
                 className={`flex-1 py-2.5 ${CTA}`}
               >
                 Open Tasks →
@@ -3045,7 +3050,7 @@ function AcceptedBlock({
           </p>
           {isPayer && (
             <button
-              onClick={() => router.push(`/tasks?view=live&focus=${encodeURIComponent(bookingJobId)}`)}
+              onClick={() => router.push(getTaskWorkspaceHref({ id: bookingJobId, status: "done" }))}
               className={`w-full py-2.5 ${CTA_GHOST}`}
             >
               View details →
@@ -3068,7 +3073,7 @@ function AcceptedBlock({
         </p>
         {isPayer && (
           <button
-            onClick={() => router.push(`/tasks?view=live&focus=${encodeURIComponent(bookingJobId)}`)}
+            onClick={() => router.push(getTaskWorkspaceHref({ id: bookingJobId, status: "running" }))}
             className={`w-full py-2.5 ${CTA}`}
           >
             View booking status →
@@ -3137,7 +3142,7 @@ function AcceptedBlock({
         return;
       }
       const { job_id } = await res.json() as { job_id: string };
-      router.push(`/tasks?view=live&focus=${encodeURIComponent(job_id)}`);
+      router.push(getTaskWorkspaceHref({ id: job_id, status: "running" }));
     } finally {
       setStarting(false);
     }

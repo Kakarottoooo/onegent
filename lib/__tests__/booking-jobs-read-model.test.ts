@@ -100,7 +100,7 @@ describe("booking job compact list rows", () => {
       adjusted_count: 1,
       replan_count: 1,
       provider: "opentable",
-      workspace: "queue",
+      workspace: "history",
       latest_status_label: "Ready to review - confirm on site",
     });
     expect(item).not.toHaveProperty("steps");
@@ -109,9 +109,12 @@ describe("booking job compact list rows", () => {
     expect(JSON.stringify(item)).not.toContain("profile");
   });
 
-  it("classifies active, action, and historical rows without full steps", () => {
+  it("classifies queue, active, ready-for-review, and historical rows without full steps", () => {
+    expect(classifyBookingJobListItem(listRow({ status: "pending" }))).toBe("queue");
+    expect(classifyBookingJobListItem(listRow({ status: "pending_local" }))).toBe("queue");
     expect(classifyBookingJobListItem(listRow({ status: "running" }))).toBe("live");
-    expect(classifyBookingJobListItem(listRow({ status: "failed", action_count: 1 }))).toBe("queue");
+    expect(classifyBookingJobListItem(listRow({ status: "done", awaiting_confirmation_count: 1 }))).toBe("history");
+    expect(classifyBookingJobListItem(listRow({ status: "failed", action_count: 1 }))).toBe("history");
     expect(classifyBookingJobListItem(listRow({ status: "done", step_count: 1, done_count: 1 }))).toBe("history");
   });
 });

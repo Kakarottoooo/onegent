@@ -17,6 +17,7 @@ import { useAuth } from "@clerk/nextjs";
 import GlobalNav from "@/components/GlobalNav";
 import MonthCalendar from "@/components/MonthCalendar";
 import { buildCalendarGrid } from "@/lib/calendar-grid";
+import { getTaskWorkspaceHref } from "@/lib/booking-jobs/workspace";
 import { isActiveJobStatus } from "@/lib/status";
 import type { ExternalCalendarEventsByDay } from "@/lib/calendar-availability";
 import type { CalendarJobItem } from "@/lib/calendar-read-model";
@@ -356,7 +357,8 @@ export default function CalendarPage() {
   }
 
   function handleEventClick(jobId: string) {
-    router.push(`/tasks?focus=${encodeURIComponent(jobId)}&view=live`);
+    const job = jobs.find((candidate) => candidate.id === jobId);
+    router.push(job ? getTaskWorkspaceHref(job) : getTaskWorkspaceHref({ id: jobId, status: "pending" }));
   }
 
   async function disconnectGoogleCalendar() {

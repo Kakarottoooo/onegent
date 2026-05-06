@@ -22,6 +22,7 @@
 
 import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
+import { getTaskWorkspaceHref } from "@/lib/booking-jobs/workspace";
 import type {
   TripPackage,
   TripSelection,
@@ -389,7 +390,7 @@ export default function TripPackageCard(props: TripPackageCardProps) {
       }).catch(() => {});
       props.onBooked?.(data.jobId);
       if (!props.onBooked) {
-        router.push(`/tasks?focus=${encodeURIComponent(data.jobId)}&view=live`);
+        router.push(getTaskWorkspaceHref({ id: data.jobId, status: "pending" }));
       }
     } catch {
       setSubmitError("Network error — please try again.");

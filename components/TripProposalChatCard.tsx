@@ -27,6 +27,7 @@ import type {
   RecommendationCard,
   ActivityRecommendationCard,
 } from "@/lib/types";
+import { getTaskWorkspaceHref } from "@/lib/booking-jobs/workspace";
 
 const MAX_RESTAURANT_PICKS = 3;
 const MAX_ACTIVITY_PICKS = 3;
@@ -556,7 +557,7 @@ export default function TripProposalChatCard(props: TripProposalChatCardProps) {
   const isExecuting = !!data.room.booking_job_id;
   if (isExecuting) {
     const taskUrl = data.room.booking_job_id
-      ? `/tasks?focus=${encodeURIComponent(data.room.booking_job_id)}&view=live`
+      ? getTaskWorkspaceHref({ id: data.room.booking_job_id, status: "pending" })
       : "/tasks";
     return (
       <div style={WRAPPER}>

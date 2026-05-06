@@ -9,6 +9,7 @@ import {
   getDecisionSession,
   type ItineraryItem,
 } from "@/lib/db";
+import { getTaskWorkspaceHref } from "@/lib/booking-jobs/workspace";
 
 type Params = { params: Promise<{ id: string }> };
 
@@ -83,7 +84,7 @@ async function buildItemPreview(it: ItineraryItem) {
           subtitle: job.steps?.[0]
             ? `${job.steps[0].emoji} ${job.steps[0].label}`
             : null,
-          href: `/tasks?focus=${encodeURIComponent(job.id)}&view=live`,
+          href: getTaskWorkspaceHref(job),
         };
       }
     } else if (it.item_kind === "dr_outcome") {

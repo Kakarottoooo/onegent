@@ -11,14 +11,15 @@ import {
   type BookingJobSummary,
   type SharedArtifact,
 } from "@/lib/db";
+import { taskWorkspaceViewForJob } from "./workspace";
+import type { TaskWorkspaceBucket } from "./workspace";
+export type { TaskWorkspaceBucket } from "./workspace";
 
 export type BookingJobOwnShare = Pick<SharedArtifact, "slug" | "view_count" | "visibility">;
 
 export type VisibleBookingJob = BookingJob & {
   own_share?: BookingJobOwnShare | null;
 };
-
-export type TaskWorkspaceBucket = "queue" | "live" | "history";
 
 export type BookingJobListItem = {
   id: string;
@@ -90,19 +91,9 @@ function inferProvider(row: BookingJobListRow): string | null {
 
 export function classifyBookingJobListItem(row: Pick<
   BookingJobListRow,
-  "status" | "action_count" | "done_count" | "awaiting_confirmation_count" | "step_count"
+  "status" | "action_count" | "done_count" | "awaiting_confirmation_count" | "step_count" | "primary_step_status"
 >): TaskWorkspaceBucket {
-  if (row.status === "pending" || row.status === "pending_local" || row.status === "running") {
-    return "live";
-  }
-  if (numberField(row.action_count) > 0 || numberField(row.awaiting_confirmation_count) > 0) {
-    return "queue";
-  }
-  const stepCount = numberField(row.step_count);
-  if (stepCount > 0 && numberField(row.done_count) > 0 && numberField(row.done_count) < stepCount) {
-    return "queue";
-  }
-  return "history";
+  return taskWorkspaceViewForJob(row);
 }
 
 export function latestBookingJobStatusLabel(row: Pick<

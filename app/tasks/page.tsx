@@ -84,11 +84,7 @@ function TaskWorkspaceSwitch({
 }
 
 function classifyTaskWorkspace(job: BookingJob | BookingJobListItem): TaskWorkspaceView {
-  if ("workspace" in job) return job.workspace;
-  const sem = computeJobSemanticStatus(job);
-  if (sem === "pending" || sem === "running" || sem === "retrying") return "live";
-  if (sem === "blocked_needs_user_input" || sem === "partially_completed") return "queue";
-  return "history";
+  return taskWorkspaceViewForJob(job);
 }
 
 function timeAgo(iso: string | null | undefined): string {
@@ -1168,7 +1164,7 @@ function InterventionBanner({ step, jobId, onOpenLive }: { step: BookingJobStep;
 // ── Job card ───────────────────────────────────────────────────────────────────
 
 function compactStatusDisplay(job: BookingJobListItem) {
-  if (job.active) {
+  if (job.workspace === "live") {
     return {
       label: job.latest_status_label,
       color: "var(--gold, #D4A34B)",
@@ -1287,6 +1283,7 @@ function JobCard({
   const isRunning = isActiveJobStatus(job.status);
   const isComplete = job.status === "done" || job.status === "failed";
   const evidenceAction = taskEvidenceAction(job);
+  const isLiveEvidence = evidenceAction.view === "live";
 
   // Detect stuck "running" jobs: Vercel function timeout kills the process before
   // updateBookingJobStatus() runs, leaving the job permanently in "running" state.
@@ -1399,8 +1396,8 @@ function JobCard({
         <div className="job-card__actions">
           <button
             onClick={(e) => { e.stopPropagation(); onOpenLive?.(job.id); }}
-            className={`job-card__cta ${isRunning ? "job-card__cta--watch" : "job-card__cta--watch-replay"}`}
-            title={isRunning ? "Open live task evidence" : "Open saved logs and snapshots"}
+            className={`job-card__cta ${isLiveEvidence ? "job-card__cta--watch" : "job-card__cta--watch-replay"}`}
+            title={isLiveEvidence ? "Open live task evidence" : "Open saved logs and snapshots"}
           >
             {evidenceAction.label === "Watch" ? "Watch" : "Evidence"}
           </button>

@@ -92,6 +92,19 @@ This keeps route navigation from waiting on large `booking_jobs.steps` JSON,
 decision logs, agent logs, or screenshot streams for tasks the user has not
 opened.
 
+Task workspace links should go through `lib/booking-jobs/workspace.ts` instead
+of hand-built `/tasks` URLs. The shared rule is:
+
+- `queue`: jobs that are created but not yet running (`pending`,
+  `pending_local`).
+- `live`: jobs that are actively executing (`running`).
+- `history`: completed, failed, or human-review boundary jobs, including
+  `awaiting_confirmation` / ready-for-review states.
+
+The same helper powers compact read models, calendar/room/itinerary links, and
+chat task cards so a completed task remains discoverable from its source
+session while logs and screenshots stay lazy-loaded for the focused task only.
+
 The app shell and adjacent workspaces now use the same compact-first rule:
 
 - `/api/app/bootstrap` is the shared shell payload for Sidebar and GlobalNav.
