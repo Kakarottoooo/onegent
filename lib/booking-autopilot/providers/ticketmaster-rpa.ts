@@ -233,25 +233,81 @@ export function parseTargetDateTime(task: string): TargetDateTime | null {
 }
 
 async function locatorLabel(locator: Locator): Promise<string> {
-  const [text, aria, title] = await Promise.all([
-    locator.textContent({ timeout: 300 }).catch(() => ""),
-    locator.getAttribute("aria-label", { timeout: 300 }).catch(() => ""),
-    locator.getAttribute("title", { timeout: 300 }).catch(() => ""),
-  ]);
+  // Same defensive pattern as locatorLooksVisible — Stagehand v3 may
+  // strip textContent / getAttribute on certain locator depths. Type-
+  // guard before calling and swallow synchronous throws.
+  const loc = locator as unknown as {
+    textContent?: (opts?: { timeout?: number }) => Promise<string | null>;
+    getAttribute?: (n: string, opts?: { timeout?: number }) => Promise<string | null>;
+    evaluate?: <R>(fn: (el: Element) => R) => Promise<R>;
+  };
+  let text: string | null = "";
+  let aria: string | null = "";
+  let title: string | null = "";
+  try {
+    if (typeof loc.textContent === "function") {
+      text = await loc.textContent({ timeout: 300 }).catch(() => "");
+    }
+    if (typeof loc.getAttribute === "function") {
+      [aria, title] = await Promise.all([
+        loc.getAttribute("aria-label", { timeout: 300 }).catch(() => ""),
+        loc.getAttribute("title", { timeout: 300 }).catch(() => ""),
+      ]);
+    }
+  } catch {
+    // continue with whatever we got
+  }
+  // Final fallback: pull via locator.evaluate if available.
+  if (!text && !aria && !title && typeof loc.evaluate === "function") {
+    const blob = await loc.evaluate((el: Element) => {
+      const e = el as HTMLElement;
+      return [
+        e.textContent ?? "",
+        e.getAttribute("aria-label") ?? "",
+        e.getAttribute("title") ?? "",
+      ].join(" ");
+    }).catch(() => "");
+    return (blob ?? "").replace(/\s+/g, " ").trim();
+  }
   return `${text ?? ""} ${aria ?? ""} ${title ?? ""}`.replace(/\s+/g, " ").trim();
 }
 
 async function locatorLooksVisible(locator: Locator): Promise<boolean> {
-  // Stagehand v3 proxy strips locator.boundingBox(); calling it throws
-  // "boundingBox is not a function" synchronously and crashes the RPA.
-  // locator.evaluate() IS exposed — read the bbox client-side via that.
-  const ok = await locator
-    .evaluate((el) => {
-      const r = (el as HTMLElement).getBoundingClientRect();
-      return r.width >= 24 && r.height >= 16;
-    })
-    .catch(() => false);
-  return ok === true;
+  // Stagehand v3 proxy aggressively strips locator-level inspection
+  // methods. boundingBox / evaluate / isVisible may each throw
+  // synchronously with "is not a function" depending on proxy depth —
+  // observed live (job @ restart-3004-20260506T010207, then 010205):
+  //   first crash:  "locator.boundingBox is not a function"
+  //   second crash: "locator.evaluate is not a function"
+  // Defensive: typeof-guard each path; if all are stripped, assume the
+  // element is visible and let downstream click({timeout, force}) gate
+  // the action. Never crash the whole RPA on a visibility check.
+  try {
+    const loc = locator as unknown as {
+      boundingBox?: (opts?: { timeout?: number }) => Promise<{ width: number; height: number } | null>;
+      isVisible?: (opts?: { timeout?: number }) => Promise<boolean>;
+      evaluate?: <R>(fn: (el: Element) => R) => Promise<R>;
+    };
+    if (typeof loc.boundingBox === "function") {
+      const box = await loc.boundingBox({ timeout: 300 }).catch(() => null);
+      if (box) return box.width >= 24 && box.height >= 16;
+    }
+    if (typeof loc.isVisible === "function") {
+      const ok = await loc.isVisible({ timeout: 300 }).catch(() => false);
+      if (ok === true) return true;
+    }
+    if (typeof loc.evaluate === "function") {
+      const ok = await loc.evaluate((el: Element) => {
+        const r = (el as HTMLElement).getBoundingClientRect();
+        return r.width >= 24 && r.height >= 16;
+      }).catch(() => false);
+      if (typeof ok === "boolean") return ok;
+    }
+  } catch {
+    // any unexpected synchronous throw → fall through to default
+  }
+  // All inspection paths stripped — assume visible; click will gate.
+  return true;
 }
 
 function targetSlotScore(label: string, target: TargetDateTime): number {
@@ -1042,17 +1098,32 @@ export async function bookTicketmasterProgrammatic(
     await page.waitForTimeout(1500);
     let slotClicked = false;
     if (target) {
-      await openCalendarViewWithLocators(page, trace);
-      // Advance the calendar to the target month if it's not already showing.
-      await navigateToTargetMonth(page, target, trace);
+      // Locator-based helpers may throw "X is not a function" under
+      // Stagehand v3 proxy stripping. Wrap each so a single helper crash
+      // can't kill the whole RPA — primary page.evaluate paths take over.
+      await openCalendarViewWithLocators(page, trace).catch((err: Error) => {
+        trace(`[tm-rpa] openCalendarView via-locators threw (continuing): ${err.message?.slice(0, 80)}`);
+      });
+      await navigateToTargetMonth(page, target, trace).catch((err: Error) => {
+        trace(`[tm-rpa] navigateToTargetMonth threw (continuing): ${err.message?.slice(0, 80)}`);
+      });
       await page.waitForTimeout(500);
-      slotClicked = await clickCalendarSlot(page, target, trace);
+      slotClicked = await clickCalendarSlot(page, target, trace).catch((err: Error) => {
+        trace(`[tm-rpa] clickCalendarSlot threw (continuing): ${err.message?.slice(0, 80)}`);
+        return false;
+      });
       if (!slotClicked) {
         trace("[tm-rpa] Target date not matched — falling back to first available slot");
-        slotClicked = await clickFirstAvailableSlot(page, trace);
+        slotClicked = await clickFirstAvailableSlot(page, trace).catch((err: Error) => {
+          trace(`[tm-rpa] clickFirstAvailableSlot threw (continuing): ${err.message?.slice(0, 80)}`);
+          return false;
+        });
       }
     } else {
-      slotClicked = await clickFirstAvailableSlot(page, trace);
+      slotClicked = await clickFirstAvailableSlot(page, trace).catch((err: Error) => {
+        trace(`[tm-rpa] clickFirstAvailableSlot threw (continuing): ${err.message?.slice(0, 80)}`);
+        return false;
+      });
     }
 
     if (slotClicked) {
