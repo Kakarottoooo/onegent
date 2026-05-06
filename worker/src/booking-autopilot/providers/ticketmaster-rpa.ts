@@ -11,7 +11,7 @@
  * and wait for the user to sign in (URL leaves the auth domain). Cookies from
  * .ticketmaster-cookies.json usually prevent this, but it's a safety net.
  */
-import type { Page } from "playwright";
+import type { Locator, Page } from "playwright";
 
 type TraceFn = (msg: string) => void;
 
@@ -23,7 +23,7 @@ export interface TicketmasterRpaResult {
   error?: string;
 }
 
-interface TargetDateTime {
+export interface TargetDateTime {
   monthName: string;   // "May"
   monthIndex: number;  // 0-based (4 = May)
   day: number;         // 20
@@ -36,32 +36,250 @@ const MONTH_NAMES = [
   "july", "august", "september", "october", "november", "december",
 ];
 
+const MONTH_ALIASES = new Map<string, number>([
+  ...MONTH_NAMES.map((name, index) => [name, index] as const),
+  ["jan", 0],
+  ["feb", 1],
+  ["mar", 2],
+  ["apr", 3],
+  ["jun", 5],
+  ["jul", 6],
+  ["aug", 7],
+  ["sep", 8],
+  ["sept", 8],
+  ["oct", 9],
+  ["nov", 10],
+  ["dec", 11],
+]);
+
+function normalizeTargetTime(value: string | undefined): string | undefined {
+  if (!value) return undefined;
+  return value.toUpperCase().replace(/\s+/g, " ");
+}
+
+function parseTaskTime(task: string): string | undefined {
+  const timeMatch = task.match(/\b(\d{1,2}:\d{2}\s*(?:am|pm))\b/i);
+  return normalizeTargetTime(timeMatch?.[1]);
+}
+
 /**
  * Pull the target date/time out of the task string. ActivityCard.tsx builds
  * task text like: `Book tickets for "X" on May 20, 2026.` — we look for a
  * `${month} ${day}, ${year}` substring plus an optional "H:MM AM/PM" time.
  */
-function parseTargetDateTime(task: string): TargetDateTime | null {
+export function parseTargetDateTime(task: string): TargetDateTime | null {
+  const isoMatch = task.match(/\b(20\d{2})-(\d{2})-(\d{2})(?:[T\s](\d{1,2}):(\d{2})(?::\d{2})?)?\b/);
+  if (isoMatch) {
+    const year = parseInt(isoMatch[1], 10);
+    const monthIndex = parseInt(isoMatch[2], 10) - 1;
+    const day = parseInt(isoMatch[3], 10);
+    const hour = isoMatch[4] == null ? null : parseInt(isoMatch[4], 10);
+    const minute = isoMatch[5] == null ? null : parseInt(isoMatch[5], 10);
+    if (monthIndex >= 0 && monthIndex < 12 && day >= 1 && day <= 31) {
+      const time = hour == null || minute == null
+        ? parseTaskTime(task)
+        : normalizeTargetTime(`${hour % 12 === 0 ? 12 : hour % 12}:${String(minute).padStart(2, "0")} ${hour >= 12 ? "PM" : "AM"}`);
+      return {
+        monthName: MONTH_NAMES[monthIndex].slice(0, 1).toUpperCase() + MONTH_NAMES[monthIndex].slice(1),
+        monthIndex,
+        day,
+        year,
+        time,
+      };
+    }
+  }
+
   const monthPattern = new RegExp(
-    `\\b(${MONTH_NAMES.join("|")})\\s+(\\d{1,2}),?\\s+(20\\d{2})\\b`,
+    `\\b(${Array.from(MONTH_ALIASES.keys()).join("|")})\\.?\\s+(\\d{1,2}),?\\s+(20\\d{2})\\b`,
     "i"
   );
   const match = task.match(monthPattern);
   if (!match) return null;
-  const monthName = match[1];
-  const monthIndex = MONTH_NAMES.indexOf(monthName.toLowerCase());
+  const monthName = match[1].toLowerCase().replace(/\.$/, "");
+  const monthIndex = MONTH_ALIASES.get(monthName) ?? -1;
   const day = parseInt(match[2], 10);
   const year = parseInt(match[3], 10);
   if (isNaN(day) || isNaN(year) || monthIndex < 0) return null;
 
-  const timeMatch = task.match(/\b(\d{1,2}:\d{2}\s*(?:am|pm))\b/i);
   return {
-    monthName: monthName.slice(0, 1).toUpperCase() + monthName.slice(1).toLowerCase(),
+    monthName: MONTH_NAMES[monthIndex].slice(0, 1).toUpperCase() + MONTH_NAMES[monthIndex].slice(1),
     monthIndex,
     day,
     year,
-    time: timeMatch?.[1].toUpperCase().replace(/\s+/g, " "),
+    time: parseTaskTime(task),
   };
+}
+
+async function locatorLabel(locator: Locator): Promise<string> {
+  const [text, aria, title] = await Promise.all([
+    locator.textContent({ timeout: 300 }).catch(() => ""),
+    locator.getAttribute("aria-label", { timeout: 300 }).catch(() => ""),
+    locator.getAttribute("title", { timeout: 300 }).catch(() => ""),
+  ]);
+  return `${text ?? ""} ${aria ?? ""} ${title ?? ""}`.replace(/\s+/g, " ").trim();
+}
+
+async function locatorLooksVisible(locator: Locator): Promise<boolean> {
+  const box = await locator.boundingBox({ timeout: 300 }).catch(() => null);
+  return !!box && box.width >= 24 && box.height >= 16;
+}
+
+function targetSlotScore(label: string, target: TargetDateTime): number {
+  const lower = label.toLowerCase();
+  if (!lower) return 0;
+  let score = 0;
+  const month = target.monthName.toLowerCase();
+  const monthShort = month.slice(0, 3);
+  if (lower.includes(month) || lower.includes(monthShort)) score += 3;
+  const day = String(target.day);
+  const dayPadded = day.padStart(2, "0");
+  const dayRx = new RegExp(`\\b${day}(st|nd|rd|th)?\\b|\\b${dayPadded}\\b`);
+  if (dayRx.test(lower)) score += 3;
+  if (target.time && lower.includes(target.time.toLowerCase())) score += 2;
+  if (lower.includes(String(target.year))) score += 1;
+  return score;
+}
+
+async function openCalendarViewWithLocators(page: Page, trace: TraceFn): Promise<boolean> {
+  const controls = page.locator('button, a, [role="button"], [role="tab"]');
+  const count = Math.min(await controls.count().catch(() => 0), 160);
+  for (let i = 0; i < count; i++) {
+    const item = controls.nth(i);
+    if (!(await locatorLooksVisible(item))) continue;
+    const label = await locatorLabel(item);
+    const lower = label.toLowerCase();
+    if (!lower.includes("calendar") || lower.includes("add to calendar")) continue;
+    await item.scrollIntoViewIfNeeded({ timeout: 800 }).catch(() => {});
+    await item.click({ timeout: 1500, force: true }).catch(() => {});
+    trace(`[tm-rpa] Opened calendar view via locator: "${label.slice(0, 80)}"`);
+    await page.waitForTimeout(700);
+    return true;
+  }
+  trace("[tm-rpa] Calendar view locator not found; continuing with current view");
+  return false;
+}
+
+async function clickCalendarSlotWithLocators(page: Page, target: TargetDateTime, trace: TraceFn): Promise<boolean> {
+  const controls = page.locator('a, button, [role="button"], [role="link"]');
+  const count = Math.min(await controls.count().catch(() => 0), 260);
+  let best: { locator: Locator; label: string; score: number } | null = null;
+  const samples: string[] = [];
+  for (let i = 0; i < count; i++) {
+    const item = controls.nth(i);
+    if (!(await locatorLooksVisible(item))) continue;
+    const label = await locatorLabel(item);
+    if (!label) continue;
+    const lower = label.toLowerCase();
+    if (
+      samples.length < 8 &&
+      (/\b\d{1,2}:\d{2}\s*(am|pm)\b/i.test(label) ||
+        MONTH_NAMES.some((month) => lower.includes(month) || lower.includes(month.slice(0, 3))))
+    ) {
+      samples.push(label.slice(0, 100));
+    }
+    const score = targetSlotScore(label, target);
+    if (score >= (target.time ? 7 : 6) && (!best || score > best.score)) {
+      best = { locator: item, label, score };
+    }
+  }
+  if (!best) {
+    trace(`[tm-rpa] Locator slot scan found no target; samples=${JSON.stringify(samples)}`);
+    return false;
+  }
+  await best.locator.scrollIntoViewIfNeeded({ timeout: 1000 }).catch(() => {});
+  await best.locator.click({ timeout: 2000, force: true });
+  trace(`[tm-rpa] Calendar slot clicked via locator: "${best.label.slice(0, 100)}" score=${best.score}`);
+  return true;
+}
+
+async function clickFirstAvailableSlotWithLocators(page: Page, trace: TraceFn): Promise<boolean> {
+  const controls = page.locator('a, button, [role="button"], [role="link"]');
+  const count = Math.min(await controls.count().catch(() => 0), 260);
+  const samples: string[] = [];
+  for (let i = 0; i < count; i++) {
+    const item = controls.nth(i);
+    if (!(await locatorLooksVisible(item))) continue;
+    const label = await locatorLabel(item);
+    if (!label) continue;
+    if (samples.length < 8 && /\b\d{1,2}:\d{2}\s*(am|pm)\b/i.test(label)) {
+      samples.push(label.slice(0, 100));
+    }
+    if (!/^\s*\d{1,2}:\d{2}\s*(am|pm)\b/i.test(label)) continue;
+    await item.scrollIntoViewIfNeeded({ timeout: 1000 }).catch(() => {});
+    await item.click({ timeout: 2000, force: true });
+    trace(`[tm-rpa] Fallback slot clicked via locator: "${label.slice(0, 100)}"`);
+    return true;
+  }
+  trace(`[tm-rpa] Locator fallback found no time slots; samples=${JSON.stringify(samples)}`);
+  return false;
+}
+
+async function clickFindTicketsWithLocators(page: Page, trace: TraceFn): Promise<boolean> {
+  const controls = page.locator('a, button, [role="button"], [role="link"]');
+  const count = Math.min(await controls.count().catch(() => 0), 180);
+  for (let i = 0; i < count; i++) {
+    const item = controls.nth(i);
+    if (!(await locatorLooksVisible(item))) continue;
+    const label = await locatorLabel(item);
+    if (!/^\s*(find tickets|buy tickets|get tickets)\s*$/i.test(label)) continue;
+    await item.scrollIntoViewIfNeeded({ timeout: 1000 }).catch(() => {});
+    await item.click({ timeout: 2000, force: true });
+    trace(`[tm-rpa] Clicked Find Tickets via locator: "${label.slice(0, 80)}"`);
+    return true;
+  }
+  return false;
+}
+
+function parseMonthYearText(text: string): { monthIndex: number; year: number } | null {
+  const lower = text.toLowerCase();
+  const entries = Array.from(MONTH_ALIASES.entries()).sort((a, b) => b[0].length - a[0].length);
+  const monthEntry = entries.find(([label]) => new RegExp(`\\b${label}\\.?\\b`, "i").test(lower));
+  const yearMatch = lower.match(/\b(20\d{2})\b/);
+  if (!monthEntry || !yearMatch) return null;
+  return { monthIndex: monthEntry[1], year: parseInt(yearMatch[1], 10) };
+}
+
+async function readCurrentCalendarMonthWithLocators(page: Page, trace: TraceFn): Promise<{ monthIndex: number; year: number } | null> {
+  const controls = page.locator('button, a, [role="button"], [role="tab"], [aria-selected], [aria-current]');
+  const count = Math.min(await controls.count().catch(() => 0), 220);
+  let fallback: { monthIndex: number; year: number; label: string } | null = null;
+  for (let i = 0; i < count; i++) {
+    const item = controls.nth(i);
+    const label = await locatorLabel(item);
+    if (!label) continue;
+    const parsed = parseMonthYearText(label);
+    if (!parsed) continue;
+    const selected = /selected|current|active/i.test(label);
+    const hit = { ...parsed, label };
+    if (selected) {
+      trace(`[tm-rpa] Calendar month read via locator: "${label.slice(0, 80)}"`);
+      return hit;
+    }
+    fallback ??= hit;
+  }
+  if (fallback) {
+    trace(`[tm-rpa] Calendar month read via locator fallback: "${fallback.label.slice(0, 80)}"`);
+    return { monthIndex: fallback.monthIndex, year: fallback.year };
+  }
+  trace("[tm-rpa] Calendar month locator fallback found no month/year labels");
+  return null;
+}
+
+async function clickMonthNavWithLocators(page: Page, wantNext: boolean, trace: TraceFn): Promise<boolean> {
+  const controls = page.locator('button, a, [role="button"]');
+  const count = Math.min(await controls.count().catch(() => 0), 180);
+  const labels = wantNext ? ["next month", "next"] : ["previous month", "previous", "prev month", "prev"];
+  for (let i = 0; i < count; i++) {
+    const item = controls.nth(i);
+    if (!(await locatorLooksVisible(item))) continue;
+    const label = (await locatorLabel(item)).toLowerCase();
+    if (!labels.some((needle) => label === needle || label.includes(needle))) continue;
+    await item.scrollIntoViewIfNeeded({ timeout: 800 }).catch(() => {});
+    await item.click({ timeout: 1500, force: true });
+    trace(`[tm-rpa] Month nav clicked via locator: "${label.slice(0, 80)}"`);
+    return true;
+  }
+  return false;
 }
 
 /**
@@ -85,17 +303,15 @@ async function readCurrentCalendarMonth(page: Page, trace: TraceFn): Promise<{ m
   }).catch(() => "");
 
   if (!text) {
-    trace("[tm-rpa] Calendar month tab not found (no selected/current element)");
-    return null;
+    trace("[tm-rpa] Calendar month tab not found via evaluate; trying locator fallback");
+    return await readCurrentCalendarMonthWithLocators(page, trace);
   }
-  const lower = text.toLowerCase();
-  const monthIndex = MONTH_NAMES.findIndex(m => lower.includes(m));
-  const yearMatch = lower.match(/\b(20\d{2})\b/);
-  if (monthIndex < 0 || !yearMatch) {
+  const parsed = parseMonthYearText(text);
+  if (!parsed) {
     trace(`[tm-rpa] Could not parse current month from tab text: "${text.slice(0, 80)}"`);
-    return null;
+    return await readCurrentCalendarMonthWithLocators(page, trace);
   }
-  return { monthIndex, year: parseInt(yearMatch[1], 10) };
+  return parsed;
 }
 
 /**
@@ -137,8 +353,11 @@ async function navigateToTargetMonth(page: Page, target: TargetDateTime, trace: 
     }, labels).catch(() => false);
 
     if (!clicked) {
-      trace(`[tm-rpa] Month nav: ${wantNext ? "next" : "previous"} button not found (diff=${diff})`);
-      return false;
+      const locatorClicked = await clickMonthNavWithLocators(page, wantNext, trace);
+      if (!locatorClicked) {
+        trace(`[tm-rpa] Month nav: ${wantNext ? "next" : "previous"} button not found (diff=${diff})`);
+        return false;
+      }
     }
     trace(`[tm-rpa] Month nav: clicked ${wantNext ? "next" : "previous"} (current=${current.year}-${String(current.monthIndex + 1).padStart(2, "0")}, diff=${diff})`);
     await page.waitForTimeout(900);
@@ -215,6 +434,9 @@ async function clickCalendarSlot(page: Page, target: TargetDateTime, trace: Trac
     trace(`[tm-rpa] Calendar slot clicked: "${result.matchedLabel}" (${result.candidates} candidates scanned)`);
     return true;
   }
+  if (await clickCalendarSlotWithLocators(page, target, trace)) {
+    return true;
+  }
   trace(`[tm-rpa] No calendar slot matched ${target.monthName} ${target.day}, ${target.year}${target.time ? ` ${target.time}` : ""} (${result.candidates} candidates scanned)`);
   return false;
 }
@@ -265,6 +487,9 @@ async function clickFirstAvailableSlot(page: Page, trace: TraceFn): Promise<bool
     trace(`[tm-rpa] Fallback: clicked first available slot → "${result.label}" (${result.candidates} slots total)`);
     return true;
   }
+  if (await clickFirstAvailableSlotWithLocators(page, trace)) {
+    return true;
+  }
   trace(`[tm-rpa] Fallback: no time-slot buttons found on page`);
   return false;
 }
@@ -297,6 +522,9 @@ async function clickFindTickets(page: Page, trace: TraceFn): Promise<boolean> {
 
     if (clicked) {
       trace(`[tm-rpa] Clicked Find Tickets: "${clicked}"`);
+      return true;
+    }
+    if (await clickFindTicketsWithLocators(page, trace)) {
       return true;
     }
     await page.waitForTimeout(400);
@@ -613,6 +841,7 @@ export async function bookTicketmasterProgrammatic(
     await page.waitForTimeout(1500);
     let slotClicked = false;
     if (target) {
+      await openCalendarViewWithLocators(page, trace);
       // Advance the calendar to the target month if it's not already showing.
       await navigateToTargetMonth(page, target, trace);
       await page.waitForTimeout(500);

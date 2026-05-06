@@ -18,6 +18,8 @@ interface Props {
   onCompare?: () => void;
   isComparing?: boolean;
   onFeedback?: (record: FeedbackRecord) => void;
+  /** Called after a task job is created so the parent can render the inline task card. */
+  onJobCreated?: (jobId: string) => void;
   /** Hide the "Reserve with Agent" booking CTA. Used inside multi-party
    *  proposal cards where booking has to wait for the group's vote winner
    *  + payer-only confirmation. Aligns with FlightCard/ActivityCard
@@ -80,6 +82,7 @@ export default function RecommendationCard({
   onCompare,
   isComparing,
   onFeedback,
+  onJobCreated,
   hideBookingActions = false,
 }: Props) {
   const router = useRouter();
@@ -156,7 +159,10 @@ export default function RecommendationCard({
       if (createRes.ok) {
         const { jobId } = await createRes.json();
         fetch(`/api/booking-jobs/${jobId}/start?executor=inline`, { method: "POST" }).catch(() => {});
-        router.push(`/tasks?view=live&focus=${encodeURIComponent(jobId)}`);
+        onJobCreated?.(jobId);
+        if (!onJobCreated) {
+          router.push(`/tasks?view=live&focus=${encodeURIComponent(jobId)}`);
+        }
       }
     } catch {
       // ignore

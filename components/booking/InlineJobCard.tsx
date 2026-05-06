@@ -164,9 +164,11 @@ interface InlineJobCardProps {
   onNeedsTravelDocs?: (req: TravelDocRequest) => void;
   /** Called when the job is deleted (manually or 404) so the parent can remove it */
   onDeleted?: (jobId: string) => void;
+  /** Opens the in-page task observer without navigating away from chat/results */
+  onWatch?: (jobId: string, title: string) => void;
 }
 
-export default function InlineJobCard({ jobId, onNeedsTravelDocs, onDeleted }: InlineJobCardProps) {
+export default function InlineJobCard({ jobId, onNeedsTravelDocs, onDeleted, onWatch }: InlineJobCardProps) {
   const [job, setJob] = useState<BookingJob | null>(null);
   const [expanded, setExpanded] = useState(true);
   const [deleting, setDeleting] = useState(false);
@@ -270,6 +272,8 @@ export default function InlineJobCard({ jobId, onNeedsTravelDocs, onDeleted }: I
   const doneCount = job.steps.filter((s) => s.status === "done").length;
   const isRunning = isActiveJobStatus(job.status);
   const isComplete = job.status === "done" || job.status === "failed";
+  const detailsView = isRunning ? "live" : isComplete ? "history" : "queue";
+  const detailsHref = `/tasks?view=${detailsView}&focus=${job.id}`;
   const isStuck = job.status === "running" &&
     Date.now() - new Date(job.updated_at).getTime() > 7 * 60 * 1000;
 
@@ -300,16 +304,33 @@ export default function InlineJobCard({ jobId, onNeedsTravelDocs, onDeleted }: I
         </div>
 
         {(isRunning || (isComplete && Date.now() - new Date(job.updated_at).getTime() < 90_000)) && (
-          <a
-            href={`/tasks?view=${isRunning ? "live" : "history"}&focus=${job.id}`}
-            target="_blank"
-            rel="noopener noreferrer"
-            onClick={(e) => e.stopPropagation()}
-            style={{ flexShrink: 0, padding: "5px 10px", borderRadius: 8, border: "1px solid var(--gold,#D4A34B)", backgroundColor: "transparent", color: isRunning ? "var(--gold,#D4A34B)" : "rgba(212,163,75,0.5)", fontFamily: "var(--font-dm-sans)", fontSize: 11, fontWeight: 600, whiteSpace: "nowrap", textDecoration: "none", display: "inline-block" }}
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              if (onWatch) {
+                onWatch(job.id, job.trip_label);
+                return;
+              }
+              window.open(
+                `/tasks?view=${isRunning ? "live" : "history"}&focus=${job.id}`,
+                "_blank",
+                "noopener,noreferrer",
+              );
+            }}
+            style={{ flexShrink: 0, padding: "5px 10px", borderRadius: 8, border: "1px solid var(--gold,#D4A34B)", backgroundColor: "transparent", color: isRunning ? "var(--gold,#D4A34B)" : "rgba(212,163,75,0.5)", fontFamily: "var(--font-dm-sans)", fontSize: 11, fontWeight: 600, whiteSpace: "nowrap", cursor: "pointer" }}
           >
             {isRunning ? "🖥 Watch" : "🖥 Replay"}
-          </a>
+          </button>
         )}
+
+        <a
+          href={detailsHref}
+          onClick={(e) => e.stopPropagation()}
+          style={{ flexShrink: 0, padding: "5px 10px", borderRadius: 8, border: "0.5px solid var(--border,#e5e7eb)", backgroundColor: "transparent", color: "var(--text-secondary,#666)", fontFamily: "var(--font-dm-sans)", fontSize: 11, fontWeight: 600, whiteSpace: "nowrap", textDecoration: "none", display: "inline-block" }}
+        >
+          Details
+        </a>
 
         {job.status === "done" && doneCount > 0 && (
           <button onClick={(e) => { e.stopPropagation(); job.steps.filter((s) => s.status === "done" && s.handoff_url).forEach((s) => window.open(s.handoff_url!, "_blank")); }} style={{ flexShrink: 0, padding: "5px 12px", borderRadius: 8, border: "none", backgroundColor: "var(--gold,#D4A34B)", color: "#fff", fontFamily: "var(--font-dm-sans)", fontSize: 11, fontWeight: 600, cursor: "pointer", whiteSpace: "nowrap" }}>
@@ -338,9 +359,7 @@ export default function InlineJobCard({ jobId, onNeedsTravelDocs, onDeleted }: I
           ))}
           <div style={{ textAlign: "right", paddingTop: 4 }}>
             <a
-              href={`/tasks?view=${isRunning ? "live" : isComplete ? "history" : "queue"}&focus=${job.id}`}
-              target="_blank"
-              rel="noopener noreferrer"
+              href={detailsHref}
               style={{ fontFamily: "var(--font-dm-sans)", fontSize: 11, color: "var(--text-muted,#aaa)", textDecoration: "none" }}
             >
               View full details in Tasks →

@@ -995,6 +995,14 @@ export async function runBrowserTask(
     if (input.jobId) activeStagehands.set(input.jobId, { close: () => stagehand.close() });
     // v3 API: get active page from context (resolvePage is private)
     const page = stagehand.context.activePage() ?? await stagehand.context.newPage();
+    if (!useCloud) {
+      const viewportWidth = Number(process.env.ONEGENT_BROWSER_VIEWPORT_WIDTH) || 1365;
+      const viewportHeight = Number(process.env.ONEGENT_BROWSER_VIEWPORT_HEIGHT) || 900;
+      await getRawPage(page)
+        .setViewportSize({ width: viewportWidth, height: viewportHeight })
+        .then(() => trace(`[viewport] local viewport set to ${viewportWidth}x${viewportHeight}`))
+        .catch((error: Error) => trace(`[viewport] setViewportSize skipped: ${error.message?.slice(0, 120)}`));
+    }
     let lastSnapshotSignature: string | null = null;
     const captureLocalSnapshot: CaptureLocalSnapshot = async (
       title: string,

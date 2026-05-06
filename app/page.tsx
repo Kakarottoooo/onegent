@@ -9,6 +9,7 @@ import HotelCard from "@/components/HotelCard";
 import FlightCard from "@/components/FlightCard";
 import InlineBookingProfileGate from "@/components/booking/InlineBookingProfileGate";
 import InlineJobCard, { type TravelDocRequest } from "@/components/booking/InlineJobCard";
+import { TaskTimelinePanel } from "@/components/task-timeline";
 import { ProfileGapCard } from "@/components/profile-gap";
 import type { GapSavePayload } from "@/components/profile-gap/types";
 import {
@@ -65,6 +66,7 @@ import {
   type SessionReplaySnapshot,
 } from "@/lib/chat-replay";
 import { useRouter } from "next/navigation";
+import "./tasks/tasks.css";
 import "@/components/chat.css";
 
 type MinimalBookingProfile = {
@@ -877,6 +879,23 @@ function HomeInner() {
   const [recentJobs, setRecentJobs] = useState<{ id: string; trip_label: string; status: string; created_at: string }[]>([]);
   // Inline booking task cards rendered below results
   const [inlineItems, setInlineItems] = useState<{ type: "job"; jobId: string }[]>([]);
+  const [inlineWatchPanel, setInlineWatchPanel] = useState<{ jobId: string; title: string } | null>(null);
+  const [inlineWatchKey, setInlineWatchKey] = useState(0);
+  const inlineWatchJobIdRef = useRef<string | null>(null);
+  const openInlineWatchPanel = useCallback((jobId: string, title: string) => {
+    if (inlineWatchJobIdRef.current !== jobId) {
+      setInlineWatchKey((key) => key + 1);
+    }
+    inlineWatchJobIdRef.current = jobId;
+    setInlineWatchPanel({
+      jobId,
+      title: title ? `Agent - ${title}` : "Agent",
+    });
+  }, []);
+  const closeInlineWatchPanel = useCallback(() => {
+    inlineWatchJobIdRef.current = null;
+    setInlineWatchPanel(null);
+  }, []);
   // When set, the next chat message is intercepted as a travel-doc reply
   const [pendingTravelDoc, setPendingTravelDoc] = useState<TravelDocRequest | null>(null);
   // Timestamp of last successful travel doc save — blocks re-trigger for 10s
@@ -1919,10 +1938,7 @@ function HomeInner() {
     void fetch(`/api/booking-jobs/${jobId}/start?executor=inline`, { method: "POST" }).catch(
       () => {}
     );
-    // Land on the Live tab with this job focused so the user sees execution
-    // progress immediately. Without focus+view=live the page defaults to the
-    // Queue tab and the just-started run is hidden one click away.
-    router.push(`/tasks?view=live&focus=${encodeURIComponent(jobId)}`);
+    setInlineItems((prev) => [...prev, { type: "job", jobId }]);
   }
 
   async function submitInlineBookingProfile() {
@@ -3904,6 +3920,7 @@ function HomeInner() {
                                   }}
                                   isComparing={isComparing(card)}
                                   onFeedback={handleCardFeedback}
+                                  onJobCreated={(jobId) => setInlineItems((prev) => [...prev, { type: "job", jobId }])}
                                 />
                               ))}
                             </div>
@@ -4104,7 +4121,10 @@ function HomeInner() {
                     pkg={tripFlow.pkg}
                     sessionId={chat.getSessionId()}
                     errors={tripFlow.errors}
-                    onBooked={() => setTripFlow(null)}
+                    onBooked={(jobId) => {
+                      setInlineItems((prev) => [...prev, { type: "job", jobId }]);
+                      setTripFlow(null);
+                    }}
                   />
                 )}
                 {tripFlow?.phase === "error" && (
@@ -4269,6 +4289,7 @@ function HomeInner() {
                         <InlineJobCard
                           key={item.jobId}
                           jobId={item.jobId}
+                          onWatch={openInlineWatchPanel}
                           onDeleted={(id) => setInlineItems((prev) => prev.filter((i) => i.jobId !== id))}
                           onNeedsTravelDocs={(req) => {
                             setPendingTravelDoc(req);
@@ -4510,6 +4531,25 @@ function HomeInner() {
           </button>
         </div>
       </div>
+
+      {inlineWatchPanel && (
+        <>
+          <button
+            type="button"
+            aria-label="Close task observer"
+            className="chat-task-watch-backdrop"
+            onClick={closeInlineWatchPanel}
+          />
+          <div className="chat-task-watch-panel">
+            <TaskTimelinePanel
+              key={inlineWatchKey}
+              jobId={inlineWatchPanel.jobId}
+              title={inlineWatchPanel.title}
+              onClose={closeInlineWatchPanel}
+            />
+          </div>
+        </>
+      )}
 
       <InlineBookingProfileGate
         open={!!inlineBookingProfile}

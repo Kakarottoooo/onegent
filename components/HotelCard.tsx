@@ -139,8 +139,8 @@ export default function HotelCard({ card, index, checkIn, checkOut, guests, onJo
         `You are starting on ${siteName} — find the listing for "${hotel.name}", select the room, and fill all guest info.`,
         stayOnSite,
         `If ${siteName} fails (no results, error, or blocked), navigate to the hotel's direct site instead: ${directFallbackUrl}`,
-        "Fill in all guest information and card details.",
-        "Stop before entering CVV or clicking the final payment confirmation button.",
+        "Fill saved profile fields requested by the page, then continue to the final review area.",
+        "Leave the final site action for the user.",
       ].filter(Boolean).join(" ");
 
       // Include contact info inline so the agent always has it,

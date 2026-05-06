@@ -1119,12 +1119,12 @@ export async function POST(req: NextRequest) {
       ok: true,
       kind: "plan",
       scenario,
-      // Flight v2 NLU already has structured origin/destination/date. Prefer a
-      // deterministic English handoff for the legacy /api/chat flight parser;
-      // reparsing the original Chinese booking sentence has regressed to
-      // BNA->BNA/today and produced false "no flights" results.
+      // Flight/activity v2 NLU already has structured fields. Prefer a
+      // deterministic English handoff for the legacy /api/chat parser;
+      // reparsing the original booking sentence has regressed to the wrong
+      // route in both flight and single-event activity flows.
       search_query:
-        scenario === "flight"
+        scenario === "flight" || scenario === "activity"
           ? buildPlanQueryFromConstraints(scenario, constraints)
           : originalMessage || buildPlanQueryFromConstraints(scenario, constraints),
       constraints,

@@ -441,3 +441,52 @@
     transform: translateY(0);
   }
 }
+
+.chat-task-watch-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 80;
+  border: 0;
+  padding: 0;
+  background: rgba(0, 0, 0, 0.28);
+  cursor: default;
+}
+
+.chat-task-watch-panel {
+  position: fixed;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 81;
+  width: min(780px, 100vw);
+  max-width: 100vw;
+  background: #0f0f0f;
+  border-left: 0.5px solid rgba(255, 255, 255, 0.1);
+  box-shadow: -20px 0 60px rgba(0, 0, 0, 0.36);
+}
+
+.chat-task-watch-panel .task-timeline {
+  height: 100%;
+}
+
+@media (max-width: 760px) {
+  .chat-task-watch-backdrop {
+    background: rgba(0, 0, 0, 0.45);
+  }
+
+  .chat-task-watch-panel {
+    left: 0;
+    width: 100vw;
+    border-left: 0;
+  }
+
+  .chat-task-watch-panel .task-timeline__columns {
+    grid-template-columns: 1fr;
+  }
+
+  .chat-task-watch-panel .task-timeline__column--events {
+    border-right: 0;
+    border-bottom: 0.5px solid rgba(255, 255, 255, 0.08);
+    max-height: 35vh;
+  }
+}

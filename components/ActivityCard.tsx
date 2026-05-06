@@ -3,6 +3,7 @@
 import { useState } from "react";
 import type { ActivityRecommendationCard, ActivitySource } from "@/lib/types";
 import { getBrowserModelAsLegacy } from "@/lib/agent-model-config";
+import { formatActivityTaskDate } from "@/lib/activity-task-date";
 import "./cards.css";
 
 const PROVIDER_LABEL: Record<ActivitySource["provider"], string> = {
@@ -38,17 +39,6 @@ interface ActivityCardProps {
   hideBookingActions?: boolean;
   /** Called after a booking job is created — inject inline task card */
   onJobCreated?: (jobId: string) => void;
-}
-
-const FULL_MONTHS = [
-  "January", "February", "March", "April", "May", "June",
-  "July", "August", "September", "October", "November", "December",
-];
-
-function formatOverrideDate(ymd: string): string {
-  const [y, m, d] = ymd.split("-").map(Number);
-  if (!y || !m || !d) return "";
-  return `${FULL_MONTHS[m - 1]} ${d}, ${y}`;
 }
 
 export default function ActivityCard({ card, index, hideBookingActions, onJobCreated }: ActivityCardProps) {
@@ -108,14 +98,16 @@ export default function ActivityCard({ card, index, hideBookingActions, onJobCre
       const agentModel = savedModel.model ? savedModel : undefined;
 
       const providerLabel = PROVIDER_LABEL[source.provider];
-      const datePart = activity.datetime_display
-        ?? activity.datetime_local?.slice(0, 10)
-        ?? (overrideDate ? formatOverrideDate(overrideDate) : "");
+      const datePart = formatActivityTaskDate({
+        datetimeLocal: activity.datetime_local,
+        datetimeDisplay: activity.datetime_display,
+        overrideDate,
+      });
       const task = [
         `Book tickets for "${activity.title}"${datePart ? ` on ${datePart}` : ""}.`,
         `You are starting on ${providerLabel} — find the "Find Tickets" / "Buy" button, select seats (prefer cheapest available unless a premium group was picked), and proceed to checkout.`,
-        "Fill in all guest information (first/last name, email, phone, address, zip) and card details.",
-        "Stop before entering CVV or clicking the final payment confirmation button.",
+        "Fill saved profile fields requested by the page, then continue to the final review area.",
+        "Leave the final site action for the user.",
       ].join(" ");
 
       // event_date defaults to the override (date picker) when the activity
