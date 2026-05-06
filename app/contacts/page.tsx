@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import dynamic from "next/dynamic";
 import Link from "next/link";
 import { useAuth } from "@/app/hooks/useAuth";
 import {
@@ -13,7 +14,15 @@ import {
   PAGE,
 } from "@/app/_ui/tokens";
 import GlobalNav from "@/components/GlobalNav";
-import ContactDmPane from "@/components/ContactDmPane";
+
+const ContactDmPane = dynamic(() => import("@/components/ContactDmPane"), {
+  ssr: false,
+  loading: () => (
+    <div className={`${CARD} flex-1 flex items-center justify-center`} style={{ minHeight: 320 }}>
+      <p className="text-sm text-[var(--text-muted)]">Loading conversation...</p>
+    </div>
+  ),
+});
 
 interface MyProfile {
   user_id: string;
@@ -61,10 +70,33 @@ interface BlockedUser {
   avatar_url: string | null;
 }
 
+interface ContactWorkspaceCounts {
+  contact_count: number;
+  incoming_request_count: number;
+  outgoing_request_count: number;
+  group_count: number;
+  blocked_count: number;
+}
+
+interface ContactsBootstrapResponse {
+  profile: MyProfile | null;
+  contacts: Contact[];
+  counts: ContactWorkspaceCounts;
+}
+
+const EMPTY_CONTACT_COUNTS: ContactWorkspaceCounts = {
+  contact_count: 0,
+  incoming_request_count: 0,
+  outgoing_request_count: 0,
+  group_count: 0,
+  blocked_count: 0,
+};
+
 export default function ContactsPage() {
   const { isSignedIn } = useAuth();
   const [myProfile, setMyProfile] = useState<MyProfile | null>(null);
   const [contacts, setContacts] = useState<Contact[] | null>(null);
+  const [counts, setCounts] = useState<ContactWorkspaceCounts>(EMPTY_CONTACT_COUNTS);
   // Telegram-style split: selecting a contact opens their DM thread in the
   // right pane. Click "Chat" on any contact to set this.
   const [selectedPeerId, setSelectedPeerId] = useState<string | null>(null);
@@ -112,45 +144,77 @@ export default function ContactsPage() {
   const [suggestionBusy, setSuggestionBusy] = useState<string | null>(null);
   const [dismissedIds, setDismissedIds] = useState<Set<string>>(new Set());
 
-  const loadAll = useCallback(async () => {
-    const [profRes, contactsRes, groupsRes, incRes, outRes, blkRes, sugRes] = await Promise.all([
-      fetch("/api/users/me"),
-      fetch("/api/contacts"),
-      fetch("/api/groups"),
-      fetch("/api/contacts/requests/incoming"),
-      fetch("/api/contacts/requests/outgoing"),
-      fetch("/api/contacts/blocks"),
-      fetch("/api/contacts/suggestions"),
-    ]);
-    if (profRes.ok) {
-      const data = await profRes.json() as { profile: MyProfile };
-      setMyProfile(data.profile);
+  const loadRequestLists = useCallback(async (nextCounts: ContactWorkspaceCounts) => {
+    const jobs: Array<Promise<void>> = [];
+    if (nextCounts.incoming_request_count > 0) {
+      jobs.push(
+        fetch("/api/contacts/requests/incoming")
+          .then(async (res) => {
+            if (!res.ok) return;
+            const data = (await res.json()) as { requests: ContactRequest[] };
+            setIncoming(data.requests);
+          })
+          .catch(() => {}),
+      );
+    } else {
+      setIncoming([]);
     }
-    if (contactsRes.ok) {
-      const data = await contactsRes.json() as { contacts: Contact[] };
-      setContacts(data.contacts);
+    if (nextCounts.outgoing_request_count > 0) {
+      jobs.push(
+        fetch("/api/contacts/requests/outgoing")
+          .then(async (res) => {
+            if (!res.ok) return;
+            const data = (await res.json()) as { requests: ContactRequest[] };
+            setOutgoing(data.requests);
+          })
+          .catch(() => {}),
+      );
+    } else {
+      setOutgoing([]);
     }
-    if (groupsRes.ok) {
-      const data = await groupsRes.json() as { groups: Group[] };
-      setGroups(data.groups);
-    }
-    if (incRes.ok) {
-      const data = await incRes.json() as { requests: ContactRequest[] };
-      setIncoming(data.requests);
-    }
-    if (outRes.ok) {
-      const data = await outRes.json() as { requests: ContactRequest[] };
-      setOutgoing(data.requests);
-    }
-    if (blkRes.ok) {
-      const data = await blkRes.json() as { blocks: BlockedUser[] };
-      setBlocks(data.blocks);
-    }
-    if (sugRes.ok) {
-      const data = await sugRes.json() as { suggestions: Suggestion[] };
-      setSuggestions(data.suggestions ?? []);
-    }
+    await Promise.all(jobs);
   }, []);
+
+  const loadGroups = useCallback(async () => {
+    const res = await fetch("/api/groups");
+    if (!res.ok) return;
+    const data = (await res.json()) as { groups: Group[] };
+    setGroups(data.groups);
+  }, []);
+
+  const loadBlocks = useCallback(async () => {
+    const res = await fetch("/api/contacts/blocks");
+    if (!res.ok) return;
+    const data = (await res.json()) as { blocks: BlockedUser[] };
+    setBlocks(data.blocks);
+  }, []);
+
+  const loadSuggestions = useCallback(async () => {
+    const res = await fetch("/api/contacts/suggestions");
+    if (!res.ok) return;
+    const data = (await res.json()) as { suggestions: Suggestion[] };
+    setSuggestions(data.suggestions ?? []);
+  }, []);
+
+  const loadAll = useCallback(async () => {
+    const res = await fetch("/api/contacts/bootstrap", { cache: "no-store" });
+    if (!res.ok) return;
+    const data = (await res.json()) as ContactsBootstrapResponse;
+    setMyProfile(data.profile);
+    setContacts(data.contacts ?? []);
+    const nextCounts = data.counts ?? EMPTY_CONTACT_COUNTS;
+    setCounts(nextCounts);
+    void loadRequestLists(nextCounts);
+
+    const win = window as typeof window & {
+      requestIdleCallback?: (callback: IdleRequestCallback, options?: IdleRequestOptions) => number;
+    };
+    if (win.requestIdleCallback) {
+      win.requestIdleCallback(() => void loadSuggestions(), { timeout: 2500 });
+    } else {
+      window.setTimeout(() => void loadSuggestions(), 800);
+    }
+  }, [loadRequestLists, loadSuggestions]);
 
   async function addSuggestion(s: Suggestion) {
     const handle = s.username ?? s.profile_code;
@@ -195,7 +259,7 @@ export default function ContactsPage() {
       });
       if (res.ok) {
         setNewGroupName("");
-        await loadAll();
+        await Promise.all([loadAll(), loadGroups()]);
       }
     } finally {
       setCreatingGroup(false);
@@ -208,14 +272,14 @@ export default function ContactsPage() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ name }),
     });
-    await loadAll();
+    await Promise.all([loadAll(), loadGroups()]);
   }
 
   async function deleteGroup(groupId: string) {
     if (!confirm("Delete this group? Contacts are not removed.")) return;
     await fetch(`/api/groups/${groupId}`, { method: "DELETE" });
     setExpandedGroupId((id) => (id === groupId ? null : id));
-    await loadAll();
+    await Promise.all([loadAll(), loadGroups()]);
   }
 
   async function addMembersToGroup(groupId: string) {
@@ -227,19 +291,29 @@ export default function ContactsPage() {
       body: JSON.stringify({ contact_user_ids: ids }),
     });
     setGroupPickerIds(new Set());
-    await Promise.all([loadGroupMembers(groupId), loadAll()]);
+    await Promise.all([loadGroupMembers(groupId), loadAll(), loadGroups()]);
   }
 
   async function removeMemberFromGroup(groupId: string, contactUserId: string) {
     await fetch(`/api/groups/${groupId}/members/${encodeURIComponent(contactUserId)}`, {
       method: "DELETE",
     });
-    await Promise.all([loadGroupMembers(groupId), loadAll()]);
+    await Promise.all([loadGroupMembers(groupId), loadAll(), loadGroups()]);
   }
 
   useEffect(() => {
     if (isSignedIn) loadAll();
   }, [isSignedIn, loadAll]);
+
+  useEffect(() => {
+    if (!isSignedIn || !groupsOpen || groups !== null) return;
+    void loadGroups();
+  }, [groups, groupsOpen, isSignedIn, loadGroups]);
+
+  useEffect(() => {
+    if (!isSignedIn || !blocksOpen || blocks !== null || counts.blocked_count === 0) return;
+    void loadBlocks();
+  }, [blocks, blocksOpen, counts.blocked_count, isSignedIn, loadBlocks]);
 
   async function copyMyCode() {
     if (!myProfile) return;
@@ -662,7 +736,7 @@ export default function ContactsPage() {
           >
             <div>
               <p className="text-sm font-semibold text-[var(--text-primary)]">
-                My groups {groups && `(${groups.length})`}
+                My groups ({groups ? groups.length : counts.group_count})
               </p>
               <p className="text-[11px] text-[var(--text-secondary)]">
                 Save a set of people you decide with — invite them with one tap.
@@ -692,6 +766,10 @@ export default function ContactsPage() {
                   {creatingGroup ? "…" : "Create"}
                 </button>
               </div>
+
+              {groupsOpen && groups === null && counts.group_count > 0 && (
+                <p className="text-xs text-[var(--text-muted)] py-2">Loading groups...</p>
+              )}
 
               {groups && groups.length === 0 && (
                 <p className="text-xs text-[var(--text-muted)] py-2">No groups yet.</p>
@@ -921,7 +999,7 @@ export default function ContactsPage() {
         )}
 
         {/* Blocked users — collapsible, at the very bottom */}
-        {blocks && blocks.length > 0 && (
+        {(blocks?.length ?? counts.blocked_count) > 0 && (
           <div className={`${CARD} mt-5 overflow-hidden`}>
             <button
               type="button"
@@ -930,7 +1008,7 @@ export default function ContactsPage() {
             >
               <div>
                 <p className="text-sm font-semibold text-[var(--text-primary)]">
-                  Blocked ({blocks.length})
+                Blocked ({blocks ? blocks.length : counts.blocked_count})
                 </p>
                 <p className="text-[11px] text-[var(--text-secondary)]">
                   Blocked users can&apos;t send you requests or see you in new rooms.
@@ -938,7 +1016,12 @@ export default function ContactsPage() {
               </div>
               <span className="text-[var(--text-muted)] text-xs">{blocksOpen ? "▲" : "▼"}</span>
             </button>
-            {blocksOpen && (
+            {blocksOpen && blocks === null && (
+              <div className="border-t border-[var(--border)] p-4">
+                <p className="text-xs text-[var(--text-muted)]">Loading blocked users...</p>
+              </div>
+            )}
+            {blocksOpen && blocks !== null && (
               <div className="border-t border-[var(--border)] p-4 flex flex-col gap-2">
                 {blocks.map((b) => {
                   const label = b.display_name ?? `@${b.profile_code ?? "user"}`;

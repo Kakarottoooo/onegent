@@ -1833,6 +1833,11 @@ export interface BookingJobListRow extends BookingJobSummary {
   scenario: string | null;
 }
 
+export type BookingJobCalendarRow = Pick<
+  BookingJob,
+  "id" | "session_id" | "user_id" | "trip_label" | "status" | "steps" | "created_at" | "updated_at"
+>;
+
 export async function createBookingJob(params: {
   id: string;
   sessionId: string;
@@ -1869,6 +1874,22 @@ export async function getBookingJobsBySession(sessionId: string, limit = 20): Pr
     WHERE session_id = ${sessionId}
     ORDER BY created_at DESC
     LIMIT ${limit}
+  `;
+  return result.rows;
+}
+
+export async function getBookingJobCalendarRowsBySession(
+  sessionId: string,
+  limit = 100,
+): Promise<BookingJobCalendarRow[]> {
+  await ensureBookingJobsTable();
+  const rowLimit = Math.max(1, Math.min(200, Math.floor(limit)));
+  const result = await sql<BookingJobCalendarRow>`
+    SELECT id, session_id, user_id, trip_label, status, steps, created_at, updated_at
+    FROM booking_jobs
+    WHERE session_id = ${sessionId}
+    ORDER BY created_at DESC
+    LIMIT ${rowLimit}
   `;
   return result.rows;
 }
@@ -1981,6 +2002,22 @@ export async function getBookingJobsByUser(userId: string, limit = 20): Promise<
     WHERE user_id = ${userId}
     ORDER BY created_at DESC
     LIMIT ${limit}
+  `;
+  return result.rows;
+}
+
+export async function getBookingJobCalendarRowsByUser(
+  userId: string,
+  limit = 100,
+): Promise<BookingJobCalendarRow[]> {
+  await ensureBookingJobsTable();
+  const rowLimit = Math.max(1, Math.min(200, Math.floor(limit)));
+  const result = await sql<BookingJobCalendarRow>`
+    SELECT id, session_id, user_id, trip_label, status, steps, created_at, updated_at
+    FROM booking_jobs
+    WHERE user_id = ${userId}
+    ORDER BY created_at DESC
+    LIMIT ${rowLimit}
   `;
   return result.rows;
 }
@@ -4156,6 +4193,21 @@ export type DecisionRoomSidebarRow = Pick<
   member_status: "joined" | "invited";
 };
 
+export type DecisionRoomListRow = Pick<
+  DecisionRoom,
+  | "id"
+  | "type"
+  | "title"
+  | "status"
+  | "creator_id"
+  | "flow"
+  | "short_code"
+  | "created_at"
+  | "updated_at"
+> & {
+  member_status: "joined" | "invited";
+};
+
 export async function listMyDecisionRooms(
   userId: string,
   opts: { archived?: boolean; includeInvited?: boolean } = {}
@@ -4198,6 +4250,83 @@ export async function listMyDecisionRooms(
       AND r.status NOT IN ('done', 'abandoned')
     ORDER BY r.updated_at DESC
     LIMIT 100
+  `;
+  return result.rows;
+}
+
+export async function listMyDecisionRoomListRows(
+  userId: string,
+  opts: { archived?: boolean; includeInvited?: boolean; limit?: number } = {},
+): Promise<DecisionRoomListRow[]> {
+  await ensureDecisionRoomTables();
+  const limit = Math.max(1, Math.min(100, Math.floor(opts.limit ?? 100)));
+  if (opts.archived) {
+    const result = await sql<DecisionRoomListRow>`
+      SELECT
+        r.id,
+        r.type,
+        r.title,
+        r.status,
+        r.creator_id,
+        r.flow,
+        r.short_code,
+        r.created_at,
+        r.updated_at,
+        m.status AS member_status
+      FROM decision_rooms r
+      JOIN decision_room_members m ON m.room_id = r.id
+      WHERE m.user_id = ${userId}
+        AND m.status = 'joined'
+        AND r.status IN ('done', 'abandoned')
+      ORDER BY r.updated_at DESC
+      LIMIT ${limit}
+    `;
+    return result.rows;
+  }
+
+  if (opts.includeInvited) {
+    const result = await sql<DecisionRoomListRow>`
+      SELECT
+        r.id,
+        r.type,
+        r.title,
+        r.status,
+        r.creator_id,
+        r.flow,
+        r.short_code,
+        r.created_at,
+        r.updated_at,
+        m.status AS member_status
+      FROM decision_rooms r
+      JOIN decision_room_members m ON m.room_id = r.id
+      WHERE m.user_id = ${userId}
+        AND m.status IN ('joined', 'invited')
+        AND r.status NOT IN ('done', 'abandoned')
+      ORDER BY (m.status = 'invited') DESC, r.updated_at DESC
+      LIMIT ${limit}
+    `;
+    return result.rows;
+  }
+
+  const result = await sql<DecisionRoomListRow>`
+    SELECT
+      r.id,
+      r.type,
+      r.title,
+      r.status,
+      r.creator_id,
+      r.flow,
+      r.short_code,
+      r.created_at,
+      r.updated_at,
+      m.status AS member_status
+    FROM decision_rooms r
+    JOIN decision_room_members m ON m.room_id = r.id
+    WHERE m.user_id = ${userId}
+      AND m.status = 'joined'
+      AND r.status NOT IN ('done', 'abandoned')
+    ORDER BY r.updated_at DESC
+    LIMIT ${limit}
   `;
   return result.rows;
 }
@@ -5274,6 +5403,67 @@ export async function listContactsWithProfiles(ownerId: string): Promise<Contact
 //   - If the target declined me within the last 7 days, I'm on cooldown.
 //   - An existing pending request in either direction blocks new ones.
 // ═══════════════════════════════════════════════════════════════════════════
+
+export interface ContactWorkspaceCounts {
+  contact_count: number;
+  incoming_request_count: number;
+  outgoing_request_count: number;
+  group_count: number;
+  blocked_count: number;
+}
+
+function firstCount(rows: Array<{ count: number | string | null | undefined }>): number {
+  const value = Number(rows[0]?.count ?? 0);
+  return Number.isFinite(value) ? value : 0;
+}
+
+export async function getContactWorkspaceCounts(ownerId: string): Promise<ContactWorkspaceCounts> {
+  await Promise.all([
+    ensureUserContactsTable(),
+    ensureContactRequestsTable(),
+    ensureUserGroupsTable(),
+    ensureContactBlocksTable(),
+  ]);
+  await backfillBidirectionalContactsOnce();
+
+  const [contacts, incoming, outgoing, groups, blocks] = await Promise.all([
+    sql<{ count: number }>`
+      SELECT COUNT(*)::int AS count
+      FROM user_contacts
+      WHERE owner_id = ${ownerId}
+    `,
+    sql<{ count: number }>`
+      SELECT COUNT(*)::int AS count
+      FROM contact_requests
+      WHERE to_user_id = ${ownerId}
+        AND status = 'pending'
+    `,
+    sql<{ count: number }>`
+      SELECT COUNT(*)::int AS count
+      FROM contact_requests
+      WHERE from_user_id = ${ownerId}
+        AND status = 'pending'
+    `,
+    sql<{ count: number }>`
+      SELECT COUNT(*)::int AS count
+      FROM user_groups
+      WHERE owner_id = ${ownerId}
+    `,
+    sql<{ count: number }>`
+      SELECT COUNT(*)::int AS count
+      FROM contact_blocks
+      WHERE blocker_id = ${ownerId}
+    `,
+  ]);
+
+  return {
+    contact_count: firstCount(contacts.rows),
+    incoming_request_count: firstCount(incoming.rows),
+    outgoing_request_count: firstCount(outgoing.rows),
+    group_count: firstCount(groups.rows),
+    blocked_count: firstCount(blocks.rows),
+  };
+}
 
 export type ContactRequestStatus = "pending" | "accepted" | "declined" | "cancelled";
 

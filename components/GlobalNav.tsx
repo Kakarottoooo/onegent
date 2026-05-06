@@ -5,11 +5,12 @@
  */
 
 import { useState, useEffect, type CSSProperties } from "react";
+import dynamic from "next/dynamic";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useLanguage, LANGUAGES } from "@/app/hooks/useLanguage";
 import { useAuth } from "@/app/hooks/useAuth";
-import NotificationBell from "./NotificationBell";
+import { fetchAppBootstrapCached } from "@/components/app-bootstrap-client";
 
 type Page = "home" | "tasks" | "insights" | "metrics" | "rooms" | "calendar" | "contacts" | "other";
 
@@ -26,45 +27,31 @@ type AccountProfile = {
 };
 
 const CORE_NAV_PREFETCH_PATHS = ["/tasks", "/calendar", "/rooms", "/contacts", "/insights", "/pricing"];
-const ACTION_COUNT_CACHE_MS = 10000;
 const ACCOUNT_PROFILE_CACHE_MS = 60000;
 
-const actionCountCache = new Map<string, { count: number; expiresAt: number }>();
-const actionCountInflight = new Map<string, Promise<number>>();
 let accountProfileCache: { key: string; profile: AccountProfile | null; expiresAt: number } | null = null;
 const accountProfileInflight = new Map<string, Promise<AccountProfile | null>>();
+
+const NotificationBell = dynamic(() => import("./NotificationBell"), {
+  ssr: false,
+  loading: () => (
+    <span
+      aria-hidden="true"
+      style={{
+        width: 32,
+        height: 32,
+        borderRadius: "50%",
+        border: "1px solid var(--border, #e5e7eb)",
+        background: "var(--card, #fff)",
+        display: "inline-block",
+      }}
+    />
+  ),
+});
 
 function getSessionId() {
   if (typeof window === "undefined") return "";
   return localStorage.getItem("session_id") ?? "";
-}
-
-async function fetchActionCountCached(sessionId: string): Promise<number> {
-  const now = Date.now();
-  const cached = actionCountCache.get(sessionId);
-  if (cached && cached.expiresAt > now) return cached.count;
-
-  const existing = actionCountInflight.get(sessionId);
-  if (existing) return existing;
-
-  const request = fetch(`/api/booking-jobs/summary?session_id=${encodeURIComponent(sessionId)}`)
-    .then(async (r) => {
-      if (!r.ok) return 0;
-      const d = (await r.json()) as { summary?: { action_count?: number } };
-      const count = d.summary?.action_count ?? 0;
-      actionCountCache.set(sessionId, {
-        count,
-        expiresAt: Date.now() + ACTION_COUNT_CACHE_MS,
-      });
-      return count;
-    })
-    .catch(() => 0)
-    .finally(() => {
-      actionCountInflight.delete(sessionId);
-    });
-
-  actionCountInflight.set(sessionId, request);
-  return request;
 }
 
 async function fetchAccountProfileCached(
@@ -133,11 +120,13 @@ export default function GlobalNav({ active }: Props) {
 
   useEffect(() => {
     const sid = getSessionId();
-    if (!sid) return;
 
     let cancelled = false;
-    void fetchActionCountCached(sid).then((count) => {
-      if (!cancelled) setActionCount(count);
+    void fetchAppBootstrapCached(sid || null).then((data) => {
+      if (!cancelled) {
+        setActionCount(data.booking_jobs_summary.action_count ?? 0);
+        if (data.account_profile) setAccountProfile(data.account_profile);
+      }
     });
     return () => {
       cancelled = true;
@@ -158,8 +147,6 @@ export default function GlobalNav({ active }: Props) {
         setAccountProfile(profile);
       }
     }
-
-    void loadAccountProfile();
 
     const refresh = () => {
       void loadAccountProfile(true);

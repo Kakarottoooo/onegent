@@ -9,7 +9,6 @@ import HotelCard from "@/components/HotelCard";
 import FlightCard from "@/components/FlightCard";
 import InlineBookingProfileGate from "@/components/booking/InlineBookingProfileGate";
 import InlineJobCard, { type TravelDocRequest } from "@/components/booking/InlineJobCard";
-import { TaskTimelinePanel } from "@/components/task-timeline";
 import { ProfileGapCard } from "@/components/profile-gap";
 import type { GapSavePayload } from "@/components/profile-gap/types";
 import {
@@ -99,6 +98,14 @@ type InlineBookingProfileState = {
 
 // Leaflet is not SSR-compatible
 const MapView = dynamic(() => import("@/components/MapView"), { ssr: false });
+const TaskTimelinePanel = dynamic(() => import("@/components/task-timeline/TaskTimelinePanel"), {
+  ssr: false,
+  loading: () => (
+    <div style={{ padding: 16, color: "#f8fafc", fontSize: 13 }}>
+      Loading task timeline...
+    </div>
+  ),
+});
 
 const DEFAULT_EXAMPLES = [
   "Romantic dinner for two, ~$80/person, quiet, no chains, Manhattan",

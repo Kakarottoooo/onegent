@@ -54,12 +54,20 @@ async function main() {
   const baseUrl = normalizeBaseUrl(arg("base-url") ?? "http://127.0.0.1:3000");
   const sessionId = arg("session-id") ?? "local-measurement-session";
   const jobId = arg("job-id");
+  const now = new Date();
+  const year = Number(arg("year") ?? String(now.getFullYear()));
+  const month = Number(arg("month") ?? String(now.getMonth()));
   const encodedSession = encodeURIComponent(sessionId);
 
   const probes: Probe[] = [
     { label: "app bootstrap", path: `/api/app/bootstrap?session_id=${encodedSession}` },
     { label: "task summary", path: `/api/booking-jobs/summary?session_id=${encodedSession}` },
     { label: "compact task list", path: `/api/booking-jobs/compact-list?session_id=${encodedSession}&include_share=1` },
+    { label: "compact room list", path: "/api/rooms/compact-list?include_invited=1" },
+    { label: "contacts bootstrap", path: "/api/contacts/bootstrap" },
+    { label: "calendar jobs", path: `/api/calendar/jobs?session_id=${encodedSession}` },
+    { label: "calendar google status", path: "/api/calendar/google/status" },
+    { label: "calendar google month", path: `/api/calendar/google/month?year=${year}&month=${month}` },
   ];
 
   if (jobId) {

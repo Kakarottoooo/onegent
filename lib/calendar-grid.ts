@@ -9,8 +9,14 @@
  * oriented) so the calendar-specific concepts (month padding, weekday
  * columns, continuation stubs) don't leak into the other view.
  */
-import type { BookingJob } from "./db";
+import type { BookingJobStep } from "./db";
 import { extractStepEvents, type ItineraryEvent } from "./itinerary";
+
+export interface CalendarGridJob {
+  id: string;
+  trip_label: string;
+  steps: BookingJobStep[];
+}
 
 /** Single-day event that lives inside one day cell (flight, restaurant, activity). */
 export interface CalendarEvent {
@@ -82,7 +88,7 @@ export interface CalendarGrid {
  * row has exactly 7 cells.
  */
 export function buildCalendarGrid(
-  jobs: BookingJob[],
+  jobs: CalendarGridJob[],
   year: number,
   month: number,
   today: Date = new Date(),
@@ -159,7 +165,7 @@ interface AggregatedEvent {
   tripLabel: string;
 }
 
-function aggregateEvents(jobs: BookingJob[]): AggregatedEvent[] {
+function aggregateEvents(jobs: CalendarGridJob[]): AggregatedEvent[] {
   const out: AggregatedEvent[] = [];
   for (const job of jobs) {
     job.steps.forEach((step, i) => {

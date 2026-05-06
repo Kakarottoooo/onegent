@@ -2,6 +2,7 @@
 
 import { Suspense, useState, useEffect, useCallback, useRef } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
+import dynamic from "next/dynamic";
 import type { BookingJob, BookingJobStep, DecisionLogEntry, AgentFeedbackStats } from "@/lib/db";
 import type { BookingJobListItem, BookingJobsSummary } from "@/lib/booking-jobs/read-model";
 import {
@@ -21,7 +22,6 @@ import {
 import GlobalNav from "@/components/GlobalNav";
 import TripItineraryCalendar from "@/components/TripItineraryCalendar";
 import RestaurantStepCard from "@/components/booking/RestaurantStepCard";
-import { TaskTimelinePanel } from "@/components/task-timeline";
 import ShareTripModal from "@/components/ShareTripModal";
 import AddToTripModal from "@/components/AddToTripModal";
 import { ModifyTaskButton } from "@/components/ModifyTaskButton";
@@ -35,6 +35,14 @@ import {
 } from "./task-data-client";
 import "./tasks.css";
 
+const TaskTimelinePanel = dynamic(() => import("@/components/task-timeline/TaskTimelinePanel"), {
+  ssr: false,
+  loading: () => (
+    <div style={{ padding: 16, color: "#f8fafc", fontSize: 13 }}>
+      Loading task timeline...
+    </div>
+  ),
+});
 
 function getSessionId(): string {
   if (typeof window === "undefined") return "";
