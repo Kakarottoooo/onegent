@@ -2,6 +2,7 @@ import {
   evaluateInternalBenchmarkGate,
   renderInternalBenchmarkMarkdown,
   runInternalNoLiveBenchmark,
+  type InternalBenchmarkReport,
   type InternalBenchmarkVerticalArg,
 } from "@/lib/internal-benchmark";
 
@@ -35,13 +36,13 @@ function readCountArg(name: string): number | undefined {
 }
 
 const vertical = readArg("--vertical", "all") as InternalBenchmarkVerticalArg;
-if (!["all", "restaurant", "hotel", "flight", "activity"].includes(vertical)) {
+if (!["all", "restaurant", "hotel", "flight", "activity", "trip"].includes(vertical)) {
   throw new Error(`Unsupported --vertical ${vertical}`);
 }
 
 const mode = readArg("--mode", "no-live");
 if (mode !== "no-live") {
-  throw new Error("Only --mode no-live is supported.");
+  throw new Error("Only --mode no-live is implemented. small-live/live are documented future modes only.");
 }
 
 const count = Number(readArg("--count", "10"));
@@ -51,26 +52,42 @@ const report = runInternalNoLiveBenchmark({
   mode: "no-live",
 });
 
-if (hasFlag("--json")) {
-  console.log(JSON.stringify(report, null, 2));
-} else {
-  console.log(renderInternalBenchmarkMarkdown(report));
-}
+let gate:
+  | ReturnType<typeof evaluateInternalBenchmarkGate>
+  | null = null;
 
 if (hasFlag("--gate")) {
-  const gate = evaluateInternalBenchmarkGate(report, {
+  gate = evaluateInternalBenchmarkGate(report, {
     minSuccessRate: readRateArg("--min-success-rate"),
     minArtifactCompletenessRate: readRateArg("--min-artifact-completeness"),
     maxFailureCounts: {
       routing_mismatch: readCountArg("--max-routing-mismatch"),
       unsafe_boundary: readCountArg("--max-unsafe-boundary"),
       artifact_incomplete: readCountArg("--max-artifact-incomplete"),
-      provider_simulated_block: readCountArg("--max-provider-simulated-block"),
+      simulated_provider_block: readCountArg("--max-provider-simulated-block"),
     },
   });
+}
 
-  if (!gate.pass) {
-    console.error(`Internal benchmark gate failed:\n- ${gate.errors.join("\n- ")}`);
-    process.exitCode = 1;
+if (hasFlag("--json")) {
+  console.log(JSON.stringify(withGate(report, gate), null, 2));
+} else {
+  console.log(renderInternalBenchmarkMarkdown(report));
+  if (gate) {
+    console.log("");
+    console.log("## Gate");
+    console.log(gate.pass ? "PASS" : `FAIL\n- ${gate.errors.join("\n- ")}`);
   }
+}
+
+if (gate && !gate.pass) {
+  console.error(`Internal benchmark gate failed:\n- ${gate.errors.join("\n- ")}`);
+  process.exitCode = 1;
+}
+
+function withGate(
+  report: InternalBenchmarkReport,
+  gateResult: ReturnType<typeof evaluateInternalBenchmarkGate> | null,
+): InternalBenchmarkReport | (InternalBenchmarkReport & { gate: NonNullable<typeof gateResult> }) {
+  return gateResult ? { ...report, gate: gateResult } : report;
 }

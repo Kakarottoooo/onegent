@@ -206,6 +206,24 @@ Calendar-specific runtime rules:
 5. Existing cached Google busy/event rows may overlay the grid after the shell
    is visible.
 
+NLU and internal-benchmark rules:
+
+1. `lib/agent/nlu-v2/routing-matrix.ts` is a no-live router/normalizer
+   regression matrix. It starts from prebuilt `IntentState` objects and proves
+   deterministic routing, constraint preservation, and confirm-card selection.
+   It does not prove live model extraction.
+2. `scripts/eval-nlu-routing.ts` is the local smoke command for routing
+   fixtures. Add every founder dogfood routing failure there before changing
+   planner behavior.
+3. `scripts/internal-benchmark.ts --mode no-live` is the only implemented
+   internal benchmark mode. `small-live` and `live` remain future modes that
+   require separate human approval and provider evidence.
+4. Internal benchmark failures should name one owner: `nlu`, `planner`,
+   `task-workspace`, `provider-runtime`, or `product/manual-boundary`.
+5. Benchmark success is not provider closure. A vertical is provider-proven
+   only when runtime evidence, DB fields, logs, screenshots, and safe terminal
+   status are captured by the provider-closure process.
+
 ## Strengths
 
 - The product has a clear execution loop from chat to task to review.
