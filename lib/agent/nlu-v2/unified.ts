@@ -109,8 +109,16 @@ export async function unifiedTurn(input: UnifiedTurnInput): Promise<UnifiedTurnO
   const partyFilled = fillCreateRoomPartySize(scrubbed);
   const upgraded = upgradeMultiPartyToRoom(partyFilled);
   const finalState = downgradeSpuriousRefine(upgraded, input.history ?? []);
+  const activityNormalized = normalizeSingleActivityTicketRequest(
+    finalState,
+    input.new_user_message,
+    reply,
+  );
 
-  return { state: finalState, reply: reply.trim() };
+  return {
+    state: activityNormalized.state,
+    reply: activityNormalized.reply,
+  };
 }
 
 // ─── Prompt construction ─────────────────────────────────────────────────
@@ -323,4 +331,130 @@ function parseUnifiedRaw(raw: string): UnifiedRaw {
   }
 
   return { stateRaw, reply };
+}
+
+interface ActivityNormalizationResult {
+  state: IntentState;
+  reply: string;
+}
+
+/**
+ * Keep one-show ticket requests on the activity path when the model sees
+ * city + date + attraction and over-generalizes into trip planning.
+ * Explicit trip/itinerary phrasing still stays on the trip planner path.
+ */
+export function normalizeSingleActivityTicketRequest(
+  state: IntentState,
+  message: string,
+  reply: string,
+): ActivityNormalizationResult {
+  if (state.scenario !== "trip") {
+    return { state, reply: reply.trim() };
+  }
+
+  if (!looksLikeSingleActivityTicketRequest(message)) {
+    return { state, reply: reply.trim() };
+  }
+
+  const eventName =
+    state.activity?.event_name ??
+    firstString(state.trip?.activities) ??
+    inferActivityEventName(message);
+  const city =
+    state.activity?.city ??
+    state.trip?.destination_city ??
+    inferActivityCity(message);
+  const eventDate =
+    state.activity?.event_date ??
+    state.trip?.start_date;
+
+  if (!eventName || !city || !eventDate) {
+    return { state, reply: reply.trim() };
+  }
+
+  const normalized: IntentState = {
+    ...state,
+    scenario: "activity",
+    categories: ["activity"],
+    activity: {
+      ...state.activity,
+      event_name: eventName,
+      event_type: state.activity?.event_type ?? inferActivityEventType(message),
+      city,
+      event_date: eventDate,
+      num_tickets: state.activity?.num_tickets ?? state.trip?.travelers,
+    },
+    trip: undefined,
+    planning_assumptions: [
+      ...(state.planning_assumptions ?? []).filter(
+        (entry) => !entry.startsWith("single_activity_ticket:"),
+      ),
+      "single_activity_ticket:normalized_from_trip",
+    ],
+  };
+
+  return {
+    state: normalized,
+    reply: buildActivityReadyReply(message, normalized),
+  };
+}
+
+function looksLikeSingleActivityTicketRequest(message: string): boolean {
+  const hasActivityCue =
+    /\b(broadway|the lion king|lion king|hamilton|musical|theater|theatre|show|event|tickets?)\b/i.test(message) ||
+    /(?:\u767e\u8001\u6c47|\u72ee\u5b50\u738b|\u6f14\u51fa|\u97f3\u4e50\u5267|\u8bdd\u5267|\u5267\u9662|\u7968)/u.test(message);
+
+  if (!hasActivityCue) return false;
+
+  const explicitTripCue =
+    /\b(plan|itinerary|trip|vacation|hotel|flight|restaurant)\b/i.test(message) ||
+    /(?:\u884c\u7a0b|\u65c5\u884c|\u9152\u5e97|\u673a\u7968|\u9910\u5385)/u.test(message);
+
+  return !explicitTripCue;
+}
+
+function inferActivityEventName(message: string): string | undefined {
+  if (/the\s+lion\s+king|lion\s+king/i.test(message) || /\u72ee\u5b50\u738b/u.test(message)) {
+    return "The Lion King";
+  }
+  if (/\bhamilton\b/i.test(message)) {
+    return "Hamilton";
+  }
+  return undefined;
+}
+
+function inferActivityCity(message: string): string | undefined {
+  if (/\b(nyc|new york)\b/i.test(message) || /\u7ebd\u7ea6/u.test(message)) {
+    return "New York";
+  }
+  return undefined;
+}
+
+function inferActivityEventType(
+  message: string,
+): NonNullable<IntentState["activity"]>["event_type"] {
+  if (
+    /\b(broadway|musical|theater|theatre|hamilton|the lion king|lion king)\b/i.test(message) ||
+    /(?:\u767e\u8001\u6c47|\u72ee\u5b50\u738b|\u97f3\u4e50\u5267|\u8bdd\u5267)/u.test(message)
+  ) {
+    return "theater";
+  }
+  return "other";
+}
+
+function firstString(values: unknown): string | undefined {
+  return Array.isArray(values)
+    ? values.find((value): value is string => typeof value === "string" && value.trim().length > 0)
+    : undefined;
+}
+
+function buildActivityReadyReply(message: string, state: IntentState): string {
+  const a = state.activity;
+  if (!a?.event_name || !a.city || !a.event_date) return "";
+
+  const isChinese = /[\u4e00-\u9fff]/u.test(message);
+  if (isChinese) {
+    return `明白，${a.city} ${a.event_date} 的《${a.event_name}》演出。确认一下就开始查票。`;
+  }
+  return `Got it: ${a.event_name} in ${a.city} on ${a.event_date}. Confirm to start the ticket search.`;
 }

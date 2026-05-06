@@ -95,6 +95,13 @@ The shared coordination home is `docs/10-coordination/`.
   `docs/40-phase1/DEMO_CONTROL_ROOM.md`,
   `docs/40-phase1/YC_DEMO_RUNBOOK.md`,
   `docs/40-phase1/DEMO_FREEZE_ACCEPTANCE.md`
+- Need to triage founder dogfood bugs:
+  `docs/40-dogfood/BUG_INBOX.md`
+- Need to expand no-live NLU / benchmark coverage:
+  `scripts/eval-nlu-routing.ts`,
+  `scripts/eval-live-extractor.ts --vertical all --count 120 --gate`,
+  `scripts/internal-benchmark.ts --vertical all --mode no-live`, and
+  `docs/40-dogfood/BUG_INBOX.md` fixture/case mappings.
 - Need to plan a Phase 2 controlled retry:
   `docs/50-product-areas/EXPEDIA_CONTROLLED_RETRY_RUNBOOK.md`,
   `docs/50-product-areas/HOTEL_VERTICAL_REVIVAL_AUDIT.md`,

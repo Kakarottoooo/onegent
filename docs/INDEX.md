@@ -64,6 +64,7 @@ Then read the task-specific section below.
 | Codex / Claude / Track C handoff | `docs/10-coordination/README.md`, then `docs/10-coordination/*.md` |
 | Restaurant Phase 0 / Resy / OpenTable | `docs/20-phase0-restaurant/` |
 | Provider runtime bug, logs, screenshots | `docs/30-provider-debug/PROVIDER_RUNTIME_DEBUG_PLAYBOOK.md`, `docs/30-provider-debug/LIVE_CLOSURE_EVIDENCE_PROTOCOL.md` |
+| Runtime mirror / codebase diet | `docs/30-provider-debug/RUNTIME_MIRROR_GUIDE.md` |
 | Operator failure taxonomy (model/env vs provider) | `docs/30-provider-debug/FAILURE_TAXONOMY.md` |
 | Provider closure operator cockpit (3-vertical workflow) | `docs/30-provider-debug/PROVIDER_CLOSURE_OPERATOR_ROOM.md` |
 | Provider closure acceptance criteria (pass / fail / inconclusive) | `docs/30-provider-debug/PROVIDER_CLOSURE_ACCEPTANCE.md` |
@@ -73,6 +74,7 @@ Then read the task-specific section below.
 | Phase 2 Expedia controlled retry | `docs/50-product-areas/EXPEDIA_CONTROLLED_RETRY_RUNBOOK.md`, `docs/50-product-areas/PHASE2_VERTICAL_REVIVAL_AUDIT.md`, `docs/10-coordination/phase2.md` |
 | Phase 2 hotel revival audit | `docs/50-product-areas/HOTEL_VERTICAL_REVIVAL_AUDIT.md`, `docs/50-product-areas/HOTEL_CONTROLLED_RETRY_RUNBOOK.md` |
 | NLU, decision room, trip packaging, social feed | `docs/50-product-areas/` |
+| Founder dogfood bug inbox | `docs/40-dogfood/BUG_INBOX.md` |
 | API, OAuth, ChatGPT apps, Claude MCP | `docs/60-api-integrations/` |
 | Old plans, audits, full historical summaries | `docs/90-archive/` |
 
@@ -180,6 +182,7 @@ release entrypoints (`AGENTS.md`, `CLAUDE.md`, `README.md`, `CHANGELOG.md`).
 | Restaurant handoff | `docs/20-phase0-restaurant/RESTAURANT_PHASE0_HANDOFF.md` |
 | R-003 live runbook | `docs/20-phase0-restaurant/R003_LIVE_SMOKE_RUNBOOK.md` |
 | Provider runtime debug | `docs/30-provider-debug/PROVIDER_RUNTIME_DEBUG_PLAYBOOK.md` |
+| Runtime mirror guide | `docs/30-provider-debug/RUNTIME_MIRROR_GUIDE.md` |
 | Live closure evidence protocol | `docs/30-provider-debug/LIVE_CLOSURE_EVIDENCE_PROTOCOL.md` |
 | Operator failure taxonomy | `docs/30-provider-debug/FAILURE_TAXONOMY.md` |
 | Provider closure operator room | `docs/30-provider-debug/PROVIDER_CLOSURE_OPERATOR_ROOM.md` |
@@ -190,6 +193,7 @@ release entrypoints (`AGENTS.md`, `CLAUDE.md`, `README.md`, `CHANGELOG.md`).
 | Demo control room runbook | `docs/40-phase1/DEMO_CONTROL_ROOM.md` |
 | YC demo runbook | `docs/40-phase1/YC_DEMO_RUNBOOK.md` |
 | Demo freeze acceptance | `docs/40-phase1/DEMO_FREEZE_ACCEPTANCE.md` |
+| Founder dogfood bug inbox | `docs/40-dogfood/BUG_INBOX.md` |
 | Phase 2 revival audit | `docs/50-product-areas/PHASE2_VERTICAL_REVIVAL_AUDIT.md` |
 | Hotel vertical revival audit | `docs/50-product-areas/HOTEL_VERTICAL_REVIVAL_AUDIT.md` |
 | Expedia controlled retry runbook | `docs/50-product-areas/EXPEDIA_CONTROLLED_RETRY_RUNBOOK.md` |
