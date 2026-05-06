@@ -3,7 +3,8 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useAuth } from "@/app/hooks/useAuth";
-import type { DecisionRoom, DecisionRoomWithMembership } from "@/lib/db";
+import type { DecisionRoom } from "@/lib/db";
+import type { DecisionRoomListItem } from "@/lib/app-shell-read-model";
 import { CARD, CTA, PAGE } from "@/app/_ui/tokens";
 import GlobalNav from "@/components/GlobalNav";
 
@@ -26,7 +27,7 @@ const TYPE_LABEL: Record<DecisionRoom["type"], string> = {
 
 type Tab = "active" | "history";
 type RoomContextMenuState = {
-  room: DecisionRoom;
+  room: DecisionRoomListItem;
   x: number;
   y: number;
 } | null;
@@ -62,7 +63,7 @@ function TabSwitch({
 export default function RoomsListPage() {
   const { isSignedIn, userId } = useAuth();
   const [tab, setTab] = useState<Tab>("active");
-  const [rooms, setRooms] = useState<DecisionRoomWithMembership[] | null>(null);
+  const [rooms, setRooms] = useState<DecisionRoomListItem[] | null>(null);
   const [acceptBusyId, setAcceptBusyId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [reloadTick, setReloadTick] = useState(0);
@@ -90,10 +91,13 @@ export default function RoomsListPage() {
       try {
         // Stage 2: include_invited=1 surfaces pending trip-room invites so
         // the invitee sees them on the active tab. Archive view ignores it.
-        const url = tab === "history" ? "/api/rooms?archived=1" : "/api/rooms?include_invited=1";
+        const url =
+          tab === "history"
+            ? "/api/rooms/compact-list?archived=1"
+            : "/api/rooms/compact-list?include_invited=1";
         const res = await fetch(url);
         if (!res.ok) throw new Error();
-        const data = (await res.json()) as { rooms: DecisionRoomWithMembership[] };
+        const data = (await res.json()) as { rooms: DecisionRoomListItem[] };
         if (!cancelled) setRooms(data.rooms);
       } catch {
         if (!cancelled) setError("We couldn't load your rooms. Please refresh.");
@@ -124,7 +128,7 @@ export default function RoomsListPage() {
     };
   }, [menu]);
 
-  async function acceptInvite(room: DecisionRoomWithMembership) {
+  async function acceptInvite(room: DecisionRoomListItem) {
     setError(null);
     setAcceptBusyId(room.id);
     try {
@@ -146,7 +150,7 @@ export default function RoomsListPage() {
     }
   }
 
-  async function runRoomAction(room: DecisionRoom, action: "archive" | "delete") {
+  async function runRoomAction(room: DecisionRoomListItem, action: "archive" | "delete") {
     setMenu(null);
     setError(null);
     setActionBusyId(room.id);

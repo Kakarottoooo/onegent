@@ -1,9 +1,11 @@
 import {
   listMyChatSessionRows,
   listMyDecisionRoomSidebarRows,
+  getUserProfile,
   type BookingJobSummary,
   type ChatSession,
   type DecisionRoomSidebarRow,
+  type UserProfile,
 } from "@/lib/db";
 import {
   getVisibleBookingJobSummaries,
@@ -19,11 +21,17 @@ export type AppBootstrapRecentJob = Pick<
   "id" | "trip_label" | "status" | "created_at" | "updated_at"
 >;
 
+export type AppBootstrapAccountProfile = Pick<
+  UserProfile,
+  "user_id" | "profile_code" | "username" | "display_name" | "avatar_url"
+> | null;
+
 export type AppBootstrapData = {
   sidebar: {
     rooms: AppBootstrapSidebarRoom[];
     sessions: AppBootstrapSidebarSession[];
   };
+  account_profile: AppBootstrapAccountProfile;
   recent_jobs: AppBootstrapRecentJob[];
   booking_jobs_summary: BookingJobsSummary;
   generated_at: string;
@@ -35,6 +43,7 @@ export function emptyAppBootstrapData(): AppBootstrapData {
       rooms: [],
       sessions: [],
     },
+    account_profile: null,
     recent_jobs: [],
     booking_jobs_summary: summarizeBookingJobs([]),
     generated_at: new Date().toISOString(),
@@ -81,10 +90,15 @@ export async function getAppBootstrapData(params: {
       )
     : Promise.resolve([] as BookingJobSummary[]);
 
-  const [rooms, sessions, bookingJobs] = await Promise.all([
+  const accountProfilePromise = userId
+    ? bestEffort("account profile", getUserProfile(userId), null as UserProfile | null)
+    : Promise.resolve(null as UserProfile | null);
+
+  const [rooms, sessions, bookingJobs, accountProfile] = await Promise.all([
     roomsPromise,
     sessionsPromise,
     bookingJobsPromise,
+    accountProfilePromise,
   ]);
 
   return {
@@ -92,6 +106,15 @@ export async function getAppBootstrapData(params: {
       rooms,
       sessions,
     },
+    account_profile: accountProfile
+      ? {
+          user_id: accountProfile.user_id,
+          profile_code: accountProfile.profile_code,
+          username: accountProfile.username,
+          display_name: accountProfile.display_name,
+          avatar_url: accountProfile.avatar_url,
+        }
+      : null,
     recent_jobs: bookingJobs.slice(0, 3).map((job) => ({
       id: job.id,
       trip_label: job.trip_label,

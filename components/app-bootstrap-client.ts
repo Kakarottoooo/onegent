@@ -9,6 +9,7 @@ const EMPTY_BOOTSTRAP: AppBootstrapData = {
     rooms: [],
     sessions: [],
   },
+  account_profile: null,
   recent_jobs: [],
   booking_jobs_summary: {
     total: 0,

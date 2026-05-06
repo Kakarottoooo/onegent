@@ -92,6 +92,25 @@ This keeps route navigation from waiting on large `booking_jobs.steps` JSON,
 decision logs, agent logs, or screenshot streams for tasks the user has not
 opened.
 
+The app shell and adjacent workspaces now use the same compact-first rule:
+
+- `/api/app/bootstrap` is the shared shell payload for Sidebar and GlobalNav.
+  It carries compact room/session rows, account display metadata, recent job
+  counters, and excludes room context, chat messages, provider logs, and task
+  detail artifacts.
+- `/api/rooms/compact-list` powers the Rooms list from id/title/type/status,
+  short code, membership status, and routing metadata. Full room context,
+  synthesis JSON, proposals, votes, and messages stay behind room detail APIs.
+- `/api/contacts/bootstrap` powers the first Contacts paint from profile,
+  contact rows, and counts. Groups, blocked users, suggestions, and DM threads
+  load only when their section or contact pane is opened.
+- `/api/calendar/jobs` returns calendar-specific task rows with minimized
+  steps for event placement. It excludes autonomy settings, policies,
+  decision logs, runtime errors, screenshots, and logs.
+- `/api/calendar/google/status` is the compact Google connection check.
+  `/api/calendar/google/month` reads cached local Google event rows, and
+  `force=1` is reserved for the explicit "Sync now" action.
+
 ### Data Layer
 
 Postgres/Neon is the source of truth for durable product state:
@@ -152,6 +171,9 @@ Current performance principles:
    screenshot.
 5. Keep provider execution out of render paths. Browser/worker work should not
    block route navigation.
+6. Keep common client bundles lean. Task timelines, notification inbox lists,
+   contact DM panes, and screenshot streams are lazy surfaces, not app-shell
+   imports.
 
 Tasks-specific runtime rules:
 
@@ -164,7 +186,18 @@ Tasks-specific runtime rules:
    stops when the timeline reports a closed run.
 5. Future performance checks can use
    `npx tsx scripts/measure-app-performance.ts --base-url http://127.0.0.1:3000 --session-id <sid> [--job-id <id>]`
-   to record endpoint latency and response bytes.
+  to record endpoint latency and response bytes.
+
+Calendar-specific runtime rules:
+
+1. `/calendar` renders its month shell immediately from an empty/local grid.
+2. Local task calendar events load from `/api/calendar/jobs`, not the full
+   booking-job list endpoint.
+3. Google connection status loads separately from month data.
+4. Google network sync is explicit via "Sync now"; page entry does not force
+   a Google API refresh.
+5. Existing cached Google busy/event rows may overlay the grid after the shell
+   is visible.
 
 ## Strengths
 
@@ -181,8 +214,9 @@ Tasks-specific runtime rules:
 
 - `app/page.tsx` is still a large client component. It increases compile cost,
   bundle size, and route transition latency.
-- Some routes still return heavy rows by default. More `summary/list/detail`
-  split work is needed outside the Tasks workspace.
+- Some detail routes still return heavy rows by default. The list surfaces for
+  Tasks, Rooms, Contacts, and Calendar now have compact entry paths, but deeper
+  detail panels can still be split further.
 - Local development can become slow when multiple Next dev servers, workers,
   and browser executors are left running.
 - Provider sites are brittle. Runtime code must be evidence-driven and
@@ -192,8 +226,8 @@ Tasks-specific runtime rules:
 
 ## Near-Term Architecture Priorities
 
-1. Continue migrating non-Tasks surfaces that still call full booking-job list
-   APIs when compact rows would be enough.
+1. Continue migrating calendar/detail surfaces from compact step rows toward
+   precomputed event read models if calendar usage grows.
 2. Split `app/page.tsx` into smaller route-level and feature-level components.
 3. Lazy-load heavy cards and modals only when the user reaches that state.
 4. Add app-shell performance marks around route transitions, bootstrap, sidebar

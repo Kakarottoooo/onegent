@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { BookingJobSummary } from "@/lib/db";
 
 vi.mock("@/lib/db", () => ({
+  getUserProfile: vi.fn(),
   listMyChatSessionRows: vi.fn(),
   listMyDecisionRoomSidebarRows: vi.fn(),
 }));
@@ -16,12 +17,13 @@ vi.mock("@/lib/booking-jobs/read-model", async () => {
   };
 });
 
-import { listMyChatSessionRows, listMyDecisionRoomSidebarRows } from "@/lib/db";
+import { getUserProfile, listMyChatSessionRows, listMyDecisionRoomSidebarRows } from "@/lib/db";
 import { getVisibleBookingJobSummaries } from "@/lib/booking-jobs/read-model";
 import { emptyAppBootstrapData, getAppBootstrapData } from "@/lib/app-bootstrap";
 
 const mockedRooms = vi.mocked(listMyDecisionRoomSidebarRows);
 const mockedSessions = vi.mocked(listMyChatSessionRows);
+const mockedProfile = vi.mocked(getUserProfile);
 const mockedJobs = vi.mocked(getVisibleBookingJobSummaries);
 
 function job(overrides: Partial<BookingJobSummary> = {}): BookingJobSummary {
@@ -45,6 +47,7 @@ describe("app bootstrap read model", () => {
     vi.clearAllMocks();
     mockedRooms.mockResolvedValue([]);
     mockedSessions.mockResolvedValue([]);
+    mockedProfile.mockResolvedValue(null);
     mockedJobs.mockResolvedValue([]);
   });
 
@@ -83,6 +86,16 @@ describe("app bootstrap read model", () => {
       job({ id: "job-3", trip_label: "Failed", status: "failed" }),
       job({ id: "job-4", trip_label: "Overflow", status: "pending" }),
     ]);
+    mockedProfile.mockResolvedValue({
+      user_id: "user-1",
+      profile_code: "ABC123",
+      username: "onegent",
+      display_name: "Onegent User",
+      avatar_url: null,
+      bio: null,
+      created_at: "2026-05-05T00:00:00.000Z",
+      updated_at: "2026-05-05T00:00:00.000Z",
+    });
 
     const data = await getAppBootstrapData({ userId: "user-1", sessionId: "session-1" });
 
@@ -96,6 +109,11 @@ describe("app bootstrap read model", () => {
     });
     expect(data.sidebar.rooms).toHaveLength(1);
     expect(data.sidebar.sessions).toHaveLength(1);
+    expect(data.account_profile).toMatchObject({
+      user_id: "user-1",
+      profile_code: "ABC123",
+      username: "onegent",
+    });
     expect(data.recent_jobs.map((row) => row.id)).toEqual(["job-1", "job-2", "job-3"]);
     expect(data.booking_jobs_summary).toMatchObject({
       total: 4,
@@ -110,6 +128,7 @@ describe("app bootstrap read model", () => {
 
     expect(mockedRooms).not.toHaveBeenCalled();
     expect(mockedSessions).not.toHaveBeenCalled();
+    expect(mockedProfile).not.toHaveBeenCalled();
     expect(mockedJobs).toHaveBeenCalledWith({
       sessionId: "session-1",
       userId: null,
@@ -134,6 +153,7 @@ describe("app bootstrap read model", () => {
   it("has a stable empty bootstrap shape", () => {
     expect(emptyAppBootstrapData()).toMatchObject({
       sidebar: { rooms: [], sessions: [] },
+      account_profile: null,
       recent_jobs: [],
       booking_jobs_summary: { total: 0 },
     });
