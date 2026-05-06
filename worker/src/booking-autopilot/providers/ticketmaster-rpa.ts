@@ -571,9 +571,91 @@ async function readCurrentCalendarMonth(page: Page, trace: TraceFn): Promise<{ m
 }
 
 /**
+ * Click the target month TAB directly (e.g. "June 2026") if visible.
+ *
+ * TM month strip is "Mar / Apr / **May** / Jun / Jul" (current selected).
+ * Each tab has aria-label like "June 2026" or "June 2026, 33 Events" and
+ * the active one is annotated "May 2026 selected, 31 Events".
+ *
+ * This is the CORRECT navigation primitive — `aria-label="next items"` is
+ * the carousel scroll arrow (scrolls the tab strip horizontally without
+ * changing the selected month). Observed live (job 16790107): clicking
+ * "next items" 12 times still left "May 2026 selected" → infinite loop.
+ *
+ * Returns true if a target tab was found AND clicked.
+ */
+async function clickTargetMonthTab(
+  page: Page,
+  target: TargetDateTime,
+  trace: TraceFn,
+): Promise<boolean> {
+  const monthName = target.monthName;
+  const year = target.year;
+  // Strategy A: aria-label exact-prefix match via Playwright locator.
+  // `[aria-label^="June 2026"]` cannot match "next items" / chevrons.
+  const ariaSelectors = [
+    `button[aria-label^="${monthName} ${year}"]`,
+    `[role="tab"][aria-label^="${monthName} ${year}"]`,
+    `[role="button"][aria-label^="${monthName} ${year}"]`,
+    `a[aria-label^="${monthName} ${year}"]`,
+  ];
+  for (const sel of ariaSelectors) {
+    try {
+      const loc = page.locator(sel).first();
+      const count = await loc.count().catch(() => 0);
+      if (count === 0) continue;
+      const visible = await locatorLooksVisible(loc);
+      if (!visible) continue;
+      await safeScrollIntoView(loc);
+      await loc.click({ timeout: 1500, force: true });
+      trace(`[tm-rpa] Month tab clicked via aria-label selector "${sel}"`);
+      return true;
+    } catch (err) {
+      trace(`[tm-rpa] Month tab aria-label sel error sel="${sel}" — ${(err as Error).message?.slice(0, 60)}`);
+    }
+  }
+  // Strategy B: page.evaluate scan for any element whose aria-label
+  // STARTS WITH the month+year string AND is NOT the currently-selected
+  // tab (avoid clicking the active tab — it's a no-op).
+  const clickedTab = await page.evaluate((tab: { month: string; year: number }) => {
+    const isVisible = (el: Element): boolean => {
+      const r = (el as HTMLElement).getBoundingClientRect();
+      return r.width > 0 && r.height > 0;
+    };
+    const prefix = `${tab.month} ${tab.year}`.toLowerCase();
+    const nodes = Array.from(document.querySelectorAll<HTMLElement>('button, [role="tab"], [role="button"], a'))
+      .filter(isVisible);
+    const hit = nodes.find(el => {
+      const aria = (el.getAttribute("aria-label") ?? "").toLowerCase().trim();
+      // Exclude carousel scrollers — they have aria-label like
+      // "next items" / "previous items" with NO month/year mention.
+      if (/^(next|previous)\s+items?$/.test(aria)) return false;
+      // Avoid the already-selected tab (clicking it is a no-op).
+      if (aria.includes("selected")) return false;
+      return aria.startsWith(prefix);
+    });
+    if (!hit) return false;
+    hit.scrollIntoView({ behavior: "auto", block: "center" });
+    hit.click();
+    return true;
+  }, { month: monthName, year }).catch(() => false);
+  if (clickedTab) {
+    trace(`[tm-rpa] Month tab clicked via evaluate aria-label prefix: "${monthName} ${year}"`);
+    return true;
+  }
+  return false;
+}
+
+/**
  * Advance / rewind the calendar until the active month matches `target`.
- * Uses the Next Month / Previous Month chevrons visible at the right side of
- * the month-tab strip. Caps at 12 hops so a bad DOM match can't infinite-loop.
+ *
+ * Strategy:
+ *   1. Try clicking the target month TAB directly ("June 2026") — instant.
+ *   2. If the target tab isn't currently in the visible strip, click the
+ *      `aria-label="next items"` / `previous items` carousel scrollers to
+ *      reveal more tabs, then retry.
+ *
+ * Caps at 12 hops so a bad DOM match can't infinite-loop.
  */
 async function navigateToTargetMonth(page: Page, target: TargetDateTime, trace: TraceFn): Promise<boolean> {
   const MAX_HOPS = 12;
@@ -588,8 +670,24 @@ async function navigateToTargetMonth(page: Page, target: TargetDateTime, trace: 
       trace(`[tm-rpa] Month nav: on target ${target.monthName} ${target.year}`);
       return true;
     }
+
+    // Strategy 1: click the target month tab directly. Cheapest + most
+    // reliable when the tab is visible in the strip.
+    const direct = await clickTargetMonthTab(page, target, trace);
+    if (direct) {
+      await page.waitForTimeout(900);
+      continue;
+    }
+
+    // Strategy 2: target tab is offscreen — scroll the carousel.
+    // CRITICAL: only match strict aria-label, not substring "next" — the
+    // previous match-anything-with-"next" caught "next items" (carousel)
+    // ALSO when the actual "Next Month" tab existed; either way the
+    // tab-direct click above runs FIRST, so this is now safe.
     const wantNext = diff > 0;
-    const labels = wantNext ? ["next month", "next"] : ["previous month", "previous", "prev month", "prev"];
+    const labels = wantNext
+      ? ["next items", "next month", "next"]
+      : ["previous items", "previous month", "prev month", "previous", "prev"];
     const clicked = await page.evaluate((labelList: string[]) => {
       const isVisible = (el: Element): boolean => {
         const r = (el as HTMLElement).getBoundingClientRect();
