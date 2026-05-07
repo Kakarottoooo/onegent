@@ -7,6 +7,10 @@ high-intent users. It is a no-live planning and operating checklist. It does
 not authorize provider workflows, live OpenAI calls, Computer Use, secrets,
 payment, login, verification, or final-confirmation flows.
 
+For the concrete submission schema, scoring contract, forbidden collection
+rules, and fixture conversion workflow, use
+`docs/40-dogfood/PRIVATE_ALPHA_INTAKE_PROTOCOL.md`.
+
 ## Stage 0 Goal
 
 Run a small, founder-supervised alpha that tests whether real travel users
