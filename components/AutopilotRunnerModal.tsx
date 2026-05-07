@@ -38,11 +38,13 @@ interface Props {
 export function AutopilotRunnerModal({ open, steps, tripLabel, onClose }: Props) {
   const [connectOpen, setConnectOpen] = useState(false);
   const [bgJobId, setBgJobId] = useState<string | null>(null);
+  const [bgJobSessionId, setBgJobSessionId] = useState<string | null>(null);
   const [bgSent, setBgSent] = useState(false);
 
   // Send job to background (server-side execution)
   async function sendToBackground() {
     const sessionId = localStorage.getItem("session_id") ?? crypto.randomUUID();
+    if (!localStorage.getItem("session_id")) localStorage.setItem("session_id", sessionId);
     const autonomySettings = loadAutonomySettings();
     // Create the job — include autonomy settings so the worker knows the boundaries
     const res = await fetch("/api/booking-jobs", {
@@ -58,6 +60,7 @@ export function AutopilotRunnerModal({ open, steps, tripLabel, onClose }: Props)
     const data = await res.json();
     const jobId: string = data.jobId;
     setBgJobId(jobId);
+    setBgJobSessionId(sessionId);
     setBgSent(true);
 
     // Fire-and-forget the start endpoint — keepalive keeps it alive if page closes
@@ -72,6 +75,7 @@ export function AutopilotRunnerModal({ open, steps, tripLabel, onClose }: Props)
     if (!open || steps.length === 0) return;
     setBgSent(false);
     setBgJobId(null);
+    setBgJobSessionId(null);
     sendToBackground();
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
@@ -231,7 +235,7 @@ export function AutopilotRunnerModal({ open, steps, tripLabel, onClose }: Props)
               <button
                 onClick={() => {
                   const href = bgJobId
-                    ? getTaskWorkspaceHref({ id: bgJobId, status: "pending" })
+                    ? getTaskWorkspaceHref({ id: bgJobId, status: "pending", sourceSessionId: bgJobSessionId })
                     : "/tasks";
                   window.location.href = href;
                 }}

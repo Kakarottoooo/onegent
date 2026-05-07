@@ -118,7 +118,7 @@ export default function RestaurantStepCard({
 
       onCreated?.(jobId);
       if (!onCreated) {
-        router.push(getTaskWorkspaceHref({ id: jobId, status: "pending" }));
+        router.push(getTaskWorkspaceHref({ id: jobId, status: "pending", sourceSessionId: sessionId }));
       }
     } catch (err) {
       setError(

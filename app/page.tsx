@@ -46,6 +46,7 @@ import type {
 } from "@/lib/agent/nlu-v2";
 import type { ChatMessage } from "@/lib/llm-client";
 import { loadAgentModelConfig } from "@/lib/agent-model-config";
+import { getTaskWorkspaceHref, taskWorkspaceHrefForView } from "@/lib/booking-jobs/workspace";
 import {
   buildRoomReplaySnapshot,
   buildSessionReplaySnapshot,
@@ -3744,7 +3745,10 @@ function HomeInner() {
                       <p style={{ fontFamily: "var(--font-dm-sans)", fontSize: 12, fontWeight: 600, color: "var(--text-secondary)", textTransform: "uppercase", letterSpacing: "0.06em" }}>
                         {th.recentTrips}
                       </p>
-                      <a href="/tasks" style={{ fontFamily: "var(--font-dm-sans)", fontSize: 12, color: "var(--gold)", textDecoration: "none" }}>
+                      <a
+                        href={taskWorkspaceHrefForView("queue", { sourceSessionId: currentTaskSessionId ?? chat.getSessionId() })}
+                        style={{ fontFamily: "var(--font-dm-sans)", fontSize: 12, color: "var(--gold)", textDecoration: "none" }}
+                      >
                         {th.viewAll}
                       </a>
                     </div>
@@ -3759,7 +3763,7 @@ function HomeInner() {
                         };
                         const sm = statusMeta[job.status] ?? statusMeta.pending;
                         return (
-                          <a key={job.id} href="/tasks" style={{ textDecoration: "none", display: "flex", alignItems: "center", gap: 10, padding: "10px 14px", borderRadius: 12, backgroundColor: "var(--card)", border: "0.5px solid var(--border)" }}>
+                          <a key={job.id} href={getTaskWorkspaceHref(job)} style={{ textDecoration: "none", display: "flex", alignItems: "center", gap: 10, padding: "10px 14px", borderRadius: 12, backgroundColor: "var(--card)", border: "0.5px solid var(--border)" }}>
                             <span style={{ width: 7, height: 7, borderRadius: "50%", backgroundColor: sm.dot, flexShrink: 0 }} />
                             <span style={{ fontFamily: "var(--font-dm-sans)", fontSize: 13, color: "var(--text-primary)", flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{job.trip_label}</span>
                             <span style={{ fontFamily: "var(--font-dm-sans)", fontSize: 11, color: "var(--text-secondary)", flexShrink: 0 }}>{sm.label}</span>

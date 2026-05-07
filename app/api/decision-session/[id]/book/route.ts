@@ -112,6 +112,6 @@ export async function POST(req: NextRequest, { params }: Params) {
 
   return NextResponse.json({
     jobId,
-    redirectTo: getTaskWorkspaceHref({ id: jobId, status: "pending" }),
+    redirectTo: getTaskWorkspaceHref({ id: jobId, status: "pending", sourceSessionId: session.id }),
   });
 }

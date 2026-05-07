@@ -14,6 +14,11 @@ export type TaskWorkspaceClassificationInput = Pick<BookingJob, "status"> & {
 };
 
 export type TaskWorkspaceStatusInput = Pick<BookingJob, "id"> & TaskWorkspaceClassificationInput;
+export type TaskWorkspaceSourceInput = {
+  session_id?: string | null;
+  sourceSessionId?: string | null;
+};
+export type TaskWorkspaceHrefInput = TaskWorkspaceStatusInput & TaskWorkspaceSourceInput;
 
 export type TaskEvidenceAction = {
   href: string;
@@ -40,6 +45,10 @@ export type NormalizedTaskAction =
       href: string;
       view: TaskWorkspaceBucket;
     };
+
+export type TaskWorkspaceHrefOptions = TaskWorkspaceSourceInput & {
+  focusId?: string | null;
+};
 
 function numberField(value: unknown): number {
   const n = Number(value);
@@ -77,21 +86,42 @@ export function taskWorkspaceViewForJob(job: TaskWorkspaceClassificationInput): 
   return taskWorkspaceViewForStatus(job.status);
 }
 
-export function taskDetailsHref(job: TaskWorkspaceStatusInput): string {
-  const view = taskWorkspaceViewForJob(job);
-  return `/tasks?view=${view}&focus=${encodeURIComponent(job.id)}`;
+export function taskSourceSessionId(source: TaskWorkspaceSourceInput): string | null {
+  const raw = source.sourceSessionId ?? source.session_id ?? null;
+  if (typeof raw !== "string") return null;
+  const trimmed = raw.trim();
+  return trimmed.length > 0 ? trimmed : null;
 }
 
-export function getTaskWorkspaceHref(job: TaskWorkspaceStatusInput): string {
+export function taskWorkspaceHrefForView(
+  view: TaskWorkspaceBucket,
+  options: TaskWorkspaceHrefOptions = {},
+): string {
+  const parts = [`view=${encodeURIComponent(view)}`];
+  if (options.focusId) parts.push(`focus=${encodeURIComponent(options.focusId)}`);
+  const sourceSessionId = taskSourceSessionId(options);
+  if (sourceSessionId) parts.push(`session_id=${encodeURIComponent(sourceSessionId)}`);
+  return `/tasks?${parts.join("&")}`;
+}
+
+export function taskDetailsHref(job: TaskWorkspaceHrefInput): string {
+  const view = taskWorkspaceViewForJob(job);
+  return taskWorkspaceHrefForView(view, {
+    focusId: job.id,
+    sourceSessionId: taskSourceSessionId(job),
+  });
+}
+
+export function getTaskWorkspaceHref(job: TaskWorkspaceHrefInput): string {
   return taskDetailsHref(job);
 }
 
-export function getTaskEvidenceHref(job: TaskWorkspaceStatusInput): string {
+export function getTaskEvidenceHref(job: TaskWorkspaceHrefInput): string {
   return taskDetailsHref(job);
 }
 
 export function normalizeTaskAction(
-  job: TaskWorkspaceStatusInput,
+  job: TaskWorkspaceHrefInput,
   kind: NormalizedTaskAction["kind"] = "details",
 ): NormalizedTaskAction {
   const view = taskWorkspaceViewForJob(job);
@@ -105,7 +135,7 @@ export function normalizeTaskAction(
   return { kind, label: "Details", href, view };
 }
 
-export function taskEvidenceAction(job: TaskWorkspaceStatusInput): TaskEvidenceAction {
+export function taskEvidenceAction(job: TaskWorkspaceHrefInput): TaskEvidenceAction {
   const view = taskWorkspaceViewForJob(job);
   const active = view === "live" || view === "queue";
   return {

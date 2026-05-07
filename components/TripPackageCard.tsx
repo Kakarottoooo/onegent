@@ -390,7 +390,7 @@ export default function TripPackageCard(props: TripPackageCardProps) {
       }).catch(() => {});
       props.onBooked?.(data.jobId);
       if (!props.onBooked) {
-        router.push(getTaskWorkspaceHref({ id: data.jobId, status: "pending" }));
+        router.push(getTaskWorkspaceHref({ id: data.jobId, status: "pending", sourceSessionId: props.sessionId }));
       }
     } catch {
       setSubmitError("Network error — please try again.");
