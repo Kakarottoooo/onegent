@@ -1685,6 +1685,7 @@ The user will enter CVV and confirm payment themselves.`,
         const decision = classifyTicketmasterTaskState({
           reachedCheckout: rpaResult.reached_checkout,
           needsLogin: rpaResult.needs_login === true,
+          needsUserChoice: rpaResult.needs_user_choice === true,
           handoffReady: rpaResult.handoff_ready === true,
           currentUrl: observedUrl,
           localBrowserDisconnected,

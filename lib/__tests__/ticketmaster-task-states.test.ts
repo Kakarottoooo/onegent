@@ -11,7 +11,7 @@ import {
 // Test scope: every branch of the pure task-state classifier and the host
 // helper. These tests pin the user-visible task-state contract so any future
 // refactor that wires the classifier into the live executor cannot silently
-// regress the 6 states.
+// regress the 7 states.
 //
 // Hard rules guarded here:
 //   - No state declares "we signed in for the user".
@@ -112,10 +112,11 @@ describe("isTicketmasterDomainUrl", () => {
 });
 
 describe("classifyTicketmasterTaskState — exported state list", () => {
-  it("exports all 6 states in the canonical order", () => {
+  it("exports all 7 states in the canonical order", () => {
     expect([...TICKETMASTER_TASK_STATES]).toEqual([
       "checkout_reached",
       "user_seat_selection_required",
+      "user_event_choice_required",
       "user_login_required",
       "external_ad_tab_detected",
       "local_browser_disconnected",
@@ -129,6 +130,7 @@ describe("classifyTicketmasterTaskState — exported state list", () => {
     const seen: Record<TicketmasterTaskState, true> = {
       checkout_reached: true,
       user_seat_selection_required: true,
+      user_event_choice_required: true,
       user_login_required: true,
       external_ad_tab_detected: true,
       local_browser_disconnected: true,
@@ -211,6 +213,45 @@ describe("classifyTicketmasterTaskState — user_seat_selection_required (event 
       summary: "Custom seat-pick prompt for Lion King.",
     });
     expect(d.summary).toBe("Custom seat-pick prompt for Lion King.");
+  });
+});
+
+describe("classifyTicketmasterTaskState — user_event_choice_required (provider-start listing choice)", () => {
+  it("provider-start choice needed returns paused_payment and keeps the browser open", () => {
+    const d = decide({
+      needsUserChoice: true,
+      handoffReady: true,
+      currentUrl:
+        "https://www.ticketmaster.com/disney-on-ice-presents-find-your-tickets/artist/1742147",
+      summary:
+        "Ticketmaster shows multiple matching listings for September 17, 2026. Which showtime should I use?",
+    });
+    expect(d.state).toBe("user_event_choice_required");
+    expect(d.executorStatus).toBe("paused_payment");
+    expect(d.holdBrowserOpen).toBe(true);
+    expect(d.summary).toMatch(/which showtime/i);
+  });
+
+  it("user_login_required wins over user_event_choice_required when both signals fire", () => {
+    const d = decide({
+      needsLogin: true,
+      needsUserChoice: true,
+      handoffReady: true,
+      currentUrl:
+        "https://auth.ticketmaster.com/as/authorization.oauth2?response_type=code",
+    });
+    expect(d.state).toBe("user_login_required");
+    expect(d.executorStatus).toBe("needs_login");
+  });
+
+  it("external ad tab wins over user_event_choice_required because the page is not trustworthy", () => {
+    const d = decide({
+      needsUserChoice: true,
+      handoffReady: true,
+      currentUrl: "https://promo.example.com/landing/abc",
+    });
+    expect(d.state).toBe("external_ad_tab_detected");
+    expect(d.executorStatus).toBe("error");
   });
 });
 

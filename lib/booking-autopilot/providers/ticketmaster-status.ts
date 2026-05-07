@@ -6,15 +6,14 @@
  * state the executor should surface. Pure / no Page / no I/O / no async — fully
  * unit-testable.
  *
- * This module is intentionally *not* wired into the live executor in this
- * branch. The 2026-05-07 founder dogfood run reached a clean safe handoff
- * via the existing inline logic in `stagehand-executor.ts`, so changing the
- * inline logic without a failing reproducible job would be a silent-risk
- * runtime change. The classifier is shipped as a typed contract so:
+ * This module is wired into the live executor after the 2026-05-07 founder
+ * dogfood runs exposed distinct Ticketmaster boundaries: seat selection,
+ * login, external ad tabs, local browser disconnects, and provider-start
+ * event choice. The classifier is shipped as a typed contract so:
  *
  *   1. Future evidence-driven patches can replace the inline branching with
  *      a 1-line `classifyTicketmasterTaskState({...})` call.
- *   2. The 6 user-visible task states are now testable against a single
+ *   2. The 7 user-visible task states are now testable against a single
  *      source of truth, instead of being implicit in inline conditionals.
  *
  * Cross-references:
@@ -25,7 +24,7 @@
  *   - docs/30-provider-debug/PROVIDER_RUNTIME_DEBUG_PLAYBOOK.md (DB / log /
  *     screenshot triage order, plus stuck-job recovery template)
  *
- * The 6 task states this classifier covers:
+ * The 7 task states this classifier covers:
  *
  *   - "checkout_reached"
  *       RPA reached `checkout.ticketmaster.com` / `payments.ticketmaster.com`.
@@ -37,6 +36,11 @@
  *       a seat (Reserve still disabled). Safe handoff: paused_payment.
  *       UX: "Ready for review — choose a seat in the browser to continue".
  *       Related class on `safe_boundary_reached`.
+ *
+ *   - "user_event_choice_required"
+ *       Provider-start page reached, but the event/date/showtime is not yet
+ *       uniquely selected. Safe handoff: paused_payment.
+ *       UX: ask which visible event or showtime to use, then continue.
  *
  *   - "user_login_required"
  *       Account / sign-in / OAuth boundary reached. Safe handoff:
@@ -71,8 +75,9 @@
  *   3. external_ad_tab_detected   — wrong host means wrong tab; do not trust
  *      handoff_ready / needs_login (they were computed from the ad tab)
  *   4. user_login_required       — explicit account boundary
- *   5. user_seat_selection_required — any other handoff_ready run
- *   6. unknown_failure           — last fallback
+ *   5. user_event_choice_required — provider-start page needs a user choice
+ *   6. user_seat_selection_required — any other handoff_ready run
+ *   7. unknown_failure           — last fallback
  *
  * Hard rules:
  *   - Never claim login was performed for the user.
@@ -85,6 +90,7 @@
 export type TicketmasterTaskState =
   | "checkout_reached"
   | "user_seat_selection_required"
+  | "user_event_choice_required"
   | "user_login_required"
   | "external_ad_tab_detected"
   | "local_browser_disconnected"
@@ -111,6 +117,8 @@ export interface TicketmasterTaskInput {
   reachedCheckout: boolean;
   /** True if the RPA returned `needs_login = true`. */
   needsLogin: boolean;
+  /** True if the RPA needs the user to choose event/date/showtime first. */
+  needsUserChoice?: boolean;
   /** True if the RPA returned `handoff_ready = true`. */
   handoffReady: boolean;
   /**
@@ -206,6 +214,8 @@ const FALLBACK_SUMMARY: Readonly<Record<TicketmasterTaskState, string>> =
       "Reached Ticketmaster checkout. Continuing with form fill.",
     user_seat_selection_required:
       "Ticketmaster page is ready for review. Choose a seat in the browser to continue.",
+    user_event_choice_required:
+      "Ticketmaster needs you to choose an event or showtime before I can continue.",
     user_login_required:
       "Ticketmaster needs you to sign in to continue. Open the live browser — we won't enter account details for you.",
     external_ad_tab_detected:
@@ -217,7 +227,7 @@ const FALLBACK_SUMMARY: Readonly<Record<TicketmasterTaskState, string>> =
   });
 
 /**
- * Classify a Ticketmaster RPA outcome into one of six user-visible task
+ * Classify a Ticketmaster RPA outcome into one of seven user-visible task
  * states. Pure / deterministic / no I/O.
  */
 export function classifyTicketmasterTaskState(
@@ -271,7 +281,19 @@ export function classifyTicketmasterTaskState(
     };
   }
 
-  // 5. Seat selection / generic safe handoff.
+  // 5. Provider-start event / showtime choice. Keep this separate from the
+  // seat-selection checkpoint so task logs make clear what the user still
+  // needs to decide.
+  if (input.needsUserChoice) {
+    return {
+      state: "user_event_choice_required",
+      executorStatus: "paused_payment",
+      summary: input.summary ?? FALLBACK_SUMMARY.user_event_choice_required,
+      holdBrowserOpen: true,
+    };
+  }
+
+  // 6. Seat selection / generic safe handoff.
   if (input.handoffReady) {
     return {
       state: "user_seat_selection_required",
@@ -281,7 +303,7 @@ export function classifyTicketmasterTaskState(
     };
   }
 
-  // 6. Last fallback: unknown failure. We avoid leaving the task looking live
+  // 7. Last fallback: unknown failure. We avoid leaving the task looking live
   //    forever by returning `error` (not `running`).
   return {
     state: "unknown_failure",
@@ -293,7 +315,7 @@ export function classifyTicketmasterTaskState(
 }
 
 /**
- * The 6 task states, in their canonical order (matches the documentation in
+ * The 7 task states, in their canonical order (matches the documentation in
  * the file header and the decision precedence). Exported so callers / tests
  * can iterate without re-deriving the list.
  */
@@ -301,6 +323,7 @@ export const TICKETMASTER_TASK_STATES: ReadonlyArray<TicketmasterTaskState> =
   Object.freeze([
     "checkout_reached",
     "user_seat_selection_required",
+    "user_event_choice_required",
     "user_login_required",
     "external_ad_tab_detected",
     "local_browser_disconnected",

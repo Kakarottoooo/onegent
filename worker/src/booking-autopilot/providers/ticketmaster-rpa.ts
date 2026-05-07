@@ -21,6 +21,7 @@ export interface TicketmasterRpaResult {
   currentUrl: string;
   activePage?: Page;
   needs_login?: boolean;
+  needs_user_choice?: boolean;
   handoff_ready?: boolean;
   summary?: string;
   error?: string;
@@ -541,6 +542,200 @@ export function pickPrimaryTicketmasterUrl(urls: ReadonlyArray<string>): string 
     return 1;
   };
   return [...tmUrls].sort((a, b) => score(b) - score(a))[0] ?? null;
+}
+
+export type TicketmasterProviderListingDecision =
+  | { kind: "no_target"; matches: string[]; question: string }
+  | { kind: "no_match"; matches: string[]; question: string }
+  | { kind: "single_match"; matches: string[]; question: null }
+  | { kind: "multiple_matches"; matches: string[]; question: string };
+
+export function ticketmasterProviderListingDecision(
+  listingTexts: ReadonlyArray<string>,
+  target: TargetDateTime | null,
+): TicketmasterProviderListingDecision {
+  if (!target) {
+    return {
+      kind: "no_target",
+      matches: [],
+      question:
+        "Which event date, city, and showtime should I use from this Ticketmaster page?",
+    };
+  }
+  const matches = listingTexts
+    .map((text) => text.replace(/\s+/g, " ").trim())
+    .filter((text) => text.length > 0 && providerListingTextMatchesTarget(text, target))
+    .slice(0, 8);
+  if (matches.length === 1) return { kind: "single_match", matches, question: null };
+  const dateLabel = formatTargetDate(target);
+  if (matches.length > 1) {
+    return {
+      kind: "multiple_matches",
+      matches,
+      question: `Ticketmaster shows multiple matching listings for ${dateLabel}. Which showtime should I use?`,
+    };
+  }
+  return {
+    kind: "no_match",
+    matches: [],
+    question: `I opened Ticketmaster, but I could not find a listing for ${dateLabel}. Which visible event/date should I use?`,
+  };
+}
+
+function providerListingTextMatchesTarget(text: string, target: TargetDateTime): boolean {
+  const lower = text.toLowerCase();
+  const monthLower = target.monthName.toLowerCase();
+  const monthShort = monthLower.slice(0, 3);
+  const dayStr = String(target.day);
+  const dayPadded = dayStr.padStart(2, "0");
+  const monthNumber = String(target.monthIndex + 1);
+  const monthNumberPadded = monthNumber.padStart(2, "0");
+  const dayRx = new RegExp(`\\b${dayStr}(st|nd|rd|th)?\\b|\\b${dayPadded}\\b`);
+  const monthTextMatch = lower.includes(monthLower) || lower.includes(monthShort);
+  const numericDateMatch =
+    lower.includes(`${monthNumber}/${dayStr}`) ||
+    lower.includes(`${monthNumber}/${dayPadded}`) ||
+    lower.includes(`${monthNumberPadded}/${dayStr}`) ||
+    lower.includes(`${monthNumberPadded}/${dayPadded}`);
+  const monthDayMatch = (monthTextMatch && dayRx.test(lower)) || numericDateMatch;
+  if (!monthDayMatch) return false;
+  if (!target.time) return true;
+  return lower.includes(target.time.toLowerCase());
+}
+
+function formatTargetDate(target: TargetDateTime): string {
+  return `${target.monthName} ${target.day}, ${target.year}${target.time ? ` at ${target.time}` : ""}`;
+}
+
+function isProviderStartTask(task: string): boolean {
+  return /provider-start page/i.test(task) ||
+    /Start from this exact .+ (artist|performer|collection|search results|listing) page URL/i.test(task);
+}
+
+type ProviderListingClickResult =
+  | { status: "clicked"; label: string; matchCount: number }
+  | { status: "needs_choice"; question: string; matches: string[] }
+  | { status: "no_match"; question: string; matches: string[] }
+  | { status: "no_target"; question: string; matches: string[] };
+
+async function clickProviderListingFindTickets(
+  page: Page,
+  target: TargetDateTime | null,
+  trace: TraceFn,
+): Promise<ProviderListingClickResult> {
+  if (!target) {
+    const decision = ticketmasterProviderListingDecision([], null);
+    return {
+      status: "no_target",
+      question:
+        decision.question ??
+        "Which event date, city, and showtime should I use from this Ticketmaster page?",
+      matches: [],
+    };
+  }
+  const args = {
+    monthLong: target.monthName.toLowerCase(),
+    monthShort: target.monthName.slice(0, 3).toLowerCase(),
+    monthNumber: String(target.monthIndex + 1),
+    monthNumberPadded: String(target.monthIndex + 1).padStart(2, "0"),
+    dayStr: String(target.day),
+    dayPadded: String(target.day).padStart(2, "0"),
+    timeLower: (target.time ?? "").toLowerCase(),
+  };
+  const source = `
+(function() {
+  var TARGET = ${JSON.stringify(args)};
+  function isVisible(el) {
+    if (!el || !el.getBoundingClientRect) return false;
+    var r = el.getBoundingClientRect();
+    if (r.width < 24 || r.height < 16) return false;
+    var s = window.getComputedStyle ? window.getComputedStyle(el) : null;
+    return !(s && (s.visibility === "hidden" || s.display === "none" || Number(s.opacity || "1") === 0));
+  }
+  function normalizedText(el) {
+    return String((el && (el.innerText || el.textContent)) || "").replace(/\\s+/g, " ").trim();
+  }
+  function looksLikeFindTickets(el) {
+    var label = [
+      normalizedText(el),
+      el.getAttribute && el.getAttribute("aria-label") || "",
+      el.getAttribute && el.getAttribute("title") || ""
+    ].join(" ").replace(/\\s+/g, " ").trim().toLowerCase();
+    if (label.indexOf("find my hotel") === 0) return false;
+    return label.indexOf("find tickets") === 0 || label.indexOf("buy tickets") === 0 || label.indexOf("get tickets") === 0;
+  }
+  function matchesTarget(text) {
+    var lower = String(text || "").toLowerCase();
+    if (!lower) return false;
+    var dayRx = new RegExp("\\\\b" + TARGET.dayStr + "(st|nd|rd|th)?\\\\b|\\\\b" + TARGET.dayPadded + "\\\\b");
+    var monthTextMatch = lower.indexOf(TARGET.monthLong) >= 0 || lower.indexOf(TARGET.monthShort) >= 0;
+    var numericDateMatch =
+      lower.indexOf(TARGET.monthNumber + "/" + TARGET.dayStr) >= 0 ||
+      lower.indexOf(TARGET.monthNumber + "/" + TARGET.dayPadded) >= 0 ||
+      lower.indexOf(TARGET.monthNumberPadded + "/" + TARGET.dayStr) >= 0 ||
+      lower.indexOf(TARGET.monthNumberPadded + "/" + TARGET.dayPadded) >= 0;
+    var monthDayMatch = (monthTextMatch && dayRx.test(lower)) || numericDateMatch;
+    if (!monthDayMatch) return false;
+    if (!TARGET.timeLower) return true;
+    return lower.indexOf(TARGET.timeLower) >= 0;
+  }
+  function rowScopeFor(el) {
+    var current = el;
+    var best = el;
+    for (var hops = 0; current && hops < 8; hops++) {
+      var text = normalizedText(current);
+      if (text.length > normalizedText(best).length && text.length < 2500) best = current;
+      if (matchesTarget(text) && /find tickets|buy tickets|get tickets/i.test(text)) return current;
+      current = current.parentElement;
+    }
+    return best;
+  }
+  var selector = 'a, button, [role="button"], [role="link"]';
+  var nodes = Array.from(document.querySelectorAll(selector)).filter(isVisible).filter(looksLikeFindTickets);
+  var matches = [];
+  for (var i = 0; i < nodes.length; i++) {
+    var el = nodes[i];
+    var scope = rowScopeFor(el);
+    var text = normalizedText(scope);
+    if (!matchesTarget(text)) continue;
+    matches.push({ el: el, text: text.slice(0, 180) });
+  }
+  if (matches.length === 1) {
+    matches[0].el.scrollIntoView({ behavior: "auto", block: "center" });
+    matches[0].el.click();
+    return { status: "clicked", label: matches[0].text, matchCount: 1 };
+  }
+  if (matches.length > 1) {
+    return { status: "needs_choice", matches: matches.slice(0, 8).map(function(m) { return m.text; }) };
+  }
+  return { status: "no_match", matches: [] };
+})()
+`;
+  const result = await page.evaluate(source).catch((err: Error) => {
+    trace(`[tm-rpa] provider listing scan failed: ${err.message?.slice(0, 100)}`);
+    return null;
+  }) as null | { status?: string; label?: string; matchCount?: number; matches?: string[] };
+  if (result?.status === "clicked") {
+    trace(`[tm-rpa] Provider listing Find Tickets clicked: "${(result.label ?? "").slice(0, 120)}"`);
+    return { status: "clicked", label: result.label ?? "", matchCount: result.matchCount ?? 1 };
+  }
+  const decision = ticketmasterProviderListingDecision(result?.matches ?? [], target);
+  if (result?.status === "needs_choice" || decision.kind === "multiple_matches") {
+    trace(`[tm-rpa] Provider listing needs user choice: matches=${(result?.matches ?? []).length}`);
+    return {
+      status: "needs_choice",
+      question: decision.question ?? `Which showtime should I use for ${formatTargetDate(target)}?`,
+      matches: result?.matches ?? [],
+    };
+  }
+  trace(`[tm-rpa] Provider listing scan found no matching Find Tickets row for ${formatTargetDate(target)}`);
+  return {
+    status: "no_match",
+    question:
+      decision.question ??
+      `I opened Ticketmaster, but I could not find a listing for ${formatTargetDate(target)}. Which visible event/date should I use?`,
+    matches: [],
+  };
 }
 
 async function clickFindTicketsWithDomScan(
@@ -1702,10 +1897,25 @@ export async function bookTicketmasterProgrammatic(
   }
 
   const target = parseTargetDateTime(task);
+  const providerStartTask = isProviderStartTask(task);
   if (target) {
     trace(`[tm-rpa] Target: ${target.monthName} ${target.day}, ${target.year}${target.time ? ` @ ${target.time}` : ""}`);
   } else {
     trace("[tm-rpa] No date found in task — will fall back to first available showtime (typical for resident shows like Wicked/Hamilton)");
+  }
+  if (providerStartTask && !target) {
+    const decision = ticketmasterProviderListingDecision([], null);
+    trace("[tm-rpa] Provider-start task has no target date/time; pausing for user event choice");
+    return {
+      reached_checkout: false,
+      currentUrl: getUrl(),
+      activePage: page,
+      needs_user_choice: true,
+      handoff_ready: true,
+      summary:
+        decision.question ??
+        "Which event date, city, and showtime should I use from this Ticketmaster page?",
+    };
   }
 
   // Layer 1A: click calendar slot if we're on attraction/artist page (no /event/ yet).
@@ -1715,27 +1925,54 @@ export async function bookTicketmasterProgrammatic(
     // Give the calendar a moment to render.
     await page.waitForTimeout(1500);
     let slotClicked = false;
+    let providerListingClicked = false;
     if (target) {
+      const providerListing = await clickProviderListingFindTickets(page, target, trace).catch((err: Error) => {
+        trace(`[tm-rpa] clickProviderListingFindTickets threw (continuing): ${err.message?.slice(0, 80)}`);
+        return null;
+      });
+      if (providerListing?.status === "clicked") {
+        slotClicked = true;
+        providerListingClicked = true;
+      } else if (providerStartTask && providerListing?.status === "needs_choice") {
+        return {
+          reached_checkout: false,
+          currentUrl: getUrl(),
+          activePage: page,
+          needs_user_choice: true,
+          handoff_ready: true,
+          summary: providerListing.question,
+        };
+      }
       // Locator-based helpers may throw "X is not a function" under
       // Stagehand v3 proxy stripping. Wrap each so a single helper crash
       // can't kill the whole RPA — primary page.evaluate paths take over.
-      await openCalendarViewWithLocators(page, trace).catch((err: Error) => {
-        trace(`[tm-rpa] openCalendarView via-locators threw (continuing): ${err.message?.slice(0, 80)}`);
-      });
-      await navigateToTargetMonth(page, target, trace).catch((err: Error) => {
-        trace(`[tm-rpa] navigateToTargetMonth threw (continuing): ${err.message?.slice(0, 80)}`);
-      });
-      await page.waitForTimeout(500);
-      slotClicked = await clickCalendarSlot(page, target, trace).catch((err: Error) => {
-        trace(`[tm-rpa] clickCalendarSlot threw (continuing): ${err.message?.slice(0, 80)}`);
-        return false;
-      });
       if (!slotClicked) {
-        trace("[tm-rpa] Target date not matched — falling back to first available slot");
-        slotClicked = await clickFirstAvailableSlot(page, trace).catch((err: Error) => {
-          trace(`[tm-rpa] clickFirstAvailableSlot threw (continuing): ${err.message?.slice(0, 80)}`);
+        await openCalendarViewWithLocators(page, trace).catch((err: Error) => {
+          trace(`[tm-rpa] openCalendarView via-locators threw (continuing): ${err.message?.slice(0, 80)}`);
+        });
+        await navigateToTargetMonth(page, target, trace).catch((err: Error) => {
+          trace(`[tm-rpa] navigateToTargetMonth threw (continuing): ${err.message?.slice(0, 80)}`);
+        });
+        await page.waitForTimeout(500);
+        slotClicked = await clickCalendarSlot(page, target, trace).catch((err: Error) => {
+          trace(`[tm-rpa] clickCalendarSlot threw (continuing): ${err.message?.slice(0, 80)}`);
           return false;
         });
+      }
+      if (!slotClicked) {
+        const decision = ticketmasterProviderListingDecision([], target);
+        trace("[tm-rpa] Target date not matched — pausing for user event choice");
+        return {
+          reached_checkout: false,
+          currentUrl: getUrl(),
+          activePage: page,
+          needs_user_choice: true,
+          handoff_ready: true,
+          summary:
+            decision.question ??
+            `I opened Ticketmaster, but I could not find a listing for ${formatTargetDate(target)}. Which visible event/date should I use?`,
+        };
       }
     } else {
       slotClicked = await clickFirstAvailableSlot(page, trace).catch((err: Error) => {
@@ -1747,9 +1984,11 @@ export async function bookTicketmasterProgrammatic(
     if (slotClicked) {
       // Sidebar "Find Tickets" should appear ~1–2s after slot click.
       await page.waitForTimeout(1200);
-      const findClicked = await clickFindTickets(page, trace, target);
-      if (!findClicked) {
-        trace("[tm-rpa] Find Tickets click failed after calendar slot — user may need to advance manually");
+      if (!providerListingClicked) {
+        const findClicked = await clickFindTickets(page, trace, target);
+        if (!findClicked) {
+          trace("[tm-rpa] Find Tickets click failed after calendar slot — user may need to advance manually");
+        }
       }
       // Wait for navigation to /event/ page.
       await waitForEventPage(page, trace, 20000);

@@ -5,6 +5,7 @@ import * as path from "node:path";
 import {
   drawerMatchesTarget,
   pickPrimaryTicketmasterUrl,
+  ticketmasterProviderListingDecision,
   type TargetDateTime,
 } from "@/lib/booking-autopilot/providers/ticketmaster-rpa";
 
@@ -238,6 +239,76 @@ describe("pickPrimaryTicketmasterUrl — TM tab handoff fallback", () => {
     expect(
       pickPrimaryTicketmasterUrl(["https://www.ticketmaster.ca/foo/event/abc"]),
     ).toBe("https://www.ticketmaster.ca/foo/event/abc");
+  });
+});
+
+describe("ticketmasterProviderListingDecision - provider-start event choice", () => {
+  const sep17DateOnly: TargetDateTime = {
+    monthName: "September",
+    monthIndex: 8,
+    day: 17,
+    year: 2026,
+  };
+  const sep17At7: TargetDateTime = {
+    ...sep17DateOnly,
+    time: "7:00 PM",
+  };
+
+  it("asks for event/date/showtime when a provider-start task has no target", () => {
+    const d = ticketmasterProviderListingDecision([], null);
+    expect(d.kind).toBe("no_target");
+    expect(d.question).toMatch(/event date, city, and showtime/i);
+  });
+
+  it("returns a single match when one listing matches a date-only target", () => {
+    const d = ticketmasterProviderListingDecision(
+      [
+        "Sep 17 Thu 7:00 PM Disney On Ice presents Find Your Hero Detroit, MI Find Tickets",
+        "Sep 18 Fri 11:00 AM Disney On Ice presents Find Your Hero Detroit, MI Find Tickets",
+      ],
+      sep17DateOnly,
+    );
+    expect(d.kind).toBe("single_match");
+    expect(d.matches).toHaveLength(1);
+    expect(d.question).toBeNull();
+  });
+
+  it("asks which showtime when multiple listings match the date-only target", () => {
+    const d = ticketmasterProviderListingDecision(
+      [
+        "Sep 17 Thu 11:00 AM Disney On Ice presents Find Your Hero Detroit, MI Find Tickets",
+        "Sep 17 Thu 7:00 PM Disney On Ice presents Find Your Hero Detroit, MI Find Tickets",
+      ],
+      sep17DateOnly,
+    );
+    expect(d.kind).toBe("multiple_matches");
+    expect(d.matches).toHaveLength(2);
+    expect(d.question).toMatch(/which showtime/i);
+  });
+
+  it("uses target time to reduce same-date listings to one row", () => {
+    const d = ticketmasterProviderListingDecision(
+      [
+        "Sep 17 Thu 11:00 AM Disney On Ice presents Find Your Hero Detroit, MI Find Tickets",
+        "Sep 17 Thu 7:00 PM Disney On Ice presents Find Your Hero Detroit, MI Find Tickets",
+      ],
+      sep17At7,
+    );
+    expect(d.kind).toBe("single_match");
+    expect(d.matches).toEqual([
+      "Sep 17 Thu 7:00 PM Disney On Ice presents Find Your Hero Detroit, MI Find Tickets",
+    ]);
+  });
+
+  it("asks which visible listing to use when no row matches the requested date", () => {
+    const d = ticketmasterProviderListingDecision(
+      [
+        "Sep 18 Fri 11:00 AM Disney On Ice presents Find Your Hero Detroit, MI Find Tickets",
+      ],
+      sep17DateOnly,
+    );
+    expect(d.kind).toBe("no_match");
+    expect(d.question).toMatch(/could not find a listing/i);
   });
 });
 

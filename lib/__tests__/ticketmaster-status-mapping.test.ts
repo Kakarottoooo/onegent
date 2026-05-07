@@ -145,7 +145,25 @@ const SCENARIOS: Scenario[] = [
     },
   },
   {
-    // 3. Account / session checkpoint — auth boundary reached, user must
+    // 3. Provider-start listing checkpoint — artist/search pages can expose
+    //    multiple visible events. The user must choose date/showtime before
+    //    we continue. This stays reviewable, not failed.
+    state: "user_event_choice_required",
+    rpa: {
+      needsUserChoice: true,
+      handoffReady: true,
+      currentUrl:
+        "https://www.ticketmaster.com/disney-on-ice-presents-find-your-tickets/artist/1742147",
+    },
+    expected: {
+      executorStatus: "paused_payment",
+      browserTaskStatus: "paused_payment",
+      executorAdapterStatus: "paused_payment",
+      travelTaskState: "ready_for_confirmation",
+    },
+  },
+  {
+    // 4. Account / session checkpoint - auth boundary reached, user must
     //    sign in. Must be "awaiting_login" (not the more generic
     //    "ready_for_confirmation"). Never "executing".
     state: "user_login_required",
