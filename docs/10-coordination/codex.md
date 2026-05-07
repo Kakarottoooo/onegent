@@ -1,8 +1,8 @@
 # Codex - coordination state
 
 > **Branch**: `codex/integrated-preview-20260504`
-> **Last updated**: 2026-05-05
-> **Last commit**: this pass - Phase 0A OpenTable Sirrah closure evidence
+> **Last updated**: 2026-05-07
+> **Last commit**: this pass - Ticketmaster activity dogfood closure record
 >
 > Claude reads this at session start. I write to it before each push.
 > See `CLAUDE.md` section "coordination protocol".
@@ -12,6 +12,24 @@
 ## Currently doing
 
 Completed in latest pass:
+- Recorded founder-confirmed Ticketmaster activity dogfood closure:
+  - request family: Broadway / The Lion King in New York on May 30;
+  - latest traced job `46028ee4-c644-4df7-bee5-7bcb7d2713f9`;
+  - runtime path was existing v1 `ticketmaster-rpa` through the local
+    Stagehand/Playwright stack, not Browser Harness;
+  - worker evidence showed session cookies injected, `May 30, 2026 @ 2:00 PM`
+    parsed, calendar view opened, May 30 2:00 PM selected, right-side
+    `Find Tickets` clicked from the main Ticketmaster page, and the provider
+    event page reached;
+  - founder confirmed the path is now closed for initial dogfood. Remaining
+    polish: suppress/ignore external ad tabs, make the seat-selection
+    checkpoint explicit, and recover stale `running/loading` jobs if the local
+    browser/CDP session closes.
+- Updated `PHASE_STATUS.md` and `BUG_INBOX.md` with the Activity/Ticketmaster
+  status and clarified that Browser Harness remains a separate v2 spike/design
+  lane.
+
+Previous completed pass:
 - Recorded founder dogfood OpenTable closure for Phase 0A:
   - request: "book Sirrah in New York next Thursday at 8pm for 1 person";
   - job `3bbe2ac4-c4cd-409f-8c11-6a83d2f81485`, session

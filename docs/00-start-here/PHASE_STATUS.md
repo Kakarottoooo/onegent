@@ -1,7 +1,7 @@
 # Phase Status - single-source overview
 
 > For: founder, Codex, Claude, and future agents.
-> Last updated: 2026-05-05.
+> Last updated: 2026-05-07.
 > Read after: `docs/INDEX.md`, `docs/00-start-here/PROJECT_SUMMARY.md`,
 > and `docs/10-coordination/HUDDLE.md`.
 
@@ -15,7 +15,7 @@ Do not enter Phase 2 yet. Stabilize Phase 0, Phase 1, and Phase 1.5 first.
 | Phase 0B - Restaurant v1 coverage | Entry gate met | Broaden OpenTable-first restaurant fixtures; keep Resy as provider/network follow-up, not a Phase 0A blocker. |
 | Phase 1 - First paying user path | Demo-freeze passed | Full Phase 1 gate with smoke and autonomous founder E2E passes 12/12; manual founder walkthrough remains the human acceptance gate. |
 | Phase 1.5 - QA and polish | Demo-freeze passed | Quality gate, dev workbenches, production build, and production route probe are passing. |
-| Phase 2 - Vertical expansion | Runtime closure hardening, not demo-promised | Expedia flight and Booking.com hotel have no-live runtime closure packs integrated; both still need controlled live revalidation before demo promises. |
+| Phase 2 - Vertical expansion | Initial dogfood closure reached for hotel, flight, and activity | Expedia flight, Booking.com hotel, and Ticketmaster activity have reached usable review/continue boundaries in founder dogfood; broaden with benchmark coverage before demo promises. |
 
 ## Current Verified State
 
@@ -75,6 +75,22 @@ Do not enter Phase 2 yet. Stabilize Phase 0, Phase 1, and Phase 1.5 first.
   - Verdict: accepted `safe_handoff` / `ready_for_confirmation`. Phase 0A is
     closed via OpenTable; Resy remains a provider/network/IP-limited follow-up
     lane, not the Phase 0A gate.
+- 2026-05-07 Ticketmaster activity dogfood closure:
+  - Founder dogfood request: "book The Lion King / Broadway in New York on
+    May 30".
+  - Latest traced job: `46028ee4-c644-4df7-bee5-7bcb7d2713f9`.
+  - Runtime path used the existing v1 Ticketmaster provider runtime
+    (`ticketmaster-rpa`) through the local Stagehand/Playwright stack, not
+    Browser Harness. Browser Harness remains a separate v2 spike/design lane.
+  - Evidence from worker/app logs: session cookies were injected, target
+    `May 30, 2026 @ 2:00 PM` was parsed, calendar view opened, the May 30
+    2:00 PM slot was selected, the right-side `Find Tickets` drawer action was
+    clicked from the main Ticketmaster page, and the provider event page was
+    reached.
+  - Founder confirmed the Ticketmaster path is now closed for initial dogfood.
+    Remaining hardening is product/runtime polish: suppress or ignore external
+    ad tabs, make the seat-selection checkpoint explicit in the task UI, and
+    recover stale `running/loading` jobs if the local browser/CDP session closes.
 - Historical side branches now folded into integrated preview:
   `codex/openai-chat-model-env` (runtime/debug),
   `codex/expedia-flight-card-fallback` (Expedia visible-card fallback),
