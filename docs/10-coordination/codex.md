@@ -2,7 +2,7 @@
 
 > **Branch**: `codex/integrated-preview-20260504`
 > **Last updated**: 2026-05-07
-> **Last commit**: this pass - Ticketmaster activity dogfood closure record
+> **Last commit**: this pass - layered benchmark / agent intake planning
 >
 > Claude reads this at session start. I write to it before each push.
 > See `CLAUDE.md` section "coordination protocol".
@@ -12,6 +12,33 @@
 ## Currently doing
 
 Completed in latest pass:
+- Added the shared layered-agent intake checklist for the next multi-agent
+  round:
+  - current integration base:
+    `origin/codex/goal-core-reliability-long-run @ 8e91f39`;
+  - expected lanes: Goal layered benchmark, Claude activity recovery, Agent2
+    flight recovery, Agent3 hotel recovery, with Restaurant/OpenTable kept as
+    Codex-owned for this round;
+  - required report shape: branch, commit, worktree, changed files,
+    no-live/live evidence, validation, and whether any provider/runtime files
+    changed;
+  - merge order and reject criteria for dirty base, missing evidence,
+    unsafe boundary drift, unvalidated runtime changes, or unrelated path
+    churn.
+- Added the Layered Benchmark v2 dogfood plan:
+  - measure L1 provider runtime first, then classify evidence-backed failures
+    for L2 Browser Harness eligibility;
+  - L2 is only for selector/click/iframe/fill/progress/unknown-page-mutation
+    failures, not real no-availability, account/session checkpoints,
+    provider/network degradation, local model/env/DB issues, or insufficient
+    evidence;
+  - benchmark ladder starts no-live, then small dogfood batches before larger
+    case matrices.
+- Added the OpenTable restaurant baseline plan, starting from the founder-
+  confirmed Sirrah safe handoff and expanding first to five OpenTable-first
+  NYC cases before 10/20 case matrices.
+
+Previous completed pass:
 - Recorded founder-confirmed Ticketmaster activity dogfood closure:
   - request family: Broadway / The Lion King in New York on May 30;
   - latest traced job `46028ee4-c644-4df7-bee5-7bcb7d2713f9`;
