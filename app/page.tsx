@@ -44,6 +44,7 @@ import type {
   ProfilePatch,
   QuickPick,
 } from "@/lib/agent/nlu-v2";
+import type { CaptureTaskBoundaryResult } from "@/lib/capture/task-boundary";
 import type { ChatMessage } from "@/lib/llm-client";
 import { loadAgentModelConfig } from "@/lib/agent-model-config";
 import { getTaskWorkspaceHref, taskWorkspaceHrefForView } from "@/lib/booking-jobs/workspace";
@@ -1420,6 +1421,7 @@ function HomeInner() {
              *  this client should auto-fire /api/rooms/[id]/synthesize and
              *  surface the merged-search cards. */
             scenario_synthesis_ready?: boolean;
+            capture_task_boundary?: CaptureTaskBoundaryResult;
             /** Contact ids the server matched against the caller's contacts
              *  via natural-language member_names (no @-picker required).
              *  Merged into capturedMentionIds below so the eventual
@@ -1506,6 +1508,36 @@ function HomeInner() {
         // returns continue_chat instead when patch has no usable fields.
         if (nlu.assistant_reply) chat.injectAssistantMessage(nlu.assistant_reply);
         await dispatchProfilePatch(v2Action.patch);
+        return;
+      }
+
+      // Stage 0 Capture seam: /api/chat/parse also returns a TravelObject
+      // boundary. In the common path NLU already sets confirm_ready and the
+      // existing branches below handle it. This fallback only fires when the
+      // capture layer has enough structured data to use the same ConfirmCard,
+      // but the conversational router did not emit a confirm action.
+      const captureBoundary = data.capture_task_boundary;
+      const captureConfirmPayload =
+        !nlu.confirm_ready &&
+        captureBoundary?.ok &&
+        captureBoundary.nextAction === "show_confirmation"
+          ? captureBoundary.payload
+          : undefined;
+      if (captureConfirmPayload && !activeRoomId) {
+        const captureNlu = captureConfirmPayload.nlu;
+        chat.injectAssistantMessage(
+          nlu.assistant_reply ||
+            captureNlu.assistant_reply ||
+            "Ready to confirm this travel task.",
+        );
+        const nextConfirm: PendingConfirmSnapshot = {
+          nlu: captureNlu,
+          message: captureConfirmPayload.message || text,
+          kind: captureConfirmPayload.kind,
+          mentioned_user_ids: mergedMentionIds,
+        };
+        restorePendingConfirmState(nextConfirm);
+        persistPendingConfirmState(nextConfirm);
         return;
       }
 
