@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   isTicketmasterTicketOptionsPage,
+  looksLikeFindTicketsLabel,
   parseTargetDateTime,
 } from "@/lib/booking-autopilot/providers/ticketmaster-rpa";
 
@@ -37,5 +38,13 @@ describe("Ticketmaster target date parsing", () => {
   it("recognizes Ticketmaster event pages as user-review ticket options", () => {
     expect(isTicketmasterTicketOptionsPage("https://www.ticketmaster.com/event/Z7r9jZ1A7jJ7w")).toBe(true);
     expect(isTicketmasterTicketOptionsPage("https://www.ticketmaster.com/the-lion-king-new-york-ny-tickets/artist/1039581")).toBe(false);
+  });
+
+  it("matches drawer Find Tickets labels with trailing chevrons", () => {
+    expect(looksLikeFindTicketsLabel("Find Tickets")).toBe(true);
+    expect(looksLikeFindTicketsLabel("Find Tickets >")).toBe(true);
+    expect(looksLikeFindTicketsLabel("Find Tickets ›")).toBe(true);
+    expect(looksLikeFindTicketsLabel("Buy Tickets")).toBe(true);
+    expect(looksLikeFindTicketsLabel("Event information Find Tickets")).toBe(false);
   });
 });

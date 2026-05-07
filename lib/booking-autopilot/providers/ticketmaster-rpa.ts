@@ -11,9 +11,10 @@
  * and wait for the user to sign in (URL leaves the auth domain). Cookies from
  * .ticketmaster-cookies.json usually prevent this, but it's a safety net.
  */
-import type { Locator, Page } from "playwright";
+import type { Frame, Locator, Page } from "playwright";
 
 type TraceFn = (msg: string) => void;
+type TicketmasterFrameLike = Page | Frame;
 
 export interface TicketmasterRpaResult {
   reached_checkout: boolean;
@@ -450,13 +451,91 @@ async function clickFirstAvailableSlotWithLocators(page: Page, trace: TraceFn): 
 // The previous anchored regex /^\s*(find tickets...)\s*$/i missed all
 // trailing-character variants — observed live with the screenshot showing
 // "Find Tickets >".
-function looksLikeFindTicketsLabel(label: string): boolean {
+export function looksLikeFindTicketsLabel(label: string): boolean {
   const trimmed = label.trim().toLowerCase();
   if (!trimmed) return false;
   return ["find tickets", "buy tickets", "get tickets"].some(p => trimmed.startsWith(p));
 }
 
+async function clickFindTicketsWithDomScan(frame: TicketmasterFrameLike, trace: TraceFn, scopeLabel: string): Promise<boolean> {
+  const source = `
+(function() {
+  var controls = [];
+  var seen = new Set();
+  function isVisible(el) {
+    if (!el || !el.getBoundingClientRect) return false;
+    var r = el.getBoundingClientRect();
+    if (r.width < 24 || r.height < 16) return false;
+    var s = window.getComputedStyle ? window.getComputedStyle(el) : null;
+    if (s && (s.visibility === "hidden" || s.display === "none" || Number(s.opacity || "1") === 0)) return false;
+    return true;
+  }
+  function labelFor(el) {
+    return [
+      el.innerText || "",
+      el.textContent || "",
+      el.getAttribute && el.getAttribute("aria-label") || "",
+      el.getAttribute && el.getAttribute("title") || ""
+    ].join(" ").replace(/\\s+/g, " ").trim();
+  }
+  function looksLike(label) {
+    var t = String(label || "").trim().toLowerCase();
+    return t.indexOf("find tickets") === 0 || t.indexOf("buy tickets") === 0 || t.indexOf("get tickets") === 0;
+  }
+  function add(el) {
+    if (!el || seen.has(el) || !isVisible(el)) return;
+    seen.add(el);
+    var label = labelFor(el);
+    if (looksLike(label)) controls.push({ el: el, label: label });
+  }
+  function scanRoot(root, depth) {
+    if (!root || depth > 4) return;
+    var nodes = [];
+    try {
+      nodes = Array.from(root.querySelectorAll('a, button, [role="button"], [role="link"], [aria-label*="Find Tickets" i], [data-testid*="find" i]'));
+    } catch {}
+    nodes.forEach(add);
+    var all = [];
+    try { all = Array.from(root.querySelectorAll("*")); } catch {}
+    for (var i = 0; i < all.length && i < 2500; i++) {
+      var child = all[i];
+      if (child && child.shadowRoot) scanRoot(child.shadowRoot, depth + 1);
+    }
+  }
+  scanRoot(document, 0);
+  if (!controls.length) {
+    return { clicked: false, candidates: 0, eventInfo: /event information/i.test(document.body && document.body.innerText || "") };
+  }
+  controls.sort(function(a, b) {
+    var aScope = a.el.closest && a.el.closest('aside, [role="dialog"], [aria-modal], section, div') || a.el;
+    var bScope = b.el.closest && b.el.closest('aside, [role="dialog"], [aria-modal], section, div') || b.el;
+    var ae = /event information/i.test(aScope.innerText || "") ? 1 : 0;
+    var be = /event information/i.test(bScope.innerText || "") ? 1 : 0;
+    return be - ae;
+  });
+  var chosen = controls[0];
+  chosen.el.scrollIntoView({ behavior: "auto", block: "center" });
+  chosen.el.click();
+  return { clicked: true, label: chosen.label.slice(0, 120), candidates: controls.length, eventInfo: true };
+})()
+`;
+  const result = await frame.evaluate(source).catch((err: Error) => {
+    trace(`[tm-rpa] Find Tickets DOM scan failed (${scopeLabel}): ${err.message?.slice(0, 80)}`);
+    return null;
+  });
+  const clicked = result as null | { clicked?: boolean; label?: string; candidates?: number; eventInfo?: boolean };
+  if (clicked?.clicked) {
+    trace(`[tm-rpa] Clicked Find Tickets via DOM scan (${scopeLabel}): "${(clicked.label ?? "").slice(0, 80)}" candidates=${clicked.candidates ?? 0}`);
+    return true;
+  }
+  if (clicked?.eventInfo) {
+    trace(`[tm-rpa] Event-info drawer visible but Find Tickets not matched in DOM scan (${scopeLabel})`);
+  }
+  return false;
+}
+
 async function clickFindTicketsWithLocators(page: Page, trace: TraceFn): Promise<boolean> {
+  const deadline = Date.now() + 3000;
   // Strategy A: Playwright :has-text() — substring-based, no regex. The
   // most reliable path when the button text has trailing chevrons/arrows.
   const hasTextSelectors = [
@@ -469,6 +548,7 @@ async function clickFindTicketsWithLocators(page: Page, trace: TraceFn): Promise
     'button:has-text("Get Tickets")',
   ];
   for (const sel of hasTextSelectors) {
+    if (Date.now() > deadline) break;
     try {
       const loc = page.locator(sel).first();
       const count = await loc.count().catch(() => 0);
@@ -486,8 +566,12 @@ async function clickFindTicketsWithLocators(page: Page, trace: TraceFn): Promise
 
   // Strategy B: scan all clickables, match via startsWith.
   const controls = page.locator('a, button, [role="button"], [role="link"]');
-  const count = Math.min(await controls.count().catch(() => 0), 180);
+  const count = Math.min(await controls.count().catch(() => 0), 60);
   for (let i = 0; i < count; i++) {
+    if (Date.now() > deadline) {
+      trace(`[tm-rpa] Find Tickets locator scan budget exceeded at i=${i}/${count}`);
+      break;
+    }
     const item = controls.nth(i);
     if (!(await locatorLooksVisible(item))) continue;
     const label = await locatorLabel(item);
@@ -978,7 +1062,18 @@ async function clickFindTickets(page: Page, trace: TraceFn): Promise<boolean> {
   // Wait up to 16s for the button to render in the sidebar (TM renders
   // the panel asynchronously — 8s was not enough on slower hosts).
   const deadline = Date.now() + 16000;
+  let loop = 0;
   while (Date.now() < deadline) {
+    loop++;
+    const frames: Array<{ target: TicketmasterFrameLike; label: string }> = [
+      { target: page, label: "page" },
+      ...page.frames().map((frame, index) => ({ target: frame, label: `frame:${index}:${frame.url().slice(0, 60)}` })),
+    ];
+    for (const item of frames) {
+      if (await clickFindTicketsWithDomScan(item.target, trace, item.label)) {
+        return true;
+      }
+    }
     const clicked = await page.evaluate(() => {
       const isVisible = (el: Element): boolean => {
         const r = (el as HTMLElement).getBoundingClientRect();
@@ -1004,7 +1099,7 @@ async function clickFindTickets(page: Page, trace: TraceFn): Promise<boolean> {
       trace(`[tm-rpa] Clicked Find Tickets: "${clicked}"`);
       return true;
     }
-    if (await clickFindTicketsWithLocators(page, trace)) {
+    if ((loop === 1 || loop % 5 === 0) && await clickFindTicketsWithLocators(page, trace)) {
       return true;
     }
     await page.waitForTimeout(400);
