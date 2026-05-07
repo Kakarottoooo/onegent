@@ -24,6 +24,8 @@ type SignalKind =
   | "mixed_or_stale_worker_evidence"
   | "checkout_form_incomplete"
   | "candidate_rejected"
+  | "price_only_candidate_rejected"
+  | "dismissable_promo_overlay"
   | "card_scan_failed"
   | "fallback_attempted"
   | "fallback_matched"
@@ -209,9 +211,14 @@ const SIGNAL_PATTERNS: SignalPattern[] = [
     rx: /\bwrong_time_candidate_rejected\b/i,
   },
   {
-    kind: "candidate_rejected",
+    kind: "price_only_candidate_rejected",
     label: "price-only candidate rejected",
     rx: /\bprice_only_fallback_rejected\b/i,
+  },
+  {
+    kind: "dismissable_promo_overlay",
+    label: "dismissable promo/member-price overlay",
+    rx: /\b(dismissable_member_price_overlay|sign in for member prices|earn OneKeyCash|Bundle & Save up to|No thanks)\b/i,
   },
   {
     kind: "candidate_rejected",
@@ -334,7 +341,7 @@ const SIGNAL_PATTERNS: SignalPattern[] = [
     rx: /\bdecision=rejected\b.*\breason=(?:price-only-time-mismatch|target-time-mismatch)\b/i,
   },
   {
-    kind: "no_match",
+    kind: "price_only_candidate_rejected",
     label: "price-only candidate rejected",
     rx: /\bdecision=rejected\b.*\breason=price-only-without-target-identity\b/i,
   },
@@ -362,6 +369,7 @@ export function analyzeExpediaRetryArtifactBundle(
   const hasMixedOrStaleEvidence = has("mixed_or_stale_worker_evidence");
   const hasCheckoutFormIncomplete = has("checkout_form_incomplete");
   const hasCandidateRejected = has("candidate_rejected");
+  const hasPriceOnlyCandidateRejected = has("price_only_candidate_rejected");
   const hasCheckout = has("checkout_reached");
   const hasLoginOrOtpBoundary = has("login_or_otp_boundary");
   const hasModelOrEnv = has("model_or_env_transient");
@@ -382,6 +390,8 @@ export function analyzeExpediaRetryArtifactBundle(
   } else if (hasNetwork) {
     state = "network_provider_failure";
   } else if (hasCheckoutFormIncomplete) {
+    state = "insufficient_evidence";
+  } else if (hasPriceOnlyCandidateRejected) {
     state = "insufficient_evidence";
   } else if (hasCandidateRejected) {
     state = "candidate_rejected_no_match";
@@ -568,6 +578,9 @@ function collectSignals(
       if (isHardStopChecklistBoundaryMention(pattern, entry)) {
         continue;
       }
+      if (isDismissablePromoBoundaryFalsePositive(pattern, excerpt)) {
+        continue;
+      }
       const key = `${pattern.kind}|${entry.label}|${pattern.label}|${excerpt}`;
       if (seen.has(key)) continue;
       seen.add(key);
@@ -643,6 +656,18 @@ function isHardStopChecklistBoundaryMention(
   );
 }
 
+function isDismissablePromoBoundaryFalsePositive(
+  pattern: SignalPattern,
+  excerpt: string,
+): boolean {
+  if (pattern.kind !== "login_or_otp_boundary") {
+    return false;
+  }
+  return /\b(dismissable_member_price_overlay|member prices?|onekeycash|bundle & save|no thanks|continue as guest)\b/i.test(
+    excerpt,
+  );
+}
+
 function classifyConfidence(
   state: ExpediaRetryState,
   flags: {
@@ -710,7 +735,7 @@ function nextActionForState(state: ExpediaRetryState): string {
     case "provider_no_availability":
       return "Treat as provider inventory/no-availability only when screenshots confirm the target card is absent. Do not patch selector logic from availability copy alone.";
     case "insufficient_evidence":
-      return "Collect one clean DB row, codex-worker.log excerpt, provider screenshots, and live snapshot paths before making a patch decision. If mixed/stale worker evidence is present, stop and clean worker topology first. If incomplete traveler fields are present, do not mark the flight lane closed.";
+      return "Collect one clean DB row, codex-worker.log excerpt, provider screenshots, and live snapshot paths before making a patch decision. If mixed/stale worker evidence is present, stop and clean worker topology first. If incomplete traveler fields are present, do not mark the flight lane closed. If price-only fallback evidence is present, require airline, target-time, or flight-number proof before closure.";
   }
 }
 
@@ -722,6 +747,10 @@ function signalRank(kind: SignalKind): number {
       return 0;
     case "candidate_rejected":
       return 0;
+    case "price_only_candidate_rejected":
+      return 0;
+    case "dismissable_promo_overlay":
+      return 1;
     case "checkout_reached":
       return 1;
     case "login_or_otp_boundary":
