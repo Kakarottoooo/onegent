@@ -24,6 +24,12 @@ describe("task workspace routing", () => {
     expect(getTaskEvidenceHref(job)).toBe("/tasks?view=history&focus=job_123&panel=evidence");
   });
 
+  it("keeps queue in the URL for pending task links", () => {
+    const job = { id: "job_pending", status: "pending" as const };
+    expect(getTaskWorkspaceHref(job)).toBe("/tasks?view=queue&focus=job_pending");
+    expect(getTaskEvidenceHref(job)).toBe("/tasks?view=queue&focus=job_pending&panel=evidence");
+  });
+
   it("uses Watch only for live jobs and Evidence for saved task records", () => {
     expect(taskEvidenceAction({ id: "job_live", status: "running" }).label).toBe("Watch");
     expect(taskEvidenceAction({ id: "job_done", status: "done" }).label).toBe("Evidence");

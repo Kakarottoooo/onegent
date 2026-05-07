@@ -3291,7 +3291,7 @@ function TripsPageInner() {
     const focusId = searchParams.get("focus");
     const panel = searchParams.get("panel");
     const nextView: TaskWorkspaceView =
-      view === "live" || view === "history" ? view : "queue";
+      view === "queue" || view === "live" || view === "history" ? view : "queue";
     setWorkspaceView(nextView);
 
     if (focusId) {
@@ -3325,8 +3325,7 @@ function TripsPageInner() {
 
   const setWorkspaceViewAndUrl = useCallback((next: TaskWorkspaceView) => {
     setWorkspaceView(next);
-    const href = next === "queue" ? "/tasks" : `/tasks?view=${next}`;
-    router.replace(href, { scroll: false });
+    router.replace(`/tasks?view=${next}`, { scroll: false });
   }, [router]);
 
   const {

@@ -45,4 +45,27 @@ describe("buildPlanQueryFromConstraints", () => {
       }),
     ).toBe("Find a Italian restaurant in New York on 2026-06-01");
   });
+
+  it("preserves structured activity event fields for legacy search handoff", () => {
+    expect(
+      buildPlanQueryFromConstraints("activity", {
+        event_name: "The Lion King",
+        event_type: "Broadway musical",
+        city: "New York",
+        event_date: "2026-05-30",
+        num_tickets: 1,
+      }),
+    ).toBe("Find tickets for The Lion King Broadway musical in New York on 2026-05-30 for 1 ticket");
+  });
+
+  it("accepts alternate activity constraint keys from older callers", () => {
+    expect(
+      buildPlanQueryFromConstraints("activity", {
+        activity_name: "Hamilton",
+        location: "New York",
+        date_from: "2026-06-01",
+        tickets: "2",
+      }),
+    ).toBe("Find tickets for Hamilton in New York on 2026-06-01 for 2 tickets");
+  });
 });

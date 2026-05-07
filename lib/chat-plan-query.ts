@@ -60,11 +60,34 @@ function buildFlightPlanQuery(constraints: Record<string, unknown>): string {
   return parts.join(" ").trim();
 }
 
+function buildActivityPlanQuery(constraints: Record<string, unknown>): string {
+  const eventName = readString(constraints, "event_name", "activity_name", "title", "name");
+  const eventType = readString(constraints, "event_type", "activity_type", "genre", "category");
+  const city = readString(constraints, "city", "venue_city", "location");
+  const date = readString(constraints, "event_date", "date", "date_from", "event_date_from");
+  const tickets = readNumber(constraints, "num_tickets", "tickets", "quantity", "party_size", "travelers");
+
+  const parts = ["Find tickets"];
+  if (eventName) {
+    parts.push(`for ${eventName}`);
+    if (eventType) parts.push(eventType);
+  } else if (eventType) {
+    parts.push(`for a ${eventType} event`);
+  } else {
+    parts.push("for an event");
+  }
+  if (city) parts.push(`in ${city}`);
+  if (date) parts.push(`on ${date}`);
+  if (tickets) parts.push(`for ${tickets} ${tickets === 1 ? "ticket" : "tickets"}`);
+  return parts.join(" ").trim();
+}
+
 export function buildPlanQueryFromConstraints(
   scenario: ConversationalScenario,
   constraints: Record<string, unknown>,
 ): string {
   if (scenario === "flight") return buildFlightPlanQuery(constraints);
+  if (scenario === "activity") return buildActivityPlanQuery(constraints);
 
   const city = readString(constraints, "city", "hotel_city", "arrival_city");
   const date = readString(constraints, "date", "check_in", "departure_date");
@@ -74,8 +97,6 @@ export function buildPlanQueryFromConstraints(
     pieces.push(cuisine ? `Find a ${cuisine} restaurant` : "Find a restaurant");
   } else if (scenario === "hotel") {
     pieces.push("Find a hotel");
-  } else if (scenario === "activity") {
-    pieces.push("Find something to do");
   } else {
     pieces.push("Plan a trip");
   }
