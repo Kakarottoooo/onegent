@@ -101,6 +101,30 @@ describe("hotel layered recovery", () => {
     expect(noAvailability.missingEvidence).toEqual(["scoped room inventory"]);
   });
 
+  it("keeps exact-property nothing-available copy weak without scoped room inventory proof", () => {
+    const noAvailability = evaluateHotelNoAvailabilityEvidence({
+      ...EXACT_CONTEXT,
+      currentUrl:
+        "https://www.booking.com/hotel/us/yotel-new-york.html?checkin=2026-06-10&checkout=2026-06-12&group_adults=1&no_rooms=1",
+      workerLogExcerpt:
+        "Hotel detail visible for YOTEL New York Times Square. Nothing available right now.",
+    });
+
+    expect(noAvailability.state).toBe("weak_no_availability");
+    expect(noAvailability.hasExactHotelEvidence).toBe(true);
+    expect(noAvailability.hasExactStayEvidence).toBe(true);
+    expect(noAvailability.hasScopedInventoryEvidence).toBe(false);
+    expect(
+      classifyHotelProviderFallbackEligibility(
+        {
+          ...EXACT_CONTEXT,
+          state: "network_provider_failure",
+        },
+        noAvailability,
+      ).eligible,
+    ).toBe(true);
+  });
+
   it("requires exact hotel/date/stay evidence before true no-availability", () => {
     const missingStay = evaluateHotelNoAvailabilityEvidence({
       ...EXACT_CONTEXT,

@@ -286,24 +286,26 @@ function hotelArtifactIncomplete(config: LayeredBenchmarkVerticalConfig): Layere
 
 function hotelStaleRunningState(config: LayeredBenchmarkVerticalConfig): LayeredBenchmarkCase {
   return hotelBaseCase(config, 10, {
-    failureClass: "progress_stall",
+    failureClass: "insufficient_evidence",
     l1Result: {
-      status: "blocked",
+      status: "insufficient_evidence",
       terminalState: "stale_running_state",
-      summary: "Worker/browser evidence ended, but task status remained running.",
+      summary:
+        "Worker/browser evidence ended, but task status remained running; do not count stale evidence as closure.",
     },
     evidenceCompleteness: completeHotelEvidence(10),
-    l2Eligible: true,
+    l2Eligible: false,
     l2SimulatedResult: {
-      status: "needs_patch",
-      summary: "Recovery needs task-workspace stale-state closure, not a blind provider retry.",
+      status: "not_applicable",
+      summary: "L2 and provider fallback are blocked until stale evidence is re-collected or reconciled.",
     },
     patchProposal: {
       proposed: true,
-      title: "Hotel stale running terminal-state guard",
+      title: "Hotel stale running evidence guard",
       files: ["lib/booking-jobs/workspace.ts", "app/api/booking-jobs/[id]/start/route.ts"],
       risk: "low",
-      notes: "Close stale running state from evidence before scheduling more provider work.",
+      notes:
+        "Close or reclassify stale running state from clean current evidence before scheduling more provider work.",
     },
     owner: "task-workspace",
     hotelContract: {

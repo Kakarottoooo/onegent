@@ -158,7 +158,7 @@ const SIGNAL_PATTERNS: SignalPattern[] = [
   {
     kind: "stale_or_mixed_evidence",
     label: "stale or mixed worker evidence",
-    rx: /\b(stale|mixed|wrong|different|previous|old)\s+(worker\s+)?(evidence|job|run|session|artifact|log|screenshot|snapshot)\b|\b(job|task|session|artifact)\s+(id\s+)?mismatch\b|\b(log|screenshot|snapshot)\s+belongs\s+to\s+(another|different|previous)\s+(job|task|run|session)\b/i,
+    rx: /\b(stale|mixed|wrong|different|previous|old)\s+(worker\s+)?(evidence|job|run|session|artifact|log|screenshot|snapshot|running\s+state)\b|\bstale[-\s]?running\s+state\b|\bstatus\s+(remained|stayed|is still)\s+running\b.*\b(worker|browser|run)\s+(ended|finished|exited|closed)\b|\b(job|task|session|artifact)\s+(id\s+)?mismatch\b|\b(log|screenshot|snapshot)\s+belongs\s+to\s+(another|different|previous)\s+(job|task|run|session)\b/i,
   },
   {
     kind: "payment_boundary",

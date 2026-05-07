@@ -343,6 +343,38 @@ describe("analyzeExpediaRetryArtifactBundle", () => {
       "provider_no_availability",
     );
   });
+
+  it("lets explicit target-card-not-visible evidence beat generic no-match signals", () => {
+    const analysis = analyzeExpediaRetryArtifactBundle({
+      job: {
+        id: "fixture-expedia-target-card-not-visible",
+        provider: "expedia",
+        scenario: "flight",
+        status: "failed",
+        errorMessage: "Provider inventory changed; target Southwest card is not visible.",
+      },
+      workerLogExcerpt: [
+        "[flight-rpa] Flight-card DOM scan failed: candidate section returned no target cards",
+        "[flight-rpa] No matching flight button found (tried airline=\"Southwest\" price=$152)",
+        "[flight-rpa] Checkout reached - stale diagnostic marker from previous attempt",
+      ].join("\n"),
+      screenshotPaths: [
+        "worker/.debug-screenshots/flight-rpa-fixture-target-card-absent/99-final-not-checkout.jpg",
+      ],
+    });
+
+    expect(analysis.state).toBe("provider_no_availability");
+    expect(analysis.confidence).toBe("high");
+    expect(analysis.signals[0]?.kind).toBe("provider_no_availability");
+    expect(analysis.signals.map((signal) => signal.kind)).toEqual(
+      expect.arrayContaining([
+        "provider_no_availability",
+        "no_match",
+        "card_scan_failed",
+      ]),
+    );
+    expect(analysis.nextAction).toContain("provider inventory/no-availability");
+  });
 });
 
 describe("Expedia retry markdown helpers", () => {

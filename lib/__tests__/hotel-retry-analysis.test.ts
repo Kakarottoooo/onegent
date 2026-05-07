@@ -223,6 +223,27 @@ describe("analyzeHotelRetryArtifactBundle", () => {
     expect(analysis.layeredRecovery.fallbackEligibility.eligible).toBe(false);
   });
 
+  it("does not close generic nothing-available copy as true inventory even with exact params", () => {
+    const analysis = analyzeHotelRetryArtifactBundle({
+      job: yotelJob("booking-com"),
+      workerLogExcerpt:
+        "[booking-com] Hotel detail visible for YOTEL New York Times Square. checkin=2026-06-10 checkout=2026-06-12 adults=1 rooms=1. Nothing available right now.",
+      workerLogPath: "codex-worker.log",
+      screenshotPaths: ["worker/.debug-screenshots/booking-com/01-nothing-available.jpg"],
+      liveSnapshotPaths: [".debug-screenshots/live/nothing-available/snapshot.json"],
+      notes: ["Synthetic no-live fixture. Generic nothing-available copy only."],
+    });
+
+    expect(analysis.state).toBe("network_provider_failure");
+    expect(analysis.layeredRecovery.noAvailabilityEvidence).toMatchObject({
+      state: "weak_no_availability",
+      hasExactHotelEvidence: true,
+      hasExactStayEvidence: true,
+      hasScopedInventoryEvidence: false,
+    });
+    expect(analysis.layeredRecovery.fallbackEligibility.eligible).toBe(true);
+  });
+
   it("preserves exact stay params when Hotels.com is fallback eligible", () => {
     const analysis = analyzeHotelRetryArtifactBundle({
       job: yotelJob("hotels-com"),
@@ -320,6 +341,29 @@ describe("analyzeHotelRetryArtifactBundle", () => {
     expect(analysis.signals[0]?.kind).toBe("stale_or_mixed_evidence");
     expect(analysis.signals.map((signal) => signal.kind)).toContain("guest_details_reached");
     expect(analysis.nextAction).toContain("Collect the DB row");
+  });
+
+  it("treats stale running state as insufficient evidence before no-availability closure", () => {
+    const analysis = analyzeHotelRetryArtifactBundle({
+      job: {
+        ...yotelJob("booking-com"),
+        status: "running",
+      },
+      workerLogExcerpt:
+        "[booking-com] Status remained running after worker ended. Hotel detail visible for YOTEL New York Times Square. checkin=2026-06-10 checkout=2026-06-12 adults=1 rooms=1. No rooms available for selected dates.",
+      workerLogPath: "codex-worker.log",
+      screenshotPaths: ["worker/.debug-screenshots/booking-com/stale-running-no-availability.jpg"],
+      liveSnapshotPaths: [".debug-screenshots/live/stale-running/snapshot.json"],
+      notes: ["Synthetic no-live fixture. Stale running state blocks terminal closure."],
+    });
+
+    expect(analysis.state).toBe("insufficient_evidence");
+    expect(analysis.status).toBe("running");
+    expect(analysis.signals[0]?.kind).toBe("stale_or_mixed_evidence");
+    expect(analysis.signals.map((signal) => signal.kind)).toContain("provider_no_availability");
+    expect(analysis.layeredRecovery.noAvailabilityEvidence.state).toBe(
+      "verified_true_no_availability",
+    );
   });
 });
 

@@ -122,7 +122,7 @@ uses hotel-specific synthetic fixtures. The ten fixtures cover:
 - Guest/review boundary.
 - Account/session boundary.
 - Artifact incomplete.
-- Stale running state.
+- Stale/mixed running evidence classified as insufficient evidence.
 
 Benchmark L2 eligibility means Browser Harness recovery. Hotel provider
 fallback eligibility is recorded separately in the hotel contract because weak

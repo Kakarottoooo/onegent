@@ -609,7 +609,10 @@ export function renderLayeredBenchmarkMarkdown(report: LayeredBenchmarkReport): 
 function buildLayeredBenchmarkCases(): LayeredBenchmarkCase[] {
   return VERTICAL_CONFIGS.flatMap((config) =>
     config.vertical === "flight"
-      ? [...FLIGHT_LAYERED_BENCHMARK_CASES, ...buildCasesForVertical(config, 11)]
+      ? [
+          ...FLIGHT_LAYERED_BENCHMARK_CASES,
+          ...buildCasesForVertical(config, FLIGHT_LAYERED_BENCHMARK_CASES.length + 1),
+        ]
       : config.vertical === "hotel"
         ? buildHotelLayeredBenchmarkCases(config)
       : buildCasesForVertical(config),

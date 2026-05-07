@@ -395,6 +395,8 @@ export function analyzeExpediaRetryArtifactBundle(
     state = "insufficient_evidence";
   } else if (hasCandidateRejected) {
     state = "candidate_rejected_no_match";
+  } else if (hasNoAvailability) {
+    state = "provider_no_availability";
   } else if (hasCheckout) {
     state = "checkout_manual_review_reached";
   } else if (hasFallbackMatched) {
@@ -405,8 +407,6 @@ export function analyzeExpediaRetryArtifactBundle(
     state = "card_scan_failed_before_fallback";
   } else if (hasNoMatch) {
     state = "fallback_attempted_no_match";
-  } else if (hasNoAvailability) {
-    state = "provider_no_availability";
   } else {
     state = "insufficient_evidence";
   }
@@ -749,6 +749,8 @@ function signalRank(kind: SignalKind): number {
       return 0;
     case "price_only_candidate_rejected":
       return 0;
+    case "provider_no_availability":
+      return 0;
     case "dismissable_promo_overlay":
       return 1;
     case "checkout_reached":
@@ -767,8 +769,6 @@ function signalRank(kind: SignalKind): number {
       return 7;
     case "no_match":
       return 8;
-    case "provider_no_availability":
-      return 9;
   }
 }
 
