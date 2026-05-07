@@ -169,7 +169,10 @@ Field notes:
      Resolver contract, not model prose. Exact event pages can start direct
      provider-entry tasks. Artist, performer, grouping, search, and listing
      pages can start provider-page tasks only with user-choice boundaries.
-     Impersonating hosts stay review-only.
+     Provider-start pages are not exact event evidence: missing date/city in
+     the original utterance is not no-availability proof, and runtime must use
+     provider-rendered listings plus safe user checkpoints before selecting an
+     event/date/city/seat. Impersonating hosts stay review-only.
 
 4. Confidence overuse.
    - Risk: high model confidence is treated as task readiness even while
@@ -221,6 +224,11 @@ current benchmark already locks:
   `hotel-artifact-gap-01`, `flight-artifact-gap-01`, and
   `activity-artifact-gap-01`) by recording task-readiness evidence in the
   deterministic artifact contract.
+- real activity provider URL shapes from founder dogfood and common ticketing
+  sites: Ticketmaster artist/event links, StubHub performer/grouping links,
+  and SeatGeek listing/dated-event links. These fixtures lock provider,
+  page type, execution mode, provider page id, title hint, and user-choice
+  metadata without fetching live webpages.
 
 Run:
 

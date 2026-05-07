@@ -113,14 +113,15 @@ export function buildProviderUrlFallbackNluResult(input: {
       provider: inferred.provider,
       provider_page_type: inferred.pageType,
       provider_page_id: inferred.providerPageId,
-      ...(inferred.needsUserChoice ? { source_needs_user_choice: true } : {}),
+      source_execution_mode: inferred.executionMode,
+      source_needs_user_choice: inferred.needsUserChoice,
     },
     missing_fields: [],
     suggested_clarify_question: null,
     suggested_quick_picks: null,
     confirm_ready: true,
     refined_target_id: null,
-    assistant_reply: `I found the provider page for ${inferred.eventName}. Confirm to start from that page; I will stop before seat selection, login, payment, or final confirmation.`,
+    assistant_reply: buildProviderUrlFallbackReply(inferred),
     __v2_state: state,
     __v2_action: action,
   };
@@ -133,6 +134,7 @@ function inferActivityFromProviderUrl(url: string): {
   pageType: string;
   providerPageId: string;
   needsUserChoice: boolean;
+  executionMode: "direct_execution" | "provider_start";
 } | null {
   const direct = parseDirectActivityProviderUrl(url);
   if (!direct) return null;
@@ -145,7 +147,38 @@ function inferActivityFromProviderUrl(url: string): {
     pageType: direct.pageType,
     providerPageId: direct.providerPageId,
     needsUserChoice: direct.needsUserChoice,
+    executionMode: direct.executionMode,
   };
+}
+
+function buildProviderUrlFallbackReply(input: {
+  eventName: string;
+  provider: string;
+  executionMode: "direct_execution" | "provider_start";
+  needsUserChoice: boolean;
+}): string {
+  const provider = labelForProvider(input.provider);
+  if (input.executionMode === "provider_start" || input.needsUserChoice) {
+    return [
+      `I found the ${provider} provider page for ${input.eventName}.`,
+      "I can start from that page directly and use its listings as the source of truth.",
+      "If multiple events, dates, cities, or seats require a choice, I will pause for you.",
+      "I will stop before seat selection, login, payment, or final confirmation.",
+    ].join(" ");
+  }
+  return [
+    `I found the exact ${provider} event page for ${input.eventName}.`,
+    "I can start this task directly from that event link.",
+    "I will stop before seat selection, login, payment, or final confirmation.",
+  ].join(" ");
+}
+
+function labelForProvider(provider: string): string {
+  if (provider === "ticketmaster") return "Ticketmaster";
+  if (provider === "stubhub") return "StubHub";
+  if (provider === "seatgeek") return "SeatGeek";
+  if (provider === "eventbrite") return "Eventbrite";
+  return "provider";
 }
 
 function inferActivityType(

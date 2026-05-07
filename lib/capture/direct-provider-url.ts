@@ -79,9 +79,12 @@ export function buildDirectActivityTask(input: {
     return [
       `Start from this exact ${providerLabel} ${pageLabel} page URL: ${input.providerUrl}.`,
       `Book ${input.numTickets} ticket${input.numTickets === 1 ? "" : "s"} for "${input.eventName}"${datePart}.`,
+      "Treat this as a provider-start page, not exact event evidence.",
       `Do not use generic event search or replace it with an unrelated ${providerLabel} page.`,
-      "Use the events, listings, dates, or cities shown on this provider page to continue.",
-      "If multiple events, dates, or seats require a choice, pause for the user to choose.",
+      "Open the provider page and use the provider-rendered events, listings, dates, and cities as the source of truth.",
+      "If the request omitted a date or city, do not report no availability just because that field is missing.",
+      "If there is exactly one obvious matching listing, continue from that listing; otherwise pause for the user to choose the event, date, city, or seats.",
+      "Only report no events or no availability when the provider page itself clearly says there are no upcoming events, the page is unavailable, or the chosen listing is unavailable.",
       "Fill allowed saved profile fields after user selection and stop before the final purchase or confirmation action.",
     ].join(" ");
   }

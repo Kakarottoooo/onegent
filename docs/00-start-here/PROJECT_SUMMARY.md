@@ -133,8 +133,11 @@ version:
   Travel Link Resolver. Exact event links can start direct provider-entry
   tasks with the exact source URL preserved. Ticketmaster artist pages,
   StubHub performer/grouping pages, and SeatGeek dated/listing pages can start
-  provider-page tasks that keep user choice boundaries. Impersonating hosts do
-  not trigger provider execution.
+  provider-page tasks that keep user choice boundaries. Provider-start pages
+  are explicitly not exact event evidence: runtime should inspect provider
+  listings, continue only when one obvious listing exists, and pause when the
+  user must choose event/date/city/seats. Impersonating hosts do not trigger
+  provider execution.
 - Runtime now has a Ticketmaster task-state classifier for checkout reached,
   seat selection needed, login/account boundary, external ad tab, local browser
   disconnect, and unknown failure states.

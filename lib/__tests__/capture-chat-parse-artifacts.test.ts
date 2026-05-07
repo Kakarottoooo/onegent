@@ -185,9 +185,14 @@ describe("provider URL fallback NLU result", () => {
         num_tickets: 1,
         source_url: lilWayneUrl,
         source_host: "www.ticketmaster.com",
+        source_execution_mode: "provider_start",
+        source_needs_user_choice: true,
       },
     });
     expect(result?.assistant_reply).not.toContain("Sorry");
+    expect(result?.assistant_reply).toContain("provider page");
+    expect(result?.assistant_reply).toContain("use its listings as the source of truth");
+    expect(result?.assistant_reply).toContain("I will pause for you");
     expect(result?.__v2_state?.activity).toMatchObject({
       event_name: "Lil Wayne",
       event_type: "concert",
@@ -230,6 +235,7 @@ describe("provider URL fallback NLU result", () => {
         provider: "stubhub",
         provider_page_type: "performer",
         provider_page_id: "101864867",
+        source_execution_mode: "provider_start",
         source_needs_user_choice: true,
       },
     });
@@ -257,8 +263,12 @@ describe("provider URL fallback NLU result", () => {
         provider: "seatgeek",
         provider_page_type: "event",
         provider_page_id: "17990981",
+        source_execution_mode: "direct_execution",
+        source_needs_user_choice: false,
       },
     });
+    expect(result?.assistant_reply).toContain("exact SeatGeek event page");
+    expect(result?.assistant_reply).toContain("start this task directly from that event link");
   });
 
   it("uses the normalized URL in the fallback result when the message starts with ttps", () => {

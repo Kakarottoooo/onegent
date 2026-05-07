@@ -159,9 +159,28 @@ describe("direct activity provider URL parsing", () => {
     });
 
     expect(task).toContain("Start from this exact Ticketmaster artist page URL");
+    expect(task).toContain("Treat this as a provider-start page, not exact event evidence");
     expect(task).toContain("Do not use generic event search");
-    expect(task).toContain("Use the events, listings, dates, or cities shown on this provider page");
+    expect(task).toContain("use the provider-rendered events, listings, dates, and cities as the source of truth");
+    expect(task).toContain("do not report no availability just because that field is missing");
+    expect(task).toContain("exactly one obvious matching listing");
     expect(task).toContain("stop before the final purchase");
+  });
+
+  it("keeps exact event task copy separate from provider-start copy", () => {
+    const task = buildDirectActivityTask({
+      eventName: "Nashville SC v DC United",
+      eventDate: "2026-05-09",
+      numTickets: 1,
+      providerUrl: "https://www.ticketmaster.com/example/event/1B0063739937BB85",
+      provider: "ticketmaster",
+      pageType: "event",
+    });
+
+    expect(task).toContain("Use this exact Ticketmaster event URL");
+    expect(task).toContain("If this exact provider page is unavailable or not found");
+    expect(task).not.toContain("provider-start page");
+    expect(task).not.toContain("date or city");
   });
 
   it("builds a non-Ticketmaster provider-start task without Ticketmaster-specific copy", () => {

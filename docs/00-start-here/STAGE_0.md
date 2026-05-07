@@ -97,9 +97,13 @@ Stage 0 work is in scope when it directly improves one of these systems:
      OpenAI extraction quality.
    - Direct activity URL coverage now flows through a structured Travel Link
      Resolver contract. Exact provider event links can become direct
-     provider-entry tasks; artist, performer, grouping, search, and listing
-     pages can become provider-start tasks that require user choice at runtime;
-     impersonating hosts remain review-only.
+     provider-entry tasks. Artist, performer, grouping, search, and listing
+     pages can also start provider-page tasks, but they are explicitly
+     `provider_start`, not exact event evidence: runtime must inspect the
+     provider-rendered listings, choose only when there is one obvious match,
+     pause for user choice when multiple events/dates/cities/seats are shown,
+     and must not claim no availability merely because the original request
+     omitted date or city. Impersonating hosts remain review-only.
    - The current Stage 0 capture corpus target is 500+ fixtures across
      restaurant, hotel, flight, activity, trip/package, ambiguous/save-only,
      refine/follow-up, profile/preferences, and chitchat/unsupported inputs.
@@ -190,6 +194,11 @@ Anti-goals for side agents:
     output before task creation. LLM/web metadata enrichment may improve this
     object later, but executor prompts must be generated from the structured
     contract, not from free-form model prose.
+  - For activity providers, exact event URLs and provider-start URLs share the
+    same task boundary but different execution contracts. Exact event URLs
+    lock the runtime to one event page. Provider-start URLs lock the runtime
+    to the supplied artist/performer/grouping/listing page and defer event,
+    date, city, or seat choice to provider evidence and user checkpoints.
   - Task readiness is derived from NLU/router state, not from model prose.
   - Convert-to-task stays behind the existing confirm/task workspace flow.
 - Keep it small and use existing NLU/task seams where possible.

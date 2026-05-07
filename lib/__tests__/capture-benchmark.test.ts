@@ -163,7 +163,7 @@ describe("Stage 0 capture benchmark", () => {
     expect(group?.capture.possible_actions.map((action) => action.type)).toContain("create_room");
   });
 
-  it("respects direct Ticketmaster event URL behavior without treating artist links or impersonation as direct", () => {
+  it("respects direct activity provider URL behavior without treating impersonation as direct", () => {
     const report = runCaptureBenchmark({ vertical: "activity" });
 
     const directEvent = report.results.find((result) => result.id === "activity-ticketmaster-event-direct-01");
@@ -195,7 +195,34 @@ describe("Stage 0 capture benchmark", () => {
     expect(buildCaptureTaskBoundary(urlOnlyEvent!.capture).nextAction).toBe("run_direct_booking");
 
     const artistLink = report.results.find((result) => result.id === "activity-url-review-01");
-    expect(buildCaptureTaskBoundary(artistLink!.capture).nextAction).not.toBe("run_direct_booking");
+    expect(buildCaptureTaskBoundary(artistLink!.capture)).toMatchObject({
+      nextAction: "run_direct_booking",
+    });
+    expect(artistLink?.capture.constraints).toMatchObject({
+      source_execution_mode: "provider_start",
+      source_needs_user_choice: true,
+      provider_page_type: "artist",
+    });
+
+    const stubHub = report.results.find((result) => result.id === "activity-provider-stubhub-world-cup-grouping-01");
+    expect(stubHub?.capture.constraints).toMatchObject({
+      source_provider: "stubhub",
+      source_page_type: "grouping",
+      source_execution_mode: "provider_start",
+      source_needs_user_choice: true,
+      provider_page_id: "45410",
+    });
+    expect(buildCaptureTaskBoundary(stubHub!.capture).nextAction).toBe("run_direct_booking");
+
+    const seatGeekExact = report.results.find((result) => result.id === "activity-provider-seatgeek-chris-stapleton-event-01");
+    expect(seatGeekExact?.capture.constraints).toMatchObject({
+      source_provider: "seatgeek",
+      source_page_type: "exact_event",
+      source_execution_mode: "direct_execution",
+      source_needs_user_choice: false,
+      provider_page_id: "17990981",
+    });
+    expect(buildCaptureTaskBoundary(seatGeekExact!.capture).nextAction).toBe("run_direct_booking");
 
     const allReport = runCaptureBenchmark({ vertical: "all" });
     const impersonation = allReport.results.find((result) => result.input.includes("ticketmaster.com.evil.example"));

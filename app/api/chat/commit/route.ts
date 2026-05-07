@@ -1251,7 +1251,10 @@ async function buildDirectBookingPayload(
     const directUrl = readDirectActivityProviderUrlFromConstraints(constraints);
     if (!directUrl) return null;
 
-    const eventName = readString(constraints, "event_name", "activity_name", "title") ?? "Ticketmaster event";
+    const eventName =
+      readString(constraints, "event_name", "activity_name", "title") ??
+      directUrl.titleHint ??
+      `${labelForActivityProvider(directUrl.provider)} event`;
     const city = readString(constraints, "city") ?? "";
     const eventDate = readString(constraints, "event_date", "date");
     const numTickets = readNumber(constraints, "num_tickets", "tickets", "quantity", "party_size") ?? 1;
@@ -1273,6 +1276,10 @@ async function buildDirectBookingPayload(
       num_tickets: numTickets,
       provider: directUrl.provider,
       provider_page_type: directUrl.pageType,
+      provider_execution_mode: directUrl.executionMode,
+      needs_user_choice: directUrl.needsUserChoice,
+      source_execution_mode: directUrl.executionMode,
+      source_needs_user_choice: directUrl.needsUserChoice,
       startUrl: directUrl.url,
       fallbackUrl: directUrl.url,
       task,
