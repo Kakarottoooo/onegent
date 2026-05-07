@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 import type { IntentState, NluV2ParseResult, RouterAction } from "@/lib/agent/nlu-v2";
-import { buildCaptureChatParseArtifacts } from "@/lib/capture/chat-parse-artifacts";
+import {
+  buildCaptureChatParseArtifacts,
+  buildProviderUrlFallbackNluResult,
+} from "@/lib/capture/chat-parse-artifacts";
+import { extractAllCaptureUrls } from "@/lib/capture/travel-object";
 
 const capturedAt = "2026-05-07T16:00:00.000Z";
 
@@ -127,5 +131,72 @@ describe("Capture chat parse artifacts", () => {
     expect(artifacts.capture_travel_object.task_readiness.reason).toBe("needs_review");
     expect(artifacts.capture_task_boundary.ok).toBe(false);
     expect(artifacts.capture_task_boundary.payload).toBeUndefined();
+  });
+});
+
+describe("provider URL fallback NLU result", () => {
+  const lilWayneUrl =
+    "https://www.ticketmaster.com/lil-wayne-tickets/artist/712214?ac_link=ursa_84359098-9ebf-4cbc-a046-9d852562c3bd_a_712214?ac_link=iccp_hp_t3_fallback_K8vZ917GemV";
+
+  it("normalizes a missing leading h in pasted provider URLs", () => {
+    const [url] = extractAllCaptureUrls(lilWayneUrl.replace(/^https/, "ttps"));
+
+    expect(url).toBe(lilWayneUrl);
+  });
+
+  it("builds a deterministic activity fallback for Ticketmaster artist URLs", () => {
+    const result = buildProviderUrlFallbackNluResult({
+      message: `帮我订这个票：${lilWayneUrl}`,
+      capturedAt,
+    });
+
+    expect(result).toMatchObject({
+      intent: "create_plan",
+      scenario: "activity",
+      confirm_ready: true,
+      assistant_reply: expect.stringContaining("Lil Wayne"),
+      collected_constraints: {
+        event_name: "Lil Wayne",
+        event_type: "concert",
+        num_tickets: 1,
+        source_url: lilWayneUrl,
+        source_host: "www.ticketmaster.com",
+      },
+    });
+    expect(result?.assistant_reply).not.toContain("Sorry");
+    expect(result?.__v2_state?.activity).toMatchObject({
+      event_name: "Lil Wayne",
+      event_type: "concert",
+      num_tickets: 1,
+    });
+  });
+
+  it("uses the normalized URL in the fallback result when the message starts with ttps", () => {
+    const result = buildProviderUrlFallbackNluResult({
+      message: `ttps://www.ticketmaster.com/lil-wayne-tickets/artist/712214 帮我订这个票`,
+      capturedAt,
+    });
+
+    expect(result?.collected_constraints.source_url).toBe(
+      "https://www.ticketmaster.com/lil-wayne-tickets/artist/712214",
+    );
+  });
+
+  it("does not build a fallback for provider host impersonation", () => {
+    expect(
+      buildProviderUrlFallbackNluResult({
+        message: "https://ticketmaster.com.evil.example/lil-wayne-tickets/artist/712214",
+        capturedAt,
+      }),
+    ).toBeNull();
+  });
+
+  it("does not silently pick the first URL from a multi-URL message", () => {
+    expect(
+      buildProviderUrlFallbackNluResult({
+        message: `${lilWayneUrl} https://www.ticketmaster.com/drake-tickets/artist/12345`,
+        capturedAt,
+      }),
+    ).toBeNull();
   });
 });

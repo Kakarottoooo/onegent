@@ -99,7 +99,7 @@ export interface BuildCaptureTravelObjectInput {
 // generic delimiters /?#@) bounds the match cleanly. Trailing
 // sentence-punctuation is stripped separately by extractCaptureUrl below
 // so legitimate inner commas (Google Maps coords) are preserved.
-const URL_RE = /https?:\/\/[A-Za-z0-9\-._~:/?#@!$&*+=%,;]+/i;
+const URL_RE = /(?:https?|ttps):\/\/[A-Za-z0-9\-._~:/?#@!$&*+=%,;]+/i;
 
 // Brand → scenario hints. Each entry lists the brand tokens (lowercased) we
 // recognize as that vertical. Matching anchors to the *registrable* host
@@ -503,6 +503,9 @@ export function extractAllCaptureUrls(raw: string): string[] {
   const out: string[] = [];
   for (const m of raw.matchAll(re)) {
     let url = m[0];
+    if (/^ttps:\/\//i.test(url)) {
+      url = `h${url}`;
+    }
     // Trim trailing sentence-delimiter punctuation. Iterate so a sequence
     // like "...,!" gets fully stripped instead of leaving the inner ',' .
     url = url.replace(/[,.;:!?]+$/, "");

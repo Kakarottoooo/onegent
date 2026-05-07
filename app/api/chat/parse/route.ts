@@ -19,7 +19,10 @@ import {
   analyzeConversationalV2,
   buildFallbackResult,
 } from "@/lib/agent/nlu-v2";
-import { buildCaptureChatParseArtifacts } from "@/lib/capture/chat-parse-artifacts";
+import {
+  buildCaptureChatParseArtifacts,
+  buildProviderUrlFallbackNluResult,
+} from "@/lib/capture/chat-parse-artifacts";
 import {
   isRoomMember,
   upsertMemberIntentState,
@@ -515,7 +518,8 @@ export async function POST(req: NextRequest) {
       "[chat/parse] v2 pipeline failed, returning fallback:",
       err instanceof Error ? err.message : err,
     );
-    const fallbackResult = buildFallbackResult(message);
+    const fallbackResult =
+      buildProviderUrlFallbackNluResult({ message }) ?? buildFallbackResult(message);
     const captureArtifacts = buildCaptureChatParseArtifacts({
       message,
       result: fallbackResult,
