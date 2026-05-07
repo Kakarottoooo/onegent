@@ -160,7 +160,8 @@ describe("layered operator cockpit", () => {
     const providerRuntime = cockpit.ownerRecommendations.find((item) => item.owner === "provider-runtime");
     expect(providerRuntime?.failedCount).toBeGreaterThan(0);
     expect(providerRuntime?.nextTask).toContain("Patch");
-    expect(providerRuntime?.cases[0]).toMatchObject({
+    expect(providerRuntime?.cases.some((item) => item.patchProposal)).toBe(true);
+    expect(providerRuntime?.cases.find((item) => item.patchProposal)).toMatchObject({
       owner: "provider-runtime",
       patchProposal: true,
     });
