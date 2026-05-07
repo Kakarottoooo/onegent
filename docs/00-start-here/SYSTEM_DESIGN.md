@@ -206,6 +206,24 @@ does not depend on the unmerged branch. Do make agents wait when the next task
 depends on a new shared schema, runtime contract, or read model that has not
 landed yet.
 
+`scripts/layered-agent-intake.ts` is the no-live intake queue for returned
+agent branches. It reads static JSON or Markdown metadata and classifies each
+branch as `ready_to_merge`, `needs_followup`, or `reject`. The schema records
+task kind, base, changed files, validations, dependency edges, supersession, and
+rebase requirements without touching provider runtime or live artifacts.
+
+Every returned side-agent task must be one of:
+
+- `runtime_fix`
+- `benchmark_fixture`
+- `read_model_perf`
+- `task_workspace_ux`
+- `docs_contract`
+
+Codex can start independent work before previous branches are merged. It should
+pause only when the next task depends on an unmerged shared contract, such as a
+shared schema branch or read-model contract that later agents must import.
+
 ## Performance Model
 
 The app should feel fast because the shell loads compact data first and heavy

@@ -1,0 +1,167 @@
+{
+  "reports": [
+    {
+      "id": "goal-shared-layered-benchmark",
+      "agent": "Goal",
+      "branch": "codex/layered-benchmark-v2",
+      "commit": "9ca2fff",
+      "base": {
+        "branch": "origin/codex/goal-core-reliability-long-run",
+        "commit": "232fabd",
+        "containsRequiredCommit": true
+      },
+      "taskKind": "benchmark_fixture",
+      "mergeState": "unmerged",
+      "summary": "Shared no-live Layered Benchmark V2 schema, runner, and docs.",
+      "changedFiles": [
+        "lib/execution-layer/layered-benchmark.ts",
+        "scripts/layered-benchmark.ts",
+        "docs/30-provider-debug/LAYERED_BENCHMARK_V2.md"
+      ],
+      "artifacts": [],
+      "validations": [
+        { "name": "targeted_vitest", "status": "pass" },
+        { "name": "tsc", "status": "pass" },
+        { "name": "check_drift", "status": "pass" },
+        { "name": "gate_phase1", "status": "pass" },
+        { "name": "git_diff_check", "status": "pass" }
+      ],
+      "dependencyEdges": [
+        {
+          "type": "independent",
+          "reason": "Shared schema branch starts from accepted base."
+        }
+      ],
+      "claims": {
+        "runtimeClosure": false,
+        "liveVerified": false,
+        "docsOnly": false
+      }
+    },
+    {
+      "id": "claude-activity-layered-recovery",
+      "agent": "Claude",
+      "branch": "claude/activity-layered-recovery",
+      "commit": "5d65a89",
+      "base": {
+        "branch": "origin/codex/goal-core-reliability-long-run",
+        "commit": "232fabd",
+        "containsRequiredCommit": true
+      },
+      "taskKind": "benchmark_fixture",
+      "mergeState": "unmerged",
+      "summary": "Activity layered recovery fixtures and no-live reports.",
+      "changedFiles": [
+        "lib/runtime-forensics/activity-layered-recovery.ts",
+        "lib/__tests__/activity-layered-recovery.test.ts",
+        "docs/40-dogfood/LAYERED_BENCHMARK_DOGFOOD_PLAN.md"
+      ],
+      "artifacts": [],
+      "validations": [
+        { "name": "targeted_vitest", "status": "pass" },
+        { "name": "tsc", "status": "pass" },
+        { "name": "check_drift", "status": "pass" },
+        { "name": "gate_phase1", "status": "pass" },
+        { "name": "git_diff_check", "status": "pass" }
+      ],
+      "dependencyEdges": [
+        {
+          "type": "depends_on_shared_schema",
+          "targetBranch": "codex/layered-benchmark-v2",
+          "requiredState": "merged",
+          "reason": "Activity fixtures should plug into the shared Layered Benchmark V2 schema."
+        }
+      ],
+      "claims": {
+        "runtimeClosure": false,
+        "liveVerified": false,
+        "docsOnly": false
+      }
+    },
+    {
+      "id": "agent2-flight-layered-recovery",
+      "agent": "Agent2",
+      "branch": "codex/flight-layered-recovery",
+      "commit": "42f9794",
+      "base": {
+        "branch": "origin/codex/goal-core-reliability-long-run",
+        "commit": "232fabd",
+        "containsRequiredCommit": true
+      },
+      "taskKind": "benchmark_fixture",
+      "mergeState": "unmerged",
+      "summary": "Flight layered benchmark fixture adapter and no-live reports.",
+      "changedFiles": [
+        "lib/runtime-forensics/flight-layered-recovery.ts",
+        "lib/__tests__/flight-layered-recovery.test.ts",
+        "docs/30-provider-debug/LIVE_CLOSURE_EVIDENCE_PROTOCOL.md"
+      ],
+      "artifacts": [],
+      "validations": [
+        { "name": "targeted_vitest", "status": "pass" },
+        { "name": "tsc", "status": "pass" },
+        { "name": "check_drift", "status": "pass" },
+        { "name": "gate_phase1", "status": "pass" },
+        { "name": "git_diff_check", "status": "pass" }
+      ],
+      "dependencyEdges": [
+        {
+          "type": "depends_on_shared_schema",
+          "targetBranch": "codex/layered-benchmark-v2",
+          "requiredState": "merged",
+          "reason": "Flight adapter should wait for the shared benchmark contract to land."
+        }
+      ],
+      "claims": {
+        "runtimeClosure": false,
+        "liveVerified": false,
+        "docsOnly": false
+      }
+    },
+    {
+      "id": "agent3-hotel-layered-recovery",
+      "agent": "Agent3",
+      "branch": "codex/hotel-layered-recovery",
+      "commit": "209edc0",
+      "base": {
+        "branch": "origin/codex/goal-core-reliability-long-run",
+        "commit": "232fabd",
+        "containsRequiredCommit": true
+      },
+      "taskKind": "benchmark_fixture",
+      "mergeState": "unmerged",
+      "summary": "Hotel layered benchmark fixture adapter and no-live reports.",
+      "changedFiles": [
+        "lib/runtime-forensics/hotel-layered-recovery.ts",
+        "lib/__tests__/hotel-layered-recovery.test.ts",
+        "docs/30-provider-debug/HOTEL_LAYERED_RECOVERY.md"
+      ],
+      "artifacts": [],
+      "validations": [
+        { "name": "targeted_vitest", "status": "pass" },
+        { "name": "tsc", "status": "pass" },
+        { "name": "check_drift", "status": "pass" },
+        { "name": "gate_phase1", "status": "pass" },
+        { "name": "git_diff_check", "status": "pass" }
+      ],
+      "dependencyEdges": [
+        {
+          "type": "depends_on_shared_schema",
+          "targetBranch": "codex/layered-benchmark-v2",
+          "requiredState": "merged",
+          "reason": "Hotel adapter should wait for the shared benchmark contract to land."
+        },
+        {
+          "type": "supersedes",
+          "targetBranch": "codex/hotel-layered-recovery-draft",
+          "reason": "Agent3 returned the cleaned hotel adapter branch."
+        }
+      ],
+      "claims": {
+        "runtimeClosure": false,
+        "liveVerified": false,
+        "docsOnly": false
+      }
+    }
+  ]
+}
