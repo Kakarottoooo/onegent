@@ -20,6 +20,7 @@ export type ExpediaRetryState =
   | "insufficient_evidence";
 
 type SignalKind =
+  | "mixed_or_stale_worker_evidence"
   | "card_scan_failed"
   | "fallback_attempted"
   | "fallback_matched"
@@ -284,9 +285,17 @@ export function analyzeExpediaRetryArtifactBundle(
   bundle: ExpediaRetryArtifactBundle,
 ): ExpediaRetryAnalysis {
   const entries = buildTextEntries(bundle);
-  const signals = collectSignals(entries);
+  const job = bundle.job ?? null;
+  const dbRow = bundle.dbRow;
+  const jobId = firstString(job?.id, readString(dbRow, "id"));
+  const taskId = firstString(job?.taskId, readString(dbRow, "task_id"), readString(dbRow, "taskId"));
+  const provider = firstString(job?.provider, readString(dbRow, "provider")) ?? "unknown";
+  const scenario = firstString(job?.scenario, readString(dbRow, "scenario")) ?? "unknown";
+  const status = firstString(job?.status, readString(dbRow, "status")) ?? "unknown";
+  const signals = collectSignals(entries, jobId);
   const has = (kind: SignalKind) => signals.some((s) => s.kind === kind);
 
+  const hasMixedOrStaleEvidence = has("mixed_or_stale_worker_evidence");
   const hasCheckout = has("checkout_reached");
   const hasLoginOrOtpBoundary = has("login_or_otp_boundary");
   const hasModelOrEnv = has("model_or_env_transient");
@@ -298,7 +307,9 @@ export function analyzeExpediaRetryArtifactBundle(
   const hasNoAvailability = has("provider_no_availability");
 
   let state: ExpediaRetryState;
-  if (hasCheckout) {
+  if (hasMixedOrStaleEvidence) {
+    state = "insufficient_evidence";
+  } else if (hasCheckout) {
     state = "checkout_manual_review_reached";
   } else if (hasLoginOrOtpBoundary) {
     state = "login_or_otp_boundary";
@@ -318,13 +329,6 @@ export function analyzeExpediaRetryArtifactBundle(
     state = "insufficient_evidence";
   }
 
-  const job = bundle.job ?? null;
-  const dbRow = bundle.dbRow;
-  const jobId = firstString(job?.id, readString(dbRow, "id"));
-  const taskId = firstString(job?.taskId, readString(dbRow, "task_id"), readString(dbRow, "taskId"));
-  const provider = firstString(job?.provider, readString(dbRow, "provider")) ?? "unknown";
-  const scenario = firstString(job?.scenario, readString(dbRow, "scenario")) ?? "unknown";
-  const status = firstString(job?.status, readString(dbRow, "status")) ?? "unknown";
   const artifactPaths = {
     workerLogPath: firstString(bundle.workerLogPath) ?? null,
     benchmarkReportPath: firstString(bundle.benchmarkReportPath) ?? null,
@@ -464,9 +468,19 @@ function buildTextEntries(bundle: ExpediaRetryArtifactBundle): TextEntry[] {
   return entries;
 }
 
-function collectSignals(entries: TextEntry[]): ExpediaRetryEvidenceSignal[] {
+function collectSignals(
+  entries: TextEntry[],
+  expectedJobId: string | null,
+): ExpediaRetryEvidenceSignal[] {
   const signals: ExpediaRetryEvidenceSignal[] = [];
   const seen = new Set<string>();
+
+  for (const signal of collectMixedOrStaleWorkerSignals(entries, expectedJobId)) {
+    const key = `${signal.kind}|${signal.sourceLabel}|${signal.excerpt}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    signals.push(signal);
+  }
 
   for (const entry of entries) {
     for (const pattern of SIGNAL_PATTERNS) {
@@ -496,6 +510,51 @@ function collectSignals(entries: TextEntry[]): ExpediaRetryEvidenceSignal[] {
   }
 
   return signals.sort((a, b) => signalRank(a.kind) - signalRank(b.kind));
+}
+
+function collectMixedOrStaleWorkerSignals(
+  entries: TextEntry[],
+  expectedJobId: string | null,
+): ExpediaRetryEvidenceSignal[] {
+  const signals: ExpediaRetryEvidenceSignal[] = [];
+  const expected = expectedJobId?.trim().toLowerCase() ?? "";
+
+  for (const entry of entries) {
+    if (entry.source !== "worker_log") continue;
+    const workerInstances = new Set(
+      Array.from(entry.text.matchAll(/\[([^\]\r\n]*expedia-flight[^\]\r\n]*)\]/gi))
+        .map((match) => (match[1] ?? "").replace(/\s+/g, " ").trim())
+        .filter(Boolean),
+    );
+    const claimedJobIds = new Set(
+      Array.from(entry.text.matchAll(/\bclaimed job\s+([0-9a-f][0-9a-f-]{7,})\b/gi))
+        .map((match) => (match[1] ?? "").trim().toLowerCase())
+        .filter(Boolean),
+    );
+    const hasUnexpectedJob =
+      Boolean(expected) &&
+      claimedJobIds.size > 0 &&
+      Array.from(claimedJobIds).some((id) => id !== expected);
+
+    if (workerInstances.size <= 1 && claimedJobIds.size <= 1 && !hasUnexpectedJob) {
+      continue;
+    }
+
+    const detail = [
+      workerInstances.size > 1 ? `workerInstances=${workerInstances.size}` : null,
+      claimedJobIds.size > 1 ? `claimedJobs=${claimedJobIds.size}` : null,
+      hasUnexpectedJob ? "claimedJobMismatch=true" : null,
+    ].filter(Boolean).join(" ");
+    signals.push({
+      kind: "mixed_or_stale_worker_evidence",
+      source: entry.source,
+      sourceLabel: entry.label,
+      label: "mixed or stale worker evidence",
+      excerpt: `${detail}: ${excerptAround(entry.text, 0, Math.min(entry.text.length, 160))}`,
+    });
+  }
+
+  return signals;
 }
 
 function isHardStopChecklistBoundaryMention(
@@ -575,12 +634,14 @@ function nextActionForState(state: ExpediaRetryState): string {
     case "provider_no_availability":
       return "Treat as provider inventory/no-availability only when screenshots confirm the target card is absent. Do not patch selector logic from availability copy alone.";
     case "insufficient_evidence":
-      return "Collect the DB row, codex-worker.log excerpt, provider screenshots, and live snapshot paths before making a patch decision.";
+      return "Collect one clean DB row, codex-worker.log excerpt, provider screenshots, and live snapshot paths before making a patch decision. If mixed/stale worker evidence is present, stop and clean worker topology first.";
   }
 }
 
 function signalRank(kind: SignalKind): number {
   switch (kind) {
+    case "mixed_or_stale_worker_evidence":
+      return -1;
     case "checkout_reached":
       return 0;
     case "login_or_otp_boundary":

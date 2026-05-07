@@ -62,6 +62,47 @@ describe("analyzeExpediaRetryArtifactBundle", () => {
     expect(analysis.signals[0]?.kind).toBe("checkout_reached");
   });
 
+  it("does not classify checkout success from mixed worker instances", () => {
+    const analysis = analyzeExpediaRetryArtifactBundle({
+      job: {
+        id: "11111111-1111-1111-1111-111111111111",
+        provider: "expedia",
+        scenario: "flight",
+        status: "running",
+      },
+      workerLogExcerpt: [
+        "[2026-05-07T03:30:00.000Z] [expedia-flight-only-20260507-033000] claimed job 11111111-1111-1111-1111-111111111111 (active=1/1)",
+        "[flight-rpa] Checkout reached - running AI form fill",
+        "[2026-05-07T03:31:00.000Z] [expedia-flight-only-20260507-033100] claimed job 11111111-1111-1111-1111-111111111111 (active=1/1)",
+      ].join("\n"),
+    });
+
+    expect(analysis.state).toBe("insufficient_evidence");
+    expect(analysis.signals[0]?.kind).toBe("mixed_or_stale_worker_evidence");
+    expect(analysis.signals.map((signal) => signal.kind)).toContain("checkout_reached");
+    expect(analysis.nextAction).toContain("clean worker topology");
+  });
+
+  it("does not use a different claimed job as Expedia closure evidence", () => {
+    const analysis = analyzeExpediaRetryArtifactBundle({
+      job: {
+        id: "11111111-1111-1111-1111-111111111111",
+        provider: "expedia",
+        scenario: "flight",
+        status: "failed",
+      },
+      workerLogExcerpt: [
+        "[2026-05-07T03:30:00.000Z] [expedia-flight-only-20260507-033000] claimed job 22222222-2222-2222-2222-222222222222 (active=1/1)",
+        "[flight-rpa] Locator fallback matched flight card: Southwest 8:50am $152",
+        "[flight-rpa] Checkout reached - running AI form fill",
+      ].join("\n"),
+    });
+
+    expect(analysis.state).toBe("insufficient_evidence");
+    expect(analysis.signals[0]?.kind).toBe("mixed_or_stale_worker_evidence");
+    expect(analysis.signals[0]?.excerpt).toContain("claimedJobMismatch=true");
+  });
+
   it("returns insufficient evidence for bundles without known signals", () => {
     const analysis = analyzeExpediaRetryArtifactBundle({
       job: {
