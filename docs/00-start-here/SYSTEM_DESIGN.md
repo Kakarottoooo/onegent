@@ -1,6 +1,6 @@
 # Onegent System Design
 
-Last updated: 2026-05-06
+Last updated: 2026-05-07
 
 This document is the high-level architecture map for Onegent. It is meant for
 new Codex, Claude, and future engineering agents who need to understand the
@@ -281,9 +281,21 @@ NLU and internal-benchmark rules:
    restaurant, hotel, flight, activity, and trip/composite/ambiguous/profile/
    refine buckets, with artifact expectations, failure classes, dogfood
    mappings, and suggested owners.
-6. Internal benchmark failures should name one owner: `nlu`, `planner`,
+6. `scripts/layered-benchmark.ts --mode no-live` is the L1/L2 closure
+   orchestration benchmark. It starts after synthetic provider evidence exists
+   and models L1 runtime result, failure classification, L2 Browser Harness
+   eligibility, simulated recovery, optional patch proposal, and final verdict.
+   It does not run Browser Harness, providers, workers, OpenAI, checkout, login,
+   payment, or final confirmation flows.
+7. Layered Benchmark V2 escalates to L2 only for page/control classes:
+   `selector_drift`, `click_miss`, `iframe_miss`, `field_fill_miss`,
+   `progress_stall`, and `unknown_page_mutation`, and only with complete
+   evidence. It must not escalate true no-availability, provider degradation,
+   account checkpoints, user-only final actions, insufficient evidence, or
+   network/model/env failures.
+8. Internal benchmark failures should name one owner: `nlu`, `planner`,
    `task-workspace`, `provider-runtime`, or `product/manual-boundary`.
-7. Benchmark success is not provider closure. A vertical is provider-proven
+9. Benchmark success is not provider closure. A vertical is provider-proven
    only when runtime evidence, DB fields, logs, screenshots, and safe terminal
    status are captured by the provider-closure process.
 

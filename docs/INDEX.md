@@ -1,6 +1,6 @@
 # Onegent Docs Index
 
-Last updated: 2026-05-06
+Last updated: 2026-05-07
 
 This is the entrypoint for any new Codex, Claude, or other coding-agent session.
 Do not start by reading every markdown file. Read the smallest set that matches
@@ -70,6 +70,7 @@ Then read the task-specific section below.
 | Operator failure taxonomy (model/env vs provider) | `docs/30-provider-debug/FAILURE_TAXONOMY.md` |
 | Provider closure operator cockpit (3-vertical workflow) | `docs/30-provider-debug/PROVIDER_CLOSURE_OPERATOR_ROOM.md` |
 | Provider closure acceptance criteria (pass / fail / inconclusive) | `docs/30-provider-debug/PROVIDER_CLOSURE_ACCEPTANCE.md` |
+| Layered no-live closure benchmark | `docs/30-provider-debug/LAYERED_BENCHMARK_V2.md`, `scripts/layered-benchmark.ts` |
 | Computer Use / executor architecture | `docs/30-provider-debug/EXECUTOR_V2_PIVOT.md` |
 | Phase 1 founder walkthrough / task UI | `docs/40-phase1/PHASE_1_FOUNDER_E2E.md`, `docs/40-phase1/AUTONOMOUS_FOUNDER_E2E.md`, `docs/40-phase1/PHASE_1_QUALITY_GATE.md` |
 | Founder dogfood bugs | `docs/40-dogfood/BUG_INBOX.md` |
@@ -191,6 +192,7 @@ release entrypoints (`AGENTS.md`, `CLAUDE.md`, `README.md`, `CHANGELOG.md`).
 | Operator failure taxonomy | `docs/30-provider-debug/FAILURE_TAXONOMY.md` |
 | Provider closure operator room | `docs/30-provider-debug/PROVIDER_CLOSURE_OPERATOR_ROOM.md` |
 | Provider closure acceptance | `docs/30-provider-debug/PROVIDER_CLOSURE_ACCEPTANCE.md` |
+| Layered no-live closure benchmark | `docs/30-provider-debug/LAYERED_BENCHMARK_V2.md` |
 | Phase 1 founder E2E | `docs/40-phase1/PHASE_1_FOUNDER_E2E.md` |
 | Founder dogfood bug inbox | `docs/40-dogfood/BUG_INBOX.md` |
 | Phase 1 autonomous E2E runner | `docs/40-phase1/AUTONOMOUS_FOUNDER_E2E.md` |
