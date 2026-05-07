@@ -47,7 +47,11 @@ const MODEL_ENV_TRANSIENT: FailureCategory = {
   oneLine:
     "OpenAI / Computer Use / model API / database / runtime env returned a 5xx, timeout, connect-failure, or service-unavailable error before or around the provider step.",
   severity: "wait",
-  relatedClasses: ["model_or_env_blocked", "infra_db_transient"],
+  relatedClasses: [
+    "model_or_env_blocked",
+    "infra_db_transient",
+    "local_browser_disconnected_stale_job",
+  ],
   signals: [
     "OpenAI Responses API 500 server_error.",
     "OpenAI rate-limit 429 / quota exhausted.",
@@ -57,6 +61,7 @@ const MODEL_ENV_TRANSIENT: FailureCategory = {
     "Token guard / `--live-openai` not set / `ONEGENT_ALLOW_LIVE_OPENAI=1` missing.",
     "Neon DB ConnectTimeoutError / NeonDbError / 'fetch failed' / 'error connecting to database' from app API route during runner polling or terminal write.",
     "Bare 500 Internal Server Error from /api/v1/travel-tasks/<taskId> with no provider / OpenAI / chromium signal in the stack: classify as DB / fetch infra blip.",
+    "Local browser / CDP target disconnected mid-run (e.g. user closed Chrome window, USB Wi-Fi reconnect, OS sleep); worker step left in running/loading without a terminal write. Not a provider regression.",
   ],
   nextActions: [
     "Treat the run as inconclusive about provider health. Do not log a Resy / OpenTable / Expedia regression.",
@@ -121,6 +126,7 @@ const PROVIDER_LOGIC_FAILURE: FailureCategory = {
     "hotel_search_result_drift",
     "room_selection_drift",
     "guest_details_incomplete",
+    "external_ad_tab_opened",
   ],
   signals: [
     "Worker log shows the provider page rendered, the strategy ladder ran, and a specific selector / step failed.",
@@ -129,6 +135,7 @@ const PROVIDER_LOGIC_FAILURE: FailureCategory = {
     "Wrong restaurant / wrong flight / wrong hotel selected in screenshot vs. params.",
     "Form locator matched but `auditAndRefill` left a visible field empty.",
     "Booking.com guest-details vs final-details boundary detected the wrong page.",
+    "Provider opened an external ad / sponsor tab during a click and the worker started driving the wrong tab. The active tab URL host no longer matches the provider domain (e.g. ticketmaster click yielded a third-party promo tab).",
   ],
   nextActions: [
     "Patch only after comparing DB row + worker log + screenshots + live snapshot. Task UI alone is not enough.",
@@ -158,12 +165,14 @@ const SAFE_BOUNDARY_REACHED: FailureCategory = {
     "resy_otp_login_boundary",
     "opentable_phone_otp_handoff",
     "safe_provider_boundary",
+    "user_seat_selection_required",
   ],
   signals: [
     "`steps[0].terminalReason` or `steps[0].terminalCode` is one of the safe-boundary codes.",
     "Status is `paused_payment` / `awaiting_confirmation` / `ready_for_confirmation`.",
     "Worker log shows the agent intentionally stopped before payment, OTP, CAPTCHA, login, or final confirmation.",
     "Screenshot shows the page at a safe handoff state (review, payment review, OTP prompt, login wall) - not crashed.",
+    "Activity / Ticketmaster: seat map visible but Reserve button still disabled because the user has not yet picked a seat. The worker is intentionally polling for the user to make a seat choice in the live browser.",
   ],
   nextActions: [
     "Treat as Phase 0 progress. The run was a success at the safety boundary.",
@@ -309,9 +318,51 @@ const R030_OPENAI_403_MODEL_NOT_FOUND: WorkedExample = {
     "This is a model_env_transient failure (F-INFRA-MODEL-ACCESS), not a Resy provider regression and not a validation of the 422abe0 patches. Closure outcome is inconclusive, not closure pass and not closure fail. The next safe step is to install/verify the intended gpt-5.5-enabled runtime env for the worktree and pass a no-provider model-access preflight, then the founder may explicitly approve exactly one new R-030 attempt; do not patch Resy code based on this evidence.",
 };
 
+const TICKETMASTER_LION_KING_SAFE_HANDOFF: WorkedExample = {
+  id: "ticketmaster-lion-king-safe-handoff-2026-05-07",
+  title:
+    "Ticketmaster Lion King New York founder dogfood -- safe handoff at user-seat-selection boundary",
+  category: "safe_boundary_reached",
+  story:
+    "A founder-controlled dogfood request 'book The Lion King in New York on May 30' ran end-to-end through the existing v1 ticketmaster-rpa local Stagehand path (not Browser Harness). The worker parsed May 30 2026 2:00 PM, opened the calendar view, selected the May 30 2:00 PM slot, clicked the right-side Find Tickets drawer action from the main Ticketmaster page, and reached the provider event page with the seat map rendered. The runtime then intentionally paused at the user-seat-selection boundary with Reserve still disabled, holding the local browser open for manual review. No payment, CVV, OTP, SMS, phone-verification, CAPTCHA, login bypass, or final confirmation was touched. The activity dogfood was accepted as closed; remaining items are runtime polish (suppress external ad tabs, make the seat-selection checkpoint explicit in the task UI, recover stale running/loading jobs after local browser/CDP disconnect), not provider regressions.",
+  evidence: Object.freeze([
+    Object.freeze({
+      label: "Job id",
+      value: "46028ee4-c644-4df7-bee5-7bcb7d2713f9",
+    }),
+    Object.freeze({
+      label: "Provider runtime path",
+      value:
+        "lib/booking-autopilot/providers/ticketmaster-rpa.ts (v1 local Stagehand/Playwright); Browser Harness was not used for the production path.",
+    }),
+    Object.freeze({
+      label: "Parsed target",
+      value: "May 30 2026 @ 2:00 PM",
+    }),
+    Object.freeze({
+      label: "Stage progression",
+      value:
+        "artist_calendar -> calendar slot click -> Find Tickets drawer click -> event_seat_map (canvas seat map rendered) -> safe handoff at user_seat_selection_required",
+    }),
+    Object.freeze({
+      label: "Boundary reached",
+      value:
+        "user_seat_selection_required (Reserve button still disabled; local browser held open for the user to pick a seat).",
+    }),
+    Object.freeze({
+      label: "Safety boundary",
+      value:
+        "No payment / CVV / OTP / SMS / phone-verification / CAPTCHA / login bypass / final confirmation touched.",
+    }),
+  ]),
+  takeaway:
+    "This is a safe_boundary_reached run, not a provider regression and not a closure failure. The activity dogfood was accepted as closed. Remaining items are runtime polish, classified separately: external_ad_tab_opened (provider_logic_failure if it disrupts the active page) and local_browser_disconnected_stale_job (model_env_transient if the CDP target disconnects mid-run). Do not repromote Browser Harness into the v1 runtime based on this evidence; it remains a v2 design input.",
+};
+
 export const WORKED_EXAMPLES: ReadonlyArray<WorkedExample> = Object.freeze([
   R030_OPENAI_500,
   R030_OPENAI_403_MODEL_NOT_FOUND,
+  TICKETMASTER_LION_KING_SAFE_HANDOFF,
 ]);
 
 export function listWorkedExamples(): WorkedExample[] {
