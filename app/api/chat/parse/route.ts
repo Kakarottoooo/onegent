@@ -520,9 +520,34 @@ export async function POST(req: NextRequest) {
     );
     const fallbackResult =
       buildProviderUrlFallbackNluResult({ message }) ?? buildFallbackResult(message);
+    let fallbackSessionId: string | null = null;
+    if (!roomId && userId) {
+      fallbackSessionId = await syncSessionContext(
+        userId,
+        incomingSessionId,
+        message,
+        fallbackResult.assistant_reply,
+        fallbackResult.__v2_state ?? null,
+      );
+      if (fallbackSessionId) {
+        const destination = extractDestination(fallbackResult.collected_constraints);
+        const scenario = fallbackResult.scenario ?? null;
+        if (destination !== null || scenario !== null) {
+          try {
+            await updateChatSessionMeta(fallbackSessionId, userId, {
+              destination,
+              scenario,
+            });
+          } catch (metaErr) {
+            console.warn(`[chat/parse] fallback updateChatSessionMeta failed for ${fallbackSessionId}`, metaErr);
+          }
+        }
+      }
+    }
     const captureArtifacts = buildCaptureChatParseArtifacts({
       message,
       result: fallbackResult,
+      sessionId: fallbackSessionId,
     });
     return NextResponse.json({
       ok: true,
@@ -530,6 +555,7 @@ export async function POST(req: NextRequest) {
       ...captureArtifacts,
       user_id: userId ?? null,
       nlu_version: "v2-fallback",
+      session_id: fallbackSessionId,
     });
   }
 }
