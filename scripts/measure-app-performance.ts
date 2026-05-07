@@ -1,4 +1,9 @@
 #!/usr/bin/env tsx
+import { writeFileSync } from "node:fs";
+import {
+  buildStage0PerformanceReport,
+  renderStage0PerformanceMarkdown,
+} from "@/lib/internal-benchmark/stage0-performance";
 
 type Probe = {
   label: string;
@@ -18,6 +23,10 @@ function arg(name: string): string | null {
   const idx = process.argv.indexOf(`--${name}`);
   if (idx === -1) return null;
   return process.argv[idx + 1] ?? null;
+}
+
+function flag(name: string): boolean {
+  return process.argv.includes(`--${name}`);
 }
 
 function normalizeBaseUrl(value: string): string {
@@ -51,6 +60,17 @@ async function measure(baseUrl: string, probe: Probe): Promise<ProbeResult> {
 }
 
 async function main() {
+  if (flag("stage0")) {
+    const report = buildStage0PerformanceReport();
+    const output = flag("json")
+      ? JSON.stringify(report, null, 2)
+      : renderStage0PerformanceMarkdown(report);
+    const outputPath = arg("output");
+    if (outputPath) writeFileSync(outputPath, output, "utf8");
+    console.log(output);
+    return;
+  }
+
   const baseUrl = normalizeBaseUrl(arg("base-url") ?? "http://127.0.0.1:3000");
   const sessionId = arg("session-id") ?? "local-measurement-session";
   const jobId = arg("job-id");
