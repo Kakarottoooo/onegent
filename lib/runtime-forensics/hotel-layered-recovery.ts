@@ -86,7 +86,7 @@ const SCOPED_INVENTORY_RX =
   /\b(for (your|the selected|selected|requested|these|approved) dates?|for (the )?requested stay|for this stay|selected dates?|requested dates?|exact stay|target hotel unavailable)\b/i;
 
 const STRONG_INVENTORY_UNAVAILABLE_RX =
-  /\b(sold[-\s]?out|fully booked|no rooms? available|no stays? available|nothing available|target hotel unavailable|unavailable for (your|the selected|selected|requested|these) dates?)\b/i;
+  /\b(sold[-\s]?out|fully booked|no rooms? available|target hotel unavailable|unavailable for (your|the selected|selected|requested|these) dates?)\b/i;
 
 const HUMAN_BOUNDARY_RX =
   /\b(payment|billing|card entry|credit card|cvv|cvc|security code|complete booking|confirm and pay|final confirmation|login|sign[-\s]?in|captcha|otp|verification code|phone verification|verify you are human)\b/i;

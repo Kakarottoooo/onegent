@@ -252,10 +252,10 @@ describe("layered benchmark v2", () => {
       calculatedL2Eligible: false,
     });
     expect(byId.get("lbv2-hotel-10")).toMatchObject({
-      failureClass: "progress_stall",
-      finalVerdict: "needs_runtime_patch",
+      failureClass: "insufficient_evidence",
+      finalVerdict: "insufficient_evidence",
       owner: "task-workspace",
-      calculatedL2Eligible: true,
+      calculatedL2Eligible: false,
       hotelContract: {
         staleRunningState: { staleStatus: "running" },
       },

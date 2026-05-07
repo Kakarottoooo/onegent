@@ -58,7 +58,7 @@ Hotel cases use a dedicated no-live fixture corpus for:
 - Guest/review boundary.
 - Account/session boundary.
 - Artifact incomplete.
-- Stale running state.
+- Stale/mixed running evidence classified as insufficient evidence.
 
 ## Escalation Rules
 
