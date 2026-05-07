@@ -1730,6 +1730,7 @@ The user will enter CVV and confirm payment themselves.`,
               handoffUrl: handoffUrlForReturn,
               sessionUrl,
               summary: decision.summary,
+              needsUserChoice: decision.state === "user_event_choice_required",
               debugTrace,
             };
           }

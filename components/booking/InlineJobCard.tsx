@@ -26,7 +26,7 @@ function formatDate(iso: string): string {
 }
 
 function stepStatusColor(step: BookingJobStep): string {
-  if (step.status === "awaiting_confirmation") return "rgba(22,163,74,0.85)";
+  if (step.status === "awaiting_confirmation" && !step.actionItem) return "rgba(22,163,74,0.85)";
   const sem = computeStepSemanticStatus(step);
   return STEP_SEMANTIC_DISPLAY[sem].color;
 }
@@ -121,6 +121,11 @@ function InlineStepCard({ step }: { step: BookingJobStep }) {
               {step.error.length > 120 ? step.error.slice(0, 120) + "…" : step.error}
             </p>
           )}
+          {step.actionItem?.message && (
+            <p style={{ fontFamily: "var(--font-dm-sans)", fontSize: 11, marginTop: 4, color: "rgba(234,88,12,0.9)", lineHeight: 1.4 }}>
+              {step.actionItem.message.length > 140 ? step.actionItem.message.slice(0, 140) + "…" : step.actionItem.message}
+            </p>
+          )}
         </div>
 
         {step.status === "done" && step.handoff_url && (
@@ -131,7 +136,7 @@ function InlineStepCard({ step }: { step: BookingJobStep }) {
             whiteSpace: "nowrap", textDecoration: "none", display: "inline-block",
           }}>Open →</a>
         )}
-        {step.status === "awaiting_confirmation" && step.handoff_url && (
+        {step.status === "awaiting_confirmation" && step.handoff_url && !step.actionItem && (
           <a href={step.handoff_url} target="_blank" rel="noopener noreferrer" style={{
             flexShrink: 0, padding: "6px 12px", borderRadius: 8, border: "none",
             backgroundColor: "rgba(22,163,74,0.85)", color: "#fff",

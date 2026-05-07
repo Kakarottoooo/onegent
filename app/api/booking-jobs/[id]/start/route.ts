@@ -59,6 +59,7 @@ import { runBrowserTask } from "@/lib/booking-autopilot/stagehand-executor";
 import { buildDeepLinkEnrichmentForStep } from "@/lib/booking-autopilot/executors/enrich-failed-step";
 import { liveLogClose, liveLogGet } from "@/lib/live-log-store";
 import { buildPreferenceProfile } from "@/lib/policy";
+import { buildProviderEventChoiceActionItem } from "@/lib/booking-jobs/provider-choice";
 
 // ── US-009: lib/core new-path types (for the USE_CORE_EXECUTOR branch) ─────
 import type {
@@ -992,10 +993,14 @@ async function runUniversalStep(
 
     if (data.status === "completed" || data.status === "paused_payment") {
       log.push({ ts: now(), type: "succeeded", message: data.summary, outcome: "Done ✓" });
+      const actionItem = data.status === "paused_payment" && data.needsUserChoice
+        ? buildProviderEventChoiceActionItem(data.summary)
+        : undefined;
       return {
         ...step,
         status: data.status === "paused_payment" ? "awaiting_confirmation" : "done",
         handoff_url: data.handoffUrl,
+        actionItem,
         decisionLog: log,
       };
     }

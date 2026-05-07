@@ -115,8 +115,25 @@ describe("booking job compact list rows", () => {
     expect(classifyBookingJobListItem(listRow({ status: "pending_local" }))).toBe("queue");
     expect(classifyBookingJobListItem(listRow({ status: "running" }))).toBe("live");
     expect(classifyBookingJobListItem(listRow({ status: "done", awaiting_confirmation_count: 1 }))).toBe("history");
+    expect(classifyBookingJobListItem(listRow({
+      status: "done",
+      action_count: 1,
+      awaiting_confirmation_count: 1,
+    }))).toBe("queue");
     expect(classifyBookingJobListItem(listRow({ status: "failed", action_count: 1 }))).toBe("history");
     expect(classifyBookingJobListItem(listRow({ status: "done", step_count: 1, done_count: 1 }))).toBe("history");
+  });
+
+  it("labels event-choice rows as user input even when they are stored as awaiting confirmation", () => {
+    const item = buildBookingJobListItem(listRow({
+      status: "done",
+      action_count: 1,
+      awaiting_confirmation_count: 1,
+      primary_step_status: "awaiting_confirmation",
+    }));
+
+    expect(item.workspace).toBe("queue");
+    expect(item.latest_status_label).toBe("Needs your input");
   });
 
   it("keeps compact rows traceable to their source chat session", () => {

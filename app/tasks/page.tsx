@@ -153,7 +153,7 @@ function inferAgentDecision(step: BookingJobStep): string {
 // ── Visual helpers ─────────────────────────────────────────────────────────────
 
 function stepStatusColor(step: BookingJobStep): string {
-  if (step.status === "awaiting_confirmation") return "rgba(22,163,74,0.85)";
+  if (step.status === "awaiting_confirmation" && !step.actionItem) return "rgba(22,163,74,0.85)";
   const sem = computeStepSemanticStatus(step);
   return STEP_SEMANTIC_DISPLAY[sem].color;
 }
@@ -970,7 +970,7 @@ function StepCard({ step, stepIndex, jobId, sessionId, onRefresh, onOpenLive }: 
       )}
 
       {/* Human intervention banner — awaiting_confirmation or needs_login */}
-      {(step.status === "awaiting_confirmation" || (step.status === "error" && step.handoff_url && step.handoff_url !== step.fallbackUrl)) && (
+      {(!step.actionItem && (step.status === "awaiting_confirmation" || (step.status === "error" && step.handoff_url && step.handoff_url !== step.fallbackUrl))) && (
         <InterventionBanner step={step} jobId={jobId} onOpenLive={onOpenLive} />
       )}
 
@@ -1192,17 +1192,17 @@ function compactStatusDisplay(job: BookingJobListItem) {
       animate: true,
     };
   }
-  if (job.awaiting_confirmation_count > 0) {
-    return {
-      label: job.latest_status_label,
-      color: "rgba(22,163,74,0.85)",
-      animate: false,
-    };
-  }
   if (job.action_count > 0) {
     return {
       label: job.latest_status_label,
       color: "rgba(234,88,12,0.85)",
+      animate: false,
+    };
+  }
+  if (job.awaiting_confirmation_count > 0) {
+    return {
+      label: job.latest_status_label,
+      color: "rgba(22,163,74,0.85)",
       animate: false,
     };
   }
@@ -1289,12 +1289,15 @@ function JobCard({
     ? fullJob.steps.filter((s) => s.status === "done").length
     : job.done_count;
   const awaitingConfirmationCount = fullJob
-    ? fullJob.steps.filter((s) => s.status === "awaiting_confirmation").length
+    ? fullJob.steps.filter((s) => s.status === "awaiting_confirmation" && !s.actionItem).length
     : job.awaiting_confirmation_count;
-  const readyCount = doneCount + awaitingConfirmationCount;
   const actionCount = fullJob
     ? fullJob.steps.filter((s) => s.actionItem).length
     : job.action_count;
+  const readyReviewCount = fullJob
+    ? awaitingConfirmationCount
+    : Math.max(0, awaitingConfirmationCount - actionCount);
+  const readyCount = doneCount + readyReviewCount;
   const adjustedCount = fullJob
     ? fullJob.steps.filter((s) => s.timeAdjusted || s.usedFallback).length
     : job.adjusted_count;

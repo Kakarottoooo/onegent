@@ -102,8 +102,8 @@ export function latestBookingJobStatusLabel(row: Pick<
 >): string {
   if (row.status === "pending" || row.status === "pending_local") return "Queued";
   if (row.status === "running") return "Agent working...";
-  if (numberField(row.awaiting_confirmation_count) > 0) return "Ready to review - confirm on site";
   if (numberField(row.action_count) > 0) return "Needs your input";
+  if (numberField(row.awaiting_confirmation_count) > 0) return "Ready to review - confirm on site";
   if (row.primary_step_status === "no_availability") return "Not available for these dates";
   const stepCount = numberField(row.step_count);
   if (row.status === "done" && stepCount > 0 && numberField(row.done_count) >= stepCount) {

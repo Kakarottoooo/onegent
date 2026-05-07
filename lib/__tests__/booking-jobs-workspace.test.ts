@@ -40,6 +40,28 @@ describe("booking job workspace helpers", () => {
     })).toBe("history");
   });
 
+  it("keeps provider event-choice pauses in queue instead of completed history", () => {
+    expect(taskWorkspaceViewForJob({
+      id: "choice-count",
+      status: "done",
+      action_count: 1,
+      awaiting_confirmation_count: 1,
+    })).toBe("queue");
+    expect(taskWorkspaceViewForJob({
+      id: "choice-step",
+      status: "done",
+      steps: [
+        {
+          status: "awaiting_confirmation",
+          actionItem: {
+            message: "Which event date should I use?",
+            options: [],
+          },
+        },
+      ],
+    })).toBe("queue");
+  });
+
   it("normalizes task details and evidence hrefs", () => {
     const queued = { id: "job 1", status: "pending" as const };
     expect(getTaskWorkspaceHref(queued)).toBe("/tasks?view=queue&focus=job%201");

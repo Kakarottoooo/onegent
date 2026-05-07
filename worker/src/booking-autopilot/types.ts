@@ -144,6 +144,8 @@ export interface BrowserTaskResult {
   sessionUrl?: string;
   /** Human-readable summary of what the agent did. */
   summary: string;
+  /** True when the provider page lists multiple events and the user must choose one before execution can continue. */
+  needsUserChoice?: boolean;
   /** Error detail when status === "error". */
   error?: string;
   /** Structured trace of automatic fallback decisions taken by the executor. */

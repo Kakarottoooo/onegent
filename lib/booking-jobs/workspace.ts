@@ -58,7 +58,12 @@ function numberField(value: unknown): number {
 function hasReadyForReviewBoundary(job: TaskWorkspaceClassificationInput): boolean {
   if (numberField(job.awaiting_confirmation_count) > 0) return true;
   if (job.primary_step_status === "awaiting_confirmation") return true;
-  return job.steps?.some((step) => step.status === "awaiting_confirmation") ?? false;
+  return job.steps?.some((step) => step.status === "awaiting_confirmation" && !step.actionItem) ?? false;
+}
+
+function hasActionRequired(job: TaskWorkspaceClassificationInput): boolean {
+  if (numberField(job.action_count) > 0) return true;
+  return job.steps?.some((step) => !!step.actionItem) ?? false;
 }
 
 export function taskWorkspaceViewForStatus(status: BookingJob["status"]): TaskWorkspaceBucket {
@@ -75,9 +80,10 @@ export function taskWorkspaceViewForJob(job: TaskWorkspaceClassificationInput): 
   if (job.workspace) return job.workspace;
   if (job.status === "pending" || job.status === "pending_local") return "queue";
   if (job.status === "running") return "live";
+  if (job.status === "failed") return "history";
+  if (hasActionRequired(job)) return "queue";
   if (hasReadyForReviewBoundary(job)) return "history";
-  if (job.status === "done" || job.status === "failed") return "history";
-  if (numberField(job.action_count) > 0) return "queue";
+  if (job.status === "done") return "history";
 
   const stepCount = numberField(job.step_count);
   const doneCount = numberField(job.done_count);

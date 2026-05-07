@@ -94,7 +94,7 @@ export function computeJobSemanticStatus(job: BookingJob): JobSemanticStatus {
   const hasRetrying        = stepStatuses.some((s) => s === "retrying");
   const hasBlocked         = stepStatuses.some((s) => s === "blocked_needs_input");
   const allFirstTry        = stepStatuses.every((s) => s === "succeeded_first_try");
-  const hasAwaitingPayment = job.steps.some((s) => s.status === "awaiting_confirmation");
+  const hasAwaitingPayment = job.steps.some((s) => s.status === "awaiting_confirmation" && !s.actionItem);
   const allNoAvailability  = job.steps.every((s) => s.status === "no_availability");
 
   if (hasRetrying) return "retrying";
