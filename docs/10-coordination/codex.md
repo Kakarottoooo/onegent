@@ -2,7 +2,7 @@
 
 > **Branch**: `codex/integrated-preview-20260504`
 > **Last updated**: 2026-05-07
-> **Last commit**: this pass - layered benchmark / agent intake planning
+> **Last commit**: this pass - parallel agent throughput rules
 >
 > Claude reads this at session start. I write to it before each push.
 > See `CLAUDE.md` section "coordination protocol".
@@ -12,6 +12,16 @@
 ## Currently doing
 
 Completed in latest pass:
+- Added the parallel development rule to coordination and system design:
+  - side agents should not wait for Codex's full merge validation when their
+    next task is independent of unmerged code;
+  - Codex owns fast intake triage plus the final merge train;
+  - every side-agent task must close a named product, benchmark, evidence,
+    runtime, task-workspace, or performance gap;
+  - broad abstraction, vertical-specific schema drift, duplicate runtime logic,
+    and app-shell bundle growth are explicitly anti-goals.
+
+Previous completed pass:
 - Added the shared layered-agent intake checklist for the next multi-agent
   round:
   - current integration base:

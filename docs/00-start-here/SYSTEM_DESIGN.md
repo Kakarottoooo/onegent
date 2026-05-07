@@ -167,6 +167,45 @@ the founder to manually copy browser text:
 The task UI should show both a compact status card and a detail surface with
 timeline plus screenshots. Screenshots are product evidence, not decoration.
 
+## Parallel Development Model
+
+Onegent uses multiple agents to increase development throughput, not to grow
+the codebase without discipline. The architecture should make parallel work
+safe by giving each agent a narrow ownership boundary and a stable contract to
+plug into.
+
+Parallel work is valuable when it:
+
+- closes a named product or reliability gap;
+- expands benchmark coverage in a reusable schema;
+- reduces latency, payload size, bundle size, polling, or local process churn;
+- improves task evidence, status, ownership, or replay behavior;
+- extracts shared pure helpers that reduce mirror drift.
+
+Parallel work is harmful when it:
+
+- creates vertical-specific schemas instead of shared contracts;
+- adds broad abstractions before a repeated problem exists;
+- duplicates provider runtime logic across `lib/` and `worker/`;
+- adds route-level client code that slows the app shell;
+- lands docs-only packaging while the real blocker remains untouched.
+
+The sustainable flow is a rolling merge train:
+
+```text
+accepted base
+-> side agents branch into isolated worktrees
+-> each agent returns branch + commit + evidence + validation
+-> Codex fast-triages each branch
+-> independent next tasks can start before earlier branches are fully merged
+-> Codex integrates in dependency order and keeps contracts coherent
+```
+
+Do not make every agent wait for Codex to finish a full merge if the next task
+does not depend on the unmerged branch. Do make agents wait when the next task
+depends on a new shared schema, runtime contract, or read model that has not
+landed yet.
+
 ## Performance Model
 
 The app should feel fast because the shell loads compact data first and heavy

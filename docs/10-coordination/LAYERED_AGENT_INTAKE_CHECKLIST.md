@@ -35,6 +35,50 @@ needed.
 
 Restaurant/OpenTable baseline ownership remains with Codex for this round.
 
+## Throughput Rule
+
+The reason to use multiple agents is throughput, not code volume. A side agent
+should not sit idle while Codex is validating a finished branch if there is an
+independent next task that can start from the last accepted base.
+
+Default operating model:
+
+1. Codex keeps the merge train and final product architecture coherent.
+2. Side agents work in isolated branches with narrow ownership.
+3. When a side agent finishes, Codex does a quick intake classification:
+   `ready_to_merge`, `needs_followup`, or `reject`.
+4. If the next task is independent of unmerged code, issue it immediately from
+   the current accepted base.
+5. If the next task depends on unmerged code, either wait for that merge or
+   explicitly tell the agent to branch from the producing branch.
+6. Do not ask agents to add broad framework code just to stay busy. Every task
+   must close a named product gap, benchmark gap, evidence gap, or performance
+   gap.
+
+This means "merge before next task" is not the default. The default is:
+
+```text
+agent finishes branch A
+-> Codex records branch A in intake queue
+-> Codex immediately gives that agent branch B if B is independent
+-> Codex merges A in the background merge train
+```
+
+## Code Volume Guardrail
+
+Every side-agent task should specify one of these contribution types:
+
+- `runtime_fix`: fixes a real execution blocker with evidence and tests.
+- `benchmark_fixture`: expands measured coverage without changing runtime.
+- `read_model_perf`: reduces payload, waterfall, bundle, or polling cost.
+- `task_workspace_ux`: improves task ownership, status, evidence, or replay.
+- `docs_contract`: records a contract needed by other agents.
+
+Avoid tasks whose output is only more abstraction, duplicate wrappers, or
+vertical-specific schema that cannot be reused. A branch should be easy to
+revert and should make the app faster, more reliable, easier to debug, or more
+consistent for users.
+
 ## Intake Gate
 
 Before cherry-picking or merging a returned branch, verify:
@@ -52,6 +96,20 @@ Before cherry-picking or merging a returned branch, verify:
    helper already exists.
 8. Runtime mirror changes, if any, are byte-aligned or have a documented
    reason accepted by `npm run check-drift`.
+
+## Fast Intake Triage
+
+Use this quick triage before full merge validation:
+
+| Verdict | Meaning | Action |
+| --- | --- | --- |
+| `ready_to_merge` | Scope matches, tests reported, no forbidden files, no obvious conflict | Add to merge train and optionally issue the agent's next independent task |
+| `needs_followup` | Useful work, but missing tests/docs/evidence or based on stale contract | Send one focused follow-up prompt; do not let the agent start unrelated work |
+| `reject` | Wrong base, wrong scope, unsafe artifact, unrelated churn, or architecture drift | Do not merge; ask for clean rebuild from accepted base |
+
+The fast triage should take minutes. Full validation still happens before
+integration, but it should not block independent agents from starting their next
+bounded task.
 
 ## Preferred Merge Order
 
