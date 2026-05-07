@@ -8,6 +8,14 @@
  */
 
 import type { JobLikeInput } from "./types";
+import {
+  classifyHotelL1Stage,
+  classifyHotelProviderFallbackEligibility,
+  evaluateHotelNoAvailabilityEvidence,
+  extractHotelLayeredContextFromArtifact,
+  validateHotelLayeredArtifactCompleteness,
+  type HotelLayeredRecoverySummary,
+} from "./hotel-layered-recovery";
 
 export type HotelRetryState =
   | "safety_boundary_violation"
@@ -108,6 +116,7 @@ export interface HotelRetryAnalysis {
     screenshots: string[];
     liveSnapshots: string[];
   };
+  layeredRecovery: HotelLayeredRecoverySummary;
   summary: string;
   nextAction: string;
 }
@@ -373,6 +382,8 @@ export function analyzeHotelRetryArtifactBundle(
   const entries = buildTextEntries(bundle);
   const signals = collectSignals(entries);
   const has = (kind: SignalKind) => signals.some((s) => s.kind === kind);
+  const layeredContext = extractHotelLayeredContextFromArtifact(bundle);
+  const noAvailabilityEvidence = evaluateHotelNoAvailabilityEvidence(layeredContext);
 
   const hasSafetyViolation = has("safety_boundary_violation");
   const hasPaymentBoundary = has("payment_boundary");
@@ -401,7 +412,9 @@ export function analyzeHotelRetryArtifactBundle(
     state = "model_env_transient";
   } else if (hasNetwork) {
     state = "network_provider_failure";
-  } else if (hasNoAvailability) {
+  } else if (hasNoAvailability && noAvailabilityEvidence.state === "weak_no_availability") {
+    state = "network_provider_failure";
+  } else if (hasNoAvailability && noAvailabilityEvidence.state === "verified_true_no_availability") {
     state = "provider_no_availability";
   } else if (hasRoomSelectionReached) {
     state = "room_selection_manual_review_reached";
@@ -435,6 +448,16 @@ export function analyzeHotelRetryArtifactBundle(
     hasProviderSelectorDrift,
     hasRoomSelectionDrift,
   });
+  const fallbackEligibility = classifyHotelProviderFallbackEligibility(
+    { ...layeredContext, state },
+    noAvailabilityEvidence,
+  );
+  const layeredRecovery: HotelLayeredRecoverySummary = {
+    l1Stage: classifyHotelL1Stage(layeredContext),
+    noAvailabilityEvidence,
+    fallbackEligibility,
+    artifactCompleteness: validateHotelLayeredArtifactCompleteness(bundle),
+  };
 
   return {
     state,
@@ -447,6 +470,7 @@ export function analyzeHotelRetryArtifactBundle(
     status,
     signals,
     artifactPaths,
+    layeredRecovery,
     summary: buildSummary(state, confidence, signals),
     nextAction: nextActionForState(state),
   };
@@ -503,6 +527,27 @@ export function formatHotelRetryAnalysisMarkdown(
   ) {
     lines.push("_No artifact paths were included._");
   }
+  lines.push("");
+  lines.push("### Layered Recovery");
+  lines.push("");
+  lines.push(`- L1 stage: \`${analysis.layeredRecovery.l1Stage}\``);
+  lines.push(
+    `- No-availability evidence: \`${analysis.layeredRecovery.noAvailabilityEvidence.state}\` - ${escapeMarkdownLine(
+      analysis.layeredRecovery.noAvailabilityEvidence.reason,
+    )}`,
+  );
+  lines.push(
+    `- L2 fallback eligible: \`${analysis.layeredRecovery.fallbackEligibility.eligible}\`${
+      analysis.layeredRecovery.fallbackEligibility.nextProviders.length > 0
+        ? ` via \`${analysis.layeredRecovery.fallbackEligibility.nextProviders.join(" -> ")}\``
+        : ""
+    }`,
+  );
+  lines.push(
+    `- Artifact completeness: \`${analysis.layeredRecovery.artifactCompleteness.complete}\` - ${escapeMarkdownLine(
+      analysis.layeredRecovery.artifactCompleteness.summary,
+    )}`,
+  );
   lines.push("");
   lines.push("### Verdict");
   lines.push("");
@@ -748,8 +793,13 @@ function excerptAround(text: string, index: number, length: number): string {
 }
 
 function isNegatedProgressExcerpt(excerpt: string): boolean {
-  return /\b(no|not|never|without)\s+(checkout|payment|guest details|contact details|traveler details|reservation details)\s+(page\s+)?(visible|reached|loaded)\b/i.test(
-    excerpt,
+  return (
+    /\b(no|not|never|without)\s+(checkout|payment|guest details|contact details|traveler details|reservation details)\s+(page\s+)?(visible|reached|loaded)\b/i.test(
+      excerpt,
+    ) ||
+    /\b(stop(?:ped)?|stopping)\s+before\s+(payment|cvv|cvc|final|confirmation|purchase|login|captcha|otp)\b/i.test(
+      excerpt,
+    )
   );
 }
 
