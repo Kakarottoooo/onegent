@@ -336,6 +336,8 @@ const EXPEDIA_FLIGHT_AIRLINE_HINTS = [
   "Alaska",
 ];
 
+// Expedia can hide flight numbers and prices can drift; do not let a named
+// other airline pass a target-time or price fallback.
 function hasExpediaFlightExplicitDifferentAirline(
   rawText: string,
   targetAirline: string | null | undefined,

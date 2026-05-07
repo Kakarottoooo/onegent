@@ -80,7 +80,7 @@ describe("analyzeExpediaRetryArtifactBundle", () => {
     expect(analysis.state).toBe("insufficient_evidence");
     expect(analysis.signals[0]?.kind).toBe("mixed_or_stale_worker_evidence");
     expect(analysis.signals.map((signal) => signal.kind)).toContain("checkout_reached");
-    expect(analysis.nextAction).toContain("clean worker topology");
+    expect(analysis.nextAction).toContain("do not mark the flight lane closed");
   });
 
   it("does not use a different claimed job as Expedia closure evidence", () => {
@@ -101,6 +101,27 @@ describe("analyzeExpediaRetryArtifactBundle", () => {
     expect(analysis.state).toBe("insufficient_evidence");
     expect(analysis.signals[0]?.kind).toBe("mixed_or_stale_worker_evidence");
     expect(analysis.signals[0]?.excerpt).toContain("claimedJobMismatch=true");
+  });
+
+  it("does not classify checkout reached as success when required traveler fields are still missing", () => {
+    const analysis = analyzeExpediaRetryArtifactBundle({
+      job: {
+        id: "fixture-expedia-checkout-incomplete",
+        provider: "expedia",
+        scenario: "flight",
+        status: "paused_payment",
+      },
+      workerLogExcerpt: [
+        "[flight-rpa] Checkout reached - running AI form fill",
+        "[flight-rpa] Traveler form state: filled=none missing=first name,last name,email address,phone number,birth month,birth day,birth year,gender",
+        "Flight checkout reached; traveler details need manual review: first name, last name, email address.",
+      ].join("\n"),
+    });
+
+    expect(analysis.state).toBe("insufficient_evidence");
+    expect(analysis.signals[0]?.kind).toBe("checkout_form_incomplete");
+    expect(analysis.signals.map((signal) => signal.kind)).toContain("checkout_reached");
+    expect(analysis.label).toBe("Insufficient evidence");
   });
 
   it("returns insufficient evidence for bundles without known signals", () => {
