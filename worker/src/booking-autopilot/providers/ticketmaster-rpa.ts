@@ -1343,8 +1343,21 @@ async function waitForEventPage(page: Page, trace: TraceFn, timeoutMs = 15000): 
 }
 
 export function isTicketmasterTicketOptionsPage(url: string): boolean {
-  const lower = url.toLowerCase();
-  return /ticketmaster\./i.test(lower) && lower.includes("/event/");
+  // Anchor on the registrable Ticketmaster host set rather than a substring
+  // regex. The previous /ticketmaster\./i test matched any URL with the
+  // literal "ticketmaster." anywhere in the string, so an impersonation
+  // host like "ticketmaster.com.evil.example/event/foo" was wrongly
+  // accepted as a TM event page and could drive subsequent polling against
+  // the wrong tab. Same hardening shape as `isTicketmasterDomainUrl` →
+  // `pickPrimaryTicketmasterUrl` already enforce.
+  if (!isTicketmasterDomainUrl(url)) return false;
+  let pathname = "";
+  try {
+    pathname = new URL(url).pathname.toLowerCase();
+  } catch {
+    return false;
+  }
+  return pathname.includes("/event/");
 }
 
 async function hasTicketmasterSeatSelectionSurface(page: Page): Promise<boolean> {
