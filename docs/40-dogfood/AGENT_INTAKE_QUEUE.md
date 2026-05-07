@@ -117,6 +117,32 @@ Useful flags:
 - `--fail-on-reject`
 - `--fail-on-followup`
 
+## Operator Cockpit
+
+When agents return branches and the layered benchmark also has failures, use
+the cockpit command instead of reading two reports manually:
+
+```bash
+npx tsx scripts/layered-operator-cockpit.ts --benchmark layered-benchmark.json --intake lib/internal-benchmark/__fixtures__/agent-intake/four-agent-queue.json --required-base-commit 3b8e39d
+```
+
+The cockpit consumes:
+
+- a Layered Benchmark V2 JSON or Markdown report;
+- an agent intake queue JSON or Markdown report;
+- an optional merged commit list through `--merged-commits` or
+  `--merged-commits-file`.
+
+It outputs one operator answer:
+
+- ordered merge queue;
+- agents that can start independent next work;
+- top benchmark failures grouped by owner;
+- concrete next task per owner;
+- dependency and conflict warnings;
+- benchmark gate pass/fail summary;
+- exact next step for Codex.
+
 ## Next Task Recommendation
 
 Every report includes:
