@@ -66,6 +66,7 @@ Then read the task-specific section below.
 | Restaurant Phase 0 / Resy / OpenTable | `docs/20-phase0-restaurant/` |
 | OpenTable restaurant baseline benchmark | `docs/20-phase0-restaurant/OPENTABLE_BASELINE_BENCHMARK_PLAN.md` |
 | Provider runtime bug, logs, screenshots | `docs/30-provider-debug/PROVIDER_RUNTIME_DEBUG_PLAYBOOK.md`, `docs/30-provider-debug/LIVE_CLOSURE_EVIDENCE_PROTOCOL.md` |
+| Hotel layered recovery / fallback rules | `docs/30-provider-debug/HOTEL_LAYERED_RECOVERY.md`, then `docs/50-product-areas/HOTEL_CONTROLLED_RETRY_RUNBOOK.md` |
 | Runtime mirror / drift strategy | `docs/30-provider-debug/RUNTIME_MIRROR_GUIDE.md`, `scripts/check-drift.ts` |
 | Operator failure taxonomy (model/env vs provider) | `docs/30-provider-debug/FAILURE_TAXONOMY.md` |
 | Provider closure operator cockpit (3-vertical workflow) | `docs/30-provider-debug/PROVIDER_CLOSURE_OPERATOR_ROOM.md` |
@@ -187,6 +188,7 @@ release entrypoints (`AGENTS.md`, `CLAUDE.md`, `README.md`, `CHANGELOG.md`).
 | Restaurant handoff | `docs/20-phase0-restaurant/RESTAURANT_PHASE0_HANDOFF.md` |
 | R-003 live runbook | `docs/20-phase0-restaurant/R003_LIVE_SMOKE_RUNBOOK.md` |
 | Provider runtime debug | `docs/30-provider-debug/PROVIDER_RUNTIME_DEBUG_PLAYBOOK.md` |
+| Hotel layered recovery | `docs/30-provider-debug/HOTEL_LAYERED_RECOVERY.md` |
 | Live closure evidence protocol | `docs/30-provider-debug/LIVE_CLOSURE_EVIDENCE_PROTOCOL.md` |
 | Runtime mirror guide | `docs/30-provider-debug/RUNTIME_MIRROR_GUIDE.md` |
 | Operator failure taxonomy | `docs/30-provider-debug/FAILURE_TAXONOMY.md` |
