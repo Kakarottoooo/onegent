@@ -94,15 +94,16 @@ describe("Expedia flight runtime safety guards", () => {
     expect(source).toContain("final button not clicked");
   });
 
-  it("treats incomplete traveler checkout as manual review instead of retryable error", () => {
+  it("does not treat incomplete traveler checkout as a successful manual-review handoff", () => {
     const source = readFileSync("lib/booking-autopilot/stagehand-executor.ts", "utf8");
     const incompleteBlock = source.slice(
       source.indexOf("travelerState.missingRequiredFields.length > 0"),
       source.indexOf("// Keep the Expedia flight browser open", source.indexOf("travelerState.missingRequiredFields.length > 0")),
     );
 
-    expect(incompleteBlock).toContain('status: "paused_payment" as const');
-    expect(incompleteBlock).not.toContain('status: "error" as const');
+    expect(incompleteBlock).toContain('status: "error" as const');
+    expect(incompleteBlock).toContain("Expedia flight traveler form incomplete");
+    expect(incompleteBlock).not.toContain('status: "paused_payment" as const');
   });
 
   it("expands executor trace into visible task decision-log entries", () => {

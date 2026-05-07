@@ -9,6 +9,7 @@
 import type { JobLikeInput } from "./types";
 
 export type ExpediaRetryState =
+  | "candidate_rejected_no_match"
   | "card_scan_failed_before_fallback"
   | "fallback_attempted_no_match"
   | "fallback_matched_no_checkout"
@@ -22,6 +23,7 @@ export type ExpediaRetryState =
 type SignalKind =
   | "mixed_or_stale_worker_evidence"
   | "checkout_form_incomplete"
+  | "candidate_rejected"
   | "card_scan_failed"
   | "fallback_attempted"
   | "fallback_matched"
@@ -35,6 +37,7 @@ type SignalKind =
 type TextSourceKind = "job" | "db_row" | "worker_log" | "artifact_path" | "note";
 
 export const EXPEDIA_RETRY_STATE_LABEL: Record<ExpediaRetryState, string> = {
+  candidate_rejected_no_match: "Candidate rejected without safe match",
   card_scan_failed_before_fallback: "Card scan failed before fallback",
   fallback_attempted_no_match: "Fallback attempted but no match",
   fallback_matched_no_checkout: "Fallback matched but did not reach checkout",
@@ -182,6 +185,11 @@ const SIGNAL_PATTERNS: SignalPattern[] = [
   },
   {
     kind: "checkout_form_incomplete",
+    label: "required traveler details missing",
+    rx: /\brequired traveler details\b.*\bmissing\b/i,
+  },
+  {
+    kind: "checkout_form_incomplete",
     label: "checkout reached but traveler form incomplete",
     rx: /\bcheckout reached\b.*\btraveler form (?:is )?incomplete\b/i,
   },
@@ -189,6 +197,26 @@ const SIGNAL_PATTERNS: SignalPattern[] = [
     kind: "checkout_form_incomplete",
     label: "required allowed fields missing",
     rx: /\brequired allowed fields\b.*\bmissing\b/i,
+  },
+  {
+    kind: "candidate_rejected",
+    label: "wrong airline candidate rejected",
+    rx: /\bwrong_airline_candidate_rejected\b/i,
+  },
+  {
+    kind: "candidate_rejected",
+    label: "wrong time candidate rejected",
+    rx: /\bwrong_time_candidate_rejected\b/i,
+  },
+  {
+    kind: "candidate_rejected",
+    label: "price-only candidate rejected",
+    rx: /\bprice_only_fallback_rejected\b/i,
+  },
+  {
+    kind: "candidate_rejected",
+    label: "selected candidate absent",
+    rx: /\bselected candidate absent\b/i,
   },
   {
     kind: "login_or_otp_boundary",
@@ -258,7 +286,7 @@ const SIGNAL_PATTERNS: SignalPattern[] = [
   {
     kind: "provider_no_availability",
     label: "provider no availability",
-    rx: /\b(no availability|no available flights?|no matching (?:flight|fare)|provider inventory changed)\b/i,
+    rx: /\b(no availability|no available flights?|provider inventory changed|no matching (?:flight|fare)\s+(?:available|in inventory|on expedia))\b/i,
   },
   {
     kind: "provider_no_availability",
@@ -297,6 +325,21 @@ const SIGNAL_PATTERNS: SignalPattern[] = [
   },
   {
     kind: "no_match",
+    label: "wrong airline candidate rejected",
+    rx: /\bdecision=rejected\b.*\breason=explicit-different-airline\b/i,
+  },
+  {
+    kind: "no_match",
+    label: "wrong time candidate rejected",
+    rx: /\bdecision=rejected\b.*\breason=(?:price-only-time-mismatch|target-time-mismatch)\b/i,
+  },
+  {
+    kind: "no_match",
+    label: "price-only candidate rejected",
+    rx: /\bdecision=rejected\b.*\breason=price-only-without-target-identity\b/i,
+  },
+  {
+    kind: "no_match",
     label: "checkout not reached",
     rx: /flight checkout was not reached|not reaching checkout|did not reach checkout/i,
   },
@@ -318,6 +361,7 @@ export function analyzeExpediaRetryArtifactBundle(
 
   const hasMixedOrStaleEvidence = has("mixed_or_stale_worker_evidence");
   const hasCheckoutFormIncomplete = has("checkout_form_incomplete");
+  const hasCandidateRejected = has("candidate_rejected");
   const hasCheckout = has("checkout_reached");
   const hasLoginOrOtpBoundary = has("login_or_otp_boundary");
   const hasModelOrEnv = has("model_or_env_transient");
@@ -339,6 +383,8 @@ export function analyzeExpediaRetryArtifactBundle(
     state = "network_provider_failure";
   } else if (hasCheckoutFormIncomplete) {
     state = "insufficient_evidence";
+  } else if (hasCandidateRejected) {
+    state = "candidate_rejected_no_match";
   } else if (hasCheckout) {
     state = "checkout_manual_review_reached";
   } else if (hasFallbackMatched) {
@@ -347,6 +393,8 @@ export function analyzeExpediaRetryArtifactBundle(
     state = "fallback_attempted_no_match";
   } else if (hasCardScanFailed) {
     state = "card_scan_failed_before_fallback";
+  } else if (hasNoMatch) {
+    state = "fallback_attempted_no_match";
   } else if (hasNoAvailability) {
     state = "provider_no_availability";
   } else {
@@ -605,6 +653,8 @@ function classifyConfidence(
   },
 ): "high" | "medium" | "low" {
   switch (state) {
+    case "candidate_rejected_no_match":
+      return "high";
     case "checkout_manual_review_reached":
     case "login_or_otp_boundary":
     case "model_or_env_transient":
@@ -641,6 +691,8 @@ function buildSummary(
 
 function nextActionForState(state: ExpediaRetryState): string {
   switch (state) {
+    case "candidate_rejected_no_match":
+      return "Treat as a protected wrong-card rejection. Preserve candidate summaries and patch only if a clean target card is visible but still rejected.";
     case "card_scan_failed_before_fallback":
       return "Treat as selector/card-scan fallback not reached. Compare the visible card screenshot with the DOM scan entry point before patching.";
     case "fallback_attempted_no_match":
@@ -667,6 +719,8 @@ function signalRank(kind: SignalKind): number {
     case "mixed_or_stale_worker_evidence":
       return -1;
     case "checkout_form_incomplete":
+      return 0;
+    case "candidate_rejected":
       return 0;
     case "checkout_reached":
       return 1;

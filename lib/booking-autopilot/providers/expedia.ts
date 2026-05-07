@@ -318,6 +318,8 @@ function extractExpediaFlightPrices(text: string): number[] {
     .filter(value => Number.isFinite(value));
 }
 
+const EXPEDIA_FLIGHT_NEAR_TARGET_TIME_MINUTES = 15;
+
 const EXPEDIA_FLIGHT_AIRLINE_HINTS = [
   "Southwest Airlines",
   "Southwest",
@@ -355,6 +357,37 @@ function hasExpediaFlightExplicitDifferentAirline(
     if (targetTokens.has(looseHint) || targetTokens.has(hintWord)) return false;
     return text.includes(looseHint) || (hintWord.length >= 4 && text.includes(hintWord));
   });
+}
+
+export type ExpediaFlightCandidateDecision =
+  | "eligible"
+  | "rejected";
+
+export function explainExpediaFlightCandidateDecision(
+  score: ExpediaFlightCandidateScore,
+): { decision: ExpediaFlightCandidateDecision; reason: string } {
+  if (score.hasExplicitDifferentAirline) {
+    return { decision: "rejected", reason: "explicit-different-airline" };
+  }
+  if (score.exactMatch) {
+    return { decision: "eligible", reason: "exact-target-fit" };
+  }
+  if (score.fallbackEligible) {
+    return { decision: "eligible", reason: "fallback-target-fit" };
+  }
+  if (score.hasPrice && !score.hasFlightNumber && score.timeDelta !== null) {
+    return { decision: "rejected", reason: "price-only-time-mismatch" };
+  }
+  if (score.hasPrice && !score.hasFlightNumber) {
+    return { decision: "rejected", reason: "price-only-without-target-identity" };
+  }
+  if (score.hasAirline && score.timeDelta !== null) {
+    return { decision: "rejected", reason: "target-time-mismatch" };
+  }
+  if (score.hasAirline) {
+    return { decision: "rejected", reason: "weak-same-airline-match" };
+  }
+  return { decision: "rejected", reason: "insufficient-target-evidence" };
 }
 
 export function extractExpediaFlightCandidateEvidence(
@@ -412,16 +445,68 @@ export function formatExpediaFlightCandidateEvidence(
     `flightNumber=${evidence.flightNumber ?? "hidden"}`,
   ];
   if (score) {
+    const candidateDecision = explainExpediaFlightCandidateDecision(score);
     parts.push(
       `score=${score.score}`,
       `fallbackScore=${score.fallbackScore}`,
       `timeDelta=${score.timeDelta ?? "unknown"}`,
       `priceDelta=${score.priceDelta ?? "unknown"}`,
       `differentAirline=${score.hasExplicitDifferentAirline ? "yes" : "no"}`,
+      `decision=${candidateDecision.decision}`,
+      `reason=${candidateDecision.reason}`,
     );
   }
   parts.push(`text="${evidence.label}"`);
   return parts.join(" ");
+}
+
+export function describeExpediaFlightCandidateRejection(
+  rawLabels: readonly string[],
+  target: ExpediaFlightTarget,
+  prefix = "candidate labels",
+): string {
+  const candidates = rawLabels
+    .map(label => label.replace(/\s+/g, " ").trim())
+    .filter(Boolean)
+    .map(label => ({
+      label,
+      score: scoreExpediaFlightCandidateText(label, target),
+    }));
+
+  const detailsFor = (score: ExpediaFlightCandidateScore): string =>
+    `timeDelta=${score.timeDelta ?? "unknown"} priceDelta=${score.priceDelta ?? "unknown"} ` +
+    `differentAirline=${score.hasExplicitDifferentAirline ? "yes" : "no"}`;
+
+  const wrongAirline = candidates.find(candidate => candidate.score.hasExplicitDifferentAirline);
+  if (wrongAirline) {
+    return `${prefix} rejected candidates: wrong_airline_candidate_rejected ${detailsFor(wrongAirline.score)} selected candidate absent`;
+  }
+
+  const wrongTime = candidates.find(candidate =>
+    candidate.score.hasAirline &&
+    candidate.score.timeDelta !== null &&
+    candidate.score.timeDelta > EXPEDIA_FLIGHT_NEAR_TARGET_TIME_MINUTES
+  );
+  if (wrongTime) {
+    return `${prefix} rejected candidates: wrong_time_candidate_rejected ${detailsFor(wrongTime.score)} selected candidate absent`;
+  }
+
+  const priceOnly = candidates.find(candidate =>
+    candidate.score.hasPrice &&
+    !candidate.score.hasAirline &&
+    !candidate.score.hasFlightNumber &&
+    (candidate.score.timeDelta === null || candidate.score.timeDelta > EXPEDIA_FLIGHT_NEAR_TARGET_TIME_MINUTES)
+  );
+  if (priceOnly) {
+    return `${prefix} rejected candidates: price_only_fallback_rejected ${detailsFor(priceOnly.score)} selected candidate absent`;
+  }
+
+  if (candidates.length > 0) {
+    const strongest = [...candidates].sort((a, b) => b.score.fallbackScore - a.score.fallbackScore)[0];
+    return `${prefix} rejected candidates: no target identity proof ${detailsFor(strongest.score)} selected candidate absent`;
+  }
+
+  return `${prefix} rejected candidates: no visible select controls selected candidate absent`;
 }
 
 async function readExpediaFlightLocatorText(
@@ -769,7 +854,8 @@ export function scoreExpediaFlightCandidateText(
     timeScore * 2 +
     (hasPrice ? 1 : 0);
   const hasExactTargetTime = timeMinutes !== null && departureMinutes === timeMinutes;
-  const hasNearTargetTime = timeDelta !== null && timeDelta <= 120;
+  const hasNearTargetTime =
+    timeDelta !== null && timeDelta <= EXPEDIA_FLIGHT_NEAR_TARGET_TIME_MINUTES;
   const hasStrongTargetIdentity = hasFlightNumber || hasExactTargetTime;
   const exactMatch =
     !hasExplicitDifferentAirline &&
@@ -2235,6 +2321,16 @@ export function summarizeExpediaFlightTravelerFormState(
     filledFields: Array.from(new Set(filledFields)),
     visibleRequiredFields: Array.from(new Set(visibleRequiredFields)),
   };
+}
+
+export function formatExpediaFlightTravelerFormStateForTrace(
+  state: ExpediaFlightTravelerFormState,
+): string {
+  return [
+    `filled=${state.filledFields.join(",") || "none"}`,
+    `missing=${state.missingRequiredFields.join(",") || "none"}`,
+    `visible=${state.visibleRequiredFields.join(",") || "none"}`,
+  ].join(" ");
 }
 
 /**
@@ -4393,6 +4489,8 @@ async function findExpediaFlightButtonWithLocatorFallback(
       x: 0,
       y: 0,
       inViewportBefore: false,
+      matchMode: selection.matchMode,
+      matchReason: selection.matchReason,
       samples: selection.samples,
       candidateSummaries: selection.candidateSummaries,
     };
@@ -4455,6 +4553,8 @@ async function clickExpediaFlightButtonWithLocatorFallback(
       clicked: false,
       label: "",
       candidates: selection.candidateCount,
+      matchMode: selection.matchMode,
+      matchReason: selection.matchReason,
       samples: selection.samples,
       candidateSummaries: selection.candidateSummaries,
     };
@@ -4551,9 +4651,14 @@ function selectExpediaFlightCandidate(
   ];
   const best = orderedCandidates[0] ?? null;
   if (!best) {
+    const rejectionLabels = candidates.length > 0
+      ? candidates.map(candidate => candidate.label)
+      : samples;
     return {
       best: null,
       candidateCount: candidates.length,
+      matchMode: "rejected",
+      matchReason: describeExpediaFlightCandidateRejection(rejectionLabels, target, prefix),
       samples,
       candidateSummaries: candidates.length > 0
         ? candidates.slice(0, 4).map(candidate => candidate.summary)
@@ -4568,12 +4673,12 @@ function selectExpediaFlightCandidate(
       ? prefix.replace(/\s+/g, "_")
       : sameAirlineFallbackCandidates[0]
         ? "fallback"
-        : "cross_airline_fallback",
+        : "hidden_airline_fallback",
     matchReason: strictCandidates[0]
       ? `${prefix} exact target fit`
       : sameAirlineFallbackCandidates[0]
         ? `${prefix} same airline timeDelta=${best.score.timeDelta ?? "?"} priceDelta=${best.score.priceDelta ?? "?"}`
-        : `${prefix} cross-airline timeDelta=${best.score.timeDelta ?? "?"} priceDelta=${best.score.priceDelta ?? "?"}`,
+        : `${prefix} hidden-airline timeDelta=${best.score.timeDelta ?? "?"} priceDelta=${best.score.priceDelta ?? "?"}`,
     samples: orderedCandidates.slice(0, 4).map(candidate => candidate.label),
     candidateSummaries: orderedCandidates.slice(0, 4).map(candidate => candidate.summary),
   };
@@ -4615,6 +4720,7 @@ async function clickExpediaFlightButtonWithDomRescan(
         .map(match => Number.parseInt((match[1] ?? "").replace(/,/g, ""), 10))
         .filter(value => Number.isFinite(value));
     const timeMinutes = parseTimeToMinutes(time);
+    const nearTargetTimeMinutes = 15;
     const airlineLoose = normalizeLoose(airline);
     const airlineWord = airlineLoose.split(" ")[0] ?? "";
     const flightNumberTight = normalizeTight(flightNumber);
@@ -4693,7 +4799,7 @@ async function clickExpediaFlightButtonWithDomRescan(
           timeScore * 2 +
           (hasPrice ? 1 : 0);
         const hasExactTargetTime = timeMinutes !== null && departureMinutes === timeMinutes;
-        const hasNearTargetTime = timeDelta !== null && timeDelta <= 120;
+        const hasNearTargetTime = timeDelta !== null && timeDelta <= nearTargetTimeMinutes;
         const hasStrongTargetIdentity = hasFlightNumber || hasExactTargetTime;
         const exactMatch =
           !hasExplicitDifferentAirline &&
@@ -4785,11 +4891,33 @@ async function clickExpediaFlightButtonWithDomRescan(
       .slice(0, 4)
       .map(candidate => candidate.label);
     if (!best) {
+      const rejected = selectableCandidates[0];
+      const details = rejected
+        ? `timeDelta=${rejected.timeDelta ?? "unknown"} priceDelta=${rejected.priceDelta ?? "unknown"} differentAirline=${rejected.hasExplicitDifferentAirline ? "yes" : "no"}`
+        : "timeDelta=unknown priceDelta=unknown differentAirline=no";
+      const rejectionClass = selectableCandidates.some(candidate => candidate.hasExplicitDifferentAirline)
+        ? "wrong_airline_candidate_rejected"
+        : selectableCandidates.some(candidate =>
+            candidate.hasAirline &&
+            candidate.timeDelta !== null &&
+            candidate.timeDelta > nearTargetTimeMinutes
+          )
+          ? "wrong_time_candidate_rejected"
+          : selectableCandidates.some(candidate =>
+              candidate.hasPrice &&
+              !candidate.hasAirline &&
+              !candidate.hasFlightNumber &&
+              (candidate.timeDelta === null || candidate.timeDelta > nearTargetTimeMinutes)
+            )
+            ? "price_only_fallback_rejected"
+            : "no target identity proof";
       return {
         clicked: false,
         label: "",
         candidates: 0,
         samples: selectableCandidates.slice(0, 6).map(candidate => candidate.label),
+        matchMode: "rejected",
+        matchReason: `DOM rescan rejected candidates: ${rejectionClass} ${details} selected candidate absent`,
       };
     }
 
@@ -4803,12 +4931,12 @@ async function clickExpediaFlightButtonWithDomRescan(
         ? "dom_rescan"
         : sameAirlineFallbackCandidates[0]
           ? "dom_rescan_fallback"
-          : "dom_rescan_cross_airline_fallback",
+          : "dom_rescan_hidden_airline_fallback",
       matchReason: strictCandidates[0]
         ? "DOM rescan exact target fit"
         : sameAirlineFallbackCandidates[0]
           ? `DOM rescan same airline timeDelta=${best.timeDelta ?? "?"} priceDelta=${best.priceDelta ?? "?"}`
-          : `DOM rescan cross-airline timeDelta=${best.timeDelta ?? "?"} priceDelta=${best.priceDelta ?? "?"}`,
+          : `DOM rescan hidden-airline timeDelta=${best.timeDelta ?? "?"} priceDelta=${best.priceDelta ?? "?"}`,
       samples,
     };
   }, target).catch((error: Error) => ({
@@ -5064,6 +5192,7 @@ export async function bookExpediaFlightProgrammatic(
       return hour * 60 + minute;
     };
     const timeMinutes = parseTimeToMinutes(time);
+    const nearTargetTimeMinutes = 15;
     const normalizeLoose = (s: string | null | undefined): string =>
       (s ?? "").toLowerCase().replace(/\s+/g, " ").trim();
     const normalizeTight = (s: string | null | undefined): string =>
@@ -5149,7 +5278,7 @@ export async function bookExpediaFlightProgrammatic(
           timeScore * 2 +
           (hasPrice ? 1 : 0);
         const hasExactTargetTime = timeMinutes !== null && departureMinutes === timeMinutes;
-        const hasNearTargetTime = timeDelta !== null && timeDelta <= 120;
+        const hasNearTargetTime = timeDelta !== null && timeDelta <= nearTargetTimeMinutes;
         const hasStrongTargetIdentity = hasFlightNumber || hasExactTargetTime;
         const exactMatch =
           !hasExplicitDifferentAirline &&
@@ -5245,7 +5374,37 @@ export async function bookExpediaFlightProgrammatic(
         .map(btn => normalizeLoose((btn.getAttribute("aria-label") ?? "") + " " + (btn.textContent ?? "")))
         .filter(text => text.includes("select"))
         .slice(0, 6);
-      return { found: false, label: "", candidates: 0, x: 0, y: 0, inViewportBefore: false, samples };
+      const rejected = selectableCandidates[0];
+      const details = rejected
+        ? `timeDelta=${rejected.timeDelta ?? "unknown"} priceDelta=${rejected.priceDelta ?? "unknown"} differentAirline=${rejected.hasExplicitDifferentAirline ? "yes" : "no"}`
+        : "timeDelta=unknown priceDelta=unknown differentAirline=no";
+      const rejectionClass = selectableCandidates.some(candidate => candidate.hasExplicitDifferentAirline)
+        ? "wrong_airline_candidate_rejected"
+        : selectableCandidates.some(candidate =>
+            candidate.hasAirline &&
+            candidate.timeDelta !== null &&
+            candidate.timeDelta > nearTargetTimeMinutes
+          )
+          ? "wrong_time_candidate_rejected"
+          : selectableCandidates.some(candidate =>
+              candidate.hasPrice &&
+              !candidate.hasAirline &&
+              !candidate.hasFlightNumber &&
+              (candidate.timeDelta === null || candidate.timeDelta > nearTargetTimeMinutes)
+            )
+            ? "price_only_fallback_rejected"
+            : "no target identity proof";
+      return {
+        found: false,
+        label: "",
+        candidates: 0,
+        x: 0,
+        y: 0,
+        inViewportBefore: false,
+        samples,
+        matchMode: "rejected",
+        matchReason: `DOM scan rejected candidates: ${rejectionClass} ${details} selected candidate absent`,
+      };
     }
 
     const rectBefore = best.btn.getBoundingClientRect();
@@ -5264,12 +5423,12 @@ export async function bookExpediaFlightProgrammatic(
         ? "strict"
         : sameAirlineFallbackCandidates[0]
           ? "fallback"
-          : "cross_airline_fallback",
+          : "hidden_airline_fallback",
       matchReason: strictCandidates[0]
         ? "exact target fit"
         : sameAirlineFallbackCandidates[0]
           ? `same airline fallback timeDelta=${best.timeDelta ?? "?"} priceDelta=${best.priceDelta ?? "?"}`
-          : `cross-airline fallback timeDelta=${best.timeDelta ?? "?"} priceDelta=${best.priceDelta ?? "?"}`,
+          : `hidden-airline fallback timeDelta=${best.timeDelta ?? "?"} priceDelta=${best.priceDelta ?? "?"}`,
       samples: [...strictCandidates, ...sameAirlineFallbackCandidates, ...crossAirlineFallbackCandidates].slice(0, 4).map(c => c.label),
     };
   }, legFlightTarget)
@@ -5296,6 +5455,9 @@ export async function bookExpediaFlightProgrammatic(
     } else if (fallback.samples.length > 0) {
       found = {
         ...found,
+        candidates: fallback.candidates,
+        matchMode: fallback.matchMode,
+        matchReason: fallback.matchReason,
         samples: fallback.samples,
         candidateSummaries: fallback.candidateSummaries,
       };
@@ -5314,6 +5476,9 @@ export async function bookExpediaFlightProgrammatic(
   if (!found.found) {
     if (Array.isArray((found as { samples?: string[] }).samples) && (found as { samples?: string[] }).samples!.length > 0) {
       trace(`[flight-rpa] Visible select-button samples: ${(found as { samples: string[] }).samples.join(" | ")}`);
+    }
+    if (found.matchReason) {
+      trace(`[flight-rpa] Flight candidate rejection reason: ${found.matchReason}`);
     }
     trace(`[flight-rpa] No matching flight button found (tried airline="${legTargetAirline}" price=$${legTargetPrice})`);
     return { reached_checkout: false, currentUrl: getUrl(), error: buildFlightInventoryDriftMessage(legLabel) };
