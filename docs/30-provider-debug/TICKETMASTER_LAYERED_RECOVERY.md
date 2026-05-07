@@ -156,11 +156,20 @@ prefers it whenever:
 
 **Account / session checkpoint rule (canonical):**
 
-> Stop the worker, return `paused_payment` with `needs_login: true` and a
-> `summary` directing the user to sign in in the live browser. Never enter
-> credentials. Never call `waitForAuthClear` for more than 10 minutes; if
-> the user does not return, the worker should release the browser via the
-> normal hold-open timeout, not block forever.
+> Stop the worker and return `BrowserTaskStatus = "needs_login"` (not
+> `paused_payment`) so the upstream task-state mapper at
+> `lib/api-v1/run-travel-task-attempt.ts` renders the user-facing
+> `TravelTaskState = "awaiting_login"` bucket — the accurate label for "user
+> needs to sign in" — instead of conflating the boundary with the seat
+> selection / payment review boundary (`ready_for_confirmation`). The
+> classifier in `lib/booking-autopilot/providers/ticketmaster-status.ts`
+> enforces this distinction: `user_seat_selection_required ->
+> paused_payment -> ready_for_confirmation`, but
+> `user_login_required -> needs_login -> awaiting_login`.
+>
+> Never enter credentials. Never call `waitForAuthClear` for more than 10
+> minutes; if the user does not return, the worker should release the browser
+> via the normal hold-open timeout, not block forever.
 
 Cookies in `.ticketmaster-cookies.json` reduce the chance of an account
 boundary mid-flow but are not part of the production v1 runtime contract

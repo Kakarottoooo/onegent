@@ -127,6 +127,7 @@ import {
   scrollExpediaCheckoutToFinalReviewBoundary,
 } from "./providers/expedia";
 import { bookTicketmasterProgrammatic } from "./providers/ticketmaster-rpa";
+import { classifyTicketmasterTaskState } from "./providers/ticketmaster-status";
 import { bookSeatGeekProgrammatic } from "./providers/seatgeek-rpa";
 
 type FieldSpec = { patterns: string[]; value: string };
@@ -1640,7 +1641,30 @@ The user will enter CVV and confirm payment themselves.`,
         const finalScreenshot = await raw.screenshot({ type: "jpeg", quality: 55 }).catch(() => null);
         const finalScreenshotBase64 = finalScreenshot?.toString("base64") ?? screenshotBase64;
 
-        if (rpaResult.reached_checkout) {
+        // Probe local browser liveness AFTER the RPA returns. If the CDP
+        // target is gone (user closed Chrome, OS sleep, etc.), `raw.url()`
+        // throws — we cannot trust handoff_ready / needs_login under that
+        // condition because they were computed against a dead page.
+        let localBrowserDisconnected = false;
+        let observedUrl = rpaResult.currentUrl ?? "";
+        try {
+          observedUrl = (raw as unknown as { url: () => string }).url() || observedUrl;
+        } catch {
+          localBrowserDisconnected = true;
+        }
+
+        const decision = classifyTicketmasterTaskState({
+          reachedCheckout: rpaResult.reached_checkout,
+          needsLogin: rpaResult.needs_login === true,
+          handoffReady: rpaResult.handoff_ready === true,
+          currentUrl: observedUrl,
+          localBrowserDisconnected,
+          errorMessage: rpaResult.error,
+          summary: rpaResult.summary,
+        });
+        trace(`[tm-rpa] Task state: ${decision.state} (executorStatus=${decision.executorStatus} holdBrowserOpen=${decision.holdBrowserOpen})`);
+
+        if (decision.state === "checkout_reached") {
           // Checkout reached — fall through to the normal form-fill pipeline below.
           // Update currentUrl so the guestDetails/payment stage detection is correct.
           // activePage stays on the Stagehand wrapper; recovery loop handles tab
@@ -1651,40 +1675,42 @@ The user will enter CVV and confirm payment themselves.`,
           // Fall through — do NOT return. Normal recovery loop will detect
           // guestDetailsStep via provider.getStageSignals and fill the form.
         } else {
-          // Sign-in / account boundary is a USER-ACTION handoff, not a
-          // failure. The UI should render "Ready for review — continue
-          // on site" so the user can sign in manually in the live browser.
-          if (rpaResult.handoff_ready || rpaResult.needs_login) {
-            if (!useCloud && input.jobId) {
-              holdBrowserOpenForManualReview(
-                `Local mode: Ticketmaster page is ready for review — keeping browser open for ${Math.round(BROWSER_KEEP_OPEN_MS / 60000)} minutes.`
-              );
-            }
-            const summary = rpaResult.summary
-              ?? (rpaResult.needs_login
-                ? "Ticketmaster needs you to sign in to continue. Open the live browser — we won't enter account details for you."
-                : "Ticketmaster page is ready for review. Continue in the browser.");
+          if (decision.holdBrowserOpen && !useCloud && input.jobId) {
+            holdBrowserOpenForManualReview(
+              `Local mode: Ticketmaster ${decision.state} — keeping browser open for ${Math.round(BROWSER_KEEP_OPEN_MS / 60000)} minutes.`
+            );
+          }
+          if (decision.executorStatus === "paused_payment") {
             return {
               status: "paused_payment" as const,
               screenshotBase64: finalScreenshotBase64,
               handoffUrl: rpaResult.currentUrl || input.startUrl,
               sessionUrl,
-              summary,
+              summary: decision.summary,
               debugTrace,
             };
           }
-          if (!useCloud && input.jobId) {
-            holdBrowserOpenForManualReview(
-              `Local mode: Ticketmaster RPA did not reach checkout — keeping browser open for ${Math.round(BROWSER_KEEP_OPEN_MS / 60000)} minutes for manual review/continue.`
-            );
+          if (decision.executorStatus === "needs_login") {
+            return {
+              status: "needs_login" as const,
+              screenshotBase64: finalScreenshotBase64,
+              handoffUrl: rpaResult.currentUrl || input.startUrl,
+              sessionUrl,
+              summary: decision.summary,
+              debugTrace,
+            };
           }
+          // executorStatus === "error" (external_ad_tab_detected /
+          // local_browser_disconnected / unknown_failure). All three map to
+          // a clear, non-generic error that does NOT leave the task looking
+          // live forever upstream.
           return {
             status: "error" as const,
             screenshotBase64: finalScreenshotBase64,
             handoffUrl: rpaResult.currentUrl || input.startUrl,
             sessionUrl,
-            summary: rpaResult.error ?? "Couldn't reach Ticketmaster checkout. Open the link to finish manually.",
-            error: rpaResult.error ?? "Ticketmaster RPA did not reach checkout.",
+            summary: decision.summary,
+            error: rpaResult.error ?? decision.summary,
             debugTrace,
           };
         }

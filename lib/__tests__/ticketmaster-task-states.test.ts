@@ -215,7 +215,12 @@ describe("classifyTicketmasterTaskState — user_seat_selection_required (event 
 });
 
 describe("classifyTicketmasterTaskState — user_login_required (account/session checkpoint)", () => {
-  it("needs_login + auth.ticketmaster URL => user_login_required / paused_payment", () => {
+  // The login boundary returns `needs_login` (not `paused_payment`) so the
+  // upstream mapper at lib/api-v1/run-travel-task-attempt.ts renders
+  // `awaiting_login`, the accurate user-facing label, instead of
+  // `ready_for_confirmation`. Pinning this here so a future refactor cannot
+  // silently re-conflate the two boundaries.
+  it("needs_login + auth.ticketmaster URL => user_login_required / needs_login", () => {
     const d = decide({
       needsLogin: true,
       handoffReady: true,
@@ -223,7 +228,7 @@ describe("classifyTicketmasterTaskState — user_login_required (account/session
         "https://auth.ticketmaster.com/as/authorization.oauth2?response_type=code",
     });
     expect(d.state).toBe("user_login_required");
-    expect(d.executorStatus).toBe("paused_payment");
+    expect(d.executorStatus).toBe("needs_login");
     expect(d.holdBrowserOpen).toBe(true);
   });
 
