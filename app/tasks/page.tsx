@@ -11,6 +11,7 @@ import {
   taskWorkspaceHrefForView,
   taskWorkspaceViewForJob,
 } from "@/lib/booking-jobs/workspace";
+import { getProviderEventChoiceActionItem } from "@/lib/booking-jobs/provider-choice";
 import {
   buildFlightInventoryDriftManualMessage,
   isFlightInventoryDriftError,
@@ -153,7 +154,9 @@ function inferAgentDecision(step: BookingJobStep): string {
 // ── Visual helpers ─────────────────────────────────────────────────────────────
 
 function stepStatusColor(step: BookingJobStep): string {
-  if (step.status === "awaiting_confirmation" && !step.actionItem) return "rgba(22,163,74,0.85)";
+  if (step.status === "awaiting_confirmation" && !getProviderEventChoiceActionItem(step)) {
+    return "rgba(22,163,74,0.85)";
+  }
   const sem = computeStepSemanticStatus(step);
   return STEP_SEMANTIC_DISPLAY[sem].color;
 }
@@ -176,7 +179,7 @@ function stepStatusLabel(step: BookingJobStep): string {
     return "Pre-filled — ready to pay";
   }
   if (step.retryScheduledFor) return `Retry scheduled for ${formatTime(step.retryScheduledFor)}`;
-  if (step.actionItem) return "Needs your choice";
+  if (getProviderEventChoiceActionItem(step)) return "Needs your choice";
   if (step.status === "awaiting_confirmation") return "Ready to review — confirm on site";
   if (step.status === "loading") return "Agent working…";
   if (step.status === "no_availability") {
@@ -266,7 +269,7 @@ function SatisfactionWidget({ jobId, sessionId }: { jobId: string; sessionId?: s
 
 function WhatsNext({ job }: { job: BookingJob }) {
   const ready = job.steps.filter((s) => s.status === "done");
-  const action = job.steps.filter((s) => s.actionItem);
+  const action = job.steps.filter((s) => getProviderEventChoiceActionItem(s));
   const isRunning = isActiveJobStatus(job.status);
 
   if (isRunning) return (
@@ -846,8 +849,12 @@ function StepCard({ step, stepIndex, jobId, sessionId, onRefresh, onOpenLive }: 
     window.open(url, "_blank");
   }
 
+  const effectiveActionItem = getProviderEventChoiceActionItem(step);
+  const stepForAction = effectiveActionItem && !step.actionItem
+    ? { ...step, actionItem: effectiveActionItem }
+    : step;
   const stepCardClass = `step-card${
-    step.actionItem ? " step-card--needs-action" : step.status === "done" ? " step-card--done" : ""
+    effectiveActionItem ? " step-card--needs-action" : step.status === "done" ? " step-card--done" : ""
   }`;
 
   return (
@@ -959,9 +966,9 @@ function StepCard({ step, stepIndex, jobId, sessionId, onRefresh, onOpenLive }: 
       )}
 
       {/* Action item — needs help card */}
-      {step.actionItem && (
+      {effectiveActionItem && (
         <NeedsHelpCard
-          step={step}
+          step={stepForAction}
           onManualLink={handleManualLink}
           jobId={jobId}
           stepIndex={stepIndex}
@@ -970,7 +977,7 @@ function StepCard({ step, stepIndex, jobId, sessionId, onRefresh, onOpenLive }: 
       )}
 
       {/* Human intervention banner — awaiting_confirmation or needs_login */}
-      {(!step.actionItem && (step.status === "awaiting_confirmation" || (step.status === "error" && step.handoff_url && step.handoff_url !== step.fallbackUrl))) && (
+      {(!effectiveActionItem && (step.status === "awaiting_confirmation" || (step.status === "error" && step.handoff_url && step.handoff_url !== step.fallbackUrl))) && (
         <InterventionBanner step={step} jobId={jobId} onOpenLive={onOpenLive} />
       )}
 
@@ -1289,10 +1296,10 @@ function JobCard({
     ? fullJob.steps.filter((s) => s.status === "done").length
     : job.done_count;
   const awaitingConfirmationCount = fullJob
-    ? fullJob.steps.filter((s) => s.status === "awaiting_confirmation" && !s.actionItem).length
+    ? fullJob.steps.filter((s) => s.status === "awaiting_confirmation" && !getProviderEventChoiceActionItem(s)).length
     : job.awaiting_confirmation_count;
   const actionCount = fullJob
-    ? fullJob.steps.filter((s) => s.actionItem).length
+    ? fullJob.steps.filter((s) => getProviderEventChoiceActionItem(s)).length
     : job.action_count;
   const readyReviewCount = fullJob
     ? awaitingConfirmationCount
@@ -1532,7 +1539,7 @@ function JobCard({
                 <p className="job-card__section-label job-card__section-label--alert">
                   Needs your decision
                 </p>
-                {fullJob.steps.filter((s) => s.actionItem).map((step, i) => (
+                {fullJob.steps.filter((s) => getProviderEventChoiceActionItem(s)).map((step, i) => (
                   <StepCard key={`a-${i}`} step={step} stepIndex={fullJob.steps.indexOf(step)} jobId={job.id} sessionId={sessionId} onRefresh={onRefresh} onOpenLive={() => onOpenLive?.(job.id)} />
                 ))}
                 <div style={{ height: 2 }} />
@@ -1544,7 +1551,7 @@ function JobCard({
                 Other steps
               </p>
             )}
-            {fullJob.steps.filter((s) => !s.actionItem).map((step, i) => (
+            {fullJob.steps.filter((s) => !getProviderEventChoiceActionItem(s)).map((step, i) => (
               <StepCard key={`s-${i}`} step={step} stepIndex={fullJob.steps.indexOf(step)} jobId={job.id} sessionId={sessionId} onRefresh={onRefresh} onOpenLive={() => onOpenLive?.(job.id)} />
             ))}
           </div>

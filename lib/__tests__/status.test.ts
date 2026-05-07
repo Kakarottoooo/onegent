@@ -68,4 +68,31 @@ describe("job status helpers", () => {
 
     expect(computeJobSemanticStatus(needsChoice)).toBe("blocked_needs_user_input");
   });
+
+  it("recognizes legacy event-choice pauses from decision logs", () => {
+    const legacyChoice = job({
+      status: "done",
+      steps: [
+        {
+          type: "activity",
+          emoji: "ticket",
+          label: "Disney On Ice",
+          apiEndpoint: "/api/booking-jobs/start",
+          fallbackUrl: "https://www.ticketmaster.com/disney-on-ice-presents-find-your-tickets/artist/1742147",
+          status: "awaiting_confirmation",
+          handoff_url: "https://www.ticketmaster.com/disney-on-ice-presents-find-your-tickets/artist/1742147",
+          body: {},
+          decisionLog: [
+            {
+              ts: "2026-05-07T20:14:32.000Z",
+              type: "attempt",
+              message: "[tm-rpa] Task state: user_event_choice_required (executorStatus=paused_payment)",
+            },
+          ],
+        },
+      ],
+    });
+
+    expect(computeJobSemanticStatus(legacyChoice)).toBe("blocked_needs_user_input");
+  });
 });

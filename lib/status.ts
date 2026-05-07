@@ -17,6 +17,7 @@
  */
 
 import type { BookingJob, BookingJobStep } from "./db";
+import { stepNeedsProviderEventChoice } from "./booking-jobs/provider-choice";
 
 // ── Types ──────────────────────────────────────────────────────────────────
 
@@ -94,7 +95,9 @@ export function computeJobSemanticStatus(job: BookingJob): JobSemanticStatus {
   const hasRetrying        = stepStatuses.some((s) => s === "retrying");
   const hasBlocked         = stepStatuses.some((s) => s === "blocked_needs_input");
   const allFirstTry        = stepStatuses.every((s) => s === "succeeded_first_try");
-  const hasAwaitingPayment = job.steps.some((s) => s.status === "awaiting_confirmation" && !s.actionItem);
+  const hasAwaitingPayment = job.steps.some(
+    (s) => s.status === "awaiting_confirmation" && !s.actionItem && !stepNeedsProviderEventChoice(s),
+  );
   const allNoAvailability  = job.steps.every((s) => s.status === "no_availability");
 
   if (hasRetrying) return "retrying";

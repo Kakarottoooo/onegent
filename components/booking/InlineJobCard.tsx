@@ -10,6 +10,7 @@ import {
   STEP_SEMANTIC_DISPLAY,
 } from "@/lib/status";
 import { taskDetailsHref, taskEvidenceAction } from "@/lib/booking-jobs/workspace";
+import { getProviderEventChoiceActionItem } from "@/lib/booking-jobs/provider-choice";
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
 
@@ -26,7 +27,9 @@ function formatDate(iso: string): string {
 }
 
 function stepStatusColor(step: BookingJobStep): string {
-  if (step.status === "awaiting_confirmation" && !step.actionItem) return "rgba(22,163,74,0.85)";
+  if (step.status === "awaiting_confirmation" && !getProviderEventChoiceActionItem(step)) {
+    return "rgba(22,163,74,0.85)";
+  }
   const sem = computeStepSemanticStatus(step);
   return STEP_SEMANTIC_DISPLAY[sem].color;
 }
@@ -49,7 +52,7 @@ function stepStatusLabel(step: BookingJobStep): string {
     return "Pre-filled — ready to pay";
   }
   if (step.retryScheduledFor) return "Retry scheduled";
-  if (step.actionItem) return "Needs your choice";
+  if (getProviderEventChoiceActionItem(step)) return "Needs your choice";
   if (step.status === "awaiting_confirmation") return "Ready to review — confirm on site";
   if (step.status === "loading") return "Agent working…";
   if (step.status === "no_availability") return "No availability found";
@@ -87,6 +90,7 @@ export function isTravelDocError(error?: string): boolean {
 
 function InlineStepCard({ step }: { step: BookingJobStep }) {
   const color = stepStatusColor(step);
+  const actionItem = getProviderEventChoiceActionItem(step);
 
   return (
     <div style={{
@@ -121,9 +125,9 @@ function InlineStepCard({ step }: { step: BookingJobStep }) {
               {step.error.length > 120 ? step.error.slice(0, 120) + "…" : step.error}
             </p>
           )}
-          {step.actionItem?.message && (
+          {actionItem?.message && (
             <p style={{ fontFamily: "var(--font-dm-sans)", fontSize: 11, marginTop: 4, color: "rgba(234,88,12,0.9)", lineHeight: 1.4 }}>
-              {step.actionItem.message.length > 140 ? step.actionItem.message.slice(0, 140) + "…" : step.actionItem.message}
+              {actionItem.message.length > 140 ? actionItem.message.slice(0, 140) + "…" : actionItem.message}
             </p>
           )}
         </div>
@@ -136,7 +140,7 @@ function InlineStepCard({ step }: { step: BookingJobStep }) {
             whiteSpace: "nowrap", textDecoration: "none", display: "inline-block",
           }}>Open →</a>
         )}
-        {step.status === "awaiting_confirmation" && step.handoff_url && !step.actionItem && (
+        {step.status === "awaiting_confirmation" && step.handoff_url && !actionItem && (
           <a href={step.handoff_url} target="_blank" rel="noopener noreferrer" style={{
             flexShrink: 0, padding: "6px 12px", borderRadius: 8, border: "none",
             backgroundColor: "rgba(22,163,74,0.85)", color: "#fff",

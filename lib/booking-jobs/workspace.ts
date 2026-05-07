@@ -1,4 +1,5 @@
 import type { BookingJob } from "@/lib/db";
+import { stepNeedsProviderEventChoice } from "./provider-choice";
 
 export type TaskWorkspaceBucket = "queue" | "live" | "history";
 
@@ -10,7 +11,14 @@ export type TaskWorkspaceClassificationInput = Pick<BookingJob, "status"> & {
   done_count?: number;
   awaiting_confirmation_count?: number;
   primary_step_status?: string | null;
-  steps?: Array<{ status?: string | null; actionItem?: unknown }>;
+  steps?: Array<{
+    status?: string | null;
+    actionItem?: {
+      message?: string | null;
+      options?: Array<{ label: string; url: string }> | null;
+    } | null;
+    decisionLog?: Array<{ message?: string | null; outcome?: string | null }> | null;
+  }>;
 };
 
 export type TaskWorkspaceStatusInput = Pick<BookingJob, "id"> & TaskWorkspaceClassificationInput;
@@ -58,12 +66,16 @@ function numberField(value: unknown): number {
 function hasReadyForReviewBoundary(job: TaskWorkspaceClassificationInput): boolean {
   if (numberField(job.awaiting_confirmation_count) > 0) return true;
   if (job.primary_step_status === "awaiting_confirmation") return true;
-  return job.steps?.some((step) => step.status === "awaiting_confirmation" && !step.actionItem) ?? false;
+  return job.steps?.some((step) => (
+    step.status === "awaiting_confirmation" &&
+    !step.actionItem &&
+    !stepNeedsProviderEventChoice(step)
+  )) ?? false;
 }
 
 function hasActionRequired(job: TaskWorkspaceClassificationInput): boolean {
   if (numberField(job.action_count) > 0) return true;
-  return job.steps?.some((step) => !!step.actionItem) ?? false;
+  return job.steps?.some((step) => !!step.actionItem || stepNeedsProviderEventChoice(step)) ?? false;
 }
 
 export function taskWorkspaceViewForStatus(status: BookingJob["status"]): TaskWorkspaceBucket {

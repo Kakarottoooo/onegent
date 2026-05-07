@@ -60,6 +60,20 @@ describe("booking job workspace helpers", () => {
         },
       ],
     })).toBe("queue");
+    expect(taskWorkspaceViewForJob({
+      id: "legacy-choice-step",
+      status: "done",
+      steps: [
+        {
+          status: "awaiting_confirmation",
+          decisionLog: [
+            {
+              message: "[tm-rpa] Task state: user_event_choice_required (executorStatus=paused_payment)",
+            },
+          ],
+        },
+      ],
+    })).toBe("queue");
   });
 
   it("normalizes task details and evidence hrefs", () => {
