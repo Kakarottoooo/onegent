@@ -116,6 +116,17 @@ Useful flags:
 - `--merged-branches branch-a,branch-b`
 - `--fail-on-reject`
 - `--fail-on-followup`
+- `--forbid-provider-runtime` for Stage 0 no-live branches that must reject
+  provider runtime, worker, booking-job API, v1 API, DB, or schema changes.
+
+Stage 0 sample queue:
+
+```bash
+npx tsx scripts/layered-agent-intake.ts --input lib/internal-benchmark/__fixtures__/agent-intake/stage0-returned-branches.json --required-base-branch origin/codex/stage0-capture-mvp --required-base-commit 9ad43f1 --forbid-provider-runtime --json
+```
+
+The Stage 0 sample models a Goal benchmark branch, Claude activity follow-up,
+Agent2 flight fixtures, Agent3 hotel fixtures, and an unsafe rejected report.
 
 ## Operator Cockpit
 

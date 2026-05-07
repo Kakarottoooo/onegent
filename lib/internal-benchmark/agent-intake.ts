@@ -27,6 +27,7 @@ export type AgentIntakeIssueCode =
   | "forbidden_artifact"
   | "missing_validation"
   | "runtime_mirror_without_drift_check"
+  | "provider_runtime_without_permission"
   | "docs_only_runtime_closure_claim"
   | "unresolved_shared_schema_dependency"
   | "requires_rebase_before_merge"
@@ -120,6 +121,7 @@ export type AgentIntakeOptions = {
   recommendedBase?: string;
   requiredValidations?: string[];
   mergedBranches?: string[];
+  forbidProviderRuntimeChanges?: boolean;
 };
 
 const DEFAULT_REQUIRED_BASE_BRANCH = "origin/codex/goal-core-reliability-long-run";
@@ -136,6 +138,7 @@ const ZERO_ISSUES: Record<AgentIntakeIssueCode, number> = {
   forbidden_artifact: 0,
   missing_validation: 0,
   runtime_mirror_without_drift_check: 0,
+  provider_runtime_without_permission: 0,
   docs_only_runtime_closure_claim: 0,
   unresolved_shared_schema_dependency: 0,
   requires_rebase_before_merge: 0,
@@ -171,6 +174,15 @@ const FORBIDDEN_ARTIFACT_PATTERNS: RegExp[] = [
 const RUNTIME_MIRROR_PATTERNS: RegExp[] = [
   /^lib[/\\]booking-autopilot[/\\]/i,
   /^worker[/\\]src[/\\]booking-autopilot[/\\]/i,
+];
+
+const PROVIDER_RUNTIME_FORBIDDEN_PATTERNS: RegExp[] = [
+  /^lib[/\\]booking-autopilot[/\\]/i,
+  /^worker[/\\]src[/\\]/i,
+  /^app[/\\]api[/\\]booking-jobs[/\\]/i,
+  /^app[/\\]api[/\\]v1[/\\]/i,
+  /^lib[/\\]db\.ts$/i,
+  /(^|[/\\])(schema|schemas|migrations)[/\\]/i,
 ];
 
 type QueueContext = {
@@ -209,6 +221,18 @@ export function classifyAgentReturnReport(
       message: "Branch metadata includes local artifacts or secret-bearing paths that should not be merged.",
       evidence: forbiddenPaths,
     });
+  }
+
+  if (options.forbidProviderRuntimeChanges) {
+    const forbiddenRuntimePaths = report.changedFiles.filter(isProviderRuntimeForbiddenPath);
+    if (forbiddenRuntimePaths.length > 0) {
+      issues.push({
+        code: "provider_runtime_without_permission",
+        severity: "reject",
+        message: "Branch touches provider runtime, worker, API mutation, DB, or schema paths without permission.",
+        evidence: forbiddenRuntimePaths,
+      });
+    }
   }
 
   const missingValidation = requiredValidations.filter(
@@ -619,6 +643,10 @@ function isForbiddenArtifactPath(pathname: string): boolean {
 
 function isRuntimeMirrorPath(pathname: string): boolean {
   return RUNTIME_MIRROR_PATTERNS.some((pattern) => pattern.test(pathname));
+}
+
+function isProviderRuntimeForbiddenPath(pathname: string): boolean {
+  return PROVIDER_RUNTIME_FORBIDDEN_PATTERNS.some((pattern) => pattern.test(pathname));
 }
 
 function isDocsOnlyReport(report: AgentReturnReport): boolean {

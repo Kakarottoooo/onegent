@@ -34,6 +34,7 @@ const queueReport = classifyAgentIntakeQueue(reports, {
   requiredBaseCommit: readArg("--required-base-commit") || undefined,
   recommendedBase: readArg("--recommended-base") || undefined,
   mergedBranches: readCsvArg("--merged-branches"),
+  forbidProviderRuntimeChanges: hasFlag("--forbid-provider-runtime"),
 });
 
 const output = hasFlag("--json")
