@@ -5,7 +5,12 @@ import { useRouter, useSearchParams } from "next/navigation";
 import dynamic from "next/dynamic";
 import type { BookingJob, BookingJobStep, DecisionLogEntry, AgentFeedbackStats } from "@/lib/db";
 import type { BookingJobListItem, BookingJobsSummary } from "@/lib/booking-jobs/read-model";
-import { taskDetailsHref, taskEvidenceAction, taskWorkspaceViewForJob } from "@/lib/booking-jobs/workspace";
+import {
+  taskDetailsHref,
+  taskEvidenceAction,
+  taskWorkspaceHrefForView,
+  taskWorkspaceViewForJob,
+} from "@/lib/booking-jobs/workspace";
 import {
   buildFlightInventoryDriftManualMessage,
   isFlightInventoryDriftError,
@@ -45,7 +50,14 @@ const TaskTimelinePanel = dynamic(() => import("@/components/task-timeline/TaskT
   ),
 });
 
-function getSessionId(): string {
+function normalizedSessionId(value?: string | null): string | null {
+  const trimmed = value?.trim();
+  return trimmed ? trimmed : null;
+}
+
+function getSessionId(preferredSessionId?: string | null): string {
+  const preferred = normalizedSessionId(preferredSessionId);
+  if (preferred) return preferred;
   if (typeof window === "undefined") return "";
   let id = localStorage.getItem("session_id");
   if (!id) { id = crypto.randomUUID(); localStorage.setItem("session_id", id); }
@@ -109,8 +121,8 @@ async function sendFeedback(payload: {
   provider?: string;
   outcome: string;
   metadata?: Record<string, unknown>;
-}) {
-  const session_id = getSessionId();
+}, sourceSessionId?: string | null) {
+  const session_id = getSessionId(sourceSessionId);
   fetch("/api/booking-feedback", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -198,7 +210,7 @@ function logEntryColor(type: DecisionLogEntry["type"]): string {
 
 // ── Satisfaction widget ────────────────────────────────────────────────────────
 
-function SatisfactionWidget({ jobId }: { jobId: string }) {
+function SatisfactionWidget({ jobId, sessionId }: { jobId: string; sessionId?: string | null }) {
   const [chosen, setChosen] = useState<string | null>(null);
   const [sent, setSent] = useState(false);
 
@@ -212,7 +224,7 @@ function SatisfactionWidget({ jobId }: { jobId: string }) {
       step_type: "job",
       agent_decision: "n/a",
       outcome,
-    });
+    }, sessionId);
   }
 
   if (sent) {
@@ -782,8 +794,8 @@ function LiveLogPanel({ jobId }: { jobId: string }) {
   );
 }
 
-function StepCard({ step, stepIndex, jobId, onRefresh, onOpenLive }: {
-  step: BookingJobStep; stepIndex: number; jobId: string; onRefresh?: () => void; onOpenLive?: () => void;
+function StepCard({ step, stepIndex, jobId, sessionId, onRefresh, onOpenLive }: {
+  step: BookingJobStep; stepIndex: number; jobId: string; sessionId?: string | null; onRefresh?: () => void; onOpenLive?: () => void;
 }) {
   const [logOpen, setLogOpen] = useState(false);
   const feedbackSent = useRef(false);
@@ -806,7 +818,7 @@ function StepCard({ step, stepIndex, jobId, onRefresh, onOpenLive }: {
           usedFallback: step.usedFallback,
           selected_time: step.selected_time,
         },
-      });
+      }, sessionId);
     }
     window.open(step.handoff_url!, "_blank");
   }
@@ -821,7 +833,7 @@ function StepCard({ step, stepIndex, jobId, onRefresh, onOpenLive }: {
       provider: inferProvider(step),
       outcome: "manual_override",
       metadata: { optionIndex, originalLabel: step.label },
-    });
+    }, sessionId);
     window.open(url, "_blank");
   }
 
@@ -1506,7 +1518,7 @@ function JobCard({
                   Needs your decision
                 </p>
                 {fullJob.steps.filter((s) => s.actionItem).map((step, i) => (
-                  <StepCard key={`a-${i}`} step={step} stepIndex={fullJob.steps.indexOf(step)} jobId={job.id} onRefresh={onRefresh} onOpenLive={() => onOpenLive?.(job.id)} />
+                  <StepCard key={`a-${i}`} step={step} stepIndex={fullJob.steps.indexOf(step)} jobId={job.id} sessionId={sessionId} onRefresh={onRefresh} onOpenLive={() => onOpenLive?.(job.id)} />
                 ))}
                 <div style={{ height: 2 }} />
               </>
@@ -1518,7 +1530,7 @@ function JobCard({
               </p>
             )}
             {fullJob.steps.filter((s) => !s.actionItem).map((step, i) => (
-              <StepCard key={`s-${i}`} step={step} stepIndex={fullJob.steps.indexOf(step)} jobId={job.id} onRefresh={onRefresh} onOpenLive={() => onOpenLive?.(job.id)} />
+              <StepCard key={`s-${i}`} step={step} stepIndex={fullJob.steps.indexOf(step)} jobId={job.id} sessionId={sessionId} onRefresh={onRefresh} onOpenLive={() => onOpenLive?.(job.id)} />
             ))}
           </div>
           )}
@@ -1531,7 +1543,7 @@ function JobCard({
           )}
 
           {/* Satisfaction widget for completed jobs */}
-          {isComplete && <SatisfactionWidget jobId={job.id} />}
+          {isComplete && <SatisfactionWidget jobId={job.id} sessionId={sessionId} />}
 
         </>
       )}
@@ -3136,6 +3148,7 @@ function TripsPageInner() {
   const liveJobIdRef = useRef<string | null>(null);
   const [selectedJobId, setSelectedJobId] = useState<string | null>(null);
   const lastFocusScrollRef = useRef<string | null>(null);
+  const sourceSessionId = normalizedSessionId(searchParams.get("session_id"));
 
   const openLive = useCallback((jobId: string) => {
     if (liveJobIdRef.current !== jobId) {
@@ -3174,10 +3187,10 @@ function TripsPageInner() {
     window.addEventListener("mouseup", onUp);
   }
 
-  const sessionId = typeof window !== "undefined" ? getSessionId() : "";
+  const sessionId = typeof window !== "undefined" ? getSessionId(sourceSessionId) : sourceSessionId ?? "";
 
   const loadJobs = useCallback(async (opts: { force?: boolean } = {}) => {
-    const sid = getSessionId();
+    const sid = getSessionId(sourceSessionId);
     try {
       if (opts.force) invalidateTaskList(sid);
       const [nextJobs, nextSummary] = await Promise.all([
@@ -3188,7 +3201,7 @@ function TripsPageInner() {
       setTaskSummary(nextSummary);
     } catch { /* ignore */ }
     finally { setLoading(false); }
-  }, []);
+  }, [sourceSessionId]);
 
   const loadJobDetail = useCallback(async (jobId: string, force = false) => {
     try {
@@ -3202,17 +3215,17 @@ function TripsPageInner() {
   }, []);
 
   const refreshTask = useCallback(async (jobId?: string) => {
-    const sid = getSessionId();
+    const sid = getSessionId(sourceSessionId);
     invalidateTaskList(sid);
     if (jobId) invalidateTaskDetail(jobId);
     await loadJobs({ force: true });
     if (jobId && jobDetails[jobId]) {
       await loadJobDetail(jobId, true);
     }
-  }, [jobDetails, loadJobDetail, loadJobs]);
+  }, [jobDetails, loadJobDetail, loadJobs, sourceSessionId]);
 
   async function handleClearAll() {
-    const sid = getSessionId();
+    const sid = getSessionId(sourceSessionId);
     if (!sid || clearingAll) return;
     if (!confirm(`Delete all ${jobs.length} tasks and their monitors?`)) return;
     setClearingAll(true);
@@ -3259,7 +3272,13 @@ function TripsPageInner() {
       setSelectedJobId(focusId);
       lastFocusScrollRef.current = focusScrollKey;
       if (focusedJob && view !== focusedView) {
-        router.replace(`/tasks?view=${focusedView}&focus=${encodeURIComponent(focusId)}`, { scroll: false });
+        router.replace(
+          taskWorkspaceHrefForView(focusedView, {
+            focusId,
+            sourceSessionId: focusedJob.session_id ?? sessionId,
+          }),
+          { scroll: false },
+        );
       }
       if (focusedView === "live") {
         openLive(focusId);
@@ -3282,12 +3301,12 @@ function TripsPageInner() {
       lastFocusScrollRef.current = null;
       setWorkspaceView(nextView);
     }
-  }, [searchParams, jobs, router, openLive, loadJobDetail]);
+  }, [searchParams, jobs, router, openLive, loadJobDetail, sessionId]);
 
   const setWorkspaceViewAndUrl = useCallback((next: TaskWorkspaceView) => {
     setWorkspaceView(next);
-    router.replace(`/tasks?view=${next}`, { scroll: false });
-  }, [router]);
+    router.replace(taskWorkspaceHrefForView(next, { sourceSessionId: sessionId }), { scroll: false });
+  }, [router, sessionId]);
 
   const queueJobs = jobs.filter((job) => classifyTaskWorkspace(job) === "queue");
   const liveJobs = jobs.filter((job) => classifyTaskWorkspace(job) === "live");
@@ -3346,7 +3365,7 @@ function TripsPageInner() {
     if (loading || explicitView || focusId || workspaceView !== "queue") return;
     if (queueJobs.length === 0 && liveJobs.length === 0 && historyJobs.length > 0) {
       setWorkspaceView("history");
-      router.replace("/tasks?view=history", { scroll: false });
+      router.replace(taskWorkspaceHrefForView("history", { sourceSessionId: sessionId }), { scroll: false });
     }
   }, [
     loading,
@@ -3356,6 +3375,7 @@ function TripsPageInner() {
     liveJobs.length,
     historyJobs.length,
     router,
+    sessionId,
   ]);
 
   function focusJob(jobId: string) {
@@ -3363,7 +3383,10 @@ function TripsPageInner() {
     const nextView = job ? taskWorkspaceViewForJob(job) : workspaceView;
     setWorkspaceView(nextView);
     setSelectedJobId(jobId);
-    router.replace(`/tasks?view=${nextView}&focus=${encodeURIComponent(jobId)}`, { scroll: false });
+    router.replace(
+      taskWorkspaceHrefForView(nextView, { focusId: jobId, sourceSessionId: job?.session_id ?? sessionId }),
+      { scroll: false },
+    );
     void loadJobDetail(jobId);
     jobRefs.current[jobId]?.scrollIntoView({ behavior: "smooth", block: "start" });
   }
@@ -3550,7 +3573,7 @@ function TripsPageInner() {
               router.back();
               setTimeout(() => {
                 if (window.location.href === startUrl) {
-                  router.push("/");
+                  router.push(sessionId ? `/?session_id=${encodeURIComponent(sessionId)}` : "/");
                 }
               }, 300);
             }}

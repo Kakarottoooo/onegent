@@ -18,7 +18,7 @@ export type AppBootstrapSidebarSession = ChatSession;
 
 export type AppBootstrapRecentJob = Pick<
   BookingJobSummary,
-  "id" | "trip_label" | "status" | "created_at" | "updated_at"
+  "id" | "session_id" | "trip_label" | "status" | "created_at" | "updated_at"
 >;
 
 export type AppBootstrapAccountProfile = Pick<
@@ -117,6 +117,7 @@ export async function getAppBootstrapData(params: {
       : null,
     recent_jobs: bookingJobs.slice(0, 3).map((job) => ({
       id: job.id,
+      session_id: job.session_id,
       trip_label: job.trip_label,
       status: job.status,
       created_at: job.created_at,

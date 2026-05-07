@@ -556,8 +556,9 @@ export default function TripProposalChatCard(props: TripProposalChatCardProps) {
   // never gets the chance to actually click Book.
   const isExecuting = !!data.room.booking_job_id;
   if (isExecuting) {
+    const roomTaskSessionId = `room-${props.roomId}`;
     const taskUrl = data.room.booking_job_id
-      ? getTaskWorkspaceHref({ id: data.room.booking_job_id, status: "pending" })
+      ? getTaskWorkspaceHref({ id: data.room.booking_job_id, status: "pending", sourceSessionId: roomTaskSessionId })
       : "/tasks";
     return (
       <div style={WRAPPER}>

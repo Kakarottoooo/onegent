@@ -358,7 +358,11 @@ export default function CalendarPage() {
 
   function handleEventClick(jobId: string) {
     const job = jobs.find((candidate) => candidate.id === jobId);
-    router.push(job ? getTaskWorkspaceHref(job) : getTaskWorkspaceHref({ id: jobId, status: "pending" }));
+    router.push(
+      job
+        ? getTaskWorkspaceHref(job)
+        : getTaskWorkspaceHref({ id: jobId, status: "pending", sourceSessionId: getSessionId() }),
+    );
   }
 
   async function disconnectGoogleCalendar() {

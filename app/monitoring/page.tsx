@@ -1,5 +1,6 @@
 import { redirect } from "next/navigation";
+import { taskWorkspaceHrefForView } from "@/lib/booking-jobs/workspace";
 
 export default function MonitoringRedirectPage() {
-  redirect("/tasks?view=live");
+  redirect(taskWorkspaceHrefForView("live"));
 }

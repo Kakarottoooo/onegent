@@ -5,6 +5,7 @@ import {
   classifyBookingJobListItem,
   summarizeBookingJobs,
 } from "@/lib/booking-jobs/read-model";
+import { getTaskWorkspaceHref } from "@/lib/booking-jobs/workspace";
 
 function summaryRow(overrides: Partial<BookingJobSummary> = {}): BookingJobSummary {
   return {
@@ -116,5 +117,21 @@ describe("booking job compact list rows", () => {
     expect(classifyBookingJobListItem(listRow({ status: "done", awaiting_confirmation_count: 1 }))).toBe("history");
     expect(classifyBookingJobListItem(listRow({ status: "failed", action_count: 1 }))).toBe("history");
     expect(classifyBookingJobListItem(listRow({ status: "done", step_count: 1, done_count: 1 }))).toBe("history");
+  });
+
+  it("keeps compact rows traceable to their source chat session", () => {
+    const item = buildBookingJobListItem(listRow({
+      id: "capture-job",
+      session_id: "capture-chat-1",
+      status: "done",
+      step_count: 1,
+      done_count: 1,
+    }));
+
+    expect(item.session_id).toBe("capture-chat-1");
+    expect(item.workspace).toBe("history");
+    expect(getTaskWorkspaceHref(item)).toBe(
+      "/tasks?view=history&focus=capture-job&session_id=capture-chat-1",
+    );
   });
 });

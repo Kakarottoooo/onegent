@@ -239,7 +239,7 @@ export async function POST(req: NextRequest, { params }: Params) {
     booking_job_id: bookingJobId,
     // /tasks has no dynamic segment; it reads ?focus=<id> and lets the shared
     // workspace helper choose queue/live/history from the job state.
-    url: getTaskWorkspaceHref({ id: bookingJobId, status: "pending" }),
+    url: getTaskWorkspaceHref({ id: bookingJobId, status: "pending", sourceSessionId: sessionId }),
     selection,
     contributors: allSelections.length,
   });

@@ -165,7 +165,7 @@ export default function RecommendationCard({
         fetch(`/api/booking-jobs/${jobId}/start?executor=inline`, { method: "POST" }).catch(() => {});
         onJobCreated?.(jobId);
         if (!onJobCreated) {
-          router.push(getTaskWorkspaceHref({ id: jobId, status: "pending" }));
+          router.push(getTaskWorkspaceHref({ id: jobId, status: "pending", sourceSessionId: bookingSessionId }));
         }
       }
     } catch {

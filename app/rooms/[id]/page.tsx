@@ -2901,6 +2901,7 @@ function AcceptedBlock({
   // "Booking in progress" forever.
   type LiveJob = {
     id: string;
+    session_id?: string | null;
     status: "pending" | "running" | "done" | "failed";
     steps: BookingJobStep[];
   };
@@ -2963,6 +2964,7 @@ function AcceptedBlock({
   if (bookingJobId) {
     const step = liveJob && typeof liveJob === "object" ? liveJob.steps?.[0] : undefined;
     const jobStatus = liveJob && typeof liveJob === "object" ? liveJob.status : null;
+    const bookingSourceSessionId = liveJob && typeof liveJob === "object" ? liveJob.session_id : null;
     const stepStatus = step?.status;
     const failed =
       jobStatus === "failed" ||
@@ -2991,7 +2993,11 @@ function AcceptedBlock({
                 {clearing ? "Resetting…" : "🔄 Retry booking"}
               </button>
               <button
-                onClick={() => router.push(getTaskWorkspaceHref({ id: bookingJobId, status: "failed" }))}
+                onClick={() => router.push(getTaskWorkspaceHref({
+                  id: bookingJobId,
+                  status: "failed",
+                  sourceSessionId: bookingSourceSessionId,
+                }))}
                 className={`flex-1 py-2.5 ${CTA_GHOST}`}
               >
                 View log →
@@ -3021,6 +3027,7 @@ function AcceptedBlock({
                   id: bookingJobId,
                   status: "done",
                   awaiting_confirmation_count: 1,
+                  sourceSessionId: bookingSourceSessionId,
                 }))}
                 className={`flex-1 py-2.5 ${CTA}`}
               >
@@ -3050,7 +3057,11 @@ function AcceptedBlock({
           </p>
           {isPayer && (
             <button
-              onClick={() => router.push(getTaskWorkspaceHref({ id: bookingJobId, status: "done" }))}
+              onClick={() => router.push(getTaskWorkspaceHref({
+                id: bookingJobId,
+                status: "done",
+                sourceSessionId: bookingSourceSessionId,
+              }))}
               className={`w-full py-2.5 ${CTA_GHOST}`}
             >
               View details →
@@ -3073,7 +3084,11 @@ function AcceptedBlock({
         </p>
         {isPayer && (
           <button
-            onClick={() => router.push(getTaskWorkspaceHref({ id: bookingJobId, status: "running" }))}
+            onClick={() => router.push(getTaskWorkspaceHref({
+              id: bookingJobId,
+              status: "running",
+              sourceSessionId: bookingSourceSessionId,
+            }))}
             className={`w-full py-2.5 ${CTA}`}
           >
             View booking status →
@@ -3142,7 +3157,7 @@ function AcceptedBlock({
         return;
       }
       const { job_id } = await res.json() as { job_id: string };
-      router.push(getTaskWorkspaceHref({ id: job_id, status: "running" }));
+      router.push(getTaskWorkspaceHref({ id: job_id, status: "running", sourceSessionId: sessionId }));
     } finally {
       setStarting(false);
     }
