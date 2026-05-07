@@ -40,6 +40,10 @@ describe("Ticketmaster target date parsing", () => {
     expect(isTicketmasterTicketOptionsPage("https://www.ticketmaster.com/the-lion-king-new-york-ny-tickets/artist/1039581")).toBe(false);
   });
 
+  it("matches drawer Find Tickets labels with visually-hidden event details", () => {
+    expect(looksLikeFindTicketsLabel("Find Tickets The Lion King (New York, NY) 5/30/26, 2:00 PM")).toBe(true);
+  });
+
   it("matches drawer Find Tickets labels with trailing chevrons", () => {
     expect(looksLikeFindTicketsLabel("Find Tickets")).toBe(true);
     expect(looksLikeFindTicketsLabel("Find Tickets >")).toBe(true);

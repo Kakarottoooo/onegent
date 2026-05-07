@@ -11,10 +11,9 @@
  * and wait for the user to sign in (URL leaves the auth domain). Cookies from
  * .ticketmaster-cookies.json usually prevent this, but it's a safety net.
  */
-import type { Frame, Locator, Page } from "playwright";
+import type { Locator, Page } from "playwright";
 
 type TraceFn = (msg: string) => void;
-type TicketmasterFrameLike = Page | Frame;
 
 export interface TicketmasterRpaResult {
   reached_checkout: boolean;
@@ -457,7 +456,7 @@ export function looksLikeFindTicketsLabel(label: string): boolean {
   return ["find tickets", "buy tickets", "get tickets"].some(p => trimmed.startsWith(p));
 }
 
-async function clickFindTicketsWithDomScan(frame: TicketmasterFrameLike, trace: TraceFn, scopeLabel: string): Promise<boolean> {
+async function clickFindTicketsWithDomScan(page: Page, trace: TraceFn): Promise<boolean> {
   const source = `
 (function() {
   var controls = [];
@@ -482,6 +481,17 @@ async function clickFindTicketsWithDomScan(frame: TicketmasterFrameLike, trace: 
     var t = String(label || "").trim().toLowerCase();
     return t.indexOf("find tickets") === 0 || t.indexOf("buy tickets") === 0 || t.indexOf("get tickets") === 0;
   }
+  function hasEventInfoAncestor(el) {
+    var current = el;
+    var hops = 0;
+    while (current && hops < 8) {
+      var text = String(current.innerText || current.textContent || "");
+      if (/event information/i.test(text)) return true;
+      current = current.parentElement;
+      hops++;
+    }
+    return false;
+  }
   function add(el) {
     if (!el || seen.has(el) || !isVisible(el)) return;
     seen.add(el);
@@ -502,9 +512,17 @@ async function clickFindTicketsWithDomScan(frame: TicketmasterFrameLike, trace: 
       if (child && child.shadowRoot) scanRoot(child.shadowRoot, depth + 1);
     }
   }
+  var bodyText = String(document.body && (document.body.innerText || document.body.textContent) || "");
+  var hasEventInfoPanel = /event information/i.test(bodyText);
   scanRoot(document, 0);
+  controls = controls.filter(function(item) {
+    if (!hasEventInfoPanel) return false;
+    if (hasEventInfoAncestor(item.el)) return true;
+    var r = item.el.getBoundingClientRect && item.el.getBoundingClientRect();
+    return !!r && r.left > (window.innerWidth * 0.45);
+  });
   if (!controls.length) {
-    return { clicked: false, candidates: 0, eventInfo: /event information/i.test(document.body && document.body.innerText || "") };
+    return { clicked: false, candidates: 0, eventInfo: hasEventInfoPanel };
   }
   controls.sort(function(a, b) {
     var aScope = a.el.closest && a.el.closest('aside, [role="dialog"], [aria-modal], section, div') || a.el;
@@ -519,17 +537,17 @@ async function clickFindTicketsWithDomScan(frame: TicketmasterFrameLike, trace: 
   return { clicked: true, label: chosen.label.slice(0, 120), candidates: controls.length, eventInfo: true };
 })()
 `;
-  const result = await frame.evaluate(source).catch((err: Error) => {
-    trace(`[tm-rpa] Find Tickets DOM scan failed (${scopeLabel}): ${err.message?.slice(0, 80)}`);
+  const result = await page.evaluate(source).catch((err: Error) => {
+    trace(`[tm-rpa] Find Tickets DOM scan failed: ${err.message?.slice(0, 80)}`);
     return null;
   });
   const clicked = result as null | { clicked?: boolean; label?: string; candidates?: number; eventInfo?: boolean };
   if (clicked?.clicked) {
-    trace(`[tm-rpa] Clicked Find Tickets via DOM scan (${scopeLabel}): "${(clicked.label ?? "").slice(0, 80)}" candidates=${clicked.candidates ?? 0}`);
+    trace(`[tm-rpa] Clicked Find Tickets via main-page DOM scan: "${(clicked.label ?? "").slice(0, 80)}" candidates=${clicked.candidates ?? 0}`);
     return true;
   }
   if (clicked?.eventInfo) {
-    trace(`[tm-rpa] Event-info drawer visible but Find Tickets not matched in DOM scan (${scopeLabel})`);
+    trace("[tm-rpa] Event-info drawer visible but Find Tickets not matched in main-page DOM scan");
   }
   return false;
 }
@@ -1065,25 +1083,23 @@ async function clickFindTickets(page: Page, trace: TraceFn): Promise<boolean> {
   let loop = 0;
   while (Date.now() < deadline) {
     loop++;
-    const frames: Array<{ target: TicketmasterFrameLike; label: string }> = [
-      { target: page, label: "page" },
-      ...page.frames().map((frame, index) => ({ target: frame, label: `frame:${index}:${frame.url().slice(0, 60)}` })),
-    ];
-    for (const item of frames) {
-      if (await clickFindTicketsWithDomScan(item.target, trace, item.label)) {
-        return true;
-      }
+    if (await clickFindTicketsWithDomScan(page, trace)) {
+      return true;
     }
     const clicked = await page.evaluate(() => {
       const isVisible = (el: Element): boolean => {
         const r = (el as HTMLElement).getBoundingClientRect();
         return r.width > 0 && r.height > 0;
       };
+      const hasEventInfoPanel = /event information/i.test(document.body?.innerText ?? "");
       const selector = 'a, button, [role="button"], [role="link"]';
       const nodes = Array.from(document.querySelectorAll<HTMLElement>(selector)).filter(isVisible);
       // startsWith semantics — handles "Find Tickets >" / "Find Tickets ›"
       // / "Find Tickets❯" (the button has a chevron icon after the label).
       const candidate = nodes.find(el => {
+        if (!hasEventInfoPanel) return false;
+        const r = el.getBoundingClientRect();
+        if (r.left <= window.innerWidth * 0.45) return false;
         const t = (el.textContent ?? "").trim().toLowerCase();
         return t.startsWith("find tickets") || t.startsWith("buy tickets") || t.startsWith("get tickets");
       });
