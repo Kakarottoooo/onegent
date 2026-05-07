@@ -59,7 +59,14 @@ export function buildCaptureTaskBoundary(
   const scenario = resolveScenario(capture);
   const ambiguity = describeAmbiguity(capture, scenario);
   const missingFields = collectMissingFields(capture, scenario, ambiguity);
-  const directActivityUrl = scenario === "activity"
+  // Multi-URL gate. When the homepage message contained more than one URL,
+  // we must NOT take the direct-booking shortcut against the first URL —
+  // the user might have meant the second one. Hold for explicit review
+  // instead. The first URL is still preserved on capture.source.url so the
+  // review surface can show it without losing context. Computed above the
+  // direct-booking branch so a multi-URL TM /event/ pair never auto-runs.
+  const hasAdditionalUrls = (capture.source.additional_urls?.length ?? 0) > 0;
+  const directActivityUrl = !hasAdditionalUrls && scenario === "activity"
     ? readDirectActivityProviderUrlFromConstraints({
         ...capture.constraints,
         _capture_source: sourceMetadata,
@@ -74,6 +81,17 @@ export function buildCaptureTaskBoundary(
       nextAction: "ask_clarification",
       sourceMetadata,
       reason: "scenario_missing",
+    };
+  }
+
+  if (hasAdditionalUrls) {
+    return {
+      ok: false,
+      scenario,
+      missingFields,
+      nextAction: "review_capture",
+      sourceMetadata,
+      reason: "multiple_urls",
     };
   }
 
