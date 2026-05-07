@@ -49,8 +49,23 @@ describe("Stage 0 performance measurement", () => {
   });
 
   it("recognizes profile, calendar events, and provider artifacts as heavy-field risks", () => {
-    expect(detectHeavyFields("profile preferences calendarEvents provider artifact")).toEqual(
+    expect(detectHeavyFields("profile preferences calendarEvents provider runtime artifact")).toEqual(
       expect.arrayContaining(["profile blobs", "calendar full event payloads", "provider runtime artifacts"]),
     );
+  });
+
+  it("does not count compact endpoint exclusion metadata as returned heavy payload", () => {
+    expect(detectHeavyFields(`
+      return {
+        jobs,
+        meta: {
+          heavy_fields_excluded: ["steps", "decisionLog", "screenshots", "logs", "profile"]
+        }
+      };
+    `)).toEqual([]);
+  });
+
+  it("does not treat compact provider labels as provider runtime artifacts", () => {
+    expect(detectHeavyFields("return { id, status, provider, scenario, primary_step_label };")).toEqual([]);
   });
 });

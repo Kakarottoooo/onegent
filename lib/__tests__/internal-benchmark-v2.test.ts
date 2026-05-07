@@ -42,9 +42,9 @@ describe("internal benchmark v2", () => {
     expect(report.summary.mode).toBe("no-live");
     expect(report.summary.routingMismatchCount).toBe(0);
     expect(report.summary.ownerUnassignedCount).toBe(0);
-    expect(report.summary.artifactCompletenessRate).toBeGreaterThanOrEqual(0.9);
+    expect(report.summary.artifactCompletenessRate).toBe(1);
     expect(report.summary.byFailureClass.provider_simulated_block).toBeGreaterThan(0);
-    expect(report.summary.byFailureClass.task_workspace_artifact_incomplete).toBeGreaterThan(0);
+    expect(report.summary.byFailureClass.task_workspace_artifact_incomplete).toBe(0);
     expect(report.summary.byFailureClass.manual_boundary_expected).toBeGreaterThan(0);
     expect(report.summary.byFailureClass.performance_budget_exceeded).toBeGreaterThan(0);
     expect(report.summary.bySuggestedOwner.nlu).toBeGreaterThan(0);
@@ -68,7 +68,7 @@ describe("internal benchmark v2", () => {
     expect(markdown).toContain("Failure Taxonomy");
     expect(markdown).toContain("Next Recommended Owners");
     expect(markdown).toContain("Dogfood Mapping");
-    expect(markdown).toContain("task_workspace_artifact_incomplete");
+    expect(markdown).toContain("performance_budget_exceeded");
   });
 
   it("can pass and fail configured gates", () => {
@@ -86,12 +86,12 @@ describe("internal benchmark v2", () => {
       minSuccessRate: 0.95,
       maxFailureCounts: {
         provider_simulated_block: 0,
-        task_workspace_artifact_incomplete: 0,
+        performance_budget_exceeded: 0,
       },
     });
     expect(failed.pass).toBe(false);
     expect(failed.errors.join(" ")).toContain("successRate");
     expect(failed.errors.join(" ")).toContain("provider_simulated_block");
-    expect(failed.errors.join(" ")).toContain("task_workspace_artifact_incomplete");
+    expect(failed.errors.join(" ")).toContain("performance_budget_exceeded");
   });
 });

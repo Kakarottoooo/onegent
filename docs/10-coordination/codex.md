@@ -2,7 +2,7 @@
 
 > **Branch**: `codex/stage0-capture-mvp`
 > **Last updated**: 2026-05-07
-> **Last commit**: this pass - Stage 0 capture + vertical no-live hardening merge
+> **Last commit**: this pass - Stage 0 workspace artifact/performance cleanup
 >
 > Claude reads this at session start. I write to it before each push.
 > See `CLAUDE.md` section "coordination protocol".
@@ -24,19 +24,41 @@ Current project progress analysis:
   intake evaluation, agent intake checks, and static performance risk scan.
 - In progress: using the daily report and Stage 0 operator report as the
   readiness cockpit; keeping side agents on fresh `codex/stage0-capture-mvp`
-  bases; reducing task-workspace artifact gaps and provider-runtime
-  insufficient-evidence/runtime-patch classes before real alpha. Flight has
-  15 Expedia no-live cases and hotel has 10 hotel no-live cases tracking the
-  next runtime/evidence gaps.
+  bases; reducing provider-runtime insufficient-evidence/runtime-patch classes
+  and the remaining task-workspace performance/stale-session signals before
+  real alpha. Flight has 15 Expedia no-live cases and hotel has 10 hotel
+  no-live cases tracking the next runtime/evidence gaps.
 - Next: collect supervised private-alpha submissions, convert safe misses into
   benchmark fixtures, and prioritize the report's top blockers:
-  task-workspace artifact contracts, provider-runtime fixture-backed patches,
-  and app performance payload risks.
+  provider-runtime fixture-backed patches, planner clarification failures,
+  private-alpha value evidence, and the remaining `/api/memory` medium-risk
+  performance payload.
 - Distance to Stage 0 alpha target: yellow. No-live gates are healthy, but the
   stage cannot be green until real users produce Travel Objects, safe next
   actions, evidence links, and user-value/reuse signals.
 
 Completed in latest pass:
+- Removed the Tasks workspace auto-redirect that sent an empty Queue view back
+  to History. Queue now remains a stable user-selected bucket, so dogfood runs
+  can inspect "nothing queued" without losing context.
+- Closed the Stage 0 task-workspace artifact contract gaps in both Capture and
+  Internal Benchmark fixtures:
+  - Capture benchmark now reports 550/550 pass, 100% source metadata, 100%
+    task-ready accuracy, 100% artifact completeness, 0 routing mismatch, and
+    0 unknown failure.
+  - Internal Benchmark v2 now reports 200 cases, 77.5% simulated success,
+    100% artifact completeness, and 0 `task_workspace_artifact_incomplete`
+    failures.
+- Removed the false high-risk flag for `/api/booking-jobs/compact-list` in the
+  Stage 0 static performance scanner by ignoring compact-endpoint exclusion
+  metadata and distinguishing compact provider labels from provider runtime
+  artifacts. Stage 0 static performance now has 0 high-risk endpoints and 1
+  remaining medium-risk endpoint (`/api/memory`).
+- Regenerated `docs/40-dogfood/STAGE0_DAILY_REPORT.md`; the verdict remains
+  yellow because private alpha still needs real supervised submissions and
+  user-value evidence.
+
+Completed in previous pass:
 - Integrated Agent2 `codex/agent2-flight-stage0-v2 @ 4360d8f` as part of the
   Stage 0 merge train:
   - explicit target-card-not-visible/no-availability evidence now beats

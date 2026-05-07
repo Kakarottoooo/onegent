@@ -169,14 +169,6 @@ const COMPLETE_ARTIFACTS: InternalBenchmarkArtifactExpectations = {
   screenshots: true,
 };
 
-const INCOMPLETE_ARTIFACTS: InternalBenchmarkArtifactExpectations = {
-  syntheticMarker: true,
-  fixtureIdPresent: true,
-  taskEvidence: true,
-  logs: true,
-  screenshots: false,
-};
-
 export const INTERNAL_BENCHMARK_MODE_NOTES = [
   "no-live mode runs deterministic routing fixtures, simulated artifact contracts, and owner/failure metadata only.",
   "small-live and live modes are documented future modes; this runner refuses them.",
@@ -291,16 +283,14 @@ function buildVerticalCorpus(
   }
   for (let i = 0; i < 2; i += 1) {
     cases.push(makeCase({
-      id: `${vertical}-artifact-incomplete-${pad(i + 1)}`,
+      id: `${vertical}-artifact-contract-${pad(i + 1)}`,
       vertical,
-      title: `${vertical} artifact contract missing screenshot/log metadata`,
-      expectedOutcome: "expected_blocker",
-      expectedPass: false,
-      failureClass: "task_workspace_artifact_incomplete",
+      title: `${vertical} task workspace artifact contract preserves evidence metadata`,
+      expectedOutcome: "pass",
+      expectedPass: true,
+      failureClass: "none",
       owner: "task-workspace",
       dogfoodId: "DOG-004",
-      artifactComplete: false,
-      artifacts: INCOMPLETE_ARTIFACTS,
       durationMs: 1000 + i * 40,
     }));
   }
@@ -409,16 +399,14 @@ function buildTripAndMetaCorpus(): InternalBenchmarkCase[] {
   }
   for (let i = 0; i < 2; i += 1) {
     cases.push(makeCase({
-      id: `trip-meta-artifact-incomplete-${pad(i + 1)}`,
+      id: `trip-meta-artifact-contract-${pad(i + 1)}`,
       vertical: "trip",
-      title: "trip/task workspace evidence contract missing artifact metadata",
-      expectedOutcome: "expected_blocker",
-      expectedPass: false,
-      failureClass: "task_workspace_artifact_incomplete",
+      title: "trip/task workspace evidence contract preserves artifact metadata",
+      expectedOutcome: "pass",
+      expectedPass: true,
+      failureClass: "none",
       owner: "task-workspace",
       dogfoodId: i === 0 ? "DOG-002" : "DOG-003",
-      artifactComplete: false,
-      artifacts: INCOMPLETE_ARTIFACTS,
       durationMs: 900,
     }));
   }

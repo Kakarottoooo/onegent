@@ -3371,25 +3371,6 @@ function TripsPageInner() {
   const liveJob = jobs.find((j) => j.id === liveJobId);
   const rightPct = liveJobId ? (100 - splitPct) : 0;
 
-  useEffect(() => {
-    const explicitView = searchParams.get("view");
-    const focusId = searchParams.get("focus");
-    if (loading || explicitView || focusId || workspaceView !== "queue") return;
-    if (queueJobs.length === 0 && liveJobs.length === 0 && historyJobs.length > 0) {
-      setWorkspaceView("history");
-      router.replace(taskWorkspaceHrefForView("history", { sourceSessionId: sessionId }), { scroll: false });
-    }
-  }, [
-    loading,
-    searchParams,
-    workspaceView,
-    queueJobs.length,
-    liveJobs.length,
-    historyJobs.length,
-    router,
-    sessionId,
-  ]);
-
   function focusJob(jobId: string) {
     const job = jobs.find((candidate) => candidate.id === jobId);
     const nextView = job ? taskWorkspaceViewForJob(job) : workspaceView;

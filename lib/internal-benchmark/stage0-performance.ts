@@ -54,7 +54,10 @@ const HEAVY_FIELD_PATTERNS: Array<{ field: string; pattern: RegExp }> = [
   { field: "profile blobs", pattern: /\b(profile|bookingProfile|preferences)\b/i },
   { field: "room full messages", pattern: /\b(messages|messageHistory|transcript)\b/i },
   { field: "calendar full event payloads", pattern: /\b(events|attendees|calendarEvents)\b/i },
-  { field: "provider runtime artifacts", pattern: /\b(provider|runtime|artifact|decision_log)\b/i },
+  {
+    field: "provider runtime artifacts",
+    pattern: /\b(provider\s+runtime|runtime\s+artifact|debug[-_\s]?artifact|decision_log)\b/i,
+  },
 ];
 
 export const STAGE0_PERFORMANCE_ENDPOINTS: Stage0PerformanceEndpointSpec[] = [
@@ -181,9 +184,14 @@ export function analyzeEndpointSpec(
 }
 
 export function detectHeavyFields(source: string): string[] {
+  const scannableSource = stripCompactContractMetadata(source);
   return HEAVY_FIELD_PATTERNS
-    .filter((entry) => entry.pattern.test(source))
+    .filter((entry) => entry.pattern.test(scannableSource))
     .map((entry) => entry.field);
+}
+
+function stripCompactContractMetadata(source: string): string {
+  return source.replace(/\bheavy_fields_excluded\s*:\s*\[[\s\S]*?\]/g, "heavy_fields_excluded: []");
 }
 
 function readSource(

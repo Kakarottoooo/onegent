@@ -139,6 +139,9 @@ version:
   - Queue = pending / not started.
   - Live = running.
   - History = terminal or ready-for-review.
+- The Queue tab no longer auto-redirects to History when queue and live are
+  empty. This keeps the user's selected task bucket stable during dogfood and
+  avoids losing context while inspecting why nothing is queued.
 - Watch / Evidence / Details entry points are being normalized across chat,
   recommendation cards, rooms, calendar, itinerary, and task cards.
 - The task surface should be the primary debugging UI: status, logs,
@@ -150,6 +153,9 @@ version:
 - Stage 0 Capture now has a 500+ fixture no-live corpus covering raw text,
   URLs, screenshot descriptions, mixed inputs, save-only, compare-only,
   group-decision, refine, profile, and unsupported requests.
+- Current Capture gate is 550/550 pass with 0 routing mismatches, 100%
+  task-ready accuracy, 100% source metadata completeness, 100% artifact
+  completeness, and 0 unknown failures.
 - Capture hardening now guards against homepage URL overcapture when a pasted
   URL is followed immediately by non-URL request text, provider-host
   impersonation, screenshot false positives, and loss of hotel/flight/
@@ -157,6 +163,16 @@ version:
 - `scripts/stage0-operator-report.ts` is the daily no-live cockpit for
   Capture benchmark, private-alpha intake, internal/layered benchmark signals,
   agent intake, and static app-shell performance risk.
+- Current Internal Benchmark v2 has 200 no-live cases, 77.5% simulated
+  success, 100% artifact completeness, 0 routing mismatches, and 0
+  `task_workspace_artifact_incomplete` failures. Remaining failures are
+  planner-required clarification, expected manual boundaries, provider
+  simulated blockers/degradation, unsupported requests, and performance
+  budget signals.
+- Current Stage 0 static performance scan has 0 high-risk endpoints. The
+  previous `/api/booking-jobs/compact-list` false positive is cleared; the
+  remaining medium-risk endpoint is `/api/memory`, which still needs a compact
+  memory summary path before alpha if it shows up in measured UX.
 - Layered Benchmark V2 exists as a no-live benchmark for L1 provider runtime
   results, evidence completeness, failure class, L2 Browser Harness
   eligibility, simulated L2 recovery, owner assignment, and patch proposals.

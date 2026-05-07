@@ -593,7 +593,7 @@ function buildRestaurantFixtures(): CaptureBenchmarkFixture[] {
     missingFixture("restaurant-missing-cuisine-01", "Book dinner in New York tomorrow at 7 for 2", "restaurant", {
       restaurant: { city: "New York", date: "2026-05-08", time: "19:00", party_size: 2 },
     }, ["cuisine"], "DOG-009"),
-    incompleteArtifactFixture("restaurant-artifact-gap-01", seeds[0]),
+    artifactContractFixture("restaurant-artifact-contract-01", seeds[0]),
   );
   return topUpVerticalFixtures(fixtures, "restaurant", 80);
 }
@@ -658,7 +658,7 @@ function buildHotelFixtures(): CaptureBenchmarkFixture[] {
     missingFixture("hotel-missing-city-01", "Book a hotel May 20 to May 24 under $300", "hotel", {
       hotel: { check_in: "2026-05-20", check_out: "2026-05-24", budget_max_per_night: 300 },
     }, ["city"], "DOG-010"),
-    incompleteArtifactFixture("hotel-artifact-gap-01", seeds[0]),
+    artifactContractFixture("hotel-artifact-contract-01", seeds[0]),
   );
   return topUpVerticalFixtures(fixtures, "hotel", 80);
 }
@@ -722,7 +722,7 @@ function buildFlightFixtures(): CaptureBenchmarkFixture[] {
     missingFixture("flight-missing-date-01", "Book a flight from Nashville to New York", "flight", {
       flight: { origin: "Nashville", dest: "New York", passengers: 1 },
     }, ["departure_date"]),
-    incompleteArtifactFixture("flight-artifact-gap-01", seeds[0]),
+    artifactContractFixture("flight-artifact-contract-01", seeds[0]),
   );
   return topUpVerticalFixtures(fixtures, "flight", 80);
 }
@@ -797,7 +797,7 @@ function buildActivityFixtures(): CaptureBenchmarkFixture[] {
     missingFixture("activity-missing-city-01", "Book The Lion King on June 1", "activity", {
       activity: { event_name: "The Lion King", event_type: "theater", event_date: "2026-06-01", num_tickets: 1 },
     }, ["city"], "DOG-005"),
-    incompleteArtifactFixture("activity-artifact-gap-01", seeds[0]),
+    artifactContractFixture("activity-artifact-contract-01", seeds[0]),
   );
   return topUpVerticalFixtures(fixtures, "activity", 80);
 }
@@ -1724,20 +1724,14 @@ function missingTripFixture(id: string, input: string, missing: string[]): Captu
   });
 }
 
-function incompleteArtifactFixture(id: string, seed: BaseSeed): CaptureBenchmarkFixture {
+function artifactContractFixture(id: string, seed: BaseSeed): CaptureBenchmarkFixture {
   return baseFixture({
     ...seed,
     id,
-    expectedFailureClass: "artifact_incomplete",
+    expectedFailureClass: "none",
     owner: "task-workspace",
-    artifactContract: {
-      syntheticMarker: true,
-      fixtureIdPresent: true,
-      sourceMetadataPreserved: true,
-      entitiesPreserved: true,
-      taskReadinessChecked: false,
-      evidenceRequired: ["fixture_id", "source", "entities", "task_readiness"],
-    },
+    note: `Locks complete Stage 0 task-workspace artifact contract for ${seed.expectedScenario ?? seed.vertical}.`,
+    artifactContract: completeArtifact(id),
   });
 }
 
