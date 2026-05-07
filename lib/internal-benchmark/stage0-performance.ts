@@ -20,9 +20,19 @@ export type Stage0PerformanceEndpointSpec = {
   suggestedNextPatch: string;
 };
 
+export type Stage0PerformanceFinding = {
+  field: string;
+  reason: string;
+  sourcePath: string;
+  line: number;
+  suggestedCompactAlternative: string;
+  owner: Stage0PerformanceOwner;
+};
+
 export type Stage0PerformanceProbe = Stage0PerformanceEndpointSpec & {
   routeSourceBytes: number;
   heavyFieldsDetected: string[];
+  findings: Stage0PerformanceFinding[];
   riskLevel: Stage0PerformanceRisk;
   durationEstimateMs: number | null;
   recommendedCompactEndpoint: string;
@@ -46,18 +56,19 @@ export type Stage0PerformanceOptions = {
 
 const GENERATED_AT = "2026-05-07T12:00:00.000Z";
 
-const HEAVY_FIELD_PATTERNS: Array<{ field: string; pattern: RegExp }> = [
-  { field: "steps", pattern: /\bsteps\b/i },
-  { field: "decisionLog", pattern: /\bdecisionLog\b/i },
-  { field: "screenshots", pattern: /\b(screenshots|snapshot|snapshots)\b/i },
-  { field: "logs", pattern: /\b(logs?|workerLog|logExcerpt)\b/i },
-  { field: "profile blobs", pattern: /\b(profile|bookingProfile|preferences)\b/i },
-  { field: "room full messages", pattern: /\b(messages|messageHistory|transcript)\b/i },
-  { field: "calendar full event payloads", pattern: /\b(events|attendees|calendarEvents)\b/i },
-  {
-    field: "provider runtime artifacts",
-    pattern: /\b(provider\s+runtime|runtime\s+artifact|debug[-_\s]?artifact|decision_log)\b/i,
-  },
+const HEAVY_FIELD_PATTERNS: Array<{
+  field: string;
+  pattern: RegExp;
+  suggestedCompactAlternative: string;
+}> = [
+  { field: "steps", pattern: /\bsteps\b/i, suggestedCompactAlternative: "Return step counts/status labels only; load full steps from task detail." },
+  { field: "decisionLog", pattern: /\bdecisionLog\b/i, suggestedCompactAlternative: "Return a decision-log presence flag or latest label; load full decisionLog lazily." },
+  { field: "screenshots", pattern: /\b(screenshots|snapshot|snapshots)\b/i, suggestedCompactAlternative: "Return screenshot counts/last timestamp only; load images from the evidence view." },
+  { field: "logs", pattern: /\b(logs?|workerLog|logExcerpt)\b/i, suggestedCompactAlternative: "Return log counts/status only; load log excerpts from task detail." },
+  { field: "profile blobs", pattern: /\b(profile|bookingProfile|preferences)\b/i, suggestedCompactAlternative: "Return compact preference labels; load full profile detail after the user opens memory." },
+  { field: "room full messages", pattern: /\b(messages|messageHistory|transcript)\b/i, suggestedCompactAlternative: "Return room summary counts; lazy-load messages after room open." },
+  { field: "calendar full event payloads", pattern: /\b(events|attendees|calendarEvents)\b/i, suggestedCompactAlternative: "Return calendar counts/status; load full calendar events from calendar detail." },
+  { field: "provider runtime artifacts", pattern: /\b(provider\s+artifact|providerRuntime|runtime|artifact|decision_log)\b/i, suggestedCompactAlternative: "Return artifact counts or refs; load provider artifacts from evidence/debug surfaces." },
 ];
 
 export const STAGE0_PERFORMANCE_ENDPOINTS: Stage0PerformanceEndpointSpec[] = [
@@ -158,6 +169,17 @@ export function renderStage0PerformanceMarkdown(report: Stage0PerformanceReport)
       `| \`${probe.endpoint}\` | \`${probe.owner}\` | ${probe.routeSourceBytes} | \`${probe.riskLevel}\` | ${probe.heavyFieldsDetected.join(", ") || "-"} | ${probe.suggestedNextPatch} |`,
     );
   }
+  lines.push("", "## Findings", "", "| Endpoint | Field | Owner | File | Line | Reason | Compact alternative |", "| --- | --- | --- | --- | ---: | --- | --- |");
+  const findings = report.probes.flatMap((probe) => probe.findings.map((finding) => ({ probe, finding })));
+  if (findings.length === 0) {
+    lines.push("| - | - | - | - | - | - | - |");
+  } else {
+    for (const { probe, finding } of findings) {
+      lines.push(
+        `| \`${probe.endpoint}\` | \`${finding.field}\` | \`${finding.owner}\` | \`${finding.sourcePath}\` | ${finding.line} | ${finding.reason} | ${finding.suggestedCompactAlternative} |`,
+      );
+    }
+  }
   lines.push("", "## Notes", "");
   for (const note of report.notes) lines.push(`- ${note}`);
   return lines.join("\n");
@@ -169,14 +191,15 @@ export function analyzeEndpointSpec(
   sourceOverrides: Record<string, string> = {},
 ): Stage0PerformanceProbe {
   const sources = spec.sourcePaths.map((sourcePath) => readSource(rootDir, sourcePath, sourceOverrides));
-  const combinedSource = sources.map((source) => source.text).join("\n");
   const routeSourceBytes = sources.reduce((sum, source) => sum + source.bytes, 0);
-  const heavyFieldsDetected = detectHeavyFields(combinedSource);
+  const findings = sources.flatMap((source) => detectHeavyFieldFindings(source.text, source.path, spec));
+  const heavyFieldsDetected = Array.from(new Set(findings.map((finding) => finding.field)));
   const riskLevel = riskFor(heavyFieldsDetected, spec.endpoint);
   return {
     ...spec,
     routeSourceBytes,
     heavyFieldsDetected,
+    findings,
     riskLevel,
     durationEstimateMs: null,
     recommendedCompactEndpoint: compactRecommendationFor(spec),
@@ -184,29 +207,49 @@ export function analyzeEndpointSpec(
 }
 
 export function detectHeavyFields(source: string): string[] {
-  const scannableSource = stripCompactContractMetadata(source);
-  return HEAVY_FIELD_PATTERNS
-    .filter((entry) => entry.pattern.test(scannableSource))
-    .map((entry) => entry.field);
+  return Array.from(new Set(detectHeavyFieldFindings(source, "inline.ts", {
+    endpoint: "/inline",
+    owner: "codex",
+  }).map((finding) => finding.field)));
 }
 
-function stripCompactContractMetadata(source: string): string {
-  return source.replace(/\bheavy_fields_excluded\s*:\s*\[[\s\S]*?\]/g, "heavy_fields_excluded: []");
+export function detectHeavyFieldFindings(
+  source: string,
+  sourcePath: string,
+  spec: Pick<Stage0PerformanceEndpointSpec, "endpoint" | "owner">,
+): Stage0PerformanceFinding[] {
+  const findings: Stage0PerformanceFinding[] = [];
+  const lines = source.split(/\r?\n/);
+  lines.forEach((line, index) => {
+    if (shouldIgnorePerformanceLine(line)) return;
+    for (const entry of HEAVY_FIELD_PATTERNS) {
+      if (!entry.pattern.test(line)) continue;
+      findings.push({
+        field: entry.field,
+        reason: `${entry.field} appears in ${spec.endpoint} source outside comments, imports, type-only declarations, or explicit exclusion metadata.`,
+        sourcePath,
+        line: index + 1,
+        suggestedCompactAlternative: entry.suggestedCompactAlternative,
+        owner: spec.owner,
+      });
+    }
+  });
+  return dedupeFindings(findings);
 }
 
 function readSource(
   rootDir: string,
   sourcePath: string,
   sourceOverrides: Record<string, string>,
-): { text: string; bytes: number } {
+): { path: string; text: string; bytes: number } {
   if (Object.prototype.hasOwnProperty.call(sourceOverrides, sourcePath)) {
     const text = sourceOverrides[sourcePath] ?? "";
-    return { text, bytes: Buffer.byteLength(text) };
+    return { path: sourcePath, text, bytes: Buffer.byteLength(text) };
   }
   const absolute = path.join(rootDir, sourcePath);
-  if (!existsSync(absolute)) return { text: "", bytes: 0 };
+  if (!existsSync(absolute)) return { path: sourcePath, text: "", bytes: 0 };
   const text = readFileSync(absolute, "utf8");
-  return { text, bytes: Buffer.byteLength(text) };
+  return { path: sourcePath, text, bytes: Buffer.byteLength(text) };
 }
 
 function riskFor(heavyFields: string[], endpoint: string): Stage0PerformanceRisk {
@@ -222,4 +265,27 @@ function compactRecommendationFor(spec: Stage0PerformanceEndpointSpec): string {
     return "Keep compact contract and add tests if heavy fields appear.";
   }
   return `Consider a compact shell endpoint before loading ${spec.endpoint} detail.`;
+}
+
+function shouldIgnorePerformanceLine(line: string): boolean {
+  const trimmed = line.trim();
+  if (!trimmed) return true;
+  if (trimmed.startsWith("//") || trimmed.startsWith("*") || trimmed.startsWith("/*")) return true;
+  if (/^import\s/i.test(trimmed)) return true;
+  if (/^(export\s+)?type\s/i.test(trimmed) || /^(export\s+)?interface\s/i.test(trimmed)) return true;
+  if (/heavy_fields_excluded/i.test(trimmed)) return true;
+  if (/^\s*["'](steps|decisionLog|screenshots|logs|profile|autonomy_settings|messages|private_messages|proposals|votes|context_json|synthesis_json|constraints)["']\s*,?\s*$/i.test(trimmed)) {
+    return true;
+  }
+  return false;
+}
+
+function dedupeFindings(findings: Stage0PerformanceFinding[]): Stage0PerformanceFinding[] {
+  const seen = new Set<string>();
+  return findings.filter((finding) => {
+    const key = `${finding.field}:${finding.sourcePath}:${finding.line}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
 }

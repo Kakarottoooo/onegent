@@ -24,6 +24,10 @@ describe("Stage 0 performance measurement", () => {
     expect(probe.heavyFieldsDetected).toEqual(
       expect.arrayContaining(["steps", "decisionLog", "screenshots", "logs"]),
     );
+    expect(probe.findings[0]).toMatchObject({
+      sourcePath: "compact.ts",
+      owner: "task-workspace",
+    });
     expect(probe.riskLevel).toBe("high");
   });
 
@@ -45,7 +49,21 @@ describe("Stage 0 performance measurement", () => {
     expect(report.mode).toBe("stage0-static");
     expect(report.totalEndpoints).toBe(1);
     expect(report.probes[0].durationEstimateMs).toBeNull();
-    expect(renderStage0PerformanceMarkdown(report)).toContain("# Stage 0 Performance Measurement");
+    expect(renderStage0PerformanceMarkdown(report)).toContain("## Findings");
+  });
+
+  it("does not flag explicit compact exclusion metadata as payload risk", () => {
+    const probe = analyzeEndpointSpec(compactSpec, process.cwd(), {
+      "compact.ts": `return { meta: { heavy_fields_excluded: [
+        "steps",
+        "decisionLog",
+        "screenshots",
+        "logs"
+      ] } };`,
+    });
+
+    expect(probe.heavyFieldsDetected).toEqual([]);
+    expect(probe.riskLevel).toBe("low");
   });
 
   it("recognizes profile, calendar events, and provider artifacts as heavy-field risks", () => {

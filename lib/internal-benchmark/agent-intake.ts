@@ -30,18 +30,22 @@ export type AgentDependencyEdge = {
 
 export type AgentIntakeIssueCode =
   | "wrong_base"
+  | "stale_base"
   | "missing_required_report_field"
   | "missing_safety_statement"
   | "forbidden_artifact"
   | "missing_validation"
   | "missing_tests_for_logic_change"
   | "runtime_mirror_without_drift_check"
+  | "worker_mirror_without_check_drift"
   | "provider_runtime_without_permission"
   | "broad_app_shell_touch"
+  | "app_shell_without_build"
   | "docs_only_runtime_closure_claim"
   | "unresolved_shared_schema_dependency"
   | "requires_rebase_before_merge"
   | "conflicts_with_mainline"
+  | "likely_merge_conflict"
   | "superseded_by_newer_branch"
   | "invalid_task_kind";
 
@@ -158,18 +162,22 @@ const DEFAULT_REQUIRED_VALIDATIONS = [
 
 const ZERO_ISSUES: Record<AgentIntakeIssueCode, number> = {
   wrong_base: 0,
+  stale_base: 0,
   missing_required_report_field: 0,
   missing_safety_statement: 0,
   forbidden_artifact: 0,
   missing_validation: 0,
   missing_tests_for_logic_change: 0,
   runtime_mirror_without_drift_check: 0,
+  worker_mirror_without_check_drift: 0,
   provider_runtime_without_permission: 0,
   broad_app_shell_touch: 0,
+  app_shell_without_build: 0,
   docs_only_runtime_closure_claim: 0,
   unresolved_shared_schema_dependency: 0,
   requires_rebase_before_merge: 0,
   conflicts_with_mainline: 0,
+  likely_merge_conflict: 0,
   superseded_by_newer_branch: 0,
   invalid_task_kind: 0,
 };
@@ -204,6 +212,10 @@ const RUNTIME_MIRROR_PATTERNS: RegExp[] = [
   /^worker[/\\]src[/\\]booking-autopilot[/\\]/i,
 ];
 
+const WORKER_MIRROR_PATTERNS: RegExp[] = [
+  /^worker[/\\]src[/\\]/i,
+];
+
 const PROVIDER_RUNTIME_FORBIDDEN_PATTERNS: RegExp[] = [
   /^lib[/\\]booking-autopilot[/\\]/i,
   /^worker[/\\]src[/\\]/i,
@@ -221,6 +233,11 @@ const BROAD_APP_SHELL_PATTERNS: RegExp[] = [
   /^components[/\\]Sidebar\.tsx$/i,
   /^components[/\\]AppShell/i,
   /^app[/\\](calendar|rooms|contacts|memory)[/\\]/i,
+];
+
+const APP_SHELL_BUILD_PATTERNS: RegExp[] = [
+  /^app[/\\].*\.(ts|tsx)$/i,
+  /^components[/\\].*\.(ts|tsx)$/i,
 ];
 
 type QueueContext = {
@@ -314,6 +331,16 @@ export function classifyAgentReturnReport(
     });
   }
 
+  const workerMirrorPaths = report.changedFiles.filter(isWorkerMirrorPath);
+  if (workerMirrorPaths.length > 0 && !hasPassingValidation(report, "check_drift")) {
+    issues.push({
+      code: "worker_mirror_without_check_drift",
+      severity: "followup",
+      message: "Worker mirror paths changed without a passing drift check.",
+      evidence: workerMirrorPaths,
+    });
+  }
+
   const broadAppShellPaths = report.changedFiles.filter(isBroadAppShellPath);
   if (broadAppShellPaths.length > 0 && report.taskKind !== "read_model_perf" && report.taskKind !== "task_workspace_ux") {
     issues.push({
@@ -321,6 +348,16 @@ export function classifyAgentReturnReport(
       severity: "followup",
       message: "Branch touches broad app-shell surfaces outside a performance or task-workspace task kind.",
       evidence: broadAppShellPaths,
+    });
+  }
+
+  const appShellBuildPaths = report.changedFiles.filter(isAppShellBuildPath);
+  if (appShellBuildPaths.length > 0 && !hasPassingValidation(report, "build")) {
+    issues.push({
+      code: "app_shell_without_build",
+      severity: "followup",
+      message: "Branch changed app shell, routes, or components without reporting a passing build.",
+      evidence: appShellBuildPaths.slice(0, 8),
     });
   }
 
@@ -375,6 +412,16 @@ export function classifyAgentReturnReport(
       const dependencyIssue = sharedSchemaDependencyIssue(report, edge, queueContext);
       if (dependencyIssue) issues.push(dependencyIssue);
     }
+  }
+
+  const conflictSignals = report.conflictNotes?.filter((note) => /\b(conflict|merge conflict|overlap|cannot apply)\b/i.test(note)) ?? [];
+  if (conflictSignals.length > 0) {
+    issues.push({
+      code: "likely_merge_conflict",
+      severity: "followup",
+      message: "Branch metadata reports likely merge conflicts or overlapping edits.",
+      evidence: conflictSignals,
+    });
   }
 
   return withIntakeOutcome({
@@ -704,20 +751,28 @@ function baseMismatch(
   requiredBaseBranch: string,
   requiredBaseCommit?: string,
 ): AgentIntakeIssue | null {
-  const evidence: string[] = [];
-  if (report.base.branch !== requiredBaseBranch) evidence.push(`base.branch=${report.base.branch || "missing"}`);
+  if (report.base.branch !== requiredBaseBranch) {
+    return {
+      code: "wrong_base",
+      severity: "reject",
+      message: `Branch was not reported from required base ${requiredBaseBranch}.`,
+      evidence: [`base.branch=${report.base.branch || "missing"}`],
+    };
+  }
+
   if (requiredBaseCommit) {
     const commitMatches = report.base.commit?.startsWith(requiredBaseCommit) ?? false;
     const containsCommit = report.base.containsRequiredCommit === true;
-    if (!commitMatches && !containsCommit) evidence.push(`base.commit=${report.base.commit || "missing"}`);
+    if (!commitMatches && !containsCommit) {
+      return {
+        code: "stale_base",
+        severity: "followup",
+        message: `Branch does not report containing required base commit ${requiredBaseCommit}.`,
+        evidence: [`base.commit=${report.base.commit || "missing"}`],
+      };
+    }
   }
-  if (evidence.length === 0) return null;
-  return {
-    code: "wrong_base",
-    severity: "reject",
-    message: `Branch was not reported from required base ${requiredBaseBranch}.`,
-    evidence,
-  };
+  return null;
 }
 
 function hasPassingValidation(report: AgentReturnReport, expectedName: string): boolean {
@@ -737,12 +792,20 @@ function isRuntimeMirrorPath(pathname: string): boolean {
   return RUNTIME_MIRROR_PATTERNS.some((pattern) => pattern.test(pathname));
 }
 
+function isWorkerMirrorPath(pathname: string): boolean {
+  return WORKER_MIRROR_PATTERNS.some((pattern) => pattern.test(pathname));
+}
+
 function isProviderRuntimeForbiddenPath(pathname: string): boolean {
   return PROVIDER_RUNTIME_FORBIDDEN_PATTERNS.some((pattern) => pattern.test(pathname));
 }
 
 function isBroadAppShellPath(pathname: string): boolean {
   return BROAD_APP_SHELL_PATTERNS.some((pattern) => pattern.test(pathname));
+}
+
+function isAppShellBuildPath(pathname: string): boolean {
+  return APP_SHELL_BUILD_PATTERNS.some((pattern) => pattern.test(pathname));
 }
 
 function isLogicPath(pathname: string): boolean {
@@ -766,8 +829,8 @@ function claimsRuntimeClosure(report: AgentReturnReport): boolean {
 
 function decideIntakeStatus(issues: AgentIntakeIssue[]): AgentIntakeDecision {
   if (issues.some((issue) => issue.severity === "reject")) return "reject";
-  if (issues.some((issue) => issue.code === "conflicts_with_mainline")) return "conflicts_with_mainline";
-  if (issues.some((issue) => issue.code === "requires_rebase_before_merge" || issue.code === "wrong_base")) return "requires_rebase";
+  if (issues.some((issue) => issue.code === "conflicts_with_mainline" || issue.code === "likely_merge_conflict")) return "conflicts_with_mainline";
+  if (issues.some((issue) => issue.code === "requires_rebase_before_merge" || issue.code === "stale_base")) return "requires_rebase";
   if (issues.length > 0) return "needs_followup";
   return "ready_to_merge";
 }
@@ -980,6 +1043,7 @@ function normalizeValidationName(value: string): string {
   if (lowered.includes("gate:phase1") || lowered.includes("gate_phase1")) return "gate_phase1";
   if (lowered.includes("git diff --check") || lowered.includes("git_diff_check")) return "git_diff_check";
   if (lowered.includes("vitest")) return "targeted_vitest";
+  if (lowered.includes("npm run build") || lowered === "build" || lowered.includes("next build")) return "build";
   if (lowered.includes("tsc")) return "tsc";
   return lowered.replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "");
 }

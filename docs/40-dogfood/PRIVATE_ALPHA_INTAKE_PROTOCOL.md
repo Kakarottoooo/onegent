@@ -33,21 +33,29 @@ Avoid:
 
 For every submission, capture:
 
-- `rawInput`: exact user request, pasted URL text, or screenshot description.
-- `sourceType`: `text`, `url`, `screenshot`, or `mixed` (`raw_text`,
+- `rawInput`: exact user request, pasted URL text, screenshot reference, or
+  direct manual request text after removing sensitive values.
+- `sourceType`: `pasted_url`, `pasted_text`, `screenshot_reference`, or
+  `manual_request` (`text`, `url`, `screenshot`, `mixed`, `raw_text`,
   `screenshot_description`, and `mixed_url_instruction` remain accepted
   legacy aliases).
 - `expectedTaskType`: restaurant, hotel, flight, activity, trip, ambiguous,
   profile, or chitchat.
-- `userGoal`: what the user wants Onegent to accomplish.
-- `travelObject`: the normalized Capture Travel Object when available.
+- `submittedIntent` / `userGoal`: what the user wants Onegent to accomplish.
+- `travelObject` or `travelObjectProduced`: the normalized Capture Travel
+  Object, or a boolean marker when the object is referenced elsewhere.
 - `safeNextAction`: task-ready, clarify, save-only, compare-only, or
   group-decision next step.
-- `evidenceLinks`: safe local doc/report/task references.
+- `taskReadyStatus`: `task_ready`, `needs_clarification`, `needs_review`,
+  `save_only`, `compare_only`, `group_decision`, or `blocked`.
+- `evidenceLink` / `evidenceLinks`: safe local doc/report/task references.
 - `userValueSignal`: strong, medium, weak, or none.
-- `wouldTrustOnegentToContinue` / `wouldPay`: optional legacy yes/no/unknown
-  value signals.
-- `blockedReason`: why the submission cannot proceed, if blocked.
+- `wouldContinue`, `wouldReuse`, `wouldPay`, or `wouldPayOrReuse`: optional
+  yes/no/unknown value signals.
+- `failureReason` / `blockedReason`: why the submission cannot proceed, if
+  blocked.
+- `owner`: capture, NLU, planner, task-readiness, task-workspace,
+  provider-runtime, product/manual-boundary, or alpha-ops when already known.
 - `notes`: non-sensitive context only.
 
 The TypeScript contract lives in `lib/capture/private-alpha.ts`.
@@ -73,6 +81,11 @@ Never collect or paste into fixtures:
 If a user submits sensitive content, classify the submission as
 `reject_sensitive`, do not turn it into a fixture, and record only the safe
 reason label.
+
+Do not ingest raw secrets, payment details, login credentials, OTP, CAPTCHA,
+provider cookies, provider storage, bearer tokens, or account-private payloads.
+If the user sends them, delete the value from the working note and retain only
+the finding label, such as `verification_code` or `card_number`.
 
 ## Scoring
 
@@ -103,6 +116,10 @@ When an alpha submission fails safely:
 3. Add or update a Capture Benchmark fixture with the same source shape.
 4. Link the alpha id as the dogfood id.
 5. Keep the fixture no-live and deterministic.
+
+The pure converter is `buildPrivateAlphaFixtureSeeds(...)` in
+`lib/capture/private-alpha.ts`. It emits safe-miss seeds by default so misses
+can become benchmark fixtures without storing secrets or provider artifacts.
 
 Do not mark private alpha `green` from docs, fixtures, or benchmark tooling
 alone. Green requires real submissions with successful Travel Object creation,

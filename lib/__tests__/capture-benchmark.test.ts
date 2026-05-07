@@ -124,6 +124,8 @@ describe("Stage 0 capture benchmark", () => {
     expect(report.summary.artifactCompletenessRate).toBe(1);
     expect(report.summary.unknownFailureRate).toBe(0);
     expect(report.summary.byFailureClass.artifact_incomplete).toBe(0);
+    expect(report.artifactGapClosures).toHaveLength(4);
+    expect(report.artifactGapClosures.every((closure) => closure.outcome === "closed")).toBe(true);
     expect(report.dogfoodLinks.find((link) => link.dogfoodId === "DOG-005")).toBeDefined();
     expect(report.recommendedNextActions.length).toBeGreaterThan(0);
 
@@ -139,6 +141,7 @@ describe("Stage 0 capture benchmark", () => {
     const markdown = renderCaptureBenchmarkMarkdown(report);
     expect(markdown).toContain("# Stage 0 Capture Benchmark");
     expect(markdown).toContain("Task-ready accuracy");
+    expect(markdown).toContain("Artifact Gap Closure");
     expect(markdown).toContain("Recommended Next Actions");
     expect(markdown).toContain("Top Failed Fixtures");
   });

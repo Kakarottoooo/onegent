@@ -156,13 +156,17 @@ version:
 - Current Capture gate is 550/550 pass with 0 routing mismatches, 100%
   task-ready accuracy, 100% source metadata completeness, 100% artifact
   completeness, and 0 unknown failures.
+- Stage 0 Alpha Readiness v3 closes the four prior intentional Capture
+  `artifact_incomplete` gaps for restaurant, hotel, flight, and activity by
+  recording task-readiness evidence in the deterministic artifact contract.
 - Capture hardening now guards against homepage URL overcapture when a pasted
   URL is followed immediately by non-URL request text, provider-host
   impersonation, screenshot false positives, and loss of hotel/flight/
   restaurant/trip constraints through the task-boundary projection.
 - `scripts/stage0-operator-report.ts` is the daily no-live cockpit for
   Capture benchmark, private-alpha intake, internal/layered benchmark signals,
-  agent intake, and static app-shell performance risk.
+  agent intake, static app-shell performance risk, top blockers by owner, and
+  the next five Stage 0 actions.
 - Current Internal Benchmark v2 has 200 no-live cases, 77.5% simulated
   success, 100% artifact completeness, 0 routing mismatches, and 0
   `task_workspace_artifact_incomplete` failures. Remaining failures are

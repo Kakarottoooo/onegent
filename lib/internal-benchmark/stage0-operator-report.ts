@@ -50,6 +50,13 @@ export type Stage0OwnerSummary = {
   signals: string[];
 };
 
+export type Stage0OwnerBlocker = {
+  owner: Stage0Owner;
+  priority: "p0" | "p1" | "p2";
+  blocker: string;
+  evidence: string;
+};
+
 export type Stage0NextAction = {
   owner: Stage0Owner;
   action: string;
@@ -82,6 +89,8 @@ export type Stage0OperatorReport = {
   blockedBranches: string[];
   whatChangedSinceLastReport: string;
   ownerSummary: Stage0OwnerSummary[];
+  topBlockersByOwner: Stage0OwnerBlocker[];
+  nextFiveActions: Stage0NextAction[];
   topNextActions: Stage0NextAction[];
   notes: string[];
 };
@@ -110,13 +119,14 @@ export function buildStage0OperatorReport(
   );
   const agentIntake = classifyAgentIntakeQueue(options.agentReports ?? defaultAgentReports(), {
     requiredBaseBranch: "origin/codex/stage0-capture-mvp",
-    requiredBaseCommit: "9ad43f1",
+    requiredBaseCommit: "2a5088a",
     forbidProviderRuntimeChanges: true,
   });
   const performance = buildStage0PerformanceReport();
 
   const ownerSummary = summarizeOwners(capture, internalBenchmark, layeredBenchmark);
   const topNextActions = nextActions(capture, internalBenchmark, layeredBenchmark, privateAlpha, agentIntake, performance, ownerSummary);
+  const topBlockersByOwner = blockersByOwner(capture, internalBenchmark, layeredBenchmark, privateAlpha, agentIntake, performance, ownerSummary);
   const { verdict, verdictReason } = readinessVerdict(capture, internalBenchmark, layeredBenchmark, privateAlpha);
   const routingMismatchCount =
     capture.summary.routingMismatchCount +
@@ -153,6 +163,8 @@ export function buildStage0OperatorReport(
       .map((result) => result.report.branch),
     whatChangedSinceLastReport: "deferred: no previous Stage 0 daily report snapshot was supplied.",
     ownerSummary,
+    topBlockersByOwner,
+    nextFiveActions: topNextActions.slice(0, 5),
     topNextActions,
     notes: [
       "Stage 0 operator report is no-live and reads deterministic benchmark fixtures only.",
@@ -179,6 +191,7 @@ export function renderStage0OperatorMarkdown(report: Stage0OperatorReport): stri
     `Task-ready accuracy: ${formatRate(report.capture.summary.taskReadyAccuracy)}`,
     `Artifact completeness: ${formatRate(report.capture.summary.artifactCompletenessRate)}`,
     `Unknown failure: ${formatRate(report.capture.summary.unknownFailureRate)}`,
+    `Artifact gap closures: ${report.capture.artifactGapClosures.filter((closure) => closure.outcome === "closed").length}/${report.capture.artifactGapClosures.length}`,
     `Dogfood links: ${report.dogfoodBugLinks.map((link) => link.dogfoodId).join(", ") || "-"}`,
     "",
     "## Internal Benchmark",
@@ -216,6 +229,7 @@ export function renderStage0OperatorMarkdown(report: Stage0OperatorReport): stri
     `Endpoints: ${report.performance.totalEndpoints}`,
     `High risk: ${report.performance.highRiskEndpoints}`,
     `Medium risk: ${report.performance.mediumRiskEndpoints}`,
+    `Findings: ${report.performance.probes.reduce((sum, probe) => sum + probe.findings.length, 0)}`,
     "",
     "## Top Failure Classes",
     "",
@@ -237,6 +251,28 @@ export function renderStage0OperatorMarkdown(report: Stage0OperatorReport): stri
 
   for (const owner of report.ownerSummary) {
     lines.push(`| \`${owner.owner}\` | ${owner.failureCount} | ${owner.signals.join("; ")} |`);
+  }
+
+  lines.push(
+    "",
+    "## Top Blockers By Owner",
+    "",
+    "| Priority | Owner | Blocker | Evidence |",
+    "| --- | --- | --- | --- |",
+  );
+  for (const blocker of report.topBlockersByOwner) {
+    lines.push(`| \`${blocker.priority}\` | \`${blocker.owner}\` | ${blocker.blocker} | ${blocker.evidence} |`);
+  }
+
+  lines.push(
+    "",
+    "## Next 5 Actions",
+    "",
+    "| Priority | Owner | Action | Reason |",
+    "| --- | --- | --- | --- |",
+  );
+  for (const action of report.nextFiveActions) {
+    lines.push(`| \`${action.priority}\` | \`${action.owner}\` | ${action.action} | ${action.reason} |`);
   }
 
   lines.push(
@@ -322,6 +358,68 @@ function summarizeOwners(
   }
 
   return Array.from(byOwner.values()).sort((a, b) => b.failureCount - a.failureCount);
+}
+
+function blockersByOwner(
+  capture: CaptureBenchmarkReport,
+  internalBenchmark: InternalBenchmarkReport,
+  layeredBenchmark: LayeredBenchmarkReport,
+  privateAlpha: PrivateAlphaIntakeReport,
+  agentIntake: AgentIntakeQueueReport,
+  performance: Stage0PerformanceReport,
+  ownerSummary: Stage0OwnerSummary[],
+): Stage0OwnerBlocker[] {
+  const blockers: Stage0OwnerBlocker[] = [];
+  if (privateAlpha.summary.readiness !== "green") {
+    blockers.push({
+      owner: "alpha-ops",
+      priority: "p0",
+      blocker: "Private alpha is not green from real supervised submissions.",
+      evidence: `${privateAlpha.summary.total} intake sample(s), readiness ${privateAlpha.summary.readiness}, ${privateAlpha.summary.safeMissSeedCount} safe-miss seed(s).`,
+    });
+  }
+  if (capture.summary.routingMismatchCount > 0 || capture.summary.byFailureClass.artifact_incomplete > 0) {
+    blockers.push({
+      owner: "task-workspace",
+      priority: "p1",
+      blocker: "Capture artifact or routing contracts still need closure.",
+      evidence: `${capture.summary.byFailureClass.artifact_incomplete} artifact gaps, ${capture.summary.routingMismatchCount} routing mismatches.`,
+    });
+  }
+  if (layeredBenchmark.summary.unknownFailureRate > 0 || internalBenchmark.summary.byFailureClass.provider_simulated_block > 0) {
+    blockers.push({
+      owner: "provider-runtime",
+      priority: "p1",
+      blocker: "Provider-runtime no-live failures need fixture-backed patches before more live attempts.",
+      evidence: `${formatRate(layeredBenchmark.summary.unknownFailureRate)} layered unknown failures, ${internalBenchmark.summary.byFailureClass.provider_simulated_block} simulated provider blockers.`,
+    });
+  }
+  if (performance.highRiskEndpoints > 0 || performance.mediumRiskEndpoints > 0) {
+    blockers.push({
+      owner: "codex",
+      priority: performance.highRiskEndpoints > 0 ? "p1" : "p2",
+      blocker: "App-shell performance risks must stay out of route-level payloads.",
+      evidence: `${performance.highRiskEndpoints} high-risk and ${performance.mediumRiskEndpoints} medium-risk endpoint(s).`,
+    });
+  }
+  if (agentIntake.summary.reject > 0 || agentIntake.summary.needsFollowup > 0 || agentIntake.summary.requiresRebase > 0) {
+    blockers.push({
+      owner: "codex",
+      priority: "p1",
+      blocker: "Returned agent branches need metadata triage before merge validation.",
+      evidence: `${agentIntake.summary.readyToMerge} ready, ${agentIntake.summary.needsFollowup} follow-up, ${agentIntake.summary.requiresRebase} rebase, ${agentIntake.summary.reject} reject.`,
+    });
+  }
+  for (const owner of ownerSummary.slice(0, 5)) {
+    if (blockers.some((blocker) => blocker.owner === owner.owner)) continue;
+    blockers.push({
+      owner: owner.owner,
+      priority: "p2",
+      blocker: "Benchmark failures remain for this owner.",
+      evidence: `${owner.failureCount} failure(s): ${owner.signals[0] ?? "see benchmark report"}.`,
+    });
+  }
+  return blockers.slice(0, 8);
 }
 
 function nextActions(

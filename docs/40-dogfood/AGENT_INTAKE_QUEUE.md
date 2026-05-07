@@ -89,7 +89,9 @@ Example JSON:
 
 Stage 0 intake also checks that changed logic/scripts have matching tests,
 worktree and safety metadata are present, broad app-shell touches match the
-declared task kind, and provider/runtime/DB/schema paths are rejected when
+declared task kind, app shell changes report a passing build, worker mirror
+changes report `check-drift`, stale bases are rebased, likely merge conflicts
+are surfaced, and provider/runtime/DB/schema paths are rejected when
 `--forbid-provider-runtime` is set.
 
 The sample four-agent queue lives at:
@@ -133,7 +135,7 @@ Useful flags:
 Stage 0 sample queue:
 
 ```bash
-npx tsx scripts/layered-agent-intake.ts --input lib/internal-benchmark/__fixtures__/agent-intake/stage0-returned-branches.json --required-base-branch origin/codex/stage0-capture-mvp --required-base-commit 9ad43f1 --forbid-provider-runtime --json
+npx tsx scripts/layered-agent-intake.ts --input lib/internal-benchmark/__fixtures__/agent-intake/stage0-returned-branches.json --required-base-branch origin/codex/stage0-capture-mvp --required-base-commit 2a5088a --forbid-provider-runtime --json
 ```
 
 The Stage 0 sample models a Goal benchmark branch, Claude activity follow-up,

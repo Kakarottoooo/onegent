@@ -5,6 +5,10 @@ import type {
 } from "@/lib/capture/benchmark";
 
 export type PrivateAlphaSubmissionSourceType =
+  | "pasted_url"
+  | "pasted_text"
+  | "screenshot_reference"
+  | "manual_request"
   | "text"
   | "url"
   | "screenshot"
@@ -23,6 +27,15 @@ export type PrivateAlphaReadiness = "green" | "yellow" | "red";
 
 export type PrivateAlphaUserValueSignal = "strong" | "medium" | "weak" | "none";
 
+export type PrivateAlphaTaskReadyStatus =
+  | "task_ready"
+  | "needs_clarification"
+  | "needs_review"
+  | "save_only"
+  | "compare_only"
+  | "group_decision"
+  | "blocked";
+
 export type PrivateAlphaSubmission = {
   submissionId?: string;
   id?: string;
@@ -33,14 +46,23 @@ export type PrivateAlphaSubmission = {
   sourceType: PrivateAlphaSubmissionSourceType;
   expectedTaskType?: PrivateAlphaExpectedTaskType;
   userGoal: string;
+  submittedIntent?: string;
   expectedHelpfulness?: string;
   actualUserFeedback?: string;
   travelObject?: unknown;
+  travelObjectProduced?: boolean;
   createdTaskId?: string;
   safeNextAction?: string;
+  taskReadyStatus?: PrivateAlphaTaskReadyStatus | boolean;
+  evidenceLink?: string;
   evidenceLinks?: string[];
   userValueSignal?: PrivateAlphaUserValueSignal | boolean | null;
+  wouldContinue?: boolean | null;
+  wouldReuse?: boolean | null;
+  wouldPayOrReuse?: boolean | null;
   blockedReason?: string;
+  failureReason?: string;
+  owner?: CaptureBenchmarkOwner;
   notes?: string;
   wouldTrustOnegentToContinue?: boolean | null;
   wouldPay?: boolean | null;
@@ -75,6 +97,9 @@ export type PrivateAlphaFixtureSeed = {
   rawInput: string;
   dogfoodId: string;
   note: string;
+  owner: CaptureBenchmarkOwner;
+  taskReadyStatus: PrivateAlphaTaskReadyStatus;
+  safeMiss: boolean;
 };
 
 export type PrivateAlphaSubmissionAssessment = {
@@ -90,6 +115,7 @@ export type PrivateAlphaSubmissionAssessment = {
   sensitiveContentFindings: string[];
   recommendedOwner: CaptureBenchmarkOwner;
   suggestedOwner: CaptureBenchmarkOwner;
+  safeMiss: boolean;
   canBecomeBenchmarkFixture: boolean;
   fixtureSeed: PrivateAlphaFixtureSeed | null;
   suggestedFollowUpQuestion?: string;
@@ -101,6 +127,7 @@ export type PrivateAlphaIntakeSummary = {
   yellow: number;
   red: number;
   fixtureSeedCount: number;
+  safeMissSeedCount: number;
   sensitiveCount: number;
   averageScore: number;
   byOwner: Record<CaptureBenchmarkOwner, number>;
@@ -120,6 +147,10 @@ export type PrivateAlphaGateOptions = {
   minAverageScore?: number;
   minFixtureSeedCount?: number;
   maxSensitiveCount?: number;
+};
+
+export type PrivateAlphaFixtureSeedOptions = {
+  includeSafeMisses?: boolean;
 };
 
 const GENERATED_AT = "2026-05-07T12:00:00.000Z";
@@ -158,7 +189,7 @@ export function assessPrivateAlphaSubmission(
   const submissionId = submission.submissionId ?? submission.id ?? "missing-submission-id";
   const missingFields = [
     ...(submission.submissionId || submission.id ? [] : ["submissionId"]),
-    ...REQUIRED_FIELDS.filter((field) => !hasValue(submission[field])).map(String),
+    ...REQUIRED_FIELDS.filter((field) => !hasValue(requiredFieldValue(submission, field))).map(String),
   ];
   const sensitiveContentFindings = findForbiddenSignals(sensitiveText(submission));
   const missingEvidence = evidenceGaps(submission);
@@ -166,10 +197,13 @@ export function assessPrivateAlphaSubmission(
   const score = buildScore(submission, missingFields, missingEvidence, sensitiveContentFindings, scoreOverrides);
   const readiness = readinessFor(submission, score, qualityFlags, sensitiveContentFindings);
   const recommendedOwner = suggestedOwnerFor(submission, score, qualityFlags, sensitiveContentFindings);
+  const taskReadyStatus = taskReadyStatusFor(submission, score, qualityFlags);
+  const substantiveQualityFlags = qualityFlags.filter((flag) => flag !== "synthetic_only");
+  const safeMiss = sensitiveContentFindings.length === 0 && score.understood && (!score.taskReady || substantiveQualityFlags.length > 0);
   const canBecomeBenchmarkFixture =
     sensitiveContentFindings.length === 0 &&
     hasValue(submission.rawInput) &&
-    hasValue(submission.userGoal) &&
+    hasValue(submission.userGoal || submission.submittedIntent) &&
     Boolean(submission.expectedTaskType) &&
     score.understood;
 
@@ -180,7 +214,12 @@ export function assessPrivateAlphaSubmission(
         vertical: submission.expectedTaskType ?? "ambiguous",
         rawInput: submission.rawInput,
         dogfoodId: submissionId,
-        note: `Private alpha seed from ${submissionId}; verify deterministic capture before using as provider evidence.`,
+        note: safeMiss
+          ? `Private alpha safe-miss seed from ${submissionId}; preserve failure reason and verify deterministic capture before any provider evidence.`
+          : `Private alpha seed from ${submissionId}; verify deterministic capture before using as provider evidence.`,
+        owner: recommendedOwner,
+        taskReadyStatus,
+        safeMiss,
       }
     : null;
 
@@ -201,6 +240,7 @@ export function assessPrivateAlphaSubmission(
     sensitiveContentFindings,
     recommendedOwner,
     suggestedOwner: recommendedOwner,
+    safeMiss,
     canBecomeBenchmarkFixture,
     fixtureSeed,
     suggestedFollowUpQuestion: suggestedFollowUpQuestion(submission, missingFields, missingEvidence, qualityFlags),
@@ -220,10 +260,22 @@ export function buildPrivateAlphaIntakeReport(
     notes: [
       "Private alpha intake is no-live: it evaluates submitted text/metadata only and never starts provider work.",
       "Synthetic samples can exercise the gate, but they cannot make private alpha green.",
+      "Do not ingest raw secrets, payment details, login credentials, OTP, CAPTCHA, provider cookies, or account-private payloads.",
       "Sensitive values are rejected; ask users to remove secrets and describe the travel goal instead.",
       "Benchmark fixture seeds prove repeatable capture contracts, not provider execution or live booking success.",
     ],
   };
+}
+
+export function buildPrivateAlphaFixtureSeeds(
+  submissions: PrivateAlphaSubmission[],
+  options: PrivateAlphaFixtureSeedOptions = {},
+): PrivateAlphaFixtureSeed[] {
+  const includeSafeMisses = options.includeSafeMisses ?? true;
+  return submissions
+    .map((submission) => assessPrivateAlphaSubmission(submission).fixtureSeed)
+    .filter((seed): seed is PrivateAlphaFixtureSeed => Boolean(seed))
+    .filter((seed) => includeSafeMisses || !seed.safeMiss);
 }
 
 export function findForbiddenSignals(value: string): string[] {
@@ -261,13 +313,21 @@ export function parsePrivateAlphaMarkdown(input: string): PrivateAlphaSubmission
       rawInput: fields.get("rawinput") ?? "",
       sourceType: fields.get("sourcetype") ?? "text",
       expectedTaskType: fields.get("expectedtasktype"),
-      userGoal: fields.get("usergoal") ?? "",
+      userGoal: fields.get("usergoal") ?? fields.get("submittedintent") ?? "",
+      submittedIntent: fields.get("submittedintent"),
       expectedHelpfulness: fields.get("expectedhelpfulness"),
       actualUserFeedback: fields.get("actualuserfeedback"),
       safeNextAction: fields.get("safenextaction"),
+      taskReadyStatus: fields.get("taskreadystatus"),
+      evidenceLink: fields.get("evidencelink"),
       evidenceLinks: parseList(fields.get("evidencelinks")),
       userValueSignal: fields.get("uservaluesignal"),
-      blockedReason: fields.get("blockedreason"),
+      blockedReason: fields.get("blockedreason") ?? fields.get("failurereason"),
+      failureReason: fields.get("failurereason"),
+      owner: fields.get("owner"),
+      wouldContinue: parseBoolean(fields.get("wouldcontinue")),
+      wouldReuse: parseBoolean(fields.get("wouldreuse")),
+      wouldPayOrReuse: parseBoolean(fields.get("wouldpayorreuse")),
       notes: fields.get("notes"),
       syntheticMarker: parseBoolean(fields.get("syntheticmarker")),
     }));
@@ -296,6 +356,7 @@ export function renderPrivateAlphaMarkdown(report: PrivateAlphaIntakeReport): st
     `Yellow: ${report.summary.yellow}`,
     `Red: ${report.summary.red}`,
     `Fixture seeds: ${report.summary.fixtureSeedCount}`,
+    `Safe-miss seeds: ${report.summary.safeMissSeedCount}`,
     `Sensitive findings: ${report.summary.sensitiveCount}`,
     `Average score: ${report.summary.averageScore}`,
     "",
@@ -334,6 +395,7 @@ function summarizeAssessments(
   const red = assessments.filter((item) => item.readiness === "red").length;
   const sensitiveCount = assessments.filter((item) => item.sensitiveContentFindings.length > 0).length;
   const fixtureSeedCount = assessments.filter((item) => item.canBecomeBenchmarkFixture).length;
+  const safeMissSeedCount = assessments.filter((item) => item.fixtureSeed?.safeMiss).length;
   const averageScore = total === 0
     ? 0
     : Math.round((assessments.reduce((sum, item) => sum + item.score.percentage, 0) / total) * 1000) / 1000;
@@ -358,6 +420,7 @@ function summarizeAssessments(
     yellow,
     red,
     fixtureSeedCount,
+    safeMissSeedCount,
     sensitiveCount,
     averageScore,
     byOwner,
@@ -374,13 +437,18 @@ function buildScore(
   sensitiveContentFindings: string[],
   scoreOverrides: Partial<Omit<PrivateAlphaScore, "total" | "max" | "percentage">>,
 ): PrivateAlphaScore {
-  const travelObjectCreated = scoreOverrides.travelObjectCreated ?? Boolean(submission.travelObject);
+  const travelObjectCreated = scoreOverrides.travelObjectCreated ?? hasTravelObject(submission);
   const safeNextAction = scoreOverrides.safeNextAction ?? hasValue(submission.safeNextAction);
   const userValue = scoreOverrides.userValue ?? hasUserValue(submission);
+  const explicitTaskReady = isTaskReadyStatus(submission.taskReadyStatus)
+    ? submission.taskReadyStatus === "task_ready" || submission.taskReadyStatus === "group_decision"
+    : typeof submission.taskReadyStatus === "boolean"
+      ? submission.taskReadyStatus
+      : undefined;
   const score = {
     understood: scoreOverrides.understood ?? (missingFields.length === 0 && sensitiveContentFindings.length === 0),
     travelObjectCreated,
-    taskReady: scoreOverrides.taskReady ?? (travelObjectCreated && safeNextAction && !submission.blockedReason),
+    taskReady: scoreOverrides.taskReady ?? (explicitTaskReady ?? (travelObjectCreated && safeNextAction && !submission.blockedReason)),
     safeNextAction,
     evidenceComplete: scoreOverrides.evidenceComplete ?? missingEvidence.length === 0,
     userValue,
@@ -427,7 +495,7 @@ function evidenceGaps(submission: PrivateAlphaSubmission): string[] {
   const gaps: string[] = [];
   if (!submission.evidenceLinks || submission.evidenceLinks.length === 0) gaps.push("evidenceLinks");
   if (!hasValue(submission.safeNextAction)) gaps.push("safeNextAction");
-  if (!submission.travelObject) gaps.push("travelObject");
+  if (!hasTravelObject(submission)) gaps.push("travelObject");
   if (!hasUserValue(submission)) gaps.push("userValueSignal");
   return gaps;
 }
@@ -438,6 +506,7 @@ function suggestedOwnerFor(
   qualityFlags: PrivateAlphaQualityFlags[],
   sensitiveContentFindings: string[],
 ): CaptureBenchmarkOwner {
+  if (submission.owner) return submission.owner;
   if (sensitiveContentFindings.length > 0) return "product/manual-boundary";
   if (!score.understood || qualityFlags.includes("needs_clarification")) return "capture";
   if (!score.travelObjectCreated) return "capture";
@@ -465,24 +534,49 @@ function suggestedFollowUpQuestion(
 
 function hasUserValue(submission: PrivateAlphaSubmission): boolean {
   if (submission.userValueSignal && submission.userValueSignal !== "none") return true;
-  return Boolean(submission.wouldTrustOnegentToContinue || submission.wouldPay || submission.actualUserFeedback);
+  return Boolean(
+    submission.wouldTrustOnegentToContinue ||
+    submission.wouldContinue ||
+    submission.wouldPay ||
+    submission.wouldReuse ||
+    submission.wouldPayOrReuse ||
+    submission.actualUserFeedback,
+  );
 }
 
 function sourceShapeFor(sourceType: PrivateAlphaSubmissionSourceType): CaptureBenchmarkSourceShape {
   switch (sourceType) {
     case "url":
+    case "pasted_url":
       return "pasted_url";
     case "screenshot":
     case "screenshot_description":
+    case "screenshot_reference":
       return "screenshot_description";
     case "mixed":
     case "mixed_url_instruction":
       return "mixed_url_instruction";
+    case "manual_request":
+    case "pasted_text":
     case "text":
     case "raw_text":
     default:
       return "plain_natural_language";
   }
+}
+
+function taskReadyStatusFor(
+  submission: PrivateAlphaSubmission,
+  score: PrivateAlphaScore,
+  qualityFlags: PrivateAlphaQualityFlags[],
+): PrivateAlphaTaskReadyStatus {
+  if (isTaskReadyStatus(submission.taskReadyStatus)) return submission.taskReadyStatus;
+  if (submission.taskReadyStatus === true) return "task_ready";
+  if (hasValue(submission.blockedReason)) return "blocked";
+  if (score.taskReady) return "task_ready";
+  if (qualityFlags.includes("missing_safe_next_action") || qualityFlags.includes("needs_clarification")) return "needs_clarification";
+  if (qualityFlags.includes("missing_evidence")) return "needs_review";
+  return "needs_review";
 }
 
 function normalizeSubmission(raw: unknown): PrivateAlphaSubmission {
@@ -496,17 +590,26 @@ function normalizeSubmission(raw: unknown): PrivateAlphaSubmission {
     rawInput: stringOrDefault(raw.rawInput, ""),
     sourceType: normalizeSourceType(raw.sourceType),
     expectedTaskType: normalizeExpectedTaskType(raw.expectedTaskType),
-    userGoal: stringOrDefault(raw.userGoal, ""),
+    userGoal: stringOrDefault(raw.userGoal, stringOrDefault(raw.submittedIntent, "")),
+    submittedIntent: stringOrUndefined(raw.submittedIntent),
     expectedHelpfulness: stringOrUndefined(raw.expectedHelpfulness),
     actualUserFeedback: stringOrUndefined(raw.actualUserFeedback),
     travelObject: raw.travelObject,
+    travelObjectProduced: booleanOrUndefined(raw.travelObjectProduced),
     createdTaskId: stringOrUndefined(raw.createdTaskId),
     safeNextAction: stringOrUndefined(raw.safeNextAction),
-    evidenceLinks: stringArray(raw.evidenceLinks),
+    taskReadyStatus: normalizeTaskReadyStatus(raw.taskReadyStatus),
+    evidenceLink: stringOrUndefined(raw.evidenceLink),
+    evidenceLinks: mergeEvidenceLinks(raw.evidenceLinks, raw.evidenceLink),
     userValueSignal: normalizeUserValueSignal(raw.userValueSignal),
-    blockedReason: stringOrUndefined(raw.blockedReason),
+    wouldContinue: booleanOrNull(raw.wouldContinue),
+    wouldReuse: booleanOrNull(raw.wouldReuse),
+    wouldPayOrReuse: booleanOrNull(raw.wouldPayOrReuse),
+    blockedReason: stringOrUndefined(raw.blockedReason) ?? stringOrUndefined(raw.failureReason),
+    failureReason: stringOrUndefined(raw.failureReason),
+    owner: normalizeOwner(raw.owner),
     notes: stringOrUndefined(raw.notes),
-    wouldTrustOnegentToContinue: booleanOrNull(raw.wouldTrustOnegentToContinue),
+    wouldTrustOnegentToContinue: booleanOrNull(raw.wouldTrustOnegentToContinue) ?? booleanOrNull(raw.wouldContinue),
     wouldPay: booleanOrNull(raw.wouldPay),
   };
 }
@@ -515,10 +618,13 @@ function sensitiveText(submission: PrivateAlphaSubmission): string {
   return [
     submission.rawInput,
     submission.userGoal,
+    submission.submittedIntent,
     submission.expectedHelpfulness,
     submission.actualUserFeedback,
     submission.safeNextAction,
     submission.blockedReason,
+    submission.failureReason,
+    submission.evidenceLink,
     submission.notes,
     ...(submission.evidenceLinks ?? []),
   ].filter(Boolean).join("\n");
@@ -526,6 +632,10 @@ function sensitiveText(submission: PrivateAlphaSubmission): string {
 
 function normalizeSourceType(value: unknown): PrivateAlphaSubmissionSourceType {
   if (
+    value === "pasted_url" ||
+    value === "pasted_text" ||
+    value === "screenshot_reference" ||
+    value === "manual_request" ||
     value === "text" ||
     value === "url" ||
     value === "screenshot" ||
@@ -537,6 +647,39 @@ function normalizeSourceType(value: unknown): PrivateAlphaSubmissionSourceType {
     return value;
   }
   return "text";
+}
+
+function normalizeTaskReadyStatus(value: unknown): PrivateAlphaSubmission["taskReadyStatus"] {
+  if (typeof value === "boolean") return value;
+  return isTaskReadyStatus(value) ? value : undefined;
+}
+
+function isTaskReadyStatus(value: unknown): value is PrivateAlphaTaskReadyStatus {
+  return (
+    value === "task_ready" ||
+    value === "needs_clarification" ||
+    value === "needs_review" ||
+    value === "save_only" ||
+    value === "compare_only" ||
+    value === "group_decision" ||
+    value === "blocked"
+  );
+}
+
+function normalizeOwner(value: unknown): CaptureBenchmarkOwner | undefined {
+  if (
+    value === "capture" ||
+    value === "nlu" ||
+    value === "planner" ||
+    value === "task-readiness" ||
+    value === "task-workspace" ||
+    value === "provider-runtime" ||
+    value === "product/manual-boundary" ||
+    value === "alpha-ops"
+  ) {
+    return value;
+  }
+  return undefined;
 }
 
 function normalizeExpectedTaskType(value: unknown): PrivateAlphaExpectedTaskType | undefined {
@@ -577,6 +720,19 @@ function stringArray(value: unknown): string[] {
   if (typeof value === "string") return parseList(value);
   if (!Array.isArray(value)) return [];
   return value.filter((item): item is string => typeof item === "string" && item.trim().length > 0);
+}
+
+function mergeEvidenceLinks(value: unknown, single: unknown): string[] {
+  return Array.from(new Set([...stringArray(value), ...stringArray(single)]));
+}
+
+function hasTravelObject(submission: PrivateAlphaSubmission): boolean {
+  return Boolean(submission.travelObject) || submission.travelObjectProduced === true;
+}
+
+function requiredFieldValue(submission: PrivateAlphaSubmission, field: keyof PrivateAlphaSubmission): unknown {
+  if (field === "userGoal") return submission.userGoal || submission.submittedIntent;
+  return submission[field];
 }
 
 function stringOrDefault(value: unknown, fallback: string): string {

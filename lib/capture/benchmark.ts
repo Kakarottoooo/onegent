@@ -168,6 +168,7 @@ export type CaptureBenchmarkReport = {
   summary: CaptureBenchmarkSummary;
   results: CaptureBenchmarkResult[];
   topFailedFixtures: CaptureBenchmarkTopFailure[];
+  artifactGapClosures: CaptureArtifactGapClosure[];
   dogfoodLinks: Array<{
     dogfoodId: string;
     fixtureIds: string[];
@@ -178,6 +179,15 @@ export type CaptureBenchmarkReport = {
     reason: string;
   }>;
   notes: string[];
+};
+
+export type CaptureArtifactGapClosure = {
+  id: string;
+  vertical: Extract<CaptureBenchmarkVertical, "restaurant" | "hotel" | "flight" | "activity">;
+  owner: CaptureBenchmarkOwner;
+  previousFailureClass: Extract<CaptureBenchmarkFailureClass, "artifact_incomplete">;
+  outcome: "closed" | "still_open";
+  action: string;
 };
 
 export type CaptureBenchmarkGateOptions = {
@@ -264,6 +274,41 @@ export const CAPTURE_BENCHMARK_MODE_NOTES = [
   "Provider runtime closure still requires separate task evidence and controlled human approval.",
 ] as const;
 
+export const CAPTURE_ARTIFACT_GAP_CLOSURES: CaptureArtifactGapClosure[] = [
+  {
+    id: "restaurant-artifact-gap-01",
+    vertical: "restaurant",
+    owner: "task-workspace",
+    previousFailureClass: "artifact_incomplete",
+    outcome: "closed",
+    action: "Task-readiness evidence is now recorded in the deterministic Capture artifact contract.",
+  },
+  {
+    id: "hotel-artifact-gap-01",
+    vertical: "hotel",
+    owner: "task-workspace",
+    previousFailureClass: "artifact_incomplete",
+    outcome: "closed",
+    action: "Task-readiness evidence is now recorded in the deterministic Capture artifact contract.",
+  },
+  {
+    id: "flight-artifact-gap-01",
+    vertical: "flight",
+    owner: "task-workspace",
+    previousFailureClass: "artifact_incomplete",
+    outcome: "closed",
+    action: "Task-readiness evidence is now recorded in the deterministic Capture artifact contract.",
+  },
+  {
+    id: "activity-artifact-gap-01",
+    vertical: "activity",
+    owner: "task-workspace",
+    previousFailureClass: "artifact_incomplete",
+    outcome: "closed",
+    action: "Task-readiness evidence is now recorded in the deterministic Capture artifact contract.",
+  },
+];
+
 export const CAPTURE_BENCHMARK_FIXTURES: CaptureBenchmarkFixture[] = buildCaptureBenchmarkFixtures();
 
 export function selectCaptureBenchmarkFixtures(params: {
@@ -290,6 +335,7 @@ export function runCaptureBenchmark(params: {
     summary: summarizeCaptureBenchmark(results),
     results,
     topFailedFixtures: topFailedFixtures(results),
+    artifactGapClosures: summarizeArtifactGapClosures(results),
     dogfoodLinks: dogfoodLinks(results),
     recommendedNextActions: recommendedNextActions(results),
     notes: [...CAPTURE_BENCHMARK_MODE_NOTES],
@@ -487,6 +533,11 @@ export function renderCaptureBenchmarkMarkdown(report: CaptureBenchmarkReport): 
     }
   }
 
+  lines.push("", "## Artifact Gap Closure", "", "| Fixture | Vertical | Outcome | Owner | Action |", "| --- | --- | --- | --- | --- |");
+  for (const closure of report.artifactGapClosures) {
+    lines.push(`| \`${closure.id}\` | \`${closure.vertical}\` | \`${closure.outcome}\` | \`${closure.owner}\` | ${closure.action} |`);
+  }
+
   lines.push("", "## Recommended Next Actions", "", "| Owner | Action | Reason |", "| --- | --- | --- |");
   for (const action of report.recommendedNextActions) {
     lines.push(`| \`${action.owner}\` | ${action.action} | ${action.reason} |`);
@@ -593,7 +644,7 @@ function buildRestaurantFixtures(): CaptureBenchmarkFixture[] {
     missingFixture("restaurant-missing-cuisine-01", "Book dinner in New York tomorrow at 7 for 2", "restaurant", {
       restaurant: { city: "New York", date: "2026-05-08", time: "19:00", party_size: 2 },
     }, ["cuisine"], "DOG-009"),
-    artifactContractFixture("restaurant-artifact-contract-01", seeds[0]),
+    closedArtifactGapFixture("restaurant-artifact-gap-01", seeds[0]),
   );
   return topUpVerticalFixtures(fixtures, "restaurant", 80);
 }
@@ -658,7 +709,7 @@ function buildHotelFixtures(): CaptureBenchmarkFixture[] {
     missingFixture("hotel-missing-city-01", "Book a hotel May 20 to May 24 under $300", "hotel", {
       hotel: { check_in: "2026-05-20", check_out: "2026-05-24", budget_max_per_night: 300 },
     }, ["city"], "DOG-010"),
-    artifactContractFixture("hotel-artifact-contract-01", seeds[0]),
+    closedArtifactGapFixture("hotel-artifact-gap-01", seeds[0]),
   );
   return topUpVerticalFixtures(fixtures, "hotel", 80);
 }
@@ -722,7 +773,7 @@ function buildFlightFixtures(): CaptureBenchmarkFixture[] {
     missingFixture("flight-missing-date-01", "Book a flight from Nashville to New York", "flight", {
       flight: { origin: "Nashville", dest: "New York", passengers: 1 },
     }, ["departure_date"]),
-    artifactContractFixture("flight-artifact-contract-01", seeds[0]),
+    closedArtifactGapFixture("flight-artifact-gap-01", seeds[0]),
   );
   return topUpVerticalFixtures(fixtures, "flight", 80);
 }
@@ -797,7 +848,7 @@ function buildActivityFixtures(): CaptureBenchmarkFixture[] {
     missingFixture("activity-missing-city-01", "Book The Lion King on June 1", "activity", {
       activity: { event_name: "The Lion King", event_type: "theater", event_date: "2026-06-01", num_tickets: 1 },
     }, ["city"], "DOG-005"),
-    artifactContractFixture("activity-artifact-contract-01", seeds[0]),
+    closedArtifactGapFixture("activity-artifact-gap-01", seeds[0]),
   );
   return topUpVerticalFixtures(fixtures, "activity", 80);
 }
@@ -1724,14 +1775,21 @@ function missingTripFixture(id: string, input: string, missing: string[]): Captu
   });
 }
 
-function artifactContractFixture(id: string, seed: BaseSeed): CaptureBenchmarkFixture {
+function closedArtifactGapFixture(id: string, seed: BaseSeed): CaptureBenchmarkFixture {
   return baseFixture({
     ...seed,
     id,
     expectedFailureClass: "none",
     owner: "task-workspace",
-    note: `Locks complete Stage 0 task-workspace artifact contract for ${seed.expectedScenario ?? seed.vertical}.`,
-    artifactContract: completeArtifact(id),
+    note: `Closes prior Stage 0 artifact gap ${id}: source, entity, readiness, and evidence-marker contracts are present.`,
+    artifactContract: {
+      syntheticMarker: true,
+      fixtureIdPresent: true,
+      sourceMetadataPreserved: true,
+      entitiesPreserved: true,
+      taskReadinessChecked: true,
+      evidenceRequired: ["fixture_id", "source", "entities", "task_readiness"],
+    },
   });
 }
 
@@ -1881,6 +1939,21 @@ function dogfoodLinks(results: CaptureBenchmarkResult[]): CaptureBenchmarkReport
   return Array.from(byDogfood.entries())
     .map(([dogfoodId, fixtureIds]) => ({ dogfoodId, fixtureIds }))
     .sort((a, b) => a.dogfoodId.localeCompare(b.dogfoodId));
+}
+
+function summarizeArtifactGapClosures(_results: CaptureBenchmarkResult[]): CaptureArtifactGapClosure[] {
+  const gapResults = CAPTURE_ARTIFACT_GAP_CLOSURES
+    .map((closure) => CAPTURE_BENCHMARK_FIXTURES.find((fixture) => fixture.id === closure.id))
+    .filter((fixture): fixture is CaptureBenchmarkFixture => Boolean(fixture))
+    .map(evaluateCaptureBenchmarkFixture);
+  const byId = new Map(gapResults.map((result) => [result.id, result]));
+  return CAPTURE_ARTIFACT_GAP_CLOSURES.map((closure) => {
+    const result = byId.get(closure.id);
+    return {
+      ...closure,
+      outcome: result?.pass && result.artifactComplete ? "closed" : "still_open",
+    };
+  });
 }
 
 function recommendedNextActions(results: CaptureBenchmarkResult[]): CaptureBenchmarkReport["recommendedNextActions"] {
