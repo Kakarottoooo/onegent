@@ -3,6 +3,7 @@ import path from "node:path";
 import { describe, expect, it } from "vitest";
 import {
   assessPrivateAlphaSubmission,
+  buildPrivateAlphaFixtureSeeds,
   buildPrivateAlphaIntakeReport,
   findForbiddenSignals,
   parsePrivateAlphaInput,
@@ -43,6 +44,7 @@ describe("private alpha intake contract", () => {
       sourceShape: "plain_natural_language",
       vertical: "activity",
       dogfoodId: "ALPHA-001",
+      safeMiss: false,
     });
   });
 
@@ -113,5 +115,37 @@ describe("private alpha intake contract", () => {
       sourceShape: "pasted_url",
       vertical: "hotel",
     });
+  });
+
+  it("accepts v3 source aliases and turns safe misses into benchmark seeds", () => {
+    const submission = baseSubmission({
+      submissionId: "ALPHA-MISS-001",
+      sourceType: "screenshot_reference",
+      rawInput: "screenshot reference: hotel cards in NYC with no dates visible",
+      userGoal: "",
+      submittedIntent: "Save the hotel options and ask for missing dates before task creation.",
+      travelObject: undefined,
+      travelObjectProduced: false,
+      taskReadyStatus: "needs_clarification",
+      safeNextAction: "Ask for check-in and check-out before creating a hotel task.",
+      evidenceLink: "docs/40-dogfood/CAPTURE_MVP_SEAMS.md",
+      evidenceLinks: [],
+      userValueSignal: "weak",
+      expectedTaskType: "hotel",
+      failureReason: "missing stay dates",
+      owner: "task-readiness",
+    });
+
+    const assessment = assessPrivateAlphaSubmission(submission);
+    expect(assessment.readiness).toBe("yellow");
+    expect(assessment.safeMiss).toBe(true);
+    expect(assessment.fixtureSeed).toMatchObject({
+      sourceShape: "screenshot_description",
+      owner: "task-readiness",
+      taskReadyStatus: "needs_clarification",
+      safeMiss: true,
+    });
+    expect(buildPrivateAlphaFixtureSeeds([submission])).toHaveLength(1);
+    expect(buildPrivateAlphaFixtureSeeds([submission], { includeSafeMisses: false })).toHaveLength(0);
   });
 });

@@ -86,6 +86,11 @@ Stage 0 work is in scope when it directly improves one of these systems:
      npx tsx scripts/measure-app-performance.ts --stage0 --json
      ```
 
+   - `scripts/stage0-operator-report.ts` is the week-scale cockpit for Stage
+     0. It should answer verdict, Capture, private-alpha intake, internal
+     benchmark, layered benchmark, performance risk, agent intake, top
+     blockers by owner, and the next five actions without starting providers
+     or loading app-shell evidence payloads.
    - Capture benchmark fixtures are no-live deterministic parser-contract
      fixtures. They prove source metadata, Travel Object projection,
      task-readiness, owner, and artifact contracts. They do not prove live

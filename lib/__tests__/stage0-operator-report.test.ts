@@ -21,6 +21,9 @@ describe("Stage 0 operator report", () => {
     expect(report.capture.summary.routingMismatchCount).toBe(0);
     expect(report.verdict).toBe("yellow");
     expect(report.verdictReason).toContain("private alpha");
+    expect(report.capture.artifactGapClosures.every((closure) => closure.outcome === "closed")).toBe(true);
+    expect(report.topBlockersByOwner.length).toBeGreaterThan(0);
+    expect(report.nextFiveActions).toHaveLength(5);
     expect(report.topNextActions.length).toBeGreaterThan(0);
     expect(report.topNextActions[0].owner).toBeTruthy();
   });
@@ -41,6 +44,8 @@ describe("Stage 0 operator report", () => {
     expect(markdown).toContain("## Private Alpha Intake");
     expect(markdown).toContain("## Agent Intake");
     expect(markdown).toContain("## Performance Measurement");
+    expect(markdown).toContain("## Top Blockers By Owner");
+    expect(markdown).toContain("## Next 5 Actions");
     expect(markdown).toContain("## Top 10 Next Engineering Actions");
     expect(markdown).toContain("Dogfood-only");
   });

@@ -150,13 +150,17 @@ version:
 - Stage 0 Capture now has a 500+ fixture no-live corpus covering raw text,
   URLs, screenshot descriptions, mixed inputs, save-only, compare-only,
   group-decision, refine, profile, and unsupported requests.
+- Stage 0 Alpha Readiness v3 closes the four prior intentional Capture
+  `artifact_incomplete` gaps for restaurant, hotel, flight, and activity by
+  recording task-readiness evidence in the deterministic artifact contract.
 - Capture hardening now guards against homepage URL overcapture when a pasted
   URL is followed immediately by non-URL request text, provider-host
   impersonation, screenshot false positives, and loss of hotel/flight/
   restaurant/trip constraints through the task-boundary projection.
 - `scripts/stage0-operator-report.ts` is the daily no-live cockpit for
   Capture benchmark, private-alpha intake, internal/layered benchmark signals,
-  agent intake, and static app-shell performance risk.
+  agent intake, static app-shell performance risk, top blockers by owner, and
+  the next five Stage 0 actions.
 - Layered Benchmark V2 exists as a no-live benchmark for L1 provider runtime
   results, evidence completeness, failure class, L2 Browser Harness
   eligibility, simulated L2 recovery, owner assignment, and patch proposals.

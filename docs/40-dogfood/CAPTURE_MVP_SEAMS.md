@@ -215,7 +215,12 @@ current benchmark already locks:
 - founder dogfood examples for Lion King, Japanese/Chinese cuisine,
   NYC hotel date/budget, Nashville to New York flight, and Sirrah/OpenTable.
 - task-ready versus needs-clarification behavior.
-- source metadata preservation and artifact-contract completeness.
+- source metadata preservation and artifact-contract completeness. Stage 0
+  Alpha Readiness v3 closed the prior four intentional
+  `artifact_incomplete` fixtures (`restaurant-artifact-gap-01`,
+  `hotel-artifact-gap-01`, `flight-artifact-gap-01`, and
+  `activity-artifact-gap-01`) by recording task-readiness evidence in the
+  deterministic artifact contract.
 
 Run:
 

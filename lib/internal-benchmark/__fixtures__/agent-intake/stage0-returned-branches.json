@@ -8,7 +8,7 @@
       "worktree": "C:\\Users\\Gzw19\\onegent-goal-stage0-reliability-system",
       "base": {
         "branch": "origin/codex/stage0-capture-mvp",
-        "commit": "9ad43f1",
+        "commit": "2a5088a",
         "containsRequiredCommit": true
       },
       "taskKind": "benchmark_fixture",
@@ -46,7 +46,7 @@
       "worktree": "C:\\Users\\Gzw19\\onegent-claude-activity-stage0",
       "base": {
         "branch": "origin/codex/stage0-capture-mvp",
-        "commit": "9ad43f1",
+        "commit": "2a5088a",
         "containsRequiredCommit": true
       },
       "taskKind": "runtime_fix",
@@ -79,7 +79,7 @@
       "worktree": "C:\\Users\\Gzw19\\onegent-agent2-flight-stage0",
       "base": {
         "branch": "origin/codex/stage0-capture-mvp",
-        "commit": "9ad43f1",
+        "commit": "2a5088a",
         "containsRequiredCommit": true
       },
       "taskKind": "benchmark_fixture",
@@ -114,7 +114,7 @@
       "worktree": "C:\\Users\\Gzw19\\onegent-agent3-hotel-stage0",
       "base": {
         "branch": "origin/codex/stage0-capture-mvp",
-        "commit": "9ad43f1",
+        "commit": "2a5088a",
         "containsRequiredCommit": true
       },
       "taskKind": "benchmark_fixture",

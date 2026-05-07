@@ -10,7 +10,7 @@ import {
 } from "@/lib/internal-benchmark/agent-intake";
 
 const REQUIRED_BASE = "origin/codex/stage0-capture-mvp";
-const REQUIRED_COMMIT = "9ad43f1";
+const REQUIRED_COMMIT = "2a5088a";
 
 function validations() {
   return [
@@ -141,5 +141,39 @@ describe("Stage 0 agent intake upgrade", () => {
 
     expect(result.decision).toBe("requires_rebase");
     expect(result.codexAction).toBe("ask_followup");
+  });
+
+  it("requires build evidence for app shell changes and flags likely merge conflicts", () => {
+    const result = classifyAgentReturnReport(
+      report({
+        branch: "codex/app-shell-risk",
+        taskKind: "read_model_perf",
+        changedFiles: ["app/page.tsx", "lib/__tests__/stage0-performance.test.ts"],
+        conflictNotes: ["likely overlap with current app/page.tsx edits"],
+      }),
+      { requiredBaseBranch: REQUIRED_BASE, requiredBaseCommit: REQUIRED_COMMIT },
+    );
+
+    expect(result.decision).toBe("conflicts_with_mainline");
+    expect(result.issues.map((issue) => issue.code)).toEqual(
+      expect.arrayContaining(["app_shell_without_build", "likely_merge_conflict"]),
+    );
+  });
+
+  it("classifies stale Stage 0 base commits as rebase follow-up", () => {
+    const result = classifyAgentReturnReport(
+      report({
+        branch: "codex/stale-stage0",
+        base: {
+          branch: REQUIRED_BASE,
+          commit: "1111111",
+          containsRequiredCommit: false,
+        },
+      }),
+      { requiredBaseBranch: REQUIRED_BASE, requiredBaseCommit: REQUIRED_COMMIT },
+    );
+
+    expect(result.decision).toBe("requires_rebase");
+    expect(result.issues.map((issue) => issue.code)).toContain("stale_base");
   });
 });
