@@ -85,6 +85,22 @@ describe("hotel layered recovery", () => {
     });
   });
 
+  it("does not promote generic property not-available copy to true no-availability from URL params alone", () => {
+    const noAvailability = evaluateHotelNoAvailabilityEvidence({
+      ...EXACT_CONTEXT,
+      currentUrl:
+        "https://www.booking.com/hotel/us/yotel-new-york.html?checkin=2026-06-10&checkout=2026-06-12&group_adults=1&no_rooms=1",
+      workerLogExcerpt:
+        "Hotel detail visible for YOTEL New York Times Square. This property is not available.",
+    });
+
+    expect(noAvailability.state).toBe("weak_no_availability");
+    expect(noAvailability.hasExactHotelEvidence).toBe(true);
+    expect(noAvailability.hasExactStayEvidence).toBe(true);
+    expect(noAvailability.hasScopedInventoryEvidence).toBe(false);
+    expect(noAvailability.missingEvidence).toEqual(["scoped room inventory"]);
+  });
+
   it("requires exact hotel/date/stay evidence before true no-availability", () => {
     const missingStay = evaluateHotelNoAvailabilityEvidence({
       ...EXACT_CONTEXT,
@@ -164,6 +180,23 @@ describe("hotel layered recovery", () => {
     expect(analysis.state).toBe("guest_details_manual_review_reached");
     expect(analysis.layeredRecovery.l1Stage).toBe("guest_review");
     expect(analysis.layeredRecovery.fallbackEligibility.eligible).toBe(false);
+  });
+
+  it("classifies payment boundary as a human-controlled checkpoint, not fallback", () => {
+    const analysis = analyzeHotelRetryArtifactBundle({
+      job: baseJob(),
+      workerLogExcerpt:
+        "Booking.com hotel runtime boundary: payment_manual_review_reached - Payment page visible and loaded. CVV field visible. Operator stopped at manual review boundary.",
+      workerLogPath: "codex-worker.log",
+      screenshotPaths: ["worker/.debug-screenshots/booking-com/03-payment-boundary.jpg"],
+      liveSnapshotPaths: [".debug-screenshots/live/payment-boundary/snapshot.json"],
+      notes: ["Synthetic fixture. No card data entered and no final action clicked."],
+    });
+
+    expect(analysis.state).toBe("payment_manual_review_reached");
+    expect(analysis.layeredRecovery.l1Stage).toBe("human_boundary");
+    expect(analysis.layeredRecovery.fallbackEligibility.eligible).toBe(false);
+    expect(analysis.nextAction).toContain("stopped before CVV");
   });
 
   it("validates artifact completeness without reading external systems", () => {

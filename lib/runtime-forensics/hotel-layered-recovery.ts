@@ -85,6 +85,9 @@ const NO_AVAILABILITY_RX =
 const SCOPED_INVENTORY_RX =
   /\b(for (your|the selected|selected|requested|these|approved) dates?|for (the )?requested stay|for this stay|selected dates?|requested dates?|exact stay|target hotel unavailable)\b/i;
 
+const STRONG_INVENTORY_UNAVAILABLE_RX =
+  /\b(sold[-\s]?out|fully booked|no rooms? available|no stays? available|nothing available|target hotel unavailable|unavailable for (your|the selected|selected|requested|these) dates?)\b/i;
+
 const HUMAN_BOUNDARY_RX =
   /\b(payment|billing|card entry|credit card|cvv|cvc|security code|complete booking|confirm and pay|final confirmation|login|sign[-\s]?in|captcha|otp|verification code|phone verification|verify you are human)\b/i;
 
@@ -120,8 +123,7 @@ export function evaluateHotelNoAvailabilityEvidence(
     urlStay.rooms === context.rooms;
   const hasExactStayEvidence = hasCheckin && hasCheckout && hasAdultCount && hasRoomCount;
   const hasScopedInventoryEvidence =
-    SCOPED_INVENTORY_RX.test(corpus) ||
-    (Boolean(context.checkin) && Boolean(context.checkout) && hasCheckin && hasCheckout);
+    SCOPED_INVENTORY_RX.test(corpus) || STRONG_INVENTORY_UNAVAILABLE_RX.test(corpus);
 
   if (!hasNoAvailabilitySignal) {
     return {

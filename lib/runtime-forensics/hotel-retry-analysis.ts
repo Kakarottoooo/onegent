@@ -33,6 +33,7 @@ export type HotelRetryState =
 
 type SignalKind =
   | "safety_boundary_violation"
+  | "stale_or_mixed_evidence"
   | "payment_boundary"
   | "guest_details_reached"
   | "room_selection_reached"
@@ -153,6 +154,11 @@ const SIGNAL_PATTERNS: SignalPattern[] = [
     kind: "safety_boundary_violation",
     label: "account challenge bypassed",
     rx: /\bbypassed\s+(otp|captcha|login|sign[-\s]?in|phone verification)\b/i,
+  },
+  {
+    kind: "stale_or_mixed_evidence",
+    label: "stale or mixed worker evidence",
+    rx: /\b(stale|mixed|wrong|different|previous|old)\s+(worker\s+)?(evidence|job|run|session|artifact|log|screenshot|snapshot)\b|\b(job|task|session|artifact)\s+(id\s+)?mismatch\b|\b(log|screenshot|snapshot)\s+belongs\s+to\s+(another|different|previous)\s+(job|task|run|session)\b/i,
   },
   {
     kind: "payment_boundary",
@@ -386,6 +392,7 @@ export function analyzeHotelRetryArtifactBundle(
   const noAvailabilityEvidence = evaluateHotelNoAvailabilityEvidence(layeredContext);
 
   const hasSafetyViolation = has("safety_boundary_violation");
+  const hasStaleOrMixedEvidence = has("stale_or_mixed_evidence");
   const hasPaymentBoundary = has("payment_boundary");
   const hasGuestDetails = has("guest_details_reached");
   const hasRoomSelectionReached = has("room_selection_reached");
@@ -400,6 +407,8 @@ export function analyzeHotelRetryArtifactBundle(
   let state: HotelRetryState;
   if (hasSafetyViolation) {
     state = "safety_boundary_violation";
+  } else if (hasStaleOrMixedEvidence) {
+    state = "insufficient_evidence";
   } else if (hasPaymentBoundary) {
     state = "payment_manual_review_reached";
   } else if (hasGuestDetails) {
@@ -732,26 +741,28 @@ function signalRank(kind: SignalKind): number {
   switch (kind) {
     case "safety_boundary_violation":
       return 0;
-    case "payment_boundary":
+    case "stale_or_mixed_evidence":
       return 1;
-    case "guest_details_reached":
+    case "payment_boundary":
       return 2;
-    case "room_selection_reached":
+    case "guest_details_reached":
       return 3;
-    case "login_or_captcha":
+    case "room_selection_reached":
       return 4;
-    case "profile_gating":
+    case "login_or_captcha":
       return 5;
-    case "model_env_transient":
+    case "profile_gating":
       return 6;
-    case "network_provider_failure":
+    case "model_env_transient":
       return 7;
-    case "provider_no_availability":
+    case "network_provider_failure":
       return 8;
-    case "provider_selector_drift":
+    case "provider_no_availability":
       return 9;
-    case "room_selection_drift":
+    case "provider_selector_drift":
       return 10;
+    case "room_selection_drift":
+      return 11;
   }
 }
 
