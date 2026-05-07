@@ -1,22 +1,22 @@
 import { NextRequest, NextResponse } from "next/server";
 import {
-  getBookingJob,
   deleteBookingJob,
   deleteMonitorsByJobId,
   clearDecisionRoomBookingJobByJobId,
 } from "@/lib/db";
 import { deleteBrowserSnapshots } from "@/lib/browser-snapshot-store";
+import { resolveBookingJobAccess } from "@/lib/booking-jobs/access";
 
 type Params = { params: Promise<{ id: string }> };
 
 /** GET /api/booking-jobs/[id] — poll job status */
-export async function GET(_req: NextRequest, { params }: Params) {
+export async function GET(req: NextRequest, { params }: Params) {
   const { id } = await params;
-  const job = await getBookingJob(id);
-  if (!job) {
-    return NextResponse.json({ error: "Job not found" }, { status: 404 });
+  const access = await resolveBookingJobAccess(req, id);
+  if (!access.ok) {
+    return NextResponse.json({ error: access.error }, { status: access.status });
   }
-  return NextResponse.json({ job });
+  return NextResponse.json({ job: access.job });
 }
 
 /**
@@ -29,14 +29,18 @@ export async function GET(_req: NextRequest, { params }: Params) {
  */
 export async function DELETE(req: NextRequest, { params }: Params) {
   const { id } = await params;
-  const job = await getBookingJob(id);
+  const access = await resolveBookingJobAccess(req, id);
+  if (!access.ok) {
+    return NextResponse.json({ error: access.error }, { status: access.status });
+  }
+  const job = access.job;
   const force = req.nextUrl.searchParams.get("force") === "true";
-  if (job && job.status === "running" && !force) {
+  if (job.status === "running" && !force) {
     return NextResponse.json({ error: "Cannot delete a running job" }, { status: 409 });
   }
   await deleteMonitorsByJobId(id);
   await clearDecisionRoomBookingJobByJobId(id);
   await deleteBrowserSnapshots(id);
-  if (job) await deleteBookingJob(id);
-  return NextResponse.json({ deleted: true, forced: force, stale: !job });
+  await deleteBookingJob(id);
+  return NextResponse.json({ deleted: true, forced: force, stale: false });
 }

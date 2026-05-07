@@ -4330,6 +4330,7 @@ function HomeInner() {
                         <InlineJobCard
                           key={item.jobId}
                           jobId={item.jobId}
+                          sourceSessionId={activeSessionId}
                           onWatch={openInlineWatchPanel}
                           onDeleted={(id) => setInlineItems((prev) => prev.filter((i) => i.jobId !== id))}
                           onNeedsTravelDocs={(req) => {

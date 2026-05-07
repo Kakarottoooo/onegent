@@ -37,6 +37,8 @@ export interface SnapshotsState {
 export interface UseSnapshotsOpts {
   /** When true, hook stops polling. Use after `timeline.closed === true`. */
   paused?: boolean;
+  /** Source chat/session id used to authorize snapshot endpoints. */
+  sessionId?: string | null;
 }
 
 export interface SnapshotDiagnostics {
@@ -80,7 +82,7 @@ export function useSnapshots(
         return;
       }
       try {
-        const result = await fetchSnapshotsWithFallback(jobId!);
+        const result = await fetchSnapshotsWithFallback(jobId!, opts.sessionId);
         if (cancelled) return;
         const nextSignature = buildSnapshotsSignature(result.snapshots, result.diagnostics);
         if (signatureRef.current !== nextSignature) {
@@ -122,7 +124,7 @@ export function useSnapshots(
       if (pollTimerRef.current) clearTimeout(pollTimerRef.current);
       pollTimerRef.current = null;
     };
-  }, [jobId, opts.paused]);
+  }, [jobId, opts.paused, opts.sessionId]);
 
   return state;
 }
@@ -146,33 +148,40 @@ interface SnapshotFetchResult {
   diagnostics: SnapshotDiagnostics;
 }
 
-async function fetchSnapshotsWithFallback(jobId: string): Promise<SnapshotFetchResult> {
-  const cached = snapshotCache.get(jobId);
+async function fetchSnapshotsWithFallback(
+  jobId: string,
+  sessionId?: string | null,
+): Promise<SnapshotFetchResult> {
+  const cacheKey = `${jobId}:${sessionId ?? ""}`;
+  const cached = snapshotCache.get(cacheKey);
   if (cached && cached.expiresAt > Date.now()) return cached.data;
-  const existing = snapshotInflight.get(jobId);
+  const existing = snapshotInflight.get(cacheKey);
   if (existing) return existing;
 
-  const request = fetchSnapshotsUncached(jobId)
+  const request = fetchSnapshotsUncached(jobId, sessionId)
     .then((result) => {
-      snapshotCache.set(jobId, {
+      snapshotCache.set(cacheKey, {
         data: result,
         expiresAt: Date.now() + SNAPSHOT_CACHE_MS,
       });
       return result;
     })
     .finally(() => {
-      snapshotInflight.delete(jobId);
+      snapshotInflight.delete(cacheKey);
     });
 
-  snapshotInflight.set(jobId, request);
+  snapshotInflight.set(cacheKey, request);
   return request;
 }
 
-async function fetchSnapshotsUncached(jobId: string): Promise<SnapshotFetchResult> {
+async function fetchSnapshotsUncached(
+  jobId: string,
+  sessionId?: string | null,
+): Promise<SnapshotFetchResult> {
   let canonicalStatus: number | undefined;
   // 1. Canonical path
   try {
-    const res = await fetch(`/api/booking-jobs/${jobId}/snapshots`, {
+    const res = await fetch(withSessionParam(`/api/booking-jobs/${jobId}/snapshots`, sessionId), {
       headers: { Accept: "application/json" },
     });
     canonicalStatus = res.status;
@@ -196,7 +205,7 @@ async function fetchSnapshotsUncached(jobId: string): Promise<SnapshotFetchResul
   }
 
   // 2. Compat path
-  const res = await fetch(`/api/browser-live/${jobId}/snapshots`, {
+  const res = await fetch(withSessionParam(`/api/browser-live/${jobId}/snapshots`, sessionId), {
     headers: { Accept: "application/json" },
   });
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -209,6 +218,13 @@ async function fetchSnapshotsUncached(jobId: string): Promise<SnapshotFetchResul
       usedFallback: true,
     },
   };
+}
+
+function withSessionParam(path: string, sessionId?: string | null): string {
+  const trimmed = sessionId?.trim();
+  if (!trimmed) return path;
+  const join = path.includes("?") ? "&" : "?";
+  return `${path}${join}session_id=${encodeURIComponent(trimmed)}`;
 }
 
 export function describeSnapshotDiagnostics(

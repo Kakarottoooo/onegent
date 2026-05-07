@@ -2916,7 +2916,12 @@ function AcceptedBlock({
     let timer: ReturnType<typeof setInterval> | null = null;
     async function poll() {
       try {
-        const res = await fetch(`/api/booking-jobs/${bookingJobId}`);
+        const sourceSessionId =
+          typeof window !== "undefined" ? window.localStorage.getItem("session_id") : null;
+        const url = sourceSessionId
+          ? `/api/booking-jobs/${bookingJobId}?session_id=${encodeURIComponent(sourceSessionId)}`
+          : `/api/booking-jobs/${bookingJobId}`;
+        const res = await fetch(url);
         if (cancelled) return;
         if (res.status === 404) {
           setLiveJob("missing");

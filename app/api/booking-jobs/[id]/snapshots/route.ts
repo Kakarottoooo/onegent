@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { getBookingJob } from "@/lib/db";
+import { resolveBookingJobAccess, readBookingJobSessionId } from "@/lib/booking-jobs/access";
 import {
   listBrowserSnapshots,
   toBrowserSnapshotListEntry,
@@ -10,17 +10,21 @@ export const runtime = "nodejs";
 
 type Params = { params: Promise<{ id: string }> };
 
-export async function GET(_req: Request, { params }: Params) {
+export async function GET(req: Request, { params }: Params) {
   const { id } = await params;
-  const job = await getBookingJob(id);
-  if (!job) {
-    return NextResponse.json({ error: "Job not found" }, { status: 404 });
+  const access = await resolveBookingJobAccess(req, id);
+  if (!access.ok) {
+    return NextResponse.json({ error: access.error }, { status: access.status });
   }
+  const sessionId = readBookingJobSessionId(req);
 
   const snapshots = (await listBrowserSnapshots(id)).map((snapshot) =>
     toBrowserSnapshotListEntry(
       snapshot,
-      `/api/booking-jobs/${encodeURIComponent(id)}/snapshots/${encodeURIComponent(snapshot.id)}/image`,
+      withSessionParam(
+        `/api/booking-jobs/${encodeURIComponent(id)}/snapshots/${encodeURIComponent(snapshot.id)}/image`,
+        sessionId,
+      ),
     ),
   );
   return NextResponse.json({
@@ -28,4 +32,9 @@ export async function GET(_req: Request, { params }: Params) {
     count: snapshots.length,
     snapshots,
   });
+}
+
+function withSessionParam(path: string, sessionId: string | null): string {
+  if (!sessionId) return path;
+  return `${path}?session_id=${encodeURIComponent(sessionId)}`;
 }

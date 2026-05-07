@@ -64,6 +64,13 @@ function getSessionId(preferredSessionId?: string | null): string {
   return id;
 }
 
+function withSessionParam(path: string, sessionId?: string | null): string {
+  const trimmed = sessionId?.trim();
+  if (!trimmed) return path;
+  const join = path.includes("?") ? "&" : "?";
+  return `${path}${join}session_id=${encodeURIComponent(trimmed)}`;
+}
+
 type TaskWorkspaceView = "queue" | "live" | "history";
 
 const TASK_WORKSPACE_TABS: Array<{ id: TaskWorkspaceView; label: string }> = [
@@ -711,7 +718,7 @@ function RetryScheduler({ step, stepIndex, jobId, onScheduled }: {
 }
 
 // ── Live log panel (streams trace lines while agent is running) ───────────────
-function LiveLogPanel({ jobId }: { jobId: string }) {
+function LiveLogPanel({ jobId, sessionId }: { jobId: string; sessionId?: string | null }) {
   const [lines, setLines] = useState<string[]>([]);
   const [closed, setClosed] = useState(false);
   const afterRef = useRef(0);
@@ -725,7 +732,9 @@ function LiveLogPanel({ jobId }: { jobId: string }) {
     async function poll() {
       if (cancelled) return;
       try {
-        const res = await fetch(`/api/booking-jobs/${jobId}/logs?after=${afterRef.current}`);
+        const res = await fetch(
+          withSessionParam(`/api/booking-jobs/${jobId}/logs?after=${afterRef.current}`, sessionId),
+        );
         if (!res.ok) { if (!cancelled) setTimeout(poll, 1200); return; }
         const data: { lines: string[]; total: number; closed: boolean; epoch: number } = await res.json();
 
@@ -920,7 +929,7 @@ function StepCard({ step, stepIndex, jobId, sessionId, onRefresh, onOpenLive }: 
       </div>
 
       {/* Live log — shown while agent is running */}
-      {step.status === "loading" && <LiveLogPanel jobId={jobId} />}
+      {step.status === "loading" && <LiveLogPanel jobId={jobId} sessionId={sessionId} />}
 
       {/* Decision log */}
       {logOpen && step.decisionLog && (
@@ -1336,7 +1345,10 @@ function JobCard({
     setDeleting(true);
     try {
       const force = isActiveJobStatus(job.status);
-      await fetch(`/api/booking-jobs/${job.id}${force ? "?force=true" : ""}`, { method: "DELETE" });
+      await fetch(
+        withSessionParam(`/api/booking-jobs/${job.id}${force ? "?force=true" : ""}`, sessionId),
+        { method: "DELETE" },
+      );
       onRefresh?.();
     } finally {
       setDeleting(false);
@@ -3206,13 +3218,13 @@ function TripsPageInner() {
   const loadJobDetail = useCallback(async (jobId: string, force = false) => {
     try {
       if (force) invalidateTaskDetail(jobId);
-      const job = await fetchTaskDetail(jobId, { force });
+      const job = await fetchTaskDetail(jobId, { force, sessionId });
       setJobDetails((prev) => ({ ...prev, [jobId]: job }));
       return job;
     } catch {
       return null;
     }
-  }, []);
+  }, [sessionId]);
 
   const refreshTask = useCallback(async (jobId?: string) => {
     const sid = getSessionId(sourceSessionId);
@@ -3682,7 +3694,10 @@ function TripsPageInner() {
               }}
               onDeleteJob={async (jobId) => {
                 try {
-                  const res = await fetch(`/api/booking-jobs/${jobId}`, { method: "DELETE" });
+                  const res = await fetch(
+                    withSessionParam(`/api/booking-jobs/${jobId}`, sessionId),
+                    { method: "DELETE" },
+                  );
                   if (res.ok) {
                     setJobs((prev) => prev.filter((j) => j.id !== jobId));
                     setJobDetails((prev) => {
@@ -3802,6 +3817,7 @@ function TripsPageInner() {
             <TaskTimelinePanel
               key={liveViewKey}
               jobId={liveJobId}
+              sessionId={sessionId}
               title={liveJob?.trip_label ? `Agent — ${liveJob.trip_label}` : "Agent"}
               subtitle={liveJob?.trip_label ? undefined : "Live run"}
               onClose={() => { liveJobIdRef.current = null; setLiveJobId(null); }}

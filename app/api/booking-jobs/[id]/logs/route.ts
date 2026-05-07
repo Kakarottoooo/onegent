@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { liveLogGet, liveLogIsClosed, liveLogEpoch } from "@/lib/live-log-store";
-import { getAgentLogs, getBookingJob } from "@/lib/db";
+import { getAgentLogs } from "@/lib/db";
+import { resolveBookingJobAccess } from "@/lib/booking-jobs/access";
 
 const TERMINAL_JOB_STATUSES = new Set(["done", "failed", "cancelled", "succeeded"]);
 
@@ -38,6 +39,10 @@ export async function GET(
   const { id } = await params;
   const url = new URL(req.url);
   const after = parseInt(url.searchParams.get("after") ?? "0", 10);
+  const access = await resolveBookingJobAccess(req, id);
+  if (!access.ok) {
+    return NextResponse.json({ error: access.error }, { status: access.status });
+  }
 
   // Source 1: in-memory (Vercel-side) live trace.
   const liveLines = liveLogGet(id, after);
@@ -80,8 +85,7 @@ export async function GET(
   // Treat the run as "closed" once the booking_job has reached a terminal
   // status — without this, the UI would keep polling forever for finished
   // worker runs (which never call liveLogClose on the Vercel side).
-  const job = await getBookingJob(id);
-  const closed = !!job && TERMINAL_JOB_STATUSES.has(job.status);
+  const closed = TERMINAL_JOB_STATUSES.has(access.job.status);
 
   return NextResponse.json({
     entries,

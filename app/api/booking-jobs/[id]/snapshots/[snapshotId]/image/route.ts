@@ -1,4 +1,4 @@
-import { getBookingJob } from "@/lib/db";
+import { resolveBookingJobAccess } from "@/lib/booking-jobs/access";
 import { getBrowserSnapshot } from "@/lib/browser-snapshot-store";
 
 export const dynamic = "force-dynamic";
@@ -6,11 +6,11 @@ export const runtime = "nodejs";
 
 type Params = { params: Promise<{ id: string; snapshotId: string }> };
 
-export async function GET(_req: Request, { params }: Params) {
+export async function GET(req: Request, { params }: Params) {
   const { id, snapshotId } = await params;
-  const job = await getBookingJob(id);
-  if (!job) {
-    return new Response("Job not found", { status: 404 });
+  const access = await resolveBookingJobAccess(req, id);
+  if (!access.ok) {
+    return new Response(access.error, { status: access.status });
   }
 
   const snapshot = await getBrowserSnapshot(id, snapshotId);

@@ -79,6 +79,8 @@ export type TimelineStatus =
 export interface TaskTimelinePanelProps {
   /** Job id to bind to. When null/undefined the panel renders an empty state. */
   jobId: string | null;
+  /** Source chat/session id used to authorize job evidence endpoints. */
+  sessionId?: string | null;
   /** Title shown in the panel header. Falls back to "Agent" if absent. */
   title?: string;
   /** Subtitle (e.g. trip label or restaurant name). */

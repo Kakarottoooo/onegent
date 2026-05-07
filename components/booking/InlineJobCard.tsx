@@ -161,6 +161,7 @@ export interface TravelDocRequest {
 
 interface InlineJobCardProps {
   jobId: string;
+  sourceSessionId?: string | null;
   /** Called once when a travel-doc error is detected, so page can ask in chat */
   onNeedsTravelDocs?: (req: TravelDocRequest) => void;
   /** Called when the job is deleted (manually or 404) so the parent can remove it */
@@ -169,7 +170,13 @@ interface InlineJobCardProps {
   onWatch?: (jobId: string, title: string) => void;
 }
 
-export default function InlineJobCard({ jobId, onNeedsTravelDocs, onDeleted, onWatch }: InlineJobCardProps) {
+export default function InlineJobCard({
+  jobId,
+  sourceSessionId,
+  onNeedsTravelDocs,
+  onDeleted,
+  onWatch,
+}: InlineJobCardProps) {
   const [job, setJob] = useState<BookingJob | null>(null);
   const [expanded, setExpanded] = useState(true);
   const [deleting, setDeleting] = useState(false);
@@ -183,7 +190,7 @@ export default function InlineJobCard({ jobId, onNeedsTravelDocs, onDeleted, onW
 
   async function doFetch() {
     try {
-      const res = await fetch(`/api/booking-jobs/${jobId}`);
+      const res = await fetch(withSessionParam(`/api/booking-jobs/${jobId}`, sourceSessionId));
       if (res.status === 404) { onDeleted?.(jobId); return; }
       if (!res.ok) { schedulePoll(4000); return; }
       const data: { job: BookingJob } = await res.json();
@@ -234,7 +241,10 @@ export default function InlineJobCard({ jobId, onNeedsTravelDocs, onDeleted, onW
     setDeleting(true);
     try {
       const force = isActiveJobStatus(job.status);
-      await fetch(`/api/booking-jobs/${job.id}${force ? "?force=true" : ""}`, { method: "DELETE" });
+      await fetch(
+        withSessionParam(`/api/booking-jobs/${job.id}${force ? "?force=true" : ""}`, sourceSessionId),
+        { method: "DELETE" },
+      );
       onDeleted?.(jobId);
     } finally {
       setDeleting(false);
@@ -364,4 +374,11 @@ export default function InlineJobCard({ jobId, onNeedsTravelDocs, onDeleted, onW
       )}
     </div>
   );
+}
+
+function withSessionParam(path: string, sessionId?: string | null): string {
+  const trimmed = sessionId?.trim();
+  if (!trimmed) return path;
+  const join = path.includes("?") ? "&" : "?";
+  return `${path}${join}session_id=${encodeURIComponent(trimmed)}`;
 }

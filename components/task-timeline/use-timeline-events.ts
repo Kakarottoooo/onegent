@@ -48,7 +48,10 @@ const VALID_KINDS = new Set<TimelineEventKind>(
   Object.keys(EVENT_DESCRIPTORS) as TimelineEventKind[],
 );
 
-export function useTimelineEvents(jobId: string | null): TimelineState {
+export function useTimelineEvents(
+  jobId: string | null,
+  opts: { sessionId?: string | null } = {},
+): TimelineState {
   const [state, setState] = useState<TimelineState>({
     events: [],
     summary: null,
@@ -107,7 +110,9 @@ export function useTimelineEvents(jobId: string | null): TimelineState {
         return;
       }
       try {
-        const es = new EventSource(`/api/booking-jobs/${jobId}/timeline-events`);
+        const es = new EventSource(
+          withSessionParam(`/api/booking-jobs/${jobId}/timeline-events`, opts.sessionId),
+        );
         esRef.current = es;
         es.addEventListener("timeline", (event) => {
           try {
@@ -143,7 +148,10 @@ export function useTimelineEvents(jobId: string | null): TimelineState {
       }
       try {
         const res = await fetch(
-          `/api/booking-jobs/${jobId}/timeline-events?format=json&slim=1`,
+          withSessionParam(
+            `/api/booking-jobs/${jobId}/timeline-events?format=json&slim=1`,
+            opts.sessionId,
+          ),
           { headers: { Accept: "application/json" } },
         );
         if (res.ok) {
@@ -172,7 +180,7 @@ export function useTimelineEvents(jobId: string | null): TimelineState {
     async function pollLegacy(prevErr?: unknown) {
       if (cancelled) return;
       try {
-        const res = await fetch(`/api/booking-jobs/${jobId}`, {
+        const res = await fetch(withSessionParam(`/api/booking-jobs/${jobId}`, opts.sessionId), {
           headers: { Accept: "application/json" },
         });
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -212,9 +220,16 @@ export function useTimelineEvents(jobId: string | null): TimelineState {
       if (pollTimerRef.current) clearTimeout(pollTimerRef.current);
       pollTimerRef.current = null;
     };
-  }, [jobId]);
+  }, [jobId, opts.sessionId]);
 
   return state;
+}
+
+function withSessionParam(path: string, sessionId?: string | null): string {
+  const trimmed = sessionId?.trim();
+  if (!trimmed) return path;
+  const join = path.includes("?") ? "&" : "?";
+  return `${path}${join}session_id=${encodeURIComponent(trimmed)}`;
 }
 
 /* ─── Payload normalizers ───────────────────────────────────────────── */

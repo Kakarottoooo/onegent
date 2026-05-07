@@ -37,6 +37,7 @@ import type {
 
 export default function TaskTimelinePanel({
   jobId,
+  sessionId,
   title,
   subtitle,
   demo,
@@ -53,10 +54,11 @@ export default function TaskTimelinePanel({
   }, [onClose]);
 
   // ── Pick data source: demo fixture or live (SSE + snapshot endpoints) ──
-  const liveTimeline = useTimelineEvents(demo ? null : jobId);
+  const liveTimeline = useTimelineEvents(demo ? null : jobId, { sessionId });
   // Pause snapshot polling once timeline says the run is closed — saves
   // requests when the user lingers on a finished job.
   const liveSnapshots = useSnapshots(demo ? null : jobId, {
+    sessionId,
     paused: liveTimeline.closed,
   });
   const { events, snapshots, status, loadState, errorMessage, emptyMessage } = useMemo(() => {

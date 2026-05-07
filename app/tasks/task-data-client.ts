@@ -16,6 +16,10 @@ type FetchOpts = {
   force?: boolean;
 };
 
+type DetailFetchOpts = FetchOpts & {
+  sessionId?: string | null;
+};
+
 const listCache = new Map<string, CacheEntry<BookingJobListItem[]>>();
 const listInflight = new Map<string, Promise<BookingJobListItem[]>>();
 const detailCache = new Map<string, CacheEntry<BookingJob>>();
@@ -111,14 +115,16 @@ export async function fetchTaskSummary(
   return request;
 }
 
-export async function fetchTaskDetail(jobId: string, opts: FetchOpts = {}): Promise<BookingJob> {
-  const cached = readCache(detailCache, jobId, opts.force);
+export async function fetchTaskDetail(jobId: string, opts: DetailFetchOpts = {}): Promise<BookingJob> {
+  const key = cacheKey({ jobId, sessionId: opts.sessionId });
+  const cached = readCache(detailCache, key, opts.force);
   if (cached) return cached;
 
-  const existing = opts.force ? null : detailInflight.get(jobId);
+  const existing = opts.force ? null : detailInflight.get(key);
   if (existing) return existing;
 
-  const request = fetch(`/api/booking-jobs/${encodeURIComponent(jobId)}`, {
+  const url = withSessionParam(`/api/booking-jobs/${encodeURIComponent(jobId)}`, opts.sessionId);
+  const request = fetch(url, {
     cache: "no-store",
     headers: { Accept: "application/json" },
   })
@@ -126,14 +132,14 @@ export async function fetchTaskDetail(jobId: string, opts: FetchOpts = {}): Prom
       if (!res.ok) throw new Error(`Task detail ${jobId} failed with HTTP ${res.status}`);
       const data = (await res.json()) as { job?: BookingJob };
       if (!data.job) throw new Error(`Task detail ${jobId} response did not include a job`);
-      detailCache.set(jobId, { data: data.job, expiresAt: Date.now() + DETAIL_TTL_MS });
+      detailCache.set(key, { data: data.job, expiresAt: Date.now() + DETAIL_TTL_MS });
       return data.job;
     })
     .finally(() => {
-      detailInflight.delete(jobId);
+      detailInflight.delete(key);
     });
 
-  detailInflight.set(jobId, request);
+  detailInflight.set(key, request);
   return request;
 }
 
@@ -154,7 +160,9 @@ export function invalidateTaskDetail(jobId?: string): void {
     detailCache.clear();
     return;
   }
-  detailCache.delete(jobId);
+  for (const key of [...detailCache.keys()]) {
+    if (key === jobId || key.includes(`jobId=${jobId}`)) detailCache.delete(key);
+  }
 }
 
 export function __resetTaskDataClientCachesForTests(): void {
@@ -164,4 +172,10 @@ export function __resetTaskDataClientCachesForTests(): void {
   detailInflight.clear();
   summaryCache.clear();
   summaryInflight.clear();
+}
+
+function withSessionParam(path: string, sessionId?: string | null): string {
+  const trimmed = sessionId?.trim();
+  if (!trimmed) return path;
+  return `${path}?session_id=${encodeURIComponent(trimmed)}`;
 }

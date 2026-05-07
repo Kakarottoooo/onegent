@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { buildJobTimelinePayload } from "@/lib/task-timeline-payload";
+import { resolveBookingJobAccess } from "@/lib/booking-jobs/access";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -26,6 +27,13 @@ export async function GET(req: NextRequest, { params }: Params) {
   const wantsJson =
     url.searchParams.get("format") === "json" ||
     req.headers.get("accept")?.includes("application/json");
+  const access = await resolveBookingJobAccess(req, id);
+  if (!access.ok) {
+    if (wantsJson) {
+      return NextResponse.json({ error: access.error }, { status: access.status });
+    }
+    return new Response(access.error, { status: access.status });
+  }
 
   if (wantsJson) {
     const payload = await buildJobTimelinePayload(id);
