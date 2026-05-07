@@ -2,7 +2,7 @@
 
 > **Branch**: `codex/stage0-capture-mvp`
 > **Last updated**: 2026-05-07
-> **Last commit**: this pass - multi-agent dispatch rules
+> **Last commit**: this pass - project progress sync rule
 >
 > Claude reads this at session start. I write to it before each push.
 > See `CLAUDE.md` section "coordination protocol".
@@ -40,6 +40,16 @@ Current multi-agent operating rule:
   files, validation, evidence, deferred work, and safety notes. This keeps
   Codex intake cheap and prevents long merge/debug stalls after the agent
   returns.
+- After any major product update, reliability milestone, dogfood closure,
+  benchmark result, architecture decision, or multi-agent merge train, Codex
+  must write a short current-project progress analysis before moving on:
+  current phase, what has been completed, what is actively in progress, what
+  should happen next, and how far the project is from the nearest stage goal.
+  Use `docs/00-start-here/STAGE_0.md` or the relevant stage file to re-align
+  the analysis with the north star before writing. Then update
+  `docs/00-start-here/PROJECT_SUMMARY.md` when the milestone changes the
+  durable project state. This rule exists to keep the team aligned on Stage 0
+  instead of drifting into disconnected bug fixes or code accumulation.
 - Side agents should not block on Codex unless their next task depends on a
   freshly merged shared schema or runtime contract. When possible, give them
   independent follow-up lanes based on the latest pushed Stage 0 base, with
