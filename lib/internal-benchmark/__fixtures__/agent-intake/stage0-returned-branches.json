@@ -1,0 +1,165 @@
+{
+  "reports": [
+    {
+      "id": "goal-stage0-reliability-system",
+      "agent": "Goal",
+      "branch": "codex/goal-stage0-reliability-system",
+      "commit": "1111111",
+      "base": {
+        "branch": "origin/codex/stage0-capture-mvp",
+        "commit": "9ad43f1",
+        "containsRequiredCommit": true
+      },
+      "taskKind": "benchmark_fixture",
+      "mergeState": "unmerged",
+      "summary": "Stage 0 capture benchmark, operator report, private alpha protocol, and no-live agent intake tests.",
+      "changedFiles": [
+        "lib/capture/benchmark.ts",
+        "scripts/capture-benchmark.ts",
+        "lib/internal-benchmark/stage0-operator-report.ts",
+        "docs/40-dogfood/PRIVATE_ALPHA_INTAKE_PROTOCOL.md"
+      ],
+      "artifacts": [],
+      "validations": [
+        { "name": "targeted_vitest", "status": "pass" },
+        { "name": "tsc", "status": "pass" },
+        { "name": "check_drift", "status": "pass" },
+        { "name": "gate_phase1", "status": "pass" },
+        { "name": "git_diff_check", "status": "pass" }
+      ],
+      "dependencyEdges": [{ "type": "independent" }],
+      "claims": {
+        "runtimeClosure": false,
+        "liveVerified": false,
+        "docsOnly": false
+      }
+    },
+    {
+      "id": "claude-activity-runtime-followup",
+      "agent": "Claude",
+      "branch": "claude/activity-runtime-stage0-followup",
+      "commit": "2222222",
+      "base": {
+        "branch": "origin/codex/stage0-capture-mvp",
+        "commit": "9ad43f1",
+        "containsRequiredCommit": true
+      },
+      "taskKind": "runtime_fix",
+      "mergeState": "unmerged",
+      "summary": "Activity task-state classifier follow-up with docs, missing gate validation.",
+      "changedFiles": [
+        "lib/runtime-forensics/ticketmaster-task-state.ts",
+        "lib/__tests__/ticketmaster-task-state.test.ts"
+      ],
+      "artifacts": [],
+      "validations": [
+        { "name": "targeted_vitest", "status": "pass" },
+        { "name": "tsc", "status": "pass" },
+        { "name": "check_drift", "status": "pass" },
+        { "name": "git_diff_check", "status": "pass" }
+      ],
+      "dependencyEdges": [{ "type": "independent" }],
+      "claims": {
+        "runtimeClosure": false,
+        "liveVerified": false,
+        "docsOnly": false
+      }
+    },
+    {
+      "id": "agent2-flight-ready",
+      "agent": "Agent2",
+      "branch": "codex/flight-stage0-fixtures",
+      "commit": "3333333",
+      "base": {
+        "branch": "origin/codex/stage0-capture-mvp",
+        "commit": "9ad43f1",
+        "containsRequiredCommit": true
+      },
+      "taskKind": "benchmark_fixture",
+      "mergeState": "unmerged",
+      "summary": "Flight capture benchmark fixtures and owner mapping.",
+      "changedFiles": [
+        "lib/internal-benchmark/flight-stage0-fixtures.ts",
+        "lib/__tests__/flight-stage0-fixtures.test.ts"
+      ],
+      "artifacts": [],
+      "validations": [
+        { "name": "targeted_vitest", "status": "pass" },
+        { "name": "tsc", "status": "pass" },
+        { "name": "check_drift", "status": "pass" },
+        { "name": "gate_phase1", "status": "pass" },
+        { "name": "git_diff_check", "status": "pass" }
+      ],
+      "dependencyEdges": [{ "type": "independent" }],
+      "claims": {
+        "runtimeClosure": false,
+        "liveVerified": false,
+        "docsOnly": false
+      }
+    },
+    {
+      "id": "agent3-hotel-ready",
+      "agent": "Agent3",
+      "branch": "codex/hotel-stage0-fixtures",
+      "commit": "4444444",
+      "base": {
+        "branch": "origin/codex/stage0-capture-mvp",
+        "commit": "9ad43f1",
+        "containsRequiredCommit": true
+      },
+      "taskKind": "benchmark_fixture",
+      "mergeState": "unmerged",
+      "summary": "Hotel capture benchmark fixtures and owner mapping.",
+      "changedFiles": [
+        "lib/internal-benchmark/hotel-stage0-fixtures.ts",
+        "lib/__tests__/hotel-stage0-fixtures.test.ts"
+      ],
+      "artifacts": [],
+      "validations": [
+        { "name": "targeted_vitest", "status": "pass" },
+        { "name": "tsc", "status": "pass" },
+        { "name": "check_drift", "status": "pass" },
+        { "name": "gate_phase1", "status": "pass" },
+        { "name": "git_diff_check", "status": "pass" }
+      ],
+      "dependencyEdges": [{ "type": "independent" }],
+      "claims": {
+        "runtimeClosure": false,
+        "liveVerified": false,
+        "docsOnly": false
+      }
+    },
+    {
+      "id": "unsafe-missing-report",
+      "agent": "AgentX",
+      "branch": "codex/unsafe-stage0-branch",
+      "commit": "5555555",
+      "base": {
+        "branch": "origin/codex/old-base",
+        "commit": "0000000",
+        "containsRequiredCommit": false
+      },
+      "taskKind": "docs_contract",
+      "mergeState": "unmerged",
+      "summary": "Docs-only branch claims live provider closure.",
+      "changedFiles": [
+        "docs/30-provider-debug/CLAIMED_CLOSURE.md",
+        ".tmp/provider-run.log",
+        "app/api/booking-jobs/start/route.ts"
+      ],
+      "artifacts": [
+        "screenshots/live-provider.png"
+      ],
+      "validations": [
+        { "name": "targeted_vitest", "status": "missing" }
+      ],
+      "dependencyEdges": [{ "type": "independent" }],
+      "docsOnly": true,
+      "claims": {
+        "runtimeClosure": true,
+        "liveVerified": true,
+        "docsOnly": true
+      }
+    }
+  ]
+}

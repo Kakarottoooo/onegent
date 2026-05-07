@@ -61,8 +61,9 @@ Then read the task-specific section below.
 |---|---|
 | Project overview or onboarding | `docs/00-start-here/` |
 | Stage 0 north star / current operating plan | `docs/00-start-here/STAGE_0.md` |
-| Capture MVP seams / homepage intake | `docs/40-dogfood/CAPTURE_MVP_SEAMS.md`, then `lib/capture/travel-object.ts` |
-| Private alpha readiness | `docs/40-dogfood/PRIVATE_ALPHA_READINESS.md` |
+| Capture MVP seams / homepage intake | `docs/40-dogfood/CAPTURE_MVP_SEAMS.md`, then `lib/capture/travel-object.ts`, `lib/capture/benchmark.ts` |
+| Stage 0 capture benchmark / operator report | `scripts/capture-benchmark.ts`, `scripts/stage0-operator-report.ts`, `lib/internal-benchmark/stage0-operator-report.ts` |
+| Private alpha readiness | `docs/40-dogfood/PRIVATE_ALPHA_READINESS.md`, `docs/40-dogfood/PRIVATE_ALPHA_INTAKE_PROTOCOL.md` |
 | System design / architecture | `docs/00-start-here/SYSTEM_DESIGN.md` |
 | Current phase / what to do next | `docs/00-start-here/PHASE_STATUS.md` |
 | Codex / Claude / Track C handoff | `docs/10-coordination/README.md`, then `docs/10-coordination/*.md` |
@@ -202,6 +203,7 @@ release entrypoints (`AGENTS.md`, `CLAUDE.md`, `README.md`, `CHANGELOG.md`).
 | Layered no-live closure benchmark | `docs/30-provider-debug/LAYERED_BENCHMARK_V2.md` |
 | Phase 1 founder E2E | `docs/40-phase1/PHASE_1_FOUNDER_E2E.md` |
 | Founder dogfood bug inbox | `docs/40-dogfood/BUG_INBOX.md` |
+| Private alpha intake protocol | `docs/40-dogfood/PRIVATE_ALPHA_INTAKE_PROTOCOL.md` |
 | Phase 1 autonomous E2E runner | `docs/40-phase1/AUTONOMOUS_FOUNDER_E2E.md` |
 | Phase 1.5 quality gate | `docs/40-phase1/PHASE_1_QUALITY_GATE.md` |
 | Demo control room runbook | `docs/40-phase1/DEMO_CONTROL_ROOM.md` |

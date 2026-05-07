@@ -75,12 +75,30 @@ Stage 0 work is in scope when it directly improves one of these systems:
    - Run no-live 5/10/20/50 case batches by vertical.
    - Track routing mismatch, artifact completeness, unknown failure, false
      success, wrong target, safe boundary, owner, and patch-proposal rate.
+   - For Capture specifically, run the Stage 0 capture benchmark before
+     accepting private-alpha intake as product signal:
+
+     ```bash
+     npx tsx scripts/capture-benchmark.ts --vertical all --count 50 --json
+     npx tsx scripts/capture-benchmark.ts --vertical all --gate
+     npx tsx scripts/stage0-operator-report.ts --json
+     ```
+
+   - Capture benchmark fixtures are no-live deterministic parser-contract
+     fixtures. They prove source metadata, Travel Object projection,
+     task-readiness, owner, and artifact contracts. They do not prove live
+     OpenAI extraction quality.
    - Use small live dogfood only when evidence justifies it.
 
 5. **Private Alpha Readiness**
    - Prepare for 10-20 high-intent users.
    - Measure task submission quality, capture-to-task conversion, safe handoff
      clarity, reuse, and willingness to pay.
+   - Use `docs/40-dogfood/PRIVATE_ALPHA_INTAKE_PROTOCOL.md` for what to
+     collect, what not to collect, scoring, and fixture conversion.
+   - Do not mark private alpha green from docs, fixtures, or tooling alone.
+     Green requires real submissions with Travel Object, task-readiness,
+     safe-next-action, evidence, and user-value signal.
 
 ## Explicit Non-Goals
 
@@ -110,6 +128,9 @@ Use these as the operating scorecard:
 | Wrong target selection | 0 |
 | Task workspace consistency | all task entry points land on the same task view |
 | Capture conversion | link/text/screenshot/request can become a Travel Object |
+| Capture benchmark corpus | at least 200 no-live fixtures before alpha intake |
+| Task-ready accuracy | at least 90% on deterministic capture fixtures |
+| Source metadata completeness | at least 95% |
 | Private alpha | 10-20 high-intent users before broad launch |
 
 ## Agent Operating Model

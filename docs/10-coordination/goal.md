@@ -1,69 +1,69 @@
-# Goal Handoff - App Shell Performance Pass
+# Goal Handoff - Stage 0 Reliability System
 
-Last updated: 2026-05-06
+Last updated: 2026-05-07
 
-Branch: `codex/goal-app-shell-performance-pass`
+Branch: `codex/goal-stage0-reliability-system`
 
-Base: `origin/codex/phase-closure-orchestration-20260505` at
-`0ff272cdbe779a6d7d42af38519dc3807a770e36`.
+Base: `origin/codex/stage0-capture-mvp` at
+`9ad43f1b2eaf446c7528e84f4ef7c8c481aa84e1`.
 
 ## Current State
 
-This branch is pure app/runtime performance engineering. It does not run or
-change provider automation. The app shell, Rooms, Contacts, and Calendar now
-follow the same compact-first pattern already used by `/tasks`.
+This branch is no-live Stage 0 reliability tooling. It builds the Capture ->
+Travel Object -> Task Readiness -> Benchmark -> Private Alpha Readiness loop
+without touching provider runtime, worker code, booking-job APIs, DB/schema,
+env files, logs, screenshots, or local artifacts.
 
 ## What Is New
 
-- GlobalNav reuses `/api/app/bootstrap` for task action count and compact
-  account display data instead of issuing a separate task-summary request on
-  first paint.
-- Notification inbox UI, task timeline panels, and the Contacts DM pane are
-  lazy client boundaries.
-- `GET /api/rooms/compact-list` returns room list cards without full context,
-  synthesis, proposal, vote, or message payloads.
-- `GET /api/contacts/bootstrap` returns profile, contacts, and counts only.
-  Groups, blocks, requests, suggestions, and DMs load after the shell or when
-  the relevant section opens.
-- `GET /api/calendar/jobs` returns calendar-specific task rows with minimized
-  step fields and excludes decision logs, errors, policies, screenshots, and
-  runtime logs.
-- Calendar route entry renders the month shell immediately, checks Google
-  connection status separately, reads cached month rows separately, and only
-  performs Google network sync when the user clicks `Sync now`.
-- `scripts/measure-app-performance.ts` now probes shell, tasks, rooms,
-  contacts, and calendar endpoint bytes/latency.
+- `lib/capture/benchmark.ts` provides a 216-fixture no-live capture corpus and
+  evaluator for raw homepage input plus deterministic parser-state fixtures.
+- `scripts/capture-benchmark.ts` emits JSON/Markdown and gate results for
+  routing mismatch, task-ready accuracy, source metadata, artifact
+  completeness, and unknown failures.
+- `lib/internal-benchmark/stage0-operator-report.ts` and
+  `scripts/stage0-operator-report.ts` combine Capture, Internal Benchmark v2,
+  and Layered Benchmark V2 into one Stage 0 readiness verdict and next-action
+  list.
+- `lib/capture/private-alpha.ts` defines the private-alpha submission contract,
+  sensitive-content guard, scoring, and fixture seed conversion.
+- Agent intake now supports `--forbid-provider-runtime` and the Stage 0 sample
+  queue at `lib/internal-benchmark/__fixtures__/agent-intake/stage0-returned-branches.json`.
+- Docs now link the Capture benchmark, Stage 0 operator report, and private
+  alpha intake protocol.
 
 ## Changed Files
 
-- `app/api/calendar/google/status/route.ts`
-- `app/api/calendar/jobs/route.ts`
-- `app/api/contacts/bootstrap/route.ts`
-- `app/api/rooms/compact-list/route.ts`
-- `app/calendar/page.tsx`
-- `app/contacts/page.tsx`
-- `app/page.tsx`
-- `app/rooms/page.tsx`
-- `app/tasks/page.tsx`
-- `components/GlobalNav.tsx`
-- `components/app-bootstrap-client.ts`
-- `docs/00-start-here/SYSTEM_DESIGN.md`
+- `lib/capture/benchmark.ts`
+- `lib/capture/private-alpha.ts`
+- `lib/internal-benchmark/agent-intake.ts`
+- `lib/internal-benchmark/stage0-operator-report.ts`
+- `lib/internal-benchmark/__fixtures__/agent-intake/stage0-returned-branches.json`
+- `lib/__tests__/capture-benchmark.test.ts`
+- `lib/__tests__/private-alpha-intake.test.ts`
+- `lib/__tests__/stage0-agent-intake.test.ts`
+- `lib/__tests__/stage0-operator-report.test.ts`
+- `scripts/capture-benchmark.ts`
+- `scripts/layered-agent-intake.ts`
+- `scripts/stage0-operator-report.ts`
+- `docs/00-start-here/STAGE_0.md`
+- `docs/40-dogfood/CAPTURE_MVP_SEAMS.md`
+- `docs/40-dogfood/PRIVATE_ALPHA_INTAKE_PROTOCOL.md`
+- `docs/40-dogfood/PRIVATE_ALPHA_READINESS.md`
+- `docs/40-dogfood/AGENT_INTAKE_QUEUE.md`
 - `docs/10-coordination/goal.md`
-- `lib/__tests__/app-bootstrap.test.ts`
-- `lib/__tests__/app-shell-read-model.test.ts`
-- `lib/__tests__/calendar-read-model.test.ts`
-- `lib/app-bootstrap.ts`
-- `lib/app-shell-read-model.ts`
-- `lib/calendar-grid.ts`
-- `lib/calendar-read-model.ts`
-- `lib/db.ts`
-- `scripts/measure-app-performance.ts`
+- `docs/INDEX.md`
+
+## Validation Plan
+
+- Targeted Vitest for new capture, operator, alpha, and intake tests.
+- Capture benchmark JSON and gate CLI.
+- Stage 0 operator report JSON CLI.
+- Typecheck, check-drift, Phase 1 gate, and diff whitespace check.
 
 ## Safety
 
-No external provider workflow, browser booking agent, live booking run,
-OpenAI live call, payment, login, verification, OTP/CAPTCHA handling, or final
-confirmation is part of this work.
-
-There are unrelated local tracked provider-runtime edits in this worktree that
-are not part of this branch and must not be staged for this goal.
+No external provider workflow, browser booking agent, live OpenAI call, worker
+queue, payment, login, verification, CAPTCHA, final confirmation, secrets,
+`.env*`, `.tmp`, logs, screenshots, provider cookies, DB/schema, or provider
+runtime path is touched by this branch.
