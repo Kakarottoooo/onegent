@@ -285,6 +285,7 @@ export function validateHotelLayeredArtifactCompleteness(bundle: unknown): Hotel
   if (!context.checkout) missing.push("checkout");
   if (context.adults == null) missing.push("adults");
   if (context.rooms == null) missing.push("rooms");
+  if (!context.currentUrl) missing.push("currentUrl");
   if (!context.workerLogExcerpt) missing.push("workerLogExcerpt");
   if (!readString(asRecord(bundle), "workerLogPath")) missing.push("workerLogPath");
   if (cleanStringList(readUnknown(asRecord(bundle), "screenshotPaths")).length === 0) {

@@ -294,6 +294,10 @@ describe("layered benchmark v2", () => {
       finalVerdict: "needs_runtime_patch",
       owner: "provider-runtime",
       calculatedL2Eligible: true,
+      artifactExpectations: {
+        ownerHint: "provider-runtime",
+        ownerAction: "patch-room-selection-after-visible-room-evidence",
+      },
     });
     expect(byId.get("lbv2-hotel-07")).toMatchObject({
       failureClass: "user_only_final_action",
@@ -312,12 +316,20 @@ describe("layered benchmark v2", () => {
       finalVerdict: "insufficient_evidence",
       owner: "task-workspace",
       calculatedL2Eligible: false,
+      artifactExpectations: {
+        ownerHint: "task-workspace",
+        ownerAction: "collect-missing-db-log-screenshot-url-evidence",
+      },
     });
     expect(byId.get("lbv2-hotel-10")).toMatchObject({
       failureClass: "insufficient_evidence",
       finalVerdict: "insufficient_evidence",
       owner: "task-workspace",
       calculatedL2Eligible: false,
+      artifactExpectations: {
+        ownerHint: "task-workspace",
+        ownerAction: "reconcile-stale-running-state-before-provider-retry",
+      },
       hotelContract: {
         staleRunningState: { staleStatus: "running" },
       },
@@ -379,6 +391,7 @@ describe("layered benchmark v2", () => {
     expect(markdown).toContain("# Layered Benchmark V2");
     expect(markdown).toContain("L1 + L2 recovered pass");
     expect(markdown).toContain("Top Failed Cases");
+    expect(markdown).toContain("Owner | Action");
     expect(markdown).toContain("Sample Case Trace");
   });
 

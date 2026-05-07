@@ -359,7 +359,13 @@ function hotelBaseCase(
     dogfoodBugLink: config.dogfoodBugLink,
     artifactExpectations:
       artifactExpectations ??
-      defaultHotelArtifactExpectations(caseId, rest.failureClass, rest.patchProposal.proposed),
+      defaultHotelArtifactExpectations(
+        caseId,
+        rest.failureClass,
+        rest.patchProposal.proposed,
+        rest.owner,
+        rest.l1Result.terminalState,
+      ),
     ...rest,
   };
 }
@@ -417,7 +423,10 @@ function defaultHotelArtifactExpectations(
   caseId: string,
   failureClass: LayeredBenchmarkFailureClass,
   patchProposed: boolean,
+  owner: LayeredBenchmarkOwner,
+  terminalState: string,
 ): LayeredBenchmarkArtifactExpectations {
+  const ownerContract = hotelOwnerContract(owner, terminalState);
   return {
     requiredSources: [
       "booking_jobs row",
@@ -427,16 +436,23 @@ function defaultHotelArtifactExpectations(
       "current URL",
       "hotel retry analysis report",
     ],
-    evidenceContract: `${caseId} must preserve exact hotel, city, dates, adults, rooms, budget, and classify ${failureClass}.`,
+    evidenceContract: `${caseId} must preserve exact hotel, city, dates, adults, rooms, budget, classify ${failureClass}, and route ownership to ${ownerContract.ownerHint}.`,
     classificationSignals: [
       `failureClass=${failureClass}`,
       "provider=Booking.com",
       "hotel=YOTEL New York Times Square",
       "fallbackParamsPreserved=yes",
+      `owner=${ownerContract.ownerHint}`,
+      `ownerAction=${ownerContract.ownerAction}`,
+      `ownerReason=${ownerContract.ownerReason}`,
+      ...ownerContract.extraSignals,
     ],
     patchProposalFields: patchProposed
       ? ["title", "files", "risk", "notes"]
       : ["proposed=false", "risk=none", "notes"],
+    ownerHint: ownerContract.ownerHint,
+    ownerAction: ownerContract.ownerAction,
+    ownerReason: ownerContract.ownerReason,
   };
 }
 
@@ -446,4 +462,59 @@ function noPatch(notes: string): LayeredBenchmarkPatchProposal {
     risk: "none",
     notes,
   };
+}
+
+function hotelOwnerContract(
+  owner: LayeredBenchmarkOwner,
+  terminalState: string,
+): {
+  ownerHint: LayeredBenchmarkOwner | "benchmark-fixture";
+  ownerAction: string;
+  ownerReason: string;
+  extraSignals: string[];
+} {
+  switch (terminalState) {
+    case "room_selection_drift":
+      return {
+        ownerHint: "provider-runtime",
+        ownerAction: "patch-room-selection-after-visible-room-evidence",
+        ownerReason:
+          "room/rate inventory is visible but the provider runtime did not select or transition",
+        extraSignals: [
+          "evidenceRequired=room-rate-visible;dates-match;guests-match;room-count-match;selector-failure-log",
+          "notOwner=task-workspace",
+          "notOwner=benchmark-fixture",
+        ],
+      };
+    case "missing_hotel_artifact_contract":
+      return {
+        ownerHint: "task-workspace",
+        ownerAction: "collect-missing-db-log-screenshot-url-evidence",
+        ownerReason: "artifact bundle cannot support recovery or closure",
+        extraSignals: [
+          "missing=decisionLog;screenshotPaths;currentUrl",
+          "notOwner=provider-runtime",
+          "notOwner=benchmark-fixture",
+        ],
+      };
+    case "stale_running_state":
+      return {
+        ownerHint: "task-workspace",
+        ownerAction: "reconcile-stale-running-state-before-provider-retry",
+        ownerReason: "stale running status or mixed evidence blocks closure",
+        extraSignals: [
+          "stale_or_mixed_worker_evidence=yes",
+          "providerRetryBlocked=yes",
+          "notOwner=provider-runtime",
+          "notOwner=benchmark-fixture",
+        ],
+      };
+    default:
+      return {
+        ownerHint: owner,
+        ownerAction: owner === "product/manual-boundary" ? "preserve-evidence-and-hold" : "follow-owner-runbook",
+        ownerReason: `terminalState=${terminalState}`,
+        extraSignals: [],
+      };
+  }
 }

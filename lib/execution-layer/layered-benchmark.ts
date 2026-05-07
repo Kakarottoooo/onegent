@@ -89,6 +89,9 @@ export type LayeredBenchmarkArtifactExpectations = {
   evidenceContract: string;
   classificationSignals: string[];
   patchProposalFields: string[];
+  ownerHint?: LayeredBenchmarkOwner | "benchmark-fixture";
+  ownerAction?: string;
+  ownerReason?: string;
 };
 
 export type LayeredBenchmarkHotelFallbackParams = {
@@ -176,6 +179,7 @@ export type LayeredBenchmarkReport = {
     verdict: LayeredBenchmarkVerdict;
     owner: LayeredBenchmarkOwner;
     patchProposal: boolean;
+    ownerAction?: string;
   }>;
   results: LayeredBenchmarkCaseResult[];
   notes: string[];
@@ -414,6 +418,12 @@ export function evaluateLayeredBenchmarkCase(testCase: LayeredBenchmarkCase): La
   if (testCase.evidenceCompleteness.score < 0.9) {
     notes.push("artifact_contract_incomplete");
   }
+  if (testCase.artifactExpectations.ownerHint && !isPassingVerdict(finalVerdict)) {
+    notes.push(`owner_hint=${testCase.artifactExpectations.ownerHint}`);
+  }
+  if (testCase.artifactExpectations.ownerAction && !isPassingVerdict(finalVerdict)) {
+    notes.push(`owner_action=${testCase.artifactExpectations.ownerAction}`);
+  }
   if (testCase.patchProposal.proposed) {
     notes.push(`patch_proposal=${testCase.patchProposal.title ?? "unnamed"}`);
   }
@@ -581,12 +591,12 @@ export function renderLayeredBenchmarkMarkdown(report: LayeredBenchmarkReport): 
     "",
     "## Top Failed Cases",
     "",
-    "| Case | Vertical | Failure | Verdict | Owner | Patch |",
-    "| --- | --- | --- | --- | --- | --- |",
+    "| Case | Vertical | Failure | Verdict | Owner | Action | Patch |",
+    "| --- | --- | --- | --- | --- | --- | --- |",
   );
   for (const failed of report.topFailedCases) {
     lines.push(
-      `| \`${failed.id}\` | ${failed.vertical} | \`${failed.failureClass}\` | \`${failed.verdict}\` | ${failed.owner} | ${failed.patchProposal ? "yes" : "no"} |`,
+      `| \`${failed.id}\` | ${failed.vertical} | \`${failed.failureClass}\` | \`${failed.verdict}\` | ${failed.owner} | ${markdownCell(failed.ownerAction ?? "see artifact contract")} | ${failed.patchProposal ? "yes" : "no"} |`,
     );
   }
 
@@ -964,6 +974,7 @@ function topFailedCases(results: LayeredBenchmarkCaseResult[]): LayeredBenchmark
       verdict: result.finalVerdict,
       owner: result.owner,
       patchProposal: result.patchProposal.proposed,
+      ownerAction: result.artifactExpectations.ownerAction,
     }));
 }
 
@@ -977,4 +988,8 @@ function pct(value: number): string {
 
 function formatRate(value: number): string {
   return Number.isInteger(value) ? String(value) : String(roundRate(value));
+}
+
+function markdownCell(value: string): string {
+  return value.replace(/\|/g, "/").replace(/\s+/g, " ").trim();
 }
