@@ -76,7 +76,7 @@ Then read the task-specific section below.
 | Phase 1 founder walkthrough / task UI | `docs/40-phase1/PHASE_1_FOUNDER_E2E.md`, `docs/40-phase1/AUTONOMOUS_FOUNDER_E2E.md`, `docs/40-phase1/PHASE_1_QUALITY_GATE.md` |
 | Founder dogfood bugs | `docs/40-dogfood/BUG_INBOX.md` |
 | Layered benchmark dogfood plan | `docs/40-dogfood/LAYERED_BENCHMARK_DOGFOOD_PLAN.md` |
-| Agent intake queue for returned branches | `docs/40-dogfood/AGENT_INTAKE_QUEUE.md`, `scripts/layered-agent-intake.ts` |
+| Agent intake queue and operator cockpit | `docs/40-dogfood/AGENT_INTAKE_QUEUE.md`, `scripts/layered-agent-intake.ts`, `scripts/layered-operator-cockpit.ts` |
 | Phase 1.5 demo readiness / control room | `docs/40-phase1/DEMO_CONTROL_ROOM.md`, `docs/40-phase1/YC_DEMO_RUNBOOK.md`, `docs/40-phase1/DEMO_FREEZE_ACCEPTANCE.md` |
 | Phase 2 Expedia controlled retry | `docs/50-product-areas/EXPEDIA_CONTROLLED_RETRY_RUNBOOK.md`, `docs/50-product-areas/PHASE2_VERTICAL_REVIVAL_AUDIT.md`, `docs/10-coordination/phase2.md` |
 | Phase 2 hotel revival audit | `docs/50-product-areas/HOTEL_VERTICAL_REVIVAL_AUDIT.md`, `docs/50-product-areas/HOTEL_CONTROLLED_RETRY_RUNBOOK.md` |
