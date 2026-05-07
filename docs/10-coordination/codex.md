@@ -1,8 +1,8 @@
 # Codex - coordination state
 
-> **Branch**: `codex/integrated-preview-20260504`
+> **Branch**: `codex/stage0-capture-mvp`
 > **Last updated**: 2026-05-07
-> **Last commit**: this pass - layered benchmark merge train integration
+> **Last commit**: this pass - multi-agent dispatch rules
 >
 > Claude reads this at session start. I write to it before each push.
 > See `CLAUDE.md` section "coordination protocol".
@@ -27,6 +27,19 @@ Current multi-agent operating rule:
   starting a long merge or debug pass, Codex should usually issue the next
   independent prompts first, so Goal/Claude/Agent2/Agent3 keep working while
   Codex validates and merges the previous train.
+- Before issuing prompts, Codex must briefly explain to the founder what each
+  agent will do and why it is valuable. The explanation should cover the
+  Stage 0 gap being closed, the expected output, and why that task belongs to
+  that agent rather than Codex.
+- Every prompt must name the latest pushed base branch and commit that the
+  agent should start from. Do not send side agents to old worktrees or stale
+  bases unless the task is explicitly an isolated forensic read. If the Stage
+  0 base has advanced since a prompt was drafted, refresh the prompt before
+  the founder distributes it.
+- Prompt reports must require branch, commit, base commit, worktree, changed
+  files, validation, evidence, deferred work, and safety notes. This keeps
+  Codex intake cheap and prevents long merge/debug stalls after the agent
+  returns.
 - Side agents should not block on Codex unless their next task depends on a
   freshly merged shared schema or runtime contract. When possible, give them
   independent follow-up lanes based on the latest pushed Stage 0 base, with
