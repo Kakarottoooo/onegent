@@ -3247,7 +3247,8 @@ function TripsPageInner() {
     const view = searchParams.get("view");
     const focusId = searchParams.get("focus");
     const nextView: TaskWorkspaceView =
-      view === "live" || view === "history" ? view : "queue";
+      view === "queue" || view === "live" || view === "history" ? view : "queue";
+    setWorkspaceView(nextView);
 
     if (focusId) {
       const focusedJob = jobs.find((job) => job.id === focusId);
@@ -3285,8 +3286,7 @@ function TripsPageInner() {
 
   const setWorkspaceViewAndUrl = useCallback((next: TaskWorkspaceView) => {
     setWorkspaceView(next);
-    const href = next === "queue" ? "/tasks" : `/tasks?view=${next}`;
-    router.replace(href, { scroll: false });
+    router.replace(`/tasks?view=${next}`, { scroll: false });
   }, [router]);
 
   const queueJobs = jobs.filter((job) => classifyTaskWorkspace(job) === "queue");

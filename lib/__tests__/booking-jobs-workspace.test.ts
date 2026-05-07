@@ -41,6 +41,7 @@ describe("booking job workspace helpers", () => {
   it("normalizes task details and evidence hrefs", () => {
     const queued = { id: "job 1", status: "pending" as const };
     expect(getTaskWorkspaceHref(queued)).toBe("/tasks?view=queue&focus=job%201");
+    expect(getTaskEvidenceHref(queued)).toBe("/tasks?view=queue&focus=job%201");
     expect(getTaskEvidenceHref({ id: "job 2", status: "running" })).toBe(
       "/tasks?view=live&focus=job%202",
     );

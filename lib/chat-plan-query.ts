@@ -69,12 +69,12 @@ function normalizeActivityEventName(name: string | null): string | null {
 
 function buildActivityPlanQuery(constraints: Record<string, unknown>): string {
   const eventName = normalizeActivityEventName(
-    readString(constraints, "event_name", "activity_name", "name", "query"),
+    readString(constraints, "event_name", "activity_name", "title", "name", "query"),
   );
-  const eventType = readString(constraints, "event_type", "activity_type", "category");
-  const city = readString(constraints, "city", "location", "destination_city");
-  const date = readString(constraints, "event_date", "date", "date_from");
-  const ticketCount = readNumber(constraints, "ticket_count", "tickets", "num_tickets", "party_size", "travelers");
+  const eventType = readString(constraints, "event_type", "activity_type", "genre", "category");
+  const city = readString(constraints, "city", "venue_city", "location", "destination_city");
+  const date = readString(constraints, "event_date", "date", "date_from", "event_date_from");
+  const ticketCount = readNumber(constraints, "ticket_count", "num_tickets", "tickets", "quantity", "party_size", "travelers");
   const seatType = readString(constraints, "seat_type", "seat_preference");
 
   const parts = [eventName ? `Find tickets for ${eventName}` : "Find activity tickets"];

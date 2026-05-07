@@ -1122,7 +1122,7 @@ export async function POST(req: NextRequest) {
       // Flight/activity v2 NLU already has structured fields. Prefer a
       // deterministic English handoff for the legacy /api/chat parser;
       // reparsing the original booking sentence has regressed to the wrong
-      // route in both flight and single-event activity flows.
+      // route or dropped fields in flight and single-event activity flows.
       search_query:
         scenario === "flight" || scenario === "activity"
           ? buildPlanQueryFromConstraints(scenario, constraints)

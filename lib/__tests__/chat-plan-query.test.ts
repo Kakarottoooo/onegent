@@ -49,12 +49,23 @@ describe("buildPlanQueryFromConstraints", () => {
   it("preserves single-event activity constraints in the handoff query", () => {
     expect(
       buildPlanQueryFromConstraints("activity", {
-        event_name: "狮子王",
+        event_name: "\u72ee\u5b50\u738b",
         event_type: "Broadway musical",
         city: "New York",
         event_date: "2026-06-01",
         ticket_count: 2,
       }),
     ).toBe("Find tickets for The Lion King (Broadway musical) in New York on 2026-06-01 for 2 people");
+  });
+
+  it("accepts alternate activity constraint keys from older callers", () => {
+    expect(
+      buildPlanQueryFromConstraints("activity", {
+        activity_name: "Hamilton",
+        location: "New York",
+        date_from: "2026-06-01",
+        tickets: "2",
+      }),
+    ).toBe("Find tickets for Hamilton in New York on 2026-06-01 for 2 people");
   });
 });
