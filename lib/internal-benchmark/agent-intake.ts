@@ -1,4 +1,10 @@
-export type AgentIntakeDecision = "ready_to_merge" | "needs_followup" | "reject";
+export type AgentIntakeDecision =
+  | "ready_to_merge"
+  | "needs_followup"
+  | "reject"
+  | "requires_rebase"
+  | "conflicts_with_mainline"
+  | "safe_to_assign_next_task_before_merge";
 
 export type AgentTaskKind =
   | "runtime_fix"
@@ -24,13 +30,18 @@ export type AgentDependencyEdge = {
 
 export type AgentIntakeIssueCode =
   | "wrong_base"
+  | "missing_required_report_field"
+  | "missing_safety_statement"
   | "forbidden_artifact"
   | "missing_validation"
+  | "missing_tests_for_logic_change"
   | "runtime_mirror_without_drift_check"
   | "provider_runtime_without_permission"
+  | "broad_app_shell_touch"
   | "docs_only_runtime_closure_claim"
   | "unresolved_shared_schema_dependency"
   | "requires_rebase_before_merge"
+  | "conflicts_with_mainline"
   | "superseded_by_newer_branch"
   | "invalid_task_kind";
 
@@ -63,6 +74,7 @@ export type AgentReturnReport = {
   agent?: string;
   branch: string;
   commit: string;
+  worktree?: string;
   base: AgentReturnBase;
   taskKind?: AgentTaskKind;
   mergeState?: AgentMergeState;
@@ -73,6 +85,8 @@ export type AgentReturnReport = {
   dependencyEdges?: AgentDependencyEdge[];
   claims?: AgentReturnClaims;
   docsOnly?: boolean;
+  safetyStatement?: string;
+  conflictNotes?: string[];
   notes?: string[];
 };
 
@@ -87,6 +101,12 @@ export type AgentIntakeResult = {
   report: AgentReturnReport;
   decision: AgentIntakeDecision;
   issues: AgentIntakeIssue[];
+  riskLevel: AgentConflictRisk;
+  mergePriority: "p0" | "p1" | "p2" | "blocked";
+  requiredValidationBeforeMerge: string[];
+  reason: string;
+  recommendedNextPrompt: string;
+  codexAction: "block" | "merge_validate" | "ask_followup" | "assign_next_independent_task";
 };
 
 export type AgentNextTaskRecommendation = {
@@ -102,6 +122,9 @@ export type AgentIntakeSummary = {
   readyToMerge: number;
   needsFollowup: number;
   reject: number;
+  requiresRebase: number;
+  conflictsWithMainline: number;
+  safeToAssignNextTaskBeforeMerge: number;
   byIssue: Record<AgentIntakeIssueCode, number>;
   byTaskKind: Record<AgentTaskKind, number>;
   dependencyEdges: number;
@@ -135,13 +158,18 @@ const DEFAULT_REQUIRED_VALIDATIONS = [
 
 const ZERO_ISSUES: Record<AgentIntakeIssueCode, number> = {
   wrong_base: 0,
+  missing_required_report_field: 0,
+  missing_safety_statement: 0,
   forbidden_artifact: 0,
   missing_validation: 0,
+  missing_tests_for_logic_change: 0,
   runtime_mirror_without_drift_check: 0,
   provider_runtime_without_permission: 0,
+  broad_app_shell_touch: 0,
   docs_only_runtime_closure_claim: 0,
   unresolved_shared_schema_dependency: 0,
   requires_rebase_before_merge: 0,
+  conflicts_with_mainline: 0,
   superseded_by_newer_branch: 0,
   invalid_task_kind: 0,
 };
@@ -179,10 +207,20 @@ const RUNTIME_MIRROR_PATTERNS: RegExp[] = [
 const PROVIDER_RUNTIME_FORBIDDEN_PATTERNS: RegExp[] = [
   /^lib[/\\]booking-autopilot[/\\]/i,
   /^worker[/\\]src[/\\]/i,
+  /^app[/\\]api[/\\]booking-autopilot[/\\]/i,
+  /^app[/\\]api[/\\]browser-live[/\\]/i,
   /^app[/\\]api[/\\]booking-jobs[/\\]/i,
   /^app[/\\]api[/\\]v1[/\\]/i,
   /^lib[/\\]db\.ts$/i,
   /(^|[/\\])(schema|schemas|migrations)[/\\]/i,
+  /\.sql$/i,
+];
+
+const BROAD_APP_SHELL_PATTERNS: RegExp[] = [
+  /^app[/\\]page\.tsx$/i,
+  /^components[/\\]Sidebar\.tsx$/i,
+  /^components[/\\]AppShell/i,
+  /^app[/\\](calendar|rooms|contacts|memory)[/\\]/i,
 ];
 
 type QueueContext = {
@@ -203,6 +241,25 @@ export function classifyAgentReturnReport(
 
   const baseIssue = baseMismatch(report, requiredBaseBranch, options.requiredBaseCommit);
   if (baseIssue) issues.push(baseIssue);
+
+  const missingRequiredFields = requiredReportFields(report);
+  if (missingRequiredFields.length > 0) {
+    issues.push({
+      code: "missing_required_report_field",
+      severity: "followup",
+      message: "Returned branch report is missing required metadata for merge triage.",
+      evidence: missingRequiredFields,
+    });
+  }
+
+  if (!hasValue(report.safetyStatement) || !safetyStatementCoversNoLive(report.safetyStatement ?? "")) {
+    issues.push({
+      code: "missing_safety_statement",
+      severity: "followup",
+      message: "Returned branch report must explicitly state no provider/browser/live OpenAI/secrets/payment/login/final-confirm work was run.",
+      evidence: [report.safetyStatement ?? "missing"],
+    });
+  }
 
   if (!isTaskKind(report.taskKind)) {
     issues.push({
@@ -257,6 +314,27 @@ export function classifyAgentReturnReport(
     });
   }
 
+  const broadAppShellPaths = report.changedFiles.filter(isBroadAppShellPath);
+  if (broadAppShellPaths.length > 0 && report.taskKind !== "read_model_perf" && report.taskKind !== "task_workspace_ux") {
+    issues.push({
+      code: "broad_app_shell_touch",
+      severity: "followup",
+      message: "Branch touches broad app-shell surfaces outside a performance or task-workspace task kind.",
+      evidence: broadAppShellPaths,
+    });
+  }
+
+  const logicFiles = report.changedFiles.filter(isLogicPath);
+  const testFiles = report.changedFiles.filter(isTestPath);
+  if (logicFiles.length > 0 && testFiles.length === 0) {
+    issues.push({
+      code: "missing_tests_for_logic_change",
+      severity: "followup",
+      message: "Logic or script changes were reported without changed tests.",
+      evidence: logicFiles.slice(0, 8),
+    });
+  }
+
   if (isDocsOnlyReport(report) && claimsRuntimeClosure(report)) {
     issues.push({
       code: "docs_only_runtime_closure_claim",
@@ -285,17 +363,25 @@ export function classifyAgentReturnReport(
         evidence: [edge.reason ?? edge.targetBranch ?? "requires rebase"],
       });
     }
+    if (edge.type === "independent" && (edge.reason ?? "").toLowerCase().includes("conflict")) {
+      issues.push({
+        code: "conflicts_with_mainline",
+        severity: "followup",
+        message: "Branch metadata reports a mainline conflict risk.",
+        evidence: [edge.reason ?? "conflict"],
+      });
+    }
     if (edge.type === "depends_on_shared_schema") {
       const dependencyIssue = sharedSchemaDependencyIssue(report, edge, queueContext);
       if (dependencyIssue) issues.push(dependencyIssue);
     }
   }
 
-  return {
+  return withIntakeOutcome({
     report,
     issues,
     decision: decideIntakeStatus(issues),
-  };
+  });
 }
 
 export function classifyAgentIntakeQueue(
@@ -323,6 +409,9 @@ export function classifyAgentIntakeQueue(
     readyToMerge: results.filter((result) => result.decision === "ready_to_merge").length,
     needsFollowup: results.filter((result) => result.decision === "needs_followup").length,
     reject: results.filter((result) => result.decision === "reject").length,
+    requiresRebase: results.filter((result) => result.decision === "requires_rebase").length,
+    conflictsWithMainline: results.filter((result) => result.decision === "conflicts_with_mainline").length,
+    safeToAssignNextTaskBeforeMerge: results.filter((result) => result.decision === "safe_to_assign_next_task_before_merge").length,
     byIssue,
     byTaskKind,
     dependencyEdges,
@@ -368,6 +457,7 @@ export function parseAgentIntakeMarkdown(input: string): AgentReturnReport[] {
       agent: fields.get("agent"),
       branch: fields.get("branch") ?? heading,
       commit: fields.get("commit") ?? "unknown",
+      worktree: fields.get("worktree"),
       base: {
         branch: fields.get("basebranch") ?? fields.get("base") ?? "",
         commit: fields.get("basecommit"),
@@ -381,6 +471,8 @@ export function parseAgentIntakeMarkdown(input: string): AgentReturnReport[] {
       validations: parseValidationList(fields.get("validations")),
       dependencyEdges: parseDependencyEdges(fields.get("dependencyedges") ?? fields.get("dependencies")),
       docsOnly: parseBoolean(fields.get("docsonly")),
+      safetyStatement: fields.get("safetystatement") ?? fields.get("safety"),
+      conflictNotes: parseList(fields.get("conflictnotes")),
       claims: {
         runtimeClosure: parseBoolean(fields.get("runtimeclosure")),
         liveVerified: parseBoolean(fields.get("liveverified")),
@@ -431,8 +523,8 @@ export function renderAgentIntakeMarkdown(report: AgentIntakeQueueReport): strin
     "",
     "## Queue",
     "",
-    "| Branch | Kind | Decision | Commit | Merge State | Issues |",
-    "| --- | --- | --- | --- | --- | --- |",
+    "| Branch | Kind | Decision | Risk | Action | Commit | Issues |",
+    "| --- | --- | --- | --- | --- | --- | --- |",
   );
 
   for (const result of report.results) {
@@ -440,7 +532,7 @@ export function renderAgentIntakeMarkdown(report: AgentIntakeQueueReport): strin
       ? "-"
       : result.issues.map((issue) => `\`${issue.code}\``).join(", ");
     lines.push(
-      `| \`${result.report.branch}\` | \`${result.report.taskKind ?? "missing"}\` | \`${result.decision}\` | \`${result.report.commit}\` | \`${result.report.mergeState ?? "unknown"}\` | ${issues} |`,
+      `| \`${result.report.branch}\` | \`${result.report.taskKind ?? "missing"}\` | \`${result.decision}\` | \`${result.riskLevel}\` | \`${result.codexAction}\` | \`${result.report.commit}\` | ${issues} |`,
     );
   }
 
@@ -518,11 +610,11 @@ function finalizeDependencyIssues(
 
   if (dependencyIssues.length === 0) return result;
   const issues = [...result.issues, ...dependencyIssues];
-  return {
+  return withIntakeOutcome({
     ...result,
     issues,
     decision: decideIntakeStatus(issues),
-  };
+  });
 }
 
 function sharedSchemaDependencyIssue(
@@ -649,6 +741,18 @@ function isProviderRuntimeForbiddenPath(pathname: string): boolean {
   return PROVIDER_RUNTIME_FORBIDDEN_PATTERNS.some((pattern) => pattern.test(pathname));
 }
 
+function isBroadAppShellPath(pathname: string): boolean {
+  return BROAD_APP_SHELL_PATTERNS.some((pattern) => pattern.test(pathname));
+}
+
+function isLogicPath(pathname: string): boolean {
+  return /^(lib|scripts|app|components)[/\\].*\.(ts|tsx)$/i.test(pathname) && !isTestPath(pathname);
+}
+
+function isTestPath(pathname: string): boolean {
+  return /(^|[/\\])(__tests__|tests?)[/\\]/i.test(pathname) || /\.(test|spec)\.(ts|tsx)$/i.test(pathname);
+}
+
 function isDocsOnlyReport(report: AgentReturnReport): boolean {
   if (typeof report.docsOnly === "boolean") return report.docsOnly;
   if (typeof report.claims?.docsOnly === "boolean") return report.claims.docsOnly;
@@ -662,8 +766,54 @@ function claimsRuntimeClosure(report: AgentReturnReport): boolean {
 
 function decideIntakeStatus(issues: AgentIntakeIssue[]): AgentIntakeDecision {
   if (issues.some((issue) => issue.severity === "reject")) return "reject";
+  if (issues.some((issue) => issue.code === "conflicts_with_mainline")) return "conflicts_with_mainline";
+  if (issues.some((issue) => issue.code === "requires_rebase_before_merge" || issue.code === "wrong_base")) return "requires_rebase";
   if (issues.length > 0) return "needs_followup";
   return "ready_to_merge";
+}
+
+function withIntakeOutcome(result: Pick<AgentIntakeResult, "report" | "issues" | "decision">): AgentIntakeResult {
+  const requiredValidationBeforeMerge = Array.from(new Set(result.issues
+    .filter((issue) => issue.code === "missing_validation")
+    .flatMap((issue) => issue.evidence)));
+  const riskLevel: AgentConflictRisk =
+    result.decision === "reject" || result.decision === "conflicts_with_mainline"
+      ? "high"
+      : result.decision === "requires_rebase" || result.decision === "needs_followup"
+        ? "medium"
+        : "low";
+  const codexAction: AgentIntakeResult["codexAction"] =
+    result.decision === "ready_to_merge"
+      ? "merge_validate"
+      : result.decision === "reject" || result.decision === "conflicts_with_mainline"
+        ? "block"
+        : result.decision === "requires_rebase"
+          ? "ask_followup"
+          : "assign_next_independent_task";
+  return {
+    ...result,
+    riskLevel,
+    mergePriority: codexAction === "block" ? "blocked" : riskLevel === "low" ? "p1" : "p2",
+    requiredValidationBeforeMerge,
+    reason: result.issues.length === 0
+      ? "Metadata is complete enough for normal merge validation."
+      : result.issues.map((issue) => issue.message).join(" "),
+    recommendedNextPrompt: recommendedNextPrompt(result),
+    codexAction,
+  };
+}
+
+function recommendedNextPrompt(result: Pick<AgentIntakeResult, "report" | "issues" | "decision">): string {
+  if (result.decision === "ready_to_merge") {
+    return `Start merge validation for ${result.report.branch}; keep provider/live workflows disabled.`;
+  }
+  if (result.decision === "reject") {
+    return `Do not use ${result.report.branch} as a base; ask the agent to restart from the required branch with forbidden paths removed.`;
+  }
+  if (result.decision === "requires_rebase") {
+    return `Rebase ${result.report.branch} onto the required base and rerun the reported validation set.`;
+  }
+  return `Ask the agent for missing metadata/tests/validation on ${result.report.branch}, then classify again before merge review.`;
 }
 
 function normalizeReport(raw: unknown): AgentReturnReport {
@@ -674,6 +824,7 @@ function normalizeReport(raw: unknown): AgentReturnReport {
     agent: stringOrUndefined(raw.agent),
     branch: requiredString(raw.branch, "branch"),
     commit: requiredString(raw.commit, "commit"),
+    worktree: stringOrUndefined(raw.worktree),
     base: {
       branch: requiredString(base.branch, "base.branch"),
       commit: stringOrUndefined(base.commit),
@@ -688,6 +839,8 @@ function normalizeReport(raw: unknown): AgentReturnReport {
     dependencyEdges: dependencyArray(raw.dependencyEdges),
     claims: claimsOrUndefined(raw.claims),
     docsOnly: booleanOrUndefined(raw.docsOnly),
+    safetyStatement: stringOrUndefined(raw.safetyStatement),
+    conflictNotes: stringArray(raw.conflictNotes),
     notes: stringArray(raw.notes),
   };
 }
@@ -833,4 +986,32 @@ function normalizeValidationName(value: string): string {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
+}
+
+function requiredReportFields(report: AgentReturnReport): string[] {
+  const missing: string[] = [];
+  if (!hasValue(report.branch)) missing.push("branch");
+  if (!hasValue(report.commit)) missing.push("commit");
+  if (!hasValue(report.base.branch)) missing.push("base.branch");
+  if (!hasValue(report.worktree)) missing.push("worktree");
+  if (report.changedFiles.length === 0) missing.push("changedFiles");
+  if (report.validations.length === 0) missing.push("validations");
+  return missing;
+}
+
+function safetyStatementCoversNoLive(value: string): boolean {
+  const text = value.toLowerCase();
+  return text.includes("no provider") &&
+    text.includes("no browser") &&
+    text.includes("no live openai") &&
+    text.includes("no secrets") &&
+    text.includes("no payment") &&
+    text.includes("no login") &&
+    text.includes("no final");
+}
+
+function hasValue(value: unknown): boolean {
+  if (typeof value === "string") return value.trim().length > 0;
+  if (Array.isArray(value)) return value.length > 0;
+  return value !== null && value !== undefined;
 }

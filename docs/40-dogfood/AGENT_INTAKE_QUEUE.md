@@ -16,6 +16,10 @@ branch as:
   validation.
 - `reject`: the branch violates base, artifact, supersession, task-kind, or
   claim rules and should not enter the merge train.
+- `requires_rebase`: the branch is useful but must be rebased before merge
+  validation.
+- `conflicts_with_mainline`: metadata reports a conflict risk that Codex
+  should block until resolved.
 
 ## Task Kinds
 
@@ -49,6 +53,7 @@ Example JSON:
 {
   "branch": "codex/example",
   "commit": "abc1234",
+  "worktree": "C:\\Users\\Gzw19\\onegent-example",
   "base": {
     "branch": "origin/codex/goal-core-reliability-long-run",
     "commit": "232fabd",
@@ -77,9 +82,15 @@ Example JSON:
     "runtimeClosure": false,
     "liveVerified": false,
     "docsOnly": false
-  }
+  },
+  "safetyStatement": "No provider workflow, no browser booking agent, no live OpenAI call, no secrets, no payment, no login or verification, and no final confirmation was run."
 }
 ```
+
+Stage 0 intake also checks that changed logic/scripts have matching tests,
+worktree and safety metadata are present, broad app-shell touches match the
+declared task kind, and provider/runtime/DB/schema paths are rejected when
+`--forbid-provider-runtime` is set.
 
 The sample four-agent queue lives at:
 
