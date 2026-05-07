@@ -111,7 +111,11 @@ version:
 - Runtime/analyzer work now guards against wrong-airline, wrong-time,
   price-only fallback, stale/mixed worker evidence, and checkout false-success
   when required traveler fields are missing.
-- Flight layered benchmark fixtures cover the known Expedia failure classes.
+- Flight layered benchmark fixtures now cover 15 Expedia no-live cases,
+  including target-card absent, card scan before fallback, fallback
+  matched/no checkout, model/env transient, and hidden-flight-number
+  target-time pass. Remaining expected failures are insufficient-evidence or
+  fixture-backed runtime-patch proposal cases, not closure success claims.
 
 ### Activity
 
@@ -119,6 +123,10 @@ version:
   in New York.
 - The v1 path used the existing Ticketmaster provider runtime, not Browser
   Harness.
+- Exact Ticketmaster `/event/<id>` URLs pasted into homepage Capture now
+  bypass the generic confirmation card and start direct activity tasks with
+  the exact source URL preserved. Artist pages and impersonating hosts do not
+  trigger this direct-booking path.
 - Runtime now has a Ticketmaster task-state classifier for checkout reached,
   seat selection needed, login/account boundary, external ad tab, local browser
   disconnect, and unknown failure states.
@@ -142,6 +150,10 @@ version:
 - Stage 0 Capture now has a 500+ fixture no-live corpus covering raw text,
   URLs, screenshot descriptions, mixed inputs, save-only, compare-only,
   group-decision, refine, profile, and unsupported requests.
+- Capture hardening now guards against homepage URL overcapture when a pasted
+  URL is followed immediately by non-URL request text, provider-host
+  impersonation, screenshot false positives, and loss of hotel/flight/
+  restaurant/trip constraints through the task-boundary projection.
 - `scripts/stage0-operator-report.ts` is the daily no-live cockpit for
   Capture benchmark, private-alpha intake, internal/layered benchmark signals,
   agent intake, and static app-shell performance risk.
@@ -152,8 +164,8 @@ version:
   - 96% artifact completeness
   - 0 routing mismatches
   - 4% unknown failure rate
-  - 26% L1 direct pass
-  - 42% L1 + L2 recovered pass
+  - 20% L1 direct pass
+  - 40% L1 + L2 recovered pass
 - Agent intake now has dependency-aware metadata, next-task recommendations,
   conflict risk, and ready/needs-followup/reject classification so side agents
   can keep working while Codex validates and merges.

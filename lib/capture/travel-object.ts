@@ -83,7 +83,15 @@ export interface BuildCaptureTravelObjectInput {
   capturedAt?: string;
 }
 
-const URL_RE = /https?:\/\/[^\s<>"')]+/i;
+// Positive ASCII-only URL body. The original negation class excluded
+// whitespace + <>"'() but allowed non-ASCII, so a URL pasted with Chinese
+// chat tokens immediately appended ("…event/Z1r9,帮我预定") was captured
+// in full and leaked into source.url + downstream constraints. Switching
+// to ASCII pchars (RFC 3986 unreserved + sub-delims minus ' ( ) plus the
+// generic delimiters /?#@) bounds the match cleanly. Trailing
+// sentence-punctuation is stripped separately by extractCaptureUrl below
+// so legitimate inner commas (Google Maps coords) are preserved.
+const URL_RE = /https?:\/\/[A-Za-z0-9\-._~:/?#@!$&*+=%,;]+/i;
 
 // Brand → scenario hints. Each entry lists the brand tokens (lowercased) we
 // recognize as that vertical. Matching anchors to the *registrable* host
@@ -227,7 +235,7 @@ export function buildCaptureTravelObjectFromNlu(
 
 export function detectCaptureSource(message: string, capturedAt: string): CaptureSource {
   const raw = message.trim();
-  const url = raw.match(URL_RE)?.[0];
+  const url = extractCaptureUrl(raw);
   if (url) {
     const parsed = safeParseUrl(url);
     return {
@@ -448,6 +456,31 @@ function safeParseUrl(value: string): URL | null {
   } catch {
     return null;
   }
+}
+
+/**
+ * Extract the first URL from a raw message and strip trailing sentence
+ * punctuation so the captured `source.url` does not leak chat tokens
+ * into downstream constraints / direct-provider task URLs.
+ *
+ * URL_RE intentionally allows commas and periods inside the URL (legitimate
+ * in paths like `/@40.7,-74.0` or `/foo.html`). The trailing-punctuation
+ * trim only acts on the final character(s) of the matched run, which is
+ * where pasted-chat shapes ("...event/Z1r9, 帮我预定" / "...event/abc.")
+ * leak punctuation into the URL. Closing parens and quotes are already
+ * excluded by URL_RE's character class so they do not need a second trim.
+ */
+function extractCaptureUrl(raw: string): string | null {
+  const match = raw.match(URL_RE);
+  if (!match) return null;
+  let url = match[0];
+  // Trim trailing sentence-delimiter punctuation. Iterate so a sequence
+  // like "...,!" gets fully stripped instead of leaving the inner ',' .
+  url = url.replace(/[,.;:!?]+$/, "");
+  // Also trim a stray unmatched closing bracket that the URL_RE class
+  // does not exclude (']' / '}' / '>' aren't in the negation).
+  url = url.replace(/[\]}>]+$/, "");
+  return url.length > 0 ? url : null;
 }
 
 function normalizeConfidence(value: number | undefined): number {

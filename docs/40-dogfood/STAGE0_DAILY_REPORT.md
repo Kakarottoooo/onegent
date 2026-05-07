@@ -25,8 +25,8 @@ Routing mismatch: 0
 Cases: 50
 Artifact completeness: 96%
 Unknown failure: 4%
-L1 direct pass: 26%
-L1 + L2 recovered pass: 48%
+L1 direct pass: 20%
+L1 + L2 recovered pass: 40%
 
 ## Private Alpha Intake
 
@@ -61,8 +61,8 @@ Medium risk: 1
 | `internal:provider_simulated_block` | 5 |
 | `internal:stale_session_or_provider_degraded` | 5 |
 | `internal:unsupported_request` | 5 |
+| `layered:insufficient_evidence` | 5 |
 | `layered:provider_degraded` | 5 |
-| `capture:artifact_incomplete` | 4 |
 
 ## Owner Summary
 
@@ -70,7 +70,7 @@ Medium risk: 1
 | --- | ---: | --- |
 | `task-workspace` | 23 | capture failures 4/4; internal benchmark failures 16/16; layered benchmark failures 3/3 |
 | `planner` | 20 | internal benchmark failures 20/53 |
-| `provider-runtime` | 15 | internal benchmark failures 9/9; layered benchmark failures 6/9 |
+| `provider-runtime` | 18 | internal benchmark failures 9/9; layered benchmark failures 9/11 |
 | `product/manual-boundary` | 10 | internal benchmark failures 10/10 |
 | `browser-harness` | 2 | layered benchmark failures 2/10 |
 
@@ -80,7 +80,7 @@ Medium risk: 1
 | --- | --- | --- | --- |
 | `p1` | `task-workspace` | Close Capture artifact-contract gaps for source, entity, and readiness evidence. | 4 fixture(s) intentionally expose incomplete artifact contracts. |
 | `p1` | `provider-runtime` | Use layered benchmark failures to pick the next fixture-backed provider hardening branch. | 5 simulated provider blockers remain in the no-live corpus. |
-| `p1` | `provider-runtime` | Prioritize L1 runtime patches over claiming L2 recovery readiness. | Layered L1+L2 recovered pass rate is 48%. |
+| `p1` | `provider-runtime` | Prioritize L1 runtime patches over claiming L2 recovery readiness. | Layered L1+L2 recovered pass rate is 40%. |
 | `p0` | `alpha-ops` | Collect supervised private-alpha submissions and score them through the intake gate. | Private alpha readiness is yellow; synthetic fixtures cannot make it green. |
 | `p1` | `codex` | Use agent intake results to block unsafe branches and ask follow-up only where metadata is incomplete. | 1 branch(es) need follow-up and 1 are rejected. |
 | `p1` | `codex` | Review Stage 0 performance heavy-field risks before adding new app-shell payloads. | 1 endpoint(s) are high-risk in the static compact-contract scan. |

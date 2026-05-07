@@ -2,7 +2,7 @@
 
 > **Branch**: `codex/stage0-capture-mvp`
 > **Last updated**: 2026-05-07
-> **Last commit**: this pass - Stage 0 daily report merge
+> **Last commit**: this pass - Stage 0 capture + vertical no-live hardening merge
 >
 > Claude reads this at session start. I write to it before each push.
 > See `CLAUDE.md` section "coordination protocol".
@@ -17,13 +17,17 @@ Current project progress analysis:
   -> Execution -> Evidence -> Modify`.
 - Completed: initial dogfood closure exists for restaurant, hotel, flight, and
   activity; exact Ticketmaster event URLs now bypass the generic confirmation
-  card and start as direct activity tasks; Goal's Stage 0 daily/operator
+  card and start as direct activity tasks; Capture now guards against homepage
+  URL overcapture, provider-host impersonation, screenshot false positives,
+  and constraint loss through the task boundary; Goal's Stage 0 daily/operator
   report stack is merged with 550 no-live Capture fixtures, private-alpha
   intake evaluation, agent intake checks, and static performance risk scan.
 - In progress: using the daily report and Stage 0 operator report as the
   readiness cockpit; keeping side agents on fresh `codex/stage0-capture-mvp`
   bases; reducing task-workspace artifact gaps and provider-runtime
-  insufficient-evidence classes before real alpha.
+  insufficient-evidence/runtime-patch classes before real alpha. Flight has
+  15 Expedia no-live cases and hotel has 10 hotel no-live cases tracking the
+  next runtime/evidence gaps.
 - Next: collect supervised private-alpha submissions, convert safe misses into
   benchmark fixtures, and prioritize the report's top blockers:
   task-workspace artifact contracts, provider-runtime fixture-backed patches,
@@ -31,6 +35,40 @@ Current project progress analysis:
 - Distance to Stage 0 alpha target: yellow. No-live gates are healthy, but the
   stage cannot be green until real users produce Travel Objects, safe next
   actions, evidence links, and user-value/reuse signals.
+
+Completed in latest pass:
+- Integrated Agent2 `codex/agent2-flight-stage0-v2 @ 4360d8f` as part of the
+  Stage 0 merge train:
+  - explicit target-card-not-visible/no-availability evidence now beats
+    generic no-match or stale checkout signals;
+  - flight layered benchmark coverage expanded from 10 to 15 Expedia-specific
+    cases, including target-card absent, card scan before fallback,
+    fallback-matched/no-checkout, model/env transient, and hidden-flight-number
+    target-time pass;
+  - verified Expedia analyzer/layered tests and the 15-case flight no-live
+    benchmark. Current expected flight failures are insufficient-evidence or
+    fixture-backed runtime-patch proposal cases, not false success.
+- Integrated Agent3 `codex/agent3-hotel-stage0-v2 @ e9e6a2d`:
+  - generic "nothing available" hotel copy is no longer strong inventory proof
+    by itself;
+  - stale running evidence blocks terminal no-availability closure and is
+    classified as insufficient evidence;
+  - verified hotel analyzer/layered tests and the 10-case hotel no-live
+    benchmark. Current expected hotel failures are room selection drift,
+    artifact incomplete, and stale running task-workspace evidence.
+- Integrated Claude `claude/capture-nlu-stage0-hardening @ 8ac84e8`:
+  - fixed homepage URL overcapture when a pasted URL is followed immediately
+    by Chinese or other non-URL text;
+  - pinned exact Ticketmaster `/event/<id>` direct-booking behavior through
+    the full Capture pipeline;
+  - added no-live regressions for screenshot precision, activity-vs-trip
+    collapse, provider-host impersonation, and hotel/flight/restaurant/trip
+    constraint preservation.
+- Integrated Goal `codex/goal-stage0-alpha-readiness-v2 @ c1eea1b`:
+  - added deterministic Capture fixtures for exact Ticketmaster event URLs;
+  - regenerated the Stage 0 daily report on the current tree. Verdict remains
+    yellow: no-live gates pass, but private alpha needs real supervised user
+    submissions and value evidence.
 
 Current multi-agent operating rule:
 - Treat Goal Agent capacity as a different time scale from the main Codex

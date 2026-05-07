@@ -6,6 +6,7 @@ import {
   runCaptureBenchmark,
   selectCaptureBenchmarkFixtures,
 } from "@/lib/capture/benchmark";
+import { buildCaptureTaskBoundary } from "@/lib/capture/task-boundary";
 
 describe("Stage 0 capture benchmark", () => {
   it("ships at least 500 no-live fixtures across required verticals and source shapes", () => {
@@ -157,5 +158,44 @@ describe("Stage 0 capture benchmark", () => {
     const group = report.results.find((result) => result.id.includes("restaurant-group"));
     expect(group?.actualObjectType).toBe("group_decision");
     expect(group?.capture.possible_actions.map((action) => action.type)).toContain("create_room");
+  });
+
+  it("respects direct Ticketmaster event URL behavior without treating artist links or impersonation as direct", () => {
+    const report = runCaptureBenchmark({ vertical: "activity" });
+
+    const directEvent = report.results.find((result) => result.id === "activity-ticketmaster-event-direct-01");
+    expect(directEvent).toMatchObject({
+      actualScenario: "activity",
+      actualSourceType: "url",
+      actualReady: true,
+      failureClass: "none",
+    });
+    expect(directEvent?.capture.constraints.source_url).toContain("/event/Z1r9uZrrZbpZ1Avr9ea");
+
+    const directBoundary = buildCaptureTaskBoundary(directEvent!.capture);
+    expect(directBoundary).toMatchObject({
+      ok: true,
+      scenario: "activity",
+      missingFields: [],
+      nextAction: "run_direct_booking",
+    });
+    expect(directBoundary.payload?.nlu.direct_booking).toBe(true);
+
+    const urlOnlyEvent = report.results.find((result) => result.id === "activity-ticketmaster-event-url-only-01");
+    expect(urlOnlyEvent).toMatchObject({
+      actualScenario: "activity",
+      actualSourceType: "url",
+      actualReady: false,
+      actualReadinessReason: "needs_review",
+      failureClass: "none",
+    });
+    expect(buildCaptureTaskBoundary(urlOnlyEvent!.capture).nextAction).toBe("run_direct_booking");
+
+    const artistLink = report.results.find((result) => result.id === "activity-url-review-01");
+    expect(buildCaptureTaskBoundary(artistLink!.capture).nextAction).not.toBe("run_direct_booking");
+
+    const allReport = runCaptureBenchmark({ vertical: "all" });
+    const impersonation = allReport.results.find((result) => result.input.includes("ticketmaster.com.evil.example"));
+    expect(buildCaptureTaskBoundary(impersonation!.capture).nextAction).not.toBe("run_direct_booking");
   });
 });
