@@ -41,6 +41,11 @@ The reason to use multiple agents is throughput, not code volume. A side agent
 should not sit idle while Codex is validating a finished branch if there is an
 independent next task that can start from the last accepted base.
 
+Unless the founder explicitly asks Codex to spawn internal subagents, "send an
+agent a task" means Codex writes an external prompt for the founder to paste
+into Goal, Claude, Agent2, Agent3, or another named side agent. The founder
+then pastes the returned branch report back to Codex for intake.
+
 Default operating model:
 
 1. Codex keeps the merge train and final product architecture coherent.

@@ -84,6 +84,28 @@ The discipline is:
 If a task spec says "do not edit HUDDLE", treat that as binding even
 if your own coordination file's history shows past HUDDLE edits.
 
+### Founder-Mediated External Agent Flow
+
+Onegent's normal multi-agent workflow is founder-mediated. Codex writes
+copy-paste task prompts for the external agents the founder is already
+running: Goal agent, Claude, Agent2, Agent3, and any later named side agent.
+The founder pastes those prompts into the external agents, receives their
+branch reports, and pastes those reports back to Codex.
+
+Codex does **not** start internal subagents for this workflow unless the
+founder explicitly asks Codex to spawn internal subagents in the current
+Codex thread. The default Codex role is:
+
+- write scoped external-agent prompts;
+- keep the intake queue and merge train coherent;
+- classify returned branches as `ready_to_merge`, `needs_followup`, or
+  `reject`;
+- validate and integrate useful work;
+- issue the next independent prompt while merge validation runs.
+
+This preserves the throughput benefit of multiple agents without letting
+unreviewed internal work drift away from the founder's explicit task lanes.
+
 ## 3. Stale Branch and Cherry-Pick Rules
 
 Codex is the integrator for `codex/integrated-preview-*`. The default

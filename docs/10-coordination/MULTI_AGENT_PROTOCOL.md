@@ -31,6 +31,24 @@ agents repeatedly:
 Following this protocol is mandatory for any agent that wants its branch
 cherry-picked into integrated preview without a Codex-side rewrite.
 
+## 0. External-Agent Dispatch Model
+
+The default Onegent multi-agent model is external and founder-mediated:
+
+1. Codex writes the prompts for Goal, Claude, Agent2, Agent3, or another named
+   side agent.
+2. The founder pastes each prompt into that external agent.
+3. The external agent reports back with branch, commit, base, worktree, changed
+   files, validation, evidence, deferred work, and safety notes.
+4. The founder pastes that report back into Codex.
+5. Codex performs intake, validation, merge/cherry-pick, HUDDLE updates, and
+   the next prompt issuance.
+
+Codex should not spawn internal subagents for this process unless the founder
+explicitly asks for internal Codex subagents in the current thread. Requests to
+"give Agent2/Agent3/Claude/Goal a prompt" mean: write a copy-paste prompt for
+the founder to distribute externally.
+
 ## 1. Branch Freshness Rule
 
 **Always base a new branch on the latest pushed integrated preview head,
