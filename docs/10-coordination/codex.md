@@ -11,6 +11,32 @@
 
 ## Currently doing
 
+Current multi-agent operating rule:
+- Treat Goal Agent capacity as a different time scale from the main Codex
+  agent. A task that Codex estimates as "one day of work" may land from Goal
+  Agent in roughly ten minutes; a "one week" Goal Agent assignment is a more
+  realistic unit and may still return in about an hour. Future Goal Agent
+  prompts should default to week-scale work packages with explicit boundaries,
+  acceptance gates, and anti-bloat constraints, not small one-hour chores.
+- Do not solve the throughput problem by asking side agents to write more
+  code indiscriminately. Every side-agent assignment must close a Stage 0
+  product, benchmark, reliability, performance, evidence, or architecture
+  gap. "More code" is not progress if it slows the app, duplicates runtime
+  logic, weakens ownership boundaries, or makes future refactors harder.
+- Codex should act as the integrator/operator, not the only worker. Before
+  starting a long merge or debug pass, Codex should usually issue the next
+  independent prompts first, so Goal/Claude/Agent2/Agent3 keep working while
+  Codex validates and merges the previous train.
+- Side agents should not block on Codex unless their next task depends on a
+  freshly merged shared schema or runtime contract. When possible, give them
+  independent follow-up lanes based on the latest pushed Stage 0 base, with
+  clear path ownership and no app-shell/runtime overlap.
+- Codex merge work should be faster and more selective: first run metadata
+  intake, classify branches as ready / follow-up / reject, then validate only
+  the risk-relevant commands before the final full gate. The target operating
+  model is "employees stay busy; Codex makes decisions, reviews evidence, and
+  integrates only useful work."
+
 Current status after founder dogfood consolidation:
 - Canonical code line is `master @ 19a14a9`, which includes the provider
   closure integration branch `codex/phase-closure-orchestration-20260505 @
