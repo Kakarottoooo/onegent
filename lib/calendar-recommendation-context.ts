@@ -21,7 +21,13 @@ export async function loadCalendarRecommendationContext(params: {
     userId: params.userId,
     rangeStart: addDaysIso(resolvedDate, -1),
     rangeEnd: addDaysIso(resolvedDate, 1),
+  }).catch((error) => {
+    console.warn("[calendar-recommendation-context] optional calendar sync failed", {
+      message: error instanceof Error ? error.message : String(error),
+    });
+    return null;
   });
+  if (!synced) return null;
   if (!synced.connected || synced.events.length === 0) return null;
 
   const durationMinutes = Math.max(30, params.durationMinutes ?? 120);
