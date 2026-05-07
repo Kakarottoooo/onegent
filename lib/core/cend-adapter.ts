@@ -276,12 +276,29 @@ function convertActivity(body: Record<string, unknown>): ActivityBookingParams {
   // takes them as `booking_link` + `task` so the executor can stage them.
   // Other body keys (activity_name / venue_name / event_date / num_tickets /
   // city) line up with our scenario contract.
+  const bookingLink = expectString(body, "startUrl");
+  const providerPageType = optionalString(body, "provider_page_type");
+  const provider = optionalString(body, "provider");
+  const isProviderStartActivity =
+    (provider === "ticketmaster" ||
+      provider === "stubhub" ||
+      provider === "seatgeek" ||
+      provider === "eventbrite") &&
+    (providerPageType === "event" ||
+      providerPageType === "artist" ||
+      providerPageType === "performer" ||
+      providerPageType === "grouping" ||
+      providerPageType === "search" ||
+      providerPageType === "listing");
+
   return {
     event_name: expectString(body, "activity_name"),
-    city: expectString(body, "city"),
-    event_date: expectString(body, "event_date"),
+    city: isProviderStartActivity ? (optionalString(body, "city") ?? "") : expectString(body, "city"),
+    event_date: isProviderStartActivity
+      ? (optionalString(body, "event_date") ?? "")
+      : expectString(body, "event_date"),
     num_tickets: expectNumber(body, "num_tickets"),
-    booking_link: expectString(body, "startUrl"),
+    booking_link: bookingLink,
     ...(typeof body.task === "string" && body.task.trim() ? { task: body.task } : {}),
   };
 }

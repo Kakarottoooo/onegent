@@ -132,6 +132,30 @@ describe("Capture chat parse artifacts", () => {
     expect(artifacts.capture_task_boundary.ok).toBe(false);
     expect(artifacts.capture_task_boundary.payload).toBeUndefined();
   });
+
+  it("keeps video-only capture in review instead of forcing a URL or text task", () => {
+    const fallback = resultFor(
+      state({ intent: "chitchat" }),
+      { type: "continue_chat" },
+      {
+        scenario: null,
+        categories: [],
+        confirm_ready: false,
+        __v2_state: undefined,
+        __v2_action: undefined,
+      },
+    );
+    const artifacts = buildCaptureChatParseArtifacts({
+      message: "attached video from TikTok",
+      result: fallback,
+      capturedAt,
+    });
+
+    expect(artifacts.capture_travel_object.source.type).toBe("video");
+    expect(artifacts.capture_travel_object.task_readiness.reason).toBe("needs_review");
+    expect(artifacts.capture_task_boundary.ok).toBe(false);
+    expect(artifacts.capture_task_boundary.nextAction).toBe("ask_clarification");
+  });
 });
 
 describe("provider URL fallback NLU result", () => {
@@ -188,6 +212,53 @@ describe("provider URL fallback NLU result", () => {
     expect(artifacts.capture_task_boundary.nextAction).toBe("run_direct_booking");
     expect(artifacts.capture_task_boundary.payload?.nlu.direct_booking).toBe(true);
     expect(artifacts.capture_task_boundary.payload?.nlu.collected_constraints.source_url).toBe(lilWayneUrl);
+  });
+
+  it("builds fallback artifacts for StubHub performer links", () => {
+    const url = "https://www.stubhub.com/olivia-rodrigo-tickets/performer/101864867";
+    const result = buildProviderUrlFallbackNluResult({
+      message: `book this ${url}`,
+      capturedAt,
+    });
+
+    expect(result).toMatchObject({
+      intent: "create_plan",
+      scenario: "activity",
+      confirm_ready: true,
+      collected_constraints: {
+        event_name: "Olivia Rodrigo",
+        provider: "stubhub",
+        provider_page_type: "performer",
+        provider_page_id: "101864867",
+        source_needs_user_choice: true,
+      },
+    });
+    const artifacts = buildCaptureChatParseArtifacts({
+      message: `book this ${url}`,
+      result: result!,
+      capturedAt,
+    });
+    expect(artifacts.capture_task_boundary.nextAction).toBe("run_direct_booking");
+    expect(artifacts.capture_task_boundary.payload?.nlu.collected_constraints.source_url).toBe(url);
+  });
+
+  it("builds fallback artifacts for exact SeatGeek dated event links", () => {
+    const url = "https://seatgeek.com/chris-stapleton-tickets/nashville-tennessee-nissan-stadium-2026-05-23-6-pm/concert/17990981";
+    const result = buildProviderUrlFallbackNluResult({
+      message: `book this ${url}`,
+      capturedAt,
+    });
+
+    expect(result).toMatchObject({
+      scenario: "activity",
+      confirm_ready: true,
+      collected_constraints: {
+        event_name: "Chris Stapleton",
+        provider: "seatgeek",
+        provider_page_type: "event",
+        provider_page_id: "17990981",
+      },
+    });
   });
 
   it("uses the normalized URL in the fallback result when the message starts with ttps", () => {

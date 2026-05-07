@@ -11,13 +11,15 @@ describe("direct activity provider URL parsing", () => {
       "https://www.ticketmaster.com/nashville-sc-v-dc-united-eddi-nashville-tennessee-05-09-2026/event/1B0063739937BB85",
     );
 
-    expect(parsed).toEqual({
+    expect(parsed).toMatchObject({
       provider: "ticketmaster",
       pageType: "event",
       url: "https://www.ticketmaster.com/nashville-sc-v-dc-united-eddi-nashville-tennessee-05-09-2026/event/1B0063739937BB85",
       host: "www.ticketmaster.com",
       providerPageId: "1B0063739937BB85",
       eventId: "1B0063739937BB85",
+      needsUserChoice: false,
+      executionMode: "direct_execution",
     });
   });
 
@@ -26,13 +28,62 @@ describe("direct activity provider URL parsing", () => {
       "https://www.ticketmaster.com/lil-wayne-tickets/artist/712214?ac_link=ursa_84359098-9ebf-4cbc-a046-9d852562c3bd_a_712214?ac_link=iccp_hp_t3_fallback_K8vZ917GemV",
     );
 
-    expect(parsed).toEqual({
+    expect(parsed).toMatchObject({
       provider: "ticketmaster",
       pageType: "artist",
       url: "https://www.ticketmaster.com/lil-wayne-tickets/artist/712214?ac_link=ursa_84359098-9ebf-4cbc-a046-9d852562c3bd_a_712214?ac_link=iccp_hp_t3_fallback_K8vZ917GemV",
       host: "www.ticketmaster.com",
       providerPageId: "712214",
       artistId: "712214",
+      titleHint: "Lil Wayne",
+      needsUserChoice: true,
+      executionMode: "provider_start",
+    });
+  });
+
+  it("accepts StubHub performer and grouping pages as provider-start URLs", () => {
+    expect(
+      parseDirectActivityProviderUrl("https://www.stubhub.com/olivia-rodrigo-tickets/performer/101864867"),
+    ).toMatchObject({
+      provider: "stubhub",
+      pageType: "performer",
+      providerPageId: "101864867",
+      titleHint: "Olivia Rodrigo",
+      needsUserChoice: true,
+      executionMode: "provider_start",
+    });
+
+    expect(
+      parseDirectActivityProviderUrl("https://www.stubhub.com/world-cup-tickets/grouping/45410"),
+    ).toMatchObject({
+      provider: "stubhub",
+      pageType: "grouping",
+      providerPageId: "45410",
+      titleHint: "World Cup",
+      needsUserChoice: true,
+      executionMode: "provider_start",
+    });
+  });
+
+  it("accepts SeatGeek dated event and listing pages", () => {
+    expect(
+      parseDirectActivityProviderUrl("https://seatgeek.com/nashville-sc-tickets/mls/2026-05-09-8-pm/17921493"),
+    ).toMatchObject({
+      provider: "seatgeek",
+      pageType: "event",
+      providerPageId: "17921493",
+      titleHint: "Nashville Sc",
+      needsUserChoice: false,
+      executionMode: "direct_execution",
+    });
+
+    expect(parseDirectActivityProviderUrl("https://seatgeek.com/hamilton-tickets")).toMatchObject({
+      provider: "seatgeek",
+      pageType: "listing",
+      providerPageId: "hamilton-tickets",
+      titleHint: "Hamilton",
+      needsUserChoice: true,
+      executionMode: "provider_start",
     });
   });
 
@@ -58,8 +109,16 @@ describe("direct activity provider URL parsing", () => {
     expect(parseDirectActivityProviderUrl("https://ticketmaster.com.evil.example/event/abc123")).toBeNull();
     expect(parseDirectActivityProviderUrl("https://ticketmaster.com.evil.example/artist/712214")).toBeNull();
     expect(parseDirectActivityProviderUrl("https://notticketmaster.com/event/abc123")).toBeNull();
-    expect(parseDirectActivityProviderUrl("https://www.ticketmaster.com/search?q=lil%20wayne")).toBeNull();
     expect(parseDirectActivityProviderUrl("javascript:https://www.ticketmaster.com/event/abc123")).toBeNull();
+  });
+
+  it("treats Ticketmaster search pages as provider-start pages that require user choice", () => {
+    expect(parseDirectActivityProviderUrl("https://www.ticketmaster.com/search?q=lil%20wayne")).toMatchObject({
+      provider: "ticketmaster",
+      pageType: "search",
+      needsUserChoice: true,
+      executionMode: "provider_start",
+    });
   });
 
   it("reads source_url and capture metadata URLs from constraints", () => {
@@ -101,7 +160,21 @@ describe("direct activity provider URL parsing", () => {
 
     expect(task).toContain("Start from this exact Ticketmaster artist page URL");
     expect(task).toContain("Do not use generic event search");
-    expect(task).toContain("Use the events shown on this provider page");
+    expect(task).toContain("Use the events, listings, dates, or cities shown on this provider page");
     expect(task).toContain("stop before the final purchase");
+  });
+
+  it("builds a non-Ticketmaster provider-start task without Ticketmaster-specific copy", () => {
+    const task = buildDirectActivityTask({
+      eventName: "Olivia Rodrigo",
+      numTickets: 1,
+      providerUrl: "https://www.stubhub.com/olivia-rodrigo-tickets/performer/101864867",
+      provider: "stubhub",
+      pageType: "performer",
+    });
+
+    expect(task).toContain("Start from this exact StubHub performer page URL");
+    expect(task).toContain("unrelated StubHub page");
+    expect(task).not.toContain("Ticketmaster");
   });
 });

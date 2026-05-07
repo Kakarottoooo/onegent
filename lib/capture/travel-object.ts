@@ -9,8 +9,12 @@ import type {
   FlightFields,
 } from "@/lib/agent/nlu-v2";
 import type { NluCategory } from "@/lib/agent/nlu-v2/types";
+import {
+  resolveTravelLinkFromUrl,
+  type ResolvedTravelLink,
+} from "@/lib/capture/travel-link-resolver";
 
-export type CaptureSourceType = "request" | "url" | "text" | "screenshot";
+export type CaptureSourceType = "request" | "url" | "text" | "screenshot" | "video";
 
 export type CaptureActionType =
   | "ask_clarification"
@@ -40,6 +44,7 @@ export interface CaptureSource {
    * gate so the homepage never silently runs the wrong link.
    */
   additional_urls?: string[];
+  resolved_link?: ResolvedTravelLink;
   captured_at: string;
 }
 
@@ -189,7 +194,8 @@ export function buildCaptureTravelObjectFromNlu(
 ): CaptureTravelObject {
   const capturedAt = input.capturedAt ?? new Date().toISOString();
   const source = detectCaptureSource(input.message, capturedAt);
-  const urlHint = source.host ? inferScenarioFromHost(source.host) : null;
+  const resolvedLinkHint = scenarioHintFromResolvedLink(source.resolved_link);
+  const urlHint = resolvedLinkHint ?? (source.host ? inferScenarioFromHost(source.host) : null);
   const state = input.result.__v2_state;
   const action = input.result.__v2_action;
   const scenario = input.result.scenario ?? urlHint?.scenario ?? null;
@@ -205,6 +211,7 @@ export function buildCaptureTravelObjectFromNlu(
     ...input.result.collected_constraints,
     ...(source.url ? { source_url: source.url } : {}),
     ...(source.host ? { source_host: source.host } : {}),
+    ...(source.resolved_link ? resolvedLinkConstraints(source.resolved_link) : {}),
   };
 
   return {
@@ -248,6 +255,7 @@ export function detectCaptureSource(message: string, capturedAt: string): Captur
   if (urls.length > 0) {
     const url = urls[0];
     const parsed = safeParseUrl(url);
+    const resolvedLink = resolveTravelLinkFromUrl(url) ?? undefined;
     const additional = urls.slice(1);
     return {
       type: "url",
@@ -255,6 +263,15 @@ export function detectCaptureSource(message: string, capturedAt: string): Captur
       url,
       ...(parsed?.hostname ? { host: parsed.hostname.toLowerCase() } : {}),
       ...(additional.length > 0 ? { additional_urls: additional } : {}),
+      ...(resolvedLink ? { resolved_link: resolvedLink } : {}),
+      captured_at: capturedAt,
+    };
+  }
+
+  if (looksLikeVideoReference(raw)) {
+    return {
+      type: "video",
+      raw_text: raw,
       captured_at: capturedAt,
     };
   }
@@ -271,6 +288,26 @@ export function detectCaptureSource(message: string, capturedAt: string): Captur
     type: raw.length > 220 ? "text" : "request",
     raw_text: raw,
     captured_at: capturedAt,
+  };
+}
+
+function scenarioHintFromResolvedLink(
+  link: ResolvedTravelLink | undefined,
+): { scenario: NluScenario; category: NluCategory } | null {
+  if (!link || link.vertical === "unknown") return null;
+  return { scenario: link.vertical, category: link.vertical };
+}
+
+function resolvedLinkConstraints(link: ResolvedTravelLink): Record<string, unknown> {
+  return {
+    source_provider: link.provider,
+    source_page_type: link.page_type,
+    source_execution_mode: link.execution_mode,
+    source_needs_user_choice: link.needs_user_choice,
+    ...(link.provider !== "unknown" ? { provider: link.provider } : {}),
+    ...(link.page_type !== "unknown_provider_page" ? { provider_page_type: link.page_type } : {}),
+    ...(link.provider_page_id ? { provider_page_id: link.provider_page_id } : {}),
+    ...(link.title_hint ? { title_hint: link.title_hint } : {}),
   };
 }
 
@@ -412,7 +449,9 @@ function buildTaskReadiness(input: {
     // what's in the screenshot, or an explicit category for the URL)
     // instead of declining as unsupported.
     const needsReviewSource =
-      input.sourceType === "url" || input.sourceType === "screenshot";
+      input.sourceType === "url" ||
+      input.sourceType === "screenshot" ||
+      input.sourceType === "video";
     return {
       ready: false,
       reason: needsReviewSource ? "needs_review" : "unsupported_source",
@@ -472,6 +511,15 @@ function looksLikeScreenshotReference(value: string): boolean {
     return true;
   }
   if (/(?:这张|那张|这个|这份|附件)\s*(?:图片?|照片|快照|图)/u.test(value)) return true;
+  return false;
+}
+
+function looksLikeVideoReference(value: string): boolean {
+  if (/\.(mp4|mov|m4v|webm|avi|mkv)\b/i.test(value)) return true;
+  if (/\b(?:this|that|the|attached|uploaded|sent)\s+(?:video|clip|reel|tiktok)\b/i.test(value)) {
+    return true;
+  }
+  if (/(?:杩欎釜|杩欐|闄勪欢)\s*(?:瑙嗛|鐭墖|reel|tiktok)/iu.test(value)) return true;
   return false;
 }
 

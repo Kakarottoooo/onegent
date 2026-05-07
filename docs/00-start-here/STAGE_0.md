@@ -47,7 +47,7 @@ Stage 0 work is in scope when it directly improves one of these systems:
 
 1. **Capture MVP**
    - The homepage input is the Capture surface.
-   - Users can paste a URL, screenshot description, text, or natural-language request into chat.
+   - Users can paste a URL, screenshot description, video reference, text, or natural-language request into chat.
    - Convert input into a Travel Object with type, extracted entities,
      confidence, source, possible actions, and task readiness.
    - Keep the UI light; the important work is backend normalization into the
@@ -95,10 +95,11 @@ Stage 0 work is in scope when it directly improves one of these systems:
      fixtures. They prove source metadata, Travel Object projection,
      task-readiness, owner, and artifact contracts. They do not prove live
      OpenAI extraction quality.
-   - Direct activity URL coverage follows the current Stage 0 contract: exact
-     Ticketmaster `/event/<id>` links can become direct provider-entry tasks,
-     while generic artist/search links and impersonating hosts remain review
-     inputs.
+   - Direct activity URL coverage now flows through a structured Travel Link
+     Resolver contract. Exact provider event links can become direct
+     provider-entry tasks; artist, performer, grouping, search, and listing
+     pages can become provider-start tasks that require user choice at runtime;
+     impersonating hosts remain review-only.
    - The current Stage 0 capture corpus target is 500+ fixtures across
      restaurant, hotel, flight, activity, trip/package, ambiguous/save-only,
      refine/follow-up, profile/preferences, and chitchat/unsupported inputs.
@@ -142,7 +143,7 @@ Use these as the operating scorecard:
 | False success | 0 |
 | Wrong target selection | 0 |
 | Task workspace consistency | all task entry points land on the same task view |
-| Capture conversion | link/text/screenshot/request can become a Travel Object |
+| Capture conversion | link/text/screenshot/video/request can become a Travel Object |
 | Capture benchmark corpus | at least 500 no-live fixtures before alpha intake |
 | Task-ready accuracy | at least 90% on deterministic capture fixtures |
 | Source metadata completeness | at least 95% |
@@ -184,7 +185,11 @@ Anti-goals for side agents:
 - Build the first Capture MVP:
   - Homepage chat remains the capture input.
   - `/api/chat/parse` returns a Travel Object alongside the normal NLU result.
-  - URL/text/screenshot-description/request sources preserve source metadata.
+  - URL/text/screenshot-description/video-reference/request sources preserve source metadata.
+  - Provider links are normalized into a structured Travel Link Resolver
+    output before task creation. LLM/web metadata enrichment may improve this
+    object later, but executor prompts must be generated from the structured
+    contract, not from free-form model prose.
   - Task readiness is derived from NLU/router state, not from model prose.
   - Convert-to-task stays behind the existing confirm/task workspace flow.
 - Keep it small and use existing NLU/task seams where possible.

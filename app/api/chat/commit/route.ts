@@ -1262,6 +1262,7 @@ async function buildDirectBookingPayload(
       eventDate,
       numTickets,
       providerUrl: directUrl.url,
+      provider: directUrl.provider,
       pageType: directUrl.pageType,
     });
     const body: Record<string, unknown> = {
@@ -1298,7 +1299,7 @@ async function buildDirectBookingPayload(
       booking_step: {
         type: "activity",
         emoji: "\u{1F3AB}",
-        label: `${eventName} (Ticketmaster)`,
+        label: `${eventName} (${labelForActivityProvider(directUrl.provider)})`,
         apiEndpoint: "/api/booking-autopilot/universal",
         body,
         status: "pending",
@@ -1306,6 +1307,14 @@ async function buildDirectBookingPayload(
     };
   }
   return null;
+}
+
+function labelForActivityProvider(provider: string): string {
+  if (provider === "ticketmaster") return "Ticketmaster";
+  if (provider === "stubhub") return "StubHub";
+  if (provider === "seatgeek") return "SeatGeek";
+  if (provider === "eventbrite") return "Eventbrite";
+  return "Provider";
 }
 
 async function buildDirectBookingProfileGap(

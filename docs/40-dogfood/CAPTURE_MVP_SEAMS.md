@@ -90,7 +90,7 @@ runtime request. Keep it stable enough to preview, edit, test, and convert
 into existing NLU/task shapes.
 
 ```ts
-type TravelObjectSourceType = "text" | "url" | "screenshot" | "request";
+type TravelObjectSourceType = "text" | "url" | "screenshot" | "video" | "request";
 
 interface TravelObject {
   id: string;
@@ -165,11 +165,11 @@ Field notes:
 3. Direct-booking false positives.
    - Risk: URL or screenshot extraction may infer a venue/property from weak
      page text and set `direct_booking`.
-   - Mitigation: set `direct_booking` only when source evidence contains a
-     specific named restaurant or hotel and required dates/party fields pass
-     the same direct-booking guard as NLU. For activity links, only exact
-     Ticketmaster `/event/<id>` URLs are treated as direct provider-entry
-     evidence; artist/search pages and impersonating hosts stay review-only.
+   - Mitigation: set activity execution from the structured Travel Link
+     Resolver contract, not model prose. Exact event pages can start direct
+     provider-entry tasks. Artist, performer, grouping, search, and listing
+     pages can start provider-page tasks only with user-choice boundaries.
+     Impersonating hosts stay review-only.
 
 4. Confidence overuse.
    - Risk: high model confidence is treated as task readiness even while

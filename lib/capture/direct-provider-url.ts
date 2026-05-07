@@ -1,5 +1,21 @@
-export type DirectActivityProvider = "ticketmaster";
-export type DirectActivityProviderPageType = "event" | "artist";
+import {
+  resolveTravelLinkFromUrl,
+  type ResolvedTravelLink,
+  type TravelLinkProvider,
+  type TravelLinkPageType,
+} from "@/lib/capture/travel-link-resolver";
+
+export type DirectActivityProvider = Extract<
+  TravelLinkProvider,
+  "ticketmaster" | "stubhub" | "seatgeek" | "eventbrite"
+>;
+export type DirectActivityProviderPageType =
+  | "event"
+  | "artist"
+  | "performer"
+  | "grouping"
+  | "search"
+  | "listing";
 
 export interface DirectActivityProviderUrl {
   provider: DirectActivityProvider;
@@ -7,76 +23,21 @@ export interface DirectActivityProviderUrl {
   url: string;
   host: string;
   providerPageId: string;
+  titleHint?: string;
+  needsUserChoice: boolean;
+  executionMode: "direct_execution" | "provider_start";
   eventId?: string;
   artistId?: string;
+  performerId?: string;
+  groupingId?: string;
 }
 
-const TICKETMASTER_HOSTS = [
-  "ticketmaster.com",
-  "ticketmaster.ca",
-  "ticketmaster.co.uk",
-  "ticketmaster.com.au",
-  "ticketmaster.de",
-  "ticketmaster.fr",
-  "ticketmaster.es",
-  "ticketmaster.it",
-  "ticketmaster.nl",
-  "ticketmaster.ie",
-] as const;
-
-const EVENT_ID_RE = /^(.*\/event\/)([A-Za-z0-9_-]+)/i;
-const ARTIST_ID_RE = /^(.*\/artist\/)([A-Za-z0-9_-]+)/i;
-
 export function parseDirectActivityProviderUrl(value: unknown): DirectActivityProviderUrl | null {
-  if (typeof value !== "string") return null;
-  const candidate = value.trim();
-  if (!candidate) return null;
-
-  let parsed: URL;
-  try {
-    parsed = new URL(candidate);
-  } catch {
-    return null;
-  }
-
-  if (parsed.protocol !== "https:" && parsed.protocol !== "http:") return null;
-
-  const host = parsed.hostname.toLowerCase();
-  if (!isTicketmasterHost(host)) return null;
-
-  const eventMatch = parsed.pathname.match(EVENT_ID_RE);
-  if (eventMatch) {
-    const eventId = eventMatch[2];
-    if (!eventId) return null;
-
-    const cleanPath = `${eventMatch[1]}${eventId}`;
-    return {
-      provider: "ticketmaster",
-      pageType: "event",
-      url: `${parsed.origin}${cleanPath}${parsed.search}${parsed.hash}`,
-      host,
-      providerPageId: eventId,
-      eventId,
-    };
-  }
-
-  const artistMatch = parsed.pathname.match(ARTIST_ID_RE);
-  if (artistMatch) {
-    const artistId = artistMatch[2];
-    if (!artistId) return null;
-
-    const cleanPath = `${artistMatch[1]}${artistId}`;
-    return {
-      provider: "ticketmaster",
-      pageType: "artist",
-      url: `${parsed.origin}${cleanPath}${parsed.search}${parsed.hash}`,
-      host,
-      providerPageId: artistId,
-      artistId,
-    };
-  }
-
-  return null;
+  const resolved = resolveTravelLinkFromUrl(value);
+  if (!resolved || resolved.vertical !== "activity") return null;
+  if (!isDirectActivityProvider(resolved.provider)) return null;
+  if (resolved.safe_next_action !== "start_task") return null;
+  return directActivityFromResolved(resolved);
 }
 
 export function readDirectActivityProviderUrlFromConstraints(
@@ -108,29 +69,79 @@ export function buildDirectActivityTask(input: {
   eventDate?: string | null;
   numTickets: number;
   providerUrl: string;
+  provider?: DirectActivityProvider;
   pageType?: DirectActivityProviderPageType;
 }): string {
   const datePart = input.eventDate ? ` on ${input.eventDate}` : "";
-  if (input.pageType === "artist") {
+  const providerLabel = labelForProvider(input.provider ?? "ticketmaster");
+  if (input.pageType && input.pageType !== "event") {
+    const pageLabel = labelForPageType(input.pageType);
     return [
-      `Start from this exact Ticketmaster artist page URL: ${input.providerUrl}.`,
+      `Start from this exact ${providerLabel} ${pageLabel} page URL: ${input.providerUrl}.`,
       `Book ${input.numTickets} ticket${input.numTickets === 1 ? "" : "s"} for "${input.eventName}"${datePart}.`,
-      "Do not use generic event search or replace it with an unrelated Ticketmaster page.",
-      "Use the events shown on this provider page to continue.",
+      `Do not use generic event search or replace it with an unrelated ${providerLabel} page.`,
+      "Use the events, listings, dates, or cities shown on this provider page to continue.",
       "If multiple events, dates, or seats require a choice, pause for the user to choose.",
       "Fill allowed saved profile fields after user selection and stop before the final purchase or confirmation action.",
     ].join(" ");
   }
   return [
-    `Use this exact Ticketmaster event URL: ${input.providerUrl}.`,
+    `Use this exact ${providerLabel} event URL: ${input.providerUrl}.`,
     `Book ${input.numTickets} ticket${input.numTickets === 1 ? "" : "s"} for "${input.eventName}"${datePart}.`,
-    "Do not search for or replace it with a different Ticketmaster event URL.",
+    `Do not search for or replace it with a different ${providerLabel} event URL.`,
     "If this exact provider page is unavailable or not found, stop and report that exact provider-link problem.",
     "If ticket or seat selection is required, pause for the user to choose.",
     "Fill allowed saved profile fields after user selection and stop before the final purchase or confirmation action.",
   ].join(" ");
 }
 
-function isTicketmasterHost(host: string): boolean {
-  return TICKETMASTER_HOSTS.some((allowed) => host === allowed || host.endsWith(`.${allowed}`));
+function directActivityFromResolved(resolved: ResolvedTravelLink): DirectActivityProviderUrl | null {
+  if (!resolved.provider_page_id) return null;
+  const pageType = mapPageType(resolved.page_type);
+  if (!pageType) return null;
+  const provider = resolved.provider as DirectActivityProvider;
+  return {
+    provider,
+    pageType,
+    url: resolved.normalized_url,
+    host: resolved.host,
+    providerPageId: resolved.provider_page_id,
+    ...(resolved.title_hint ? { titleHint: resolved.title_hint } : {}),
+    needsUserChoice: resolved.needs_user_choice,
+    executionMode: resolved.execution_mode === "direct_execution" ? "direct_execution" : "provider_start",
+    ...(pageType === "event" ? { eventId: resolved.provider_page_id } : {}),
+    ...(pageType === "artist" ? { artistId: resolved.provider_page_id } : {}),
+    ...(pageType === "performer" ? { performerId: resolved.provider_page_id } : {}),
+    ...(pageType === "grouping" ? { groupingId: resolved.provider_page_id } : {}),
+  };
+}
+
+function isDirectActivityProvider(provider: TravelLinkProvider): provider is DirectActivityProvider {
+  return provider === "ticketmaster" || provider === "stubhub" || provider === "seatgeek" || provider === "eventbrite";
+}
+
+function mapPageType(pageType: TravelLinkPageType): DirectActivityProviderPageType | null {
+  if (pageType === "exact_event") return "event";
+  if (pageType === "artist") return "artist";
+  if (pageType === "performer") return "performer";
+  if (pageType === "grouping") return "grouping";
+  if (pageType === "search_results") return "search";
+  if (pageType === "provider_listing") return "listing";
+  return null;
+}
+
+function labelForProvider(provider: DirectActivityProvider): string {
+  if (provider === "ticketmaster") return "Ticketmaster";
+  if (provider === "stubhub") return "StubHub";
+  if (provider === "seatgeek") return "SeatGeek";
+  if (provider === "eventbrite") return "Eventbrite";
+  return "provider";
+}
+
+function labelForPageType(pageType: DirectActivityProviderPageType): string {
+  if (pageType === "artist") return "artist";
+  if (pageType === "performer") return "performer";
+  if (pageType === "grouping") return "collection";
+  if (pageType === "search") return "search results";
+  return "listing";
 }

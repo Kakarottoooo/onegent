@@ -21,6 +21,12 @@ is the capture surface, and `/api/chat/parse` can now return a normalized
 Travel Object alongside the normal NLU result. Separate heavy Capture pages
 are not the Stage 0 priority.
 
+Capture link handling now uses a structured Travel Link Resolver seam. URL
+patterns are only the first evidence source: the resolver records provider,
+page type, execution mode, user-choice requirements, and source evidence so
+future webpage metadata, screenshot, video, or LLM enrichers can feed the same
+task contract without turning model prose directly into execution prompts.
+
 ## Current Product Direction
 
 Onegent is not a generic browser bot and not just a recommendation UI. It is a
@@ -123,10 +129,12 @@ version:
   in New York.
 - The v1 path used the existing Ticketmaster provider runtime, not Browser
   Harness.
-- Exact Ticketmaster `/event/<id>` URLs pasted into homepage Capture now
-  bypass the generic confirmation card and start direct activity tasks with
-  the exact source URL preserved. Artist pages and impersonating hosts do not
-  trigger this direct-booking path.
+- Activity provider links pasted into homepage Capture now flow through the
+  Travel Link Resolver. Exact event links can start direct provider-entry
+  tasks with the exact source URL preserved. Ticketmaster artist pages,
+  StubHub performer/grouping pages, and SeatGeek dated/listing pages can start
+  provider-page tasks that keep user choice boundaries. Impersonating hosts do
+  not trigger provider execution.
 - Runtime now has a Ticketmaster task-state classifier for checkout reached,
   seat selection needed, login/account boundary, external ad tab, local browser
   disconnect, and unknown failure states.
@@ -161,8 +169,9 @@ version:
   recording task-readiness evidence in the deterministic artifact contract.
 - Capture hardening now guards against homepage URL overcapture when a pasted
   URL is followed immediately by non-URL request text, provider-host
-  impersonation, screenshot false positives, and loss of hotel/flight/
-  restaurant/trip constraints through the task-boundary projection.
+  impersonation, screenshot false positives, multi-URL silent selection, and
+  loss of hotel/flight/restaurant/trip constraints through the task-boundary
+  projection.
 - `scripts/stage0-operator-report.ts` is the daily no-live cockpit for
   Capture benchmark, private-alpha intake, internal/layered benchmark signals,
   agent intake, static app-shell performance risk, top blockers by owner, and

@@ -3,6 +3,7 @@ import {
   buildCaptureTravelObjectFromNlu,
   type CaptureTravelObject,
 } from "@/lib/capture/travel-object";
+import { parseDirectActivityProviderUrl } from "@/lib/capture/direct-provider-url";
 import {
   buildCaptureTaskBoundary,
   type CaptureTaskBoundaryResult,
@@ -109,6 +110,10 @@ export function buildProviderUrlFallbackNluResult(input: {
       num_tickets: 1,
       source_url: capture.source.url,
       ...(capture.source.host ? { source_host: capture.source.host } : {}),
+      provider: inferred.provider,
+      provider_page_type: inferred.pageType,
+      provider_page_id: inferred.providerPageId,
+      ...(inferred.needsUserChoice ? { source_needs_user_choice: true } : {}),
     },
     missing_fields: [],
     suggested_clarify_question: null,
@@ -121,82 +126,26 @@ export function buildProviderUrlFallbackNluResult(input: {
   };
 }
 
-const FALLBACK_ACTIVITY_PROVIDER_HOSTS = [
-  "ticketmaster.com",
-  "ticketmaster.ca",
-  "ticketmaster.co.uk",
-  "ticketmaster.com.au",
-  "ticketmaster.de",
-  "ticketmaster.fr",
-  "ticketmaster.es",
-  "ticketmaster.it",
-  "ticketmaster.nl",
-  "ticketmaster.ie",
-  "seatgeek.com",
-  "stubhub.com",
-  "eventbrite.com",
-] as const;
-
 function inferActivityFromProviderUrl(url: string): {
   eventName: string;
   eventType: NonNullable<IntentState["activity"]>["event_type"];
+  provider: string;
+  pageType: string;
+  providerPageId: string;
+  needsUserChoice: boolean;
 } | null {
-  let parsed: URL;
-  try {
-    parsed = new URL(url);
-  } catch {
-    return null;
-  }
-  const host = parsed.hostname.toLowerCase();
-  if (!isFallbackActivityProviderHost(host)) {
-    return null;
-  }
-  const segments = parsed.pathname
-    .split("/")
-    .map((segment) => safeDecode(segment).trim())
-    .filter(Boolean);
-  if (segments.length === 0) return null;
-  const markerIndex = segments.findIndex((segment) =>
-    /^(artist|event|e|events|tickets)$/i.test(segment),
-  );
-  const slug = markerIndex > 0 ? segments[markerIndex - 1] : segments[0];
-  const eventName = titleizeSlug(slug);
+  const direct = parseDirectActivityProviderUrl(url);
+  if (!direct) return null;
+  const eventName = direct.titleHint || "Provider event";
   if (!eventName) return null;
   return {
     eventName,
-    eventType: inferActivityType(eventName, host),
+    eventType: inferActivityType(eventName, direct.host),
+    provider: direct.provider,
+    pageType: direct.pageType,
+    providerPageId: direct.providerPageId,
+    needsUserChoice: direct.needsUserChoice,
   };
-}
-
-function isFallbackActivityProviderHost(host: string): boolean {
-  return FALLBACK_ACTIVITY_PROVIDER_HOSTS.some(
-    (allowed) => host === allowed || host.endsWith(`.${allowed}`),
-  );
-}
-
-function safeDecode(value: string): string {
-  try {
-    return decodeURIComponent(value);
-  } catch {
-    return value;
-  }
-}
-
-function titleizeSlug(value: string): string {
-  const cleaned = value
-    .replace(/\.(html?|aspx?)$/i, "")
-    .replace(/(?:^|-)(?:tickets?|events?|artist)$/gi, "")
-    .replace(/-+/g, " ")
-    .replace(/\s+/g, " ")
-    .trim();
-  if (!cleaned) return "";
-  return cleaned
-    .split(" ")
-    .map((word) => {
-      if (/^[A-Z0-9]{2,}$/.test(word)) return word;
-      return word.charAt(0).toUpperCase() + word.slice(1).toLowerCase();
-    })
-    .join(" ");
 }
 
 function inferActivityType(

@@ -41,11 +41,10 @@ import { parseDirectActivityProviderUrl } from "@/lib/capture/direct-provider-ur
 //      `source.url`, but the second+ URLs surface in `additional_urls`
 //      and the task boundary holds for review (review_capture, not
 //      run_direct_booking).
-//   B) Eventbrite / SeatGeek / StubHub URLs are recognized as activity
-//      via the host hint but DO NOT take the run_direct_booking shortcut
-//      — that path is locked to Ticketmaster /event/<id> until each
-//      provider has a deterministic event-id pattern AND a corresponding
-//      executor instruction message.
+//   B) Curated non-Ticketmaster provider URLs (SeatGeek / StubHub /
+//      Eventbrite) can now start provider-page tasks through the same
+//      structured direct-provider contract. The prompt is provider-specific
+//      and keeps user-choice boundaries for performer/listing pages.
 //   C) Pure helper `extractAllCaptureUrls` returns every URL in the
 //      message, in order, with the same trailing-punctuation cleanup as
 //      the single-URL `extractCaptureUrl` path.
@@ -367,9 +366,9 @@ describe("buildCaptureTaskBoundary — multi-URL blocks the direct_booking short
   });
 });
 
-// ─── D. Eventbrite / SeatGeek / StubHub: classified but NOT direct ────
+// ─── D. Curated non-Ticketmaster provider-start links ─────────────────
 
-describe("non-Ticketmaster activity providers — host hint OK, direct booking deferred", () => {
+describe("non-Ticketmaster activity providers — structured provider-start", () => {
   it("Eventbrite event URL classifies as activity via host hint", () => {
     const url = "https://www.eventbrite.com/e/sample-event-tickets-987654321012";
     const capture = buildCaptureTravelObjectFromNlu({
@@ -383,16 +382,13 @@ describe("non-Ticketmaster activity providers — host hint OK, direct booking d
     expect(capture.classification.categories).toEqual(["activity"]);
   });
 
-  it("Eventbrite event URL does NOT trigger run_direct_booking (parser is TM-only by design)", () => {
-    // Defense-in-depth: even if someone seeds a complete activity capture
-    // around an Eventbrite URL, parseDirectActivityProviderUrl returns
-    // null for non-Ticketmaster hosts so the boundary stays on the
-    // normal show_confirmation path. Pinning this contract prevents a
-    // future "expand DirectActivityProvider" change from silently
-    // shipping an executor task that says "Use this exact Ticketmaster
-    // event URL" against an Eventbrite link.
+  it("Eventbrite exact event URL can start a provider task without Ticketmaster copy", () => {
     const url = "https://www.eventbrite.com/e/sample-event-tickets-987654321012";
-    expect(parseDirectActivityProviderUrl(url)).toBeNull();
+    expect(parseDirectActivityProviderUrl(url)).toMatchObject({
+      provider: "eventbrite",
+      pageType: "event",
+      providerPageId: "987654321012",
+    });
     const cap = captureFixture({
       source: {
         type: "url",
@@ -419,8 +415,7 @@ describe("non-Ticketmaster activity providers — host hint OK, direct booking d
       constraints: { source_url: url },
     });
     const boundary = buildCaptureTaskBoundary(cap);
-    expect(boundary.nextAction).not.toBe("run_direct_booking");
-    expect(boundary.nextAction).toBe("show_confirmation");
+    expect(boundary.nextAction).toBe("run_direct_booking");
   });
 
   it("SeatGeek event URL classifies as activity via host hint", () => {
@@ -435,9 +430,13 @@ describe("non-Ticketmaster activity providers — host hint OK, direct booking d
     expect(capture.classification.scenario).toBe("activity");
   });
 
-  it("SeatGeek event URL does NOT trigger run_direct_booking", () => {
+  it("SeatGeek listing URL starts as provider_start and keeps user choice required", () => {
     const url = "https://seatgeek.com/knicks-vs-celtics-tickets/12345";
-    expect(parseDirectActivityProviderUrl(url)).toBeNull();
+    expect(parseDirectActivityProviderUrl(url)).toMatchObject({
+      provider: "seatgeek",
+      pageType: "listing",
+      needsUserChoice: true,
+    });
     const cap = captureFixture({
       source: {
         type: "url",
@@ -464,19 +463,27 @@ describe("non-Ticketmaster activity providers — host hint OK, direct booking d
       constraints: { source_url: url },
     });
     const boundary = buildCaptureTaskBoundary(cap);
-    expect(boundary.nextAction).not.toBe("run_direct_booking");
-    expect(boundary.nextAction).toBe("show_confirmation");
+    expect(boundary.nextAction).toBe("run_direct_booking");
   });
 
-  it("StubHub URL classifies as activity, does not trigger run_direct_booking", () => {
-    const url = "https://www.stubhub.com/example-event/12345";
-    expect(parseDirectActivityProviderUrl(url)).toBeNull();
+  it("StubHub performer URL classifies as activity and direct provider-start", () => {
+    const url = "https://www.stubhub.com/olivia-rodrigo-tickets/performer/101864867";
+    expect(parseDirectActivityProviderUrl(url)).toMatchObject({
+      provider: "stubhub",
+      pageType: "performer",
+      titleHint: "Olivia Rodrigo",
+    });
     const capture = buildCaptureTravelObjectFromNlu({
       message: url,
       result: fallbackResultWithoutState(),
       capturedAt,
     });
     expect(capture.classification.scenario).toBe("activity");
+    expect(capture.source.resolved_link).toMatchObject({
+      provider: "stubhub",
+      page_type: "performer",
+      needs_user_choice: true,
+    });
   });
 
   it("Telecharge URL classifies as activity (Broadway-class), no direct booking", () => {
