@@ -14,6 +14,22 @@ import {
   type LayeredBenchmarkReport,
   type LayeredBenchmarkOwner,
 } from "@/lib/execution-layer/layered-benchmark";
+import {
+  buildPrivateAlphaIntakeReport,
+  type PrivateAlphaIntakeReport,
+  type PrivateAlphaSubmission,
+} from "@/lib/capture/private-alpha";
+import {
+  classifyAgentIntakeQueue,
+  type AgentIntakeQueueReport,
+  type AgentReturnReport,
+} from "@/lib/internal-benchmark/agent-intake";
+import {
+  buildStage0PerformanceReport,
+  type Stage0PerformanceReport,
+} from "@/lib/internal-benchmark/stage0-performance";
+import privateAlphaFixture from "@/lib/capture/__fixtures__/private-alpha-submissions.json";
+import agentIntakeFixture from "@/lib/internal-benchmark/__fixtures__/agent-intake/stage0-returned-branches.json";
 
 export type Stage0ReadinessVerdict = "green" | "yellow" | "red";
 
@@ -22,6 +38,8 @@ export type Stage0OperatorReportOptions = {
   captureVertical?: CaptureBenchmarkVerticalArg;
   internalCount?: number;
   layeredCount?: number;
+  privateAlphaSubmissions?: PrivateAlphaSubmission[];
+  agentReports?: AgentReturnReport[];
 };
 
 export type Stage0Owner = CaptureBenchmarkOwner | InternalBenchmarkOwner | LayeredBenchmarkOwner | "codex";
@@ -39,6 +57,11 @@ export type Stage0NextAction = {
   priority: "p0" | "p1" | "p2";
 };
 
+export type Stage0FailureClassSummary = {
+  failureClass: string;
+  count: number;
+};
+
 export type Stage0OperatorReport = {
   generatedAt: string;
   verdict: Stage0ReadinessVerdict;
@@ -46,6 +69,18 @@ export type Stage0OperatorReport = {
   capture: CaptureBenchmarkReport;
   internalBenchmark: InternalBenchmarkReport;
   layeredBenchmark: LayeredBenchmarkReport;
+  privateAlpha: PrivateAlphaIntakeReport;
+  agentIntake: AgentIntakeQueueReport;
+  performance: Stage0PerformanceReport;
+  captureBenchmarkPassRate: number;
+  routingMismatchCount: number;
+  taskReadyAccuracy: number;
+  artifactCompleteness: number;
+  unknownFailureRate: number;
+  topFailureClasses: Stage0FailureClassSummary[];
+  dogfoodBugLinks: CaptureBenchmarkReport["dogfoodLinks"];
+  blockedBranches: string[];
+  whatChangedSinceLastReport: string;
   ownerSummary: Stage0OwnerSummary[];
   topNextActions: Stage0NextAction[];
   notes: string[];
@@ -70,10 +105,27 @@ export function buildStage0OperatorReport(
     count: options.layeredCount ?? 50,
     mode: "no-live",
   });
+  const privateAlpha = buildPrivateAlphaIntakeReport(
+    options.privateAlphaSubmissions ?? defaultPrivateAlphaSubmissions(),
+  );
+  const agentIntake = classifyAgentIntakeQueue(options.agentReports ?? defaultAgentReports(), {
+    requiredBaseBranch: "origin/codex/stage0-capture-mvp",
+    requiredBaseCommit: "9ad43f1",
+    forbidProviderRuntimeChanges: true,
+  });
+  const performance = buildStage0PerformanceReport();
 
   const ownerSummary = summarizeOwners(capture, internalBenchmark, layeredBenchmark);
-  const topNextActions = nextActions(capture, internalBenchmark, layeredBenchmark, ownerSummary);
-  const { verdict, verdictReason } = readinessVerdict(capture, internalBenchmark, layeredBenchmark);
+  const topNextActions = nextActions(capture, internalBenchmark, layeredBenchmark, privateAlpha, agentIntake, performance, ownerSummary);
+  const { verdict, verdictReason } = readinessVerdict(capture, internalBenchmark, layeredBenchmark, privateAlpha);
+  const routingMismatchCount =
+    capture.summary.routingMismatchCount +
+    internalBenchmark.summary.routingMismatchCount +
+    layeredBenchmark.summary.routingMismatchCount;
+  const unknownFailureRate = Math.max(
+    capture.summary.unknownFailureRate,
+    layeredBenchmark.summary.unknownFailureRate,
+  );
 
   return {
     generatedAt: GENERATED_AT,
@@ -82,12 +134,31 @@ export function buildStage0OperatorReport(
     capture,
     internalBenchmark,
     layeredBenchmark,
+    privateAlpha,
+    agentIntake,
+    performance,
+    captureBenchmarkPassRate: capture.summary.successRate,
+    routingMismatchCount,
+    taskReadyAccuracy: capture.summary.taskReadyAccuracy,
+    artifactCompleteness: Math.min(
+      capture.summary.artifactCompletenessRate,
+      internalBenchmark.summary.artifactCompletenessRate,
+      layeredBenchmark.summary.artifactCompletenessRate,
+    ),
+    unknownFailureRate,
+    topFailureClasses: topFailureClasses(capture, internalBenchmark, layeredBenchmark),
+    dogfoodBugLinks: capture.dogfoodLinks,
+    blockedBranches: agentIntake.results
+      .filter((result) => result.decision !== "ready_to_merge")
+      .map((result) => result.report.branch),
+    whatChangedSinceLastReport: "deferred: no previous Stage 0 daily report snapshot was supplied.",
     ownerSummary,
     topNextActions,
     notes: [
       "Stage 0 operator report is no-live and reads deterministic benchmark fixtures only.",
       "yellow can still be the correct verdict when benchmark gates pass but private-alpha submissions have not been collected yet.",
       "green requires real private-alpha evidence, not docs, fixtures, or tooling alone.",
+      "Private alpha synthetic samples are useful for gate smoke tests but cannot make the Stage 0 verdict green.",
       "The report never starts providers, workers, browser agents, OpenAI calls, payments, logins, verification, or final confirmations.",
     ],
   };
@@ -108,6 +179,7 @@ export function renderStage0OperatorMarkdown(report: Stage0OperatorReport): stri
     `Task-ready accuracy: ${formatRate(report.capture.summary.taskReadyAccuracy)}`,
     `Artifact completeness: ${formatRate(report.capture.summary.artifactCompletenessRate)}`,
     `Unknown failure: ${formatRate(report.capture.summary.unknownFailureRate)}`,
+    `Dogfood links: ${report.dogfoodBugLinks.map((link) => link.dogfoodId).join(", ") || "-"}`,
     "",
     "## Internal Benchmark",
     "",
@@ -124,11 +196,44 @@ export function renderStage0OperatorMarkdown(report: Stage0OperatorReport): stri
     `L1 direct pass: ${formatRate(report.layeredBenchmark.summary.l1DirectPassRate)}`,
     `L1 + L2 recovered pass: ${formatRate(report.layeredBenchmark.summary.l1PlusL2RecoveredPassRate)}`,
     "",
+    "## Private Alpha Intake",
+    "",
+    `Readiness: ${report.privateAlpha.summary.readiness}`,
+    `Gate: ${report.privateAlpha.summary.gatePass ? "PASS" : "FAIL"}`,
+    `Fixture seeds: ${report.privateAlpha.summary.fixtureSeedCount}`,
+    `Sensitive submissions: ${report.privateAlpha.summary.sensitiveCount}`,
+    "",
+    "## Agent Intake",
+    "",
+    `Ready to merge: ${report.agentIntake.summary.readyToMerge}`,
+    `Needs follow-up: ${report.agentIntake.summary.needsFollowup}`,
+    `Reject: ${report.agentIntake.summary.reject}`,
+    `Blocked branches: ${report.blockedBranches.join(", ") || "-"}`,
+    "",
+    "## Performance Measurement",
+    "",
+    `Mode: ${report.performance.mode}`,
+    `Endpoints: ${report.performance.totalEndpoints}`,
+    `High risk: ${report.performance.highRiskEndpoints}`,
+    `Medium risk: ${report.performance.mediumRiskEndpoints}`,
+    "",
+    "## Top Failure Classes",
+    "",
+    "| Failure class | Count |",
+    "| --- | ---: |",
+  ];
+
+  for (const failure of report.topFailureClasses) {
+    lines.push(`| \`${failure.failureClass}\` | ${failure.count} |`);
+  }
+
+  lines.push(
+    "",
     "## Owner Summary",
     "",
     "| Owner | Failures | Signals |",
     "| --- | ---: | --- |",
-  ];
+  );
 
   for (const owner of report.ownerSummary) {
     lines.push(`| \`${owner.owner}\` | ${owner.failureCount} | ${owner.signals.join("; ")} |`);
@@ -147,6 +252,7 @@ export function renderStage0OperatorMarkdown(report: Stage0OperatorReport): stri
 
   lines.push("", "## Notes", "");
   for (const note of report.notes) lines.push(`- ${note}`);
+  lines.push(`- ${report.whatChangedSinceLastReport}`);
   return lines.join("\n");
 }
 
@@ -154,6 +260,7 @@ function readinessVerdict(
   capture: CaptureBenchmarkReport,
   internalBenchmark: InternalBenchmarkReport,
   layeredBenchmark: LayeredBenchmarkReport,
+  privateAlpha: PrivateAlphaIntakeReport,
 ): { verdict: Stage0ReadinessVerdict; verdictReason: string } {
   if (
     capture.summary.routingMismatchCount > 0 ||
@@ -162,11 +269,21 @@ function readinessVerdict(
     capture.summary.unknownFailureRate > 0.05 ||
     internalBenchmark.summary.routingMismatchCount > 0 ||
     layeredBenchmark.summary.routingMismatchCount > 0 ||
-    layeredBenchmark.summary.unknownFailureRate > 0.05
+    layeredBenchmark.summary.unknownFailureRate > 0.05 ||
+    !privateAlpha.summary.gatePass ||
+    privateAlpha.summary.red > 0
   ) {
     return {
       verdict: "red",
       verdictReason: "Block private alpha until routing, task-readiness, artifact, or unknown-failure gates recover.",
+    };
+  }
+
+  if (privateAlpha.summary.readiness === "green") {
+    return {
+      verdict: "green",
+      verdictReason:
+        "Private alpha can proceed: capture gates pass and real submissions are green with fixture seeds and safe next actions.",
     };
   }
 
@@ -211,6 +328,9 @@ function nextActions(
   capture: CaptureBenchmarkReport,
   internalBenchmark: InternalBenchmarkReport,
   layeredBenchmark: LayeredBenchmarkReport,
+  privateAlpha: PrivateAlphaIntakeReport,
+  agentIntake: AgentIntakeQueueReport,
+  performance: Stage0PerformanceReport,
   ownerSummary: Stage0OwnerSummary[],
 ): Stage0NextAction[] {
   const actions: Stage0NextAction[] = [];
@@ -246,6 +366,30 @@ function nextActions(
       reason: `Layered L1+L2 recovered pass rate is ${formatRate(layeredBenchmark.summary.l1PlusL2RecoveredPassRate)}.`,
     });
   }
+  if (privateAlpha.summary.readiness !== "green") {
+    actions.push({
+      owner: "alpha-ops",
+      priority: "p0",
+      action: "Collect supervised private-alpha submissions and score them through the intake gate.",
+      reason: `Private alpha readiness is ${privateAlpha.summary.readiness}; synthetic fixtures cannot make it green.`,
+    });
+  }
+  if (agentIntake.summary.reject > 0 || agentIntake.summary.needsFollowup > 0) {
+    actions.push({
+      owner: "codex",
+      priority: "p1",
+      action: "Use agent intake results to block unsafe branches and ask follow-up only where metadata is incomplete.",
+      reason: `${agentIntake.summary.needsFollowup} branch(es) need follow-up and ${agentIntake.summary.reject} are rejected.`,
+    });
+  }
+  if (performance.highRiskEndpoints > 0) {
+    actions.push({
+      owner: "codex",
+      priority: "p1",
+      action: "Review Stage 0 performance heavy-field risks before adding new app-shell payloads.",
+      reason: `${performance.highRiskEndpoints} endpoint(s) are high-risk in the static compact-contract scan.`,
+    });
+  }
   actions.push({
     owner: "alpha-ops",
     priority: "p1",
@@ -270,6 +414,39 @@ function nextActions(
     });
   }
   return actions.slice(0, 10);
+}
+
+function topFailureClasses(
+  capture: CaptureBenchmarkReport,
+  internalBenchmark: InternalBenchmarkReport,
+  layeredBenchmark: LayeredBenchmarkReport,
+): Stage0FailureClassSummary[] {
+  const counts = new Map<string, number>();
+  const add = (failureClass: string, count: number) => {
+    if (failureClass === "none" || count <= 0) return;
+    counts.set(failureClass, (counts.get(failureClass) ?? 0) + count);
+  };
+  for (const [failureClass, count] of Object.entries(capture.summary.byFailureClass)) {
+    if (failureClass !== "none") add(`capture:${failureClass}`, count);
+  }
+  for (const [failureClass, count] of Object.entries(internalBenchmark.summary.byFailureClass)) {
+    if (failureClass !== "none") add(`internal:${failureClass}`, count);
+  }
+  for (const [failureClass, count] of Object.entries(layeredBenchmark.summary.byFailureClass)) {
+    if (failureClass !== "none") add(`layered:${failureClass}`, count);
+  }
+  return Array.from(counts.entries())
+    .map(([failureClass, count]) => ({ failureClass, count }))
+    .sort((a, b) => b.count - a.count || a.failureClass.localeCompare(b.failureClass))
+    .slice(0, 10);
+}
+
+function defaultPrivateAlphaSubmissions(): PrivateAlphaSubmission[] {
+  return (privateAlphaFixture as { submissions: PrivateAlphaSubmission[] }).submissions;
+}
+
+function defaultAgentReports(): AgentReturnReport[] {
+  return (agentIntakeFixture as { reports: AgentReturnReport[] }).reports;
 }
 
 function formatRate(value: number): string {

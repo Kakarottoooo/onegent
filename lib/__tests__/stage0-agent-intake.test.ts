@@ -26,6 +26,7 @@ function report(overrides: Partial<AgentReturnReport> = {}): AgentReturnReport {
   return {
     branch: "codex/example-stage0",
     commit: "abc1234",
+    worktree: "C:\\Users\\Gzw19\\onegent-example-stage0",
     base: {
       branch: REQUIRED_BASE,
       commit: REQUIRED_COMMIT,
@@ -39,6 +40,8 @@ function report(overrides: Partial<AgentReturnReport> = {}): AgentReturnReport {
     validations: validations(),
     dependencyEdges: [{ type: "independent" }],
     claims: { runtimeClosure: false, liveVerified: false, docsOnly: false },
+    safetyStatement:
+      "No provider workflow, no browser booking agent, no live OpenAI call, no secrets, no payment, no login or verification, and no final confirmation was run.",
     ...overrides,
   };
 }
@@ -63,10 +66,13 @@ describe("Stage 0 agent intake upgrade", () => {
     expect(queue.results.find((item) => item.report.id === "agent3-hotel-ready")?.decision).toBe("ready_to_merge");
     expect(queue.results.find((item) => item.report.id === "unsafe-missing-report")?.decision).toBe("reject");
     expect(queue.summary.byIssue.provider_runtime_without_permission).toBe(1);
+    expect(queue.summary.byIssue.missing_safety_statement).toBe(1);
+    expect(queue.results.find((item) => item.report.id === "goal-stage0-reliability-system")?.codexAction).toBe("merge_validate");
 
     const markdown = renderAgentIntakeMarkdown(queue);
     expect(markdown).toContain("codex/goal-stage0-reliability-system");
     expect(markdown).toContain("provider_runtime_without_permission");
+    expect(markdown).toContain("codex/unsafe-stage0-branch");
   });
 
   it("rejects provider runtime paths when Stage 0 forbids them", () => {
@@ -101,5 +107,39 @@ describe("Stage 0 agent intake upgrade", () => {
 
     expect(result.decision).toBe("reject");
     expect(result.issues.map((issue) => issue.code)).toContain("docs_only_runtime_closure_claim");
+  });
+
+  it("catches missing worktree, safety statement, and tests for logic changes", () => {
+    const result = classifyAgentReturnReport(
+      report({
+        worktree: undefined,
+        safetyStatement: "",
+        changedFiles: ["lib/capture/private-alpha.ts"],
+      }),
+      { requiredBaseBranch: REQUIRED_BASE, requiredBaseCommit: REQUIRED_COMMIT },
+    );
+
+    expect(result.decision).toBe("needs_followup");
+    expect(result.issues.map((issue) => issue.code)).toEqual(
+      expect.arrayContaining([
+        "missing_required_report_field",
+        "missing_safety_statement",
+        "missing_tests_for_logic_change",
+      ]),
+    );
+    expect(result.codexAction).toBe("assign_next_independent_task");
+    expect(result.recommendedNextPrompt).toContain("missing metadata");
+  });
+
+  it("classifies explicit rebase requirements separately from ordinary follow-up", () => {
+    const result = classifyAgentReturnReport(
+      report({
+        dependencyEdges: [{ type: "requires_rebase_before_merge", reason: "base is behind stage0-capture-mvp" }],
+      }),
+      { requiredBaseBranch: REQUIRED_BASE, requiredBaseCommit: REQUIRED_COMMIT },
+    );
+
+    expect(result.decision).toBe("requires_rebase");
+    expect(result.codexAction).toBe("ask_followup");
   });
 });

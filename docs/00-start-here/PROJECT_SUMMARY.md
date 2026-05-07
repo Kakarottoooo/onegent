@@ -139,6 +139,12 @@ version:
 
 ### Benchmarks And Agent Intake
 
+- Stage 0 Capture now has a 500+ fixture no-live corpus covering raw text,
+  URLs, screenshot descriptions, mixed inputs, save-only, compare-only,
+  group-decision, refine, profile, and unsupported requests.
+- `scripts/stage0-operator-report.ts` is the daily no-live cockpit for
+  Capture benchmark, private-alpha intake, internal/layered benchmark signals,
+  agent intake, and static app-shell performance risk.
 - Layered Benchmark V2 exists as a no-live benchmark for L1 provider runtime
   results, evidence completeness, failure class, L2 Browser Harness
   eligibility, simulated L2 recovery, owner assignment, and patch proposals.
@@ -151,6 +157,8 @@ version:
 - Agent intake now has dependency-aware metadata, next-task recommendations,
   conflict risk, and ready/needs-followup/reject classification so side agents
   can keep working while Codex validates and merges.
+- Private alpha remains yellow until real submissions, not fixtures, produce
+  Travel Objects, safe next actions, evidence links, and user-value signals.
 
 ## Execution Layer Strategy
 

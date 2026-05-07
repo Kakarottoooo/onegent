@@ -2,7 +2,7 @@
 
 > **Branch**: `codex/stage0-capture-mvp`
 > **Last updated**: 2026-05-07
-> **Last commit**: this pass - project progress sync rule
+> **Last commit**: this pass - Stage 0 daily report merge
 >
 > Claude reads this at session start. I write to it before each push.
 > See `CLAUDE.md` section "coordination protocol".
@@ -10,6 +10,27 @@
 > `origin/claude/festive-pare-f27273:docs/10-coordination/claude.md`.
 
 ## Currently doing
+
+Current project progress analysis:
+- Phase: Stage 0 - Capture MVP plus Task Runtime hardening, before private
+  alpha. The north star remains `Capture -> Travel Object -> Task -> Decision
+  -> Execution -> Evidence -> Modify`.
+- Completed: initial dogfood closure exists for restaurant, hotel, flight, and
+  activity; exact Ticketmaster event URLs now bypass the generic confirmation
+  card and start as direct activity tasks; Goal's Stage 0 daily/operator
+  report stack is merged with 550 no-live Capture fixtures, private-alpha
+  intake evaluation, agent intake checks, and static performance risk scan.
+- In progress: using the daily report and Stage 0 operator report as the
+  readiness cockpit; keeping side agents on fresh `codex/stage0-capture-mvp`
+  bases; reducing task-workspace artifact gaps and provider-runtime
+  insufficient-evidence classes before real alpha.
+- Next: collect supervised private-alpha submissions, convert safe misses into
+  benchmark fixtures, and prioritize the report's top blockers:
+  task-workspace artifact contracts, provider-runtime fixture-backed patches,
+  and app performance payload risks.
+- Distance to Stage 0 alpha target: yellow. No-live gates are healthy, but the
+  stage cannot be green until real users produce Travel Objects, safe next
+  actions, evidence links, and user-value/reuse signals.
 
 Current multi-agent operating rule:
 - Treat Goal Agent capacity as a different time scale from the main Codex

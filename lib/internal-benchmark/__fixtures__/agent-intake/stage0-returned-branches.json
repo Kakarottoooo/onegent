@@ -5,6 +5,7 @@
       "agent": "Goal",
       "branch": "codex/goal-stage0-reliability-system",
       "commit": "1111111",
+      "worktree": "C:\\Users\\Gzw19\\onegent-goal-stage0-reliability-system",
       "base": {
         "branch": "origin/codex/stage0-capture-mvp",
         "commit": "9ad43f1",
@@ -16,7 +17,9 @@
       "changedFiles": [
         "lib/capture/benchmark.ts",
         "scripts/capture-benchmark.ts",
+        "lib/__tests__/capture-benchmark.test.ts",
         "lib/internal-benchmark/stage0-operator-report.ts",
+        "lib/__tests__/stage0-operator-report.test.ts",
         "docs/40-dogfood/PRIVATE_ALPHA_INTAKE_PROTOCOL.md"
       ],
       "artifacts": [],
@@ -32,13 +35,15 @@
         "runtimeClosure": false,
         "liveVerified": false,
         "docsOnly": false
-      }
+      },
+      "safetyStatement": "No provider workflow, no browser booking agent, no live OpenAI call, no secrets, no payment, no login or verification, and no final confirmation was run."
     },
     {
       "id": "claude-activity-runtime-followup",
       "agent": "Claude",
       "branch": "claude/activity-runtime-stage0-followup",
       "commit": "2222222",
+      "worktree": "C:\\Users\\Gzw19\\onegent-claude-activity-stage0",
       "base": {
         "branch": "origin/codex/stage0-capture-mvp",
         "commit": "9ad43f1",
@@ -63,13 +68,15 @@
         "runtimeClosure": false,
         "liveVerified": false,
         "docsOnly": false
-      }
+      },
+      "safetyStatement": "No provider workflow, no browser booking agent, no live OpenAI call, no secrets, no payment, no login or verification, and no final confirmation was run."
     },
     {
       "id": "agent2-flight-ready",
       "agent": "Agent2",
       "branch": "codex/flight-stage0-fixtures",
       "commit": "3333333",
+      "worktree": "C:\\Users\\Gzw19\\onegent-agent2-flight-stage0",
       "base": {
         "branch": "origin/codex/stage0-capture-mvp",
         "commit": "9ad43f1",
@@ -80,6 +87,7 @@
       "summary": "Flight capture benchmark fixtures and owner mapping.",
       "changedFiles": [
         "lib/internal-benchmark/flight-stage0-fixtures.ts",
+        "scripts/internal-benchmark.ts",
         "lib/__tests__/flight-stage0-fixtures.test.ts"
       ],
       "artifacts": [],
@@ -95,13 +103,15 @@
         "runtimeClosure": false,
         "liveVerified": false,
         "docsOnly": false
-      }
+      },
+      "safetyStatement": "No provider workflow, no browser booking agent, no live OpenAI call, no secrets, no payment, no login or verification, and no final confirmation was run."
     },
     {
       "id": "agent3-hotel-ready",
       "agent": "Agent3",
       "branch": "codex/hotel-stage0-fixtures",
       "commit": "4444444",
+      "worktree": "C:\\Users\\Gzw19\\onegent-agent3-hotel-stage0",
       "base": {
         "branch": "origin/codex/stage0-capture-mvp",
         "commit": "9ad43f1",
@@ -112,6 +122,7 @@
       "summary": "Hotel capture benchmark fixtures and owner mapping.",
       "changedFiles": [
         "lib/internal-benchmark/hotel-stage0-fixtures.ts",
+        "scripts/internal-benchmark.ts",
         "lib/__tests__/hotel-stage0-fixtures.test.ts"
       ],
       "artifacts": [],
@@ -127,7 +138,8 @@
         "runtimeClosure": false,
         "liveVerified": false,
         "docsOnly": false
-      }
+      },
+      "safetyStatement": "No provider workflow, no browser booking agent, no live OpenAI call, no secrets, no payment, no login or verification, and no final confirmation was run."
     },
     {
       "id": "unsafe-missing-report",

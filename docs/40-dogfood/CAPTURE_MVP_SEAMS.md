@@ -199,16 +199,17 @@ Field notes:
 
 No-live tests only.
 
-Status update for this branch: the broad Stage 0 benchmark layer now lives in
+Status update for this branch: the broad Stage 0 benchmark layer lives in
 `lib/capture/benchmark.ts` and `scripts/capture-benchmark.ts`. It uses
 deterministic fixture parser states, not live OpenAI extraction. The narrower
 unit tests below remain useful as future builder/API hardening, but the
 current benchmark already locks:
 
-- 200+ raw homepage fixture inputs across restaurant, hotel, flight, activity,
+- 500+ raw homepage fixture inputs across restaurant, hotel, flight, activity,
   trip, ambiguous, refine, profile, and chitchat.
 - source shapes for text, URL, screenshot descriptions, mixed URL+instruction,
-  vague inspiration, exact task-ready requests, and group decision requests.
+  vague inspiration, exact task-ready requests, group decision requests,
+  save-only, compare-only, and provider URL impersonation.
 - founder dogfood examples for Lion King, Japanese/Chinese cuisine,
   NYC hotel date/budget, Nashville to New York flight, and Sirrah/OpenTable.
 - task-ready versus needs-clarification behavior.
@@ -219,6 +220,7 @@ Run:
 ```bash
 npx tsx scripts/capture-benchmark.ts --vertical all --count 50 --json
 npx tsx scripts/capture-benchmark.ts --vertical all --gate
+npx tsx scripts/stage0-operator-report.ts --json
 ```
 
 1. `lib/agent/nlu-v2/__tests__/capture-travel-object-text.test.ts`

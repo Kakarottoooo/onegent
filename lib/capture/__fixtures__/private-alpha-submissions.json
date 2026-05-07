@@ -1,0 +1,79 @@
+{
+  "submissions": [
+    {
+      "submissionId": "ALPHA-SAMPLE-LION-KING-001",
+      "syntheticMarker": true,
+      "submittedAt": "2026-05-07T12:00:00.000Z",
+      "userId": "synthetic-alpha-user-1",
+      "rawInput": "book The Lion King in New York on June 1",
+      "sourceType": "text",
+      "expectedTaskType": "activity",
+      "userGoal": "Find a credible ticket path and stop before payment or final purchase.",
+      "expectedHelpfulness": "Onegent should understand this as an activity/event task, not a trip package.",
+      "actualUserFeedback": "This is the kind of handoff I would trust if the price and date are preserved.",
+      "travelObject": {
+        "type": "task_intent",
+        "scenario": "activity",
+        "constraints": {
+          "event_name": "The Lion King",
+          "city": "New York",
+          "event_date": "2026-06-01"
+        }
+      },
+      "safeNextAction": "Create an activity task seed and stop at safe confirmation/payment boundary.",
+      "evidenceLinks": [
+        "docs/40-dogfood/BUG_INBOX.md#dog-005"
+      ],
+      "userValueSignal": "strong",
+      "notes": "Synthetic seed for private alpha gate and Lion King routing."
+    },
+    {
+      "submissionId": "ALPHA-SAMPLE-RESTAURANT-001",
+      "syntheticMarker": true,
+      "submittedAt": "2026-05-07T12:00:00.000Z",
+      "rawInput": "帮我订一个明晚7点纽约2个人的中餐",
+      "sourceType": "text",
+      "expectedTaskType": "restaurant",
+      "userGoal": "Preserve Chinese cuisine, city, date/time, and party size before creating a task.",
+      "actualUserFeedback": "Cuisine match matters more than showing a generic restaurant list.",
+      "travelObject": {
+        "type": "task_intent",
+        "scenario": "restaurant",
+        "constraints": {
+          "city": "New York",
+          "date": "2026-05-08",
+          "time": "19:00",
+          "party_size": 2,
+          "cuisine": "Chinese"
+        }
+      },
+      "safeNextAction": "Create restaurant task seed with cuisine as a hard constraint.",
+      "evidenceLinks": [
+        "docs/40-dogfood/BUG_INBOX.md#dog-009"
+      ],
+      "userValueSignal": "strong",
+      "notes": "Synthetic seed for cuisine preservation."
+    },
+    {
+      "submissionId": "ALPHA-SAMPLE-SCREENSHOT-001",
+      "syntheticMarker": true,
+      "submittedAt": "2026-05-07T12:00:00.000Z",
+      "rawInput": "screenshot description: several NYC hotel cards with prices, no dates shown",
+      "sourceType": "screenshot",
+      "expectedTaskType": "ambiguous",
+      "userGoal": "Save the capture and ask for missing dates before claiming this is task-ready.",
+      "expectedHelpfulness": "I want Onegent to remember the options without pretending it can book yet.",
+      "travelObject": {
+        "type": "travel_screenshot",
+        "scenario": null,
+        "constraints": {}
+      },
+      "safeNextAction": "Ask a clarification question for check-in/check-out before creating any task.",
+      "evidenceLinks": [
+        "docs/40-dogfood/CAPTURE_MVP_SEAMS.md"
+      ],
+      "userValueSignal": "medium",
+      "notes": "Synthetic screenshot intake sample for needs-review behavior."
+    }
+  ]
+}

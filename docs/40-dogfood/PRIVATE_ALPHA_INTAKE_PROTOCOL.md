@@ -34,17 +34,31 @@ Avoid:
 For every submission, capture:
 
 - `rawInput`: exact user request, pasted URL text, or screenshot description.
-- `sourceType`: `raw_text`, `url`, `screenshot_description`, or
-  `mixed_url_instruction`.
+- `sourceType`: `text`, `url`, `screenshot`, or `mixed` (`raw_text`,
+  `screenshot_description`, and `mixed_url_instruction` remain accepted
+  legacy aliases).
 - `expectedTaskType`: restaurant, hotel, flight, activity, trip, ambiguous,
   profile, or chitchat.
 - `userGoal`: what the user wants Onegent to accomplish.
-- `wouldTrustOnegentToContinue`: yes/no/unknown.
-- `wouldPay`: yes/no/unknown.
-- `expectedOutcome`: what a correct next action would look like.
+- `travelObject`: the normalized Capture Travel Object when available.
+- `safeNextAction`: task-ready, clarify, save-only, compare-only, or
+  group-decision next step.
+- `evidenceLinks`: safe local doc/report/task references.
+- `userValueSignal`: strong, medium, weak, or none.
+- `wouldTrustOnegentToContinue` / `wouldPay`: optional legacy yes/no/unknown
+  value signals.
+- `blockedReason`: why the submission cannot proceed, if blocked.
 - `notes`: non-sensitive context only.
 
 The TypeScript contract lives in `lib/capture/private-alpha.ts`.
+
+Run the no-live evaluator:
+
+```bash
+npx tsx scripts/private-alpha-intake.ts --gate
+npx tsx scripts/private-alpha-intake.ts --input alpha-submissions.json --json
+npx tsx scripts/private-alpha-intake.ts --input alpha-submissions.md --markdown
+```
 
 ## What Not To Collect
 

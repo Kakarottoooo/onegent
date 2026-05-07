@@ -8,13 +8,27 @@ import {
 } from "@/lib/capture/benchmark";
 
 describe("Stage 0 capture benchmark", () => {
-  it("ships at least 200 no-live fixtures across required verticals and source shapes", () => {
-    expect(CAPTURE_BENCHMARK_FIXTURES.length).toBeGreaterThanOrEqual(200);
+  it("ships at least 500 no-live fixtures across required verticals and source shapes", () => {
+    expect(CAPTURE_BENCHMARK_FIXTURES.length).toBeGreaterThanOrEqual(500);
 
     const verticals = new Set(CAPTURE_BENCHMARK_FIXTURES.map((fixture) => fixture.vertical));
     for (const vertical of ["restaurant", "hotel", "flight", "activity", "trip", "ambiguous", "refine", "profile", "chitchat"]) {
       expect(verticals.has(vertical)).toBe(true);
     }
+
+    const byVertical = CAPTURE_BENCHMARK_FIXTURES.reduce<Record<string, number>>((acc, fixture) => {
+      acc[fixture.vertical] = (acc[fixture.vertical] ?? 0) + 1;
+      return acc;
+    }, {});
+    expect(byVertical.restaurant).toBeGreaterThanOrEqual(80);
+    expect(byVertical.hotel).toBeGreaterThanOrEqual(80);
+    expect(byVertical.flight).toBeGreaterThanOrEqual(80);
+    expect(byVertical.activity).toBeGreaterThanOrEqual(80);
+    expect(byVertical.trip).toBeGreaterThanOrEqual(80);
+    expect(byVertical.ambiguous).toBeGreaterThanOrEqual(50);
+    expect(byVertical.refine).toBeGreaterThanOrEqual(50);
+    expect(byVertical.profile).toBeGreaterThanOrEqual(30);
+    expect(byVertical.chitchat).toBeGreaterThanOrEqual(20);
 
     const sourceShapes = new Set(CAPTURE_BENCHMARK_FIXTURES.map((fixture) => fixture.sourceShape));
     for (const sourceShape of [
@@ -25,8 +39,15 @@ describe("Stage 0 capture benchmark", () => {
       "vague_inspiration",
       "exact_task_ready",
       "group_decision_request",
+      "save_only",
+      "compare_only",
+      "provider_url_impersonation",
     ]) {
       expect(sourceShapes.has(sourceShape)).toBe(true);
+    }
+
+    for (const fixture of CAPTURE_BENCHMARK_FIXTURES) {
+      expect(fixture.note.trim().length).toBeGreaterThan(12);
     }
   });
 
@@ -102,6 +123,8 @@ describe("Stage 0 capture benchmark", () => {
     expect(report.summary.artifactCompletenessRate).toBeGreaterThanOrEqual(0.95);
     expect(report.summary.unknownFailureRate).toBe(0);
     expect(report.summary.byFailureClass.artifact_incomplete).toBeGreaterThan(0);
+    expect(report.dogfoodLinks.find((link) => link.dogfoodId === "DOG-005")).toBeDefined();
+    expect(report.recommendedNextActions.length).toBeGreaterThan(0);
 
     const gate = evaluateCaptureBenchmarkGate(report);
     expect(gate).toMatchObject({ pass: true, errors: [] });
@@ -115,6 +138,24 @@ describe("Stage 0 capture benchmark", () => {
     const markdown = renderCaptureBenchmarkMarkdown(report);
     expect(markdown).toContain("# Stage 0 Capture Benchmark");
     expect(markdown).toContain("Task-ready accuracy");
+    expect(markdown).toContain("Recommended Next Actions");
     expect(markdown).toContain("Top Failed Fixtures");
+  });
+
+  it("locks Stage 0 source edge cases for screenshots, provider URLs, and group decisions", () => {
+    const report = runCaptureBenchmark({ vertical: "all" });
+
+    const imageText = report.results.find((result) => result.id.includes("ambiguous-generated") && result.input.startsWith("image of"));
+    expect(imageText?.actualSourceType).toBe("request");
+    expect(imageText?.actualReady).toBe(false);
+
+    const impersonation = report.results.find((result) => result.input.includes("ticketmaster.com.evil.example"));
+    expect(impersonation?.actualSourceType).toBe("url");
+    expect(impersonation?.actualScenario).toBeNull();
+    expect(impersonation?.actualReadinessReason).toBe("needs_review");
+
+    const group = report.results.find((result) => result.id.includes("restaurant-group"));
+    expect(group?.actualObjectType).toBe("group_decision");
+    expect(group?.capture.possible_actions.map((action) => action.type)).toContain("create_room");
   });
 });

@@ -11,6 +11,17 @@ For the concrete submission schema, scoring contract, forbidden collection
 rules, and fixture conversion workflow, use
 `docs/40-dogfood/PRIVATE_ALPHA_INTAKE_PROTOCOL.md`.
 
+Daily no-live intake check:
+
+```bash
+npx tsx scripts/private-alpha-intake.ts --gate
+npx tsx scripts/stage0-operator-report.ts --json
+```
+
+The default sample file is synthetic and should keep the readiness verdict
+yellow. Green requires real private-alpha submissions with Travel Objects,
+safe next actions, evidence links, and user-value signals.
+
 ## Stage 0 Goal
 
 Run a small, founder-supervised alpha that tests whether real travel users
@@ -119,6 +130,8 @@ Measure weekly across the 10-20 user cohort:
   weeks.
 - Willingness-to-pay signal: percent of users who say they would pay for the
   task result or ask to keep using the product after the alpha.
+- Benchmark-seed conversion: percent of safe misses that become no-live
+  fixtures with owner, source type, readiness, and preserved constraints.
 
 Initial Stage 0 target:
 
