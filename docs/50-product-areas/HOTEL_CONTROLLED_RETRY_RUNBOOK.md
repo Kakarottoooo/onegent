@@ -167,33 +167,37 @@ for founder approval for the changed case.
 
 1. If profile data is missing before provider work, stop and classify
    `profile_gating`.
-2. If Booking.com does not show YOTEL New York Times Square with the approved
+2. If worker logs, screenshots, live snapshots, or DB rows are stale or belong
+   to different jobs/runs, stop and classify `insufficient_evidence`. Do not
+   count guest/review, room, or payment-looking copy from mixed evidence as
+   closure.
+3. If Booking.com does not show YOTEL New York Times Square with the approved
    dates, guest count, and room count, stop and preserve DB/log/screenshot
    evidence before considering URL or search-result drift.
-3. If the target hotel is visible but not selected, classify
+4. If the target hotel is visible but not selected, classify
    `provider_selector_drift` only after screenshots prove the approved target
    hotel was visible.
-4. If room selection is reached, stop for operator review when evidence is
+5. If room selection is reached, stop for operator review when evidence is
    sufficient and classify `room_selection_manual_review_reached`. Patch the
    room-to-guest transition only if screenshots and logs prove selector or
    runtime drift.
-5. If room/rate inventory is visible but selection or room/card scan fails,
+6. If room/rate inventory is visible but selection or room/card scan fails,
    classify `room_selection_drift` only after DB/log/screenshot evidence
    confirms the correct target was visible.
-6. If guest details or manual review is reached, stop before payment/CVV/final
+7. If guest details or manual review is reached, stop before payment/CVV/final
    controls and classify `guest_details_manual_review_reached`.
-7. If payment, billing, checkout, CVV, or final booking controls appear, hard
+8. If payment, billing, checkout, CVV, or final booking controls appear, hard
    stop. Classify `payment_manual_review_reached` only when no payment data was
    entered and no final control was clicked.
-8. If login, OTP, CAPTCHA, phone verification, bot wall, or an account prompt
+9. If login, OTP, CAPTCHA, phone verification, bot wall, or an account prompt
    appears, hard stop and classify `login_or_captcha_boundary`. Do not bypass.
-9. If OpenAI Responses API, Computer Use, or local model/runtime environment
+10. If OpenAI Responses API, Computer Use, or local model/runtime environment
    fails before provider evidence exists, classify `model_env_transient`. Do not
    patch hotel selectors from model/env evidence alone.
-10. If Booking.com returns 5xx, timeout, blocked provider response, or network
+11. If Booking.com returns 5xx, timeout, blocked provider response, or network
     instability, classify `network_provider_failure`. Do not patch selectors
     from network evidence alone.
-11. If the target hotel is sold out, fully booked, or has no rooms available
+12. If the target hotel is sold out, fully booked, or has no rooms available
     with exact hotel, date, adult-count, and room-count evidence, classify
     `provider_no_availability`. If the copy is generic or city-level and does
     not prove the exact stay has no inventory, classify `network_provider_failure`

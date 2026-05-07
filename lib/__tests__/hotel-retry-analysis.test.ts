@@ -183,6 +183,46 @@ describe("analyzeHotelRetryArtifactBundle", () => {
     });
   });
 
+  it("keeps exact-property generic not-available copy fallback eligible without scoped inventory proof", () => {
+    const analysis = analyzeHotelRetryArtifactBundle({
+      job: yotelJob("booking-com"),
+      workerLogExcerpt:
+        "[booking-com] Hotel detail visible for YOTEL New York Times Square. checkin=2026-06-10 checkout=2026-06-12 adults=1 rooms=1. This property is not available.",
+      workerLogPath: "codex-worker.log",
+      screenshotPaths: ["worker/.debug-screenshots/booking-com/01-property-not-available.jpg"],
+      liveSnapshotPaths: [".debug-screenshots/live/property-not-available/snapshot.json"],
+      notes: ["Synthetic no-live fixture. Generic copy only; no scoped room-inventory proof."],
+    });
+
+    expect(analysis.state).toBe("network_provider_failure");
+    expect(analysis.layeredRecovery.noAvailabilityEvidence).toMatchObject({
+      state: "weak_no_availability",
+      hasExactHotelEvidence: true,
+      hasExactStayEvidence: true,
+      hasScopedInventoryEvidence: false,
+      missingEvidence: ["scoped room inventory"],
+    });
+    expect(analysis.layeredRecovery.fallbackEligibility.eligible).toBe(true);
+  });
+
+  it("keeps exact scoped hotel/date/stay no-availability as terminal inventory evidence", () => {
+    const analysis = analyzeHotelRetryArtifactBundle({
+      job: yotelJob("booking-com"),
+      workerLogExcerpt:
+        "[booking-com] Hotel detail visible for YOTEL New York Times Square. checkin=2026-06-10 checkout=2026-06-12 adults=1 rooms=1. No rooms available for selected dates.",
+      workerLogPath: "codex-worker.log",
+      screenshotPaths: ["worker/.debug-screenshots/booking-com/01-exact-no-availability.jpg"],
+      liveSnapshotPaths: [".debug-screenshots/live/exact-no-availability/snapshot.json"],
+      notes: ["Synthetic no-live fixture. Exact scoped inventory unavailable."],
+    });
+
+    expect(analysis.state).toBe("provider_no_availability");
+    expect(analysis.layeredRecovery.noAvailabilityEvidence.state).toBe(
+      "verified_true_no_availability",
+    );
+    expect(analysis.layeredRecovery.fallbackEligibility.eligible).toBe(false);
+  });
+
   it("preserves exact stay params when Hotels.com is fallback eligible", () => {
     const analysis = analyzeHotelRetryArtifactBundle({
       job: yotelJob("hotels-com"),
@@ -262,6 +302,24 @@ describe("analyzeHotelRetryArtifactBundle", () => {
     expect(analysis.state).toBe("insufficient_evidence");
     expect(analysis.confidence).toBe("low");
     expect(analysis.signals).toEqual([]);
+  });
+
+  it("treats stale or mixed worker evidence as insufficient evidence instead of closure", () => {
+    const analysis = analyzeHotelRetryArtifactBundle({
+      job: yotelJob("booking-com"),
+      workerLogExcerpt:
+        "[booking-com] Guest details page visible and loaded for a previous run. Mixed worker evidence: screenshot belongs to a different job.",
+      workerLogPath: "codex-worker.log",
+      screenshotPaths: ["worker/.debug-screenshots/booking-com/old-run-guest-details.jpg"],
+      liveSnapshotPaths: [".debug-screenshots/live/current-job/snapshot.json"],
+      notes: ["Synthetic no-live fixture. Job id mismatch between DB row and screenshot evidence."],
+    });
+
+    expect(analysis.state).toBe("insufficient_evidence");
+    expect(analysis.confidence).toBe("low");
+    expect(analysis.signals[0]?.kind).toBe("stale_or_mixed_evidence");
+    expect(analysis.signals.map((signal) => signal.kind)).toContain("guest_details_reached");
+    expect(analysis.nextAction).toContain("Collect the DB row");
   });
 });
 
