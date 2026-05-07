@@ -100,6 +100,7 @@ unicode arrow ("Find Tickets >" / "Find Tickets ›" / "Find Tickets❯").
 | Visually-hidden event details inside the button label | The label parser collapses whitespace and matches on the leading prefix; full label is captured in trace for debugging | `ticketmaster-rpa.ts` `looksLikeFindTicketsLabel` (test: `Find Tickets The Lion King (New York, NY) 5/30/26, 2:00 PM`) |
 | "Event information" header in body but no drawer button matched in main DOM | `clickFindTicketsWithDomScan` enforces a "must have Event information panel" gate, then prefers candidates inside `aside`, `[role="dialog"]`, `[aria-modal]` ancestors; falls back to right-half-of-viewport heuristic | `ticketmaster-rpa.ts` `clickFindTicketsWithDomScan` |
 | Drawer renders late on slow hosts | `clickFindTickets` polls up to 16 s with mixed `:has-text` locator + DOM scan strategies | `ticketmaster-rpa.ts` `clickFindTickets` |
+| Drawer is showing a stale / wrong-date event | `clickFindTicketsWithDomScan` now passes the parsed `TargetDateTime` into the in-page IIFE and rejects any candidate whose drawer scope text does not match month+day or time. Pure helper `drawerMatchesTarget` mirrors the same logic for unit tests | `ticketmaster-rpa.ts` `drawerMatchesTarget`, `clickFindTicketsWithDomScan` (target arg threaded through `clickFindTickets`) |
 
 **Event drawer Find Tickets rule (canonical):**
 
@@ -210,11 +211,28 @@ provider page.
 > `provider_logic_failure`) and surface a safe handoff so the user can
 > close the ad tab and continue manually.
 
-Not implemented in v1 yet -- requires a `getAllPages()` filter and a tab
-selector pre-step in `bookTicketmasterProgrammatic`. This doc records the
-rule so the future patch is mechanical, not exploratory. Do not promote
-this into the v1 runtime in this branch (no captured failing job in the
-dogfood evidence; the closure run did not fail on this).
+Implemented v1 (post-2026-05-07 dogfood): after the RPA returns, the
+executor scans `stagehand.context.pages()` for any Ticketmaster-domain tab
+via `pickPrimaryTicketmasterUrl(...)` (preference order: checkout > /event/
+> /artist/ or *-tickets/ > auth > other TM). When the active page drifted
+to a non-TM host but a TM tab is still alive, the executor:
+
+- emits a `[tm-rpa] Active page drifted off Ticketmaster (...) — using it as
+  the handoff URL` trace line for evidence,
+- swaps in the surviving TM URL as the result `handoffUrl` so the user has
+  a concrete recovery target instead of the original `input.startUrl`,
+- and substitutes a more actionable summary
+  ("Close the ad tab and continue on the open Ticketmaster page") in place
+  of the generic ad-tab fallback.
+
+What is still NOT done in v1 (deferred, evidence-needed):
+
+- The executor never CLOSES the ad tab. Closing tabs is a destructive action
+  and we have no captured failing job that proves it is needed; the surviving
+  TM URL is enough for the user to recover manually.
+- The executor never SWITCHES the driving Page to the surviving TM tab.
+  Switching mid-flow on `raw` is more invasive than this branch warrants
+  without a reproducible failure.
 
 ## Local browser / CDP disconnect handling rule
 

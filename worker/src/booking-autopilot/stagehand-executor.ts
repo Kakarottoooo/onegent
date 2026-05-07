@@ -126,8 +126,8 @@ import {
   inspectExpediaFlightTravelerFormState,
   scrollExpediaCheckoutToFinalReviewBoundary,
 } from "./providers/expedia";
-import { bookTicketmasterProgrammatic } from "./providers/ticketmaster-rpa";
-import { classifyTicketmasterTaskState } from "./providers/ticketmaster-status";
+import { bookTicketmasterProgrammatic, pickPrimaryTicketmasterUrl } from "./providers/ticketmaster-rpa";
+import { classifyTicketmasterTaskState, isTicketmasterDomainUrl } from "./providers/ticketmaster-status";
 import { bookSeatGeekProgrammatic } from "./providers/seatgeek-rpa";
 
 type FieldSpec = { patterns: string[]; value: string };
@@ -1653,6 +1653,35 @@ The user will enter CVV and confirm payment themselves.`,
           localBrowserDisconnected = true;
         }
 
+        // Scan all open tabs for a Ticketmaster-domain page. If the active
+        // page drifted to a non-TM host (an ad / sponsor tab opened during a
+        // click) but a TM tab is still alive, we use that TM URL as the
+        // user's recovery handoff URL so they have a clear place to continue.
+        // This NEVER closes tabs — that is a destructive action — and never
+        // changes which Page the executor drives. It only enriches the
+        // handoffUrl + trace evidence.
+        const tmTabUrls: string[] = [];
+        try {
+          for (const candidatePage of stagehand.context.pages()) {
+            const candidateRaw = getRawPage(candidatePage);
+            const candidateUrl = (() => {
+              try {
+                return (candidateRaw as unknown as { url: () => string }).url();
+              } catch {
+                return "";
+              }
+            })();
+            if (candidateUrl) tmTabUrls.push(candidateUrl);
+          }
+        } catch {
+          /* ignore — page enumeration is best-effort */
+        }
+        const recoveryTmUrl = pickPrimaryTicketmasterUrl(tmTabUrls);
+        const activePageOnTm = !!observedUrl && isTicketmasterDomainUrl(observedUrl);
+        if (!activePageOnTm && recoveryTmUrl) {
+          trace(`[tm-rpa] Active page drifted off Ticketmaster (url=${observedUrl.slice(0, 100)}); a Ticketmaster tab remains at ${recoveryTmUrl.slice(0, 100)} — using it as the handoff URL`);
+        }
+
         const decision = classifyTicketmasterTaskState({
           reachedCheckout: rpaResult.reached_checkout,
           needsLogin: rpaResult.needs_login === true,
@@ -1663,6 +1692,19 @@ The user will enter CVV and confirm payment themselves.`,
           summary: rpaResult.summary,
         });
         trace(`[tm-rpa] Task state: ${decision.state} (executorStatus=${decision.executorStatus} holdBrowserOpen=${decision.holdBrowserOpen})`);
+
+        // If the run ended up on the ad-tab branch but a Ticketmaster tab is
+        // still open, give the user a more actionable summary that names
+        // where to continue. The classifier's summary stays the source of
+        // truth in every other case.
+        const adTabRecoverySummary =
+          decision.state === "external_ad_tab_detected" && recoveryTmUrl
+            ? "An external ad tab opened during booking. Close the ad tab and continue on the open Ticketmaster page."
+            : null;
+        const handoffUrlForReturn =
+          decision.state === "external_ad_tab_detected" && recoveryTmUrl
+            ? recoveryTmUrl
+            : (rpaResult.currentUrl || input.startUrl);
 
         if (decision.state === "checkout_reached") {
           // Checkout reached — fall through to the normal form-fill pipeline below.
@@ -1684,7 +1726,7 @@ The user will enter CVV and confirm payment themselves.`,
             return {
               status: "paused_payment" as const,
               screenshotBase64: finalScreenshotBase64,
-              handoffUrl: rpaResult.currentUrl || input.startUrl,
+              handoffUrl: handoffUrlForReturn,
               sessionUrl,
               summary: decision.summary,
               debugTrace,
@@ -1694,7 +1736,7 @@ The user will enter CVV and confirm payment themselves.`,
             return {
               status: "needs_login" as const,
               screenshotBase64: finalScreenshotBase64,
-              handoffUrl: rpaResult.currentUrl || input.startUrl,
+              handoffUrl: handoffUrlForReturn,
               sessionUrl,
               summary: decision.summary,
               debugTrace,
@@ -1703,14 +1745,17 @@ The user will enter CVV and confirm payment themselves.`,
           // executorStatus === "error" (external_ad_tab_detected /
           // local_browser_disconnected / unknown_failure). All three map to
           // a clear, non-generic error that does NOT leave the task looking
-          // live forever upstream.
+          // live forever upstream. For external_ad_tab_detected with a
+          // surviving Ticketmaster tab, swap in the more actionable
+          // recovery summary that names where to continue.
+          const errorSummary = adTabRecoverySummary ?? decision.summary;
           return {
             status: "error" as const,
             screenshotBase64: finalScreenshotBase64,
-            handoffUrl: rpaResult.currentUrl || input.startUrl,
+            handoffUrl: handoffUrlForReturn,
             sessionUrl,
-            summary: decision.summary,
-            error: rpaResult.error ?? decision.summary,
+            summary: errorSummary,
+            error: rpaResult.error ?? errorSummary,
             debugTrace,
           };
         }

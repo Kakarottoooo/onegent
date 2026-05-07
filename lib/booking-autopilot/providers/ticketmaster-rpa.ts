@@ -12,6 +12,7 @@
  * .ticketmaster-cookies.json usually prevent this, but it's a safety net.
  */
 import type { Locator, Page } from "playwright";
+import { isTicketmasterDomainUrl } from "./ticketmaster-status";
 
 type TraceFn = (msg: string) => void;
 
@@ -456,9 +457,114 @@ export function looksLikeFindTicketsLabel(label: string): boolean {
   return ["find tickets", "buy tickets", "get tickets"].some(p => trimmed.startsWith(p));
 }
 
-async function clickFindTicketsWithDomScan(page: Page, trace: TraceFn): Promise<boolean> {
+/**
+ * Decide whether a drawer's text content matches the requested target
+ * date/time well enough that we can click its Find Tickets control. Pure /
+ * deterministic / no I/O — fully unit-testable.
+ *
+ * Used as a pre-click guard inside `clickFindTicketsWithDomScan` so the v1
+ * runtime no longer clicks the FIRST Find-Tickets-shaped button on the page
+ * when:
+ *   - The user picked a different calendar slot earlier and the drawer is
+ *     still showing a stale event.
+ *   - The page has multiple Event Information drawers (multi-event listing
+ *     pages), and the worker happened to find the wrong one.
+ *   - A sponsored / search / header control happens to share the
+ *     "Find Tickets" prefix but is not date/time-scoped.
+ *
+ * Behavior:
+ *   - target === null  =>  matches=true, reason="no_target". This preserves
+ *     the existing dateless-show fallback (Wicked / Hamilton residencies)
+ *     where the calendar has no specific date and the executor accepts the
+ *     first available drawer.
+ *   - target with month+day matching the drawer text => matches=true.
+ *   - target with target.time present and matching the drawer text =>
+ *     matches=true even if month/day did not match (some drawers render
+ *     time strongly and date in a separate component our text scrape may
+ *     miss).
+ *   - Otherwise matches=false, reason="no_match".
+ */
+export function drawerMatchesTarget(
+  drawerText: string,
+  target: TargetDateTime | null,
+): {
+  matches: boolean;
+  reason: "no_target" | "month_day_and_time" | "month_day" | "time" | "no_match";
+} {
+  if (!target) return { matches: true, reason: "no_target" };
+  const lower = (drawerText ?? "").toLowerCase();
+  if (!lower.trim()) return { matches: false, reason: "no_match" };
+  const monthLower = target.monthName.toLowerCase();
+  const monthShort = monthLower.slice(0, 3);
+  const dayStr = String(target.day);
+  const dayPadded = dayStr.padStart(2, "0");
+  const timeLower = (target.time ?? "").toLowerCase();
+  const dayRx = new RegExp(`\\b${dayStr}(st|nd|rd|th)?\\b|\\b${dayPadded}\\b|/${dayStr}/|/${dayPadded}/|-${dayStr}-|-${dayPadded}-`);
+  const monthMatch = lower.includes(monthLower) || lower.includes(monthShort);
+  const dayMatch = dayRx.test(lower);
+  const monthDayMatch = monthMatch && dayMatch;
+  const timeMatch = timeLower !== "" && lower.includes(timeLower);
+  if (monthDayMatch && timeMatch) return { matches: true, reason: "month_day_and_time" };
+  if (monthDayMatch) return { matches: true, reason: "month_day" };
+  if (timeMatch) return { matches: true, reason: "time" };
+  return { matches: false, reason: "no_match" };
+}
+
+/**
+ * Pure helper: pick the most relevant Ticketmaster-domain URL from a list of
+ * tab URLs. Used by the executor when the active page drifts off a
+ * Ticketmaster host (e.g. an ad/sponsor tab opened on click) and we want to
+ * surface the canonical TM URL to the user as the handoff URL even though
+ * the active `Page` is no longer trustworthy.
+ *
+ * Order of preference (most actionable first):
+ *   1. checkout.ticketmaster.* / payments.ticketmaster.* (closest to
+ *      transaction completion)
+ *   2. /event/<id> URLs (seat selection in progress)
+ *   3. /artist/<id> or *-tickets/ landing (calendar surface)
+ *   4. auth.ticketmaster.* (account boundary; user knows what to do)
+ *   5. Any other Ticketmaster-domain URL
+ *
+ * Non-Ticketmaster URLs are skipped. Empty input or all-non-TM input
+ * returns null.
+ */
+export function pickPrimaryTicketmasterUrl(urls: ReadonlyArray<string>): string | null {
+  if (!urls || urls.length === 0) return null;
+  const tmUrls = urls.filter((u) => isTicketmasterDomainUrl(u));
+  if (tmUrls.length === 0) return null;
+  const score = (u: string): number => {
+    const lower = u.toLowerCase();
+    if (/(?:^|\W)(?:checkout|payments)\.ticketmaster\./i.test(lower)) return 5;
+    if (/\/event\//i.test(lower)) return 4;
+    if (/\/artist\/|-tickets\b/i.test(lower)) return 3;
+    if (/auth\.ticketmaster|\/identity\b|\/login\b|\/signin\b/i.test(lower)) return 2;
+    return 1;
+  };
+  return [...tmUrls].sort((a, b) => score(b) - score(a))[0] ?? null;
+}
+
+async function clickFindTicketsWithDomScan(
+  page: Page,
+  trace: TraceFn,
+  target: TargetDateTime | null,
+): Promise<boolean> {
+  // Pass the target month/day/time into the IIFE so the in-page filter can
+  // reject drawers whose currently-shown event does NOT match what the user
+  // asked for. The in-page predicate `drawerMatchesTargetInPage` mirrors the
+  // pure `drawerMatchesTarget` helper exported above; tests pin the helper
+  // and the IIFE keeps in lock-step by inlined regex source.
+  const targetArg = target
+    ? {
+        monthLong: target.monthName.toLowerCase(),
+        monthShort: target.monthName.slice(0, 3).toLowerCase(),
+        dayStr: String(target.day),
+        dayPadded: String(target.day).padStart(2, "0"),
+        timeLower: (target.time ?? "").toLowerCase(),
+      }
+    : null;
   const source = `
 (function() {
+  var TARGET = ${JSON.stringify(targetArg)};
   var controls = [];
   var seen = new Set();
   function isVisible(el) {
@@ -492,6 +598,24 @@ async function clickFindTicketsWithDomScan(page: Page, trace: TraceFn): Promise<
     }
     return false;
   }
+  function drawerScopeText(el) {
+    var scope = el.closest && el.closest('aside, [role="dialog"], [aria-modal], section, div') || el;
+    return String(scope.innerText || scope.textContent || "");
+  }
+  function drawerMatchesTargetInPage(text) {
+    if (!TARGET) return { matches: true, reason: "no_target" };
+    var lower = String(text || "").toLowerCase();
+    if (!lower.replace(/\\s+/g, "").length) return { matches: false, reason: "no_match" };
+    var dayRx = new RegExp("\\\\b" + TARGET.dayStr + "(st|nd|rd|th)?\\\\b|\\\\b" + TARGET.dayPadded + "\\\\b|/" + TARGET.dayStr + "/|/" + TARGET.dayPadded + "/|-" + TARGET.dayStr + "-|-" + TARGET.dayPadded + "-");
+    var monthMatch = lower.indexOf(TARGET.monthLong) >= 0 || lower.indexOf(TARGET.monthShort) >= 0;
+    var dayMatch = dayRx.test(lower);
+    var monthDayMatch = monthMatch && dayMatch;
+    var timeMatch = TARGET.timeLower !== "" && lower.indexOf(TARGET.timeLower) >= 0;
+    if (monthDayMatch && timeMatch) return { matches: true, reason: "month_day_and_time" };
+    if (monthDayMatch) return { matches: true, reason: "month_day" };
+    if (timeMatch) return { matches: true, reason: "time" };
+    return { matches: false, reason: "no_match" };
+  }
   function add(el) {
     if (!el || seen.has(el) || !isVisible(el)) return;
     seen.add(el);
@@ -515,15 +639,41 @@ async function clickFindTicketsWithDomScan(page: Page, trace: TraceFn): Promise<
   var bodyText = String(document.body && (document.body.innerText || document.body.textContent) || "");
   var hasEventInfoPanel = /event information/i.test(bodyText);
   scanRoot(document, 0);
+  // Step 1: keep only candidates inside the Event Information drawer
+  // (or, fallback heuristic, in the right half of the viewport when the
+  // panel exists somewhere on the page).
   controls = controls.filter(function(item) {
     if (!hasEventInfoPanel) return false;
     if (hasEventInfoAncestor(item.el)) return true;
     var r = item.el.getBoundingClientRect && item.el.getBoundingClientRect();
     return !!r && r.left > (window.innerWidth * 0.45);
   });
-  if (!controls.length) {
-    return { clicked: false, candidates: 0, eventInfo: hasEventInfoPanel };
+  // Step 2 (NEW): if a target date/time was supplied, score each candidate's
+  // drawer scope text against the target and reject candidates whose drawer
+  // does not match. This prevents the runtime from clicking the wrong
+  // drawer when the user picked a different calendar slot earlier or the
+  // page has multiple Event Information drawers.
+  var rejected = 0;
+  if (TARGET) {
+    var matched = [];
+    for (var k = 0; k < controls.length; k++) {
+      var c = controls[k];
+      var ds = drawerScopeText(c.el);
+      var mm = drawerMatchesTargetInPage(ds);
+      if (mm.matches) {
+        c.matchReason = mm.reason;
+        matched.push(c);
+      } else {
+        rejected++;
+      }
+    }
+    controls = matched;
   }
+  if (!controls.length) {
+    return { clicked: false, candidates: 0, eventInfo: hasEventInfoPanel, rejected: rejected };
+  }
+  // Step 3: prefer drawers whose scope text actually contains
+  // "event information" over a right-half-of-viewport fallback.
   controls.sort(function(a, b) {
     var aScope = a.el.closest && a.el.closest('aside, [role="dialog"], [aria-modal], section, div') || a.el;
     var bScope = b.el.closest && b.el.closest('aside, [role="dialog"], [aria-modal], section, div') || b.el;
@@ -534,20 +684,31 @@ async function clickFindTicketsWithDomScan(page: Page, trace: TraceFn): Promise<
   var chosen = controls[0];
   chosen.el.scrollIntoView({ behavior: "auto", block: "center" });
   chosen.el.click();
-  return { clicked: true, label: chosen.label.slice(0, 120), candidates: controls.length, eventInfo: true };
+  return {
+    clicked: true,
+    label: chosen.label.slice(0, 120),
+    candidates: controls.length,
+    eventInfo: true,
+    matchReason: chosen.matchReason || (TARGET ? "month_day_and_time" : "no_target"),
+    rejected: rejected
+  };
 })()
 `;
   const result = await page.evaluate(source).catch((err: Error) => {
     trace(`[tm-rpa] Find Tickets DOM scan failed: ${err.message?.slice(0, 80)}`);
     return null;
   });
-  const clicked = result as null | { clicked?: boolean; label?: string; candidates?: number; eventInfo?: boolean };
+  const clicked = result as null | { clicked?: boolean; label?: string; candidates?: number; eventInfo?: boolean; matchReason?: string; rejected?: number };
   if (clicked?.clicked) {
-    trace(`[tm-rpa] Clicked Find Tickets via main-page DOM scan: "${(clicked.label ?? "").slice(0, 80)}" candidates=${clicked.candidates ?? 0}`);
+    trace(`[tm-rpa] Clicked Find Tickets via main-page DOM scan: "${(clicked.label ?? "").slice(0, 80)}" candidates=${clicked.candidates ?? 0} matchReason=${clicked.matchReason ?? "?"} rejected=${clicked.rejected ?? 0}`);
     return true;
   }
   if (clicked?.eventInfo) {
-    trace("[tm-rpa] Event-info drawer visible but Find Tickets not matched in main-page DOM scan");
+    if ((clicked.rejected ?? 0) > 0) {
+      trace(`[tm-rpa] Event-info drawer visible but no Find Tickets candidate matched the target date/time (rejected=${clicked.rejected}); leaving page open for user retry`);
+    } else {
+      trace("[tm-rpa] Event-info drawer visible but Find Tickets not matched in main-page DOM scan");
+    }
   }
   return false;
 }
@@ -1076,40 +1237,75 @@ async function clickFirstAvailableSlot(page: Page, trace: TraceFn): Promise<bool
  * with an "Event information" header and a prominent blue "Find Tickets"
  * button. We wait for it to appear then click it.
  */
-async function clickFindTickets(page: Page, trace: TraceFn): Promise<boolean> {
+async function clickFindTickets(
+  page: Page,
+  trace: TraceFn,
+  target: TargetDateTime | null,
+): Promise<boolean> {
   // Wait up to 16s for the button to render in the sidebar (TM renders
   // the panel asynchronously — 8s was not enough on slower hosts).
   const deadline = Date.now() + 16000;
   let loop = 0;
   while (Date.now() < deadline) {
     loop++;
-    if (await clickFindTicketsWithDomScan(page, trace)) {
+    if (await clickFindTicketsWithDomScan(page, trace, target)) {
       return true;
     }
-    const clicked = await page.evaluate(() => {
-      const isVisible = (el: Element): boolean => {
-        const r = (el as HTMLElement).getBoundingClientRect();
-        return r.width > 0 && r.height > 0;
-      };
-      const hasEventInfoPanel = /event information/i.test(document.body?.innerText ?? "");
-      const selector = 'a, button, [role="button"], [role="link"]';
-      const nodes = Array.from(document.querySelectorAll<HTMLElement>(selector)).filter(isVisible);
-      // startsWith semantics — handles "Find Tickets >" / "Find Tickets ›"
-      // / "Find Tickets❯" (the button has a chevron icon after the label).
-      const candidate = nodes.find(el => {
-        if (!hasEventInfoPanel) return false;
-        const r = el.getBoundingClientRect();
-        if (r.left <= window.innerWidth * 0.45) return false;
-        const t = (el.textContent ?? "").trim().toLowerCase();
-        return t.startsWith("find tickets") || t.startsWith("buy tickets") || t.startsWith("get tickets");
-      });
-      if (candidate) {
-        candidate.scrollIntoView({ behavior: "auto", block: "center" });
-        candidate.click();
-        return (candidate.textContent ?? "").trim();
-      }
-      return null;
-    }).catch(() => null);
+    // Inline secondary scan — kept as a defensive backup to the canonical
+    // `clickFindTicketsWithDomScan` IIFE above. Applies the same drawer
+    // date/time guard so the wrong-drawer click cannot leak through this
+    // backup path either.
+    const inlineTargetArg = target
+      ? {
+          monthLong: target.monthName.toLowerCase(),
+          monthShort: target.monthName.slice(0, 3).toLowerCase(),
+          dayStr: String(target.day),
+          dayPadded: String(target.day).padStart(2, "0"),
+          timeLower: (target.time ?? "").toLowerCase(),
+        }
+      : null;
+    const inlineSource = `
+(function() {
+  var TARGET = ${JSON.stringify(inlineTargetArg)};
+  function isVisible(el) {
+    var r = el.getBoundingClientRect();
+    return r.width > 0 && r.height > 0;
+  }
+  function drawerScopeText(el) {
+    var scope = el.closest && el.closest('aside, [role="dialog"], [aria-modal], section, div') || el;
+    return String(scope.innerText || scope.textContent || "");
+  }
+  function drawerMatchesTargetInPage(text) {
+    if (!TARGET) return true;
+    var lower = String(text || "").toLowerCase();
+    if (!lower.replace(/\\s+/g, "").length) return false;
+    var dayRx = new RegExp("\\\\b" + TARGET.dayStr + "(st|nd|rd|th)?\\\\b|\\\\b" + TARGET.dayPadded + "\\\\b|/" + TARGET.dayStr + "/|/" + TARGET.dayPadded + "/|-" + TARGET.dayStr + "-|-" + TARGET.dayPadded + "-");
+    var monthMatch = lower.indexOf(TARGET.monthLong) >= 0 || lower.indexOf(TARGET.monthShort) >= 0;
+    var dayMatch = dayRx.test(lower);
+    var timeMatch = TARGET.timeLower !== "" && lower.indexOf(TARGET.timeLower) >= 0;
+    return (monthMatch && dayMatch) || timeMatch;
+  }
+  var hasEventInfoPanel = /event information/i.test(document.body && document.body.innerText || "");
+  var selector = 'a, button, [role="button"], [role="link"]';
+  var nodes = Array.from(document.querySelectorAll(selector)).filter(isVisible);
+  var candidate = nodes.find(function(el) {
+    if (!hasEventInfoPanel) return false;
+    var r = el.getBoundingClientRect();
+    if (r.left <= window.innerWidth * 0.45) return false;
+    var t = (el.textContent || "").trim().toLowerCase();
+    if (t.indexOf("find tickets") !== 0 && t.indexOf("buy tickets") !== 0 && t.indexOf("get tickets") !== 0) return false;
+    if (TARGET && !drawerMatchesTargetInPage(drawerScopeText(el))) return false;
+    return true;
+  });
+  if (candidate) {
+    candidate.scrollIntoView({ behavior: "auto", block: "center" });
+    candidate.click();
+    return (candidate.textContent || "").trim();
+  }
+  return null;
+})()
+`;
+    const clicked = await page.evaluate(inlineSource).catch(() => null);
 
     if (clicked) {
       trace(`[tm-rpa] Clicked Find Tickets: "${clicked}"`);
@@ -1538,7 +1734,7 @@ export async function bookTicketmasterProgrammatic(
     if (slotClicked) {
       // Sidebar "Find Tickets" should appear ~1–2s after slot click.
       await page.waitForTimeout(1200);
-      const findClicked = await clickFindTickets(page, trace);
+      const findClicked = await clickFindTickets(page, trace, target);
       if (!findClicked) {
         trace("[tm-rpa] Find Tickets click failed after calendar slot — user may need to advance manually");
       }
