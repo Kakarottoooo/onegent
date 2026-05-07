@@ -21,6 +21,7 @@ export type ExpediaRetryState =
 
 type SignalKind =
   | "mixed_or_stale_worker_evidence"
+  | "checkout_form_incomplete"
   | "card_scan_failed"
   | "fallback_attempted"
   | "fallback_matched"
@@ -170,6 +171,26 @@ const SIGNAL_PATTERNS: SignalPattern[] = [
     rx: /\b(payment[-_\s]?wall|cvv[-_\s]?gate|stop[-_\s]?at[-_\s]?cvv)\b/i,
   },
   {
+    kind: "checkout_form_incomplete",
+    label: "traveler form missing required fields",
+    rx: /\bTraveler form state:\b.*\bmissing=(?!none\b)[^\r\n]+/i,
+  },
+  {
+    kind: "checkout_form_incomplete",
+    label: "traveler details need manual review",
+    rx: /\btraveler details need manual review\b/i,
+  },
+  {
+    kind: "checkout_form_incomplete",
+    label: "checkout reached but traveler form incomplete",
+    rx: /\bcheckout reached\b.*\btraveler form (?:is )?incomplete\b/i,
+  },
+  {
+    kind: "checkout_form_incomplete",
+    label: "required allowed fields missing",
+    rx: /\brequired allowed fields\b.*\bmissing\b/i,
+  },
+  {
     kind: "login_or_otp_boundary",
     label: "login boundary",
     rx: /\b(sign[-_\s]?in|log[-_\s]?in|login|authentication)\b.{0,80}\b(continue|required|boundary|manual intervention)\b/i,
@@ -296,6 +317,7 @@ export function analyzeExpediaRetryArtifactBundle(
   const has = (kind: SignalKind) => signals.some((s) => s.kind === kind);
 
   const hasMixedOrStaleEvidence = has("mixed_or_stale_worker_evidence");
+  const hasCheckoutFormIncomplete = has("checkout_form_incomplete");
   const hasCheckout = has("checkout_reached");
   const hasLoginOrOtpBoundary = has("login_or_otp_boundary");
   const hasModelOrEnv = has("model_or_env_transient");
@@ -309,14 +331,16 @@ export function analyzeExpediaRetryArtifactBundle(
   let state: ExpediaRetryState;
   if (hasMixedOrStaleEvidence) {
     state = "insufficient_evidence";
-  } else if (hasCheckout) {
-    state = "checkout_manual_review_reached";
   } else if (hasLoginOrOtpBoundary) {
     state = "login_or_otp_boundary";
   } else if (hasModelOrEnv) {
     state = "model_or_env_transient";
   } else if (hasNetwork) {
     state = "network_provider_failure";
+  } else if (hasCheckoutFormIncomplete) {
+    state = "insufficient_evidence";
+  } else if (hasCheckout) {
+    state = "checkout_manual_review_reached";
   } else if (hasFallbackMatched) {
     state = "fallback_matched_no_checkout";
   } else if (hasFallbackAttempted) {
@@ -634,7 +658,7 @@ function nextActionForState(state: ExpediaRetryState): string {
     case "provider_no_availability":
       return "Treat as provider inventory/no-availability only when screenshots confirm the target card is absent. Do not patch selector logic from availability copy alone.";
     case "insufficient_evidence":
-      return "Collect one clean DB row, codex-worker.log excerpt, provider screenshots, and live snapshot paths before making a patch decision. If mixed/stale worker evidence is present, stop and clean worker topology first.";
+      return "Collect one clean DB row, codex-worker.log excerpt, provider screenshots, and live snapshot paths before making a patch decision. If mixed/stale worker evidence is present, stop and clean worker topology first. If incomplete traveler fields are present, do not mark the flight lane closed.";
   }
 }
 
@@ -642,24 +666,26 @@ function signalRank(kind: SignalKind): number {
   switch (kind) {
     case "mixed_or_stale_worker_evidence":
       return -1;
-    case "checkout_reached":
+    case "checkout_form_incomplete":
       return 0;
-    case "login_or_otp_boundary":
+    case "checkout_reached":
       return 1;
-    case "model_or_env_transient":
+    case "login_or_otp_boundary":
       return 2;
-    case "network_provider_failure":
+    case "model_or_env_transient":
       return 3;
-    case "fallback_matched":
+    case "network_provider_failure":
       return 4;
-    case "fallback_attempted":
+    case "fallback_matched":
       return 5;
-    case "card_scan_failed":
+    case "fallback_attempted":
       return 6;
-    case "no_match":
+    case "card_scan_failed":
       return 7;
-    case "provider_no_availability":
+    case "no_match":
       return 8;
+    case "provider_no_availability":
+      return 9;
   }
 }
 

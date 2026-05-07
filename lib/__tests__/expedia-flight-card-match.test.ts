@@ -385,9 +385,23 @@ describe("classifyExpediaFlightBlockingOverlayText", () => {
     ).toBe("dismissable_member_price_overlay");
   });
 
+  it("treats OneKeyCash sign-in promos as dismissable overlays with evidence", () => {
+    expect(
+      classifyExpediaFlightBlockingOverlayText(
+        "You can sign in or create an account to earn OneKeyCash after this trip. You're on your way!",
+      ),
+    ).toBe("dismissable_member_price_overlay");
+  });
+
   it("keeps true sign-in-to-continue copy as a hard safety boundary", () => {
     expect(
       classifyExpediaFlightBlockingOverlayText("Sign in to continue to checkout"),
+    ).toBe("hard_safety_boundary");
+  });
+
+  it("keeps account-required sign-in overlays as a hard boundary", () => {
+    expect(
+      classifyExpediaFlightBlockingOverlayText("Sign in or create an account to continue"),
     ).toBe("hard_safety_boundary");
   });
 });
