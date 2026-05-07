@@ -5,8 +5,10 @@ import {
   classifyExpediaFlightSafetyBoundaryText,
   buildExpediaCardExpirySelectCandidates,
   buildExpediaDateOfBirthSelectCandidates,
+  describeExpediaFlightCandidateRejection,
   extractExpediaFlightCandidateEvidence,
   formatExpediaFlightCandidateEvidence,
+  formatExpediaFlightTravelerFormStateForTrace,
   hasExpediaFlightBundlePopupText,
   normalizeExpediaTravelerGender,
   readExpediaFlightLocatorBoundingBox,
@@ -118,6 +120,42 @@ describe("scoreExpediaFlightCandidateText", () => {
     expect(score.fallbackEligible).toBe(false);
   });
 
+  it("rejects a stale-price same-airline card outside the narrow target-time window", () => {
+    const score = scoreExpediaFlightCandidateText(
+      [
+        "Select flight",
+        "7:25am 8:35am",
+        "Orlando (MCO) - Nashville (BNA)",
+        "Southwest Airlines",
+        "2h 10m Nonstop",
+        "$152",
+      ].join(" "),
+      {
+        airline: "Southwest",
+        price: 152,
+        time: "08:50",
+        flightNumber: "WN 3084",
+      },
+    );
+    const summary = formatExpediaFlightCandidateEvidence(
+      "Select flight Southwest Airlines 7:25am 8:35am MCO to BNA $152 Nonstop",
+      {
+        airline: "Southwest",
+        price: 152,
+        time: "08:50",
+        flightNumber: "WN 3084",
+      },
+    );
+
+    expect(score.hasAirline).toBe(true);
+    expect(score.hasPrice).toBe(true);
+    expect(score.timeDelta).toBe(85);
+    expect(score.exactMatch).toBe(false);
+    expect(score.fallbackEligible).toBe(false);
+    expect(summary).toContain("decision=rejected");
+    expect(summary).toContain("reason=price-only-time-mismatch");
+  });
+
   it("rejects unrelated airline cards with no useful target overlap", () => {
     const score = scoreExpediaFlightCandidateText(
       "Select flight Delta DL 1212 Departing at 6:10 PM $418",
@@ -188,6 +226,8 @@ describe("Expedia flight candidate evidence", () => {
     expect(summary).toContain("flightNumber=WN 3084");
     expect(summary).toContain("route=Orlando (MCO) - Nashville (BNA)");
     expect(summary).toContain("fallbackScore=");
+    expect(summary).toContain("decision=eligible");
+    expect(summary).toContain("reason=exact-target-fit");
   });
 
   it("keeps hidden-flight-number cards evidence-ready with text fallback", () => {
@@ -351,6 +391,23 @@ describe("Expedia flight candidate selection", () => {
     expect(selection.matchMode).toBe("fallback");
   });
 
+  it("does not select same-airline stale-price cards when none match target time or flight number", () => {
+    const selection = selectExpediaFlightCandidateLabels(
+      [
+        "Select flight Southwest Airlines 7:25am 8:35am MCO to BNA $152 Nonstop",
+        "Select flight Southwest Airlines 9:55pm 11:00pm MCO to BNA $152 Nonstop",
+      ],
+      target,
+      "unit",
+    );
+
+    expect(selection.selected).toBeNull();
+    expect(selection.candidateCount).toBe(2);
+    expect(selection.candidateSummaries.join(" ")).toContain("decision=rejected");
+    expect(selection.candidateSummaries.join(" ")).toContain("reason=price-only-time-mismatch");
+    expect(selection.matchReason).toContain("wrong_time_candidate_rejected");
+  });
+
   it("does not select a different-airline card just because target time and price match", () => {
     const selection = selectExpediaFlightCandidateLabels(
       [
@@ -364,6 +421,28 @@ describe("Expedia flight candidate selection", () => {
     expect(selection.selected).toBeNull();
     expect(selection.candidateCount).toBe(0);
     expect(selection.candidateSummaries.join(" ")).toContain("differentAirline=yes");
+    expect(selection.matchReason).toContain("wrong_airline_candidate_rejected");
+    expect(selection.matchReason).toContain("selected candidate absent");
+  });
+
+  it("records explicit rejection reasons for wrong-time and price-only cards", () => {
+    expect(
+      describeExpediaFlightCandidateRejection(
+        ["Select flight Southwest Airlines 9:55pm 11:00pm MCO to BNA $152 Nonstop"],
+        target,
+        "unit",
+      ),
+    ).toContain("wrong_time_candidate_rejected");
+
+    const priceOnly = selectExpediaFlightCandidateLabels(
+      ["Select flight Orlando (MCO) to Nashville (BNA) 2h 5m Nonstop $152"],
+      target,
+      "unit",
+    );
+
+    expect(priceOnly.selected).toBeNull();
+    expect(priceOnly.matchReason).toContain("price_only_fallback_rejected");
+    expect(priceOnly.matchReason).toContain("selected candidate absent");
   });
 });
 
@@ -535,5 +614,25 @@ describe("Expedia flight traveler form state", () => {
       "birth year",
       "gender",
     ]);
+  });
+
+  it("formats traveler form trace with required-field names and no field values", () => {
+    const state = summarizeExpediaFlightTravelerFormState({
+      bodyText: "Who's traveling? First name Last name Email address Phone number",
+      controls: [
+        { tagName: "input", type: "text", text: "first name", value: "Jane", checked: false, selectedIndex: -1 },
+        { tagName: "input", type: "text", text: "last name", value: "", checked: false, selectedIndex: -1 },
+        { tagName: "input", type: "email", text: "email address", value: "jane@example.com", checked: false, selectedIndex: -1 },
+        { tagName: "input", type: "tel", text: "phone number", value: "", checked: false, selectedIndex: -1 },
+      ],
+    });
+
+    const trace = formatExpediaFlightTravelerFormStateForTrace(state);
+
+    expect(trace).toContain("filled=first name,email address");
+    expect(trace).toContain("missing=last name,phone number");
+    expect(trace).toContain("visible=first name,last name,email address,phone number");
+    expect(trace).not.toContain("Jane");
+    expect(trace).not.toContain("jane@example.com");
   });
 });

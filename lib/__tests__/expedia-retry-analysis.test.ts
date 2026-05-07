@@ -114,7 +114,7 @@ describe("analyzeExpediaRetryArtifactBundle", () => {
       workerLogExcerpt: [
         "[flight-rpa] Checkout reached - running AI form fill",
         "[flight-rpa] Traveler form state: filled=none missing=first name,last name,email address,phone number,birth month,birth day,birth year,gender",
-        "Flight checkout reached; traveler details need manual review: first name, last name, email address.",
+        "Flight checkout reached but required traveler details are still missing: first name, last name, email address.",
       ].join("\n"),
     });
 
@@ -122,6 +122,47 @@ describe("analyzeExpediaRetryArtifactBundle", () => {
     expect(analysis.signals[0]?.kind).toBe("checkout_form_incomplete");
     expect(analysis.signals.map((signal) => signal.kind)).toContain("checkout_reached");
     expect(analysis.label).toBe("Insufficient evidence");
+  });
+
+  it("classifies explicit wrong-card rejection as protected no-match evidence", () => {
+    const analysis = analyzeExpediaRetryArtifactBundle({
+      job: {
+        id: "fixture-expedia-wrong-card-rejected",
+        provider: "expedia",
+        scenario: "flight",
+        status: "failed",
+      },
+      workerLogExcerpt: [
+        "[flight-rpa] Flight candidate evidence dump: airline=Frontier departure=8:50am arrival=9:55am route=MCO to BNA price=$152 flightNumber=hidden score=9 fallbackScore=0 timeDelta=0 priceDelta=0 differentAirline=yes",
+        "[flight-rpa] Flight candidate rejection reason: locator fallback rejected candidates: wrong_airline_candidate_rejected timeDelta=0 priceDelta=0 differentAirline=yes selected candidate absent",
+        "[flight-rpa] No matching flight button found (tried airline=\"Southwest\" price=$152)",
+      ].join("\n"),
+    });
+
+    expect(analysis.state).toBe("candidate_rejected_no_match");
+    expect(analysis.confidence).toBe("high");
+    expect(analysis.signals[0]?.kind).toBe("candidate_rejected");
+    expect(analysis.signals.map((signal) => signal.label)).toContain("wrong airline candidate rejected");
+    expect(analysis.nextAction).toContain("protected wrong-card rejection");
+  });
+
+  it("does not let a stale checkout marker override candidate rejection evidence", () => {
+    const analysis = analyzeExpediaRetryArtifactBundle({
+      job: {
+        id: "fixture-expedia-price-only-rejected",
+        provider: "expedia",
+        scenario: "flight",
+        status: "failed",
+      },
+      workerLogExcerpt: [
+        "[flight-rpa] Flight candidate rejection reason: DOM scan rejected candidates: price_only_fallback_rejected timeDelta=unknown priceDelta=0 differentAirline=no selected candidate absent",
+        "[flight-rpa] Checkout reached - running AI form fill",
+      ].join("\n"),
+    });
+
+    expect(analysis.state).toBe("candidate_rejected_no_match");
+    expect(analysis.signals.map((signal) => signal.kind)).toContain("checkout_reached");
+    expect(analysis.signals[0]?.kind).toBe("candidate_rejected");
   });
 
   it("returns insufficient evidence for bundles without known signals", () => {

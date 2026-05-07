@@ -123,6 +123,7 @@ import {
   bookExpediaFlightProgrammatic,
   fillExpediaGroupPaymentForm,
   fillExpediaGuestForm,
+  formatExpediaFlightTravelerFormStateForTrace,
   inspectExpediaFlightTravelerFormState,
   scrollExpediaCheckoutToFinalReviewBoundary,
 } from "./providers/expedia";
@@ -1548,10 +1549,7 @@ The user will enter CVV and confirm payment themselves.`,
           const postFillScreenshot = await checkoutPage.screenshot({ type: "jpeg", quality: 55 }).catch(() => null);
           const checkoutUrl = (() => { try { return (checkoutPage as unknown as { url: () => string }).url(); } catch { return rpaResult.currentUrl || input.startUrl; } })();
           const travelerState = await inspectExpediaFlightTravelerFormState(checkoutPage);
-          trace(
-            `[flight-rpa] Traveler form state: filled=${travelerState.filledFields.join(",") || "none"} ` +
-            `missing=${travelerState.missingRequiredFields.join(",") || "none"}`
-          );
+          trace(`[flight-rpa] Traveler form state: ${formatExpediaFlightTravelerFormStateForTrace(travelerState)}`);
 
           if (travelerState.missingRequiredFields.length > 0) {
             if (!useCloud && input.jobId) {
@@ -1559,12 +1557,14 @@ The user will enter CVV and confirm payment themselves.`,
                 `Local mode: flight checkout reached but traveler form is incomplete — keeping browser open for ${Math.round(BROWSER_KEEP_OPEN_MS / 60000)} minutes for inspection.`
               );
             }
+            const missingTravelerFields = travelerState.missingRequiredFields.join(", ");
             return {
-              status: "paused_payment" as const,
+              status: "error" as const,
               screenshotBase64: postFillScreenshot?.toString("base64") ?? finalScreenshotBase64,
               handoffUrl: checkoutUrl || rpaResult.currentUrl || input.startUrl,
               sessionUrl,
-              summary: `Flight checkout reached; traveler details need manual review: ${travelerState.missingRequiredFields.join(", ")}.`,
+              summary: `Flight checkout reached but required traveler details are still missing: ${missingTravelerFields}.`,
+              error: `Expedia flight traveler form incomplete: ${missingTravelerFields}.`,
               debugTrace,
             };
           }

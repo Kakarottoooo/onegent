@@ -127,10 +127,10 @@ describe("layered benchmark v2", () => {
 
     expect(results.map((result) => result.finalVerdict)).toEqual([
       "l1_direct_pass",
-      "needs_runtime_patch",
-      "needs_runtime_patch",
-      "needs_runtime_patch",
-      "needs_runtime_patch",
+      "l2_recovered_pass",
+      "l2_recovered_pass",
+      "l2_recovered_pass",
+      "insufficient_evidence",
       "insufficient_evidence",
       "l2_recovered_pass",
       "expected_manual_boundary",
@@ -138,9 +138,13 @@ describe("layered benchmark v2", () => {
       "expected_manual_boundary",
     ]);
     expect(results[1].artifactExpectations.classificationSignals).toContain("differentAirline=yes");
-    expect(results[2].artifactExpectations.classificationSignals).toContain("timeDelta>120");
+    expect(results[1].artifactExpectations.classificationSignals).toContain("reason=explicit-different-airline");
+    expect(results[2].artifactExpectations.classificationSignals).toContain("timeDelta>15");
+    expect(results[2].artifactExpectations.classificationSignals).toContain("reason=price-only-time-mismatch");
     expect(results[3].artifactExpectations.classificationSignals).toContain("priceDelta=0");
+    expect(results[3].artifactExpectations.classificationSignals).toContain("decision=rejected");
     expect(results[4].artifactExpectations.classificationSignals.join(" ")).toContain("Traveler form state");
+    expect(results[4].artifactExpectations.classificationSignals).toContain("status=error");
     expect(results[5].artifactExpectations.classificationSignals).toContain("mixed_or_stale_worker_evidence");
     expect(results[6].calculatedL2Eligible).toBe(true);
     expect(results[7].calculatedL2Eligible).toBe(false);
@@ -149,7 +153,7 @@ describe("layered benchmark v2", () => {
   });
 
   it("requires patch proposal fields for flight cases that ask for L1 fixes", () => {
-    const patchCases = selectLayeredBenchmarkCases({ vertical: "flight", count: 10 })
+    const patchCases = selectLayeredBenchmarkCases({ vertical: "flight", count: 20 })
       .filter((testCase) => testCase.patchProposal.proposed);
 
     expect(patchCases.length).toBeGreaterThan(0);
@@ -157,7 +161,7 @@ describe("layered benchmark v2", () => {
       expect(testCase.patchProposal.title).toBeTruthy();
       expect(testCase.patchProposal.files?.length).toBeGreaterThan(0);
       expect(testCase.patchProposal.risk).toMatch(/low|medium/);
-      expect(testCase.patchProposal.notes).toContain("fixture-driven");
+      expect(testCase.patchProposal.notes).toMatch(/fixture-driven|Patch proposal only/);
       expect(testCase.artifactExpectations.patchProposalFields).toEqual([
         "title",
         "files",
