@@ -12,6 +12,45 @@
 ## Currently doing
 
 Completed in latest pass:
+- Integrated the benchmark-fixture/status merge train in dependency order:
+  1. Goal `codex/agent-intake-dashboard @ 5aff168` -> `dec9173`
+     - extended the metadata-only returned-agent intake queue with dependency
+       awareness, supersede/rebase guidance, next-task recommendations, and
+       JSON/Markdown CLI output;
+     - verified agent intake tests 19/19 plus JSON/Markdown CLI smoke.
+  2. Claude `claude/activity-status-followup @ 999d72e` -> `a016d59`
+     - wired the Ticketmaster task-state classifier into the executor, mapping
+       login/account checkpoints to `needs_login -> awaiting_login` while
+       keeping seat-selection handoff as `paused_payment`;
+     - verified Ticketmaster/activity/task-workspace targeted suite 132/132,
+       strict drift 0, and `git diff --check`.
+  3. Agent2 `codex/flight-benchmark-fixtures @ 5d99804` -> `4a0bdce`
+     - added ten Expedia flight-specific Layered Benchmark V2 fixtures and
+       tightened checkout-with-missing-traveler-field evidence to
+       `insufficient_evidence`;
+     - verified layered/Expedia targeted suite 58/58 and the 10-case flight
+       no-live benchmark.
+  4. Agent3 `codex/hotel-benchmark-fixtures @ a49e9f8` -> `e7abc01`
+     - added ten Booking.com hotel-specific Layered Benchmark V2 fixtures with
+       exact no-availability, weak no-availability fallback, room drift,
+       guest/review boundary, account boundary, incomplete artifacts, and stale
+       running-state contracts;
+     - verified layered/hotel targeted suite 19/19 and the 10-case hotel
+       no-live benchmark.
+- Final integrated validation:
+  - `npx tsc --noEmit --pretty false`;
+  - `npm run check-drift` with no drift;
+  - 50-case layered benchmark gate passed with 96% artifact completeness, 0
+    routing mismatches, 4% unknown failure rate, 26% L1 direct pass, and 42%
+    L1+L2 recovered pass;
+  - `npm run gate:phase1 -- --allow-known-drift` 9/9, run id
+    `2026-05-07T07-42-03-976Z`;
+  - `git diff --check HEAD~4 HEAD`.
+- No `.tmp/` artifacts were staged, and no external provider/browser workflow,
+  worker start, live OpenAI call, secret handling, payment/login/verification,
+  or final checkout flow was run during Codex integration.
+
+Completed in previous pass:
 - Integrated the second layered follow-up merge train in dependency order:
   1. Goal `codex/layered-benchmark-next @ 68222ac` -> `6fbff6b`
      - added metadata-only returned-agent intake classification, CLI, docs,
