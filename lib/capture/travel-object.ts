@@ -71,6 +71,7 @@ export interface CaptureTravelObject {
     nlu_state?: IntentState;
     nlu_action?: RouterAction;
     session_id?: string;
+    chat_id?: string;
   };
 }
 
@@ -78,6 +79,7 @@ export interface BuildCaptureTravelObjectInput {
   message: string;
   result: NluV2ParseResult;
   sessionId?: string | null;
+  chatId?: string | null;
   capturedAt?: string;
 }
 
@@ -146,6 +148,7 @@ export function buildCaptureTravelObjectFromNlu(
       ...(state ? { nlu_state: state } : {}),
       ...(action ? { nlu_action: action } : {}),
       ...(input.sessionId ? { session_id: input.sessionId } : {}),
+      ...(input.chatId ? { chat_id: input.chatId } : {}),
     },
   };
 }
