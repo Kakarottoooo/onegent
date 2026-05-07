@@ -311,7 +311,7 @@ describe("direct provider URL — Capture builder -> task boundary", () => {
     expect(boundary.nextAction).not.toBe("run_direct_booking");
   });
 
-  it("Ticketmaster /artist/ (non-event) URL does NOT trigger run_direct_booking", () => {
+  it("Ticketmaster /artist/ URL triggers provider-start direct booking", () => {
     const artistUrl =
       "https://www.ticketmaster.com/the-lion-king-new-york-ny-tickets/artist/1039581";
     const cap = captureFixture({
@@ -340,11 +340,11 @@ describe("direct provider URL — Capture builder -> task boundary", () => {
       constraints: { source_url: artistUrl },
     });
     const boundary = buildCaptureTaskBoundary(cap);
-    expect(boundary.nextAction).not.toBe("run_direct_booking");
-    // /artist/ is the calendar landing page, not a booking lock — the
-    // boundary should fall through to the regular confirm path because
-    // entities are complete.
-    expect(boundary.nextAction).toBe("show_confirmation");
+    expect(boundary.nextAction).toBe("run_direct_booking");
+    // /artist/ is not an exact event lock, but it is still an explicit
+    // provider-start page from the user. The executor should start there
+    // instead of falling back to generic event search.
+    expect(boundary.payload?.nlu.direct_booking).toBe(true);
   });
 
   it("Ticketmaster /event/ URL on a locale TLD (.co.uk) triggers run_direct_booking", () => {

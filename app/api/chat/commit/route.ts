@@ -1262,14 +1262,16 @@ async function buildDirectBookingPayload(
       eventDate,
       numTickets,
       providerUrl: directUrl.url,
+      pageType: directUrl.pageType,
     });
     const body: Record<string, unknown> = {
       activity_name: eventName,
-      activity_id: directUrl.eventId,
+      activity_id: directUrl.providerPageId,
       city,
       event_date: eventDate ?? "",
       num_tickets: numTickets,
       provider: directUrl.provider,
+      provider_page_type: directUrl.pageType,
       startUrl: directUrl.url,
       fallbackUrl: directUrl.url,
       task,

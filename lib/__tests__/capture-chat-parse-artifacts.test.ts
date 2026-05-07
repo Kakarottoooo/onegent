@@ -171,6 +171,25 @@ describe("provider URL fallback NLU result", () => {
     });
   });
 
+  it("turns Ticketmaster artist URL fallback artifacts into a direct provider-start task", () => {
+    const result = buildProviderUrlFallbackNluResult({
+      message: `帮我订这个票：${lilWayneUrl}`,
+      capturedAt,
+    });
+    expect(result).not.toBeNull();
+
+    const artifacts = buildCaptureChatParseArtifacts({
+      message: `帮我订这个票：${lilWayneUrl}`,
+      result: result!,
+      capturedAt,
+    });
+
+    expect(artifacts.capture_task_boundary.ok).toBe(true);
+    expect(artifacts.capture_task_boundary.nextAction).toBe("run_direct_booking");
+    expect(artifacts.capture_task_boundary.payload?.nlu.direct_booking).toBe(true);
+    expect(artifacts.capture_task_boundary.payload?.nlu.collected_constraints.source_url).toBe(lilWayneUrl);
+  });
+
   it("uses the normalized URL in the fallback result when the message starts with ttps", () => {
     const result = buildProviderUrlFallbackNluResult({
       message: `ttps://www.ticketmaster.com/lil-wayne-tickets/artist/712214 帮我订这个票`,

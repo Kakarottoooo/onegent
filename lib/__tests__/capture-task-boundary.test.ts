@@ -348,4 +348,47 @@ describe("Capture -> task boundary", () => {
     expect(result.nextAction).toBe("run_direct_booking");
     expect(result.missingFields).toEqual([]);
   });
+
+  it("runs a direct activity task from a Ticketmaster artist URL without falling back to generic search", () => {
+    const url = "https://www.ticketmaster.com/lil-wayne-tickets/artist/712214?ac_link=iccp_hp_t3_fallback_K8vZ917GemV";
+    const result = buildCaptureTaskBoundary(
+      capture({
+        source: {
+          type: "url",
+          raw_text: `帮我订这个票：${url}`,
+          url,
+          host: "www.ticketmaster.com",
+          captured_at: capturedAt,
+        },
+        classification: {
+          scenario: "activity",
+          categories: ["activity"],
+          confidence: 0.72,
+          direct_booking: false,
+        },
+        entities: {
+          activity: {
+            event_name: "Lil Wayne",
+            event_type: "concert",
+            num_tickets: 1,
+          },
+        },
+        constraints: {
+          source_url: url,
+        },
+        missing_fields: ["city", "event_date"],
+        task_readiness: {
+          ready: false,
+          reason: "missing_fields",
+          next_missing_fields: ["city", "event_date"],
+        },
+      }),
+    );
+
+    expect(result.ok).toBe(true);
+    expect(result.nextAction).toBe("run_direct_booking");
+    expect(result.missingFields).toEqual([]);
+    expect(result.payload?.nlu.direct_booking).toBe(true);
+    expect(result.payload?.nlu.collected_constraints.source_url).toBe(url);
+  });
 });
