@@ -35,13 +35,17 @@ export type CaptureBenchmarkSourceShape =
   | "mixed_url_instruction"
   | "vague_inspiration"
   | "exact_task_ready"
-  | "group_decision_request";
+  | "group_decision_request"
+  | "save_only"
+  | "compare_only"
+  | "provider_url_impersonation";
 
 export type CaptureBenchmarkObjectType =
   | "task_intent"
   | "travel_link"
   | "travel_screenshot"
   | "trip_seed"
+  | "group_decision"
   | "profile_or_preference"
   | "refine_request"
   | "needs_clarification"
@@ -98,6 +102,7 @@ export type CaptureBenchmarkFixture = {
   owner: CaptureBenchmarkOwner;
   expectedFailureClass: CaptureBenchmarkFailureClass;
   artifactContract: CaptureBenchmarkArtifactContract;
+  note: string;
   dogfoodId?: string;
   parserState?: IntentState;
 };
@@ -125,6 +130,7 @@ export type CaptureBenchmarkResult = {
   failureClass: CaptureBenchmarkFailureClass;
   owner: CaptureBenchmarkOwner;
   dogfoodId?: string;
+  note: string;
   notes: string[];
   capture: CaptureTravelObject;
 };
@@ -162,6 +168,15 @@ export type CaptureBenchmarkReport = {
   summary: CaptureBenchmarkSummary;
   results: CaptureBenchmarkResult[];
   topFailedFixtures: CaptureBenchmarkTopFailure[];
+  dogfoodLinks: Array<{
+    dogfoodId: string;
+    fixtureIds: string[];
+  }>;
+  recommendedNextActions: Array<{
+    owner: CaptureBenchmarkOwner;
+    action: string;
+    reason: string;
+  }>;
   notes: string[];
 };
 
@@ -208,6 +223,9 @@ const SOURCE_SHAPES: CaptureBenchmarkSourceShape[] = [
   "vague_inspiration",
   "exact_task_ready",
   "group_decision_request",
+  "save_only",
+  "compare_only",
+  "provider_url_impersonation",
 ];
 
 const FAILURE_CLASSES: CaptureBenchmarkFailureClass[] = [
@@ -272,6 +290,8 @@ export function runCaptureBenchmark(params: {
     summary: summarizeCaptureBenchmark(results),
     results,
     topFailedFixtures: topFailedFixtures(results),
+    dogfoodLinks: dogfoodLinks(results),
+    recommendedNextActions: recommendedNextActions(results),
     notes: [...CAPTURE_BENCHMARK_MODE_NOTES],
   };
 }
@@ -371,6 +391,7 @@ export function evaluateCaptureBenchmarkFixture(fixture: CaptureBenchmarkFixture
     failureClass,
     owner: fixture.owner,
     dogfoodId: fixture.dogfoodId,
+    note: fixture.note,
     notes,
     capture,
   };
@@ -455,6 +476,20 @@ export function renderCaptureBenchmarkMarkdown(report: CaptureBenchmarkReport): 
   for (const owner of OWNERS) {
     const count = report.summary.byOwner[owner];
     if (count > 0) lines.push(`| \`${owner}\` | ${count} |`);
+  }
+
+  lines.push("", "## Dogfood Links", "", "| Dogfood | Fixtures |", "| --- | ---: |");
+  if (report.dogfoodLinks.length === 0) {
+    lines.push("| - | 0 |");
+  } else {
+    for (const link of report.dogfoodLinks) {
+      lines.push(`| \`${link.dogfoodId}\` | ${link.fixtureIds.length} |`);
+    }
+  }
+
+  lines.push("", "## Recommended Next Actions", "", "| Owner | Action | Reason |", "| --- | --- | --- |");
+  for (const action of report.recommendedNextActions) {
+    lines.push(`| \`${action.owner}\` | ${action.action} | ${action.reason} |`);
   }
 
   lines.push(
@@ -560,7 +595,7 @@ function buildRestaurantFixtures(): CaptureBenchmarkFixture[] {
     }, ["cuisine"], "DOG-009"),
     incompleteArtifactFixture("restaurant-artifact-gap-01", seeds[0]),
   );
-  return fixtures;
+  return topUpVerticalFixtures(fixtures, "restaurant", 80);
 }
 
 function buildHotelFixtures(): CaptureBenchmarkFixture[] {
@@ -625,7 +660,7 @@ function buildHotelFixtures(): CaptureBenchmarkFixture[] {
     }, ["city"], "DOG-010"),
     incompleteArtifactFixture("hotel-artifact-gap-01", seeds[0]),
   );
-  return fixtures;
+  return topUpVerticalFixtures(fixtures, "hotel", 80);
 }
 
 function buildFlightFixtures(): CaptureBenchmarkFixture[] {
@@ -689,7 +724,7 @@ function buildFlightFixtures(): CaptureBenchmarkFixture[] {
     }, ["departure_date"]),
     incompleteArtifactFixture("flight-artifact-gap-01", seeds[0]),
   );
-  return fixtures;
+  return topUpVerticalFixtures(fixtures, "flight", 80);
 }
 
 function buildActivityFixtures(): CaptureBenchmarkFixture[] {
@@ -756,7 +791,7 @@ function buildActivityFixtures(): CaptureBenchmarkFixture[] {
     }, ["city"], "DOG-005"),
     incompleteArtifactFixture("activity-artifact-gap-01", seeds[0]),
   );
-  return fixtures;
+  return topUpVerticalFixtures(fixtures, "activity", 80);
 }
 
 function buildTripFixtures(): CaptureBenchmarkFixture[] {
@@ -804,7 +839,7 @@ function buildTripFixtures(): CaptureBenchmarkFixture[] {
     missingTripFixture("trip-missing-dates-01", "Plan a New York trip for two", ["date_range"]),
     missingTripFixture("trip-missing-travelers-01", "Plan a New York trip June 1 to June 4", ["traveler_count"]),
   );
-  return fixtures;
+  return topUpVerticalFixtures(fixtures, "trip", 80);
 }
 
 function buildAmbiguousFixtures(): CaptureBenchmarkFixture[] {
@@ -841,7 +876,7 @@ function buildAmbiguousFixtures(): CaptureBenchmarkFixture[] {
       expectedActionTypes: ["save", "ask_clarification"],
       expectedTaskReadiness: {
         ready: false,
-        reason: input.includes("http") ? "needs_review" : "unsupported_source",
+        reason: input.includes("http") || input.includes("screenshot") ? "needs_review" : "unsupported_source",
         missing: ["categories"],
       },
       owner: "nlu",
@@ -849,7 +884,7 @@ function buildAmbiguousFixtures(): CaptureBenchmarkFixture[] {
       parserState: state({ intent: "create_plan", categories: [], scenario: null, confidence: 0.5 }),
     }));
   }
-  return fixtures;
+  return topUpVerticalFixtures(fixtures, "ambiguous", 50);
 }
 
 function buildRefineFixtures(): CaptureBenchmarkFixture[] {
@@ -906,7 +941,7 @@ function buildRefineFixtures(): CaptureBenchmarkFixture[] {
       }),
     }));
   }
-  return fixtures;
+  return topUpVerticalFixtures(fixtures, "refine", 50);
 }
 
 function buildProfileFixtures(): CaptureBenchmarkFixture[] {
@@ -943,7 +978,7 @@ function buildProfileFixtures(): CaptureBenchmarkFixture[] {
       }),
     }));
   }
-  return fixtures;
+  return topUpVerticalFixtures(fixtures, "profile", 30);
 }
 
 function buildChitchatFixtures(): CaptureBenchmarkFixture[] {
@@ -957,7 +992,7 @@ function buildChitchatFixtures(): CaptureBenchmarkFixture[] {
     "I am just browsing",
     "maybe later",
   ];
-  return inputs.map((input, index) =>
+  const fixtures = inputs.map((input, index) =>
     baseFixture({
       id: `chitchat-${pad(index + 1)}`,
       input,
@@ -976,10 +1011,453 @@ function buildChitchatFixtures(): CaptureBenchmarkFixture[] {
       parserState: state({ intent: "chitchat", scenario: null, categories: [] }),
     }),
   );
+  return topUpVerticalFixtures(fixtures, "chitchat", 20);
 }
 
-type BaseSeed = Omit<CaptureBenchmarkFixture, "id" | "artifactContract"> & {
+function topUpVerticalFixtures(
+  fixtures: CaptureBenchmarkFixture[],
+  vertical: CaptureBenchmarkVertical,
+  minimum: number,
+): CaptureBenchmarkFixture[] {
+  if (fixtures.length >= minimum) return fixtures;
+  const needed = minimum - fixtures.length;
+  return [...fixtures, ...buildGeneratedFixtures(vertical, needed, fixtures.length + 1)];
+}
+
+function buildGeneratedFixtures(
+  vertical: CaptureBenchmarkVertical,
+  count: number,
+  start: number,
+): CaptureBenchmarkFixture[] {
+  const builders: Record<CaptureBenchmarkVertical, (index: number) => CaptureBenchmarkFixture> = {
+    restaurant: generatedRestaurantFixture,
+    hotel: generatedHotelFixture,
+    flight: generatedFlightFixture,
+    activity: generatedActivityFixture,
+    trip: generatedTripFixture,
+    ambiguous: generatedAmbiguousFixture,
+    refine: generatedRefineFixture,
+    profile: generatedProfileFixture,
+    chitchat: generatedChitchatFixture,
+  };
+  return Array.from({ length: count }, (_, i) => builders[vertical](start + i));
+}
+
+function generatedRestaurantFixture(index: number): CaptureBenchmarkFixture {
+  const cuisines = ["Sichuan", "Japanese", "Chinese", "Italian", "Korean", "Vegan", "Thai", "Mexican"];
+  const cities = ["New York", "Brooklyn", "San Francisco", "Chicago", "Boston", "Los Angeles"];
+  const times = ["18:30", "19:00", "20:00", "20:30"];
+  const cuisine = cuisines[index % cuisines.length];
+  const city = cities[index % cities.length];
+  const time = times[index % times.length];
+  const partySize = (index % 5) + 1;
+  const date = `2026-06-${String((index % 20) + 1).padStart(2, "0")}`;
+  if (index % 11 === 0) {
+    return groupDecisionFixture({
+      id: `restaurant-group-${pad(index)}`,
+      input: `Create a dinner decision room with Alice for ${cuisine} in ${city} on ${date} at ${time}`,
+      scenario: "restaurant",
+      categories: ["restaurant"],
+      fields: { restaurant: { city, date, time, party_size: partySize, cuisine } },
+      note: "Locks restaurant group-decision readiness without provider execution.",
+    });
+  }
+  return baseFixture({
+    id: `restaurant-generated-${pad(index)}`,
+    input: `Book ${cuisine} dinner in ${city} on ${date} at ${time} for ${partySize}`,
+    locale: "en",
+    vertical: "restaurant",
+    sourceShape: "exact_task_ready",
+    expectedObjectType: "task_intent",
+    expectedScenario: "restaurant",
+    expectedCategories: ["restaurant"],
+    expectedSourceType: "request",
+    expectedEntityPaths: criticalEntityPaths("restaurant", { city, date, time, party_size: partySize, cuisine }),
+    expectedActionTypes: ["save", "create_task"],
+    expectedTaskReadiness: { ready: true, reason: "ready", missing: [] },
+    owner: "nlu",
+    expectedFailureClass: "none",
+    note: "Locks restaurant cuisine, city, date, time, and party-size preservation across varied alpha-like inputs.",
+    dogfoodId: cuisine === "Sichuan" || cuisine === "Chinese" || cuisine === "Japanese" ? "DOG-009" : undefined,
+    parserState: state({
+      scenario: "restaurant",
+      categories: ["restaurant"],
+      restaurant: { city, date, time, party_size: partySize, cuisine },
+    }),
+  });
+}
+
+function generatedHotelFixture(index: number): CaptureBenchmarkFixture {
+  const cities = ["New York", "Chicago", "Miami", "Seattle", "Boston", "Los Angeles"];
+  const budgets = [180, 220, 250, 300, 350, 400];
+  const city = cities[index % cities.length];
+  const checkInDay = (index % 20) + 1;
+  const checkOutDay = checkInDay + 3;
+  const checkIn = `2026-07-${String(checkInDay).padStart(2, "0")}`;
+  const checkOut = `2026-07-${String(checkOutDay).padStart(2, "0")}`;
+  const budget = budgets[index % budgets.length];
+  const guests = (index % 4) + 1;
+  if (index % 13 === 0) {
+    return groupDecisionFixture({
+      id: `hotel-group-${pad(index)}`,
+      input: `Create a room with Bob to compare ${city} hotels ${checkIn} to ${checkOut} under ${budget}`,
+      scenario: "hotel",
+      categories: ["hotel"],
+      fields: { hotel: { city, check_in: checkIn, check_out: checkOut, budget_max_per_night: budget, guests } },
+      note: "Locks hotel group-decision readiness for compare-before-booking alpha inputs.",
+    });
+  }
+  return baseFixture({
+    id: `hotel-generated-${pad(index)}`,
+    input: `Find a ${city} hotel from ${checkIn} to ${checkOut} under $${budget} for ${guests} guest${guests > 1 ? "s" : ""}`,
+    locale: "en",
+    vertical: "hotel",
+    sourceShape: "exact_task_ready",
+    expectedObjectType: "task_intent",
+    expectedScenario: "hotel",
+    expectedCategories: ["hotel"],
+    expectedSourceType: "request",
+    expectedEntityPaths: criticalEntityPaths("hotel", {
+      city,
+      check_in: checkIn,
+      check_out: checkOut,
+      budget_max_per_night: budget,
+    }),
+    expectedActionTypes: ["save", "create_task"],
+    expectedTaskReadiness: { ready: true, reason: "ready", missing: [] },
+    owner: "nlu",
+    expectedFailureClass: "none",
+    note: "Locks hotel date-range, budget, city, and guest preservation for Stage 0 task readiness.",
+    dogfoodId: city === "New York" && budget === 300 ? "DOG-010" : undefined,
+    parserState: state({
+      scenario: "hotel",
+      categories: ["hotel"],
+      hotel: { city, check_in: checkIn, check_out: checkOut, budget_max_per_night: budget, guests },
+    }),
+  });
+}
+
+function generatedFlightFixture(index: number): CaptureBenchmarkFixture {
+  const routes = [
+    ["Nashville", "New York"],
+    ["SFO", "LAX"],
+    ["Chicago", "Orlando"],
+    ["Boston", "Seattle"],
+    ["JFK", "LHR"],
+    ["Dallas", "Miami"],
+  ] as const;
+  const [origin, dest] = routes[index % routes.length];
+  const date = `2026-08-${String((index % 20) + 1).padStart(2, "0")}`;
+  const passengers = (index % 4) + 1;
+  const cabin = index % 9 === 0 ? "business" : "economy";
+  return baseFixture({
+    id: `flight-generated-${pad(index)}`,
+    input: `Book ${passengers} ${cabin} flight${passengers > 1 ? "s" : ""} from ${origin} to ${dest} on ${date}`,
+    locale: "en",
+    vertical: "flight",
+    sourceShape: "exact_task_ready",
+    expectedObjectType: "task_intent",
+    expectedScenario: "flight",
+    expectedCategories: ["flight"],
+    expectedSourceType: "request",
+    expectedEntityPaths: criticalEntityPaths("flight", { origin, dest, date, passengers, cabin_class: cabin }),
+    expectedActionTypes: ["save", "create_task"],
+    expectedTaskReadiness: { ready: true, reason: "ready", missing: [] },
+    owner: "nlu",
+    expectedFailureClass: "none",
+    note: "Locks flight origin, destination, departure date, passengers, and cabin constraints.",
+    parserState: state({
+      scenario: "flight",
+      categories: ["flight"],
+      flight: { origin, dest, date, passengers, cabin_class: cabin },
+    }),
+  });
+}
+
+function generatedActivityFixture(index: number): CaptureBenchmarkFixture {
+  const events = [
+    ["The Lion King", "theater", "New York"],
+    ["Hamilton", "theater", "New York"],
+    ["Knicks", "sports", "New York"],
+    ["Taylor Swift", "concert", "Los Angeles"],
+    ["Art Institute exhibition", "exhibition", "Chicago"],
+    ["Comedy Cellar", "comedy", "New York"],
+  ] as const;
+  const [eventName, eventType, city] = events[index % events.length];
+  const date = `2026-09-${String((index % 20) + 1).padStart(2, "0")}`;
+  const numTickets = (index % 4) + 1;
+  return baseFixture({
+    id: `activity-generated-${pad(index)}`,
+    input: `Find ${numTickets} ticket${numTickets > 1 ? "s" : ""} for ${eventName} in ${city} on ${date}`,
+    locale: "en",
+    vertical: "activity",
+    sourceShape: "exact_task_ready",
+    expectedObjectType: "task_intent",
+    expectedScenario: "activity",
+    expectedCategories: ["activity"],
+    expectedSourceType: "request",
+    expectedEntityPaths: criticalEntityPaths("activity", {
+      event_name: eventName,
+      event_type: eventType,
+      city,
+      event_date: date,
+      num_tickets: numTickets,
+    }),
+    expectedActionTypes: ["save", "create_task"],
+    expectedTaskReadiness: { ready: true, reason: "ready", missing: [] },
+    owner: "nlu",
+    expectedFailureClass: "none",
+    note: "Locks single-event activity routing away from generic trip planning.",
+    dogfoodId: eventName === "The Lion King" ? "DOG-005" : undefined,
+    parserState: state({
+      scenario: "activity",
+      categories: ["activity"],
+      activity: {
+        event_name: eventName,
+        event_type: eventType as NonNullable<IntentState["activity"]>["event_type"],
+        city,
+        event_date: date,
+        num_tickets: numTickets,
+      },
+    }),
+  });
+}
+
+function generatedTripFixture(index: number): CaptureBenchmarkFixture {
+  const cities = ["New York", "Los Angeles", "Chicago", "Seattle", "Miami"];
+  const city = cities[index % cities.length];
+  const startDay = (index % 18) + 1;
+  const startDate = `2026-10-${String(startDay).padStart(2, "0")}`;
+  const endDate = `2026-10-${String(startDay + 3).padStart(2, "0")}`;
+  const travelers = (index % 4) + 1;
+  return baseFixture({
+    id: `trip-generated-${pad(index)}`,
+    input: `Plan a ${city} trip from ${startDate} to ${endDate} for ${travelers}, with flights, hotel, dinner, and one show`,
+    locale: "en",
+    vertical: "trip",
+    sourceShape: "exact_task_ready",
+    expectedObjectType: "trip_seed",
+    expectedScenario: "trip",
+    expectedCategories: ["hotel", "flight", "restaurant", "activity"],
+    expectedSourceType: "request",
+    expectedEntityPaths: criticalEntityPaths("trip", {
+      destination_city: city,
+      departure_city: "Nashville",
+      start_date: startDate,
+      end_date: endDate,
+      travelers,
+    }),
+    expectedActionTypes: ["save", "create_task"],
+    expectedTaskReadiness: { ready: true, reason: "ready", missing: [] },
+    owner: "planner",
+    expectedFailureClass: "none",
+    note: "Locks explicit trip/package requests as trip seeds rather than single-vertical tasks.",
+    parserState: state({
+      scenario: "trip",
+      categories: ["hotel", "flight", "restaurant", "activity"],
+      trip: completeTrip({
+        destination_city: city,
+        departure_city: "Nashville",
+        start_date: startDate,
+        end_date: endDate,
+        travelers,
+        activities: ["one show"],
+      }),
+    }),
+  });
+}
+
+function generatedAmbiguousFixture(index: number): CaptureBenchmarkFixture {
+  const cases = [
+    {
+      input: "image of a cozy Kyoto ryokan for maybe spring",
+      sourceShape: "vague_inspiration" as const,
+      expectedSourceType: "request" as const,
+      note: "Locks bare image/photo words as normal travel text, not screenshot input.",
+    },
+    {
+      input: "photo ideas for a New York anniversary trip",
+      sourceShape: "vague_inspiration" as const,
+      expectedSourceType: "request" as const,
+      note: "Locks broad photo/inspiration text as clarification, not attached screenshot metadata.",
+    },
+    {
+      input: "https://ticketmaster.com.evil.example/lion-king",
+      sourceShape: "provider_url_impersonation" as const,
+      expectedSourceType: "url" as const,
+      note: "Rejects provider URL impersonation by keeping scenario null and requiring review.",
+    },
+    {
+      input: "https://opentable.com.evil.example/r/sirrah",
+      sourceShape: "provider_url_impersonation" as const,
+      expectedSourceType: "url" as const,
+      note: "Rejects restaurant provider impersonation without classifying a provider.",
+    },
+    {
+      input: "Save this travel idea for later: quiet beach and good food",
+      sourceShape: "save_only" as const,
+      expectedSourceType: "request" as const,
+      note: "Locks save-only vague inspiration as not task-ready.",
+    },
+    {
+      input: "Compare a beach trip versus a Broadway weekend sometime this summer",
+      sourceShape: "compare_only" as const,
+      expectedSourceType: "request" as const,
+      note: "Locks compare-only inspiration as clarification, not execution-ready.",
+    },
+  ];
+  const item = cases[index % cases.length];
+  return baseFixture({
+    id: `ambiguous-generated-${pad(index)}`,
+    input: `${item.input}${index > cases.length ? ` #${index}` : ""}`,
+    locale: "en",
+    vertical: "ambiguous",
+    sourceShape: item.sourceShape,
+    expectedObjectType: item.expectedSourceType === "url" ? "travel_link" : "needs_clarification",
+    expectedScenario: null,
+    expectedCategories: [],
+    expectedSourceType: item.expectedSourceType,
+    expectedEntityPaths: {},
+    expectedActionTypes: item.expectedSourceType === "url" ? ["save", "preview_task", "ask_clarification"] : ["save", "ask_clarification"],
+    expectedTaskReadiness: { ready: false, reason: item.expectedSourceType === "url" ? "needs_review" : "unsupported_source", missing: ["categories"] },
+    owner: "capture",
+    expectedFailureClass: "none",
+    note: item.note,
+    parserState: undefined,
+  });
+}
+
+function generatedRefineFixture(index: number): CaptureBenchmarkFixture {
+  const cases = [
+    ["restaurant", ["restaurant"], "Change it to Sichuan and keep 7pm", { restaurant: { cuisine: "Sichuan", time: "19:00" } }],
+    ["hotel", ["hotel"], "Actually make the hotel budget 350 and keep the same dates", { hotel: { budget_max_per_night: 350 } }],
+    ["flight", ["flight"], "Prefer nonstop flights only", { flight: { max_stops: 0 } }],
+    ["activity", ["activity"], "Make the Broadway tickets two seats together", { activity: { num_tickets: 2, section_preferences: ["together"] as string[] } }],
+  ] as const;
+  const [scenario, categories, input, fields] = cases[index % cases.length];
+  return baseFixture({
+    id: `refine-generated-${pad(index)}`,
+    input: `${input}${index > cases.length ? ` #${index}` : ""}`,
+    locale: "en",
+    vertical: "refine",
+    sourceShape: "plain_natural_language",
+    expectedObjectType: "refine_request",
+    expectedScenario: scenario,
+    expectedCategories: [...categories],
+    expectedSourceType: "request",
+    expectedEntityPaths: {},
+    expectedActionTypes: ["save", "preview_task"],
+    expectedTaskReadiness: { ready: false, reason: "needs_review", missing: [] },
+    owner: "planner",
+    expectedFailureClass: "none",
+    note: "Locks follow-up/refine text as plan modification context, not a new provider run.",
+    parserState: state({
+      intent: "refine_existing",
+      scenario,
+      categories: [...categories],
+      refined_target_id: `task_refine_${index}`,
+      ...fields,
+    }),
+  });
+}
+
+function generatedProfileFixture(index: number): CaptureBenchmarkFixture {
+  const inputs = [
+    "Remember I prefer aisle seats and morning flights",
+    "Save that I like boutique hotels near transit",
+    "I usually want spicy Sichuan or Japanese restaurants",
+    "记住我不喜欢红眼航班",
+  ];
+  const input = inputs[index % inputs.length];
+  return baseFixture({
+    id: `profile-generated-${pad(index)}`,
+    input: `${input}${index > inputs.length ? ` #${index}` : ""}`,
+    locale: input.startsWith("记") ? "zh" : "en",
+    vertical: "profile",
+    sourceShape: "save_only",
+    expectedObjectType: "profile_or_preference",
+    expectedScenario: null,
+    expectedCategories: [],
+    expectedSourceType: "request",
+    expectedEntityPaths: {},
+    expectedActionTypes: ["save", "ask_clarification"],
+    expectedTaskReadiness: { ready: false, reason: "unsupported_source", missing: ["categories"] },
+    owner: "alpha-ops",
+    expectedFailureClass: "none",
+    note: "Locks preference/profile updates as save-only capture input, not booking tasks.",
+    parserState: state({ intent: "profile_edit", scenario: null, categories: [], profile_patch: { country: "US" } }),
+  });
+}
+
+function generatedChitchatFixture(index: number): CaptureBenchmarkFixture {
+  const inputs = [
+    "can you help with travel?",
+    "not sure yet",
+    "tell me how Onegent works",
+    "谢谢，先不用了",
+    "unsupported: renew my passport",
+    "unsupported: apply for a visa",
+  ];
+  const input = inputs[index % inputs.length];
+  return baseFixture({
+    id: `chitchat-generated-${pad(index)}`,
+    input: `${input}${index > inputs.length ? ` #${index}` : ""}`,
+    locale: input.match(/[谢谢先不用]/u) ? "zh" : "en",
+    vertical: "chitchat",
+    sourceShape: "plain_natural_language",
+    expectedObjectType: "non_task",
+    expectedScenario: null,
+    expectedCategories: [],
+    expectedSourceType: "request",
+    expectedEntityPaths: {},
+    expectedActionTypes: ["save", "ask_clarification"],
+    expectedTaskReadiness: { ready: false, reason: "unsupported_source", missing: ["categories"] },
+    owner: "product/manual-boundary",
+    expectedFailureClass: "none",
+    note: "Locks chitchat or unsupported adjacent requests out of task/provider execution.",
+    parserState: state({ intent: "chitchat", scenario: null, categories: [] }),
+  });
+}
+
+function groupDecisionFixture(input: {
   id: string;
+  input: string;
+  scenario: Exclude<NluScenario, "trip">;
+  categories: NluCategory[];
+  fields: Partial<Pick<IntentState, "restaurant" | "hotel" | "flight" | "activity">>;
+  note: string;
+}): CaptureBenchmarkFixture {
+  return baseFixture({
+    id: input.id,
+    input: input.input,
+    locale: "en",
+    vertical: input.scenario,
+    sourceShape: "group_decision_request",
+    expectedObjectType: "group_decision",
+    expectedScenario: input.scenario,
+    expectedCategories: input.categories,
+    expectedSourceType: "request",
+    expectedEntityPaths: {},
+    expectedActionTypes: ["save", "create_room"],
+    expectedTaskReadiness: { ready: true, reason: "ready", missing: [] },
+    owner: "planner",
+    expectedFailureClass: "none",
+    note: input.note,
+    parserState: state({
+      intent: "create_room",
+      scenario: input.scenario,
+      categories: input.categories,
+      party_type: "multi",
+      member_names: ["Alice"],
+      ...input.fields,
+    }),
+  });
+}
+
+type BaseSeed = Omit<CaptureBenchmarkFixture, "id" | "artifactContract" | "note"> & {
+  id: string;
+  note?: string;
+  artifactContract?: CaptureBenchmarkArtifactContract;
 };
 
 function restaurantSeed(
@@ -1118,7 +1596,7 @@ function tripSeed(
     expectedCategories: ["hotel", "flight", "restaurant", "activity"],
     expectedSourceType,
     expectedEntityPaths: criticalEntityPaths("trip", fullTrip),
-    expectedActionTypes: ["save", intent === "create_room" ? "create_room" : "create_room"],
+    expectedActionTypes: ["save", intent === "create_room" ? "create_room" : "create_task"],
     expectedTaskReadiness: { ready: true, reason: "ready", missing: [] },
     owner: "planner",
     expectedFailureClass: "none",
@@ -1258,8 +1736,14 @@ function incompleteArtifactFixture(id: string, seed: BaseSeed): CaptureBenchmark
 function baseFixture(input: BaseSeed & { artifactContract?: CaptureBenchmarkArtifactContract }): CaptureBenchmarkFixture {
   return {
     ...input,
+    note: input.note ?? defaultFixtureNote(input),
     artifactContract: input.artifactContract ?? completeArtifact(input.id),
   };
+}
+
+function defaultFixtureNote(input: BaseSeed): string {
+  const scenario = input.expectedScenario ?? input.vertical;
+  return `Locks ${scenario} ${input.sourceShape} capture behavior as ${input.expectedObjectType}.`;
 }
 
 function completeArtifact(fixtureId: string): CaptureBenchmarkArtifactContract {
@@ -1384,6 +1868,64 @@ function topFailedFixtures(results: CaptureBenchmarkResult[]): CaptureBenchmarkT
     }));
 }
 
+function dogfoodLinks(results: CaptureBenchmarkResult[]): CaptureBenchmarkReport["dogfoodLinks"] {
+  const byDogfood = new Map<string, string[]>();
+  for (const result of results) {
+    if (!result.dogfoodId) continue;
+    const list = byDogfood.get(result.dogfoodId) ?? [];
+    list.push(result.id);
+    byDogfood.set(result.dogfoodId, list);
+  }
+  return Array.from(byDogfood.entries())
+    .map(([dogfoodId, fixtureIds]) => ({ dogfoodId, fixtureIds }))
+    .sort((a, b) => a.dogfoodId.localeCompare(b.dogfoodId));
+}
+
+function recommendedNextActions(results: CaptureBenchmarkResult[]): CaptureBenchmarkReport["recommendedNextActions"] {
+  const failed = results.filter((result) => !result.pass);
+  const byOwner = new Map<CaptureBenchmarkOwner, CaptureBenchmarkResult[]>();
+  for (const result of failed) {
+    const list = byOwner.get(result.owner) ?? [];
+    list.push(result);
+    byOwner.set(result.owner, list);
+  }
+  const actions = Array.from(byOwner.entries()).map(([owner, ownerResults]) => ({
+    owner,
+    action: actionForOwner(owner),
+    reason: `${ownerResults.length} failing capture fixture(s), top class ${ownerResults[0]?.failureClass ?? "none"}.`,
+  }));
+  if (!actions.some((action) => action.owner === "alpha-ops")) {
+    actions.push({
+      owner: "alpha-ops",
+      action: "Keep collecting high-intent submissions and convert safe misses into benchmark seeds.",
+      reason: "No-live capture coverage is healthy, but private alpha still needs real user-value evidence.",
+    });
+  }
+  return actions.slice(0, 8);
+}
+
+function actionForOwner(owner: CaptureBenchmarkOwner): string {
+  switch (owner) {
+    case "nlu":
+      return "Patch parser/router fixture class before adding more provider work.";
+    case "planner":
+      return "Tighten missing-field and Travel Object readiness rules.";
+    case "task-workspace":
+      return "Close artifact-contract gaps for source, entities, readiness, and evidence links.";
+    case "capture":
+      return "Harden source metadata classification and provider URL validation.";
+    case "task-readiness":
+      return "Review task-ready versus needs-review decisions.";
+    case "provider-runtime":
+      return "Do not run providers; convert this into a no-live runtime fixture first.";
+    case "product/manual-boundary":
+      return "Clarify product boundary and safe next action copy.";
+    case "alpha-ops":
+    default:
+      return "Ask a safe follow-up and convert the submission into a benchmark seed only after clarification.";
+  }
+}
+
 function classifyCaptureFailure(input: {
   fixture: CaptureBenchmarkFixture;
   routingPass: boolean;
@@ -1412,6 +1954,7 @@ function classifyCaptureObject(capture: CaptureTravelObject): CaptureBenchmarkOb
   }
   if (!capture.task_readiness.ready) return "needs_clarification";
   if (capture.classification.scenario === "trip") return "trip_seed";
+  if (capture.possible_actions.some((action) => action.type === "create_room")) return "group_decision";
   return "task_intent";
 }
 
