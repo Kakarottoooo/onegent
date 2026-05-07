@@ -155,6 +155,59 @@ describe("layered benchmark v2", () => {
     expect(results[9].failureClass).toBe("user_only_final_action");
   });
 
+  it("extends flight fixtures with no-availability, scan, transition, env, and hidden-number contracts", () => {
+    const results = runLayeredNoLiveBenchmark({ vertical: "flight", count: 15 }).results;
+    expect(results.slice(10, 15).map((result) => result.id)).toEqual([
+      "lbv2-flight-11",
+      "lbv2-flight-12",
+      "lbv2-flight-13",
+      "lbv2-flight-14",
+      "lbv2-flight-15",
+    ]);
+
+    expect(results[10]).toMatchObject({
+      failureClass: "true_no_availability",
+      finalVerdict: "expected_provider_block",
+      pass: true,
+    });
+    expect(results[10].artifactExpectations.classificationSignals).toContain(
+      "target Southwest card is not visible",
+    );
+
+    expect(results[11]).toMatchObject({
+      failureClass: "selector_drift",
+      finalVerdict: "needs_runtime_patch",
+      pass: false,
+    });
+    expect(results[11].patchProposal.proposed).toBe(true);
+    expect(results[11].artifactExpectations.classificationSignals).toContain(
+      "Flight-card DOM scan failed",
+    );
+
+    expect(results[12]).toMatchObject({
+      failureClass: "progress_stall",
+      finalVerdict: "needs_runtime_patch",
+      pass: false,
+    });
+    expect(results[12].artifactExpectations.classificationSignals).toContain(
+      "fallback_matched_no_checkout",
+    );
+
+    expect(results[13]).toMatchObject({
+      failureClass: "network_model_env_issue",
+      finalVerdict: "expected_provider_block",
+      pass: true,
+    });
+
+    expect(results[14]).toMatchObject({
+      failureClass: "none",
+      finalVerdict: "l1_direct_pass",
+      pass: true,
+    });
+    expect(results[14].artifactExpectations.classificationSignals).toContain("flightNumber=hidden");
+    expect(results[14].artifactExpectations.classificationSignals).toContain("timeDelta=0");
+  });
+
   it("requires patch proposal fields for flight cases that ask for L1 fixes", () => {
     const patchCases = selectLayeredBenchmarkCases({ vertical: "flight", count: 20 })
       .filter((testCase) => testCase.patchProposal.proposed);

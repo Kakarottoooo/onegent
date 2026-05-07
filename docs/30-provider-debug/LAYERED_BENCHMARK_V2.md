@@ -113,6 +113,9 @@ evidence unless target identity is strong, checkout-with-missing-traveler-fields
 stale/mixed worker evidence, dismissable promo overlay, account-required
 boundary, provider degradation, and final review checkpoint. Each case carries
 owner, artifact expectations, L2 eligibility, and patch proposal fields.
+Flight cases 11-15 extend the Expedia corpus with target-card-not-visible
+no-availability, card-scan-before-fallback failure, fallback-matched/no-checkout
+stall, model/env transient, and hidden-flight-number target-time pass evidence.
 
 Run a founder-readable markdown report:
 
