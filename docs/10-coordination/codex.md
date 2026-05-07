@@ -2,7 +2,7 @@
 
 > **Branch**: `codex/integrated-preview-20260504`
 > **Last updated**: 2026-05-07
-> **Last commit**: this pass - parallel agent throughput rules
+> **Last commit**: this pass - layered benchmark merge train integration
 >
 > Claude reads this at session start. I write to it before each push.
 > See `CLAUDE.md` section "coordination protocol".
@@ -12,6 +12,35 @@
 ## Currently doing
 
 Completed in latest pass:
+- Integrated the first layered benchmark merge train in dependency order:
+  1. Goal `codex/layered-benchmark-v2 @ 9ca2fff` -> `653c1bc`
+     - added shared Layered Benchmark V2 schema, no-live corpus, CLI, gate,
+       markdown renderer, and docs;
+     - verified `layered-benchmark-v2.test.ts` 9/9 and 50-case no-live gate.
+  2. Claude `claude/activity-layered-recovery @ 5d65a89` -> `232dc16`
+     - added Ticketmaster layered recovery docs, taxonomy related classes, and
+       no-live recovery tests;
+     - verified activity/Ticketmaster targeted suite 69/69 and confirmed no
+       v1 Ticketmaster runtime file changed.
+  3. Agent2 `codex/flight-layered-recovery @ 42f9794` -> `3ecb4f1`
+     - hardened Expedia wrong-airline/price-only selection evidence and stale
+       mixed-worker classification;
+     - verified Expedia targeted suite 44/44 and strict drift 0.
+  4. Agent3 `codex/hotel-layered-recovery @ 209edc0` -> `2420027`
+     - added hotel layered recovery artifact helper and stricter weak
+       no-availability classification;
+     - verified hotel targeted suite 39/39.
+- Final integrated validation:
+  - `npx tsc --noEmit --pretty false`;
+  - `npm run check-drift` with no drift;
+  - `npm run gate:phase1 -- --allow-known-drift` 9/9, run id
+    `2026-05-07T06-07-07-006Z`;
+  - `git diff --check HEAD~4 HEAD`.
+- No external provider/browser workflow, worker start, live OpenAI call,
+  secret handling, payment/login/verification, or final checkout flow was run
+  during Codex integration.
+
+Previous completed pass:
 - Added the parallel development rule to coordination and system design:
   - side agents should not wait for Codex's full merge validation when their
     next task is independent of unmerged code;
