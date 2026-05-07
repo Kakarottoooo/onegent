@@ -12,6 +12,34 @@
 ## Currently doing
 
 Completed in latest pass:
+- Integrated the second layered follow-up merge train in dependency order:
+  1. Goal `codex/layered-benchmark-next @ 68222ac` -> `6fbff6b`
+     - added metadata-only returned-agent intake classification, CLI, docs,
+       and queue renderer so Codex can triage branches while side agents keep
+       working;
+     - verified `agent-intake.test.ts` 8/8 and a CLI smoke against a synthetic
+       intake markdown file.
+  2. Claude `claude/activity-followup @ 613acf5` -> `4564241`
+     - added a pure Ticketmaster task-state classifier plus byte-identical
+       worker mirror for checkout reached, user seat selection, user login,
+       external ad tab, local browser disconnect, and unknown failure states;
+     - verified activity/Ticketmaster targeted suite 113/113 and strict drift 0.
+  3. Agent2 `codex/flight-followup @ e2f0708` -> `6a12c0f`
+     - closed Expedia false-success classes for mixed/stale worker evidence,
+       missing traveler-required fields, and explicit wrong-airline fallback
+       matching;
+     - verified Expedia/provider targeted suite 53/53 and strict drift 0.
+  4. Agent3 `codex/hotel-followup @ 1168294` -> `3baf337`
+     - integrated weak hotel no-availability fallback semantics into the
+       existing hotel layered recovery helper, preserving hotel/city/dates/
+       adults/rooms/budget for alternate-provider attempts;
+     - verified hotel layered/retry tests 26/26, `tsc`, strict drift 0,
+       `gate:phase1 --allow-known-drift` 9/9, and `git diff --check`.
+- No `.tmp/` artifacts were staged, and no external provider/browser workflow,
+  worker start, live OpenAI call, secret handling, payment/login/verification,
+  or final checkout flow was run during Codex integration.
+
+Completed in latest pass:
 - Integrated the first layered benchmark merge train in dependency order:
   1. Goal `codex/layered-benchmark-v2 @ 9ca2fff` -> `653c1bc`
      - added shared Layered Benchmark V2 schema, no-live corpus, CLI, gate,
