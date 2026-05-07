@@ -183,6 +183,9 @@ describe("layered benchmark v2", () => {
     expect(results[11].artifactExpectations.classificationSignals).toContain(
       "Flight-card DOM scan failed",
     );
+    expect(results[11].artifactExpectations.classificationSignals).toContain(
+      "runtime patch proposal required",
+    );
 
     expect(results[12]).toMatchObject({
       failureClass: "progress_stall",
@@ -191,6 +194,12 @@ describe("layered benchmark v2", () => {
     });
     expect(results[12].artifactExpectations.classificationSignals).toContain(
       "fallback_matched_no_checkout",
+    );
+    expect(results[12].artifactExpectations.classificationSignals).toContain(
+      "generic checkout marker ignored without safe handoff/manual-review",
+    );
+    expect(results[12].artifactExpectations.classificationSignals).toContain(
+      "requires selected candidate, fare modal, current URL, and screenshot evidence",
     );
 
     expect(results[13]).toMatchObject({

@@ -116,6 +116,9 @@ owner, artifact expectations, L2 eligibility, and patch proposal fields.
 Flight cases 11-15 extend the Expedia corpus with target-card-not-visible
 no-availability, card-scan-before-fallback failure, fallback-matched/no-checkout
 stall, model/env transient, and hidden-flight-number target-time pass evidence.
+For fallback-matched/no-checkout, a generic checkout marker is not closure
+unless paired with safe-handoff or manual-review evidence and the selected
+candidate, fare modal, current URL, and screenshot path are preserved.
 
 Run a founder-readable markdown report:
 

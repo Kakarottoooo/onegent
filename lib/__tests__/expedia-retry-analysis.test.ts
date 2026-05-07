@@ -62,6 +62,53 @@ describe("analyzeExpediaRetryArtifactBundle", () => {
     expect(analysis.signals[0]?.kind).toBe("checkout_reached");
   });
 
+  it("lets strong safe-handoff checkout evidence win over earlier no-checkout diagnostics", () => {
+    const analysis = analyzeExpediaRetryArtifactBundle({
+      job: {
+        id: "fixture-expedia-strong-checkout-after-diagnostic-no-checkout",
+        provider: "expedia",
+        scenario: "flight",
+        status: "ready_for_confirmation",
+      },
+      workerLogExcerpt: [
+        "[flight-rpa] Locator fallback matched flight card: Southwest 8:50am MCO to BNA $152",
+        "[flight-rpa] flight checkout was not reached during earlier diagnostic probe",
+        "[flight-rpa] Checkout reached: traveler review page visible",
+        "[flight-rpa] safe handoff for manual review before payment",
+      ].join("\n"),
+    });
+
+    expect(analysis.state).toBe("checkout_manual_review_reached");
+    expect(analysis.signals[0]?.kind).toBe("checkout_reached");
+    expect(analysis.signals.map((signal) => signal.kind)).toEqual(
+      expect.arrayContaining(["fallback_matched", "no_match"]),
+    );
+  });
+
+  it("does not close fallback-matched/no-checkout from a generic stale checkout marker", () => {
+    const analysis = analyzeExpediaRetryArtifactBundle({
+      job: {
+        id: "fixture-expedia-fallback-matched-stale-checkout",
+        provider: "expedia",
+        scenario: "flight",
+        status: "failed",
+      },
+      workerLogExcerpt: [
+        "[flight-rpa] Locator fallback matched flight card: Southwest 8:50am MCO to BNA $152",
+        "[flight-rpa] Fare modal appeared",
+        "[flight-rpa] flight checkout was not reached",
+        "[flight-rpa] Checkout reached - stale diagnostic marker from previous attempt",
+      ].join("\n"),
+    });
+
+    expect(analysis.state).toBe("fallback_matched_no_checkout");
+    expect(analysis.confidence).toBe("high");
+    expect(analysis.signals.map((signal) => signal.kind)).toEqual(
+      expect.arrayContaining(["fallback_matched", "no_match", "checkout_reached"]),
+    );
+    expect(analysis.nextAction).toContain("generic or stale checkout marker");
+  });
+
   it("does not classify checkout success from mixed worker instances", () => {
     const analysis = analyzeExpediaRetryArtifactBundle({
       job: {

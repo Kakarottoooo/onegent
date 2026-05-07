@@ -238,6 +238,8 @@ export const FLIGHT_LAYERED_BENCHMARK_CASES: LayeredBenchmarkCase[] = [
       "Flight-card DOM scan failed",
       "fallback not attempted",
       "candidate evidence absent",
+      "runtime patch proposal required",
+      "requires screenshot plus DOM entrypoint evidence",
     ],
   }),
   flightCase(13, {
@@ -257,6 +259,8 @@ export const FLIGHT_LAYERED_BENCHMARK_CASES: LayeredBenchmarkCase[] = [
       "fallback_matched_no_checkout",
       "flight checkout was not reached",
       "current URL stayed on review/search",
+      "generic checkout marker ignored without safe handoff/manual-review",
+      "requires selected candidate, fare modal, current URL, and screenshot evidence",
     ],
   }),
   flightCase(14, {
