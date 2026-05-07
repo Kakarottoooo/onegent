@@ -83,16 +83,88 @@ export interface BuildCaptureTravelObjectInput {
 
 const URL_RE = /https?:\/\/[^\s<>"')]+/i;
 
+// Brand → scenario hints. Each entry lists the brand tokens (lowercased) we
+// recognize as that vertical. Matching anchors to the *registrable* host
+// suffix ("brand.tld" or "brand.co.tld"), so "ticketmaster.com.evil.example"
+// — which contains the substring "ticketmaster." — does NOT match. See
+// matchProviderScenarioHint for the full rule.
 const PROVIDER_SCENARIO_HINTS: Array<{
-  host: RegExp;
+  brands: readonly string[];
   scenario: NluScenario;
   category: NluCategory;
 }> = [
-  { host: /(opentable|resy|tock|sevenrooms)\./i, scenario: "restaurant", category: "restaurant" },
-  { host: /(booking|hotels|hoteltonight|hilton|hyatt|marriott|ihg)\./i, scenario: "hotel", category: "hotel" },
-  { host: /(expedia|kayak|skyscanner|google\..*\/travel\/flights|delta|southwest|united|aa)\./i, scenario: "flight", category: "flight" },
-  { host: /(ticketmaster|seatgeek|stubhub|broadway|telecharge)\./i, scenario: "activity", category: "activity" },
+  {
+    brands: ["opentable", "resy", "tock", "sevenrooms", "tablecheck", "chope"],
+    scenario: "restaurant",
+    category: "restaurant",
+  },
+  {
+    brands: [
+      "booking",
+      "hotels",
+      "hoteltonight",
+      "hilton",
+      "hyatt",
+      "marriott",
+      "ihg",
+      "airbnb",
+      "vrbo",
+      "agoda",
+    ],
+    scenario: "hotel",
+    category: "hotel",
+  },
+  {
+    brands: [
+      "expedia",
+      "kayak",
+      "skyscanner",
+      "delta",
+      "southwest",
+      "united",
+      "aa",
+      "jetblue",
+      "alaskaair",
+      "lufthansa",
+      "britishairways",
+      "airfrance",
+    ],
+    scenario: "flight",
+    category: "flight",
+  },
+  {
+    brands: [
+      "ticketmaster",
+      "seatgeek",
+      "stubhub",
+      "broadway",
+      "telecharge",
+      "eventbrite",
+    ],
+    scenario: "activity",
+    category: "activity",
+  },
 ];
+
+// Multi-segment public suffixes we treat as locale TLDs. Anything else is
+// a single-segment TLD ("com", "net", "io", ...). Kept short on purpose —
+// the goal is to recognize the legitimate locale variants of the providers
+// we already cover, not to be a full PSL.
+const MULTI_SEGMENT_TLDS = new Set<string>([
+  "co.uk",
+  "co.jp",
+  "co.kr",
+  "co.in",
+  "co.nz",
+  "co.za",
+  "com.au",
+  "com.br",
+  "com.cn",
+  "com.hk",
+  "com.mx",
+  "com.sg",
+  "com.tw",
+]);
 
 export function buildCaptureTravelObjectFromNlu(
   input: BuildCaptureTravelObjectInput,
@@ -180,12 +252,52 @@ export function detectCaptureSource(message: string, capturedAt: string): Captur
 }
 
 function inferScenarioFromHost(host: string): { scenario: NluScenario; category: NluCategory } | null {
+  const registrable = registrableHost(host);
+  if (!registrable) return null;
+  // Brand is the labels of `registrable` minus the final 1 or 2 TLD labels.
+  // For "ticketmaster.com" → brand="ticketmaster". For
+  // "ticketmaster.co.uk" → brand="ticketmaster". For
+  // "ticketmaster.com.evil.example" → registrable="evil.example" → brand="evil".
+  const brand = brandLabelOf(registrable);
+  if (!brand) return null;
   for (const hint of PROVIDER_SCENARIO_HINTS) {
-    if (hint.host.test(host)) {
+    if (hint.brands.includes(brand)) {
       return { scenario: hint.scenario, category: hint.category };
     }
   }
   return null;
+}
+
+/**
+ * Return the registrable (eTLD+1 or eTLD+1 for known multi-segment TLDs)
+ * portion of a hostname, lowercased. "www.opentable.com" → "opentable.com".
+ * "www.ticketmaster.co.uk" → "ticketmaster.co.uk".
+ * "ticketmaster.com.evil.example" → "evil.example".
+ *
+ * Returns null for IPs, single-label hosts, or anything that fails URL parse.
+ */
+function registrableHost(host: string): string | null {
+  const lower = host.toLowerCase().trim();
+  if (!lower) return null;
+  // Reject IPv4/IPv6-ish.
+  if (/^\d+(?:\.\d+){3}$/.test(lower)) return null;
+  if (lower.includes(":")) return null;
+  const parts = lower.split(".").filter((p) => p.length > 0);
+  if (parts.length < 2) return null;
+  // Try a 3-label match against MULTI_SEGMENT_TLDS first (e.g. ".co.uk").
+  if (parts.length >= 3) {
+    const tail2 = parts.slice(-2).join(".");
+    if (MULTI_SEGMENT_TLDS.has(tail2)) {
+      return parts.slice(-3).join(".");
+    }
+  }
+  return parts.slice(-2).join(".");
+}
+
+function brandLabelOf(registrable: string): string | null {
+  const parts = registrable.split(".");
+  if (parts.length === 0) return null;
+  return parts[0] || null;
 }
 
 function collectEntities(state: IntentState | undefined): CaptureTravelObject["entities"] {
@@ -228,9 +340,19 @@ function buildCaptureActions(input: {
   }
 
   if (input.action?.type === "show_confirm_card") {
+    // kind="room" is unambiguously multi-party. kind="trip" is the legacy
+    // alias the router emits for BOTH solo (intent=create_plan) and multi
+    // (intent=create_room) 4-category trip flows — read state.intent to
+    // decide the action label so a solo trip plan doesn't surface as
+    // "Create decision room" and a multi-party DR doesn't surface as
+    // "Create pending task".
+    const isRoom =
+      input.action.kind === "room" ||
+      (input.action.kind === "trip" &&
+        input.action.state.intent === "create_room");
     actions.push({
-      type: input.action.kind === "room" || input.action.kind === "trip" ? "create_room" : "create_task",
-      label: input.action.kind === "room" ? "Create decision room" : "Create pending task",
+      type: isRoom ? "create_room" : "create_task",
+      label: isRoom ? "Create decision room" : "Create pending task",
     });
     actions.push({ type: "compare", label: "Compare options" });
     return actions;
@@ -248,9 +370,16 @@ function buildTaskReadiness(input: {
   sourceType: CaptureSourceType;
 }): CaptureTaskReadiness {
   if (!input.scenario) {
+    // url + screenshot: source is supported but we need user context to
+    // turn it into a Travel Object. Keep them on the "needs_review"
+    // branch so the homepage UI nudges for context (a description of
+    // what's in the screenshot, or an explicit category for the URL)
+    // instead of declining as unsupported.
+    const needsReviewSource =
+      input.sourceType === "url" || input.sourceType === "screenshot";
     return {
       ready: false,
-      reason: input.sourceType === "url" ? "needs_review" : "unsupported_source",
+      reason: needsReviewSource ? "needs_review" : "unsupported_source",
       next_missing_fields: input.missingFields.length ? input.missingFields : ["categories"],
     };
   }
@@ -287,15 +416,27 @@ function buildTaskReadiness(input: {
 }
 
 function looksLikeScreenshotReference(value: string): boolean {
-  const lower = value.toLowerCase();
-  return (
-    lower.includes("screenshot") ||
-    lower.includes("screen shot") ||
-    lower.includes("image") ||
-    lower.includes("photo") ||
-    lower.includes("截图") ||
-    /\.(png|jpe?g|webp|gif)\b/i.test(value)
-  );
+  // Image filename — strongest signal.
+  if (/\.(png|jpe?g|webp|gif|heic|bmp)\b/i.test(value)) return true;
+  // Whole-word screenshot/截图 — second-strongest. We require word
+  // boundaries so "screenshotting" still matches but inert substrings
+  // don't (e.g. an arbitrary URL slug containing "screenshot").
+  if (/\bscreenshot(?:s|ting)?\b/i.test(value)) return true;
+  if (/\bscreen\s+shots?\b/i.test(value)) return true;
+  if (/(?:截图|屏幕截图|屏幕快照|抓图|抓屏)/u.test(value)) return true;
+  // "image" / "photo" / "picture" alone are too broad ("famous photos of
+  // Yosemite", "image of the skyline" are travel descriptions, not
+  // screenshot references). Require an explicit pointer that the user is
+  // referring to AN attached/uploaded/visible image.
+  if (
+    /\b(?:this|that|the|attached|uploaded|sent|here'?s?\s+(?:an?|the))\s+(?:image|photo|picture|pic|snapshot)s?\b/i.test(
+      value,
+    )
+  ) {
+    return true;
+  }
+  if (/(?:这张|那张|这个|这份|附件)\s*(?:图片?|照片|快照|图)/u.test(value)) return true;
+  return false;
 }
 
 function safeParseUrl(value: string): URL | null {
