@@ -6,9 +6,11 @@ import type {
 } from "@/lib/agent/nlu-v2";
 import type { NluCategory } from "@/lib/agent/nlu-v2/types";
 import type { TripIntentState } from "@/lib/agent/trip-intent-state";
+import { readDirectActivityProviderUrlFromConstraints } from "@/lib/capture/direct-provider-url";
 import type { CaptureSourceType, CaptureTravelObject } from "@/lib/capture/travel-object";
 
 export type CaptureTaskBoundaryNextAction =
+  | "run_direct_booking"
   | "show_confirmation"
   | "ask_clarification"
   | "review_capture";
@@ -57,6 +59,12 @@ export function buildCaptureTaskBoundary(
   const scenario = resolveScenario(capture);
   const ambiguity = describeAmbiguity(capture, scenario);
   const missingFields = collectMissingFields(capture, scenario, ambiguity);
+  const directActivityUrl = scenario === "activity"
+    ? readDirectActivityProviderUrlFromConstraints({
+        ...capture.constraints,
+        _capture_source: sourceMetadata,
+      })
+    : null;
 
   if (!scenario) {
     return {
@@ -66,6 +74,18 @@ export function buildCaptureTaskBoundary(
       nextAction: "ask_clarification",
       sourceMetadata,
       reason: "scenario_missing",
+    };
+  }
+
+  if (directActivityUrl) {
+    const payload = buildConfirmationPayload(capture, scenario, sourceMetadata);
+    return {
+      ok: true,
+      scenario,
+      missingFields: [],
+      nextAction: "run_direct_booking",
+      sourceMetadata,
+      payload,
     };
   }
 
@@ -115,15 +135,21 @@ function buildConfirmationPayload(
     ...stripUndefined(capture.constraints),
     _capture_source: sourceMetadata,
   };
+  const directProviderActivity = scenario === "activity" &&
+    readDirectActivityProviderUrlFromConstraints(constraints) !== null;
+  const directBooking = capture.classification.direct_booking || directProviderActivity;
   const existingState = capture.provenance.nlu_state;
   const state = existingState ?? synthesizeIntentState(capture, scenario, constraints, kind);
   const action: RouterAction = capture.provenance.nlu_action?.type === "show_confirm_card"
-    ? capture.provenance.nlu_action
+    ? {
+        ...capture.provenance.nlu_action,
+        ...(directBooking ? { directBooking: true } : {}),
+      }
     : {
         type: "show_confirm_card",
         kind,
         state,
-        ...(capture.classification.direct_booking ? { directBooking: true } : {}),
+        ...(directBooking ? { directBooking: true } : {}),
       };
 
   const nlu: NluV2ParseResult = {
@@ -139,9 +165,7 @@ function buildConfirmationPayload(
     confirm_ready: true,
     refined_target_id: state.refined_target_id,
     assistant_reply: "Ready to confirm this travel task.",
-    ...(capture.classification.direct_booking && (scenario === "restaurant" || scenario === "hotel")
-      ? { direct_booking: true }
-      : {}),
+    ...(directBooking ? { direct_booking: true } : {}),
     __v2_state: state,
     __v2_action: action,
   };

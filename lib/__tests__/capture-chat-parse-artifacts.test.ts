@@ -76,6 +76,35 @@ describe("Capture chat parse artifacts", () => {
     });
   });
 
+  it("marks exact Ticketmaster event URLs as direct booking capture tasks", () => {
+    const url = "https://www.ticketmaster.com/nashville-sc-v-dc-united-eddi-nashville-tennessee-05-09-2026/event/1B0063739937BB85";
+    const s = state({
+      scenario: "activity",
+      categories: ["activity"],
+      activity: {
+        event_name: "Nashville SC v DC United",
+        event_type: "sports",
+        city: "Nashville",
+        event_date: "2026-05-09",
+        num_tickets: 1,
+      },
+    });
+    const artifacts = buildCaptureChatParseArtifacts({
+      message: `${url},帮我预定一下这个`,
+      result: resultFor(s, { type: "show_confirm_card", kind: "plan", state: s }),
+      sessionId: "sess_ticketmaster",
+      capturedAt,
+    });
+
+    expect(artifacts.capture_travel_object.source.type).toBe("url");
+    expect(artifacts.capture_task_boundary.ok).toBe(true);
+    expect(artifacts.capture_task_boundary.nextAction).toBe("run_direct_booking");
+    expect(artifacts.capture_task_boundary.payload?.nlu.direct_booking).toBe(true);
+    expect(artifacts.capture_task_boundary.payload?.nlu.collected_constraints.source_url).toContain(
+      "/event/1B0063739937BB85",
+    );
+  });
+
   it("keeps unsupported screenshot-only input in review instead of creating a task", () => {
     const fallback = resultFor(
       state({ intent: "chitchat" }),

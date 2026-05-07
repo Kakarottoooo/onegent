@@ -263,4 +263,89 @@ describe("Capture -> task boundary", () => {
     });
     expect(result.payload?.nlu.collected_constraints._capture_source).toEqual(result.payload?.capture_metadata);
   });
+
+  it("runs a direct activity booking when the capture includes an exact Ticketmaster event URL", () => {
+    const url = "https://www.ticketmaster.com/nashville-sc-v-dc-united-eddi-nashville-tennessee-05-09-2026/event/1B0063739937BB85";
+    const result = buildCaptureTaskBoundary(
+      capture({
+        source: {
+          type: "url",
+          raw_text: `${url},帮我预定一下这个`,
+          url,
+          host: "www.ticketmaster.com",
+          captured_at: capturedAt,
+        },
+        classification: {
+          scenario: "activity",
+          categories: ["activity"],
+          confidence: 0.9,
+          direct_booking: false,
+        },
+        entities: {
+          activity: {
+            event_name: "Nashville SC v DC United",
+            event_type: "sports",
+            city: "Nashville",
+            event_date: "2026-05-09",
+            num_tickets: 1,
+          },
+        },
+        constraints: {
+          source_url: url,
+        },
+      }),
+    );
+
+    expect(result.ok).toBe(true);
+    expect(result.nextAction).toBe("run_direct_booking");
+    expect(result.payload?.kind).toBe("plan");
+    expect(result.payload?.nlu.direct_booking).toBe(true);
+    expect(result.payload?.nlu.__v2_action).toMatchObject({
+      type: "show_confirm_card",
+      directBooking: true,
+    });
+    expect(result.payload?.nlu.collected_constraints).toMatchObject({
+      event_name: "Nashville SC v DC United",
+      event_date: "2026-05-09",
+      source_url: url,
+    });
+  });
+
+  it("allows exact Ticketmaster event URLs to run even when the extractor misses display fields", () => {
+    const result = buildCaptureTaskBoundary(
+      capture({
+        source: {
+          type: "url",
+          raw_text: "https://www.ticketmaster.com/example/event/1B0063739937BB85",
+          url: "https://www.ticketmaster.com/example/event/1B0063739937BB85",
+          host: "www.ticketmaster.com",
+          captured_at: capturedAt,
+        },
+        classification: {
+          scenario: "activity",
+          categories: ["activity"],
+          confidence: 0.72,
+          direct_booking: false,
+        },
+        entities: {
+          activity: {
+            event_name: "Ticketmaster event",
+          },
+        },
+        constraints: {
+          source_url: "https://www.ticketmaster.com/example/event/1B0063739937BB85",
+        },
+        missing_fields: ["city", "event_date", "num_tickets"],
+        task_readiness: {
+          ready: false,
+          reason: "missing_fields",
+          next_missing_fields: ["city", "event_date", "num_tickets"],
+        },
+      }),
+    );
+
+    expect(result.ok).toBe(true);
+    expect(result.nextAction).toBe("run_direct_booking");
+    expect(result.missingFields).toEqual([]);
+  });
 });

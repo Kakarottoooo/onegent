@@ -1458,6 +1458,7 @@ function HomeInner() {
       // effect doesn't re-fetch and dedupe.
       if (data.session_id && data.session_id !== activeSessionId && !activeRoomId) {
         setActiveSessionId(data.session_id);
+        activeSessionIdRef.current = data.session_id;
         replayedSessionIds.current.add(data.session_id);
         setSidebarReloadTick((n) => n + 1);
         if (typeof window !== "undefined") {
@@ -1517,6 +1518,24 @@ function HomeInner() {
       // capture layer has enough structured data to use the same ConfirmCard,
       // but the conversational router did not emit a confirm action.
       const captureBoundary = data.capture_task_boundary;
+      const captureDirectPayload =
+        captureBoundary?.ok &&
+        captureBoundary.nextAction === "run_direct_booking"
+          ? captureBoundary.payload
+          : undefined;
+      if (captureDirectPayload && !activeRoomId) {
+        const captureNlu = captureDirectPayload.nlu;
+        const content =
+          "Using the Ticketmaster event link you sent and starting this task directly.";
+        chat.injectAssistantMessage(content);
+        void persistThreadMessage({ role: "assistant", content });
+        await commitConfirmedNluDirectly({
+          nlu: captureNlu,
+          message: captureDirectPayload.message || text,
+          mentionedUserIds: mergedMentionIds,
+        });
+        return;
+      }
       const captureConfirmPayload =
         !nlu.confirm_ready &&
         captureBoundary?.ok &&
@@ -1860,6 +1879,45 @@ function HomeInner() {
     }
     if (payload.kind === "direct_booking") {
       await handleDirectBooking(payload);
+    }
+  }
+
+  async function commitConfirmedNluDirectly(input: {
+    nlu: ConversationalNLUResult;
+    message: string;
+    mentionedUserIds: string[];
+  }) {
+    try {
+      const history = chat.messages
+        .filter((m) => m.role === "user" || m.role === "assistant")
+        .map((m) => ({ role: m.role as "user" | "assistant", content: m.content }));
+      const res = await fetch("/api/chat/commit", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          result: input.nlu,
+          message: input.message,
+          ...(history.length > 0 ? { history } : {}),
+          ...(activeSessionIdRef.current ?? activeSessionId
+            ? { session_id: activeSessionIdRef.current ?? activeSessionId }
+            : {}),
+          ...(input.mentionedUserIds.length > 0
+            ? { mentioned_user_ids: input.mentionedUserIds }
+            : {}),
+        }),
+      });
+      const data = (await res.json().catch(() => ({}))) as CommitResponse;
+      if (!res.ok || !data.ok) {
+        const content = data.error ?? "Something went wrong. Please try again.";
+        chat.injectAssistantMessage(content);
+        void persistThreadMessage({ role: "assistant", content });
+        return;
+      }
+      await handleConfirmCommitted(data);
+    } catch {
+      const content = "Network hiccup while starting the task. Try again in a moment.";
+      chat.injectAssistantMessage(content);
+      void persistThreadMessage({ role: "assistant", content });
     }
   }
 

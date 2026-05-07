@@ -57,6 +57,10 @@ import { buildProfileGap } from "@/lib/core/execution/profile-requirements";
 import type { ExecutionParams, NeedsProfileDataPayload } from "@/lib/core";
 import type { BookingProfile } from "@/lib/booking-autopilot/types";
 import { buildPlanQueryFromConstraints } from "@/lib/chat-plan-query";
+import {
+  buildDirectActivityTask,
+  readDirectActivityProviderUrlFromConstraints,
+} from "@/lib/capture/direct-provider-url";
 
 export const maxDuration = 30;
 
@@ -1089,10 +1093,11 @@ export async function POST(req: NextRequest) {
     // Decision Rooms (intent==="create_room") deliberately do NOT take this
     // shortcut even when the creator names a venue — co-deciders need to
     // see/vote on the option, so we keep the recommendation path for them.
+    const hasDirectActivityUrl =
+      scenario === "activity" &&
+      readDirectActivityProviderUrlFromConstraints(constraints) !== null;
     const directBookingFlag =
-      typeof (nluRaw as { direct_booking?: boolean }).direct_booking === "boolean"
-        ? Boolean((nluRaw as { direct_booking?: boolean }).direct_booking)
-        : false;
+      Boolean((nluRaw as { direct_booking?: boolean }).direct_booking) || hasDirectActivityUrl;
     if (directBookingFlag) {
       const directPayload = await buildDirectBookingPayload(userId, scenario, constraints);
       if (directPayload) return NextResponse.json(directPayload);
@@ -1144,14 +1149,14 @@ export async function POST(req: NextRequest) {
 interface DirectBookingPayload {
   ok: true;
   kind: "direct_booking";
-  scenario: "restaurant" | "hotel";
+  scenario: "restaurant" | "hotel" | "activity";
   venue_name: string;
   profile_gap?: NeedsProfileDataPayload;
   booking_step: {
-    type: "restaurant" | "hotel";
+    type: "restaurant" | "hotel" | "activity";
     emoji: string;
     label: string;
-    apiEndpoint: "/api/booking-jobs/start";
+    apiEndpoint: "/api/booking-jobs/start" | "/api/booking-autopilot/universal";
     body: Record<string, unknown>;
     status: "pending";
   };
@@ -1237,6 +1242,62 @@ async function buildDirectBookingPayload(
         emoji: "\u{1F3E8}",
         label: name,
         apiEndpoint: "/api/booking-jobs/start",
+        body,
+        status: "pending",
+      },
+    };
+  }
+  if (scenario === "activity") {
+    const directUrl = readDirectActivityProviderUrlFromConstraints(constraints);
+    if (!directUrl) return null;
+
+    const eventName = readString(constraints, "event_name", "activity_name", "title") ?? "Ticketmaster event";
+    const city = readString(constraints, "city") ?? "";
+    const eventDate = readString(constraints, "event_date", "date");
+    const numTickets = readNumber(constraints, "num_tickets", "tickets", "quantity", "party_size") ?? 1;
+    const venueName = readString(constraints, "venue_name", "venue_hint", "venue");
+    const eventType = readString(constraints, "event_type", "activity_type", "genre");
+    const task = buildDirectActivityTask({
+      eventName,
+      eventDate,
+      numTickets,
+      providerUrl: directUrl.url,
+    });
+    const body: Record<string, unknown> = {
+      activity_name: eventName,
+      activity_id: directUrl.eventId,
+      city,
+      event_date: eventDate ?? "",
+      num_tickets: numTickets,
+      provider: directUrl.provider,
+      startUrl: directUrl.url,
+      fallbackUrl: directUrl.url,
+      task,
+    };
+    if (venueName) body.venue_name = venueName;
+    if (eventType) body.event_type = eventType;
+    const execution: ExecutionParams = {
+      scenario: "activity",
+      params: {
+        event_name: eventName,
+        city,
+        event_date: eventDate ?? "",
+        num_tickets: numTickets,
+        booking_link: directUrl.url,
+        task,
+      },
+    };
+    return {
+      ok: true,
+      kind: "direct_booking",
+      scenario: "activity",
+      venue_name: eventName,
+      profile_gap: await buildDirectBookingProfileGap(userId, execution),
+      booking_step: {
+        type: "activity",
+        emoji: "\u{1F3AB}",
+        label: `${eventName} (Ticketmaster)`,
+        apiEndpoint: "/api/booking-autopilot/universal",
         body,
         status: "pending",
       },

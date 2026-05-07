@@ -81,10 +81,10 @@ export interface CommitResponse {
   venue_name?: string;
   profile_gap?: NeedsProfileDataPayload;
   booking_step?: {
-    type: "restaurant" | "hotel";
+    type: "restaurant" | "hotel" | "activity";
     emoji: string;
     label: string;
-    apiEndpoint: "/api/booking-jobs/start";
+    apiEndpoint: "/api/booking-jobs/start" | "/api/booking-autopilot/universal";
     body: Record<string, unknown>;
     status: "pending";
   };
