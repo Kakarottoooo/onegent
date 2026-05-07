@@ -19,6 +19,7 @@ import {
   analyzeConversationalV2,
   buildFallbackResult,
 } from "@/lib/agent/nlu-v2";
+import { buildCaptureTravelObjectFromNlu } from "@/lib/capture/travel-object";
 import {
   isRoomMember,
   upsertMemberIntentState,
@@ -489,9 +490,16 @@ export async function POST(req: NextRequest) {
       }
     }
 
+    const captureTravelObject = buildCaptureTravelObjectFromNlu({
+      message,
+      result,
+      sessionId: resolvedSessionId,
+    });
+
     return NextResponse.json({
       ok: true,
       result,
+      capture_travel_object: captureTravelObject,
       user_id: userId ?? null,
       nlu_version: "v2",
       session_id: resolvedSessionId,
@@ -507,9 +515,14 @@ export async function POST(req: NextRequest) {
       "[chat/parse] v2 pipeline failed, returning fallback:",
       err instanceof Error ? err.message : err,
     );
+    const fallbackResult = buildFallbackResult(message);
     return NextResponse.json({
       ok: true,
-      result: buildFallbackResult(message),
+      result: fallbackResult,
+      capture_travel_object: buildCaptureTravelObjectFromNlu({
+        message,
+        result: fallbackResult,
+      }),
       user_id: userId ?? null,
       nlu_version: "v2-fallback",
     });

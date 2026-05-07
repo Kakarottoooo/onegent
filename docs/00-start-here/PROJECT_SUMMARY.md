@@ -12,6 +12,15 @@ hotel, flight, and activity have all reached initial dogfood closure. The
 focus is now reliability: task workspace consistency, no-live benchmark
 coverage, layered recovery rules, runtime hardening, and private-alpha quality.
 
+The active operating plan is Stage 0. All near-term work should align with
+`docs/00-start-here/STAGE_0.md`: Capture -> Travel Object -> Task -> Decision
+-> Execution -> Evidence -> Modify.
+
+The first Capture MVP is intentionally backend-first: the homepage chat input
+is the capture surface, and `/api/chat/parse` can now return a normalized
+Travel Object alongside the normal NLU result. Separate heavy Capture pages
+are not the Stage 0 priority.
+
 ## Current Product Direction
 
 Onegent is not a generic browser bot and not just a recommendation UI. It is a
@@ -191,6 +200,10 @@ closure claims are anti-goals.
 The shared coordination home is `docs/10-coordination/`.
 
 ## Near-Term Priorities
+
+Read `docs/00-start-here/STAGE_0.md` before opening new product, runtime,
+benchmark, or multi-agent work. The priorities below are the Stage 0 execution
+lanes.
 
 1. **Task Workspace v2 hardening**
    - All task cards and entry points should land on the same task view.

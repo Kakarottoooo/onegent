@@ -1,0 +1,199 @@
+# Onegent Stage 0
+
+Last updated: 2026-05-07
+
+Stage 0 is the current operating plan for Onegent. All near-term product,
+runtime, benchmark, and multi-agent work should align with this file unless
+Codex and the founder explicitly update the stage plan.
+
+## North Star
+
+Onegent should become the travel task runtime for AI agents and groups.
+
+The product promise for this stage is:
+
+```text
+Send Onegent a link, screenshot, text, or request.
+Onegent turns travel intent into a structured task,
+narrows the next action, executes through provider runtimes when appropriate,
+stops at a user-controlled review or continuation boundary,
+and preserves evidence for audit, recovery, and later modification.
+```
+
+Stage 0 is not about broad launch or adding many surface features. It is about
+making the core chain reliable:
+
+```text
+Capture -> Travel Object -> Task -> Decision -> Execution -> Evidence -> Modify
+```
+
+## Current Starting Point
+
+Onegent has already moved beyond "can one provider close once." Founder dogfood
+has reached initial review or continuation boundaries for:
+
+- Restaurant through OpenTable.
+- Hotel through Booking.com-style provider flows.
+- Flight through Expedia.
+- Activity through Ticketmaster.
+
+This is enough to validate the execution-layer direction. It is not enough for
+broad launch. Stage 0 exists to turn those initial closures into repeatable,
+auditable product behavior.
+
+## Product Scope
+
+Stage 0 work is in scope when it directly improves one of these systems:
+
+1. **Capture MVP**
+   - The homepage input is the Capture surface.
+   - Users can paste a URL, screenshot description, text, or natural-language request into chat.
+   - Convert input into a Travel Object with type, extracted entities,
+     confidence, source, possible actions, and task readiness.
+   - Keep the UI light; the important work is backend normalization into the
+     task runtime, not a separate heavy Capture page.
+
+2. **Task Runtime**
+   - Preserve task identity.
+   - Keep task ownership and source session stable.
+   - Show consistent status, logs, screenshots, Evidence, Watch, Details, and
+     next actions across restaurant, hotel, flight, activity, rooms, calendar,
+     and chat.
+   - Support the first Mutable Task State MVP: modify date/time/party/budget or
+     provider policy, increment plan version, audit the change, and resume from
+     the affected step.
+
+3. **Execution Reliability**
+   - Keep L1 provider runtimes as the default.
+   - Use evidence-backed benchmark failures to patch wrong-target,
+     false-success, field-fill, and state-classification bugs.
+   - Keep L2 Browser Harness as a future recovery layer for selector/click/
+     iframe/fill/progress/page-mutation failures.
+   - Keep L3 Computer Use as a later fallback, not the current default.
+
+4. **Benchmarks And Evidence**
+   - Run no-live 5/10/20/50 case batches by vertical.
+   - Track routing mismatch, artifact completeness, unknown failure, false
+     success, wrong target, safe boundary, owner, and patch-proposal rate.
+   - Use small live dogfood only when evidence justifies it.
+
+5. **Private Alpha Readiness**
+   - Prepare for 10-20 high-intent users.
+   - Measure task submission quality, capture-to-task conversion, safe handoff
+     clarity, reuse, and willingness to pay.
+
+## Explicit Non-Goals
+
+Do not spend Stage 0 energy on:
+
+- Broad Product Hunt, Hacker News, or Reddit launch.
+- Full social feed.
+- Supplier network or large OTA business development.
+- Self-built browser farm.
+- Generic non-travel vertical expansion.
+- More provider automation without benchmark or dogfood evidence.
+- Broad abstractions that duplicate runtime logic or make the app slower.
+
+These can matter later. They are not the current bottleneck.
+
+## Stage 0 Quality Metrics
+
+Use these as the operating scorecard:
+
+| Area | Target |
+| --- | --- |
+| Routing mismatch | 0 |
+| Artifact completeness | at least 95% |
+| Unknown failure | below 5% |
+| Severe provider mistake | 0 |
+| False success | 0 |
+| Wrong target selection | 0 |
+| Task workspace consistency | all task entry points land on the same task view |
+| Capture conversion | link/text/screenshot/request can become a Travel Object |
+| Private alpha | 10-20 high-intent users before broad launch |
+
+## Agent Operating Model
+
+Codex owns:
+
+- Integration and merge review.
+- Stage 0 architecture.
+- Capture schema and task runtime boundaries.
+- Task Workspace and benchmark contracts.
+- Keeping code changes scoped and maintainable.
+
+Side agents should work in parallel on independent, high-value tasks:
+
+- Benchmark corpus and owner reports.
+- Provider-specific, evidence-backed runtime hardening.
+- No-live NLU and Capture fixture expansion.
+- Task Workspace audits that do not edit shared UI at the same time as Codex.
+- Private-alpha readiness artifacts.
+
+Anti-goals for side agents:
+
+- Docs-only closure claims.
+- Runtime mirror drift.
+- Vertical-specific schema forks.
+- Broad rewrites of `app/page.tsx`.
+- Provider live runs without explicit run approval and evidence capture.
+- Code that increases app shell bloat or duplicates existing helpers.
+
+## 30-45 Day Plan
+
+### Week 1: Align And Capture MVP
+
+- Land this Stage 0 file as the north star.
+- Build the first Capture MVP:
+  - Homepage chat remains the capture input.
+  - `/api/chat/parse` returns a Travel Object alongside the normal NLU result.
+  - URL/text/screenshot-description/request sources preserve source metadata.
+  - Task readiness is derived from NLU/router state, not from model prose.
+  - Convert-to-task stays behind the existing confirm/task workspace flow.
+- Keep it small and use existing NLU/task seams where possible.
+
+### Week 2: Task Runtime Hardening
+
+- Finish consistent Task Workspace behavior:
+  - Queue = pending or not started.
+  - Live = running.
+  - History = terminal or ready-for-review.
+  - Watch, Evidence, Details behave consistently everywhere.
+- Ensure completed tasks remain attached to the originating chat/session.
+- Add no-live tests for key task entry points.
+
+### Week 3: Benchmark And Runtime Patches
+
+- Run 5/10/20 batches by vertical.
+- Patch only fixture-backed failure classes.
+- Keep owner, failure class, and patch proposal reporting current.
+
+### Week 4: Mutable Task State MVP
+
+- Add or harden modify API and UI for active tasks.
+- Preserve task identity.
+- Increment plan version.
+- Add audit events.
+- Resume from the affected step when possible.
+
+### Week 5-6: Private Alpha
+
+- Recruit 10-20 high-intent users.
+- Ask for real screenshots, links, text, and travel requests.
+- Track:
+  - Was the input understood?
+  - Did it become a Travel Object?
+  - Did it become a task?
+  - Did it reach a safe review or continuation boundary?
+  - Did the user reuse it?
+  - Would the user pay?
+
+## Decision Rule
+
+When choosing between two tasks, pick the one that most improves this chain:
+
+```text
+Capture -> Travel Object -> Task -> Decision -> Execution -> Evidence -> Modify
+```
+
+If a task does not improve that chain, defer it.
