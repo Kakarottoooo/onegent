@@ -34,6 +34,7 @@ export interface HotelLayeredContext {
   checkout?: string | null;
   adults?: number | null;
   rooms?: number | null;
+  budget?: string | null;
 }
 
 export interface HotelNoAvailabilityEvidenceVerdict {
@@ -50,6 +51,17 @@ export interface HotelFallbackEligibility {
   eligible: boolean;
   reason: string;
   nextProviders: string[];
+  preservedParams: HotelFallbackPreservedParams;
+}
+
+export interface HotelFallbackPreservedParams {
+  hotel: string | null;
+  city: string | null;
+  checkin: string | null;
+  checkout: string | null;
+  adults: number | null;
+  rooms: number | null;
+  budget: string | null;
 }
 
 export interface HotelArtifactCompleteness {
@@ -68,7 +80,7 @@ export interface HotelLayeredRecoverySummary {
 type UnknownRecord = Record<string, unknown>;
 
 const NO_AVAILABILITY_RX =
-  /\b(sold[-\s]?out|fully booked|no rooms? available|no availability|unavailable for (your|the selected|selected|requested|these) dates?|target hotel unavailable)\b/i;
+  /\b(sold[-\s]?out|fully booked|no rooms? available|no availability|not available|no properties match|no stays? available|nothing available|unavailable for (your|the selected|selected|requested|these) dates?|target hotel unavailable)\b/i;
 
 const SCOPED_INVENTORY_RX =
   /\b(for (your|the selected|selected|requested|these|approved) dates?|for (the )?requested stay|for this stay|selected dates?|requested dates?|exact stay|target hotel unavailable)\b/i;
@@ -184,11 +196,13 @@ export function classifyHotelProviderFallbackEligibility(
   const state = context.state ?? "insufficient_evidence";
   const provider = normalizeProvider(context.provider);
   const nextProviders = nextHotelProviders(provider);
+  const preservedParams = buildHotelFallbackPreservedParams(context);
 
   if (nextProviders.length === 0) {
     return {
       eligible: false,
       nextProviders,
+      preservedParams,
       reason: "No configured L2 hotel provider remains after the current provider.",
     };
   }
@@ -197,6 +211,7 @@ export function classifyHotelProviderFallbackEligibility(
     return {
       eligible: false,
       nextProviders: [],
+      preservedParams,
       reason: "Do not use L2 fallback when exact hotel/date/stay no-availability is verified.",
     };
   }
@@ -205,6 +220,7 @@ export function classifyHotelProviderFallbackEligibility(
     return {
       eligible: true,
       nextProviders,
+      preservedParams,
       reason:
         "Weak no-availability evidence is L2-eligible; try an alternate hotel provider before terminal inventory classification.",
     };
@@ -218,6 +234,7 @@ export function classifyHotelProviderFallbackEligibility(
     return {
       eligible: true,
       nextProviders,
+      preservedParams,
       reason: `${state} is L2-eligible when no human-only boundary or verified no-availability is present.`,
     };
   }
@@ -225,7 +242,22 @@ export function classifyHotelProviderFallbackEligibility(
   return {
     eligible: false,
     nextProviders: [],
+    preservedParams,
     reason: `${state} is not L2-eligible; preserve evidence and do not switch providers automatically.`,
+  };
+}
+
+function buildHotelFallbackPreservedParams(
+  context: HotelLayeredContext,
+): HotelFallbackPreservedParams {
+  return {
+    hotel: context.targetHotelName ?? null,
+    city: context.city ?? null,
+    checkin: context.checkin ?? null,
+    checkout: context.checkout ?? null,
+    adults: context.adults ?? null,
+    rooms: context.rooms ?? null,
+    budget: context.budget ?? null,
   };
 }
 
@@ -329,6 +361,17 @@ export function extractHotelLayeredContextFromArtifact(bundle: unknown): HotelLa
     ),
     adults: firstNumber(readUnknown(params, "adults"), readUnknown(bodyParams, "adults")),
     rooms: firstNumber(readUnknown(params, "rooms"), readUnknown(bodyParams, "rooms")),
+    budget: firstString(
+      scalarString(readUnknown(params, "budget")),
+      scalarString(readUnknown(params, "budgetPerNight")),
+      scalarString(readUnknown(params, "budget_per_night")),
+      scalarString(readUnknown(params, "budgetTotal")),
+      scalarString(readUnknown(params, "budget_total")),
+      scalarString(readUnknown(params, "maxPrice")),
+      scalarString(readUnknown(params, "max_price")),
+      scalarString(readUnknown(bodyParams, "budget")),
+      scalarString(readUnknown(bodyParams, "budget_per_night")),
+    ),
   };
 }
 
@@ -471,6 +514,12 @@ function firstNumber(...values: unknown[]): number | null {
       if (Number.isFinite(parsed)) return parsed;
     }
   }
+  return null;
+}
+
+function scalarString(value: unknown): string | null {
+  if (typeof value === "string" && value.trim()) return value.trim();
+  if (typeof value === "number" && Number.isFinite(value)) return String(value);
   return null;
 }
 

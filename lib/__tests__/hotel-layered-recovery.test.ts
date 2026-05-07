@@ -20,6 +20,7 @@ const EXACT_CONTEXT = {
   checkout: "2026-06-12",
   adults: 1,
   rooms: 1,
+  budget: "300",
 };
 
 describe("hotel layered recovery", () => {
@@ -50,6 +51,15 @@ describe("hotel layered recovery", () => {
       "hotels-com",
       "expedia-hotel",
     ]);
+    expect(analysis.layeredRecovery.fallbackEligibility.preservedParams).toEqual({
+      hotel: "YOTEL New York Times Square",
+      city: "New York",
+      checkin: "2026-06-10",
+      checkout: "2026-06-12",
+      adults: 1,
+      rooms: 1,
+      budget: "300",
+    });
   });
 
   it("requires exact hotel/date/stay evidence before true no-availability", () => {
@@ -171,6 +181,7 @@ function baseJob(): NonNullable<HotelRetryArtifactBundle["job"]> {
       adults: 1,
       rooms: 1,
       hotelName: "YOTEL New York Times Square",
+      budgetPerNight: 300,
     },
   };
 }

@@ -101,8 +101,8 @@ Hotels.com can fall back to Expedia hotel under the same evidence rules.
 Expedia hotel has no further configured L2 provider in this lane.
 
 L2 fallback must preserve the same target hotel, city, dates, adult count, room
-count, and safety hard stops. It must not be implemented as an automatic live
-retry loop.
+count, budget when present, and safety hard stops. It must not be implemented as
+an automatic live retry loop.
 
 ## L2 Eligible Failures
 

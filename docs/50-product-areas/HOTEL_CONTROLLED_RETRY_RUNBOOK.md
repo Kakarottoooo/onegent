@@ -193,9 +193,14 @@ for founder approval for the changed case.
 10. If Booking.com returns 5xx, timeout, blocked provider response, or network
     instability, classify `network_provider_failure`. Do not patch selectors
     from network evidence alone.
-11. If the target hotel is sold out, fully booked, or has no rooms available,
-    classify `provider_no_availability`. Do not patch selectors unless
-    screenshots show matching available inventory that the worker missed.
+11. If the target hotel is sold out, fully booked, or has no rooms available
+    with exact hotel, date, adult-count, and room-count evidence, classify
+    `provider_no_availability`. If the copy is generic or city-level and does
+    not prove the exact stay has no inventory, classify `network_provider_failure`
+    with hotel fallback eligible, preserving the exact hotel, city, check-in,
+    check-out, adults, rooms, and budget before trying another provider. Do not
+    patch selectors unless screenshots show matching available inventory that
+    the worker missed.
 
 ## DB Evidence Query
 

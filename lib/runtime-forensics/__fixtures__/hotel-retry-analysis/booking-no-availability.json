@@ -20,10 +20,11 @@
       "checkOut": "2026-06-12",
       "adults": 1,
       "rooms": 1,
-      "hotelName": "YOTEL New York Times Square"
+      "hotelName": "YOTEL New York Times Square",
+      "budgetPerNight": 300
     }
   },
-  "workerLogExcerpt": "[booking-com] Hotel detail visible for YOTEL New York Times Square\n[booking-com] approved stay evidence: checkin=2026-06-10 checkout=2026-06-12 adults=1 rooms=1\n[booking-com] no rooms available for selected dates\n[booking-com] target hotel unavailable; stopping without retry loop",
+  "workerLogExcerpt": "[booking-com] Hotel detail visible for YOTEL New York Times Square\n[booking-com] approved stay evidence: checkin=2026-06-10 checkout=2026-06-12 adults=1 rooms=1 budget=300\n[booking-com] no rooms available for selected dates\n[booking-com] target hotel unavailable; stopping without retry loop",
   "workerLogPath": "codex-worker.log",
   "screenshotPaths": [
     "worker/.debug-screenshots/booking-com-fixture-no-availability/01-hotel-detail.jpg"

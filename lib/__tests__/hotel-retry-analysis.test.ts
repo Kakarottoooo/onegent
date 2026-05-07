@@ -155,6 +155,60 @@ describe("analyzeHotelRetryArtifactBundle", () => {
     expect(analysis.nextAction).toContain("Do not patch hotel provider selectors");
   });
 
+  it("classifies weak generic Booking.com not-available copy as provider degraded and fallback eligible", () => {
+    const analysis = analyzeHotelRetryArtifactBundle({
+      job: yotelJob("booking-com"),
+      workerLogExcerpt:
+        "[booking-com] Search results page displayed generic copy: This property is not available. No properties match your search.",
+      workerLogPath: "codex-worker.log",
+      screenshotPaths: ["worker/.debug-screenshots/booking-com/01-generic-not-available.jpg"],
+      liveSnapshotPaths: [".debug-screenshots/live/weak-not-available/snapshot.json"],
+      notes: ["Synthetic no-live fixture. No payment, login, OTP, CAPTCHA, or final confirmation."],
+    });
+
+    expect(analysis.state).toBe("network_provider_failure");
+    expect(analysis.layeredRecovery.noAvailabilityEvidence.state).toBe("weak_no_availability");
+    expect(analysis.layeredRecovery.fallbackEligibility).toMatchObject({
+      eligible: true,
+      nextProviders: ["hotels-com", "expedia-hotel"],
+      preservedParams: {
+        hotel: "YOTEL New York Times Square",
+        city: "New York",
+        checkin: "2026-06-10",
+        checkout: "2026-06-12",
+        adults: 1,
+        rooms: 1,
+        budget: "300",
+      },
+    });
+  });
+
+  it("preserves exact stay params when Hotels.com is fallback eligible", () => {
+    const analysis = analyzeHotelRetryArtifactBundle({
+      job: yotelJob("hotels-com"),
+      workerLogExcerpt:
+        "[hotels-com] Hotel search result page says not available, but no exact hotel/date/stay inventory proof was captured.",
+      workerLogPath: "codex-worker.log",
+      screenshotPaths: ["worker/.debug-screenshots/hotels-com/01-generic-not-available.jpg"],
+      liveSnapshotPaths: [".debug-screenshots/live/hotels-weak-not-available/snapshot.json"],
+    });
+
+    expect(analysis.state).toBe("network_provider_failure");
+    expect(analysis.layeredRecovery.fallbackEligibility).toMatchObject({
+      eligible: true,
+      nextProviders: ["expedia-hotel"],
+      preservedParams: {
+        hotel: "YOTEL New York Times Square",
+        city: "New York",
+        checkin: "2026-06-10",
+        checkout: "2026-06-12",
+        adults: 1,
+        rooms: 1,
+        budget: "300",
+      },
+    });
+  });
+
   it("classifies explicit Booking.com runtime boundary log lines", () => {
     const cases: Array<{ line: string; state: HotelRetryState }> = [
       {
@@ -236,4 +290,23 @@ describe("Hotel retry markdown helpers", () => {
 async function readFixture(file: string): Promise<HotelRetryArtifactBundle> {
   const raw = await fs.readFile(path.join(FIXTURE_DIR, file), "utf8");
   return JSON.parse(raw) as HotelRetryArtifactBundle;
+}
+
+function yotelJob(provider: "booking-com" | "hotels-com"): NonNullable<HotelRetryArtifactBundle["job"]> {
+  return {
+    id: `fixture-hotel-${provider}-yotel`,
+    taskId: `fixture-task-${provider}-yotel`,
+    provider,
+    scenario: "hotel",
+    status: "failed",
+    params: {
+      hotelName: "YOTEL New York Times Square",
+      city: "New York",
+      checkIn: "2026-06-10",
+      checkOut: "2026-06-12",
+      adults: 1,
+      rooms: 1,
+      budgetPerNight: 300,
+    },
+  };
 }

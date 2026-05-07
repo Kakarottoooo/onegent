@@ -307,7 +307,7 @@ const SIGNAL_PATTERNS: SignalPattern[] = [
   {
     kind: "provider_no_availability",
     label: "hotel sold out or fully booked",
-    rx: /\b(sold[-\s]?out|fully booked|no rooms? available|no availability)\b/i,
+    rx: /\b(sold[-\s]?out|fully booked|no rooms? available|no availability|not available|no properties match|no stays? available|nothing available)\b/i,
   },
   {
     kind: "provider_no_availability",
@@ -472,7 +472,7 @@ export function analyzeHotelRetryArtifactBundle(
     artifactPaths,
     layeredRecovery,
     summary: buildSummary(state, confidence, signals),
-    nextAction: nextActionForState(state),
+    nextAction: nextActionForState(state, fallbackEligibility),
   };
 }
 
@@ -543,6 +543,13 @@ export function formatHotelRetryAnalysisMarkdown(
         : ""
     }`,
   );
+  if (analysis.layeredRecovery.fallbackEligibility.eligible) {
+    lines.push(
+      `- Preserved params: \`${JSON.stringify(
+        analysis.layeredRecovery.fallbackEligibility.preservedParams,
+      )}\``,
+    );
+  }
   lines.push(
     `- Artifact completeness: \`${analysis.layeredRecovery.artifactCompleteness.complete}\` - ${escapeMarkdownLine(
       analysis.layeredRecovery.artifactCompleteness.summary,
@@ -683,7 +690,16 @@ function buildSummary(
   return `${HOTEL_RETRY_STATE_LABEL[state]} with ${confidence} confidence (${signalText}).`;
 }
 
-function nextActionForState(state: HotelRetryState): string {
+function nextActionForState(
+  state: HotelRetryState,
+  fallbackEligibility: HotelLayeredRecoverySummary["fallbackEligibility"],
+): string {
+  if (fallbackEligibility.eligible) {
+    return `Treat as provider-degraded/fallback-eligible. Preserve exact hotel, city, check-in, check-out, adults, rooms, and budget before trying ${fallbackEligibility.nextProviders.join(
+      " -> ",
+    )}.`;
+  }
+
   switch (state) {
     case "safety_boundary_violation":
       return "Stop. Do not retry. Preserve DB/log/screenshot evidence and run a separate root-cause review of the safety boundary.";
@@ -700,7 +716,7 @@ function nextActionForState(state: HotelRetryState): string {
     case "model_env_transient":
       return "Treat as model/runtime environment instability. Do not patch hotel provider selectors from OpenAI Responses API or Computer Use transient evidence alone.";
     case "network_provider_failure":
-      return "Treat as provider/network instability. Do not patch selectors from this state unless separate screenshots prove room-selection drift.";
+      return "Treat as provider/network instability. Do not patch selectors from this state unless separate screenshots prove room-selection drift or weak no-availability evidence justifies provider fallback.";
     case "provider_no_availability":
       return "Treat as a provider inventory outcome. Do not patch selectors unless screenshots show matching available inventory that the worker missed.";
     case "provider_selector_drift":
