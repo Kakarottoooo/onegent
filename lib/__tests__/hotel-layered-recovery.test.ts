@@ -226,6 +226,10 @@ describe("hotel layered recovery", () => {
   it("validates artifact completeness without reading external systems", () => {
     const completeBundle: HotelRetryArtifactBundle = {
       job: baseJob(),
+      dbRow: {
+        handoff_url:
+          "https://www.booking.com/hotel/us/yotel-new-york.html?checkin=2026-06-10&checkout=2026-06-12&group_adults=1&no_rooms=1",
+      },
       workerLogExcerpt:
         "Hotel detail visible for YOTEL New York Times Square. checkin=2026-06-10 checkout=2026-06-12 adults=1 rooms=1. Room selection reached.",
       workerLogPath: "codex-worker.log",
@@ -242,6 +246,7 @@ describe("hotel layered recovery", () => {
     });
     expect(incomplete.complete).toBe(false);
     expect(incomplete.missing).toContain("hotel name");
+    expect(incomplete.missing).toContain("currentUrl");
     expect(incomplete.missing).toContain("workerLogExcerpt");
     expect(incomplete.missing).toContain("screenshotPaths");
   });

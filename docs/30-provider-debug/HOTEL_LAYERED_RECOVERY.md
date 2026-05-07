@@ -161,6 +161,7 @@ Minimum no-live hotel artifact bundle:
 - `job.id`, `job.provider`, `job.scenario=hotel`, `job.status`.
 - Exact hotel name, city, check-in, check-out, adults, rooms, and budget when
   present in the task.
+- Current provider URL or handoff URL.
 - Bounded `workerLogExcerpt`.
 - `workerLogPath`.
 - At least one screenshot path.

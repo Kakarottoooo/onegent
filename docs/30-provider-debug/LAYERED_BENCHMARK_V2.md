@@ -34,6 +34,8 @@ Every case records:
 - `failureClass`: normalized failure class.
 - `evidenceCompleteness`: synthetic marker, fixture id, DB row, decision log,
   worker log, screenshot, current URL, benchmark report, and score.
+- `artifactExpectations`: required sources, evidence contract,
+  classification signals, patch proposal fields, owner hint, and owner action.
 - `l2Eligible`: whether the class should be recoverable by L2.
 - `l2SimulatedResult`: deterministic simulated Browser Harness outcome.
 - `patchProposal`: whether a patch should be proposed and where ownership
