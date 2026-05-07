@@ -44,6 +44,7 @@ True hotel no-availability requires all of:
 - Exact hotel evidence: visible/logged hotel name matches the requested hotel.
 - Exact stay evidence: check-in, check-out, adult count, and room count match
   the requested stay.
+- Exact budget evidence when the task included a budget.
 - Scoped inventory evidence: the provider says the exact hotel/stay has no
   rooms, is sold out, fully booked, or unavailable for the selected dates.
 - Artifact completeness: DB/job params, bounded worker log, screenshot path,
@@ -53,6 +54,8 @@ Weak no-availability examples:
 
 - Search results say "no properties match your search" without exact hotel
   evidence.
+- Search or property copy says "not available" or "nothing available" without
+  exact hotel/date/stay proof.
 - A city-level result page says "no availability" without the approved dates
   and room/guest counts.
 - A worker error says "stuck at listing page" without a hotel detail or room
@@ -104,6 +107,28 @@ L2 fallback must preserve the same target hotel, city, dates, adult count, room
 count, budget when present, and safety hard stops. It must not be implemented as
 an automatic live retry loop.
 
+## Layered Benchmark Contract
+
+`scripts/layered-benchmark.ts --vertical hotel --count 10 --mode no-live`
+uses hotel-specific synthetic fixtures. The ten fixtures cover:
+
+- L1 direct pass.
+- Exact no-availability with strong evidence.
+- Weak/generic no-availability that is provider-degraded and fallback eligible.
+- Provider degraded.
+- Fallback recommendation preserving hotel, city, check-in, check-out, adults,
+  rooms, and budget.
+- Room selection drift.
+- Guest/review boundary.
+- Account/session boundary.
+- Artifact incomplete.
+- Stale running state.
+
+Benchmark L2 eligibility means Browser Harness recovery. Hotel provider
+fallback eligibility is recorded separately in the hotel contract because weak
+no-availability and provider-degraded outcomes can be provider-fallback
+eligible while still being Browser Harness L2-ineligible.
+
 ## L2 Eligible Failures
 
 - `provider_selector_drift`
@@ -134,7 +159,8 @@ inputs before choosing L2 or a code patch.
 Minimum no-live hotel artifact bundle:
 
 - `job.id`, `job.provider`, `job.scenario=hotel`, `job.status`.
-- Exact hotel name, city, check-in, check-out, adults, and rooms.
+- Exact hotel name, city, check-in, check-out, adults, rooms, and budget when
+  present in the task.
 - Bounded `workerLogExcerpt`.
 - `workerLogPath`.
 - At least one screenshot path.

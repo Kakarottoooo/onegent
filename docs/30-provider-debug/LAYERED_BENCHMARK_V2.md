@@ -40,7 +40,25 @@ Every case records:
   likely belongs.
 - `owner`: `nlu`, `planner`, `provider-runtime`, `browser-harness`,
   `task-workspace`, or `product/manual-boundary`.
+- `hotelContract`: optional hotel-only evidence contract for no-availability,
+  provider fallback, preserved stay params, artifact completeness, and stale
+  running state.
 - `dogfoodBugLink`: optional DOG id from the founder bug inbox.
+
+Hotel cases use a dedicated no-live fixture corpus for:
+
+- L1 direct pass.
+- Exact no-availability with strong hotel/date/stay evidence.
+- Weak/generic no-availability classified as provider-degraded and
+  provider-fallback eligible.
+- Provider degraded.
+- Fallback recommendation preserving hotel, city, check-in, check-out, adults,
+  rooms, and budget.
+- Room selection drift.
+- Guest/review boundary.
+- Account/session boundary.
+- Artifact incomplete.
+- Stale running state.
 
 ## Escalation Rules
 
@@ -68,6 +86,12 @@ Do not escalate for:
 These rules are intentional. L2 is for page/control recovery only, not for
 bypassing human-only boundaries, account checks, final actions, or missing
 evidence.
+
+Hotel provider fallback is tracked separately from Browser Harness L2. Weak
+hotel no-availability and provider degradation can be provider-fallback
+eligible while still being Browser Harness L2-ineligible. The fallback contract
+must preserve the exact hotel, city, check-in, check-out, adults, rooms, and
+budget before considering Hotels.com or Expedia hotel.
 
 ## Commands
 
