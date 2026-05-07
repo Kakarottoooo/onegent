@@ -1,3 +1,5 @@
+import { FLIGHT_LAYERED_BENCHMARK_CASES } from "./flight-layered-benchmark-fixtures";
+
 export type LayeredBenchmarkVertical = "restaurant" | "hotel" | "flight" | "activity";
 export type LayeredBenchmarkVerticalArg = LayeredBenchmarkVertical | "all";
 export type LayeredBenchmarkMode = "no-live";
@@ -81,6 +83,13 @@ export type LayeredBenchmarkPatchProposal = {
   notes: string;
 };
 
+export type LayeredBenchmarkArtifactExpectations = {
+  requiredSources: string[];
+  evidenceContract: string;
+  classificationSignals: string[];
+  patchProposalFields: string[];
+};
+
 export type LayeredBenchmarkCase = {
   id: string;
   vertical: LayeredBenchmarkVertical;
@@ -90,6 +99,7 @@ export type LayeredBenchmarkCase = {
   l1Result: LayeredBenchmarkL1Result;
   failureClass: LayeredBenchmarkFailureClass;
   evidenceCompleteness: LayeredBenchmarkEvidenceCompleteness;
+  artifactExpectations: LayeredBenchmarkArtifactExpectations;
   l2Eligible: boolean;
   l2SimulatedResult: LayeredBenchmarkL2SimulatedResult;
   patchProposal: LayeredBenchmarkPatchProposal;
@@ -562,29 +572,33 @@ export function renderLayeredBenchmarkMarkdown(report: LayeredBenchmarkReport): 
 }
 
 function buildLayeredBenchmarkCases(): LayeredBenchmarkCase[] {
-  return VERTICAL_CONFIGS.flatMap(buildCasesForVertical);
+  return VERTICAL_CONFIGS.flatMap((config) =>
+    config.vertical === "flight"
+      ? [...FLIGHT_LAYERED_BENCHMARK_CASES, ...buildCasesForVertical(config, 11)]
+      : buildCasesForVertical(config),
+  );
 }
 
-function buildCasesForVertical(config: VerticalConfig): LayeredBenchmarkCase[] {
+function buildCasesForVertical(config: VerticalConfig, startIndex = 1): LayeredBenchmarkCase[] {
   return [
-    directPassCase(config, 1),
-    directPassCase(config, 2),
-    directPassCase(config, 3),
-    directPassCase(config, 4),
-    l2Case(config, "selector_drift", "recovered", 5),
-    l2Case(config, "click_miss", "recovered", 6),
-    l2Case(config, "iframe_miss", "needs_patch", 7),
-    l2Case(config, "field_fill_miss", "recovered", 8),
-    l2Case(config, "progress_stall", "not_recovered", 9),
-    l2Case(config, "unknown_page_mutation", "needs_patch", 10),
-    blockedCase(config, "true_no_availability", 11),
-    blockedCase(config, "provider_degraded", 12),
-    manualBoundaryCase(config, "account_checkpoint", 13),
-    manualBoundaryCase(config, "user_only_final_action", 14),
-    blockedCase(config, "network_model_env_issue", 15),
-    insufficientEvidenceCase(config, 16),
-    l2Case(config, "selector_drift", "needs_patch", 17),
-    routingMismatchCase(config, 18),
+    directPassCase(config, startIndex),
+    directPassCase(config, startIndex + 1),
+    directPassCase(config, startIndex + 2),
+    directPassCase(config, startIndex + 3),
+    l2Case(config, "selector_drift", "recovered", startIndex + 4),
+    l2Case(config, "click_miss", "recovered", startIndex + 5),
+    l2Case(config, "iframe_miss", "needs_patch", startIndex + 6),
+    l2Case(config, "field_fill_miss", "recovered", startIndex + 7),
+    l2Case(config, "progress_stall", "not_recovered", startIndex + 8),
+    l2Case(config, "unknown_page_mutation", "needs_patch", startIndex + 9),
+    blockedCase(config, "true_no_availability", startIndex + 10),
+    blockedCase(config, "provider_degraded", startIndex + 11),
+    manualBoundaryCase(config, "account_checkpoint", startIndex + 12),
+    manualBoundaryCase(config, "user_only_final_action", startIndex + 13),
+    blockedCase(config, "network_model_env_issue", startIndex + 14),
+    insufficientEvidenceCase(config, startIndex + 15),
+    l2Case(config, "selector_drift", "needs_patch", startIndex + 16),
+    routingMismatchCase(config, startIndex + 17),
   ];
 }
 
@@ -764,9 +778,11 @@ function baseCase(
     | "taskIntent"
     | "expectedTarget"
     | "dogfoodBugLink"
-  >,
+    | "artifactExpectations"
+  > & { artifactExpectations?: LayeredBenchmarkArtifactExpectations },
 ): LayeredBenchmarkCase {
   const caseId = `lbv2-${config.vertical}-${String(index).padStart(2, "0")}`;
+  const { artifactExpectations, ...rest } = overrides;
   return {
     id: caseId,
     vertical: config.vertical,
@@ -781,7 +797,43 @@ function baseCase(
       hardStop: "Stop before login, verification, payment/CVV, final confirmation, or any user-only action.",
     },
     dogfoodBugLink: config.dogfoodBugLink,
-    ...overrides,
+    artifactExpectations:
+      artifactExpectations ??
+      defaultArtifactExpectations(
+        config,
+        index,
+        rest.failureClass,
+        rest.patchProposal.proposed,
+      ),
+    ...rest,
+  };
+}
+
+function defaultArtifactExpectations(
+  config: VerticalConfig,
+  index: number,
+  failureClass: LayeredBenchmarkFailureClass,
+  patchProposed: boolean,
+): LayeredBenchmarkArtifactExpectations {
+  const caseId = `lbv2-${config.vertical}-${String(index).padStart(2, "0")}`;
+  return {
+    requiredSources: [
+      "booking_jobs row",
+      "decisionLog",
+      "worker log excerpt",
+      "provider screenshot",
+      "current URL",
+      "benchmark report",
+    ],
+    evidenceContract: `${caseId} must contain enough evidence to classify ${failureClass}.`,
+    classificationSignals: [
+      `failureClass=${failureClass}`,
+      `provider=${config.provider}`,
+      `stage=${config.providerStage}`,
+    ],
+    patchProposalFields: patchProposed
+      ? ["title", "files", "risk", "notes"]
+      : ["proposed=false", "risk=none", "notes"],
   };
 }
 

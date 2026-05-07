@@ -80,6 +80,10 @@ describe("layered benchmark v2", () => {
       expect(testCase.expectedTarget.hardStop).toContain("final confirmation");
       expect(testCase.evidenceCompleteness.syntheticMarker).toBe(true);
       expect(testCase.evidenceCompleteness.fixtureId).toContain("synthetic-");
+      expect(testCase.artifactExpectations.requiredSources.length).toBeGreaterThan(0);
+      expect(testCase.artifactExpectations.evidenceContract).toContain(testCase.id);
+      expect(testCase.artifactExpectations.classificationSignals.length).toBeGreaterThan(0);
+      expect(testCase.artifactExpectations.patchProposalFields.length).toBeGreaterThan(0);
       expect(typeof testCase.l2Eligible).toBe("boolean");
       expect(testCase.l2SimulatedResult.status).toBeTruthy();
       expect(typeof testCase.patchProposal.proposed).toBe("boolean");
@@ -104,6 +108,63 @@ describe("layered benchmark v2", () => {
     const cases = selectLayeredBenchmarkCases({ vertical: "hotel", count: 10 });
     expect(cases).toHaveLength(10);
     expect(cases.every((testCase) => testCase.vertical === "hotel")).toBe(true);
+  });
+
+  it("uses flight-specific Expedia evidence fixtures for the first 10 flight cases", () => {
+    const results = runLayeredNoLiveBenchmark({ vertical: "flight", count: 10 }).results;
+    expect(results.map((result) => result.id)).toEqual([
+      "lbv2-flight-01",
+      "lbv2-flight-02",
+      "lbv2-flight-03",
+      "lbv2-flight-04",
+      "lbv2-flight-05",
+      "lbv2-flight-06",
+      "lbv2-flight-07",
+      "lbv2-flight-08",
+      "lbv2-flight-09",
+      "lbv2-flight-10",
+    ]);
+
+    expect(results.map((result) => result.finalVerdict)).toEqual([
+      "l1_direct_pass",
+      "needs_runtime_patch",
+      "needs_runtime_patch",
+      "needs_runtime_patch",
+      "needs_runtime_patch",
+      "insufficient_evidence",
+      "l2_recovered_pass",
+      "expected_manual_boundary",
+      "expected_provider_block",
+      "expected_manual_boundary",
+    ]);
+    expect(results[1].artifactExpectations.classificationSignals).toContain("differentAirline=yes");
+    expect(results[2].artifactExpectations.classificationSignals).toContain("timeDelta>120");
+    expect(results[3].artifactExpectations.classificationSignals).toContain("priceDelta=0");
+    expect(results[4].artifactExpectations.classificationSignals.join(" ")).toContain("Traveler form state");
+    expect(results[5].artifactExpectations.classificationSignals).toContain("mixed_or_stale_worker_evidence");
+    expect(results[6].calculatedL2Eligible).toBe(true);
+    expect(results[7].calculatedL2Eligible).toBe(false);
+    expect(results[8].pass).toBe(true);
+    expect(results[9].failureClass).toBe("user_only_final_action");
+  });
+
+  it("requires patch proposal fields for flight cases that ask for L1 fixes", () => {
+    const patchCases = selectLayeredBenchmarkCases({ vertical: "flight", count: 10 })
+      .filter((testCase) => testCase.patchProposal.proposed);
+
+    expect(patchCases.length).toBeGreaterThan(0);
+    for (const testCase of patchCases) {
+      expect(testCase.patchProposal.title).toBeTruthy();
+      expect(testCase.patchProposal.files?.length).toBeGreaterThan(0);
+      expect(testCase.patchProposal.risk).toMatch(/low|medium/);
+      expect(testCase.patchProposal.notes).toContain("fixture-driven");
+      expect(testCase.artifactExpectations.patchProposalFields).toEqual([
+        "title",
+        "files",
+        "risk",
+        "notes",
+      ]);
+    }
   });
 
   it("classifies L1, L2, patch, and evidence verdicts", () => {

@@ -77,6 +77,19 @@ Run a quick JSON report:
 npx tsx scripts/layered-benchmark.ts --vertical all --count 50 --mode no-live --json
 ```
 
+Run the Expedia flight fixture pack:
+
+```bash
+npx tsx scripts/layered-benchmark.ts --vertical flight --count 10 --mode no-live --json
+```
+
+The first 10 flight cases are Expedia-specific no-live fixtures covering direct
+pass, wrong-airline rejection, wrong-time rejection, price-only rejection,
+checkout-with-missing-traveler-fields, stale/mixed worker evidence, dismissable
+promo overlay, account-required boundary, provider degradation, and final review
+checkpoint. Each case carries owner, artifact expectations, L2 eligibility, and
+patch proposal fields.
+
 Run a founder-readable markdown report:
 
 ```bash

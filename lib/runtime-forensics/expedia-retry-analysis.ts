@@ -658,7 +658,7 @@ function nextActionForState(state: ExpediaRetryState): string {
     case "provider_no_availability":
       return "Treat as provider inventory/no-availability only when screenshots confirm the target card is absent. Do not patch selector logic from availability copy alone.";
     case "insufficient_evidence":
-      return "Collect one clean DB row, codex-worker.log excerpt, provider screenshots, and live snapshot paths before making a patch decision. If mixed/stale worker evidence or incomplete traveler fields are present, do not mark the flight lane closed.";
+      return "Collect one clean DB row, codex-worker.log excerpt, provider screenshots, and live snapshot paths before making a patch decision. If mixed/stale worker evidence is present, stop and clean worker topology first. If incomplete traveler fields are present, do not mark the flight lane closed.";
   }
 }
 
