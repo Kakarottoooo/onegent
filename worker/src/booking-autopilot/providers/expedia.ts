@@ -4720,6 +4720,7 @@ async function clickExpediaFlightButtonWithDomRescan(
         .map(match => Number.parseInt((match[1] ?? "").replace(/,/g, ""), 10))
         .filter(value => Number.isFinite(value));
     const timeMinutes = parseTimeToMinutes(time);
+    const nearTargetTimeMinutes = 15;
     const airlineLoose = normalizeLoose(airline);
     const airlineWord = airlineLoose.split(" ")[0] ?? "";
     const flightNumberTight = normalizeTight(flightNumber);
@@ -4798,7 +4799,6 @@ async function clickExpediaFlightButtonWithDomRescan(
           timeScore * 2 +
           (hasPrice ? 1 : 0);
         const hasExactTargetTime = timeMinutes !== null && departureMinutes === timeMinutes;
-        const nearTargetTimeMinutes = 15;
         const hasNearTargetTime = timeDelta !== null && timeDelta <= nearTargetTimeMinutes;
         const hasStrongTargetIdentity = hasFlightNumber || hasExactTargetTime;
         const exactMatch =
@@ -4897,13 +4897,17 @@ async function clickExpediaFlightButtonWithDomRescan(
         : "timeDelta=unknown priceDelta=unknown differentAirline=no";
       const rejectionClass = selectableCandidates.some(candidate => candidate.hasExplicitDifferentAirline)
         ? "wrong_airline_candidate_rejected"
-        : selectableCandidates.some(candidate => candidate.hasAirline && candidate.timeDelta !== null && candidate.timeDelta > 15)
+        : selectableCandidates.some(candidate =>
+            candidate.hasAirline &&
+            candidate.timeDelta !== null &&
+            candidate.timeDelta > nearTargetTimeMinutes
+          )
           ? "wrong_time_candidate_rejected"
           : selectableCandidates.some(candidate =>
               candidate.hasPrice &&
               !candidate.hasAirline &&
               !candidate.hasFlightNumber &&
-              (candidate.timeDelta === null || candidate.timeDelta > 15)
+              (candidate.timeDelta === null || candidate.timeDelta > nearTargetTimeMinutes)
             )
             ? "price_only_fallback_rejected"
             : "no target identity proof";
@@ -5188,6 +5192,7 @@ export async function bookExpediaFlightProgrammatic(
       return hour * 60 + minute;
     };
     const timeMinutes = parseTimeToMinutes(time);
+    const nearTargetTimeMinutes = 15;
     const normalizeLoose = (s: string | null | undefined): string =>
       (s ?? "").toLowerCase().replace(/\s+/g, " ").trim();
     const normalizeTight = (s: string | null | undefined): string =>
@@ -5273,7 +5278,6 @@ export async function bookExpediaFlightProgrammatic(
           timeScore * 2 +
           (hasPrice ? 1 : 0);
         const hasExactTargetTime = timeMinutes !== null && departureMinutes === timeMinutes;
-        const nearTargetTimeMinutes = 15;
         const hasNearTargetTime = timeDelta !== null && timeDelta <= nearTargetTimeMinutes;
         const hasStrongTargetIdentity = hasFlightNumber || hasExactTargetTime;
         const exactMatch =
@@ -5376,13 +5380,17 @@ export async function bookExpediaFlightProgrammatic(
         : "timeDelta=unknown priceDelta=unknown differentAirline=no";
       const rejectionClass = selectableCandidates.some(candidate => candidate.hasExplicitDifferentAirline)
         ? "wrong_airline_candidate_rejected"
-        : selectableCandidates.some(candidate => candidate.hasAirline && candidate.timeDelta !== null && candidate.timeDelta > 15)
+        : selectableCandidates.some(candidate =>
+            candidate.hasAirline &&
+            candidate.timeDelta !== null &&
+            candidate.timeDelta > nearTargetTimeMinutes
+          )
           ? "wrong_time_candidate_rejected"
           : selectableCandidates.some(candidate =>
               candidate.hasPrice &&
               !candidate.hasAirline &&
               !candidate.hasFlightNumber &&
-              (candidate.timeDelta === null || candidate.timeDelta > 15)
+              (candidate.timeDelta === null || candidate.timeDelta > nearTargetTimeMinutes)
             )
             ? "price_only_fallback_rejected"
             : "no target identity proof";
