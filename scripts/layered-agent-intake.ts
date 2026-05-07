@@ -15,6 +15,13 @@ function hasFlag(flag: string): boolean {
   return process.argv.includes(flag);
 }
 
+function readCsvArg(name: string): string[] {
+  return readArg(name)
+    .split(",")
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
 const inputPath = readArg("--input");
 if (!inputPath) {
   throw new Error("Missing --input <agent-return-report.json|md>.");
@@ -25,6 +32,8 @@ const reports = parseAgentIntakeInput(source, inputPath);
 const queueReport = classifyAgentIntakeQueue(reports, {
   requiredBaseBranch: readArg("--required-base-branch", "origin/codex/goal-core-reliability-long-run"),
   requiredBaseCommit: readArg("--required-base-commit") || undefined,
+  recommendedBase: readArg("--recommended-base") || undefined,
+  mergedBranches: readCsvArg("--merged-branches"),
 });
 
 const output = hasFlag("--json")

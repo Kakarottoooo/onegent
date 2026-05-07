@@ -206,15 +206,24 @@ does not depend on the unmerged branch. Do make agents wait when the next task
 depends on a new shared schema, runtime contract, or read model that has not
 landed yet.
 
-`scripts/layered-agent-intake.ts` is the lightweight metadata gate for returned
-agent branches. It reads static JSON or Markdown return reports, then classifies
-branches as `ready_to_merge`, `needs_followup`, or `reject` before Codex spends
-time on full merge validation. The classifier catches wrong bases, forbidden
-local artifacts, missing validation, runtime mirror changes without
-`check_drift`, and docs-only branches that claim runtime closure.
+`scripts/layered-agent-intake.ts` is the no-live intake queue for returned
+agent branches. It reads static JSON or Markdown metadata and classifies each
+branch as `ready_to_merge`, `needs_followup`, or `reject`. The schema records
+task kind, base, changed files, validations, dependency edges, supersession, and
+rebase requirements without touching provider runtime or live artifacts.
 
-This keeps independent agents moving while Codex validates the merge train in
-the background. It should not replace real merge validation; it only decides
+Every returned side-agent task must be one of:
+
+- `runtime_fix`
+- `benchmark_fixture`
+- `read_model_perf`
+- `task_workspace_ux`
+- `docs_contract`
+
+Codex can start independent work before previous branches are merged. It should
+pause only when the next task depends on an unmerged shared contract, such as a
+shared schema branch or read-model contract that later agents must import.
+This intake gate should not replace real merge validation; it only decides
 whether a returned branch is clean enough to enter that validation queue.
 
 ## Performance Model

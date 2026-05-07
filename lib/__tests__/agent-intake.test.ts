@@ -29,6 +29,7 @@ function baseReport(overrides: Partial<AgentReturnReport> = {}): AgentReturnRepo
       commit: REQUIRED_COMMIT,
       containsRequiredCommit: true,
     },
+    taskKind: "benchmark_fixture",
     summary: "No-live intake test branch",
     changedFiles: ["docs/40-dogfood/EXAMPLE.md", "lib/internal-benchmark/example.ts"],
     artifacts: [],
@@ -164,6 +165,7 @@ describe("agent intake classifier", () => {
 - baseBranch: origin/codex/goal-core-reliability-long-run
 - baseCommit: 0e85721
 - baseContainsRequiredCommit: true
+- taskKind: benchmark_fixture
 - changedFiles: docs/40-dogfood/EXAMPLE.md, scripts/example.ts
 - artifacts: none
 - validations: targeted_vitest=pass, tsc=pass, check-drift=pass, gate:phase1=pass, git diff --check=pass
