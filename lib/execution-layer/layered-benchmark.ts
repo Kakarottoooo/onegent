@@ -1,3 +1,5 @@
+import { buildHotelLayeredBenchmarkCases } from "./hotel-layered-benchmark-fixtures";
+
 export type LayeredBenchmarkVertical = "restaurant" | "hotel" | "flight" | "activity";
 export type LayeredBenchmarkVerticalArg = LayeredBenchmarkVertical | "all";
 export type LayeredBenchmarkMode = "no-live";
@@ -81,6 +83,39 @@ export type LayeredBenchmarkPatchProposal = {
   notes: string;
 };
 
+export type LayeredBenchmarkHotelFallbackParams = {
+  hotel: string;
+  city: string;
+  checkin: string;
+  checkout: string;
+  adults: number;
+  rooms: number;
+  budget: string;
+};
+
+export type LayeredBenchmarkHotelContract = {
+  noAvailabilityEvidence?: {
+    state: "verified_true_no_availability" | "weak_no_availability" | "not_no_availability";
+    missingEvidence: string[];
+    reason: string;
+  };
+  providerFallback?: {
+    eligible: boolean;
+    nextProviders: string[];
+    preservedParams: LayeredBenchmarkHotelFallbackParams;
+    reason: string;
+  };
+  artifactContract?: {
+    complete: boolean;
+    missing: string[];
+    summary: string;
+  };
+  staleRunningState?: {
+    staleStatus: "running" | "pending";
+    ownerAction: string;
+  };
+};
+
 export type LayeredBenchmarkCase = {
   id: string;
   vertical: LayeredBenchmarkVertical;
@@ -95,6 +130,7 @@ export type LayeredBenchmarkCase = {
   patchProposal: LayeredBenchmarkPatchProposal;
   owner: LayeredBenchmarkOwner;
   dogfoodBugLink?: string;
+  hotelContract?: LayeredBenchmarkHotelContract;
 };
 
 export type LayeredBenchmarkCaseResult = LayeredBenchmarkCase & {
@@ -216,7 +252,7 @@ const ZERO_VERDICTS: Record<LayeredBenchmarkVerdict, number> = {
   not_recovered: 0,
 };
 
-type VerticalConfig = {
+export type LayeredBenchmarkVerticalConfig = {
   vertical: LayeredBenchmarkVertical;
   provider: string;
   dogfoodBugLink?: string;
@@ -226,7 +262,7 @@ type VerticalConfig = {
   safeTerminalState: string;
 };
 
-const VERTICAL_CONFIGS: VerticalConfig[] = [
+const VERTICAL_CONFIGS: LayeredBenchmarkVerticalConfig[] = [
   {
     vertical: "restaurant",
     provider: "OpenTable",
@@ -565,7 +601,11 @@ function buildLayeredBenchmarkCases(): LayeredBenchmarkCase[] {
   return VERTICAL_CONFIGS.flatMap(buildCasesForVertical);
 }
 
-function buildCasesForVertical(config: VerticalConfig): LayeredBenchmarkCase[] {
+function buildCasesForVertical(config: LayeredBenchmarkVerticalConfig): LayeredBenchmarkCase[] {
+  if (config.vertical === "hotel") {
+    return buildHotelLayeredBenchmarkCases(config);
+  }
+
   return [
     directPassCase(config, 1),
     directPassCase(config, 2),
@@ -588,7 +628,7 @@ function buildCasesForVertical(config: VerticalConfig): LayeredBenchmarkCase[] {
   ];
 }
 
-function directPassCase(config: VerticalConfig, index: number): LayeredBenchmarkCase {
+function directPassCase(config: LayeredBenchmarkVerticalConfig, index: number): LayeredBenchmarkCase {
   return baseCase(config, index, {
     failureClass: "none",
     l1Result: {
@@ -608,7 +648,7 @@ function directPassCase(config: VerticalConfig, index: number): LayeredBenchmark
 }
 
 function l2Case(
-  config: VerticalConfig,
+  config: LayeredBenchmarkVerticalConfig,
   failureClass: Extract<
     LayeredBenchmarkFailureClass,
     | "selector_drift"
@@ -653,7 +693,7 @@ function l2Case(
 }
 
 function blockedCase(
-  config: VerticalConfig,
+  config: LayeredBenchmarkVerticalConfig,
   failureClass: Extract<
     LayeredBenchmarkFailureClass,
     "true_no_availability" | "provider_degraded" | "network_model_env_issue"
@@ -681,7 +721,7 @@ function blockedCase(
 }
 
 function manualBoundaryCase(
-  config: VerticalConfig,
+  config: LayeredBenchmarkVerticalConfig,
   failureClass: Extract<LayeredBenchmarkFailureClass, "account_checkpoint" | "user_only_final_action">,
   index: number,
 ): LayeredBenchmarkCase {
@@ -703,7 +743,7 @@ function manualBoundaryCase(
   });
 }
 
-function insufficientEvidenceCase(config: VerticalConfig, index: number): LayeredBenchmarkCase {
+function insufficientEvidenceCase(config: LayeredBenchmarkVerticalConfig, index: number): LayeredBenchmarkCase {
   return baseCase(config, index, {
     failureClass: "insufficient_evidence",
     l1Result: {
@@ -728,7 +768,7 @@ function insufficientEvidenceCase(config: VerticalConfig, index: number): Layere
   });
 }
 
-function routingMismatchCase(config: VerticalConfig, index: number): LayeredBenchmarkCase {
+function routingMismatchCase(config: LayeredBenchmarkVerticalConfig, index: number): LayeredBenchmarkCase {
   return baseCase(config, index, {
     failureClass: "routing_mismatch",
     l1Result: {
@@ -754,7 +794,7 @@ function routingMismatchCase(config: VerticalConfig, index: number): LayeredBenc
 }
 
 function baseCase(
-  config: VerticalConfig,
+  config: LayeredBenchmarkVerticalConfig,
   index: number,
   overrides: Omit<
     LayeredBenchmarkCase,
@@ -785,7 +825,7 @@ function baseCase(
   };
 }
 
-function completeEvidence(config: VerticalConfig, index: number): LayeredBenchmarkEvidenceCompleteness {
+function completeEvidence(config: LayeredBenchmarkVerticalConfig, index: number): LayeredBenchmarkEvidenceCompleteness {
   return {
     syntheticMarker: true,
     fixtureId: `synthetic-${config.vertical}-${String(index).padStart(2, "0")}`,
@@ -799,7 +839,7 @@ function completeEvidence(config: VerticalConfig, index: number): LayeredBenchma
   };
 }
 
-function incompleteEvidence(config: VerticalConfig, index: number): LayeredBenchmarkEvidenceCompleteness {
+function incompleteEvidence(config: LayeredBenchmarkVerticalConfig, index: number): LayeredBenchmarkEvidenceCompleteness {
   return {
     syntheticMarker: true,
     fixtureId: `synthetic-${config.vertical}-${String(index).padStart(2, "0")}`,

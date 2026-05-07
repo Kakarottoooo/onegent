@@ -106,6 +106,112 @@ describe("layered benchmark v2", () => {
     expect(cases.every((testCase) => testCase.vertical === "hotel")).toBe(true);
   });
 
+  it("uses hotel-specific benchmark cases for no-availability and provider fallback contracts", () => {
+    const results = runLayeredNoLiveBenchmark({ vertical: "hotel", count: 10 }).results;
+    expect(results.map((result) => result.id)).toEqual([
+      "lbv2-hotel-01",
+      "lbv2-hotel-02",
+      "lbv2-hotel-03",
+      "lbv2-hotel-04",
+      "lbv2-hotel-05",
+      "lbv2-hotel-06",
+      "lbv2-hotel-07",
+      "lbv2-hotel-08",
+      "lbv2-hotel-09",
+      "lbv2-hotel-10",
+    ]);
+
+    const byId = new Map(results.map((result) => [result.id, result]));
+
+    expect(byId.get("lbv2-hotel-01")).toMatchObject({
+      finalVerdict: "l1_direct_pass",
+      owner: "product/manual-boundary",
+      calculatedL2Eligible: false,
+    });
+    expect(byId.get("lbv2-hotel-02")).toMatchObject({
+      failureClass: "true_no_availability",
+      finalVerdict: "expected_provider_block",
+      owner: "product/manual-boundary",
+      calculatedL2Eligible: false,
+      hotelContract: {
+        noAvailabilityEvidence: { state: "verified_true_no_availability" },
+        providerFallback: { eligible: false },
+      },
+    });
+    expect(byId.get("lbv2-hotel-03")).toMatchObject({
+      failureClass: "provider_degraded",
+      finalVerdict: "expected_provider_block",
+      owner: "product/manual-boundary",
+      calculatedL2Eligible: false,
+      hotelContract: {
+        noAvailabilityEvidence: { state: "weak_no_availability" },
+        providerFallback: { eligible: true, nextProviders: ["hotels-com", "expedia-hotel"] },
+      },
+    });
+    expect(byId.get("lbv2-hotel-04")).toMatchObject({
+      failureClass: "provider_degraded",
+      finalVerdict: "expected_provider_block",
+      calculatedL2Eligible: false,
+    });
+    expect(byId.get("lbv2-hotel-05")).toMatchObject({
+      failureClass: "selector_drift",
+      finalVerdict: "l2_recovered_pass",
+      owner: "browser-harness",
+      calculatedL2Eligible: true,
+    });
+    expect(byId.get("lbv2-hotel-06")).toMatchObject({
+      failureClass: "selector_drift",
+      finalVerdict: "needs_runtime_patch",
+      owner: "provider-runtime",
+      calculatedL2Eligible: true,
+    });
+    expect(byId.get("lbv2-hotel-07")).toMatchObject({
+      failureClass: "user_only_final_action",
+      finalVerdict: "expected_manual_boundary",
+      owner: "product/manual-boundary",
+      calculatedL2Eligible: false,
+    });
+    expect(byId.get("lbv2-hotel-08")).toMatchObject({
+      failureClass: "account_checkpoint",
+      finalVerdict: "expected_manual_boundary",
+      owner: "product/manual-boundary",
+      calculatedL2Eligible: false,
+    });
+    expect(byId.get("lbv2-hotel-09")).toMatchObject({
+      failureClass: "insufficient_evidence",
+      finalVerdict: "insufficient_evidence",
+      owner: "task-workspace",
+      calculatedL2Eligible: false,
+    });
+    expect(byId.get("lbv2-hotel-10")).toMatchObject({
+      failureClass: "progress_stall",
+      finalVerdict: "needs_runtime_patch",
+      owner: "task-workspace",
+      calculatedL2Eligible: true,
+      hotelContract: {
+        staleRunningState: { staleStatus: "running" },
+      },
+    });
+  });
+
+  it("preserves exact hotel fallback params in hotel benchmark recommendations", () => {
+    const cases = selectLayeredBenchmarkCases({ vertical: "hotel", count: 10 });
+    const fallbackCases = cases.filter((testCase) => testCase.hotelContract?.providerFallback?.eligible);
+    expect(fallbackCases.length).toBeGreaterThanOrEqual(3);
+
+    for (const testCase of fallbackCases) {
+      expect(testCase.hotelContract?.providerFallback?.preservedParams).toEqual({
+        hotel: "YOTEL New York Times Square",
+        city: "New York",
+        checkin: "2026-06-10",
+        checkout: "2026-06-12",
+        adults: 1,
+        rooms: 1,
+        budget: "300",
+      });
+    }
+  });
+
   it("classifies L1, L2, patch, and evidence verdicts", () => {
     const directPass = evaluateLayeredBenchmarkCase(LAYERED_BENCHMARK_CASES[0]);
     expect(directPass.finalVerdict).toBe("l1_direct_pass");

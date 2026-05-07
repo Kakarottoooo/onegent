@@ -68,7 +68,7 @@ export interface HotelLayeredRecoverySummary {
 type UnknownRecord = Record<string, unknown>;
 
 const NO_AVAILABILITY_RX =
-  /\b(sold[-\s]?out|fully booked|no rooms? available|no availability|unavailable for (your|the selected|selected|requested|these) dates?|target hotel unavailable)\b/i;
+  /\b(sold[-\s]?out|fully booked|no rooms? available|no availability|not available|no properties match|no stays? available|nothing available|unavailable for (your|the selected|selected|requested|these) dates?|target hotel unavailable)\b/i;
 
 const SCOPED_INVENTORY_RX =
   /\b(for (your|the selected|selected|requested|these|approved) dates?|for (the )?requested stay|for this stay|selected dates?|requested dates?|exact stay|target hotel unavailable)\b/i;

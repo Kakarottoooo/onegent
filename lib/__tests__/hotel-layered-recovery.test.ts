@@ -52,6 +52,29 @@ describe("hotel layered recovery", () => {
     ]);
   });
 
+  it("treats generic not-available copy as weak no-availability and fallback eligible", () => {
+    const noAvailability = evaluateHotelNoAvailabilityEvidence({
+      ...EXACT_CONTEXT,
+      currentUrl: "https://www.booking.com/searchresults.html?ss=New+York",
+      workerLogExcerpt: "This property is not available. Nothing available matched the search page.",
+    });
+
+    expect(noAvailability.state).toBe("weak_no_availability");
+    expect(noAvailability.missingEvidence).toContain("exact hotel");
+    expect(
+      classifyHotelProviderFallbackEligibility(
+        {
+          ...EXACT_CONTEXT,
+          state: "network_provider_failure",
+        },
+        noAvailability,
+      ),
+    ).toMatchObject({
+      eligible: true,
+      nextProviders: ["hotels-com", "expedia-hotel"],
+    });
+  });
+
   it("requires exact hotel/date/stay evidence before true no-availability", () => {
     const missingStay = evaluateHotelNoAvailabilityEvidence({
       ...EXACT_CONTEXT,
