@@ -32,6 +32,14 @@ export interface CaptureSource {
   raw_text?: string;
   url?: string;
   host?: string;
+  /**
+   * URLs beyond the first that were extracted from the same message. Optional —
+   * present only when more than one URL was found. The first URL stays in
+   * `url`/`host` so existing consumers see no shape change; downstream
+   * readiness logic checks `additional_urls?.length` to force a needs_review
+   * gate so the homepage never silently runs the wrong link.
+   */
+  additional_urls?: string[];
   captured_at: string;
 }
 
@@ -222,6 +230,7 @@ export function buildCaptureTravelObjectFromNlu(
       missingFields,
       confidence: state?.confidence,
       sourceType: source.type,
+      hasAdditionalUrls: (source.additional_urls?.length ?? 0) > 0,
     }),
     provenance: {
       parser: state ? "nlu-v2" : source.url ? "url-parser" : "fallback",
@@ -235,14 +244,17 @@ export function buildCaptureTravelObjectFromNlu(
 
 export function detectCaptureSource(message: string, capturedAt: string): CaptureSource {
   const raw = message.trim();
-  const url = extractCaptureUrl(raw);
-  if (url) {
+  const urls = extractAllCaptureUrls(raw);
+  if (urls.length > 0) {
+    const url = urls[0];
     const parsed = safeParseUrl(url);
+    const additional = urls.slice(1);
     return {
       type: "url",
       raw_text: raw,
       url,
       ...(parsed?.hostname ? { host: parsed.hostname.toLowerCase() } : {}),
+      ...(additional.length > 0 ? { additional_urls: additional } : {}),
       captured_at: capturedAt,
     };
   }
@@ -379,7 +391,20 @@ function buildTaskReadiness(input: {
   missingFields: string[];
   confidence: number | undefined;
   sourceType: CaptureSourceType;
+  hasAdditionalUrls?: boolean;
 }): CaptureTaskReadiness {
+  // Multi-URL gate. The homepage must never silently pick the first URL
+  // and run direct booking when the user pasted more than one. We keep
+  // `source.url` as the first URL (so existing renderers don't change),
+  // but force `needs_review` so downstream paths route to the
+  // multi-URL review UI instead of the direct-booking shortcut.
+  if (input.hasAdditionalUrls) {
+    return {
+      ready: false,
+      reason: "needs_review",
+      next_missing_fields: input.missingFields,
+    };
+  }
   if (!input.scenario) {
     // url + screenshot: source is supported but we need user context to
     // turn it into a Travel Object. Keep them on the "needs_review"
@@ -459,28 +484,34 @@ function safeParseUrl(value: string): URL | null {
 }
 
 /**
- * Extract the first URL from a raw message and strip trailing sentence
- * punctuation so the captured `source.url` does not leak chat tokens
- * into downstream constraints / direct-provider task URLs.
+ * Extract every URL from a raw message in the order they appear, with the
+ * same trailing-punctuation cleanup the single-URL path applies. Multi-URL
+ * detection is the v2 entry point used by `detectCaptureSource` to surface
+ * `additional_urls` so the homepage never silently picks the first URL and
+ * runs direct booking against a multi-link message ("compare A and B").
  *
  * URL_RE intentionally allows commas and periods inside the URL (legitimate
- * in paths like `/@40.7,-74.0` or `/foo.html`). The trailing-punctuation
- * trim only acts on the final character(s) of the matched run, which is
+ * in paths like `/@40.7,-74.0` or `/foo.html`); the trailing-punctuation
+ * trim only acts on the final character(s) of each matched run, which is
  * where pasted-chat shapes ("...event/Z1r9, 帮我预定" / "...event/abc.")
- * leak punctuation into the URL. Closing parens and quotes are already
- * excluded by URL_RE's character class so they do not need a second trim.
+ * glue chat tokens onto the URL.
  */
-function extractCaptureUrl(raw: string): string | null {
-  const match = raw.match(URL_RE);
-  if (!match) return null;
-  let url = match[0];
-  // Trim trailing sentence-delimiter punctuation. Iterate so a sequence
-  // like "...,!" gets fully stripped instead of leaving the inner ',' .
-  url = url.replace(/[,.;:!?]+$/, "");
-  // Also trim a stray unmatched closing bracket that the URL_RE class
-  // does not exclude (']' / '}' / '>' aren't in the negation).
-  url = url.replace(/[\]}>]+$/, "");
-  return url.length > 0 ? url : null;
+export function extractAllCaptureUrls(raw: string): string[] {
+  if (!raw) return [];
+  // /g for matchAll. Anchored 'i' kept consistent with URL_RE itself.
+  const re = new RegExp(URL_RE.source, "gi");
+  const out: string[] = [];
+  for (const m of raw.matchAll(re)) {
+    let url = m[0];
+    // Trim trailing sentence-delimiter punctuation. Iterate so a sequence
+    // like "...,!" gets fully stripped instead of leaving the inner ',' .
+    url = url.replace(/[,.;:!?]+$/, "");
+    // Also trim a stray unmatched closing bracket that the URL_RE class
+    // does not exclude (']' / '}' / '>' aren't in the negation).
+    url = url.replace(/[\]}>]+$/, "");
+    if (url.length > 0) out.push(url);
+  }
+  return out;
 }
 
 function normalizeConfidence(value: number | undefined): number {
