@@ -4,6 +4,8 @@ import { describe, expect, it } from "vitest";
 
 import {
   analyzeHotelRetryArtifactBundle,
+  buildHotelFallbackRecommendation,
+  evaluateHotelNoAvailabilityEvidence,
   formatHotelRetryAnalysisMarkdown,
   formatHotelRetryArtifactBundleMarkdown,
   type HotelRetryArtifactBundle,
@@ -155,6 +157,91 @@ describe("analyzeHotelRetryArtifactBundle", () => {
     expect(analysis.nextAction).toContain("Do not patch hotel provider selectors");
   });
 
+  it("classifies weak generic Booking.com not-available copy as provider degraded and fallback eligible", () => {
+    const bundle: HotelRetryArtifactBundle = {
+      job: yotelJob("booking-com"),
+      workerLogExcerpt:
+        "[booking-com] Search results page displayed generic copy: This property is not available. No properties match your search.",
+      workerLogPath: "codex-worker.log",
+      screenshotPaths: ["worker/.debug-screenshots/booking-com/01-generic-not-available.jpg"],
+      liveSnapshotPaths: [".debug-screenshots/live/weak-not-available/snapshot.json"],
+      notes: ["Synthetic no-live fixture. No payment, login, OTP, CAPTCHA, or final confirmation."],
+    };
+
+    const analysis = analyzeHotelRetryArtifactBundle(bundle);
+
+    expect(analysis.state).toBe("network_provider_failure");
+    expect(analysis.label).toBe("Network/provider degraded");
+    expect(analysis.noAvailabilityEvidence.state).toBe("weak_no_availability");
+    expect(analysis.noAvailabilityEvidence.missingEvidence).toContain("exact hotel");
+    expect(analysis.noAvailabilityEvidence.missingEvidence).toContain("exact dates/adults/rooms");
+    expect(analysis.fallbackRecommendation).toMatchObject({
+      eligible: true,
+      nextProviders: ["hotels-com", "expedia-hotel"],
+      preservedParams: {
+        hotel: "YOTEL New York Times Square",
+        city: "New York",
+        checkIn: "2026-06-10",
+        checkOut: "2026-06-12",
+        adults: 1,
+        rooms: 1,
+        budget: "300",
+      },
+    });
+    expect(analysis.nextAction).toContain("provider-degraded/fallback-eligible");
+  });
+
+  it("does not recommend fallback when exact hotel/date/stay no-availability is verified", () => {
+    const bundle: HotelRetryArtifactBundle = {
+      job: yotelJob("booking-com"),
+      workerLogExcerpt:
+        "[booking-com] Hotel detail visible for YOTEL New York Times Square\n" +
+        "[booking-com] approved stay evidence: checkin=2026-06-10 checkout=2026-06-12 adults=1 rooms=1 budget=300\n" +
+        "[booking-com] no rooms available for selected dates",
+      workerLogPath: "codex-worker.log",
+      screenshotPaths: ["worker/.debug-screenshots/booking-com/01-exact-no-availability.jpg"],
+      liveSnapshotPaths: [".debug-screenshots/live/exact-no-availability/snapshot.json"],
+      notes: ["Synthetic no-live fixture. Exact stay unavailable; no payment/login/final action."],
+    };
+
+    const noAvailability = evaluateHotelNoAvailabilityEvidence(bundle);
+    const recommendation = buildHotelFallbackRecommendation(
+      bundle,
+      "provider_no_availability",
+      noAvailability,
+    );
+    const analysis = analyzeHotelRetryArtifactBundle(bundle);
+
+    expect(noAvailability.state).toBe("verified_true_no_availability");
+    expect(recommendation.eligible).toBe(false);
+    expect(analysis.state).toBe("provider_no_availability");
+    expect(analysis.fallbackRecommendation.eligible).toBe(false);
+  });
+
+  it("preserves exact stay params when Hotels.com is fallback eligible", () => {
+    const analysis = analyzeHotelRetryArtifactBundle({
+      job: yotelJob("hotels-com"),
+      workerLogExcerpt:
+        "[hotels-com] Hotel search result page says not available, but no exact hotel/date/stay inventory proof was captured.",
+      workerLogPath: "codex-worker.log",
+      screenshotPaths: ["worker/.debug-screenshots/hotels-com/01-generic-not-available.jpg"],
+      liveSnapshotPaths: [".debug-screenshots/live/hotels-weak-not-available/snapshot.json"],
+    });
+
+    expect(analysis.state).toBe("network_provider_failure");
+    expect(analysis.fallbackRecommendation.eligible).toBe(true);
+    expect(analysis.fallbackRecommendation.nextProviders).toEqual(["expedia-hotel"]);
+    expect(analysis.fallbackRecommendation.preservedParams).toEqual({
+      hotel: "YOTEL New York Times Square",
+      city: "New York",
+      checkIn: "2026-06-10",
+      checkOut: "2026-06-12",
+      adults: 1,
+      rooms: 1,
+      budget: "300",
+    });
+  });
+
   it("classifies explicit Booking.com runtime boundary log lines", () => {
     const cases: Array<{ line: string; state: HotelRetryState }> = [
       {
@@ -220,6 +307,7 @@ describe("Hotel retry markdown helpers", () => {
     expect(markdown).toContain("## Hotel Retry Artifact Analysis");
     expect(markdown).toContain("room_selection_drift");
     expect(markdown).toContain("worker/.debug-screenshots/booking-com-fixture-room-drift");
+    expect(markdown).toContain("### No-Availability / Fallback");
     expect(markdown).toContain("### Next Action");
   });
 
@@ -236,4 +324,23 @@ describe("Hotel retry markdown helpers", () => {
 async function readFixture(file: string): Promise<HotelRetryArtifactBundle> {
   const raw = await fs.readFile(path.join(FIXTURE_DIR, file), "utf8");
   return JSON.parse(raw) as HotelRetryArtifactBundle;
+}
+
+function yotelJob(provider: "booking-com" | "hotels-com"): NonNullable<HotelRetryArtifactBundle["job"]> {
+  return {
+    id: `fixture-hotel-${provider}-yotel`,
+    taskId: `fixture-task-${provider}-yotel`,
+    provider,
+    scenario: "hotel",
+    status: "failed",
+    params: {
+      hotelName: "YOTEL New York Times Square",
+      city: "New York",
+      checkIn: "2026-06-10",
+      checkOut: "2026-06-12",
+      adults: 1,
+      rooms: 1,
+      budgetPerNight: 300,
+    },
+  };
 }

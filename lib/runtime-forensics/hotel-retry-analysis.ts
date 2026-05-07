@@ -108,8 +108,42 @@ export interface HotelRetryAnalysis {
     screenshots: string[];
     liveSnapshots: string[];
   };
+  noAvailabilityEvidence: HotelNoAvailabilityEvidence;
+  fallbackRecommendation: HotelFallbackRecommendation;
   summary: string;
   nextAction: string;
+}
+
+export type HotelNoAvailabilityEvidenceState =
+  | "verified_true_no_availability"
+  | "weak_no_availability"
+  | "not_no_availability";
+
+export interface HotelNoAvailabilityEvidence {
+  state: HotelNoAvailabilityEvidenceState;
+  hasNoAvailabilitySignal: boolean;
+  hasExactHotelEvidence: boolean;
+  hasExactStayEvidence: boolean;
+  hasScopedInventoryEvidence: boolean;
+  missingEvidence: string[];
+  reason: string;
+}
+
+export interface HotelFallbackPreservedParams {
+  hotel: string | null;
+  city: string | null;
+  checkIn: string | null;
+  checkOut: string | null;
+  adults: number | null;
+  rooms: number | null;
+  budget: string | null;
+}
+
+export interface HotelFallbackRecommendation {
+  eligible: boolean;
+  reason: string;
+  nextProviders: string[];
+  preservedParams: HotelFallbackPreservedParams;
 }
 
 interface SignalPattern {
@@ -298,7 +332,7 @@ const SIGNAL_PATTERNS: SignalPattern[] = [
   {
     kind: "provider_no_availability",
     label: "hotel sold out or fully booked",
-    rx: /\b(sold[-\s]?out|fully booked|no rooms? available|no availability)\b/i,
+    rx: /\b(sold[-\s]?out|fully booked|no rooms? available|no availability|not available|no properties match|no stays? available|nothing available)\b/i,
   },
   {
     kind: "provider_no_availability",
@@ -373,6 +407,7 @@ export function analyzeHotelRetryArtifactBundle(
   const entries = buildTextEntries(bundle);
   const signals = collectSignals(entries);
   const has = (kind: SignalKind) => signals.some((s) => s.kind === kind);
+  const noAvailabilityEvidence = evaluateHotelNoAvailabilityEvidence(bundle);
 
   const hasSafetyViolation = has("safety_boundary_violation");
   const hasPaymentBoundary = has("payment_boundary");
@@ -401,8 +436,10 @@ export function analyzeHotelRetryArtifactBundle(
     state = "model_env_transient";
   } else if (hasNetwork) {
     state = "network_provider_failure";
-  } else if (hasNoAvailability) {
+  } else if (hasNoAvailability && noAvailabilityEvidence.state === "verified_true_no_availability") {
     state = "provider_no_availability";
+  } else if (hasNoAvailability && noAvailabilityEvidence.state === "weak_no_availability") {
+    state = "network_provider_failure";
   } else if (hasRoomSelectionReached) {
     state = "room_selection_manual_review_reached";
   } else if (hasProviderSelectorDrift) {
@@ -435,6 +472,11 @@ export function analyzeHotelRetryArtifactBundle(
     hasProviderSelectorDrift,
     hasRoomSelectionDrift,
   });
+  const fallbackRecommendation = buildHotelFallbackRecommendation(
+    bundle,
+    state,
+    noAvailabilityEvidence,
+  );
 
   return {
     state,
@@ -447,8 +489,10 @@ export function analyzeHotelRetryArtifactBundle(
     status,
     signals,
     artifactPaths,
+    noAvailabilityEvidence,
+    fallbackRecommendation,
     summary: buildSummary(state, confidence, signals),
-    nextAction: nextActionForState(state),
+    nextAction: nextActionForState(state, fallbackRecommendation),
   };
 }
 
@@ -504,6 +548,24 @@ export function formatHotelRetryAnalysisMarkdown(
     lines.push("_No artifact paths were included._");
   }
   lines.push("");
+  lines.push("### No-Availability / Fallback");
+  lines.push("");
+  lines.push(
+    `- **No-availability evidence**: \`${analysis.noAvailabilityEvidence.state}\` - ${escapeMarkdownLine(
+      analysis.noAvailabilityEvidence.reason,
+    )}`,
+  );
+  lines.push(
+    `- **Fallback eligible**: \`${analysis.fallbackRecommendation.eligible}\`${
+      analysis.fallbackRecommendation.nextProviders.length > 0
+        ? ` via \`${analysis.fallbackRecommendation.nextProviders.join(" -> ")}\``
+        : ""
+    }`,
+  );
+  lines.push(
+    `- **Preserved params**: hotel=\`${analysis.fallbackRecommendation.preservedParams.hotel ?? "(unknown)"}\`, city=\`${analysis.fallbackRecommendation.preservedParams.city ?? "(unknown)"}\`, check-in=\`${analysis.fallbackRecommendation.preservedParams.checkIn ?? "(unknown)"}\`, check-out=\`${analysis.fallbackRecommendation.preservedParams.checkOut ?? "(unknown)"}\`, adults=\`${analysis.fallbackRecommendation.preservedParams.adults ?? "(unknown)"}\`, rooms=\`${analysis.fallbackRecommendation.preservedParams.rooms ?? "(unknown)"}\`, budget=\`${analysis.fallbackRecommendation.preservedParams.budget ?? "(unknown)"}\``,
+  );
+  lines.push("");
   lines.push("### Verdict");
   lines.push("");
   lines.push(analysis.summary);
@@ -519,6 +581,140 @@ export function formatHotelRetryArtifactBundleMarkdown(
   bundle: HotelRetryArtifactBundle,
 ): string {
   return formatHotelRetryAnalysisMarkdown(analyzeHotelRetryArtifactBundle(bundle));
+}
+
+export function evaluateHotelNoAvailabilityEvidence(
+  bundle: HotelRetryArtifactBundle,
+): HotelNoAvailabilityEvidence {
+  const target = extractHotelFallbackPreservedParams(bundle);
+  const corpus = buildNoAvailabilityEvidenceCorpus(bundle);
+  const lowerCorpus = corpus.toLowerCase();
+  const urlStay = extractStayEvidenceFromUrls(corpus);
+
+  const hasNoAvailabilitySignal =
+    /\b(provider_no_availability|sold[-\s]?out|fully booked|no rooms? available|no availability|not available|no properties match|no stays? available|nothing available|target hotel unavailable)\b/i.test(
+      corpus,
+    );
+  const hasExactHotelEvidence =
+    Boolean(target.hotel) && containsNormalizedPhrase(corpus, target.hotel ?? "");
+  const hasCheckIn =
+    Boolean(target.checkIn) &&
+    (lowerCorpus.includes((target.checkIn ?? "").toLowerCase()) || urlStay.checkIn === target.checkIn);
+  const hasCheckOut =
+    Boolean(target.checkOut) &&
+    (lowerCorpus.includes((target.checkOut ?? "").toLowerCase()) || urlStay.checkOut === target.checkOut);
+  const hasAdults =
+    target.adults != null &&
+    (countEvidenceMatches(lowerCorpus, target.adults, "adult") || urlStay.adults === target.adults);
+  const hasRooms =
+    target.rooms != null &&
+    (countEvidenceMatches(lowerCorpus, target.rooms, "room") || urlStay.rooms === target.rooms);
+  const hasExactStayEvidence = hasCheckIn && hasCheckOut && hasAdults && hasRooms;
+  const hasScopedInventoryEvidence =
+    /\b(for (your|the selected|selected|requested|these|approved) dates?|for (the )?requested stay|for this stay|selected dates?|requested dates?|exact stay|target hotel unavailable)\b/i.test(
+      corpus,
+    ) ||
+    (Boolean(target.checkIn) && Boolean(target.checkOut) && hasCheckIn && hasCheckOut);
+
+  if (!hasNoAvailabilitySignal) {
+    return {
+      state: "not_no_availability",
+      hasNoAvailabilitySignal,
+      hasExactHotelEvidence,
+      hasExactStayEvidence,
+      hasScopedInventoryEvidence,
+      missingEvidence: [],
+      reason: "No provider no-availability signal was present.",
+    };
+  }
+
+  const missingEvidence: string[] = [];
+  if (!hasExactHotelEvidence) missingEvidence.push("exact hotel");
+  if (!hasExactStayEvidence) missingEvidence.push("exact dates/adults/rooms");
+  if (!hasScopedInventoryEvidence) missingEvidence.push("scoped room inventory");
+
+  if (missingEvidence.length === 0) {
+    return {
+      state: "verified_true_no_availability",
+      hasNoAvailabilitySignal,
+      hasExactHotelEvidence,
+      hasExactStayEvidence,
+      hasScopedInventoryEvidence,
+      missingEvidence,
+      reason:
+        "No-availability evidence is scoped to the exact hotel, dates, adult count, and room count.",
+    };
+  }
+
+  return {
+    state: "weak_no_availability",
+    hasNoAvailabilitySignal,
+    hasExactHotelEvidence,
+    hasExactStayEvidence,
+    hasScopedInventoryEvidence,
+    missingEvidence,
+    reason: `No-availability evidence is weak; missing ${missingEvidence.join(", ")} evidence.`,
+  };
+}
+
+export function buildHotelFallbackRecommendation(
+  bundle: HotelRetryArtifactBundle,
+  state: HotelRetryState,
+  noAvailabilityEvidence = evaluateHotelNoAvailabilityEvidence(bundle),
+): HotelFallbackRecommendation {
+  const provider = normalizeHotelProvider(
+    firstString(bundle.job?.provider, readString(bundle.dbRow, "provider")),
+  );
+  const preservedParams = extractHotelFallbackPreservedParams(bundle);
+  const nextProviders = nextHotelProviders(provider);
+
+  if (nextProviders.length === 0) {
+    return {
+      eligible: false,
+      reason: "No configured hotel fallback provider remains after the current provider.",
+      nextProviders,
+      preservedParams,
+    };
+  }
+
+  if (noAvailabilityEvidence.state === "verified_true_no_availability") {
+    return {
+      eligible: false,
+      reason: "Exact hotel/date/stay no-availability is verified; do not switch providers automatically.",
+      nextProviders: [],
+      preservedParams,
+    };
+  }
+
+  if (noAvailabilityEvidence.state === "weak_no_availability") {
+    return {
+      eligible: true,
+      reason:
+        "Weak no-availability evidence is provider-degraded and fallback-eligible; preserve exact stay params before trying another provider.",
+      nextProviders,
+      preservedParams,
+    };
+  }
+
+  if (
+    state === "network_provider_failure" ||
+    state === "provider_selector_drift" ||
+    state === "room_selection_drift"
+  ) {
+    return {
+      eligible: true,
+      reason: `${state} is fallback-eligible when no human-only boundary or verified no-availability is present.`,
+      nextProviders,
+      preservedParams,
+    };
+  }
+
+  return {
+    eligible: false,
+    reason: `${state} is not fallback-eligible; preserve evidence and do not switch providers automatically.`,
+    nextProviders: [],
+    preservedParams,
+  };
 }
 
 function buildTextEntries(bundle: HotelRetryArtifactBundle): TextEntry[] {
@@ -638,7 +834,16 @@ function buildSummary(
   return `${HOTEL_RETRY_STATE_LABEL[state]} with ${confidence} confidence (${signalText}).`;
 }
 
-function nextActionForState(state: HotelRetryState): string {
+function nextActionForState(
+  state: HotelRetryState,
+  fallbackRecommendation: HotelFallbackRecommendation,
+): string {
+  if (fallbackRecommendation.eligible) {
+    return `Treat as provider-degraded/fallback-eligible. Preserve exact hotel, city, check-in, check-out, adults, rooms, and budget before trying ${fallbackRecommendation.nextProviders.join(
+      " -> ",
+    )}.`;
+  }
+
   switch (state) {
     case "safety_boundary_violation":
       return "Stop. Do not retry. Preserve DB/log/screenshot evidence and run a separate root-cause review of the safety boundary.";
@@ -655,7 +860,7 @@ function nextActionForState(state: HotelRetryState): string {
     case "model_env_transient":
       return "Treat as model/runtime environment instability. Do not patch hotel provider selectors from OpenAI Responses API or Computer Use transient evidence alone.";
     case "network_provider_failure":
-      return "Treat as provider/network instability. Do not patch selectors from this state unless separate screenshots prove room-selection drift.";
+      return "Treat as provider/network instability. Do not patch selectors from this state unless separate screenshots prove room-selection drift or weak no-availability evidence justifies provider fallback.";
     case "provider_no_availability":
       return "Treat as a provider inventory outcome. Do not patch selectors unless screenshots show matching available inventory that the worker missed.";
     case "provider_selector_drift":
@@ -748,11 +953,246 @@ function excerptAround(text: string, index: number, length: number): string {
 }
 
 function isNegatedProgressExcerpt(excerpt: string): boolean {
-  return /\b(no|not|never|without)\s+(checkout|payment|guest details|contact details|traveler details|reservation details)\s+(page\s+)?(visible|reached|loaded)\b/i.test(
-    excerpt,
+  return (
+    /\b(no|not|never|without)\s+(checkout|payment|guest details|contact details|traveler details|reservation details)\s+(page\s+)?(visible|reached|loaded)\b/i.test(
+      excerpt,
+    ) ||
+    /\b(stop(?:ped)?|stopping)\s+before\s+(payment|cvv|cvc|final|confirmation|purchase|login|captcha|otp)\b/i.test(
+      excerpt,
+    )
   );
 }
 
 function escapeMarkdownLine(text: string): string {
   return text.replace(/`/g, "\\`");
+}
+
+function extractHotelFallbackPreservedParams(
+  bundle: HotelRetryArtifactBundle,
+): HotelFallbackPreservedParams {
+  const params = collectHotelParamRecords(bundle);
+  const readParamString = (...keys: string[]) => firstString(...params.flatMap((p) => keys.map((k) => readString(p, k))));
+  const readParamScalar = (...keys: string[]) =>
+    firstString(...params.flatMap((p) => keys.map((k) => scalarString(readUnknown(p, k)))));
+  const readParamNumber = (...keys: string[]) => firstNumber(...params.flatMap((p) => keys.map((k) => readUnknown(p, k))));
+
+  return {
+    hotel: readParamString("hotelName", "hotel_name", "targetHotelName", "target_hotel_name"),
+    city: readParamString("city", "destination", "location"),
+    checkIn: readParamString("checkIn", "checkin", "check_in"),
+    checkOut: readParamString("checkOut", "checkout", "check_out"),
+    adults: readParamNumber("adults", "adultCount", "adult_count", "guestCount", "guest_count"),
+    rooms: readParamNumber("rooms", "roomCount", "room_count", "no_rooms"),
+    budget: readParamScalar(
+      "budget",
+      "budgetPerNight",
+      "budget_per_night",
+      "budgetTotal",
+      "budget_total",
+      "maxPrice",
+      "max_price",
+    ),
+  };
+}
+
+function collectHotelParamRecords(bundle: HotelRetryArtifactBundle): Record<string, unknown>[] {
+  const records: Record<string, unknown>[] = [];
+  const job = bundle.job;
+  if (isRecord(job?.params)) records.push(job.params);
+
+  for (const step of Array.isArray(job?.steps) ? job.steps : []) {
+    if (!isRecord(step)) continue;
+    const body = readRecord(step, "body");
+    const params = readRecord(body, "params");
+    if (Object.keys(params).length > 0) records.push(params);
+  }
+
+  const dbRow = bundle.dbRow;
+  if (isRecord(dbRow)) {
+    const dbParams = readRecord(dbRow, "params");
+    if (Object.keys(dbParams).length > 0) records.push(dbParams);
+    const steps = readArray(dbRow, "steps");
+    for (const step of steps) {
+      const body = readRecord(step, "body");
+      const params = readRecord(body, "params");
+      if (Object.keys(params).length > 0) records.push(params);
+    }
+  }
+
+  return records;
+}
+
+function buildNoAvailabilityEvidenceCorpus(bundle: HotelRetryArtifactBundle): string {
+  const job = bundle.job ?? null;
+  const parts: string[] = [];
+  addEvidencePart(parts, bundle.workerLogExcerpt);
+  addEvidencePart(parts, job?.rawWorkerLogExcerpt);
+  addEvidencePart(parts, job?.errorMessage);
+  addEvidencePart(parts, job?.terminalReason);
+  addEvidencePart(parts, job?.terminalCode);
+
+  for (const step of Array.isArray(job?.steps) ? job.steps : []) {
+    if (!isRecord(step)) continue;
+    addEvidencePart(parts, readString(step, "error"));
+    addEvidencePart(parts, readString(step, "terminalReason"));
+    addEvidencePart(parts, readString(step, "terminalCode"));
+    addEvidencePart(parts, readString(step, "handoffUrl"));
+    addEvidencePart(parts, readString(step, "handoff_url"));
+  }
+
+  if (isRecord(bundle.dbRow)) {
+    addEvidencePart(parts, readString(bundle.dbRow, "error"));
+    addEvidencePart(parts, readString(bundle.dbRow, "terminalReason"));
+    addEvidencePart(parts, readString(bundle.dbRow, "terminalCode"));
+    addEvidencePart(parts, readString(bundle.dbRow, "handoffUrl"));
+    addEvidencePart(parts, readString(bundle.dbRow, "handoff_url"));
+    for (const step of readArray(bundle.dbRow, "steps")) {
+      addEvidencePart(parts, readString(step, "error"));
+      addEvidencePart(parts, readString(step, "terminalReason"));
+      addEvidencePart(parts, readString(step, "terminalCode"));
+      addEvidencePart(parts, readString(step, "handoffUrl"));
+      addEvidencePart(parts, readString(step, "handoff_url"));
+    }
+  }
+
+  for (const entry of Array.isArray(job?.decisionLog) ? job.decisionLog : []) {
+    if (!isRecord(entry)) continue;
+    addEvidencePart(parts, readString(entry, "message"));
+    addEvidencePart(parts, readString(entry, "event"));
+  }
+
+  addEvidencePart(parts, bundle.workerLogPath);
+  for (const path of cleanStringList(bundle.screenshotPaths)) addEvidencePart(parts, path);
+  for (const path of cleanStringList(bundle.liveSnapshotPaths)) addEvidencePart(parts, path);
+  for (const note of cleanStringList(bundle.notes)) addEvidencePart(parts, note);
+
+  return parts.join("\n");
+}
+
+function addEvidencePart(parts: string[], value: string | null | undefined): void {
+  if (typeof value === "string" && value.trim()) parts.push(value.trim());
+}
+
+function containsNormalizedPhrase(text: string, phrase: string): boolean {
+  if (!phrase.trim()) return false;
+  return normalizeText(text).includes(normalizeText(phrase));
+}
+
+function normalizeText(value: string): string {
+  return value.toLowerCase().replace(/[^a-z0-9]+/g, " ").replace(/\s+/g, " ").trim();
+}
+
+function countEvidenceMatches(text: string, count: number, unit: "adult" | "room"): boolean {
+  const plural = unit === "adult" ? "adults" : "rooms";
+  return (
+    text.includes(`${unit}s=${count}`) ||
+    text.includes(`${plural}=${count}`) ||
+    text.includes(`group_${plural}=${count}`) ||
+    text.includes(`no_${plural}=${count}`) ||
+    new RegExp(`\\b${count}\\s+${unit}s?\\b`, "i").test(text)
+  );
+}
+
+function extractStayEvidenceFromUrls(text: string): {
+  checkIn: string | null;
+  checkOut: string | null;
+  adults: number | null;
+  rooms: number | null;
+} {
+  const urls = text.match(/https?:\/\/[^\s"'<>]+/g) ?? [];
+  for (const url of urls) {
+    const stay = extractStayEvidenceFromUrl(url);
+    if (stay.checkIn || stay.checkOut || stay.adults || stay.rooms) return stay;
+  }
+  return { checkIn: null, checkOut: null, adults: null, rooms: null };
+}
+
+function extractStayEvidenceFromUrl(url: string): {
+  checkIn: string | null;
+  checkOut: string | null;
+  adults: number | null;
+  rooms: number | null;
+} {
+  const empty = { checkIn: null, checkOut: null, adults: null, rooms: null };
+  try {
+    const parsed = new URL(url);
+    const params = parsed.searchParams;
+    return {
+      checkIn: params.get("checkin") ?? dateFromSplitParams(params, "checkin"),
+      checkOut: params.get("checkout") ?? dateFromSplitParams(params, "checkout"),
+      adults: positiveInteger(params.get("group_adults")),
+      rooms: positiveInteger(params.get("no_rooms")),
+    };
+  } catch {
+    return empty;
+  }
+}
+
+function dateFromSplitParams(params: URLSearchParams, prefix: "checkin" | "checkout"): string | null {
+  const year = params.get(`${prefix}_year`);
+  const month = params.get(`${prefix}_month`);
+  const day = params.get(`${prefix}_monthday`);
+  if (!year || !month || !day) return null;
+  const monthNumber = Number.parseInt(month, 10);
+  const dayNumber = Number.parseInt(day, 10);
+  if (!/^\d{4}$/.test(year)) return null;
+  if (!Number.isFinite(monthNumber) || monthNumber < 1 || monthNumber > 12) return null;
+  if (!Number.isFinite(dayNumber) || dayNumber < 1 || dayNumber > 31) return null;
+  return `${year}-${String(monthNumber).padStart(2, "0")}-${String(dayNumber).padStart(2, "0")}`;
+}
+
+function positiveInteger(value: string | null): number | null {
+  if (!value) return null;
+  const parsed = Number.parseInt(value, 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+}
+
+function normalizeHotelProvider(provider: string | null | undefined): string {
+  const normalized = (provider ?? "").toLowerCase().trim();
+  if (normalized === "expedia") return "expedia-hotel";
+  return normalized;
+}
+
+function nextHotelProviders(provider: string): string[] {
+  switch (provider) {
+    case "booking-com":
+      return ["hotels-com", "expedia-hotel"];
+    case "hotels-com":
+      return ["expedia-hotel"];
+    default:
+      return [];
+  }
+}
+
+function readRecord(value: unknown, key: string): Record<string, unknown> {
+  if (!isRecord(value)) return {};
+  return isRecord(value[key]) ? value[key] : {};
+}
+
+function readArray(value: unknown, key: string): unknown[] {
+  if (!isRecord(value)) return [];
+  const candidate = value[key];
+  return Array.isArray(candidate) ? candidate : [];
+}
+
+function readUnknown(value: unknown, key: string): unknown {
+  if (!isRecord(value)) return undefined;
+  return value[key];
+}
+
+function scalarString(value: unknown): string | null {
+  if (typeof value === "string" && value.trim()) return value.trim();
+  if (typeof value === "number" && Number.isFinite(value)) return String(value);
+  return null;
+}
+
+function firstNumber(...values: unknown[]): number | null {
+  for (const value of values) {
+    if (typeof value === "number" && Number.isFinite(value)) return value;
+    if (typeof value === "string") {
+      const parsed = Number.parseInt(value, 10);
+      if (Number.isFinite(parsed)) return parsed;
+    }
+  }
+  return null;
 }

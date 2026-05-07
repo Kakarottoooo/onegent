@@ -1,6 +1,6 @@
 # Hotel Controlled Retry Runbook
 
-Last updated: 2026-05-04
+Last updated: 2026-05-07
 
 Scope: one Booking.com hotel controlled retry after explicit founder approval.
 This runbook prepares the evidence path. It does not authorize a live provider
@@ -127,6 +127,29 @@ Expected terminal labels from those lines are:
 - `network_provider_failure`
 - `provider_no_availability`
 
+## No-Availability and Fallback Evidence
+
+Do not classify a generic Booking.com, Hotels.com, or Expedia hotel message as
+true `provider_no_availability` unless the artifact proves all of:
+
+- Exact hotel name.
+- Exact city.
+- Exact check-in and check-out dates.
+- Exact adult count and room count.
+- Exact budget constraint when the task included one.
+- Scoped provider inventory copy for that same hotel/stay.
+
+Weak copy such as "not available", "no properties match", or "nothing
+available" at a search/listing level is provider-degraded evidence, not a true
+inventory result. Treat it as fallback-eligible only when no payment, login,
+OTP, CAPTCHA, account-sensitive prompt, or final confirmation boundary is
+present.
+
+Fallback recommendation must preserve the exact same hotel, city, check-in,
+check-out, adults, rooms, and budget. Booking.com may fall back to Hotels.com,
+then Expedia hotel. Hotels.com may fall back to Expedia hotel. Expedia hotel
+has no further configured fallback in this lane.
+
 ## Preflight Environment
 
 Before a retry:
@@ -194,8 +217,11 @@ for founder approval for the changed case.
     instability, classify `network_provider_failure`. Do not patch selectors
     from network evidence alone.
 11. If the target hotel is sold out, fully booked, or has no rooms available,
-    classify `provider_no_availability`. Do not patch selectors unless
-    screenshots show matching available inventory that the worker missed.
+    classify `provider_no_availability` only when the artifact proves the
+    exact hotel, city, dates, adult count, room count, budget, and scoped
+    inventory evidence. Otherwise classify provider-degraded/fallback-eligible
+    and preserve the exact stay params before considering another hotel
+    provider.
 
 ## DB Evidence Query
 
