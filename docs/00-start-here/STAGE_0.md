@@ -90,6 +90,10 @@ Stage 0 work is in scope when it directly improves one of these systems:
      fixtures. They prove source metadata, Travel Object projection,
      task-readiness, owner, and artifact contracts. They do not prove live
      OpenAI extraction quality.
+   - Direct activity URL coverage follows the current Stage 0 contract: exact
+     Ticketmaster `/event/<id>` links can become direct provider-entry tasks,
+     while generic artist/search links and impersonating hosts remain review
+     inputs.
    - The current Stage 0 capture corpus target is 500+ fixtures across
      restaurant, hotel, flight, activity, trip/package, ambiguous/save-only,
      refine/follow-up, profile/preferences, and chitchat/unsupported inputs.

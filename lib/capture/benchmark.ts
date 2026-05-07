@@ -782,6 +782,14 @@ function buildActivityFixtures(): CaptureBenchmarkFixture[] {
   ];
   const fixtures = expandSeeds(seeds, 30, "activity");
   fixtures.push(
+    baseFixture(activitySeed("activity-ticketmaster-event-direct-01", "Use this exact Ticketmaster event link for The Lion King on June 1: https://www.ticketmaster.com/the-lion-king-new-york-new-york-06-01-2026/event/Z1r9uZrrZbpZ1Avr9ea", "en", {
+      event_name: "The Lion King",
+      event_type: "theater",
+      city: "New York",
+      event_date: "2026-06-01",
+      num_tickets: 1,
+    }, "DOG-005", "mixed_url_instruction", "url")),
+    urlOnlyFixture("activity-ticketmaster-event-url-only-01", "https://www.ticketmaster.com/the-lion-king-new-york-new-york-06-01-2026/event/Z1r9uZrrZbpZ1Avr9ea", "activity", "DOG-005"),
     urlOnlyFixture("activity-url-review-01", "https://www.ticketmaster.com/the-lion-king-new-york-ny-tickets/artist/1039581", "activity", "DOG-005"),
     missingFixture("activity-missing-date-01", "Book The Lion King in New York", "activity", {
       activity: { event_name: "The Lion King", event_type: "theater", city: "New York", num_tickets: 1 },

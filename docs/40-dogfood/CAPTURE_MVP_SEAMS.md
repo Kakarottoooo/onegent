@@ -167,7 +167,9 @@ Field notes:
      page text and set `direct_booking`.
    - Mitigation: set `direct_booking` only when source evidence contains a
      specific named restaurant or hotel and required dates/party fields pass
-     the same direct-booking guard as NLU.
+     the same direct-booking guard as NLU. For activity links, only exact
+     Ticketmaster `/event/<id>` URLs are treated as direct provider-entry
+     evidence; artist/search pages and impersonating hosts stay review-only.
 
 4. Confidence overuse.
    - Risk: high model confidence is treated as task readiness even while
