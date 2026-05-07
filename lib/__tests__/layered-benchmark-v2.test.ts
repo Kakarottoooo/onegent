@@ -129,7 +129,7 @@ describe("layered benchmark v2", () => {
       "l1_direct_pass",
       "l2_recovered_pass",
       "l2_recovered_pass",
-      "l2_recovered_pass",
+      "insufficient_evidence",
       "insufficient_evidence",
       "insufficient_evidence",
       "l2_recovered_pass",
@@ -142,6 +142,9 @@ describe("layered benchmark v2", () => {
     expect(results[2].artifactExpectations.classificationSignals).toContain("timeDelta>15");
     expect(results[2].artifactExpectations.classificationSignals).toContain("reason=price-only-time-mismatch");
     expect(results[3].artifactExpectations.classificationSignals).toContain("priceDelta=0");
+    expect(results[3].artifactExpectations.classificationSignals).toContain("price_only_fallback_rejected");
+    expect(results[3].failureClass).toBe("insufficient_evidence");
+    expect(results[3].calculatedL2Eligible).toBe(false);
     expect(results[3].artifactExpectations.classificationSignals).toContain("decision=rejected");
     expect(results[4].artifactExpectations.classificationSignals.join(" ")).toContain("Traveler form state");
     expect(results[4].artifactExpectations.classificationSignals).toContain("status=error");

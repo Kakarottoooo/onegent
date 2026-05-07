@@ -108,11 +108,11 @@ npx tsx scripts/layered-benchmark.ts --vertical flight --count 10 --mode no-live
 ```
 
 The first 10 flight cases are Expedia-specific no-live fixtures covering direct
-pass, wrong-airline rejection, wrong-time rejection, price-only rejection,
-checkout-with-missing-traveler-fields, stale/mixed worker evidence, dismissable
-promo overlay, account-required boundary, provider degradation, and final review
-checkpoint. Each case carries owner, artifact expectations, L2 eligibility, and
-patch proposal fields.
+pass, wrong-airline rejection, wrong-time rejection, price-only insufficient
+evidence unless target identity is strong, checkout-with-missing-traveler-fields,
+stale/mixed worker evidence, dismissable promo overlay, account-required
+boundary, provider degradation, and final review checkpoint. Each case carries
+owner, artifact expectations, L2 eligibility, and patch proposal fields.
 
 Run a founder-readable markdown report:
 

@@ -146,7 +146,28 @@ describe("analyzeExpediaRetryArtifactBundle", () => {
     expect(analysis.nextAction).toContain("protected wrong-card rejection");
   });
 
-  it("does not let a stale checkout marker override candidate rejection evidence", () => {
+  it("classifies explicit wrong-time rejection as protected no-match evidence", () => {
+    const analysis = analyzeExpediaRetryArtifactBundle({
+      job: {
+        id: "fixture-expedia-wrong-time-rejected",
+        provider: "expedia",
+        scenario: "flight",
+        status: "failed",
+      },
+      workerLogExcerpt: [
+        "[flight-rpa] Flight candidate evidence dump: airline=Southwest departure=9:55pm arrival=11:00pm route=MCO to BNA price=$152 flightNumber=WN 2515 score=8 fallbackScore=0 timeDelta=785 priceDelta=0 differentAirline=no",
+        "[flight-rpa] Flight candidate rejection reason: locator fallback rejected candidates: wrong_time_candidate_rejected timeDelta=785 priceDelta=0 differentAirline=no selected candidate absent",
+        "[flight-rpa] No matching flight button found (tried airline=\"Southwest\" departure=\"08:50\" price=$152)",
+      ].join("\n"),
+    });
+
+    expect(analysis.state).toBe("candidate_rejected_no_match");
+    expect(analysis.confidence).toBe("high");
+    expect(analysis.signals[0]?.kind).toBe("candidate_rejected");
+    expect(analysis.signals.map((signal) => signal.label)).toContain("wrong time candidate rejected");
+  });
+
+  it("classifies price-only rejection as insufficient evidence even with a stale checkout marker", () => {
     const analysis = analyzeExpediaRetryArtifactBundle({
       job: {
         id: "fixture-expedia-price-only-rejected",
@@ -160,9 +181,10 @@ describe("analyzeExpediaRetryArtifactBundle", () => {
       ].join("\n"),
     });
 
-    expect(analysis.state).toBe("candidate_rejected_no_match");
+    expect(analysis.state).toBe("insufficient_evidence");
     expect(analysis.signals.map((signal) => signal.kind)).toContain("checkout_reached");
-    expect(analysis.signals[0]?.kind).toBe("candidate_rejected");
+    expect(analysis.signals[0]?.kind).toBe("price_only_candidate_rejected");
+    expect(analysis.nextAction).toContain("price-only fallback evidence");
   });
 
   it("returns insufficient evidence for bundles without known signals", () => {
@@ -269,6 +291,40 @@ describe("analyzeExpediaRetryArtifactBundle", () => {
     expect(analysis.signals.map((signal) => signal.kind)).not.toContain(
       "login_or_otp_boundary",
     );
+  });
+
+  it("separates dismissable promo overlays from account-required boundaries", () => {
+    const promo = analyzeExpediaRetryArtifactBundle({
+      job: {
+        id: "fixture-expedia-dismissable-promo-overlay",
+        provider: "expedia",
+        scenario: "flight",
+        status: "failed",
+      },
+      workerLogExcerpt: [
+        "[flight-rpa] dismissable_member_price_overlay visible: Sign in for member prices or continue as guest.",
+        "[flight-rpa] Bundle & Save up to $974 with flight + car package deals. No thanks button visible.",
+      ].join("\n"),
+    });
+
+    expect(promo.state).toBe("insufficient_evidence");
+    expect(promo.signals.map((signal) => signal.kind)).toContain("dismissable_promo_overlay");
+    expect(promo.signals.map((signal) => signal.kind)).not.toContain("login_or_otp_boundary");
+
+    const account = analyzeExpediaRetryArtifactBundle({
+      job: {
+        id: "fixture-expedia-account-required-boundary",
+        provider: "expedia",
+        scenario: "flight",
+        status: "failed",
+      },
+      workerLogExcerpt: [
+        "[flight-rpa] Account checkpoint: sign in or create an account to continue.",
+      ].join("\n"),
+    });
+
+    expect(account.state).toBe("login_or_otp_boundary");
+    expect(account.signals[0]?.kind).toBe("login_or_otp_boundary");
   });
 
   it("classifies provider no-availability only when explicit availability evidence is present", () => {
