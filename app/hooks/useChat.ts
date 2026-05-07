@@ -214,7 +214,11 @@ export function useChat({
     async (
       text: string,
       pinnedPlanId?: string,
-      opts?: { skipUserPush?: boolean; categoryHint?: "restaurant" | "hotel" | "flight" | "activity" }
+      opts?: {
+        skipUserPush?: boolean;
+        categoryHint?: "restaurant" | "hotel" | "flight" | "activity";
+        confirmedConstraints?: Record<string, unknown>;
+      }
     ) => {
       if (!text.trim() || loading) return;
 
@@ -306,6 +310,7 @@ export function useChat({
             user_id: userId ?? undefined,
             pinned_plan_id: pinnedPlanId ?? undefined,
             category_hint: opts?.categoryHint ?? undefined,
+            confirmed_constraints: opts?.confirmedConstraints ?? undefined,
           }),
         });
 
@@ -709,6 +714,7 @@ export function useChat({
                 } else if (category === "activity") {
                   const activityRecs: ActivityRecommendationCard[] = event.activityRecommendations ?? [];
                   const missingActivityFields: string[] = event.missing_activity_fields ?? [];
+                  const activityTraceNote = refinements.length > 0 ? `${refinements[0]}\n\n` : "";
 
                   if (missingActivityFields.includes("provider_api_key")) {
                     setMessages((prev) => [
@@ -716,9 +722,10 @@ export function useChat({
                       {
                         role: "assistant",
                         content:
-                          outputLanguage === "zh"
+                          activityTraceNote +
+                          (outputLanguage === "zh"
                             ? "演出搜索暂不可用：后台未配置 SeatGeek / Ticketmaster API key。"
-                            : "Event search is temporarily unavailable: no SeatGeek or Ticketmaster API key configured on the server.",
+                            : "Event search is temporarily unavailable: no SeatGeek or Ticketmaster API key configured on the server."),
                         category: "activity" as const,
                         output_language: outputLanguage,
                       },
@@ -739,9 +746,10 @@ export function useChat({
                       {
                         role: "assistant",
                         content:
-                          outputLanguage === "zh"
+                          activityTraceNote +
+                          (outputLanguage === "zh"
                             ? "没有找到符合条件的演出门票。可以换个日期、城市或关键词再试试。"
-                            : "No events matched that search. Try different dates, a different city, or a different keyword.",
+                            : "No events matched that search. Try different dates, a different city, or a different keyword."),
                         category: "activity" as const,
                         output_language: outputLanguage,
                       },
@@ -750,9 +758,10 @@ export function useChat({
                     const assistantMessage: Message = {
                       role: "assistant",
                       content:
-                        outputLanguage === "zh"
+                        activityTraceNote +
+                        (outputLanguage === "zh"
                           ? `找到 ${activityRecs.length} 场符合条件的演出。`
-                          : `Found ${activityRecs.length} event${activityRecs.length > 1 ? "s" : ""} for you.`,
+                          : `Found ${activityRecs.length} event${activityRecs.length > 1 ? "s" : ""} for you.`),
                       activityCards: activityRecs,
                       category: "activity" as const,
                       output_language: outputLanguage,

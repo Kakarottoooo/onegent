@@ -102,7 +102,7 @@ function terminalDataForResult(result: ExecutionJobResult): Record<string, unkno
   }
 }
 
-function mapExecutionStatusToTaskState(status: ExecutionJobStatus): TravelTaskState {
+export function mapExecutionStatusToTaskState(status: ExecutionJobStatus): TravelTaskState {
   switch (status) {
     case "needs_profile_data":
       return "awaiting_profile";

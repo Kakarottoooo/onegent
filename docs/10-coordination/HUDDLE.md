@@ -1,7 +1,7 @@
 # HUDDLE - Shared Working Memory
 
 > Last writer: codex
-> Last updated: 2026-05-05
+> Last updated: 2026-05-07
 > Cap: 2000 words. Trim oldest Live activity first.
 
 This file is the short-term shared memory for Codex, Claude, and future coding
@@ -36,6 +36,15 @@ small.
 
 ## Live Activity
 
+- 2026-05-07 codex: recorded founder-confirmed Ticketmaster activity dogfood
+  closure. Latest traced job `46028ee4-c644-4df7-bee5-7bcb7d2713f9` used the
+  existing v1 `ticketmaster-rpa` local Stagehand/Playwright path, not Browser
+  Harness. Logs show May 30 2026 2:00 PM parsed, calendar slot selected,
+  right-side `Find Tickets` clicked from the main Ticketmaster page, and the
+  provider event page reached. Browser Harness remains a separate v2
+  spike/design lane. Follow-up polish: ignore external ad tabs, make
+  seat-selection checkpoint explicit, and recover stale running/loading jobs
+  after local browser/CDP disconnects.
 - 2026-05-05 codex: recorded founder dogfood OpenTable closure for Phase 0A.
   Request was "book Sirrah in New York next Thursday at 8pm for 1 person".
   Job `3bbe2ac4-c4cd-409f-8c11-6a83d2f81485` reached

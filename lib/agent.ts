@@ -36,6 +36,26 @@ import { buildDateNightFallbackIntent } from "./agent/planners/date-night";
 import { parseConcertEventIntent } from "./agent/parse/concert-event";
 import { runConcertEventPlanner } from "./agent/planners/concert-event";
 import { ConcertEventIntent } from "./types";
+import {
+  buildConfirmedIntentFromConstraints,
+  buildConfirmedQueryContext,
+} from "./agent/confirmed-constraints";
+
+export function applyCategoryHintOverride(
+  queryContext: MultilingualQueryContext,
+  categoryHintOverride?: CategoryType,
+): MultilingualQueryContext {
+  if (!categoryHintOverride) return queryContext;
+
+  queryContext.category_hint = categoryHintOverride;
+  // The confirm-card NLU has already chosen a concrete category. For
+  // single-event activity asks, stale legacy scenario hints can otherwise
+  // route the handoff into city-trip clarification.
+  if (categoryHintOverride === "activity") {
+    queryContext.scenario_hint = null;
+  }
+  return queryContext;
+}
 
 // ─── Main Agent Function ──────────────────────────────────────────────────────
 
@@ -52,7 +72,8 @@ export async function runAgent(
   sessionId?: string,
   userId?: string,
   pinned_plan_id?: string,
-  categoryHintOverride?: CategoryType
+  categoryHintOverride?: CategoryType,
+  confirmedConstraints?: Record<string, unknown>
 ): Promise<{
   requirements:
     | UserRequirements
@@ -90,20 +111,20 @@ export async function runAgent(
   const city = CITIES[cityId] ?? CITIES[DEFAULT_CITY];
   const cityFullName = gpsCoords ? "your current location" : city.fullName;
 
+  const hasConfirmedConstraints = !!categoryHintOverride && !!confirmedConstraints;
   const userPreferences =
-    userId || sessionId
+    !hasConfirmedConstraints && (userId || sessionId)
       ? await getUserPreferences(sessionId ?? "", userId).catch(() => ({}))
       : {};
-  const queryContext = await analyzeMultilingualQuery(userMessage, cityFullName, userPreferences, { pinned_plan_id, conversationHistory });
-  if (categoryHintOverride) {
-    queryContext.category_hint = categoryHintOverride;
-    // When NLU already classified as activity, bypass scenario-plan routing
-    // (concert_event DecisionPlan) and fall through to intent.category === "activity"
-    // direct-card path.
-    if (categoryHintOverride === "activity" && queryContext.scenario_hint === "concert_event") {
-      queryContext.scenario_hint = null;
-    }
-  }
+  const queryContext = hasConfirmedConstraints
+    ? buildConfirmedQueryContext(
+        userMessage,
+        categoryHintOverride,
+        confirmedConstraints,
+        cityFullName,
+      )
+    : await analyzeMultilingualQuery(userMessage, cityFullName, userPreferences, { pinned_plan_id, conversationHistory });
+  applyCategoryHintOverride(queryContext, categoryHintOverride);
 
   function buildBaseResult(
     requirements:
@@ -456,7 +477,12 @@ export async function runAgent(
   }
 
   // Layer 1: Parse intent (with session preferences + profile context)
-  const intent = await parseIntent(
+  const confirmedIntent = buildConfirmedIntentFromConstraints(
+    categoryHintOverride,
+    confirmedConstraints,
+    cityFullName,
+  );
+  const intent = confirmedIntent ?? await parseIntent(
     userMessage,
     cityFullName,
     queryContext,
@@ -497,7 +523,7 @@ export async function runAgent(
 
   // Route to activity pipeline (SeatGeek direct-card path for solo ticketed events)
   if (intent.category === "activity") {
-    const { activityRecommendations, missing_fields } = await runActivityPipeline(intent);
+    const { activityRecommendations, missing_fields, suggested_refinements } = await runActivityPipeline(intent);
     const activityCalendarContext = await loadCalendarRecommendationContext({
       userId,
       dateText: intent.date_from ?? intent.date_to ?? null,
@@ -507,7 +533,9 @@ export async function runAgent(
     return buildBaseResult(intent, "activity", {
       activityRecommendations,
       missing_activity_fields: missing_fields,
-      suggested_refinements: activityCalendarContext ? [activityCalendarContext.noteForUser] : [],
+      suggested_refinements: activityCalendarContext
+        ? [...suggested_refinements, activityCalendarContext.noteForUser]
+        : suggested_refinements,
     });
   }
 

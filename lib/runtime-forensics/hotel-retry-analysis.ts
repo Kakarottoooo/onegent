@@ -8,6 +8,14 @@
  */
 
 import type { JobLikeInput } from "./types";
+import {
+  classifyHotelL1Stage,
+  classifyHotelProviderFallbackEligibility,
+  evaluateHotelNoAvailabilityEvidence,
+  extractHotelLayeredContextFromArtifact,
+  validateHotelLayeredArtifactCompleteness,
+  type HotelLayeredRecoverySummary,
+} from "./hotel-layered-recovery";
 
 export type HotelRetryState =
   | "safety_boundary_violation"
@@ -108,6 +116,7 @@ export interface HotelRetryAnalysis {
     screenshots: string[];
     liveSnapshots: string[];
   };
+  layeredRecovery: HotelLayeredRecoverySummary;
   summary: string;
   nextAction: string;
 }
@@ -298,7 +307,7 @@ const SIGNAL_PATTERNS: SignalPattern[] = [
   {
     kind: "provider_no_availability",
     label: "hotel sold out or fully booked",
-    rx: /\b(sold[-\s]?out|fully booked|no rooms? available|no availability)\b/i,
+    rx: /\b(sold[-\s]?out|fully booked|no rooms? available|no availability|not available|no properties match|no stays? available|nothing available)\b/i,
   },
   {
     kind: "provider_no_availability",
@@ -373,6 +382,8 @@ export function analyzeHotelRetryArtifactBundle(
   const entries = buildTextEntries(bundle);
   const signals = collectSignals(entries);
   const has = (kind: SignalKind) => signals.some((s) => s.kind === kind);
+  const layeredContext = extractHotelLayeredContextFromArtifact(bundle);
+  const noAvailabilityEvidence = evaluateHotelNoAvailabilityEvidence(layeredContext);
 
   const hasSafetyViolation = has("safety_boundary_violation");
   const hasPaymentBoundary = has("payment_boundary");
@@ -401,7 +412,9 @@ export function analyzeHotelRetryArtifactBundle(
     state = "model_env_transient";
   } else if (hasNetwork) {
     state = "network_provider_failure";
-  } else if (hasNoAvailability) {
+  } else if (hasNoAvailability && noAvailabilityEvidence.state === "weak_no_availability") {
+    state = "network_provider_failure";
+  } else if (hasNoAvailability && noAvailabilityEvidence.state === "verified_true_no_availability") {
     state = "provider_no_availability";
   } else if (hasRoomSelectionReached) {
     state = "room_selection_manual_review_reached";
@@ -435,6 +448,16 @@ export function analyzeHotelRetryArtifactBundle(
     hasProviderSelectorDrift,
     hasRoomSelectionDrift,
   });
+  const fallbackEligibility = classifyHotelProviderFallbackEligibility(
+    { ...layeredContext, state },
+    noAvailabilityEvidence,
+  );
+  const layeredRecovery: HotelLayeredRecoverySummary = {
+    l1Stage: classifyHotelL1Stage(layeredContext),
+    noAvailabilityEvidence,
+    fallbackEligibility,
+    artifactCompleteness: validateHotelLayeredArtifactCompleteness(bundle),
+  };
 
   return {
     state,
@@ -447,8 +470,9 @@ export function analyzeHotelRetryArtifactBundle(
     status,
     signals,
     artifactPaths,
+    layeredRecovery,
     summary: buildSummary(state, confidence, signals),
-    nextAction: nextActionForState(state),
+    nextAction: nextActionForState(state, fallbackEligibility),
   };
 }
 
@@ -503,6 +527,34 @@ export function formatHotelRetryAnalysisMarkdown(
   ) {
     lines.push("_No artifact paths were included._");
   }
+  lines.push("");
+  lines.push("### Layered Recovery");
+  lines.push("");
+  lines.push(`- L1 stage: \`${analysis.layeredRecovery.l1Stage}\``);
+  lines.push(
+    `- No-availability evidence: \`${analysis.layeredRecovery.noAvailabilityEvidence.state}\` - ${escapeMarkdownLine(
+      analysis.layeredRecovery.noAvailabilityEvidence.reason,
+    )}`,
+  );
+  lines.push(
+    `- L2 fallback eligible: \`${analysis.layeredRecovery.fallbackEligibility.eligible}\`${
+      analysis.layeredRecovery.fallbackEligibility.nextProviders.length > 0
+        ? ` via \`${analysis.layeredRecovery.fallbackEligibility.nextProviders.join(" -> ")}\``
+        : ""
+    }`,
+  );
+  if (analysis.layeredRecovery.fallbackEligibility.eligible) {
+    lines.push(
+      `- Preserved params: \`${JSON.stringify(
+        analysis.layeredRecovery.fallbackEligibility.preservedParams,
+      )}\``,
+    );
+  }
+  lines.push(
+    `- Artifact completeness: \`${analysis.layeredRecovery.artifactCompleteness.complete}\` - ${escapeMarkdownLine(
+      analysis.layeredRecovery.artifactCompleteness.summary,
+    )}`,
+  );
   lines.push("");
   lines.push("### Verdict");
   lines.push("");
@@ -638,7 +690,16 @@ function buildSummary(
   return `${HOTEL_RETRY_STATE_LABEL[state]} with ${confidence} confidence (${signalText}).`;
 }
 
-function nextActionForState(state: HotelRetryState): string {
+function nextActionForState(
+  state: HotelRetryState,
+  fallbackEligibility: HotelLayeredRecoverySummary["fallbackEligibility"],
+): string {
+  if (fallbackEligibility.eligible) {
+    return `Treat as provider-degraded/fallback-eligible. Preserve exact hotel, city, check-in, check-out, adults, rooms, and budget before trying ${fallbackEligibility.nextProviders.join(
+      " -> ",
+    )}.`;
+  }
+
   switch (state) {
     case "safety_boundary_violation":
       return "Stop. Do not retry. Preserve DB/log/screenshot evidence and run a separate root-cause review of the safety boundary.";
@@ -655,7 +716,7 @@ function nextActionForState(state: HotelRetryState): string {
     case "model_env_transient":
       return "Treat as model/runtime environment instability. Do not patch hotel provider selectors from OpenAI Responses API or Computer Use transient evidence alone.";
     case "network_provider_failure":
-      return "Treat as provider/network instability. Do not patch selectors from this state unless separate screenshots prove room-selection drift.";
+      return "Treat as provider/network instability. Do not patch selectors from this state unless separate screenshots prove room-selection drift or weak no-availability evidence justifies provider fallback.";
     case "provider_no_availability":
       return "Treat as a provider inventory outcome. Do not patch selectors unless screenshots show matching available inventory that the worker missed.";
     case "provider_selector_drift":
@@ -748,8 +809,13 @@ function excerptAround(text: string, index: number, length: number): string {
 }
 
 function isNegatedProgressExcerpt(excerpt: string): boolean {
-  return /\b(no|not|never|without)\s+(checkout|payment|guest details|contact details|traveler details|reservation details)\s+(page\s+)?(visible|reached|loaded)\b/i.test(
-    excerpt,
+  return (
+    /\b(no|not|never|without)\s+(checkout|payment|guest details|contact details|traveler details|reservation details)\s+(page\s+)?(visible|reached|loaded)\b/i.test(
+      excerpt,
+    ) ||
+    /\b(stop(?:ped)?|stopping)\s+before\s+(payment|cvv|cvc|final|confirmation|purchase|login|captcha|otp)\b/i.test(
+      excerpt,
+    )
   );
 }
 

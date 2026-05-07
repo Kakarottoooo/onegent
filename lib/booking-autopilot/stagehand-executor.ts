@@ -127,6 +127,7 @@ import {
   scrollExpediaCheckoutToFinalReviewBoundary,
 } from "./providers/expedia";
 import { bookTicketmasterProgrammatic } from "./providers/ticketmaster-rpa";
+import { classifyTicketmasterTaskState } from "./providers/ticketmaster-status";
 import { bookSeatGeekProgrammatic } from "./providers/seatgeek-rpa";
 
 type FieldSpec = { patterns: string[]; value: string };
@@ -921,7 +922,9 @@ export async function runBrowserTask(
   // persistent userDataDir, Playwright can't spawn a new Chrome against the
   // same profile — the child exits and the requested CDP port never binds
   // (manifests as ECONNREFUSED 127.0.0.1:<port>). Kill stale siblings first.
-  if (!useCloud && shouldUseRealChrome(input.startUrl)) {
+  const useRealChrome = !useCloud && shouldUseRealChrome(input.startUrl);
+
+  if (useRealChrome) {
     await ensureUserDataDirFree(resolveRealChromeUserDataDir(), trace);
   }
 
@@ -948,11 +951,11 @@ export async function runBrowserTask(
         // Opt-in: route specific providers (e.g. SeatGeek) to the user's real
         // Chrome with a persistent profile to bypass DataDome-style bot
         // fingerprinting. Other providers keep the default Playwright path.
-        ...(shouldUseRealChrome(input.startUrl) && buildRealChromeLaunchOptions(trace)),
+        ...(useRealChrome && buildRealChromeLaunchOptions(trace)),
       },
     }),
   });
-  if (!useCloud && shouldUseRealChrome(input.startUrl)) {
+  if (useRealChrome) {
     trace(`[real-chrome] Activated for startUrl matching USE_REAL_CHROME_FOR="${process.env.USE_REAL_CHROME_FOR}"`);
   }
 
@@ -995,6 +998,24 @@ export async function runBrowserTask(
     if (input.jobId) activeStagehands.set(input.jobId, { close: () => stagehand.close() });
     // v3 API: get active page from context (resolvePage is private)
     const page = stagehand.context.activePage() ?? await stagehand.context.newPage();
+    if (!useCloud && !useRealChrome) {
+      const envViewportWidth = Number(process.env.ONEGENT_BROWSER_VIEWPORT_WIDTH);
+      const envViewportHeight = Number(process.env.ONEGENT_BROWSER_VIEWPORT_HEIGHT);
+      const screenSize = (!envViewportWidth || !envViewportHeight)
+        ? await getRawPage(page).evaluate(() => ({
+          width: window.screen?.availWidth || window.outerWidth || window.innerWidth,
+          height: window.screen?.availHeight || window.outerHeight || window.innerHeight,
+        })).catch(() => null)
+        : null;
+      const viewportWidth = envViewportWidth || Math.max(1365, Math.min(1920, Math.floor(screenSize?.width || 1600)));
+      const viewportHeight = envViewportHeight || Math.max(900, Math.min(1080, Math.floor(screenSize?.height || 1000)));
+      await getRawPage(page)
+        .setViewportSize({ width: viewportWidth, height: viewportHeight })
+        .then(() => trace(`[viewport] local viewport set to ${viewportWidth}x${viewportHeight}`))
+        .catch((error: Error) => trace(`[viewport] setViewportSize skipped: ${error.message?.slice(0, 120)}`));
+    } else if (useRealChrome) {
+      trace("[viewport] real Chrome uses native window viewport (no fixed Playwright viewport)");
+    }
     let lastSnapshotSignature: string | null = null;
     const captureLocalSnapshot: CaptureLocalSnapshot = async (
       title: string,
@@ -1004,7 +1025,9 @@ export async function runBrowserTask(
     ) => {
       if (!input.jobId || useCloud) return;
       try {
-        const activePage = stagehand.context.activePage() ?? page;
+        const ctx = stagehand.context;
+        if (!ctx) return;
+        const activePage = ctx.activePage() ?? page;
         const rawSnapshotPage = getRawPage(activePage);
         const buf = await rawSnapshotPage.screenshot({
           type: "jpeg",
@@ -1025,7 +1048,10 @@ export async function runBrowserTask(
           url,
         });
       } catch (error) {
-        trace(`[snapshots] capture failed: ${(error as Error).message?.slice(0, 120)}`);
+        const message = `[snapshots] capture failed: ${(error as Error).message?.slice(0, 120)}`;
+        debugTrace.push(message);
+        if (input.jobId) liveLogPush(input.jobId, message);
+        console.warn(`[stagehand] ${message}`);
       }
     };
     captureLocalSnapshotRef = captureLocalSnapshot;
@@ -1615,7 +1641,30 @@ The user will enter CVV and confirm payment themselves.`,
         const finalScreenshot = await raw.screenshot({ type: "jpeg", quality: 55 }).catch(() => null);
         const finalScreenshotBase64 = finalScreenshot?.toString("base64") ?? screenshotBase64;
 
-        if (rpaResult.reached_checkout) {
+        // Probe local browser liveness AFTER the RPA returns. If the CDP
+        // target is gone (user closed Chrome, OS sleep, etc.), `raw.url()`
+        // throws — we cannot trust handoff_ready / needs_login under that
+        // condition because they were computed against a dead page.
+        let localBrowserDisconnected = false;
+        let observedUrl = rpaResult.currentUrl ?? "";
+        try {
+          observedUrl = (raw as unknown as { url: () => string }).url() || observedUrl;
+        } catch {
+          localBrowserDisconnected = true;
+        }
+
+        const decision = classifyTicketmasterTaskState({
+          reachedCheckout: rpaResult.reached_checkout,
+          needsLogin: rpaResult.needs_login === true,
+          handoffReady: rpaResult.handoff_ready === true,
+          currentUrl: observedUrl,
+          localBrowserDisconnected,
+          errorMessage: rpaResult.error,
+          summary: rpaResult.summary,
+        });
+        trace(`[tm-rpa] Task state: ${decision.state} (executorStatus=${decision.executorStatus} holdBrowserOpen=${decision.holdBrowserOpen})`);
+
+        if (decision.state === "checkout_reached") {
           // Checkout reached — fall through to the normal form-fill pipeline below.
           // Update currentUrl so the guestDetails/payment stage detection is correct.
           // activePage stays on the Stagehand wrapper; recovery loop handles tab
@@ -1626,20 +1675,42 @@ The user will enter CVV and confirm payment themselves.`,
           // Fall through — do NOT return. Normal recovery loop will detect
           // guestDetailsStep via provider.getStageSignals and fill the form.
         } else {
-          if (!useCloud && input.jobId) {
+          if (decision.holdBrowserOpen && !useCloud && input.jobId) {
             holdBrowserOpenForManualReview(
-              `Local mode: Ticketmaster RPA did not reach checkout — keeping browser open for ${Math.round(BROWSER_KEEP_OPEN_MS / 60000)} minutes for manual review/continue.`
+              `Local mode: Ticketmaster ${decision.state} — keeping browser open for ${Math.round(BROWSER_KEEP_OPEN_MS / 60000)} minutes.`
             );
           }
+          if (decision.executorStatus === "paused_payment") {
+            return {
+              status: "paused_payment" as const,
+              screenshotBase64: finalScreenshotBase64,
+              handoffUrl: rpaResult.currentUrl || input.startUrl,
+              sessionUrl,
+              summary: decision.summary,
+              debugTrace,
+            };
+          }
+          if (decision.executorStatus === "needs_login") {
+            return {
+              status: "needs_login" as const,
+              screenshotBase64: finalScreenshotBase64,
+              handoffUrl: rpaResult.currentUrl || input.startUrl,
+              sessionUrl,
+              summary: decision.summary,
+              debugTrace,
+            };
+          }
+          // executorStatus === "error" (external_ad_tab_detected /
+          // local_browser_disconnected / unknown_failure). All three map to
+          // a clear, non-generic error that does NOT leave the task looking
+          // live forever upstream.
           return {
-            status: rpaResult.needs_login ? "error" as const : "error" as const,
+            status: "error" as const,
             screenshotBase64: finalScreenshotBase64,
             handoffUrl: rpaResult.currentUrl || input.startUrl,
             sessionUrl,
-            summary: rpaResult.needs_login
-              ? "Ticketmaster wants you to sign in. Run `node scripts/save-ticketmaster-cookies.mjs` to refresh your saved session, then try again."
-              : (rpaResult.error ?? "Couldn't reach Ticketmaster checkout. Open the link to finish manually."),
-            error: rpaResult.error ?? "Ticketmaster RPA did not reach checkout.",
+            summary: decision.summary,
+            error: rpaResult.error ?? decision.summary,
             debugTrace,
           };
         }
@@ -1982,10 +2053,19 @@ The user will enter CVV and confirm payment themselves.`,
           /opentable\.com\/(?:r\/[^/?#]+|[a-z0-9][a-z0-9-]*(?:\?|$|\/?$))/i.test(raw.url()) &&
           !/opentable\.com\/(?:s\?|booking\/|restaurants\/|search\?|account\/|user\/signup|login)/i.test(raw.url());
 
+        const bookingComBoundary = /booking\.com/i.test(raw.url())
+          ? providerClassifyBookingComHotelRuntimeBoundary({
+              currentUrl: raw.url(),
+              pageText: earlyText,
+            })
+          : null;
+
         if (hasTimeSlots) {
           trace(`Pre-AI fast path: matched "${matchedSignal}" but visible time-slot buttons exist — false positive, continuing.`);
         } else if (onOpenTableDetailPage) {
           trace(`Pre-AI fast path: matched "${matchedSignal}" on OpenTable detail page but no visible slots yet — letting detail-page slot picker scroll/probe before fallback.`);
+        } else if (bookingComBoundary && bookingComBoundary.state !== "provider_no_availability") {
+          trace(`Pre-AI fast path: matched "${matchedSignal}" on Booking.com, but boundary=${bookingComBoundary.state} (${bookingComBoundary.reason}) — continuing instead of terminal no_availability.`);
         } else {
           // ── User insight (run 6 dig): "Not available on OpenTable" pages
           // should NOT just return no_availability — the venue may exist on
@@ -2002,7 +2082,11 @@ The user will enter CVV and confirm payment themselves.`,
           //     C2 time ladder (±15/30/60 min) is the right fallback.
           const isVenueNotOnPlatform = VENUE_NOT_ON_PLATFORM_SIGNALS.some((sig) => earlyText.includes(sig));
           const venueLabel = targetHotelName ?? "This venue";
-          const platformLabel = /resy\.com/i.test(raw.url()) ? "Resy" : "OpenTable";
+          const platformLabel = /booking\.com/i.test(raw.url())
+            ? "Booking.com"
+            : /resy\.com/i.test(raw.url())
+              ? "Resy"
+              : "OpenTable";
 
           // When OT renders the alt-day banner ("Next available is Sun, May 10
           // [11:15 AM] [11:30 AM] ..."), pull it out so the summary can give

@@ -1,14 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
-import {
-  getBookingJobCompactRowsBySession,
-  getBookingJobCompactRowsByUser,
-} from "@/lib/db";
-import {
-  mergeCompactRows,
-  summarizeBookingJobList,
-} from "@/lib/booking-jobs/read-model";
 import { getOptionalClerkUserId } from "@/lib/auth/optional-clerk-user";
 import { canUseNoDatabaseBookingJobsFallback } from "@/lib/booking-jobs/db-errors";
+import { getVisibleBookingJobListItems } from "@/lib/booking-jobs/read-model";
 
 export async function GET(req: NextRequest) {
   const sessionId = req.nextUrl.searchParams.get("session_id");
@@ -16,29 +9,51 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: "session_id required" }, { status: 400 });
   }
 
-  const limitRaw = req.nextUrl.searchParams.get("limit");
-  const limit = limitRaw ? Math.max(1, Math.min(200, Number(limitRaw) || 0)) : 100;
-  const scope = req.nextUrl.searchParams.get("scope");
-  const includeUserJobs = scope !== "session";
+  const includeShares = req.nextUrl.searchParams.get("include_share") === "1";
+  const limitParam = Number(req.nextUrl.searchParams.get("limit") ?? "60");
+  const limit = Number.isFinite(limitParam)
+    ? Math.max(1, Math.min(100, Math.floor(limitParam)))
+    : 60;
   const userId = await getOptionalClerkUserId();
 
   try {
-    const [sessionRows, userRows] = await Promise.all([
-      getBookingJobCompactRowsBySession(sessionId, limit),
-      includeUserJobs && userId
-        ? getBookingJobCompactRowsByUser(userId, limit)
-        : Promise.resolve([]),
-    ]);
-    const jobs = mergeCompactRows(sessionRows, userRows, limit);
-    return NextResponse.json(
-      { jobs, summary: summarizeBookingJobList(jobs) },
-      { headers: { "Cache-Control": "private, max-age=3, stale-while-revalidate=10" } },
-    );
+    const jobs = await getVisibleBookingJobListItems({
+      sessionId,
+      userId,
+      includeShares,
+      limit,
+    });
+    return NextResponse.json({
+      jobs,
+      meta: {
+        shape: "compact",
+        count: jobs.length,
+        heavy_fields_excluded: [
+          "steps",
+          "decisionLog",
+          "screenshots",
+          "logs",
+          "profile",
+          "autonomy_settings",
+        ],
+      },
+    });
   } catch (err) {
     if (canUseNoDatabaseBookingJobsFallback(err)) {
       return NextResponse.json({
         jobs: [],
-        summary: { total: 0, queue: 0, live: 0, history: 0, actions: 0, ready: 0 },
+        meta: {
+          shape: "compact",
+          count: 0,
+          heavy_fields_excluded: [
+            "steps",
+            "decisionLog",
+            "screenshots",
+            "logs",
+            "profile",
+            "autonomy_settings",
+          ],
+        },
       });
     }
     throw err;

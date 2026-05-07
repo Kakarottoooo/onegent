@@ -34,6 +34,7 @@ import {
 } from "@/lib/db";
 import { getLatestTripProposal } from "@/lib/agent/trip-synthesis";
 import { extractOptions, tallyVotes, resolveAcceptedOption } from "@/lib/rooms/proposal-shape";
+import { getTaskWorkspaceHref } from "@/lib/booking-jobs/workspace";
 import type { TripPackage } from "@/lib/types";
 
 export const maxDuration = 60;
@@ -236,10 +237,9 @@ export async function POST(req: NextRequest, { params }: Params) {
   return NextResponse.json({
     ok: true,
     booking_job_id: bookingJobId,
-    // /tasks has no dynamic segment; it reads ?focus=<id>&view=live to zoom
-    // into a specific job + land on the live-activity tab. Matches the URL
-    // shape TripPackageCard (Solo flow) uses after its own booking click.
-    url: `/tasks?focus=${encodeURIComponent(bookingJobId)}&view=live`,
+    // /tasks has no dynamic segment; it reads ?focus=<id> and lets the shared
+    // workspace helper choose queue/live/history from the job state.
+    url: getTaskWorkspaceHref({ id: bookingJobId, status: "pending" }),
     selection,
     contributors: allSelections.length,
   });

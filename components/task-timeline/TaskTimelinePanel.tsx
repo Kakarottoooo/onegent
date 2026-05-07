@@ -106,6 +106,7 @@ export default function TaskTimelinePanel({
   );
 
   const headerTitle = title ?? FIXTURE_PANEL_LABELS.title;
+  const displayTitle = headerTitle.replace(/^\s*(?:🖥️|🖥|💻)\s*/u, "");
   const headerSubtitle = subtitle ?? (demo ? FIXTURE_PANEL_LABELS.subtitle : undefined);
   const bannerDetail = bannerDetailFor(events, status);
 
@@ -120,7 +121,7 @@ export default function TaskTimelinePanel({
         <div className="task-timeline__header-text">
           <p className="task-timeline__header-title">
             <span className="task-timeline__header-glyph" aria-hidden>🖥️</span>
-            {headerTitle}
+            {displayTitle}
           </p>
           {headerSubtitle && (
             <p className="task-timeline__header-subtitle">{headerSubtitle}</p>

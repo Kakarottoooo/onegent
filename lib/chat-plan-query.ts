@@ -60,11 +60,38 @@ function buildFlightPlanQuery(constraints: Record<string, unknown>): string {
   return parts.join(" ").trim();
 }
 
+function normalizeActivityEventName(name: string | null): string | null {
+  if (!name) return name;
+  if (/\u72ee\u5b50\u738b/u.test(name) || /\blion\s+king\b/i.test(name)) return "The Lion King";
+  if (/\u6c49\u5bc6\u5c14\u987f/u.test(name) || /\bhamilton\b/i.test(name)) return "Hamilton";
+  return name;
+}
+
+function buildActivityPlanQuery(constraints: Record<string, unknown>): string {
+  const eventName = normalizeActivityEventName(
+    readString(constraints, "event_name", "activity_name", "title", "name", "query"),
+  );
+  const eventType = readString(constraints, "event_type", "activity_type", "genre", "category");
+  const city = readString(constraints, "city", "venue_city", "location", "destination_city");
+  const date = readString(constraints, "event_date", "date", "date_from", "event_date_from");
+  const ticketCount = readNumber(constraints, "ticket_count", "num_tickets", "tickets", "quantity", "party_size", "travelers");
+  const seatType = readString(constraints, "seat_type", "seat_preference");
+
+  const parts = [eventName ? `Find tickets for ${eventName}` : "Find activity tickets"];
+  if (eventType && eventType !== eventName) parts.push(`(${eventType})`);
+  if (city) parts.push(`in ${city}`);
+  if (date) parts.push(`on ${date}`);
+  if (ticketCount) parts.push(`for ${ticketCount} ${ticketCount === 1 ? "person" : "people"}`);
+  if (seatType) parts.push(`with ${seatType} seats`);
+  return parts.join(" ").trim();
+}
+
 export function buildPlanQueryFromConstraints(
   scenario: ConversationalScenario,
   constraints: Record<string, unknown>,
 ): string {
   if (scenario === "flight") return buildFlightPlanQuery(constraints);
+  if (scenario === "activity") return buildActivityPlanQuery(constraints);
 
   const city = readString(constraints, "city", "hotel_city", "arrival_city");
   const date = readString(constraints, "date", "check_in", "departure_date");
@@ -74,8 +101,6 @@ export function buildPlanQueryFromConstraints(
     pieces.push(cuisine ? `Find a ${cuisine} restaurant` : "Find a restaurant");
   } else if (scenario === "hotel") {
     pieces.push("Find a hotel");
-  } else if (scenario === "activity") {
-    pieces.push("Find something to do");
   } else {
     pieces.push("Plan a trip");
   }

@@ -1,8 +1,8 @@
 # Codex - coordination state
 
 > **Branch**: `codex/integrated-preview-20260504`
-> **Last updated**: 2026-05-05
-> **Last commit**: this pass - Phase 0A OpenTable Sirrah closure evidence
+> **Last updated**: 2026-05-07
+> **Last commit**: this pass - layered benchmark merge train integration
 >
 > Claude reads this at session start. I write to it before each push.
 > See `CLAUDE.md` section "coordination protocol".
@@ -26,6 +26,157 @@ Current status after founder dogfood consolidation:
   route-level data fetching before running 5/10/20-case coverage batches.
 
 Completed in latest pass:
+- Integrated the benchmark-fixture/status merge train in dependency order:
+  1. Goal `codex/agent-intake-dashboard @ 5aff168` -> `dec9173`
+     - extended the metadata-only returned-agent intake queue with dependency
+       awareness, supersede/rebase guidance, next-task recommendations, and
+       JSON/Markdown CLI output;
+     - verified agent intake tests 19/19 plus JSON/Markdown CLI smoke.
+  2. Claude `claude/activity-status-followup @ 999d72e` -> `a016d59`
+     - wired the Ticketmaster task-state classifier into the executor, mapping
+       login/account checkpoints to `needs_login -> awaiting_login` while
+       keeping seat-selection handoff as `paused_payment`;
+     - verified Ticketmaster/activity/task-workspace targeted suite 132/132,
+       strict drift 0, and `git diff --check`.
+  3. Agent2 `codex/flight-benchmark-fixtures @ 5d99804` -> `4a0bdce`
+     - added ten Expedia flight-specific Layered Benchmark V2 fixtures and
+       tightened checkout-with-missing-traveler-field evidence to
+       `insufficient_evidence`;
+     - verified layered/Expedia targeted suite 58/58 and the 10-case flight
+       no-live benchmark.
+  4. Agent3 `codex/hotel-benchmark-fixtures @ a49e9f8` -> `e7abc01`
+     - added ten Booking.com hotel-specific Layered Benchmark V2 fixtures with
+       exact no-availability, weak no-availability fallback, room drift,
+       guest/review boundary, account boundary, incomplete artifacts, and stale
+       running-state contracts;
+     - verified layered/hotel targeted suite 19/19 and the 10-case hotel
+       no-live benchmark.
+- Final integrated validation:
+  - `npx tsc --noEmit --pretty false`;
+  - `npm run check-drift` with no drift;
+  - 50-case layered benchmark gate passed with 96% artifact completeness, 0
+    routing mismatches, 4% unknown failure rate, 26% L1 direct pass, and 42%
+    L1+L2 recovered pass;
+  - `npm run gate:phase1 -- --allow-known-drift` 9/9, run id
+    `2026-05-07T07-42-03-976Z`;
+  - `git diff --check HEAD~4 HEAD`.
+- No `.tmp/` artifacts were staged, and no external provider/browser workflow,
+  worker start, live OpenAI call, secret handling, payment/login/verification,
+  or final checkout flow was run during Codex integration.
+
+Completed in previous pass:
+- Integrated the second layered follow-up merge train in dependency order:
+  1. Goal `codex/layered-benchmark-next @ 68222ac` -> `6fbff6b`
+     - added metadata-only returned-agent intake classification, CLI, docs,
+       and queue renderer so Codex can triage branches while side agents keep
+       working;
+     - verified `agent-intake.test.ts` 8/8 and a CLI smoke against a synthetic
+       intake markdown file.
+  2. Claude `claude/activity-followup @ 613acf5` -> `4564241`
+     - added a pure Ticketmaster task-state classifier plus byte-identical
+       worker mirror for checkout reached, user seat selection, user login,
+       external ad tab, local browser disconnect, and unknown failure states;
+     - verified activity/Ticketmaster targeted suite 113/113 and strict drift 0.
+  3. Agent2 `codex/flight-followup @ e2f0708` -> `6a12c0f`
+     - closed Expedia false-success classes for mixed/stale worker evidence,
+       missing traveler-required fields, and explicit wrong-airline fallback
+       matching;
+     - verified Expedia/provider targeted suite 53/53 and strict drift 0.
+  4. Agent3 `codex/hotel-followup @ 1168294` -> `3baf337`
+     - integrated weak hotel no-availability fallback semantics into the
+       existing hotel layered recovery helper, preserving hotel/city/dates/
+       adults/rooms/budget for alternate-provider attempts;
+     - verified hotel layered/retry tests 26/26, `tsc`, strict drift 0,
+       `gate:phase1 --allow-known-drift` 9/9, and `git diff --check`.
+- No `.tmp/` artifacts were staged, and no external provider/browser workflow,
+  worker start, live OpenAI call, secret handling, payment/login/verification,
+  or final checkout flow was run during Codex integration.
+
+Completed in latest pass:
+- Integrated the first layered benchmark merge train in dependency order:
+  1. Goal `codex/layered-benchmark-v2 @ 9ca2fff` -> `653c1bc`
+     - added shared Layered Benchmark V2 schema, no-live corpus, CLI, gate,
+       markdown renderer, and docs;
+     - verified `layered-benchmark-v2.test.ts` 9/9 and 50-case no-live gate.
+  2. Claude `claude/activity-layered-recovery @ 5d65a89` -> `232dc16`
+     - added Ticketmaster layered recovery docs, taxonomy related classes, and
+       no-live recovery tests;
+     - verified activity/Ticketmaster targeted suite 69/69 and confirmed no
+       v1 Ticketmaster runtime file changed.
+  3. Agent2 `codex/flight-layered-recovery @ 42f9794` -> `3ecb4f1`
+     - hardened Expedia wrong-airline/price-only selection evidence and stale
+       mixed-worker classification;
+     - verified Expedia targeted suite 44/44 and strict drift 0.
+  4. Agent3 `codex/hotel-layered-recovery @ 209edc0` -> `2420027`
+     - added hotel layered recovery artifact helper and stricter weak
+       no-availability classification;
+     - verified hotel targeted suite 39/39.
+- Final integrated validation:
+  - `npx tsc --noEmit --pretty false`;
+  - `npm run check-drift` with no drift;
+  - `npm run gate:phase1 -- --allow-known-drift` 9/9, run id
+    `2026-05-07T06-07-07-006Z`;
+  - `git diff --check HEAD~4 HEAD`.
+- No external provider/browser workflow, worker start, live OpenAI call,
+  secret handling, payment/login/verification, or final checkout flow was run
+  during Codex integration.
+
+Previous completed pass:
+- Added the parallel development rule to coordination and system design:
+  - side agents should not wait for Codex's full merge validation when their
+    next task is independent of unmerged code;
+  - Codex owns fast intake triage plus the final merge train;
+  - every side-agent task must close a named product, benchmark, evidence,
+    runtime, task-workspace, or performance gap;
+  - broad abstraction, vertical-specific schema drift, duplicate runtime logic,
+    and app-shell bundle growth are explicitly anti-goals.
+
+Previous completed pass:
+- Added the shared layered-agent intake checklist for the next multi-agent
+  round:
+  - current integration base:
+    `origin/codex/goal-core-reliability-long-run @ 8e91f39`;
+  - expected lanes: Goal layered benchmark, Claude activity recovery, Agent2
+    flight recovery, Agent3 hotel recovery, with Restaurant/OpenTable kept as
+    Codex-owned for this round;
+  - required report shape: branch, commit, worktree, changed files,
+    no-live/live evidence, validation, and whether any provider/runtime files
+    changed;
+  - merge order and reject criteria for dirty base, missing evidence,
+    unsafe boundary drift, unvalidated runtime changes, or unrelated path
+    churn.
+- Added the Layered Benchmark v2 dogfood plan:
+  - measure L1 provider runtime first, then classify evidence-backed failures
+    for L2 Browser Harness eligibility;
+  - L2 is only for selector/click/iframe/fill/progress/unknown-page-mutation
+    failures, not real no-availability, account/session checkpoints,
+    provider/network degradation, local model/env/DB issues, or insufficient
+    evidence;
+  - benchmark ladder starts no-live, then small dogfood batches before larger
+    case matrices.
+- Added the OpenTable restaurant baseline plan, starting from the founder-
+  confirmed Sirrah safe handoff and expanding first to five OpenTable-first
+  NYC cases before 10/20 case matrices.
+
+Previous completed pass:
+- Recorded founder-confirmed Ticketmaster activity dogfood closure:
+  - request family: Broadway / The Lion King in New York on May 30;
+  - latest traced job `46028ee4-c644-4df7-bee5-7bcb7d2713f9`;
+  - runtime path was existing v1 `ticketmaster-rpa` through the local
+    Stagehand/Playwright stack, not Browser Harness;
+  - worker evidence showed session cookies injected, `May 30, 2026 @ 2:00 PM`
+    parsed, calendar view opened, May 30 2:00 PM selected, right-side
+    `Find Tickets` clicked from the main Ticketmaster page, and the provider
+    event page reached;
+  - founder confirmed the path is now closed for initial dogfood. Remaining
+    polish: suppress/ignore external ad tabs, make the seat-selection
+    checkpoint explicit, and recover stale `running/loading` jobs if the local
+    browser/CDP session closes.
+- Updated `PHASE_STATUS.md` and `BUG_INBOX.md` with the Activity/Ticketmaster
+  status and clarified that Browser Harness remains a separate v2 spike/design
+  lane.
+
+Previous completed pass:
 - Recorded founder dogfood OpenTable closure for Phase 0A:
   - request: "book Sirrah in New York next Thursday at 8pm for 1 person";
   - job `3bbe2ac4-c4cd-409f-8c11-6a83d2f81485`, session

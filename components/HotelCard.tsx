@@ -19,6 +19,7 @@ interface HotelCardProps {
   checkIn?: string;
   checkOut?: string;
   guests?: number;
+  sessionId?: string | null;
   /** Called after a booking job is created — inject inline task card */
   onJobCreated?: (jobId: string) => void;
   /** Hide the "Book with Agent" booking CTA. Used inside multi-party
@@ -27,7 +28,7 @@ interface HotelCardProps {
   hideBookingActions?: boolean;
 }
 
-export default function HotelCard({ card, index, checkIn, checkOut, guests, onJobCreated, hideBookingActions = false }: HotelCardProps) {
+export default function HotelCard({ card, index, checkIn, checkOut, guests, sessionId, onJobCreated, hideBookingActions = false }: HotelCardProps) {
   const { hotel } = card;
   const [booking, setBooking] = useState(false);
   const [noProfile, setNoProfile] = useState(false);
@@ -103,7 +104,8 @@ export default function HotelCard({ card, index, checkIn, checkOut, guests, onJo
   async function proceedWithProfile(profile: { id: number; first_name: string; last_name: string; email: string; phone: string; address_line1?: string; city?: string; state?: string; zip?: string; country?: string }) {
     localStorage.setItem("active_profile_id", String(profile.id));
     try {
-      const sessionId = localStorage.getItem("session_id") ?? crypto.randomUUID();
+      const bookingSessionId = sessionId?.trim() || localStorage.getItem("session_id") || crypto.randomUUID();
+      if (!localStorage.getItem("session_id")) localStorage.setItem("session_id", bookingSessionId);
       // apiKey may be empty when using a server-side env key — only require model to be set.
       const savedModel = getBrowserModelAsLegacy();
       const agentModel = savedModel.model ? savedModel : undefined;
@@ -139,8 +141,8 @@ export default function HotelCard({ card, index, checkIn, checkOut, guests, onJo
         `You are starting on ${siteName} — find the listing for "${hotel.name}", select the room, and fill all guest info.`,
         stayOnSite,
         `If ${siteName} fails (no results, error, or blocked), navigate to the hotel's direct site instead: ${directFallbackUrl}`,
-        "Fill in all guest information and card details.",
-        "Stop before entering CVV or clicking the final payment confirmation button.",
+        "Fill saved profile fields requested by the page, then continue to the final review area.",
+        "Leave the final site action for the user.",
       ].filter(Boolean).join(" ");
 
       // Include contact info inline so the agent always has it,
@@ -175,7 +177,7 @@ export default function HotelCard({ card, index, checkIn, checkOut, guests, onJo
       const createRes = await fetch("/api/booking-jobs", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ session_id: sessionId, trip_label: hotel.name, steps: [step] }),
+        body: JSON.stringify({ session_id: bookingSessionId, trip_label: hotel.name, steps: [step] }),
       });
       if (createRes.ok) {
         const { jobId } = await createRes.json();

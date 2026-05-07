@@ -339,9 +339,13 @@ interface ActivityNormalizationResult {
 }
 
 /**
- * Keep one-show ticket requests on the activity path when the model sees
- * city + date + attraction and over-generalizes into trip planning.
- * Explicit trip/itinerary phrasing still stays on the trip planner path.
+ * The LLM sometimes treats "Broadway/Lion King in New York on June 1" as a
+ * city-trip seed because it sees city + date + attraction. For a single named
+ * show or event, keep the product path activity-only so the router asks for
+ * activity fields rather than trip dates, nights, and traveler count.
+ *
+ * This is intentionally narrow: explicit trip/itinerary phrasing still stays
+ * on the trip planner path.
  */
 export function normalizeSingleActivityTicketRequest(
   state: IntentState,
@@ -400,6 +404,8 @@ export function normalizeSingleActivityTicketRequest(
 }
 
 function looksLikeSingleActivityTicketRequest(message: string): boolean {
+  const lower = message.toLowerCase();
+
   const hasActivityCue =
     /\b(broadway|the lion king|lion king|hamilton|musical|theater|theatre|show|event|tickets?)\b/i.test(message) ||
     /(?:\u767e\u8001\u6c47|\u72ee\u5b50\u738b|\u6f14\u51fa|\u97f3\u4e50\u5267|\u8bdd\u5267|\u5267\u9662|\u7968)/u.test(message);
@@ -407,7 +413,7 @@ function looksLikeSingleActivityTicketRequest(message: string): boolean {
   if (!hasActivityCue) return false;
 
   const explicitTripCue =
-    /\b(plan|itinerary|trip|vacation|hotel|flight|restaurant)\b/i.test(message) ||
+    /\b(plan|itinerary|trip|vacation|hotel|flight|restaurant)\b/i.test(lower) ||
     /(?:\u884c\u7a0b|\u65c5\u884c|\u9152\u5e97|\u673a\u7968|\u9910\u5385)/u.test(message);
 
   return !explicitTripCue;

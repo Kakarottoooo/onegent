@@ -117,4 +117,22 @@ describe("ChatRequestSchema", () => {
     expect(result.success).toBe(true);
     if (result.success) expect(result.data.message).toBe("test");
   });
+
+  it("accepts confirmed constraints from a confirm card", () => {
+    const result = ChatRequestSchema.safeParse({
+      message: "帮我订一个5月20号到24号的纽约酒店，预算300一天",
+      category_hint: "hotel",
+      confirmed_constraints: {
+        city: "New York",
+        check_in: "2026-05-20",
+        check_out: "2026-05-24",
+        budget_per_night: 300,
+      },
+    });
+
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.confirmed_constraints?.check_in).toBe("2026-05-20");
+    }
+  });
 });

@@ -318,6 +318,7 @@ export async function runActivityPipeline(
 ): Promise<{
   activityRecommendations: ActivityRecommendationCard[];
   missing_fields: string[];
+  suggested_refinements: string[];
 }> {
   console.log("[activity-pipeline] intent", JSON.stringify({
     event_type: intent.event_type,
@@ -332,7 +333,7 @@ export async function runActivityPipeline(
   if (!intent.city) missing.push("city");
   if (!intent.event_name && !intent.event_type) missing.push("event_name or event_type");
   if (missing.length > 0) {
-    return { activityRecommendations: [], missing_fields: missing };
+    return { activityRecommendations: [], missing_fields: missing, suggested_refinements: [] };
   }
 
   const haveSeatGeek = Boolean(process.env.SEATGEEK_CLIENT_ID);
@@ -340,7 +341,7 @@ export async function runActivityPipeline(
   console.log(`[activity-pipeline] env haveSeatGeek=${haveSeatGeek} haveTicketmaster=${haveTicketmaster}`);
   if (!haveSeatGeek && !haveTicketmaster) {
     console.warn("[activity-pipeline] no provider keys configured");
-    return { activityRecommendations: [], missing_fields: ["provider_api_key"] };
+    return { activityRecommendations: [], missing_fields: ["provider_api_key"], suggested_refinements: [] };
   }
 
   // Parallel fetch — always call both providers when their keys exist. We used
@@ -360,7 +361,28 @@ export async function runActivityPipeline(
   );
 
   if (mergedActivities.length === 0) {
-    return { activityRecommendations: [], missing_fields: [] };
+    const nearby = await fetchNearbyDateAlternatives(intent, haveTicketmaster);
+    if (nearby.length > 0) {
+      const note = buildNearbyDateNote(intent, nearby);
+      console.log("[activity-pipeline] exact_date_empty_showing_nearby", JSON.stringify({
+        requestedDate: intent.date_from,
+        nearbyCount: nearby.length,
+        nearbyDates: Array.from(new Set(nearby.map((a) => extractActivityDate(a)).filter(Boolean))).slice(0, 5),
+      }));
+      return {
+        activityRecommendations: buildRecommendationCards(nearby, intent, note),
+        missing_fields: [],
+        suggested_refinements: [note],
+      };
+    }
+    console.log("[activity-pipeline] empty_result", JSON.stringify({
+      reason: "no_provider_events_after_filters",
+      event_name: intent.event_name,
+      city: intent.city,
+      date_from: intent.date_from,
+      date_to: intent.date_to,
+    }));
+    return { activityRecommendations: [], missing_fields: [], suggested_refinements: [] };
   }
 
   const activities = mergedActivities;
@@ -403,16 +425,111 @@ export async function runActivityPipeline(
     merged.push({ ...card, rank: merged.length + 1 });
   }
 
-  return { activityRecommendations: merged.slice(0, 5), missing_fields: [] };
+  return { activityRecommendations: merged.slice(0, 5), missing_fields: [], suggested_refinements: [] };
+}
+
+async function fetchNearbyDateAlternatives(
+  intent: ActivityIntent,
+  haveTicketmaster: boolean
+): Promise<Activity[]> {
+  if (!isExactSingleDateIntent(intent)) return [];
+  const requestedDate = intent.date_from!;
+  const nearbyIntent: ActivityIntent = {
+    ...intent,
+    date_from: offsetDateIso(requestedDate, -3),
+    date_to: offsetDateIso(requestedDate, 3),
+  };
+  console.log("[activity-pipeline] exact date returned no matches; trying nearby window", JSON.stringify({
+    requestedDate,
+    nearbyFrom: nearbyIntent.date_from,
+    nearbyTo: nearbyIntent.date_to,
+  }));
+
+  const [sgEvents, tmActivitiesRaw] = await Promise.all([
+    fetchSeatGeek(nearbyIntent),
+    haveTicketmaster ? fetchTicketmaster(nearbyIntent) : Promise.resolve([] as Activity[]),
+  ]);
+  const sgActivities = sgEvents.map(toActivity).filter((a): a is Activity => a !== null);
+  const nearby = mergeBySource([...sgActivities, ...tmActivitiesRaw]);
+  const multiSource = nearby.filter((a) => a.sources.length > 1).length;
+  console.log(
+    `[activity-pipeline] nearby sg=${sgActivities.length} tm=${tmActivitiesRaw.length} merged=${nearby.length} multi_source=${multiSource}`
+  );
+  if (nearby.length > 0) {
+    console.log("[activity-pipeline] nearby candidates", JSON.stringify(nearby.slice(0, 5).map((a) => ({
+      title: a.title,
+      date: extractActivityDate(a),
+      venue: a.venue_name,
+      city: a.venue_city,
+      sources: a.sources.map((s) => s.provider),
+    }))));
+  }
+  return nearby;
+}
+
+function isExactSingleDateIntent(intent: ActivityIntent): boolean {
+  return Boolean(intent.date_from && intent.date_to && intent.date_from === intent.date_to);
+}
+
+function extractActivityDate(activity: Activity): string {
+  return activity.datetime_local?.slice(0, 10) ?? "";
+}
+
+function buildNearbyDateNote(intent: ActivityIntent, alternatives: Activity[]): string {
+  const requested = intent.date_from ?? "that date";
+  const nearbyDates = Array.from(new Set(alternatives.map((a) => extractActivityDate(a)).filter(Boolean))).slice(0, 3);
+  const dateText = nearbyDates.length > 0 ? nearbyDates.join(", ") : "nearby dates";
+  return `No exact ${requested} listings came back; showing nearby ${intent.event_name ?? "event"} dates: ${dateText}.`;
+}
+
+function buildRecommendationCards(
+  activities: Activity[],
+  intent: ActivityIntent,
+  resultNote?: string
+): ActivityRecommendationCard[] {
+  const budgeted =
+    typeof intent.budget_max_per_ticket === "number" && intent.budget_max_per_ticket > 0
+      ? activities.filter((a) => a.price_min > 0 && a.price_min <= intent.budget_max_per_ticket!)
+      : activities;
+  const pool = budgeted.length > 0 ? budgeted : activities;
+
+  const bestMatch = pool.slice(0, 5).map((a, i) => buildCard(a, i + 1, "best_match", intent, resultNote));
+
+  const cheapest = [...pool]
+    .filter((a) => a.price_min > 0)
+    .sort((a, b) => a.price_min - b.price_min)
+    .slice(0, 3)
+    .map((a, i) => buildCard(a, bestMatch.length + i + 1, "cheapest", intent, resultNote));
+
+  const premiumSeats =
+    intent.seat_type === "premium"
+      ? [...pool]
+          .filter((a) => (a.price_max ?? 0) > 0)
+          .sort((a, b) => (b.price_max ?? 0) - (a.price_max ?? 0))
+          .slice(0, 2)
+          .map((a, i) => buildCard(a, bestMatch.length + cheapest.length + i + 1, "premium_seats", intent, resultNote))
+      : [];
+
+  const seen = new Set<string>();
+  const merged: ActivityRecommendationCard[] = [];
+  for (const card of [...bestMatch, ...cheapest, ...premiumSeats]) {
+    if (seen.has(card.activity.id)) continue;
+    seen.add(card.activity.id);
+    merged.push({ ...card, rank: merged.length + 1 });
+  }
+
+  return merged.slice(0, 5);
 }
 
 function buildCard(
   activity: Activity,
   rank: number,
   group: ActivityRecommendationCard["group"],
-  intent: ActivityIntent
+  intent: ActivityIntent,
+  resultNote?: string
 ): ActivityRecommendationCard {
   const reasons: string[] = [];
+  if (resultNote) reasons.push(resultNote);
   if (group === "best_match") reasons.push("Top match for your search");
   if (group === "cheapest") reasons.push(`Lowest available ticket at $${activity.price_min}`);
   if (group === "premium_seats") reasons.push(`Premium seating up to $${activity.price_max ?? "?"}`);

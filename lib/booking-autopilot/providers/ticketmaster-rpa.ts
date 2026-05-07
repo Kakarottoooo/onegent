@@ -11,7 +11,7 @@
  * and wait for the user to sign in (URL leaves the auth domain). Cookies from
  * .ticketmaster-cookies.json usually prevent this, but it's a safety net.
  */
-import type { Page } from "playwright";
+import type { Locator, Page } from "playwright";
 
 type TraceFn = (msg: string) => void;
 
@@ -20,10 +20,12 @@ export interface TicketmasterRpaResult {
   currentUrl: string;
   activePage?: Page;
   needs_login?: boolean;
+  handoff_ready?: boolean;
+  summary?: string;
   error?: string;
 }
 
-interface TargetDateTime {
+export interface TargetDateTime {
   monthName: string;   // "May"
   monthIndex: number;  // 0-based (4 = May)
   day: number;         // 20
@@ -31,37 +33,625 @@ interface TargetDateTime {
   time?: string;       // "7:00 PM" — optional
 }
 
+// ── Stage classifier ────────────────────────────────────────────────────────
+// Used to route the main flow and to emit clean trace lines. Each stage maps
+// to a deterministic outcome:
+//   artist_calendar   → click target slot OR stop with "select showtime"
+//   event_seat_map    → poll Reserve Tickets; user selects seat in browser
+//   ticket_selected   → Reserve Tickets enabled; click and continue
+//   account           → hand off to user (sign-in / create-account boundary)
+//   checkout          → handed off to existing guest/payment pipeline
+//   unknown           → caller decides
+export type TicketmasterStage =
+  | "artist_calendar"
+  | "event_seat_map"
+  | "ticket_selected"
+  | "account"
+  | "checkout"
+  | "unknown";
+
+export interface TicketmasterStageSnapshot {
+  url: string;
+  hasSeatMap: boolean;
+  hasYourTicketsPanel: boolean;
+  hasSubtotal: boolean;
+  hasReserveButton: boolean;
+  reserveEnabled: boolean;
+  hasSeatSelection: boolean;
+  hasSignInHeading: boolean;
+  hasEmailInput: boolean;
+}
+
+/**
+ * Pure stage classifier — operates on a DOM snapshot so it can be unit-tested
+ * without a live browser. Caller collects the snapshot via page.evaluate.
+ */
+export function classifyTicketmasterStage(
+  snap: TicketmasterStageSnapshot,
+): TicketmasterStage {
+  const url = snap.url.toLowerCase();
+  // Account stage: highest priority — never proceed past this boundary even
+  // if other DOM signals are present (Ticketmaster sometimes layers a sign-in
+  // overlay over the seat map).
+  if (
+    /\/auth\.|auth\.ticketmaster|\.ticketmaster\.[^/]+\/identity\b|\/login\b|\/signin\b|create.?account/i.test(url) ||
+    snap.hasSignInHeading ||
+    (snap.hasEmailInput && /sign.?in|create.?account|checkout/i.test(url))
+  ) {
+    return "account";
+  }
+  if (/checkout\.ticketmaster|\.ticketmaster\.[^/]+\/checkout\b|payments\.ticketmaster/i.test(url)) {
+    return "checkout";
+  }
+  if (snap.hasReserveButton && snap.reserveEnabled && snap.hasSeatSelection) {
+    return "ticket_selected";
+  }
+  if (snap.hasSeatMap || snap.hasYourTicketsPanel || snap.hasReserveButton || /\/event\//i.test(url)) {
+    return "event_seat_map";
+  }
+  if (/\/artist\/|\/attraction\/|\/.+-tickets\//i.test(url)) {
+    return "artist_calendar";
+  }
+  return "unknown";
+}
+
+async function readTicketmasterStageSnapshot(page: Page): Promise<TicketmasterStageSnapshot> {
+  const url = (() => { try { return page.url(); } catch { return ""; } })();
+  const dom = await page.evaluate(() => {
+    const isVisible = (el: Element): boolean => {
+      const r = (el as HTMLElement).getBoundingClientRect();
+      return r.width > 0 && r.height > 0;
+    };
+    const hasSeatMap = !!document.querySelector(
+      'canvas, [data-testid*="seat" i], iframe[src*="seat" i], [class*="seat-map" i]'
+    );
+    const allText = (document.body?.innerText ?? "").toLowerCase();
+    const hasYourTicketsPanel = /your tickets/i.test(document.body?.innerText ?? "");
+    const hasSubtotal = /subtotal/i.test(document.body?.innerText ?? "");
+    const buttons = Array.from(document.querySelectorAll<HTMLElement>('button, [role="button"]'))
+      .filter(isVisible);
+    // startsWith semantics — TM renders Reserve buttons with a trailing
+    // chevron / arrow icon. Anchored regex would miss "Reserve Tickets >".
+    const reserveBtn = buttons.find(el => {
+      const t = (el.textContent ?? "").trim().toLowerCase();
+      return t.startsWith("reserve tickets") ||
+        t.startsWith("continue to checkout") ||
+        t === "reserve" || t.startsWith("reserve ");
+    });
+    const hasReserveButton = !!reserveBtn;
+    const reserveEnabled = !!reserveBtn && !(
+      reserveBtn.hasAttribute("disabled") ||
+      reserveBtn.getAttribute("aria-disabled") === "true" ||
+      (reserveBtn as HTMLButtonElement).disabled
+    );
+    // "Seat selected" signal: a section/row/seat label rendered in the
+    // right-hand Your Tickets panel — TM uses elements like
+    //   "Section 100", "Row C", "Seat 3" or "100/C/3" patterns.
+    const hasSeatSelection =
+      /section\s+\w+.*\brow\s+\w+|\brow\s+\w+.*\bseat\s+\d+|sec(?:tion)?\s*\d+\s*[\/,]\s*row/i.test(allText) ||
+      /\bsection\b.*\bseat\b/i.test(allText.slice(0, 4000));
+    const hasSignInHeading = !!Array.from(
+      document.querySelectorAll<HTMLElement>('h1, h2, h3, [role="heading"]')
+    ).find(el => /sign in or create account|sign in|create account/i.test((el.textContent ?? "").trim()));
+    const hasEmailInput = !!document.querySelector(
+      'input[type="email"], input[name="email" i], input[id*="email" i], input[autocomplete="email"]'
+    );
+    return {
+      hasSeatMap,
+      hasYourTicketsPanel,
+      hasSubtotal,
+      hasReserveButton,
+      reserveEnabled,
+      hasSeatSelection,
+      hasSignInHeading,
+      hasEmailInput,
+    };
+  }).catch(() => ({
+    hasSeatMap: false,
+    hasYourTicketsPanel: false,
+    hasSubtotal: false,
+    hasReserveButton: false,
+    reserveEnabled: false,
+    hasSeatSelection: false,
+    hasSignInHeading: false,
+    hasEmailInput: false,
+  }));
+  return { url, ...dom };
+}
+
 const MONTH_NAMES = [
   "january", "february", "march", "april", "may", "june",
   "july", "august", "september", "october", "november", "december",
 ];
+
+const MONTH_ALIASES = new Map<string, number>([
+  ...MONTH_NAMES.map((name, index) => [name, index] as const),
+  ["jan", 0],
+  ["feb", 1],
+  ["mar", 2],
+  ["apr", 3],
+  ["jun", 5],
+  ["jul", 6],
+  ["aug", 7],
+  ["sep", 8],
+  ["sept", 8],
+  ["oct", 9],
+  ["nov", 10],
+  ["dec", 11],
+]);
+
+function normalizeTargetTime(value: string | undefined): string | undefined {
+  if (!value) return undefined;
+  return value.toUpperCase().replace(/\s+/g, " ");
+}
+
+function parseTaskTime(task: string): string | undefined {
+  const timeMatch = task.match(/\b(\d{1,2}:\d{2}\s*(?:am|pm))\b/i);
+  return normalizeTargetTime(timeMatch?.[1]);
+}
 
 /**
  * Pull the target date/time out of the task string. ActivityCard.tsx builds
  * task text like: `Book tickets for "X" on May 20, 2026.` — we look for a
  * `${month} ${day}, ${year}` substring plus an optional "H:MM AM/PM" time.
  */
-function parseTargetDateTime(task: string): TargetDateTime | null {
+export function parseTargetDateTime(task: string): TargetDateTime | null {
+  const isoMatch = task.match(/\b(20\d{2})-(\d{2})-(\d{2})(?:[T\s](\d{1,2}):(\d{2})(?::\d{2})?)?\b/);
+  if (isoMatch) {
+    const year = parseInt(isoMatch[1], 10);
+    const monthIndex = parseInt(isoMatch[2], 10) - 1;
+    const day = parseInt(isoMatch[3], 10);
+    const hour = isoMatch[4] == null ? null : parseInt(isoMatch[4], 10);
+    const minute = isoMatch[5] == null ? null : parseInt(isoMatch[5], 10);
+    if (monthIndex >= 0 && monthIndex < 12 && day >= 1 && day <= 31) {
+      const time = hour == null || minute == null
+        ? parseTaskTime(task)
+        : normalizeTargetTime(`${hour % 12 === 0 ? 12 : hour % 12}:${String(minute).padStart(2, "0")} ${hour >= 12 ? "PM" : "AM"}`);
+      return {
+        monthName: MONTH_NAMES[monthIndex].slice(0, 1).toUpperCase() + MONTH_NAMES[monthIndex].slice(1),
+        monthIndex,
+        day,
+        year,
+        time,
+      };
+    }
+  }
+
   const monthPattern = new RegExp(
-    `\\b(${MONTH_NAMES.join("|")})\\s+(\\d{1,2}),?\\s+(20\\d{2})\\b`,
+    `\\b(${Array.from(MONTH_ALIASES.keys()).join("|")})\\.?\\s+(\\d{1,2}),?\\s+(20\\d{2})\\b`,
     "i"
   );
   const match = task.match(monthPattern);
   if (!match) return null;
-  const monthName = match[1];
-  const monthIndex = MONTH_NAMES.indexOf(monthName.toLowerCase());
+  const monthName = match[1].toLowerCase().replace(/\.$/, "");
+  const monthIndex = MONTH_ALIASES.get(monthName) ?? -1;
   const day = parseInt(match[2], 10);
   const year = parseInt(match[3], 10);
   if (isNaN(day) || isNaN(year) || monthIndex < 0) return null;
 
-  const timeMatch = task.match(/\b(\d{1,2}:\d{2}\s*(?:am|pm))\b/i);
   return {
-    monthName: monthName.slice(0, 1).toUpperCase() + monthName.slice(1).toLowerCase(),
+    monthName: MONTH_NAMES[monthIndex].slice(0, 1).toUpperCase() + MONTH_NAMES[monthIndex].slice(1),
     monthIndex,
     day,
     year,
-    time: timeMatch?.[1].toUpperCase().replace(/\s+/g, " "),
+    time: parseTaskTime(task),
   };
+}
+
+async function safeScrollIntoView(locator: Locator): Promise<void> {
+  // Stagehand v3 strips locator.scrollIntoViewIfNeeded — observed live:
+  // "best.locator.scrollIntoViewIfNeeded is not a function" → caller crash.
+  // Try Playwright's native first; fall back to locator.evaluate scrollIntoView;
+  // last resort: silently skip (click({force:true}) handles offscreen).
+  const loc = locator as unknown as {
+    scrollIntoViewIfNeeded?: (opts?: { timeout?: number }) => Promise<void>;
+    evaluate?: (fn: (el: Element) => void) => Promise<void>;
+  };
+  try {
+    if (typeof loc.scrollIntoViewIfNeeded === "function") {
+      await loc.scrollIntoViewIfNeeded({ timeout: 800 }).catch(() => { /* ignore */ });
+      return;
+    }
+    if (typeof loc.evaluate === "function") {
+      await loc.evaluate((el: Element) => {
+        (el as HTMLElement).scrollIntoView({ behavior: "auto", block: "center" });
+      }).catch(() => { /* ignore */ });
+    }
+  } catch {
+    // any sync throw — caller can still click({force:true})
+  }
+}
+
+async function locatorLabel(locator: Locator): Promise<string> {
+  // Same defensive pattern as locatorLooksVisible — Stagehand v3 may
+  // strip textContent / getAttribute on certain locator depths. Type-
+  // guard before calling and swallow synchronous throws.
+  const loc = locator as unknown as {
+    textContent?: (opts?: { timeout?: number }) => Promise<string | null>;
+    getAttribute?: (n: string, opts?: { timeout?: number }) => Promise<string | null>;
+    evaluate?: <R>(fn: (el: Element) => R) => Promise<R>;
+  };
+  let text: string | null = "";
+  let aria: string | null = "";
+  let title: string | null = "";
+  try {
+    if (typeof loc.textContent === "function") {
+      text = await loc.textContent({ timeout: 300 }).catch(() => "");
+    }
+    if (typeof loc.getAttribute === "function") {
+      [aria, title] = await Promise.all([
+        loc.getAttribute("aria-label", { timeout: 300 }).catch(() => ""),
+        loc.getAttribute("title", { timeout: 300 }).catch(() => ""),
+      ]);
+    }
+  } catch {
+    // continue with whatever we got
+  }
+  // Final fallback: pull via locator.evaluate if available.
+  if (!text && !aria && !title && typeof loc.evaluate === "function") {
+    const blob = await loc.evaluate((el: Element) => {
+      const e = el as HTMLElement;
+      return [
+        e.textContent ?? "",
+        e.getAttribute("aria-label") ?? "",
+        e.getAttribute("title") ?? "",
+      ].join(" ");
+    }).catch(() => "");
+    return (blob ?? "").replace(/\s+/g, " ").trim();
+  }
+  return `${text ?? ""} ${aria ?? ""} ${title ?? ""}`.replace(/\s+/g, " ").trim();
+}
+
+async function locatorLooksVisible(locator: Locator): Promise<boolean> {
+  // Stagehand v3 proxy aggressively strips locator-level inspection
+  // methods. boundingBox / evaluate / isVisible may each throw
+  // synchronously with "is not a function" depending on proxy depth —
+  // observed live (job @ restart-3004-20260506T010207, then 010205):
+  //   first crash:  "locator.boundingBox is not a function"
+  //   second crash: "locator.evaluate is not a function"
+  // Defensive: typeof-guard each path; if all are stripped, assume the
+  // element is visible and let downstream click({timeout, force}) gate
+  // the action. Never crash the whole RPA on a visibility check.
+  try {
+    const loc = locator as unknown as {
+      boundingBox?: (opts?: { timeout?: number }) => Promise<{ width: number; height: number } | null>;
+      isVisible?: (opts?: { timeout?: number }) => Promise<boolean>;
+      evaluate?: <R>(fn: (el: Element) => R) => Promise<R>;
+    };
+    if (typeof loc.boundingBox === "function") {
+      const box = await loc.boundingBox({ timeout: 300 }).catch(() => null);
+      if (box) return box.width >= 24 && box.height >= 16;
+    }
+    if (typeof loc.isVisible === "function") {
+      const ok = await loc.isVisible({ timeout: 300 }).catch(() => false);
+      if (ok === true) return true;
+    }
+    if (typeof loc.evaluate === "function") {
+      const ok = await loc.evaluate((el: Element) => {
+        const r = (el as HTMLElement).getBoundingClientRect();
+        return r.width >= 24 && r.height >= 16;
+      }).catch(() => false);
+      if (typeof ok === "boolean") return ok;
+    }
+  } catch {
+    // any unexpected synchronous throw → fall through to default
+  }
+  // All inspection paths stripped — assume visible; click will gate.
+  return true;
+}
+
+function targetSlotScore(label: string, target: TargetDateTime): number {
+  const lower = label.toLowerCase();
+  if (!lower) return 0;
+  let score = 0;
+  const month = target.monthName.toLowerCase();
+  const monthShort = month.slice(0, 3);
+  if (lower.includes(month) || lower.includes(monthShort)) score += 3;
+  const day = String(target.day);
+  const dayPadded = day.padStart(2, "0");
+  const dayRx = new RegExp(`\\b${day}(st|nd|rd|th)?\\b|\\b${dayPadded}\\b`);
+  if (dayRx.test(lower)) score += 3;
+  if (target.time && lower.includes(target.time.toLowerCase())) score += 2;
+  if (lower.includes(String(target.year))) score += 1;
+  return score;
+}
+
+async function openCalendarViewWithLocators(page: Page, trace: TraceFn): Promise<boolean> {
+  const controls = page.locator('button, a, [role="button"], [role="tab"]');
+  const count = Math.min(await controls.count().catch(() => 0), 160);
+  for (let i = 0; i < count; i++) {
+    const item = controls.nth(i);
+    if (!(await locatorLooksVisible(item))) continue;
+    const label = await locatorLabel(item);
+    const lower = label.toLowerCase();
+    if (!lower.includes("calendar") || lower.includes("add to calendar")) continue;
+    await safeScrollIntoView(item);
+    await item.click({ timeout: 1500, force: true }).catch(() => {});
+    trace(`[tm-rpa] Opened calendar view via locator: "${label.slice(0, 80)}"`);
+    await page.waitForTimeout(700);
+    return true;
+  }
+  trace("[tm-rpa] Calendar view locator not found; continuing with current view");
+  return false;
+}
+
+async function clickCalendarSlotWithLocators(page: Page, target: TargetDateTime, trace: TraceFn): Promise<boolean> {
+  // HARD wallclock budget: this loop iterated 260 elements at ~600ms each
+  // under Stagehand's stripped-locator timeouts → 156s hang per call,
+  // pushing the worker step to 600s timeout. Cap the budget at 6s.
+  const deadline = Date.now() + 6000;
+  const controls = page.locator('a, button, [role="button"], [role="link"]');
+  const count = Math.min(await controls.count().catch(() => 0), 80);
+  let best: { locator: Locator; label: string; score: number } | null = null;
+  const samples: string[] = [];
+  for (let i = 0; i < count; i++) {
+    if (Date.now() > deadline) {
+      trace(`[tm-rpa] Locator slot scan budget exceeded at i=${i}/${count}`);
+      break;
+    }
+    const item = controls.nth(i);
+    if (!(await locatorLooksVisible(item))) continue;
+    const label = await locatorLabel(item);
+    if (!label) continue;
+    const lower = label.toLowerCase();
+    if (
+      samples.length < 8 &&
+      (/\b\d{1,2}:\d{2}\s*(am|pm)\b/i.test(label) ||
+        MONTH_NAMES.some((month) => lower.includes(month) || lower.includes(month.slice(0, 3))))
+    ) {
+      samples.push(label.slice(0, 100));
+    }
+    const score = targetSlotScore(label, target);
+    if (score >= (target.time ? 7 : 6) && (!best || score > best.score)) {
+      best = { locator: item, label, score };
+    }
+  }
+  if (!best) {
+    trace(`[tm-rpa] Locator slot scan found no target; samples=${JSON.stringify(samples)}`);
+    return false;
+  }
+  await safeScrollIntoView(best.locator);
+  await best.locator.click({ timeout: 2000, force: true });
+  trace(`[tm-rpa] Calendar slot clicked via locator: "${best.label.slice(0, 100)}" score=${best.score}`);
+  return true;
+}
+
+async function clickFirstAvailableSlotWithLocators(page: Page, trace: TraceFn): Promise<boolean> {
+  // Same 6s wallclock budget — see clickCalendarSlotWithLocators.
+  const deadline = Date.now() + 6000;
+  const controls = page.locator('a, button, [role="button"], [role="link"]');
+  const count = Math.min(await controls.count().catch(() => 0), 80);
+  const samples: string[] = [];
+  for (let i = 0; i < count; i++) {
+    if (Date.now() > deadline) {
+      trace(`[tm-rpa] First-slot locator scan budget exceeded at i=${i}/${count}`);
+      break;
+    }
+    const item = controls.nth(i);
+    if (!(await locatorLooksVisible(item))) continue;
+    const label = await locatorLabel(item);
+    if (!label) continue;
+    if (samples.length < 8 && /\b\d{1,2}:\d{2}\s*(am|pm)\b/i.test(label)) {
+      samples.push(label.slice(0, 100));
+    }
+    if (!/^\s*\d{1,2}:\d{2}\s*(am|pm)\b/i.test(label)) continue;
+    await safeScrollIntoView(item);
+    await item.click({ timeout: 2000, force: true });
+    trace(`[tm-rpa] Fallback slot clicked via locator: "${label.slice(0, 100)}"`);
+    return true;
+  }
+  trace(`[tm-rpa] Locator fallback found no time slots; samples=${JSON.stringify(samples)}`);
+  return false;
+}
+
+// startsWith semantics — "Find Tickets >" / "Find Tickets ›" / "Find Tickets❯"
+// all match because TM renders the button label as text + chevron icon
+// (sometimes a literal ">", sometimes a unicode arrow, sometimes SVG).
+// The previous anchored regex /^\s*(find tickets...)\s*$/i missed all
+// trailing-character variants — observed live with the screenshot showing
+// "Find Tickets >".
+export function looksLikeFindTicketsLabel(label: string): boolean {
+  const trimmed = label.trim().toLowerCase();
+  if (!trimmed) return false;
+  return ["find tickets", "buy tickets", "get tickets"].some(p => trimmed.startsWith(p));
+}
+
+async function clickFindTicketsWithDomScan(page: Page, trace: TraceFn): Promise<boolean> {
+  const source = `
+(function() {
+  var controls = [];
+  var seen = new Set();
+  function isVisible(el) {
+    if (!el || !el.getBoundingClientRect) return false;
+    var r = el.getBoundingClientRect();
+    if (r.width < 24 || r.height < 16) return false;
+    var s = window.getComputedStyle ? window.getComputedStyle(el) : null;
+    if (s && (s.visibility === "hidden" || s.display === "none" || Number(s.opacity || "1") === 0)) return false;
+    return true;
+  }
+  function labelFor(el) {
+    return [
+      el.innerText || "",
+      el.textContent || "",
+      el.getAttribute && el.getAttribute("aria-label") || "",
+      el.getAttribute && el.getAttribute("title") || ""
+    ].join(" ").replace(/\\s+/g, " ").trim();
+  }
+  function looksLike(label) {
+    var t = String(label || "").trim().toLowerCase();
+    return t.indexOf("find tickets") === 0 || t.indexOf("buy tickets") === 0 || t.indexOf("get tickets") === 0;
+  }
+  function hasEventInfoAncestor(el) {
+    var current = el;
+    var hops = 0;
+    while (current && hops < 8) {
+      var text = String(current.innerText || current.textContent || "");
+      if (/event information/i.test(text)) return true;
+      current = current.parentElement;
+      hops++;
+    }
+    return false;
+  }
+  function add(el) {
+    if (!el || seen.has(el) || !isVisible(el)) return;
+    seen.add(el);
+    var label = labelFor(el);
+    if (looksLike(label)) controls.push({ el: el, label: label });
+  }
+  function scanRoot(root, depth) {
+    if (!root || depth > 4) return;
+    var nodes = [];
+    try {
+      nodes = Array.from(root.querySelectorAll('a, button, [role="button"], [role="link"], [aria-label*="Find Tickets" i], [data-testid*="find" i]'));
+    } catch {}
+    nodes.forEach(add);
+    var all = [];
+    try { all = Array.from(root.querySelectorAll("*")); } catch {}
+    for (var i = 0; i < all.length && i < 2500; i++) {
+      var child = all[i];
+      if (child && child.shadowRoot) scanRoot(child.shadowRoot, depth + 1);
+    }
+  }
+  var bodyText = String(document.body && (document.body.innerText || document.body.textContent) || "");
+  var hasEventInfoPanel = /event information/i.test(bodyText);
+  scanRoot(document, 0);
+  controls = controls.filter(function(item) {
+    if (!hasEventInfoPanel) return false;
+    if (hasEventInfoAncestor(item.el)) return true;
+    var r = item.el.getBoundingClientRect && item.el.getBoundingClientRect();
+    return !!r && r.left > (window.innerWidth * 0.45);
+  });
+  if (!controls.length) {
+    return { clicked: false, candidates: 0, eventInfo: hasEventInfoPanel };
+  }
+  controls.sort(function(a, b) {
+    var aScope = a.el.closest && a.el.closest('aside, [role="dialog"], [aria-modal], section, div') || a.el;
+    var bScope = b.el.closest && b.el.closest('aside, [role="dialog"], [aria-modal], section, div') || b.el;
+    var ae = /event information/i.test(aScope.innerText || "") ? 1 : 0;
+    var be = /event information/i.test(bScope.innerText || "") ? 1 : 0;
+    return be - ae;
+  });
+  var chosen = controls[0];
+  chosen.el.scrollIntoView({ behavior: "auto", block: "center" });
+  chosen.el.click();
+  return { clicked: true, label: chosen.label.slice(0, 120), candidates: controls.length, eventInfo: true };
+})()
+`;
+  const result = await page.evaluate(source).catch((err: Error) => {
+    trace(`[tm-rpa] Find Tickets DOM scan failed: ${err.message?.slice(0, 80)}`);
+    return null;
+  });
+  const clicked = result as null | { clicked?: boolean; label?: string; candidates?: number; eventInfo?: boolean };
+  if (clicked?.clicked) {
+    trace(`[tm-rpa] Clicked Find Tickets via main-page DOM scan: "${(clicked.label ?? "").slice(0, 80)}" candidates=${clicked.candidates ?? 0}`);
+    return true;
+  }
+  if (clicked?.eventInfo) {
+    trace("[tm-rpa] Event-info drawer visible but Find Tickets not matched in main-page DOM scan");
+  }
+  return false;
+}
+
+async function clickFindTicketsWithLocators(page: Page, trace: TraceFn): Promise<boolean> {
+  const deadline = Date.now() + 3000;
+  // Strategy A: Playwright :has-text() — substring-based, no regex. The
+  // most reliable path when the button text has trailing chevrons/arrows.
+  const hasTextSelectors = [
+    'button:has-text("Find Tickets")',
+    'a:has-text("Find Tickets")',
+    '[role="button"]:has-text("Find Tickets")',
+    '[role="link"]:has-text("Find Tickets")',
+    'button:has-text("Buy Tickets")',
+    'a:has-text("Buy Tickets")',
+    'button:has-text("Get Tickets")',
+  ];
+  for (const sel of hasTextSelectors) {
+    if (Date.now() > deadline) break;
+    try {
+      const loc = page.locator(sel).first();
+      const count = await loc.count().catch(() => 0);
+      if (count === 0) continue;
+      const visible = await locatorLooksVisible(loc);
+      if (!visible) continue;
+      await safeScrollIntoView(loc);
+      await loc.click({ timeout: 2000, force: true });
+      trace(`[tm-rpa] Clicked Find Tickets via :has-text("${sel}")`);
+      return true;
+    } catch (err) {
+      trace(`[tm-rpa] Find Tickets :has-text strategy error sel="${sel}" — ${(err as Error).message?.slice(0, 60)}`);
+    }
+  }
+
+  // Strategy B: scan all clickables, match via startsWith.
+  const controls = page.locator('a, button, [role="button"], [role="link"]');
+  const count = Math.min(await controls.count().catch(() => 0), 60);
+  for (let i = 0; i < count; i++) {
+    if (Date.now() > deadline) {
+      trace(`[tm-rpa] Find Tickets locator scan budget exceeded at i=${i}/${count}`);
+      break;
+    }
+    const item = controls.nth(i);
+    if (!(await locatorLooksVisible(item))) continue;
+    const label = await locatorLabel(item);
+    if (!looksLikeFindTicketsLabel(label)) continue;
+    await safeScrollIntoView(item);
+    await item.click({ timeout: 2000, force: true });
+    trace(`[tm-rpa] Clicked Find Tickets via locator scan: "${label.slice(0, 80)}"`);
+    return true;
+  }
+  return false;
+}
+
+function parseMonthYearText(text: string): { monthIndex: number; year: number } | null {
+  const lower = text.toLowerCase();
+  const entries = Array.from(MONTH_ALIASES.entries()).sort((a, b) => b[0].length - a[0].length);
+  const monthEntry = entries.find(([label]) => new RegExp(`\\b${label}\\.?\\b`, "i").test(lower));
+  const yearMatch = lower.match(/\b(20\d{2})\b/);
+  if (!monthEntry || !yearMatch) return null;
+  return { monthIndex: monthEntry[1], year: parseInt(yearMatch[1], 10) };
+}
+
+async function readCurrentCalendarMonthWithLocators(page: Page, trace: TraceFn): Promise<{ monthIndex: number; year: number } | null> {
+  const controls = page.locator('button, a, [role="button"], [role="tab"], [aria-selected], [aria-current]');
+  const count = Math.min(await controls.count().catch(() => 0), 220);
+  let fallback: { monthIndex: number; year: number; label: string } | null = null;
+  for (let i = 0; i < count; i++) {
+    const item = controls.nth(i);
+    const label = await locatorLabel(item);
+    if (!label) continue;
+    const parsed = parseMonthYearText(label);
+    if (!parsed) continue;
+    const selected = /selected|current|active/i.test(label);
+    const hit = { ...parsed, label };
+    if (selected) {
+      trace(`[tm-rpa] Calendar month read via locator: "${label.slice(0, 80)}"`);
+      return hit;
+    }
+    fallback ??= hit;
+  }
+  if (fallback) {
+    trace(`[tm-rpa] Calendar month read via locator fallback: "${fallback.label.slice(0, 80)}"`);
+    return { monthIndex: fallback.monthIndex, year: fallback.year };
+  }
+  trace("[tm-rpa] Calendar month locator fallback found no month/year labels");
+  return null;
+}
+
+async function clickMonthNavWithLocators(page: Page, wantNext: boolean, trace: TraceFn): Promise<boolean> {
+  const controls = page.locator('button, a, [role="button"]');
+  const count = Math.min(await controls.count().catch(() => 0), 180);
+  const labels = wantNext ? ["next month", "next"] : ["previous month", "previous", "prev month", "prev"];
+  for (let i = 0; i < count; i++) {
+    const item = controls.nth(i);
+    if (!(await locatorLooksVisible(item))) continue;
+    const label = (await locatorLabel(item)).toLowerCase();
+    if (!labels.some((needle) => label === needle || label.includes(needle))) continue;
+    await safeScrollIntoView(item);
+    await item.click({ timeout: 1500, force: true });
+    trace(`[tm-rpa] Month nav clicked via locator: "${label.slice(0, 80)}"`);
+    return true;
+  }
+  return false;
 }
 
 /**
@@ -85,23 +675,103 @@ async function readCurrentCalendarMonth(page: Page, trace: TraceFn): Promise<{ m
   }).catch(() => "");
 
   if (!text) {
-    trace("[tm-rpa] Calendar month tab not found (no selected/current element)");
-    return null;
+    trace("[tm-rpa] Calendar month tab not found via evaluate; trying locator fallback");
+    return await readCurrentCalendarMonthWithLocators(page, trace);
   }
-  const lower = text.toLowerCase();
-  const monthIndex = MONTH_NAMES.findIndex(m => lower.includes(m));
-  const yearMatch = lower.match(/\b(20\d{2})\b/);
-  if (monthIndex < 0 || !yearMatch) {
+  const parsed = parseMonthYearText(text);
+  if (!parsed) {
     trace(`[tm-rpa] Could not parse current month from tab text: "${text.slice(0, 80)}"`);
-    return null;
+    return await readCurrentCalendarMonthWithLocators(page, trace);
   }
-  return { monthIndex, year: parseInt(yearMatch[1], 10) };
+  return parsed;
+}
+
+/**
+ * Click the target month TAB directly (e.g. "June 2026") if visible.
+ *
+ * TM month strip is "Mar / Apr / **May** / Jun / Jul" (current selected).
+ * Each tab has aria-label like "June 2026" or "June 2026, 33 Events" and
+ * the active one is annotated "May 2026 selected, 31 Events".
+ *
+ * This is the CORRECT navigation primitive — `aria-label="next items"` is
+ * the carousel scroll arrow (scrolls the tab strip horizontally without
+ * changing the selected month). Observed live (job 16790107): clicking
+ * "next items" 12 times still left "May 2026 selected" → infinite loop.
+ *
+ * Returns true if a target tab was found AND clicked.
+ */
+async function clickTargetMonthTab(
+  page: Page,
+  target: TargetDateTime,
+  trace: TraceFn,
+): Promise<boolean> {
+  const monthName = target.monthName;
+  const year = target.year;
+  // Strategy A: aria-label exact-prefix match via Playwright locator.
+  // `[aria-label^="June 2026"]` cannot match "next items" / chevrons.
+  const ariaSelectors = [
+    `button[aria-label^="${monthName} ${year}"]`,
+    `[role="tab"][aria-label^="${monthName} ${year}"]`,
+    `[role="button"][aria-label^="${monthName} ${year}"]`,
+    `a[aria-label^="${monthName} ${year}"]`,
+  ];
+  for (const sel of ariaSelectors) {
+    try {
+      const loc = page.locator(sel).first();
+      const count = await loc.count().catch(() => 0);
+      if (count === 0) continue;
+      const visible = await locatorLooksVisible(loc);
+      if (!visible) continue;
+      await safeScrollIntoView(loc);
+      await loc.click({ timeout: 1500, force: true });
+      trace(`[tm-rpa] Month tab clicked via aria-label selector "${sel}"`);
+      return true;
+    } catch (err) {
+      trace(`[tm-rpa] Month tab aria-label sel error sel="${sel}" — ${(err as Error).message?.slice(0, 60)}`);
+    }
+  }
+  // Strategy B: page.evaluate scan for any element whose aria-label
+  // STARTS WITH the month+year string AND is NOT the currently-selected
+  // tab (avoid clicking the active tab — it's a no-op).
+  const clickedTab = await page.evaluate((tab: { month: string; year: number }) => {
+    const isVisible = (el: Element): boolean => {
+      const r = (el as HTMLElement).getBoundingClientRect();
+      return r.width > 0 && r.height > 0;
+    };
+    const prefix = `${tab.month} ${tab.year}`.toLowerCase();
+    const nodes = Array.from(document.querySelectorAll<HTMLElement>('button, [role="tab"], [role="button"], a'))
+      .filter(isVisible);
+    const hit = nodes.find(el => {
+      const aria = (el.getAttribute("aria-label") ?? "").toLowerCase().trim();
+      // Exclude carousel scrollers — they have aria-label like
+      // "next items" / "previous items" with NO month/year mention.
+      if (/^(next|previous)\s+items?$/.test(aria)) return false;
+      // Avoid the already-selected tab (clicking it is a no-op).
+      if (aria.includes("selected")) return false;
+      return aria.startsWith(prefix);
+    });
+    if (!hit) return false;
+    hit.scrollIntoView({ behavior: "auto", block: "center" });
+    hit.click();
+    return true;
+  }, { month: monthName, year }).catch(() => false);
+  if (clickedTab) {
+    trace(`[tm-rpa] Month tab clicked via evaluate aria-label prefix: "${monthName} ${year}"`);
+    return true;
+  }
+  return false;
 }
 
 /**
  * Advance / rewind the calendar until the active month matches `target`.
- * Uses the Next Month / Previous Month chevrons visible at the right side of
- * the month-tab strip. Caps at 12 hops so a bad DOM match can't infinite-loop.
+ *
+ * Strategy:
+ *   1. Try clicking the target month TAB directly ("June 2026") — instant.
+ *   2. If the target tab isn't currently in the visible strip, click the
+ *      `aria-label="next items"` / `previous items` carousel scrollers to
+ *      reveal more tabs, then retry.
+ *
+ * Caps at 12 hops so a bad DOM match can't infinite-loop.
  */
 async function navigateToTargetMonth(page: Page, target: TargetDateTime, trace: TraceFn): Promise<boolean> {
   const MAX_HOPS = 12;
@@ -116,8 +786,24 @@ async function navigateToTargetMonth(page: Page, target: TargetDateTime, trace: 
       trace(`[tm-rpa] Month nav: on target ${target.monthName} ${target.year}`);
       return true;
     }
+
+    // Strategy 1: click the target month tab directly. Cheapest + most
+    // reliable when the tab is visible in the strip.
+    const direct = await clickTargetMonthTab(page, target, trace);
+    if (direct) {
+      await page.waitForTimeout(900);
+      continue;
+    }
+
+    // Strategy 2: target tab is offscreen — scroll the carousel.
+    // CRITICAL: only match strict aria-label, not substring "next" — the
+    // previous match-anything-with-"next" caught "next items" (carousel)
+    // ALSO when the actual "Next Month" tab existed; either way the
+    // tab-direct click above runs FIRST, so this is now safe.
     const wantNext = diff > 0;
-    const labels = wantNext ? ["next month", "next"] : ["previous month", "previous", "prev month", "prev"];
+    const labels = wantNext
+      ? ["next items", "next month", "next"]
+      : ["previous items", "previous month", "prev month", "previous", "prev"];
     const clicked = await page.evaluate((labelList: string[]) => {
       const isVisible = (el: Element): boolean => {
         const r = (el as HTMLElement).getBoundingClientRect();
@@ -137,8 +823,11 @@ async function navigateToTargetMonth(page: Page, target: TargetDateTime, trace: 
     }, labels).catch(() => false);
 
     if (!clicked) {
-      trace(`[tm-rpa] Month nav: ${wantNext ? "next" : "previous"} button not found (diff=${diff})`);
-      return false;
+      const locatorClicked = await clickMonthNavWithLocators(page, wantNext, trace);
+      if (!locatorClicked) {
+        trace(`[tm-rpa] Month nav: ${wantNext ? "next" : "previous"} button not found (diff=${diff})`);
+        return false;
+      }
     }
     trace(`[tm-rpa] Month nav: clicked ${wantNext ? "next" : "previous"} (current=${current.year}-${String(current.monthIndex + 1).padStart(2, "0")}, diff=${diff})`);
     await page.waitForTimeout(900);
@@ -148,11 +837,118 @@ async function navigateToTargetMonth(page: Page, target: TargetDateTime, trace: 
 }
 
 /**
+ * String-based page.evaluate that bypasses tsx function serialization.
+ *
+ * tsx (the worker's TS runtime) injects helper variables into transpiled
+ * function bodies in some configurations — when those functions are then
+ * serialized via Function.prototype.toString and shipped to Stagehand's
+ * page.evaluate, the helpers reference globals that don't exist in the
+ * page context, throwing "StagehandEvalError: Uncaught" — observed live
+ * for cookie dismiss / clickCalendarSlot / clickFirstAvailableSlot.
+ *
+ * Passing the source as a STRING bypasses the function-to-string path
+ * entirely; the page evaluates raw JS without tsx's helper injection.
+ *
+ * Also: evaluate-side el.click() seems to compound the StagehandEvalError
+ * (the OpenTable provider's comment in stagehand-executor.ts:4720 documents
+ * this). So we ONLY tag the winner with a data-attr inside evaluate, and
+ * click via Playwright locator afterwards — separating concerns.
+ */
+async function evaluateAndTagBestSlot(
+  page: Page,
+  target: TargetDateTime,
+  pickName: string,
+): Promise<{ tagged: boolean; label: string; candidates: number; score: number }> {
+  const args = {
+    monthName: target.monthName,
+    monthShort: target.monthName.slice(0, 3),
+    day: target.day,
+    year: target.year,
+    time: target.time ?? "",
+    pickName,
+    minScore: target.time ? 7 : 6,
+  };
+  // String-based source — no tsx transpilation, no function serialization.
+  // Each var is read from the JSON-injected `args` object.
+  const source = `
+(function() {
+  var args = ${JSON.stringify(args)};
+  var monthLower = args.monthName.toLowerCase();
+  var monthShort = args.monthShort.toLowerCase();
+  var dayStr = String(args.day);
+  var dayPadded = dayStr.length === 1 ? "0" + dayStr : dayStr;
+  var timeLower = (args.time || "").toLowerCase();
+  var nodes = Array.from(document.querySelectorAll('a, button, [role="button"], [role="link"]'));
+  var best = null;
+  var candidates = 0;
+  for (var i = 0; i < nodes.length; i++) {
+    var el = nodes[i];
+    var rect = el.getBoundingClientRect();
+    if (rect.width <= 0 || rect.height <= 0) continue;
+    if (el.offsetWidth < 30 || el.offsetHeight < 20) continue;
+    candidates++;
+    var text = (el.textContent || "").toLowerCase().replace(/\\s+/g, " ").trim();
+    var aria = (el.getAttribute("aria-label") || "").toLowerCase();
+    var combined = text + " " + aria;
+    if (!combined.trim()) continue;
+    var score = 0;
+    if (combined.indexOf(monthLower) >= 0 || combined.indexOf(monthShort) >= 0) score += 3;
+    var dayRx = new RegExp("\\\\b" + dayStr + "(st|nd|rd|th)?\\\\b|\\\\b" + dayPadded + "\\\\b");
+    if (dayRx.test(combined)) score += 3;
+    if (timeLower && combined.indexOf(timeLower) >= 0) score += 2;
+    if (combined.indexOf(String(args.year)) >= 0) score += 1;
+    if (score >= args.minScore && (!best || score > best.score)) {
+      best = { el: el, score: score, label: text.slice(0, 80) };
+    }
+  }
+  if (!best) return { tagged: false, label: "", candidates: candidates, score: 0 };
+  // Clear any prior tag (re-runs).
+  var prior = document.querySelectorAll('[data-onegent-tm-pick="' + args.pickName + '"]');
+  for (var j = 0; j < prior.length; j++) prior[j].removeAttribute("data-onegent-tm-pick");
+  best.el.setAttribute("data-onegent-tm-pick", args.pickName);
+  return { tagged: true, label: best.label, candidates: candidates, score: best.score };
+})()
+`;
+  const r = await page.evaluate(source).catch(() => null);
+  if (!r || typeof r !== "object") {
+    return { tagged: false, label: "", candidates: 0, score: 0 };
+  }
+  const obj = r as { tagged?: boolean; label?: string; candidates?: number; score?: number };
+  return {
+    tagged: obj.tagged === true,
+    label: obj.label ?? "",
+    candidates: obj.candidates ?? 0,
+    score: obj.score ?? 0,
+  };
+}
+
+/**
  * Click the calendar/event slot that matches the target date (and time if
  * provided). Ticketmaster attraction pages list events as <a> or <button>
  * elements; we match by day number + month name in the visible text.
  */
 async function clickCalendarSlot(page: Page, target: TargetDateTime, trace: TraceFn): Promise<boolean> {
+  // Strategy 1: string-based evaluate scan + tag, then locator click.
+  // Bypasses both StagehandEvalError AND slow 260-locator iteration.
+  const tag = await evaluateAndTagBestSlot(page, target, "calendar-slot");
+  trace(`[tm-rpa] Calendar slot scan: tagged=${tag.tagged} candidates=${tag.candidates} score=${tag.score} label="${tag.label.slice(0, 80)}"`);
+  if (tag.tagged) {
+    try {
+      const loc = page.locator('[data-onegent-tm-pick="calendar-slot"]').first();
+      const count = await loc.count().catch(() => 0);
+      if (count > 0) {
+        await safeScrollIntoView(loc);
+        await loc.click({ timeout: 2500, force: true });
+        trace(`[tm-rpa] Calendar slot clicked via tag locator: "${tag.label.slice(0, 80)}" score=${tag.score}`);
+        return true;
+      }
+    } catch (err) {
+      trace(`[tm-rpa] Calendar slot tag locator click failed: ${(err as Error).message?.slice(0, 80)}`);
+    }
+  }
+
+  // Strategy 2: legacy function-based evaluate (kept for graceful degradation;
+  // may still hit StagehandEvalError but won't crash thanks to .catch).
   const result = await page.evaluate(
     ({ monthName, day, year, time }: { monthName: string; day: number; year: number; time?: string }) => {
       const isVisible = (el: Element): boolean => {
@@ -215,6 +1011,9 @@ async function clickCalendarSlot(page: Page, target: TargetDateTime, trace: Trac
     trace(`[tm-rpa] Calendar slot clicked: "${result.matchedLabel}" (${result.candidates} candidates scanned)`);
     return true;
   }
+  if (await clickCalendarSlotWithLocators(page, target, trace)) {
+    return true;
+  }
   trace(`[tm-rpa] No calendar slot matched ${target.monthName} ${target.day}, ${target.year}${target.time ? ` ${target.time}` : ""} (${result.candidates} candidates scanned)`);
   return false;
 }
@@ -265,6 +1064,9 @@ async function clickFirstAvailableSlot(page: Page, trace: TraceFn): Promise<bool
     trace(`[tm-rpa] Fallback: clicked first available slot → "${result.label}" (${result.candidates} slots total)`);
     return true;
   }
+  if (await clickFirstAvailableSlotWithLocators(page, trace)) {
+    return true;
+  }
   trace(`[tm-rpa] Fallback: no time-slot buttons found on page`);
   return false;
 }
@@ -275,18 +1077,32 @@ async function clickFirstAvailableSlot(page: Page, trace: TraceFn): Promise<bool
  * button. We wait for it to appear then click it.
  */
 async function clickFindTickets(page: Page, trace: TraceFn): Promise<boolean> {
-  // Wait up to 8s for the button to render in the sidebar.
-  const deadline = Date.now() + 8000;
+  // Wait up to 16s for the button to render in the sidebar (TM renders
+  // the panel asynchronously — 8s was not enough on slower hosts).
+  const deadline = Date.now() + 16000;
+  let loop = 0;
   while (Date.now() < deadline) {
+    loop++;
+    if (await clickFindTicketsWithDomScan(page, trace)) {
+      return true;
+    }
     const clicked = await page.evaluate(() => {
       const isVisible = (el: Element): boolean => {
         const r = (el as HTMLElement).getBoundingClientRect();
         return r.width > 0 && r.height > 0;
       };
+      const hasEventInfoPanel = /event information/i.test(document.body?.innerText ?? "");
       const selector = 'a, button, [role="button"], [role="link"]';
       const nodes = Array.from(document.querySelectorAll<HTMLElement>(selector)).filter(isVisible);
-      const pattern = /^\s*(find tickets|buy tickets|get tickets)\s*$/i;
-      const candidate = nodes.find(el => pattern.test((el.textContent ?? "").trim()));
+      // startsWith semantics — handles "Find Tickets >" / "Find Tickets ›"
+      // / "Find Tickets❯" (the button has a chevron icon after the label).
+      const candidate = nodes.find(el => {
+        if (!hasEventInfoPanel) return false;
+        const r = el.getBoundingClientRect();
+        if (r.left <= window.innerWidth * 0.45) return false;
+        const t = (el.textContent ?? "").trim().toLowerCase();
+        return t.startsWith("find tickets") || t.startsWith("buy tickets") || t.startsWith("get tickets");
+      });
       if (candidate) {
         candidate.scrollIntoView({ behavior: "auto", block: "center" });
         candidate.click();
@@ -299,9 +1115,12 @@ async function clickFindTickets(page: Page, trace: TraceFn): Promise<boolean> {
       trace(`[tm-rpa] Clicked Find Tickets: "${clicked}"`);
       return true;
     }
+    if ((loop === 1 || loop % 5 === 0) && await clickFindTicketsWithLocators(page, trace)) {
+      return true;
+    }
     await page.waitForTimeout(400);
   }
-  trace("[tm-rpa] Find Tickets button not found within 8s");
+  trace("[tm-rpa] Find Tickets button not found within 16s");
   return false;
 }
 
@@ -327,59 +1146,132 @@ async function waitForEventPage(page: Page, trace: TraceFn, timeoutMs = 15000): 
   return false;
 }
 
-/**
- * Poll the "Reserve Tickets" button. Ticketmaster disables it until seats
- * are selected. We give the user up to 10min to pick seats — long enough for
- * anyone, short enough that abandoned sessions don't hang forever.
- */
-async function pollReserveTickets(page: Page, trace: TraceFn, timeoutMs = 10 * 60 * 1000): Promise<boolean> {
-  const deadline = Date.now() + timeoutMs;
-  let lastLog = 0;
-  while (Date.now() < deadline) {
-    const state = await page.evaluate(() => {
-      const isVisible = (el: Element): boolean => {
-        const r = (el as HTMLElement).getBoundingClientRect();
-        return r.width > 0 && r.height > 0;
-      };
-      const btns = Array.from(document.querySelectorAll<HTMLButtonElement>("button, [role='button']"))
-        .filter(isVisible);
-      const pattern = /reserve tickets|checkout|continue to checkout/i;
-      const btn = btns.find(el => pattern.test((el.textContent ?? "").trim()));
-      if (!btn) return { present: false, enabled: false };
-      const disabled = btn.hasAttribute("disabled") ||
-        btn.getAttribute("aria-disabled") === "true" ||
-        (btn as HTMLButtonElement).disabled;
-      return { present: true, enabled: !disabled };
-    }).catch(() => ({ present: false, enabled: false }));
+export function isTicketmasterTicketOptionsPage(url: string): boolean {
+  const lower = url.toLowerCase();
+  return /ticketmaster\./i.test(lower) && lower.includes("/event/");
+}
 
-    if (state.present && state.enabled) {
-      trace("[tm-rpa] Reserve Tickets enabled — clicking");
-      const clicked = await page.evaluate(() => {
+async function hasTicketmasterSeatSelectionSurface(page: Page): Promise<boolean> {
+  return page.evaluate(() => {
+    return !!document.querySelector('canvas, [data-testid*="seat" i], iframe[src*="seat" i], [class*="seat-map" i]');
+  }).catch(() => false);
+}
+
+type ReserveAttempt = "evaluate" | "locator-click" | "locator-evaluate";
+
+/**
+ * Multi-strategy click for the Reserve Tickets button. Each strategy is
+ * traced once with kind + outcome; subsequent attempts only fire if the
+ * previous returns false. Order is cheapest-first (DOM evaluate) → richest
+ * (Playwright locator with full event chain).
+ */
+async function clickReserveTickets(page: Page, trace: TraceFn): Promise<boolean> {
+  const strategies: Array<{ kind: ReserveAttempt; fn: () => Promise<boolean> }> = [
+    {
+      kind: "evaluate",
+      fn: () => page.evaluate(() => {
         const isVisible = (el: Element): boolean => {
           const r = (el as HTMLElement).getBoundingClientRect();
           return r.width > 0 && r.height > 0;
         };
-        const btns = Array.from(document.querySelectorAll<HTMLButtonElement>("button, [role='button']"))
+        const btns = Array.from(document.querySelectorAll<HTMLElement>("button, [role='button']"))
           .filter(isVisible);
-        const pattern = /reserve tickets|checkout|continue to checkout/i;
-        const btn = btns.find(el => pattern.test((el.textContent ?? "").trim()));
+        const btn = btns.find(el => {
+          const t = (el.textContent ?? "").trim().toLowerCase();
+          return t.startsWith("reserve tickets") ||
+            t.startsWith("continue to checkout") ||
+            t === "reserve" || t.startsWith("reserve ");
+        });
         if (!btn) return false;
         btn.scrollIntoView({ behavior: "auto", block: "center" });
         btn.click();
         return true;
-      }).catch(() => false);
-      return clicked;
-    }
+      }).catch(() => false),
+    },
+    {
+      kind: "locator-click",
+      fn: async () => {
+        const loc = page.locator('button:has-text("Reserve Tickets"), [role="button"]:has-text("Reserve Tickets")').first();
+        const count = await loc.count().catch(() => 0);
+        if (count === 0) return false;
+        const visible = await locatorLooksVisible(loc);
+        if (!visible) return false;
+        await safeScrollIntoView(loc);
+        await loc.click({ timeout: 2000, force: true }).catch(() => {});
+        return true;
+      },
+    },
+    {
+      kind: "locator-evaluate",
+      fn: async () => {
+        const loc = page.locator('button:has-text("Reserve Tickets"), [role="button"]:has-text("Reserve Tickets")').first();
+        const count = await loc.count().catch(() => 0);
+        if (count === 0) return false;
+        const ok = await loc.evaluate((el) => {
+          if ((el as HTMLButtonElement).disabled) return false;
+          (el as HTMLElement).scrollIntoView({ behavior: "auto", block: "center" });
+          (el as HTMLElement).click();
+          return true;
+        }).catch(() => false);
+        return ok === true;
+      },
+    },
+  ];
+  for (const s of strategies) {
+    const ok = await s.fn();
+    trace(`[tm-rpa] Reserve click strategy=${s.kind} → ${ok ? "OK" : "miss"}`);
+    if (ok) return true;
+  }
+  return false;
+}
 
-    // Heartbeat log every 30s so the user sees we're still waiting.
-    if (Date.now() - lastLog > 30000) {
-      trace(`[tm-rpa] Waiting for user to select seats… Reserve Tickets ${state.present ? "visible but disabled" : "not yet rendered"}`);
+/**
+ * Poll the "Reserve Tickets" button. Ticketmaster disables it until seats
+ * are selected. We give the user up to 10min to pick seats — long enough for
+ * anyone, short enough that abandoned sessions don't hang forever.
+ *
+ * Returns one of:
+ *   "clicked"     — button became enabled and we clicked it
+ *   "account"     — page transitioned to sign-in / create-account boundary
+ *                   while waiting (user hit Reserve manually OR TM forces auth)
+ *   "timeout"     — neither happened within timeoutMs
+ */
+async function pollReserveTickets(
+  page: Page,
+  trace: TraceFn,
+  timeoutMs = 8 * 60 * 1000,
+): Promise<"clicked" | "account" | "timeout"> {
+  const deadline = Date.now() + timeoutMs;
+  let lastLog = 0;
+  while (Date.now() < deadline) {
+    const snap = await readTicketmasterStageSnapshot(page);
+    const stage = classifyTicketmasterStage(snap);
+
+    // Account stage gets priority — abandon polling immediately.
+    if (stage === "account") {
+      trace(`[tm-rpa] Reserve poll: account boundary reached (url=${snap.url.slice(0, 100)}) — stopping`);
+      return "account";
+    }
+    if (snap.hasReserveButton && snap.reserveEnabled) {
+      trace(`[tm-rpa] Reserve enabled (url=${snap.url.slice(0, 100)} yourTickets=${snap.hasYourTicketsPanel} subtotal=${snap.hasSubtotal} seatSel=${snap.hasSeatSelection}) — clicking`);
+      const ok = await clickReserveTickets(page, trace);
+      if (ok) return "clicked";
+      // Click failed (rare); keep polling.
+    }
+    if (Date.now() - lastLog > 20000) {
+      trace(
+        `[tm-rpa] Reserve poll: stage=${stage} ` +
+        `url=${snap.url.slice(0, 80)} ` +
+        `yourTickets=${snap.hasYourTicketsPanel} subtotal=${snap.hasSubtotal} ` +
+        `reserve=${snap.hasReserveButton ? (snap.reserveEnabled ? "enabled" : "disabled") : "absent"} ` +
+        `seatSelected=${snap.hasSeatSelection}`
+      );
       lastLog = Date.now();
     }
     await page.waitForTimeout(2000);
   }
-  trace("[tm-rpa] Reserve Tickets poll timed out (10 min)");
-  return false;
+  trace("[tm-rpa] Reserve Tickets poll timed out (8 min)");
+  return "timeout";
 }
 
 /**
@@ -584,18 +1476,20 @@ export async function bookTicketmasterProgrammatic(
 
   trace(`[tm-rpa] Starting Ticketmaster RPA. Current URL: ${getUrl().slice(0, 140)}`);
 
-  // Auth gate (cookies may have expired).
-  if (getUrl().includes("auth.ticketmaster")) {
-    trace("[tm-rpa] Landed on auth URL — waiting for user sign-in");
-    const ok = await waitForAuthClear(page, trace);
-    if (!ok) {
-      return {
-        reached_checkout: false,
-        currentUrl: getUrl(),
-        needs_login: true,
-        error: "User did not sign in within 10 minutes.",
-      };
-    }
+  // Initial stage assessment — if we landed on the account/sign-in page,
+  // immediately hand off to user. Do NOT block 10 minutes.
+  const startSnap = await readTicketmasterStageSnapshot(page);
+  const startStage = classifyTicketmasterStage(startSnap);
+  trace(`[tm-rpa] Initial stage: ${startStage} (yourTickets=${startSnap.hasYourTicketsPanel} reserve=${startSnap.hasReserveButton}/${startSnap.reserveEnabled} seatMap=${startSnap.hasSeatMap})`);
+  if (startStage === "account") {
+    return {
+      reached_checkout: false,
+      currentUrl: getUrl(),
+      activePage: page,
+      needs_login: true,
+      handoff_ready: true,
+      summary: "Ticketmaster needs you to sign in to continue. Open the live browser to complete sign-in — we won't enter account details for you.",
+    };
   }
 
   const target = parseTargetDateTime(task);
@@ -613,16 +1507,32 @@ export async function bookTicketmasterProgrammatic(
     await page.waitForTimeout(1500);
     let slotClicked = false;
     if (target) {
-      // Advance the calendar to the target month if it's not already showing.
-      await navigateToTargetMonth(page, target, trace);
+      // Locator-based helpers may throw "X is not a function" under
+      // Stagehand v3 proxy stripping. Wrap each so a single helper crash
+      // can't kill the whole RPA — primary page.evaluate paths take over.
+      await openCalendarViewWithLocators(page, trace).catch((err: Error) => {
+        trace(`[tm-rpa] openCalendarView via-locators threw (continuing): ${err.message?.slice(0, 80)}`);
+      });
+      await navigateToTargetMonth(page, target, trace).catch((err: Error) => {
+        trace(`[tm-rpa] navigateToTargetMonth threw (continuing): ${err.message?.slice(0, 80)}`);
+      });
       await page.waitForTimeout(500);
-      slotClicked = await clickCalendarSlot(page, target, trace);
+      slotClicked = await clickCalendarSlot(page, target, trace).catch((err: Error) => {
+        trace(`[tm-rpa] clickCalendarSlot threw (continuing): ${err.message?.slice(0, 80)}`);
+        return false;
+      });
       if (!slotClicked) {
         trace("[tm-rpa] Target date not matched — falling back to first available slot");
-        slotClicked = await clickFirstAvailableSlot(page, trace);
+        slotClicked = await clickFirstAvailableSlot(page, trace).catch((err: Error) => {
+          trace(`[tm-rpa] clickFirstAvailableSlot threw (continuing): ${err.message?.slice(0, 80)}`);
+          return false;
+        });
       }
     } else {
-      slotClicked = await clickFirstAvailableSlot(page, trace);
+      slotClicked = await clickFirstAvailableSlot(page, trace).catch((err: Error) => {
+        trace(`[tm-rpa] clickFirstAvailableSlot threw (continuing): ${err.message?.slice(0, 80)}`);
+        return false;
+      });
     }
 
     if (slotClicked) {
@@ -638,41 +1548,72 @@ export async function bookTicketmasterProgrammatic(
   }
 
   // Auth gate mid-flow (clicking Find Tickets can trigger sign-in).
-  if (getUrl().includes("auth.ticketmaster")) {
-    trace("[tm-rpa] Auth redirect during navigation — waiting for sign-in");
-    const ok = await waitForAuthClear(page, trace);
-    if (!ok) {
+  // Treat as a handoff boundary, not a 10-min blocker.
+  {
+    const midSnap = await readTicketmasterStageSnapshot(page);
+    if (classifyTicketmasterStage(midSnap) === "account") {
+      trace("[tm-rpa] Auth boundary mid-flow (post Find-Tickets) — handing off");
       return {
         reached_checkout: false,
         currentUrl: getUrl(),
+        activePage: page,
         needs_login: true,
-        error: "User did not sign in within 10 minutes.",
+        handoff_ready: true,
+        summary: "Ticketmaster prompted for sign-in after the calendar selection. Open the live browser to sign in — we won't enter account details for you.",
       };
     }
   }
 
-  // Layer 1B: wait for user to pick seats, then auto-click Reserve Tickets.
-  // If we never made it to /event/, still poll in case user navigated manually.
-  const reserved = await pollReserveTickets(page, trace);
-  if (!reserved) {
+  // Layer 1B: keep watching while the user chooses a ticket option. Once the
+  // Reserve/Continue button becomes enabled, click it and continue to the next
+  // page. If no selection happens within the bounded wait, return a clean
+  // reviewable state instead of timing out the worker step.
+  const ticketOptionsReady =
+    isTicketmasterTicketOptionsPage(getUrl()) ||
+    await hasTicketmasterSeatSelectionSurface(page);
+  if (ticketOptionsReady) {
+    trace(`[tm-rpa] Ticket options page ready; waiting for user ticket selection: ${getUrl().slice(0, 140)}`);
+  } else {
+    trace(`[tm-rpa] Ticket options surface not confirmed yet; watching for Reserve/Continue: ${getUrl().slice(0, 140)}`);
+  }
+
+  const pollResult = await pollReserveTickets(page, trace);
+  if (pollResult === "account") {
     return {
       reached_checkout: false,
       currentUrl: getUrl(),
-      error: "User did not select seats within 10 minutes (Reserve Tickets never clicked).",
+      activePage: page,
+      needs_login: true,
+      handoff_ready: true,
+      summary: "Ticketmaster moved to the sign-in / create-account step. Open the live browser to sign in — we won't enter account details for you.",
+    };
+  }
+  if (pollResult === "timeout") {
+    return {
+      reached_checkout: false,
+      currentUrl: getUrl(),
+      activePage: page,
+      handoff_ready: true,
+      summary: ticketOptionsReady
+        ? "Ticketmaster is waiting for a ticket option. Choose an option in the browser to continue."
+        : "Ticketmaster opened, but the ticket options were not selected automatically. Review the browser page to continue.",
     };
   }
 
   // After Reserve Tickets, Ticketmaster may push us through a final auth step.
+  // Same boundary policy: hand off, do NOT block 10 minutes.
   await page.waitForTimeout(1500);
-  if (getUrl().includes("auth.ticketmaster")) {
-    trace("[tm-rpa] Post-reserve auth redirect — waiting for sign-in");
-    const ok = await waitForAuthClear(page, trace);
-    if (!ok) {
+  {
+    const postReserveSnap = await readTicketmasterStageSnapshot(page);
+    if (classifyTicketmasterStage(postReserveSnap) === "account") {
+      trace("[tm-rpa] Post-reserve auth boundary — handing off");
       return {
         reached_checkout: false,
         currentUrl: getUrl(),
+        activePage: page,
         needs_login: true,
-        error: "Sign-in required after Reserve Tickets but user did not complete it.",
+        handoff_ready: true,
+        summary: "Ticketmaster needs you to sign in or create an account before payment. Open the live browser — we won't enter account details for you.",
       };
     }
   }

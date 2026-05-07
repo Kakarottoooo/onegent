@@ -5,11 +5,12 @@
  */
 
 import { useState, useEffect, type CSSProperties } from "react";
+import dynamic from "next/dynamic";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useLanguage, LANGUAGES } from "@/app/hooks/useLanguage";
 import { useAuth } from "@/app/hooks/useAuth";
-import NotificationBell from "./NotificationBell";
+import { fetchAppBootstrapCached } from "@/components/app-bootstrap-client";
 
 type Page = "home" | "tasks" | "insights" | "metrics" | "rooms" | "calendar" | "contacts" | "other";
 
@@ -25,32 +26,65 @@ type AccountProfile = {
   avatar_url: string | null;
 };
 
+const CORE_NAV_PREFETCH_PATHS = ["/tasks", "/calendar", "/rooms", "/contacts", "/insights", "/pricing"];
+const ACCOUNT_PROFILE_CACHE_MS = 60000;
+
+let accountProfileCache: { key: string; profile: AccountProfile | null; expiresAt: number } | null = null;
+const accountProfileInflight = new Map<string, Promise<AccountProfile | null>>();
+
+const NotificationBell = dynamic(() => import("./NotificationBell"), {
+  ssr: false,
+  loading: () => (
+    <span
+      aria-hidden="true"
+      style={{
+        width: 32,
+        height: 32,
+        borderRadius: "50%",
+        border: "1px solid var(--border, #e5e7eb)",
+        background: "var(--card, #fff)",
+        display: "inline-block",
+      }}
+    />
+  ),
+});
+
 function getSessionId() {
   if (typeof window === "undefined") return "";
   return localStorage.getItem("session_id") ?? "";
 }
 
-function scheduleIdleWork(callback: () => void, delayMs = 900): () => void {
-  if (typeof window === "undefined") return () => {};
-  let idleId: number | null = null;
-  const timer = window.setTimeout(() => {
-    const idleWindow = window as Window & {
-      requestIdleCallback?: (cb: IdleRequestCallback, opts?: IdleRequestOptions) => number;
-      cancelIdleCallback?: (id: number) => void;
-    };
-    if (idleWindow.requestIdleCallback) {
-      idleId = idleWindow.requestIdleCallback(callback, { timeout: 1500 });
-    } else {
-      callback();
-    }
-  }, delayMs);
-  return () => {
-    window.clearTimeout(timer);
-    if (idleId !== null) {
-      const idleWindow = window as Window & { cancelIdleCallback?: (id: number) => void };
-      idleWindow.cancelIdleCallback?.(idleId);
-    }
-  };
+async function fetchAccountProfileCached(
+  cacheKey: string,
+  force = false,
+): Promise<AccountProfile | null> {
+  const now = Date.now();
+  if (!force && accountProfileCache?.key === cacheKey && accountProfileCache.expiresAt > now) {
+    return accountProfileCache.profile;
+  }
+
+  const existing = !force ? accountProfileInflight.get(cacheKey) : null;
+  if (existing) return existing;
+
+  const request = fetch("/api/users/me")
+    .then(async (response) => {
+      if (!response.ok) return null;
+      const data = (await response.json()) as { profile?: AccountProfile };
+      const profile = data.profile ?? null;
+      accountProfileCache = {
+        key: cacheKey,
+        profile,
+        expiresAt: Date.now() + ACCOUNT_PROFILE_CACHE_MS,
+      };
+      return profile;
+    })
+    .catch(() => null)
+    .finally(() => {
+      accountProfileInflight.delete(cacheKey);
+    });
+
+  accountProfileInflight.set(cacheKey, request);
+  return request;
 }
 
 export default function GlobalNav({ active }: Props) {
@@ -63,30 +97,41 @@ export default function GlobalNav({ active }: Props) {
   const [accountMenuOpen, setAccountMenuOpen] = useState(false);
 
   useEffect(() => {
-    if (active === "tasks") return;
-    const sid = getSessionId();
-    if (!sid) return;
-    let cancelled = false;
+    const win = window as typeof window & {
+      requestIdleCallback?: (callback: IdleRequestCallback, options?: IdleRequestOptions) => number;
+      cancelIdleCallback?: (handle: number) => void;
+    };
+    const prefetchRoutes = () => {
+      for (const href of CORE_NAV_PREFETCH_PATHS) {
+        router.prefetch(href);
+      }
+    };
+    const idleHandle =
+      win.requestIdleCallback?.(prefetchRoutes, { timeout: 1800 }) ??
+      window.setTimeout(prefetchRoutes, 1200);
+    return () => {
+      if (win.cancelIdleCallback) {
+        win.cancelIdleCallback(idleHandle);
+      } else {
+        window.clearTimeout(idleHandle);
+      }
+    };
+  }, [router]);
 
-    const cancelIdle = scheduleIdleWork(() => {
-      fetch(`/api/booking-jobs?session_id=${encodeURIComponent(sid)}&scope=session&lean=1&limit=20`)
-        .then((r) => (r.ok ? r.json() : null))
-        .then((d) => {
-          if (cancelled || !d?.jobs) return;
-          const actions = d.jobs.reduce(
-            (n: number, j: { steps?: { actionItem?: unknown }[] }) =>
-              n + (j.steps?.filter((s) => s.actionItem).length ?? 0),
-            0,
-          );
-          setActionCount(actions);
-        })
-        .catch(() => {});
+  useEffect(() => {
+    const sid = getSessionId();
+
+    let cancelled = false;
+    void fetchAppBootstrapCached(sid || null).then((data) => {
+      if (!cancelled) {
+        setActionCount(data.booking_jobs_summary.action_count ?? 0);
+        if (data.account_profile) setAccountProfile(data.account_profile);
+      }
     });
     return () => {
       cancelled = true;
-      cancelIdle();
     };
-  }, [active]);
+  }, []);
 
   useEffect(() => {
     if (!auth.isSignedIn) {
@@ -96,33 +141,22 @@ export default function GlobalNav({ active }: Props) {
 
     let cancelled = false;
 
-    async function loadAccountProfile() {
-      try {
-        const response = await fetch("/api/users/me");
-        if (!response.ok) return;
-        const data = (await response.json()) as { profile?: AccountProfile };
-        if (!cancelled) {
-          setAccountProfile(data.profile ?? null);
-        }
-      } catch {
-        // ignore
+    async function loadAccountProfile(force = false) {
+      const profile = await fetchAccountProfileCached(auth.userId ?? "signed-in", force);
+      if (!cancelled) {
+        setAccountProfile(profile);
       }
     }
 
-    const cancelIdle = scheduleIdleWork(() => {
-      void loadAccountProfile();
-    }, 1200);
-
     const refresh = () => {
-      void loadAccountProfile();
+      void loadAccountProfile(true);
     };
     window.addEventListener("onegent-account-updated", refresh);
     return () => {
       cancelled = true;
-      cancelIdle();
       window.removeEventListener("onegent-account-updated", refresh);
     };
-  }, [auth.isSignedIn]);
+  }, [auth.isSignedIn, auth.userId]);
 
   const displayName =
     accountProfile?.display_name ?? auth.userDisplayName ?? "Signed in";
@@ -237,6 +271,8 @@ export default function GlobalNav({ active }: Props) {
                 <Link
                   key={link.id}
                   href={link.href}
+                  onFocus={() => router.prefetch(link.href)}
+                  onMouseEnter={() => router.prefetch(link.href)}
                   style={{
                     position: "relative",
                     display: "flex",

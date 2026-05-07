@@ -11,16 +11,58 @@
  * same landing as "Book this trip" — consistent mental model.
  */
 
-import { useState, useEffect, useCallback, useMemo } from "react";
+import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useAuth } from "@clerk/nextjs";
 import GlobalNav from "@/components/GlobalNav";
 import MonthCalendar from "@/components/MonthCalendar";
 import { buildCalendarGrid } from "@/lib/calendar-grid";
+import { getTaskWorkspaceHref } from "@/lib/booking-jobs/workspace";
 import { isActiveJobStatus } from "@/lib/status";
-import { buildTaskWorkspaceHref } from "@/lib/booking-jobs/workspace";
 import type { ExternalCalendarEventsByDay } from "@/lib/calendar-availability";
-import type { BookingJob } from "@/lib/db";
+import type { CalendarJobItem } from "@/lib/calendar-read-model";
+
+type GoogleMonthResponse = {
+  connected?: boolean;
+  busy_counts?: Record<string, number>;
+  events_by_day?: ExternalCalendarEventsByDay;
+  event_count?: number;
+  account_email?: string | null;
+  last_synced_at?: string | null;
+  error?: string;
+};
+
+type GoogleStatusResponse = {
+  connected?: boolean;
+  account_email?: string | null;
+  timezone?: string | null;
+  last_synced_at?: string | null;
+  error?: string;
+};
+
+type GoogleMonthPayload = GoogleMonthResponse & {
+  ok: boolean;
+  status: number;
+};
+
+type GoogleStatusPayload = GoogleStatusResponse & {
+  ok: boolean;
+  status: number;
+};
+
+const BOOKING_JOBS_CACHE_MS = 5000;
+const GOOGLE_STATUS_CACHE_MS = 30000;
+const GOOGLE_MONTH_CACHE_MS = 60000;
+// The base calendar grid should render immediately; keep the old blocking
+// loader branch disabled so month navigation never waits on optional data.
+const SHOW_BLOCKING_CALENDAR_LOADER = false;
+
+const bookingJobsCache = new Map<string, { data: CalendarJobItem[]; expiresAt: number }>();
+const bookingJobsInflight = new Map<string, Promise<CalendarJobItem[]>>();
+const googleStatusCache = new Map<string, { data: GoogleStatusPayload; expiresAt: number }>();
+const googleStatusInflight = new Map<string, Promise<GoogleStatusPayload>>();
+const googleMonthCache = new Map<string, { data: GoogleMonthPayload; expiresAt: number }>();
+const googleMonthInflight = new Map<string, Promise<GoogleMonthPayload>>();
 
 function getSessionId(): string {
   if (typeof window === "undefined") return "";
@@ -32,12 +74,118 @@ function getSessionId(): string {
   return sid;
 }
 
+async function fetchBookingJobsCached(sessionId: string): Promise<CalendarJobItem[]> {
+  const now = Date.now();
+  const cached = bookingJobsCache.get(sessionId);
+  if (cached && cached.expiresAt > now) return cached.data;
+
+  const existing = bookingJobsInflight.get(sessionId);
+  if (existing) return existing;
+
+  const request = fetch(`/api/calendar/jobs?session_id=${encodeURIComponent(sessionId)}`)
+    .then(async (res) => {
+      if (!res.ok) return [];
+      const data = (await res.json()) as { jobs?: CalendarJobItem[] };
+      const jobs = data.jobs ?? [];
+      bookingJobsCache.set(sessionId, {
+        data: jobs,
+        expiresAt: Date.now() + BOOKING_JOBS_CACHE_MS,
+      });
+      return jobs;
+    })
+    .finally(() => {
+      bookingJobsInflight.delete(sessionId);
+    });
+
+  bookingJobsInflight.set(sessionId, request);
+  return request;
+}
+
+async function fetchGoogleStatusCached(force: boolean): Promise<GoogleStatusPayload> {
+  const key = "google";
+  const now = Date.now();
+
+  if (!force) {
+    const cached = googleStatusCache.get(key);
+    if (cached && cached.expiresAt > now) return cached.data;
+  }
+
+  const existing = !force ? googleStatusInflight.get(key) : null;
+  if (existing) return existing;
+
+  const request = fetch("/api/calendar/google/status", { cache: "no-store" })
+    .then(async (res) => {
+      const data = (await res.json().catch(() => ({}))) as GoogleStatusResponse;
+      const payload: GoogleStatusPayload = {
+        ...data,
+        ok: res.ok,
+        status: res.status,
+      };
+      if (res.ok) {
+        googleStatusCache.set(key, {
+          data: payload,
+          expiresAt: Date.now() + GOOGLE_STATUS_CACHE_MS,
+        });
+      }
+      return payload;
+    })
+    .finally(() => {
+      googleStatusInflight.delete(key);
+    });
+
+  googleStatusInflight.set(key, request);
+  return request;
+}
+
+async function fetchGoogleMonthCached(
+  year: number,
+  month: number,
+  force: boolean,
+): Promise<GoogleMonthPayload> {
+  const monthKey = `${year}-${month}`;
+  const inflightKey = `${force ? "force" : "read"}:${monthKey}`;
+  const now = Date.now();
+
+  if (!force) {
+    const cached = googleMonthCache.get(monthKey);
+    if (cached && cached.expiresAt > now) return cached.data;
+  }
+
+  const existing = googleMonthInflight.get(inflightKey);
+  if (existing) return existing;
+
+  const url = `/api/calendar/google/month?year=${year}&month=${month}${force ? "&force=1" : ""}`;
+  const request = fetch(url, { cache: "no-store" })
+    .then(async (res) => {
+      const data = (await res.json().catch(() => ({}))) as GoogleMonthResponse;
+      const payload: GoogleMonthPayload = {
+        ...data,
+        ok: res.ok,
+        status: res.status,
+      };
+      if (res.ok) {
+        googleMonthCache.set(monthKey, {
+          data: payload,
+          expiresAt: Date.now() + GOOGLE_MONTH_CACHE_MS,
+        });
+      }
+      return payload;
+    })
+    .finally(() => {
+      googleMonthInflight.delete(inflightKey);
+    });
+
+  googleMonthInflight.set(inflightKey, request);
+  return request;
+}
+
 export default function CalendarPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const auth = useAuth();
-  const [jobs, setJobs] = useState<BookingJob[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [jobs, setJobs] = useState<CalendarJobItem[]>([]);
+  const [jobsLoading, setJobsLoading] = useState(false);
+  const [googleStatusLoading, setGoogleStatusLoading] = useState(false);
   const [googleConnected, setGoogleConnected] = useState(false);
   const [googleEmail, setGoogleEmail] = useState<string | null>(null);
   const [googleBusyCounts, setGoogleBusyCounts] = useState<Record<string, number>>({});
@@ -45,6 +193,7 @@ export default function CalendarPage() {
   const [googleEventCount, setGoogleEventCount] = useState(0);
   const [googleSyncing, setGoogleSyncing] = useState(false);
   const [googleError, setGoogleError] = useState<string | null>(null);
+  const latestGoogleMonthKeyRef = useRef<string>("");
 
   // Anchor = first day of the viewed month. Use local-TZ constructor so the
   // grid matches the user's wall clock rather than UTC.
@@ -56,18 +205,13 @@ export default function CalendarPage() {
   const loadJobs = useCallback(async () => {
     const sid = getSessionId();
     if (!sid) return;
+    setJobsLoading(true);
     try {
-      const res = await fetch(`/api/booking-jobs?session_id=${encodeURIComponent(sid)}`);
-      if (!res.ok) {
-        setJobs([]);
-        return;
-      }
-      const data = (await res.json()) as { jobs?: BookingJob[] };
-      setJobs(data.jobs ?? []);
+      setJobs(await fetchBookingJobsCached(sid));
     } catch {
       setJobs([]);
     } finally {
-      setLoading(false);
+      setJobsLoading(false);
     }
   }, []);
 
@@ -83,6 +227,44 @@ export default function CalendarPage() {
     const timer = setInterval(() => void loadJobs(), 8000);
     return () => clearInterval(timer);
   }, [jobs, loadJobs]);
+
+  const loadGoogleStatus = useCallback(
+    async (opts: { force?: boolean } = {}): Promise<{ connected: boolean; lastSyncedAt: string | null }> => {
+      if (!auth.isLoaded) return { connected: false, lastSyncedAt: null };
+      if (!auth.isSignedIn) {
+        setGoogleConnected(false);
+        setGoogleEmail(null);
+        setGoogleBusyCounts({});
+        setGoogleEventsByDay({});
+        setGoogleEventCount(0);
+        setGoogleError(null);
+        return { connected: false, lastSyncedAt: null };
+      }
+
+      setGoogleStatusLoading(true);
+      setGoogleError(null);
+      try {
+        const data = await fetchGoogleStatusCached(!!opts.force);
+        if (!data.ok) {
+          throw new Error(data.error ?? "Couldn't load Google Calendar status.");
+        }
+        setGoogleConnected(!!data.connected);
+        setGoogleEmail(data.account_email ?? null);
+        if (!data.connected) {
+          setGoogleBusyCounts({});
+          setGoogleEventsByDay({});
+          setGoogleEventCount(0);
+        }
+        return { connected: !!data.connected, lastSyncedAt: data.last_synced_at ?? null };
+      } catch (error) {
+        setGoogleError(error instanceof Error ? error.message : "Couldn't load Google Calendar status.");
+        return { connected: false, lastSyncedAt: null };
+      } finally {
+        setGoogleStatusLoading(false);
+      }
+    },
+    [auth.isLoaded, auth.isSignedIn],
+  );
 
   // Fast path = read DB only (no Google API). Force = re-sync from Google first.
   // The "Syncing..." spinner only shows during force calls (user clicks Sync now,
@@ -102,19 +284,16 @@ export default function CalendarPage() {
 
       if (opts.force) setGoogleSyncing(true);
       setGoogleError(null);
+      const year = anchor.getFullYear();
+      const month = anchor.getMonth();
+      const monthKey = `${year}-${month}`;
+      latestGoogleMonthKeyRef.current = monthKey;
       try {
-        const url = `/api/calendar/google/month?year=${anchor.getFullYear()}&month=${anchor.getMonth()}${opts.force ? "&force=1" : ""}`;
-        const res = await fetch(url, { cache: "no-store" });
-        const data = (await res.json().catch(() => ({}))) as {
-          connected?: boolean;
-          busy_counts?: Record<string, number>;
-          events_by_day?: ExternalCalendarEventsByDay;
-          event_count?: number;
-          account_email?: string | null;
-          last_synced_at?: string | null;
-          error?: string;
-        };
-        if (!res.ok) {
+        const data = await fetchGoogleMonthCached(year, month, !!opts.force);
+        if (latestGoogleMonthKeyRef.current !== monthKey) {
+          return data.last_synced_at ?? null;
+        }
+        if (!data.ok) {
           throw new Error(data.error ?? "Couldn't sync Google Calendar.");
         }
 
@@ -134,22 +313,19 @@ export default function CalendarPage() {
     [anchor, auth.isLoaded, auth.isSignedIn],
   );
 
-  // Stale-while-revalidate: render DB cache instantly, then refresh in background
-  // if last sync was >10min ago (or never).
+  // Render cached DB calendar data only on page load. A Google network sync is
+  // explicit via "Sync now" so route entry never waits on Google.
   useEffect(() => {
     let cancelled = false;
     void (async () => {
-      const lastSyncedAt = await loadGoogleMonth();
-      if (cancelled) return;
-      const stale =
-        !lastSyncedAt ||
-        Date.now() - new Date(lastSyncedAt).getTime() > 10 * 60 * 1000;
-      if (stale) void loadGoogleMonth({ force: true });
+      const status = await loadGoogleStatus();
+      if (cancelled || !status.connected) return;
+      await loadGoogleMonth();
     })();
     return () => {
       cancelled = true;
     };
-  }, [loadGoogleMonth]);
+  }, [loadGoogleMonth, loadGoogleStatus]);
 
   const grid = useMemo(
     () => buildCalendarGrid(jobs, anchor.getFullYear(), anchor.getMonth()),
@@ -181,7 +357,8 @@ export default function CalendarPage() {
   }
 
   function handleEventClick(jobId: string) {
-    router.push(buildTaskWorkspaceHref(jobId, "live", "evidence"));
+    const job = jobs.find((candidate) => candidate.id === jobId);
+    router.push(job ? getTaskWorkspaceHref(job) : getTaskWorkspaceHref({ id: jobId, status: "pending" }));
   }
 
   async function disconnectGoogleCalendar() {
@@ -254,6 +431,8 @@ export default function CalendarPage() {
                 ? "Sign in first, then connect Google Calendar."
                 : googleCalendarStatus === "denied"
                 ? "Google Calendar access was denied."
+                : googleStatusLoading
+                ? "Checking Google Calendar connection..."
                 : googleConnected
                 ? `${googleCalendarStatus === "connected" ? "Google Calendar connected successfully. " : ""}Connected${googleEmail ? ` as ${googleEmail}` : ""}. ${googleEventCount} synced event${googleEventCount === 1 ? "" : "s"} and ${googleBusyDayCount} busy day${googleBusyDayCount === 1 ? "" : "s"} in ${grid.monthLabel}.`
                 : "Connect Google Calendar so trip planning can avoid your existing schedule."}
@@ -283,7 +462,26 @@ export default function CalendarPage() {
           </div>
 
           <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
-            {!googleConnected ? (
+            {googleStatusLoading ? (
+              <button
+                type="button"
+                disabled
+                style={{
+                  padding: "10px 14px",
+                  borderRadius: 999,
+                  border: "1px solid var(--border, #e5e7eb)",
+                  background: "transparent",
+                  color: "var(--text-secondary, #555)",
+                  fontFamily: "var(--font-dm-sans)",
+                  fontSize: 12,
+                  fontWeight: 600,
+                  cursor: "wait",
+                  opacity: 0.7,
+                }}
+              >
+                Checking...
+              </button>
+            ) : !googleConnected ? (
               <a
                 href="/api/calendar/google/connect"
                 style={{
@@ -344,7 +542,7 @@ export default function CalendarPage() {
           </div>
         </section>
 
-        {loading ? (
+        {SHOW_BLOCKING_CALENDAR_LOADER ? (
           <div
             style={{
               padding: 40,
@@ -387,6 +585,18 @@ export default function CalendarPage() {
               </div>
             )}
           </>
+        )}
+        {(jobsLoading || googleStatusLoading) && (
+          <div
+            style={{
+              marginTop: 10,
+              fontFamily: "var(--font-dm-sans)",
+              fontSize: 12,
+              color: "var(--text-muted, #888)",
+            }}
+          >
+            Refreshing calendar data...
+          </div>
         )}
       </main>
     </div>

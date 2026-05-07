@@ -1,6 +1,6 @@
 # Onegent Docs Index
 
-Last updated: 2026-05-04
+Last updated: 2026-05-07
 
 This is the entrypoint for any new Codex, Claude, or other coding-agent session.
 Do not start by reading every markdown file. Read the smallest set that matches
@@ -60,21 +60,27 @@ Then read the task-specific section below.
 | Task | Read |
 |---|---|
 | Project overview or onboarding | `docs/00-start-here/` |
+| System design / architecture | `docs/00-start-here/SYSTEM_DESIGN.md` |
 | Current phase / what to do next | `docs/00-start-here/PHASE_STATUS.md` |
 | Codex / Claude / Track C handoff | `docs/10-coordination/README.md`, then `docs/10-coordination/*.md` |
 | Restaurant Phase 0 / Resy / OpenTable | `docs/20-phase0-restaurant/` |
+| OpenTable restaurant baseline benchmark | `docs/20-phase0-restaurant/OPENTABLE_BASELINE_BENCHMARK_PLAN.md` |
 | Provider runtime bug, logs, screenshots | `docs/30-provider-debug/PROVIDER_RUNTIME_DEBUG_PLAYBOOK.md`, `docs/30-provider-debug/LIVE_CLOSURE_EVIDENCE_PROTOCOL.md` |
-| Runtime mirror / codebase diet | `docs/30-provider-debug/RUNTIME_MIRROR_GUIDE.md` |
+| Hotel layered recovery / fallback rules | `docs/30-provider-debug/HOTEL_LAYERED_RECOVERY.md`, then `docs/50-product-areas/HOTEL_CONTROLLED_RETRY_RUNBOOK.md` |
+| Runtime mirror / drift strategy | `docs/30-provider-debug/RUNTIME_MIRROR_GUIDE.md`, `scripts/check-drift.ts` |
 | Operator failure taxonomy (model/env vs provider) | `docs/30-provider-debug/FAILURE_TAXONOMY.md` |
 | Provider closure operator cockpit (3-vertical workflow) | `docs/30-provider-debug/PROVIDER_CLOSURE_OPERATOR_ROOM.md` |
 | Provider closure acceptance criteria (pass / fail / inconclusive) | `docs/30-provider-debug/PROVIDER_CLOSURE_ACCEPTANCE.md` |
+| Layered no-live closure benchmark | `docs/30-provider-debug/LAYERED_BENCHMARK_V2.md`, `scripts/layered-benchmark.ts` |
 | Computer Use / executor architecture | `docs/30-provider-debug/EXECUTOR_V2_PIVOT.md` |
 | Phase 1 founder walkthrough / task UI | `docs/40-phase1/PHASE_1_FOUNDER_E2E.md`, `docs/40-phase1/AUTONOMOUS_FOUNDER_E2E.md`, `docs/40-phase1/PHASE_1_QUALITY_GATE.md` |
+| Founder dogfood bugs | `docs/40-dogfood/BUG_INBOX.md` |
+| Layered benchmark dogfood plan | `docs/40-dogfood/LAYERED_BENCHMARK_DOGFOOD_PLAN.md` |
+| Agent intake queue for returned branches | `docs/40-dogfood/AGENT_INTAKE_QUEUE.md`, `scripts/layered-agent-intake.ts` |
 | Phase 1.5 demo readiness / control room | `docs/40-phase1/DEMO_CONTROL_ROOM.md`, `docs/40-phase1/YC_DEMO_RUNBOOK.md`, `docs/40-phase1/DEMO_FREEZE_ACCEPTANCE.md` |
 | Phase 2 Expedia controlled retry | `docs/50-product-areas/EXPEDIA_CONTROLLED_RETRY_RUNBOOK.md`, `docs/50-product-areas/PHASE2_VERTICAL_REVIVAL_AUDIT.md`, `docs/10-coordination/phase2.md` |
 | Phase 2 hotel revival audit | `docs/50-product-areas/HOTEL_VERTICAL_REVIVAL_AUDIT.md`, `docs/50-product-areas/HOTEL_CONTROLLED_RETRY_RUNBOOK.md` |
 | NLU, decision room, trip packaging, social feed | `docs/50-product-areas/` |
-| Founder dogfood bug inbox | `docs/40-dogfood/BUG_INBOX.md` |
 | API, OAuth, ChatGPT apps, Claude MCP | `docs/60-api-integrations/` |
 | Old plans, audits, full historical summaries | `docs/90-archive/` |
 
@@ -168,6 +174,7 @@ release entrypoints (`AGENTS.md`, `CLAUDE.md`, `README.md`, `CHANGELOG.md`).
 | Purpose | Canonical file |
 |---|---|
 | Project summary | `docs/00-start-here/PROJECT_SUMMARY.md` |
+| System design | `docs/00-start-here/SYSTEM_DESIGN.md` |
 | Phase status | `docs/00-start-here/PHASE_STATUS.md` |
 | Full historical project summary | `docs/90-archive/history/PROJECT_SUMMARY_FULL_2026-05-03.md` |
 | Coordination root | `docs/10-coordination/README.md` |
@@ -182,18 +189,20 @@ release entrypoints (`AGENTS.md`, `CLAUDE.md`, `README.md`, `CHANGELOG.md`).
 | Restaurant handoff | `docs/20-phase0-restaurant/RESTAURANT_PHASE0_HANDOFF.md` |
 | R-003 live runbook | `docs/20-phase0-restaurant/R003_LIVE_SMOKE_RUNBOOK.md` |
 | Provider runtime debug | `docs/30-provider-debug/PROVIDER_RUNTIME_DEBUG_PLAYBOOK.md` |
-| Runtime mirror guide | `docs/30-provider-debug/RUNTIME_MIRROR_GUIDE.md` |
+| Hotel layered recovery | `docs/30-provider-debug/HOTEL_LAYERED_RECOVERY.md` |
 | Live closure evidence protocol | `docs/30-provider-debug/LIVE_CLOSURE_EVIDENCE_PROTOCOL.md` |
+| Runtime mirror guide | `docs/30-provider-debug/RUNTIME_MIRROR_GUIDE.md` |
 | Operator failure taxonomy | `docs/30-provider-debug/FAILURE_TAXONOMY.md` |
 | Provider closure operator room | `docs/30-provider-debug/PROVIDER_CLOSURE_OPERATOR_ROOM.md` |
 | Provider closure acceptance | `docs/30-provider-debug/PROVIDER_CLOSURE_ACCEPTANCE.md` |
+| Layered no-live closure benchmark | `docs/30-provider-debug/LAYERED_BENCHMARK_V2.md` |
 | Phase 1 founder E2E | `docs/40-phase1/PHASE_1_FOUNDER_E2E.md` |
+| Founder dogfood bug inbox | `docs/40-dogfood/BUG_INBOX.md` |
 | Phase 1 autonomous E2E runner | `docs/40-phase1/AUTONOMOUS_FOUNDER_E2E.md` |
 | Phase 1.5 quality gate | `docs/40-phase1/PHASE_1_QUALITY_GATE.md` |
 | Demo control room runbook | `docs/40-phase1/DEMO_CONTROL_ROOM.md` |
 | YC demo runbook | `docs/40-phase1/YC_DEMO_RUNBOOK.md` |
 | Demo freeze acceptance | `docs/40-phase1/DEMO_FREEZE_ACCEPTANCE.md` |
-| Founder dogfood bug inbox | `docs/40-dogfood/BUG_INBOX.md` |
 | Phase 2 revival audit | `docs/50-product-areas/PHASE2_VERTICAL_REVIVAL_AUDIT.md` |
 | Hotel vertical revival audit | `docs/50-product-areas/HOTEL_VERTICAL_REVIVAL_AUDIT.md` |
 | Expedia controlled retry runbook | `docs/50-product-areas/EXPEDIA_CONTROLLED_RETRY_RUNBOOK.md` |

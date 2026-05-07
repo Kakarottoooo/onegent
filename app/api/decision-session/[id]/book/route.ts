@@ -7,6 +7,7 @@ import {
   createBookingJob,
   type BookingJobStep,
 } from "@/lib/db";
+import { getTaskWorkspaceHref } from "@/lib/booking-jobs/workspace";
 
 type Params = { params: Promise<{ id: string }> };
 
@@ -109,5 +110,8 @@ export async function POST(req: NextRequest, { params }: Params) {
     steps: [step],
   });
 
-  return NextResponse.json({ jobId, redirectTo: `/tasks?focus=${jobId}&view=live` });
+  return NextResponse.json({
+    jobId,
+    redirectTo: getTaskWorkspaceHref({ id: jobId, status: "pending" }),
+  });
 }

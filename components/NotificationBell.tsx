@@ -27,28 +27,35 @@ interface NotifRow {
 }
 
 const POLL_MS = 45_000;
+const UNREAD_COUNT_CACHE_MS = 30000;
 
-function scheduleIdleWork(callback: () => void): () => void {
-  if (typeof window === "undefined") return () => {};
-  let idleId: number | null = null;
-  const timer = window.setTimeout(() => {
-    const idleWindow = window as Window & {
-      requestIdleCallback?: (cb: IdleRequestCallback, opts?: IdleRequestOptions) => number;
-      cancelIdleCallback?: (id: number) => void;
-    };
-    if (idleWindow.requestIdleCallback) {
-      idleId = idleWindow.requestIdleCallback(callback, { timeout: 2000 });
-    } else {
-      callback();
-    }
-  }, 1500);
-  return () => {
-    window.clearTimeout(timer);
-    if (idleId !== null) {
-      const idleWindow = window as Window & { cancelIdleCallback?: (id: number) => void };
-      idleWindow.cancelIdleCallback?.(idleId);
-    }
-  };
+let unreadCountCache: { count: number; expiresAt: number } | null = null;
+let unreadCountInflight: Promise<number> | null = null;
+
+async function fetchUnreadCountCached(force = false): Promise<number> {
+  const now = Date.now();
+  if (!force && unreadCountCache && unreadCountCache.expiresAt > now) {
+    return unreadCountCache.count;
+  }
+  if (!force && unreadCountInflight) return unreadCountInflight;
+
+  unreadCountInflight = fetch("/api/notifications/unread-count")
+    .then(async (res) => {
+      if (!res.ok) return unreadCountCache?.count ?? 0;
+      const data = (await res.json()) as { count?: number };
+      const count = data.count ?? 0;
+      unreadCountCache = {
+        count,
+        expiresAt: Date.now() + UNREAD_COUNT_CACHE_MS,
+      };
+      return count;
+    })
+    .catch(() => unreadCountCache?.count ?? 0)
+    .finally(() => {
+      unreadCountInflight = null;
+    });
+
+  return unreadCountInflight;
 }
 
 export default function NotificationBell() {
@@ -69,26 +76,13 @@ export default function NotificationBell() {
     }
     let cancelled = false;
     async function tick() {
-      if (typeof document !== "undefined" && document.visibilityState !== "visible") return;
-      try {
-        const res = await fetch("/api/notifications/unread-count");
-        if (!res.ok) return;
-        const data = (await res.json()) as { count?: number };
-        if (!cancelled) setCount(data.count ?? 0);
-      } catch {
-        /* silent */
-      }
+      const nextCount = await fetchUnreadCountCached();
+      if (!cancelled) setCount(nextCount);
     }
-    const cancelIdle = scheduleIdleWork(() => void tick());
+    void tick();
     pollRef.current = setInterval(() => void tick(), POLL_MS);
-    const onVisible = () => {
-      if (document.visibilityState === "visible") void tick();
-    };
-    document.addEventListener("visibilitychange", onVisible);
     return () => {
       cancelled = true;
-      cancelIdle();
-      document.removeEventListener("visibilitychange", onVisible);
       if (pollRef.current) clearInterval(pollRef.current);
     };
   }, [auth.isSignedIn]);
@@ -115,6 +109,12 @@ export default function NotificationBell() {
     if (!n.read_at) {
       setItems((prev) => prev.map((x) => (x.id === n.id ? { ...x, read_at: new Date().toISOString() } : x)));
       setCount((prev) => Math.max(0, prev - 1));
+      if (unreadCountCache) {
+        unreadCountCache = {
+          count: Math.max(0, unreadCountCache.count - 1),
+          expiresAt: Date.now() + UNREAD_COUNT_CACHE_MS,
+        };
+      }
       void fetch(`/api/notifications/${n.id}/read`, { method: "PATCH" }).catch(() => {});
     }
     setOpen(false);
@@ -123,6 +123,10 @@ export default function NotificationBell() {
 
   async function markAllRead() {
     setCount(0);
+    unreadCountCache = {
+      count: 0,
+      expiresAt: Date.now() + UNREAD_COUNT_CACHE_MS,
+    };
     setItems((prev) => prev.map((x) => ({ ...x, read_at: x.read_at ?? new Date().toISOString() })));
     void fetch("/api/notifications/read-all", { method: "POST" }).catch(() => {});
   }

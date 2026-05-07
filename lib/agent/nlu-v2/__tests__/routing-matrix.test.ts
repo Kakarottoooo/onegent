@@ -1,4 +1,4 @@
-﻿import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "vitest";
 import {
   NLU_ROUTING_FIXTURES,
   NLU_ROUTING_MATRIX_SCOPE,

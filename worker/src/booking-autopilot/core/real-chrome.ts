@@ -30,6 +30,7 @@ export interface RealChromeOptions {
   executablePath?: string;
   userDataDir: string;
   preserveUserDataDir: true;
+  args?: string[];
 }
 
 /**
@@ -193,6 +194,8 @@ export function buildRealChromeLaunchOptions(
   trace: (msg: string) => void,
 ): RealChromeOptions {
   const userDataDir = resolveRealChromeUserDataDir();
+  const viewportWidth = Number(process.env.ONEGENT_BROWSER_VIEWPORT_WIDTH) || 1365;
+  const viewportHeight = Number(process.env.ONEGENT_BROWSER_VIEWPORT_HEIGHT) || 900;
 
   fs.mkdirSync(userDataDir, { recursive: true });
 
@@ -210,5 +213,6 @@ export function buildRealChromeLaunchOptions(
     executablePath,
     userDataDir,
     preserveUserDataDir: true,
+    args: [`--window-size=${viewportWidth},${viewportHeight}`],
   };
 }

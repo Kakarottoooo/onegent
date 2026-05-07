@@ -1,14 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
-import {
-  getBookingJobCompactRowsBySession,
-  getBookingJobCompactRowsByUser,
-} from "@/lib/db";
-import {
-  mergeCompactRows,
-  summarizeBookingJobList,
-} from "@/lib/booking-jobs/read-model";
 import { getOptionalClerkUserId } from "@/lib/auth/optional-clerk-user";
 import { canUseNoDatabaseBookingJobsFallback } from "@/lib/booking-jobs/db-errors";
+import {
+  getVisibleBookingJobSummaries,
+  summarizeBookingJobs,
+} from "@/lib/booking-jobs/read-model";
 
 export async function GET(req: NextRequest) {
   const sessionId = req.nextUrl.searchParams.get("session_id");
@@ -17,21 +13,24 @@ export async function GET(req: NextRequest) {
   }
 
   const userId = await getOptionalClerkUserId();
-
   try {
-    const [sessionRows, userRows] = await Promise.all([
-      getBookingJobCompactRowsBySession(sessionId, 200),
-      userId ? getBookingJobCompactRowsByUser(userId, 200) : Promise.resolve([]),
-    ]);
-    const jobs = mergeCompactRows(sessionRows, userRows, 200);
-    return NextResponse.json(
-      { summary: summarizeBookingJobList(jobs) },
-      { headers: { "Cache-Control": "private, max-age=5, stale-while-revalidate=15" } },
-    );
+    const jobs = await getVisibleBookingJobSummaries({
+      sessionId,
+      userId,
+      limit: 30,
+    });
+    return NextResponse.json({ summary: summarizeBookingJobs(jobs) });
   } catch (err) {
     if (canUseNoDatabaseBookingJobsFallback(err)) {
       return NextResponse.json({
-        summary: { total: 0, queue: 0, live: 0, history: 0, actions: 0, ready: 0 },
+        summary: {
+          total: 0,
+          action_count: 0,
+          active_count: 0,
+          completed_count: 0,
+          failed_count: 0,
+          latest_updated_at: null,
+        },
       });
     }
     throw err;

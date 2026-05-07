@@ -37,6 +37,7 @@ describe("scoreExpediaFlightCandidateText", () => {
     );
 
     expect(score.hasAirline).toBe(true);
+    expect(score.hasExplicitDifferentAirline).toBe(false);
     expect(score.hasPrice).toBe(true);
     expect(score.hasFlightNumber).toBe(true);
     expect(score.timeScore).toBe(4);
@@ -56,6 +57,7 @@ describe("scoreExpediaFlightCandidateText", () => {
     );
 
     expect(score.hasAirline).toBe(true);
+    expect(score.hasExplicitDifferentAirline).toBe(false);
     expect(score.hasFlightNumber).toBe(true);
     expect(score.priceDelta).toBe(5);
     expect(score.timeDelta).toBe(5);
@@ -81,6 +83,7 @@ describe("scoreExpediaFlightCandidateText", () => {
     );
 
     expect(score.hasAirline).toBe(true);
+    expect(score.hasExplicitDifferentAirline).toBe(false);
     expect(score.hasFlightNumber).toBe(false);
     expect(score.hasPrice).toBe(true);
     expect(score.timeScore).toBe(4);
@@ -107,6 +110,7 @@ describe("scoreExpediaFlightCandidateText", () => {
     );
 
     expect(score.hasAirline).toBe(true);
+    expect(score.hasExplicitDifferentAirline).toBe(false);
     expect(score.hasPrice).toBe(true);
     expect(score.hasFlightNumber).toBe(false);
     expect(score.timeDelta).toBeGreaterThan(120);
@@ -126,8 +130,28 @@ describe("scoreExpediaFlightCandidateText", () => {
     );
 
     expect(score.hasAirline).toBe(false);
+    expect(score.hasExplicitDifferentAirline).toBe(true);
     expect(score.hasFlightNumber).toBe(false);
     expect(score.hasPrice).toBe(false);
+    expect(score.exactMatch).toBe(false);
+    expect(score.fallbackEligible).toBe(false);
+  });
+
+  it("rejects explicit different-airline cards even when time and price match", () => {
+    const score = scoreExpediaFlightCandidateText(
+      "Select flight Frontier Airlines 8:50am 9:55am Orlando (MCO) - Nashville (BNA) $152 Nonstop",
+      {
+        airline: "Southwest",
+        price: 152,
+        time: "08:50",
+        flightNumber: "WN 3084",
+      },
+    );
+
+    expect(score.hasAirline).toBe(false);
+    expect(score.hasExplicitDifferentAirline).toBe(true);
+    expect(score.hasPrice).toBe(true);
+    expect(score.timeDelta).toBe(0);
     expect(score.exactMatch).toBe(false);
     expect(score.fallbackEligible).toBe(false);
   });
@@ -326,6 +350,21 @@ describe("Expedia flight candidate selection", () => {
     expect(selection.selected?.score.fallbackEligible).toBe(true);
     expect(selection.matchMode).toBe("fallback");
   });
+
+  it("does not select a different-airline card just because target time and price match", () => {
+    const selection = selectExpediaFlightCandidateLabels(
+      [
+        "Select flight Frontier Airlines 8:50am 9:55am MCO to BNA $152 Nonstop",
+        "Select flight United Airlines 8:50am 9:55am MCO to BNA $152 Nonstop",
+      ],
+      target,
+      "unit",
+    );
+
+    expect(selection.selected).toBeNull();
+    expect(selection.candidateCount).toBe(0);
+    expect(selection.candidateSummaries.join(" ")).toContain("differentAirline=yes");
+  });
 });
 
 describe("classifyExpediaFlightSafetyBoundaryText", () => {
@@ -346,9 +385,23 @@ describe("classifyExpediaFlightBlockingOverlayText", () => {
     ).toBe("dismissable_member_price_overlay");
   });
 
+  it("treats OneKeyCash sign-in promos as dismissable overlays with evidence", () => {
+    expect(
+      classifyExpediaFlightBlockingOverlayText(
+        "You can sign in or create an account to earn OneKeyCash after this trip. You're on your way!",
+      ),
+    ).toBe("dismissable_member_price_overlay");
+  });
+
   it("keeps true sign-in-to-continue copy as a hard safety boundary", () => {
     expect(
       classifyExpediaFlightBlockingOverlayText("Sign in to continue to checkout"),
+    ).toBe("hard_safety_boundary");
+  });
+
+  it("keeps account-required sign-in overlays as a hard boundary", () => {
+    expect(
+      classifyExpediaFlightBlockingOverlayText("Sign in or create an account to continue"),
     ).toBe("hard_safety_boundary");
   });
 });

@@ -1,10 +1,10 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
 import { useAuth } from "@/app/hooks/useAuth";
-import type { DecisionRoom, DecisionRoomWithMembership } from "@/lib/db";
+import type { DecisionRoom } from "@/lib/db";
+import type { DecisionRoomListItem } from "@/lib/app-shell-read-model";
 import { CARD, CTA, PAGE } from "@/app/_ui/tokens";
 import GlobalNav from "@/components/GlobalNav";
 
@@ -27,39 +27,10 @@ const TYPE_LABEL: Record<DecisionRoom["type"], string> = {
 
 type Tab = "active" | "history";
 type RoomContextMenuState = {
-  room: DecisionRoom;
+  room: DecisionRoomListItem;
   x: number;
   y: number;
 } | null;
-
-const ROOMS_CACHE_PREFIX = "onegent.rooms.list.v1:";
-
-function roomsCacheKey(tab: Tab, userId: string | null | undefined): string {
-  return `${ROOMS_CACHE_PREFIX}${userId ?? "anonymous"}:${tab}`;
-}
-
-function roomSignature(rooms: DecisionRoomWithMembership[]): string {
-  return rooms.map((room) => `${room.id}:${room.updated_at}:${room.status}:${room.member_status}`).join("|");
-}
-
-function readRoomsCache(tab: Tab, userId: string | null | undefined): DecisionRoomWithMembership[] | null {
-  if (typeof window === "undefined") return null;
-  try {
-    const raw = window.sessionStorage.getItem(roomsCacheKey(tab, userId));
-    return raw ? JSON.parse(raw) as DecisionRoomWithMembership[] : null;
-  } catch {
-    return null;
-  }
-}
-
-function writeRoomsCache(tab: Tab, userId: string | null | undefined, rooms: DecisionRoomWithMembership[]) {
-  if (typeof window === "undefined") return;
-  try {
-    window.sessionStorage.setItem(roomsCacheKey(tab, userId), JSON.stringify(rooms));
-  } catch {
-    // Best-effort perceived-speed cache.
-  }
-}
 
 function TabSwitch({
   tab,
@@ -91,16 +62,14 @@ function TabSwitch({
 
 export default function RoomsListPage() {
   const { isSignedIn, userId } = useAuth();
-  const router = useRouter();
   const [tab, setTab] = useState<Tab>("active");
-  const [rooms, setRooms] = useState<DecisionRoomWithMembership[] | null>(null);
+  const [rooms, setRooms] = useState<DecisionRoomListItem[] | null>(null);
   const [acceptBusyId, setAcceptBusyId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [reloadTick, setReloadTick] = useState(0);
   const [menu, setMenu] = useState<RoomContextMenuState>(null);
   const [actionBusyId, setActionBusyId] = useState<string | null>(null);
   const [bulkDeleteBusy, setBulkDeleteBusy] = useState(false);
-  const roomsSignatureRef = useRef("");
   const menuIsCreator = menu?.room.creator_id === userId;
   const menuCanArchive = !!(
     menuIsCreator &&
@@ -116,32 +85,20 @@ export default function RoomsListPage() {
   useEffect(() => {
     if (!isSignedIn) return;
     let cancelled = false;
-    const cached = readRoomsCache(tab, userId);
-    if (cached) {
-      roomsSignatureRef.current = roomSignature(cached);
-      setRooms(cached);
-    } else {
-      roomsSignatureRef.current = "";
-      setRooms(null);
-    }
+    setRooms(null);
     setError(null);
     (async () => {
       try {
         // Stage 2: include_invited=1 surfaces pending trip-room invites so
         // the invitee sees them on the active tab. Archive view ignores it.
-        const url = tab === "history" ? "/api/rooms?archived=1" : "/api/rooms?include_invited=1";
+        const url =
+          tab === "history"
+            ? "/api/rooms/compact-list?archived=1"
+            : "/api/rooms/compact-list?include_invited=1";
         const res = await fetch(url);
         if (!res.ok) throw new Error();
-        const data = (await res.json()) as { rooms: DecisionRoomWithMembership[] };
-        const nextRooms = data.rooms ?? [];
-        if (!cancelled) {
-          writeRoomsCache(tab, userId, nextRooms);
-          const nextSignature = roomSignature(nextRooms);
-          if (roomsSignatureRef.current !== nextSignature) {
-            roomsSignatureRef.current = nextSignature;
-            setRooms(nextRooms);
-          }
-        }
+        const data = (await res.json()) as { rooms: DecisionRoomListItem[] };
+        if (!cancelled) setRooms(data.rooms);
       } catch {
         if (!cancelled) setError("We couldn't load your rooms. Please refresh.");
       }
@@ -149,7 +106,7 @@ export default function RoomsListPage() {
     return () => {
       cancelled = true;
     };
-  }, [isSignedIn, tab, reloadTick, userId]);
+  }, [isSignedIn, tab, reloadTick]);
 
   useEffect(() => {
     if (!menu) return;
@@ -171,7 +128,7 @@ export default function RoomsListPage() {
     };
   }, [menu]);
 
-  async function acceptInvite(room: DecisionRoomWithMembership) {
+  async function acceptInvite(room: DecisionRoomListItem) {
     setError(null);
     setAcceptBusyId(room.id);
     try {
@@ -183,9 +140,9 @@ export default function RoomsListPage() {
       // Navigate based on the room's flow — chat-flow rooms live on the
       // homepage; classic rooms render the legacy form UI.
       if (room.flow === "chat") {
-        router.push(`/?room_id=${room.id}`);
+        window.location.href = `/?room_id=${room.id}`;
       } else {
-        router.push(`/rooms/${room.id}`);
+        window.location.href = `/rooms/${room.id}`;
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Couldn't accept the invite.");
@@ -193,7 +150,7 @@ export default function RoomsListPage() {
     }
   }
 
-  async function runRoomAction(room: DecisionRoom, action: "archive" | "delete") {
+  async function runRoomAction(room: DecisionRoomListItem, action: "archive" | "delete") {
     setMenu(null);
     setError(null);
     setActionBusyId(room.id);

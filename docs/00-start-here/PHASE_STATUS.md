@@ -1,23 +1,21 @@
 # Phase Status - single-source overview
 
 > For: founder, Codex, Claude, and future agents.
-> Last updated: 2026-05-05.
+> Last updated: 2026-05-07.
 > Read after: `docs/INDEX.md`, `docs/00-start-here/PROJECT_SUMMARY.md`,
 > and `docs/10-coordination/HUDDLE.md`.
 
 ## TL;DR
 
-Initial single-case closure is complete enough for founder dogfood across the
-core lanes. Do not expand breadth yet. Stabilize performance, task observability,
-and then run controlled multi-case coverage.
+Do not enter Phase 2 yet. Stabilize Phase 0, Phase 1, and Phase 1.5 first.
 
 | Phase | Status | Current gate |
 | --- | --- | --- |
 | Phase 0A - Restaurant provider closure | Closed via OpenTable safe handoff | Sirrah OpenTable live run reached final review with phone filled and stopped before `Complete reservation`. |
-| Phase 0B - Restaurant v1 coverage | Deferred to batch coverage | After stable single-case closure, run OpenTable-first 5/10/20 case batches and measure success rate. Resy remains a provider/network follow-up. |
-| Phase 1 - First paying user path | Initial founder path accepted | Founder dogfood has exercised restaurant, hotel, flight, and activity-shaped prompts through UI, logs, screenshots, and task status. Remaining work is bug-fix and performance polish. |
-| Phase 1.5 - QA and polish | OK | Quality gate, dev workbenches, production build, and production route probe are passing. |
-| Phase 2 - Vertical expansion | Initial hotel + flight closure achieved | Booking.com hotel and Expedia flight have reached useful human-review boundaries in founder dogfood. Hold breadth until performance and multi-case coverage are measured. |
+| Phase 0B - Restaurant v1 coverage | Entry gate met | Broaden OpenTable-first restaurant fixtures; keep Resy as provider/network follow-up, not a Phase 0A blocker. |
+| Phase 1 - First paying user path | Demo-freeze passed | Full Phase 1 gate with smoke and autonomous founder E2E passes 12/12; manual founder walkthrough remains the human acceptance gate. |
+| Phase 1.5 - QA and polish | Demo-freeze passed | Quality gate, dev workbenches, production build, and production route probe are passing. |
+| Phase 2 - Vertical expansion | Initial dogfood closure reached for hotel, flight, and activity | Expedia flight, Booking.com hotel, and Ticketmaster activity have reached usable review/continue boundaries in founder dogfood; broaden with benchmark coverage before demo promises. |
 
 ## Current Verified State
 
@@ -77,16 +75,22 @@ and then run controlled multi-case coverage.
   - Verdict: accepted `safe_handoff` / `ready_for_confirmation`. Phase 0A is
     closed via OpenTable; Resy remains a provider/network/IP-limited follow-up
     lane, not the Phase 0A gate.
-- 2026-05-05 founder dogfood consolidation:
-  - Founder confirms restaurant, flight, and hotel have each reached an
-    acceptable initial closure/handoff state for the single-case product path.
-  - Phase 1 main user path has been exercised with real user phrasing across
-    restaurant, hotel, flight, and activity-shaped flows, with UI, task logs,
-    screenshot stream, and task status now usable enough for iterative bugfixing.
-  - Phase 1.5 is not currently blocking.
-  - Phase 2 hotel and flight should be treated as initial closure achieved for
-    dogfood, not as broad production coverage. The next proof point is measured
-    multi-case coverage after performance stabilizes.
+- 2026-05-07 Ticketmaster activity dogfood closure:
+  - Founder dogfood request: "book The Lion King / Broadway in New York on
+    May 30".
+  - Latest traced job: `46028ee4-c644-4df7-bee5-7bcb7d2713f9`.
+  - Runtime path used the existing v1 Ticketmaster provider runtime
+    (`ticketmaster-rpa`) through the local Stagehand/Playwright stack, not
+    Browser Harness. Browser Harness remains a separate v2 spike/design lane.
+  - Evidence from worker/app logs: session cookies were injected, target
+    `May 30, 2026 @ 2:00 PM` was parsed, calendar view opened, the May 30
+    2:00 PM slot was selected, the right-side `Find Tickets` drawer action was
+    clicked from the main Ticketmaster page, and the provider event page was
+    reached.
+  - Founder confirmed the Ticketmaster path is now closed for initial dogfood.
+    Remaining hardening is product/runtime polish: suppress or ignore external
+    ad tabs, make the seat-selection checkpoint explicit in the task UI, and
+    recover stale `running/loading` jobs if the local browser/CDP session closes.
 - Historical side branches now folded into integrated preview:
   `codex/openai-chat-model-env` (runtime/debug),
   `codex/expedia-flight-card-fallback` (Expedia visible-card fallback),
@@ -205,12 +209,9 @@ Completed:
 
 Still open:
 
-- Performance and navigation latency need a focused pass before broadening test
-  volume.
-- Bugs found in live dogfood should be fixed directly from the current task
-  logs, screenshots, and DB evidence.
-- OTP/resume-style work remains conditional and should only be built when a
-  real flow proves it is needed.
+- Founder manual E2E walkthrough remains the final acceptance check.
+- OTP resume remains conditional and should only be built when a real Phase 0
+  flow proves it is needed.
 
 Primary docs:
 
@@ -247,30 +248,33 @@ When a task lands:
 - Update the closest phase/runbook doc only if the durable operating procedure
   changed.
 
-## Flight And Hotel Runtime Status
+## Expedia / Flight Runtime Status
 
-Expedia flight and Booking.com hotel are now initial closed lanes for founder
-dogfood. The right operating model is no longer "prove the first closure at all";
-it is "patch concrete bugs from current artifacts, then measure coverage."
+The earlier legacy-shape worker error is considered fixed. The latest reproduced
+flight failure had a valid `__source` marker and correct Expedia params, but the
+provider DOM scan failed while the target Southwest card was visible.
 
-Current status:
+Current fix branch:
 
-- Expedia flight has worker routing, card selection hardening, checkout
-  progression, screenshot stream, task status, and human-review stop behavior
-  good enough for the single-case founder path.
-- Booking.com hotel has language forcing, guest-form filling, country/phone
-  fixes, and manual-review behavior good enough for the single-case founder
-  path.
-- Any new issue should be debugged from current DB rows, task logs, screenshots,
-  and worker/app logs rather than from stale artifacts.
+- `codex/expedia-flight-card-fallback`
+- Merged into `codex/integrated-preview-20260504` on 2026-05-04.
+- Adds a visible-text locator fallback when the bulk Expedia flight-card DOM
+  scan throws.
+- Verified after merge with targeted Vitest, TypeScript, drift check, and Phase
+  1 quality gate.
 
 Next step:
 
-- Run a performance pass before adding more provider breadth.
-- Then run measured coverage batches: start with 5 cases per scenario, then 10,
-  20, and only then larger sets such as 50. Track success rate, failure class,
-  and whether failures are product bugs, provider inventory, network/session, or
-  expected human-review boundaries.
+- If the founder approves a controlled provider runtime check, retry the same
+  MCO to BNA Expedia task and inspect DB, worker log, and screenshots before
+  making any further provider changes.
+- Phase 2 revival audit lives at
+  `docs/50-product-areas/PHASE2_VERTICAL_REVIVAL_AUDIT.md`.
+- Hotel-specific no-live audit lives at
+  `docs/50-product-areas/HOTEL_VERTICAL_REVIVAL_AUDIT.md`.
+- Controlled retry checklists:
+  `docs/50-product-areas/EXPEDIA_CONTROLLED_RETRY_RUNBOOK.md` and
+  `docs/50-product-areas/HOTEL_CONTROLLED_RETRY_RUNBOOK.md`.
 
 ## Provider Closure Acceptance
 
@@ -281,17 +285,16 @@ declaring a closure attempt is closure-pass; tooling passing is not provider
 closure passing. Until the acceptance doc records verified live closure for a
 lane, that lane in `lib/provider-closure-room/lanes.ts` stays
 `liveVerified: false`. Restaurant/OpenTable now has accepted Sirrah evidence;
-flight and hotel have founder-confirmed initial closure, but the cockpit
-metadata may still need a separate update if it is used as the formal
-`liveVerified` registry. The cockpit at `/dev/provider-closure` mirrors the
+flight and hotel remain not live verified. The cockpit at `/dev/provider-closure` mirrors the
 acceptance partition; the operator failure taxonomy at
 `docs/30-provider-debug/FAILURE_TAXONOMY.md` is the 4-class signal layer that
 feeds the 8-state outcome partition.
 
-## Phase 2 - Stabilize Before Breadth
+## Phase 2 - Frozen
 
-Do not expand vertical scope until the current restaurant, flight, and hotel
-single-case paths feel fast and debuggable in founder dogfood.
+Do not expand vertical scope or add new live provider work until Phase 0,
+Phase 1, and Phase 1.5 are stable enough to dogfood without repeated handoff
+confusion.
 
 Allowed while frozen:
 
@@ -302,7 +305,7 @@ Allowed while frozen:
 
 Not allowed while frozen:
 
-- New provider verticals before performance improves.
-- Large multi-case batches before the 5-case batch is healthy.
-- Any irreversible provider action automation.
-- Account verification or human-check bypass work.
+- New provider verticals.
+- Payment automation.
+- OTP/CAPTCHA/login bypass.
+- Final booking confirmation automation.

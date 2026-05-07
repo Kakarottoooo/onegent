@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@clerk/nextjs/server";
 import { buildBusyCountsByDay, buildExternalEventsByDay } from "@/lib/calendar-availability";
 import {
+  type CalendarBusySlotRow,
+  type CalendarEventRow,
   getCalendarConnection,
   listCalendarBusySlots,
   listCalendarEvents,
@@ -36,6 +38,8 @@ export async function GET(req: NextRequest) {
 
   let calendarTimeZone: string | null = connection.calendar_timezone;
   let lastSyncedAt: string | null = connection.last_synced_at;
+  let syncedBusySlots: CalendarBusySlotRow[] | null = null;
+  let syncedEvents: CalendarEventRow[] | null = null;
 
   // Fast path (default): read whatever is already in DB. No Google API.
   // Force path: re-sync from Google first, then read.
@@ -52,20 +56,26 @@ export async function GET(req: NextRequest) {
     });
     calendarTimeZone = detailed.calendarTimeZone ?? calendarTimeZone;
     lastSyncedAt = detailed.syncedAt ?? synced.syncedAt ?? lastSyncedAt;
+    syncedBusySlots = synced.slots;
+    syncedEvents = detailed.events;
   }
 
-  const busySlots = await listCalendarBusySlots({
-    userId,
-    provider: "google",
-    rangeStart: syncStartIso,
-    rangeEnd: syncEndIso,
-  });
-  const events = await listCalendarEvents({
-    userId,
-    provider: "google",
-    rangeStart: syncStartIso,
-    rangeEnd: syncEndIso,
-  });
+  const [busySlots, events] = await Promise.all([
+    syncedBusySlots ??
+      listCalendarBusySlots({
+        userId,
+        provider: "google",
+        rangeStart: syncStartIso,
+        rangeEnd: syncEndIso,
+      }),
+    syncedEvents ??
+      listCalendarEvents({
+        userId,
+        provider: "google",
+        rangeStart: syncStartIso,
+        rangeEnd: syncEndIso,
+      }),
+  ]);
 
   const busyCounts = buildBusyCountsByDay(
     busySlots,

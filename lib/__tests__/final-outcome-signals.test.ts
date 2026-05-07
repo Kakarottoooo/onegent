@@ -1,5 +1,8 @@
 import { describe, it, expect } from "vitest";
-import { NO_AVAILABILITY_SIGNALS } from "@/lib/booking-autopilot/core/final-outcome";
+import {
+  determineFinalOutcome,
+  NO_AVAILABILITY_SIGNALS,
+} from "@/lib/booking-autopilot/core/final-outcome";
 
 // These tests pin the specific page-copy fragments we rely on the listing-stage
 // classifier in stagehand-executor.ts to recognise as no_availability rather
@@ -76,5 +79,61 @@ describe("NO_AVAILABILITY_SIGNALS — does not over-match", () => {
   it("does not match a checkout / payment page", () => {
     const text = "Complete your reservation. Cancellation policy. Card number, expiry, CVV.";
     expect(matchesAnySignal(text)).toBe(false);
+  });
+});
+
+describe("Booking.com final no-availability evidence guard", () => {
+  it("downgrades search-level empty results instead of terminal no_availability", () => {
+    const traces: string[] = [];
+    const result = determineFinalOutcome({
+      assessment: {
+        stage: "listing",
+        reason: "search results stayed empty",
+        pageText: "No properties match your search. No rooms available.",
+        visibleCheckoutFields: false,
+        hitPaymentGate: false,
+        listingSignals: true,
+        bookingProgressSignals: false,
+        blocked: false,
+      },
+      screenshotBase64: "data:image/png;base64,",
+      handoffUrl: "https://www.booking.com/searchresults.html?ss=New%20York",
+      startUrl: "https://www.booking.com/searchresults.html?ss=YOTEL%20New%20York",
+      selectedDatesMatchRequest: true,
+      bookingComVerification: {
+        pageHasIdentityFields: false,
+        pageHasFullNameField: false,
+        pageHasFirstNameField: false,
+        pageHasLastNameField: false,
+        pageHasEmailField: false,
+        pageHasPhoneField: false,
+        identityOk: false,
+        cardOk: false,
+        hasMinimumFilledProfile: false,
+        visiblePaymentInputs: false,
+        paymentSignalsVisible: false,
+        cardTypeRequired: false,
+        cardTypeSelected: false,
+        readyForManualPaymentCompletion: false,
+        paymentFieldVisibility: { cardholder: false, cardNumber: false, cardExpiry: false },
+        paymentFieldVerification: { cardholder: false, cardNumber: false, cardExpiry: false },
+      },
+      hasEnteredFullName: false,
+      hasEnteredFirstName: false,
+      hasEnteredLastName: false,
+      hasEnteredEmail: false,
+      hasEnteredPhone: false,
+      hasEnteredCardNumber: false,
+      hasEnteredCardExpiry: false,
+      agentMessage: "No availability found.",
+      resultMessage: "No availability found.",
+      resultCompleted: false,
+      cardNumberProvided: false,
+      cardExpiryProvided: false,
+    }, (message) => traces.push(message));
+
+    expect(result.status).toBe("error");
+    expect(result.summary).toContain("hotel-specific");
+    expect(traces.join("\n")).toContain("lacked hotel-detail evidence");
   });
 });

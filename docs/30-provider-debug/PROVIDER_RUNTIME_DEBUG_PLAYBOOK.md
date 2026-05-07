@@ -27,6 +27,9 @@ Safety boundary:
    provider_network_degraded / provider_logic_failure /
    safe_boundary_reached) before deciding to patch. A model/env transient
    or network-degraded run is not a provider regression.
+   For hotel no-availability and fallback decisions, also apply
+   `docs/30-provider-debug/HOTEL_LAYERED_RECOVERY.md` before marking
+   inventory unavailable.
 7. Only then decide whether to patch selectors, strategy ordering, or runtime
    state handling.
 

@@ -18,28 +18,22 @@ import type {
 } from "@/lib/db";
 import type { RecommendationCard, FlightRecommendationCard, ActivityRecommendationCard } from "@/lib/types";
 import { extractOptions, resolveAcceptedOption, tallyVotes } from "@/lib/rooms/proposal-shape";
-import { buildTaskWorkspaceHref } from "@/lib/booking-jobs/workspace";
 import { CARD, CARD_MUTED, CTA, CTA_GHOST, PAGE } from "@/app/_ui/tokens";
 import { EyebrowLabel } from "@/app/_shared/editorial";
 import GlobalNav from "@/components/GlobalNav";
-import { deriveDREventsFromSnapshot } from "@/components/dr-timeline/derive-events";
-import type { DRTimelineInputs } from "@/components/dr-timeline/types";
+import PhotoCarousel from "@/components/PhotoCarousel";
+import FlightCard from "@/components/FlightCard";
+import ActivityCard from "@/components/ActivityCard";
+import {
+  DRTimelineList,
+  deriveDREventsFromSnapshot,
+  type DRTimelineInputs,
+} from "@/components/dr-timeline";
+import { getTaskWorkspaceHref } from "@/lib/booking-jobs/workspace";
 
 // Leaflet pulls in `window` — force client-only so the room detail page (a
 // server component by default) doesn't choke during SSR.
 const MapView = dynamic(() => import("@/components/MapView"), { ssr: false });
-const PhotoCarousel = dynamic(() => import("@/components/PhotoCarousel"), {
-  loading: () => null,
-});
-const FlightCard = dynamic(() => import("@/components/FlightCard"), {
-  loading: () => null,
-});
-const ActivityCard = dynamic(() => import("@/components/ActivityCard"), {
-  loading: () => null,
-});
-const DRTimelineList = dynamic(() => import("@/components/dr-timeline/DRTimelineList"), {
-  loading: () => null,
-});
 
 type MyConstraint = {
   budget_max?: number;
@@ -2914,26 +2908,17 @@ function AcceptedBlock({
     bookingJobId ? "loading" : null
   );
   const [clearing, setClearing] = useState(false);
-  const liveJobSignatureRef = useRef("");
 
   useEffect(() => {
-    if (!bookingJobId) {
-      liveJobSignatureRef.current = "";
-      setLiveJob(null);
-      return;
-    }
+    if (!bookingJobId) { setLiveJob(null); return; }
     let cancelled = false;
     let timer: ReturnType<typeof setInterval> | null = null;
     async function poll() {
-      if (typeof document !== "undefined" && document.visibilityState !== "visible") return;
       try {
         const res = await fetch(`/api/booking-jobs/${bookingJobId}`);
         if (cancelled) return;
         if (res.status === 404) {
-          if (liveJobSignatureRef.current !== "missing") {
-            liveJobSignatureRef.current = "missing";
-            setLiveJob("missing");
-          }
+          setLiveJob("missing");
           if (timer) clearInterval(timer);
           // Auto-clean: tell the server to drop the dangling reference so
           // refreshing the room state renders the date form again.
@@ -2946,11 +2931,7 @@ function AcceptedBlock({
         }
         if (!res.ok) return;
         const { job } = await res.json() as { job: LiveJob };
-        const nextSignature = `${job.id}:${job.status}:${job.steps.map((step, index) => `${index}:${step.status}:${step.error ?? ""}`).join("|")}`;
-        if (liveJobSignatureRef.current !== nextSignature) {
-          liveJobSignatureRef.current = nextSignature;
-          setLiveJob(job);
-        }
+        setLiveJob(job);
         // Stop polling once terminal.
         if ((job.status === "done" || job.status === "failed") && timer) {
           clearInterval(timer);
@@ -2959,17 +2940,7 @@ function AcceptedBlock({
     }
     poll();
     timer = setInterval(poll, 4000);
-    function pollWhenVisible() {
-      if (document.visibilityState === "visible") {
-        poll();
-      }
-    }
-    document.addEventListener("visibilitychange", pollWhenVisible);
-    return () => {
-      cancelled = true;
-      document.removeEventListener("visibilitychange", pollWhenVisible);
-      if (timer) clearInterval(timer);
-    };
+    return () => { cancelled = true; if (timer) clearInterval(timer); };
   }, [bookingJobId, roomId, isPayer, refresh]);
 
   async function retryBooking() {
@@ -3020,7 +2991,7 @@ function AcceptedBlock({
                 {clearing ? "Resetting…" : "🔄 Retry booking"}
               </button>
               <button
-                onClick={() => router.push(buildTaskWorkspaceHref(bookingJobId, "live", "evidence"))}
+                onClick={() => router.push(getTaskWorkspaceHref({ id: bookingJobId, status: "failed" }))}
                 className={`flex-1 py-2.5 ${CTA_GHOST}`}
               >
                 View log →
@@ -3046,7 +3017,11 @@ function AcceptedBlock({
           {isPayer && (
             <div className="flex gap-2">
               <button
-                onClick={() => router.push(buildTaskWorkspaceHref(bookingJobId, "live", "evidence"))}
+                onClick={() => router.push(getTaskWorkspaceHref({
+                  id: bookingJobId,
+                  status: "done",
+                  awaiting_confirmation_count: 1,
+                }))}
                 className={`flex-1 py-2.5 ${CTA}`}
               >
                 Open Tasks →
@@ -3075,7 +3050,7 @@ function AcceptedBlock({
           </p>
           {isPayer && (
             <button
-              onClick={() => router.push(buildTaskWorkspaceHref(bookingJobId, "live", "evidence"))}
+              onClick={() => router.push(getTaskWorkspaceHref({ id: bookingJobId, status: "done" }))}
               className={`w-full py-2.5 ${CTA_GHOST}`}
             >
               View details →
@@ -3098,7 +3073,7 @@ function AcceptedBlock({
         </p>
         {isPayer && (
           <button
-            onClick={() => router.push(buildTaskWorkspaceHref(bookingJobId, "live", "evidence"))}
+            onClick={() => router.push(getTaskWorkspaceHref({ id: bookingJobId, status: "running" }))}
             className={`w-full py-2.5 ${CTA}`}
           >
             View booking status →
@@ -3167,7 +3142,7 @@ function AcceptedBlock({
         return;
       }
       const { job_id } = await res.json() as { job_id: string };
-      router.push(buildTaskWorkspaceHref(job_id, "live", "evidence"));
+      router.push(getTaskWorkspaceHref({ id: job_id, status: "running" }));
     } finally {
       setStarting(false);
     }
@@ -3486,7 +3461,6 @@ function ChatPanel({
   const [text, setText] = useState("");
   const [sending, setSending] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
-  const messagesSignatureRef = useRef("");
 
   const memberShort = useMemo(() => {
     const map: Record<string, string> = {};
@@ -3497,38 +3471,22 @@ function ChatPanel({
   }, [members, memberProfiles]);
 
   const fetchMessages = useCallback(async () => {
-    if (typeof document !== "undefined" && document.visibilityState !== "visible") return;
     try {
       const res = await fetch(`/api/rooms/${roomId}/messages`);
       if (!res.ok) return;
       const data = await res.json() as { messages: DecisionRoomMessage[] };
-      const nextSignature = data.messages
-        .map((message) => `${message.id}:${message.created_at}:${message.content.length}`)
-        .join("|");
-      if (messagesSignatureRef.current !== nextSignature) {
-        messagesSignatureRef.current = nextSignature;
-        setMessages(data.messages);
-      }
+      setMessages(data.messages);
     } catch { /* noop */ }
   }, [roomId]);
 
   useEffect(() => {
     fetchMessages();
     const i = setInterval(fetchMessages, 4000);
-    function refreshWhenVisible() {
-      if (document.visibilityState === "visible") {
-        fetchMessages();
-      }
-    }
-    document.addEventListener("visibilitychange", refreshWhenVisible);
-    return () => {
-      clearInterval(i);
-      document.removeEventListener("visibilitychange", refreshWhenVisible);
-    };
+    return () => clearInterval(i);
   }, [fetchMessages]);
 
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: "auto", block: "end" });
+    bottomRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
   }, [messages.length]);
 
   async function send() {

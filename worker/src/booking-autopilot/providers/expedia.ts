@@ -199,6 +199,7 @@ export interface ExpediaFlightTarget {
 
 export interface ExpediaFlightCandidateScore {
   hasAirline: boolean;
+  hasExplicitDifferentAirline: boolean;
   score: number;
   exactMatch: boolean;
   fallbackEligible: boolean;
@@ -335,6 +336,27 @@ const EXPEDIA_FLIGHT_AIRLINE_HINTS = [
   "Alaska",
 ];
 
+// Expedia can hide flight numbers and prices can drift; do not let a named
+// other airline pass a target-time or price fallback.
+function hasExpediaFlightExplicitDifferentAirline(
+  rawText: string,
+  targetAirline: string | null | undefined,
+): boolean {
+  const text = normalizeExpediaFlightLoose(rawText);
+  const target = normalizeExpediaFlightLoose(targetAirline);
+  if (!text || !target) return false;
+  const targetWord = target.split(" ")[0] ?? "";
+  const targetTokens = new Set([target, targetWord].filter(token => token.length >= 3));
+
+  return EXPEDIA_FLIGHT_AIRLINE_HINTS.some(hint => {
+    const looseHint = normalizeExpediaFlightLoose(hint);
+    const hintWord = looseHint.split(" ")[0] ?? "";
+    if (!looseHint) return false;
+    if (targetTokens.has(looseHint) || targetTokens.has(hintWord)) return false;
+    return text.includes(looseHint) || (hintWord.length >= 4 && text.includes(hintWord));
+  });
+}
+
 export function extractExpediaFlightCandidateEvidence(
   rawText: string,
   target: ExpediaFlightTarget = {},
@@ -395,6 +417,7 @@ export function formatExpediaFlightCandidateEvidence(
       `fallbackScore=${score.fallbackScore}`,
       `timeDelta=${score.timeDelta ?? "unknown"}`,
       `priceDelta=${score.priceDelta ?? "unknown"}`,
+      `differentAirline=${score.hasExplicitDifferentAirline ? "yes" : "no"}`,
     );
   }
   parts.push(`text="${evidence.label}"`);
@@ -713,6 +736,8 @@ export function scoreExpediaFlightCandidateText(
   const priceToken = typeof target.price === "number" ? `$${target.price}` : "";
 
   const hasAirline = !airlineWord || combined.includes(airlineWord) || combined.includes(airlineLoose);
+  const hasExplicitDifferentAirline =
+    !hasAirline && hasExpediaFlightExplicitDifferentAirline(combined, target.airline);
   const visiblePrices = extractExpediaFlightPrices(combined);
   const priceDelta =
     typeof target.price === "number" && visiblePrices.length > 0
@@ -747,15 +772,19 @@ export function scoreExpediaFlightCandidateText(
   const hasNearTargetTime = timeDelta !== null && timeDelta <= 120;
   const hasStrongTargetIdentity = hasFlightNumber || hasExactTargetTime;
   const exactMatch =
+    !hasExplicitDifferentAirline &&
     (!flightNumberTight || hasFlightNumber) &&
     (timeMinutes === null || timeScore > 0) &&
     (hasStrongTargetIdentity || !priceToken || hasPrice);
   const hasPriceFallbackWithoutTargetTime =
     timeMinutes === null && (hasPrice || (priceDelta !== null && priceDelta <= 60));
   const fallbackEligible =
-    hasFlightNumber ||
-    hasNearTargetTime ||
-    hasPriceFallbackWithoutTargetTime;
+    !hasExplicitDifferentAirline &&
+    (
+      hasFlightNumber ||
+      hasNearTargetTime ||
+      hasPriceFallbackWithoutTargetTime
+    );
   const fallbackScore =
     (hasFlightNumber ? 120 : 0) +
     (hasExactTargetTime ? 100 : 0) +
@@ -764,6 +793,7 @@ export function scoreExpediaFlightCandidateText(
 
   return {
     hasAirline,
+    hasExplicitDifferentAirline,
     score,
     exactMatch,
     fallbackEligible,
@@ -4508,6 +4538,7 @@ function selectExpediaFlightCandidate(
   const crossAirlineFallbackCandidates = candidates
     .filter(candidate =>
       !candidate.score.hasAirline &&
+      !candidate.score.hasExplicitDifferentAirline &&
       !candidate.score.exactMatch &&
       candidate.score.fallbackEligible
     )
@@ -4589,6 +4620,35 @@ async function clickExpediaFlightButtonWithDomRescan(
     const flightNumberTight = normalizeTight(flightNumber);
     const flightDigits = (flightNumber ?? "").replace(/\D/g, "");
     const priceToken = typeof price === "number" ? `$${price}` : "";
+    const knownAirlineHints = [
+      "Southwest Airlines",
+      "Southwest",
+      "American Airlines",
+      "American",
+      "Delta Air Lines",
+      "Delta",
+      "United Airlines",
+      "United",
+      "Spirit Airlines",
+      "Spirit",
+      "Frontier Airlines",
+      "Frontier",
+      "JetBlue",
+      "Alaska Airlines",
+      "Alaska",
+    ];
+    const hasExplicitDifferentAirlineText = (text: string): boolean => {
+      if (!text || !airlineLoose) return false;
+      const targetWord = airlineLoose.split(" ")[0] ?? "";
+      const targetTokens = new Set([airlineLoose, targetWord].filter(token => token.length >= 3));
+      return knownAirlineHints.some(hint => {
+        const looseHint = normalizeLoose(hint);
+        const hintWord = looseHint.split(" ")[0] ?? "";
+        if (!looseHint) return false;
+        if (targetTokens.has(looseHint) || targetTokens.has(hintWord)) return false;
+        return text.includes(looseHint) || (hintWord.length >= 4 && text.includes(hintWord));
+      });
+    };
 
     const selectableCandidates = Array.from(document.querySelectorAll<HTMLElement>('button, [role="button"]'))
       .map(btn => {
@@ -4601,6 +4661,7 @@ async function clickExpediaFlightButtonWithDomRescan(
         const rect = btn.getBoundingClientRect();
         if (rect.width === 0 || rect.height === 0) return null;
         const hasAirline = !airlineWord || combined.includes(airlineWord) || combined.includes(airlineLoose);
+        const hasExplicitDifferentAirline = !hasAirline && hasExplicitDifferentAirlineText(combined);
         const visiblePrices = extractPrices(combined);
         const priceDelta =
           typeof price === "number" && visiblePrices.length > 0
@@ -4635,15 +4696,19 @@ async function clickExpediaFlightButtonWithDomRescan(
         const hasNearTargetTime = timeDelta !== null && timeDelta <= 120;
         const hasStrongTargetIdentity = hasFlightNumber || hasExactTargetTime;
         const exactMatch =
+          !hasExplicitDifferentAirline &&
           (!flightNumberTight || hasFlightNumber) &&
           (timeMinutes === null || timeScore > 0) &&
           (hasStrongTargetIdentity || !priceToken || hasPrice);
         const hasPriceFallbackWithoutTargetTime =
           timeMinutes === null && (hasPrice || (priceDelta !== null && priceDelta <= 60));
         const fallbackEligible =
-          hasFlightNumber ||
-          hasNearTargetTime ||
-          hasPriceFallbackWithoutTargetTime;
+          !hasExplicitDifferentAirline &&
+          (
+            hasFlightNumber ||
+            hasNearTargetTime ||
+            hasPriceFallbackWithoutTargetTime
+          );
         const fallbackScore =
           (hasFlightNumber ? 120 : 0) +
           (hasExactTargetTime ? 100 : 0) +
@@ -4653,6 +4718,7 @@ async function clickExpediaFlightButtonWithDomRescan(
           btn,
           label: combined.slice(0, 140),
           hasAirline,
+          hasExplicitDifferentAirline,
           exactMatch,
           fallbackEligible,
           hasFlightNumber,
@@ -4668,6 +4734,7 @@ async function clickExpediaFlightButtonWithDomRescan(
         btn: HTMLElement;
         label: string;
         hasAirline: boolean;
+        hasExplicitDifferentAirline: boolean;
         exactMatch: boolean;
         fallbackEligible: boolean;
         hasFlightNumber: boolean;
@@ -4707,6 +4774,7 @@ async function clickExpediaFlightButtonWithDomRescan(
     const crossAirlineFallbackCandidates = selectableCandidates
       .filter(candidate =>
         !candidate.hasAirline &&
+        !candidate.hasExplicitDifferentAirline &&
         !candidate.exactMatch &&
         candidate.fallbackEligible
       )
@@ -5009,6 +5077,35 @@ export async function bookExpediaFlightProgrammatic(
     const flightNumberTight = normalizeTight(flightNumber);
     const flightDigits = (flightNumber ?? "").replace(/\D/g, "");
     const priceToken = typeof price === "number" ? `$${price}` : "";
+    const knownAirlineHints = [
+      "Southwest Airlines",
+      "Southwest",
+      "American Airlines",
+      "American",
+      "Delta Air Lines",
+      "Delta",
+      "United Airlines",
+      "United",
+      "Spirit Airlines",
+      "Spirit",
+      "Frontier Airlines",
+      "Frontier",
+      "JetBlue",
+      "Alaska Airlines",
+      "Alaska",
+    ];
+    const hasExplicitDifferentAirlineText = (text: string): boolean => {
+      if (!text || !airlineLoose) return false;
+      const targetWord = airlineLoose.split(" ")[0] ?? "";
+      const targetTokens = new Set([airlineLoose, targetWord].filter(token => token.length >= 3));
+      return knownAirlineHints.some(hint => {
+        const looseHint = normalizeLoose(hint);
+        const hintWord = looseHint.split(" ")[0] ?? "";
+        if (!looseHint) return false;
+        if (targetTokens.has(looseHint) || targetTokens.has(hintWord)) return false;
+        return text.includes(looseHint) || (hintWord.length >= 4 && text.includes(hintWord));
+      });
+    };
 
     const allButtons = Array.from(document.querySelectorAll<HTMLElement>('button, [role="button"]'));
     const selectableCandidates = allButtons
@@ -5020,6 +5117,7 @@ export async function bookExpediaFlightProgrammatic(
         const combined = `${label} ${context}`.trim();
         const combinedTight = normalizeTight(combined);
         const hasAirline = !airlineWord || combined.includes(airlineWord) || combined.includes(airlineLoose);
+        const hasExplicitDifferentAirline = !hasAirline && hasExplicitDifferentAirlineText(combined);
         const visiblePrices = extractPrices(combined);
         const priceDelta =
           typeof price === "number" && visiblePrices.length > 0
@@ -5054,15 +5152,19 @@ export async function bookExpediaFlightProgrammatic(
         const hasNearTargetTime = timeDelta !== null && timeDelta <= 120;
         const hasStrongTargetIdentity = hasFlightNumber || hasExactTargetTime;
         const exactMatch =
+          !hasExplicitDifferentAirline &&
           (!flightNumberTight || hasFlightNumber) &&
           (timeMinutes === null || timeScore > 0) &&
           (hasStrongTargetIdentity || !priceToken || hasPrice);
         const hasPriceFallbackWithoutTargetTime =
           timeMinutes === null && (hasPrice || (priceDelta !== null && priceDelta <= 60));
         const fallbackEligible =
-          hasFlightNumber ||
-          hasNearTargetTime ||
-          hasPriceFallbackWithoutTargetTime;
+          !hasExplicitDifferentAirline &&
+          (
+            hasFlightNumber ||
+            hasNearTargetTime ||
+            hasPriceFallbackWithoutTargetTime
+          );
         const fallbackScore =
           (hasFlightNumber ? 120 : 0) +
           (hasExactTargetTime ? 100 : 0) +
@@ -5074,6 +5176,7 @@ export async function bookExpediaFlightProgrammatic(
           btn,
           label: combined.slice(0, 140),
           hasAirline,
+          hasExplicitDifferentAirline,
           score,
           exactMatch,
           fallbackEligible,
@@ -5090,6 +5193,7 @@ export async function bookExpediaFlightProgrammatic(
         btn: HTMLElement;
         label: string;
         hasAirline: boolean;
+        hasExplicitDifferentAirline: boolean;
         score: number;
         exactMatch: boolean;
         fallbackEligible: boolean;
@@ -5130,6 +5234,7 @@ export async function bookExpediaFlightProgrammatic(
     const crossAirlineFallbackCandidates = selectableCandidates
       .filter(candidate =>
         !candidate.hasAirline &&
+        !candidate.hasExplicitDifferentAirline &&
         !candidate.exactMatch &&
         candidate.fallbackEligible
       )

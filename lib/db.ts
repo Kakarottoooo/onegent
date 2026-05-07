@@ -1,7 +1,6 @@
 import { sql, db } from "@vercel/postgres";
 import { createHash, createHmac, randomBytes, randomUUID } from "node:crypto";
 import { encrypt, decrypt } from "./encryption";
-import type { BookingJobCompactRow } from "./booking-jobs/read-model";
 
 export { sql };
 
@@ -1692,6 +1691,8 @@ export async function ensureBookingJobsTable(): Promise<void> {
       `.catch(() => {});
       await sql`CREATE INDEX IF NOT EXISTS booking_jobs_session_idx ON booking_jobs (session_id)`;
       await sql`CREATE INDEX IF NOT EXISTS booking_jobs_user_idx ON booking_jobs (user_id) WHERE user_id IS NOT NULL`;
+      await sql`CREATE INDEX IF NOT EXISTS booking_jobs_session_created_idx ON booking_jobs (session_id, created_at DESC)`;
+      await sql`CREATE INDEX IF NOT EXISTS booking_jobs_user_created_idx ON booking_jobs (user_id, created_at DESC) WHERE user_id IS NOT NULL`;
     })().catch((err) => {
       bookingJobsTableReady = null;
       throw err;
@@ -1807,6 +1808,36 @@ export interface BookingJob {
   completed_at: string | null;
 }
 
+export interface BookingJobSummary {
+  id: string;
+  session_id: string;
+  user_id: string | null;
+  trip_label: string;
+  status: BookingJob["status"];
+  step_count: number;
+  action_count: number;
+  created_at: string;
+  updated_at: string;
+  completed_at: string | null;
+}
+
+export interface BookingJobListRow extends BookingJobSummary {
+  done_count: number;
+  awaiting_confirmation_count: number;
+  adjusted_count: number;
+  replan_count: number;
+  primary_step_type: string | null;
+  primary_step_label: string | null;
+  primary_step_status: string | null;
+  primary_start_url: string | null;
+  scenario: string | null;
+}
+
+export type BookingJobCalendarRow = Pick<
+  BookingJob,
+  "id" | "session_id" | "user_id" | "trip_label" | "status" | "steps" | "created_at" | "updated_at"
+>;
+
 export async function createBookingJob(params: {
   id: string;
   sessionId: string;
@@ -1847,6 +1878,119 @@ export async function getBookingJobsBySession(sessionId: string, limit = 20): Pr
   return result.rows;
 }
 
+export async function getBookingJobCalendarRowsBySession(
+  sessionId: string,
+  limit = 100,
+): Promise<BookingJobCalendarRow[]> {
+  await ensureBookingJobsTable();
+  const rowLimit = Math.max(1, Math.min(200, Math.floor(limit)));
+  const result = await sql<BookingJobCalendarRow>`
+    SELECT id, session_id, user_id, trip_label, status, steps, created_at, updated_at
+    FROM booking_jobs
+    WHERE session_id = ${sessionId}
+    ORDER BY created_at DESC
+    LIMIT ${rowLimit}
+  `;
+  return result.rows;
+}
+
+export async function getBookingJobSummariesBySession(
+  sessionId: string,
+  limit = 20,
+): Promise<BookingJobSummary[]> {
+  await ensureBookingJobsTable();
+  const result = await sql<BookingJobSummary>`
+    SELECT
+      id,
+      session_id,
+      user_id,
+      trip_label,
+      status,
+      jsonb_array_length(steps)::int AS step_count,
+      COALESCE((
+        SELECT COUNT(*)::int
+        FROM jsonb_array_elements(steps) AS step
+        WHERE step ? 'actionItem'
+          AND step->'actionItem' IS NOT NULL
+          AND step->'actionItem' <> 'null'::jsonb
+      ), 0)::int AS action_count,
+      created_at,
+      updated_at,
+      completed_at
+    FROM booking_jobs
+    WHERE session_id = ${sessionId}
+    ORDER BY created_at DESC
+    LIMIT ${limit}
+  `;
+  return result.rows;
+}
+
+export async function getBookingJobListRowsBySession(
+  sessionId: string,
+  limit = 50,
+): Promise<BookingJobListRow[]> {
+  await ensureBookingJobsTable();
+  const result = await sql<BookingJobListRow>`
+    SELECT
+      id,
+      session_id,
+      user_id,
+      trip_label,
+      status,
+      jsonb_array_length(steps)::int AS step_count,
+      COALESCE((
+        SELECT COUNT(*)::int
+        FROM jsonb_array_elements(steps) AS step
+        WHERE step ? 'actionItem'
+          AND step->'actionItem' IS NOT NULL
+          AND step->'actionItem' <> 'null'::jsonb
+      ), 0)::int AS action_count,
+      COALESCE((
+        SELECT COUNT(*)::int
+        FROM jsonb_array_elements(steps) AS step
+        WHERE step->>'status' = 'done'
+      ), 0)::int AS done_count,
+      COALESCE((
+        SELECT COUNT(*)::int
+        FROM jsonb_array_elements(steps) AS step
+        WHERE step->>'status' = 'awaiting_confirmation'
+      ), 0)::int AS awaiting_confirmation_count,
+      COALESCE((
+        SELECT COUNT(*)::int
+        FROM jsonb_array_elements(steps) AS step
+        WHERE step->>'timeAdjusted' = 'true'
+          OR step->>'usedFallback' = 'true'
+      ), 0)::int AS adjusted_count,
+      COALESCE((
+        SELECT COUNT(*)::int
+        FROM jsonb_array_elements(steps) AS step
+        WHERE step->>'replanAdjusted' = 'true'
+          OR step->>'replanFlagged' = 'true'
+      ), 0)::int AS replan_count,
+      steps->0->>'type' AS primary_step_type,
+      steps->0->>'label' AS primary_step_label,
+      steps->0->>'status' AS primary_step_status,
+      COALESCE(
+        steps->0->'body'->>'startUrl',
+        steps->0->'body'->'params'->>'startUrl',
+        steps->0->>'handoff_url'
+      ) AS primary_start_url,
+      COALESCE(
+        steps->0->'body'->>'scenario',
+        steps->0->'body'->'params'->>'scenario',
+        steps->0->>'type'
+      ) AS scenario,
+      created_at,
+      updated_at,
+      completed_at
+    FROM booking_jobs
+    WHERE session_id = ${sessionId}
+    ORDER BY created_at DESC
+    LIMIT ${limit}
+  `;
+  return result.rows;
+}
+
 /**
  * Jobs owned by a user regardless of session_id — recovers Decision Room
  * bookings whose session_id was a one-off random UUID.
@@ -1862,104 +2006,111 @@ export async function getBookingJobsByUser(userId: string, limit = 20): Promise<
   return result.rows;
 }
 
-export async function getBookingJobCompactRowsBySession(
-  sessionId: string,
+export async function getBookingJobCalendarRowsByUser(
+  userId: string,
   limit = 100,
-): Promise<BookingJobCompactRow[]> {
+): Promise<BookingJobCalendarRow[]> {
   await ensureBookingJobsTable();
-  const result = await sql<BookingJobCompactRow>`
+  const rowLimit = Math.max(1, Math.min(200, Math.floor(limit)));
+  const result = await sql<BookingJobCalendarRow>`
+    SELECT id, session_id, user_id, trip_label, status, steps, created_at, updated_at
+    FROM booking_jobs
+    WHERE user_id = ${userId}
+    ORDER BY created_at DESC
+    LIMIT ${rowLimit}
+  `;
+  return result.rows;
+}
+
+export async function getBookingJobSummariesByUser(
+  userId: string,
+  limit = 20,
+): Promise<BookingJobSummary[]> {
+  await ensureBookingJobsTable();
+  const result = await sql<BookingJobSummary>`
     SELECT
       id,
       session_id,
       user_id,
       trip_label,
       status,
-      COALESCE(plan_version, 1)::int AS plan_version,
+      jsonb_array_length(steps)::int AS step_count,
+      COALESCE((
+        SELECT COUNT(*)::int
+        FROM jsonb_array_elements(steps) AS step
+        WHERE step ? 'actionItem'
+          AND step->'actionItem' IS NOT NULL
+          AND step->'actionItem' <> 'null'::jsonb
+      ), 0)::int AS action_count,
       created_at,
       updated_at,
-      completed_at,
-      COALESCE(jsonb_array_length(steps), 0)::int AS step_count,
-      COALESCE((
-        SELECT count(*)::int
-        FROM jsonb_array_elements(steps) AS s(step)
-        WHERE step->>'status' IN ('done', 'awaiting_confirmation')
-      ), 0)::int AS ready_step_count,
-      COALESCE((
-        SELECT count(*)::int
-        FROM jsonb_array_elements(steps) AS s(step)
-        WHERE step ? 'actionItem'
-      ), 0)::int AS action_count,
-      steps->0->>'type' AS first_step_type,
-      steps->0->>'emoji' AS first_step_emoji,
-      steps->0->>'label' AS first_step_label,
-      COALESCE((
-        SELECT step->>'status'
-        FROM jsonb_array_elements(steps) WITH ORDINALITY AS s(step, ord)
-        WHERE COALESCE(step->>'status', '') <> 'pending'
-        ORDER BY ord DESC
-        LIMIT 1
-      ), steps->0->>'status') AS latest_step_status,
-      COALESCE((
-        SELECT bool_or(NULLIF(step->>'handoff_url', '') IS NOT NULL)
-        FROM jsonb_array_elements(steps) AS s(step)
-      ), false) AS has_handoff_url,
-      COALESCE((
-        SELECT bool_or(NULLIF(step->>'session_url', '') IS NOT NULL)
-        FROM jsonb_array_elements(steps) AS s(step)
-      ), false) AS has_session_url
+      completed_at
     FROM booking_jobs
-    WHERE session_id = ${sessionId}
+    WHERE user_id = ${userId}
     ORDER BY created_at DESC
     LIMIT ${limit}
   `;
   return result.rows;
 }
 
-export async function getBookingJobCompactRowsByUser(
+export async function getBookingJobListRowsByUser(
   userId: string,
-  limit = 100,
-): Promise<BookingJobCompactRow[]> {
+  limit = 50,
+): Promise<BookingJobListRow[]> {
   await ensureBookingJobsTable();
-  const result = await sql<BookingJobCompactRow>`
+  const result = await sql<BookingJobListRow>`
     SELECT
       id,
       session_id,
       user_id,
       trip_label,
       status,
-      COALESCE(plan_version, 1)::int AS plan_version,
+      jsonb_array_length(steps)::int AS step_count,
+      COALESCE((
+        SELECT COUNT(*)::int
+        FROM jsonb_array_elements(steps) AS step
+        WHERE step ? 'actionItem'
+          AND step->'actionItem' IS NOT NULL
+          AND step->'actionItem' <> 'null'::jsonb
+      ), 0)::int AS action_count,
+      COALESCE((
+        SELECT COUNT(*)::int
+        FROM jsonb_array_elements(steps) AS step
+        WHERE step->>'status' = 'done'
+      ), 0)::int AS done_count,
+      COALESCE((
+        SELECT COUNT(*)::int
+        FROM jsonb_array_elements(steps) AS step
+        WHERE step->>'status' = 'awaiting_confirmation'
+      ), 0)::int AS awaiting_confirmation_count,
+      COALESCE((
+        SELECT COUNT(*)::int
+        FROM jsonb_array_elements(steps) AS step
+        WHERE step->>'timeAdjusted' = 'true'
+          OR step->>'usedFallback' = 'true'
+      ), 0)::int AS adjusted_count,
+      COALESCE((
+        SELECT COUNT(*)::int
+        FROM jsonb_array_elements(steps) AS step
+        WHERE step->>'replanAdjusted' = 'true'
+          OR step->>'replanFlagged' = 'true'
+      ), 0)::int AS replan_count,
+      steps->0->>'type' AS primary_step_type,
+      steps->0->>'label' AS primary_step_label,
+      steps->0->>'status' AS primary_step_status,
+      COALESCE(
+        steps->0->'body'->>'startUrl',
+        steps->0->'body'->'params'->>'startUrl',
+        steps->0->>'handoff_url'
+      ) AS primary_start_url,
+      COALESCE(
+        steps->0->'body'->>'scenario',
+        steps->0->'body'->'params'->>'scenario',
+        steps->0->>'type'
+      ) AS scenario,
       created_at,
       updated_at,
-      completed_at,
-      COALESCE(jsonb_array_length(steps), 0)::int AS step_count,
-      COALESCE((
-        SELECT count(*)::int
-        FROM jsonb_array_elements(steps) AS s(step)
-        WHERE step->>'status' IN ('done', 'awaiting_confirmation')
-      ), 0)::int AS ready_step_count,
-      COALESCE((
-        SELECT count(*)::int
-        FROM jsonb_array_elements(steps) AS s(step)
-        WHERE step ? 'actionItem'
-      ), 0)::int AS action_count,
-      steps->0->>'type' AS first_step_type,
-      steps->0->>'emoji' AS first_step_emoji,
-      steps->0->>'label' AS first_step_label,
-      COALESCE((
-        SELECT step->>'status'
-        FROM jsonb_array_elements(steps) WITH ORDINALITY AS s(step, ord)
-        WHERE COALESCE(step->>'status', '') <> 'pending'
-        ORDER BY ord DESC
-        LIMIT 1
-      ), steps->0->>'status') AS latest_step_status,
-      COALESCE((
-        SELECT bool_or(NULLIF(step->>'handoff_url', '') IS NOT NULL)
-        FROM jsonb_array_elements(steps) AS s(step)
-      ), false) AS has_handoff_url,
-      COALESCE((
-        SELECT bool_or(NULLIF(step->>'session_url', '') IS NOT NULL)
-        FROM jsonb_array_elements(steps) AS s(step)
-      ), false) AS has_session_url
+      completed_at
     FROM booking_jobs
     WHERE user_id = ${userId}
     ORDER BY created_at DESC
@@ -4035,6 +4186,28 @@ export interface DecisionRoomWithMembership extends DecisionRoom {
   member_status: "joined" | "invited";
 }
 
+export type DecisionRoomSidebarRow = Pick<
+  DecisionRoom,
+  "id" | "type" | "title" | "status" | "creator_id" | "flow" | "created_at" | "updated_at"
+> & {
+  member_status: "joined" | "invited";
+};
+
+export type DecisionRoomListRow = Pick<
+  DecisionRoom,
+  | "id"
+  | "type"
+  | "title"
+  | "status"
+  | "creator_id"
+  | "flow"
+  | "short_code"
+  | "created_at"
+  | "updated_at"
+> & {
+  member_status: "joined" | "invited";
+};
+
 export async function listMyDecisionRooms(
   userId: string,
   opts: { archived?: boolean; includeInvited?: boolean } = {}
@@ -4077,6 +4250,135 @@ export async function listMyDecisionRooms(
       AND r.status NOT IN ('done', 'abandoned')
     ORDER BY r.updated_at DESC
     LIMIT 100
+  `;
+  return result.rows;
+}
+
+export async function listMyDecisionRoomListRows(
+  userId: string,
+  opts: { archived?: boolean; includeInvited?: boolean; limit?: number } = {},
+): Promise<DecisionRoomListRow[]> {
+  await ensureDecisionRoomTables();
+  const limit = Math.max(1, Math.min(100, Math.floor(opts.limit ?? 100)));
+  if (opts.archived) {
+    const result = await sql<DecisionRoomListRow>`
+      SELECT
+        r.id,
+        r.type,
+        r.title,
+        r.status,
+        r.creator_id,
+        r.flow,
+        r.short_code,
+        r.created_at,
+        r.updated_at,
+        m.status AS member_status
+      FROM decision_rooms r
+      JOIN decision_room_members m ON m.room_id = r.id
+      WHERE m.user_id = ${userId}
+        AND m.status = 'joined'
+        AND r.status IN ('done', 'abandoned')
+      ORDER BY r.updated_at DESC
+      LIMIT ${limit}
+    `;
+    return result.rows;
+  }
+
+  if (opts.includeInvited) {
+    const result = await sql<DecisionRoomListRow>`
+      SELECT
+        r.id,
+        r.type,
+        r.title,
+        r.status,
+        r.creator_id,
+        r.flow,
+        r.short_code,
+        r.created_at,
+        r.updated_at,
+        m.status AS member_status
+      FROM decision_rooms r
+      JOIN decision_room_members m ON m.room_id = r.id
+      WHERE m.user_id = ${userId}
+        AND m.status IN ('joined', 'invited')
+        AND r.status NOT IN ('done', 'abandoned')
+      ORDER BY (m.status = 'invited') DESC, r.updated_at DESC
+      LIMIT ${limit}
+    `;
+    return result.rows;
+  }
+
+  const result = await sql<DecisionRoomListRow>`
+    SELECT
+      r.id,
+      r.type,
+      r.title,
+      r.status,
+      r.creator_id,
+      r.flow,
+      r.short_code,
+      r.created_at,
+      r.updated_at,
+      m.status AS member_status
+    FROM decision_rooms r
+    JOIN decision_room_members m ON m.room_id = r.id
+    WHERE m.user_id = ${userId}
+      AND m.status = 'joined'
+      AND r.status NOT IN ('done', 'abandoned')
+    ORDER BY r.updated_at DESC
+    LIMIT ${limit}
+  `;
+  return result.rows;
+}
+
+export async function listMyDecisionRoomSidebarRows(
+  userId: string,
+  opts: { includeInvited?: boolean; limit?: number } = {},
+): Promise<DecisionRoomSidebarRow[]> {
+  await ensureDecisionRoomTables();
+  const limit = Math.max(1, Math.min(100, Math.floor(opts.limit ?? 30)));
+
+  if (opts.includeInvited) {
+    const result = await sql<DecisionRoomSidebarRow>`
+      SELECT
+        r.id,
+        r.type,
+        r.title,
+        r.status,
+        r.creator_id,
+        r.flow,
+        r.created_at,
+        r.updated_at,
+        m.status AS member_status
+      FROM decision_rooms r
+      JOIN decision_room_members m ON m.room_id = r.id
+      WHERE m.user_id = ${userId}
+        AND m.status IN ('joined', 'invited')
+        AND r.status NOT IN ('done', 'abandoned')
+      ORDER BY (m.status = 'invited') DESC, r.updated_at DESC
+      LIMIT ${limit}
+    `;
+    return result.rows;
+  }
+
+  const result = await sql<DecisionRoomSidebarRow>`
+    SELECT
+      r.id,
+      r.type,
+      r.title,
+      r.status,
+      r.creator_id,
+      r.flow,
+      r.created_at,
+      r.updated_at,
+      m.status AS member_status
+    FROM decision_rooms r
+    JOIN decision_room_members m ON m.room_id = r.id
+    WHERE m.user_id = ${userId}
+      AND m.status = 'joined'
+      AND r.status NOT IN ('done', 'abandoned')
+    ORDER BY r.updated_at DESC
+    LIMIT ${limit}
   `;
   return result.rows;
 }
@@ -5101,6 +5403,67 @@ export async function listContactsWithProfiles(ownerId: string): Promise<Contact
 //   - If the target declined me within the last 7 days, I'm on cooldown.
 //   - An existing pending request in either direction blocks new ones.
 // ═══════════════════════════════════════════════════════════════════════════
+
+export interface ContactWorkspaceCounts {
+  contact_count: number;
+  incoming_request_count: number;
+  outgoing_request_count: number;
+  group_count: number;
+  blocked_count: number;
+}
+
+function firstCount(rows: Array<{ count: number | string | null | undefined }>): number {
+  const value = Number(rows[0]?.count ?? 0);
+  return Number.isFinite(value) ? value : 0;
+}
+
+export async function getContactWorkspaceCounts(ownerId: string): Promise<ContactWorkspaceCounts> {
+  await Promise.all([
+    ensureUserContactsTable(),
+    ensureContactRequestsTable(),
+    ensureUserGroupsTable(),
+    ensureContactBlocksTable(),
+  ]);
+  await backfillBidirectionalContactsOnce();
+
+  const [contacts, incoming, outgoing, groups, blocks] = await Promise.all([
+    sql<{ count: number }>`
+      SELECT COUNT(*)::int AS count
+      FROM user_contacts
+      WHERE owner_id = ${ownerId}
+    `,
+    sql<{ count: number }>`
+      SELECT COUNT(*)::int AS count
+      FROM contact_requests
+      WHERE to_user_id = ${ownerId}
+        AND status = 'pending'
+    `,
+    sql<{ count: number }>`
+      SELECT COUNT(*)::int AS count
+      FROM contact_requests
+      WHERE from_user_id = ${ownerId}
+        AND status = 'pending'
+    `,
+    sql<{ count: number }>`
+      SELECT COUNT(*)::int AS count
+      FROM user_groups
+      WHERE owner_id = ${ownerId}
+    `,
+    sql<{ count: number }>`
+      SELECT COUNT(*)::int AS count
+      FROM contact_blocks
+      WHERE blocker_id = ${ownerId}
+    `,
+  ]);
+
+  return {
+    contact_count: firstCount(contacts.rows),
+    incoming_request_count: firstCount(incoming.rows),
+    outgoing_request_count: firstCount(outgoing.rows),
+    group_count: firstCount(groups.rows),
+    blocked_count: firstCount(blocks.rows),
+  };
+}
 
 export type ContactRequestStatus = "pending" | "accepted" | "declined" | "cancelled";
 
@@ -6274,6 +6637,30 @@ export async function listMyChatSessions(userId: string): Promise<ChatSession[]>
     WHERE user_id = ${userId}
     ORDER BY updated_at DESC
     LIMIT 100
+  `;
+  return result.rows;
+}
+
+export async function listMyChatSessionRows(userId: string, limit = 30): Promise<ChatSession[]> {
+  await ensureChatSessionsTable();
+  const rowLimit = Math.max(1, Math.min(100, Math.floor(limit)));
+  const result = await sql<ChatSession>`
+    SELECT
+      id,
+      user_id,
+      title,
+      upgraded_room_id,
+      upgraded_plan_id,
+      upgraded_trip_id,
+      destination,
+      scenario,
+      completed_at,
+      created_at,
+      updated_at
+    FROM chat_sessions
+    WHERE user_id = ${userId}
+    ORDER BY updated_at DESC
+    LIMIT ${rowLimit}
   `;
   return result.rows;
 }

@@ -95,17 +95,17 @@ describe("docs static guard - ia", () => {
     expect(index, "INDEX must remain ASCII-only").not.toMatch(/[^\x00-\x7F]/);
   });
 
-  it("keeps PROJECT_SUMMARY phase snapshot aligned with the current integrated preview", () => {
+  it("keeps PROJECT_SUMMARY phase snapshot aligned with current canonical master", () => {
     const summary = read("docs/00-start-here/PROJECT_SUMMARY.md");
 
     expect(
       summary,
-      "PROJECT_SUMMARY must point at the current integrated preview worktree",
-    ).toContain("onegent-integrated-20260504");
+      "PROJECT_SUMMARY must point at the current canonical worktree",
+    ).toContain("C:\\Users\\Gzw19\\onegent");
     expect(
       summary,
-      "PROJECT_SUMMARY must point at the current integrated preview branch",
-    ).toContain("codex/integrated-preview-20260504");
+      "PROJECT_SUMMARY must point at the current canonical branch",
+    ).toContain("branch: master");
     expect(
       summary,
       "PROJECT_SUMMARY phase snapshot must record demo-freeze pass for Phase 1",

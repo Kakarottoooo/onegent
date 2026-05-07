@@ -28,12 +28,14 @@ in `codex/integrated-preview-*` without a Codex-side rewrite.
 
 1. `docs/10-coordination/README.md`
 2. `docs/10-coordination/MULTI_AGENT_PROTOCOL.md`
-3. `docs/10-coordination/HUDDLE.md`
-4. `docs/10-coordination/codex.md`
-5. `docs/10-coordination/claude.md`
-6. `docs/10-coordination/phase2.md`
-7. `docs/10-coordination/track-c.md` when demo-readiness work is active
-8. `docs/10-coordination/STRATEGIC_LEDGER.md`
+3. `docs/10-coordination/LAYERED_AGENT_INTAKE_CHECKLIST.md` when layered
+   benchmark / Browser Harness / multi-agent provider work is active
+4. `docs/10-coordination/HUDDLE.md`
+5. `docs/10-coordination/codex.md`
+6. `docs/10-coordination/claude.md`
+7. `docs/10-coordination/phase2.md`
+8. `docs/10-coordination/track-c.md` when demo-readiness work is active
+9. `docs/10-coordination/STRATEGIC_LEDGER.md`
 
 If `.coordination/*.md` exists, treat it as a compatibility pointer only. The
 canonical files are in this folder.
@@ -61,6 +63,8 @@ Belongs here:
 - What each agent is blocking on.
 - Which branch/commit contains a handoff.
 - What another agent should read next.
+- Current multi-agent intake checklist and merge gates for active shared
+  provider/runtime pushes.
 - Persistent strategic decisions that should not be relitigated.
 
 Does not belong here:

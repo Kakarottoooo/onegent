@@ -17,6 +17,7 @@ interface FlightCardProps {
     cabin_class?: string;
     is_round_trip?: boolean;
   } | null;
+  sessionId?: string | null;
   /** Called after a booking job is created — inject inline task card */
   onJobCreated?: (jobId: string) => void;
   /**
@@ -58,7 +59,7 @@ const GROUP_COLOR: Record<FlightRecommendationCard["group"], string> = {
   cheapest: "#1a5fa8",
 };
 
-export default function FlightCard({ card, index, bookingContext, onJobCreated, hideBookingActions }: FlightCardProps) {
+export default function FlightCard({ card, index, bookingContext, sessionId, onJobCreated, hideBookingActions }: FlightCardProps) {
   const { flight, group, why_recommended } = card;
   const [booking, setBooking] = useState(false);
   const [noProfile, setNoProfile] = useState(false);
@@ -92,7 +93,8 @@ export default function FlightCard({ card, index, bookingContext, onJobCreated, 
 
   async function proceedWithProfile(profile: { id: number; first_name: string; last_name: string; email: string; phone: string; address_line1?: string; city?: string; state?: string; zip?: string; country?: string }) {
     try {
-      const sessionId = localStorage.getItem("session_id") ?? crypto.randomUUID();
+      const bookingSessionId = sessionId?.trim() || localStorage.getItem("session_id") || crypto.randomUUID();
+      if (!localStorage.getItem("session_id")) localStorage.setItem("session_id", bookingSessionId);
       const savedModel = getBrowserModelAsLegacy();
       const agentModel = savedModel.model ? savedModel : undefined;
 
@@ -144,7 +146,7 @@ export default function FlightCard({ card, index, bookingContext, onJobCreated, 
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          session_id: sessionId,
+          session_id: bookingSessionId,
           trip_label: step.label,
           steps: [step],
         }),

@@ -1,80 +1,120 @@
 import { describe, expect, it } from "vitest";
-import type { BookingJob } from "@/lib/db";
+import type { BookingJobListRow, BookingJobSummary } from "@/lib/db";
 import {
-  compactRowFromJob,
-  mergeCompactRows,
-  summarizeBookingJobList,
-  toBookingJobListItem,
+  buildBookingJobListItem,
+  classifyBookingJobListItem,
+  summarizeBookingJobs,
 } from "@/lib/booking-jobs/read-model";
 
-function job(overrides: Partial<BookingJob> = {}): BookingJob {
+function summaryRow(overrides: Partial<BookingJobSummary> = {}): BookingJobSummary {
   return {
-    id: "job_1",
-    session_id: "session_1",
-    user_id: "user_1",
-    trip_label: "Sirrah",
-    status: "done",
-    steps: [
-      {
-        type: "restaurant",
-        emoji: "restaurant",
-        label: "Sirrah",
-        apiEndpoint: "/api/booking-autopilot/universal",
-        body: {},
-        fallbackUrl: "https://example.com",
-        status: "awaiting_confirmation",
-        handoff_url: "https://opentable.example/details",
-      },
-    ],
-    autonomy_settings: null,
-    plan_version: 1,
-    constraints: null,
-    policy: null,
-    created_at: "2026-05-06T10:00:00.000Z",
-    updated_at: "2026-05-06T10:01:00.000Z",
-    completed_at: "2026-05-06T10:01:00.000Z",
+    id: "job-1",
+    session_id: "session-1",
+    user_id: null,
+    trip_label: "Test job",
+    status: "pending",
+    step_count: 1,
+    action_count: 0,
+    created_at: "2026-05-05T00:00:00.000Z",
+    updated_at: "2026-05-05T00:00:00.000Z",
+    completed_at: null,
     ...overrides,
   };
 }
 
-describe("booking job compact read model", () => {
-  it("extracts compact task fields without retaining heavy step payloads", () => {
-    const row = compactRowFromJob(job());
+function listRow(overrides: Partial<BookingJobListRow> = {}): BookingJobListRow {
+  return {
+    ...summaryRow(),
+    done_count: 0,
+    awaiting_confirmation_count: 0,
+    adjusted_count: 0,
+    replan_count: 0,
+    primary_step_type: "restaurant",
+    primary_step_label: "Book Fumo",
+    primary_step_status: "pending",
+    primary_start_url: "https://www.opentable.com/r/fumo-soho-new-york",
+    scenario: "restaurant",
+    ...overrides,
+  };
+}
 
-    expect(row).toMatchObject({
-      id: "job_1",
-      trip_label: "Sirrah",
-      step_count: 1,
-      ready_step_count: 1,
-      first_step_type: "restaurant",
-      first_step_label: "Sirrah",
-      has_handoff_url: true,
+describe("summarizeBookingJobs", () => {
+  it("counts active, completed, failed, and action jobs from summary rows", () => {
+    const summary = summarizeBookingJobs([
+      summaryRow({ id: "pending", status: "pending", action_count: 1 }),
+      summaryRow({ id: "pending-local", status: "pending_local", action_count: 0 }),
+      summaryRow({ id: "running", status: "running", action_count: 2 }),
+      summaryRow({ id: "done", status: "done", action_count: 1 }),
+      summaryRow({ id: "failed", status: "failed", action_count: 0 }),
+    ]);
+
+    expect(summary).toMatchObject({
+      total: 5,
+      action_count: 4,
+      active_count: 3,
+      completed_count: 1,
+      failed_count: 1,
     });
-    expect(row).not.toHaveProperty("steps");
-    expect(row).not.toHaveProperty("decisionLog");
-    expect(row).not.toHaveProperty("autonomy_settings");
   });
 
-  it("adds workspace and summary fields for list rendering", () => {
-    const item = toBookingJobListItem(compactRowFromJob(job({ status: "pending_local" })));
+  it("uses the newest updated_at as the latest summary timestamp", () => {
+    const summary = summarizeBookingJobs([
+      summaryRow({ id: "older", updated_at: "2026-05-05T01:00:00.000Z" }),
+      summaryRow({ id: "newer", updated_at: "2026-05-05T02:30:00.000Z" }),
+      summaryRow({ id: "middle", updated_at: "2026-05-05T02:00:00.000Z" }),
+    ]);
 
-    expect(item.workspace).toBe("queue");
-    expect(item.latest_status_label).toBe("Queued locally");
+    expect(summary.latest_updated_at).toBe("2026-05-05T02:30:00.000Z");
   });
 
-  it("dedupes session and user rows and computes workspace totals", () => {
-    const sessionRow = compactRowFromJob(job({ id: "job_1", status: "running" }));
-    const duplicateUserRow = compactRowFromJob(job({ id: "job_1", status: "done" }));
-    const secondUserRow = compactRowFromJob(job({
-      id: "job_2",
-      status: "failed",
-      created_at: "2026-05-06T10:02:00.000Z",
+  it("returns a stable empty summary", () => {
+    expect(summarizeBookingJobs([])).toEqual({
+      total: 0,
+      action_count: 0,
+      active_count: 0,
+      completed_count: 0,
+      failed_count: 0,
+      latest_updated_at: null,
+    });
+  });
+});
+
+describe("booking job compact list rows", () => {
+  it("builds a compact task row without heavy detail fields", () => {
+    const item = buildBookingJobListItem(listRow({
+      id: "compact-1",
+      status: "done",
+      step_count: 2,
+      done_count: 1,
+      awaiting_confirmation_count: 1,
+      action_count: 0,
+      adjusted_count: 1,
+      replan_count: 1,
     }));
 
-    const items = mergeCompactRows([sessionRow], [duplicateUserRow, secondUserRow], 10);
-    const summary = summarizeBookingJobList(items);
+    expect(item).toMatchObject({
+      id: "compact-1",
+      step_count: 2,
+      done_count: 1,
+      awaiting_confirmation_count: 1,
+      adjusted_count: 1,
+      replan_count: 1,
+      provider: "opentable",
+      workspace: "history",
+      latest_status_label: "Ready to review - confirm on site",
+    });
+    expect(item).not.toHaveProperty("steps");
+    expect(item).not.toHaveProperty("decisionLog");
+    expect(item).not.toHaveProperty("autonomy_settings");
+    expect(JSON.stringify(item)).not.toContain("profile");
+  });
 
-    expect(items.map((item) => item.id)).toEqual(["job_2", "job_1"]);
-    expect(summary).toMatchObject({ total: 2, queue: 0, live: 1, history: 1 });
+  it("classifies queue, active, ready-for-review, and historical rows without full steps", () => {
+    expect(classifyBookingJobListItem(listRow({ status: "pending" }))).toBe("queue");
+    expect(classifyBookingJobListItem(listRow({ status: "pending_local" }))).toBe("queue");
+    expect(classifyBookingJobListItem(listRow({ status: "running" }))).toBe("live");
+    expect(classifyBookingJobListItem(listRow({ status: "done", awaiting_confirmation_count: 1 }))).toBe("history");
+    expect(classifyBookingJobListItem(listRow({ status: "failed", action_count: 1 }))).toBe("history");
+    expect(classifyBookingJobListItem(listRow({ status: "done", step_count: 1, done_count: 1 }))).toBe("history");
   });
 });

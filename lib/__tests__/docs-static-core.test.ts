@@ -26,6 +26,8 @@ describe("docs static guard - core", () => {
       "docs/40-phase1/AUTONOMOUS_FOUNDER_E2E.md",
       "docs/40-phase1/PHASE_1_QUALITY_GATE.md",
       "docs/40-phase1/PHASE_1_E2E_SMOKE.md",
+      "docs/40-dogfood/BUG_INBOX.md",
+      "docs/30-provider-debug/RUNTIME_MIRROR_GUIDE.md",
       "docs/50-product-areas/EXPEDIA_CONTROLLED_RETRY_RUNBOOK.md",
       "docs/50-product-areas/HOTEL_CONTROLLED_RETRY_RUNBOOK.md",
       "docs/50-product-areas/HOTEL_VERTICAL_REVIVAL_AUDIT.md",

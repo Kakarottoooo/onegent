@@ -4,7 +4,7 @@ import { useState, useEffect } from "react";
 import { ConnectAccountsModal } from "./ConnectAccountsModal";
 
 import { loadAutonomySettings } from "@/lib/autonomy";
-import { buildTaskWorkspaceHref } from "@/lib/booking-jobs/workspace";
+import { getTaskWorkspaceHref } from "@/lib/booking-jobs/workspace";
 
 export interface BookableFallbackCandidate {
   label: string;
@@ -231,7 +231,7 @@ export function AutopilotRunnerModal({ open, steps, tripLabel, onClose }: Props)
               <button
                 onClick={() => {
                   const href = bgJobId
-                    ? buildTaskWorkspaceHref(bgJobId, "live", "evidence")
+                    ? getTaskWorkspaceHref({ id: bgJobId, status: "pending" })
                     : "/tasks";
                   window.location.href = href;
                 }}

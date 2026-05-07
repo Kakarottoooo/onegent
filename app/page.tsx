@@ -5,6 +5,7 @@ import { useSearchParams } from "next/navigation";
 import dynamic from "next/dynamic";
 import Link from "next/link";
 import type { TravelDocRequest } from "@/components/booking/InlineJobCard";
+import type { InlineTaskWatchState } from "@/components/chat/InlineTaskWatchPanel";
 import type { GapSavePayload } from "@/components/profile-gap/types";
 import {
   commitResponseToDecisionInput,
@@ -31,7 +32,9 @@ import type { TripIntentState } from "@/lib/agent/trip-intent-state";
 import { useLanguage } from "@/app/hooks/useLanguage";
 import GlobalNav from "@/components/GlobalNav";
 import Sidebar from "@/components/Sidebar";
-import type { MentionContact } from "@/components/MentionPicker";
+import { fetchAppBootstrapCached } from "@/components/app-bootstrap-client";
+import type { AppBootstrapRecentJob } from "@/lib/app-bootstrap";
+import MentionPicker, { type MentionContact } from "@/components/MentionPicker";
 import {
   looksLikeRecommendationAsk,
   getFallbackQuickPicks,
@@ -52,8 +55,8 @@ import {
   type RoomReplaySnapshot,
   type SessionReplaySnapshot,
 } from "@/lib/chat-replay";
-import { buildTaskWorkspaceHref } from "@/lib/booking-jobs/workspace";
 import { useRouter } from "next/navigation";
+import "./tasks/tasks.css";
 import "@/components/chat.css";
 
 type MinimalBookingProfile = {
@@ -84,51 +87,42 @@ type InlineBookingProfileState = {
 
 // Leaflet is not SSR-compatible
 const MapView = dynamic(() => import("@/components/MapView"), { ssr: false });
-const RecommendationCard = dynamic(() => import("@/components/RecommendationCard"), {
-  loading: () => null,
+const RecommendationCard = dynamic(() => import("@/components/RecommendationCard"), { loading: LazySurfaceFallback });
+const HotelCard = dynamic(() => import("@/components/HotelCard"), { loading: LazySurfaceFallback });
+const FlightCard = dynamic(() => import("@/components/FlightCard"), { loading: LazySurfaceFallback });
+const ActivityCard = dynamic(() => import("@/components/ActivityCard"), { loading: LazySurfaceFallback });
+const InlineJobCard = dynamic(() => import("@/components/booking/InlineJobCard"), { loading: LazySurfaceFallback });
+const InlineBookingProfileGate = dynamic(() => import("@/components/booking/InlineBookingProfileGate"), { loading: () => null });
+const ProfileGapCard = dynamic(() => import("@/components/profile-gap").then((m) => m.ProfileGapCard), { loading: LazySurfaceFallback });
+const ScenarioPlanView = dynamic(() => import("@/components/ScenarioPlanView"), { loading: LazySurfaceFallback });
+const FeedbackPromptCard = dynamic(() => import("@/components/FeedbackPromptCard"), { loading: LazySurfaceFallback });
+const DateRangePicker = dynamic(() => import("@/components/DateRangePicker"), { loading: LazySurfaceFallback });
+const ConfirmCard = dynamic(() => import("@/components/ConfirmCard"), { loading: LazySurfaceFallback });
+const TripPackageCard = dynamic(() => import("@/components/TripPackageCard"), { loading: LazySurfaceFallback });
+const TripProposalChatCard = dynamic(() => import("@/components/TripProposalChatCard"), { loading: LazySurfaceFallback });
+const ScenarioProposalChatCard = dynamic(() => import("@/components/ScenarioProposalChatCard"), { loading: LazySurfaceFallback });
+const InlineTaskWatchPanel = dynamic(() => import("@/components/chat/InlineTaskWatchPanel"), {
+  ssr: false,
+  loading: () => (
+    <div className="chat-task-watch-panel" style={{ padding: 16, color: "#f8fafc", fontSize: 13 }}>
+      Loading task observer...
+    </div>
+  ),
 });
-const HotelCard = dynamic(() => import("@/components/HotelCard"), {
-  loading: () => null,
-});
-const FlightCard = dynamic(() => import("@/components/FlightCard"), {
-  loading: () => null,
-});
-const ActivityCard = dynamic(() => import("@/components/ActivityCard"), {
-  loading: () => null,
-});
-const InlineBookingProfileGate = dynamic(() => import("@/components/booking/InlineBookingProfileGate"), {
-  loading: () => null,
-});
-const InlineJobCard = dynamic(() => import("@/components/booking/InlineJobCard"), {
-  loading: () => null,
-});
-const ProfileGapCard = dynamic(() => import("@/components/profile-gap").then((mod) => mod.ProfileGapCard), {
-  loading: () => null,
-});
-const ScenarioPlanView = dynamic(() => import("@/components/ScenarioPlanView"), {
-  loading: () => null,
-});
-const FeedbackPromptCard = dynamic(() => import("@/components/FeedbackPromptCard"), {
-  loading: () => null,
-});
-const DateRangePicker = dynamic(() => import("@/components/DateRangePicker"), {
-  loading: () => null,
-});
-const ConfirmCard = dynamic(() => import("@/components/ConfirmCard"), {
-  loading: () => null,
-});
-const TripPackageCard = dynamic(() => import("@/components/TripPackageCard"), {
-  loading: () => null,
-});
-const TripProposalChatCard = dynamic(() => import("@/components/TripProposalChatCard"), {
-  loading: () => null,
-});
-const ScenarioProposalChatCard = dynamic(() => import("@/components/ScenarioProposalChatCard"), {
-  loading: () => null,
-});
-const MentionPicker = dynamic(() => import("@/components/MentionPicker"), {
-  loading: () => null,
-});
+
+function LazySurfaceFallback() {
+  return (
+    <div
+      aria-hidden
+      style={{
+        minHeight: 88,
+        borderRadius: 16,
+        border: "0.5px solid var(--border, #e5e7eb)",
+        background: "var(--card, #fff)",
+      }}
+    />
+  );
+}
 
 const DEFAULT_EXAMPLES = [
   "Romantic dinner for two, ~$80/person, quiet, no chains, Manhattan",
@@ -168,29 +162,6 @@ const WEIGHT_LABELS: Record<string, string> = {
   location_convenience: "Location",
   preference_match: "Preference match",
 };
-
-function scheduleIdleWork(callback: () => void, delayMs = 900): () => void {
-  if (typeof window === "undefined") return () => {};
-  let idleId: number | null = null;
-  const timer = window.setTimeout(() => {
-    const idleWindow = window as Window & {
-      requestIdleCallback?: (cb: IdleRequestCallback, opts?: IdleRequestOptions) => number;
-      cancelIdleCallback?: (id: number) => void;
-    };
-    if (idleWindow.requestIdleCallback) {
-      idleId = idleWindow.requestIdleCallback(callback, { timeout: 1500 });
-    } else {
-      callback();
-    }
-  }, delayMs);
-  return () => {
-    window.clearTimeout(timer);
-    if (idleId !== null) {
-      const idleWindow = window as Window & { cancelIdleCallback?: (id: number) => void };
-      idleWindow.cancelIdleCallback?.(idleId);
-    }
-  };
-}
 
 function HomeInner() {
   const { profile, updateProfile, learnFromFavorite, learnFromSearch, resetProfile, learnedWeights, learnWeightsFromFeedback, learnFromFeedback, learnFromAgentResponse, updateDiscoveredPreference, removeDiscoveredPreference } =
@@ -451,6 +422,8 @@ function HomeInner() {
       prev !== ctx &&
       prev !== "none"; // "none → session:X" is session creation, not a switch
     if (isRealSwitch) {
+      setInlineItems([]);
+      closeInlineWatchPanel();
       // Evict the previous thread first so its replay-set flag doesn't
       // wedge a future return-visit. (Switching A→B→A would leave A
       // blank if its flag stayed set.) Encoded prev as "room:X" /
@@ -931,9 +904,26 @@ function HomeInner() {
   // (404/403 → room is gone). Three seconds is enough to read and matches
   // the mentionToast cadence so the UI feels coherent.
   const [roomGoneToast, setRoomGoneToast] = useState<string | null>(null);
-  const [recentJobs, setRecentJobs] = useState<{ id: string; trip_label: string; status: string; created_at: string }[]>([]);
+  const [recentJobs, setRecentJobs] = useState<AppBootstrapRecentJob[]>([]);
   // Inline booking task cards rendered below results
   const [inlineItems, setInlineItems] = useState<{ type: "job"; jobId: string }[]>([]);
+  const [inlineWatchPanel, setInlineWatchPanel] = useState<InlineTaskWatchState | null>(null);
+  const [inlineWatchKey, setInlineWatchKey] = useState(0);
+  const inlineWatchJobIdRef = useRef<string | null>(null);
+  const openInlineWatchPanel = useCallback((jobId: string, title: string) => {
+    if (inlineWatchJobIdRef.current !== jobId) {
+      setInlineWatchKey((key) => key + 1);
+    }
+    inlineWatchJobIdRef.current = jobId;
+    setInlineWatchPanel({
+      jobId,
+      title: title ? `Agent - ${title}` : "Agent",
+    });
+  }, []);
+  const closeInlineWatchPanel = useCallback(() => {
+    inlineWatchJobIdRef.current = null;
+    setInlineWatchPanel(null);
+  }, []);
   // When set, the next chat message is intercepted as a travel-doc reply
   const [pendingTravelDoc, setPendingTravelDoc] = useState<TravelDocRequest | null>(null);
   // Timestamp of last successful travel doc save — blocks re-trigger for 10s
@@ -998,27 +988,23 @@ function HomeInner() {
     const sid = chat.getSessionId();
     if (!sid) return;
     let cancelled = false;
-    const cancelIdle = scheduleIdleWork(() => {
-      if (typeof document !== "undefined" && document.visibilityState !== "visible") return;
-      fetch(`/api/booking-jobs?session_id=${encodeURIComponent(sid)}&scope=session&lean=1&limit=3`)
-        .then((r) => r.ok ? r.json() : null)
+    const timer = window.setTimeout(() => {
+      fetchAppBootstrapCached(sid)
         .then((d) => {
-          if (!cancelled && d?.jobs) setRecentJobs(d.jobs.slice(0, 3));
+          if (!cancelled) setRecentJobs(d.recent_jobs ?? []);
         })
         .catch(() => {});
-    }, 900);
+    }, 150);
     return () => {
       cancelled = true;
-      cancelIdle();
+      window.clearTimeout(timer);
     };
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // Phase 4.6: Call learnWeightsFromFeedback on mount
   useEffect(() => {
-    return scheduleIdleWork(() => {
-      learnWeightsFromFeedback();
-    }, 1400);
+    learnWeightsFromFeedback();
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -1042,11 +1028,10 @@ function HomeInner() {
       setAllContacts([]);
     }
     if (hasMessages) return;
-    const cancelIdle = scheduleIdleWork(() => {
-      if (typeof document !== "undefined" && document.visibilityState !== "visible") return;
+    const timer = window.setTimeout(() => {
       void loadRecentContacts();
-    }, 1200);
-    return cancelIdle;
+    }, 900);
+    return () => window.clearTimeout(timer);
   }, [auth.isSignedIn, auth.userId, hasMessages, loadRecentContacts]);
 
   // Full contacts list for the @-mention picker. It is not needed for the
@@ -1072,11 +1057,8 @@ function HomeInner() {
   // Phase 5.3: Migrate localStorage data to cloud after sign-in
   useEffect(() => {
     if (auth.isSignedIn) {
-      return scheduleIdleWork(() => {
-        auth.migrateLocalDataToCloud();
-      }, 1800);
+      auth.migrateLocalDataToCloud();
     }
-    return undefined;
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [auth.isSignedIn]);
 
@@ -1111,8 +1093,7 @@ function HomeInner() {
   useEffect(() => {
     const sessionId = chat.getSessionId();
     let cancelled = false;
-    const cancelIdle = scheduleIdleWork(() => {
-      if (typeof document !== "undefined" && document.visibilityState !== "visible") return;
+    const timer = window.setTimeout(() => {
       fetch(`/api/feedback-prompts?session_id=${encodeURIComponent(sessionId)}`)
         .then((r) => r.ok ? r.json() : null)
         .then((data) => {
@@ -1121,10 +1102,10 @@ function HomeInner() {
           }
         })
         .catch(() => {});
-    }, 1600);
+    }, 1000);
     return () => {
       cancelled = true;
-      cancelIdle();
+      window.clearTimeout(timer);
     };
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -1840,6 +1821,7 @@ function HomeInner() {
         chat.sendMessage(query, undefined, {
           skipUserPush: true,
           ...(hint ? { categoryHint: hint } : {}),
+          ...(payload.constraints ? { confirmedConstraints: payload.constraints } : {}),
         });
       }
     }
@@ -1945,7 +1927,10 @@ function HomeInner() {
     profile: MinimalBookingProfile
   ) {
     const sessionId =
-      localStorage.getItem("session_id") ?? crypto.randomUUID();
+      activeRoomIdRef.current ??
+      activeSessionIdRef.current ??
+      localStorage.getItem("session_id") ??
+      crypto.randomUUID();
     if (!localStorage.getItem("session_id")) {
       localStorage.setItem("session_id", sessionId);
     }
@@ -1984,10 +1969,7 @@ function HomeInner() {
     void fetch(`/api/booking-jobs/${jobId}/start?executor=inline`, { method: "POST" }).catch(
       () => {}
     );
-    // Land on the Live tab with this job focused so the user sees execution
-    // progress immediately. Without focus+view=live the page defaults to the
-    // Queue tab and the just-started run is hidden one click away.
-    router.push(buildTaskWorkspaceHref(jobId, "live", "evidence"));
+    setInlineItems((prev) => [...prev, { type: "job", jobId }]);
   }
 
   async function submitInlineBookingProfile() {
@@ -2617,6 +2599,8 @@ function HomeInner() {
       )}
     </div>
   );
+
+  const currentTaskSessionId = activeRoomId ?? activeSessionId ?? null;
 
   return (
     <div style={{ display: "flex", height: "100dvh" }}>
@@ -3911,6 +3895,7 @@ function HomeInner() {
                                 checkIn={chat.hotelDates?.check_in}
                                 checkOut={chat.hotelDates?.check_out}
                                 guests={chat.hotelDates?.guests}
+                                sessionId={currentTaskSessionId}
                                 onJobCreated={(jobId) => setInlineItems((prev) => [...prev, { type: "job", jobId }])}
                               />
                             ))}
@@ -3925,6 +3910,7 @@ function HomeInner() {
                                 card={card}
                                 index={ci}
                                 bookingContext={chat.flightBookingContext}
+                                sessionId={currentTaskSessionId}
                                 onJobCreated={(jobId) => setInlineItems((prev) => [...prev, { type: "job", jobId }])}
                               />
                             ))}
@@ -3938,6 +3924,7 @@ function HomeInner() {
                                 key={`${card.activity.id}-${card.group}`}
                                 card={card}
                                 index={ci}
+                                sessionId={currentTaskSessionId}
                                 onJobCreated={(jobId) => setInlineItems((prev) => [...prev, { type: "job", jobId }])}
                               />
                             ))}
@@ -3963,12 +3950,14 @@ function HomeInner() {
                                   }}
                                   nearLocationLabel={location.nearLocation || undefined}
                                   currentQuery={lastUserQuery}
+                                  sessionId={currentTaskSessionId}
                                   onCompare={() => {
                                     toggleCompare(card);
                                     setCompareOpen(true);
                                   }}
                                   isComparing={isComparing(card)}
                                   onFeedback={handleCardFeedback}
+                                  onJobCreated={(jobId) => setInlineItems((prev) => [...prev, { type: "job", jobId }])}
                                 />
                               ))}
                             </div>
@@ -4167,9 +4156,12 @@ function HomeInner() {
                 {tripFlow?.phase === "ready" && (
                   <TripPackageCard
                     pkg={tripFlow.pkg}
-                    sessionId={chat.getSessionId()}
+                    sessionId={currentTaskSessionId ?? chat.getSessionId()}
                     errors={tripFlow.errors}
-                    onBooked={() => setTripFlow(null)}
+                    onBooked={(jobId) => {
+                      setInlineItems((prev) => [...prev, { type: "job", jobId }]);
+                      setTripFlow(null);
+                    }}
                   />
                 )}
                 {tripFlow?.phase === "error" && (
@@ -4334,6 +4326,7 @@ function HomeInner() {
                         <InlineJobCard
                           key={item.jobId}
                           jobId={item.jobId}
+                          onWatch={openInlineWatchPanel}
                           onDeleted={(id) => setInlineItems((prev) => prev.filter((i) => i.jobId !== id))}
                           onNeedsTravelDocs={(req) => {
                             setPendingTravelDoc(req);
@@ -4575,6 +4568,14 @@ function HomeInner() {
           </button>
         </div>
       </div>
+
+      {inlineWatchPanel && (
+        <InlineTaskWatchPanel
+          panel={inlineWatchPanel}
+          panelKey={inlineWatchKey}
+          onClose={closeInlineWatchPanel}
+        />
+      )}
 
       <InlineBookingProfileGate
         open={!!inlineBookingProfile}

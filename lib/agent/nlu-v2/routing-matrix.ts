@@ -1,4 +1,4 @@
-﻿import { routeIntent } from "./router";
+import { routeIntent } from "./router";
 import type { IntentState, RouterAction, NluScenario } from "./types";
 import { normalizeSingleActivityTicketRequest } from "./unified";
 

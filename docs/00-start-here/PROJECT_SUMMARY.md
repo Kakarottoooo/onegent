@@ -1,113 +1,252 @@
 # Onegent Project Summary
 
-Last updated: 2026-05-05
+Last updated: 2026-05-07
 
-Onegent is an AI decision and execution agent for travel and high-consideration
-consumer tasks. The current wedge is restaurant booking: prove one provider can
-reach a safe human-confirmation point reliably, then expand.
+Onegent is a travel execution layer for AI agents and user-facing trip
+workflows. The product turns natural-language travel requests into structured
+tasks, runs provider-specific execution logic, records evidence, and stops at a
+user-controlled review point before irreversible provider actions.
+
+The current stage is no longer "prove one restaurant can close." Restaurant,
+hotel, flight, and activity have all reached initial dogfood closure. The
+focus is now reliability: task workspace consistency, no-live benchmark
+coverage, layered recovery rules, runtime hardening, and private-alpha quality.
 
 ## Current Product Direction
 
-The product is not a generic browser bot. It is a user-facing agent that:
+Onegent is not a generic browser bot and not just a recommendation UI. It is a
+task runtime for travel execution:
 
-1. Understands a natural-language request.
-2. Converts it into structured task parameters.
-3. Uses provider-specific execution logic and, when needed, model-assisted
-   browser control.
-4. Stops before irreversible provider actions such as final booking, payment,
-   OTP, CAPTCHA, or account-sensitive confirmation.
-5. Shows the user a task surface with logs, screenshots, and safe next actions.
+1. Understand a natural-language request.
+2. Convert it into structured task parameters.
+3. Route to the right vertical and provider.
+4. Run L1 provider-specific execution logic first.
+5. Escalate only evidence-backed page/control failures to L2 Browser Harness
+   recovery in future versions.
+6. Keep Computer Use as a later L3 fallback for cases where deterministic
+   provider logic and Browser Harness are not enough.
+7. Stop at a user-controlled review or continuation boundary before final
+   booking, account-sensitive steps, verification, or irreversible actions.
+8. Show the user and operators a task surface with logs, screenshots, status,
+   evidence, and next actions.
+
+The runtime, task ownership model, evidence capture, benchmark system, and
+safe task UI are the durable product. Individual provider executors are
+replaceable execution layers under that runtime.
 
 ## Active Worktree
 
-The current canonical code line is now `master` after the provider-closure
-integration was folded into GitHub:
+Current canonical worktree after the provider-closure integration was folded
+back into `master`:
 
 ```text
 C:\Users\Gzw19\onegent
 branch: master
-head: origin/master @ 19a14a9
+head: current local master
 ```
 
 The integration source worktree that produced the verified closure build was:
 
 ```text
 C:\Users\Gzw19\onegent-provider-closure-integration-20260505
-branch: codex/phase-closure-orchestration-20260505
-head: 0394c8c
+branch: codex/goal-core-reliability-long-run
+head: e1fd890
 ```
 
-Other worktrees may contain stale agents, logs, or branch-local experiments.
-Use `master` for the next product/performance pass unless the founder assigns a
-specific lane worktree.
+Use `C:\Users\Gzw19\onegent` / `master` as the base for new multi-agent work
+unless Codex explicitly announces a newer integration branch.
+
+Older worktrees such as `C:\Users\Gzw19\onegent-integrated-20260504` and
+one-off provider/debug worktrees may be stale or dirty. Verify branch, HEAD,
+and status before using them.
 
 ## Phase Snapshot
 
-Read `docs/00-start-here/PHASE_STATUS.md` for the detailed table. Short version:
+Read `docs/00-start-here/PHASE_STATUS.md` for the detailed table. Short
+version:
 
 | Phase | Status | Notes |
 |---|---|---|
 | Phase 0A | Closed via OpenTable | Sirrah OpenTable live dogfood reached final review with phone filled and stopped before final confirmation. |
-| Phase 0B | Deferred to batch coverage | Initial restaurant closure is enough for now. Multi-case OpenTable-first coverage comes after each scenario has a stable single-case path. |
-| Phase 1 | Initial founder path accepted | Founder dogfood has covered restaurant, hotel, flight, and activity-shaped user prompts through the UI/task/log/screenshot surfaces. Remaining work is bug-fix and performance polish. |
-| Phase 1.5 | OK | Quality gate and debug/readiness surfaces are integrated; use them as regression tools rather than blockers. |
-| Phase 2 | Initial hotel + flight closure achieved | Booking.com hotel and Expedia flight have reached useful human-review boundaries in founder dogfood. Do not broaden until performance and multi-case coverage are measured. |
+| Phase 0B | Entry gate met | Broaden OpenTable-first restaurant fixtures; Resy remains provider/network follow-up, not the Phase 0A blocker. |
+| Phase 1 | Demo-freeze passed | Founder user path works through chat, tasks, evidence, and safe provider handoff. Manual walkthrough remains the human acceptance check. |
+| Phase 1.5 | Demo-freeze passed | QA/dev surfaces, quality gates, runtime forensics, and demo control room are integrated. |
+| Phase 2 | Initial dogfood closure reached | Expedia flight, Booking.com hotel, and Ticketmaster activity reached usable review/continue boundaries; broaden with benchmark coverage before demo promises. |
+
+## Current Verified State
+
+### Restaurant
+
+- OpenTable is the accepted Phase 0A closure path.
+- Founder dogfood request "book Sirrah in New York next Thursday at 8pm for 1
+  person" reached OpenTable final review with phone filled and stopped before
+  `Complete reservation`.
+- Resy is not the Phase 0A blocker anymore. It remains a provider/network/IP
+  follow-up lane because availability can differ by network conditions.
+
+### Hotel
+
+- Booking.com has reached initial dogfood closure to a user review/continue
+  boundary.
+- Hotel runtime and analyzers now avoid classifying weak/generic
+  "not available" copy as true inventory unavailable unless exact hotel,
+  dates, stay params, and scoped inventory evidence are present.
+- Hotel layered benchmark fixtures cover exact no-availability,
+  weak-no-availability fallback, provider degradation, room drift, account
+  boundary, incomplete artifacts, and stale running state.
+
+### Flight
+
+- Expedia flight has reached initial dogfood closure to a user review/continue
+  boundary.
+- Runtime/analyzer work now guards against wrong-airline, wrong-time,
+  price-only fallback, stale/mixed worker evidence, and checkout false-success
+  when required traveler fields are missing.
+- Flight layered benchmark fixtures cover the known Expedia failure classes.
+
+### Activity
+
+- Ticketmaster activity has reached initial dogfood closure for The Lion King
+  in New York.
+- The v1 path used the existing Ticketmaster provider runtime, not Browser
+  Harness.
+- Runtime now has a Ticketmaster task-state classifier for checkout reached,
+  seat selection needed, login/account boundary, external ad tab, local browser
+  disconnect, and unknown failure states.
+- Remaining hardening is around external ad tabs, explicit seat-selection UI,
+  and stale local browser/CDP jobs.
+
+### Task Workspace
+
+- Task Workspace v2 semantics are now centralized:
+  - Queue = pending / not started.
+  - Live = running.
+  - History = terminal or ready-for-review.
+- Watch / Evidence / Details entry points are being normalized across chat,
+  recommendation cards, rooms, calendar, itinerary, and task cards.
+- The task surface should be the primary debugging UI: status, logs,
+  screenshots, evidence, and safe next actions belong to the task, not to a
+  random chat window.
+
+### Benchmarks And Agent Intake
+
+- Layered Benchmark V2 exists as a no-live benchmark for L1 provider runtime
+  results, evidence completeness, failure class, L2 Browser Harness
+  eligibility, simulated L2 recovery, owner assignment, and patch proposals.
+- Latest integrated 50-case layered gate passed with:
+  - 96% artifact completeness
+  - 0 routing mismatches
+  - 4% unknown failure rate
+  - 26% L1 direct pass
+  - 42% L1 + L2 recovered pass
+- Agent intake now has dependency-aware metadata, next-task recommendations,
+  conflict risk, and ready/needs-followup/reject classification so side agents
+  can keep working while Codex validates and merges.
+
+## Execution Layer Strategy
+
+Onegent's execution architecture should evolve in layers:
+
+1. **L1 provider runtime**: existing deterministic/provider-specific logic.
+   This remains the default because it is fast, testable, and already works for
+   the initial restaurant, hotel, flight, and activity closures.
+2. **L2 Browser Harness**: future recovery layer for evidence-backed
+   selector/click/iframe/fill/progress/page-mutation failures. It should
+   produce patch proposals and recovery evidence, not silently replace the
+   runtime.
+3. **L3 Computer Use**: later fallback for cases where L1 and L2 cannot handle
+   dynamic pages, as long as the same task/evidence/safety runtime is preserved.
+
+L2 should not trigger for true no availability, account/session checkpoints,
+provider degradation, network/model/env failures, insufficient evidence, or
+user-only final actions.
 
 ## Current Runtime Reality
 
-- OpenTable uses mostly programmatic provider logic and has reached the
-  `ready_for_confirmation` / final review boundary in live dogfood. It should
-  not auto-submit final confirmation.
-- Resy uses Computer Use and provider-specific logic. Availability and IP/network
-  behavior can block useful live tests before code is involved; it no longer
-  blocks Phase 0A now that OpenTable has closed the restaurant wedge.
-- Expedia flight is now an initial closed lane for founder dogfood: worker
-  routing, card selection, checkout progression, screenshot stream, and task
-  status are good enough for the single-case path. Treat new failures as normal
-  product bugs to patch from logs and screenshots.
-- Booking.com hotel is now an initial closed lane for founder dogfood after the
-  language, guest-form, and manual-review fixes. Treat new failures as normal
-  product bugs to patch from current artifacts.
-- Provider task cards intentionally compress logs. Debugging must use DB
-  evidence, worker logs, and screenshots. See
+- OpenTable, Booking.com, Expedia, and Ticketmaster have all reached useful
+  review/continue boundaries in founder dogfood.
+- The product is still not ready for broad launch. The next milestone is
+  repeatability across 5/10/20 case benchmark batches per vertical.
+- No agent should blindly repeat live provider attempts. Failed attempts must
+  be root-caused from DB rows, decision logs, logs, screenshots, report JSON,
+  current URL, and provider stage evidence.
+- Provider cards intentionally compress detail. Debugging must use task
+  evidence, worker/app logs, benchmark reports, and screenshots. See
   `docs/30-provider-debug/PROVIDER_RUNTIME_DEBUG_PLAYBOOK.md`.
 
 ## Agent Collaboration Model
 
-Codex owns core runtime, provider execution, worker routing, auth/security, live
-debugging, and final review/merge. Claude is best used for large UI, dashboard,
-docs, testing, and observability surfaces.
+Codex owns integration, final merge review, shared architecture, task
+workspace, benchmarks, and cross-agent coordination.
+
+Side agents should work on independent, high-value gaps while Codex validates
+and merges previous branches. They should not wait idle when their next task
+does not depend on unmerged code.
+
+Every side-agent task must close a named product, runtime, benchmark,
+evidence, task-workspace, or performance gap. Broad abstraction, duplicate
+runtime logic, vertical-specific schema drift, app-shell bloat, and docs-only
+closure claims are anti-goals.
 
 The shared coordination home is `docs/10-coordination/`.
 
+## Near-Term Priorities
+
+1. **Task Workspace v2 hardening**
+   - All task cards and entry points should land on the same task view.
+   - Completed tasks should remain attached to the originating chat/session.
+   - Logs, screenshots, Watch, Evidence, Details, and status should behave the
+     same across restaurant, hotel, flight, and activity.
+
+2. **Layered Benchmark expansion**
+   - Run no-live 5/10/20/50 case batches by vertical.
+   - Track L1 direct pass, L1+L2 recovered pass, artifact completeness,
+     routing mismatch, unknown failure, owner, and patch proposal rate.
+
+3. **Runtime hardening from benchmark failures**
+   - Close fixture-backed false success and wrong-target classes.
+   - Prefer focused provider/runtime patches with tests over broad rewrites.
+
+4. **Mutable Task State MVP**
+   - Let users modify an active task's time/date/party/budget/provider policy.
+   - Preserve task identity, increment plan version, audit the change, and
+     resume from the affected step instead of starting unrelated duplicate
+     tasks.
+
+5. **MCP v2 task protocol**
+   - After task runtime is stable, expose create/modify/status/continue/cancel
+     to Claude/ChatGPT through a cleaner task protocol.
+
+6. **Private Alpha**
+   - Use 10-20 real users before any broad launch.
+   - Measure reuse, failure recovery, safe handoff clarity, and willingness to
+     pay.
+
 ## Where To Look Next
 
-- Next near-term priority: performance. The app is usable but page/session
-  transitions feel slow in local dogfood. Profile `/`, `/tasks`, room/session
-  switching, snapshot polling, and task history queries before adding more
-  provider scope.
-- Need to know what phase is blocked: `docs/00-start-here/PHASE_STATUS.md`
-- Need the new agent read order: `docs/INDEX.md` § "New Agent Read Order"
-- Need to continue restaurant execution: `docs/20-phase0-restaurant/RESTAURANT_PHASE0_HANDOFF.md`
-- Need to debug provider runtime: `docs/30-provider-debug/PROVIDER_RUNTIME_DEBUG_PLAYBOOK.md`
-- Need to run founder checks: `docs/40-phase1/PHASE_1_FOUNDER_E2E.md`
-- Need to operate / extend the demo surfaces:
-  `docs/40-phase1/DEMO_CONTROL_ROOM.md`,
-  `docs/40-phase1/YC_DEMO_RUNBOOK.md`,
-  `docs/40-phase1/DEMO_FREEZE_ACCEPTANCE.md`
-- Need to triage founder dogfood bugs:
+- Current phase and gates:
+  `docs/00-start-here/PHASE_STATUS.md`
+- New agent read order:
+  `docs/INDEX.md`
+- Task workspace semantics:
+  `lib/booking-jobs/workspace.ts`
+- Layered benchmark:
+  `docs/30-provider-debug/LAYERED_BENCHMARK_V2.md`,
+  `scripts/layered-benchmark.ts`
+- Agent intake queue:
+  `docs/40-dogfood/AGENT_INTAKE_QUEUE.md`,
+  `scripts/layered-agent-intake.ts`
+- Runtime debugging:
+  `docs/30-provider-debug/PROVIDER_RUNTIME_DEBUG_PLAYBOOK.md`
+- Founder dogfood bugs:
   `docs/40-dogfood/BUG_INBOX.md`
-- Need to expand no-live NLU / benchmark coverage:
-  `scripts/eval-nlu-routing.ts`,
-  `scripts/eval-live-extractor.ts --vertical all --count 120 --gate`,
-  `scripts/internal-benchmark.ts --vertical all --mode no-live`, and
-  `docs/40-dogfood/BUG_INBOX.md` fixture/case mappings.
-- Need to plan a Phase 2 controlled retry:
-  `docs/50-product-areas/EXPEDIA_CONTROLLED_RETRY_RUNBOOK.md`,
-  `docs/50-product-areas/HOTEL_VERTICAL_REVIVAL_AUDIT.md`,
-  `docs/50-product-areas/HOTEL_CONTROLLED_RETRY_RUNBOOK.md`
-- Need cross-agent handoff context:
-  `docs/10-coordination/HUDDLE.md`, `docs/10-coordination/codex.md`,
-  `docs/10-coordination/claude.md`, `docs/10-coordination/track-c.md`,
-  `docs/10-coordination/phase2.md`
-- Need historical context: `docs/90-archive/history/PROJECT_SUMMARY_FULL_2026-05-03.md`
+- Phase 1 founder checks:
+  `docs/40-phase1/PHASE_1_FOUNDER_E2E.md`,
+  `docs/40-phase1/AUTONOMOUS_FOUNDER_E2E.md`
+- Demo / QA surfaces:
+  `docs/40-phase1/DEMO_CONTROL_ROOM.md`,
+  `docs/40-phase1/DEMO_FREEZE_ACCEPTANCE.md`
+- Cross-agent state:
+  `docs/10-coordination/HUDDLE.md`,
+  `docs/10-coordination/codex.md`,
+  `docs/10-coordination/claude.md`

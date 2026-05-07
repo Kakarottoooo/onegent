@@ -1,6 +1,6 @@
 # Onegent System Design
 
-Last updated: 2026-05-06
+Last updated: 2026-05-07
 
 This document is the high-level architecture map for Onegent. It is meant for
 new Codex, Claude, and future engineering agents who need to understand the
@@ -92,6 +92,19 @@ This keeps route navigation from waiting on large `booking_jobs.steps` JSON,
 decision logs, agent logs, or screenshot streams for tasks the user has not
 opened.
 
+Task workspace links should go through `lib/booking-jobs/workspace.ts` instead
+of hand-built `/tasks` URLs. The shared rule is:
+
+- `queue`: jobs that are created but not yet running (`pending`,
+  `pending_local`).
+- `live`: jobs that are actively executing (`running`).
+- `history`: completed, failed, or human-review boundary jobs, including
+  `awaiting_confirmation` / ready-for-review states.
+
+The same helper powers compact read models, calendar/room/itinerary links, and
+chat task cards so a completed task remains discoverable from its source
+session while logs and screenshots stay lazy-loaded for the focused task only.
+
 The app shell and adjacent workspaces now use the same compact-first rule:
 
 - `/api/app/bootstrap` is the shared shell payload for Sidebar and GlobalNav.
@@ -153,6 +166,65 @@ the founder to manually copy browser text:
 
 The task UI should show both a compact status card and a detail surface with
 timeline plus screenshots. Screenshots are product evidence, not decoration.
+
+## Parallel Development Model
+
+Onegent uses multiple agents to increase development throughput, not to grow
+the codebase without discipline. The architecture should make parallel work
+safe by giving each agent a narrow ownership boundary and a stable contract to
+plug into.
+
+Parallel work is valuable when it:
+
+- closes a named product or reliability gap;
+- expands benchmark coverage in a reusable schema;
+- reduces latency, payload size, bundle size, polling, or local process churn;
+- improves task evidence, status, ownership, or replay behavior;
+- extracts shared pure helpers that reduce mirror drift.
+
+Parallel work is harmful when it:
+
+- creates vertical-specific schemas instead of shared contracts;
+- adds broad abstractions before a repeated problem exists;
+- duplicates provider runtime logic across `lib/` and `worker/`;
+- adds route-level client code that slows the app shell;
+- lands docs-only packaging while the real blocker remains untouched.
+
+The sustainable flow is a rolling merge train:
+
+```text
+accepted base
+-> side agents branch into isolated worktrees
+-> each agent returns branch + commit + evidence + validation
+-> Codex fast-triages each branch
+-> independent next tasks can start before earlier branches are fully merged
+-> Codex integrates in dependency order and keeps contracts coherent
+```
+
+Do not make every agent wait for Codex to finish a full merge if the next task
+does not depend on the unmerged branch. Do make agents wait when the next task
+depends on a new shared schema, runtime contract, or read model that has not
+landed yet.
+
+`scripts/layered-agent-intake.ts` is the no-live intake queue for returned
+agent branches. It reads static JSON or Markdown metadata and classifies each
+branch as `ready_to_merge`, `needs_followup`, or `reject`. The schema records
+task kind, base, changed files, validations, dependency edges, supersession, and
+rebase requirements without touching provider runtime or live artifacts.
+
+Every returned side-agent task must be one of:
+
+- `runtime_fix`
+- `benchmark_fixture`
+- `read_model_perf`
+- `task_workspace_ux`
+- `docs_contract`
+
+Codex can start independent work before previous branches are merged. It should
+pause only when the next task depends on an unmerged shared contract, such as a
+shared schema branch or read-model contract that later agents must import.
+This intake gate should not replace real merge validation; it only decides
+whether a returned branch is clean enough to enter that validation queue.
 
 ## Performance Model
 
@@ -229,9 +301,21 @@ NLU and internal-benchmark rules:
    restaurant, hotel, flight, activity, and trip/composite/ambiguous/profile/
    refine buckets, with artifact expectations, failure classes, dogfood
    mappings, and suggested owners.
-6. Internal benchmark failures should name one owner: `nlu`, `planner`,
+6. `scripts/layered-benchmark.ts --mode no-live` is the L1/L2 closure
+   orchestration benchmark. It starts after synthetic provider evidence exists
+   and models L1 runtime result, failure classification, L2 Browser Harness
+   eligibility, simulated recovery, optional patch proposal, and final verdict.
+   It does not run Browser Harness, providers, workers, OpenAI, checkout, login,
+   payment, or final confirmation flows.
+7. Layered Benchmark V2 escalates to L2 only for page/control classes:
+   `selector_drift`, `click_miss`, `iframe_miss`, `field_fill_miss`,
+   `progress_stall`, and `unknown_page_mutation`, and only with complete
+   evidence. It must not escalate true no-availability, provider degradation,
+   account checkpoints, user-only final actions, insufficient evidence, or
+   network/model/env failures.
+8. Internal benchmark failures should name one owner: `nlu`, `planner`,
    `task-workspace`, `provider-runtime`, or `product/manual-boundary`.
-7. Benchmark success is not provider closure. A vertical is provider-proven
+9. Benchmark success is not provider closure. A vertical is provider-proven
    only when runtime evidence, DB fields, logs, screenshots, and safe terminal
    status are captured by the provider-closure process.
 
