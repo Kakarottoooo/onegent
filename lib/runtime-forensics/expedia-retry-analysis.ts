@@ -379,6 +379,9 @@ export function analyzeExpediaRetryArtifactBundle(
   const hasFallbackMatched = has("fallback_matched");
   const hasNoMatch = has("no_match");
   const hasNoAvailability = has("provider_no_availability");
+  const hasCheckoutClosureSignal = signals.some(isStrongCheckoutClosureSignal);
+  const hasFallbackMatchedNoCheckout =
+    hasFallbackMatched && hasNoMatch && !hasCheckoutClosureSignal;
 
   let state: ExpediaRetryState;
   if (hasMixedOrStaleEvidence) {
@@ -397,6 +400,8 @@ export function analyzeExpediaRetryArtifactBundle(
     state = "candidate_rejected_no_match";
   } else if (hasNoAvailability) {
     state = "provider_no_availability";
+  } else if (hasFallbackMatchedNoCheckout) {
+    state = "fallback_matched_no_checkout";
   } else if (hasCheckout) {
     state = "checkout_manual_review_reached";
   } else if (hasFallbackMatched) {
@@ -723,7 +728,7 @@ function nextActionForState(state: ExpediaRetryState): string {
     case "fallback_attempted_no_match":
       return "Treat as locator fallback too narrow only if the screenshot still shows the target card. Patch selector/card matching, not routing/job shape.";
     case "fallback_matched_no_checkout":
-      return "Inspect the fare modal and checkout transition evidence. Patch fare-modal or checkout-boundary detection only after screenshot confirmation.";
+      return "Inspect the selected candidate, fare modal, current URL, and checkout transition evidence. Do not mark success from a generic or stale checkout marker; patch fare-modal or checkout-boundary detection only after screenshot confirmation.";
     case "checkout_manual_review_reached":
       return "Count as demo-useful safe progress. Preserve the hard stop before payment, CVV, OTP, CAPTCHA, login bypass, or final confirmation.";
     case "login_or_otp_boundary":
@@ -737,6 +742,16 @@ function nextActionForState(state: ExpediaRetryState): string {
     case "insufficient_evidence":
       return "Collect one clean DB row, codex-worker.log excerpt, provider screenshots, and live snapshot paths before making a patch decision. If mixed/stale worker evidence is present, stop and clean worker topology first. If incomplete traveler fields are present, do not mark the flight lane closed. If price-only fallback evidence is present, require airline, target-time, or flight-number proof before closure.";
   }
+}
+
+function isStrongCheckoutClosureSignal(signal: ExpediaRetryEvidenceSignal): boolean {
+  if (signal.kind !== "checkout_reached") {
+    return false;
+  }
+  const text = `${signal.label} ${signal.excerpt}`;
+  return /\b(safe[-_\s]?handoff|manual[-_\s]?review|ready[-_\s]?for[-_\s]?confirmation|awaiting[-_\s]?(confirmation|human|founder|manual)|paused[-_\s]?payment|payment[-_\s]?wall|cvv[-_\s]?gate|traveler review page visible)\b/i.test(
+    text,
+  );
 }
 
 function signalRank(kind: SignalKind): number {
