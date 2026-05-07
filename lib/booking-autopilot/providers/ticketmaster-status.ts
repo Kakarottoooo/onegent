@@ -92,12 +92,18 @@ export type TicketmasterTaskState =
 
 /**
  * Executor status the surrounding stagehand-executor branch should return.
- * Mirrors the existing union it already uses; "running" is the
- * fall-through-to-form-fill case (the executor does NOT return early).
+ * Subset of the existing `BrowserTaskStatus` union it already supports;
+ * "running" is the fall-through-to-form-fill case (the executor does NOT
+ * return early). "needs_login" is preserved as a distinct value because the
+ * task-state mapper at `lib/api-v1/run-travel-task-attempt.ts` maps
+ * `paused_payment | ready_for_confirmation` -> `ready_for_confirmation` and
+ * `needs_login` -> `awaiting_login`; conflating the two would lose the more
+ * accurate user-facing label for the account/session boundary.
  */
 export type TicketmasterTaskExecutorStatus =
   | "running"
   | "paused_payment"
+  | "needs_login"
   | "error";
 
 export interface TicketmasterTaskInput {
@@ -251,11 +257,15 @@ export function classifyTicketmasterTaskState(
     };
   }
 
-  // 4. Account / sign-in boundary.
+  // 4. Account / sign-in boundary. Returns `needs_login` (not
+  //    `paused_payment`) so the upstream task-state mapper renders
+  //    `awaiting_login`, the more accurate user-facing label, instead of
+  //    `ready_for_confirmation`. The original inline executor branching
+  //    conflated this with the seat-selection boundary.
   if (input.needsLogin) {
     return {
       state: "user_login_required",
-      executorStatus: "paused_payment",
+      executorStatus: "needs_login",
       summary: input.summary ?? FALLBACK_SUMMARY.user_login_required,
       holdBrowserOpen: true,
     };
