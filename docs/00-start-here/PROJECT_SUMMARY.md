@@ -147,6 +147,13 @@ version:
   choices; an exact Nashville SC event reaches the seat-selection hard stop and
   stops safely. Raw lab evidence remains local under
   `.stage0b-evidence/`; only reviewed rules and no-live tests enter git.
+- The latest Ticketmaster Forge 20-case controlled lab summary is:
+  13 safe outcomes, 7 provider-degraded pages, 0 unsafe boundary violations,
+  0 wrong-target signals, and 0 remaining `skill_patch_needed` runs. The main
+  reviewed patch was candidate extraction for locale artist pages such as
+  Ticketmaster CA Kacey Musgraves; Ticketmaster `/category/*` Browse 404
+  pages are now correctly treated as provider degradation instead of selector
+  drift.
 - Runtime now has a Ticketmaster task-state classifier for checkout reached,
   seat selection needed, login/account boundary, external ad tab, local browser
   disconnect, and unknown failure states.

@@ -94,14 +94,20 @@ const INSPECT_JS = String.raw`
     const normalizedLabel = normalizeWords(label);
     return targetTokens.some((token) => normalizedLabel.includes(token));
   };
-  const linkLooksLikeProviderEvent = (link) => {
+  const labelHasDateSignal = (label) =>
+    /\b(?:jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec)[a-z.]*\s+\d{1,2}(?:st|nd|rd|th)?(?:,\s*\d{4})?|\b\d{4}-\d{2}-\d{2}\b/i.test(label);
+  const linkLooksLikeProviderEvent = (link, label, buttonText) => {
     if (!/ticketmaster\./i.test(location.hostname) || !requiresTargetMatch) return true;
     try {
       const parsed = new URL(link || "", location.href);
-      return /ticketmaster\./i.test(parsed.hostname) && /\/event\//i.test(parsed.pathname);
+      if (/ticketmaster\./i.test(parsed.hostname) && /\/event\//i.test(parsed.pathname)) return true;
     } catch {
-      return false;
+      // Some Ticketmaster artist pages render Find Tickets as a button without
+      // an event href in the static DOM. The visible row label is still useful
+      // user-choice evidence when it names the target and carries a date.
     }
+    return /find tickets|view seats|see tickets|get tickets|buy tickets/i.test(buttonText || "") &&
+      labelHasDateSignal(label || "");
   };
   const clickableElements = Array.from(document.querySelectorAll("button,a,[role='button']"))
     .map((el) => {
@@ -122,6 +128,8 @@ const INSPECT_JS = String.raw`
     .slice(0, 80);
   const buttonLower = buttonTexts.join("\n").toLowerCase();
   const findTicketButtons = clickableElements.filter((item) => /find tickets|view seats|see tickets|get tickets|buy tickets/i.test(item.text));
+  const ignoredTicketmasterCandidate = (label) =>
+    /parking|pre-?show|lounge access|club access|special entry|hotel deals|find my hotel|add-ons?/i.test(label || "");
   const eventCandidates = findTicketButtons
     .map((item) => {
       const element = Array.from(document.querySelectorAll("button,a,[role='button']"))
@@ -137,9 +145,47 @@ const INSPECT_JS = String.raw`
     .filter((item) =>
       item.label &&
       !/ticketmaster home page|skip to main content|search|help|gift cards|sell|fans also viewed/i.test(item.label) &&
+      !ignoredTicketmasterCandidate(item.label) &&
       labelMatchesTarget(item.label) &&
-      linkLooksLikeProviderEvent(item.link)
-    )
+      linkLooksLikeProviderEvent(item.link, item.label, item.text)
+    );
+  const eventInfoLinkCandidates = Array.from(document.querySelectorAll("a[href]"))
+    .map((link) => {
+      const href = link.href || "";
+      const label = (link.textContent || link.getAttribute("aria-label") || link.getAttribute("title") || "")
+        .replace(/\s+/g, " ")
+        .trim()
+        .slice(0, 500);
+      const rect = link.getBoundingClientRect();
+      return {
+        label,
+        link: href,
+        text: label,
+        href,
+        x: rect.left + rect.width / 2,
+        y: rect.top + rect.height / 2,
+        visible: rect.width > 0 && rect.height > 0 && rect.bottom >= 0 && rect.right >= 0 && rect.top <= window.innerHeight && rect.left <= window.innerWidth,
+      };
+    })
+    .filter((item) => {
+      if (!/ticketmaster\./i.test(location.hostname) || !requiresTargetMatch) return false;
+      if (!item.label || ignoredTicketmasterCandidate(item.label)) return false;
+      if (!labelMatchesTarget(item.label) || !labelHasDateSignal(item.label)) return false;
+      try {
+        const parsed = new URL(item.link, location.href);
+        return /ticketmaster\./i.test(parsed.hostname) && /\/event\//i.test(parsed.pathname);
+      } catch {
+        return false;
+      }
+    });
+  const seenCandidateKeys = new Set();
+  const allEventCandidates = [...eventCandidates, ...eventInfoLinkCandidates]
+    .filter((item) => {
+      const key = item.link || item.label;
+      if (!key || seenCandidateKeys.has(key)) return false;
+      seenCandidateKeys.add(key);
+      return true;
+    })
     .slice(0, 20);
   const safeFollowTarget = findTicketButtons.find((item) =>
     item.visible &&
@@ -201,7 +247,10 @@ const INSPECT_JS = String.raw`
   if (/cookie/.test(lower) && /accept all|manage cookies|cookie settings/.test(buttonLower) && text.length < 1200) {
     hardStops.push("cookie_consent_blocking_render");
   }
-  const notes = eventCandidates.map((item) => item.label).slice(0, 20);
+  const notes = allEventCandidates.map((item) => item.label).slice(0, 20);
+  if (/page requested could not be found|page not found|well,\s*this isn't right|we can't seem to find|something went wrong|try again later/.test(lower)) {
+    notes.unshift("provider_error_page_visible");
+  }
   if (/\bloading\b|please wait|hang tight/.test(lower)) {
     notes.unshift("loading_indicator_visible");
   }
@@ -213,9 +262,9 @@ const INSPECT_JS = String.raw`
       title,
       visible_dates: dateMatches,
       visible_times: timeMatches,
-      candidate_count: eventCandidates.length,
-      candidate_labels: eventCandidates.map((item) => item.label),
-      candidate_links: eventCandidates.map((item) => item.link).filter(Boolean),
+      candidate_count: allEventCandidates.length,
+      candidate_labels: allEventCandidates.map((item) => item.label),
+      candidate_links: allEventCandidates.map((item) => item.link).filter(Boolean),
       notes,
     },
     safeFollowTarget,
@@ -672,7 +721,14 @@ function looksLikeProviderErrorPage(visibleFacts: LabVisibleFacts): boolean {
   const title = visibleFacts.title?.trim().toLowerCase() || "";
   const notes = visibleFacts.notes?.join(" ").toLowerCase() || "";
   const haystack = `${title} ${notes}`;
-  return /page not found|404|not found|well,\s*this isn't right|something went wrong|try again later/.test(haystack);
+  if (
+    /ticketmaster\s*-\s*browse/.test(title) &&
+    (visibleFacts.candidate_count ?? 0) === 0 &&
+    (visibleFacts.visible_dates?.length ?? 0) === 0
+  ) {
+    return true;
+  }
+  return /provider_error_page_visible|page not found|404|not found|well,\s*this isn't right|something went wrong|try again later/.test(haystack);
 }
 
 function looksLikeNoEventsPage(visibleFacts: LabVisibleFacts): boolean {

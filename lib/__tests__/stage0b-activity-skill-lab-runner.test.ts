@@ -17,6 +17,8 @@ import type { LabTestPlanEntry } from "@/lib/stage0b-skill-runtime";
 
 const EXACT_EVENT = STAGE0B_TEST_PLAN.find((entry) => entry.expected_resolver_execution_mode === "direct_execution")!;
 const LISTING = STAGE0B_TEST_PLAN.find((entry) => entry.expected_resolver_execution_mode === "provider_start")!;
+const TMF_11 = TICKETMASTER_SKILL_FORGE_PLAN.find((entry) => entry.id === "tmf-11")!;
+const TMF_15 = TICKETMASTER_SKILL_FORGE_PLAN.find((entry) => entry.id === "tmf-15")!;
 
 describe("Stage 0B live lab runner args and plan selection", () => {
   it("defaults to no-live dry plan behavior unless --live is explicit", () => {
@@ -118,8 +120,18 @@ describe("Stage 0B Browser Harness bridge code generation", () => {
     const python = buildBrowserHarnessPython(EXACT_EVENT, "C:/tmp/stage0b.png");
     expect(python).toContain("targetTokens");
     expect(python).toContain("labelMatchesTarget(item.label)");
-    expect(python).toContain("linkLooksLikeProviderEvent(item.link)");
+    expect(python).toContain("linkLooksLikeProviderEvent(item.link, item.label, item.text)");
+    expect(python).toContain("labelHasDateSignal");
+    expect(python).toContain("eventInfoLinkCandidates");
+    expect(python).toContain("ignoredTicketmasterCandidate");
     expect(python).toContain("fans also viewed");
+  });
+
+  it("marks visible Ticketmaster 404 copy as provider error evidence", () => {
+    const python = buildBrowserHarnessPython(TMF_15, "C:/tmp/stage0b.png");
+    expect(python).toContain("provider_error_page_visible");
+    expect(python).toContain("page requested could not be found");
+    expect(python).toContain("we can't seem to find");
   });
 
   it("attempts screenshot and page_info capture even on Browser Harness exceptions", () => {
@@ -214,6 +226,26 @@ describe("Stage 0B Browser Harness observations classify into safe next actions"
 
   it("classifies rendered listing pages with zero extracted candidates as skill_patch_needed", () => {
     expect(classifyStage0BOutcome(LISTING, okPayload({ candidate_count: 0 }))).toBe("skill_patch_needed");
+  });
+
+  it("classifies Ticketmaster browse 404 pages as provider_degraded, not selector drift", () => {
+    expect(classifyStage0BOutcome(TMF_15, okPayload({
+      title: "Ticketmaster - Browse",
+      candidate_count: 0,
+      notes: ["provider_error_page_visible"],
+    }))).toBe("provider_degraded");
+  });
+
+  it("classifies locale artist pages with extracted target rows as user choice, not patch needed", () => {
+    expect(classifyStage0BOutcome(TMF_11, okPayload({
+      title: "Kacey Musgraves Tickets",
+      candidate_count: 18,
+      candidate_labels: [
+        "AUG 24 Kacey Musgraves Vancouver, BC Rogers Arena Find Tickets",
+        "AUG 28 Kacey Musgraves Edmonton, AB Rogers Place Find Tickets",
+      ],
+      candidate_links: [],
+    }))).toBe("provider_listing_needs_choice");
   });
 
   it("does not create a patch proposal for explicit no-events listing pages", () => {
@@ -392,6 +424,9 @@ function okPayload(options: {
   title?: string;
   currentUrl?: string;
   candidate_count?: number;
+  candidate_labels?: string[];
+  candidate_links?: string[];
+  notes?: string[];
   followedSafeLink?: boolean;
   followTarget?: BrowserHarnessPayload["followTarget"];
   hardStops?: BrowserHarnessPayload["hardStops"];
@@ -403,8 +438,11 @@ function okPayload(options: {
     visibleFacts: {
       title: options.title ?? "Nashville SC",
       candidate_count: options.candidate_count ?? 1,
+      candidate_labels: options.candidate_labels,
+      candidate_links: options.candidate_links,
       visible_dates: ["May 9, 2026"],
       visible_times: ["8:00 PM"],
+      notes: options.notes,
     },
     followedSafeLink: options.followedSafeLink,
     followTarget: options.followTarget,

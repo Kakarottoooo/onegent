@@ -91,6 +91,16 @@ Do not enter Phase 2 yet. Stabilize Phase 0, Phase 1, and Phase 1.5 first.
     Remaining hardening is product/runtime polish: suppress or ignore external
     ad tabs, make the seat-selection checkpoint explicit in the task UI, and
     recover stale `running/loading` jobs if the local browser/CDP session closes.
+- 2026-05-08 Stage 0B Ticketmaster Forge lab:
+  - The 20-case Ticketmaster Forge Browser Harness lab has a reviewed summary:
+    13 safe outcomes, 7 provider-degraded pages, 0 unsafe boundary violations,
+    0 wrong-target signals, and 0 remaining `skill_patch_needed` runs.
+  - Locale artist pages such as Ticketmaster CA Kacey Musgraves now extract
+    real event candidates from `/event/` "Event Info" links and ask the user to
+    choose. Ticketmaster `/category/*` Browse 404 pages are classified as
+    provider degradation rather than selector drift.
+  - Raw `.stage0b-evidence/` screenshots, JSONL, and result files stay local;
+    only reviewed rules, tests, and generated summary docs enter git.
 - Historical side branches now folded into integrated preview:
   `codex/openai-chat-model-env` (runtime/debug),
   `codex/expedia-flight-card-fallback` (Expedia visible-card fallback),
