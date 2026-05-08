@@ -37,6 +37,7 @@ export type Stage0BActivityLabPriority = "p0" | "p1" | "p2";
 
 export type Stage0BActivityLabPlanIdSource =
   | "explicit"
+  | "screenshot_path"
   | "input_url"
   | "source_path";
 
@@ -684,11 +685,22 @@ function inferPlanId(
   explicitPlanId?: string,
 ): { planId?: string; source?: Stage0BActivityLabPlanIdSource } {
   if (explicitPlanId) return { planId: explicitPlanId, source: "explicit" };
-  const byUrl = ALL_PLAN_ENTRIES.find((entry) => normalizeUrlForPlan(entry.url) === normalizeUrlForPlan(result.evidence.input_url));
-  if (byUrl) return { planId: byUrl.id, source: "input_url" };
+  const byScreenshot = inferPlanIdFromScreenshotPaths(result.evidence.screenshot_paths);
+  if (byScreenshot) return { planId: byScreenshot, source: "screenshot_path" };
   const byPath = sourcePath?.split(/[\\/]/).find((part) => ALL_PLAN_IDS.has(part));
   if (byPath) return { planId: byPath, source: "source_path" };
+  const byUrl = ALL_PLAN_ENTRIES.find((entry) => normalizeUrlForPlan(entry.url) === normalizeUrlForPlan(result.evidence.input_url));
+  if (byUrl) return { planId: byUrl.id, source: "input_url" };
   return {};
+}
+
+function inferPlanIdFromScreenshotPaths(paths: string[]): string | undefined {
+  for (const screenshotPath of paths) {
+    const name = screenshotPath.split(/[\\/]/).pop() ?? "";
+    const stem = name.replace(/\.[^.]+$/, "");
+    if (ALL_PLAN_IDS.has(stem)) return stem;
+  }
+  return undefined;
 }
 
 function readExplicitPlanId(value: unknown): string | undefined {

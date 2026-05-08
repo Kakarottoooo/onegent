@@ -1,3 +1,7 @@
+import { mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
+import path from "node:path";
+
 import { describe, expect, it } from "vitest";
 import {
   buildStage0OperatorReport,
@@ -10,6 +14,7 @@ describe("Stage 0 operator report", () => {
       captureCount: 200,
       internalCount: 200,
       layeredCount: 50,
+      activityLabEvidenceRoot: emptyEvidenceRoot(),
     });
 
     expect(report.capture.summary.total).toBe(200);
@@ -34,7 +39,12 @@ describe("Stage 0 operator report", () => {
   });
 
   it("keeps private-alpha green blocked by evidence rather than docs or fixtures", () => {
-    const report = buildStage0OperatorReport({ captureCount: 50, internalCount: 50, layeredCount: 20 });
+    const report = buildStage0OperatorReport({
+      captureCount: 50,
+      internalCount: 50,
+      layeredCount: 20,
+      activityLabEvidenceRoot: emptyEvidenceRoot(),
+    });
     expect(report.verdict).not.toBe("green");
     expect(report.privateAlpha.summary.readiness).toBe("yellow");
     expect(report.notes.join(" ")).toContain("green requires real private-alpha evidence");
@@ -42,7 +52,12 @@ describe("Stage 0 operator report", () => {
 
   it("renders founder-readable markdown with blockers and owners", () => {
     const markdown = renderStage0OperatorMarkdown(
-      buildStage0OperatorReport({ captureCount: 50, internalCount: 50, layeredCount: 20 }),
+      buildStage0OperatorReport({
+        captureCount: 50,
+        internalCount: 50,
+        layeredCount: 20,
+        activityLabEvidenceRoot: emptyEvidenceRoot(),
+      }),
     );
     expect(markdown).toContain("# Stage 0 Operator Report");
     expect(markdown).toContain("## Capture Benchmark");
@@ -58,3 +73,7 @@ describe("Stage 0 operator report", () => {
     expect(markdown).toContain("Dogfood-only");
   });
 });
+
+function emptyEvidenceRoot(): string {
+  return mkdtempSync(path.join(tmpdir(), "onegent-stage0-operator-empty-evidence-"));
+}

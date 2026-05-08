@@ -41,38 +41,38 @@ Unsafe boundary: 0
 Wrong target: 0
 Host impersonation escapes: 0
 Patch proposal candidates: 97
-Controlled lab runs: 0
+Controlled lab runs: 20
 
 ## Activity Skill Lab Evidence
 
 Evidence root: .stage0b-evidence
-Total runs: 0
-Result files: 0
+Total runs: 20
+Result files: 20
 Invalid files: 0
-Safe outcomes: 0
+Safe outcomes: 12
 Unsafe boundary violations: 0
 Wrong target / candidate signals: 0
-Provider degraded: 0
-Skill patch needed: 0
-Patch proposals: 0
+Provider degraded: 3
+Skill patch needed: 5
+Patch proposals: 5
 
 | Provider | Runs |
 | --- | ---: |
-| `ticketmaster` | 0 |
+| `ticketmaster` | 20 |
 | `seatgeek` | 0 |
 
 | Classification | Runs |
 | --- | ---: |
 | `exact_event_ready` | 0 |
-| `provider_listing_needs_choice` | 0 |
+| `provider_listing_needs_choice` | 9 |
 | `single_candidate_ready` | 0 |
 | `safe_handoff_reached` | 0 |
-| `user_seat_selection_required` | 0 |
+| `user_seat_selection_required` | 3 |
 | `account_session_required` | 0 |
 | `payment_or_final_action_required` | 0 |
-| `provider_degraded` | 0 |
+| `provider_degraded` | 3 |
 | `insufficient_evidence` | 0 |
-| `skill_patch_needed` | 0 |
+| `skill_patch_needed` | 5 |
 
 ## Private Alpha Intake
 
@@ -137,7 +137,7 @@ Findings: 0
 | Priority | Owner | Blocker | Evidence |
 | --- | --- | --- | --- |
 | `p0` | `alpha-ops` | Private alpha is not green from real supervised submissions. | 3 intake sample(s), readiness yellow, 0 safe-miss seed(s). |
-| `p1` | `activity-skill-runtime` | Activity Skill Runtime needs controlled Browser Harness lab evidence before production runtime wiring. | 145 no-live fixture(s), 0 controlled lab run(s), no-live gate PASS. |
+| `p1` | `activity-skill-runtime` | Activity Skill Lab patch proposals need reviewed no-live fixtures. | 5 skill_patch_needed run(s), 5 patch proposal(s). |
 | `p1` | `provider-runtime` | Provider-runtime no-live failures need fixture-backed patches before more live attempts. | 4% layered unknown failures, 5 simulated provider blockers. |
 | `p1` | `codex` | Returned agent branches need metadata triage before merge validation. | 3 ready, 1 follow-up, 0 rebase, 1 reject. |
 | `p2` | `planner` | Benchmark failures remain for this owner. | 20 failure(s): internal benchmark failures 20/53. |
@@ -152,7 +152,7 @@ Findings: 0
 | `p1` | `provider-runtime` | Use layered benchmark failures to pick the next fixture-backed provider hardening branch. | 5 simulated provider blockers remain in the no-live corpus. |
 | `p1` | `provider-runtime` | Prioritize L1 runtime patches over claiming L2 recovery readiness. | Layered L1+L2 recovered pass rate is 40%. |
 | `p0` | `alpha-ops` | Collect supervised private-alpha submissions and score them through the intake gate. | Private alpha readiness is yellow; synthetic fixtures cannot make it green. |
-| `p1` | `activity-skill-runtime` | Run the 20-case controlled Activity Provider Skill Runtime lab and convert failures into reviewed patch proposals. | 145 no-live fixtures pass the registry gate, but controlled lab runs are 0/20. |
+| `p1` | `activity-skill-runtime` | Review Activity Skill Lab patch proposals and land only fixture-backed rules. | 5 run(s) classified skill_patch_needed. |
 | `p1` | `codex` | Use agent intake results to block unsafe branches and ask follow-up only where metadata is incomplete. | 1 branch(es) need follow-up and 1 are rejected. |
 
 ## Top 10 Next Engineering Actions
@@ -162,7 +162,7 @@ Findings: 0
 | `p1` | `provider-runtime` | Use layered benchmark failures to pick the next fixture-backed provider hardening branch. | 5 simulated provider blockers remain in the no-live corpus. |
 | `p1` | `provider-runtime` | Prioritize L1 runtime patches over claiming L2 recovery readiness. | Layered L1+L2 recovered pass rate is 40%. |
 | `p0` | `alpha-ops` | Collect supervised private-alpha submissions and score them through the intake gate. | Private alpha readiness is yellow; synthetic fixtures cannot make it green. |
-| `p1` | `activity-skill-runtime` | Run the 20-case controlled Activity Provider Skill Runtime lab and convert failures into reviewed patch proposals. | 145 no-live fixtures pass the registry gate, but controlled lab runs are 0/20. |
+| `p1` | `activity-skill-runtime` | Review Activity Skill Lab patch proposals and land only fixture-backed rules. | 5 run(s) classified skill_patch_needed. |
 | `p1` | `codex` | Use agent intake results to block unsafe branches and ask follow-up only where metadata is incomplete. | 1 branch(es) need follow-up and 1 are rejected. |
 | `p1` | `alpha-ops` | Start private-alpha intake only as supervised dogfood and convert failures into capture fixtures. | No-live gates can support intake, but green alpha readiness requires real submissions and value scoring. |
 | `p2` | `codex` | Keep agent branches flowing through Stage 0 intake before merge validation. | Returned branches should be triaged by metadata so independent agents can start the next bounded task. |

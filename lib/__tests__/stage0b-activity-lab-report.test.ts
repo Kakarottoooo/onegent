@@ -113,6 +113,21 @@ describe("Stage 0B Activity Lab evidence ingestion", () => {
     expect(report.results[0]?.planIdSource).toBe("explicit");
   });
 
+  it("prefers screenshot plan id over duplicate URL matches from older lab plans", () => {
+    const root = mkdtempSync(path.join(tmpdir(), "onegent-stage0b-lab-screenshot-plan-"));
+    const resultPath = writeResult(root, "screenshot-plan", run("screenshot-plan", "ticketmaster", "provider_listing_needs_choice", planUrl("tmf-03"), {
+      screenshots: [".stage0b-evidence/screenshot-plan/screenshots/tmf-03.png"],
+    }));
+
+    const report = buildStage0BActivityLabEvidenceReport({
+      resultPaths: [resultPath],
+    });
+
+    expect(report.summary.byPlanId).toEqual({ "tmf-03": 1 });
+    expect(report.results[0]?.planId).toBe("tmf-03");
+    expect(report.results[0]?.planIdSource).toBe("screenshot_path");
+  });
+
   it("surfaces malformed result.json files without counting them as runs", () => {
     const root = mkdtempSync(path.join(tmpdir(), "onegent-stage0b-lab-bad-"));
     const runDir = path.join(root, "bad");
