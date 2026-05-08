@@ -66,3 +66,25 @@ export type {
   BrowserHarnessPayload,
   Stage0BLabRunSummary,
 } from "./lab-runner";
+
+export {
+  buildStage0BActivityLabEvidenceReport,
+  buildStage0BActivityLabReportFromResults,
+  findStage0BActivityLabResultPaths,
+  parseStage0BActivityLabResultJson,
+  renderStage0BActivityLabMarkdown,
+} from "./lab-report";
+
+export type {
+  BuildStage0BActivityLabReportInput,
+  ParsedStage0BActivityLabResult,
+  Stage0BActivityLabBlocker,
+  Stage0BActivityLabFileError,
+  Stage0BActivityLabNextAction,
+  Stage0BActivityLabOwner,
+  Stage0BActivityLabPatchProposalSummary,
+  Stage0BActivityLabPlanIdSource,
+  Stage0BActivityLabPriority,
+  Stage0BActivityLabReport,
+  Stage0BActivityLabSummary,
+} from "./lab-report";

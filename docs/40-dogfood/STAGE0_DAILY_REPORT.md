@@ -43,6 +43,37 @@ Host impersonation escapes: 0
 Patch proposal candidates: 97
 Controlled lab runs: 0
 
+## Activity Skill Lab Evidence
+
+Evidence root: .stage0b-evidence
+Total runs: 0
+Result files: 0
+Invalid files: 0
+Safe outcomes: 0
+Unsafe boundary violations: 0
+Wrong target / candidate signals: 0
+Provider degraded: 0
+Skill patch needed: 0
+Patch proposals: 0
+
+| Provider | Runs |
+| --- | ---: |
+| `ticketmaster` | 0 |
+| `seatgeek` | 0 |
+
+| Classification | Runs |
+| --- | ---: |
+| `exact_event_ready` | 0 |
+| `provider_listing_needs_choice` | 0 |
+| `single_candidate_ready` | 0 |
+| `safe_handoff_reached` | 0 |
+| `user_seat_selection_required` | 0 |
+| `account_session_required` | 0 |
+| `payment_or_final_action_required` | 0 |
+| `provider_degraded` | 0 |
+| `insufficient_evidence` | 0 |
+| `skill_patch_needed` | 0 |
+
 ## Private Alpha Intake
 
 Readiness: yellow
@@ -145,5 +176,6 @@ Findings: 0
 - yellow can still be the correct verdict when benchmark gates pass but private-alpha submissions have not been collected yet.
 - green requires real private-alpha evidence, not docs, fixtures, or tooling alone.
 - Private alpha synthetic samples are useful for gate smoke tests but cannot make the Stage 0 verdict green.
+- Activity Skill Lab evidence ingestion reads local result.json summaries only; screenshots and JSONL stay local under .stage0b-evidence.
 - The report never starts providers, workers, browser agents, OpenAI calls, payments, logins, verification, or final confirmations.
 - deferred: no previous Stage 0 daily report snapshot was supplied.

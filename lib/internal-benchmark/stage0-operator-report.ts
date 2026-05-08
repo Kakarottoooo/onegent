@@ -32,6 +32,12 @@ import {
   buildActivitySkillReadinessReport,
   type ActivitySkillReadinessReport,
 } from "@/lib/activity-skills";
+import {
+  buildStage0BActivityLabEvidenceReport,
+  buildStage0BActivityLabReportFromResults,
+  type Stage0BActivityLabReport,
+} from "@/lib/stage0b-skill-runtime";
+import type { L2RecoveryResult } from "@/lib/stage0b-skill-runtime";
 import privateAlphaFixture from "@/lib/capture/__fixtures__/private-alpha-submissions.json";
 import agentIntakeFixture from "@/lib/internal-benchmark/__fixtures__/agent-intake/stage0-returned-branches.json";
 
@@ -44,6 +50,9 @@ export type Stage0OperatorReportOptions = {
   layeredCount?: number;
   privateAlphaSubmissions?: PrivateAlphaSubmission[];
   agentReports?: AgentReturnReport[];
+  activityLabEvidenceRoot?: string;
+  activityLabResultPaths?: string[];
+  activityLabResults?: L2RecoveryResult[];
 };
 
 export type Stage0Owner =
@@ -86,6 +95,7 @@ export type Stage0OperatorReport = {
   internalBenchmark: InternalBenchmarkReport;
   layeredBenchmark: LayeredBenchmarkReport;
   activitySkillReadiness: ActivitySkillReadinessReport;
+  activityLabEvidence: Stage0BActivityLabReport;
   privateAlpha: PrivateAlphaIntakeReport;
   agentIntake: AgentIntakeQueueReport;
   performance: Stage0PerformanceReport;
@@ -133,11 +143,21 @@ export function buildStage0OperatorReport(
     forbidProviderRuntimeChanges: true,
   });
   const performance = buildStage0PerformanceReport();
-  const activitySkillReadiness = buildActivitySkillReadinessReport();
+  const activityLabEvidence = options.activityLabResults
+    ? buildStage0BActivityLabReportFromResults(options.activityLabResults, {
+        evidenceRoot: options.activityLabEvidenceRoot,
+      })
+    : buildStage0BActivityLabEvidenceReport({
+        evidenceRoot: options.activityLabEvidenceRoot,
+        resultPaths: options.activityLabResultPaths,
+      });
+  const activitySkillReadiness = buildActivitySkillReadinessReport({
+    controlledLabRuns: activityLabEvidence.summary.totalRuns,
+  });
 
   const ownerSummary = summarizeOwners(capture, internalBenchmark, layeredBenchmark);
-  const topNextActions = nextActions(capture, internalBenchmark, layeredBenchmark, privateAlpha, agentIntake, performance, activitySkillReadiness, ownerSummary);
-  const topBlockersByOwner = blockersByOwner(capture, internalBenchmark, layeredBenchmark, privateAlpha, agentIntake, performance, activitySkillReadiness, ownerSummary);
+  const topNextActions = nextActions(capture, internalBenchmark, layeredBenchmark, privateAlpha, agentIntake, performance, activitySkillReadiness, activityLabEvidence, ownerSummary);
+  const topBlockersByOwner = blockersByOwner(capture, internalBenchmark, layeredBenchmark, privateAlpha, agentIntake, performance, activitySkillReadiness, activityLabEvidence, ownerSummary);
   const { verdict, verdictReason } = readinessVerdict(capture, internalBenchmark, layeredBenchmark, privateAlpha, activitySkillReadiness);
   const routingMismatchCount =
     capture.summary.routingMismatchCount +
@@ -156,6 +176,7 @@ export function buildStage0OperatorReport(
     internalBenchmark,
     layeredBenchmark,
     activitySkillReadiness,
+    activityLabEvidence,
     privateAlpha,
     agentIntake,
     performance,
@@ -183,6 +204,7 @@ export function buildStage0OperatorReport(
       "yellow can still be the correct verdict when benchmark gates pass but private-alpha submissions have not been collected yet.",
       "green requires real private-alpha evidence, not docs, fixtures, or tooling alone.",
       "Private alpha synthetic samples are useful for gate smoke tests but cannot make the Stage 0 verdict green.",
+      "Activity Skill Lab evidence ingestion reads local result.json summaries only; screenshots and JSONL stay local under .stage0b-evidence.",
       "The report never starts providers, workers, browser agents, OpenAI calls, payments, logins, verification, or final confirmations.",
     ],
   };
@@ -235,6 +257,38 @@ export function renderStage0OperatorMarkdown(report: Stage0OperatorReport): stri
     `Patch proposal candidates: ${report.activitySkillReadiness.summary.patchProposalCandidateCount}`,
     `Controlled lab runs: ${report.activitySkillReadiness.summary.controlledLabRuns}`,
     "",
+    "## Activity Skill Lab Evidence",
+    "",
+    `Evidence root: ${report.activityLabEvidence.evidenceRoot}`,
+    `Total runs: ${report.activityLabEvidence.summary.totalRuns}`,
+    `Result files: ${report.activityLabEvidence.summary.resultFiles}`,
+    `Invalid files: ${report.activityLabEvidence.summary.invalidFiles}`,
+    `Safe outcomes: ${report.activityLabEvidence.summary.safeOutcomesCount}`,
+    `Unsafe boundary violations: ${report.activityLabEvidence.summary.unsafeBoundaryViolations}`,
+    `Wrong target / candidate signals: ${report.activityLabEvidence.summary.wrongTargetSignalCount}`,
+    `Provider degraded: ${report.activityLabEvidence.summary.providerDegradedCount}`,
+    `Skill patch needed: ${report.activityLabEvidence.summary.skillPatchNeededCount}`,
+    `Patch proposals: ${report.activityLabEvidence.summary.patchProposalCount}`,
+    "",
+    "| Provider | Runs |",
+    "| --- | ---: |",
+  ];
+
+  for (const [provider, count] of Object.entries(report.activityLabEvidence.summary.byProvider)) {
+    lines.push(`| \`${provider}\` | ${count} |`);
+  }
+
+  lines.push(
+    "",
+    "| Classification | Runs |",
+    "| --- | ---: |",
+  );
+  for (const [classification, count] of Object.entries(report.activityLabEvidence.summary.byClassification)) {
+    lines.push(`| \`${classification}\` | ${count} |`);
+  }
+
+  lines.push(
+    "",
     "## Private Alpha Intake",
     "",
     `Readiness: ${report.privateAlpha.summary.readiness}`,
@@ -259,7 +313,7 @@ export function renderStage0OperatorMarkdown(report: Stage0OperatorReport): stri
     "",
     "| Endpoint | Owner | Risk | Findings | Suggested next patch |",
     "| --- | --- | --- | ---: | --- |",
-  ];
+  );
 
   for (const probe of report.performance.probes) {
     lines.push(
@@ -408,6 +462,7 @@ function blockersByOwner(
   agentIntake: AgentIntakeQueueReport,
   performance: Stage0PerformanceReport,
   activitySkillReadiness: ActivitySkillReadinessReport,
+  activityLabEvidence: Stage0BActivityLabReport,
   ownerSummary: Stage0OwnerSummary[],
 ): Stage0OwnerBlocker[] {
   const blockers: Stage0OwnerBlocker[] = [];
@@ -425,6 +480,30 @@ function blockersByOwner(
       priority: activitySkillReadiness.summary.noLiveGatePass ? "p1" : "p0",
       blocker: "Activity Skill Runtime needs controlled Browser Harness lab evidence before production runtime wiring.",
       evidence: `${activitySkillReadiness.summary.totalFixtures} no-live fixture(s), ${activitySkillReadiness.summary.controlledLabRuns} controlled lab run(s), no-live gate ${activitySkillReadiness.summary.noLiveGatePass ? "PASS" : "FAIL"}.`,
+    });
+  }
+  if (activityLabEvidence.summary.unsafeBoundaryViolations > 0 || activityLabEvidence.summary.wrongTargetSignalCount > 0) {
+    blockers.push({
+      owner: "activity-skill-runtime",
+      priority: "p0",
+      blocker: "Activity Skill Lab evidence contains unsafe or wrong-target signals.",
+      evidence: `${activityLabEvidence.summary.unsafeBoundaryViolations} unsafe boundary violation(s), ${activityLabEvidence.summary.wrongTargetSignalCount} wrong-target signal(s).`,
+    });
+  }
+  if (activityLabEvidence.summary.skillPatchNeededCount > 0) {
+    blockers.push({
+      owner: "activity-skill-runtime",
+      priority: "p1",
+      blocker: "Activity Skill Lab patch proposals need reviewed no-live fixtures.",
+      evidence: `${activityLabEvidence.summary.skillPatchNeededCount} skill_patch_needed run(s), ${activityLabEvidence.summary.patchProposalCount} patch proposal(s).`,
+    });
+  }
+  if (activityLabEvidence.summary.missingEvidenceCount > 0 || activityLabEvidence.summary.invalidFiles > 0) {
+    blockers.push({
+      owner: "activity-skill-runtime",
+      priority: "p1",
+      blocker: "Activity Skill Lab evidence bundles are incomplete or unreadable.",
+      evidence: `${activityLabEvidence.summary.missingEvidenceCount} missing-evidence run(s), ${activityLabEvidence.summary.invalidFiles} invalid result file(s).`,
     });
   }
   if (capture.summary.routingMismatchCount > 0 || capture.summary.byFailureClass.artifact_incomplete > 0) {
@@ -479,6 +558,7 @@ function nextActions(
   agentIntake: AgentIntakeQueueReport,
   performance: Stage0PerformanceReport,
   activitySkillReadiness: ActivitySkillReadinessReport,
+  activityLabEvidence: Stage0BActivityLabReport,
   ownerSummary: Stage0OwnerSummary[],
 ): Stage0NextAction[] {
   const actions: Stage0NextAction[] = [];
@@ -528,6 +608,30 @@ function nextActions(
       priority: activitySkillReadiness.summary.noLiveGatePass ? "p1" : "p0",
       action: "Run the 20-case controlled Activity Provider Skill Runtime lab and convert failures into reviewed patch proposals.",
       reason: `${activitySkillReadiness.summary.totalFixtures} no-live fixtures pass the registry gate, but controlled lab runs are ${activitySkillReadiness.summary.controlledLabRuns}/20.`,
+    });
+  }
+  if (activityLabEvidence.summary.unsafeBoundaryViolations > 0 || activityLabEvidence.summary.wrongTargetSignalCount > 0) {
+    actions.push({
+      owner: "activity-skill-runtime",
+      priority: "p0",
+      action: "Block Activity Skill Runtime promotion until unsafe and wrong-target lab evidence has fixture-backed fixes.",
+      reason: `${activityLabEvidence.summary.unsafeBoundaryViolations} unsafe boundary violation(s), ${activityLabEvidence.summary.wrongTargetSignalCount} wrong-target signal(s).`,
+    });
+  }
+  if (activityLabEvidence.summary.skillPatchNeededCount > 0) {
+    actions.push({
+      owner: "activity-skill-runtime",
+      priority: "p1",
+      action: "Review Activity Skill Lab patch proposals and land only fixture-backed rules.",
+      reason: `${activityLabEvidence.summary.skillPatchNeededCount} run(s) classified skill_patch_needed.`,
+    });
+  }
+  if (activityLabEvidence.summary.missingEvidenceCount > 0 || activityLabEvidence.summary.invalidFiles > 0) {
+    actions.push({
+      owner: "activity-skill-runtime",
+      priority: "p1",
+      action: "Rerun or repair Activity Skill Lab results with missing result evidence.",
+      reason: `${activityLabEvidence.summary.missingEvidenceCount} missing-evidence run(s), ${activityLabEvidence.summary.invalidFiles} invalid result file(s).`,
     });
   }
   if (agentIntake.summary.reject > 0 || agentIntake.summary.needsFollowup > 0) {

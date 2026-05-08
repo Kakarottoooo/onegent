@@ -22,12 +22,26 @@ function readCountArg(name: string): number | undefined {
   return Math.floor(parsed);
 }
 
+function readRepeatedArg(name: string): string[] {
+  const values: string[] = [];
+  for (let index = 0; index < process.argv.length; index += 1) {
+    if (process.argv[index] !== name) continue;
+    const value = process.argv[index + 1];
+    if (!value) throw new Error(`${name} requires a value`);
+    values.push(value);
+  }
+  return values;
+}
+
 const captureVertical = readArg("--capture-vertical", "all") as CaptureBenchmarkVerticalArg;
+const activityLabResultPaths = readRepeatedArg("--activity-lab-result");
 const report = buildStage0OperatorReport({
   captureVertical,
   captureCount: readCountArg("--capture-count"),
   internalCount: readCountArg("--internal-count"),
   layeredCount: readCountArg("--layered-count"),
+  activityLabEvidenceRoot: readArg("--activity-lab-evidence-root") || undefined,
+  activityLabResultPaths: activityLabResultPaths.length > 0 ? activityLabResultPaths : undefined,
 });
 
 const output = hasFlag("--json")

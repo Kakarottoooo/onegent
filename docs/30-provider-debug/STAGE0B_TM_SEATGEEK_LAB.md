@@ -180,6 +180,16 @@ type L2RecoveryResult = {
 };
 ```
 
+Ingest completed local result summaries with:
+
+```bash
+npx tsx scripts/stage0b-activity-lab-report.ts --evidence-root .stage0b-evidence --markdown
+npx tsx scripts/stage0b-activity-lab-report.ts --evidence-root .stage0b-evidence --json
+```
+
+The report reads `result.json` files only. It does not open Browser Harness,
+providers, screenshots, JSONL logs, workers, or OpenAI.
+
 ### 5.1 Classification → safe_next_action mapping
 
 Locked in `lib/stage0b-skill-runtime/l2-recovery-result.ts:RECOVERY_OUTCOMES`.
