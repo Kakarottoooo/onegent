@@ -68,21 +68,15 @@ describe("analyzeCaptureImageForText", () => {
     const fetchMock = vi.fn(async () =>
       new Response(
         JSON.stringify({
-          choices: [
-            {
-              message: {
-                content: JSON.stringify({
-                  scenario: "activity",
-                  provider: "ticketmaster",
-                  title: "Lil Wayne",
-                  city: "Nashville",
-                  missing_fields: ["date", "time"],
-                  confidence: 0.81,
-                  concise_summary: "Ticketmaster artist page for Lil Wayne.",
-                }),
-              },
-            },
-          ],
+          output_text: JSON.stringify({
+            scenario: "activity",
+            provider: "ticketmaster",
+            title: "Lil Wayne",
+            city: "Nashville",
+            missing_fields: ["date", "time"],
+            confidence: 0.81,
+            concise_summary: "Ticketmaster artist page for Lil Wayne.",
+          }),
         }),
         { status: 200 },
       ),
@@ -108,6 +102,65 @@ describe("analyzeCaptureImageForText", () => {
     expect((init as RequestInit).headers).toMatchObject({
       Authorization: "Bearer sk-test",
     });
+    expect(JSON.parse((init as RequestInit).body as string).model).toBe("gpt-4o-mini");
+  });
+
+  it("retries gpt-5.5 when a stale user model is not allowed", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            error: {
+              message: "Project does not have access to model `gpt-4o-mini`",
+              code: "model_not_found",
+            },
+          }),
+          { status: 403 },
+        ),
+      )
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            output: [
+              {
+                content: [
+                  {
+                    type: "output_text",
+                    text: JSON.stringify({
+                      scenario: "activity",
+                      provider: "ticketmaster",
+                      title: "Disney On Ice",
+                    }),
+                  },
+                ],
+              },
+            ],
+          }),
+          { status: 200 },
+        ),
+      );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await analyzeCaptureImageForText({
+      image: {
+        type: "image",
+        mime_type: "image/png",
+        data_url: dataUrl,
+        size: 5,
+      },
+      userText: "help me reserve May 17th ticket",
+      userModel: { provider: "openai", model: "gpt-4o-mini", apiKey: "sk-test" },
+    });
+
+    expect(result.status).toBe("analyzed");
+    expect(result.model).toBe("gpt-5.5");
+    expect(result.summary_text).toContain("Disney On Ice");
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    const firstBody = JSON.parse(fetchMock.mock.calls[0][1].body as string);
+    const secondBody = JSON.parse(fetchMock.mock.calls[1][1].body as string);
+    expect(firstBody.model).toBe("gpt-4o-mini");
+    expect(secondBody.model).toBe("gpt-5.5");
   });
 
   it("falls back safely when no vision key is available", async () => {

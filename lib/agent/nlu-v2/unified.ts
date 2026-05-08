@@ -18,7 +18,7 @@
  * state — it decides confirm-card vs. ask-clarification UI dispatch
  * deterministically, independent of how the model phrased its reply.
  *
- * Default model: gpt-4o-mini (cheap, fast). Override via the `model`
+ * Default model comes from `lib/openai.ts` (`gpt-5.5` in Stage 0). Override via the `model`
  * param to e.g. anthropic/claude-sonnet-4-6 if reply quality is rough.
  */
 
@@ -46,7 +46,7 @@ export interface UnifiedTurnInput {
   new_user_message: string;
   /** Conversation history so far. */
   history?: Turn[];
-  /** Override model (provider/model string). Default: gpt-4o-mini. */
+  /** Override model (provider/model string). Defaults through lib/openai.ts. */
   model?: string;
   /** Optional override API key (BYOK). */
   apiKey?: string;

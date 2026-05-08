@@ -64,8 +64,8 @@ export async function analyzeCaptureImageForText(input: {
   userText: string;
   userModel?: unknown;
 }): Promise<CaptureImageAnalysis> {
-  const model = resolveOpenAiVisionModel(input.userModel);
-  if (!model.apiKey) {
+  const initial = resolveOpenAiVisionModel(input.userModel);
+  if (!initial.apiKey) {
     return {
       status: "unavailable",
       summary_text:
@@ -73,81 +73,36 @@ export async function analyzeCaptureImageForText(input: {
     };
   }
 
+  let model = initial.model;
   try {
-    const res = await fetch("https://api.openai.com/v1/chat/completions", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${model.apiKey}`,
-      },
-      body: JSON.stringify({
-        model: model.model,
-        response_format: { type: "json_object" },
-        max_tokens: 700,
-        messages: [
-          {
-            role: "system",
-            content: [
-              "You extract travel-task facts from screenshots for Onegent.",
-              "Return compact JSON only.",
-              "Do not invent facts that are not visible or supplied by the user.",
-              "If the screenshot is not travel-related, say scenario null and list what context is missing.",
-              "Never say the task is ready for payment, login, seat selection, or final confirmation.",
-            ].join(" "),
-          },
-          {
-            role: "user",
-            content: [
-              {
-                type: "text",
-                text: JSON.stringify({
-                  user_instruction: input.userText.trim() || null,
-                  requested_output: {
-                    scenario:
-                      "restaurant | hotel | flight | activity | trip | null",
-                    provider: "visible provider or null",
-                    title: "visible place/event/hotel/flight/trip title or null",
-                    city: "visible city or null",
-                    date: "visible date or null",
-                    time: "visible time or null",
-                    price_or_budget: "visible price/budget or null",
-                    source_url: "visible URL or null",
-                    missing_fields: "array of missing required fields",
-                    confidence: "0..1",
-                    concise_summary: "one sentence for a downstream text parser",
-                  },
-                }),
-              },
-              {
-                type: "image_url",
-                image_url: { url: input.image.data_url, detail: "low" },
-              },
-            ],
-          },
-        ],
-      }),
+    let response = await callOpenAiVisionResponses({
+      apiKey: initial.apiKey,
+      model,
+      image: input.image,
+      userText: input.userText,
     });
-
-    if (!res.ok) {
-      const body = await res.text().catch(() => "");
-      throw new Error(`OpenAI vision request failed: ${res.status} ${body.slice(0, 160)}`);
+    if (!response.ok && model !== DEFAULT_OPENAI_VISION_MODEL && isModelAccessFailure(response.error)) {
+      model = DEFAULT_OPENAI_VISION_MODEL;
+      response = await callOpenAiVisionResponses({
+        apiKey: initial.apiKey,
+        model,
+        image: input.image,
+        userText: input.userText,
+      });
     }
-    const json = (await res.json()) as {
-      choices?: Array<{ message?: { content?: string | null } }>;
-    };
-    const content = json.choices?.[0]?.message?.content?.trim() ?? "";
-    const normalized = normalizeVisionJson(content);
+    if (!response.ok) throw new Error(response.error);
+    const normalized = normalizeVisionJson(response.content);
     return {
       status: "analyzed",
       provider: "openai",
-      model: model.model,
+      model,
       summary_text: normalized,
     };
   } catch (err) {
     return {
       status: "failed",
       provider: "openai",
-      model: model.model,
+      model,
       error: err instanceof Error ? err.message : String(err),
       summary_text:
         "Screenshot received, but image analysis failed. Treat this as a screenshot capture and ask the user for a short description before creating or running a task.",
@@ -155,9 +110,11 @@ export async function analyzeCaptureImageForText(input: {
   }
 }
 
+const DEFAULT_OPENAI_VISION_MODEL = process.env.OPENAI_VISION_MODEL?.trim() || "gpt-5.5";
+
 function resolveOpenAiVisionModel(userModel: unknown): { model: string; apiKey: string | null } {
   const envKey = process.env.OPENAI_API_KEY?.trim() || null;
-  const fallbackModel = process.env.OPENAI_VISION_MODEL?.trim() || "gpt-4o-mini";
+  const fallbackModel = DEFAULT_OPENAI_VISION_MODEL;
   if (!userModel || typeof userModel !== "object") {
     return { model: fallbackModel, apiKey: envKey };
   }
@@ -167,6 +124,91 @@ function resolveOpenAiVisionModel(userModel: unknown): { model: string; apiKey: 
     model: typeof m.model === "string" && m.model.trim() ? m.model.trim() : fallbackModel,
     apiKey: typeof m.apiKey === "string" && m.apiKey.trim() ? m.apiKey.trim() : envKey,
   };
+}
+
+async function callOpenAiVisionResponses(input: {
+  apiKey: string;
+  model: string;
+  image: CaptureImagePayload;
+  userText: string;
+}): Promise<{ ok: true; content: string } | { ok: false; error: string }> {
+  const res = await fetch("https://api.openai.com/v1/responses", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${input.apiKey}`,
+    },
+    body: JSON.stringify({
+      model: input.model,
+      store: false,
+      max_output_tokens: 700,
+      instructions: [
+        "You extract travel-task facts from screenshots for Onegent.",
+        "Return compact JSON only.",
+        "Do not invent facts that are not visible or supplied by the user.",
+        "If the screenshot is not travel-related, say scenario null and list what context is missing.",
+        "Never say the task is ready for payment, login, seat selection, or final confirmation.",
+      ].join(" "),
+      input: [
+        {
+          role: "user",
+          content: [
+            {
+              type: "input_text",
+              text: JSON.stringify({
+                user_instruction: input.userText.trim() || null,
+                requested_output: {
+                  scenario: "restaurant | hotel | flight | activity | trip | null",
+                  provider: "visible provider or null",
+                  title: "visible place/event/hotel/flight/trip title or null",
+                  city: "visible city or null",
+                  date: "visible date or null",
+                  time: "visible time or null",
+                  price_or_budget: "visible price/budget or null",
+                  source_url: "visible URL or null",
+                  missing_fields: "array of missing required fields",
+                  confidence: "0..1",
+                  concise_summary: "one sentence for a downstream text parser",
+                },
+              }),
+            },
+            {
+              type: "input_image",
+              image_url: input.image.data_url,
+              detail: "low",
+            },
+          ],
+        },
+      ],
+    }),
+  });
+
+  if (!res.ok) {
+    const body = await res.text().catch(() => "");
+    return {
+      ok: false,
+      error: `OpenAI vision request failed: ${res.status} ${body.slice(0, 240)}`,
+    };
+  }
+  const json = (await res.json()) as {
+    output_text?: string;
+    output?: Array<{
+      content?: Array<{ text?: string; type?: string }>;
+    }>;
+  };
+  const content =
+    json.output_text?.trim() ||
+    json.output
+      ?.flatMap((item) => item.content ?? [])
+      .map((item) => item.text ?? "")
+      .join("\n")
+      .trim() ||
+    "";
+  return { ok: true, content };
+}
+
+function isModelAccessFailure(error: string): boolean {
+  return /does not have access to model|model_not_found|unsupported.*model|invalid.*model/i.test(error);
 }
 
 function normalizeVisionJson(content: string): string {

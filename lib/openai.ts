@@ -10,11 +10,10 @@
  * Env:
  *   - `OPENAI_API_KEY` (required)
  *   - `OPENAI_CHAT_MODEL` (optional override for restricted local projects)
- *   - We default to `gpt-4o-mini` — cheap, fast, and already used by Stagehand
- *     for its act() loops so no new billing setup is needed.
+ *   - Current Stage 0 default is `gpt-5.5`; older projects can override.
  */
 const OPENAI_API_URL = "https://api.openai.com/v1/chat/completions";
-const DEFAULT_MODEL = process.env.OPENAI_CHAT_MODEL ?? "gpt-4o-mini";
+const DEFAULT_MODEL = process.env.OPENAI_CHAT_MODEL ?? "gpt-5.5";
 const DEFAULT_TIMEOUT_MS = 30_000;
 
 function usesMaxCompletionTokens(model: string): boolean {
