@@ -148,6 +148,43 @@ Current multi-agent operating rule:
   the risk-relevant commands before the final full gate. The target operating
   model is "employees stay busy; Codex makes decisions, reviews evidence, and
   integrates only useful work."
+- Codex must proactively decide whether a task needs Agent Teams mode. The
+  founder should not have to ask "should we use multiple agents?" at the start
+  of every workstream. At task intake, Codex should quickly classify the work as
+  solo-Codex or Agent Teams and state the decision when it matters.
+- Use Agent Teams by default when the work touches multiple independent
+  surfaces, providers, verticals, or ownership lanes; when a strategy or
+  architecture decision needs adversarial review; when benchmark/corpus/research
+  work can run in parallel with implementation; when the task would likely take
+  Codex more than 1-2 hours; when safety, auth, payment, provider runtime, or
+  evidence boundaries need independent critique; or when the founder asks a
+  broad product direction question where multiple viewpoints improve the
+  answer.
+- Do not use Agent Teams for small deterministic single-file fixes, urgent
+  local debugging where all relevant state is in one browser/log/terminal,
+  merge decisions that require Codex to own integration authority, tasks that
+  require secrets/live account/payment access, short chat-only answers, or work
+  where multiple agents would edit the same files and create avoidable merge
+  conflicts.
+- When Agent Teams mode is warranted, Codex should first tell the founder why
+  the team is being activated, explain each assignment's product value, then
+  provide copy-paste prompts for Goal Agent, Claude, Agent2, and Agent3 as
+  appropriate. Each prompt must include the latest pushed base branch and
+  commit, the expected worktree, allowed and forbidden paths, validation gates,
+  report template, and anti-bloat constraints. After issuing prompts, Codex
+  should immediately continue its own non-overlapping work instead of waiting.
+- Default team allocation: Goal Agent gets week-scale Stage 0 systems work
+  such as readiness cockpit, benchmark/reporting, performance, architecture, and
+  cross-agent intake; Claude gets adversarial review, capture/NLU/activity
+  hardening, and precise no-live bug discovery; Agent2 and Agent3 get bounded
+  provider/vertical lanes or independent fixture/analyzer/runtime-contract
+  work. These defaults can change, but Codex must keep write ownership
+  disjoint.
+- If Codex is uncertain, bias toward issuing no-live, non-conflicting analysis
+  or fixture-expansion prompts while Codex implements the critical-path patch.
+  Reject or defer any returned branch that adds broad code, duplicates runtime
+  logic, weakens performance, lacks validation, starts from a stale base, or
+  fails the Stage 0 safety boundary.
 
 Current status after founder dogfood consolidation:
 - Canonical code line is `master @ 19a14a9`, which includes the provider
