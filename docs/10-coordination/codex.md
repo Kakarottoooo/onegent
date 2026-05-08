@@ -131,6 +131,14 @@ Current multi-agent operating rule:
   `docs/00-start-here/PROJECT_SUMMARY.md` when the milestone changes the
   durable project state. This rule exists to keep the team aligned on Stage 0
   instead of drifting into disconnected bug fixes or code accumulation.
+- After each substantive task is completed, Codex must proactively recommend
+  next steps instead of waiting for the founder to ask "what next?" If the
+  nearest stage goal is not yet reached, list a few concrete options, explain
+  the value and tradeoff of each, rank them by expected Stage 0 impact, and
+  state Codex's recommended top choice. This recommendation loop should be
+  brief, evidence-based, and tied to the current stage file or daily report so
+  the next action maximizes product/reliability/alpha readiness rather than
+  producing unfocused code.
 - Side agents should not block on Codex unless their next task depends on a
   freshly merged shared schema or runtime contract. When possible, give them
   independent follow-up lanes based on the latest pushed Stage 0 base, with
