@@ -162,6 +162,11 @@ Ticketmaster surfaces to explicit checkpoints:
 | provider degraded / 404 / unavailable | Capture evidence and stop. |
 | missing URL/screenshot/action log | Collect more evidence before continuing. |
 
+Gmail OTP implementation details live in
+`docs/60-api-integrations/GMAIL_OTP_ASSIST.md`. The activity layer should treat
+Gmail as an active-task OTP source only; it must not use Gmail as a broad
+mailbox reader.
+
 This keeps Onegent useful during provider execution while making authorization
 the deciding boundary: scoped credentials, active-task Gmail OTP, and non-CVV
 payment prefill can be delegated by the user; CAPTCHA, seat choice, CVV,

@@ -88,6 +88,7 @@ Then read the task-specific section below.
 | Phase 2 hotel revival audit | `docs/50-product-areas/HOTEL_VERTICAL_REVIVAL_AUDIT.md`, `docs/50-product-areas/HOTEL_CONTROLLED_RETRY_RUNBOOK.md` |
 | NLU, decision room, trip packaging, social feed | `docs/50-product-areas/` |
 | API, OAuth, ChatGPT apps, Claude MCP | `docs/60-api-integrations/` |
+| Gmail OTP assist / provider login codes | `docs/60-api-integrations/GMAIL_OTP_ASSIST.md` |
 | Old plans, audits, full historical summaries | `docs/90-archive/` |
 
 ## Phase 1 / 1.5 Demo Freeze Quick Path
