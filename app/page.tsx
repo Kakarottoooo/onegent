@@ -1,6 +1,14 @@
 "use client";
 
-import { useRef, useEffect, useState, useCallback, Suspense } from "react";
+import {
+  useRef,
+  useEffect,
+  useState,
+  useCallback,
+  Suspense,
+  type ChangeEvent,
+  type ClipboardEvent,
+} from "react";
 import { useSearchParams } from "next/navigation";
 import dynamic from "next/dynamic";
 import Link from "next/link";
@@ -86,6 +94,16 @@ type InlineBookingProfileState = {
   phone: string;
   missing: string[];
 };
+
+type PendingCaptureImage = {
+  id: string;
+  name: string;
+  mimeType: string;
+  size: number;
+  dataUrl: string;
+};
+
+const MAX_CAPTURE_IMAGE_BYTES = 8 * 1024 * 1024;
 
 // Leaflet is not SSR-compatible
 const MapView = dynamic(() => import("@/components/MapView"), { ssr: false });
@@ -930,6 +948,8 @@ function HomeInner() {
   const [pendingTravelDoc, setPendingTravelDoc] = useState<TravelDocRequest | null>(null);
   const [pendingProviderEventChoice, setPendingProviderEventChoice] =
     useState<ProviderEventChoiceRequest | null>(null);
+  const [pendingCaptureImage, setPendingCaptureImage] = useState<PendingCaptureImage | null>(null);
+  const captureImageFileInputRef = useRef<HTMLInputElement | null>(null);
   // Timestamp of last successful travel doc save — blocks re-trigger for 10s
   const travelDocSavedAtRef = useRef<number>(0);
   // NLU conversation history sent to /api/chat/parse. Assistant turns are
@@ -1236,6 +1256,69 @@ function HomeInner() {
     chat.setInput(value);
   }
 
+  function showCaptureToast(message: string) {
+    setMentionToast(message);
+    setTimeout(() => setMentionToast(null), 3000);
+  }
+
+  function readCaptureImageFile(file: File): Promise<PendingCaptureImage> {
+    return new Promise((resolve, reject) => {
+      if (!file.type.startsWith("image/")) {
+        reject(new Error("Please attach an image file."));
+        return;
+      }
+      if (file.size > MAX_CAPTURE_IMAGE_BYTES) {
+        reject(new Error("Image is too large. Please use a screenshot under 8 MB."));
+        return;
+      }
+      const reader = new FileReader();
+      reader.onerror = () => reject(new Error("Could not read that image."));
+      reader.onload = () => {
+        const dataUrl = typeof reader.result === "string" ? reader.result : "";
+        if (!dataUrl.startsWith("data:image/")) {
+          reject(new Error("Unsupported image format."));
+          return;
+        }
+        resolve({
+          id:
+            typeof crypto !== "undefined" && "randomUUID" in crypto
+              ? crypto.randomUUID()
+              : `${Date.now()}-${Math.random().toString(16).slice(2)}`,
+          name: file.name || "pasted-screenshot.png",
+          mimeType: file.type || "image/png",
+          size: file.size,
+          dataUrl,
+        });
+      };
+      reader.readAsDataURL(file);
+    });
+  }
+
+  async function stageCaptureImageFile(file: File) {
+    try {
+      const image = await readCaptureImageFile(file);
+      setPendingCaptureImage(image);
+      showCaptureToast("Screenshot attached. Add a note or send it for analysis.");
+    } catch (err) {
+      showCaptureToast(err instanceof Error ? err.message : "Could not attach that image.");
+    }
+  }
+
+  function handleCapturePaste(event: ClipboardEvent<HTMLInputElement>) {
+    const file = Array.from(event.clipboardData.files).find((item) =>
+      item.type.startsWith("image/"),
+    );
+    if (!file) return;
+    event.preventDefault();
+    void stageCaptureImageFile(file);
+  }
+
+  function handleCaptureFileInput(event: ChangeEvent<HTMLInputElement>) {
+    const file = event.currentTarget.files?.[0];
+    event.currentTarget.value = "";
+    if (file) void stageCaptureImageFile(file);
+  }
+
   function parseTravelDocs(text: string): { dob?: string; passport?: string } {
     const dobMatch = text.match(/(\d{4}[\/\-]\d{1,2}[\/\-]\d{1,2})/);
     const passportMatch = text.match(/\b([A-Za-z]{1,2}\d{6,9})\b/);
@@ -1401,7 +1484,15 @@ function HomeInner() {
 
   async function sendCurrentInput() {
     const text = chatInputRef.current.trim();
-    if (!text || chat.loading || isListening || nluPending) return;
+    const captureImageForRequest = pendingCaptureImage;
+    if ((!text && !captureImageForRequest) || chat.loading || isListening || nluPending) return;
+    if (captureImageForRequest && (pendingTravelDoc || pendingProviderEventChoice)) {
+      showCaptureToast("Finish the current question before attaching a screenshot.");
+      return;
+    }
+    const messageForParse =
+      text || "Please analyze this travel screenshot and turn it into a travel task.";
+    const messageForDisplay = text || "Screenshot attached";
 
     // If we're waiting for travel doc info, intercept the message
     if (pendingTravelDoc) {
@@ -1429,6 +1520,7 @@ function HomeInner() {
     // just show a conversational reply (chitchat / clarify).
     chatInputRef.current = "";
     chat.setInput("");
+    setPendingCaptureImage(null);
     if (pendingConfirm) {
       restorePendingConfirmState(null);
       persistPendingConfirmState(null);
@@ -1441,7 +1533,11 @@ function HomeInner() {
     const capturedMentionIds = mentionedUserIds;
 
     // Echo user message immediately so the UX stays snappy during the NLU call.
-    chat.injectUserMessage(text);
+    chat.injectUserMessage(
+      captureImageForRequest
+        ? `${messageForDisplay}\n\n[Image: ${captureImageForRequest.name}]`
+        : text,
+    );
     setNluPending(true);
 
     try {
@@ -1451,7 +1547,18 @@ function HomeInner() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          message: text,
+          message: messageForParse,
+          ...(captureImageForRequest
+            ? {
+                capture_image: {
+                  type: "image",
+                  mime_type: captureImageForRequest.mimeType,
+                  data_url: captureImageForRequest.dataUrl,
+                  name: captureImageForRequest.name,
+                  size: captureImageForRequest.size,
+                },
+              }
+            : {}),
           history: historyToSend,
           userModel: cfg.conversational,
           // Stage 2: when the homepage is scoped to a room, the server mirrors
@@ -1492,8 +1599,8 @@ function HomeInner() {
       // Network / NLU failure → fall back to the old restaurant search pipeline
       // so the user still gets results rather than a dead chat.
       if (!data || !data.ok) {
-        learnFromSearch(text);
-        chat.sendMessage(text, undefined, { skipUserPush: true });
+        learnFromSearch(messageForParse);
+        chat.sendMessage(messageForParse, undefined, { skipUserPush: true });
         return;
       }
 
@@ -1529,7 +1636,12 @@ function HomeInner() {
       // Record this turn into the NLU history *after* a successful parse.
       // Assistant content is the slim NLU JSON so follow-up turns see state
       // (scenario, collected_constraints, missing_fields) not just rendered text.
-      nluHistoryRef.current.push({ role: "user", content: text });
+      nluHistoryRef.current.push({
+        role: "user",
+        content: captureImageForRequest
+          ? `${messageForParse}\n[screenshot attached: ${captureImageForRequest.name}]`
+          : text,
+      });
       nluHistoryRef.current.push({
         role: "assistant",
         content: JSON.stringify({
@@ -1590,7 +1702,7 @@ function HomeInner() {
         void persistThreadMessage({ role: "assistant", content });
         await commitConfirmedNluDirectly({
           nlu: captureNlu,
-          message: captureDirectPayload.message || text,
+          message: captureDirectPayload.message || messageForParse,
           mentionedUserIds: mergedMentionIds,
         });
         return;
@@ -1610,7 +1722,7 @@ function HomeInner() {
         );
         const nextConfirm: PendingConfirmSnapshot = {
           nlu: captureNlu,
-          message: captureConfirmPayload.message || text,
+          message: captureConfirmPayload.message || messageForParse,
           kind: captureConfirmPayload.kind,
           mentioned_user_ids: mergedMentionIds,
         };
@@ -1626,7 +1738,7 @@ function HomeInner() {
       // the DR IS the plan, the user is just refining their preferences.
       if (nlu.intent === "create_plan" && nlu.confirm_ready && nlu.scenario === "trip" && !activeRoomId) {
         if (nlu.assistant_reply) chat.injectAssistantMessage(nlu.assistant_reply);
-        const nextConfirm: PendingConfirmSnapshot = { nlu, message: text, kind: "trip", mentioned_user_ids: mergedMentionIds };
+        const nextConfirm: PendingConfirmSnapshot = { nlu, message: messageForParse, kind: "trip", mentioned_user_ids: mergedMentionIds };
         restorePendingConfirmState(nextConfirm);
         persistPendingConfirmState(nextConfirm);
         return;
@@ -1653,7 +1765,7 @@ function HomeInner() {
       // multi-party merge gets bypassed entirely.
       if (nlu.intent === "create_plan" && nlu.confirm_ready && !activeRoomId) {
         if (nlu.assistant_reply) chat.injectAssistantMessage(nlu.assistant_reply);
-        const nextConfirm: PendingConfirmSnapshot = { nlu, message: text, kind: "plan", mentioned_user_ids: mergedMentionIds };
+        const nextConfirm: PendingConfirmSnapshot = { nlu, message: messageForParse, kind: "plan", mentioned_user_ids: mergedMentionIds };
         restorePendingConfirmState(nextConfirm);
         persistPendingConfirmState(nextConfirm);
         return;
@@ -4662,7 +4774,7 @@ function HomeInner() {
           {/* New chat button — only show when there's conversation history */}
           {hasMessages && (
             <button
-              onClick={() => { chat.clearChat(); setInlineItems([]); setPendingTravelDoc(null); setPendingProviderEventChoice(null); nluHistoryRef.current = []; lastNluStateRef.current = null; }}
+              onClick={() => { chat.clearChat(); setInlineItems([]); setPendingTravelDoc(null); setPendingProviderEventChoice(null); setPendingCaptureImage(null); nluHistoryRef.current = []; lastNluStateRef.current = null; }}
               title="Start a new conversation"
               className="chat-newchat"
               aria-label="Start a new conversation"
@@ -4670,6 +4782,92 @@ function HomeInner() {
               ✕
             </button>
           )}
+          {pendingCaptureImage && (
+            <div
+              style={{
+                position: "absolute",
+                left: 52,
+                right: 78,
+                bottom: "calc(100% + 8px)",
+                display: "flex",
+                alignItems: "center",
+                gap: 10,
+                padding: "8px 10px",
+                borderRadius: 12,
+                border: "1px solid var(--border, rgba(201,168,76,0.35))",
+                background: "var(--card, #1f1f1f)",
+                boxShadow: "0 10px 30px rgba(0,0,0,0.18)",
+                zIndex: 45,
+              }}
+            >
+              <img
+                src={pendingCaptureImage.dataUrl}
+                alt=""
+                style={{
+                  width: 44,
+                  height: 34,
+                  objectFit: "cover",
+                  borderRadius: 8,
+                  border: "1px solid var(--border, rgba(255,255,255,0.12))",
+                  flexShrink: 0,
+                }}
+              />
+              <div style={{ minWidth: 0, flex: 1 }}>
+                <div
+                  style={{
+                    fontSize: 12,
+                    fontWeight: 700,
+                    color: "var(--text-primary)",
+                    whiteSpace: "nowrap",
+                    overflow: "hidden",
+                    textOverflow: "ellipsis",
+                  }}
+                >
+                  {pendingCaptureImage.name}
+                </div>
+                <div style={{ fontSize: 11, color: "var(--text-secondary)" }}>
+                  Screenshot attached
+                </div>
+              </div>
+              <button
+                type="button"
+                aria-label="Remove screenshot"
+                onClick={() => setPendingCaptureImage(null)}
+                style={{
+                  border: "none",
+                  background: "transparent",
+                  color: "var(--text-secondary)",
+                  cursor: "pointer",
+                  fontSize: 16,
+                  lineHeight: 1,
+                  padding: 4,
+                }}
+              >
+                脳
+              </button>
+            </div>
+          )}
+          <input
+            ref={captureImageFileInputRef}
+            type="file"
+            accept="image/*"
+            onChange={handleCaptureFileInput}
+            style={{ display: "none" }}
+          />
+          <button
+            type="button"
+            onClick={() => captureImageFileInputRef.current?.click()}
+            disabled={chat.loading || isListening}
+            aria-label="Attach screenshot"
+            title="Attach screenshot"
+            className="chat-mic"
+          >
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+              <rect x="4" y="5" width="16" height="14" rx="2.5" stroke="currentColor" strokeWidth="2" />
+              <circle cx="8.5" cy="9.5" r="1.5" fill="currentColor" />
+              <path d="M5 17l4.5-4.5 3.2 3.2 2.1-2.1L20 18" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+            </svg>
+          </button>
           <MentionPicker
             value={isListening ? "" : chat.input}
             onChange={updateChatInput}
@@ -4688,9 +4886,12 @@ function HomeInner() {
               isComposingRef.current = false;
               updateChatInput(value);
             }}
+            onPaste={handleCapturePaste}
             placeholder={
               isListening
                 ? "Listening..."
+                : pendingCaptureImage
+                ? "Add a note, or send the screenshot for analysis..."
                 : pendingTravelDoc
                 ? "e.g. 2001-09-05, passport EJ2676174"
                 : pendingProviderEventChoice
@@ -4723,7 +4924,7 @@ function HomeInner() {
           )}
           <button
             onClick={sendCurrentInput}
-            disabled={chat.loading || !chat.input.trim()}
+            disabled={chat.loading || (!chat.input.trim() && !pendingCaptureImage)}
             aria-label="Send"
             className="chat-send"
           >

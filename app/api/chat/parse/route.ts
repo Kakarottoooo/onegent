@@ -24,6 +24,12 @@ import {
   buildProviderUrlFallbackNluResult,
 } from "@/lib/capture/chat-parse-artifacts";
 import {
+  analyzeCaptureImageForText,
+  buildScreenshotCaptureMessage,
+  parseCaptureImagePayload,
+  type CaptureImageAnalysis,
+} from "@/lib/capture/screenshot-analysis";
+import {
   isRoomMember,
   upsertMemberIntentState,
   insertPrivateMessage,
@@ -122,9 +128,25 @@ export async function POST(req: NextRequest) {
   }
   const b = body as Record<string, unknown>;
 
-  const message = typeof b.message === "string" ? b.message.trim() : "";
-  if (!message) {
+  const userMessage = typeof b.message === "string" ? b.message.trim() : "";
+  const captureImage = parseCaptureImagePayload(b.capture_image);
+  if (!userMessage && !captureImage) {
     return NextResponse.json({ error: "message required" }, { status: 400 });
+  }
+  let captureImageAnalysis: CaptureImageAnalysis | null = null;
+  let message = userMessage;
+  let captureSourceMessage = userMessage;
+  if (captureImage) {
+    captureImageAnalysis = await analyzeCaptureImageForText({
+      image: captureImage,
+      userText: userMessage,
+      userModel: b.userModel,
+    });
+    message = buildScreenshotCaptureMessage({
+      userText: userMessage,
+      analysis: captureImageAnalysis,
+    });
+    captureSourceMessage = `[screenshot attached] ${userMessage || captureImage.name || "travel screenshot"}`;
   }
 
   const history = parseHistory(b.history);
@@ -494,7 +516,7 @@ export async function POST(req: NextRequest) {
     }
 
     const captureArtifacts = buildCaptureChatParseArtifacts({
-      message,
+      message: captureSourceMessage,
       result,
       sessionId: resolvedSessionId,
     });
@@ -503,6 +525,7 @@ export async function POST(req: NextRequest) {
       ok: true,
       result,
       ...captureArtifacts,
+      ...(captureImageAnalysis ? { capture_image_analysis: publicCaptureImageAnalysis(captureImageAnalysis) } : {}),
       user_id: userId ?? null,
       nlu_version: "v2",
       session_id: resolvedSessionId,
@@ -545,7 +568,7 @@ export async function POST(req: NextRequest) {
       }
     }
     const captureArtifacts = buildCaptureChatParseArtifacts({
-      message,
+      message: captureSourceMessage,
       result: fallbackResult,
       sessionId: fallbackSessionId,
     });
@@ -553,11 +576,24 @@ export async function POST(req: NextRequest) {
       ok: true,
       result: fallbackResult,
       ...captureArtifacts,
+      ...(captureImageAnalysis ? { capture_image_analysis: publicCaptureImageAnalysis(captureImageAnalysis) } : {}),
       user_id: userId ?? null,
       nlu_version: "v2-fallback",
       session_id: fallbackSessionId,
     });
   }
+}
+
+function publicCaptureImageAnalysis(analysis: CaptureImageAnalysis): Omit<CaptureImageAnalysis, "error"> & {
+  error?: string;
+} {
+  return {
+    status: analysis.status,
+    summary_text: analysis.summary_text,
+    ...(analysis.provider ? { provider: analysis.provider } : {}),
+    ...(analysis.model ? { model: analysis.model } : {}),
+    ...(analysis.error ? { error: analysis.error.slice(0, 160) } : {}),
+  };
 }
 
 /**

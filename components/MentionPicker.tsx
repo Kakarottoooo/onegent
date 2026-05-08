@@ -67,6 +67,8 @@ export interface MentionPickerProps {
   /** Pass-through composition handlers for IME safety. */
   onCompositionStart?: () => void;
   onCompositionEnd?: (value: string) => void;
+  /** Optional paste hook for Capture inputs such as screenshots. */
+  onPaste?: React.ClipboardEventHandler<HTMLInputElement>;
 }
 
 interface AtToken {
@@ -174,6 +176,7 @@ const MentionPicker = forwardRef<HTMLInputElement, MentionPickerProps>(
       inputDataAttributes,
       onCompositionStart,
       onCompositionEnd,
+      onPaste,
     } = props;
 
     const innerRef = useRef<HTMLInputElement | null>(null);
@@ -293,6 +296,7 @@ const MentionPicker = forwardRef<HTMLInputElement, MentionPickerProps>(
           }
           onCompositionStart={onCompositionStart}
           onCompositionEnd={(e) => onCompositionEnd?.(e.currentTarget.value)}
+          onPaste={onPaste}
           onKeyDown={(e) => {
             // IME composition: never act on Enter while user is composing
             // (Chinese pinyin etc. — Enter is the commit, not a submit).
