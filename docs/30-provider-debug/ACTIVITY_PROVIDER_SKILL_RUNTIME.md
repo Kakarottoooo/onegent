@@ -171,6 +171,41 @@ For activity provider pages, the skill lab should classify outcomes as:
 | `insufficient_evidence` | Missing screenshot/log/currentUrl/candidate evidence. |
 | `skill_patch_needed` | Browser Harness found a likely recovery rule that should become a reviewed patch. |
 
+The no-live task-state contract lives in
+`lib/activity-skills/runtime.ts`. It maps these outcomes to task workspace
+state and the next safe action:
+
+| Outcome | Task state | Workspace | Safe next action |
+| --- | --- | --- | --- |
+| `exact_event_ready` | `draft` | `queue` | Start provider execution. |
+| `provider_listing_needs_choice` | `ready_for_confirmation` | `queue` | Ask the user which visible event to use. |
+| `single_candidate_ready` | `draft` | `queue` | Start provider execution. |
+| `safe_handoff_reached` | `ready_for_confirmation` | `history` | Hold for manual review. |
+| `user_seat_selection_required` | `ready_for_confirmation` | `history` | Ask the user to select seats. |
+| `account_session_required` | `awaiting_login` | `history` | Ask the user to sign in manually. |
+| `payment_or_final_action_required` | `ready_for_confirmation` | `history` | Stop before payment or final action. |
+| `provider_degraded` | `failed` | `history` | Capture provider-degraded evidence. |
+| `insufficient_evidence` | `failed` | `history` | Collect required evidence. |
+| `skill_patch_needed` | `failed` | `history` | Create a reviewed skill patch proposal. |
+
+Only `exact_event_ready` and `single_candidate_ready` can map to executable
+provider continuation, and only when the task-workspace evidence bundle is
+complete. Seat selection, account/session, payment, purchase, and final
+confirmation boundaries never map to executable continuation.
+
+Minimum task-workspace evidence for every activity skill outcome:
+
+- `provider`
+- `page_type`
+- `currentUrl`
+- screenshot path or screenshot id
+- action log
+- visible candidate facts, such as event name, venue/city, date/time, and
+  ticket/seat context when visible
+
+Missing evidence blocks execution-ready outcomes and maps them to
+`insufficient_evidence` until the bundle is complete.
+
 ## Initial URL Corpus
 
 Stage 0B should start with a no-live corpus and then move to controlled lab
