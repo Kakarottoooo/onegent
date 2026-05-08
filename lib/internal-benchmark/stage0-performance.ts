@@ -22,6 +22,7 @@ export type Stage0PerformanceEndpointSpec = {
 
 export type Stage0PerformanceFinding = {
   field: string;
+  severity: Stage0PerformanceRisk;
   reason: string;
   sourcePath: string;
   line: number;
@@ -58,17 +59,17 @@ const GENERATED_AT = "2026-05-07T12:00:00.000Z";
 
 const HEAVY_FIELD_PATTERNS: Array<{
   field: string;
-  pattern: RegExp;
+  matches: (line: string, spec: Pick<Stage0PerformanceEndpointSpec, "endpoint" | "owner">) => boolean;
   suggestedCompactAlternative: string;
 }> = [
-  { field: "steps", pattern: /\bsteps\b/i, suggestedCompactAlternative: "Return step counts/status labels only; load full steps from task detail." },
-  { field: "decisionLog", pattern: /\bdecisionLog\b/i, suggestedCompactAlternative: "Return a decision-log presence flag or latest label; load full decisionLog lazily." },
-  { field: "screenshots", pattern: /\b(screenshots|snapshot|snapshots)\b/i, suggestedCompactAlternative: "Return screenshot counts/last timestamp only; load images from the evidence view." },
-  { field: "logs", pattern: /\b(logs?|workerLog|logExcerpt)\b/i, suggestedCompactAlternative: "Return log counts/status only; load log excerpts from task detail." },
-  { field: "profile blobs", pattern: /\b(profile|bookingProfile|preferences)\b/i, suggestedCompactAlternative: "Return compact preference labels; load full profile detail after the user opens memory." },
-  { field: "room full messages", pattern: /\b(messages|messageHistory|transcript)\b/i, suggestedCompactAlternative: "Return room summary counts; lazy-load messages after room open." },
-  { field: "calendar full event payloads", pattern: /\b(events|attendees|calendarEvents)\b/i, suggestedCompactAlternative: "Return calendar counts/status; load full calendar events from calendar detail." },
-  { field: "provider runtime artifacts", pattern: /\b(provider\s+artifact|providerRuntime|runtime|artifact|decision_log)\b/i, suggestedCompactAlternative: "Return artifact counts or refs; load provider artifacts from evidence/debug surfaces." },
+  { field: "steps", matches: (line) => /\bsteps\b/i.test(line), suggestedCompactAlternative: "Return step counts/status labels only; load full steps from task detail." },
+  { field: "decisionLog", matches: (line) => /\bdecisionLog\b/i.test(line), suggestedCompactAlternative: "Return a decision-log presence flag or latest label; load full decisionLog lazily." },
+  { field: "screenshots", matches: (line) => /\b(screenshots|snapshot|snapshots|imageBase64)\b/i.test(line), suggestedCompactAlternative: "Return screenshot counts/last timestamp only; load images from the evidence view." },
+  { field: "logs", matches: (line) => /\b(logs?|workerLog|logExcerpt)\b/i.test(line), suggestedCompactAlternative: "Return log counts/status only; load log excerpts from task detail." },
+  { field: "profile blobs", matches: matchesProfileBlob, suggestedCompactAlternative: "Return compact preference labels; load full profile detail after the user opens memory." },
+  { field: "room full messages", matches: (line) => /\b(messages|messageHistory|transcript)\b/i.test(line), suggestedCompactAlternative: "Return room summary counts; lazy-load messages after room open." },
+  { field: "calendar full event payloads", matches: matchesCalendarPayload, suggestedCompactAlternative: "Return calendar counts/status; load full calendar events from calendar detail." },
+  { field: "provider runtime artifacts", matches: matchesProviderRuntimeArtifact, suggestedCompactAlternative: "Return artifact counts or refs; load provider artifacts from evidence/debug surfaces." },
 ];
 
 export const STAGE0_PERFORMANCE_ENDPOINTS: Stage0PerformanceEndpointSpec[] = [
@@ -108,11 +109,11 @@ export const STAGE0_PERFORMANCE_ENDPOINTS: Stage0PerformanceEndpointSpec[] = [
     suggestedNextPatch: "Keep contacts bootstrap to compact cards; lazy-load suggestions, blocks, and relationship detail.",
   },
   {
-    label: "memory summary",
-    endpoint: "/api/memory",
-    sourcePaths: ["app/api/memory/route.ts"],
+    label: "memory compact summary",
+    endpoint: "/api/memory/compact",
+    sourcePaths: ["app/api/memory/compact/route.ts", "lib/memory-endpoint.ts", "lib/memory-read-model.ts"],
     owner: "memory",
-    suggestedNextPatch: "Add a compact memory summary endpoint before loading large preference/profile bodies.",
+    suggestedNextPatch: "Keep memory compact summary bounded; load full memory detail only after the user opens insights.",
   },
   {
     label: "tasks compact list",
@@ -147,6 +148,7 @@ export function buildStage0PerformanceReport(
       "Stage 0 performance mode is static/no-live; it does not require a dev server or call app endpoints.",
       "Byte size is route/helper source bytes, not network payload bytes. Use normal probe mode with a dev server for latency.",
       "Heavy-field findings are contract risk hints for compact read-model review, not proof of runtime payload size.",
+      "Full detail endpoints may remain lazy surfaces; Stage 0 guards the compact/bootstrap paths that can affect app-shell navigation.",
     ],
   };
 }
@@ -169,14 +171,14 @@ export function renderStage0PerformanceMarkdown(report: Stage0PerformanceReport)
       `| \`${probe.endpoint}\` | \`${probe.owner}\` | ${probe.routeSourceBytes} | \`${probe.riskLevel}\` | ${probe.heavyFieldsDetected.join(", ") || "-"} | ${probe.suggestedNextPatch} |`,
     );
   }
-  lines.push("", "## Findings", "", "| Endpoint | Field | Owner | File | Line | Reason | Compact alternative |", "| --- | --- | --- | --- | ---: | --- | --- |");
+  lines.push("", "## Findings", "", "| Endpoint | Severity | Field | Owner | File | Line | Reason | Compact alternative |", "| --- | --- | --- | --- | --- | ---: | --- | --- |");
   const findings = report.probes.flatMap((probe) => probe.findings.map((finding) => ({ probe, finding })));
   if (findings.length === 0) {
-    lines.push("| - | - | - | - | - | - | - |");
+    lines.push("| - | - | - | - | - | - | - | - |");
   } else {
     for (const { probe, finding } of findings) {
       lines.push(
-        `| \`${probe.endpoint}\` | \`${finding.field}\` | \`${finding.owner}\` | \`${finding.sourcePath}\` | ${finding.line} | ${finding.reason} | ${finding.suggestedCompactAlternative} |`,
+        `| \`${probe.endpoint}\` | \`${finding.severity}\` | \`${finding.field}\` | \`${finding.owner}\` | \`${finding.sourcePath}\` | ${finding.line} | ${finding.reason} | ${finding.suggestedCompactAlternative} |`,
       );
     }
   }
@@ -194,7 +196,7 @@ export function analyzeEndpointSpec(
   const routeSourceBytes = sources.reduce((sum, source) => sum + source.bytes, 0);
   const findings = sources.flatMap((source) => detectHeavyFieldFindings(source.text, source.path, spec));
   const heavyFieldsDetected = Array.from(new Set(findings.map((finding) => finding.field)));
-  const riskLevel = riskFor(heavyFieldsDetected, spec.endpoint);
+  const riskLevel = riskForFindings(findings);
   return {
     ...spec,
     routeSourceBytes,
@@ -223,9 +225,10 @@ export function detectHeavyFieldFindings(
   lines.forEach((line, index) => {
     if (shouldIgnorePerformanceLine(line)) return;
     for (const entry of HEAVY_FIELD_PATTERNS) {
-      if (!entry.pattern.test(line)) continue;
+      if (!entry.matches(line, spec)) continue;
       findings.push({
         field: entry.field,
+        severity: severityFor(entry.field, spec.endpoint),
         reason: `${entry.field} appears in ${spec.endpoint} source outside comments, imports, type-only declarations, or explicit exclusion metadata.`,
         sourcePath,
         line: index + 1,
@@ -252,11 +255,9 @@ function readSource(
   return { path: sourcePath, text, bytes: Buffer.byteLength(text) };
 }
 
-function riskFor(heavyFields: string[], endpoint: string): Stage0PerformanceRisk {
-  if (heavyFields.some((field) => field === "steps" || field === "decisionLog" || field === "screenshots" || field === "logs")) {
-    return endpoint.includes("compact") || endpoint.includes("bootstrap") || endpoint.includes("summary") ? "high" : "medium";
-  }
-  if (heavyFields.length >= 2) return "medium";
+function riskForFindings(findings: Stage0PerformanceFinding[]): Stage0PerformanceRisk {
+  if (findings.some((finding) => finding.severity === "high")) return "high";
+  if (findings.some((finding) => finding.severity === "medium")) return "medium";
   return "low";
 }
 
@@ -278,6 +279,62 @@ function shouldIgnorePerformanceLine(line: string): boolean {
     return true;
   }
   return false;
+}
+
+function matchesProfileBlob(
+  line: string,
+  spec: Pick<Stage0PerformanceEndpointSpec, "endpoint" | "owner">,
+): boolean {
+  if (/\b(bookingProfile|fullProfile|profileBlob|profileJson|profile_json|preferences)\b/i.test(line)) {
+    return true;
+  }
+  if (spec.owner === "memory" && /\b(buildPreferenceProfile|UserPreferenceProfile)\b/i.test(line)) {
+    return true;
+  }
+  return false;
+}
+
+function matchesCalendarPayload(
+  line: string,
+  spec: Pick<Stage0PerformanceEndpointSpec, "endpoint" | "owner">,
+): boolean {
+  if (/\b(calendarEvents|googleEvents|attendees|eventPayload|event_payload|eventsJson|events_json)\b/i.test(line)) {
+    return true;
+  }
+  if (spec.owner === "calendar" && /\bevents\b/i.test(line) && !/\b(eventCount|count|summary|status)\b/i.test(line)) {
+    return true;
+  }
+  return false;
+}
+
+function matchesProviderRuntimeArtifact(line: string): boolean {
+  return /\b(provider\s+artifact|providerRuntime|runtimeArtifact|artifactPayload|artifact_payload|decision_log|artifacts?)\b/i.test(line);
+}
+
+function severityFor(field: string, endpoint: string): Stage0PerformanceRisk {
+  const compactCritical = isCompactCriticalEndpoint(endpoint);
+  if (field === "steps" || field === "decisionLog" || field === "screenshots" || field === "logs") {
+    return compactCritical ? "high" : "medium";
+  }
+  if (
+    compactCritical &&
+    (field === "profile blobs" ||
+      field === "room full messages" ||
+      field === "calendar full event payloads" ||
+      field === "provider runtime artifacts")
+  ) {
+    return "medium";
+  }
+  return "low";
+}
+
+function isCompactCriticalEndpoint(endpoint: string): boolean {
+  return (
+    endpoint.includes("compact") ||
+    endpoint.includes("bootstrap") ||
+    endpoint.includes("summary") ||
+    endpoint === "/api/calendar/jobs"
+  );
 }
 
 function dedupeFindings(findings: Stage0PerformanceFinding[]): Stage0PerformanceFinding[] {

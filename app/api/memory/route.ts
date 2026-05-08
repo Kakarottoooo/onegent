@@ -1,5 +1,6 @@
 /**
  * GET /api/memory?session_id=...
+ * GET /api/memory?session_id=...&shape=compact
  *
  * Returns the full three-layer memory model for a session:
  *   - taskMemory: per-scenario preference profiles
@@ -8,6 +9,9 @@
  *
  * Used by the InsightsPanel to show the user what the agent has learned
  * about them across ALL bookings, not just entity-level preferences.
+ *
+ * App-shell or preview surfaces should use /api/memory/compact, or
+ * shape=compact here, so full preference/profile detail stays lazy.
  */
 import { NextRequest, NextResponse } from "next/server";
 import {
@@ -15,6 +19,7 @@ import {
   getBookingJobsBySession,
   getRelationshipBySession,
 } from "@/lib/db";
+import { getCompactMemoryEndpointResponse } from "@/lib/memory-endpoint";
 import { buildTaskMemory, buildPatternMemory } from "@/lib/memory";
 import { computePolicyBias, buildPreferenceProfile } from "@/lib/policy";
 
@@ -23,6 +28,10 @@ export async function GET(req: NextRequest) {
   if (!sessionId) return NextResponse.json({ error: "session_id required" }, { status: 400 });
 
   try {
+    if (req.nextUrl.searchParams.get("shape") === "compact") {
+      return NextResponse.json(await getCompactMemoryEndpointResponse(sessionId));
+    }
+
     const [events, jobs, relationship] = await Promise.all([
       getAgentFeedbackEvents(sessionId, 500),
       getBookingJobsBySession(sessionId, 50),

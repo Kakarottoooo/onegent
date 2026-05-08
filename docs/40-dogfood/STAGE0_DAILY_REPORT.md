@@ -12,7 +12,7 @@ Task-ready accuracy: 100%
 Artifact completeness: 100%
 Unknown failure: 0%
 Artifact gap closures: 4/4
-Dogfood links: DOG-005, DOG-009, DOG-010
+Dogfood links: DOG-005, DOG-009, DOG-010, DOG-activity-provider-url
 
 ## Internal Benchmark
 
@@ -48,8 +48,19 @@ Blocked branches: claude/activity-runtime-stage0-followup, codex/unsafe-stage0-b
 Mode: stage0-static
 Endpoints: 8
 High risk: 0
-Medium risk: 1
-Findings: 10
+Medium risk: 0
+Findings: 0
+
+| Endpoint | Owner | Risk | Findings | Suggested next patch |
+| --- | --- | --- | ---: | --- |
+| `/api/app/bootstrap` | `app-shell` | `low` | 0 | Keep bootstrap to compact sidebar/session rows and move task/history detail behind lazy endpoints. |
+| `/api/chat/sessions` | `app-shell` | `low` | 0 | Return compact session rows by default; fetch message history only for the selected session. |
+| `/api/rooms/compact-list` | `rooms` | `low` | 0 | Keep room cards compact and lazy-load member/message/proposal detail after room open. |
+| `/api/calendar/jobs` | `calendar` | `low` | 0 | Keep calendar jobs as shell metadata and load Google month/status independently. |
+| `/api/contacts/bootstrap` | `contacts` | `low` | 0 | Keep contacts bootstrap to compact cards; lazy-load suggestions, blocks, and relationship detail. |
+| `/api/memory/compact` | `memory` | `low` | 0 | Keep memory compact summary bounded; load full memory detail only after the user opens insights. |
+| `/api/booking-jobs/compact-list` | `task-workspace` | `low` | 0 | Keep task list free of steps, logs, screenshots, and decision logs; detail remains per selected task. |
+| `/api/booking-jobs/summary` | `task-workspace` | `low` | 0 | Keep counters cheap and avoid loading job detail or evidence for collapsed tasks. |
 
 ## Top Failure Classes
 
@@ -82,7 +93,6 @@ Findings: 10
 | --- | --- | --- | --- |
 | `p0` | `alpha-ops` | Private alpha is not green from real supervised submissions. | 3 intake sample(s), readiness yellow, 0 safe-miss seed(s). |
 | `p1` | `provider-runtime` | Provider-runtime no-live failures need fixture-backed patches before more live attempts. | 4% layered unknown failures, 5 simulated provider blockers. |
-| `p2` | `codex` | App-shell performance risks must stay out of route-level payloads. | 0 high-risk and 1 medium-risk endpoint(s). |
 | `p1` | `codex` | Returned agent branches need metadata triage before merge validation. | 3 ready, 1 follow-up, 0 rebase, 1 reject. |
 | `p2` | `planner` | Benchmark failures remain for this owner. | 20 failure(s): internal benchmark failures 20/53. |
 | `p2` | `product/manual-boundary` | Benchmark failures remain for this owner. | 10 failure(s): internal benchmark failures 10/10. |

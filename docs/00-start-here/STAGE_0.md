@@ -91,6 +91,9 @@ Stage 0 work is in scope when it directly improves one of these systems:
      benchmark, layered benchmark, performance risk, agent intake, top
      blockers by owner, and the next five actions without starting providers
      or loading app-shell evidence payloads.
+   - Stage 0 performance scan guards compact/bootstrap paths. Memory shell
+     surfaces must use `/api/memory/compact`; full `/api/memory` is a lazy
+     detail route for insights.
    - Capture benchmark fixtures are no-live deterministic parser-contract
      fixtures. They prove source metadata, Travel Object projection,
      task-readiness, owner, and artifact contracts. They do not prove live

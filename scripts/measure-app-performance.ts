@@ -86,6 +86,7 @@ async function main() {
     { label: "compact room list", path: "/api/rooms/compact-list?include_invited=1" },
     { label: "contacts bootstrap", path: "/api/contacts/bootstrap" },
     { label: "calendar jobs", path: `/api/calendar/jobs?session_id=${encodedSession}` },
+    { label: "compact memory", path: `/api/memory/compact?session_id=${encodedSession}` },
     { label: "calendar google status", path: "/api/calendar/google/status" },
     { label: "calendar google month", path: `/api/calendar/google/month?year=${year}&month=${month}` },
   ];
