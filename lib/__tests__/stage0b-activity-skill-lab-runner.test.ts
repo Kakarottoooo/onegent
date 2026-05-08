@@ -80,6 +80,13 @@ describe("Stage 0B Browser Harness bridge code generation", () => {
     expect(python).not.toMatch(/type_text|fill_input|press_key/);
   });
 
+  it("does not treat ordinary header Sign In/Register text as an account wall", () => {
+    const python = buildBrowserHarnessPython(EXACT_EVENT, "C:/tmp/stage0b.png");
+    expect(python).toContain("passwordFieldVisible");
+    expect(python).toContain("loginHeading");
+    expect(python).not.toContain("if (/sign in|log in|login|create account");
+  });
+
   it("embeds the input URL and screenshot path as quoted literals", () => {
     const python = buildBrowserHarnessPython(EXACT_EVENT, "C:/tmp/with spaces/stage0b.png");
     expect(python).toContain(JSON.stringify(EXACT_EVENT.url));

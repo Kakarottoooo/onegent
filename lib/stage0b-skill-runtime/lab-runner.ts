@@ -102,7 +102,15 @@ const INSPECT_JS = String.raw`
     .map((match) => match[0])
     .slice(0, 20);
   const hardStops = [];
-  if (/sign in|log in|login|create account|account required|verify your account/.test(lower) || /auth\.ticketmaster|\/login|\/signin/.test(location.href.toLowerCase())) {
+  const urlLower = location.href.toLowerCase();
+  const authUrl = /auth\.ticketmaster|\/login|\/signin|\/account/.test(urlLower);
+  const passwordFieldVisible = Array.from(document.querySelectorAll("input[type='password']")).some((el) => {
+    const rect = el.getBoundingClientRect();
+    return rect.width > 0 && rect.height > 0;
+  });
+  const loginHeading = Array.from(document.querySelectorAll("h1,h2,[role='heading']"))
+    .some((el) => /^(sign in|log in|login|create account|verify your account)$/i.test((el.textContent || "").trim()));
+  if (authUrl || passwordFieldVisible || loginHeading || /account required|verify your account/.test(lower)) {
     hardStops.push("login_or_signin_wall");
   }
   if (/captcha|recaptcha|hcaptcha|verify you are human|are you a real fan|security check|cloudflare/.test(lower)) {
