@@ -70,6 +70,7 @@ Then read the task-specific section below.
 | Restaurant Phase 0 / Resy / OpenTable | `docs/20-phase0-restaurant/` |
 | OpenTable restaurant baseline benchmark | `docs/20-phase0-restaurant/OPENTABLE_BASELINE_BENCHMARK_PLAN.md` |
 | Provider runtime bug, logs, screenshots | `docs/30-provider-debug/PROVIDER_RUNTIME_DEBUG_PLAYBOOK.md`, `docs/30-provider-debug/LIVE_CLOSURE_EVIDENCE_PROTOCOL.md` |
+| Activity provider skill runtime / Browser Harness Stage 0B | `docs/30-provider-debug/ACTIVITY_PROVIDER_SKILL_RUNTIME.md`, then `docs/30-provider-debug/TICKETMASTER_LAYERED_RECOVERY.md`, `docs/30-provider-debug/LAYERED_BENCHMARK_V2.md` |
 | Hotel layered recovery / fallback rules | `docs/30-provider-debug/HOTEL_LAYERED_RECOVERY.md`, then `docs/50-product-areas/HOTEL_CONTROLLED_RETRY_RUNBOOK.md` |
 | Runtime mirror / drift strategy | `docs/30-provider-debug/RUNTIME_MIRROR_GUIDE.md`, `scripts/check-drift.ts` |
 | Operator failure taxonomy (model/env vs provider) | `docs/30-provider-debug/FAILURE_TAXONOMY.md` |

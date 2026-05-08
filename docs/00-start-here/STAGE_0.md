@@ -70,6 +70,12 @@ Stage 0 work is in scope when it directly improves one of these systems:
    - Keep L2 Browser Harness as a future recovery layer for selector/click/
      iframe/fill/progress/page-mutation failures.
    - Keep L3 Computer Use as a later fallback, not the current default.
+   - Stage 0B narrows new provider expansion to activity/events only. Keep
+     restaurant, hotel, and flight provider surfaces in maintenance mode unless
+     safety evidence requires a fix. Use
+     `docs/30-provider-debug/ACTIVITY_PROVIDER_SKILL_RUNTIME.md` as the shared
+     plan for testing whether Browser Harness can help create a scalable
+     activity provider skill system.
 
 4. **Benchmarks And Evidence**
    - Run no-live 5/10/20/50 case batches by vertical.

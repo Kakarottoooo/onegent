@@ -1,0 +1,286 @@
+# Activity Provider Skill Runtime
+
+Status: Stage 0B design lane
+Last updated: 2026-05-08
+
+This document is the shared direction for the next execution-layer experiment.
+All agents working on activity/events provider coverage should read this file
+before editing code or docs.
+
+## Decision
+
+Freeze new provider expansion for restaurant, hotel, and flight during this
+lane. Keep their current L1 closures, benchmarks, and safety fixes, but do not
+add new provider surfaces unless the founder explicitly changes this plan.
+
+Focus new execution-layer expansion on events and activities:
+
+1. Ticketmaster
+2. SeatGeek
+3. StubHub
+4. Eventbrite
+5. AXS
+
+The purpose is to test whether Onegent can move from one-off provider runtime
+files toward a provider skill system that can be repaired quickly when websites
+change.
+
+## Why Activity First
+
+Activity and ticketing providers are the best Stage 0B proving ground because
+their user-controlled boundaries are clear:
+
+- Allowed: open provider pages, inspect listing/event pages, filter by date or
+  city, identify candidates, click through to ticket availability.
+- Required stop: seat selection, login, account verification, payment, final
+  purchase, final confirmation.
+
+This makes activity suitable for evaluating Browser Harness as a recovery and
+skill-discovery layer without taking payment or identity risks.
+
+## Current Baseline
+
+Current Onegent runtime already has an L1 dogfood closure for activity through
+Ticketmaster. That path uses the existing local Stagehand/Playwright
+`ticketmaster-rpa` provider runtime, not Browser Harness.
+
+Browser Harness currently exists in Onegent only as:
+
+- design input,
+- no-live L2 benchmark modeling,
+- failure owner classification,
+- provider recovery documentation.
+
+It is not production runtime today.
+
+## Browser Harness Use Policy
+
+Do not vendor the Browser Harness repository into Onegent at this stage.
+
+Use Browser Harness as an external tool or dev dependency for an isolated lab:
+
+```text
+Onegent repo
+-> invokes browser-harness CLI or a thin local adapter in dev/spike mode
+-> collects screenshots, page info, action logs, current URL, and candidate data
+-> writes evidence artifacts
+-> emits a patch proposal or skill update candidate
+```
+
+Do not copy Browser Harness core files into `lib/`, `worker/`, or app runtime.
+Reasons:
+
+- Browser Harness is a fast-moving tool; vendoring creates maintenance debt.
+- Onegent should own task state, audit, evidence, and safety boundaries, not
+  the low-level CDP harness.
+- The first milestone is proof of recovery/skill value, not production coupling.
+
+Allowed integration shapes for Stage 0B:
+
+1. **External CLI lab**: `scripts/activity-skill-lab.ts` starts or calls a
+   Browser Harness command and writes structured evidence.
+2. **Thin adapter boundary**: a narrow TypeScript interface that shells out to
+   the CLI in dev-only mode.
+3. **No-live skill manifest first**: provider skills can be modeled and tested
+   without launching a browser.
+
+Disallowed in Stage 0B:
+
+- Importing Browser Harness source into Onegent runtime.
+- Letting Browser Harness modify production provider files automatically.
+- Running Browser Harness inside the normal worker booking path.
+- Continuing past login, CAPTCHA, OTP, account verification, seat selection,
+  payment, or final purchase.
+- Treating an unreproducible Browser Harness success as provider closure.
+
+## Target Architecture
+
+```text
+Capture input
+-> Travel Link Resolver
+-> Activity Provider Skill Registry
+-> Provider Skill
+-> Activity Skill Lab / Browser Harness recovery
+-> Evidence bundle
+-> Safe next action or patch proposal
+```
+
+The long-term architecture is:
+
+```text
+L1 reviewed provider skills/runtime
+L2 Browser Harness recovery and skill discovery
+L3 Computer Use fallback for cases L1/L2 cannot handle
+```
+
+Browser Harness should help Onegent learn and repair provider skills. It should
+not silently replace Onegent's task runtime, audit model, or safety policy.
+
+## Provider Skill Contract
+
+Each activity provider skill should eventually declare:
+
+```ts
+type ActivityProviderSkill = {
+  provider: "ticketmaster" | "seatgeek" | "stubhub" | "eventbrite" | "axs";
+  pageTypes: Array<
+    | "exact_event"
+    | "artist_or_performer"
+    | "listing"
+    | "grouping"
+    | "search_results"
+    | "unknown_provider_page"
+  >;
+  canHandleUrl(url: string): SkillUrlMatch;
+  requiredInputs: string[];
+  safeActions: string[];
+  hardStops: string[];
+  evidenceContract: string[];
+};
+```
+
+Minimum evidence contract:
+
+- provider
+- page type
+- input URL
+- current URL after navigation
+- title or visible event name
+- visible city or venue when available
+- visible date/time candidates when available
+- screenshot path or screenshot id
+- action log
+- final state
+- safe next action
+- failure class when blocked
+
+## Runtime Classification
+
+For activity provider pages, the skill lab should classify outcomes as:
+
+| Outcome | Meaning |
+| --- | --- |
+| `exact_event_ready` | URL or page uniquely identifies an event and can start provider execution. |
+| `provider_listing_needs_choice` | Listing/artist/grouping page has multiple event candidates; ask the user. |
+| `single_candidate_ready` | Listing page has one strong candidate matching user constraints. |
+| `safe_handoff_reached` | Provider page reached a user-controlled continuation boundary. |
+| `user_seat_selection_required` | Seat map or seat choice is visible; stop. |
+| `account_session_required` | Login/account wall; stop. |
+| `payment_or_final_action_required` | Payment/final confirmation; stop. |
+| `provider_degraded` | Provider page degraded, blocked, or unavailable. |
+| `insufficient_evidence` | Missing screenshot/log/currentUrl/candidate evidence. |
+| `skill_patch_needed` | Browser Harness found a likely recovery rule that should become a reviewed patch. |
+
+## Initial URL Corpus
+
+Stage 0B should start with a no-live corpus and then move to controlled lab
+runs. The first corpus should include:
+
+- Ticketmaster artist pages, event pages, search pages, and venue/listing
+  pages.
+- SeatGeek performer/listing pages and dated exact event pages.
+- StubHub performer pages, grouping pages, and event pages if a deterministic
+  event URL pattern is observed.
+- Eventbrite event pages and city/category listing pages.
+- AXS artist/event/listing pages.
+- Host impersonation examples for every provider.
+- Multi-URL messages that must route to review rather than silent direct
+  execution.
+
+## Success Criteria
+
+Do not claim Stage 0B success from docs or a single happy path.
+
+The first success threshold is:
+
+```text
+100 no-live activity URL fixtures
+0 host impersonation escapes
+0 exact-event false positives
+0 listing pages treated as exact event evidence
+0 unsafe boundary violations
+20 controlled Browser Harness lab runs across Ticketmaster + SeatGeek
+Evidence bundle produced for every lab run
+At least 5 useful skill or patch proposals
+```
+
+The second threshold is:
+
+```text
+5 providers represented in skill manifests
+50 controlled lab runs across all 5 providers
+>= 90% of runs end in safe_handoff, needs_user_choice, or known safe block
+0 wrong event/date/city continuations
+0 login/payment/final-confirm actions
+```
+
+If these thresholds look healthy, promote the model to other verticals. If not,
+return to the existing L1 Stagehand/Playwright, L2 Browser Harness recovery,
+L3 Computer Use fallback strategy.
+
+## Workstreams
+
+### Workstream A: Shared Skill Contract
+
+Owner: Codex or Goal agent.
+
+Deliver:
+
+- provider skill TypeScript types,
+- no-live skill registry,
+- URL/page-type resolver fixtures,
+- no-live tests,
+- docs updated from this runbook.
+
+Do not launch Browser Harness in this workstream.
+
+### Workstream B: Ticketmaster + SeatGeek Lab
+
+Owner: Claude or activity-focused side agent.
+
+Deliver:
+
+- controlled Browser Harness lab script or runbook,
+- 10 Ticketmaster runs,
+- 10 SeatGeek runs,
+- screenshots and JSONL action evidence,
+- patch proposals only; no production runtime edits without review.
+
+### Workstream C: StubHub + Eventbrite + AXS Corpus
+
+Owner: Agent2 or Agent3.
+
+Deliver:
+
+- provider URL corpus,
+- host impersonation fixtures,
+- page-type classification tests,
+- known hard stops and safe next actions.
+
+Do not claim direct execution support unless a page type uniquely identifies an
+event and evidence proves the boundary.
+
+### Workstream D: Stage 0 Cockpit Integration
+
+Owner: Goal agent.
+
+Deliver:
+
+- Stage 0 operator report includes Activity Skill Runtime readiness.
+- Daily report lists provider coverage, lab run counts, unsafe-boundary count,
+  wrong-target count, and patch proposal count.
+- Private alpha intake can tag activity provider skill failures as benchmark
+  seeds.
+
+## Promotion Rule
+
+Browser Harness discoveries become production behavior only after:
+
+1. evidence bundle exists,
+2. no-live fixture exists,
+3. safety hard stops are tested,
+4. the patch is reviewed by Codex,
+5. a controlled dogfood run reaches a safe outcome.
+
+Until then, Browser Harness output is evidence and patch proposal, not product
+closure.
