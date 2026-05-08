@@ -231,11 +231,23 @@ export function renderStage0OperatorMarkdown(report: Stage0OperatorReport): stri
     `Medium risk: ${report.performance.mediumRiskEndpoints}`,
     `Findings: ${report.performance.probes.reduce((sum, probe) => sum + probe.findings.length, 0)}`,
     "",
+    "| Endpoint | Owner | Risk | Findings | Suggested next patch |",
+    "| --- | --- | --- | ---: | --- |",
+  ];
+
+  for (const probe of report.performance.probes) {
+    lines.push(
+      `| \`${probe.endpoint}\` | \`${probe.owner}\` | \`${probe.riskLevel}\` | ${probe.findings.length} | ${probe.suggestedNextPatch} |`,
+    );
+  }
+
+  lines.push(
+    "",
     "## Top Failure Classes",
     "",
     "| Failure class | Count |",
     "| --- | ---: |",
-  ];
+  );
 
   for (const failure of report.topFailureClasses) {
     lines.push(`| \`${failure.failureClass}\` | ${failure.count} |`);

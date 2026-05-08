@@ -185,10 +185,11 @@ version:
   planner-required clarification, expected manual boundaries, provider
   simulated blockers/degradation, unsupported requests, and performance
   budget signals.
-- Current Stage 0 static performance scan has 0 high-risk endpoints. The
-  previous `/api/booking-jobs/compact-list` false positive is cleared; the
-  remaining medium-risk endpoint is `/api/memory`, which still needs a compact
-  memory summary path before alpha if it shows up in measured UX.
+- Current Stage 0 static performance scan covers app bootstrap, chat sessions,
+  rooms compact list, calendar jobs, contacts bootstrap, memory compact
+  summary, booking-job compact list, and task summary. It now has 0 high-risk
+  and 0 medium-risk endpoints. `/api/memory/compact` is the shell-safe memory
+  path; full `/api/memory` remains a lazy detail route for insights.
 - Layered Benchmark V2 exists as a no-live benchmark for L1 provider runtime
   results, evidence completeness, failure class, L2 Browser Harness
   eligibility, simulated L2 recovery, owner assignment, and patch proposals.

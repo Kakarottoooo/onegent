@@ -278,6 +278,19 @@ Calendar-specific runtime rules:
 5. Existing cached Google busy/event rows may overlay the grid after the shell
    is visible.
 
+Memory-specific runtime rules:
+
+1. `/api/memory/compact` is the shell-safe memory summary. It returns bounded
+   counts, rates, top labels, and relationship counts only.
+2. Full `/api/memory` remains a lazy detail surface for the memory/insights
+   experience. App bootstrap, navigation, and compact panels should not call
+   the full route.
+3. Compact memory summaries must not return raw feedback metadata, booking job
+   steps, autonomy settings, relationship notes, full preference profiles,
+   screenshots, logs, or provider artifacts.
+4. Future compact memory changes should use the read-model helper and tests,
+   then run `npx tsx scripts/measure-app-performance.ts --stage0 --json`.
+
 NLU and internal-benchmark rules:
 
 1. `lib/agent/nlu-v2/routing-matrix.ts` is a no-live router/normalizer
@@ -371,5 +384,9 @@ Before changing a performance-critical path:
 3. Avoid adding new client-side waterfalls.
 4. Prefer one read-model helper shared by route and tests.
 5. Add a small test for shape/count behavior when the read model is non-trivial.
-6. Run `npx tsc --noEmit --pretty false`, `npm run check-drift`, and the phase
+6. Run the Stage 0 static scan and inspect endpoint, severity, file, line,
+   reason, and owner before claiming a performance fix.
+7. If the scan is noisy, tighten the scanner semantics with a regression test;
+   do not allowlist away a real heavy-field leak.
+8. Run `npx tsc --noEmit --pretty false`, `npm run check-drift`, and the phase
    gate before landing.
