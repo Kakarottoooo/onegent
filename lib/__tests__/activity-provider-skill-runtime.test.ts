@@ -1,10 +1,38 @@
 import { describe, expect, it } from "vitest";
 import {
   ACTIVITY_PROVIDER_SKILLS,
+  ACTIVITY_TASK_WORKSPACE_EVIDENCE_REQUIREMENTS,
   findActivityProviderSkill,
   isActivitySkillExactEvent,
+  mapActivitySkillOutcomeToTaskDecision,
   resolveActivityProviderSkillUrl,
+  validateActivitySkillEvidence,
 } from "@/lib/activity-skills";
+import type {
+  ActivitySkillOutcome,
+  ActivitySkillRuntimeNextAction,
+} from "@/lib/activity-skills";
+import type { TravelTaskState } from "@/lib/core";
+import type { TaskWorkspaceBucket } from "@/lib/booking-jobs/workspace";
+
+const completeEvidence = {
+  provider: "ticketmaster",
+  pageType: "exact_event",
+  currentUrl:
+    "https://www.ticketmaster.com/the-lion-king-05-30-2026/event/Z1r9uZrrZbpZ1Avr9ea",
+  screenshotRef: "artifact://activity/ticketmaster-lion-king/event-page.png",
+  actionLog: [
+    "opened provider URL",
+    "classified exact_event page",
+    "captured visible candidate facts",
+  ],
+  visibleCandidateFacts: [
+    "The Lion King",
+    "New York, NY",
+    "May 30, 2026",
+    "2:00 PM",
+  ],
+} as const;
 
 describe("activity provider skill registry", () => {
   it("registers the Stage 0B activity providers with safety stops and evidence contracts", () => {
@@ -37,6 +65,7 @@ describe("activity provider skill registry", () => {
           "current_url",
           "screenshot",
           "action_log",
+          "visible_candidate_facts",
           "safe_next_action",
         ]),
       );
@@ -46,6 +75,198 @@ describe("activity provider skill registry", () => {
   it("finds skills by provider without falling back to the wrong provider", () => {
     expect(findActivityProviderSkill("ticketmaster")?.provider).toBe("ticketmaster");
     expect(findActivityProviderSkill("axs")?.provider).toBe("axs");
+  });
+});
+
+describe("activity provider skill outcome -> task state mapping", () => {
+  const cases: Array<{
+    outcome: ActivitySkillOutcome;
+    taskState: TravelTaskState;
+    workspaceBucket: TaskWorkspaceBucket;
+    safeNextAction: ActivitySkillRuntimeNextAction;
+    executable: boolean;
+    hardStop: boolean;
+  }> = [
+    {
+      outcome: "exact_event_ready",
+      taskState: "draft",
+      workspaceBucket: "queue",
+      safeNextAction: "start_provider_execution",
+      executable: true,
+      hardStop: false,
+    },
+    {
+      outcome: "provider_listing_needs_choice",
+      taskState: "ready_for_confirmation",
+      workspaceBucket: "queue",
+      safeNextAction: "ask_user_to_choose_event",
+      executable: false,
+      hardStop: false,
+    },
+    {
+      outcome: "single_candidate_ready",
+      taskState: "draft",
+      workspaceBucket: "queue",
+      safeNextAction: "start_provider_execution",
+      executable: true,
+      hardStop: false,
+    },
+    {
+      outcome: "safe_handoff_reached",
+      taskState: "ready_for_confirmation",
+      workspaceBucket: "history",
+      safeNextAction: "hold_for_manual_review",
+      executable: false,
+      hardStop: false,
+    },
+    {
+      outcome: "user_seat_selection_required",
+      taskState: "ready_for_confirmation",
+      workspaceBucket: "history",
+      safeNextAction: "ask_user_to_select_seats",
+      executable: false,
+      hardStop: true,
+    },
+    {
+      outcome: "account_session_required",
+      taskState: "awaiting_login",
+      workspaceBucket: "history",
+      safeNextAction: "ask_user_to_sign_in",
+      executable: false,
+      hardStop: true,
+    },
+    {
+      outcome: "payment_or_final_action_required",
+      taskState: "ready_for_confirmation",
+      workspaceBucket: "history",
+      safeNextAction: "stop_before_payment_or_final_action",
+      executable: false,
+      hardStop: true,
+    },
+    {
+      outcome: "provider_degraded",
+      taskState: "failed",
+      workspaceBucket: "history",
+      safeNextAction: "capture_provider_degraded_evidence",
+      executable: false,
+      hardStop: false,
+    },
+    {
+      outcome: "insufficient_evidence",
+      taskState: "failed",
+      workspaceBucket: "history",
+      safeNextAction: "collect_required_evidence",
+      executable: false,
+      hardStop: false,
+    },
+    {
+      outcome: "skill_patch_needed",
+      taskState: "failed",
+      workspaceBucket: "history",
+      safeNextAction: "create_reviewed_skill_patch",
+      executable: false,
+      hardStop: false,
+    },
+  ];
+
+  for (const row of cases) {
+    it(`${row.outcome} maps to ${row.taskState} / ${row.safeNextAction}`, () => {
+      const decision = mapActivitySkillOutcomeToTaskDecision({
+        ...completeEvidence,
+        outcome: row.outcome,
+      });
+      expect(decision).toMatchObject({
+        outcome: row.outcome,
+        taskState: row.taskState,
+        workspaceBucket: row.workspaceBucket,
+        safeNextAction: row.safeNextAction,
+        canExecuteProviderContinuation: row.executable,
+        hardStop: row.hardStop,
+        evidence: { complete: true, missing: [] },
+      });
+    });
+  }
+
+  it("seat selection, account, and payment/final boundaries never become executable continuations", () => {
+    const humanOnlyOutcomes: ActivitySkillOutcome[] = [
+      "user_seat_selection_required",
+      "account_session_required",
+      "payment_or_final_action_required",
+    ];
+
+    for (const outcome of humanOnlyOutcomes) {
+      const decision = mapActivitySkillOutcomeToTaskDecision({
+        ...completeEvidence,
+        outcome,
+      });
+      expect(decision.canExecuteProviderContinuation, outcome).toBe(false);
+      expect(decision.hardStop, outcome).toBe(true);
+      expect(decision.safeNextAction, outcome).not.toBe("start_provider_execution");
+      expect(decision.taskState, outcome).not.toBe("executing");
+    }
+  });
+
+  it("execution-ready outcomes downgrade to insufficient_evidence when task workspace evidence is incomplete", () => {
+    const decision = mapActivitySkillOutcomeToTaskDecision({
+      outcome: "exact_event_ready",
+      provider: "ticketmaster",
+      pageType: "exact_event",
+      currentUrl: "",
+      screenshotRef: "",
+      actionLog: [],
+      visibleCandidateFacts: [],
+    });
+
+    expect(decision.outcome).toBe("insufficient_evidence");
+    expect(decision.taskState).toBe("failed");
+    expect(decision.workspaceBucket).toBe("history");
+    expect(decision.safeNextAction).toBe("collect_required_evidence");
+    expect(decision.canExecuteProviderContinuation).toBe(false);
+    expect(decision.evidence).toEqual({
+      complete: false,
+      missing: ["currentUrl", "screenshot", "action_log", "visible_candidate_facts"],
+    });
+  });
+});
+
+describe("activity provider skill task-workspace evidence contract", () => {
+  it("names every field Stage 0B requires before task execution can continue", () => {
+    expect(ACTIVITY_TASK_WORKSPACE_EVIDENCE_REQUIREMENTS).toEqual([
+      "provider",
+      "page_type",
+      "currentUrl",
+      "screenshot",
+      "action_log",
+      "visible_candidate_facts",
+    ]);
+  });
+
+  it("validates provider, page type, current URL, screenshot, action log, and visible candidate facts", () => {
+    expect(validateActivitySkillEvidence(completeEvidence)).toEqual({
+      complete: true,
+      missing: [],
+    });
+
+    expect(
+      validateActivitySkillEvidence({
+        provider: "  ",
+        pageType: null,
+        currentUrl: "",
+        screenshotRef: "",
+        actionLog: ["  "],
+        visibleCandidateFacts: [],
+      }),
+    ).toEqual({
+      complete: false,
+      missing: [
+        "provider",
+        "page_type",
+        "currentUrl",
+        "screenshot",
+        "action_log",
+        "visible_candidate_facts",
+      ],
+    });
   });
 });
 describe("activity provider skill URL matching", () => {

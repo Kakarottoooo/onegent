@@ -31,6 +31,7 @@ const ACTIVITY_EVIDENCE_CONTRACT: ActivitySkillEvidenceContract = {
     "input_url",
     "current_url",
     "visible_title_or_event_name",
+    "visible_candidate_facts",
     "screenshot",
     "action_log",
     "final_state",
@@ -42,6 +43,7 @@ const ACTIVITY_EVIDENCE_CONTRACT: ActivitySkillEvidenceContract = {
     "current_url",
     "screenshot",
     "action_log",
+    "visible_candidate_facts",
     "safe_next_action",
   ],
 };
