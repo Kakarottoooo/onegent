@@ -118,10 +118,16 @@ inspection and safe navigation before a user-controlled boundary. It may:
 
 - open Ticketmaster artist, listing, search, and event pages,
 - reuse a user-authorized provider session after the user has signed in once,
+- use provider credentials stored in the user's Onegent profile when that
+  provider/account scope is explicitly authorized,
+- read Gmail only for the active provider-login OTP or verification code tied
+  to the current task,
 - collect page title, current URL, screenshots, visible candidates, and action
   logs,
 - prefill non-payment profile fields that Onegent already owns, such as name,
   email, phone, party size, city, date, and budget preferences,
+- prefill saved payment-card fields except CVV when the user has authorized
+  this provider/payment scope,
 - click safe provider CTAs such as `Find Tickets` only while still before hard
   stops,
 - ask the user which visible event/date/time to use,
@@ -130,12 +136,12 @@ inspection and safe navigation before a user-controlled boundary. It may:
 
 It must not:
 
-- sign in using stored provider passwords or profile credentials in the
-  background,
-- read Gmail or any mailbox to fetch OTP/account codes,
+- use unscoped credentials or credentials for a different provider/account,
+- read unrelated email, search a mailbox broadly, or use an OTP outside the
+  active provider-login task,
 - solve CAPTCHA or human-verification challenges,
 - select seats for the user,
-- fill card number, billing fields, CVV, or payment forms,
+- fill CVV or store plaintext payment secrets,
 - submit payment,
 - click `Place Order`, `Confirm Purchase`, or any final purchase action.
 
@@ -147,16 +153,19 @@ Ticketmaster surfaces to explicit checkpoints:
 | --- | --- |
 | exact event before hard stops | Continue only to the next safe ticket CTA. |
 | listing or multiple visible candidates | Ask the user which event/date/time to use. |
-| login wall | Pause for manual sign-in; allow resume after user action. |
-| CAPTCHA / OTP / account verification | Pause for manual verification; allow resume after user action. |
+| login wall | Reuse authorized session or authorized profile credentials; otherwise pause for manual sign-in. |
+| OTP / account verification | Read the active provider-login Gmail OTP only when explicitly authorized; otherwise pause for manual verification. |
+| CAPTCHA | Pause for manual verification; never solve automatically. |
 | seat selection | Pause for user seat choice; allow resume after user action. |
-| payment fields | Stop before payment; no automated resume. |
+| payment fields | Prefill saved card fields except CVV when authorized, then stop before CVV/payment. |
 | final confirmation | Stop before final confirmation; no automated resume. |
 | provider degraded / 404 / unavailable | Capture evidence and stop. |
 | missing URL/screenshot/action log | Collect more evidence before continuing. |
 
-This keeps Onegent useful during provider execution without crossing identity,
-verification, payment, or final-confirmation boundaries.
+This keeps Onegent useful during provider execution while making authorization
+the deciding boundary: scoped credentials, active-task Gmail OTP, and non-CVV
+payment prefill can be delegated by the user; CAPTCHA, seat choice, CVV,
+payment submission, and final confirmation stay user-controlled.
 
 ## Target Architecture
 

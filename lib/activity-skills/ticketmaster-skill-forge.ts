@@ -16,26 +16,33 @@ export type TicketmasterForgeNextAction =
   | "continue_inspecting"
   | "follow_safe_ticket_cta"
   | "ask_user_to_choose_event"
+  | "reuse_authorized_session"
+  | "use_authorized_profile_login"
+  | "use_authorized_gmail_otp"
   | "pause_for_user_login"
   | "pause_for_user_verification"
   | "pause_for_user_seat_selection"
+  | "prefill_card_except_cvv_then_pause"
   | "pause_before_payment"
   | "pause_before_final_confirmation"
   | "review_provider_degraded"
   | "collect_more_evidence";
 
 export type TicketmasterForbiddenAutomation =
-  | "background_login"
-  | "read_gmail_otp"
   | "solve_captcha"
   | "auto_select_seats"
-  | "fill_payment_card"
   | "fill_cvv"
   | "submit_payment"
-  | "click_final_confirmation";
+  | "click_final_confirmation"
+  | "use_unscoped_credentials"
+  | "read_unrelated_email"
+  | "store_plaintext_payment_secret";
 
 export type TicketmasterAllowedAssistance =
   | "reuse_user_authorized_provider_session"
+  | "use_profile_credentials_for_provider_login"
+  | "read_gmail_otp_for_active_provider_login"
+  | "fill_payment_card_without_cvv"
   | "prefill_non_payment_profile_fields"
   | "resume_after_user_boundary_action"
   | "inspect_page_and_collect_evidence"
@@ -63,6 +70,12 @@ export type TicketmasterForgeObservation = {
   candidates?: TicketmasterVisibleCandidate[] | null;
   screenshotRef?: string | null;
   actionLog?: string[] | null;
+  authorizedCapabilities?: {
+    providerSession?: boolean;
+    profileCredentials?: boolean;
+    gmailOtp?: boolean;
+    paymentCardWithoutCvv?: boolean;
+  } | null;
 };
 
 export type TicketmasterForgeDecision = {
@@ -81,6 +94,9 @@ export type TicketmasterForgeDecision = {
 export const TICKETMASTER_ALLOWED_ASSISTANCE: ReadonlyArray<TicketmasterAllowedAssistance> =
   Object.freeze([
     "reuse_user_authorized_provider_session",
+    "use_profile_credentials_for_provider_login",
+    "read_gmail_otp_for_active_provider_login",
+    "fill_payment_card_without_cvv",
     "prefill_non_payment_profile_fields",
     "resume_after_user_boundary_action",
     "inspect_page_and_collect_evidence",
@@ -89,14 +105,14 @@ export const TICKETMASTER_ALLOWED_ASSISTANCE: ReadonlyArray<TicketmasterAllowedA
 
 export const TICKETMASTER_FORBIDDEN_AUTOMATION: ReadonlyArray<TicketmasterForbiddenAutomation> =
   Object.freeze([
-    "background_login",
-    "read_gmail_otp",
     "solve_captcha",
     "auto_select_seats",
-    "fill_payment_card",
     "fill_cvv",
     "submit_payment",
     "click_final_confirmation",
+    "use_unscoped_credentials",
+    "read_unrelated_email",
+    "store_plaintext_payment_secret",
   ]);
 
 const DECISIONS: Readonly<
@@ -226,9 +242,11 @@ export function buildTicketmasterForgeDecision(
       ? "insufficient_evidence"
       : classifyTicketmasterForgePage(observation);
   const base = DECISIONS[boundary];
+  const authorizedOverride = buildAuthorizedOverride(boundary, observation);
   return {
     boundary,
     ...base,
+    ...authorizedOverride,
     missingEvidence,
   };
 }
@@ -284,6 +302,59 @@ export function getTicketmasterForbiddenAutomation(): ReadonlyArray<Ticketmaster
 
 export function getTicketmasterAllowedAssistance(): ReadonlyArray<TicketmasterAllowedAssistance> {
   return TICKETMASTER_ALLOWED_ASSISTANCE;
+}
+
+function buildAuthorizedOverride(
+  boundary: TicketmasterForgeBoundary,
+  observation: TicketmasterForgeObservation,
+): Partial<TicketmasterForgeDecision> {
+  const capabilities = observation.authorizedCapabilities;
+  if (boundary === "login_checkpoint") {
+    if (capabilities?.providerSession) {
+      return {
+        nextAction: "reuse_authorized_session",
+        canAutoContinue: true,
+        requiresUserAction: false,
+        resumeAfterUserAction: false,
+        summary:
+          "Ticketmaster requires account access; reuse the user's explicitly authorized provider session.",
+      };
+    }
+    if (capabilities?.profileCredentials) {
+      return {
+        nextAction: "use_authorized_profile_login",
+        canAutoContinue: true,
+        requiresUserAction: false,
+        resumeAfterUserAction: false,
+        summary:
+          "Ticketmaster requires sign-in; use explicitly authorized profile credentials for this provider.",
+      };
+    }
+  }
+
+  if (boundary === "otp_checkpoint" && capabilities?.gmailOtp) {
+    return {
+      nextAction: "use_authorized_gmail_otp",
+      canAutoContinue: true,
+      requiresUserAction: false,
+      resumeAfterUserAction: false,
+      summary:
+        "Ticketmaster requires an OTP; read only the active provider-login Gmail code under user authorization.",
+    };
+  }
+
+  if (boundary === "payment_checkpoint" && capabilities?.paymentCardWithoutCvv) {
+    return {
+      nextAction: "prefill_card_except_cvv_then_pause",
+      canAutoContinue: false,
+      requiresUserAction: true,
+      resumeAfterUserAction: false,
+      summary:
+        "Ticketmaster shows payment fields; prefill authorized saved-card fields except CVV, then pause before CVV and payment.",
+    };
+  }
+
+  return {};
 }
 
 function findMissingEvidence(

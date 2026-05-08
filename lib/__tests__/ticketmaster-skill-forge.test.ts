@@ -75,7 +75,7 @@ describe("Ticketmaster skill forge classifier", () => {
     expect(boundary).toBe("needs_user_choice");
   });
 
-  it("pauses for login checkpoints and never offers background login", () => {
+  it("pauses for login checkpoints when no authorized session or credentials exist", () => {
     const decision = buildTicketmasterForgeDecision({
       ...baseObservation,
       currentUrl:
@@ -92,10 +92,50 @@ describe("Ticketmaster skill forge classifier", () => {
       requiresUserAction: true,
       resumeAfterUserAction: true,
     });
-    expect(decision.forbiddenAutomation).toContain("background_login");
+    expect(decision.forbiddenAutomation).toContain("use_unscoped_credentials");
   });
 
-  it("pauses for OTP checkpoints and forbids Gmail-code automation", () => {
+  it("uses an authorized provider session at a login checkpoint", () => {
+    const decision = buildTicketmasterForgeDecision({
+      ...baseObservation,
+      currentUrl:
+        "https://auth.ticketmaster.com/as/authorization.oauth2?client_id=abc",
+      visibleText: "Sign in to your account Email address Password Continue",
+      fields: ["Email address", "Password"],
+      authorizedCapabilities: { providerSession: true },
+    });
+
+    expect(decision).toMatchObject({
+      boundary: "login_checkpoint",
+      outcome: "account_session_required",
+      nextAction: "reuse_authorized_session",
+      canAutoContinue: true,
+      requiresUserAction: false,
+      resumeAfterUserAction: false,
+    });
+  });
+
+  it("uses authorized profile credentials at a login checkpoint", () => {
+    const decision = buildTicketmasterForgeDecision({
+      ...baseObservation,
+      currentUrl:
+        "https://auth.ticketmaster.com/as/authorization.oauth2?client_id=abc",
+      visibleText: "Sign in to your account Email address Password Continue",
+      fields: ["Email address", "Password"],
+      authorizedCapabilities: { profileCredentials: true },
+    });
+
+    expect(decision).toMatchObject({
+      boundary: "login_checkpoint",
+      outcome: "account_session_required",
+      nextAction: "use_authorized_profile_login",
+      canAutoContinue: true,
+      requiresUserAction: false,
+      resumeAfterUserAction: false,
+    });
+  });
+
+  it("pauses for OTP checkpoints when Gmail OTP is not authorized", () => {
     const decision = buildTicketmasterForgeDecision({
       ...baseObservation,
       visibleText: "Enter the verification code sent to your email",
@@ -109,7 +149,26 @@ describe("Ticketmaster skill forge classifier", () => {
       canAutoContinue: false,
       resumeAfterUserAction: true,
     });
-    expect(decision.forbiddenAutomation).toContain("read_gmail_otp");
+    expect(decision.forbiddenAutomation).toContain("read_unrelated_email");
+  });
+
+  it("uses Gmail OTP only for an active authorized provider-login checkpoint", () => {
+    const decision = buildTicketmasterForgeDecision({
+      ...baseObservation,
+      visibleText: "Enter the verification code sent to your email",
+      fields: ["Verification code"],
+      authorizedCapabilities: { gmailOtp: true },
+    });
+
+    expect(decision).toMatchObject({
+      boundary: "otp_checkpoint",
+      outcome: "account_session_required",
+      nextAction: "use_authorized_gmail_otp",
+      canAutoContinue: true,
+      requiresUserAction: false,
+      resumeAfterUserAction: false,
+    });
+    expect(decision.forbiddenAutomation).toContain("read_unrelated_email");
   });
 
   it("pauses for CAPTCHA checkpoints and forbids solving the challenge", () => {
@@ -148,7 +207,7 @@ describe("Ticketmaster skill forge classifier", () => {
     expect(decision.forbiddenAutomation).toContain("auto_select_seats");
   });
 
-  it("pauses at payment fields and forbids card, CVV, and payment submission", () => {
+  it("pauses at payment fields and forbids CVV and payment submission", () => {
     const decision = buildTicketmasterForgeDecision({
       ...baseObservation,
       visibleText:
@@ -164,7 +223,30 @@ describe("Ticketmaster skill forge classifier", () => {
       resumeAfterUserAction: false,
     });
     expect(decision.forbiddenAutomation).toEqual(
-      expect.arrayContaining(["fill_payment_card", "fill_cvv", "submit_payment"]),
+      expect.arrayContaining(["fill_cvv", "submit_payment"]),
+    );
+  });
+
+  it("can prefill authorized saved-card fields except CVV, then pause", () => {
+    const decision = buildTicketmasterForgeDecision({
+      ...baseObservation,
+      visibleText:
+        "Checkout Payment Method Card Number Expiration Date CVV Billing address",
+      fields: ["Card number", "Expiration date", "CVV", "Billing address"],
+      authorizedCapabilities: { paymentCardWithoutCvv: true },
+    });
+
+    expect(decision).toMatchObject({
+      boundary: "payment_checkpoint",
+      outcome: "payment_or_final_action_required",
+      nextAction: "prefill_card_except_cvv_then_pause",
+      canAutoContinue: false,
+      requiresUserAction: true,
+      resumeAfterUserAction: false,
+    });
+    expect(decision.allowedAssistance).toContain("fill_payment_card_without_cvv");
+    expect(decision.forbiddenAutomation).toEqual(
+      expect.arrayContaining(["fill_cvv", "submit_payment"]),
     );
   });
 
@@ -226,6 +308,9 @@ describe("Ticketmaster skill forge safety policy", () => {
   it("allows trusted session reuse and non-payment profile prefill", () => {
     expect(getTicketmasterAllowedAssistance()).toEqual([
       "reuse_user_authorized_provider_session",
+      "use_profile_credentials_for_provider_login",
+      "read_gmail_otp_for_active_provider_login",
+      "fill_payment_card_without_cvv",
       "prefill_non_payment_profile_fields",
       "resume_after_user_boundary_action",
       "inspect_page_and_collect_evidence",
@@ -235,27 +320,27 @@ describe("Ticketmaster skill forge safety policy", () => {
 
   it("keeps the explicit forbidden automation list stable", () => {
     expect(getTicketmasterForbiddenAutomation()).toEqual([
-      "background_login",
-      "read_gmail_otp",
       "solve_captcha",
       "auto_select_seats",
-      "fill_payment_card",
       "fill_cvv",
       "submit_payment",
       "click_final_confirmation",
+      "use_unscoped_credentials",
+      "read_unrelated_email",
+      "store_plaintext_payment_secret",
     ]);
   });
 
-  it("distinguishes authorized session reuse from forbidden credential login", () => {
+  it("distinguishes authorized credential use from unscoped credential use", () => {
     const decision = buildTicketmasterForgeDecision(baseObservation);
 
     expect(decision.allowedAssistance).toContain(
       "reuse_user_authorized_provider_session",
     );
-    expect(decision.forbiddenAutomation).toContain("background_login");
-    expect(decision.forbiddenAutomation).not.toContain(
-      "reuse_user_authorized_provider_session",
+    expect(decision.allowedAssistance).toContain(
+      "use_profile_credentials_for_provider_login",
     );
+    expect(decision.forbiddenAutomation).toContain("use_unscoped_credentials");
   });
 
   it("only resumes after user-action checkpoints, never payment or final confirmation", () => {
