@@ -144,6 +144,13 @@ describe("Stage 0B Browser Harness bridge code generation", () => {
     expect(python).not.toContain("section\\s+\\d+|row\\s+\\w+");
   });
 
+  it("does not treat venue FAQ payment wording alone as a payment form", () => {
+    const python = buildBrowserHarnessPython(EXACT_EVENT, "C:/tmp/stage0b.png");
+    expect(python).toContain("paymentInputVisible");
+    expect(python).toContain("checkoutPaymentHeading");
+    expect(python).not.toContain("/credit card|card number|billing address|payment method|cvv|expiration date/.test(lower))");
+  });
+
   it("embeds the input URL and screenshot path as quoted literals", () => {
     const python = buildBrowserHarnessPython(EXACT_EVENT, "C:/tmp/with spaces/stage0b.png");
     expect(python).toContain(JSON.stringify(EXACT_EVENT.url));

@@ -283,6 +283,11 @@ and listing pages often contain those words in unrelated event cards. Seat
 selection requires a strong seat-map signal, ticket/seat CTA, or section + row
 context on an actual ticket/seat surface.
 
+The same rule applies to payment boundaries. Venue FAQ copy such as "what
+payment types are accepted" is not a payment form. `payment_form_visible`
+requires a visible card/billing/CVV input or clear checkout/order-summary
+context.
+
 ### 7.1 Ticketmaster (10)
 
 | ID | Class | URL gist |

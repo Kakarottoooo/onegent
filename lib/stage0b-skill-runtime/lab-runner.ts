@@ -159,8 +159,23 @@ const INSPECT_JS = String.raw`
     const rect = el.getBoundingClientRect();
     return rect.width > 0 && rect.height > 0;
   });
+  const paymentInputVisible = Array.from(document.querySelectorAll("input,select,textarea")).some((el) => {
+    const rect = el.getBoundingClientRect();
+    if (rect.width <= 0 || rect.height <= 0) return false;
+    const haystack = [
+      el.getAttribute("name") || "",
+      el.getAttribute("id") || "",
+      el.getAttribute("autocomplete") || "",
+      el.getAttribute("aria-label") || "",
+      el.getAttribute("placeholder") || "",
+      el.closest("label")?.textContent || "",
+    ].join(" ").toLowerCase();
+    return /card number|credit card|cc-number|cvv|cvc|security code|expiration|exp-date|billing address|name on card/.test(haystack);
+  });
   const loginHeading = Array.from(document.querySelectorAll("h1,h2,[role='heading']"))
     .some((el) => /^(sign in|log in|login|create account|verify your account)$/i.test((el.textContent || "").trim()));
+  const checkoutPaymentHeading = /checkout|order summary|subtotal|total due|place order|confirm purchase|complete purchase/.test(lower) &&
+    /credit card|card number|billing address|payment method|cvv|expiration date/.test(lower);
   if (authUrl || passwordFieldVisible || loginHeading || /account required|verify your account/.test(lower)) {
     hardStops.push("login_or_signin_wall");
   }
@@ -177,7 +192,7 @@ const INSPECT_JS = String.raw`
   ) {
     hardStops.push("seat_selection_required");
   }
-  if (/credit card|card number|billing address|payment method|cvv|expiration date/.test(lower)) {
+  if (paymentInputVisible || checkoutPaymentHeading) {
     hardStops.push("payment_form_visible");
   }
   if (/place order|confirm purchase|complete purchase|buy now|submit order/.test(buttonLower)) {
