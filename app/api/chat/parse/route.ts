@@ -27,6 +27,7 @@ import {
   analyzeCaptureImageForText,
   buildScreenshotCaptureMessage,
   parseCaptureImagePayload,
+  summarizeCaptureImageAnalysisForUser,
   type CaptureImageAnalysis,
 } from "@/lib/capture/screenshot-analysis";
 import {
@@ -142,6 +143,7 @@ export async function POST(req: NextRequest) {
       userText: userMessage,
       userModel: b.userModel,
     });
+    logCaptureImageAnalysis(captureImageAnalysis);
     message = buildScreenshotCaptureMessage({
       userText: userMessage,
       analysis: captureImageAnalysis,
@@ -385,6 +387,7 @@ export async function POST(req: NextRequest) {
     if (roomId && !isSynthesisTrigger(message)) {
       result.confirm_ready = false;
     }
+    applyCaptureImageAssistantPrefix(result, captureImageAnalysis);
 
     // Sessions (ChatGPT-style solo thread): when not in a room context,
     // mirror the turn into chat_session_messages. Auto-create a session on
@@ -543,6 +546,7 @@ export async function POST(req: NextRequest) {
     );
     const fallbackResult =
       buildProviderUrlFallbackNluResult({ message }) ?? buildFallbackResult(message);
+    applyCaptureImageAssistantPrefix(fallbackResult, captureImageAnalysis);
     let fallbackSessionId: string | null = null;
     if (!roomId && userId) {
       fallbackSessionId = await syncSessionContext(
@@ -582,6 +586,35 @@ export async function POST(req: NextRequest) {
       session_id: fallbackSessionId,
     });
   }
+}
+
+function applyCaptureImageAssistantPrefix(
+  result: { assistant_reply?: string | null },
+  analysis: CaptureImageAnalysis | null,
+): void {
+  if (!analysis) return;
+  const prefix = summarizeCaptureImageAnalysisForUser(analysis);
+  if (!prefix) return;
+  const existing = result.assistant_reply?.trim() ?? "";
+  if (!existing) {
+    result.assistant_reply = prefix;
+    return;
+  }
+  if (
+    existing.includes(prefix) ||
+    existing.startsWith("I analyzed the screenshot") ||
+    existing.startsWith("I received the screenshot")
+  ) {
+    return;
+  }
+  result.assistant_reply = `${prefix}\n\n${existing}`;
+}
+
+function logCaptureImageAnalysis(analysis: CaptureImageAnalysis): void {
+  const summary = analysis.summary_text.replace(/\s+/g, " ").slice(0, 260);
+  console.log(
+    `[chat/parse] capture image status=${analysis.status}${analysis.model ? ` model=${analysis.model}` : ""} summary="${summary}"`,
+  );
 }
 
 function publicCaptureImageAnalysis(analysis: CaptureImageAnalysis): Omit<CaptureImageAnalysis, "error"> & {

@@ -21,6 +21,37 @@ export interface CaptureImageAnalysis {
   error?: string;
 }
 
+export function summarizeCaptureImageAnalysisForUser(
+  analysis: CaptureImageAnalysis,
+): string | null {
+  if (analysis.status === "unavailable") {
+    return "I received the screenshot, but image analysis is not available in this environment yet.";
+  }
+  if (analysis.status === "failed") {
+    return "I received the screenshot, but image analysis failed, so I need you to describe the event, place, or provider before I create a task.";
+  }
+
+  const fields = parseVisionSummaryFields(analysis.summary_text);
+  const visibleFacts: string[] = [];
+  addVisibleFact(visibleFacts, "title", fields.title);
+  addVisibleFact(visibleFacts, "provider", fields.provider);
+  addVisibleFact(visibleFacts, "city", fields.city);
+  addVisibleFact(visibleFacts, "date", fields.date);
+  addVisibleFact(visibleFacts, "time", fields.time);
+  addVisibleFact(visibleFacts, "price/budget", fields.price_or_budget);
+
+  const concise = sanitizeVisionField(fields.concise_summary);
+  const missing = sanitizeVisionField(fields.missing_fields);
+  if (visibleFacts.length === 0 && !concise) {
+    return "I analyzed the screenshot, but I could not identify enough travel details from it.";
+  }
+
+  const seen = visibleFacts.length > 0
+    ? `I analyzed the screenshot and can see: ${visibleFacts.join("; ")}.`
+    : `I analyzed the screenshot: ${concise}.`;
+  return missing ? `${seen} Still needed: ${missing}.` : seen;
+}
+
 export function parseCaptureImagePayload(value: unknown): CaptureImagePayload | null {
   if (!value || typeof value !== "object") return null;
   const raw = value as Record<string, unknown>;
@@ -239,6 +270,33 @@ function normalizeVisionJson(content: string): string {
   } catch {
     return `Screenshot analysis: ${content.slice(0, 1200)}`;
   }
+}
+
+function parseVisionSummaryFields(summary: string): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const line of summary.split(/\r?\n/)) {
+    const match = line.match(/^\s*-\s*([a-z_]+)\s*:\s*(.+?)\s*$/i);
+    if (!match) continue;
+    const key = match[1].toLowerCase();
+    const value = sanitizeVisionField(match[2]);
+    if (value) out[key] = value;
+  }
+  return out;
+}
+
+function addVisibleFact(out: string[], label: string, value: string | undefined): void {
+  const normalized = sanitizeVisionField(value);
+  if (!normalized) return;
+  out.push(`${label} ${normalized}`);
+}
+
+function sanitizeVisionField(value: string | undefined): string | null {
+  if (!value) return null;
+  const normalized = value
+    .replace(/\s+/g, " ")
+    .replace(/^(null|undefined|n\/a|none|unknown)$/i, "")
+    .trim();
+  return normalized || null;
 }
 
 function estimateDataUrlBytes(dataUrl: string): number {

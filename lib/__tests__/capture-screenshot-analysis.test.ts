@@ -4,6 +4,7 @@ import {
   buildScreenshotCaptureMessage,
   MAX_CAPTURE_IMAGE_BYTES,
   parseCaptureImagePayload,
+  summarizeCaptureImageAnalysisForUser,
 } from "@/lib/capture/screenshot-analysis";
 
 const dataUrl = "data:image/png;base64,aGVsbG8=";
@@ -60,6 +61,50 @@ describe("buildScreenshotCaptureMessage", () => {
     expect(message).toContain("scenario: activity");
     expect(message).toContain("User instruction: 帮我订这个票");
     expect(message).toContain("Ask for missing date");
+  });
+});
+
+describe("summarizeCaptureImageAnalysisForUser", () => {
+  it("turns analyzed screenshot facts into a visible user-facing summary", () => {
+    const summary = summarizeCaptureImageAnalysisForUser({
+      status: "analyzed",
+      provider: "openai",
+      model: "gpt-5.5",
+      summary_text: [
+        "Screenshot analysis:",
+        "- scenario: activity",
+        "- provider: Ticketmaster",
+        "- title: Disney On Ice",
+        "- city: Detroit",
+        "- date: May 17",
+        "- time: null",
+        "- missing_fields: time, ticket count, budget",
+        "- concise_summary: Ticketmaster listing for Disney On Ice.",
+      ].join("\n"),
+    });
+
+    expect(summary).toContain("I analyzed the screenshot");
+    expect(summary).toContain("title Disney On Ice");
+    expect(summary).toContain("provider Ticketmaster");
+    expect(summary).toContain("city Detroit");
+    expect(summary).toContain("date May 17");
+    expect(summary).not.toContain("time null");
+    expect(summary).toContain("Still needed: time, ticket count, budget");
+  });
+
+  it("explains failed and unavailable screenshot analysis instead of hiding it", () => {
+    expect(
+      summarizeCaptureImageAnalysisForUser({
+        status: "failed",
+        summary_text: "Screenshot received, but image analysis failed.",
+      }),
+    ).toContain("image analysis failed");
+    expect(
+      summarizeCaptureImageAnalysisForUser({
+        status: "unavailable",
+        summary_text: "Screenshot received, but no OpenAI vision API key is configured.",
+      }),
+    ).toContain("image analysis is not available");
   });
 });
 
