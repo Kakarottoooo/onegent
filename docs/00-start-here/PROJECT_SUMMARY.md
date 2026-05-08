@@ -138,6 +138,15 @@ version:
   listings, continue only when one obvious listing exists, and pause when the
   user must choose event/date/city/seats. Impersonating hosts do not trigger
   provider execution.
+- Stage 0B Activity is now testing Browser Harness as an external skill-forge
+  lab, not as production runtime. The Ticketmaster skill-forge plan covers 20
+  real Ticketmaster URL shapes across artist, exact event, search, category,
+  and venue pages. Initial controlled evidence shows: Disney On Ice artist
+  pages ask user choice with visible candidate labels/links; Kacey Musgraves
+  artist pages no longer leak unrelated "fans also viewed" candidates as
+  choices; an exact Nashville SC event reaches the seat-selection hard stop and
+  stops safely. Raw lab evidence remains local under
+  `.stage0b-evidence/`; only reviewed rules and no-live tests enter git.
 - Runtime now has a Ticketmaster task-state classifier for checkout reached,
   seat selection needed, login/account boundary, external ad tab, local browser
   disconnect, and unknown failure states.

@@ -15,6 +15,9 @@ import {
 import {
   STAGE0B_TEST_PLAN,
 } from "@/lib/stage0b-skill-runtime/test-plan";
+import {
+  TICKETMASTER_SKILL_FORGE_PLAN,
+} from "@/lib/stage0b-skill-runtime/ticketmaster-forge-plan";
 import type {
   LabEvent,
   LabHardStopReason,
@@ -22,6 +25,8 @@ import type {
   LabVisibleFacts,
   L2RecoveryClass,
   L2RecoveryResult,
+  SkillPatchProposal,
+  Stage0bLabPlanName,
   Stage0bLabProvider,
 } from "@/lib/stage0b-skill-runtime/types";
 
@@ -34,6 +39,8 @@ export type Stage0BLabRunnerArgs = {
   evidenceRoot: string;
   browserHarnessCommand: string;
   stopOnError: boolean;
+  keepOpen: boolean;
+  plan: Stage0bLabPlanName;
 };
 
 export type BrowserHarnessPayload = {
@@ -72,6 +79,30 @@ const INSPECT_JS = String.raw`
   const text = rawText.replace(/\s+/g, " ").trim();
   const lower = text.toLowerCase();
   const title = (document.querySelector("h1")?.textContent || document.title || "").replace(/\s+/g, " ").trim();
+  const normalizeWords = (value) => value
+    .toLowerCase()
+    .replace(/&/g, " and ")
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
+  const targetTokens = normalizeWords(title)
+    .split(/\s+/)
+    .filter((token) => token.length >= 4 && !/^(ticket|tickets|event|events|tour|live|show|shows|find|your|presents|official|page)$/.test(token))
+    .slice(0, 8);
+  const requiresTargetMatch = /ticketmaster\./i.test(location.hostname) && /\/(?:artist|venue)\//i.test(location.pathname);
+  const labelMatchesTarget = (label) => {
+    if (!requiresTargetMatch || targetTokens.length === 0) return true;
+    const normalizedLabel = normalizeWords(label);
+    return targetTokens.some((token) => normalizedLabel.includes(token));
+  };
+  const linkLooksLikeProviderEvent = (link) => {
+    if (!/ticketmaster\./i.test(location.hostname) || !requiresTargetMatch) return true;
+    try {
+      const parsed = new URL(link || "", location.href);
+      return /ticketmaster\./i.test(parsed.hostname) && /\/event\//i.test(parsed.pathname);
+    } catch {
+      return false;
+    }
+  };
   const clickableElements = Array.from(document.querySelectorAll("button,a,[role='button']"))
     .map((el) => {
       const rect = el.getBoundingClientRect();
@@ -91,6 +122,25 @@ const INSPECT_JS = String.raw`
     .slice(0, 80);
   const buttonLower = buttonTexts.join("\n").toLowerCase();
   const findTicketButtons = clickableElements.filter((item) => /find tickets|view seats|see tickets|get tickets|buy tickets/i.test(item.text));
+  const eventCandidates = findTicketButtons
+    .map((item) => {
+      const element = Array.from(document.querySelectorAll("button,a,[role='button']"))
+        .find((el) => (el.textContent || "").replace(/\s+/g, " ").trim() === item.text);
+      const container = element?.closest?.("li, article, section, [data-testid*='event'], [class*='event'], [class*='Event'], [class*='card'], [class*='Card']") || element?.parentElement;
+      const label = (container?.textContent || item.text || "")
+        .replace(/\s+/g, " ")
+        .replace(/^\s+|\s+$/g, "")
+        .slice(0, 500);
+      const link = item.href || (container?.querySelector?.("a[href]")?.href || "");
+      return { label, link, text: item.text, href: item.href, x: item.x, y: item.y, visible: item.visible };
+    })
+    .filter((item) =>
+      item.label &&
+      !/ticketmaster home page|skip to main content|search|help|gift cards|sell|fans also viewed/i.test(item.label) &&
+      labelMatchesTarget(item.label) &&
+      linkLooksLikeProviderEvent(item.link)
+    )
+    .slice(0, 20);
   const safeFollowTarget = findTicketButtons.find((item) =>
     item.visible &&
     !/sign in|log in|checkout|place order|confirm purchase|complete purchase|buy now|payment|card number/i.test(item.text)
@@ -103,6 +153,7 @@ const INSPECT_JS = String.raw`
     .slice(0, 20);
   const hardStops = [];
   const urlLower = location.href.toLowerCase();
+  const eventPageLike = /\/event\//i.test(location.pathname);
   const authUrl = /auth\.ticketmaster|\/login|\/signin|\/account/.test(urlLower);
   const passwordFieldVisible = Array.from(document.querySelectorAll("input[type='password']")).some((el) => {
     const rect = el.getBoundingClientRect();
@@ -119,7 +170,11 @@ const INSPECT_JS = String.raw`
   if (/one-time code|verification code|enter code|otp|two-factor|2fa|phone verification/.test(lower)) {
     hardStops.push("otp_or_phone_verification");
   }
-  if (/select seats|choose seats|seat map|section\s+\d+|row\s+\w+/.test(lower) || /view seats|select seats|choose seats/i.test(buttonTexts.join(" "))) {
+  if (
+    /select seats|choose seats|seat map/i.test(rawText) ||
+    (eventPageLike && /lowest price|best seats|standard tickets|sec\s+\d+[\s\S]{0,80}row\s+\w+/i.test(rawText)) ||
+    /view seats|select seats|choose seats/i.test(buttonTexts.join(" "))
+  ) {
     hardStops.push("seat_selection_required");
   }
   if (/credit card|card number|billing address|payment method|cvv|expiration date/.test(lower)) {
@@ -131,6 +186,10 @@ const INSPECT_JS = String.raw`
   if (/cookie/.test(lower) && /accept all|manage cookies|cookie settings/.test(buttonLower) && text.length < 1200) {
     hardStops.push("cookie_consent_blocking_render");
   }
+  const notes = eventCandidates.map((item) => item.label).slice(0, 20);
+  if (/\bloading\b|please wait|hang tight/.test(lower)) {
+    notes.unshift("loading_indicator_visible");
+  }
   return {
     ok: true,
     currentUrl: location.href,
@@ -139,8 +198,10 @@ const INSPECT_JS = String.raw`
       title,
       visible_dates: dateMatches,
       visible_times: timeMatches,
-      candidate_count: findTicketButtons.length,
-      notes: buttonTexts.slice(0, 20),
+      candidate_count: eventCandidates.length,
+      candidate_labels: eventCandidates.map((item) => item.label),
+      candidate_links: eventCandidates.map((item) => item.link).filter(Boolean),
+      notes,
     },
     safeFollowTarget,
     hardStops,
@@ -155,6 +216,8 @@ export function parseStage0BLabRunnerArgs(argv: string[]): Stage0BLabRunnerArgs 
     evidenceRoot: ".stage0b-evidence",
     browserHarnessCommand: "browser-harness",
     stopOnError: false,
+    keepOpen: false,
+    plan: "stage0b",
   };
 
   for (let index = 0; index < argv.length; index += 1) {
@@ -169,6 +232,12 @@ export function parseStage0BLabRunnerArgs(argv: string[]): Stage0BLabRunnerArgs 
         throw new Error(`Unsupported --provider value: ${next ?? ""}`);
       }
       args.provider = next;
+      index += 1;
+    } else if (token === "--plan") {
+      if (next !== "stage0b" && next !== "ticketmaster-forge") {
+        throw new Error(`Unsupported --plan value: ${next ?? ""}`);
+      }
+      args.plan = next;
       index += 1;
     } else if (token === "--id") {
       if (!next) throw new Error("--id requires a value");
@@ -191,6 +260,8 @@ export function parseStage0BLabRunnerArgs(argv: string[]): Stage0BLabRunnerArgs 
       index += 1;
     } else if (token === "--stop-on-error") {
       args.stopOnError = true;
+    } else if (token === "--keep-open") {
+      args.keepOpen = true;
     } else {
       throw new Error(`Unknown argument: ${token}`);
     }
@@ -199,8 +270,8 @@ export function parseStage0BLabRunnerArgs(argv: string[]): Stage0BLabRunnerArgs 
   return args;
 }
 
-export function selectStage0BLabEntries(args: Pick<Stage0BLabRunnerArgs, "provider" | "id" | "limit">): LabTestPlanEntry[] {
-  let entries = STAGE0B_TEST_PLAN.slice();
+export function selectStage0BLabEntries(args: Pick<Stage0BLabRunnerArgs, "provider" | "id" | "limit"> & Partial<Pick<Stage0BLabRunnerArgs, "plan">>): LabTestPlanEntry[] {
+  let entries = labPlanEntries(args.plan ?? "stage0b");
   if (args.provider) {
     entries = entries.filter((entry) => entry.provider === args.provider);
   }
@@ -216,16 +287,24 @@ export function selectStage0BLabEntries(args: Pick<Stage0BLabRunnerArgs, "provid
   return entries;
 }
 
-export function buildBrowserHarnessPython(entry: LabTestPlanEntry, screenshotPath: string): string {
+function labPlanEntries(plan: Stage0bLabPlanName): LabTestPlanEntry[] {
+  return plan === "ticketmaster-forge"
+    ? TICKETMASTER_SKILL_FORGE_PLAN.slice()
+    : STAGE0B_TEST_PLAN.slice();
+}
+
+export function buildBrowserHarnessPython(entry: LabTestPlanEntry, screenshotPath: string, keepOpen = false): string {
   return [
     "import json, traceback",
     `url = ${pythonString(entry.url)}`,
     `screenshot_path = ${pythonString(screenshotPath)}`,
     `expected_direct = ${entry.expected_resolver_execution_mode === "direct_execution" ? "True" : "False"}`,
+    `keep_open = ${keepOpen ? "True" : "False"}`,
     `inspect_js = ${pythonString(INSPECT_JS)}`,
     "payload = {}",
+    "opened_target = None",
     "try:",
-    "    page = new_tab(url)",
+    "    opened_target = new_tab(url)",
     "    wait_for_load()",
     "    wait(3)",
     "    info = page_info()",
@@ -267,6 +346,13 @@ export function buildBrowserHarnessPython(entry: LabTestPlanEntry, screenshotPat
     "    if isinstance(info, dict):",
     "        payload['currentUrl'] = info.get('url')",
     "        payload['title'] = info.get('title')",
+    "finally:",
+    "    if opened_target and not keep_open:",
+    "        try:",
+    "            cdp('Target.closeTarget', targetId=opened_target)",
+    "            payload['closedLabTab'] = True",
+    "        except Exception as close_exc:",
+    "            payload.setdefault('closeError', str(close_exc))",
     `print(${pythonString(SENTINEL_START)})`,
     "print(json.dumps(payload, ensure_ascii=False))",
     `print(${pythonString(SENTINEL_END)})`,
@@ -380,6 +466,9 @@ export function buildStage0BLabResult(input: {
   }
 
   const classification = classifyStage0BOutcome(input.entry, input.payload);
+  const skillPatchProposal = classification === "skill_patch_needed"
+    ? buildSkillPatchProposal(input.entry, input.payload)
+    : undefined;
 
   events.push(buildLabEvent({
     run_id: input.runId,
@@ -396,6 +485,7 @@ export function buildStage0BLabResult(input: {
     run_id: input.runId,
     provider: input.entry.provider,
     classification,
+    ...(skillPatchProposal ? { skill_patch_proposal: skillPatchProposal } : {}),
     evidence: {
       input_url: input.entry.url,
       final_url: currentUrl,
@@ -439,22 +529,28 @@ export function classifyStage0BOutcome(
   if (!payload.visibleFacts || !payload.screenshotPath) {
     return "insufficient_evidence";
   }
-  if (entry.expected_resolver_execution_mode === "direct_execution") {
-    return "exact_event_ready";
-  }
   const candidateCount = payload.visibleFacts.candidate_count ?? 0;
+  if (entry.expected_resolver_execution_mode === "direct_execution") {
+    if (payload.followedSafeLink || candidateCount > 0) {
+      return "exact_event_ready";
+    }
+    return "skill_patch_needed";
+  }
   if (candidateCount === 1) {
     return "single_candidate_ready";
+  }
+  if (candidateCount === 0 && !looksLikeNoEventsPage(payload.visibleFacts)) {
+    return "skill_patch_needed";
   }
   return "provider_listing_needs_choice";
 }
 
 export function runBrowserHarnessEntry(
   entry: LabTestPlanEntry,
-  args: Pick<Stage0BLabRunnerArgs, "browserHarnessCommand">,
+  args: Pick<Stage0BLabRunnerArgs, "browserHarnessCommand" | "keepOpen">,
   screenshotPath: string,
 ): BrowserHarnessPayload {
-  const python = buildBrowserHarnessPython(entry, screenshotPath);
+  const python = buildBrowserHarnessPython(entry, screenshotPath, args.keepOpen);
   const completed = spawnSync(args.browserHarnessCommand, ["-c", python], {
     encoding: "utf8",
     maxBuffer: 1024 * 1024 * 20,
@@ -476,7 +572,7 @@ export function runBrowserHarnessEntry(
 
 export function runStage0BLabEntry(
   entry: LabTestPlanEntry,
-  args: Pick<Stage0BLabRunnerArgs, "evidenceRoot" | "browserHarnessCommand">,
+  args: Pick<Stage0BLabRunnerArgs, "evidenceRoot" | "browserHarnessCommand" | "keepOpen">,
 ): Stage0BLabRunSummary {
   const startedAt = new Date().toISOString();
   const runId = randomUUID();
@@ -564,12 +660,41 @@ function looksLikeProviderErrorPage(visibleFacts: LabVisibleFacts): boolean {
   return /page not found|404|not found|well,\s*this isn't right|something went wrong|try again later/.test(haystack);
 }
 
+function looksLikeNoEventsPage(visibleFacts: LabVisibleFacts): boolean {
+  const title = visibleFacts.title?.trim().toLowerCase() || "";
+  const notes = visibleFacts.notes?.join(" ").toLowerCase() || "";
+  const haystack = `${title} ${notes}`;
+  return /no events|no tickets|no results|couldn't find|cannot find|nothing available/.test(haystack);
+}
+
+function buildSkillPatchProposal(
+  entry: LabTestPlanEntry,
+  payload: BrowserHarnessPayload,
+): SkillPatchProposal {
+  const title = payload.visibleFacts?.title || entry.id;
+  return {
+    kind: "selector_drift",
+    title: `${entry.provider} candidate extraction produced no candidates`,
+    observed_evidence: [
+      `Plan ${entry.id} (${entry.expected_resolver_page_type}) rendered "${title}" at ${payload.currentUrl || entry.url}.`,
+      "The page was not classified as an error/no-events page, but the lab extracted zero visible candidate rows.",
+    ].join(" "),
+    patch_target: "lib/stage0b-skill-runtime/lab-runner.ts",
+    proposed_change:
+      "Update the Stage 0B candidate extraction selectors for this provider/page shape, then add a no-live fixture before rerunning the controlled lab.",
+    risk: "medium",
+    evidence_event_seqs: [2],
+  };
+}
+
 function normalizeVisibleFacts(record: Record<string, unknown>): LabVisibleFacts {
   return {
     title: typeof record.title === "string" ? record.title : undefined,
     visible_dates: Array.isArray(record.visible_dates) ? record.visible_dates.filter((value): value is string => typeof value === "string") : undefined,
     visible_times: Array.isArray(record.visible_times) ? record.visible_times.filter((value): value is string => typeof value === "string") : undefined,
     candidate_count: typeof record.candidate_count === "number" ? record.candidate_count : undefined,
+    candidate_labels: Array.isArray(record.candidate_labels) ? record.candidate_labels.filter((value): value is string => typeof value === "string") : undefined,
+    candidate_links: Array.isArray(record.candidate_links) ? record.candidate_links.filter((value): value is string => typeof value === "string") : undefined,
     notes: Array.isArray(record.notes) ? record.notes.filter((value): value is string => typeof value === "string") : undefined,
   };
 }

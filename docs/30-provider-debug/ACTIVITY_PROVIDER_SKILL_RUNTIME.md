@@ -167,6 +167,27 @@ Gmail OTP implementation details live in
 Gmail as an active-task OTP source only; it must not use Gmail as a broad
 mailbox reader.
 
+The controlled Browser Harness lab contract lives in
+`lib/stage0b-skill-runtime/lab-runner.ts`. Its Ticketmaster-only seed set lives
+in `lib/stage0b-skill-runtime/ticketmaster-forge-plan.ts` and runs with:
+
+```bash
+npx tsx scripts/stage0b-activity-skill-lab-runner.ts --live --plan ticketmaster-forge --limit 20
+```
+
+This is evidence collection, not production automation. Artist, venue,
+category, and search pages must surface `provider_listing_needs_choice` unless
+the lab proves exactly one visible candidate matches the user's constraints.
+Exact event pages must show a safe ticket continuation or a known hard stop
+before they can be treated as executable. Loading pages, empty ticket widgets,
+404s, ad drift, or missing candidate evidence produce `skill_patch_needed` or
+provider-degraded evidence, never silent closure.
+
+The lab closes tabs it opens by default after evidence is captured. Operators
+can pass `--keep-open` for a single case when a page needs manual inspection or
+continued debugging. Do not leave bulk lab runs open in the shared Chrome
+profile.
+
 This keeps Onegent useful during provider execution while making authorization
 the deciding boundary: scoped credentials, active-task Gmail OTP, and non-CVV
 payment prefill can be delegated by the user; CAPTCHA, seat choice, CVV,

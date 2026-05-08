@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   STAGE0B_TEST_PLAN,
+  TICKETMASTER_SKILL_FORGE_PLAN,
   buildBrowserHarnessPython,
   buildStage0BLabResult,
   classifyStage0BOutcome,
@@ -11,6 +12,7 @@ import {
   selectStage0BLabEntries,
   type BrowserHarnessPayload,
 } from "@/lib/stage0b-skill-runtime";
+import { resolveActivityProviderSkillUrl } from "@/lib/activity-skills";
 import type { LabTestPlanEntry } from "@/lib/stage0b-skill-runtime";
 
 const EXACT_EVENT = STAGE0B_TEST_PLAN.find((entry) => entry.expected_resolver_execution_mode === "direct_execution")!;
@@ -20,6 +22,8 @@ describe("Stage 0B live lab runner args and plan selection", () => {
   it("defaults to no-live dry plan behavior unless --live is explicit", () => {
     const args = parseStage0BLabRunnerArgs([]);
     expect(args.live).toBe(false);
+    expect(args.plan).toBe("stage0b");
+    expect(args.keepOpen).toBe(false);
     expect(args.evidenceRoot).toBe(".stage0b-evidence");
     expect(args.browserHarnessCommand).toBe("browser-harness");
   });
@@ -33,26 +37,47 @@ describe("Stage 0B live lab runner args and plan selection", () => {
       "tm-01",
       "--limit",
       "1",
+      "--plan",
+      "ticketmaster-forge",
       "--evidence-root",
       ".tmp/evidence",
       "--browser-harness",
       "browser-harness-dev",
       "--stop-on-error",
+      "--keep-open",
     ]);
     expect(args).toMatchObject({
       live: true,
       provider: "ticketmaster",
       id: "tm-01",
       limit: 1,
+      plan: "ticketmaster-forge",
       evidenceRoot: ".tmp/evidence",
       browserHarnessCommand: "browser-harness-dev",
       stopOnError: true,
+      keepOpen: true,
     });
   });
 
   it("selects the 10 Ticketmaster and 10 SeatGeek cases from the shared plan", () => {
     expect(selectStage0BLabEntries({ provider: "ticketmaster" })).toHaveLength(10);
     expect(selectStage0BLabEntries({ provider: "seatgeek" })).toHaveLength(10);
+  });
+
+  it("selects the expanded Ticketmaster Skill Forge plan when requested", () => {
+    const entries = selectStage0BLabEntries({ plan: "ticketmaster-forge" });
+    expect(entries).toHaveLength(20);
+    expect(entries.every((entry) => entry.provider === "ticketmaster")).toBe(true);
+    expect(entries.map((entry) => entry.id)).toEqual(TICKETMASTER_SKILL_FORGE_PLAN.map((entry) => entry.id));
+  });
+
+  it("keeps every Ticketmaster Skill Forge URL aligned with the activity resolver", () => {
+    for (const entry of TICKETMASTER_SKILL_FORGE_PLAN) {
+      const resolved = resolveActivityProviderSkillUrl(entry.url);
+      expect(resolved?.provider, entry.id).toBe("ticketmaster");
+      expect(resolved?.pageType, entry.id).toBe(entry.expected_resolver_page_type);
+      expect(resolved?.executionMode, entry.id).toBe(entry.expected_resolver_execution_mode);
+    }
   });
 
   it("filters by exact id before applying limit", () => {
@@ -76,8 +101,25 @@ describe("Stage 0B Browser Harness bridge code generation", () => {
     expect(python).toContain("capture_screenshot");
     expect(python).toContain("js(inspect_js)");
     expect(python).toContain("click_at_xy");
+    expect(python).toContain("cdp('Target.closeTarget'");
     expect(python).toContain("ONEGENT_STAGE0B_RESULT_START");
     expect(python).not.toMatch(/type_text|fill_input|press_key/);
+  });
+
+  it("keeps live lab tabs open only when explicitly requested", () => {
+    const defaultPython = buildBrowserHarnessPython(EXACT_EVENT, "C:/tmp/stage0b.png");
+    const keepOpenPython = buildBrowserHarnessPython(EXACT_EVENT, "C:/tmp/stage0b.png", true);
+    expect(defaultPython).toContain("keep_open = False");
+    expect(defaultPython).toContain("if opened_target and not keep_open:");
+    expect(keepOpenPython).toContain("keep_open = True");
+  });
+
+  it("filters Ticketmaster artist candidates by target title and provider event link", () => {
+    const python = buildBrowserHarnessPython(EXACT_EVENT, "C:/tmp/stage0b.png");
+    expect(python).toContain("targetTokens");
+    expect(python).toContain("labelMatchesTarget(item.label)");
+    expect(python).toContain("linkLooksLikeProviderEvent(item.link)");
+    expect(python).toContain("fans also viewed");
   });
 
   it("attempts screenshot and page_info capture even on Browser Harness exceptions", () => {
@@ -94,6 +136,14 @@ describe("Stage 0B Browser Harness bridge code generation", () => {
     expect(python).not.toContain("if (/sign in|log in|login|create account");
   });
 
+  it("does not use broad section/row text alone as a seat-selection hard stop", () => {
+    const python = buildBrowserHarnessPython(EXACT_EVENT, "C:/tmp/stage0b.png");
+    expect(python).toContain("eventPageLike");
+    expect(python).toContain("standard tickets");
+    expect(python).toContain("sec\\\\s+\\\\d+");
+    expect(python).not.toContain("section\\s+\\d+|row\\s+\\w+");
+  });
+
   it("embeds the input URL and screenshot path as quoted literals", () => {
     const python = buildBrowserHarnessPython(EXACT_EVENT, "C:/tmp/with spaces/stage0b.png");
     expect(python).toContain(JSON.stringify(EXACT_EVENT.url));
@@ -108,7 +158,12 @@ describe("Stage 0B Browser Harness bridge code generation", () => {
         ok: true,
         currentUrl: EXACT_EVENT.url,
         screenshotPath: "C:/tmp/stage0b.png",
-        visibleFacts: { title: "Nashville SC", candidate_count: 1 },
+        visibleFacts: {
+          title: "Nashville SC",
+          candidate_count: 1,
+          candidate_labels: ["Nashville SC vs D.C. United May 9, 2026"],
+          candidate_links: ["https://www.ticketmaster.com/foo/event/abc"],
+        },
         followedSafeLink: true,
         followTarget: { text: "Find Tickets", href: "https://www.ticketmaster.com/foo/event/abc" },
         hardStops: ["seat_selection_required", "not-real"],
@@ -117,6 +172,8 @@ describe("Stage 0B Browser Harness bridge code generation", () => {
     ].join("\n"));
     expect(payload.ok).toBe(true);
     expect(payload.visibleFacts?.title).toBe("Nashville SC");
+    expect(payload.visibleFacts?.candidate_labels).toEqual(["Nashville SC vs D.C. United May 9, 2026"]);
+    expect(payload.visibleFacts?.candidate_links).toEqual(["https://www.ticketmaster.com/foo/event/abc"]);
     expect(payload.followedSafeLink).toBe(true);
     expect(payload.followTarget?.text).toBe("Find Tickets");
     expect(payload.hardStops).toEqual(["seat_selection_required"]);
@@ -134,12 +191,29 @@ describe("Stage 0B Browser Harness observations classify into safe next actions"
     expect(classifyStage0BOutcome(EXACT_EVENT, okPayload({ candidate_count: 1 }))).toBe("exact_event_ready");
   });
 
+  it("does not mark exact-event pages ready when the ticket widget never reaches a candidate or hard stop", () => {
+    expect(classifyStage0BOutcome(EXACT_EVENT, okPayload({
+      candidate_count: 0,
+    }))).toBe("skill_patch_needed");
+  });
+
   it("classifies listing pages with one candidate as single_candidate_ready", () => {
     expect(classifyStage0BOutcome(LISTING, okPayload({ candidate_count: 1 }))).toBe("single_candidate_ready");
   });
 
   it("classifies listing pages with multiple candidates as provider_listing_needs_choice", () => {
     expect(classifyStage0BOutcome(LISTING, okPayload({ candidate_count: 4 }))).toBe("provider_listing_needs_choice");
+  });
+
+  it("classifies rendered listing pages with zero extracted candidates as skill_patch_needed", () => {
+    expect(classifyStage0BOutcome(LISTING, okPayload({ candidate_count: 0 }))).toBe("skill_patch_needed");
+  });
+
+  it("does not create a patch proposal for explicit no-events listing pages", () => {
+    expect(classifyStage0BOutcome(LISTING, okPayload({
+      title: "No events found",
+      candidate_count: 0,
+    }))).toBe("provider_listing_needs_choice");
   });
 
   it.each([
@@ -265,6 +339,45 @@ describe("Stage 0B lab result evidence shape", () => {
     });
     expect(result.evidence.final_url).toBe("https://ads.example.com/interstitial");
     expect(result.evidence.final_page_type).toBe("exact_event");
+  });
+
+  it("emits a reviewed patch proposal when candidate extraction needs a skill patch", () => {
+    const { result } = buildStage0BLabResult({
+      entry: LISTING,
+      payload: okPayload({
+        title: "Kacey Musgraves Tickets",
+        candidate_count: 0,
+      }),
+      runId: "00000000-0000-4000-8000-000000000005",
+      eventsPath: ".stage0b-evidence/run/events.jsonl",
+      screenshotPath: ".stage0b-evidence/run/screenshots/tm.png",
+      startedAt: "2026-05-08T00:00:00.000Z",
+      finishedAt: "2026-05-08T00:00:10.000Z",
+    });
+    expect(result.classification).toBe("skill_patch_needed");
+    expect(result.safe_next_action).toBe("review_patch_proposal");
+    expect(result.skill_patch_proposal).toMatchObject({
+      kind: "selector_drift",
+      patch_target: "lib/stage0b-skill-runtime/lab-runner.ts",
+      risk: "medium",
+    });
+  });
+
+  it("emits a reviewed patch proposal for exact-event pages stuck before a ticket boundary", () => {
+    const { result } = buildStage0BLabResult({
+      entry: EXACT_EVENT,
+      payload: okPayload({
+        title: "Nashville SC v D.C. United - Eddi Tagseth Bobblehead Night",
+        candidate_count: 0,
+      }),
+      runId: "00000000-0000-4000-8000-000000000006",
+      eventsPath: ".stage0b-evidence/run/events.jsonl",
+      screenshotPath: ".stage0b-evidence/run/screenshots/tm.png",
+      startedAt: "2026-05-08T00:00:00.000Z",
+      finishedAt: "2026-05-08T00:00:10.000Z",
+    });
+    expect(result.classification).toBe("skill_patch_needed");
+    expect(result.skill_patch_proposal?.observed_evidence).toContain("Nashville SC");
   });
 });
 

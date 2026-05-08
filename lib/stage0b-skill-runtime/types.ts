@@ -91,6 +91,10 @@ export interface LabVisibleFacts {
   visible_times?: string[];
   /** Number of upcoming-event rows / cards rendered on the page. */
   candidate_count?: number;
+  /** Compact visible labels for candidate rows/cards, in page order. */
+  candidate_labels?: string[];
+  /** Provider links associated with visible candidate rows/cards, in page order. */
+  candidate_links?: string[];
   /** Visible price band when it appears as a hint, e.g. "$45 - $250". */
   visible_price_band?: string;
   /** Free-form notes the harness emits ("seat map iframe present"). */
@@ -265,3 +269,5 @@ export interface LabTestPlanEntry {
   /** Reason this fixture exists — what the run should reveal. */
   reason: string;
 }
+
+export type Stage0bLabPlanName = "stage0b" | "ticketmaster-forge";

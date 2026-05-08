@@ -111,7 +111,7 @@ produces a parseable file up to the last completed event.
 |---|---|---|
 | `screenshotPath` | `action === "screenshot"` (required) | Relative path under `.stage0b-evidence/<run_id>/`. |
 | `hardStop` | `action === "halt_at_hard_stop"` (required) | One of the reasons in § 2. |
-| `visible_facts` | optional | Title / performer / city / venue / dates / times / candidate count. Absence = "not observed", NEVER "absent on page". |
+| `visible_facts` | optional | Title / performer / city / venue / dates / times / candidate count / candidate labels / candidate links. Absence = "not observed", NEVER "absent on page". |
 | `notes` | optional | Free-form. |
 
 ### 4.3 LabAction values
@@ -126,7 +126,7 @@ The runner MUST emit at least one `screenshot` event and exactly one
 
 ```jsonl
 {"timestamp":"2026-05-08T10:11:12.345Z","run_id":"7af3-...","seq":1,"provider":"seatgeek","page_type":"exact_event","action":"navigate","currentUrl":"https://seatgeek.com/nashville-sc-tickets/mls/2026-05-09-8-pm/17921493","outcome":"ok"}
-{"timestamp":"2026-05-08T10:11:14.001Z","run_id":"7af3-...","seq":2,"provider":"seatgeek","page_type":"exact_event","action":"screenshot","currentUrl":"https://seatgeek.com/nashville-sc-tickets/mls/2026-05-09-8-pm/17921493","screenshotPath":"01-event-page.png","visible_facts":{"title":"Nashville SC vs Inter Miami","city":"Nashville","venue":"GEODIS Park","visible_dates":["2026-05-09"],"visible_times":["8:00 PM"],"candidate_count":1},"outcome":"ok"}
+{"timestamp":"2026-05-08T10:11:14.001Z","run_id":"7af3-...","seq":2,"provider":"seatgeek","page_type":"exact_event","action":"screenshot","currentUrl":"https://seatgeek.com/nashville-sc-tickets/mls/2026-05-09-8-pm/17921493","screenshotPath":"01-event-page.png","visible_facts":{"title":"Nashville SC vs Inter Miami","city":"Nashville","venue":"GEODIS Park","visible_dates":["2026-05-09"],"visible_times":["8:00 PM"],"candidate_count":1,"candidate_labels":["Nashville SC vs Inter Miami, May 9, 8:00 PM"],"candidate_links":["https://seatgeek.com/nashville-sc-tickets/mls/2026-05-09-8-pm/17921493"]},"outcome":"ok"}
 {"timestamp":"2026-05-08T10:11:16.220Z","run_id":"7af3-...","seq":3,"provider":"seatgeek","page_type":"exact_event","action":"halt_at_hard_stop","currentUrl":"https://seatgeek.com/nashville-sc-tickets/mls/2026-05-09-8-pm/17921493","hardStop":"seat_selection_required","outcome":"halted"}
 {"timestamp":"2026-05-08T10:11:16.500Z","run_id":"7af3-...","seq":4,"provider":"seatgeek","page_type":"exact_event","action":"complete","currentUrl":"https://seatgeek.com/nashville-sc-tickets/mls/2026-05-09-8-pm/17921493","outcome":"ok"}
 ```
@@ -209,9 +209,12 @@ Controlled runner commands:
 
 ```bash
 npx tsx scripts/stage0b-activity-skill-lab-runner.ts --dry-run
+npx tsx scripts/stage0b-activity-skill-lab-runner.ts --dry-run --plan ticketmaster-forge --limit 20
 npx tsx scripts/stage0b-activity-skill-lab-runner.ts --live --provider ticketmaster --limit 10
 npx tsx scripts/stage0b-activity-skill-lab-runner.ts --live --provider seatgeek --limit 10
 npx tsx scripts/stage0b-activity-skill-lab-runner.ts --live --id tm-01
+npx tsx scripts/stage0b-activity-skill-lab-runner.ts --live --plan ticketmaster-forge --id tmf-01 --stop-on-error
+npx tsx scripts/stage0b-activity-skill-lab-runner.ts --live --plan ticketmaster-forge --id tmf-08 --keep-open
 ```
 
 The live runner shells out to the external `browser-harness` CLI. It
@@ -222,8 +225,24 @@ and writes `.stage0b-evidence/<run_id>/events.jsonl` plus `result.json`.
 It is forbidden from typing, filling inputs, pressing keys, or clicking
 login, checkout, payment, or final purchase controls.
 
+By default the live runner closes the lab tab it opened after screenshot and
+JSONL evidence are written. This prevents Chrome tab buildup during 20-case
+runs. Use `--keep-open` only when the operator intentionally wants to inspect
+or continue from the live page after the run. Raw evidence remains the source of
+truth either way.
+
+`--plan stage0b` is the original 10 Ticketmaster + 10 SeatGeek plan.
+`--plan ticketmaster-forge` is the Ticketmaster-only skill-forge plan in
+`lib/stage0b-skill-runtime/ticketmaster-forge-plan.ts`. It contains 20
+Ticketmaster seed URLs across artist, exact event, search, category, and venue
+surfaces. Use it before promoting any Ticketmaster skill rule because it
+exercises the founder-observed artist/listing cases where Onegent must ask the
+user for event/date/time rather than silently choosing.
+
 1. Operator picks a `LabTestPlanEntry` from `STAGE0B_TEST_PLAN`
-   (`lib/stage0b-skill-runtime/test-plan.ts`).
+   (`lib/stage0b-skill-runtime/test-plan.ts`) or from
+   `TICKETMASTER_SKILL_FORGE_PLAN`
+   (`lib/stage0b-skill-runtime/ticketmaster-forge-plan.ts`).
 2. Operator confirms § 3 prerequisites.
 3. Operator calls Browser Harness CLI (external) with the entry's URL.
 4. Harness wrapper writes JSONL events to
@@ -248,6 +267,21 @@ login, checkout, payment, or final purchase controls.
 The plan lives in `lib/stage0b-skill-runtime/test-plan.ts` and is
 double-checked against the URL resolver inside the Stage 0B no-live
 test (`lib/__tests__/stage0b-skill-runtime.test.ts`). The two halves:
+
+For Ticketmaster skill-forge work, use the separate
+`TICKETMASTER_SKILL_FORGE_PLAN`. It is also pinned by no-live tests and is
+selected with `--plan ticketmaster-forge`. Its classifications are stricter
+than the resolver: an exact-event URL is not considered `exact_event_ready`
+until the live lab observes a safe ticket continuation or reaches a known hard
+stop. A loading page, 404, empty ticket widget, or exact-event page with no
+candidate/hard-stop evidence becomes `skill_patch_needed` with a reviewed patch
+proposal instead of a false success.
+
+The runner's hard-stop detector must remain specific. Broad page text such as
+`section` or `row` is not enough to call `user_seat_selection_required`; artist
+and listing pages often contain those words in unrelated event cards. Seat
+selection requires a strong seat-map signal, ticket/seat CTA, or section + row
+context on an actual ticket/seat surface.
 
 ### 7.1 Ticketmaster (10)
 
