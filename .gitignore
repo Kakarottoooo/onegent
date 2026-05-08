@@ -73,4 +73,5 @@ phase1-dev.log
 scripts/ralph/.last-branch
 # Local QA evidence (never commit; per-attempt timestamped logs)
 logs/
+.stage0b-evidence/
 worker.log

@@ -94,8 +94,9 @@ Reasons:
 
 Allowed integration shapes for Stage 0B:
 
-1. **External CLI lab**: `scripts/activity-skill-lab.ts` starts or calls a
-   Browser Harness command and writes structured evidence.
+1. **External CLI lab**:
+   `scripts/stage0b-activity-skill-lab-runner.ts --live` calls the
+   external Browser Harness command and writes structured evidence.
 2. **Thin adapter boundary**: a narrow TypeScript interface that shells out to
    the CLI in dev-only mode.
 3. **No-live skill manifest first**: provider skills can be modeled and tested
@@ -292,7 +293,7 @@ Owner: Claude or activity-focused side agent.
 
 Deliver:
 
-- controlled Browser Harness lab script or runbook,
+- controlled Browser Harness lab script and runbook,
 - 10 Ticketmaster runs,
 - 10 SeatGeek runs,
 - screenshots and JSONL action evidence,

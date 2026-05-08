@@ -205,6 +205,23 @@ The builder enforces this; the runner cannot ship one without the other.
 
 ## 6. Run procedure
 
+Controlled runner commands:
+
+```bash
+npx tsx scripts/stage0b-activity-skill-lab-runner.ts --dry-run
+npx tsx scripts/stage0b-activity-skill-lab-runner.ts --live --provider ticketmaster --limit 10
+npx tsx scripts/stage0b-activity-skill-lab-runner.ts --live --provider seatgeek --limit 10
+npx tsx scripts/stage0b-activity-skill-lab-runner.ts --live --id tm-01
+```
+
+The live runner shells out to the external `browser-harness` CLI. It
+opens the selected URL, waits for load, inspects visible DOM text,
+optionally clicks exactly one safe ticket CTA when the page is an exact
+event or a listing has one candidate, screenshots the resulting page,
+and writes `.stage0b-evidence/<run_id>/events.jsonl` plus `result.json`.
+It is forbidden from typing, filling inputs, pressing keys, or clicking
+login, checkout, payment, or final purchase controls.
+
 1. Operator picks a `LabTestPlanEntry` from `STAGE0B_TEST_PLAN`
    (`lib/stage0b-skill-runtime/test-plan.ts`).
 2. Operator confirms § 3 prerequisites.
@@ -323,6 +340,12 @@ matching no-live fixture. The harness never edits production files.
 ---
 
 ## 10. Browser Harness invocation status for THIS branch
+
+The integrated Stage 0B runner now supports real local `--live` Browser
+Harness execution through `scripts/stage0b-activity-skill-lab-runner.ts`.
+This source tree still commits only code, docs, and no-live tests; raw
+provider evidence is created only when an operator runs the live command
+locally, and that output stays under `.stage0b-evidence/`.
 
 Browser Harness was **not** run in the branch that authored this
 runbook. This file ships the schema, the helpers, the plan, and the
