@@ -181,6 +181,14 @@ describe("Stage 0B Browser Harness observations classify into safe next actions"
       candidate_count: 0,
     }))).toBe("provider_degraded");
   });
+
+  it("provider error pages beat false hard-stop text matches", () => {
+    expect(classifyStage0BOutcome(EXACT_EVENT, okPayload({
+      title: "PAGE NOT FOUND",
+      candidate_count: 0,
+      hardStops: ["seat_selection_required"],
+    }))).toBe("provider_degraded");
+  });
 });
 
 describe("Stage 0B lab result evidence shape", () => {

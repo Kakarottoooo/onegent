@@ -420,6 +420,9 @@ export function classifyStage0BOutcome(
   if (!payload.ok) {
     return "provider_degraded";
   }
+  if (payload.visibleFacts && looksLikeProviderErrorPage(payload.visibleFacts)) {
+    return "provider_degraded";
+  }
   const hardStop = firstHardStop(payload.hardStops);
   if (hardStop === "login_or_signin_wall" || hardStop === "otp_or_phone_verification") {
     return "account_session_required";
@@ -435,9 +438,6 @@ export function classifyStage0BOutcome(
   }
   if (!payload.visibleFacts || !payload.screenshotPath) {
     return "insufficient_evidence";
-  }
-  if (looksLikeProviderErrorPage(payload.visibleFacts)) {
-    return "provider_degraded";
   }
   if (entry.expected_resolver_execution_mode === "direct_execution") {
     return "exact_event_ready";
