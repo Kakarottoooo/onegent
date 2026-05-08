@@ -80,6 +80,13 @@ describe("Stage 0B Browser Harness bridge code generation", () => {
     expect(python).not.toMatch(/type_text|fill_input|press_key/);
   });
 
+  it("attempts screenshot and page_info capture even on Browser Harness exceptions", () => {
+    const python = buildBrowserHarnessPython(EXACT_EVENT, "C:/tmp/stage0b.png");
+    expect(python).toContain("except Exception as exc:");
+    expect(python).toContain("captured = capture_screenshot(screenshot_path, full=True)");
+    expect(python).toContain("info = page_info()");
+  });
+
   it("does not treat ordinary header Sign In/Register text as an account wall", () => {
     const python = buildBrowserHarnessPython(EXACT_EVENT, "C:/tmp/stage0b.png");
     expect(python).toContain("passwordFieldVisible");
@@ -162,6 +169,17 @@ describe("Stage 0B Browser Harness observations classify into safe next actions"
 
   it("classifies Browser Harness errors as provider_degraded", () => {
     expect(classifyStage0BOutcome(EXACT_EVENT, { ok: false, error: "CDP disconnected" })).toBe("provider_degraded");
+  });
+
+  it.each([
+    "PAGE NOT FOUND",
+    "Well, this isn't right",
+    "Something went wrong",
+  ])("classifies provider error title %s as provider_degraded, not exact_event_ready", (title) => {
+    expect(classifyStage0BOutcome(EXACT_EVENT, okPayload({
+      title,
+      candidate_count: 0,
+    }))).toBe("provider_degraded");
   });
 });
 

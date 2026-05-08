@@ -251,7 +251,22 @@ export function buildBrowserHarnessPython(entry: LabTestPlanEntry, screenshotPat
     "        payload.setdefault('currentUrl', info.get('url'))",
     "        payload.setdefault('title', info.get('title'))",
     "except Exception as exc:",
+    "    captured = None",
+    "    info = {}",
+    "    try:",
+    "        captured = capture_screenshot(screenshot_path, full=True)",
+    "    except Exception:",
+    "        captured = None",
+    "    try:",
+    "        info = page_info()",
+    "    except Exception:",
+    "        info = {}",
     "    payload = {'ok': False, 'error': str(exc), 'traceback': traceback.format_exc()}",
+    "    if captured:",
+    "        payload['screenshotPath'] = captured",
+    "    if isinstance(info, dict):",
+    "        payload['currentUrl'] = info.get('url')",
+    "        payload['title'] = info.get('title')",
     `print(${pythonString(SENTINEL_START)})`,
     "print(json.dumps(payload, ensure_ascii=False))",
     `print(${pythonString(SENTINEL_END)})`,
@@ -421,6 +436,9 @@ export function classifyStage0BOutcome(
   if (!payload.visibleFacts || !payload.screenshotPath) {
     return "insufficient_evidence";
   }
+  if (looksLikeProviderErrorPage(payload.visibleFacts)) {
+    return "provider_degraded";
+  }
   if (entry.expected_resolver_execution_mode === "direct_execution") {
     return "exact_event_ready";
   }
@@ -537,6 +555,13 @@ function normalizePayload(value: unknown): BrowserHarnessPayload {
     error: typeof record.error === "string" ? record.error : undefined,
     traceback: typeof record.traceback === "string" ? record.traceback : undefined,
   };
+}
+
+function looksLikeProviderErrorPage(visibleFacts: LabVisibleFacts): boolean {
+  const title = visibleFacts.title?.trim().toLowerCase() || "";
+  const notes = visibleFacts.notes?.join(" ").toLowerCase() || "";
+  const haystack = `${title} ${notes}`;
+  return /page not found|404|not found|well,\s*this isn't right|something went wrong|try again later/.test(haystack);
 }
 
 function normalizeVisibleFacts(record: Record<string, unknown>): LabVisibleFacts {
