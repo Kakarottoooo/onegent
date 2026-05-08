@@ -7,6 +7,7 @@ export type TravelLinkProvider =
   | "stubhub"
   | "seatgeek"
   | "eventbrite"
+  | "axs"
   | "unknown";
 
 export type TravelLinkPageType =
@@ -23,6 +24,10 @@ export type TravelLinkExecutionMode =
   | "provider_start"
   | "review_capture";
 
+export type TravelLinkHardStop =
+  | "seat_selection_login_payment_or_final_confirmation"
+  | "review_only_no_execution";
+
 export interface ResolvedTravelLink {
   original_url: string;
   normalized_url: string;
@@ -36,6 +41,7 @@ export interface ResolvedTravelLink {
   execution_mode: TravelLinkExecutionMode;
   needs_user_choice: boolean;
   safe_next_action: "start_task" | "review_capture";
+  hard_stop: TravelLinkHardStop;
   evidence: {
     source: "url_pattern";
     matched_pattern: string;
@@ -65,15 +71,20 @@ const KNOWN_ACTIVITY_HOSTS: Array<{
   { provider: "stubhub", hosts: ["stubhub.com"] },
   { provider: "seatgeek", hosts: ["seatgeek.com"] },
   { provider: "eventbrite", hosts: ["eventbrite.com"] },
+  { provider: "axs", hosts: ["axs.com"] },
 ];
 
 const EVENT_ID_RE = /\/event\/([A-Za-z0-9_-]+)/i;
 const ARTIST_ID_RE = /\/artist\/([A-Za-z0-9_-]+)/i;
 const STUBHUB_PERFORMER_RE = /\/performer\/([A-Za-z0-9_-]+)/i;
 const STUBHUB_GROUPING_RE = /\/grouping\/([A-Za-z0-9_-]+)/i;
+const STUBHUB_EVENT_RE = /\/event\/([A-Za-z0-9_-]+)/i;
 const SEATGEEK_EVENT_ID_RE = /\/(?:[^/?#]+\/)*([0-9]{5,})(?:[/?#]|$)/i;
 const SEATGEEK_DATE_SEGMENT_RE = /\b20\d{2}-\d{2}-\d{2}(?:-\d{1,2}(?:-\d{2})?-(?:am|pm))?\b/i;
 const EVENTBRITE_EVENT_RE = /\/e\/.+?(?:tickets-)?([0-9]{5,})(?:[/?#]|$)/i;
+const EVENTBRITE_ORGANIZER_RE = /\/o\/(?:[^/?#]+-)?([0-9]{5,})(?:[/?#]|$)/i;
+const AXS_EVENT_RE = /\/events\/([A-Za-z0-9_-]+)/i;
+const AXS_ARTIST_RE = /\/artists\/([A-Za-z0-9_-]+)/i;
 
 export function resolveTravelLinkFromUrl(value: unknown): ResolvedTravelLink | null {
   const parsed = normalizeTravelUrl(value);
@@ -91,6 +102,7 @@ export function resolveTravelLinkFromUrl(value: unknown): ResolvedTravelLink | n
       execution_mode: "review_capture",
       needs_user_choice: true,
       safe_next_action: "review_capture",
+      hard_stop: "review_only_no_execution",
       evidence: {
         source: "url_pattern",
         matched_pattern: "unknown_host",
@@ -109,6 +121,9 @@ export function resolveTravelLinkFromUrl(value: unknown): ResolvedTravelLink | n
   }
   if (provider.provider === "eventbrite") {
     return resolveEventbrite(parsed, provider.provider);
+  }
+  if (provider.provider === "axs") {
+    return resolveAxs(parsed, provider.provider);
   }
   return null;
 }
@@ -214,6 +229,22 @@ function resolveStubHub(
   parsed: NonNullable<ReturnType<typeof normalizeTravelUrl>>,
   provider: "stubhub",
 ): ResolvedTravelLink {
+  const eventMatch = parsed.pathname.match(STUBHUB_EVENT_RE);
+  if (eventMatch?.[1]) {
+    return activityLink({
+      parsed,
+      provider,
+      pageType: "exact_event",
+      providerPageId: eventMatch[1],
+      normalizedUrl: cleanUrlThroughMarker(parsed, "event", eventMatch[1]),
+      titleHint: titleHintBeforeMarker(parsed.pathname, "event"),
+      confidence: 0.86,
+      executionMode: "direct_execution",
+      needsUserChoice: false,
+      matchedPattern: "stubhub_event",
+    });
+  }
+
   const performerMatch = parsed.pathname.match(STUBHUB_PERFORMER_RE);
   if (performerMatch?.[1]) {
     return activityLink({
@@ -285,6 +316,7 @@ function resolveEventbrite(
   parsed: NonNullable<ReturnType<typeof normalizeTravelUrl>>,
   provider: "eventbrite",
 ): ResolvedTravelLink {
+  const segments = pathSegments(parsed.pathname);
   const eventMatch = parsed.pathname.match(EVENTBRITE_EVENT_RE);
   if (eventMatch?.[1]) {
     return activityLink({
@@ -299,7 +331,112 @@ function resolveEventbrite(
       matchedPattern: "eventbrite_event",
     });
   }
+
+  const organizerMatch = parsed.pathname.match(EVENTBRITE_ORGANIZER_RE);
+  if (organizerMatch?.[1]) {
+    return activityLink({
+      parsed,
+      provider,
+      pageType: "provider_listing",
+      providerPageId: organizerMatch[1],
+      titleHint: titleHintBeforeMarker(parsed.pathname, "o"),
+      confidence: 0.76,
+      executionMode: "provider_start",
+      needsUserChoice: true,
+      matchedPattern: "eventbrite_organizer",
+    });
+  }
+
+  const firstSegment = segments[0]?.toLowerCase();
+  if (firstSegment === "search") {
+    return activityLink({
+      parsed,
+      provider,
+      pageType: "search_results",
+      providerPageId: "search",
+      titleHint: "Eventbrite Search",
+      confidence: 0.62,
+      executionMode: "provider_start",
+      needsUserChoice: true,
+      matchedPattern: "eventbrite_search",
+    });
+  }
+
+  if (firstSegment === "d" || firstSegment === "b") {
+    const pageId = segments.slice(1).join("/") || firstSegment;
+    const titleSource =
+      segments
+        .slice()
+        .reverse()
+        .find((segment) => !/^(events?|tickets?)$/i.test(segment)) ?? firstSegment;
+    return activityLink({
+      parsed,
+      provider,
+      pageType: "provider_listing",
+      providerPageId: pageId,
+      titleHint: titleizeTravelSlug(titleSource),
+      confidence: 0.72,
+      executionMode: "provider_start",
+      needsUserChoice: true,
+      matchedPattern: "eventbrite_city_category_listing",
+    });
+  }
+
   return genericActivityLink(parsed, provider, "eventbrite_provider_listing");
+}
+
+function resolveAxs(
+  parsed: NonNullable<ReturnType<typeof normalizeTravelUrl>>,
+  provider: "axs",
+): ResolvedTravelLink {
+  const eventMatch = parsed.pathname.match(AXS_EVENT_RE);
+  if (eventMatch?.[1]) {
+    return activityLink({
+      parsed,
+      provider,
+      pageType: "exact_event",
+      providerPageId: eventMatch[1],
+      normalizedUrl: cleanUrlThroughMarker(parsed, "events", eventMatch[1]),
+      titleHint: titleHintAfterMarkerId(parsed.pathname, "events"),
+      confidence: 0.88,
+      executionMode: "direct_execution",
+      needsUserChoice: false,
+      matchedPattern: "axs_event",
+    });
+  }
+
+  const artistMatch = parsed.pathname.match(AXS_ARTIST_RE);
+  if (artistMatch?.[1]) {
+    return activityLink({
+      parsed,
+      provider,
+      pageType: "artist",
+      providerPageId: artistMatch[1],
+      normalizedUrl: cleanUrlThroughMarker(parsed, "artists", artistMatch[1]),
+      titleHint: titleHintAfterMarkerId(parsed.pathname, "artists"),
+      confidence: 0.82,
+      executionMode: "provider_start",
+      needsUserChoice: true,
+      matchedPattern: "axs_artist",
+    });
+  }
+
+  const segments = pathSegments(parsed.pathname);
+  if (segments[0]?.toLowerCase() === "search") {
+    return activityLink({
+      parsed,
+      provider,
+      pageType: "search_results",
+      providerPageId: "search",
+      titleHint: "AXS Search",
+      confidence: 0.62,
+      executionMode: "provider_start",
+      needsUserChoice: true,
+      matchedPattern: "axs_search",
+    });
+  }
+
+  return genericActivityLink(parsed, provider, "axs_provider_listing");
 }
 
 function genericActivityLink(
@@ -346,6 +483,7 @@ function activityLink(input: {
     execution_mode: input.executionMode,
     needs_user_choice: input.needsUserChoice,
     safe_next_action: "start_task",
+    hard_stop: "seat_selection_login_payment_or_final_confirmation",
     evidence: {
       source: "url_pattern",
       matched_pattern: input.matchedPattern,
@@ -381,6 +519,13 @@ function titleHintBeforeMarker(pathname: string, marker: string): string {
   const segments = pathSegments(pathname);
   const markerIndex = segments.findIndex((segment) => segment.toLowerCase() === marker.toLowerCase());
   const source = markerIndex > 0 ? segments[markerIndex - 1] : segments[0] ?? "";
+  return titleizeTravelSlug(source);
+}
+
+function titleHintAfterMarkerId(pathname: string, marker: string): string {
+  const segments = pathSegments(pathname);
+  const markerIndex = segments.findIndex((segment) => segment.toLowerCase() === marker.toLowerCase());
+  const source = markerIndex >= 0 ? segments[markerIndex + 2] ?? "" : segments[0] ?? "";
   return titleizeTravelSlug(source);
 }
 
