@@ -21,11 +21,14 @@
 import type { BookingJob, BookingJobStep, DecisionLogEntry } from "@/lib/db";
 import {
   DEFAULT_JOB_POLICY,
+  type ActivityConstraintsPlaceholder,
   type JobConstraints,
   type JobModificationPatch,
   type JobPolicy,
   type RestaurantConstraints,
 } from "./types";
+import { buildDirectActivityTask } from "@/lib/capture/direct-provider-url";
+import { stepNeedsProviderEventChoice } from "@/lib/booking-jobs/provider-choice";
 
 // ─── Errors ─────────────────────────────────────────────────────────────────
 
@@ -67,9 +70,20 @@ function validatePatch(patch: JobModificationPatch): void {
     if (c.date !== undefined && (typeof c.date !== "string" || !ISO_DATE_RE.test(c.date))) {
       throw new ModifyValidationError("patch.constraints.date must be YYYY-MM-DD");
     }
+    if (c.event_date !== undefined && (typeof c.event_date !== "string" || !ISO_DATE_RE.test(c.event_date))) {
+      throw new ModifyValidationError("patch.constraints.event_date must be YYYY-MM-DD");
+    }
+    if (c.event_time !== undefined && (typeof c.event_time !== "string" || !HHMM_RE.test(c.event_time))) {
+      throw new ModifyValidationError("patch.constraints.event_time must be HH:MM (24h)");
+    }
     if (c.party_size !== undefined) {
       if (typeof c.party_size !== "number" || !Number.isInteger(c.party_size) || c.party_size < 1 || c.party_size > 20) {
         throw new ModifyValidationError("patch.constraints.party_size must be an integer 1-20");
+      }
+    }
+    if (c.num_tickets !== undefined) {
+      if (typeof c.num_tickets !== "number" || !Number.isInteger(c.num_tickets) || c.num_tickets < 1 || c.num_tickets > 20) {
+        throw new ModifyValidationError("patch.constraints.num_tickets must be an integer 1-20");
       }
     }
     if (c.city !== undefined && typeof c.city !== "string") {
@@ -104,6 +118,8 @@ function assertModifiableState(job: BookingJob): void {
     );
   }
   if (job.status === "done") {
+    const hasProviderEventChoice = job.steps.some(stepNeedsProviderEventChoice);
+    if (hasProviderEventChoice) return;
     throw new ModifyForbiddenStateError(
       job.status,
       "Job is already completed. Create a new task instead.",
@@ -130,6 +146,50 @@ export function deriveRestaurantConstraintsFromStep(
     restaurant_name:
       typeof body.restaurantName === "string" ? body.restaurantName : "",
   };
+}
+
+export function deriveActivityConstraintsFromStep(
+  step: BookingJobStep | undefined,
+): ActivityConstraintsPlaceholder {
+  const body = (step?.body ?? {}) as Record<string, unknown>;
+  const eventName =
+    typeof body.event_name === "string" ? body.event_name :
+    typeof body.activity_name === "string" ? body.activity_name :
+    typeof body.eventName === "string" ? body.eventName :
+    typeof body.title === "string" ? body.title :
+    typeof step?.label === "string" ? step.label : "";
+  const eventDate =
+    typeof body.event_date === "string" ? body.event_date :
+    typeof body.eventDate === "string" ? body.eventDate :
+    typeof body.date === "string" ? body.date : "";
+  const eventTime =
+    typeof body.event_time === "string" ? body.event_time :
+    typeof body.eventTime === "string" ? body.eventTime :
+    typeof body.time === "string" ? body.time : "";
+  const city = typeof body.city === "string" ? body.city : "";
+  const numTickets = typeof body.num_tickets === "number" ? body.num_tickets :
+    typeof body.numTickets === "number" ? body.numTickets :
+    typeof body.tickets === "number" ? body.tickets : 1;
+
+  return {
+    task_type: "activity_booking",
+    event_name: eventName,
+    event_date: eventDate,
+    event_time: eventTime,
+    city,
+    num_tickets: numTickets,
+    ...(typeof body.provider === "string" ? { provider: body.provider } : {}),
+    ...(typeof body.provider_page_type === "string" ? { provider_page_type: body.provider_page_type } : {}),
+    ...(typeof body.startUrl === "string" ? { startUrl: body.startUrl } : {}),
+  };
+}
+
+function deriveConstraintsFromJob(job: BookingJob): JobConstraints {
+  const first = job.steps?.[0];
+  if (first?.type === "activity") {
+    return deriveActivityConstraintsFromStep(first) as JobConstraints;
+  }
+  return deriveRestaurantConstraintsFromStep(first) as JobConstraints;
 }
 
 function derivePolicyFromAutonomy(
@@ -165,6 +225,64 @@ function mirrorRestaurantConstraintsToBody(
   return { ...step, body };
 }
 
+function mirrorActivityConstraintsToBody(
+  step: BookingJobStep,
+  c: ActivityConstraintsPlaceholder,
+): BookingJobStep {
+  const body = { ...(step.body as Record<string, unknown>) };
+  const eventName = readString(c.event_name) ?? readString(body.event_name) ?? readString(body.activity_name) ?? step.label;
+  const eventDate = readString(c.event_date);
+  const eventTime = readString(c.event_time);
+  const city = readString(c.city);
+  const numTickets = readNumber(c.num_tickets);
+  const provider = readString(c.provider) ?? readString(body.provider) ?? "ticketmaster";
+  const pageType = readString(c.provider_page_type) ?? readString(body.provider_page_type);
+  const providerUrl = readString(c.startUrl) ?? readString(body.startUrl) ?? readString(body.fallbackUrl);
+
+  if (eventName) {
+    body.event_name = eventName;
+    body.activity_name = eventName;
+  }
+  if (eventDate) {
+    body.event_date = eventDate;
+    body.date = eventDate;
+  }
+  if (eventTime) {
+    body.event_time = eventTime;
+    body.time = eventTime;
+  }
+  if (city) body.city = city;
+  if (numTickets) body.num_tickets = numTickets;
+  if (providerUrl && eventName) {
+    const baseTask = buildDirectActivityTask({
+      eventName,
+      eventDate,
+      numTickets: numTickets ?? readNumber(body.num_tickets) ?? 1,
+      providerUrl,
+      provider: provider as Parameters<typeof buildDirectActivityTask>[0]["provider"],
+      pageType: pageType as Parameters<typeof buildDirectActivityTask>[0]["pageType"],
+    });
+    const choiceDetails = [
+      eventDate ? `date ${eventDate}` : null,
+      eventTime ? `time ${eventTime}` : null,
+      city ? `city ${city}` : null,
+    ].filter(Boolean).join(", ");
+    body.task = choiceDetails
+      ? `${baseTask} The user selected ${choiceDetails}; use that to choose the provider-rendered listing.`
+      : baseTask;
+  }
+
+  return { ...step, body };
+}
+
+function readString(value: unknown): string | undefined {
+  return typeof value === "string" && value.trim() ? value.trim() : undefined;
+}
+
+function readNumber(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isFinite(value) ? value : undefined;
+}
+
 // ─── Audit log entry ────────────────────────────────────────────────────────
 
 function summarisePatch(patch: JobModificationPatch): string {
@@ -173,7 +291,10 @@ function summarisePatch(patch: JobModificationPatch): string {
   if (c) {
     if (c.time !== undefined) parts.push(`time → ${c.time}`);
     if (c.date !== undefined) parts.push(`date → ${c.date}`);
+    if (c.event_date !== undefined) parts.push(`event_date → ${c.event_date}`);
+    if (c.event_time !== undefined) parts.push(`event_time → ${c.event_time}`);
     if (c.party_size !== undefined) parts.push(`party_size → ${c.party_size}`);
+    if (c.num_tickets !== undefined) parts.push(`num_tickets → ${c.num_tickets}`);
     if (c.restaurant_name !== undefined) parts.push(`restaurant → ${c.restaurant_name}`);
     if (c.city !== undefined) parts.push(`city → ${c.city}`);
   }
@@ -208,7 +329,7 @@ export function applyJobModification(
   // Seed constraints / policy if the job is a legacy row with nulls.
   const currentConstraints =
     job.constraints ??
-    (deriveRestaurantConstraintsFromStep(job.steps?.[0]) as JobConstraints);
+    deriveConstraintsFromJob(job);
   const currentPolicy = job.policy ?? derivePolicyFromAutonomy(job.autonomy_settings);
 
   // Merge.
@@ -240,7 +361,9 @@ export function applyJobModification(
     const mirrored =
       step.type === "restaurant" && nextConstraints.task_type === "restaurant_booking"
         ? mirrorRestaurantConstraintsToBody(step, nextConstraints)
-        : step;
+        : step.type === "activity" && nextConstraints.task_type === "activity_booking"
+          ? mirrorActivityConstraintsToBody(step, nextConstraints)
+          : step;
 
     const baseLog: DecisionLogEntry[] = idx === 0
       ? [...(step.decisionLog ?? []), auditEntry]

@@ -4,7 +4,7 @@ import { useRef, useEffect, useState, useCallback, Suspense } from "react";
 import { useSearchParams } from "next/navigation";
 import dynamic from "next/dynamic";
 import Link from "next/link";
-import type { TravelDocRequest } from "@/components/booking/InlineJobCard";
+import type { ProviderEventChoiceRequest, TravelDocRequest } from "@/components/booking/InlineJobCard";
 import type { InlineTaskWatchState } from "@/components/chat/InlineTaskWatchPanel";
 import type { GapSavePayload } from "@/components/profile-gap/types";
 import {
@@ -928,6 +928,8 @@ function HomeInner() {
   }, []);
   // When set, the next chat message is intercepted as a travel-doc reply
   const [pendingTravelDoc, setPendingTravelDoc] = useState<TravelDocRequest | null>(null);
+  const [pendingProviderEventChoice, setPendingProviderEventChoice] =
+    useState<ProviderEventChoiceRequest | null>(null);
   // Timestamp of last successful travel doc save — blocks re-trigger for 10s
   const travelDocSavedAtRef = useRef<number>(0);
   // NLU conversation history sent to /api/chat/parse. Assistant turns are
@@ -1286,12 +1288,65 @@ function HomeInner() {
     );
   }
 
-  // MentionPicker calls this when user picks "Look up @<handle>" — we resolve
-  // the handle via the public profile endpoint, immediately fire a contact
-  // request, and remember the user_id keyed by lowercase username so the
-  // mention bubbles up as a real user_id even though the request is still
-  // pending. Returns the canonical username so MentionPicker splices it back
-  // into the text (handles case-mismatch). Returns null on 404.
+  // Provider-start activity jobs pause when a provider page needs the user to
+  // pick a concrete date/city/showtime. The next chat turn updates the same job.
+  async function handleProviderEventChoiceReply(text: string, req: ProviderEventChoiceRequest) {
+    chat.injectUserMessage(text);
+    chat.setInput("");
+    chatInputRef.current = "";
+    setNluPending(true);
+
+    try {
+      const modifyRes = await fetch(`/api/booking-jobs/${req.jobId}/continue-choice`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ message: text }),
+      });
+      const modifyData = (await modifyRes.json().catch(() => null)) as
+        | { question?: string; error?: string; parsed?: { event_date?: string; event_time?: string; city?: string } }
+        | null;
+
+      if (modifyRes.status === 422) {
+        chat.injectAssistantMessage(
+          modifyData?.question ??
+            "Which date should I use for this provider page? You can reply like \"Sep 17 7pm Detroit\".",
+        );
+        return;
+      }
+      if (!modifyRes.ok) {
+        chat.injectAssistantMessage(
+          modifyData?.error ??
+            "I couldn't update that task yet. Please reply with the event date, city, and showtime.",
+        );
+        return;
+      }
+
+      setPendingProviderEventChoice(null);
+      const parsed = modifyData?.parsed;
+      const details = [
+        parsed?.event_date,
+        parsed?.event_time,
+        parsed?.city,
+      ].filter(Boolean).join(" ");
+      chat.injectAssistantMessage(
+        details
+          ? `Got it — using ${details}. I’ll continue the same task and stop before seat selection, login, payment, or final confirmation.`
+          : "Got it — I’ll continue the same task and stop before seat selection, login, payment, or final confirmation.",
+      );
+      void fetch(`/api/booking-jobs/${req.jobId}/start?executor=inline`, { method: "POST" }).catch(() => {});
+      setInlineItems((prev) =>
+        prev.some((item) => item.jobId === req.jobId) ? prev : [...prev, { type: "job", jobId: req.jobId }],
+      );
+      setSidebarReloadTick((n) => n + 1);
+    } catch {
+      chat.injectAssistantMessage("Network error continuing that task. Please try again.");
+    } finally {
+      setNluPending(false);
+    }
+  }
+
+  // MentionPicker resolves "@handle" into a real user id and stages the
+  // contact invite so downstream confirm-card commits can use deterministic ids.
   async function handleMentionLookup(rawHandle: string): Promise<{
     user_id: string;
     username: string;
@@ -1351,6 +1406,10 @@ function HomeInner() {
     // If we're waiting for travel doc info, intercept the message
     if (pendingTravelDoc) {
       handleTravelDocReply(text, pendingTravelDoc);
+      return;
+    }
+    if (pendingProviderEventChoice) {
+      handleProviderEventChoiceReply(text, pendingProviderEventChoice);
       return;
     }
 
@@ -4429,6 +4488,13 @@ function HomeInner() {
                               "To book this flight, I need your travel documents. Could you please share your **date of birth** (YYYY-MM-DD) and **passport number**? For example: \"2001-09-05, passport EJ2676174\""
                             );
                           }}
+                          onNeedsProviderEventChoice={(req) => {
+                            setPendingProviderEventChoice(req);
+                            chat.injectAssistantMessage(
+                              req.message ||
+                                "Which event date, city, and showtime should I use from this provider page?",
+                            );
+                          }}
                         />
                       ) : null
                     )}
@@ -4596,7 +4662,7 @@ function HomeInner() {
           {/* New chat button — only show when there's conversation history */}
           {hasMessages && (
             <button
-              onClick={() => { chat.clearChat(); setInlineItems([]); setPendingTravelDoc(null); nluHistoryRef.current = []; lastNluStateRef.current = null; }}
+              onClick={() => { chat.clearChat(); setInlineItems([]); setPendingTravelDoc(null); setPendingProviderEventChoice(null); nluHistoryRef.current = []; lastNluStateRef.current = null; }}
               title="Start a new conversation"
               className="chat-newchat"
               aria-label="Start a new conversation"
@@ -4627,6 +4693,8 @@ function HomeInner() {
                 ? "Listening..."
                 : pendingTravelDoc
                 ? "e.g. 2001-09-05, passport EJ2676174"
+                : pendingProviderEventChoice
+                ? "e.g. Sep 17 7pm Detroit"
                 : hasMessages
                 ? "Refine: 'more quiet', 'cheaper options'..."
                 : "Describe what you're looking for... (type @ to tag a contact)"

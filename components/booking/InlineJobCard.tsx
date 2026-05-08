@@ -168,11 +168,19 @@ export interface TravelDocRequest {
   profileId: number;
 }
 
+export interface ProviderEventChoiceRequest {
+  jobId: string;
+  tripLabel: string;
+  message: string;
+}
+
 interface InlineJobCardProps {
   jobId: string;
   sourceSessionId?: string | null;
   /** Called once when a travel-doc error is detected, so page can ask in chat */
   onNeedsTravelDocs?: (req: TravelDocRequest) => void;
+  /** Called when a provider-start activity task needs date/city/showtime in chat */
+  onNeedsProviderEventChoice?: (req: ProviderEventChoiceRequest) => void;
   /** Called when the job is deleted (manually or 404) so the parent can remove it */
   onDeleted?: (jobId: string) => void;
   /** Opens the in-page task observer without navigating away from chat/results */
@@ -183,6 +191,7 @@ export default function InlineJobCard({
   jobId,
   sourceSessionId,
   onNeedsTravelDocs,
+  onNeedsProviderEventChoice,
   onDeleted,
   onWatch,
 }: InlineJobCardProps) {
@@ -191,6 +200,7 @@ export default function InlineJobCard({
   const [deleting, setDeleting] = useState(false);
   const [resetting, setResetting] = useState(false);
   const travelDocNotifiedRef = useRef(false);
+  const providerChoiceNotifiedRef = useRef<string | null>(null);
   const pollRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   function schedulePoll(delay: number) {
@@ -219,6 +229,22 @@ export default function InlineJobCard({
             onNeedsTravelDocs({ jobId, profileId });
           }
         }
+      }
+
+      const choiceStep = data.job.steps.find((s) => getProviderEventChoiceActionItem(s));
+      const choiceAction = choiceStep ? getProviderEventChoiceActionItem(choiceStep) : undefined;
+      if (choiceAction?.message && onNeedsProviderEventChoice) {
+        const notifyKey = `${data.job.plan_version}:${choiceAction.message}`;
+        if (providerChoiceNotifiedRef.current !== notifyKey) {
+          providerChoiceNotifiedRef.current = notifyKey;
+          onNeedsProviderEventChoice({
+            jobId,
+            tripLabel: data.job.trip_label,
+            message: choiceAction.message,
+          });
+        }
+      } else {
+        providerChoiceNotifiedRef.current = null;
       }
 
       const terminal = data.job.status === "done" || data.job.status === "failed";

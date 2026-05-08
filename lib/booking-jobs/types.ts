@@ -68,7 +68,7 @@ export interface JobPolicy {
 
 export interface JobModificationPatch {
   /** Partial constraints — only listed keys overwrite. */
-  constraints?: Partial<RestaurantConstraints>;
+  constraints?: Record<string, unknown>;
   /** Partial policy — only listed keys overwrite. */
   policy?: Partial<JobPolicy>;
   /** Optional human-readable note for the audit log. */
