@@ -15,6 +15,9 @@ describe("Stage 0 operator report", () => {
     expect(report.capture.summary.total).toBe(200);
     expect(report.internalBenchmark.summary.total).toBe(200);
     expect(report.layeredBenchmark.summary.total).toBe(50);
+    expect(report.activitySkillReadiness.summary.totalFixtures).toBe(145);
+    expect(report.activitySkillReadiness.summary.noLiveGatePass).toBe(true);
+    expect(report.activitySkillReadiness.summary.controlledLabRuns).toBe(0);
     expect(report.privateAlpha.summary.total).toBe(3);
     expect(report.agentIntake.summary.total).toBe(5);
     expect(report.performance.totalEndpoints).toBeGreaterThan(0);
@@ -41,6 +44,7 @@ describe("Stage 0 operator report", () => {
     );
     expect(markdown).toContain("# Stage 0 Operator Report");
     expect(markdown).toContain("## Capture Benchmark");
+    expect(markdown).toContain("## Activity Skill Runtime");
     expect(markdown).toContain("## Private Alpha Intake");
     expect(markdown).toContain("## Agent Intake");
     expect(markdown).toContain("## Performance Measurement");

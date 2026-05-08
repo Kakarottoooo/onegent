@@ -7,6 +7,7 @@ export type TravelLinkProvider =
   | "stubhub"
   | "seatgeek"
   | "eventbrite"
+  | "axs"
   | "unknown";
 
 export type TravelLinkPageType =
@@ -65,6 +66,7 @@ const KNOWN_ACTIVITY_HOSTS: Array<{
   { provider: "stubhub", hosts: ["stubhub.com"] },
   { provider: "seatgeek", hosts: ["seatgeek.com"] },
   { provider: "eventbrite", hosts: ["eventbrite.com"] },
+  { provider: "axs", hosts: ["axs.com"] },
 ];
 
 const EVENT_ID_RE = /\/event\/([A-Za-z0-9_-]+)/i;
@@ -74,6 +76,9 @@ const STUBHUB_GROUPING_RE = /\/grouping\/([A-Za-z0-9_-]+)/i;
 const SEATGEEK_EVENT_ID_RE = /\/(?:[^/?#]+\/)*([0-9]{5,})(?:[/?#]|$)/i;
 const SEATGEEK_DATE_SEGMENT_RE = /\b20\d{2}-\d{2}-\d{2}(?:-\d{1,2}(?:-\d{2})?-(?:am|pm))?\b/i;
 const EVENTBRITE_EVENT_RE = /\/e\/.+?(?:tickets-)?([0-9]{5,})(?:[/?#]|$)/i;
+const AXS_EVENT_RE = /\/events\/([A-Za-z0-9_-]+)/i;
+const AXS_ARTIST_RE = /\/artists\/([A-Za-z0-9_-]+)/i;
+const AXS_SERIES_RE = /\/series\/([A-Za-z0-9_-]+)/i;
 
 export function resolveTravelLinkFromUrl(value: unknown): ResolvedTravelLink | null {
   const parsed = normalizeTravelUrl(value);
@@ -109,6 +114,9 @@ export function resolveTravelLinkFromUrl(value: unknown): ResolvedTravelLink | n
   }
   if (provider.provider === "eventbrite") {
     return resolveEventbrite(parsed, provider.provider);
+  }
+  if (provider.provider === "axs") {
+    return resolveAxs(parsed, provider.provider);
   }
   return null;
 }
@@ -302,6 +310,75 @@ function resolveEventbrite(
   return genericActivityLink(parsed, provider, "eventbrite_provider_listing");
 }
 
+function resolveAxs(
+  parsed: NonNullable<ReturnType<typeof normalizeTravelUrl>>,
+  provider: "axs",
+): ResolvedTravelLink {
+  const eventMatch = parsed.pathname.match(AXS_EVENT_RE);
+  if (eventMatch?.[1]) {
+    return activityLink({
+      parsed,
+      provider,
+      pageType: "exact_event",
+      providerPageId: eventMatch[1],
+      normalizedUrl: cleanUrlThroughMarker(parsed, "events", eventMatch[1]),
+      titleHint: titleHintAfterMarkerId(parsed.pathname, "events"),
+      confidence: 0.84,
+      executionMode: "direct_execution",
+      needsUserChoice: false,
+      matchedPattern: "axs_event",
+    });
+  }
+
+  const artistMatch = parsed.pathname.match(AXS_ARTIST_RE);
+  if (artistMatch?.[1]) {
+    return activityLink({
+      parsed,
+      provider,
+      pageType: "artist",
+      providerPageId: artistMatch[1],
+      normalizedUrl: cleanUrlThroughMarker(parsed, "artists", artistMatch[1]),
+      titleHint: titleHintAfterMarkerId(parsed.pathname, "artists"),
+      confidence: 0.78,
+      executionMode: "provider_start",
+      needsUserChoice: true,
+      matchedPattern: "axs_artist",
+    });
+  }
+
+  const seriesMatch = parsed.pathname.match(AXS_SERIES_RE);
+  if (seriesMatch?.[1]) {
+    return activityLink({
+      parsed,
+      provider,
+      pageType: "grouping",
+      providerPageId: seriesMatch[1],
+      normalizedUrl: cleanUrlThroughMarker(parsed, "series", seriesMatch[1]),
+      titleHint: titleHintAfterMarkerId(parsed.pathname, "series"),
+      confidence: 0.74,
+      executionMode: "provider_start",
+      needsUserChoice: true,
+      matchedPattern: "axs_series",
+    });
+  }
+
+  if (pathSegments(parsed.pathname)[0]?.toLowerCase() === "search") {
+    return activityLink({
+      parsed,
+      provider,
+      pageType: "search_results",
+      providerPageId: "search",
+      titleHint: "AXS Search",
+      confidence: 0.62,
+      executionMode: "provider_start",
+      needsUserChoice: true,
+      matchedPattern: "axs_search",
+    });
+  }
+
+  return genericActivityLink(parsed, provider, "axs_provider_listing");
+}
+
 function genericActivityLink(
   parsed: NonNullable<ReturnType<typeof normalizeTravelUrl>>,
   provider: Exclude<TravelLinkProvider, "unknown">,
@@ -381,6 +458,13 @@ function titleHintBeforeMarker(pathname: string, marker: string): string {
   const segments = pathSegments(pathname);
   const markerIndex = segments.findIndex((segment) => segment.toLowerCase() === marker.toLowerCase());
   const source = markerIndex > 0 ? segments[markerIndex - 1] : segments[0] ?? "";
+  return titleizeTravelSlug(source);
+}
+
+function titleHintAfterMarkerId(pathname: string, marker: string): string {
+  const segments = pathSegments(pathname);
+  const markerIndex = segments.findIndex((segment) => segment.toLowerCase() === marker.toLowerCase());
+  const source = markerIndex >= 0 ? segments[markerIndex + 2] ?? "" : segments[0] ?? "";
   return titleizeTravelSlug(source);
 }
 

@@ -89,6 +89,42 @@ describe("resolveTravelLinkFromUrl", () => {
         needs_user_choice: true,
       },
     ],
+    [
+      "AXS exact event",
+      "https://www.axs.com/events/901001/red-rocks-summer-night-tickets",
+      {
+        provider: "axs",
+        page_type: "exact_event",
+        provider_page_id: "901001",
+        title_hint: "Red Rocks Summer Night",
+        execution_mode: "direct_execution",
+        needs_user_choice: false,
+      },
+    ],
+    [
+      "AXS artist",
+      "https://www.axs.com/artists/110001/foo-fighters-tickets",
+      {
+        provider: "axs",
+        page_type: "artist",
+        provider_page_id: "110001",
+        title_hint: "Foo Fighters",
+        execution_mode: "provider_start",
+        needs_user_choice: true,
+      },
+    ],
+    [
+      "AXS search",
+      "https://www.axs.com/search?q=red%20rocks",
+      {
+        provider: "axs",
+        page_type: "search_results",
+        provider_page_id: "search",
+        title_hint: "AXS Search",
+        execution_mode: "provider_start",
+        needs_user_choice: true,
+      },
+    ],
   ])("classifies %s", (_label, url, expected) => {
     expect(resolveTravelLinkFromUrl(url)).toMatchObject({
       vertical: "activity",

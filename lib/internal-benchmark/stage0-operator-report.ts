@@ -28,6 +28,10 @@ import {
   buildStage0PerformanceReport,
   type Stage0PerformanceReport,
 } from "@/lib/internal-benchmark/stage0-performance";
+import {
+  buildActivitySkillReadinessReport,
+  type ActivitySkillReadinessReport,
+} from "@/lib/activity-skills";
 import privateAlphaFixture from "@/lib/capture/__fixtures__/private-alpha-submissions.json";
 import agentIntakeFixture from "@/lib/internal-benchmark/__fixtures__/agent-intake/stage0-returned-branches.json";
 
@@ -42,7 +46,12 @@ export type Stage0OperatorReportOptions = {
   agentReports?: AgentReturnReport[];
 };
 
-export type Stage0Owner = CaptureBenchmarkOwner | InternalBenchmarkOwner | LayeredBenchmarkOwner | "codex";
+export type Stage0Owner =
+  | CaptureBenchmarkOwner
+  | InternalBenchmarkOwner
+  | LayeredBenchmarkOwner
+  | "codex"
+  | "activity-skill-runtime";
 
 export type Stage0OwnerSummary = {
   owner: Stage0Owner;
@@ -76,6 +85,7 @@ export type Stage0OperatorReport = {
   capture: CaptureBenchmarkReport;
   internalBenchmark: InternalBenchmarkReport;
   layeredBenchmark: LayeredBenchmarkReport;
+  activitySkillReadiness: ActivitySkillReadinessReport;
   privateAlpha: PrivateAlphaIntakeReport;
   agentIntake: AgentIntakeQueueReport;
   performance: Stage0PerformanceReport;
@@ -123,11 +133,12 @@ export function buildStage0OperatorReport(
     forbidProviderRuntimeChanges: true,
   });
   const performance = buildStage0PerformanceReport();
+  const activitySkillReadiness = buildActivitySkillReadinessReport();
 
   const ownerSummary = summarizeOwners(capture, internalBenchmark, layeredBenchmark);
-  const topNextActions = nextActions(capture, internalBenchmark, layeredBenchmark, privateAlpha, agentIntake, performance, ownerSummary);
-  const topBlockersByOwner = blockersByOwner(capture, internalBenchmark, layeredBenchmark, privateAlpha, agentIntake, performance, ownerSummary);
-  const { verdict, verdictReason } = readinessVerdict(capture, internalBenchmark, layeredBenchmark, privateAlpha);
+  const topNextActions = nextActions(capture, internalBenchmark, layeredBenchmark, privateAlpha, agentIntake, performance, activitySkillReadiness, ownerSummary);
+  const topBlockersByOwner = blockersByOwner(capture, internalBenchmark, layeredBenchmark, privateAlpha, agentIntake, performance, activitySkillReadiness, ownerSummary);
+  const { verdict, verdictReason } = readinessVerdict(capture, internalBenchmark, layeredBenchmark, privateAlpha, activitySkillReadiness);
   const routingMismatchCount =
     capture.summary.routingMismatchCount +
     internalBenchmark.summary.routingMismatchCount +
@@ -144,6 +155,7 @@ export function buildStage0OperatorReport(
     capture,
     internalBenchmark,
     layeredBenchmark,
+    activitySkillReadiness,
     privateAlpha,
     agentIntake,
     performance,
@@ -208,6 +220,20 @@ export function renderStage0OperatorMarkdown(report: Stage0OperatorReport): stri
     `Unknown failure: ${formatRate(report.layeredBenchmark.summary.unknownFailureRate)}`,
     `L1 direct pass: ${formatRate(report.layeredBenchmark.summary.l1DirectPassRate)}`,
     `L1 + L2 recovered pass: ${formatRate(report.layeredBenchmark.summary.l1PlusL2RecoveredPassRate)}`,
+    "",
+    "## Activity Skill Runtime",
+    "",
+    `Readiness: ${report.activitySkillReadiness.summary.readiness}`,
+    `No-live gate: ${report.activitySkillReadiness.summary.noLiveGatePass ? "PASS" : "FAIL"}`,
+    `Provider coverage: ${report.activitySkillReadiness.summary.providerCoverage.registered}/${report.activitySkillReadiness.summary.providerCoverage.required}`,
+    `URL fixtures: ${report.activitySkillReadiness.summary.totalFixtures}`,
+    `Exact-event ready: ${report.activitySkillReadiness.summary.exactEventReadyCount}`,
+    `Listing needs choice: ${report.activitySkillReadiness.summary.listingNeedsChoiceCount}`,
+    `Unsafe boundary: ${report.activitySkillReadiness.summary.unsafeBoundaryCount}`,
+    `Wrong target: ${report.activitySkillReadiness.summary.wrongTargetCount}`,
+    `Host impersonation escapes: ${report.activitySkillReadiness.summary.hostImpersonationEscapeCount}`,
+    `Patch proposal candidates: ${report.activitySkillReadiness.summary.patchProposalCandidateCount}`,
+    `Controlled lab runs: ${report.activitySkillReadiness.summary.controlledLabRuns}`,
     "",
     "## Private Alpha Intake",
     "",
@@ -309,6 +335,7 @@ function readinessVerdict(
   internalBenchmark: InternalBenchmarkReport,
   layeredBenchmark: LayeredBenchmarkReport,
   privateAlpha: PrivateAlphaIntakeReport,
+  activitySkillReadiness: ActivitySkillReadinessReport,
 ): { verdict: Stage0ReadinessVerdict; verdictReason: string } {
   if (
     capture.summary.routingMismatchCount > 0 ||
@@ -318,6 +345,7 @@ function readinessVerdict(
     internalBenchmark.summary.routingMismatchCount > 0 ||
     layeredBenchmark.summary.routingMismatchCount > 0 ||
     layeredBenchmark.summary.unknownFailureRate > 0.05 ||
+    !activitySkillReadiness.summary.noLiveGatePass ||
     !privateAlpha.summary.gatePass ||
     privateAlpha.summary.red > 0
   ) {
@@ -379,6 +407,7 @@ function blockersByOwner(
   privateAlpha: PrivateAlphaIntakeReport,
   agentIntake: AgentIntakeQueueReport,
   performance: Stage0PerformanceReport,
+  activitySkillReadiness: ActivitySkillReadinessReport,
   ownerSummary: Stage0OwnerSummary[],
 ): Stage0OwnerBlocker[] {
   const blockers: Stage0OwnerBlocker[] = [];
@@ -388,6 +417,14 @@ function blockersByOwner(
       priority: "p0",
       blocker: "Private alpha is not green from real supervised submissions.",
       evidence: `${privateAlpha.summary.total} intake sample(s), readiness ${privateAlpha.summary.readiness}, ${privateAlpha.summary.safeMissSeedCount} safe-miss seed(s).`,
+    });
+  }
+  if (!activitySkillReadiness.summary.noLiveGatePass || activitySkillReadiness.summary.controlledLabRuns < 20) {
+    blockers.push({
+      owner: "activity-skill-runtime",
+      priority: activitySkillReadiness.summary.noLiveGatePass ? "p1" : "p0",
+      blocker: "Activity Skill Runtime needs controlled Browser Harness lab evidence before production runtime wiring.",
+      evidence: `${activitySkillReadiness.summary.totalFixtures} no-live fixture(s), ${activitySkillReadiness.summary.controlledLabRuns} controlled lab run(s), no-live gate ${activitySkillReadiness.summary.noLiveGatePass ? "PASS" : "FAIL"}.`,
     });
   }
   if (capture.summary.routingMismatchCount > 0 || capture.summary.byFailureClass.artifact_incomplete > 0) {
@@ -441,6 +478,7 @@ function nextActions(
   privateAlpha: PrivateAlphaIntakeReport,
   agentIntake: AgentIntakeQueueReport,
   performance: Stage0PerformanceReport,
+  activitySkillReadiness: ActivitySkillReadinessReport,
   ownerSummary: Stage0OwnerSummary[],
 ): Stage0NextAction[] {
   const actions: Stage0NextAction[] = [];
@@ -482,6 +520,14 @@ function nextActions(
       priority: "p0",
       action: "Collect supervised private-alpha submissions and score them through the intake gate.",
       reason: `Private alpha readiness is ${privateAlpha.summary.readiness}; synthetic fixtures cannot make it green.`,
+    });
+  }
+  if (activitySkillReadiness.summary.controlledLabRuns < 20 || !activitySkillReadiness.summary.noLiveGatePass) {
+    actions.push({
+      owner: "activity-skill-runtime",
+      priority: activitySkillReadiness.summary.noLiveGatePass ? "p1" : "p0",
+      action: "Run the 20-case controlled Activity Provider Skill Runtime lab and convert failures into reviewed patch proposals.",
+      reason: `${activitySkillReadiness.summary.totalFixtures} no-live fixtures pass the registry gate, but controlled lab runs are ${activitySkillReadiness.summary.controlledLabRuns}/20.`,
     });
   }
   if (agentIntake.summary.reject > 0 || agentIntake.summary.needsFollowup > 0) {

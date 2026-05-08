@@ -53,6 +53,23 @@ Browser Harness currently exists in Onegent only as:
 
 It is not production runtime today.
 
+## No-Live Readiness Cockpit
+
+Stage 0B readiness is tracked by a pure fixture gate before any browser lab
+claim:
+
+```bash
+npx tsx scripts/activity-skill-readiness.ts --gate
+npx tsx scripts/activity-skill-readiness.ts --json
+```
+
+The gate covers Ticketmaster, SeatGeek, StubHub, Eventbrite, and AXS URL
+surfaces across exact events, artist/performer pages, listing/search pages,
+grouping pages, malformed URLs, multi-URL review paths, and host
+impersonation. It is intentionally no-live: a passing gate means the registry
+and safe-next-action contracts are coherent, not that Browser Harness has
+closed a real provider run.
+
 ## Browser Harness Use Policy
 
 Do not vendor the Browser Harness repository into Onegent at this stage.

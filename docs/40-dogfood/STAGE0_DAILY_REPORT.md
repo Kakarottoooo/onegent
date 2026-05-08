@@ -29,6 +29,20 @@ Unknown failure: 4%
 L1 direct pass: 20%
 L1 + L2 recovered pass: 40%
 
+## Activity Skill Runtime
+
+Readiness: yellow
+No-live gate: PASS
+Provider coverage: 5/5
+URL fixtures: 145
+Exact-event ready: 32
+Listing needs choice: 79
+Unsafe boundary: 0
+Wrong target: 0
+Host impersonation escapes: 0
+Patch proposal candidates: 97
+Controlled lab runs: 0
+
 ## Private Alpha Intake
 
 Readiness: yellow
@@ -92,6 +106,7 @@ Findings: 0
 | Priority | Owner | Blocker | Evidence |
 | --- | --- | --- | --- |
 | `p0` | `alpha-ops` | Private alpha is not green from real supervised submissions. | 3 intake sample(s), readiness yellow, 0 safe-miss seed(s). |
+| `p1` | `activity-skill-runtime` | Activity Skill Runtime needs controlled Browser Harness lab evidence before production runtime wiring. | 145 no-live fixture(s), 0 controlled lab run(s), no-live gate PASS. |
 | `p1` | `provider-runtime` | Provider-runtime no-live failures need fixture-backed patches before more live attempts. | 4% layered unknown failures, 5 simulated provider blockers. |
 | `p1` | `codex` | Returned agent branches need metadata triage before merge validation. | 3 ready, 1 follow-up, 0 rebase, 1 reject. |
 | `p2` | `planner` | Benchmark failures remain for this owner. | 20 failure(s): internal benchmark failures 20/53. |
@@ -106,8 +121,8 @@ Findings: 0
 | `p1` | `provider-runtime` | Use layered benchmark failures to pick the next fixture-backed provider hardening branch. | 5 simulated provider blockers remain in the no-live corpus. |
 | `p1` | `provider-runtime` | Prioritize L1 runtime patches over claiming L2 recovery readiness. | Layered L1+L2 recovered pass rate is 40%. |
 | `p0` | `alpha-ops` | Collect supervised private-alpha submissions and score them through the intake gate. | Private alpha readiness is yellow; synthetic fixtures cannot make it green. |
+| `p1` | `activity-skill-runtime` | Run the 20-case controlled Activity Provider Skill Runtime lab and convert failures into reviewed patch proposals. | 145 no-live fixtures pass the registry gate, but controlled lab runs are 0/20. |
 | `p1` | `codex` | Use agent intake results to block unsafe branches and ask follow-up only where metadata is incomplete. | 1 branch(es) need follow-up and 1 are rejected. |
-| `p1` | `alpha-ops` | Start private-alpha intake only as supervised dogfood and convert failures into capture fixtures. | No-live gates can support intake, but green alpha readiness requires real submissions and value scoring. |
 
 ## Top 10 Next Engineering Actions
 
@@ -116,13 +131,13 @@ Findings: 0
 | `p1` | `provider-runtime` | Use layered benchmark failures to pick the next fixture-backed provider hardening branch. | 5 simulated provider blockers remain in the no-live corpus. |
 | `p1` | `provider-runtime` | Prioritize L1 runtime patches over claiming L2 recovery readiness. | Layered L1+L2 recovered pass rate is 40%. |
 | `p0` | `alpha-ops` | Collect supervised private-alpha submissions and score them through the intake gate. | Private alpha readiness is yellow; synthetic fixtures cannot make it green. |
+| `p1` | `activity-skill-runtime` | Run the 20-case controlled Activity Provider Skill Runtime lab and convert failures into reviewed patch proposals. | 145 no-live fixtures pass the registry gate, but controlled lab runs are 0/20. |
 | `p1` | `codex` | Use agent intake results to block unsafe branches and ask follow-up only where metadata is incomplete. | 1 branch(es) need follow-up and 1 are rejected. |
 | `p1` | `alpha-ops` | Start private-alpha intake only as supervised dogfood and convert failures into capture fixtures. | No-live gates can support intake, but green alpha readiness requires real submissions and value scoring. |
 | `p2` | `codex` | Keep agent branches flowing through Stage 0 intake before merge validation. | Returned branches should be triaged by metadata so independent agents can start the next bounded task. |
 | `p2` | `planner` | Review the highest-volume planner failure class in the benchmark report. | internal benchmark failures 20/53 |
 | `p2` | `product/manual-boundary` | Review the highest-volume product/manual-boundary failure class in the benchmark report. | internal benchmark failures 10/10 |
 | `p2` | `task-workspace` | Review the highest-volume task-workspace failure class in the benchmark report. | internal benchmark failures 6/16 |
-| `p2` | `browser-harness` | Review the highest-volume browser-harness failure class in the benchmark report. | layered benchmark failures 2/10 |
 
 ## Notes
 
