@@ -111,6 +111,49 @@ Disallowed in Stage 0B:
   payment, or final purchase.
 - Treating an unreproducible Browser Harness success as provider closure.
 
+## Ticketmaster Skill Forge Safety Contract
+
+The Ticketmaster skill-forge lane may automate only reversible provider-page
+inspection and safe navigation before a user-controlled boundary. It may:
+
+- open Ticketmaster artist, listing, search, and event pages,
+- collect page title, current URL, screenshots, visible candidates, and action
+  logs,
+- click safe provider CTAs such as `Find Tickets` only while still before hard
+  stops,
+- ask the user which visible event/date/time to use,
+- resume after the user manually finishes login, verification, CAPTCHA, or seat
+  selection, then inspect the resulting page again.
+
+It must not:
+
+- sign in using profile credentials in the background,
+- read Gmail or any mailbox to fetch OTP/account codes,
+- solve CAPTCHA or human-verification challenges,
+- select seats for the user,
+- fill card number, billing fields, CVV, or payment forms,
+- submit payment,
+- click `Place Order`, `Confirm Purchase`, or any final purchase action.
+
+The code contract lives in
+`lib/activity-skills/ticketmaster-skill-forge.ts`. It maps observed
+Ticketmaster surfaces to explicit checkpoints:
+
+| Checkpoint | Runtime action |
+| --- | --- |
+| exact event before hard stops | Continue only to the next safe ticket CTA. |
+| listing or multiple visible candidates | Ask the user which event/date/time to use. |
+| login wall | Pause for manual sign-in; allow resume after user action. |
+| CAPTCHA / OTP / account verification | Pause for manual verification; allow resume after user action. |
+| seat selection | Pause for user seat choice; allow resume after user action. |
+| payment fields | Stop before payment; no automated resume. |
+| final confirmation | Stop before final confirmation; no automated resume. |
+| provider degraded / 404 / unavailable | Capture evidence and stop. |
+| missing URL/screenshot/action log | Collect more evidence before continuing. |
+
+This keeps Onegent useful during provider execution without crossing identity,
+verification, payment, or final-confirmation boundaries.
+
 ## Target Architecture
 
 ```text
