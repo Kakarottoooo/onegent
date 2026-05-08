@@ -156,7 +156,7 @@ describe("activity provider skill URL matching", () => {
     });
     expect(resolveActivityProviderSkillUrl("https://www.axs.com/search?q=concert")).toMatchObject({
       provider: "axs",
-      pageType: "listing",
+      pageType: "search_results",
       executionMode: "provider_start",
       needsUserChoice: true,
     });

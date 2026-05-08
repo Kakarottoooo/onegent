@@ -71,7 +71,9 @@ const SEATGEEK_EVENT_ID_RE = /\/(?:[^/?#]+\/)*([0-9]{5,})(?:[/?#]|$)/i;
 const SEATGEEK_DATE_SEGMENT_RE = /\b20\d{2}-\d{2}-\d{2}(?:-\d{1,2}(?:-\d{2})?-(?:am|pm))?\b/i;
 const STUBHUB_PERFORMER_RE = /\/performer\/([A-Za-z0-9_-]+)/i;
 const STUBHUB_GROUPING_RE = /\/grouping\/([A-Za-z0-9_-]+)/i;
+const STUBHUB_EVENT_RE = /\/event\/([A-Za-z0-9_-]+)/i;
 const EVENTBRITE_EVENT_RE = /\/e\/.+?(?:tickets-)?([0-9]{5,})(?:[/?#]|$)/i;
+const EVENTBRITE_ORGANIZER_RE = /\/o\/(?:[^/?#]+-)?([0-9]{5,})(?:[/?#]|$)/i;
 const AXS_EVENT_RE = /\/events\/([A-Za-z0-9_-]+)/i;
 const AXS_ARTIST_RE = /\/artists\/([A-Za-z0-9_-]+)/i;
 const AXS_SERIES_RE = /\/series\/([A-Za-z0-9_-]+)/i;
@@ -79,9 +81,9 @@ const AXS_SERIES_RE = /\/series\/([A-Za-z0-9_-]+)/i;
 export const ACTIVITY_PROVIDER_SKILLS: ActivityProviderSkill[] = [
   buildSkill("ticketmaster", ["exact_event", "artist_or_performer", "listing", "search_results"], resolveTicketmasterUrl),
   buildSkill("seatgeek", ["exact_event", "listing"], resolveSeatGeekUrl),
-  buildSkill("stubhub", ["artist_or_performer", "grouping", "listing"], resolveStubHubUrl),
+  buildSkill("stubhub", ["exact_event", "artist_or_performer", "grouping", "listing"], resolveStubHubUrl),
   buildSkill("eventbrite", ["exact_event", "listing", "search_results"], resolveEventbriteUrl),
-  buildSkill("axs", ["exact_event", "artist_or_performer", "grouping", "listing"], resolveAxsUrl),
+  buildSkill("axs", ["exact_event", "artist_or_performer", "grouping", "listing", "search_results"], resolveAxsUrl),
 ];
 
 export function resolveActivityProviderSkillUrl(value: unknown): ActivitySkillUrlMatch | null {
@@ -204,6 +206,21 @@ function resolveSeatGeekUrl(value: unknown): ActivitySkillUrlMatch | null {
 function resolveStubHubUrl(value: unknown): ActivitySkillUrlMatch | null {
   const parsed = parseProviderUrl(value, "stubhub");
   if (!parsed) return null;
+  const event = parsed.pathname.match(STUBHUB_EVENT_RE)?.[1];
+  if (event) {
+    return providerMatch({
+      parsed,
+      provider: "stubhub",
+      pageType: "exact_event",
+      providerPageId: event,
+      titleHint: titleHintBeforeMarker(parsed.pathname, "event"),
+      confidence: 0.86,
+      executionMode: "direct_execution",
+      needsUserChoice: false,
+      safeNextAction: "start_task",
+      matchedPattern: "stubhub_event",
+    });
+  }
   const performer = parsed.pathname.match(STUBHUB_PERFORMER_RE)?.[1];
   if (performer) {
     return providerMatch({
@@ -240,6 +257,7 @@ function resolveStubHubUrl(value: unknown): ActivitySkillUrlMatch | null {
 function resolveEventbriteUrl(value: unknown): ActivitySkillUrlMatch | null {
   const parsed = parseProviderUrl(value, "eventbrite");
   if (!parsed) return null;
+  const segments = pathSegments(parsed.pathname);
   const event = parsed.pathname.match(EVENTBRITE_EVENT_RE)?.[1];
   if (event) {
     return providerMatch({
@@ -253,6 +271,55 @@ function resolveEventbriteUrl(value: unknown): ActivitySkillUrlMatch | null {
       needsUserChoice: false,
       safeNextAction: "start_task",
       matchedPattern: "eventbrite_event",
+    });
+  }
+  const organizer = parsed.pathname.match(EVENTBRITE_ORGANIZER_RE)?.[1];
+  if (organizer) {
+    return providerMatch({
+      parsed,
+      provider: "eventbrite",
+      pageType: "listing",
+      providerPageId: organizer,
+      titleHint: titleHintBeforeMarker(parsed.pathname, "o"),
+      confidence: 0.76,
+      executionMode: "provider_start",
+      needsUserChoice: true,
+      safeNextAction: "ask_user_to_choose",
+      matchedPattern: "eventbrite_organizer",
+    });
+  }
+  const first = segments[0]?.toLowerCase();
+  if (first === "search") {
+    return providerMatch({
+      parsed,
+      provider: "eventbrite",
+      pageType: "search_results",
+      providerPageId: "search",
+      titleHint: "Eventbrite Search",
+      confidence: 0.62,
+      executionMode: "provider_start",
+      needsUserChoice: true,
+      safeNextAction: "ask_user_to_choose",
+      matchedPattern: "eventbrite_search",
+    });
+  }
+  if (first === "d" || first === "b") {
+    const pageId = segments.slice(1).join("/") || first;
+    const titleSource =
+      [...segments]
+        .reverse()
+        .find((segment) => !/^(events?|tickets?)$/i.test(segment)) ?? first;
+    return providerMatch({
+      parsed,
+      provider: "eventbrite",
+      pageType: "listing",
+      providerPageId: pageId,
+      titleHint: titleizeTravelSlug(titleSource),
+      confidence: 0.72,
+      executionMode: "provider_start",
+      needsUserChoice: true,
+      safeNextAction: "ask_user_to_choose",
+      matchedPattern: "eventbrite_city_category_listing",
     });
   }
   return listingMatch(parsed, "eventbrite", "eventbrite_listing");
@@ -304,6 +371,20 @@ function resolveAxsUrl(value: unknown): ActivitySkillUrlMatch | null {
       needsUserChoice: true,
       safeNextAction: "ask_user_to_choose",
       matchedPattern: "axs_series",
+    });
+  }
+  if (firstSegment(parsed.pathname).toLowerCase() === "search") {
+    return providerMatch({
+      parsed,
+      provider: "axs",
+      pageType: "search_results",
+      providerPageId: "search",
+      titleHint: "AXS Search",
+      confidence: 0.62,
+      executionMode: "provider_start",
+      needsUserChoice: true,
+      safeNextAction: "ask_user_to_choose",
+      matchedPattern: "axs_search",
     });
   }
   return listingMatch(parsed, "axs", "axs_listing");
