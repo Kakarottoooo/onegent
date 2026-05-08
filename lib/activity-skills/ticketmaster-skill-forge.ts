@@ -34,6 +34,13 @@ export type TicketmasterForbiddenAutomation =
   | "submit_payment"
   | "click_final_confirmation";
 
+export type TicketmasterAllowedAssistance =
+  | "reuse_user_authorized_provider_session"
+  | "prefill_non_payment_profile_fields"
+  | "resume_after_user_boundary_action"
+  | "inspect_page_and_collect_evidence"
+  | "click_reversible_ticket_cta_before_hard_stop";
+
 export type TicketmasterForgeMissingEvidence =
   | "currentUrl"
   | "screenshot"
@@ -66,9 +73,19 @@ export type TicketmasterForgeDecision = {
   requiresUserAction: boolean;
   resumeAfterUserAction: boolean;
   missingEvidence: TicketmasterForgeMissingEvidence[];
+  allowedAssistance: TicketmasterAllowedAssistance[];
   forbiddenAutomation: TicketmasterForbiddenAutomation[];
   summary: string;
 };
+
+export const TICKETMASTER_ALLOWED_ASSISTANCE: ReadonlyArray<TicketmasterAllowedAssistance> =
+  Object.freeze([
+    "reuse_user_authorized_provider_session",
+    "prefill_non_payment_profile_fields",
+    "resume_after_user_boundary_action",
+    "inspect_page_and_collect_evidence",
+    "click_reversible_ticket_cta_before_hard_stop",
+  ]);
 
 export const TICKETMASTER_FORBIDDEN_AUTOMATION: ReadonlyArray<TicketmasterForbiddenAutomation> =
   Object.freeze([
@@ -94,6 +111,7 @@ const DECISIONS: Readonly<
     canAutoContinue: true,
     requiresUserAction: false,
     resumeAfterUserAction: false,
+    allowedAssistance: [...TICKETMASTER_ALLOWED_ASSISTANCE],
     forbiddenAutomation: [...TICKETMASTER_FORBIDDEN_AUTOMATION],
     summary:
       "Ticketmaster page is safe to continue until the next user-controlled boundary.",
@@ -104,6 +122,7 @@ const DECISIONS: Readonly<
     canAutoContinue: false,
     requiresUserAction: true,
     resumeAfterUserAction: true,
+    allowedAssistance: [...TICKETMASTER_ALLOWED_ASSISTANCE],
     forbiddenAutomation: [...TICKETMASTER_FORBIDDEN_AUTOMATION],
     summary:
       "Ticketmaster listing has multiple or non-unique candidates; ask the user which event to use.",
@@ -114,6 +133,7 @@ const DECISIONS: Readonly<
     canAutoContinue: false,
     requiresUserAction: true,
     resumeAfterUserAction: true,
+    allowedAssistance: [...TICKETMASTER_ALLOWED_ASSISTANCE],
     forbiddenAutomation: [...TICKETMASTER_FORBIDDEN_AUTOMATION],
     summary:
       "Ticketmaster requires account sign-in; pause for the user and resume only after they finish manually.",
@@ -124,6 +144,7 @@ const DECISIONS: Readonly<
     canAutoContinue: false,
     requiresUserAction: true,
     resumeAfterUserAction: true,
+    allowedAssistance: [...TICKETMASTER_ALLOWED_ASSISTANCE],
     forbiddenAutomation: [...TICKETMASTER_FORBIDDEN_AUTOMATION],
     summary:
       "Ticketmaster shows a CAPTCHA or human-verification challenge; pause for the user.",
@@ -134,6 +155,7 @@ const DECISIONS: Readonly<
     canAutoContinue: false,
     requiresUserAction: true,
     resumeAfterUserAction: true,
+    allowedAssistance: [...TICKETMASTER_ALLOWED_ASSISTANCE],
     forbiddenAutomation: [...TICKETMASTER_FORBIDDEN_AUTOMATION],
     summary:
       "Ticketmaster requires an OTP or account verification code; pause for the user.",
@@ -144,6 +166,7 @@ const DECISIONS: Readonly<
     canAutoContinue: false,
     requiresUserAction: true,
     resumeAfterUserAction: true,
+    allowedAssistance: [...TICKETMASTER_ALLOWED_ASSISTANCE],
     forbiddenAutomation: [...TICKETMASTER_FORBIDDEN_AUTOMATION],
     summary:
       "Ticketmaster requires ticket or seat selection; the user must choose seats before any resume.",
@@ -154,6 +177,7 @@ const DECISIONS: Readonly<
     canAutoContinue: false,
     requiresUserAction: true,
     resumeAfterUserAction: false,
+    allowedAssistance: [...TICKETMASTER_ALLOWED_ASSISTANCE],
     forbiddenAutomation: [...TICKETMASTER_FORBIDDEN_AUTOMATION],
     summary:
       "Ticketmaster shows payment or billing fields; stop before card entry, CVV, payment submission, or purchase.",
@@ -164,6 +188,7 @@ const DECISIONS: Readonly<
     canAutoContinue: false,
     requiresUserAction: true,
     resumeAfterUserAction: false,
+    allowedAssistance: [...TICKETMASTER_ALLOWED_ASSISTANCE],
     forbiddenAutomation: [...TICKETMASTER_FORBIDDEN_AUTOMATION],
     summary:
       "Ticketmaster shows a final purchase confirmation action; stop and leave final confirmation to the user.",
@@ -174,6 +199,7 @@ const DECISIONS: Readonly<
     canAutoContinue: false,
     requiresUserAction: false,
     resumeAfterUserAction: false,
+    allowedAssistance: [...TICKETMASTER_ALLOWED_ASSISTANCE],
     forbiddenAutomation: [...TICKETMASTER_FORBIDDEN_AUTOMATION],
     summary:
       "Ticketmaster page is unavailable, blocked, degraded, or not safe to continue.",
@@ -184,6 +210,7 @@ const DECISIONS: Readonly<
     canAutoContinue: false,
     requiresUserAction: false,
     resumeAfterUserAction: false,
+    allowedAssistance: [...TICKETMASTER_ALLOWED_ASSISTANCE],
     forbiddenAutomation: [...TICKETMASTER_FORBIDDEN_AUTOMATION],
     summary:
       "Ticketmaster skill runner lacks required evidence; collect URL, screenshot, and action log before continuing.",
@@ -253,6 +280,10 @@ export function canResumeTicketmasterAfterUserAction(
 
 export function getTicketmasterForbiddenAutomation(): ReadonlyArray<TicketmasterForbiddenAutomation> {
   return TICKETMASTER_FORBIDDEN_AUTOMATION;
+}
+
+export function getTicketmasterAllowedAssistance(): ReadonlyArray<TicketmasterAllowedAssistance> {
+  return TICKETMASTER_ALLOWED_ASSISTANCE;
 }
 
 function findMissingEvidence(

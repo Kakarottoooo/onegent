@@ -3,6 +3,7 @@ import {
   buildTicketmasterForgeDecision,
   canResumeTicketmasterAfterUserAction,
   classifyTicketmasterForgePage,
+  getTicketmasterAllowedAssistance,
   getTicketmasterForbiddenAutomation,
 } from "@/lib/activity-skills";
 import type {
@@ -34,6 +35,9 @@ describe("Ticketmaster skill forge classifier", () => {
       resumeAfterUserAction: false,
       missingEvidence: [],
     });
+    expect(decision.allowedAssistance).toContain(
+      "reuse_user_authorized_provider_session",
+    );
   });
 
   it("asks the user to choose when an artist/listing page has multiple visible candidates", () => {
@@ -219,6 +223,16 @@ describe("Ticketmaster skill forge classifier", () => {
 });
 
 describe("Ticketmaster skill forge safety policy", () => {
+  it("allows trusted session reuse and non-payment profile prefill", () => {
+    expect(getTicketmasterAllowedAssistance()).toEqual([
+      "reuse_user_authorized_provider_session",
+      "prefill_non_payment_profile_fields",
+      "resume_after_user_boundary_action",
+      "inspect_page_and_collect_evidence",
+      "click_reversible_ticket_cta_before_hard_stop",
+    ]);
+  });
+
   it("keeps the explicit forbidden automation list stable", () => {
     expect(getTicketmasterForbiddenAutomation()).toEqual([
       "background_login",
@@ -230,6 +244,18 @@ describe("Ticketmaster skill forge safety policy", () => {
       "submit_payment",
       "click_final_confirmation",
     ]);
+  });
+
+  it("distinguishes authorized session reuse from forbidden credential login", () => {
+    const decision = buildTicketmasterForgeDecision(baseObservation);
+
+    expect(decision.allowedAssistance).toContain(
+      "reuse_user_authorized_provider_session",
+    );
+    expect(decision.forbiddenAutomation).toContain("background_login");
+    expect(decision.forbiddenAutomation).not.toContain(
+      "reuse_user_authorized_provider_session",
+    );
   });
 
   it("only resumes after user-action checkpoints, never payment or final confirmation", () => {

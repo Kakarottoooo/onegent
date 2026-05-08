@@ -117,8 +117,11 @@ The Ticketmaster skill-forge lane may automate only reversible provider-page
 inspection and safe navigation before a user-controlled boundary. It may:
 
 - open Ticketmaster artist, listing, search, and event pages,
+- reuse a user-authorized provider session after the user has signed in once,
 - collect page title, current URL, screenshots, visible candidates, and action
   logs,
+- prefill non-payment profile fields that Onegent already owns, such as name,
+  email, phone, party size, city, date, and budget preferences,
 - click safe provider CTAs such as `Find Tickets` only while still before hard
   stops,
 - ask the user which visible event/date/time to use,
@@ -127,7 +130,8 @@ inspection and safe navigation before a user-controlled boundary. It may:
 
 It must not:
 
-- sign in using profile credentials in the background,
+- sign in using stored provider passwords or profile credentials in the
+  background,
 - read Gmail or any mailbox to fetch OTP/account codes,
 - solve CAPTCHA or human-verification challenges,
 - select seats for the user,
