@@ -24,16 +24,16 @@ import type {
 // ─── Provider scope ─────────────────────────────────────────────────────
 //
 // Stage 0B lab started with Ticketmaster + SeatGeek and now includes StubHub
-// as the first copyability check for the Activity Provider Skill Runtime.
-// Eventbrite / AXS stay no-live corpus work until their controlled lab starts.
+// and Eventbrite as copyability checks for the Activity Provider Skill Runtime.
+// AXS stays no-live corpus work until its controlled lab starts.
 
 export type Stage0bLabProvider = Extract<
   ActivitySkillProvider,
-  "ticketmaster" | "seatgeek" | "stubhub"
+  "ticketmaster" | "seatgeek" | "stubhub" | "eventbrite"
 >;
 
 export const STAGE0B_LAB_PROVIDERS: ReadonlyArray<Stage0bLabProvider> =
-  Object.freeze(["ticketmaster", "seatgeek", "stubhub"]);
+  Object.freeze(["ticketmaster", "seatgeek", "stubhub", "eventbrite"]);
 
 // ─── Lab event JSONL schema ─────────────────────────────────────────────
 //
@@ -267,7 +267,11 @@ export interface LabTestPlanEntry {
     | "stubhub_performer"
     | "stubhub_category"
     | "stubhub_geography"
-    | "stubhub_checkout";
+    | "stubhub_checkout"
+    | "eventbrite_event"
+    | "eventbrite_listing"
+    | "eventbrite_search"
+    | "eventbrite_directory";
   url: string;
   expected_resolver_page_type: ActivitySkillPageType;
   expected_resolver_execution_mode: ActivitySkillExecutionMode;
@@ -275,4 +279,4 @@ export interface LabTestPlanEntry {
   reason: string;
 }
 
-export type Stage0bLabPlanName = "stage0b" | "ticketmaster-forge" | "stubhub-forge";
+export type Stage0bLabPlanName = "stage0b" | "ticketmaster-forge" | "stubhub-forge" | "eventbrite-forge";

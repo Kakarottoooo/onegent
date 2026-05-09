@@ -33,6 +33,7 @@ import {
   STAGE0B_PLAN_COUNTS,
   TICKETMASTER_SKILL_FORGE_PLAN,
   STUBHUB_SKILL_FORGE_PLAN,
+  EVENTBRITE_SKILL_FORGE_PLAN,
   type LabTestPlanEntry,
   type Stage0bLabPlanName,
   type Stage0bLabProvider,
@@ -55,7 +56,7 @@ function parseArgs(argv: ReadonlyArray<string>): LabRunnerArgs {
   const planIdx = argv.indexOf("--plan");
   if (planIdx >= 0 && argv[planIdx + 1]) {
     const value = argv[planIdx + 1];
-    if (value === "stage0b" || value === "ticketmaster-forge" || value === "stubhub-forge") {
+    if (value === "stage0b" || value === "ticketmaster-forge" || value === "stubhub-forge" || value === "eventbrite-forge") {
       args.plan = value;
     } else {
       throw new Error(`Unknown --plan value: ${value}`);
@@ -64,7 +65,7 @@ function parseArgs(argv: ReadonlyArray<string>): LabRunnerArgs {
   const providerIdx = argv.indexOf("--provider");
   if (providerIdx >= 0 && argv[providerIdx + 1]) {
     const value = argv[providerIdx + 1];
-    if (value === "ticketmaster" || value === "seatgeek" || value === "stubhub") {
+    if (value === "ticketmaster" || value === "seatgeek" || value === "stubhub" || value === "eventbrite") {
       args.providerFilter = value;
     } else {
       throw new Error(`Unknown --provider value: ${value}`);
@@ -153,7 +154,9 @@ function filterPlan(args: Pick<LabRunnerArgs, "providerFilter" | "plan">): LabTe
     ? TICKETMASTER_SKILL_FORGE_PLAN
     : args.plan === "stubhub-forge"
       ? STUBHUB_SKILL_FORGE_PLAN
-      : STAGE0B_TEST_PLAN;
+      : args.plan === "eventbrite-forge"
+        ? EVENTBRITE_SKILL_FORGE_PLAN
+        : STAGE0B_TEST_PLAN;
   return args.providerFilter
     ? base.filter((e) => e.provider === args.providerFilter)
     : [...base];
@@ -163,7 +166,7 @@ function printCheckResult(results: ReadonlyArray<PreflightResult>): boolean {
   const failures = results.filter((r) => !r.ok);
   console.log("Stage 0B Activity Skill Lab — PRE-FLIGHT CHECK");
   console.log("");
-  console.log(`Baseline plan size: ${STAGE0B_PLAN_COUNTS.total} (TM=${STAGE0B_PLAN_COUNTS.ticketmaster}, SG=${STAGE0B_PLAN_COUNTS.seatgeek})`);
+  console.log(`Baseline shared plan size: ${STAGE0B_PLAN_COUNTS.total} (TM=${STAGE0B_PLAN_COUNTS.ticketmaster}, SG=${STAGE0B_PLAN_COUNTS.seatgeek})`);
   console.log(`Checked: ${results.length}`);
   console.log(`Pass: ${results.length - failures.length}`);
   console.log(`Fail: ${failures.length}`);

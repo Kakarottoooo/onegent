@@ -168,13 +168,16 @@ Gmail as an active-task OTP source only; it must not use Gmail as a broad
 mailbox reader.
 
 The controlled Browser Harness lab contract lives in
-`lib/stage0b-skill-runtime/lab-runner.ts`. Ticketmaster and StubHub expanded
-forge seed sets live in `lib/stage0b-skill-runtime/ticketmaster-forge-plan.ts`
-and `lib/stage0b-skill-runtime/stubhub-forge-plan.ts`.
+`lib/stage0b-skill-runtime/lab-runner.ts`. Ticketmaster, StubHub, and
+Eventbrite expanded forge seed sets live in
+`lib/stage0b-skill-runtime/ticketmaster-forge-plan.ts`,
+`lib/stage0b-skill-runtime/stubhub-forge-plan.ts`, and
+`lib/stage0b-skill-runtime/eventbrite-forge-plan.ts`.
 
 ```bash
 npx tsx scripts/stage0b-activity-skill-lab-runner.ts --live --plan ticketmaster-forge --limit 20
 npx tsx scripts/stage0b-activity-skill-lab-runner.ts --live --plan stubhub-forge --limit 10
+npx tsx scripts/stage0b-activity-skill-lab-runner.ts --live --plan eventbrite-forge --limit 10
 ```
 
 This is evidence collection, not production automation. Artist, venue,
@@ -371,7 +374,7 @@ Deliver:
 
 Do not launch Browser Harness in this workstream.
 
-### Workstream B: Ticketmaster + SeatGeek + StubHub Lab
+### Workstream B: Ticketmaster + SeatGeek + StubHub + Eventbrite Lab
 
 Owner: Claude or activity-focused side agent.
 
@@ -381,10 +384,11 @@ Deliver:
 - 10 Ticketmaster runs,
 - 10 SeatGeek runs,
 - 10 StubHub runs,
+- 10 Eventbrite runs,
 - screenshots and JSONL action evidence,
 - patch proposals only; no production runtime edits without review.
 
-### Workstream C: Eventbrite + AXS Corpus
+### Workstream C: AXS Corpus
 
 Owner: Agent2 or Agent3.
 

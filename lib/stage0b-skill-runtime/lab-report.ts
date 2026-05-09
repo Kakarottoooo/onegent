@@ -15,6 +15,7 @@ import {
 import { STAGE0B_TEST_PLAN } from "./test-plan";
 import { TICKETMASTER_SKILL_FORGE_PLAN } from "./ticketmaster-forge-plan";
 import { STUBHUB_SKILL_FORGE_PLAN } from "./stubhub-forge-plan";
+import { EVENTBRITE_SKILL_FORGE_PLAN } from "./eventbrite-forge-plan";
 import type {
   L2EvidenceBundle,
   L2RecoveryClass,
@@ -123,7 +124,7 @@ export interface BuildStage0BActivityLabReportInput {
 
 const GENERATED_AT = "2026-05-07T12:00:00.000Z";
 const DEFAULT_EVIDENCE_ROOT = ".stage0b-evidence";
-const LAB_RUN_TARGET = 40;
+const LAB_RUN_TARGET = 50;
 
 const SAFE_LAB_CLASSES: ReadonlySet<L2RecoveryClass> = new Set([
   "provider_listing_needs_choice",
@@ -466,7 +467,7 @@ function buildTopBlockers(
       owner: "activity-skill-runtime",
       priority: "p1",
       blocker: "Controlled Stage 0B lab target is not complete.",
-      evidence: `${summary.totalRuns}/${LAB_RUN_TARGET} Ticketmaster + SeatGeek + StubHub lab run(s) ingested.`,
+      evidence: `${summary.totalRuns}/${LAB_RUN_TARGET} Ticketmaster + SeatGeek + StubHub + Eventbrite lab run(s) ingested.`,
     });
   }
   if (blockers.length === 0) {
@@ -526,7 +527,7 @@ function buildNextActions(summary: Stage0BActivityLabSummary): Stage0BActivityLa
     actions.push({
       owner: "activity-skill-runtime",
       priority: "p1",
-      action: "Complete the controlled Ticketmaster + SeatGeek + StubHub lab set and ingest every result.json.",
+      action: "Complete the controlled Ticketmaster + SeatGeek + StubHub + Eventbrite lab set and ingest every result.json.",
       reason: `${summary.totalRuns}/${LAB_RUN_TARGET} lab run(s) have been ingested.`,
     });
   }
@@ -738,6 +739,7 @@ function zeroProviderRecord(): Record<Stage0bLabProvider, number> {
     ticketmaster: 0,
     seatgeek: 0,
     stubhub: 0,
+    eventbrite: 0,
   };
 }
 
@@ -778,7 +780,7 @@ function readNumberArray(value: unknown, label: string): number[] {
 }
 
 function readProvider(value: unknown): Stage0bLabProvider {
-  if (value === "ticketmaster" || value === "seatgeek" || value === "stubhub") return value;
+  if (value === "ticketmaster" || value === "seatgeek" || value === "stubhub" || value === "eventbrite") return value;
   throw new Error(`Unsupported Stage 0B provider: ${String(value)}`);
 }
 
@@ -844,5 +846,10 @@ function isString(value: unknown): value is string {
   return typeof value === "string";
 }
 
-const ALL_PLAN_ENTRIES = [...STAGE0B_TEST_PLAN, ...TICKETMASTER_SKILL_FORGE_PLAN, ...STUBHUB_SKILL_FORGE_PLAN];
+const ALL_PLAN_ENTRIES = [
+  ...STAGE0B_TEST_PLAN,
+  ...TICKETMASTER_SKILL_FORGE_PLAN,
+  ...STUBHUB_SKILL_FORGE_PLAN,
+  ...EVENTBRITE_SKILL_FORGE_PLAN,
+];
 const ALL_PLAN_IDS = new Set(ALL_PLAN_ENTRIES.map((entry) => entry.id));

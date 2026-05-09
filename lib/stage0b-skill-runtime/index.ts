@@ -55,6 +55,10 @@ export {
   STUBHUB_SKILL_FORGE_PLAN,
   STUBHUB_SKILL_FORGE_PLAN_COUNTS,
 } from "./stubhub-forge-plan";
+export {
+  EVENTBRITE_SKILL_FORGE_PLAN,
+  EVENTBRITE_SKILL_FORGE_PLAN_COUNTS,
+} from "./eventbrite-forge-plan";
 
 export {
   parseStage0BLabRunnerArgs,

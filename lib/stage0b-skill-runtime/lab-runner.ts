@@ -21,6 +21,9 @@ import {
 import {
   STUBHUB_SKILL_FORGE_PLAN,
 } from "@/lib/stage0b-skill-runtime/stubhub-forge-plan";
+import {
+  EVENTBRITE_SKILL_FORGE_PLAN,
+} from "@/lib/stage0b-skill-runtime/eventbrite-forge-plan";
 import type {
   LabEvent,
   LabHardStopReason,
@@ -116,6 +119,15 @@ const INSPECT_JS = String.raw`
     try {
       const parsed = new URL(link || "", location.href);
       return /stubhub\.com$/i.test(parsed.hostname) && /\/event\/\d+/i.test(parsed.pathname);
+    } catch {
+      return false;
+    }
+  };
+  const linkLooksLikeEventbriteEvent = (link) => {
+    if (!/eventbrite\.com$/i.test(location.hostname)) return false;
+    try {
+      const parsed = new URL(link || "", location.href);
+      return /eventbrite\.com$/i.test(parsed.hostname) && /\/e\//i.test(parsed.pathname) && /(?:tickets-)?\d{8,}$/i.test(parsed.pathname);
     } catch {
       return false;
     }
@@ -252,8 +264,33 @@ const INSPECT_JS = String.raw`
       !/sign in|privacy|terms|gift cards|sell tickets|support|download the app/i.test(item.label) &&
       linkLooksLikeStubHubEvent(item.link)
     );
+  const eventbriteCardCandidates = Array.from(document.querySelectorAll("a[href]"))
+    .map((link) => {
+      const href = link.href || "";
+      const container = link.closest?.("article,li,section,[data-testid*='event'],[data-testid*='card'],[class*='event'],[class*='Event'],[class*='card'],[class*='Card'],[class*='eds-event-card']") || link;
+      const label = (container?.textContent || link.textContent || link.getAttribute("aria-label") || link.getAttribute("title") || "")
+        .replace(/\s+/g, " ")
+        .trim()
+        .slice(0, 500);
+      const rect = link.getBoundingClientRect();
+      return {
+        label,
+        link: href,
+        text: label,
+        href,
+        x: rect.left + rect.width / 2,
+        y: rect.top + rect.height / 2,
+        visible: rect.width > 0 && rect.height > 0 && rect.bottom >= 0 && rect.right >= 0 && rect.top <= window.innerHeight && rect.left <= window.innerWidth,
+      };
+    })
+    .filter((item) =>
+      item.visible &&
+      item.label &&
+      !/sign in|create event|help center|privacy|terms|sell tickets|organizer|download the app/i.test(item.label) &&
+      linkLooksLikeEventbriteEvent(item.link)
+    );
   const seenCandidateKeys = new Set();
-  const allEventCandidates = [...eventCandidates, ...eventInfoLinkCandidates, ...seatGeekCardCandidates, ...stubHubCardCandidates]
+  const allEventCandidates = [...eventCandidates, ...eventInfoLinkCandidates, ...seatGeekCardCandidates, ...stubHubCardCandidates, ...eventbriteCardCandidates]
     .filter((item) => {
       const key = item.link || item.label;
       if (!key || seenCandidateKeys.has(key)) return false;
@@ -374,13 +411,13 @@ export function parseStage0BLabRunnerArgs(argv: string[]): Stage0BLabRunnerArgs 
     } else if (token === "--dry-run") {
       args.dryRun = true;
     } else if (token === "--provider") {
-      if (next !== "ticketmaster" && next !== "seatgeek" && next !== "stubhub") {
+      if (next !== "ticketmaster" && next !== "seatgeek" && next !== "stubhub" && next !== "eventbrite") {
         throw new Error(`Unsupported --provider value: ${next ?? ""}`);
       }
       args.provider = next;
       index += 1;
     } else if (token === "--plan") {
-      if (next !== "stage0b" && next !== "ticketmaster-forge" && next !== "stubhub-forge") {
+      if (next !== "stage0b" && next !== "ticketmaster-forge" && next !== "stubhub-forge" && next !== "eventbrite-forge") {
         throw new Error(`Unsupported --plan value: ${next ?? ""}`);
       }
       args.plan = next;
@@ -436,6 +473,7 @@ export function selectStage0BLabEntries(args: Pick<Stage0BLabRunnerArgs, "provid
 function labPlanEntries(plan: Stage0bLabPlanName): LabTestPlanEntry[] {
   if (plan === "ticketmaster-forge") return TICKETMASTER_SKILL_FORGE_PLAN.slice();
   if (plan === "stubhub-forge") return STUBHUB_SKILL_FORGE_PLAN.slice();
+  if (plan === "eventbrite-forge") return EVENTBRITE_SKILL_FORGE_PLAN.slice();
   return STAGE0B_TEST_PLAN.slice();
 }
 

@@ -170,6 +170,14 @@ version:
   lab evidence is now 40 runs: 30 safe outcomes including the explicit
   payment/checkout hard stop, 10 provider-degraded pages, 0 unsafe,
   0 wrong-target, and 0 patch-needed.
+- The first Eventbrite 10-case controlled lab has now run from live public URLs
+  across exact event, city/category listing, and online directory shapes. The
+  canonical Eventbrite result is 6 exact-event-ready outcomes, 3
+  provider-listing/user-choice outcomes, and 1 single-candidate-ready outcome,
+  with 0 provider-degraded pages, 0 unsafe boundary violations, 0 wrong-target
+  signals, and 0 `skill_patch_needed` runs. Combined Ticketmaster + SeatGeek +
+  StubHub + Eventbrite lab evidence is now 50 runs: 40 safe outcomes, 10
+  provider-degraded pages, 0 unsafe, 0 wrong-target, and 0 patch-needed.
 - Runtime now has a Ticketmaster task-state classifier for checkout reached,
   seat selection needed, login/account boundary, external ad tab, local browser
   disconnect, and unknown failure states.

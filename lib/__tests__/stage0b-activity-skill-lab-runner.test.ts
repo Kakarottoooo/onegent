@@ -4,6 +4,7 @@ import {
   STAGE0B_TEST_PLAN,
   TICKETMASTER_SKILL_FORGE_PLAN,
   STUBHUB_SKILL_FORGE_PLAN,
+  EVENTBRITE_SKILL_FORGE_PLAN,
   buildBrowserHarnessPython,
   buildStage0BLabResult,
   classifyStage0BOutcome,
@@ -25,6 +26,8 @@ const TMF_15 = TICKETMASTER_SKILL_FORGE_PLAN.find((entry) => entry.id === "tmf-1
 const SHF_01 = STUBHUB_SKILL_FORGE_PLAN.find((entry) => entry.id === "shf-01")!;
 const SHF_05 = STUBHUB_SKILL_FORGE_PLAN.find((entry) => entry.id === "shf-05")!;
 const SHF_09 = STUBHUB_SKILL_FORGE_PLAN.find((entry) => entry.id === "shf-09")!;
+const EBF_01 = EVENTBRITE_SKILL_FORGE_PLAN.find((entry) => entry.id === "ebf-01")!;
+const EBF_07 = EVENTBRITE_SKILL_FORGE_PLAN.find((entry) => entry.id === "ebf-07")!;
 
 describe("Stage 0B live lab runner args and plan selection", () => {
   it("defaults to no-live dry plan behavior unless --live is explicit", () => {
@@ -86,6 +89,13 @@ describe("Stage 0B live lab runner args and plan selection", () => {
     expect(entries.map((entry) => entry.id)).toEqual(STUBHUB_SKILL_FORGE_PLAN.map((entry) => entry.id));
   });
 
+  it("selects the Eventbrite Skill Forge plan when requested", () => {
+    const entries = selectStage0BLabEntries({ plan: "eventbrite-forge" });
+    expect(entries).toHaveLength(10);
+    expect(entries.every((entry) => entry.provider === "eventbrite")).toBe(true);
+    expect(entries.map((entry) => entry.id)).toEqual(EVENTBRITE_SKILL_FORGE_PLAN.map((entry) => entry.id));
+  });
+
   it("keeps every Ticketmaster Skill Forge URL aligned with the activity resolver", () => {
     for (const entry of TICKETMASTER_SKILL_FORGE_PLAN) {
       const resolved = resolveActivityProviderSkillUrl(entry.url);
@@ -99,6 +109,15 @@ describe("Stage 0B live lab runner args and plan selection", () => {
     for (const entry of STUBHUB_SKILL_FORGE_PLAN) {
       const resolved = resolveActivityProviderSkillUrl(entry.url);
       expect(resolved?.provider, entry.id).toBe("stubhub");
+      expect(resolved?.pageType, entry.id).toBe(entry.expected_resolver_page_type);
+      expect(resolved?.executionMode, entry.id).toBe(entry.expected_resolver_execution_mode);
+    }
+  });
+
+  it("keeps every Eventbrite Skill Forge URL aligned with the activity resolver", () => {
+    for (const entry of EVENTBRITE_SKILL_FORGE_PLAN) {
+      const resolved = resolveActivityProviderSkillUrl(entry.url);
+      expect(resolved?.provider, entry.id).toBe("eventbrite");
       expect(resolved?.pageType, entry.id).toBe(entry.expected_resolver_page_type);
       expect(resolved?.executionMode, entry.id).toBe(entry.expected_resolver_execution_mode);
     }
@@ -203,6 +222,22 @@ describe("Stage 0B Browser Harness bridge code generation", () => {
     expect(python).toContain("stubHubCheckoutUrl");
     expect(python).toContain("!stubHubCheckoutUrl");
     expect(python).toContain("payment_form_visible");
+  });
+
+  it("extracts visible Eventbrite event links as candidate evidence", () => {
+    const python = buildBrowserHarnessPython(EBF_07, "C:/tmp/stage0b.png");
+    expect(python).toContain("linkLooksLikeEventbriteEvent");
+    expect(python).toContain("eventbriteCardCandidates");
+    expect(python).toContain("create event");
+  });
+
+  it("keeps Eventbrite exact events in the direct-execution lab lane", () => {
+    const result = classifyStage0BOutcome(EBF_01, okPayload({
+      followedSafeLink: true,
+      title: "Quad State Wine & Music Fest 2026",
+      candidate_count: 0,
+    }));
+    expect(result).toBe("exact_event_ready");
   });
 
   it("does not treat venue FAQ payment wording alone as a payment form", () => {
