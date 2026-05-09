@@ -17,6 +17,8 @@ import type { LabTestPlanEntry } from "@/lib/stage0b-skill-runtime";
 
 const EXACT_EVENT = STAGE0B_TEST_PLAN.find((entry) => entry.expected_resolver_execution_mode === "direct_execution")!;
 const LISTING = STAGE0B_TEST_PLAN.find((entry) => entry.expected_resolver_execution_mode === "provider_start")!;
+const SG_EXACT_EVENT = STAGE0B_TEST_PLAN.find((entry) => entry.id === "sg-01")!;
+const SG_ROOT_LISTING = STAGE0B_TEST_PLAN.find((entry) => entry.id === "sg-08")!;
 const TMF_11 = TICKETMASTER_SKILL_FORGE_PLAN.find((entry) => entry.id === "tmf-11")!;
 const TMF_15 = TICKETMASTER_SKILL_FORGE_PLAN.find((entry) => entry.id === "tmf-15")!;
 
@@ -156,6 +158,19 @@ describe("Stage 0B Browser Harness bridge code generation", () => {
     expect(python).not.toContain("section\\s+\\d+|row\\s+\\w+");
   });
 
+  it("treats SeatGeek ticket quantity modals as a seat-selection hard stop", () => {
+    const python = buildBrowserHarnessPython(SG_EXACT_EVENT, "C:/tmp/stage0b.png");
+    expect(python).toContain("how many tickets\\\\?");
+    expect(python).toContain("you.?ll be seated together");
+  });
+
+  it("extracts visible SeatGeek event cards as candidate evidence", () => {
+    const python = buildBrowserHarnessPython(SG_ROOT_LISTING, "C:/tmp/stage0b.png");
+    expect(python).toContain("linkLooksLikeSeatGeekEvent");
+    expect(python).toContain("seatGeekCardCandidates");
+    expect(python).toContain("sell on seatgeek");
+  });
+
   it("does not treat venue FAQ payment wording alone as a payment form", () => {
     const python = buildBrowserHarnessPython(EXACT_EVENT, "C:/tmp/stage0b.png");
     expect(python).toContain("paymentInputVisible");
@@ -278,6 +293,27 @@ describe("Stage 0B Browser Harness observations classify into safe next actions"
       currentUrl: EXACT_EVENT.url,
       screenshotPath: ".stage0b-evidence/run/shot.png",
     })).toBe("insufficient_evidence");
+  });
+
+  it("classifies SeatGeek exact events that reach the quantity modal as seat-selection handoff", () => {
+    expect(classifyStage0BOutcome(SG_EXACT_EVENT, okPayload({
+      title: "D.C. United at Nashville SC Sat, May 9 at 8:00pm",
+      candidate_count: 0,
+      hardStops: ["seat_selection_required"],
+    }))).toBe("user_seat_selection_required");
+  });
+
+  it("classifies SeatGeek home/listing pages with extracted event cards as user choice", () => {
+    expect(classifyStage0BOutcome(SG_ROOT_LISTING, okPayload({
+      title: "Let there be live",
+      candidate_count: 4,
+      candidate_labels: [
+        "Eagles with Tedeschi Trucks Band May 9",
+        "Chris Stapleton's All-American Road Show May 23",
+        "Leanne Morgan Dec 11",
+        "D.C. United at Nashville SC May 9",
+      ],
+    }))).toBe("provider_listing_needs_choice");
   });
 
   it("classifies Browser Harness errors as provider_degraded", () => {

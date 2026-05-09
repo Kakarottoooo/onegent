@@ -101,6 +101,17 @@ Do not enter Phase 2 yet. Stabilize Phase 0, Phase 1, and Phase 1.5 first.
     provider degradation rather than selector drift.
   - Raw `.stage0b-evidence/` screenshots, JSONL, and result files stay local;
     only reviewed rules, tests, and generated summary docs enter git.
+- 2026-05-09 Stage 0B SeatGeek Forge lab:
+  - The 10-case SeatGeek Browser Harness lab has a reviewed summary after
+    no-live runner hardening: 7 safe outcomes, 3 provider-degraded pages,
+    0 unsafe boundary violations, 0 wrong-target signals, and 0 remaining
+    `skill_patch_needed` runs.
+  - The reviewed hardening covered SeatGeek's "How many tickets?" quantity
+    modal as a seat-selection hard stop and SeatGeek homepage/listing event
+    cards as candidate evidence.
+  - Combined Ticketmaster + SeatGeek controlled lab evidence is now 30 runs:
+    20 safe outcomes, 10 provider-degraded, 0 unsafe, 0 wrong-target, and
+    0 patch-needed. Raw `.stage0b-evidence/` remains local.
 - Historical side branches now folded into integrated preview:
   `codex/openai-chat-model-env` (runtime/debug),
   `codex/expedia-flight-card-fallback` (Expedia visible-card fallback),

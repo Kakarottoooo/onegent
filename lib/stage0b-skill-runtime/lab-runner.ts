@@ -96,6 +96,18 @@ const INSPECT_JS = String.raw`
   };
   const labelHasDateSignal = (label) =>
     /\b(?:jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec)[a-z.]*\s+\d{1,2}(?:st|nd|rd|th)?(?:,\s*\d{4})?|\b\d{4}-\d{2}-\d{2}\b/i.test(label);
+  const linkLooksLikeSeatGeekEvent = (link, label) => {
+    if (!/seatgeek\.com/i.test(location.hostname)) return false;
+    try {
+      const parsed = new URL(link || "", location.href);
+      if (!/seatgeek\.com$/i.test(parsed.hostname)) return false;
+      const pathParts = parsed.pathname.split("/").filter(Boolean);
+      if (pathParts.length < 1) return false;
+      return labelHasDateSignal(label || "") || /\b\d{4}-\d{2}-\d{2}-(?:\d{1,2})-(?:am|pm)\b/i.test(parsed.pathname);
+    } catch {
+      return false;
+    }
+  };
   const linkLooksLikeProviderEvent = (link, label, buttonText) => {
     if (!/ticketmaster\./i.test(location.hostname) || !requiresTargetMatch) return true;
     try {
@@ -178,8 +190,33 @@ const INSPECT_JS = String.raw`
         return false;
       }
     });
+  const seatGeekCardCandidates = Array.from(document.querySelectorAll("a[href]"))
+    .map((link) => {
+      const href = link.href || "";
+      const container = link.closest?.("article,li,section,[data-testid*='event'],[class*='event'],[class*='Event'],[class*='card'],[class*='Card']") || link;
+      const label = (container?.textContent || link.textContent || link.getAttribute("aria-label") || link.getAttribute("title") || "")
+        .replace(/\s+/g, " ")
+        .trim()
+        .slice(0, 500);
+      const rect = link.getBoundingClientRect();
+      return {
+        label,
+        link: href,
+        text: label,
+        href,
+        x: rect.left + rect.width / 2,
+        y: rect.top + rect.height / 2,
+        visible: rect.width > 0 && rect.height > 0 && rect.bottom >= 0 && rect.right >= 0 && rect.top <= window.innerHeight && rect.left <= window.innerWidth,
+      };
+    })
+    .filter((item) =>
+      item.visible &&
+      item.label &&
+      !/sign in|support|privacy|terms|developer|sell on seatgeek|download the app/i.test(item.label) &&
+      linkLooksLikeSeatGeekEvent(item.link, item.label)
+    );
   const seenCandidateKeys = new Set();
-  const allEventCandidates = [...eventCandidates, ...eventInfoLinkCandidates]
+  const allEventCandidates = [...eventCandidates, ...eventInfoLinkCandidates, ...seatGeekCardCandidates]
     .filter((item) => {
       const key = item.link || item.label;
       if (!key || seenCandidateKeys.has(key)) return false;
@@ -233,6 +270,7 @@ const INSPECT_JS = String.raw`
   }
   if (
     /select seats|choose seats|seat map/i.test(rawText) ||
+    /how many tickets\?|you.?ll be seated together/i.test(rawText) ||
     (eventPageLike && /lowest price|best seats|standard tickets|sec\s+\d+[\s\S]{0,80}row\s+\w+/i.test(rawText)) ||
     /view seats|select seats|choose seats/i.test(buttonTexts.join(" "))
   ) {

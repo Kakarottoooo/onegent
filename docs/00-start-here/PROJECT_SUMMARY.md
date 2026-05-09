@@ -154,6 +154,13 @@ version:
   Ticketmaster CA Kacey Musgraves; Ticketmaster `/category/*` Browse 404
   pages are now correctly treated as provider degradation instead of selector
   drift.
+- The first SeatGeek 10-case controlled lab has also run. After a reviewed
+  runner patch for SeatGeek quantity-modal hard stops and event-card
+  extraction, the canonical SeatGeek result is 7 safe outcomes, 3
+  provider-degraded pages, 0 unsafe boundary violations, 0 wrong-target
+  signals, and 0 remaining `skill_patch_needed` runs. Combined Ticketmaster +
+  SeatGeek lab evidence is now 30 runs: 20 safe outcomes, 10 provider-degraded,
+  0 unsafe, 0 wrong-target, and 0 patch-needed.
 - Runtime now has a Ticketmaster task-state classifier for checkout reached,
   seat selection needed, login/account boundary, external ad tab, local browser
   disconnect, and unknown failure states.
