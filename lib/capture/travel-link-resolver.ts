@@ -73,6 +73,7 @@ const EVENT_ID_RE = /\/event\/([A-Za-z0-9_-]+)/i;
 const ARTIST_ID_RE = /\/artist\/([A-Za-z0-9_-]+)/i;
 const STUBHUB_PERFORMER_RE = /\/performer\/([A-Za-z0-9_-]+)/i;
 const STUBHUB_GROUPING_RE = /\/grouping\/([A-Za-z0-9_-]+)/i;
+const STUBHUB_EVENT_RE = /\/event\/([A-Za-z0-9_-]+)/i;
 const SEATGEEK_EVENT_ID_RE = /\/(?:[^/?#]+\/)*([0-9]{5,})(?:[/?#]|$)/i;
 const SEATGEEK_DATE_SEGMENT_RE = /\b20\d{2}-\d{2}-\d{2}(?:-\d{1,2}(?:-\d{2})?-(?:am|pm))?\b/i;
 const EVENTBRITE_EVENT_RE = /\/e\/.+?(?:tickets-)?([0-9]{5,})(?:[/?#]|$)/i;
@@ -222,6 +223,36 @@ function resolveStubHub(
   parsed: NonNullable<ReturnType<typeof normalizeTravelUrl>>,
   provider: "stubhub",
 ): ResolvedTravelLink {
+  if (isProviderCheckoutBoundary(parsed)) {
+    return activityLink({
+      parsed,
+      provider,
+      pageType: "unknown_provider_page",
+      providerPageId: "checkout",
+      titleHint: "StubHub Checkout",
+      confidence: 0.94,
+      executionMode: "review_capture",
+      needsUserChoice: true,
+      safeNextAction: "review_capture",
+      matchedPattern: "stubhub_checkout_boundary",
+    });
+  }
+
+  const eventMatch = parsed.pathname.match(STUBHUB_EVENT_RE);
+  if (eventMatch?.[1]) {
+    return activityLink({
+      parsed,
+      provider,
+      pageType: "exact_event",
+      providerPageId: eventMatch[1],
+      titleHint: titleHintBeforeMarker(parsed.pathname, "event"),
+      confidence: 0.86,
+      executionMode: "direct_execution",
+      needsUserChoice: false,
+      matchedPattern: "stubhub_event",
+    });
+  }
+
   const performerMatch = parsed.pathname.match(STUBHUB_PERFORMER_RE);
   if (performerMatch?.[1]) {
     return activityLink({
@@ -408,6 +439,7 @@ function activityLink(input: {
   confidence: number;
   executionMode: TravelLinkExecutionMode;
   needsUserChoice: boolean;
+  safeNextAction?: ResolvedTravelLink["safe_next_action"];
   matchedPattern: string;
 }): ResolvedTravelLink {
   return {
@@ -422,7 +454,7 @@ function activityLink(input: {
     confidence: input.confidence,
     execution_mode: input.executionMode,
     needs_user_choice: input.needsUserChoice,
-    safe_next_action: "start_task",
+    safe_next_action: input.safeNextAction ?? "start_task",
     evidence: {
       source: "url_pattern",
       matched_pattern: input.matchedPattern,
@@ -452,6 +484,13 @@ function detectActivityProvider(host: string): { provider: Exclude<TravelLinkPro
     }
   }
   return null;
+}
+
+function isProviderCheckoutBoundary(
+  parsed: NonNullable<ReturnType<typeof normalizeTravelUrl>>,
+): boolean {
+  return /^checkout\./i.test(parsed.hostname) ||
+    /\/(?:secure\/buy\/)?checkout(?:[/?#]|$)/i.test(parsed.pathname);
 }
 
 function titleHintBeforeMarker(pathname: string, marker: string): string {

@@ -208,6 +208,9 @@ function resolveSeatGeekUrl(value: unknown): ActivitySkillUrlMatch | null {
 function resolveStubHubUrl(value: unknown): ActivitySkillUrlMatch | null {
   const parsed = parseProviderUrl(value, "stubhub");
   if (!parsed) return null;
+  if (isProviderCheckoutBoundary(parsed)) {
+    return boundaryMatch(parsed, "stubhub", "stubhub_checkout_boundary");
+  }
   const event = parsed.pathname.match(STUBHUB_EVENT_RE)?.[1];
   if (event) {
     return providerMatch({
@@ -452,6 +455,46 @@ function providerMatch(input: {
       ...(input.titleHint ? { titleSource: "slug" } : {}),
     },
   };
+}
+
+function boundaryMatch(
+  parsed: NonNullable<ReturnType<typeof normalizeTravelUrl>>,
+  provider: ActivitySkillProvider,
+  matchedPattern: string,
+): ActivitySkillUrlMatch {
+  return {
+    provider,
+    pageType: "unknown_provider_page",
+    inputUrl: parsed.original,
+    normalizedUrl: parsed.url,
+    host: parsed.hostname,
+    providerPageId: "checkout",
+    titleHint: `${providerLabel(provider)} Checkout`,
+    confidence: 0.94,
+    executionMode: "review_capture",
+    needsUserChoice: true,
+    safeNextAction: "review_capture",
+    evidence: {
+      source: "url_pattern",
+      matchedPattern,
+      titleSource: "slug",
+    },
+  };
+}
+
+function isProviderCheckoutBoundary(
+  parsed: NonNullable<ReturnType<typeof normalizeTravelUrl>>,
+): boolean {
+  return /^checkout\./i.test(parsed.hostname) ||
+    /\/(?:secure\/buy\/)?checkout(?:[/?#]|$)/i.test(parsed.pathname);
+}
+
+function providerLabel(provider: ActivitySkillProvider): string {
+  if (provider === "ticketmaster") return "Ticketmaster";
+  if (provider === "seatgeek") return "SeatGeek";
+  if (provider === "stubhub") return "StubHub";
+  if (provider === "eventbrite") return "Eventbrite";
+  return "AXS";
 }
 
 function unknownProviderMatch(

@@ -26,6 +26,7 @@ export type {
   SkillPatchKind,
   SkillPatchProposal,
   LabTestPlanEntry,
+  Stage0bLabPlanName,
 } from "./types";
 
 export { STAGE0B_LAB_PROVIDERS } from "./types";
@@ -50,6 +51,10 @@ export {
   TICKETMASTER_SKILL_FORGE_PLAN,
   TICKETMASTER_SKILL_FORGE_PLAN_COUNTS,
 } from "./ticketmaster-forge-plan";
+export {
+  STUBHUB_SKILL_FORGE_PLAN,
+  STUBHUB_SKILL_FORGE_PLAN_COUNTS,
+} from "./stubhub-forge-plan";
 
 export {
   parseStage0BLabRunnerArgs,

@@ -23,17 +23,17 @@ import type {
 
 // ─── Provider scope ─────────────────────────────────────────────────────
 //
-// Stage 0B lab is locked to Ticketmaster + SeatGeek (Workstream B in the
-// Activity Provider Skill Runtime doc). StubHub / Eventbrite / AXS are
-// Workstream C corpus work and stay no-live for now.
+// Stage 0B lab started with Ticketmaster + SeatGeek and now includes StubHub
+// as the first copyability check for the Activity Provider Skill Runtime.
+// Eventbrite / AXS stay no-live corpus work until their controlled lab starts.
 
 export type Stage0bLabProvider = Extract<
   ActivitySkillProvider,
-  "ticketmaster" | "seatgeek"
+  "ticketmaster" | "seatgeek" | "stubhub"
 >;
 
 export const STAGE0B_LAB_PROVIDERS: ReadonlyArray<Stage0bLabProvider> =
-  Object.freeze(["ticketmaster", "seatgeek"]);
+  Object.freeze(["ticketmaster", "seatgeek", "stubhub"]);
 
 // ─── Lab event JSONL schema ─────────────────────────────────────────────
 //
@@ -262,12 +262,17 @@ export interface LabTestPlanEntry {
     | "ticketmaster_search"
     | "ticketmaster_listing"
     | "seatgeek_dated_event"
-    | "seatgeek_listing";
+    | "seatgeek_listing"
+    | "stubhub_event"
+    | "stubhub_performer"
+    | "stubhub_category"
+    | "stubhub_geography"
+    | "stubhub_checkout";
   url: string;
   expected_resolver_page_type: ActivitySkillPageType;
-  expected_resolver_execution_mode: Extract<ActivitySkillExecutionMode, "direct_execution" | "provider_start">;
+  expected_resolver_execution_mode: ActivitySkillExecutionMode;
   /** Reason this fixture exists — what the run should reveal. */
   reason: string;
 }
 
-export type Stage0bLabPlanName = "stage0b" | "ticketmaster-forge";
+export type Stage0bLabPlanName = "stage0b" | "ticketmaster-forge" | "stubhub-forge";

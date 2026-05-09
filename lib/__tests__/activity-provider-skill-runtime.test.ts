@@ -344,6 +344,26 @@ describe("activity provider skill URL matching", () => {
     });
   });
 
+  it("recognizes StubHub exact events but review-captures checkout/payment URLs", () => {
+    expect(resolveActivityProviderSkillUrl("https://www.stubhub.com/world-cup-east-rutherford-tickets-6-16-2026/event/153022598/?quantity=2")).toMatchObject({
+      provider: "stubhub",
+      pageType: "exact_event",
+      providerPageId: "153022598",
+      executionMode: "direct_execution",
+      needsUserChoice: false,
+      safeNextAction: "start_task",
+    });
+
+    expect(resolveActivityProviderSkillUrl("https://checkout.stubhub.com/secure/buy/checkout?ID=stubhub-payment-boundary")).toMatchObject({
+      provider: "stubhub",
+      pageType: "unknown_provider_page",
+      providerPageId: "checkout",
+      executionMode: "review_capture",
+      needsUserChoice: true,
+      safeNextAction: "review_capture",
+    });
+  });
+
   it("recognizes Eventbrite event pages but keeps directories as listings", () => {
     expect(resolveActivityProviderSkillUrl("https://www.eventbrite.com/e/summer-concert-tickets-123456789")).toMatchObject({
       provider: "eventbrite",

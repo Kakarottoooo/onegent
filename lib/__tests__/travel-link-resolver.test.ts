@@ -159,3 +159,34 @@ describe("titleizeTravelSlug", () => {
     );
   });
 });
+
+describe("resolveTravelLinkFromUrl StubHub exact event and checkout boundaries", () => {
+  it("recognizes StubHub /event/<id> URLs as exact events", () => {
+    expect(
+      resolveTravelLinkFromUrl("https://www.stubhub.com/john-mulaney-nashville-tickets-6-12-2026/event/160512394/"),
+    ).toMatchObject({
+      provider: "stubhub",
+      page_type: "exact_event",
+      provider_page_id: "160512394",
+      title_hint: "John Mulaney Nashville Tickets 6 12 2026",
+      execution_mode: "direct_execution",
+      needs_user_choice: false,
+      safe_next_action: "start_task",
+      evidence: { matched_pattern: "stubhub_event" },
+    });
+  });
+
+  it("keeps StubHub checkout URLs at review_capture instead of direct provider execution", () => {
+    expect(
+      resolveTravelLinkFromUrl("https://checkout.stubhub.com/secure/buy/checkout?ID=d045373b-46cb-4b2c-adb8-185255e52d55%7c12631332481%7c2%7c0"),
+    ).toMatchObject({
+      provider: "stubhub",
+      page_type: "unknown_provider_page",
+      provider_page_id: "checkout",
+      execution_mode: "review_capture",
+      needs_user_choice: true,
+      safe_next_action: "review_capture",
+      evidence: { matched_pattern: "stubhub_checkout_boundary" },
+    });
+  });
+});

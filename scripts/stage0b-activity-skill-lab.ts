@@ -31,25 +31,40 @@
 import {
   STAGE0B_TEST_PLAN,
   STAGE0B_PLAN_COUNTS,
+  TICKETMASTER_SKILL_FORGE_PLAN,
+  STUBHUB_SKILL_FORGE_PLAN,
   type LabTestPlanEntry,
+  type Stage0bLabPlanName,
+  type Stage0bLabProvider,
 } from "@/lib/stage0b-skill-runtime";
 import { resolveActivityProviderSkillUrl } from "@/lib/activity-skills";
 
 interface LabRunnerArgs {
   dryRun: boolean;
   check: boolean;
-  providerFilter?: "ticketmaster" | "seatgeek";
+  providerFilter?: Stage0bLabProvider;
+  plan: Stage0bLabPlanName;
 }
 
 function parseArgs(argv: ReadonlyArray<string>): LabRunnerArgs {
   const args: LabRunnerArgs = {
     dryRun: argv.includes("--dry-run") || (!argv.includes("--check") && !argv.includes("--print-plan")),
     check: argv.includes("--check"),
+    plan: "stage0b",
   };
+  const planIdx = argv.indexOf("--plan");
+  if (planIdx >= 0 && argv[planIdx + 1]) {
+    const value = argv[planIdx + 1];
+    if (value === "stage0b" || value === "ticketmaster-forge" || value === "stubhub-forge") {
+      args.plan = value;
+    } else {
+      throw new Error(`Unknown --plan value: ${value}`);
+    }
+  }
   const providerIdx = argv.indexOf("--provider");
   if (providerIdx >= 0 && argv[providerIdx + 1]) {
     const value = argv[providerIdx + 1];
-    if (value === "ticketmaster" || value === "seatgeek") {
+    if (value === "ticketmaster" || value === "seatgeek" || value === "stubhub") {
       args.providerFilter = value;
     } else {
       throw new Error(`Unknown --provider value: ${value}`);
@@ -126,24 +141,29 @@ function printDryRunInstructions(args: LabRunnerArgs): void {
   console.log("");
   console.log("=== Plan ===");
   console.log("");
-  const entries = filterPlan(args.providerFilter);
+  const entries = filterPlan(args);
   for (const entry of entries) {
     console.log(formatPlanEntry(entry));
     console.log("");
   }
 }
 
-function filterPlan(provider?: LabRunnerArgs["providerFilter"]): LabTestPlanEntry[] {
-  return provider
-    ? STAGE0B_TEST_PLAN.filter((e) => e.provider === provider)
-    : [...STAGE0B_TEST_PLAN];
+function filterPlan(args: Pick<LabRunnerArgs, "providerFilter" | "plan">): LabTestPlanEntry[] {
+  const base = args.plan === "ticketmaster-forge"
+    ? TICKETMASTER_SKILL_FORGE_PLAN
+    : args.plan === "stubhub-forge"
+      ? STUBHUB_SKILL_FORGE_PLAN
+      : STAGE0B_TEST_PLAN;
+  return args.providerFilter
+    ? base.filter((e) => e.provider === args.providerFilter)
+    : [...base];
 }
 
 function printCheckResult(results: ReadonlyArray<PreflightResult>): boolean {
   const failures = results.filter((r) => !r.ok);
   console.log("Stage 0B Activity Skill Lab — PRE-FLIGHT CHECK");
   console.log("");
-  console.log(`Plan size: ${STAGE0B_PLAN_COUNTS.total} (TM=${STAGE0B_PLAN_COUNTS.ticketmaster}, SG=${STAGE0B_PLAN_COUNTS.seatgeek})`);
+  console.log(`Baseline plan size: ${STAGE0B_PLAN_COUNTS.total} (TM=${STAGE0B_PLAN_COUNTS.ticketmaster}, SG=${STAGE0B_PLAN_COUNTS.seatgeek})`);
   console.log(`Checked: ${results.length}`);
   console.log(`Pass: ${results.length - failures.length}`);
   console.log(`Fail: ${failures.length}`);
@@ -175,7 +195,7 @@ async function main(): Promise<void> {
   }
 
   if (args.check) {
-    const entries = filterPlan(args.providerFilter);
+    const entries = filterPlan(args);
     const results = entries.map(preflight);
     const ok = printCheckResult(results);
     if (!ok) {

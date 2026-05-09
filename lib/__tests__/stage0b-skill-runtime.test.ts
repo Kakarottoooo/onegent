@@ -28,7 +28,7 @@ const RUN_ID = "00000000-0000-4000-8000-000000000000";
 
 describe("Stage 0B — provider scope is locked to TM + SeatGeek", () => {
   it("STAGE0B_LAB_PROVIDERS contains exactly Ticketmaster and SeatGeek (alphabetic-stable order)", () => {
-    expect(STAGE0B_LAB_PROVIDERS).toEqual(["ticketmaster", "seatgeek"]);
+    expect(STAGE0B_LAB_PROVIDERS).toEqual(["ticketmaster", "seatgeek", "stubhub"]);
   });
 });
 

@@ -18,6 +18,9 @@ import {
 import {
   TICKETMASTER_SKILL_FORGE_PLAN,
 } from "@/lib/stage0b-skill-runtime/ticketmaster-forge-plan";
+import {
+  STUBHUB_SKILL_FORGE_PLAN,
+} from "@/lib/stage0b-skill-runtime/stubhub-forge-plan";
 import type {
   LabEvent,
   LabHardStopReason,
@@ -104,6 +107,15 @@ const INSPECT_JS = String.raw`
       const pathParts = parsed.pathname.split("/").filter(Boolean);
       if (pathParts.length < 1) return false;
       return labelHasDateSignal(label || "") || /\b\d{4}-\d{2}-\d{2}-(?:\d{1,2})-(?:am|pm)\b/i.test(parsed.pathname);
+    } catch {
+      return false;
+    }
+  };
+  const linkLooksLikeStubHubEvent = (link) => {
+    if (!/stubhub\.com$/i.test(location.hostname)) return false;
+    try {
+      const parsed = new URL(link || "", location.href);
+      return /stubhub\.com$/i.test(parsed.hostname) && /\/event\/\d+/i.test(parsed.pathname);
     } catch {
       return false;
     }
@@ -215,8 +227,33 @@ const INSPECT_JS = String.raw`
       !/sign in|support|privacy|terms|developer|sell on seatgeek|download the app/i.test(item.label) &&
       linkLooksLikeSeatGeekEvent(item.link, item.label)
     );
+  const stubHubCardCandidates = Array.from(document.querySelectorAll("a[href]"))
+    .map((link) => {
+      const href = link.href || "";
+      const container = link.closest?.("article,li,section,[data-testid*='event'],[data-testid*='listing'],[class*='event'],[class*='Event'],[class*='card'],[class*='Card'],[class*='tile'],[class*='Tile']") || link;
+      const label = (container?.textContent || link.textContent || link.getAttribute("aria-label") || link.getAttribute("title") || "")
+        .replace(/\s+/g, " ")
+        .trim()
+        .slice(0, 500);
+      const rect = link.getBoundingClientRect();
+      return {
+        label,
+        link: href,
+        text: label,
+        href,
+        x: rect.left + rect.width / 2,
+        y: rect.top + rect.height / 2,
+        visible: rect.width > 0 && rect.height > 0 && rect.bottom >= 0 && rect.right >= 0 && rect.top <= window.innerHeight && rect.left <= window.innerWidth,
+      };
+    })
+    .filter((item) =>
+      item.visible &&
+      item.label &&
+      !/sign in|privacy|terms|gift cards|sell tickets|support|download the app/i.test(item.label) &&
+      linkLooksLikeStubHubEvent(item.link)
+    );
   const seenCandidateKeys = new Set();
-  const allEventCandidates = [...eventCandidates, ...eventInfoLinkCandidates, ...seatGeekCardCandidates]
+  const allEventCandidates = [...eventCandidates, ...eventInfoLinkCandidates, ...seatGeekCardCandidates, ...stubHubCardCandidates]
     .filter((item) => {
       const key = item.link || item.label;
       if (!key || seenCandidateKeys.has(key)) return false;
@@ -236,6 +273,7 @@ const INSPECT_JS = String.raw`
     .slice(0, 20);
   const hardStops = [];
   const urlLower = location.href.toLowerCase();
+  const stubHubCheckoutUrl = /checkout\.stubhub\.com/i.test(location.hostname) || /\/secure\/buy\/checkout/i.test(location.pathname);
   const eventPageLike = /\/event\//i.test(location.pathname);
   const authUrl = /auth\.ticketmaster|\/login|\/signin|\/account/.test(urlLower);
   const passwordFieldVisible = Array.from(document.querySelectorAll("input[type='password']")).some((el) => {
@@ -259,6 +297,9 @@ const INSPECT_JS = String.raw`
     .some((el) => /^(sign in|log in|login|create account|verify your account)$/i.test((el.textContent || "").trim()));
   const checkoutPaymentHeading = /checkout|order summary|subtotal|total due|place order|confirm purchase|complete purchase/.test(lower) &&
     /credit card|card number|billing address|payment method|cvv|expiration date/.test(lower);
+  if (stubHubCheckoutUrl) {
+    hardStops.push("payment_form_visible");
+  }
   if (authUrl || passwordFieldVisible || loginHeading || /account required|verify your account/.test(lower)) {
     hardStops.push("login_or_signin_wall");
   }
@@ -269,10 +310,13 @@ const INSPECT_JS = String.raw`
     hardStops.push("otp_or_phone_verification");
   }
   if (
-    /select seats|choose seats|seat map/i.test(rawText) ||
-    /how many tickets\?|you.?ll be seated together/i.test(rawText) ||
-    (eventPageLike && /lowest price|best seats|standard tickets|sec\s+\d+[\s\S]{0,80}row\s+\w+/i.test(rawText)) ||
-    /view seats|select seats|choose seats/i.test(buttonTexts.join(" "))
+    !stubHubCheckoutUrl &&
+    (
+      /select seats|choose seats|seat map/i.test(rawText) ||
+      /how many tickets\?|you.?ll be seated together/i.test(rawText) ||
+      (eventPageLike && /lowest price|best seats|standard tickets|sec\s+\d+[\s\S]{0,80}row\s+\w+/i.test(rawText)) ||
+      /view seats|select seats|choose seats/i.test(buttonTexts.join(" "))
+    )
   ) {
     hardStops.push("seat_selection_required");
   }
@@ -330,13 +374,13 @@ export function parseStage0BLabRunnerArgs(argv: string[]): Stage0BLabRunnerArgs 
     } else if (token === "--dry-run") {
       args.dryRun = true;
     } else if (token === "--provider") {
-      if (next !== "ticketmaster" && next !== "seatgeek") {
+      if (next !== "ticketmaster" && next !== "seatgeek" && next !== "stubhub") {
         throw new Error(`Unsupported --provider value: ${next ?? ""}`);
       }
       args.provider = next;
       index += 1;
     } else if (token === "--plan") {
-      if (next !== "stage0b" && next !== "ticketmaster-forge") {
+      if (next !== "stage0b" && next !== "ticketmaster-forge" && next !== "stubhub-forge") {
         throw new Error(`Unsupported --plan value: ${next ?? ""}`);
       }
       args.plan = next;
@@ -390,9 +434,9 @@ export function selectStage0BLabEntries(args: Pick<Stage0BLabRunnerArgs, "provid
 }
 
 function labPlanEntries(plan: Stage0bLabPlanName): LabTestPlanEntry[] {
-  return plan === "ticketmaster-forge"
-    ? TICKETMASTER_SKILL_FORGE_PLAN.slice()
-    : STAGE0B_TEST_PLAN.slice();
+  if (plan === "ticketmaster-forge") return TICKETMASTER_SKILL_FORGE_PLAN.slice();
+  if (plan === "stubhub-forge") return STUBHUB_SKILL_FORGE_PLAN.slice();
+  return STAGE0B_TEST_PLAN.slice();
 }
 
 export function buildBrowserHarnessPython(entry: LabTestPlanEntry, screenshotPath: string, keepOpen = false): string {

@@ -65,6 +65,23 @@ describe("direct activity provider URL parsing", () => {
     });
   });
 
+  it("accepts StubHub exact events and rejects StubHub checkout links", () => {
+    expect(
+      parseDirectActivityProviderUrl("https://www.stubhub.com/john-mulaney-nashville-tickets-6-12-2026/event/160512394/"),
+    ).toMatchObject({
+      provider: "stubhub",
+      pageType: "event",
+      providerPageId: "160512394",
+      eventId: "160512394",
+      needsUserChoice: false,
+      executionMode: "direct_execution",
+    });
+
+    expect(
+      parseDirectActivityProviderUrl("https://checkout.stubhub.com/secure/buy/checkout?ID=payment-boundary"),
+    ).toBeNull();
+  });
+
   it("accepts SeatGeek dated event and listing pages", () => {
     expect(
       parseDirectActivityProviderUrl("https://seatgeek.com/nashville-sc-tickets/mls/2026-05-09-8-pm/17921493"),

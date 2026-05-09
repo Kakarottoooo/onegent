@@ -41,15 +41,15 @@ Unsafe boundary: 0
 Wrong target: 0
 Host impersonation escapes: 0
 Patch proposal candidates: 97
-Controlled lab runs: 30
+Controlled lab runs: 40
 
 ## Activity Skill Lab Evidence
 
 Evidence root: .stage0b-evidence
-Total runs: 30
-Result files: 30
+Total runs: 40
+Result files: 40
 Invalid files: 0
-Safe outcomes: 20
+Safe outcomes: 30
 Unsafe boundary violations: 0
 Wrong target / candidate signals: 0
 Provider degraded: 10
@@ -60,16 +60,17 @@ Patch proposals: 0
 | --- | ---: |
 | `ticketmaster` | 20 |
 | `seatgeek` | 10 |
+| `stubhub` | 10 |
 
 | Classification | Runs |
 | --- | ---: |
 | `exact_event_ready` | 0 |
-| `provider_listing_needs_choice` | 12 |
+| `provider_listing_needs_choice` | 17 |
 | `single_candidate_ready` | 0 |
 | `safe_handoff_reached` | 0 |
-| `user_seat_selection_required` | 8 |
+| `user_seat_selection_required` | 12 |
 | `account_session_required` | 0 |
-| `payment_or_final_action_required` | 0 |
+| `payment_or_final_action_required` | 1 |
 | `provider_degraded` | 10 |
 | `insufficient_evidence` | 0 |
 | `skill_patch_needed` | 0 |

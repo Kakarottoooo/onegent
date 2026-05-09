@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   STAGE0B_TEST_PLAN,
   TICKETMASTER_SKILL_FORGE_PLAN,
+  STUBHUB_SKILL_FORGE_PLAN,
   buildBrowserHarnessPython,
   buildStage0BLabResult,
   classifyStage0BOutcome,
@@ -21,6 +22,9 @@ const SG_EXACT_EVENT = STAGE0B_TEST_PLAN.find((entry) => entry.id === "sg-01")!;
 const SG_ROOT_LISTING = STAGE0B_TEST_PLAN.find((entry) => entry.id === "sg-08")!;
 const TMF_11 = TICKETMASTER_SKILL_FORGE_PLAN.find((entry) => entry.id === "tmf-11")!;
 const TMF_15 = TICKETMASTER_SKILL_FORGE_PLAN.find((entry) => entry.id === "tmf-15")!;
+const SHF_01 = STUBHUB_SKILL_FORGE_PLAN.find((entry) => entry.id === "shf-01")!;
+const SHF_05 = STUBHUB_SKILL_FORGE_PLAN.find((entry) => entry.id === "shf-05")!;
+const SHF_09 = STUBHUB_SKILL_FORGE_PLAN.find((entry) => entry.id === "shf-09")!;
 
 describe("Stage 0B live lab runner args and plan selection", () => {
   it("defaults to no-live dry plan behavior unless --live is explicit", () => {
@@ -75,10 +79,26 @@ describe("Stage 0B live lab runner args and plan selection", () => {
     expect(entries.map((entry) => entry.id)).toEqual(TICKETMASTER_SKILL_FORGE_PLAN.map((entry) => entry.id));
   });
 
+  it("selects the StubHub Skill Forge plan when requested", () => {
+    const entries = selectStage0BLabEntries({ plan: "stubhub-forge" });
+    expect(entries).toHaveLength(10);
+    expect(entries.every((entry) => entry.provider === "stubhub")).toBe(true);
+    expect(entries.map((entry) => entry.id)).toEqual(STUBHUB_SKILL_FORGE_PLAN.map((entry) => entry.id));
+  });
+
   it("keeps every Ticketmaster Skill Forge URL aligned with the activity resolver", () => {
     for (const entry of TICKETMASTER_SKILL_FORGE_PLAN) {
       const resolved = resolveActivityProviderSkillUrl(entry.url);
       expect(resolved?.provider, entry.id).toBe("ticketmaster");
+      expect(resolved?.pageType, entry.id).toBe(entry.expected_resolver_page_type);
+      expect(resolved?.executionMode, entry.id).toBe(entry.expected_resolver_execution_mode);
+    }
+  });
+
+  it("keeps every StubHub Skill Forge URL aligned with the activity resolver", () => {
+    for (const entry of STUBHUB_SKILL_FORGE_PLAN) {
+      const resolved = resolveActivityProviderSkillUrl(entry.url);
+      expect(resolved?.provider, entry.id).toBe("stubhub");
       expect(resolved?.pageType, entry.id).toBe(entry.expected_resolver_page_type);
       expect(resolved?.executionMode, entry.id).toBe(entry.expected_resolver_execution_mode);
     }
@@ -169,6 +189,20 @@ describe("Stage 0B Browser Harness bridge code generation", () => {
     expect(python).toContain("linkLooksLikeSeatGeekEvent");
     expect(python).toContain("seatGeekCardCandidates");
     expect(python).toContain("sell on seatgeek");
+  });
+
+  it("extracts visible StubHub event links as candidate evidence", () => {
+    const python = buildBrowserHarnessPython(SHF_01, "C:/tmp/stage0b.png");
+    expect(python).toContain("linkLooksLikeStubHubEvent");
+    expect(python).toContain("stubHubCardCandidates");
+    expect(python).toContain("sell tickets");
+  });
+
+  it("hard-stops StubHub checkout URLs as payment boundary evidence", () => {
+    const python = buildBrowserHarnessPython(SHF_09, "C:/tmp/stage0b.png");
+    expect(python).toContain("stubHubCheckoutUrl");
+    expect(python).toContain("!stubHubCheckoutUrl");
+    expect(python).toContain("payment_form_visible");
   });
 
   it("does not treat venue FAQ payment wording alone as a payment form", () => {
@@ -314,6 +348,33 @@ describe("Stage 0B Browser Harness observations classify into safe next actions"
         "D.C. United at Nashville SC May 9",
       ],
     }))).toBe("provider_listing_needs_choice");
+  });
+
+  it("classifies StubHub performer pages with extracted event cards as user choice", () => {
+    expect(classifyStage0BOutcome(SHF_01, okPayload({
+      title: "Athletics Tickets",
+      candidate_count: 5,
+      candidate_labels: [
+        "Athletics at Sacramento May 14, 2026",
+        "Athletics at Sacramento May 15, 2026",
+      ],
+    }))).toBe("provider_listing_needs_choice");
+  });
+
+  it("classifies StubHub exact events with ticket boundary evidence as seat-selection handoff", () => {
+    expect(classifyStage0BOutcome(SHF_05, okPayload({
+      title: "Athletics Sacramento Tickets",
+      candidate_count: 0,
+      hardStops: ["seat_selection_required"],
+    }))).toBe("user_seat_selection_required");
+  });
+
+  it("classifies StubHub checkout links as payment boundary handoff", () => {
+    expect(classifyStage0BOutcome(SHF_09, okPayload({
+      title: "StubHub Checkout",
+      candidate_count: 0,
+      hardStops: ["payment_form_visible"],
+    }))).toBe("payment_or_final_action_required");
   });
 
   it("classifies Browser Harness errors as provider_degraded", () => {

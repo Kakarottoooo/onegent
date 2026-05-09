@@ -15,6 +15,7 @@ import {
   renderStage0BActivityLabMarkdown,
   STAGE0B_TEST_PLAN,
   TICKETMASTER_SKILL_FORGE_PLAN,
+  STUBHUB_SKILL_FORGE_PLAN,
   type L2RecoveryClass,
   type L2RecoveryResult,
   type SkillPatchKind,
@@ -65,7 +66,7 @@ describe("Stage 0B Activity Lab evidence ingestion", () => {
     expect(report.summary.totalRuns).toBe(7);
     expect(report.summary.resultFiles).toBe(7);
     expect(report.summary.invalidFiles).toBe(0);
-    expect(report.summary.byProvider).toEqual({ ticketmaster: 5, seatgeek: 2 });
+    expect(report.summary.byProvider).toEqual({ ticketmaster: 5, seatgeek: 2, stubhub: 0 });
     expect(report.summary.byPlanId["tmf-08"]).toBe(1);
     expect(report.summary.byPlanId["sg-01"]).toBe(1);
     expect(report.summary.byClassification.exact_event_ready).toBe(2);
@@ -220,7 +221,7 @@ function writeResult(
 }
 
 function planUrl(id: string): string {
-  const entry = [...STAGE0B_TEST_PLAN, ...TICKETMASTER_SKILL_FORGE_PLAN].find((candidate) => candidate.id === id);
+  const entry = [...STAGE0B_TEST_PLAN, ...TICKETMASTER_SKILL_FORGE_PLAN, ...STUBHUB_SKILL_FORGE_PLAN].find((candidate) => candidate.id === id);
   if (!entry) throw new Error(`Missing plan entry ${id}`);
   return entry.url;
 }

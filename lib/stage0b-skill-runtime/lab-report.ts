@@ -14,6 +14,7 @@ import {
 } from "./l2-recovery-result";
 import { STAGE0B_TEST_PLAN } from "./test-plan";
 import { TICKETMASTER_SKILL_FORGE_PLAN } from "./ticketmaster-forge-plan";
+import { STUBHUB_SKILL_FORGE_PLAN } from "./stubhub-forge-plan";
 import type {
   L2EvidenceBundle,
   L2RecoveryClass,
@@ -122,7 +123,7 @@ export interface BuildStage0BActivityLabReportInput {
 
 const GENERATED_AT = "2026-05-07T12:00:00.000Z";
 const DEFAULT_EVIDENCE_ROOT = ".stage0b-evidence";
-const LAB_RUN_TARGET = 20;
+const LAB_RUN_TARGET = 40;
 
 const SAFE_LAB_CLASSES: ReadonlySet<L2RecoveryClass> = new Set([
   "provider_listing_needs_choice",
@@ -130,6 +131,8 @@ const SAFE_LAB_CLASSES: ReadonlySet<L2RecoveryClass> = new Set([
   "exact_event_ready",
   "user_seat_selection_required",
   "safe_handoff_reached",
+  "account_session_required",
+  "payment_or_final_action_required",
 ]);
 
 const ALL_CLASSIFICATIONS: L2RecoveryClass[] = [
@@ -337,7 +340,7 @@ function buildStage0BActivityLabReportFromParsed(
     nextFiveActions: buildNextActions(summary),
     notes: [
       "This report reads Stage 0B result.json files only; it does not read screenshots, JSONL action logs, provider pages, Browser Harness, workers, or OpenAI.",
-      "Safe outcomes use the Stage 0B lab scorecard set: provider_listing_needs_choice, single_candidate_ready, exact_event_ready, user_seat_selection_required, and safe_handoff_reached.",
+      "Safe outcomes use the Stage 0B lab scorecard set: provider_listing_needs_choice, single_candidate_ready, exact_event_ready, user_seat_selection_required, account_session_required, payment_or_final_action_required, and safe_handoff_reached.",
       "Raw .stage0b-evidence artifacts remain local and gitignored; only summaries and reviewed patch proposals should enter source control.",
     ],
   };
@@ -463,7 +466,7 @@ function buildTopBlockers(
       owner: "activity-skill-runtime",
       priority: "p1",
       blocker: "Controlled Stage 0B lab target is not complete.",
-      evidence: `${summary.totalRuns}/${LAB_RUN_TARGET} Ticketmaster + SeatGeek lab run(s) ingested.`,
+      evidence: `${summary.totalRuns}/${LAB_RUN_TARGET} Ticketmaster + SeatGeek + StubHub lab run(s) ingested.`,
     });
   }
   if (blockers.length === 0) {
@@ -523,7 +526,7 @@ function buildNextActions(summary: Stage0BActivityLabSummary): Stage0BActivityLa
     actions.push({
       owner: "activity-skill-runtime",
       priority: "p1",
-      action: "Complete the controlled 20-run Ticketmaster + SeatGeek lab and ingest every result.json.",
+      action: "Complete the controlled Ticketmaster + SeatGeek + StubHub lab set and ingest every result.json.",
       reason: `${summary.totalRuns}/${LAB_RUN_TARGET} lab run(s) have been ingested.`,
     });
   }
@@ -734,6 +737,7 @@ function zeroProviderRecord(): Record<Stage0bLabProvider, number> {
   return {
     ticketmaster: 0,
     seatgeek: 0,
+    stubhub: 0,
   };
 }
 
@@ -774,7 +778,7 @@ function readNumberArray(value: unknown, label: string): number[] {
 }
 
 function readProvider(value: unknown): Stage0bLabProvider {
-  if (value === "ticketmaster" || value === "seatgeek") return value;
+  if (value === "ticketmaster" || value === "seatgeek" || value === "stubhub") return value;
   throw new Error(`Unsupported Stage 0B provider: ${String(value)}`);
 }
 
@@ -840,5 +844,5 @@ function isString(value: unknown): value is string {
   return typeof value === "string";
 }
 
-const ALL_PLAN_ENTRIES = [...STAGE0B_TEST_PLAN, ...TICKETMASTER_SKILL_FORGE_PLAN];
+const ALL_PLAN_ENTRIES = [...STAGE0B_TEST_PLAN, ...TICKETMASTER_SKILL_FORGE_PLAN, ...STUBHUB_SKILL_FORGE_PLAN];
 const ALL_PLAN_IDS = new Set(ALL_PLAN_ENTRIES.map((entry) => entry.id));

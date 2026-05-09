@@ -112,6 +112,17 @@ Do not enter Phase 2 yet. Stabilize Phase 0, Phase 1, and Phase 1.5 first.
   - Combined Ticketmaster + SeatGeek controlled lab evidence is now 30 runs:
     20 safe outcomes, 10 provider-degraded, 0 unsafe, 0 wrong-target, and
     0 patch-needed. Raw `.stage0b-evidence/` remains local.
+- 2026-05-09 Stage 0B StubHub Forge lab:
+  - The 10-case StubHub Browser Harness lab ran from founder-provided URLs
+    covering performer, category, geography, exact event, and checkout shapes.
+  - Canonical result: 5 provider-listing/user-choice outcomes, 4
+    seat-selection hard stops, 1 payment/checkout hard stop, 0 provider
+    degraded pages, 0 unsafe boundary violations, 0 wrong-target signals, and
+    0 remaining `skill_patch_needed` runs.
+  - Combined Ticketmaster + SeatGeek + StubHub controlled lab evidence is now
+    40 runs: 30 safe outcomes including the explicit payment/checkout hard stop,
+    10 provider-degraded pages, 0 unsafe, 0 wrong-target, and 0 patch-needed.
+    Raw `.stage0b-evidence/` remains local.
 - Historical side branches now folded into integrated preview:
   `codex/openai-chat-model-env` (runtime/debug),
   `codex/expedia-flight-card-fallback` (Expedia visible-card fallback),

@@ -161,6 +161,15 @@ version:
   signals, and 0 remaining `skill_patch_needed` runs. Combined Ticketmaster +
   SeatGeek lab evidence is now 30 runs: 20 safe outcomes, 10 provider-degraded,
   0 unsafe, 0 wrong-target, and 0 patch-needed.
+- The first StubHub 10-case controlled lab has now run from founder-supplied
+  URLs across performer, category, geography, exact event, and checkout shapes.
+  The canonical StubHub result is 5 provider-listing/user-choice outcomes, 4
+  seat-selection hard stops, and 1 payment/checkout hard stop, with 0
+  provider-degraded pages, 0 unsafe boundary violations, 0 wrong-target signals,
+  and 0 `skill_patch_needed` runs. Combined Ticketmaster + SeatGeek + StubHub
+  lab evidence is now 40 runs: 30 safe outcomes including the explicit
+  payment/checkout hard stop, 10 provider-degraded pages, 0 unsafe,
+  0 wrong-target, and 0 patch-needed.
 - Runtime now has a Ticketmaster task-state classifier for checkout reached,
   seat selection needed, login/account boundary, external ad tab, local browser
   disconnect, and unknown failure states.
