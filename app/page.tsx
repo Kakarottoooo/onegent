@@ -4607,6 +4607,9 @@ function HomeInner() {
                                 "Which event date, city, and showtime should I use from this provider page?",
                             );
                           }}
+                          onProviderEventChoiceOption={(req) =>
+                            handleProviderEventChoiceReply(req.message, req)
+                          }
                         />
                       ) : null
                     )}

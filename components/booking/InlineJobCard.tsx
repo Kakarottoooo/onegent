@@ -88,7 +88,15 @@ export function isTravelDocError(error?: string): boolean {
 
 // ── StepCard ──────────────────────────────────────────────────────────────────
 
-function InlineStepCard({ step }: { step: BookingJobStep }) {
+function InlineStepCard({
+  step,
+  choiceSubmitting,
+  onProviderEventChoiceOption,
+}: {
+  step: BookingJobStep;
+  choiceSubmitting?: string | null;
+  onProviderEventChoiceOption?: (label: string) => void;
+}) {
   const color = stepStatusColor(step);
   const actionItem = getProviderEventChoiceActionItem(step);
 
@@ -133,9 +141,18 @@ function InlineStepCard({ step }: { step: BookingJobStep }) {
           {actionItem?.options && actionItem.options.length > 0 && (
             <div style={{ display: "grid", gap: 4, marginTop: 6 }}>
               {actionItem.options.slice(0, 4).map((option, index) => (
-                <div
+                <button
+                  type="button"
                   key={`${option.label}-${index}`}
+                  aria-label={option.label}
+                  disabled={choiceSubmitting !== null}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onProviderEventChoiceOption?.(option.label);
+                  }}
                   style={{
+                    appearance: "none",
+                    textAlign: "left",
                     border: "0.5px solid rgba(234,88,12,0.22)",
                     borderRadius: 7,
                     padding: "5px 7px",
@@ -143,11 +160,15 @@ function InlineStepCard({ step }: { step: BookingJobStep }) {
                     fontSize: 10.5,
                     color: "var(--text-secondary,#666)",
                     lineHeight: 1.35,
-                    backgroundColor: "rgba(234,88,12,0.045)",
+                    backgroundColor: choiceSubmitting === option.label ? "rgba(234,88,12,0.12)" : "rgba(234,88,12,0.045)",
+                    cursor: choiceSubmitting === null ? "pointer" : "default",
+                    opacity: choiceSubmitting !== null && choiceSubmitting !== option.label ? 0.62 : 1,
                   }}
                 >
-                  {option.label.length > 120 ? `${option.label.slice(0, 120)}...` : option.label}
-                </div>
+                  {choiceSubmitting === option.label
+                    ? "Starting..."
+                    : option.label.length > 120 ? `${option.label.slice(0, 120)}...` : option.label}
+                </button>
               ))}
             </div>
           )}
@@ -202,6 +223,8 @@ interface InlineJobCardProps {
   onNeedsTravelDocs?: (req: TravelDocRequest) => void;
   /** Called when a provider-start activity task needs date/city/showtime in chat */
   onNeedsProviderEventChoice?: (req: ProviderEventChoiceRequest) => void;
+  /** Called when the user clicks a visible provider candidate in the task card */
+  onProviderEventChoiceOption?: (req: ProviderEventChoiceRequest) => void | Promise<void>;
   /** Called when the job is deleted (manually or 404) so the parent can remove it */
   onDeleted?: (jobId: string) => void;
   /** Opens the in-page task observer without navigating away from chat/results */
@@ -215,11 +238,13 @@ export default function InlineJobCard({
   onNeedsProviderEventChoice,
   onDeleted,
   onWatch,
+  onProviderEventChoiceOption,
 }: InlineJobCardProps) {
   const [job, setJob] = useState<BookingJob | null>(null);
   const [expanded, setExpanded] = useState(true);
   const [deleting, setDeleting] = useState(false);
   const [resetting, setResetting] = useState(false);
+  const [providerChoiceSubmitting, setProviderChoiceSubmitting] = useState<string | null>(null);
   const travelDocNotifiedRef = useRef(false);
   const providerChoiceNotifiedRef = useRef<string | null>(null);
   const pollRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -316,6 +341,44 @@ export default function InlineJobCard({
       handleJobRestarted();
     } finally {
       setResetting(false);
+    }
+  }
+
+  async function handleProviderChoiceOption(label: string) {
+    if (!job || providerChoiceSubmitting !== null) return;
+    setProviderChoiceSubmitting(label);
+    try {
+      if (onProviderEventChoiceOption) {
+        await onProviderEventChoiceOption({
+          jobId: job.id,
+          tripLabel: job.trip_label,
+          message: label,
+        });
+      } else {
+        const choiceRes = await fetch(`/api/booking-jobs/${job.id}/continue-choice`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ message: label }),
+        });
+        if (choiceRes.ok) {
+          await fetch(`/api/booking-jobs/${job.id}/start?executor=inline`, { method: "POST" });
+        }
+      }
+      setJob((current) => current
+        ? {
+            ...current,
+            status: "running",
+            completed_at: null,
+            steps: current.steps.map((step) =>
+              getProviderEventChoiceActionItem(step)
+                ? { ...step, status: "loading" as const, actionItem: undefined }
+                : step,
+            ),
+          }
+        : current);
+      schedulePoll(1200);
+    } finally {
+      setProviderChoiceSubmitting(null);
     }
   }
 
@@ -416,7 +479,12 @@ export default function InlineJobCard({
       {expanded && (
         <div style={{ borderTop: "0.5px solid var(--border,#e5e7eb)", padding: "10px 12px", display: "flex", flexDirection: "column", gap: 8 }}>
           {job.steps.map((step, i) => (
-            <InlineStepCard key={i} step={step} />
+            <InlineStepCard
+              key={i}
+              step={step}
+              choiceSubmitting={providerChoiceSubmitting}
+              onProviderEventChoiceOption={handleProviderChoiceOption}
+            />
           ))}
           <div style={{ textAlign: "right", paddingTop: 4 }}>
             <a

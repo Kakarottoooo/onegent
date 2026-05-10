@@ -112,6 +112,22 @@ describe("activity provider-choice continuation", () => {
     });
   });
 
+  it("builds a modification patch from a clicked visible provider candidate", () => {
+    const result = buildActivityEventChoicePatch(
+      "Sep 17 7:00 PM Disney On Ice presents Find Your Hero Detroit, MI Little Caesars Arena",
+      makeActivityStep(),
+      NOW,
+    );
+
+    expect(result.ok).toBe(true);
+    expect(result.patch?.constraints).toMatchObject({
+      task_type: "activity_booking",
+      event_date: "2026-09-17",
+      event_time: "19:00",
+      city: "Detroit",
+    });
+  });
+
   it("allows a done provider-choice activity job to be updated and re-queued", () => {
     const job = makeActivityJob();
     const patch = buildActivityEventChoicePatch("Sep 17 7pm Detroit", job.steps[0], NOW).patch;
