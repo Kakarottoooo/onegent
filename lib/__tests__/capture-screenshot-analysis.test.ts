@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   analyzeCaptureImageForText,
+  applyCaptureImageAssistantPrefix,
   buildScreenshotCaptureMessage,
   MAX_CAPTURE_IMAGE_BYTES,
   parseCaptureImagePayload,
@@ -105,6 +106,45 @@ describe("summarizeCaptureImageAnalysisForUser", () => {
         summary_text: "Screenshot received, but no OpenAI vision API key is configured.",
       }),
     ).toContain("image analysis is not available");
+  });
+});
+
+describe("applyCaptureImageAssistantPrefix", () => {
+  const analysis = {
+    status: "analyzed" as const,
+    provider: "openai" as const,
+    model: "gpt-5.5",
+    summary_text: [
+      "Screenshot analysis:",
+      "- scenario: activity",
+      "- provider: Ticketmaster",
+      "- title: Disney On Ice",
+      "- city: Detroit",
+      "- date: May 17",
+      "- missing_fields: ticket count, preferred time",
+    ].join("\n"),
+  };
+
+  it("surfaces screenshot vision facts on successful assistant replies", () => {
+    const result = { assistant_reply: "How many tickets should I use?" };
+
+    applyCaptureImageAssistantPrefix(result, analysis);
+
+    expect(result.assistant_reply).toContain("I analyzed the screenshot");
+    expect(result.assistant_reply).toContain("title Disney On Ice");
+    expect(result.assistant_reply).toContain("provider Ticketmaster");
+    expect(result.assistant_reply).toContain("How many tickets should I use?");
+  });
+
+  it("does not duplicate the screenshot summary on retry/fallback paths", () => {
+    const result = {
+      assistant_reply:
+        "I analyzed the screenshot and can see: title Disney On Ice.\n\nHow many tickets?",
+    };
+
+    applyCaptureImageAssistantPrefix(result, analysis);
+
+    expect(result.assistant_reply?.match(/I analyzed the screenshot/g)).toHaveLength(1);
   });
 });
 

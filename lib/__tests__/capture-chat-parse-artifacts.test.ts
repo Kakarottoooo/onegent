@@ -133,6 +133,41 @@ describe("Capture chat parse artifacts", () => {
     expect(artifacts.capture_task_boundary.payload).toBeUndefined();
   });
 
+  it("turns analyzed screenshot activity facts into a confirmation task boundary", () => {
+    const s = state({
+      scenario: "activity",
+      categories: ["activity"],
+      activity: {
+        event_name: "Disney On Ice presents Find Your Hero",
+        event_type: "other",
+        city: "Detroit",
+        event_date: "2026-05-17",
+        num_tickets: 2,
+      },
+    });
+    const artifacts = buildCaptureChatParseArtifacts({
+      message: "[screenshot attached] help me reserve May 17th ticket",
+      result: resultFor(s, { type: "show_confirm_card", kind: "plan", state: s }),
+      sessionId: "sess_screenshot",
+      capturedAt,
+    });
+
+    expect(artifacts.capture_travel_object.source.type).toBe("screenshot");
+    expect(artifacts.capture_task_boundary.ok).toBe(true);
+    expect(artifacts.capture_task_boundary.nextAction).toBe("show_confirmation");
+    expect(artifacts.capture_task_boundary.payload?.nlu.collected_constraints).toMatchObject({
+      event_name: "Disney On Ice presents Find Your Hero",
+      city: "Detroit",
+      event_date: "2026-05-17",
+      num_tickets: 2,
+      _capture_source: {
+        source_type: "screenshot",
+        original_input: "[screenshot attached] help me reserve May 17th ticket",
+        source_session_id: "sess_screenshot",
+      },
+    });
+  });
+
   it("keeps video-only capture in review instead of forcing a URL or text task", () => {
     const fallback = resultFor(
       state({ intent: "chitchat" }),

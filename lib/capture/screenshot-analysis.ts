@@ -52,6 +52,28 @@ export function summarizeCaptureImageAnalysisForUser(
   return missing ? `${seen} Still needed: ${missing}.` : seen;
 }
 
+export function applyCaptureImageAssistantPrefix(
+  result: { assistant_reply?: string | null },
+  analysis: CaptureImageAnalysis | null,
+): void {
+  if (!analysis) return;
+  const prefix = summarizeCaptureImageAnalysisForUser(analysis);
+  if (!prefix) return;
+  const existing = result.assistant_reply?.trim() ?? "";
+  if (!existing) {
+    result.assistant_reply = prefix;
+    return;
+  }
+  if (
+    existing.includes(prefix) ||
+    existing.startsWith("I analyzed the screenshot") ||
+    existing.startsWith("I received the screenshot")
+  ) {
+    return;
+  }
+  result.assistant_reply = `${prefix}\n\n${existing}`;
+}
+
 export function parseCaptureImagePayload(value: unknown): CaptureImagePayload | null {
   if (!value || typeof value !== "object") return null;
   const raw = value as Record<string, unknown>;

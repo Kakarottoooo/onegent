@@ -25,9 +25,9 @@ import {
 } from "@/lib/capture/chat-parse-artifacts";
 import {
   analyzeCaptureImageForText,
+  applyCaptureImageAssistantPrefix,
   buildScreenshotCaptureMessage,
   parseCaptureImagePayload,
-  summarizeCaptureImageAnalysisForUser,
   type CaptureImageAnalysis,
 } from "@/lib/capture/screenshot-analysis";
 import {
@@ -586,28 +586,6 @@ export async function POST(req: NextRequest) {
       session_id: fallbackSessionId,
     });
   }
-}
-
-function applyCaptureImageAssistantPrefix(
-  result: { assistant_reply?: string | null },
-  analysis: CaptureImageAnalysis | null,
-): void {
-  if (!analysis) return;
-  const prefix = summarizeCaptureImageAnalysisForUser(analysis);
-  if (!prefix) return;
-  const existing = result.assistant_reply?.trim() ?? "";
-  if (!existing) {
-    result.assistant_reply = prefix;
-    return;
-  }
-  if (
-    existing.includes(prefix) ||
-    existing.startsWith("I analyzed the screenshot") ||
-    existing.startsWith("I received the screenshot")
-  ) {
-    return;
-  }
-  result.assistant_reply = `${prefix}\n\n${existing}`;
 }
 
 function logCaptureImageAnalysis(analysis: CaptureImageAnalysis): void {
