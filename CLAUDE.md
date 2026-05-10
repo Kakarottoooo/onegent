@@ -27,6 +27,8 @@ Capture -> Travel Object -> Task -> Decision -> Execution -> Evidence -> Modify
 
 - Prefer product code, tests, benchmarks, runtime evidence, performance, and
   task UX over docs. Docs are support material, not the product.
+- Keep changes surgical: state assumptions, avoid speculative abstractions,
+  touch only what the task needs, and verify the behavior that changed.
 - Avoid code pile bloat: no broad abstractions, duplicate runtime paths, or
   one-off provider hacks unless they close a named product, reliability,
   benchmark, performance, or evidence gap.

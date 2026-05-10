@@ -97,6 +97,40 @@ registries/singletons whose initialization will not rerun through HMR. Normal
 React components, ordinary `lib/**/*.ts`, API route changes, CSS, and static
 assets usually do not need a restart.
 
+## Engineering Discipline
+
+Think before coding. Do not hide confusion behind implementation. State
+important assumptions when the task is ambiguous, surface tradeoffs, and ask a
+focused question when a missing decision would materially change the solution.
+
+Prefer the smallest change that solves the verified problem:
+
+- no speculative features;
+- no abstractions for one-off code;
+- no configurability that was not requested;
+- no broad rewrites when a surgical patch will do.
+
+Every changed line should trace to the founder's request, the root cause, or the
+verification needed to prove the fix. Match existing style even when you would
+design it differently. Do not refactor adjacent code, reformat unrelated files,
+or delete pre-existing dead code unless the task explicitly owns that cleanup.
+If unrelated code looks bad, mention it as a follow-up instead of folding it
+into the patch.
+
+For bugs, reproduce or pin the failure before fixing whenever feasible. A good
+bug-fix loop is:
+
+1. name the observed failure and root-cause hypothesis;
+2. add or identify a targeted test, fixture, log, or browser evidence path;
+3. make the smallest fix;
+4. rerun the targeted verification;
+5. broaden validation only as risk requires.
+
+If an implementation grows much larger than the problem, stop and simplify
+before committing. Kent Beck's default would be the smallest reversible change
+with a clear test; Linus Torvalds' default would be a clean diff whose necessity
+is obvious line by line.
+
 ## Canonical Operating Rules
 
 `AGENTS.md` is the canonical behavior file for coding agents in this repo.
