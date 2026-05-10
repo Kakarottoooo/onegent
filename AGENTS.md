@@ -212,6 +212,13 @@ writing more documents.
 - Do not default to creating new docs. Add or edit docs only when they are core
   durable context, an operational runbook, or a generated status report that
   materially helps execution.
+- Do not create stage, strategy, or coordination docs speculatively. Create or
+  update a stage-level doc only when there is a real decision, milestone,
+  operating contract, or recurring workflow that future agents need; otherwise
+  keep the note in the final response, issue/task queue, or a compact existing
+  doc.
+- Before adding a new doc, first check whether an existing canonical doc can
+  absorb the useful information in 3-5 lines.
 - Prefer code changes that create usable product behavior: capture intake, task
   creation, provider skill/runtime execution, task workspace choices, evidence,
   performance, reliability, and safe handoff.
