@@ -36,11 +36,20 @@ function isUserFacingChoiceQuestion(value: string | null | undefined): value is 
     lower.includes("which date, city");
 }
 
-export function buildProviderEventChoiceActionItem(summary?: string | null): StepActionItem {
+export function buildProviderEventChoiceActionItem(
+  summary?: string | null,
+  options: Array<{ label: string; url?: string }> = [],
+): StepActionItem {
   const message = summary?.trim() || DEFAULT_EVENT_CHOICE_MESSAGE;
   return {
     message,
-    options: [],
+    options: options
+      .map((option) => ({
+        label: option.label.trim(),
+        url: option.url ?? "",
+      }))
+      .filter((option) => option.label.length > 0)
+      .slice(0, 8),
   };
 }
 

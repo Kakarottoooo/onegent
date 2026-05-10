@@ -4,6 +4,7 @@ import {
   parseActivityEventChoiceReply,
 } from "@/lib/booking-jobs/activity-choice";
 import { applyJobModification } from "@/lib/booking-jobs/modify";
+import { ticketmasterProviderListingDecision } from "@/lib/booking-autopilot/providers/ticketmaster-rpa";
 import type { BookingJob, BookingJobStep } from "@/lib/db";
 
 const NOW = new Date("2026-05-07T12:00:00.000Z");
@@ -89,6 +90,17 @@ describe("parseActivityEventChoiceReply", () => {
 });
 
 describe("activity provider-choice continuation", () => {
+  it("keeps visible Ticketmaster choices when provider-start pages lack a target date", () => {
+    const decision = ticketmasterProviderListingDecision([
+      "Thu 7:00 PM Disney On Ice presents Find Your Hero Detroit, MI Little Caesars Arena Find Tickets",
+      "Fri 11:00 AM Disney On Ice presents Find Your Hero Detroit, MI Little Caesars Arena Find Tickets",
+    ], null);
+
+    expect(decision.kind).toBe("no_target");
+    expect(decision.question).toBe("Ticketmaster shows multiple visible events. Which one should I use?");
+    expect(decision.matches).toHaveLength(2);
+  });
+
   it("builds a modification patch from the user choice reply", () => {
     const result = buildActivityEventChoicePatch("Sep 17 7pm Detroit", makeActivityStep(), NOW);
     expect(result.ok).toBe(true);

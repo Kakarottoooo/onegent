@@ -146,6 +146,8 @@ export interface BrowserTaskResult {
   summary: string;
   /** True when the provider page lists multiple events and the user must choose one before execution can continue. */
   needsUserChoice?: boolean;
+  /** Visible provider candidates that explain the user-choice pause. */
+  userChoiceOptions?: Array<{ label: string; url?: string }>;
   /** Error detail when status === "error". */
   error?: string;
   /** Structured trace of automatic fallback decisions taken by the executor. */

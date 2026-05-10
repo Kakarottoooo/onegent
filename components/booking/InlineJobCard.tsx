@@ -130,6 +130,27 @@ function InlineStepCard({ step }: { step: BookingJobStep }) {
               {actionItem.message.length > 140 ? actionItem.message.slice(0, 140) + "…" : actionItem.message}
             </p>
           )}
+          {actionItem?.options && actionItem.options.length > 0 && (
+            <div style={{ display: "grid", gap: 4, marginTop: 6 }}>
+              {actionItem.options.slice(0, 4).map((option, index) => (
+                <div
+                  key={`${option.label}-${index}`}
+                  style={{
+                    border: "0.5px solid rgba(234,88,12,0.22)",
+                    borderRadius: 7,
+                    padding: "5px 7px",
+                    fontFamily: "var(--font-dm-sans)",
+                    fontSize: 10.5,
+                    color: "var(--text-secondary,#666)",
+                    lineHeight: 1.35,
+                    backgroundColor: "rgba(234,88,12,0.045)",
+                  }}
+                >
+                  {option.label.length > 120 ? `${option.label.slice(0, 120)}...` : option.label}
+                </div>
+              ))}
+            </div>
+          )}
         </div>
 
         {step.status === "done" && step.handoff_url && (

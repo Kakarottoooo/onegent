@@ -22,6 +22,7 @@ export interface TicketmasterRpaResult {
   activePage?: Page;
   needs_login?: boolean;
   needs_user_choice?: boolean;
+  user_choice_options?: string[];
   handoff_ready?: boolean;
   summary?: string;
   error?: string;
@@ -555,11 +556,16 @@ export function ticketmasterProviderListingDecision(
   target: TargetDateTime | null,
 ): TicketmasterProviderListingDecision {
   if (!target) {
+    const choices = listingTexts
+      .map((text) => text.replace(/\s+/g, " ").trim())
+      .filter((text) => text.length > 0)
+      .slice(0, 8);
     return {
       kind: "no_target",
-      matches: [],
-      question:
-        "Which event date, city, and showtime should I use from this Ticketmaster page?",
+      matches: choices,
+      question: choices.length > 0
+        ? "Ticketmaster shows multiple visible events. Which one should I use?"
+        : "Which event date, city, and showtime should I use from this Ticketmaster page?",
     };
   }
   const matches = listingTexts
@@ -618,19 +624,75 @@ type ProviderListingClickResult =
   | { status: "no_match"; question: string; matches: string[] }
   | { status: "no_target"; question: string; matches: string[] };
 
+async function collectProviderListingChoices(page: Page, trace: TraceFn): Promise<string[]> {
+  const source = `
+(function() {
+  function isVisible(el) {
+    if (!el || !el.getBoundingClientRect) return false;
+    var r = el.getBoundingClientRect();
+    if (r.width < 24 || r.height < 16) return false;
+    var s = window.getComputedStyle ? window.getComputedStyle(el) : null;
+    return !(s && (s.visibility === "hidden" || s.display === "none" || Number(s.opacity || "1") === 0));
+  }
+  function normalizedText(el) {
+    return String((el && (el.innerText || el.textContent)) || "").replace(/\\s+/g, " ").trim();
+  }
+  function looksLikeFindTickets(el) {
+    var label = [
+      normalizedText(el),
+      el.getAttribute && el.getAttribute("aria-label") || "",
+      el.getAttribute && el.getAttribute("title") || ""
+    ].join(" ").replace(/\\s+/g, " ").trim().toLowerCase();
+    if (label.indexOf("find my hotel") === 0) return false;
+    return label.indexOf("find tickets") === 0 || label.indexOf("buy tickets") === 0 || label.indexOf("get tickets") === 0;
+  }
+  function rowScopeFor(el) {
+    var current = el;
+    var best = el;
+    for (var hops = 0; current && hops < 8; hops++) {
+      var text = normalizedText(current);
+      if (text.length > normalizedText(best).length && text.length < 2500) best = current;
+      current = current.parentElement;
+    }
+    return best;
+  }
+  var selector = 'a, button, [role="button"], [role="link"]';
+  var nodes = Array.from(document.querySelectorAll(selector)).filter(isVisible).filter(looksLikeFindTickets);
+  var seen = {};
+  var choices = [];
+  for (var i = 0; i < nodes.length; i++) {
+    var text = normalizedText(rowScopeFor(nodes[i])).slice(0, 180);
+    if (!text || seen[text]) continue;
+    seen[text] = true;
+    choices.push(text);
+    if (choices.length >= 8) break;
+  }
+  return choices;
+})()
+`;
+  const result = await page.evaluate(source).catch((err: Error) => {
+    trace(`[tm-rpa] provider listing choice scan failed: ${err.message?.slice(0, 100)}`);
+    return [];
+  });
+  return Array.isArray(result)
+    ? result.filter((value): value is string => typeof value === "string" && value.trim().length > 0)
+    : [];
+}
+
 async function clickProviderListingFindTickets(
   page: Page,
   target: TargetDateTime | null,
   trace: TraceFn,
 ): Promise<ProviderListingClickResult> {
   if (!target) {
-    const decision = ticketmasterProviderListingDecision([], null);
+    const choices = await collectProviderListingChoices(page, trace);
+    const decision = ticketmasterProviderListingDecision(choices, null);
     return {
       status: "no_target",
       question:
         decision.question ??
         "Which event date, city, and showtime should I use from this Ticketmaster page?",
-      matches: [],
+      matches: choices,
     };
   }
   const args = {
@@ -1911,6 +1973,7 @@ export async function bookTicketmasterProgrammatic(
       currentUrl: getUrl(),
       activePage: page,
       needs_user_choice: true,
+      user_choice_options: decision.matches,
       handoff_ready: true,
       summary:
         decision.question ??
@@ -1940,6 +2003,7 @@ export async function bookTicketmasterProgrammatic(
           currentUrl: getUrl(),
           activePage: page,
           needs_user_choice: true,
+          user_choice_options: providerListing.matches,
           handoff_ready: true,
           summary: providerListing.question,
         };
@@ -1968,6 +2032,7 @@ export async function bookTicketmasterProgrammatic(
           currentUrl: getUrl(),
           activePage: page,
           needs_user_choice: true,
+          user_choice_options: decision.matches,
           handoff_ready: true,
           summary:
             decision.question ??

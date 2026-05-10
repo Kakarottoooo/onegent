@@ -1731,6 +1731,7 @@ The user will enter CVV and confirm payment themselves.`,
               sessionUrl,
               summary: decision.summary,
               needsUserChoice: decision.state === "user_event_choice_required",
+              userChoiceOptions: (rpaResult.user_choice_options ?? []).map((label) => ({ label })),
               debugTrace,
             };
           }

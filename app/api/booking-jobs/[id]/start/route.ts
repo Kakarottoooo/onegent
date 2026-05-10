@@ -994,7 +994,7 @@ async function runUniversalStep(
     if (data.status === "completed" || data.status === "paused_payment") {
       log.push({ ts: now(), type: "succeeded", message: data.summary, outcome: "Done ✓" });
       const actionItem = data.status === "paused_payment" && data.needsUserChoice
-        ? buildProviderEventChoiceActionItem(data.summary)
+        ? buildProviderEventChoiceActionItem(data.summary, data.userChoiceOptions)
         : undefined;
       return {
         ...step,

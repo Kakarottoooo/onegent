@@ -25,6 +25,24 @@ describe("provider event choice action item", () => {
     });
   });
 
+  it("preserves visible provider candidates as review-only choices", () => {
+    expect(
+      buildProviderEventChoiceActionItem(
+        "Ticketmaster shows multiple visible events. Which one should I use?",
+        [
+          { label: "Sep 17 7:00 PM Disney On Ice Detroit" },
+          { label: "Sep 18 11:00 AM Disney On Ice Detroit", url: "https://example.com/event" },
+        ],
+      ),
+    ).toEqual({
+      message: "Ticketmaster shows multiple visible events. Which one should I use?",
+      options: [
+        { label: "Sep 17 7:00 PM Disney On Ice Detroit", url: "" },
+        { label: "Sep 18 11:00 AM Disney On Ice Detroit", url: "https://example.com/event" },
+      ],
+    });
+  });
+
   it("recovers provider choice intent from legacy decision logs", () => {
     const step = {
       decisionLog: [
