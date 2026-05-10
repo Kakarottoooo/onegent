@@ -1,11 +1,9 @@
 # Multi-Agent Conflict Protocol
 
-> Last updated: 2026-05-04
+> Last updated: 2026-05-10
 > Owner: Codex (Track A) reviews; Claude (Track B) and sidecar agents follow.
-> Read order: this file is the canonical merge-conflict-avoidance contract;
-> read it after `docs/10-coordination/README.md` and
-> `docs/10-coordination/NEW_AGENT_STARTUP_CONTRACT.md`, and before opening
-> any new branch that touches shared docs, tests, or coordination state.
+> Read order: read `AGENTS.md` first. This file is the long-form
+> merge-conflict-avoidance contract for parallel external-agent work.
 
 For a 3-minute boiled-down version that every new agent should read
 before this one, see
@@ -16,7 +14,7 @@ that the contract references.
 This document exists because the project now has multiple coding agents
 (Codex Track A, Claude Track B, Phase 2 sidecar Agent2, Track C demo
 readiness sidecar Agent3, plus future agents) shipping work in parallel
-into the same `codex/integrated-preview-*` trunk. Without this protocol,
+into the same integration branch. Without this protocol,
 agents repeatedly:
 
 - base their branch on a stale integration commit, then collide with
@@ -28,8 +26,8 @@ agents repeatedly:
 - re-implement what a peer agent already shipped because they did not
   read coordination state.
 
-Following this protocol is mandatory for any agent that wants its branch
-cherry-picked into integrated preview without a Codex-side rewrite.
+Following this protocol is mandatory for any agent that wants its branch landed
+without a Codex-side rewrite.
 
 ## 0. External-Agent Dispatch Model
 
@@ -51,16 +49,16 @@ the founder to distribute externally.
 
 ## 1. Branch Freshness Rule
 
-**Always base a new branch on the latest pushed integrated preview head,
-not an older commit.**
+**Always base a new branch on the latest pushed integration head named in the
+current Codex prompt, not an older commit.**
 
 Procedure when starting any new task:
 
 1. `git fetch origin`.
-2. `git --no-pager log --oneline -5 origin/codex/integrated-preview-20260504`
-   (or the current integrated trunk name).
+2. `git --no-pager log --oneline -5 origin/codex/stage0-capture-mvp`
+   (or the current integration branch named by Codex).
 3. Create the new branch from that latest tip:
-   `git checkout -b <agent>/<topic> origin/codex/integrated-preview-20260504`.
+   `git checkout -b <agent>/<topic> origin/codex/stage0-capture-mvp`.
 4. Record the base SHA you started from in your branch's first
    coordination entry (e.g. in `docs/10-coordination/<agent>.md` or in
    the first commit message). Codex uses that SHA when deciding between
@@ -99,7 +97,7 @@ or `[delegated by user]` tag in the commit message.
 - Benchmark fixtures, live runners, provider safety policies.
 - `lib/db.ts` and any schema changes.
 - Auth, Clerk wiring, Stripe, security middleware.
-- Final review and merge into `codex/integrated-preview-*`.
+- Final review and merge into the active Stage 0 integration branch.
 
 ### Track B - Claude (dashboards/observability/docs/tests)
 
@@ -151,8 +149,8 @@ or `[delegated by user]` tag in the commit message.
 - `docs/10-coordination/STRATEGIC_LEDGER.md`
 - `lib/__tests__/docs-static-*.test.ts` (the docs static guard suite).
 
-Any agent editing a shared file must first check
-`docs/10-coordination/HUDDLE.md` for a recent peer change and avoid
+Any agent editing a shared file must first check the current prompt and, when
+needed, `docs/10-coordination/HUDDLE.md` for recent peer state. Avoid
 re-asserting decisions another agent just landed.
 
 ## 3. HUDDLE Edit Discipline
@@ -161,14 +159,11 @@ re-asserting decisions another agent just landed.
 the most conflict-prone file in the repo because every agent wants to
 prepend an entry. The rule is:
 
-- **Side agents (Agent2 Phase 2, Agent3 Track C, ad-hoc Claude topic
-  branches) do not edit HUDDLE directly.** They update their own
-  coordination file (`phase2.md`, `track-c.md`, or `claude.md`) and let
-  Codex or the agent that owns the integration step prepend the HUDDLE
-  Live Activity entry on the cherry-pick.
-- **Track A and Track B may edit HUDDLE** but only when they are the
-  agent currently driving the integration step or completing a major
-  task on the canonical trunk.
+- **Side agents do not edit HUDDLE directly** unless the current prompt
+  explicitly delegates that action. They report through the founder or their
+  own short coordination pointer and let Codex own integration notes.
+- **Track A and Track B may edit HUDDLE** only when a current task explicitly
+  needs fresh shared coordination state.
 - **One HUDDLE prepend per push.** Do not chain multiple HUDDLE edits
   inside a single branch unless every entry corresponds to a separate
   shipped step. Do not reorder old entries.
@@ -217,12 +212,13 @@ Goal branches do not:
 
 ## 5. Merge Train and Cherry-Pick Policy
 
-Codex is the integrator for `codex/integrated-preview-*`. The default
-landing strategy is cherry-pick, not merge:
+Codex is the integrator for the active Stage 0 integration branch. The default
+landing strategy is cherry-pick when a branch is stale or noisy, and direct
+merge only when it is freshly based and clean:
 
 - **Cherry-pick** when the branch was based on an older preview head,
   contains stale `[coord]` commits, or includes tangential drift.
-  Cherry-pick keeps the integrated preview history linear and skips
+  Cherry-pick keeps the integration history linear and skips
   the stale coord layer.
 - **Merge** is only used when the branch is freshly based on the
   current preview tip and contains no `[coord]` noise that needs to be
@@ -231,16 +227,14 @@ landing strategy is cherry-pick, not merge:
   is intended to be pre-integration metadata. After integration, Codex
   writes a single fresh HUDDLE Live Activity entry summarizing what
   landed.
-- **Multiple sidecars in one batch**: Codex may integrate several
-  sidecar branches in a single push (a "second sidecar batch"). When
-  this happens, the HUDDLE Live Activity entry mentions every branch
-  and SHA that landed, plus the unified verification numbers.
+- **Multiple sidecars in one batch**: Codex may integrate several sidecar
+  branches in a single push. When this happens, the summary mentions every
+  branch and SHA that landed, plus unified verification numbers when relevant.
 
 What an agent must do to make integration easy:
 
 1. Push the branch to origin.
-2. In the agent's own coordination file, summarize what shipped, the
-   verification commands run, and any handoff notes.
+2. Report what shipped, the verification commands run, and any handoff notes.
 3. Do not edit HUDDLE if you are a side agent (see Rule 3).
 4. Report only branch + commit hash to the founder unless blocked.
 5. Do not modify the branch after pushing unless the founder or Codex
@@ -264,12 +258,10 @@ What Codex does on integration:
    git diff --check
    ```
 
-5. Prepend a single HUDDLE Live Activity entry covering every branch
-   that landed in the batch, with verification numbers and the run id
-   for the gate.
-6. Push the new integrated preview head.
-7. If a sidecar branch needs to be re-based, report back via the agent's
-   inbox section in HUDDLE rather than rewriting its branch directly.
+5. Update only the compact coordination/status files that actually changed.
+6. Push the new integration head.
+7. If a sidecar branch needs to be re-based, report back through the founder or
+   a short coordination pointer rather than rewriting its branch directly.
 
 ## 6. Forbidden Paths
 
@@ -309,15 +301,16 @@ with a synthetic mock that pretends to be live.
 
 ## 7. When in Doubt
 
-- Re-read `docs/10-coordination/HUDDLE.md` for the latest peer state.
-- Re-read `docs/10-coordination/codex.md` and the relevant sidecar
-  coordination file for ownership detail.
+- Re-read `AGENTS.md` for durable behavior rules.
+- Re-read `docs/10-coordination/HUDDLE.md` only if latest peer state is needed.
+- Re-read the relevant sidecar coordination pointer only if ownership detail is
+  still unclear.
 - Re-read `docs/10-coordination/STRATEGIC_LEDGER.md` before reopening
   any decision that has been locked there.
 - If a peer agent's last entry contradicts your plan, stop and ask the
   founder before pushing.
 
 The cost of asking is one round trip. The cost of an avoidable merge
-conflict on `codex/integrated-preview-*` is a Codex-side rewrite plus
+conflict on the integration branch is a Codex-side rewrite plus
 a delayed integration plus a stale coordination entry that no one
 trusts later.

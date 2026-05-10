@@ -28,23 +28,24 @@ describe("docs static guard - ia", () => {
       "PHASE_STATUS must list the Track C demo readiness sidecar",
     ).toContain("/dev/demo-readiness");
 
+    const projectSummary = read("docs/00-start-here/PROJECT_SUMMARY.md");
     const claudeCoord = read("docs/10-coordination/claude.md");
     expect(
-      claudeCoord,
-      "claude.md must not claim Phase 1 is only ~95% shipped after demo-freeze",
-    ).not.toMatch(/roughly\s+95%\s+shipped/i);
-    expect(
-      claudeCoord,
-      "claude.md must reflect the demo-freeze pass for Phase 1",
+      projectSummary,
+      "PROJECT_SUMMARY must reflect the demo-freeze pass for Phase 1",
     ).toMatch(/demo-freeze\s+passed/i);
     expect(
       claudeCoord,
-      "claude.md must list the Demo Control Room shipping line",
-    ).toContain("claude/demo-control-room");
+      "claude.md should now be a pointer, not a historical demo-freeze log",
+    ).toContain("Claude Coordination Pointer");
     expect(
       claudeCoord,
-      "claude.md must list the runtime-forensics UX v2 shipping line",
-    ).toContain("claude/runtime-forensics-ux-polish-v2");
+      "claude.md must not carry old demo branch logs after cleanup",
+    ).not.toContain("claude/demo-control-room");
+    expect(
+      claudeCoord,
+      "claude.md must not carry old runtime-forensics branch logs after cleanup",
+    ).not.toContain("claude/runtime-forensics-ux-polish-v2");
 
     const founderE2e = read("docs/40-phase1/PHASE_1_FOUNDER_E2E.md");
     expect(

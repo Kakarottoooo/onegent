@@ -1,33 +1,27 @@
 # Onegent Docs Index
 
-Last updated: 2026-05-07
+Last updated: 2026-05-10
 
-This is the entrypoint for any new Codex, Claude, or other coding-agent session.
-Do not start by reading every markdown file. Read the smallest set that matches
-the task.
+This is the docs entrypoint for any new Codex, Claude, Goal, Agent2, Agent3, or
+other coding-agent session. Read `AGENTS.md` first for behavior rules. Do not
+start by reading every markdown file. Read the smallest set that matches the
+task.
 
 ## New Agent Read Order
 
 If you are a fresh agent picking up Onegent cold, read this exact set first
 and stop at the first task-specific runbook that matches your assignment:
 
-1. `docs/INDEX.md` (this file).
-2. `docs/10-coordination/NEW_AGENT_STARTUP_CONTRACT.md` - the one-page
-   contract every coding agent signs implicitly when opening a branch.
-   Read this BEFORE you read PROJECT_SUMMARY or PHASE_STATUS.
-3. `docs/00-start-here/PROJECT_SUMMARY.md` - short current project overview.
-4. `docs/00-start-here/PHASE_STATUS.md` - phase status, blockers, owners,
-   and current verified verdict numbers.
-5. `docs/10-coordination/README.md` - how Codex/Claude coordinate.
-6. `docs/10-coordination/MULTI_AGENT_PROTOCOL.md` - long-form
-   merge-conflict-avoidance contract. Mandatory before opening any new
-   branch that touches shared docs, tests, or coordination state.
-7. `docs/10-coordination/HUDDLE.md` - short shared working memory; latest
-   activity + active locks + inboxes for codex / claude / track-c.
-8. `docs/10-coordination/codex.md`, `docs/10-coordination/claude.md`,
-   `docs/10-coordination/phase2.md`, and `docs/10-coordination/track-c.md` -
-   current agent-specific state.
-9. The task-specific section below that matches your assignment.
+1. `AGENTS.md` - canonical behavior rules.
+2. `docs/INDEX.md` (this file).
+3. `docs/00-start-here/PROJECT_SUMMARY.md` - compact current project overview.
+4. `docs/00-start-here/PHASE_STATUS.md` - current verified state and phase
+   gates.
+5. `docs/00-start-here/STAGE_0.md` - current operating plan.
+6. The task-specific section below that matches your assignment.
+
+Read coordination logs only when the task is specifically about multi-agent
+intake, branch integration, or stale handoff history.
 
 Verification baseline for any non-trivial branch:
 
@@ -46,14 +40,13 @@ exact live run.
 The "New Agent Read Order" above is the canonical entry path. The list below
 is kept for compatibility with older docs that linked to "Start Here":
 
-1. `docs/00-start-here/PROJECT_SUMMARY.md`
-2. `docs/00-start-here/PHASE_STATUS.md`
-3. `docs/10-coordination/README.md`
-4. `docs/10-coordination/HUDDLE.md`
-5. `docs/10-coordination/codex.md`, `docs/10-coordination/claude.md`,
-   `docs/10-coordination/phase2.md`, `docs/10-coordination/track-c.md`
+1. `AGENTS.md`
+2. `docs/00-start-here/PROJECT_SUMMARY.md`
+3. `docs/00-start-here/PHASE_STATUS.md`
+4. `docs/00-start-here/STAGE_0.md`
 
-Then read the task-specific section below.
+Then read the task-specific section below. Do not read historical coordination
+logs by default.
 
 ## Task-Specific Reading
 
@@ -66,7 +59,8 @@ Then read the task-specific section below.
 | Private alpha readiness | `docs/40-dogfood/PRIVATE_ALPHA_READINESS.md`, `docs/40-dogfood/PRIVATE_ALPHA_INTAKE_PROTOCOL.md` |
 | System design / architecture | `docs/00-start-here/SYSTEM_DESIGN.md` |
 | Current phase / what to do next | `docs/00-start-here/PHASE_STATUS.md` |
-| Codex / Claude / Track C handoff | `docs/10-coordination/README.md`, then `docs/10-coordination/*.md` |
+| Agent behavior rules | `AGENTS.md` |
+| Codex / Claude / Goal / Agent2 / Agent3 handoff | `docs/10-coordination/README.md`, then the specific coordination file only if needed |
 | Restaurant Phase 0 / Resy / OpenTable | `docs/20-phase0-restaurant/` |
 | OpenTable restaurant baseline benchmark | `docs/20-phase0-restaurant/OPENTABLE_BASELINE_BENCHMARK_PLAN.md` |
 | Provider runtime bug, logs, screenshots | `docs/30-provider-debug/PROVIDER_RUNTIME_DEBUG_PLAYBOOK.md`, `docs/30-provider-debug/LIVE_CLOSURE_EVIDENCE_PROTOCOL.md` |
@@ -84,28 +78,26 @@ Then read the task-specific section below.
 | Stage 0 daily operator report | `docs/40-dogfood/STAGE0_DAILY_REPORT.md` |
 | Agent intake queue and operator cockpit | `docs/40-dogfood/AGENT_INTAKE_QUEUE.md`, `scripts/layered-agent-intake.ts`, `scripts/layered-operator-cockpit.ts` |
 | Phase 1.5 demo readiness / control room | `docs/40-phase1/DEMO_CONTROL_ROOM.md`, `docs/40-phase1/YC_DEMO_RUNBOOK.md`, `docs/40-phase1/DEMO_FREEZE_ACCEPTANCE.md` |
-| Phase 2 Expedia controlled retry | `docs/50-product-areas/EXPEDIA_CONTROLLED_RETRY_RUNBOOK.md`, `docs/50-product-areas/PHASE2_VERTICAL_REVIVAL_AUDIT.md`, `docs/10-coordination/phase2.md` |
+| Legacy Phase 2 Expedia controlled retry | `docs/50-product-areas/EXPEDIA_CONTROLLED_RETRY_RUNBOOK.md`, `docs/50-product-areas/PHASE2_VERTICAL_REVIVAL_AUDIT.md` |
 | Phase 2 hotel revival audit | `docs/50-product-areas/HOTEL_VERTICAL_REVIVAL_AUDIT.md`, `docs/50-product-areas/HOTEL_CONTROLLED_RETRY_RUNBOOK.md` |
 | NLU, decision room, trip packaging, social feed | `docs/50-product-areas/` |
 | API, OAuth, ChatGPT apps, Claude MCP | `docs/60-api-integrations/` |
 | Gmail OTP assist / provider login codes | `docs/60-api-integrations/GMAIL_OTP_ASSIST.md` |
 | Old plans, audits, full historical summaries | `docs/90-archive/` |
 
-## Phase 1 / 1.5 Demo Freeze Quick Path
+## Legacy Phase 1 / 1.5 Demo Freeze Quick Path
 
-After the 2026-05-04 demo-freeze pass, a new agent who needs to operate or
-extend the demo surfaces should read this exact sequence:
+This section is historical. Use it only when operating old demo surfaces:
 
 1. `docs/INDEX.md`
 2. `docs/00-start-here/PHASE_STATUS.md`
-3. `docs/10-coordination/HUDDLE.md`
-4. `docs/40-phase1/DEMO_FREEZE_ACCEPTANCE.md`
-5. `docs/40-phase1/DEMO_CONTROL_ROOM.md`
-6. `docs/40-phase1/YC_DEMO_RUNBOOK.md`
-7. `docs/40-phase1/PHASE_1_FOUNDER_E2E.md`
+3. `docs/40-phase1/DEMO_FREEZE_ACCEPTANCE.md`
+4. `docs/40-phase1/DEMO_CONTROL_ROOM.md`
+5. `docs/40-phase1/YC_DEMO_RUNBOOK.md`
+6. `docs/40-phase1/PHASE_1_FOUNDER_E2E.md`
 
-Then verify the live integrated-preview state by opening these read-only
-dev surfaces (no run / retry / live buttons exist):
+Then verify the relevant local state by opening these read-only dev surfaces
+(no run / retry / live buttons exist):
 
 - `/dev/demo-readiness` - compact go/no-go.
 - `/dev/demo-control-room` - full evidence cockpit + safe demo script.
@@ -113,17 +105,15 @@ dev surfaces (no run / retry / live buttons exist):
 - `/dev/founder-e2e` - latest founder E2E verdict.
 - `/dev/runtime-forensics` - failure classification when artifacts exist.
 
-## Expedia Debug Quick Path
+## Legacy Expedia Debug Quick Path
 
-For the current Expedia / flight-card DOM scan work, read this exact sequence:
+For old Expedia / flight-card DOM scan work, read this exact sequence:
 
 1. `docs/INDEX.md`
 2. `docs/00-start-here/PROJECT_SUMMARY.md`
 3. `docs/00-start-here/PHASE_STATUS.md`
-4. `docs/10-coordination/codex.md`
-5. `docs/10-coordination/phase2.md`
-6. `docs/30-provider-debug/PROVIDER_RUNTIME_DEBUG_PLAYBOOK.md`
-7. `docs/50-product-areas/EXPEDIA_CONTROLLED_RETRY_RUNBOOK.md`
+4. `docs/30-provider-debug/PROVIDER_RUNTIME_DEBUG_PLAYBOOK.md`
+5. `docs/50-product-areas/EXPEDIA_CONTROLLED_RETRY_RUNBOOK.md`
 
 Then inspect runtime evidence:
 
@@ -131,9 +121,9 @@ Then inspect runtime evidence:
 - Worker log: `codex-worker.log` in the active e2e worktree.
 - Debug screenshots: `worker/.debug-screenshots/`.
 
-## Phase 2 Revival Quick Path
+## Legacy Phase 2 Revival Quick Path
 
-For hotel/flight revival work, read:
+For old hotel/flight revival work, read:
 
 1. `docs/50-product-areas/PHASE2_VERTICAL_REVIVAL_AUDIT.md` - cross-vertical
    revival audit.
@@ -145,19 +135,17 @@ For hotel/flight revival work, read:
    controlled retry checklist.
 5. `docs/30-provider-debug/PROVIDER_RUNTIME_DEBUG_PLAYBOOK.md`
 6. `docs/30-provider-debug/LIVE_CLOSURE_EVIDENCE_PROTOCOL.md`
-7. `docs/10-coordination/phase2.md`
-8. `docs/10-coordination/HUDDLE.md`
-
-Do not run broad live suites. Start with Expedia flight, then Booking.com
-hotel, then Hotels.com only after fresh artifacts exist.
+Do not run broad live suites. Start with the current Stage 0 plan before using
+this legacy section.
 
 ## Maintenance Rules
 
 When a task finishes, update only the relevant layer:
 
 - Phase or blocker changed: update `docs/00-start-here/PHASE_STATUS.md`.
-- Agent handoff changed: update `docs/10-coordination/codex.md`,
-  `docs/10-coordination/claude.md`, or `docs/10-coordination/track-c.md`.
+- Durable agent behavior changed: update `AGENTS.md`.
+- Agent handoff changed: update only the relevant short coordination pointer
+  file if it materially helps the next agent.
 - Long-term decision changed: update `docs/10-coordination/STRATEGIC_LEDGER.md`.
 - Provider debugging lesson learned: update `docs/30-provider-debug/PROVIDER_RUNTIME_DEBUG_PLAYBOOK.md`.
 - Restaurant benchmark/runbook changed: update `docs/20-phase0-restaurant/`.
@@ -165,12 +153,9 @@ When a task finishes, update only the relevant layer:
   (and `docs/40-phase1/AUTONOMOUS_FOUNDER_E2E.md` if the autonomous runner
   surface changed).
 - Demo readiness, control room, or freeze acceptance changed: update the
-  matching runbook under `docs/40-phase1/` and `docs/10-coordination/track-c.md`.
-- Phase 2 vertical posture changed: update
-  `docs/50-product-areas/PHASE2_VERTICAL_REVIVAL_AUDIT.md`,
-  `docs/50-product-areas/HOTEL_VERTICAL_REVIVAL_AUDIT.md`,
-  `docs/10-coordination/phase2.md`, and the `phase2-status.ts` mirror used
-  by `/dev/demo-control-room` if applicable.
+  matching runbook under `docs/40-phase1/`.
+- Phase 2 vertical posture changed: update the closest product-area runbook
+  and any code mirror used by the relevant UI if applicable.
 - A plan is completed and no longer active: move it to `docs/90-archive/completed-plans/`.
 
 Do not add new root-level markdown files unless they are repo-level agent or
@@ -190,10 +175,8 @@ release entrypoints (`AGENTS.md`, `CLAUDE.md`, `README.md`, `CHANGELOG.md`).
 | Multi-agent conflict protocol | `docs/10-coordination/MULTI_AGENT_PROTOCOL.md` |
 | Coordination shared memory | `docs/10-coordination/HUDDLE.md` |
 | Coordination strategic ledger | `docs/10-coordination/STRATEGIC_LEDGER.md` |
-| Codex state | `docs/10-coordination/codex.md` |
-| Claude state | `docs/10-coordination/claude.md` |
-| Track C state | `docs/10-coordination/track-c.md` |
-| Phase 2 sidecar state | `docs/10-coordination/phase2.md` |
+| Codex state pointer | `docs/10-coordination/codex.md` |
+| Historical per-agent state | `docs/10-coordination/claude.md`, `docs/10-coordination/track-c.md`, `docs/10-coordination/phase2.md` |
 | Restaurant handoff | `docs/20-phase0-restaurant/RESTAURANT_PHASE0_HANDOFF.md` |
 | R-003 live runbook | `docs/20-phase0-restaurant/R003_LIVE_SMOKE_RUNBOOK.md` |
 | Provider runtime debug | `docs/30-provider-debug/PROVIDER_RUNTIME_DEBUG_PLAYBOOK.md` |

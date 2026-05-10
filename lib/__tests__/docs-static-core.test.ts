@@ -11,6 +11,8 @@ function read(relPath: string): string {
 describe("docs static guard - core", () => {
   it("keeps key Phase 1 and demo-readiness docs in place", () => {
     const requiredDocs = [
+      "AGENTS.md",
+      "CLAUDE.md",
       "docs/INDEX.md",
       "docs/00-start-here/PHASE_STATUS.md",
       "docs/10-coordination/HUDDLE.md",
@@ -68,22 +70,18 @@ describe("docs static guard - core", () => {
   });
 
   it("keeps the new-agent startup contract present and linked", () => {
-    // The contract is the cold-start checklist for any coding agent
-    // and must stay reachable from both INDEX and MULTI_AGENT_PROTOCOL.
-    // This invariant does not duplicate the existence-only check above;
-    // it locks the structural sections and cross-links.
+    // The contract is the short startup checklist. Durable behavior rules live
+    // in AGENTS.md, so this test protects the lightweight contract shape and
+    // avoids locking in stale historical branch names.
     const contract = read("docs/10-coordination/NEW_AGENT_STARTUP_CONTRACT.md");
 
-    // Required structural sections (numbered headings the task spec
-    // calls out as the contract's seven rules).
     const requiredSections = [
-      /##\s+1\.\s+Canonical Branch and Worktree/,
-      /##\s+2\.\s+Who Edits HUDDLE vs Track Files/,
-      /##\s+3\.\s+Stale Branch and Cherry-Pick Rules/,
-      /##\s+4\.\s+Forbidden Paths/,
-      /##\s+5\.\s+Safety Hard Stops/,
-      /##\s+6\.\s+Required Validation Levels/,
-      /##\s+7\.\s+How to Report Results/,
+      /##\s+1\.\s+Start From The Current Integration Base/,
+      /##\s+2\.\s+Founder-Mediated External Agent Flow/,
+      /##\s+3\.\s+Edit Only Your Assigned Surface/,
+      /##\s+4\.\s+Safety Hard Stops/,
+      /##\s+5\.\s+Validation/,
+      /##\s+6\.\s+Return Report Shape/,
     ];
     for (const pattern of requiredSections) {
       expect(
@@ -92,30 +90,26 @@ describe("docs static guard - core", () => {
       ).toMatch(pattern);
     }
 
-    // Key terms that anchor the contract's meaning. Removing any of
-    // these would silently weaken the contract.
     const requiredTerms = [
-      "codex/integrated-preview-20260504",
-      "onegent-integrated-20260504",
-      "docs/10-coordination/MULTI_AGENT_PROTOCOL.md",
-      "docs/10-coordination/HUDDLE.md",
-      "docs/10-coordination/codex.md",
-      "docs/10-coordination/claude.md",
-      "docs/10-coordination/phase2.md",
-      "docs/10-coordination/track-c.md",
+      "AGENTS.md",
+      "origin/codex/stage0-capture-mvp",
+      "founder-mediated",
+      "Goal, Claude, Agent2, Agent3",
       "lib/booking-autopilot/**",
       "lib/core/**",
       "worker/src/**",
       "app/api/v1/**",
       "app/api/booking-jobs/**",
       "lib/db.ts",
-      "Live OpenAI calls",
-      "Live Computer Use sessions",
-      "Final booking",
+      "live OpenAI / Computer Use validation",
+      "final purchase",
+      "CAPTCHA bypass",
       "npx tsc --noEmit --pretty false",
+      "npm run check-drift",
       "npm run gate:phase1 -- --allow-known-drift",
       "git diff --check",
-      "Branch: <agent>/<topic>",
+      "Branch:",
+      "Safety:",
     ];
     for (const term of requiredTerms) {
       expect(
@@ -131,17 +125,16 @@ describe("docs static guard - core", () => {
       "NEW_AGENT_STARTUP_CONTRACT must be ASCII-only",
     ).not.toMatch(/[^\x00-\x7F]/);
 
-    // INDEX must surface the contract in the New Agent Read Order and
-    // in the Current Canonical Files table so a fresh agent can find it.
+    // INDEX must keep AGENTS.md as the first behavior entry and keep the
+    // startup contract discoverable in the canonical files table.
     const index = read("docs/INDEX.md");
+    expect(index, "INDEX must point new agents at AGENTS.md").toMatch(
+      /New Agent Read Order[\s\S]*AGENTS\.md/,
+    );
     expect(
       index,
       "INDEX must reference the new-agent startup contract",
     ).toContain("docs/10-coordination/NEW_AGENT_STARTUP_CONTRACT.md");
-    expect(
-      index,
-      "INDEX New Agent Read Order must mention the startup contract",
-    ).toMatch(/New Agent Read Order[\s\S]*NEW_AGENT_STARTUP_CONTRACT/);
 
     // MULTI_AGENT_PROTOCOL must cross-link to the contract as the
     // boiled-down checklist version.
@@ -150,6 +143,34 @@ describe("docs static guard - core", () => {
       protocol,
       "MULTI_AGENT_PROTOCOL must cross-link to the startup contract",
     ).toContain("docs/10-coordination/NEW_AGENT_STARTUP_CONTRACT.md");
+  });
+
+  it("keeps AGENTS as canonical behavior source and CLAUDE as a thin mirror", () => {
+    const agents = read("AGENTS.md");
+    const claude = read("CLAUDE.md");
+
+    const requiredRules = [
+      /Always respond in Chinese/,
+      /Do not ask the founder to do work the agent can do locally/,
+      /commit and\s+push by default/,
+      /Codex should proactively decide whether a task needs Agent Teams mode/,
+      /After each substantive task, proactively recommend next steps/,
+      /Programmatic navigation handles known provider UI steps/,
+      /Conversational NLU should preserve the three-layer split/,
+    ];
+
+    for (const rule of requiredRules) {
+      expect(agents, `AGENTS.md must include rule ${rule}`).toMatch(rule);
+    }
+
+    expect(claude).toContain("Read `AGENTS.md` first and treat it as binding");
+    expect(claude).toContain("Always respond in Chinese");
+    expect(claude).toContain("Do not ask the founder to paste logs");
+    expect(claude).toContain("Commit and push completed, validated work");
+    expect(
+      claude,
+      "CLAUDE.md should stay a thin entrypoint instead of another huge rule file",
+    ).toSatisfy((value: string) => value.length < 6000);
   });
 
   it("keeps dogfood and runtime mirror docs discoverable", () => {
