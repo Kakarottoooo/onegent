@@ -61,6 +61,18 @@ export {
 } from "./eventbrite-forge-plan";
 
 export {
+  STAGE0B_LAB_PLAN_REGISTRY,
+  getAllStage0BLabPlanEntries,
+  getStage0BLabPlanEntries,
+  getStage0BLabPlanNames,
+  isStage0BLabPlanName,
+} from "./plan-registry";
+
+export type {
+  Stage0BLabPlanDefinition,
+} from "./plan-registry";
+
+export {
   parseStage0BLabRunnerArgs,
   selectStage0BLabEntries,
   buildBrowserHarnessPython,

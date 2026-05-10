@@ -13,17 +13,9 @@ import {
   STAGE0B_HARD_STOPS,
 } from "@/lib/stage0b-skill-runtime/l2-recovery-result";
 import {
-  STAGE0B_TEST_PLAN,
-} from "@/lib/stage0b-skill-runtime/test-plan";
-import {
-  TICKETMASTER_SKILL_FORGE_PLAN,
-} from "@/lib/stage0b-skill-runtime/ticketmaster-forge-plan";
-import {
-  STUBHUB_SKILL_FORGE_PLAN,
-} from "@/lib/stage0b-skill-runtime/stubhub-forge-plan";
-import {
-  EVENTBRITE_SKILL_FORGE_PLAN,
-} from "@/lib/stage0b-skill-runtime/eventbrite-forge-plan";
+  getStage0BLabPlanEntries,
+  isStage0BLabPlanName,
+} from "@/lib/stage0b-skill-runtime/plan-registry";
 import type {
   LabEvent,
   LabHardStopReason,
@@ -417,7 +409,7 @@ export function parseStage0BLabRunnerArgs(argv: string[]): Stage0BLabRunnerArgs 
       args.provider = next;
       index += 1;
     } else if (token === "--plan") {
-      if (next !== "stage0b" && next !== "ticketmaster-forge" && next !== "stubhub-forge" && next !== "eventbrite-forge") {
+      if (!isStage0BLabPlanName(next)) {
         throw new Error(`Unsupported --plan value: ${next ?? ""}`);
       }
       args.plan = next;
@@ -471,10 +463,7 @@ export function selectStage0BLabEntries(args: Pick<Stage0BLabRunnerArgs, "provid
 }
 
 function labPlanEntries(plan: Stage0bLabPlanName): LabTestPlanEntry[] {
-  if (plan === "ticketmaster-forge") return TICKETMASTER_SKILL_FORGE_PLAN.slice();
-  if (plan === "stubhub-forge") return STUBHUB_SKILL_FORGE_PLAN.slice();
-  if (plan === "eventbrite-forge") return EVENTBRITE_SKILL_FORGE_PLAN.slice();
-  return STAGE0B_TEST_PLAN.slice();
+  return getStage0BLabPlanEntries(plan);
 }
 
 export function buildBrowserHarnessPython(entry: LabTestPlanEntry, screenshotPath: string, keepOpen = false): string {

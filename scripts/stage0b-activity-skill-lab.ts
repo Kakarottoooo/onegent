@@ -29,11 +29,9 @@
  */
 
 import {
-  STAGE0B_TEST_PLAN,
   STAGE0B_PLAN_COUNTS,
-  TICKETMASTER_SKILL_FORGE_PLAN,
-  STUBHUB_SKILL_FORGE_PLAN,
-  EVENTBRITE_SKILL_FORGE_PLAN,
+  getStage0BLabPlanEntries,
+  isStage0BLabPlanName,
   type LabTestPlanEntry,
   type Stage0bLabPlanName,
   type Stage0bLabProvider,
@@ -56,7 +54,7 @@ function parseArgs(argv: ReadonlyArray<string>): LabRunnerArgs {
   const planIdx = argv.indexOf("--plan");
   if (planIdx >= 0 && argv[planIdx + 1]) {
     const value = argv[planIdx + 1];
-    if (value === "stage0b" || value === "ticketmaster-forge" || value === "stubhub-forge" || value === "eventbrite-forge") {
+    if (isStage0BLabPlanName(value)) {
       args.plan = value;
     } else {
       throw new Error(`Unknown --plan value: ${value}`);
@@ -150,16 +148,10 @@ function printDryRunInstructions(args: LabRunnerArgs): void {
 }
 
 function filterPlan(args: Pick<LabRunnerArgs, "providerFilter" | "plan">): LabTestPlanEntry[] {
-  const base = args.plan === "ticketmaster-forge"
-    ? TICKETMASTER_SKILL_FORGE_PLAN
-    : args.plan === "stubhub-forge"
-      ? STUBHUB_SKILL_FORGE_PLAN
-      : args.plan === "eventbrite-forge"
-        ? EVENTBRITE_SKILL_FORGE_PLAN
-        : STAGE0B_TEST_PLAN;
+  const base = getStage0BLabPlanEntries(args.plan);
   return args.providerFilter
     ? base.filter((e) => e.provider === args.providerFilter)
-    : [...base];
+    : base;
 }
 
 function printCheckResult(results: ReadonlyArray<PreflightResult>): boolean {

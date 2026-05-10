@@ -323,7 +323,7 @@ describe("URL Resolver V2 — StubHub", () => {
     expect(r!.page_type).toBe("provider_listing");
     expect(r!.execution_mode).toBe("provider_start");
     expect(r!.needs_user_choice).toBe(true);
-    expect(r!.evidence.matched_pattern).toBe("stubhub_provider_listing");
+    expect(r!.evidence.matched_pattern).toBe("stubhub_listing");
   });
 
   it("StubHub apex (no www) /performer/ still resolves", () => {

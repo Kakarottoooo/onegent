@@ -9,6 +9,10 @@ import {
   buildStage0BLabResult,
   classifyStage0BOutcome,
   formatStage0BLabDryRun,
+  getAllStage0BLabPlanEntries,
+  getStage0BLabPlanEntries,
+  getStage0BLabPlanNames,
+  isStage0BLabPlanName,
   parseBrowserHarnessPayload,
   parseStage0BLabRunnerArgs,
   selectStage0BLabEntries,
@@ -94,6 +98,35 @@ describe("Stage 0B live lab runner args and plan selection", () => {
     expect(entries).toHaveLength(10);
     expect(entries.every((entry) => entry.provider === "eventbrite")).toBe(true);
     expect(entries.map((entry) => entry.id)).toEqual(EVENTBRITE_SKILL_FORGE_PLAN.map((entry) => entry.id));
+  });
+
+  it("uses one lab plan registry for runner, reports, and no-live plan checks", () => {
+    expect(getStage0BLabPlanNames()).toEqual([
+      "stage0b",
+      "ticketmaster-forge",
+      "stubhub-forge",
+      "eventbrite-forge",
+    ]);
+    expect(getStage0BLabPlanEntries("stage0b").map((entry) => entry.id)).toEqual(
+      STAGE0B_TEST_PLAN.map((entry) => entry.id),
+    );
+    expect(getStage0BLabPlanEntries("ticketmaster-forge").map((entry) => entry.id)).toEqual(
+      TICKETMASTER_SKILL_FORGE_PLAN.map((entry) => entry.id),
+    );
+    expect(getStage0BLabPlanEntries("stubhub-forge").map((entry) => entry.id)).toEqual(
+      STUBHUB_SKILL_FORGE_PLAN.map((entry) => entry.id),
+    );
+    expect(getStage0BLabPlanEntries("eventbrite-forge").map((entry) => entry.id)).toEqual(
+      EVENTBRITE_SKILL_FORGE_PLAN.map((entry) => entry.id),
+    );
+    expect(getAllStage0BLabPlanEntries()).toHaveLength(
+      STAGE0B_TEST_PLAN.length +
+        TICKETMASTER_SKILL_FORGE_PLAN.length +
+        STUBHUB_SKILL_FORGE_PLAN.length +
+        EVENTBRITE_SKILL_FORGE_PLAN.length,
+    );
+    expect(isStage0BLabPlanName("eventbrite-forge")).toBe(true);
+    expect(isStage0BLabPlanName("axs-forge")).toBe(false);
   });
 
   it("keeps every Ticketmaster Skill Forge URL aligned with the activity resolver", () => {

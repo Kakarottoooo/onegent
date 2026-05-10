@@ -77,6 +77,7 @@ const STUBHUB_EVENT_RE = /\/event\/([A-Za-z0-9_-]+)/i;
 const SEATGEEK_EVENT_ID_RE = /\/(?:[^/?#]+\/)*([0-9]{5,})(?:[/?#]|$)/i;
 const SEATGEEK_DATE_SEGMENT_RE = /\b20\d{2}-\d{2}-\d{2}(?:-\d{1,2}(?:-\d{2})?-(?:am|pm))?\b/i;
 const EVENTBRITE_EVENT_RE = /\/e\/.+?(?:tickets-)?([0-9]{5,})(?:[/?#]|$)/i;
+const EVENTBRITE_ORGANIZER_RE = /\/o\/(?:[^/?#]+-)?([0-9]{5,})(?:[/?#]|$)/i;
 const AXS_EVENT_RE = /\/events\/([A-Za-z0-9_-]+)/i;
 const AXS_ARTIST_RE = /\/artists\/([A-Za-z0-9_-]+)/i;
 const AXS_SERIES_RE = /\/series\/([A-Za-z0-9_-]+)/i;
@@ -283,7 +284,7 @@ function resolveStubHub(
     });
   }
 
-  return genericActivityLink(parsed, provider, "stubhub_provider_listing");
+  return genericActivityLink(parsed, provider, "stubhub_listing");
 }
 
 function resolveSeatGeek(
@@ -324,6 +325,7 @@ function resolveEventbrite(
   parsed: NonNullable<ReturnType<typeof normalizeTravelUrl>>,
   provider: "eventbrite",
 ): ResolvedTravelLink {
+  const segments = pathSegments(parsed.pathname);
   const eventMatch = parsed.pathname.match(EVENTBRITE_EVENT_RE);
   if (eventMatch?.[1]) {
     return activityLink({
@@ -338,6 +340,56 @@ function resolveEventbrite(
       matchedPattern: "eventbrite_event",
     });
   }
+
+  const organizerMatch = parsed.pathname.match(EVENTBRITE_ORGANIZER_RE);
+  if (organizerMatch?.[1]) {
+    return activityLink({
+      parsed,
+      provider,
+      pageType: "provider_listing",
+      providerPageId: organizerMatch[1],
+      titleHint: titleHintBeforeMarker(parsed.pathname, "o"),
+      confidence: 0.76,
+      executionMode: "provider_start",
+      needsUserChoice: true,
+      matchedPattern: "eventbrite_organizer",
+    });
+  }
+
+  const first = segments[0]?.toLowerCase();
+  if (first === "search") {
+    return activityLink({
+      parsed,
+      provider,
+      pageType: "search_results",
+      providerPageId: "search",
+      titleHint: "Eventbrite Search",
+      confidence: 0.62,
+      executionMode: "provider_start",
+      needsUserChoice: true,
+      matchedPattern: "eventbrite_search",
+    });
+  }
+
+  if (first === "d" || first === "b") {
+    const pageId = segments.slice(1).join("/") || first;
+    const titleSource =
+      [...segments]
+        .reverse()
+        .find((segment) => !/^(events?|tickets?)$/i.test(segment)) ?? first;
+    return activityLink({
+      parsed,
+      provider,
+      pageType: "provider_listing",
+      providerPageId: pageId,
+      titleHint: titleizeTravelSlug(titleSource),
+      confidence: 0.72,
+      executionMode: "provider_start",
+      needsUserChoice: true,
+      matchedPattern: "eventbrite_city_category_listing",
+    });
+  }
+
   return genericActivityLink(parsed, provider, "eventbrite_provider_listing");
 }
 
@@ -407,7 +459,7 @@ function resolveAxs(
     });
   }
 
-  return genericActivityLink(parsed, provider, "axs_provider_listing");
+  return genericActivityLink(parsed, provider, "axs_listing");
 }
 
 function genericActivityLink(

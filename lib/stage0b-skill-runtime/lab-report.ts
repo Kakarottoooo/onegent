@@ -12,10 +12,7 @@ import {
   safeNextActionFor,
   STAGE0B_HARD_STOPS,
 } from "./l2-recovery-result";
-import { STAGE0B_TEST_PLAN } from "./test-plan";
-import { TICKETMASTER_SKILL_FORGE_PLAN } from "./ticketmaster-forge-plan";
-import { STUBHUB_SKILL_FORGE_PLAN } from "./stubhub-forge-plan";
-import { EVENTBRITE_SKILL_FORGE_PLAN } from "./eventbrite-forge-plan";
+import { getAllStage0BLabPlanEntries } from "./plan-registry";
 import type {
   L2EvidenceBundle,
   L2RecoveryClass,
@@ -846,10 +843,5 @@ function isString(value: unknown): value is string {
   return typeof value === "string";
 }
 
-const ALL_PLAN_ENTRIES = [
-  ...STAGE0B_TEST_PLAN,
-  ...TICKETMASTER_SKILL_FORGE_PLAN,
-  ...STUBHUB_SKILL_FORGE_PLAN,
-  ...EVENTBRITE_SKILL_FORGE_PLAN,
-];
+const ALL_PLAN_ENTRIES = getAllStage0BLabPlanEntries();
 const ALL_PLAN_IDS = new Set(ALL_PLAN_ENTRIES.map((entry) => entry.id));

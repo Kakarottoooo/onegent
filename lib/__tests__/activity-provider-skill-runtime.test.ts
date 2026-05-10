@@ -8,6 +8,7 @@ import {
   resolveActivityProviderSkillUrl,
   validateActivitySkillEvidence,
 } from "@/lib/activity-skills";
+import { resolveTravelLinkFromUrl } from "@/lib/capture/travel-link-resolver";
 import type {
   ActivitySkillOutcome,
   ActivitySkillRuntimeNextAction,
@@ -270,6 +271,42 @@ describe("activity provider skill task-workspace evidence contract", () => {
   });
 });
 describe("activity provider skill URL matching", () => {
+  it("adapts the canonical travel-link resolver instead of maintaining a second URL classifier", () => {
+    const cases = [
+      "https://www.ticketmaster.com/disney-on-ice-presents-find-your-tickets/artist/1742147",
+      "https://www.stubhub.com/john-mulaney-nashville-tickets-6-12-2026/event/160512394/",
+      "https://seatgeek.com/nashville-sc-tickets/mls/2026-05-09-8-pm/17921493",
+      "https://www.eventbrite.com/e/summer-concert-tickets-123456789",
+      "https://www.axs.com/artists/98765/example-artist",
+      "https://ticketmaster.com.evil.example/event/abc",
+    ];
+
+    for (const url of cases) {
+      const travel = resolveTravelLinkFromUrl(url);
+      const activity = resolveActivityProviderSkillUrl(url);
+
+      expect(activity, url).not.toBeNull();
+      expect(travel, url).not.toBeNull();
+      expect(activity?.normalizedUrl, url).toBe(travel?.normalized_url);
+      expect(activity?.host, url).toBe(travel?.host);
+      expect(activity?.providerPageId, url).toBe(travel?.provider_page_id);
+      expect(activity?.confidence, url).toBe(travel?.confidence);
+      expect(activity?.executionMode, url).toBe(travel?.execution_mode);
+      expect(activity?.needsUserChoice, url).toBe(travel?.needs_user_choice);
+      expect(activity?.evidence.matchedPattern, url).toBe(travel?.evidence.matched_pattern);
+    }
+  });
+
+  it("keeps provider skills as capability adapters over the canonical URL resolver", () => {
+    const ticketmaster = findActivityProviderSkill("ticketmaster")!;
+    const ticketmasterUrl =
+      "https://www.ticketmaster.com/disney-on-ice-presents-find-your-tickets/artist/1742147";
+    const seatgeekUrl = "https://seatgeek.com/nashville-sc-tickets/mls/2026-05-09-8-pm/17921493";
+
+    expect(ticketmaster.canHandleUrl(ticketmasterUrl)).toEqual(resolveActivityProviderSkillUrl(ticketmasterUrl));
+    expect(ticketmaster.canHandleUrl(seatgeekUrl)).toBeNull();
+  });
+
   it("treats exact Ticketmaster event URLs as direct task starts", () => {
     const match = resolveActivityProviderSkillUrl(
       "https://www.ticketmaster.com/the-lion-king-new-york-ny-tickets/artist/1039581/event/1D0062E4AABB",
