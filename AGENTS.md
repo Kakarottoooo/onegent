@@ -33,6 +33,34 @@ Close provider/browser tabs after a lab or QA step is finished unless that tab
 is still needed for active debugging. Do not let stale windows accumulate and
 hide current evidence or consume local memory.
 
+## Skill Awareness
+
+When a locally installed skill could materially improve the current work, remind
+the founder proactively instead of waiting for them to remember it. This should
+be a short recommendation, not a distraction: name the skill, explain the value,
+and say whether it is worth using now or keeping as a follow-up.
+
+Use this especially for the Matt Pocock engineering skills now installed
+globally:
+
+- `grill-me` or `grill-with-docs` when the request is broad, underspecified, or
+  benefits from sharper requirements before coding;
+- `diagnose` when debugging needs a disciplined reproduce/minimize/hypothesize
+  loop;
+- `tdd` when a bug or feature can be pinned with a red-green-refactor loop;
+- `zoom-out` when unfamiliar code needs system-level context before editing;
+- `improve-codebase-architecture` when repeated friction suggests a design or
+  module-boundary problem;
+- `prototype` when multiple UI or state-machine designs should be explored
+  cheaply before committing to production code;
+- `to-prd`, `to-issues`, or `triage` when a plan needs to become tracked,
+  independently grabbable work;
+- `caveman` when the founder wants compressed, high-signal communication.
+
+Do not force a skill into small deterministic fixes. The rule is to surface
+useful leverage at the moment it would help, then continue with the most direct
+path.
+
 ## Language And Collaboration
 
 Always respond in Chinese. Do not respond in Korean or any other natural
