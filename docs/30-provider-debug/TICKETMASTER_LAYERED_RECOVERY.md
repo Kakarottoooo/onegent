@@ -3,7 +3,7 @@
 > Last updated: 2026-05-07.
 > For: anyone reading or extending the Activity / Ticketmaster runtime.
 > Read after: `docs/30-provider-debug/PROVIDER_RUNTIME_DEBUG_PLAYBOOK.md`
-> and `docs/30-provider-debug/FAILURE_TAXONOMY.md`.
+> and `docs/30-provider-debug/PROVIDER_EVIDENCE_AND_CLOSURE.md`.
 
 This doc captures Activity / Ticketmaster learnings as **L1 / L2 recovery
 rules** so the next agent can:
@@ -92,7 +92,7 @@ diving.
 
 The right-side "Event information" drawer renders ~1-2 s after a calendar
 slot click. The Find Tickets button text often has a trailing chevron or
-unicode arrow ("Find Tickets >" / "Find Tickets ›" / "Find Tickets❯").
+unicode arrow ("Find Tickets >" / "Find Tickets �? / "Find Tickets�?).
 
 | Trigger | Action | Evidence in code |
 |---|---|---|
@@ -160,8 +160,8 @@ prefers it whenever:
 > Stop the worker and return `BrowserTaskStatus = "needs_login"` (not
 > `paused_payment`) so the upstream task-state mapper at
 > `lib/api-v1/run-travel-task-attempt.ts` renders the user-facing
-> `TravelTaskState = "awaiting_login"` bucket — the accurate label for "user
-> needs to sign in" — instead of conflating the boundary with the seat
+> `TravelTaskState = "awaiting_login"` bucket �?the accurate label for "user
+> needs to sign in" �?instead of conflating the boundary with the seat
 > selection / payment review boundary (`ready_for_confirmation`). The
 > classifier in `lib/booking-autopilot/providers/ticketmaster-status.ts`
 > enforces this distinction: `user_seat_selection_required ->
@@ -217,7 +217,7 @@ via `pickPrimaryTicketmasterUrl(...)` (preference order: checkout > /event/
 > /artist/ or *-tickets/ > auth > other TM). When the active page drifted
 to a non-TM host but a TM tab is still alive, the executor:
 
-- emits a `[tm-rpa] Active page drifted off Ticketmaster (...) — using it as
+- emits a `[tm-rpa] Active page drifted off Ticketmaster (...) �?using it as
   the handoff URL` trace line for evidence,
 - swaps in the surviving TM URL as the result `handoffUrl` so the user has
   a concrete recovery target instead of the original `input.startUrl`,
@@ -334,7 +334,7 @@ related classes, not as new top-level categories.
 
 ## Cross-references
 
-- `docs/30-provider-debug/FAILURE_TAXONOMY.md` -- the four-way operator
+- `docs/30-provider-debug/PROVIDER_EVIDENCE_AND_CLOSURE.md` -- the four-way operator
   taxonomy and the worked examples used during triage.
 - `docs/30-provider-debug/PROVIDER_RUNTIME_DEBUG_PLAYBOOK.md` -- DB +
   worker log + screenshot triage order, plus the stuck-job recovery

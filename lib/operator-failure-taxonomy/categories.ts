@@ -3,7 +3,7 @@
 //
 // This module is pure. It does not start a live provider, read the
 // database, open a browser, or call OpenAI. It is consumed by
-// docs/30-provider-debug/FAILURE_TAXONOMY.md and (when it lands) the
+// docs/30-provider-debug/PROVIDER_EVIDENCE_AND_CLOSURE.md and (when it lands) the
 // /dev/live-operator-checklist read-only page so the operator has one
 // source of truth for "what kind of failure am I looking at" before
 // they decide to patch a selector vs. wait out an OpenAI 5xx.

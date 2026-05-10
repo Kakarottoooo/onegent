@@ -10,7 +10,7 @@ import {
 
 const ROOT = process.cwd();
 const ACCEPTANCE_DOC_REL =
-  "docs/30-provider-debug/PROVIDER_CLOSURE_ACCEPTANCE.md";
+  "docs/30-provider-debug/PROVIDER_EVIDENCE_AND_CLOSURE.md";
 
 function read(rel: string): string {
   return readFileSync(path.join(ROOT, rel), "utf8");
@@ -28,7 +28,8 @@ function listMarkdownFiles(dir: string, acc: string[] = []): string[] {
     }
     if (st.isDirectory()) {
       // Skip archive + node_modules to keep this fast and bounded.
-      if (entry === "node_modules" || entry === ".git") continue;
+      if (entry === "node_modules" || entry === ".git" || entry === "90-archive")
+        continue;
       listMarkdownFiles(full, acc);
     } else if (st.isFile() && entry.endsWith(".md")) {
       acc.push(path.relative(ROOT, full).replace(/\\/g, "/"));
@@ -229,10 +230,10 @@ describe("provider-closure-acceptance doc structure", () => {
     const doc = read(ACCEPTANCE_DOC_REL);
     expect(doc).toContain("/dev/provider-closure");
     expect(doc).toContain(
-      "docs/30-provider-debug/LIVE_CLOSURE_EVIDENCE_PROTOCOL.md",
+      "docs/30-provider-debug/PROVIDER_EVIDENCE_AND_CLOSURE.md",
     );
     expect(doc).toContain(
-      "docs/30-provider-debug/PROVIDER_CLOSURE_OPERATOR_ROOM.md",
+      "docs/30-provider-debug/PROVIDER_EVIDENCE_AND_CLOSURE.md",
     );
     expect(doc).toContain("lib/provider-closure/schema.ts");
     expect(doc).toContain("lib/provider-closure-room/lanes.ts");

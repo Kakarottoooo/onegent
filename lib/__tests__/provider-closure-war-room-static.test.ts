@@ -10,9 +10,9 @@ import { createArtifactBundleTemplate } from "@/scripts/create-artifact-bundle-t
 const ROOT = process.cwd();
 
 const WAR_ROOM_REPORTS = [
-  "docs/30-provider-debug/provider-closure-war-room/RESTAURANT_SYNTHETIC_WAR_ROOM_REPORT.md",
-  "docs/30-provider-debug/provider-closure-war-room/FLIGHT_SYNTHETIC_WAR_ROOM_REPORT.md",
-  "docs/30-provider-debug/provider-closure-war-room/HOTEL_SYNTHETIC_WAR_ROOM_REPORT.md",
+  "docs/90-archive/provider-debug/provider-closure-war-room/RESTAURANT_SYNTHETIC_WAR_ROOM_REPORT.md",
+  "docs/90-archive/provider-debug/provider-closure-war-room/FLIGHT_SYNTHETIC_WAR_ROOM_REPORT.md",
+  "docs/90-archive/provider-debug/provider-closure-war-room/HOTEL_SYNTHETIC_WAR_ROOM_REPORT.md",
 ] as const;
 
 describe("provider closure war room static guards", () => {
@@ -30,7 +30,7 @@ describe("provider closure war room static guards", () => {
 
   it("documents the war-room verdict taxonomy and model/env 500 handling", () => {
     const protocol = read(
-      "docs/30-provider-debug/LIVE_CLOSURE_EVIDENCE_PROTOCOL.md",
+      "docs/30-provider-debug/PROVIDER_EVIDENCE_AND_CLOSURE.md",
     );
 
     for (const verdict of [
@@ -92,8 +92,8 @@ describe("provider closure war room static guards", () => {
 
   it("keeps operator docs free of mutating live controls", () => {
     const docs = [
-      "docs/30-provider-debug/LIVE_CLOSURE_EVIDENCE_PROTOCOL.md",
-      "docs/30-provider-debug/PROVIDER_CLOSURE_OPERATOR_ROOM.md",
+      "docs/30-provider-debug/PROVIDER_EVIDENCE_AND_CLOSURE.md",
+      "docs/30-provider-debug/PROVIDER_EVIDENCE_AND_CLOSURE.md",
       ...WAR_ROOM_REPORTS,
       "docs/10-coordination/goal.md",
     ];

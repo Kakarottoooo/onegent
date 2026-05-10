@@ -253,7 +253,7 @@ function LaneCard({ laneSnap }: { laneSnap: ProviderLaneSnapshot }) {
         <p className="pcr__prose pcr__prose--small">
           See{" "}
           <a href="/dev/runtime-forensics">/dev/runtime-forensics</a> and{" "}
-          <code>docs/30-provider-debug/FAILURE_TAXONOMY.md</code> for the
+          <code>docs/30-provider-debug/PROVIDER_EVIDENCE_AND_CLOSURE.md</code> for the
           full taxonomy + signals + do-NOT lists.
         </p>
       </Block>
@@ -352,7 +352,7 @@ function ClosureAcceptanceBlock({
           Outcomes are partitioned across the 8-state taxonomy in{" "}
           <code>lib/provider-closure/schema.ts</code>. Read the full
           pass / fail / inconclusive criteria in{" "}
-          <code>docs/30-provider-debug/PROVIDER_CLOSURE_ACCEPTANCE.md</code>.
+          <code>docs/30-provider-debug/PROVIDER_EVIDENCE_AND_CLOSURE.md</code>.
         </p>
         <div className="pcr__acceptance-grid">
           <AcceptanceColumn
@@ -520,11 +520,11 @@ function SourceFooter({ snap }: { snap: ProviderClosureRoomSnapshot }) {
       <p>
         Cockpit source: <code>app/dev/provider-closure/page.tsx</code> +{" "}
         <code>lib/provider-closure-room/</code>. Operator usage doc:{" "}
-        <code>docs/30-provider-debug/PROVIDER_CLOSURE_OPERATOR_ROOM.md</code>.
+        <code>docs/30-provider-debug/PROVIDER_EVIDENCE_AND_CLOSURE.md</code>.
         Evidence protocol:{" "}
-        <code>docs/30-provider-debug/LIVE_CLOSURE_EVIDENCE_PROTOCOL.md</code>.
+        <code>docs/30-provider-debug/PROVIDER_EVIDENCE_AND_CLOSURE.md</code>.
         Failure taxonomy:{" "}
-        <code>docs/30-provider-debug/FAILURE_TAXONOMY.md</code>.
+        <code>docs/30-provider-debug/PROVIDER_EVIDENCE_AND_CLOSURE.md</code>.
       </p>
       {snap.notes.length > 0 && (
         <details className="pcr__notes">

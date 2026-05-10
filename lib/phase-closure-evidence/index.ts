@@ -97,11 +97,11 @@ export const PHASE_CLOSURE_REQUIRED_DOCS: Record<
   claude: "docs/10-coordination/claude.md",
   phase2: "docs/10-coordination/phase2.md",
   providerClosureAcceptance:
-    "docs/30-provider-debug/PROVIDER_CLOSURE_ACCEPTANCE.md",
+    "docs/30-provider-debug/PROVIDER_EVIDENCE_AND_CLOSURE.md",
   providerClosureOperatorRoom:
-    "docs/30-provider-debug/PROVIDER_CLOSURE_OPERATOR_ROOM.md",
+    "docs/30-provider-debug/PROVIDER_EVIDENCE_AND_CLOSURE.md",
   liveClosureEvidenceProtocol:
-    "docs/30-provider-debug/LIVE_CLOSURE_EVIDENCE_PROTOCOL.md",
+    "docs/30-provider-debug/PROVIDER_EVIDENCE_AND_CLOSURE.md",
   demoFreezeAcceptance: "docs/90-archive/phase1-demo/DEMO_FREEZE_ACCEPTANCE.md",
   demoControlRoom: "docs/90-archive/phase1-demo/DEMO_CONTROL_ROOM.md",
   ycDemoRunbook: "docs/90-archive/phase1-demo/YC_DEMO_RUNBOOK.md",
@@ -256,7 +256,7 @@ export function formatPhaseClosureEvidencePackMarkdown(
   lines.push("");
   lines.push(pack.summary);
   lines.push("");
-  lines.push("Closure claim rule: tooling integrated is not provider closure proven, and docs / fixtures / green no-live tests do not close a phase by themselves. Do not claim any provider lane is live verified unless `docs/30-provider-debug/PROVIDER_CLOSURE_ACCEPTANCE.md` records a non-empty verified live closure section for that lane.");
+  lines.push("Closure claim rule: tooling integrated is not provider closure proven, and docs / fixtures / green no-live tests do not close a phase by themselves. Do not claim any provider lane is live verified unless `docs/30-provider-debug/PROVIDER_EVIDENCE_AND_CLOSURE.md` records a non-empty verified live closure section for that lane.");
   lines.push("");
   lines.push("## Phase Table");
   lines.push("");

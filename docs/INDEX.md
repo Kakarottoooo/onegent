@@ -31,13 +31,9 @@ below.
 | Stage 0 operator report | `docs/40-dogfood/STAGE0_DAILY_REPORT.md` |
 | Founder dogfood bug inbox | `docs/40-dogfood/BUG_INBOX.md` |
 | Activity provider skill runtime | `docs/30-provider-debug/ACTIVITY_PROVIDER_SKILL_RUNTIME.md` |
-| Stage 0B Ticketmaster / SeatGeek lab | `docs/30-provider-debug/STAGE0B_TM_SEATGEEK_LAB.md` |
-| Stage 0B patch proposal templates | `docs/30-provider-debug/STAGE0B_PATCH_PROPOSAL_TEMPLATES.md` |
+| Activity skill lab and patch proposals | `docs/30-provider-debug/ACTIVITY_SKILL_LAB_RUNBOOK.md` |
 | Provider runtime debugging | `docs/30-provider-debug/PROVIDER_RUNTIME_DEBUG_PLAYBOOK.md` |
-| Evidence and safe closure | `docs/30-provider-debug/LIVE_CLOSURE_EVIDENCE_PROTOCOL.md` |
-| Failure taxonomy | `docs/30-provider-debug/FAILURE_TAXONOMY.md` |
-| Provider closure cockpit | `docs/30-provider-debug/PROVIDER_CLOSURE_OPERATOR_ROOM.md` |
-| Provider closure acceptance criteria | `docs/30-provider-debug/PROVIDER_CLOSURE_ACCEPTANCE.md` |
+| Provider evidence, taxonomy, closure, and cockpit rules | `docs/30-provider-debug/PROVIDER_EVIDENCE_AND_CLOSURE.md` |
 | Layered no-live benchmark | `docs/30-provider-debug/LAYERED_BENCHMARK_V2.md` |
 | Runtime mirror / drift | `docs/30-provider-debug/RUNTIME_MIRROR_GUIDE.md` |
 | Ticketmaster recovery notes | `docs/30-provider-debug/TICKETMASTER_LAYERED_RECOVERY.md` |

@@ -38,7 +38,7 @@ describe("live closure evidence protocol static guards", () => {
       },
       {
         vertical: "unified closure",
-        path: "docs/30-provider-debug/LIVE_CLOSURE_EVIDENCE_PROTOCOL.md",
+        path: "docs/30-provider-debug/PROVIDER_EVIDENCE_AND_CLOSURE.md",
         terms: ["restaurant", "flight", "hotel"],
       },
     ];
@@ -54,7 +54,7 @@ describe("live closure evidence protocol static guards", () => {
 
   it("keeps operator evidence docs free of mutating live controls", () => {
     const operatorDocs = [
-      "docs/30-provider-debug/LIVE_CLOSURE_EVIDENCE_PROTOCOL.md",
+      "docs/30-provider-debug/PROVIDER_EVIDENCE_AND_CLOSURE.md",
       "docs/90-archive/phase2-product-areas/LIVE_ARTIFACT_BRIDGE.md",
       "docs/90-archive/phase0-restaurant/RESTAURANT_ARTIFACT_ANALYSIS.md",
       "docs/90-archive/phase2-product-areas/EXPEDIA_CONTROLLED_RETRY_RUNBOOK.md",
@@ -72,7 +72,7 @@ describe("live closure evidence protocol static guards", () => {
       expect(badLines, relPath).toEqual([]);
     }
 
-    const protocol = read("docs/30-provider-debug/LIVE_CLOSURE_EVIDENCE_PROTOCOL.md");
+    const protocol = read("docs/30-provider-debug/PROVIDER_EVIDENCE_AND_CLOSURE.md");
     expect(protocol).toContain("Do not add run/retry/live buttons");
   });
 
@@ -102,7 +102,7 @@ describe("live closure evidence protocol static guards", () => {
   });
 
   it("documents OpenAI Responses API 500 as model/env transient, not provider 5xx", () => {
-    const protocol = read("docs/30-provider-debug/LIVE_CLOSURE_EVIDENCE_PROTOCOL.md");
+    const protocol = read("docs/30-provider-debug/PROVIDER_EVIDENCE_AND_CLOSURE.md");
 
     expect(protocol).toContain("OpenAI Responses API 500");
     expect(protocol).toContain("model/env transient");

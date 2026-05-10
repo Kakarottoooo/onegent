@@ -1,8 +1,8 @@
 /**
- * Stage 0B Activity Provider Skill Runtime — public no-live API.
+ * Stage 0B Activity Provider Skill Runtime �?public no-live API.
  *
  * Pure helpers for the controlled Browser Harness lab documented in
- * docs/30-provider-debug/STAGE0B_TM_SEATGEEK_LAB.md. None of these
+ * docs/30-provider-debug/ACTIVITY_SKILL_LAB_RUNBOOK.md. None of these
  * symbols launch a browser, touch the network, or import Browser Harness.
  *
  * The lab runner script (`scripts/stage0b-activity-skill-lab.ts`) is the

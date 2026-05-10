@@ -3,7 +3,7 @@
  *
  * Maps a TicketmasterRpaResult-shaped input plus a small set of side signals
  * (active-tab URL, local-browser-disconnect flag) into the user-visible task
- * state the executor should surface. Pure / no Page / no I/O / no async — fully
+ * state the executor should surface. Pure / no Page / no I/O / no async �?fully
  * unit-testable.
  *
  * This module is wired into the live executor after the 2026-05-07 founder
@@ -18,9 +18,9 @@
  *
  * Cross-references:
  *   - lib/booking-autopilot/providers/ticketmaster-rpa.ts (`bookTicketmasterProgrammatic`
- *     return shape — what feeds this classifier)
- *   - lib/operator-failure-taxonomy/ (related-class taxonomy — same vocabulary)
- *   - docs/30-provider-debug/FAILURE_TAXONOMY.md (operator triage runbook)
+ *     return shape �?what feeds this classifier)
+ *   - lib/operator-failure-taxonomy/ (related-class taxonomy �?same vocabulary)
+ *   - docs/30-provider-debug/PROVIDER_EVIDENCE_AND_CLOSURE.md (operator triage runbook)
  *   - docs/30-provider-debug/PROVIDER_RUNTIME_DEBUG_PLAYBOOK.md (DB / log /
  *     screenshot triage order, plus stuck-job recovery template)
  *
@@ -34,7 +34,7 @@
  *   - "user_seat_selection_required"
  *       Event page reached, seat map visible, but the user has not yet picked
  *       a seat (Reserve still disabled). Safe handoff: paused_payment.
- *       UX: "Ready for review — choose a seat in the browser to continue".
+ *       UX: "Ready for review �?choose a seat in the browser to continue".
  *       Related class on `safe_boundary_reached`.
  *
  *   - "user_event_choice_required"
@@ -62,7 +62,7 @@
  *       indefinitely. Reconciliation domain (artifact-only stuck-job audit
  *       + founder-approved manual UPDATE), not a provider regression.
  *       Related class on `model_env_transient`.
- *       UX: "Browser disconnected before checkout — reopen the task to retry".
+ *       UX: "Browser disconnected before checkout �?reopen the task to retry".
  *
  *   - "unknown_failure"
  *       RPA returned without checkout, without handoff_ready/needs_login, and
@@ -70,20 +70,20 @@
  *       not look live forever. Mapped to `error`.
  *
  * Decision precedence (top-down):
- *   1. checkout_reached         — success regardless of other signals
- *   2. local_browser_disconnected — cannot trust other signals without the page
- *   3. external_ad_tab_detected   — wrong host means wrong tab; do not trust
+ *   1. checkout_reached         �?success regardless of other signals
+ *   2. local_browser_disconnected �?cannot trust other signals without the page
+ *   3. external_ad_tab_detected   �?wrong host means wrong tab; do not trust
  *      handoff_ready / needs_login (they were computed from the ad tab)
- *   4. user_login_required       — explicit account boundary
- *   5. user_event_choice_required — provider-start page needs a user choice
- *   6. user_seat_selection_required — any other handoff_ready run
- *   7. unknown_failure           — last fallback
+ *   4. user_login_required       �?explicit account boundary
+ *   5. user_event_choice_required �?provider-start page needs a user choice
+ *   6. user_seat_selection_required �?any other handoff_ready run
+ *   7. unknown_failure           �?last fallback
  *
  * Hard rules:
  *   - Never claim login was performed for the user.
  *   - Never assume the user picked a seat.
  *   - Never silently downgrade an external-tab error to a generic "Ticketmaster
- *     RPA did not reach checkout" — that summary is what made it hard to spot
+ *     RPA did not reach checkout" �?that summary is what made it hard to spot
  *     ad-tab incidents in the original inline logic.
  */
 
@@ -217,11 +217,11 @@ const FALLBACK_SUMMARY: Readonly<Record<TicketmasterTaskState, string>> =
     user_event_choice_required:
       "Ticketmaster needs you to choose an event or showtime before I can continue.",
     user_login_required:
-      "Ticketmaster needs you to sign in to continue. Open the live browser — we won't enter account details for you.",
+      "Ticketmaster needs you to sign in to continue. Open the live browser �?we won't enter account details for you.",
     external_ad_tab_detected:
       "An external ad tab opened during booking. Close the ad tab and continue on Ticketmaster.",
     local_browser_disconnected:
-      "Ticketmaster browser session disconnected before checkout. Reopen the task to retry — we won't keep this task running silently.",
+      "Ticketmaster browser session disconnected before checkout. Reopen the task to retry �?we won't keep this task running silently.",
     unknown_failure:
       "Couldn't reach Ticketmaster checkout. Open the link to finish manually.",
   });
@@ -256,7 +256,7 @@ export function classifyTicketmasterTaskState(
   // 3. External ad tab: a non-empty URL on a non-Ticketmaster host means the
   //    runtime was driving the wrong tab. We surface a specific summary so the
   //    task is not classified as a generic "did not reach checkout" failure.
-  //    NOTE: an empty currentUrl is not an ad tab — it's either a disconnect
+  //    NOTE: an empty currentUrl is not an ad tab �?it's either a disconnect
   //    (handled above) or an unknown failure (handled below).
   if (input.currentUrl !== "" && !isTicketmasterDomainUrl(input.currentUrl)) {
     return {

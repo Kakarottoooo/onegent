@@ -11,7 +11,7 @@ calls, payment, OTP/CAPTCHA/login bypass, or final confirmation.
 
 Before running the restaurant artifact analyzer below, classify the failure
 against the four-way operator taxonomy in
-`docs/30-provider-debug/FAILURE_TAXONOMY.md`. The analyzer only fires usefully
+`docs/30-provider-debug/PROVIDER_EVIDENCE_AND_CLOSURE.md`. The analyzer only fires usefully
 on a `provider_logic_failure`. If the run actually died at planning time with
 an OpenAI 5xx, or if the provider site itself was network-degraded, the
 analyzer will return `insufficient_evidence` and the correct response is to

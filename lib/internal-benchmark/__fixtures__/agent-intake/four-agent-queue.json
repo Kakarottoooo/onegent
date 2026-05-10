@@ -94,7 +94,7 @@
       "changedFiles": [
         "lib/runtime-forensics/flight-layered-recovery.ts",
         "lib/__tests__/flight-layered-recovery.test.ts",
-        "docs/30-provider-debug/LIVE_CLOSURE_EVIDENCE_PROTOCOL.md"
+        "docs/30-provider-debug/PROVIDER_EVIDENCE_AND_CLOSURE.md"
       ],
       "artifacts": [],
       "validations": [

@@ -323,14 +323,14 @@ Next step:
 
 The canonical pass / fail / inconclusive criteria for restaurant, flight, and
 hotel provider closure live in
-`docs/30-provider-debug/PROVIDER_CLOSURE_ACCEPTANCE.md`. Read this doc before
+`docs/30-provider-debug/PROVIDER_EVIDENCE_AND_CLOSURE.md`. Read this doc before
 declaring a closure attempt is closure-pass; tooling passing is not provider
 closure passing. Until the acceptance doc records verified live closure for a
 lane, that lane in `lib/provider-closure-room/lanes.ts` stays
 `liveVerified: false`. Restaurant/OpenTable now has accepted Sirrah evidence;
 flight and hotel remain not live verified. The cockpit at `/dev/provider-closure` mirrors the
 acceptance partition; the operator failure taxonomy at
-`docs/30-provider-debug/FAILURE_TAXONOMY.md` is the 4-class signal layer that
+`docs/30-provider-debug/PROVIDER_EVIDENCE_AND_CLOSURE.md` is the 4-class signal layer that
 feeds the 8-state outcome partition.
 
 ## Phase 2 - Frozen

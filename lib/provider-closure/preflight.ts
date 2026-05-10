@@ -51,7 +51,7 @@ export function formatProviderClosurePreflightMarkdown(
     "## Read First",
     "",
     `- ${runbook}`,
-    "- `docs/30-provider-debug/LIVE_CLOSURE_EVIDENCE_PROTOCOL.md`",
+    "- `docs/30-provider-debug/PROVIDER_EVIDENCE_AND_CLOSURE.md`",
   ].join("\n");
 }
 

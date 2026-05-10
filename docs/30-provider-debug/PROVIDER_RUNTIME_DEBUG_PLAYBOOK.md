@@ -23,7 +23,7 @@ Safety boundary:
 4. Open the latest provider debug screenshot folder.
 5. Compare the visible page state against what the worker believed.
 6. **Classify against the four-way operator taxonomy in
-   `docs/30-provider-debug/FAILURE_TAXONOMY.md`** (model_env_transient /
+   `docs/30-provider-debug/PROVIDER_EVIDENCE_AND_CLOSURE.md`** (model_env_transient /
    provider_network_degraded / provider_logic_failure /
    safe_boundary_reached) before deciding to patch. A model/env transient
    or network-degraded run is not a provider regression.
@@ -42,15 +42,15 @@ There is no single dashboard that holds the truth. Use this exact order:
 
 | Source | Path / surface | What it gives you |
 |---|---|---|
-| **Database** | `booking_jobs` row → `steps[0].error`, `steps[0].decisionLog`, `steps[0].body.params`, `steps[0].body.__source`, `terminalReason`, `terminalCode` | Authoritative job + step + decision-log content |
-| **Worker log** | `C:\Users\Gzw19\onegent-e2e-20260503\codex-worker.log` (Codex's worktree) — override locally with `WORKER_LOG_PATH` env, default `./codex-worker.log` | Step-by-step execution narrative, strategy ladder hits, frame-aware probe results |
+| **Database** | `booking_jobs` row �?`steps[0].error`, `steps[0].decisionLog`, `steps[0].body.params`, `steps[0].body.__source`, `terminalReason`, `terminalCode` | Authoritative job + step + decision-log content |
+| **Worker log** | `C:\Users\Gzw19\onegent-e2e-20260503\codex-worker.log` (Codex's worktree) �?override locally with `WORKER_LOG_PATH` env, default `./codex-worker.log` | Step-by-step execution narrative, strategy ladder hits, frame-aware probe results |
 | **Debug screenshots** | `worker/.debug-screenshots/<provider>/<run>/` (page.png + page.html + summary.json) | Visual ground truth of what the provider site looked like at terminal failure |
 | **Benchmark report** | `benchmark/runs/*.json` (no `phase1-quality-gate-` / `founder-e2e-` prefix) | Phase 0 acceptance suite per-case outcomes |
 | **Task UI** | `/tasks/<taskId>` | Customer-facing summary; **not** ground truth (compressed) |
 
 **Triage rule**: the task UI is the lowest-fidelity source. Do not draw a
 conclusion from it alone. The forensics workbench (next section) re-renders
-the same evidence after pre-classification, but is still **not** authoritative —
+the same evidence after pre-classification, but is still **not** authoritative �?
 the artifact files + DB are.
 
 ## 1.6 Forensics workbench (`/dev/runtime-forensics`)
@@ -60,13 +60,13 @@ categories. Reads filesystem artifacts (V1):
 
 - `benchmark/runs/*.json` (excluding quality-gate / founder-e2e prefixes)
 - `worker/.debug-screenshots/<provider>/<run>/summary.json`
-- `./codex-worker.log` (or `$WORKER_LOG_PATH`) — graceful empty if missing
+- `./codex-worker.log` (or `$WORKER_LOG_PATH`) �?graceful empty if missing
 
 Failure classifications:
 
 | Class | Severity | What it means |
 |---|---|---|
-| `legacy_shape_missing_source` | **P0** | Worker received a step without `__source` — M5 force-gate at `app/api/booking-jobs/[id]/start/route.ts` failed to stamp. Worker-gating regression. |
+| `legacy_shape_missing_source` | **P0** | Worker received a step without `__source` �?M5 force-gate at `app/api/booking-jobs/[id]/start/route.ts` failed to stamp. Worker-gating regression. |
 | `provider_no_availability` | INFO | Provider returned no slots in the target window. Not a fill failure. |
 | `provider_form_incomplete` | P1 | Guest form not fully filled / required field empty / `auditAndRefill` gave up. |
 | `otp_or_login_required` | INFO | OTP / phone-verify / login wall reached. Expected boundary. |
@@ -80,7 +80,7 @@ How to use:
 1. Open `/dev/runtime-forensics` (dev-gated; requires
    `NODE_ENV !== "production"` or `ENABLE_DEV_BENCHMARK_API=1`).
 2. Filter by provider / status / classification.
-3. Click a job row → the detail drawer shows raw terminal fields + matched
+3. Click a job row �?the detail drawer shows raw terminal fields + matched
    signals + step shape audit + decision log + cross-references + a
    paste-ready markdown bug-report block.
 4. Triple-click the markdown textarea, copy, paste into the Codex / Claude
@@ -122,28 +122,28 @@ Use this when you open `/dev/runtime-forensics` for a real triage:
 5. **Open a row** with *Inspect*. The detail drawer renders, top to
    bottom:
    - **Source of truth** reminder (4-step verification ladder).
-   - **Recommended next evidence** — a numbered checklist tailored
+   - **Recommended next evidence** �?a numbered checklist tailored
      to the failure class, plus per-class file/doc/db pointers, plus
      ready-to-paste PowerShell `Select-String` commands keyed to the
      job's id, scenario, and top matched signals.
-   - **Signals grouped by source** — `step_shape_audit` / `error_message`
+   - **Signals grouped by source** �?`step_shape_audit` / `error_message`
      / `terminal_reason` / `step_error` / `decision_log` /
      `raw_worker_log`. Helps you see whether the verdict came from one
      loud field or several converging hints.
    - **Step shape audit** table with rows missing `__source` outlined
      in red and a `[!]` marker.
    - **Raw terminal fields** + **Decision log** + **Cross references**.
-   - **Paste-ready markdown bug report** — same text the API returns,
+   - **Paste-ready markdown bug report** �?same text the API returns,
      with a Copy button.
 6. **Verify against ground truth** before filing or fixing. The drawer
-   nudges this in the green "Source of truth" block — open the worker
+   nudges this in the green "Source of truth" block �?open the worker
    log, screenshot dir, and DB row referenced there.
 
 ### Hard rules (operator)
 
 - The dashboard NEVER triggers a live run, retry, payment, OTP, or
   worker action. If you see a button that suggests otherwise, it's a
-  bug — file under Track B.
+  bug �?file under Track B.
 - `[FIXTURE]` rows are SYNTHETIC. Do not file bugs against them, do
   not screenshot them as evidence, do not reference them in retros.
 - Generated `Select-String` commands sanitize signal text before

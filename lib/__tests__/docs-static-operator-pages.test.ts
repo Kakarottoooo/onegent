@@ -180,7 +180,7 @@ describe("docs static guard - operator dev pages", () => {
     // operator-failure-taxonomy.test.ts pin the module's content.
     expect(
       existsSync(
-        path.join(ROOT, "docs/30-provider-debug/FAILURE_TAXONOMY.md"),
+        path.join(ROOT, "docs/30-provider-debug/PROVIDER_EVIDENCE_AND_CLOSURE.md"),
       ),
     ).toBe(true);
     expect(
@@ -192,7 +192,7 @@ describe("docs static guard - operator dev pages", () => {
       ),
     ).toBe(true);
 
-    const taxonomy = read("docs/30-provider-debug/FAILURE_TAXONOMY.md");
+    const taxonomy = read("docs/30-provider-debug/PROVIDER_EVIDENCE_AND_CLOSURE.md");
 
     // Required structural sections.
     const requiredSections = [
@@ -205,7 +205,7 @@ describe("docs static guard - operator dev pages", () => {
     for (const pattern of requiredSections) {
       expect(
         taxonomy,
-        `FAILURE_TAXONOMY.md must keep section matching ${pattern}`,
+        `PROVIDER_EVIDENCE_AND_CLOSURE.md must keep section matching ${pattern}`,
       ).toMatch(pattern);
     }
 
@@ -225,7 +225,7 @@ describe("docs static guard - operator dev pages", () => {
     expect(
       restaurant,
       "RESTAURANT_ARTIFACT_ANALYSIS must cross-link to FAILURE_TAXONOMY",
-    ).toContain("docs/30-provider-debug/FAILURE_TAXONOMY.md");
+    ).toContain("docs/30-provider-debug/PROVIDER_EVIDENCE_AND_CLOSURE.md");
 
     // Provider runtime debug playbook must surface the taxonomy in its
     // fast triage order.
@@ -235,7 +235,7 @@ describe("docs static guard - operator dev pages", () => {
     expect(
       playbook,
       "PROVIDER_RUNTIME_DEBUG_PLAYBOOK must reference FAILURE_TAXONOMY in its triage steps",
-    ).toContain("docs/30-provider-debug/FAILURE_TAXONOMY.md");
+    ).toContain("docs/30-provider-debug/PROVIDER_EVIDENCE_AND_CLOSURE.md");
   });
 
   it("/dev/provider-closure cockpit obeys the strictest no-action-button rule", () => {
@@ -324,7 +324,7 @@ describe("docs static guard - operator dev pages", () => {
       existsSync(
         path.join(
           ROOT,
-          "docs/30-provider-debug/PROVIDER_CLOSURE_OPERATOR_ROOM.md",
+          "docs/30-provider-debug/PROVIDER_EVIDENCE_AND_CLOSURE.md",
         ),
       ),
     ).toBe(true);
@@ -339,22 +339,22 @@ describe("docs static guard - operator dev pages", () => {
 
     // LIVE_CLOSURE_EVIDENCE_PROTOCOL must cross-link to the new doc
     const evidenceProtocol = read(
-      "docs/30-provider-debug/LIVE_CLOSURE_EVIDENCE_PROTOCOL.md",
+      "docs/30-provider-debug/PROVIDER_EVIDENCE_AND_CLOSURE.md",
     );
     expect(
       evidenceProtocol,
       "LIVE_CLOSURE_EVIDENCE_PROTOCOL must cross-link to PROVIDER_CLOSURE_OPERATOR_ROOM",
     ).toContain(
-      "docs/30-provider-debug/PROVIDER_CLOSURE_OPERATOR_ROOM.md",
+      "docs/30-provider-debug/PROVIDER_EVIDENCE_AND_CLOSURE.md",
     );
 
     // INDEX must list the new doc
     const index = read("docs/INDEX.md");
     expect(
       index,
-      "docs/INDEX.md must reference PROVIDER_CLOSURE_OPERATOR_ROOM.md",
+      "docs/INDEX.md must reference PROVIDER_EVIDENCE_AND_CLOSURE.md",
     ).toContain(
-      "docs/30-provider-debug/PROVIDER_CLOSURE_OPERATOR_ROOM.md",
+      "docs/30-provider-debug/PROVIDER_EVIDENCE_AND_CLOSURE.md",
     );
   });
 });

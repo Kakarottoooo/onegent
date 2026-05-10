@@ -1,8 +1,8 @@
 /**
- * Stage 0B Activity Provider Skill Runtime — pure no-live types.
+ * Stage 0B Activity Provider Skill Runtime �?pure no-live types.
  *
  * Mirrors the contract documented in:
- *   docs/30-provider-debug/STAGE0B_TM_SEATGEEK_LAB.md
+ *   docs/30-provider-debug/ACTIVITY_SKILL_LAB_RUNBOOK.md
  *
  * These types describe the JSONL evidence format the controlled Browser
  * Harness lab writes, plus the L2RecoveryResult shape Onegent uses to
@@ -72,7 +72,7 @@ export type LabHardStopReason =
   | "harness_error_or_disconnect";
 
 /**
- * Visible facts the lab observed on the page. Each field is OPTIONAL —
+ * Visible facts the lab observed on the page. Each field is OPTIONAL �?
  * the harness only fills what it can read from the DOM/text. Any field
  * absent here means "not observed", NOT "absent on the page". Downstream
  * code MUST treat absence as inconclusive.
@@ -138,7 +138,7 @@ export interface LabEvent {
   notes?: string;
 }
 
-// ─── L2RecoveryResult — final-state schema ───────────────────────────────
+// ─── L2RecoveryResult �?final-state schema ───────────────────────────────
 //
 // Emitted exactly once per lab run as the final JSON object alongside the
 // JSONL event stream. This is the per-run summary the cockpit and patch
@@ -216,7 +216,7 @@ export interface L2RecoveryResult {
 }
 
 /**
- * Patch proposal — captures what the harness saw and what Onegent should
+ * Patch proposal �?captures what the harness saw and what Onegent should
  * change in a *future*, code-reviewed PR. Intentionally narrow: this is a
  * proposal, not an automatic edit. The patch_target is a string referring
  * to a file path Onegent owns; the harness must NOT touch it.
@@ -239,7 +239,7 @@ export interface SkillPatchProposal {
   patch_target: string;
   /** What the suggested change would do. Plain English. */
   proposed_change: string;
-  /** Risk class — controls whether the proposal can land without dogfood. */
+  /** Risk class �?controls whether the proposal can land without dogfood. */
   risk: "low" | "medium" | "high";
   /** Cross-references to LabEvent.seq values that motivate the proposal. */
   evidence_event_seqs: number[];
@@ -275,7 +275,7 @@ export interface LabTestPlanEntry {
   url: string;
   expected_resolver_page_type: ActivitySkillPageType;
   expected_resolver_execution_mode: ActivitySkillExecutionMode;
-  /** Reason this fixture exists — what the run should reveal. */
+  /** Reason this fixture exists �?what the run should reveal. */
   reason: string;
 }
 

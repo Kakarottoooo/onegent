@@ -1,6 +1,6 @@
 #!/usr/bin/env tsx
 /**
- * Stage 0B Activity Provider Skill Lab — operator-driven runner template.
+ * Stage 0B Activity Provider Skill Lab �?operator-driven runner template.
  *
  * THIS SCRIPT DOES NOT LAUNCH A BROWSER. It is a thin TypeScript helper
  * that:
@@ -98,7 +98,7 @@ function preflight(entry: LabTestPlanEntry): PreflightResult {
   const notes: string[] = [];
   const resolved = resolveActivityProviderSkillUrl(entry.url);
   if (!resolved) {
-    notes.push("resolver returned null — URL is malformed or unreachable to the resolver");
+    notes.push("resolver returned null �?URL is malformed or unreachable to the resolver");
     return { entry, ok: false, notes };
   }
   if (resolved.provider !== entry.provider) {
@@ -118,7 +118,7 @@ function preflight(entry: LabTestPlanEntry): PreflightResult {
 }
 
 function printDryRunInstructions(args: LabRunnerArgs): void {
-  console.log("Stage 0B Activity Skill Lab — DRY RUN");
+  console.log("Stage 0B Activity Skill Lab �?DRY RUN");
   console.log("");
   console.log("This script does not launch a browser. To execute the lab:");
   console.log("");
@@ -135,7 +135,7 @@ function printDryRunInstructions(args: LabRunnerArgs): void {
   console.log("  5. The harness wrapper emits LabEvent JSONL to events.jsonl");
   console.log("     and result.json (L2RecoveryResult) to the same directory.");
   console.log("");
-  console.log("Hard stops the wrapper MUST enforce (see STAGE0B_TM_SEATGEEK_LAB.md § 2):");
+  console.log("Hard stops the wrapper MUST enforce (see ACTIVITY_SKILL_LAB_RUNBOOK.md § 2):");
   console.log("  login_or_signin_wall · captcha_or_challenge · otp_or_phone_verification");
   console.log("  seat_selection_required · payment_form_visible · final_confirm_button");
   console.log("  cookie_consent_blocking_render · harness_error_or_disconnect");
@@ -164,7 +164,7 @@ function filterPlan(args: Pick<LabRunnerArgs, "providerFilter" | "plan">): LabTe
 
 function printCheckResult(results: ReadonlyArray<PreflightResult>): boolean {
   const failures = results.filter((r) => !r.ok);
-  console.log("Stage 0B Activity Skill Lab — PRE-FLIGHT CHECK");
+  console.log("Stage 0B Activity Skill Lab �?PRE-FLIGHT CHECK");
   console.log("");
   console.log(`Baseline shared plan size: ${STAGE0B_PLAN_COUNTS.total} (TM=${STAGE0B_PLAN_COUNTS.ticketmaster}, SG=${STAGE0B_PLAN_COUNTS.seatgeek})`);
   console.log(`Checked: ${results.length}`);
@@ -187,9 +187,9 @@ async function main(): Promise<void> {
 
   // Operator-facing safety banner. The script is read-only.
   console.log("============================================================");
-  console.log("Stage 0B lab runner — DOES NOT launch a browser.");
+  console.log("Stage 0B lab runner �?DOES NOT launch a browser.");
   console.log("Browser Harness invocation is operator-driven, out of repo.");
-  console.log("Read docs/30-provider-debug/STAGE0B_TM_SEATGEEK_LAB.md first.");
+  console.log("Read docs/30-provider-debug/ACTIVITY_SKILL_LAB_RUNBOOK.md first.");
   console.log("============================================================");
   console.log("");
 

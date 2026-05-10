@@ -8,7 +8,7 @@
  *
  * Update protocol:
  *   1. Update the corresponding canonical doc/runbook first
- *      (LIVE_CLOSURE_EVIDENCE_PROTOCOL.md, the per-vertical
+ *      (PROVIDER_EVIDENCE_AND_CLOSURE.md, the per-vertical
  *      runbook, or PROVIDER_RUNTIME_DEBUG_PLAYBOOK.md).
  *   2. Mirror the change here.
  *   3. The cockpit picks it up on next render.
@@ -149,12 +149,12 @@ const RESTAURANT_LANE: ProviderLane = {
     },
     {
       label: "Live closure evidence protocol",
-      ref: "docs/30-provider-debug/LIVE_CLOSURE_EVIDENCE_PROTOCOL.md",
+      ref: "docs/30-provider-debug/PROVIDER_EVIDENCE_AND_CLOSURE.md",
       kind: "doc",
     },
     {
       label: "Operator failure taxonomy",
-      ref: "docs/30-provider-debug/FAILURE_TAXONOMY.md",
+      ref: "docs/30-provider-debug/PROVIDER_EVIDENCE_AND_CLOSURE.md",
       kind: "doc",
     },
     {
@@ -238,7 +238,7 @@ const RESTAURANT_LANE: ProviderLane = {
     detail:
       "Review the accepted Sirrah OpenTable evidence before broadening " +
       "OpenTable-first restaurant fixtures. Do not click final confirmation.",
-    ref: "docs/30-provider-debug/PROVIDER_CLOSURE_ACCEPTANCE.md",
+    ref: "docs/30-provider-debug/PROVIDER_EVIDENCE_AND_CLOSURE.md",
   },
   inspectAfterRun: [
     {
@@ -344,7 +344,7 @@ const FLIGHT_LANE: ProviderLane = {
     },
     {
       label: "Live closure evidence protocol",
-      ref: "docs/30-provider-debug/LIVE_CLOSURE_EVIDENCE_PROTOCOL.md",
+      ref: "docs/30-provider-debug/PROVIDER_EVIDENCE_AND_CLOSURE.md",
       kind: "doc",
     },
     {
@@ -354,7 +354,7 @@ const FLIGHT_LANE: ProviderLane = {
     },
     {
       label: "Operator failure taxonomy",
-      ref: "docs/30-provider-debug/FAILURE_TAXONOMY.md",
+      ref: "docs/30-provider-debug/PROVIDER_EVIDENCE_AND_CLOSURE.md",
       kind: "doc",
     },
     {
@@ -550,7 +550,7 @@ const HOTEL_LANE: ProviderLane = {
     },
     {
       label: "Live closure evidence protocol",
-      ref: "docs/30-provider-debug/LIVE_CLOSURE_EVIDENCE_PROTOCOL.md",
+      ref: "docs/30-provider-debug/PROVIDER_EVIDENCE_AND_CLOSURE.md",
       kind: "doc",
     },
     {
@@ -560,7 +560,7 @@ const HOTEL_LANE: ProviderLane = {
     },
     {
       label: "Operator failure taxonomy",
-      ref: "docs/30-provider-debug/FAILURE_TAXONOMY.md",
+      ref: "docs/30-provider-debug/PROVIDER_EVIDENCE_AND_CLOSURE.md",
       kind: "doc",
     },
     {

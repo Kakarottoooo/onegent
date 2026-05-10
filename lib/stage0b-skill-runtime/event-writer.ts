@@ -1,5 +1,5 @@
 /**
- * Stage 0B lab event writer — pure helpers.
+ * Stage 0B lab event writer �?pure helpers.
  *
  * Builds and serializes LabEvent records to JSONL. The lab runner writes
  * the JSONL file; downstream tests / cockpit code reads it back. The
@@ -33,7 +33,7 @@ export interface BuildLabEventInput {
 
 /**
  * Build a fully-validated LabEvent. Throws when the inputs violate the
- * contract documented in STAGE0B_TM_SEATGEEK_LAB.md so the runner cannot
+ * contract documented in ACTIVITY_SKILL_LAB_RUNBOOK.md so the runner cannot
  * silently emit malformed evidence.
  */
 export function buildLabEvent(input: BuildLabEventInput): LabEvent {

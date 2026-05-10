@@ -7,9 +7,9 @@ const ROOT = process.cwd();
 describe("provider closure docs static guards", () => {
   it("keeps one synthetic closure report per kind", () => {
     const reports = [
-      "docs/30-provider-debug/provider-closure-reports/RESTAURANT_SYNTHETIC_CLOSURE_REPORT.md",
-      "docs/30-provider-debug/provider-closure-reports/FLIGHT_SYNTHETIC_CLOSURE_REPORT.md",
-      "docs/30-provider-debug/provider-closure-reports/HOTEL_SYNTHETIC_CLOSURE_REPORT.md",
+      "docs/90-archive/provider-debug/provider-closure-reports/RESTAURANT_SYNTHETIC_CLOSURE_REPORT.md",
+      "docs/90-archive/provider-debug/provider-closure-reports/FLIGHT_SYNTHETIC_CLOSURE_REPORT.md",
+      "docs/90-archive/provider-debug/provider-closure-reports/HOTEL_SYNTHETIC_CLOSURE_REPORT.md",
     ];
 
     for (const relPath of reports) {
@@ -22,7 +22,7 @@ describe("provider closure docs static guards", () => {
   });
 
   it("documents the provider closure harness in the live protocol", () => {
-    const protocol = read("docs/30-provider-debug/LIVE_CLOSURE_EVIDENCE_PROTOCOL.md");
+    const protocol = read("docs/30-provider-debug/PROVIDER_EVIDENCE_AND_CLOSURE.md");
 
     expect(protocol).toContain("scripts/provider-closure.ts");
     expect(protocol).toContain("safe_handoff");
@@ -32,10 +32,10 @@ describe("provider closure docs static guards", () => {
 
   it("keeps closure docs free of mutating live controls", () => {
     const docs = [
-      "docs/30-provider-debug/LIVE_CLOSURE_EVIDENCE_PROTOCOL.md",
-      "docs/30-provider-debug/provider-closure-reports/RESTAURANT_SYNTHETIC_CLOSURE_REPORT.md",
-      "docs/30-provider-debug/provider-closure-reports/FLIGHT_SYNTHETIC_CLOSURE_REPORT.md",
-      "docs/30-provider-debug/provider-closure-reports/HOTEL_SYNTHETIC_CLOSURE_REPORT.md",
+      "docs/30-provider-debug/PROVIDER_EVIDENCE_AND_CLOSURE.md",
+      "docs/90-archive/provider-debug/provider-closure-reports/RESTAURANT_SYNTHETIC_CLOSURE_REPORT.md",
+      "docs/90-archive/provider-debug/provider-closure-reports/FLIGHT_SYNTHETIC_CLOSURE_REPORT.md",
+      "docs/90-archive/provider-debug/provider-closure-reports/HOTEL_SYNTHETIC_CLOSURE_REPORT.md",
       "docs/10-coordination/goal.md",
     ];
 
