@@ -122,6 +122,6 @@ It does not affect the OpenTable Phase 0A closure.
 - `docs/30-provider-debug/PROVIDER_CLOSURE_ACCEPTANCE.md`
 - `docs/30-provider-debug/PROVIDER_CLOSURE_OPERATOR_ROOM.md`
 - `docs/30-provider-debug/LIVE_CLOSURE_EVIDENCE_PROTOCOL.md`
-- `docs/40-phase1/DEMO_FREEZE_ACCEPTANCE.md`
-- `docs/40-phase1/DEMO_CONTROL_ROOM.md`
-- `docs/40-phase1/YC_DEMO_RUNBOOK.md`
+- `docs/90-archive/phase1-demo/DEMO_FREEZE_ACCEPTANCE.md`
+- `docs/90-archive/phase1-demo/DEMO_CONTROL_ROOM.md`
+- `docs/90-archive/phase1-demo/YC_DEMO_RUNBOOK.md`

@@ -18,22 +18,22 @@ describe("live closure evidence protocol static guards", () => {
     const requiredDocs = [
       {
         vertical: "restaurant",
-        path: "docs/20-phase0-restaurant/R003_LIVE_SMOKE_RUNBOOK.md",
-        terms: ["Resy", "docs/20-phase0-restaurant/RESTAURANT_ARTIFACT_ANALYSIS.md"],
+        path: "docs/90-archive/phase0-restaurant/R003_LIVE_SMOKE_RUNBOOK.md",
+        terms: ["Resy", "docs/90-archive/phase0-restaurant/RESTAURANT_ARTIFACT_ANALYSIS.md"],
       },
       {
         vertical: "restaurant evidence",
-        path: "docs/20-phase0-restaurant/RESTAURANT_ARTIFACT_ANALYSIS.md",
+        path: "docs/90-archive/phase0-restaurant/RESTAURANT_ARTIFACT_ANALYSIS.md",
         terms: ["Resy", "OpenTable", "analyze-restaurant-artifact.ts"],
       },
       {
         vertical: "flight",
-        path: "docs/50-product-areas/EXPEDIA_CONTROLLED_RETRY_RUNBOOK.md",
+        path: "docs/90-archive/phase2-product-areas/EXPEDIA_CONTROLLED_RETRY_RUNBOOK.md",
         terms: ["Expedia", "controlled retry", "analyze-expedia-retry-artifact"],
       },
       {
         vertical: "hotel",
-        path: "docs/50-product-areas/HOTEL_CONTROLLED_RETRY_RUNBOOK.md",
+        path: "docs/90-archive/phase2-product-areas/HOTEL_CONTROLLED_RETRY_RUNBOOK.md",
         terms: ["Booking.com", "controlled retry", "analyze-provider-artifact.ts --kind hotel"],
       },
       {
@@ -55,11 +55,11 @@ describe("live closure evidence protocol static guards", () => {
   it("keeps operator evidence docs free of mutating live controls", () => {
     const operatorDocs = [
       "docs/30-provider-debug/LIVE_CLOSURE_EVIDENCE_PROTOCOL.md",
-      "docs/50-product-areas/LIVE_ARTIFACT_BRIDGE.md",
-      "docs/20-phase0-restaurant/RESTAURANT_ARTIFACT_ANALYSIS.md",
-      "docs/50-product-areas/EXPEDIA_CONTROLLED_RETRY_RUNBOOK.md",
-      "docs/50-product-areas/HOTEL_CONTROLLED_RETRY_RUNBOOK.md",
-      "docs/40-phase1/DEMO_CONTROL_ROOM.md",
+      "docs/90-archive/phase2-product-areas/LIVE_ARTIFACT_BRIDGE.md",
+      "docs/90-archive/phase0-restaurant/RESTAURANT_ARTIFACT_ANALYSIS.md",
+      "docs/90-archive/phase2-product-areas/EXPEDIA_CONTROLLED_RETRY_RUNBOOK.md",
+      "docs/90-archive/phase2-product-areas/HOTEL_CONTROLLED_RETRY_RUNBOOK.md",
+      "docs/90-archive/phase1-demo/DEMO_CONTROL_ROOM.md",
     ];
 
     for (const relPath of operatorDocs) {

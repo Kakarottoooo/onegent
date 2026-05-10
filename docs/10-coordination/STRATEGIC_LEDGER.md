@@ -49,18 +49,18 @@ reversed, add a later entry that explicitly supersedes the older one.
 - 2026-05-03 Do not introduce third-party browser-agent tools such as MultiOn,
   Skyvern, or browser-use for provider execution.
 - 2026-05-02 Computer Use is the default executor direction for Phase 0
-  provider hardening. See `docs/30-provider-debug/EXECUTOR_V2_PIVOT.md`.
+  provider hardening. See `docs/90-archive/old-provider-plans/EXECUTOR_V2_PIVOT.md`.
 
 ## Phase 0 Restaurant
 
 - 2026-05-03 Phase 0 OTP transitional rule is locked in
-  `docs/20-phase0-restaurant/BENCHMARK_RESTAURANT_100.md`.
+  `docs/90-archive/phase0-restaurant/BENCHMARK_RESTAURANT_100.md`.
 - 2026-05-03 Q11 R-003 expectedOutcomes use explicit spec broadening in
-  `docs/20-phase0-restaurant/BENCHMARK_RESTAURANT_100.md`.
+  `docs/90-archive/phase0-restaurant/BENCHMARK_RESTAURANT_100.md`.
 - 2026-05-03 R-003 live smoke checklist and readiness preflight are tracked in
-  `docs/20-phase0-restaurant/R003_LIVE_SMOKE_RUNBOOK.md`.
+  `docs/90-archive/phase0-restaurant/R003_LIVE_SMOKE_RUNBOOK.md`.
 - 2026-05-03 OTP path D is warm session first, with Gmail OTP resume fallback.
-  See `docs/20-phase0-restaurant/WARM_SESSION_STRATEGY.md`.
+  See `docs/90-archive/phase0-restaurant/WARM_SESSION_STRATEGY.md`.
 - 2026-05-03 Phase 0B means Restaurant v1: Resy observed fixture coverage
   target plus OpenTable Phase 0 coverage. See
   `docs/00-start-here/PHASE_STATUS.md`.
@@ -68,9 +68,9 @@ reversed, add a later entry that explicitly supersedes the older one.
 ## Phase 1 And Phase 1.5
 
 - 2026-05-03 Phase 1 UI shipped to master via the Phase 1 plan and follow-up
-  merges. See `docs/40-phase1/PHASE_1_PLAN.md`.
+  merges. See `docs/90-archive/phase1-demo/PHASE_1_PLAN.md`.
 - 2026-05-03 Phase 1 #7 shipped through Path A, Path B, and safety hardening.
-  See `docs/40-phase1/PHASE_1_7_SPEC.md`.
+  See `docs/90-archive/phase1-demo/PHASE_1_7_SPEC.md`.
 - 2026-05-03 Path B hardening landed with helper extraction and focused tests
   in `lib/profile-gap-decision.ts` and `lib/profile-gap-on-save.ts`.
 - 2026-05-03 Audit Finding 5 is closed: cancel updates task state.
@@ -80,7 +80,7 @@ reversed, add a later entry that explicitly supersedes the older one.
 - 2026-05-03 Phase 1 founder walkthrough has an automated no-token render
   smoke gate via `npm run smoke:phase1`.
 - 2026-05-03 Founder E2E walkthrough has Quick and Full paths plus stop
-  conditions in `docs/40-phase1/PHASE_1_FOUNDER_E2E.md`.
+  conditions in `docs/90-archive/phase1-demo/PHASE_1_FOUNDER_E2E.md`.
 - 2026-05-04 Phase 1.5 uses two complementary surfaces: autonomous Quality
   Gate (`npm run gate:phase1`) and manual Founder E2E workbench
   (`/dev/founder-e2e`).
@@ -111,5 +111,5 @@ reversed, add a later entry that explicitly supersedes the older one.
   at least $1500/month browser cost, a cofounder, or a seed round.
 - 2026-05-03 Do not delete the old UI at the Phase 1 boundary. Use an explicit
   deprecation queue and removal criteria. See
-  `docs/40-phase1/UI_MIGRATION_MAP.md`.
+  `docs/90-archive/phase1-demo/UI_MIGRATION_MAP.md`.
 

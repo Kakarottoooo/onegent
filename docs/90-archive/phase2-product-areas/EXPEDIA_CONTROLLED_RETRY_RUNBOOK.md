@@ -307,7 +307,7 @@ artifact paths:
 Template with fake data:
 
 ```text
-docs/50-product-areas/EXPEDIA_RETRY_ARTIFACT_TEMPLATE.json
+docs/90-archive/phase2-product-areas/EXPEDIA_RETRY_ARTIFACT_TEMPLATE.json
 ```
 
 ```json

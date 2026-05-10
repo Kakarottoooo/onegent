@@ -339,7 +339,7 @@ related classes, not as new top-level categories.
 - `docs/30-provider-debug/PROVIDER_RUNTIME_DEBUG_PLAYBOOK.md` -- DB +
   worker log + screenshot triage order, plus the stuck-job recovery
   template.
-- `docs/30-provider-debug/EXECUTOR_V2_PIVOT.md` -- background on Computer
+- `docs/90-archive/old-provider-plans/EXECUTOR_V2_PIVOT.md` -- background on Computer
   Use as the v2 default and on the L1/L2 split this doc plugs into.
 - `docs/spikes/ticketmaster-harness-spike-20260506.md` (separate
   worktree, branch `claude/ticketmaster-browser-harness-spike-20260506`)

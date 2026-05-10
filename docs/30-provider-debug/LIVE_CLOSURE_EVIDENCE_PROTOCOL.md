@@ -259,8 +259,8 @@ For every screenshot set, answer:
 
 Controlled docs:
 
-- `docs/20-phase0-restaurant/R003_LIVE_SMOKE_RUNBOOK.md`
-- `docs/20-phase0-restaurant/RESTAURANT_ARTIFACT_ANALYSIS.md`
+- `docs/90-archive/phase0-restaurant/R003_LIVE_SMOKE_RUNBOOK.md`
+- `docs/90-archive/phase0-restaurant/RESTAURANT_ARTIFACT_ANALYSIS.md`
 
 Primary evidence:
 
@@ -294,7 +294,7 @@ npx tsx scripts/analyze-provider-artifact.ts --kind restaurant .tmp\restaurant-a
 
 Controlled doc:
 
-- `docs/50-product-areas/EXPEDIA_CONTROLLED_RETRY_RUNBOOK.md`
+- `docs/90-archive/phase2-product-areas/EXPEDIA_CONTROLLED_RETRY_RUNBOOK.md`
 
 Primary evidence:
 
@@ -326,7 +326,7 @@ npx tsx scripts/analyze-provider-artifact.ts --kind expedia .tmp\expedia-retry-a
 
 Controlled doc:
 
-- `docs/50-product-areas/HOTEL_CONTROLLED_RETRY_RUNBOOK.md`
+- `docs/90-archive/phase2-product-areas/HOTEL_CONTROLLED_RETRY_RUNBOOK.md`
 
 Primary evidence:
 

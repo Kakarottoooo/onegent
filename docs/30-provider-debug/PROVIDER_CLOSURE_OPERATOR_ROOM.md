@@ -200,15 +200,15 @@ These rules are enforced by static guards
 | `docs/30-provider-debug/PROVIDER_CLOSURE_ACCEPTANCE.md` | Canonical per-vertical pass / fail / inconclusive closure criteria. Read this when deciding whether a closure attempt is closure-pass; the cockpit mirrors the partition. |
 | `docs/30-provider-debug/FAILURE_TAXONOMY.md` | Four-way operator failure taxonomy used by every lane's "What to inspect after run" step. |
 | `docs/30-provider-debug/PROVIDER_RUNTIME_DEBUG_PLAYBOOK.md` | Provider runtime debug source of truth. Cross-linked from each lane's supporting references. |
-| `docs/50-product-areas/LIVE_ARTIFACT_BRIDGE.md` | Synthetic template generator + bundle redaction protocol. The cockpit's CLI blocks reference these scripts. |
-| `docs/20-phase0-restaurant/R003_LIVE_SMOKE_RUNBOOK.md` | Restaurant lane primary runbook. |
-| `docs/20-phase0-restaurant/RESY_LIVE_DEBUG_PLAYBOOK.md` | Restaurant lane operator decision flow for `/dev/resy-run-analysis`. |
-| `docs/20-phase0-restaurant/RESY_AVAILABILITY_PROBE_PROTOCOL.md` | Probe-first protocol for restaurant lane case selection. |
-| `docs/20-phase0-restaurant/RESTAURANT_ARTIFACT_ANALYSIS.md` | Restaurant artifact analysis with R-030 evidence anchors. |
-| `docs/50-product-areas/EXPEDIA_CONTROLLED_RETRY_RUNBOOK.md` | Flight lane primary runbook. |
-| `docs/50-product-areas/HOTEL_CONTROLLED_RETRY_RUNBOOK.md` | Hotel lane primary runbook. |
-| `docs/50-product-areas/PHASE2_VERTICAL_REVIVAL_AUDIT.md` | Phase 2 status anchor for flight + hotel lanes. |
-| `docs/50-product-areas/HOTEL_VERTICAL_REVIVAL_AUDIT.md` | Hotel vertical no-live audit. |
+| `docs/90-archive/phase2-product-areas/LIVE_ARTIFACT_BRIDGE.md` | Synthetic template generator + bundle redaction protocol. The cockpit's CLI blocks reference these scripts. |
+| `docs/90-archive/phase0-restaurant/R003_LIVE_SMOKE_RUNBOOK.md` | Restaurant lane primary runbook. |
+| `docs/90-archive/phase0-restaurant/RESY_LIVE_DEBUG_PLAYBOOK.md` | Restaurant lane operator decision flow for `/dev/resy-run-analysis`. |
+| `docs/90-archive/phase0-restaurant/RESY_AVAILABILITY_PROBE_PROTOCOL.md` | Probe-first protocol for restaurant lane case selection. |
+| `docs/90-archive/phase0-restaurant/RESTAURANT_ARTIFACT_ANALYSIS.md` | Restaurant artifact analysis with R-030 evidence anchors. |
+| `docs/90-archive/phase2-product-areas/EXPEDIA_CONTROLLED_RETRY_RUNBOOK.md` | Flight lane primary runbook. |
+| `docs/90-archive/phase2-product-areas/HOTEL_CONTROLLED_RETRY_RUNBOOK.md` | Hotel lane primary runbook. |
+| `docs/90-archive/phase2-product-areas/PHASE2_VERTICAL_REVIVAL_AUDIT.md` | Phase 2 status anchor for flight + hotel lanes. |
+| `docs/90-archive/phase2-product-areas/HOTEL_VERTICAL_REVIVAL_AUDIT.md` | Hotel vertical no-live audit. |
 | `/dev/runtime-forensics` | Read-only artifact-based forensic classification across 8 categories. |
 | `/dev/restaurant-readiness` | Restaurant lane go/no-go before live token spend. |
 | `/dev/resy-probe-runs` | Restaurant lane probe runs surface. |

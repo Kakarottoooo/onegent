@@ -290,7 +290,7 @@ function Phase2Panel({ snap }: { snap: DemoControlRoomSnapshot }) {
         Phase 2 is FROZEN unless Phase 0/1 are stable. The statuses below
         are the no-live audit verdict. <strong>Phase 2 is not live
         verified.</strong> Update protocol: change{" "}
-        <code>docs/50-product-areas/PHASE2_VERTICAL_REVIVAL_AUDIT.md</code>{" "}
+        <code>docs/90-archive/phase2-product-areas/PHASE2_VERTICAL_REVIVAL_AUDIT.md</code>{" "}
         first, then mirror in{" "}
         <code>lib/demo-control-room/phase2-status.ts</code>.
       </p>
@@ -351,8 +351,8 @@ function SafeDemoScriptBlock({ markdown }: { markdown: string }) {
       <h2 className="dcr__section-title">Safe demo script</h2>
       <p className="dcr__script-intro">
         Pre-demo checklist + happy path + hard stops + recovery phrases.
-        Runbooks: <code>docs/40-phase1/DEMO_CONTROL_ROOM.md</code> and{" "}
-        <code>docs/40-phase1/YC_DEMO_RUNBOOK.md</code>. Triple-click the
+        Runbooks: <code>docs/90-archive/phase1-demo/DEMO_CONTROL_ROOM.md</code> and{" "}
+        <code>docs/90-archive/phase1-demo/YC_DEMO_RUNBOOK.md</code>. Triple-click the
         textarea below to copy as markdown.
       </p>
 
@@ -463,19 +463,19 @@ function SourceLinks({ snap }: { snap: DemoControlRoomSnapshot }) {
       <ul className="dcr__sources-list">
         <li>
           Phase 1 runbook:{" "}
-          <code>docs/40-phase1/PHASE_1_FOUNDER_E2E.md</code>
+          <code>docs/90-archive/phase1-demo/PHASE_1_FOUNDER_E2E.md</code>
         </li>
         <li>
           Demo runbook:{" "}
-          <code>docs/40-phase1/DEMO_CONTROL_ROOM.md</code>
+          <code>docs/90-archive/phase1-demo/DEMO_CONTROL_ROOM.md</code>
         </li>
         <li>
           YC demo runbook:{" "}
-          <code>docs/40-phase1/YC_DEMO_RUNBOOK.md</code>
+          <code>docs/90-archive/phase1-demo/YC_DEMO_RUNBOOK.md</code>
         </li>
         <li>
           Phase 2 audit:{" "}
-          <code>docs/50-product-areas/PHASE2_VERTICAL_REVIVAL_AUDIT.md</code>
+          <code>docs/90-archive/phase2-product-areas/PHASE2_VERTICAL_REVIVAL_AUDIT.md</code>
         </li>
         <li>
           Coordination:{" "}

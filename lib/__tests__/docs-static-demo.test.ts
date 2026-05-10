@@ -11,10 +11,10 @@ function read(relPath: string): string {
 describe("docs static guard - demo", () => {
   it("keeps active demo docs free of mojibake and unsafe live-action copy", () => {
     const activeDemoDocs = [
-      "docs/40-phase1/DEMO_CONTROL_ROOM.md",
-      "docs/40-phase1/DEMO_FREEZE_ACCEPTANCE.md",
-      "docs/40-phase1/YC_DEMO_OPERATOR_CARD.md",
-      "docs/40-phase1/YC_DEMO_RUNBOOK.md",
+      "docs/90-archive/phase1-demo/DEMO_CONTROL_ROOM.md",
+      "docs/90-archive/phase1-demo/DEMO_FREEZE_ACCEPTANCE.md",
+      "docs/90-archive/phase1-demo/YC_DEMO_OPERATOR_CARD.md",
+      "docs/90-archive/phase1-demo/YC_DEMO_RUNBOOK.md",
     ];
     const unsafePatterns = [
       /\b(run live|retry live|live retry)\b/i,
@@ -53,9 +53,9 @@ describe("docs static guard - demo", () => {
 
   it("keeps YC demo docs wired to readiness, freeze checker, Phase 2 posture, and restaurant analyzer", () => {
     const ycDemoDocs = [
-      "docs/40-phase1/DEMO_FREEZE_ACCEPTANCE.md",
-      "docs/40-phase1/YC_DEMO_OPERATOR_CARD.md",
-      "docs/40-phase1/YC_DEMO_RUNBOOK.md",
+      "docs/90-archive/phase1-demo/DEMO_FREEZE_ACCEPTANCE.md",
+      "docs/90-archive/phase1-demo/YC_DEMO_OPERATOR_CARD.md",
+      "docs/90-archive/phase1-demo/YC_DEMO_RUNBOOK.md",
     ];
 
     for (const relPath of ycDemoDocs) {
@@ -75,7 +75,7 @@ describe("docs static guard - demo", () => {
       expect(
         source,
         `${relPath} must link the no-live restaurant artifact analyzer`,
-      ).toContain("docs/20-phase0-restaurant/RESTAURANT_ARTIFACT_ANALYSIS.md");
+      ).toContain("docs/90-archive/phase0-restaurant/RESTAURANT_ARTIFACT_ANALYSIS.md");
       expect(
         source,
         `${relPath} must state the restaurant artifact analyzer is no-live only`,
@@ -84,18 +84,18 @@ describe("docs static guard - demo", () => {
   });
 
   it("links the YC demo runbook from the demo control room docs and page", () => {
-    const doc = read("docs/40-phase1/DEMO_CONTROL_ROOM.md");
-    const runbook = read("docs/40-phase1/YC_DEMO_RUNBOOK.md");
-    const acceptance = read("docs/40-phase1/DEMO_FREEZE_ACCEPTANCE.md");
+    const doc = read("docs/90-archive/phase1-demo/DEMO_CONTROL_ROOM.md");
+    const runbook = read("docs/90-archive/phase1-demo/YC_DEMO_RUNBOOK.md");
+    const acceptance = read("docs/90-archive/phase1-demo/DEMO_FREEZE_ACCEPTANCE.md");
     const page = read("app/dev/demo-control-room/page.tsx");
     const devPage = read("app/dev/page.tsx");
 
-    expect(doc).toContain("docs/40-phase1/YC_DEMO_RUNBOOK.md");
-    expect(doc).toContain("docs/40-phase1/DEMO_FREEZE_ACCEPTANCE.md");
-    expect(runbook).toContain("docs/40-phase1/YC_DEMO_OPERATOR_CARD.md");
-    expect(acceptance).toContain("docs/40-phase1/YC_DEMO_OPERATOR_CARD.md");
+    expect(doc).toContain("docs/90-archive/phase1-demo/YC_DEMO_RUNBOOK.md");
+    expect(doc).toContain("docs/90-archive/phase1-demo/DEMO_FREEZE_ACCEPTANCE.md");
+    expect(runbook).toContain("docs/90-archive/phase1-demo/YC_DEMO_OPERATOR_CARD.md");
+    expect(acceptance).toContain("docs/90-archive/phase1-demo/YC_DEMO_OPERATOR_CARD.md");
     expect(acceptance).toContain("scripts/check-demo-freeze.ts");
-    expect(page).toContain("docs/40-phase1/YC_DEMO_RUNBOOK.md");
+    expect(page).toContain("docs/90-archive/phase1-demo/YC_DEMO_RUNBOOK.md");
     expect(devPage).toContain("/dev/demo-readiness");
     expect(page).not.toMatch(/run\s+live|retry\s+live/i);
   });
@@ -103,7 +103,7 @@ describe("docs static guard - demo", () => {
   it("surfaces restaurant artifact analysis from demo readiness links", () => {
     const helper = read("lib/demo-evidence/readiness.ts");
 
-    expect(helper).toContain("docs/20-phase0-restaurant/RESTAURANT_ARTIFACT_ANALYSIS.md");
+    expect(helper).toContain("docs/90-archive/phase0-restaurant/RESTAURANT_ARTIFACT_ANALYSIS.md");
   });
 });
 

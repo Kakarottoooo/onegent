@@ -40,7 +40,7 @@ Top-down on the page:
    (numbered steps), hard stops table (OTP / payment / CAPTCHA /
    login wall / final-confirm + recovery lines), recovery phrases
    for unexpected boundaries, plus a paste-ready markdown export and a
-   link to `docs/40-phase1/YC_DEMO_RUNBOOK.md`.
+   link to `docs/90-archive/phase1-demo/YC_DEMO_RUNBOOK.md`.
 5. **Sources + notes** - links to the canonical docs (`PHASE_1_FOUNDER_E2E`,
    `PHASE2_VERTICAL_REVIVAL_AUDIT`, `HUDDLE`, `STRATEGIC_LEDGER`) plus
    loader notes about what artifacts were found / missing.
@@ -104,7 +104,7 @@ lib/__tests__/
 ### Update the Phase 2 vertical status
 
 1. Update the prose in
-   `docs/50-product-areas/PHASE2_VERTICAL_REVIVAL_AUDIT.md` first.
+   `docs/90-archive/phase2-product-areas/PHASE2_VERTICAL_REVIVAL_AUDIT.md` first.
 2. Mirror the change in `lib/demo-control-room/phase2-status.ts`.
 3. Run the demo-control-room tests; the structural invariants will
    catch shape regressions.
@@ -132,8 +132,8 @@ lib/__tests__/
 3. Verify all three verdict cards are green or yellow. **Red = stop.**
 4. Skim the Phase 2 panel - confirm the Expedia phrasing matches what
    you plan to say.
-5. Read `docs/40-phase1/YC_DEMO_RUNBOOK.md` and
-   `docs/40-phase1/DEMO_FREEZE_ACCEPTANCE.md` for the route order,
+5. Read `docs/90-archive/phase1-demo/YC_DEMO_RUNBOOK.md` and
+   `docs/90-archive/phase1-demo/DEMO_FREEZE_ACCEPTANCE.md` for the route order,
    acceptance checklist, and YC-specific fallback lines.
 6. Triple-click the markdown textarea to copy the safe demo script;
    paste into Slack / a deck.
@@ -157,10 +157,10 @@ Per project convention:
 
 - This file (the runbook): update on any change to the page's
   layout, sections, or operator instructions.
-- `docs/40-phase1/PHASE_1_FOUNDER_E2E.md`: linked to here from a
+- `docs/90-archive/phase1-demo/PHASE_1_FOUNDER_E2E.md`: linked to here from a
   pre-demo cross-reference; update when adding a fundamentally new
   pre-demo step.
-- `docs/50-product-areas/PHASE2_VERTICAL_REVIVAL_AUDIT.md`: keep in
+- `docs/90-archive/phase2-product-areas/PHASE2_VERTICAL_REVIVAL_AUDIT.md`: keep in
   sync with `lib/demo-control-room/phase2-status.ts`.
 
 ## Hold rules

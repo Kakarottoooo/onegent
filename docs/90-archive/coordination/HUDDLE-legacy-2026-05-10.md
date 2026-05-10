@@ -22,8 +22,8 @@ small.
 - Base new Track C UI/docs/tooling branches on the latest
   `origin/codex/integrated-preview-20260504`, not older integration commits.
 - Use `docs/INDEX.md` as the root docs map.
-- Large UI/dashboard/testing tasks should live under `docs/40-phase1/`,
-  `docs/50-product-areas/`, or dedicated app/lib code areas, not root docs.
+- Large UI/dashboard/testing tasks should live under `docs/90-archive/phase1-demo/`,
+  `docs/90-archive/phase2-product-areas/`, or dedicated app/lib code areas, not root docs.
 - If a branch adds a new operational dashboard or QA runner, update
   `docs/00-start-here/PHASE_STATUS.md` and the closest runbook.
 - Fresh worktrees do not inherit `.env.local`; use
@@ -115,7 +115,7 @@ small.
   `codex/goal-phase-closure-evidence-pack @ 9b43a65` as `aa034b3`, then
   applied a Codex integration correction to avoid stale model-access wording.
   The new no-live phase closure evidence pack adds
-  `docs/00-start-here/PHASE_CLOSURE_EVIDENCE_PACK.md`,
+  `docs/90-archive/start-here-history/PHASE_CLOSURE_EVIDENCE_PACK.md`,
   `lib/phase-closure-evidence/**`, and `scripts/phase-closure-evidence.ts`.
   It keeps Phase 0A blocked on unvalidated Resy provider-path closure, Phase
   1/1.5 demo-freeze passed but not phase-closed without explicit human

@@ -38,7 +38,7 @@ function Header({ snap }: { snap: DemoEvidenceSnapshot }) {
           <p>
             Compact, read-only pre-demo summary. For the full founder script
             and evidence dashboard, open <a href="/dev/demo-control-room">Demo Control Room</a>.
-            Use <code>docs/40-phase1/DEMO_FREEZE_ACCEPTANCE.md</code> as the
+            Use <code>docs/90-archive/phase1-demo/DEMO_FREEZE_ACCEPTANCE.md</code> as the
             final acceptance checklist.
           </p>
         </div>

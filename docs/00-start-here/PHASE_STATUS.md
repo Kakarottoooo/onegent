@@ -203,9 +203,9 @@ Completed:
 - OpenTable can reach checkout/contact boundaries and stop before final submit.
 - Resy probe-first protocol exists and is represented in dev dashboards.
 - Restaurant readiness surfaces exist:
-  - `docs/20-phase0-restaurant/RESY_AVAILABILITY_PROBE_PROTOCOL.md`
-  - `docs/20-phase0-restaurant/RESY_LIVE_DEBUG_PLAYBOOK.md`
-  - `docs/20-phase0-restaurant/R003_LIVE_SMOKE_RUNBOOK.md`
+  - `docs/90-archive/phase0-restaurant/RESY_AVAILABILITY_PROBE_PROTOCOL.md`
+  - `docs/90-archive/phase0-restaurant/RESY_LIVE_DEBUG_PLAYBOOK.md`
+  - `docs/90-archive/phase0-restaurant/R003_LIVE_SMOKE_RUNBOOK.md`
   - `/dev/restaurant-readiness`
   - `/dev/resy-probe-runs`
   - `/dev/resy-run-analysis`
@@ -258,12 +258,12 @@ Still open:
 
 Primary docs:
 
-- `docs/40-phase1/PHASE_1_FOUNDER_E2E.md`
-- `docs/40-phase1/AUTONOMOUS_FOUNDER_E2E.md`
-- `docs/40-phase1/PHASE_1_QUALITY_GATE.md`
-- `docs/40-phase1/DEMO_CONTROL_ROOM.md`
-- `docs/40-phase1/YC_DEMO_RUNBOOK.md`
-- `docs/40-phase1/DEMO_FREEZE_ACCEPTANCE.md`
+- `docs/90-archive/phase1-demo/PHASE_1_FOUNDER_E2E.md`
+- `docs/90-archive/phase1-demo/AUTONOMOUS_FOUNDER_E2E.md`
+- `docs/90-archive/phase1-demo/PHASE_1_QUALITY_GATE.md`
+- `docs/90-archive/phase1-demo/DEMO_CONTROL_ROOM.md`
+- `docs/90-archive/phase1-demo/YC_DEMO_RUNBOOK.md`
+- `docs/90-archive/phase1-demo/DEMO_FREEZE_ACCEPTANCE.md`
 
 ## Phase 1.5 - Quality Gate And Polish
 
@@ -312,12 +312,12 @@ Next step:
   MCO to BNA Expedia task and inspect DB, worker log, and screenshots before
   making any further provider changes.
 - Phase 2 revival audit lives at
-  `docs/50-product-areas/PHASE2_VERTICAL_REVIVAL_AUDIT.md`.
+  `docs/90-archive/phase2-product-areas/PHASE2_VERTICAL_REVIVAL_AUDIT.md`.
 - Hotel-specific no-live audit lives at
-  `docs/50-product-areas/HOTEL_VERTICAL_REVIVAL_AUDIT.md`.
+  `docs/90-archive/phase2-product-areas/HOTEL_VERTICAL_REVIVAL_AUDIT.md`.
 - Controlled retry checklists:
-  `docs/50-product-areas/EXPEDIA_CONTROLLED_RETRY_RUNBOOK.md` and
-  `docs/50-product-areas/HOTEL_CONTROLLED_RETRY_RUNBOOK.md`.
+  `docs/90-archive/phase2-product-areas/EXPEDIA_CONTROLLED_RETRY_RUNBOOK.md` and
+  `docs/90-archive/phase2-product-areas/HOTEL_CONTROLLED_RETRY_RUNBOOK.md`.
 
 ## Provider Closure Acceptance
 

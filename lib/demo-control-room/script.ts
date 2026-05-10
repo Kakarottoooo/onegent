@@ -3,8 +3,8 @@
  * demo prep dashboard.
  *
  * Pulled together from:
- *   - `docs/40-phase1/PHASE_1_FOUNDER_E2E.md` (manual checklist)
- *   - `docs/40-phase1/PHASE_1_PLAN.md` (happy path)
+ *   - `docs/90-archive/phase1-demo/PHASE_1_FOUNDER_E2E.md` (manual checklist)
+ *   - `docs/90-archive/phase1-demo/PHASE_1_PLAN.md` (happy path)
  *   - `docs/30-provider-debug/PROVIDER_RUNTIME_DEBUG_PLAYBOOK.md`
  *     (safety boundaries)
  *   - User-locked safety rules:
@@ -311,7 +311,7 @@ export function formatDemoScriptMarkdown(
     "_This script is content, not a runner. The dashboard reads " +
       "filesystem artifacts only and never invokes a provider, OpenAI, " +
       "payment, or worker. See " +
-      "`docs/40-phase1/DEMO_CONTROL_ROOM.md` for the operator runbook._",
+      "`docs/90-archive/phase1-demo/DEMO_CONTROL_ROOM.md` for the operator runbook._",
   );
 
   return lines.join("\n");

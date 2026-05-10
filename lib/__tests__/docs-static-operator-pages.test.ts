@@ -220,7 +220,7 @@ describe("docs static guard - operator dev pages", () => {
 
     // Restaurant runbook must cross-link to the taxonomy.
     const restaurant = read(
-      "docs/20-phase0-restaurant/RESTAURANT_ARTIFACT_ANALYSIS.md",
+      "docs/90-archive/phase0-restaurant/RESTAURANT_ARTIFACT_ANALYSIS.md",
     );
     expect(
       restaurant,

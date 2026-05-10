@@ -414,7 +414,7 @@ Use this template only after a founder-approved hotel retry has already
 produced DB/log/screenshot evidence:
 
 ```text
-docs/50-product-areas/HOTEL_RETRY_ARTIFACT_TEMPLATE.json
+docs/90-archive/phase2-product-areas/HOTEL_RETRY_ARTIFACT_TEMPLATE.json
 ```
 
 Copy it to `.tmp\hotel-retry-artifact-bundle.json`, replace every synthetic

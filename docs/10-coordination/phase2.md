@@ -29,7 +29,7 @@ plan and a fresh base instead.
 - Stage 0 north star: `docs/00-start-here/STAGE_0.md`
 - Activity skill runtime plan:
   `docs/30-provider-debug/ACTIVITY_PROVIDER_SKILL_RUNTIME.md`
-- Historical Phase 2 runbooks remain under `docs/50-product-areas/`.
+- Historical Phase 2 runbooks remain under `docs/90-archive/phase2-product-areas/`.
 
 ## Safety Reminder
 

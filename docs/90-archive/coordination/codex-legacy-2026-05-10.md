@@ -457,7 +457,7 @@ Previous completed pass:
   `aa034b3`, with a Codex follow-up wording correction in this integration
   worktree.
 - New integrated capability:
-  - `docs/00-start-here/PHASE_CLOSURE_EVIDENCE_PACK.md`;
+  - `docs/90-archive/start-here-history/PHASE_CLOSURE_EVIDENCE_PACK.md`;
   - `lib/phase-closure-evidence/**`;
   - `scripts/phase-closure-evidence.ts`.
 - The pack reports Phase 0A blocked on unvalidated Resy provider-path closure,
@@ -654,7 +654,7 @@ Previous completed pass:
 - Cherry-picked Goal `codex/goal-artifact-corpus-consolidation @ bb238b7` as
   `ee5a3d7`.
 - Added:
-  - `docs/50-product-areas/ARTIFACT_CORPUS_INVENTORY.md`
+  - `docs/90-archive/phase2-product-areas/ARTIFACT_CORPUS_INVENTORY.md`
   - `scripts/list-artifact-fixtures.ts`
   - `lib/__tests__/artifact-fixture-corpus.test.ts`
 - Current no-live fixture corpus count: 27 total fixtures, split as
@@ -719,7 +719,7 @@ Previous completed pass:
   - `scripts/analyze-restaurant-artifact.ts`
   - synthetic restaurant artifact fixtures under
     `lib/runtime-forensics/__fixtures__/restaurant-artifact-analysis/`
-  - `docs/20-phase0-restaurant/RESTAURANT_ARTIFACT_ANALYSIS.md`
+  - `docs/90-archive/phase0-restaurant/RESTAURANT_ARTIFACT_ANALYSIS.md`
   - restaurant runbook links/updates.
 - Verified:
   - Forbidden-path audit pass.
@@ -769,7 +769,7 @@ Previous completed pass:
   as `98473e9`, adding only the reduced no-live hotel analyzer pack and
   `docs/10-coordination/goal.md`.
 - Cherry-picked Agent3 `codex/track-c-demo-operator-pack @ 6dd005e` as
-  `2d56e6f`, adding `docs/40-phase1/YC_DEMO_OPERATOR_CARD.md` and demo docs
+  `2d56e6f`, adding `docs/90-archive/phase1-demo/YC_DEMO_OPERATOR_CARD.md` and demo docs
   guards.
 - Cherry-picked Claude `claude/docs-ia-post-freeze-index @ b1ddda2` as
   `9b83153`, refreshing docs IA and post-freeze summary docs.
@@ -819,7 +819,7 @@ Previous completed pass:
 - Cherry-picked Agent2 `codex/phase2-expedia-artifact-cli @ 4c04936` as
   `465ec79`, adding:
   - `scripts/analyze-expedia-retry-artifact.ts`
-  - `docs/50-product-areas/EXPEDIA_RETRY_ARTIFACT_TEMPLATE.json`
+  - `docs/90-archive/phase2-product-areas/EXPEDIA_RETRY_ARTIFACT_TEMPLATE.json`
   - CLI helper tests for artifact-bundle analysis.
 - Cherry-picked Agent3 `codex/track-c-demo-readiness-v2 @ fd7d231` as
   `07d3fc4`, adding:
@@ -901,7 +901,7 @@ Previous completed pass:
     Expedia retry from DB/log/screenshot artifact bundles.
 - Added Track C YC demo readiness pack directly because the sidecar had not
   completed the implementation yet:
-  - `docs/40-phase1/YC_DEMO_RUNBOOK.md`
+  - `docs/90-archive/phase1-demo/YC_DEMO_RUNBOOK.md`
   - `docs/10-coordination/track-c.md`
   - `lib/__tests__/docs-static-guard.test.ts`
   - `/dev/demo-control-room` links to the YC runbook and states Phase 2 is not
@@ -943,7 +943,7 @@ Previous completed pass:
   - runtime-forensics URL state, fixtures, examples toggle, recommendation
     engine, and dashboard UX v2;
   - `/dev/demo-control-room`, `lib/demo-control-room/**`, and
-    `docs/40-phase1/DEMO_CONTROL_ROOM.md`.
+    `docs/90-archive/phase1-demo/DEMO_CONTROL_ROOM.md`.
 - Integration fixes after review:
   - new Demo Control Room files are ASCII-clean;
   - Demo Control Room links Agent2's Expedia controlled retry runbook;
@@ -961,7 +961,7 @@ Previous completed pass:
   - `5499949 test(forensics): classify Expedia card-scan signals`
   - `24def46 test(forensics): render Expedia card-scan report signals`
 - Added/merged:
-  - `docs/50-product-areas/EXPEDIA_CONTROLLED_RETRY_RUNBOOK.md`
+  - `docs/90-archive/phase2-product-areas/EXPEDIA_CONTROLLED_RETRY_RUNBOOK.md`
   - richer `docs/10-coordination/phase2.md`
   - Expedia card-scan/fallback runtime-forensics diagnostic patterns and report
     tests.
@@ -1081,7 +1081,7 @@ Next:
 - Expedia fallback is merged into integrated preview and verified.
 - Runtime forensics is merged into integrated preview and verified.
 - Phase 2 revival audit is documented in
-  `docs/50-product-areas/PHASE2_VERTICAL_REVIVAL_AUDIT.md`.
+  `docs/90-archive/phase2-product-areas/PHASE2_VERTICAL_REVIVAL_AUDIT.md`.
 - Runtime-forensics route no longer exports test helpers from a Next route
   module; import helpers from `lib/runtime-forensics` instead.
 - If founder approves a controlled runtime check later, retry the same MCO to
@@ -1120,7 +1120,7 @@ Next live gate:
 
 Historical current-state handoff:
 
-Handed off Phase 0 restaurant execution state in `docs/20-phase0-restaurant/RESTAURANT_PHASE0_HANDOFF.md`.
+Handed off Phase 0 restaurant execution state in `docs/90-archive/phase0-restaurant/RESTAURANT_PHASE0_HANDOFF.md`.
 
 This document is the durable continuation guide for a fresh Codex/Claude session:
 - what to read first,
@@ -1349,11 +1349,11 @@ R-003 live command when user explicitly authorizes token spend:
 
 What I just merged from Claude:
 - `origin/claude/founder-e2e-polish` merged into master as `3043a29`.
-- Added quick/full founder E2E paths, stop conditions, stronger bug template, and R-003 runbook references in `docs/40-phase1/PHASE_1_FOUNDER_E2E.md`.
-- Merge preserved Codex-owned `docs/20-phase0-restaurant/R003_LIVE_SMOKE_RUNBOOK.md`, `docs/00-start-here/PHASE_STATUS.md`, and `docs/10-coordination/codex.md` corrections.
+- Added quick/full founder E2E paths, stop conditions, stronger bug template, and R-003 runbook references in `docs/90-archive/phase1-demo/PHASE_1_FOUNDER_E2E.md`.
+- Merge preserved Codex-owned `docs/90-archive/phase0-restaurant/R003_LIVE_SMOKE_RUNBOOK.md`, `docs/00-start-here/PHASE_STATUS.md`, and `docs/10-coordination/codex.md` corrections.
 - Verification after founder E2E polish merge: `npx tsc --noEmit --pretty false` passed. No live calls.
 - `origin/claude/phase-status-docs` merged into master as `d0d5d32`.
-- Added `docs/00-start-here/PHASE_STATUS.md`, `docs/40-phase1/UI_MIGRATION_MAP.md`, `docs/20-phase0-restaurant/R003_LIVE_SMOKE_RUNBOOK.md`, and refreshed `docs/40-phase1/PHASE_1_PLAN.md`.
+- Added `docs/00-start-here/PHASE_STATUS.md`, `docs/90-archive/phase1-demo/UI_MIGRATION_MAP.md`, `docs/90-archive/phase0-restaurant/R003_LIVE_SMOKE_RUNBOOK.md`, and refreshed `docs/90-archive/phase1-demo/PHASE_1_PLAN.md`.
 - Codex corrected the runbook after review: removed single-case `--confirm-suite`, removed unsupported `--output`, replaced Browserbase assumptions with current local Next + local worker + local Playwright path, and fixed Resy fixture count wording.
 - Verification after docs merge: `npx tsc --noEmit --pretty false` passed. No live calls.
 
@@ -1381,7 +1381,7 @@ What I just merged from Claude:
 | `d0d5d32` | `merge: land phase status docs` | Merges Claude `phase-status-docs` and Codex-reviewed Phase 0/1 status docs. Codex follow-up corrected R-003 runbook commands and current local-worker assumptions before push. |
 | `2bedc91` | `[coord] sha fix-up cd34997` | Coordination sha fix after Phase 1 no-token smoke landing. |
 | `cd34997` | `[coord] report Phase 1 smoke landing` | Documents merge verification and Turbopack symlink workaround. |
-| `f9dd0ba` | `merge: land Phase 1 no-token smoke` | Merges Claude `phase-1-e2e-smoke`: `scripts/smoke-phase1.mjs`, `npm run smoke:phase1`, `docs/40-phase1/PHASE_1_E2E_SMOKE.md`, and founder E2E preflight docs. Verified tsc + drift + 350 targeted tests + smoke 6/6 using webpack dev server in Codex symlinked worktree. No live calls. |
+| `f9dd0ba` | `merge: land Phase 1 no-token smoke` | Merges Claude `phase-1-e2e-smoke`: `scripts/smoke-phase1.mjs`, `npm run smoke:phase1`, `docs/90-archive/phase1-demo/PHASE_1_E2E_SMOKE.md`, and founder E2E preflight docs. Verified tsc + drift + 350 targeted tests + smoke 6/6 using webpack dev server in Codex symlinked worktree. No live calls. |
 | `f423b56` | `feat(phase-1-7): Path B hardening — extract helpers + tests + dev demo` | Cherry-picks Claude `acec60c` onto current master without stale branch reversions. Adds `lib/profile-gap-decision.ts`, `lib/profile-gap-on-save.ts`, 19 focused tests, and `/dev/path-b-demo`. Verified tsc + drift + 350 targeted tests. No live calls. |
 | `8e690e5` | `merge: land post-merge Phase 1 docs` | Merges cleaned `post-merge-doc-fixes`: audit doc, Phase 1 #7 spec, founder E2E corrections, dev doc links, and Claude coord cleanup. Verified tsc + drift + 331 targeted tests. No live calls. |
 | `4cdaa36` | `merge: land Phase 1 homepage profile gap path B` | Merges Path B inline `ProfileGapCard` in homepage chat. Codex kept master coord state and fixed PATCH-failure control flow so failed profile save does not resume booking. Verified tsc + drift + 331 targeted tests. No live calls. |

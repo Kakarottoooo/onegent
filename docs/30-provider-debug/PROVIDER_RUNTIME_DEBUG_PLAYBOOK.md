@@ -522,8 +522,8 @@ Branch: codex/openai-chat-model-env
 Read first:
 - docs/30-provider-debug/PROVIDER_RUNTIME_DEBUG_PLAYBOOK.md
 - docs/00-start-here/PHASE_STATUS.md
-- docs/40-phase1/PHASE_1_FOUNDER_E2E.md
-- docs/20-phase0-restaurant/R003_LIVE_SMOKE_RUNBOOK.md
+- docs/90-archive/phase1-demo/PHASE_1_FOUNDER_E2E.md
+- docs/90-archive/phase0-restaurant/R003_LIVE_SMOKE_RUNBOOK.md
 - docs/10-coordination/HUDDLE.md if present
 
 Do not rely on task UI logs only. For each external-provider failure, inspect:

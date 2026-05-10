@@ -33,7 +33,7 @@ Hotel architecture exists, but the hotel vertical is not demo-verified.
 
 Read-only sources used:
 
-- `docs/50-product-areas/PHASE2_VERTICAL_REVIVAL_AUDIT.md`
+- `docs/90-archive/phase2-product-areas/PHASE2_VERTICAL_REVIVAL_AUDIT.md`
 - `docs/10-coordination/phase2.md`
 - `docs/30-provider-debug/PROVIDER_RUNTIME_DEBUG_PLAYBOOK.md`
 - `lib/agent/planners/booking-links.ts`

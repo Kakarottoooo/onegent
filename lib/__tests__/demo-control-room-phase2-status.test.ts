@@ -107,7 +107,7 @@ describe("PHASE_2_VERTICALS shape", () => {
     const expedia = getPhase2Vertical("expedia-flight");
     const refs = expedia.evidence.map((e) => e.ref);
     expect(refs).toContain(
-      "docs/50-product-areas/PHASE2_VERTICAL_REVIVAL_AUDIT.md",
+      "docs/90-archive/phase2-product-areas/PHASE2_VERTICAL_REVIVAL_AUDIT.md",
     );
     expect(refs).toContain(
       "lib/__tests__/expedia-flight-card-match.test.ts",

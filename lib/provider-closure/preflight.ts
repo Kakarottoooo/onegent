@@ -62,10 +62,10 @@ function templateKindForKind(kind: ProviderClosureKind): string {
 function runbookForKind(kind: ProviderClosureKind): string {
   switch (kind) {
     case "restaurant":
-      return "`docs/20-phase0-restaurant/RESTAURANT_ARTIFACT_ANALYSIS.md`";
+      return "`docs/90-archive/phase0-restaurant/RESTAURANT_ARTIFACT_ANALYSIS.md`";
     case "expedia-flight":
-      return "`docs/50-product-areas/EXPEDIA_CONTROLLED_RETRY_RUNBOOK.md`";
+      return "`docs/90-archive/phase2-product-areas/EXPEDIA_CONTROLLED_RETRY_RUNBOOK.md`";
     case "hotel":
-      return "`docs/50-product-areas/HOTEL_CONTROLLED_RETRY_RUNBOOK.md`";
+      return "`docs/90-archive/phase2-product-areas/HOTEL_CONTROLLED_RETRY_RUNBOOK.md`";
   }
 }

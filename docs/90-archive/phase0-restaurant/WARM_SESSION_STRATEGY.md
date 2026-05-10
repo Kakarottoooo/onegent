@@ -1,6 +1,6 @@
 # Warm Session Strategy — Phase 0 OTP bypass
 
-> **Context**: docs/20-phase0-restaurant/BENCHMARK_RESTAURANT_100.md § 7.5 (Phase 0 OTP transitional rule).
+> **Context**: docs/90-archive/phase0-restaurant/BENCHMARK_RESTAURANT_100.md § 7.5 (Phase 0 OTP transitional rule).
 > **Decision locked**: Option D — warm session first; Gmail OTP resume only as fallback.
 > **Owners**: codex (PoC implementation) · Claude (spec + observability + tests).
 > **Status**: 🔵 **BLOCKED** until R-003 reaches `F-PROVIDER-OTP` or `ready_for_confirmation` after exact-venue navigation repair.
@@ -337,7 +337,7 @@ This path is harder because it requires keeping the SAME browser tab alive acros
 
 ## Pointers
 
-- **Spec**: `docs/20-phase0-restaurant/BENCHMARK_RESTAURANT_100.md` § 7.5 (transitional acceptance rule that triggered this strategy)
+- **Spec**: `docs/90-archive/phase0-restaurant/BENCHMARK_RESTAURANT_100.md` § 7.5 (transitional acceptance rule that triggered this strategy)
 - **Current CU executor**: `lib/execution-v2/computer-use.ts:62` (where storageState wiring goes)
 - **Existing encryption**: `lib/encryption.ts` (per-row pattern to mirror for `state_json`)
 - **Coordination**: `docs/10-coordination/claude.md` § "Open questions for codex" (Q6-Q10 above will move there if codex wants async review)

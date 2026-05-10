@@ -18,11 +18,11 @@ Latest integrated work:
   `/dev/demo-control-room`, `scripts/check-demo-freeze.ts`, Phase 2
   not-live-verified wording, and the no-live restaurant artifact analyzer. The
   operator card now has a demo day checklist, and `/dev/demo-readiness` useful
-  docs surface `docs/20-phase0-restaurant/RESTAURANT_ARTIFACT_ANALYSIS.md` via
+  docs surface `docs/90-archive/phase0-restaurant/RESTAURANT_ARTIFACT_ANALYSIS.md` via
   the read-only demo-evidence helper. No HUDDLE edit, no provider/runtime/live
   files, and no run/retry/live controls.
 - Branch `codex/track-c-demo-operator-pack` adds
-  `docs/40-phase1/YC_DEMO_OPERATOR_CARD.md` as a one-page printable operator
+  `docs/90-archive/phase1-demo/YC_DEMO_OPERATOR_CARD.md` as a one-page printable operator
   checklist with route order, 30-second pitch, fallback lines, hard stops, and
   Phase 2 "audited / not live-verified" wording. It links the card from the
   YC runbook, freeze acceptance doc, and `/dev/demo-readiness` useful docs via
@@ -33,7 +33,7 @@ Latest integrated work:
   for `lib/demo-evidence`, renders a read-only markdown export block on
   `/dev/demo-readiness`, and expands demo-evidence tests for markdown export
   plus hard-stop coverage.
-- Added `docs/40-phase1/DEMO_FREEZE_ACCEPTANCE.md` as the pre-demo acceptance
+- Added `docs/90-archive/phase1-demo/DEMO_FREEZE_ACCEPTANCE.md` as the pre-demo acceptance
   pack: latest gate/founder/readiness interpretation, YC 10-minute checklist,
   fallback script, hard stops, and explicit Phase 2 not-live-verified posture.
 - Extended the docs static guard around active demo docs for mojibake, unsafe
@@ -41,7 +41,7 @@ Latest integrated work:
 - Lightly polished `/dev/demo-readiness` with the acceptance doc path and an
   explicit Phase 2 not-live-verified notice. No run, retry, live, provider,
   payment, OTP, CAPTCHA, or final-confirmation controls were added.
-- Added `docs/40-phase1/YC_DEMO_RUNBOOK.md` as the YC-style five-minute
+- Added `docs/90-archive/phase1-demo/YC_DEMO_RUNBOOK.md` as the YC-style five-minute
   preflight and demo script.
 - Added a static docs guard test so future agents do not accidentally drop key
   Phase 1 docs or regress developer docs path wiring after the docs reorg.
@@ -59,9 +59,9 @@ Latest integrated work:
 1. `docs/INDEX.md`
 2. `docs/00-start-here/PHASE_STATUS.md`
 3. `docs/10-coordination/HUDDLE.md`
-4. `docs/40-phase1/DEMO_CONTROL_ROOM.md`
-5. `docs/40-phase1/YC_DEMO_RUNBOOK.md`
-6. `docs/50-product-areas/EXPEDIA_CONTROLLED_RETRY_RUNBOOK.md`
+4. `docs/90-archive/phase1-demo/DEMO_CONTROL_ROOM.md`
+5. `docs/90-archive/phase1-demo/YC_DEMO_RUNBOOK.md`
+6. `docs/90-archive/phase2-product-areas/EXPEDIA_CONTROLLED_RETRY_RUNBOOK.md`
 
 ## Allowed Work
 

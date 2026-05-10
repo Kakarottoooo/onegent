@@ -104,7 +104,7 @@ describe("hotel live readiness docs", () => {
     const runbook = normalizeLineEndings(await fs.readFile(RUNBOOK_PATH, "utf8"));
 
     for (const required of [
-      "docs/50-product-areas/HOTEL_RETRY_ARTIFACT_TEMPLATE.json",
+      "docs/90-archive/phase2-product-areas/HOTEL_RETRY_ARTIFACT_TEMPLATE.json",
       "workerLogExcerpt",
       "workerLogPath",
       "screenshotPaths",

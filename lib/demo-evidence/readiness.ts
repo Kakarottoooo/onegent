@@ -199,37 +199,37 @@ export const DEMO_ROUTE_ORDER: DemoRouteStep[] = [
 const DOC_LINKS: Omit<DemoEvidenceDocLink, "exists">[] = [
   {
     label: "Demo freeze acceptance",
-    path: "docs/40-phase1/DEMO_FREEZE_ACCEPTANCE.md",
+    path: "docs/90-archive/phase1-demo/DEMO_FREEZE_ACCEPTANCE.md",
     kind: "runbook",
   },
   {
     label: "YC demo operator card",
-    path: "docs/40-phase1/YC_DEMO_OPERATOR_CARD.md",
+    path: "docs/90-archive/phase1-demo/YC_DEMO_OPERATOR_CARD.md",
     kind: "runbook",
   },
   {
     label: "YC demo runbook",
-    path: "docs/40-phase1/YC_DEMO_RUNBOOK.md",
+    path: "docs/90-archive/phase1-demo/YC_DEMO_RUNBOOK.md",
     kind: "runbook",
   },
   {
     label: "Demo Control Room runbook",
-    path: "docs/40-phase1/DEMO_CONTROL_ROOM.md",
+    path: "docs/90-archive/phase1-demo/DEMO_CONTROL_ROOM.md",
     kind: "runbook",
   },
   {
     label: "Phase 1 quality gate",
-    path: "docs/40-phase1/PHASE_1_QUALITY_GATE.md",
+    path: "docs/90-archive/phase1-demo/PHASE_1_QUALITY_GATE.md",
     kind: "runbook",
   },
   {
     label: "Founder E2E",
-    path: "docs/40-phase1/PHASE_1_FOUNDER_E2E.md",
+    path: "docs/90-archive/phase1-demo/PHASE_1_FOUNDER_E2E.md",
     kind: "runbook",
   },
   {
     label: "Restaurant artifact analysis",
-    path: "docs/20-phase0-restaurant/RESTAURANT_ARTIFACT_ANALYSIS.md",
+    path: "docs/90-archive/phase0-restaurant/RESTAURANT_ARTIFACT_ANALYSIS.md",
     kind: "runbook",
   },
   {
@@ -239,12 +239,12 @@ const DOC_LINKS: Omit<DemoEvidenceDocLink, "exists">[] = [
   },
   {
     label: "Expedia controlled retry runbook",
-    path: "docs/50-product-areas/EXPEDIA_CONTROLLED_RETRY_RUNBOOK.md",
+    path: "docs/90-archive/phase2-product-areas/EXPEDIA_CONTROLLED_RETRY_RUNBOOK.md",
     kind: "phase2",
   },
   {
     label: "Phase 2 revival audit",
-    path: "docs/50-product-areas/PHASE2_VERTICAL_REVIVAL_AUDIT.md",
+    path: "docs/90-archive/phase2-product-areas/PHASE2_VERTICAL_REVIVAL_AUDIT.md",
     kind: "phase2",
   },
 ];
@@ -538,14 +538,14 @@ function buildPhase2Links(): Phase2EvidenceLink[] {
     },
     {
       label: "Expedia controlled retry runbook",
-      path: "docs/50-product-areas/EXPEDIA_CONTROLLED_RETRY_RUNBOOK.md",
+      path: "docs/90-archive/phase2-product-areas/EXPEDIA_CONTROLLED_RETRY_RUNBOOK.md",
       note: "Checklist only; not approval to run live Expedia.",
     },
   ];
   for (const vertical of listPhase2Verticals()) {
     out.push({
       label: vertical.displayName,
-      path: vertical.evidence[0]?.ref ?? "docs/50-product-areas/PHASE2_VERTICAL_REVIVAL_AUDIT.md",
+      path: vertical.evidence[0]?.ref ?? "docs/90-archive/phase2-product-areas/PHASE2_VERTICAL_REVIVAL_AUDIT.md",
       note: vertical.liveVerifiedNote,
     });
   }

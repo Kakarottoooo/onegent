@@ -111,7 +111,7 @@ severe_error_rate  = count(bucket 8) / N
 
 ### 2.3 Strategic-doc thresholds (Phase 0 gate)
 
-From `docs/30-provider-debug/EXECUTOR_V2_PIVOT.md` and the user's strategic discussion:
+From `docs/90-archive/old-provider-plans/EXECUTOR_V2_PIVOT.md` and the user's strategic discussion:
 
 ```
 Target:  booking_ready_rate ≥ 80%
@@ -971,7 +971,7 @@ These records flow into the Site Skill Registry (`site_skills` table — Phase 4
 The numbers from a successful Phase 0 run become the headline:
 
 ```
-"We benchmarked 100 real NYC restaurant cases (docs/20-phase0-restaurant/BENCHMARK_RESTAURANT_100.md
+"We benchmarked 100 real NYC restaurant cases (docs/90-archive/phase0-restaurant/BENCHMARK_RESTAURANT_100.md
 in the repo). On the Resy subset, Onegent reached ready_for_confirmation
 or safe_handoff in 84% of cases. Severe error rate: 0%. Every failure
 mapped to a known taxonomy code with an actionable user-facing message."
@@ -999,8 +999,8 @@ see, and it requires no embellishment — the doc is the proof.
 
 ## Pointers
 
-- Phase context: [docs/30-provider-debug/EXECUTOR_V2_PIVOT.md](./EXECUTOR_V2_PIVOT.md)
-- Task runtime design: [docs/40-phase1/TASK_RUNTIME_DESIGN.md](../40-phase1/TASK_RUNTIME_DESIGN.md)
+- Phase context: [docs/90-archive/old-provider-plans/EXECUTOR_V2_PIVOT.md](./EXECUTOR_V2_PIVOT.md)
+- Task runtime design: [docs/90-archive/phase1-demo/TASK_RUNTIME_DESIGN.md](../40-phase1/TASK_RUNTIME_DESIGN.md)
 - Failure taxonomy already used in code (will be aligned over time): [lib/benchmark/parse-decision-log.ts](./lib/benchmark/parse-decision-log.ts)
 - Existing benchmark scripts (will be extended to consume this doc): [scripts/dig-benchmark.ts](./scripts/dig-benchmark.ts)
 

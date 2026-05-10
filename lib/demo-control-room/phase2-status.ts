@@ -3,7 +3,7 @@
  *
  * `/dev/demo-control-room` reads this and renders the "Phase 2"
  * panel. The canonical narrative explanation lives in
- * `docs/50-product-areas/PHASE2_VERTICAL_REVIVAL_AUDIT.md`; this file
+ * `docs/90-archive/phase2-product-areas/PHASE2_VERTICAL_REVIVAL_AUDIT.md`; this file
  * is the machine-readable mirror so the dashboard does not parse
  * markdown and the audit doc has a stable structure to reference
  * back into.
@@ -103,7 +103,7 @@ export const PHASE_2_VERTICALS: ReadonlyArray<Phase2Vertical> = [
     evidence: [
       {
         label: "Phase 2 vertical revival audit",
-        ref: "docs/50-product-areas/PHASE2_VERTICAL_REVIVAL_AUDIT.md",
+        ref: "docs/90-archive/phase2-product-areas/PHASE2_VERTICAL_REVIVAL_AUDIT.md",
         kind: "doc",
       },
       {
@@ -113,7 +113,7 @@ export const PHASE_2_VERTICALS: ReadonlyArray<Phase2Vertical> = [
       },
       {
         label: "Expedia controlled retry runbook",
-        ref: "docs/50-product-areas/EXPEDIA_CONTROLLED_RETRY_RUNBOOK.md",
+        ref: "docs/90-archive/phase2-product-areas/EXPEDIA_CONTROLLED_RETRY_RUNBOOK.md",
         kind: "runbook",
       },
       {
@@ -150,7 +150,7 @@ export const PHASE_2_VERTICALS: ReadonlyArray<Phase2Vertical> = [
     evidence: [
       {
         label: "Phase 2 vertical revival audit",
-        ref: "docs/50-product-areas/PHASE2_VERTICAL_REVIVAL_AUDIT.md",
+        ref: "docs/90-archive/phase2-product-areas/PHASE2_VERTICAL_REVIVAL_AUDIT.md",
         kind: "doc",
       },
       {
@@ -176,7 +176,7 @@ export const PHASE_2_VERTICALS: ReadonlyArray<Phase2Vertical> = [
     evidence: [
       {
         label: "Phase 2 vertical revival audit",
-        ref: "docs/50-product-areas/PHASE2_VERTICAL_REVIVAL_AUDIT.md",
+        ref: "docs/90-archive/phase2-product-areas/PHASE2_VERTICAL_REVIVAL_AUDIT.md",
         kind: "doc",
       },
       {

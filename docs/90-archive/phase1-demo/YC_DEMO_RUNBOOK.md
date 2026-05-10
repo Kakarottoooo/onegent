@@ -18,7 +18,7 @@ final-confirmation flow still needs explicit founder approval and must stop at
 the safe boundary.
 
 For the one-page printable checklist, use
-`docs/40-phase1/YC_DEMO_OPERATOR_CARD.md`.
+`docs/90-archive/phase1-demo/YC_DEMO_OPERATOR_CARD.md`.
 
 Before the demo, run the no-live freeze checker:
 
@@ -27,7 +27,7 @@ npx tsx scripts/check-demo-freeze.ts
 ```
 
 For restaurant artifact questions, use
-`docs/20-phase0-restaurant/RESTAURANT_ARTIFACT_ANALYSIS.md`.
+`docs/90-archive/phase0-restaurant/RESTAURANT_ARTIFACT_ANALYSIS.md`.
 The restaurant artifact analyzer is no-live only.
 It reads already-collected DB/log/screenshot bundles and does not start
 providers, OpenAI, payment, OTP, CAPTCHA, login, retry, or final confirmation
@@ -232,7 +232,7 @@ After a demo, update the closest coordination file:
 If a provider flow failed, use:
 
 - `docs/30-provider-debug/PROVIDER_RUNTIME_DEBUG_PLAYBOOK.md`
-- `docs/50-product-areas/EXPEDIA_CONTROLLED_RETRY_RUNBOOK.md`
+- `docs/90-archive/phase2-product-areas/EXPEDIA_CONTROLLED_RETRY_RUNBOOK.md`
 - `/dev/runtime-forensics`
 
 Do not patch from the task UI alone.

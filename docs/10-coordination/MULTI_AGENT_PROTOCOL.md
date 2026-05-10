@@ -112,7 +112,7 @@ or `[delegated by user]` tag in the commit message.
 - `lib/demo-control-room/**`
 - `scripts/run-founder-e2e.ts`
 - `scripts/run-phase1-quality-gate.ts`
-- Phase 1/1.5 docs under `docs/40-phase1/` (except acceptance-pack docs
+- Phase 1/1.5 docs under `docs/90-archive/phase1-demo/` (except acceptance-pack docs
   owned by Track C).
 - Coordination edits to `docs/10-coordination/claude.md`.
 - Focused vitest tests under `lib/__tests__/` for Track B modules.
@@ -121,19 +121,19 @@ or `[delegated by user]` tag in the commit message.
 
 - `app/dev/demo-readiness/**`
 - `lib/demo-evidence/**`
-- `docs/40-phase1/DEMO_FREEZE_ACCEPTANCE.md`
-- `docs/40-phase1/YC_DEMO_RUNBOOK.md`
+- `docs/90-archive/phase1-demo/DEMO_FREEZE_ACCEPTANCE.md`
+- `docs/90-archive/phase1-demo/YC_DEMO_RUNBOOK.md`
 - Coordination edits to `docs/10-coordination/track-c.md`.
 - Light read-only polish on existing demo dev pages without adding
   run/retry/live controls.
 
 ### Phase 2 sidecar - Agent2 (no-live audits + analyzers)
 
-- `docs/50-product-areas/PHASE2_VERTICAL_REVIVAL_AUDIT.md`
-- `docs/50-product-areas/HOTEL_VERTICAL_REVIVAL_AUDIT.md`
-- `docs/50-product-areas/EXPEDIA_CONTROLLED_RETRY_RUNBOOK.md`
-- `docs/50-product-areas/HOTEL_CONTROLLED_RETRY_RUNBOOK.md`
-- `docs/50-product-areas/EXPEDIA_RETRY_ARTIFACT_TEMPLATE.json`
+- `docs/90-archive/phase2-product-areas/PHASE2_VERTICAL_REVIVAL_AUDIT.md`
+- `docs/90-archive/phase2-product-areas/HOTEL_VERTICAL_REVIVAL_AUDIT.md`
+- `docs/90-archive/phase2-product-areas/EXPEDIA_CONTROLLED_RETRY_RUNBOOK.md`
+- `docs/90-archive/phase2-product-areas/HOTEL_CONTROLLED_RETRY_RUNBOOK.md`
+- `docs/90-archive/phase2-product-areas/EXPEDIA_RETRY_ARTIFACT_TEMPLATE.json`
 - `lib/runtime-forensics/expedia-retry-analysis.ts` and its fixtures.
 - `scripts/analyze-expedia-retry-artifact.ts` and similar pure analyzers.
 - `lib/__tests__/expedia-retry-analysis.test.ts` and similar.

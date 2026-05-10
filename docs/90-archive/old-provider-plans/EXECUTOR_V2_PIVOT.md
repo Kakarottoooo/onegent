@@ -388,7 +388,7 @@ NLU test count: **88 → 151 passing** (+63 cases), 1 real bug found and fixed (
 
 - **State doc**: `docs/00-start-here/PROJECT_SUMMARY.md` — high-level position + architecture + Browserbase roadmap (this file is **transition-only**)
 - **NLU plan (completed)**: `NLU_REFACTOR_PLAN_C.md`
-- **Browser farm plan**: `docs/30-provider-debug/BROWSER_FARM_PLAN.md`
+- **Browser farm plan**: `docs/90-archive/old-provider-plans/BROWSER_FARM_PLAN.md`
 - **Trip packaging plan**: `TRIP_PACKAGING_PLAN.md`
 - **Decision Room test plan**: `DECISION_ROOM_TEST_PLAN.md`
 - **Cross-track ownership rules**: see `CLAUDE.md`'s "Booking Automation Architecture" + this file's [Ownership matrix](#ownership-matrix)

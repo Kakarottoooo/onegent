@@ -164,12 +164,12 @@ const STATIC_CATALOG: Record<
     pointers: [
       {
         label: "Resy probe runbook",
-        ref: "docs/20-phase0-restaurant/RESY_AVAILABILITY_PROBE_PROTOCOL.md",
+        ref: "docs/90-archive/phase0-restaurant/RESY_AVAILABILITY_PROBE_PROTOCOL.md",
         kind: "doc",
       },
       {
         label: "Live smoke runbook",
-        ref: "docs/20-phase0-restaurant/R003_LIVE_SMOKE_RUNBOOK.md",
+        ref: "docs/90-archive/phase0-restaurant/R003_LIVE_SMOKE_RUNBOOK.md",
         kind: "doc",
       },
     ],
@@ -210,17 +210,17 @@ const STATIC_CATALOG: Record<
         "and burns the new code immediately.",
       "If this is happening more than once per session, consider " +
         "warm-session strategy or the Gmail OTP receiver per " +
-        "`docs/20-phase0-restaurant/WARM_SESSION_STRATEGY.md`.",
+        "`docs/90-archive/phase0-restaurant/WARM_SESSION_STRATEGY.md`.",
     ],
     pointers: [
       {
         label: "Warm session strategy",
-        ref: "docs/20-phase0-restaurant/WARM_SESSION_STRATEGY.md",
+        ref: "docs/90-archive/phase0-restaurant/WARM_SESSION_STRATEGY.md",
         kind: "doc",
       },
       {
         label: "Resy live debug playbook",
-        ref: "docs/20-phase0-restaurant/RESY_LIVE_DEBUG_PLAYBOOK.md",
+        ref: "docs/90-archive/phase0-restaurant/RESY_LIVE_DEBUG_PLAYBOOK.md",
         kind: "doc",
       },
     ],
@@ -258,7 +258,7 @@ const STATIC_CATALOG: Record<
     pointers: [
       {
         label: "Phase 1 quality gate",
-        ref: "docs/40-phase1/PHASE_1_QUALITY_GATE.md",
+        ref: "docs/90-archive/phase1-demo/PHASE_1_QUALITY_GATE.md",
         kind: "doc",
       },
     ],

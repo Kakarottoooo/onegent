@@ -347,11 +347,11 @@ lanes.
 - Founder dogfood bugs:
   `docs/40-dogfood/BUG_INBOX.md`
 - Phase 1 founder checks:
-  `docs/40-phase1/PHASE_1_FOUNDER_E2E.md`,
-  `docs/40-phase1/AUTONOMOUS_FOUNDER_E2E.md`
+  `docs/90-archive/phase1-demo/PHASE_1_FOUNDER_E2E.md`,
+  `docs/90-archive/phase1-demo/AUTONOMOUS_FOUNDER_E2E.md`
 - Demo / QA surfaces:
-  `docs/40-phase1/DEMO_CONTROL_ROOM.md`,
-  `docs/40-phase1/DEMO_FREEZE_ACCEPTANCE.md`
+  `docs/90-archive/phase1-demo/DEMO_CONTROL_ROOM.md`,
+  `docs/90-archive/phase1-demo/DEMO_FREEZE_ACCEPTANCE.md`
 - Cross-agent state:
   `docs/10-coordination/HUDDLE.md`,
   `docs/10-coordination/codex.md`,

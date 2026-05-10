@@ -83,7 +83,7 @@ Read in this order:
 1. `docs/10-coordination/codex.md`
 2. `docs/10-coordination/claude.md`
 3. `docs/00-start-here/PHASE_STATUS.md`
-4. `docs/20-phase0-restaurant/R003_LIVE_SMOKE_RUNBOOK.md`
+4. `docs/90-archive/phase0-restaurant/R003_LIVE_SMOKE_RUNBOOK.md`
 5. `benchmark/restaurant-resy-phase0.json`
 6. `scripts/probe-resy-availability.ts`
 7. `scripts/run-phase0-resy-benchmark.ts`
@@ -268,7 +268,7 @@ pure artifact analyzer before deciding whether to patch or retry:
 npx tsx scripts/analyze-restaurant-artifact.ts .tmp\restaurant-artifact-bundle.json
 ```
 
-Read `docs/20-phase0-restaurant/RESTAURANT_ARTIFACT_ANALYSIS.md` for the bundle
+Read `docs/90-archive/phase0-restaurant/RESTAURANT_ARTIFACT_ANALYSIS.md` for the bundle
 shape and supported classes. The analyzer is no-live: it does not run providers,
 OpenAI, workers, browser automation, payment, OTP/CAPTCHA/login bypass, or
 final confirmation.

@@ -164,7 +164,7 @@ Inconclusive datapoints (do not flip `liveVerified`):
 - "Locator fallback matched" absent and "bulk DOM scan succeeded"
   absent: failure is upstream of the fallback fix.
 - Re-run requires explicit founder approval per
-  `docs/50-product-areas/EXPEDIA_CONTROLLED_RETRY_RUNBOOK.md`.
+  `docs/90-archive/phase2-product-areas/EXPEDIA_CONTROLLED_RETRY_RUNBOOK.md`.
 
 ### Next single allowed action
 
@@ -211,7 +211,7 @@ recorded here.
   verification: treat as `insufficient_evidence` even if the
   worker log looks healthy.
 - Re-run requires explicit founder approval per
-  `docs/50-product-areas/HOTEL_CONTROLLED_RETRY_RUNBOOK.md`.
+  `docs/90-archive/phase2-product-areas/HOTEL_CONTROLLED_RETRY_RUNBOOK.md`.
 - Hotels.com is fallback only after Booking.com is explicitly
   blocked. Expedia hotel is out of scope until a separate
   founder-approved hotel case exists.

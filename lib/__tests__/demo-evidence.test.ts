@@ -193,9 +193,9 @@ describe("loadDemoEvidenceSnapshot", () => {
     expect(snap.founderE2e.available).toBe(true);
     expect(snap.runtimeForensics.reportCount).toBe(1);
     expect(snap.docs.every((doc) => doc.exists)).toBe(true);
-    expect(snap.docs.some((doc) => doc.path === "docs/40-phase1/DEMO_FREEZE_ACCEPTANCE.md")).toBe(true);
-    expect(snap.docs.some((doc) => doc.path === "docs/40-phase1/YC_DEMO_OPERATOR_CARD.md")).toBe(true);
-    expect(snap.docs.some((doc) => doc.path === "docs/20-phase0-restaurant/RESTAURANT_ARTIFACT_ANALYSIS.md")).toBe(true);
+    expect(snap.docs.some((doc) => doc.path === "docs/90-archive/phase1-demo/DEMO_FREEZE_ACCEPTANCE.md")).toBe(true);
+    expect(snap.docs.some((doc) => doc.path === "docs/90-archive/phase1-demo/YC_DEMO_OPERATOR_CARD.md")).toBe(true);
+    expect(snap.docs.some((doc) => doc.path === "docs/90-archive/phase0-restaurant/RESTAURANT_ARTIFACT_ANALYSIS.md")).toBe(true);
     expect(snap.readiness.verdict).toBe("ready");
   });
 });
@@ -277,16 +277,16 @@ async function writeFounderRun(root: string): Promise<void> {
 
 async function seedRunbooks(root: string): Promise<void> {
   const docs = [
-    "docs/40-phase1/DEMO_FREEZE_ACCEPTANCE.md",
-    "docs/40-phase1/YC_DEMO_OPERATOR_CARD.md",
-    "docs/40-phase1/YC_DEMO_RUNBOOK.md",
-    "docs/40-phase1/DEMO_CONTROL_ROOM.md",
-    "docs/40-phase1/PHASE_1_QUALITY_GATE.md",
-    "docs/40-phase1/PHASE_1_FOUNDER_E2E.md",
-    "docs/20-phase0-restaurant/RESTAURANT_ARTIFACT_ANALYSIS.md",
+    "docs/90-archive/phase1-demo/DEMO_FREEZE_ACCEPTANCE.md",
+    "docs/90-archive/phase1-demo/YC_DEMO_OPERATOR_CARD.md",
+    "docs/90-archive/phase1-demo/YC_DEMO_RUNBOOK.md",
+    "docs/90-archive/phase1-demo/DEMO_CONTROL_ROOM.md",
+    "docs/90-archive/phase1-demo/PHASE_1_QUALITY_GATE.md",
+    "docs/90-archive/phase1-demo/PHASE_1_FOUNDER_E2E.md",
+    "docs/90-archive/phase0-restaurant/RESTAURANT_ARTIFACT_ANALYSIS.md",
     "docs/10-coordination/phase2.md",
-    "docs/50-product-areas/EXPEDIA_CONTROLLED_RETRY_RUNBOOK.md",
-    "docs/50-product-areas/PHASE2_VERTICAL_REVIVAL_AUDIT.md",
+    "docs/90-archive/phase2-product-areas/EXPEDIA_CONTROLLED_RETRY_RUNBOOK.md",
+    "docs/90-archive/phase2-product-areas/PHASE2_VERTICAL_REVIVAL_AUDIT.md",
   ];
   for (const doc of docs) {
     const file = path.join(root, doc);
@@ -378,7 +378,7 @@ function makeSnapshot(
     docs: [
       {
         label: "YC demo runbook",
-        path: "docs/40-phase1/YC_DEMO_RUNBOOK.md",
+        path: "docs/90-archive/phase1-demo/YC_DEMO_RUNBOOK.md",
         kind: "runbook",
         exists: true,
       },
@@ -392,7 +392,7 @@ function makeSnapshot(
     phase2Links: [
       {
         label: "Expedia",
-        path: "docs/50-product-areas/EXPEDIA_CONTROLLED_RETRY_RUNBOOK.md",
+        path: "docs/90-archive/phase2-product-areas/EXPEDIA_CONTROLLED_RETRY_RUNBOOK.md",
         note: "candidate, not live-verified",
       },
     ],

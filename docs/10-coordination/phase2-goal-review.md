@@ -48,7 +48,7 @@ Merge simulation found real conflicts in:
 
 - `docs/10-coordination/HUDDLE.md`
 - `docs/10-coordination/phase2.md`
-- `docs/50-product-areas/HOTEL_CONTROLLED_RETRY_RUNBOOK.md`
+- `docs/90-archive/phase2-product-areas/HOTEL_CONTROLLED_RETRY_RUNBOOK.md`
 
 ## File-By-File Summary
 
@@ -57,10 +57,10 @@ Merge simulation found real conflicts in:
 | `docs/10-coordination/HUDDLE.md` | Adds a short no-live Phase 2 revival status note. | Manual merge only. Current integrated already has later Track C/sidecar huddle entries, so a direct cherry-pick conflicts. |
 | `docs/10-coordination/goal.md` | Adds a goal handoff with changed files, validation, risks, and human approval points. | Safe doc candidate after updating base/commit claims to latest integrated and removing duplicate validation claims that belong to the old branch state. |
 | `docs/10-coordination/phase2.md` | Changes current hotel posture and appends a no-live hotel analysis pack section. | Manual merge only. Preserve current integrated Expedia analyzer, artifact CLI, and hotel artifact audit sections, then append the hotel analyzer pack as a later section. |
-| `docs/50-product-areas/EXPEDIA_CONTROLLED_RETRY_RUNBOOK.md` | Adds optional usage for `scripts/analyze-phase2-artifact.ts flight`. | Safe only if the shared wrapper lands. Otherwise this duplicates the already-integrated Expedia-specific CLI. |
-| `docs/50-product-areas/HOTEL_CONTROLLED_RETRY_RUNBOOK.md` | Adds hotel artifact bundle shape, analyzer command, and hotel success/failure taxonomy. | Conflict with integrated hotel runbook. Preserve integrated exact prompt, preflight, SQL, grep patterns, screenshot paths, and hard stops. Port only analyzer usage and artifact-bundle details. |
-| `docs/50-product-areas/PHASE2_READINESS_MATRIX.md` | New no-live readiness table for Expedia flight, Booking.com, and Hotels.com. | Safe doc candidate, but update scope to latest integrated and cross-link the already-integrated hotel audit. |
-| `docs/50-product-areas/PHASE2_VERTICAL_REVIVAL_AUDIT.md` | Adds readiness matrix pointer and notes hotel analyzer support. | Manual doc patch only. Preserve existing audit wording and avoid implying hotel is live-ready. |
+| `docs/90-archive/phase2-product-areas/EXPEDIA_CONTROLLED_RETRY_RUNBOOK.md` | Adds optional usage for `scripts/analyze-phase2-artifact.ts flight`. | Safe only if the shared wrapper lands. Otherwise this duplicates the already-integrated Expedia-specific CLI. |
+| `docs/90-archive/phase2-product-areas/HOTEL_CONTROLLED_RETRY_RUNBOOK.md` | Adds hotel artifact bundle shape, analyzer command, and hotel success/failure taxonomy. | Conflict with integrated hotel runbook. Preserve integrated exact prompt, preflight, SQL, grep patterns, screenshot paths, and hard stops. Port only analyzer usage and artifact-bundle details. |
+| `docs/90-archive/phase2-product-areas/PHASE2_READINESS_MATRIX.md` | New no-live readiness table for Expedia flight, Booking.com, and Hotels.com. | Safe doc candidate, but update scope to latest integrated and cross-link the already-integrated hotel audit. |
+| `docs/90-archive/phase2-product-areas/PHASE2_VERTICAL_REVIVAL_AUDIT.md` | Adds readiness matrix pointer and notes hotel analyzer support. | Manual doc patch only. Preserve existing audit wording and avoid implying hotel is live-ready. |
 | `docs/INDEX.md` | Adds `PHASE2_READINESS_MATRIX.md` to Phase 2 quick path and canonical files. | Safe if the readiness matrix lands. Otherwise skip. |
 | `lib/__tests__/hotel-retry-analysis.test.ts` | Adds targeted tests for hotel artifact analyzer states and markdown helper output. | Safe cherry-pick with analyzer module and fixtures. |
 | `lib/runtime-forensics/__fixtures__/hotel-retry-analysis/*.json` | Adds seven synthetic no-live Booking.com/Hotels.com hotel artifact fixtures. | Safe cherry-pick with analyzer tests. Keep synthetic labels clear; do not treat as live evidence. |
@@ -80,12 +80,12 @@ Integrated preview already contains the Expedia artifact CLI pack:
 
 - `scripts/analyze-expedia-retry-artifact.ts`
 - `lib/__tests__/analyze-expedia-retry-artifact-cli.test.ts`
-- `docs/50-product-areas/EXPEDIA_RETRY_ARTIFACT_TEMPLATE.json`
+- `docs/90-archive/phase2-product-areas/EXPEDIA_RETRY_ARTIFACT_TEMPLATE.json`
 
 Integrated preview already contains the hotel artifact audit pack:
 
-- `docs/50-product-areas/HOTEL_VERTICAL_REVIVAL_AUDIT.md`
-- `docs/50-product-areas/HOTEL_CONTROLLED_RETRY_RUNBOOK.md`
+- `docs/90-archive/phase2-product-areas/HOTEL_VERTICAL_REVIVAL_AUDIT.md`
+- `docs/90-archive/phase2-product-areas/HOTEL_CONTROLLED_RETRY_RUNBOOK.md`
 - `lib/runtime-forensics/__fixtures__/booking-hotel-guest-form-incomplete.json`
 - Fixture index/test updates for the synthetic Booking.com hotel
   `provider_form_incomplete` example.
@@ -106,9 +106,9 @@ Cherry-pick as one coherent hotel analyzer pack:
 
 Manual docs candidates after the analyzer pack:
 
-- `docs/50-product-areas/PHASE2_READINESS_MATRIX.md`
+- `docs/90-archive/phase2-product-areas/PHASE2_READINESS_MATRIX.md`
 - The analyzer usage and artifact-bundle sections from
-  `docs/50-product-areas/HOTEL_CONTROLLED_RETRY_RUNBOOK.md`
+  `docs/90-archive/phase2-product-areas/HOTEL_CONTROLLED_RETRY_RUNBOOK.md`
 - The no-live hotel analysis pack section from `docs/10-coordination/phase2.md`
 - `docs/10-coordination/goal.md`, after updating base and validation details.
 

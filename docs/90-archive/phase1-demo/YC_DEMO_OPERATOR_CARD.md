@@ -28,7 +28,7 @@ Use this sequence before anyone opens the user-facing flow:
    red.
 5. Confirm the Phase 2 wording is "audited / not live-verified."
 6. If restaurant provider evidence comes up, use
-   `docs/20-phase0-restaurant/RESTAURANT_ARTIFACT_ANALYSIS.md`.
+   `docs/90-archive/phase0-restaurant/RESTAURANT_ARTIFACT_ANALYSIS.md`.
    The restaurant artifact analyzer is no-live only.
    It reads existing DB/log/screenshot bundles and does not start providers,
    OpenAI, payment, OTP, CAPTCHA, login, retry, or final confirmation flows.

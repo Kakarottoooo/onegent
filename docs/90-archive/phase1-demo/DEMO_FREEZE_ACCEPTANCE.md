@@ -9,7 +9,7 @@ provider execution, production provider sessions, payment entry, OTP entry,
 CAPTCHA solving, login shortcuts, or final confirmation.
 
 For the one-page printable operator checklist, use
-`docs/40-phase1/YC_DEMO_OPERATOR_CARD.md`.
+`docs/90-archive/phase1-demo/YC_DEMO_OPERATOR_CARD.md`.
 
 No-live freeze checker:
 
@@ -19,7 +19,7 @@ npx tsx scripts/check-demo-freeze.ts
 
 Restaurant artifact analyzer:
 
-- `docs/20-phase0-restaurant/RESTAURANT_ARTIFACT_ANALYSIS.md`
+- `docs/90-archive/phase0-restaurant/RESTAURANT_ARTIFACT_ANALYSIS.md`
 - The restaurant artifact analyzer is no-live only.
 - It reads already-collected DB/log/screenshot bundles and does
   not start providers, OpenAI, payment, OTP, CAPTCHA, login, retry, or final
@@ -140,9 +140,9 @@ Stop immediately if any of these appear:
 
 ## Source Links
 
-- `docs/40-phase1/YC_DEMO_RUNBOOK.md`
-- `docs/40-phase1/YC_DEMO_OPERATOR_CARD.md`
-- `docs/40-phase1/DEMO_CONTROL_ROOM.md`
+- `docs/90-archive/phase1-demo/YC_DEMO_RUNBOOK.md`
+- `docs/90-archive/phase1-demo/YC_DEMO_OPERATOR_CARD.md`
+- `docs/90-archive/phase1-demo/DEMO_CONTROL_ROOM.md`
 - `scripts/check-demo-freeze.ts`
 - `/dev/demo-readiness`
 - `/dev/demo-control-room`

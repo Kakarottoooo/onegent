@@ -48,19 +48,19 @@ export interface DemoFreezeReport {
 export const REQUIRED_DEMO_DOCS: ReadonlyArray<Omit<DemoFreezeDocStatus, "exists">> = [
   {
     label: "YC demo runbook",
-    path: "docs/40-phase1/YC_DEMO_RUNBOOK.md",
+    path: "docs/90-archive/phase1-demo/YC_DEMO_RUNBOOK.md",
   },
   {
     label: "Demo freeze acceptance",
-    path: "docs/40-phase1/DEMO_FREEZE_ACCEPTANCE.md",
+    path: "docs/90-archive/phase1-demo/DEMO_FREEZE_ACCEPTANCE.md",
   },
   {
     label: "YC demo operator card",
-    path: "docs/40-phase1/YC_DEMO_OPERATOR_CARD.md",
+    path: "docs/90-archive/phase1-demo/YC_DEMO_OPERATOR_CARD.md",
   },
   {
     label: "Demo Control Room",
-    path: "docs/40-phase1/DEMO_CONTROL_ROOM.md",
+    path: "docs/90-archive/phase1-demo/DEMO_CONTROL_ROOM.md",
   },
 ];
 

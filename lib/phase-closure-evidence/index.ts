@@ -102,9 +102,9 @@ export const PHASE_CLOSURE_REQUIRED_DOCS: Record<
     "docs/30-provider-debug/PROVIDER_CLOSURE_OPERATOR_ROOM.md",
   liveClosureEvidenceProtocol:
     "docs/30-provider-debug/LIVE_CLOSURE_EVIDENCE_PROTOCOL.md",
-  demoFreezeAcceptance: "docs/40-phase1/DEMO_FREEZE_ACCEPTANCE.md",
-  demoControlRoom: "docs/40-phase1/DEMO_CONTROL_ROOM.md",
-  ycDemoRunbook: "docs/40-phase1/YC_DEMO_RUNBOOK.md",
+  demoFreezeAcceptance: "docs/90-archive/phase1-demo/DEMO_FREEZE_ACCEPTANCE.md",
+  demoControlRoom: "docs/90-archive/phase1-demo/DEMO_CONTROL_ROOM.md",
+  ycDemoRunbook: "docs/90-archive/phase1-demo/YC_DEMO_RUNBOOK.md",
 };
 
 export const PHASE_CLOSURE_HARD_STOPS = [

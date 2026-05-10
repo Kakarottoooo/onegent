@@ -65,7 +65,7 @@ describe("formatDemoFreezeMarkdown", () => {
     expect(blocked.verdict).toBe("blocked");
 
     const missingDoc = buildDemoFreezeReport(makeSnapshot(), [
-      { label: "YC demo runbook", path: "docs/40-phase1/YC_DEMO_RUNBOOK.md", exists: false },
+      { label: "YC demo runbook", path: "docs/90-archive/phase1-demo/YC_DEMO_RUNBOOK.md", exists: false },
     ]);
     expect(missingDoc.verdict).toBe("needs_attention");
     expect(missingDoc.warnings.join(" ")).toContain("Missing required demo docs");
@@ -106,7 +106,7 @@ describe("loadDemoFreezeReport", () => {
     );
     expect(report.docs.every((doc) => doc.exists)).toBe(true);
     expect(report.docs.map((doc) => doc.path)).toContain(
-      "docs/40-phase1/YC_DEMO_OPERATOR_CARD.md",
+      "docs/90-archive/phase1-demo/YC_DEMO_OPERATOR_CARD.md",
     );
     expect(report.requiredRoutes.map((route) => route.href)).toContain(
       "/dev/demo-control-room",
@@ -287,11 +287,11 @@ async function seedRunbooks(root: string): Promise<void> {
   }
 
   const extraDocs = [
-    "docs/40-phase1/PHASE_1_QUALITY_GATE.md",
-    "docs/40-phase1/PHASE_1_FOUNDER_E2E.md",
+    "docs/90-archive/phase1-demo/PHASE_1_QUALITY_GATE.md",
+    "docs/90-archive/phase1-demo/PHASE_1_FOUNDER_E2E.md",
     "docs/10-coordination/phase2.md",
-    "docs/50-product-areas/EXPEDIA_CONTROLLED_RETRY_RUNBOOK.md",
-    "docs/50-product-areas/PHASE2_VERTICAL_REVIVAL_AUDIT.md",
+    "docs/90-archive/phase2-product-areas/EXPEDIA_CONTROLLED_RETRY_RUNBOOK.md",
+    "docs/90-archive/phase2-product-areas/PHASE2_VERTICAL_REVIVAL_AUDIT.md",
   ];
   for (const doc of extraDocs) {
     const file = path.join(root, doc);

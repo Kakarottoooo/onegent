@@ -13,7 +13,7 @@
   promise.
 - No live provider run is approved by default.
 - Controlled retry procedure lives in
-  `docs/50-product-areas/EXPEDIA_CONTROLLED_RETRY_RUNBOOK.md`.
+  `docs/90-archive/phase2-product-areas/EXPEDIA_CONTROLLED_RETRY_RUNBOOK.md`.
 
 Safety boundary:
 
@@ -63,7 +63,7 @@ Runtime hardening in progress:
   analyzer fixture classification completed before any live attempt.
 
 Controlled retry remains the exact YOTEL New York Times Square Booking.com case
-in `docs/50-product-areas/HOTEL_CONTROLLED_RETRY_RUNBOOK.md`.
+in `docs/90-archive/phase2-product-areas/HOTEL_CONTROLLED_RETRY_RUNBOOK.md`.
 
 No live provider, OpenAI live call, payment, CVV/security-code,
 OTP/CAPTCHA/login/verification handling, or final confirmation is authorized by
@@ -308,7 +308,7 @@ Added:
 - CLI script:
   `scripts/analyze-expedia-retry-artifact.ts`
 - Fake-data template:
-  `docs/50-product-areas/EXPEDIA_RETRY_ARTIFACT_TEMPLATE.json`
+  `docs/90-archive/phase2-product-areas/EXPEDIA_RETRY_ARTIFACT_TEMPLATE.json`
 - Targeted CLI helper tests:
   `lib/__tests__/analyze-expedia-retry-artifact-cli.test.ts`
 
@@ -354,9 +354,9 @@ Agent2 branch:
 Added:
 
 - Hotel audit:
-  `docs/50-product-areas/HOTEL_VERTICAL_REVIVAL_AUDIT.md`
+  `docs/90-archive/phase2-product-areas/HOTEL_VERTICAL_REVIVAL_AUDIT.md`
 - Hotel controlled retry runbook:
-  `docs/50-product-areas/HOTEL_CONTROLLED_RETRY_RUNBOOK.md`
+  `docs/90-archive/phase2-product-areas/HOTEL_CONTROLLED_RETRY_RUNBOOK.md`
 - Synthetic Booking.com hotel runtime-forensics fixture:
   `lib/runtime-forensics/__fixtures__/booking-hotel-guest-form-incomplete.json`
 - Fixture index/test updates for the synthetic hotel fixture.
@@ -525,7 +525,7 @@ Added:
 - No-live controlled retry preflight test:
   `lib/__tests__/expedia-controlled-retry-preflight.test.ts`
 - Expedia artifact template updates:
-  `docs/50-product-areas/EXPEDIA_RETRY_ARTIFACT_TEMPLATE.json`
+  `docs/90-archive/phase2-product-areas/EXPEDIA_RETRY_ARTIFACT_TEMPLATE.json`
 - Runtime-forensics classifier/report tests for OpenAI Responses API 500 as a
   non-provider model/env transient while preserving Expedia provider signals.
 - Runbook checklist for exact prompt:

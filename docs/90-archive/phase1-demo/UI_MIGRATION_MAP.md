@@ -117,8 +117,8 @@
 ## 关联文档
 
 - `docs/00-start-here/PHASE_STATUS.md` — phase 总览（这个 map 是 Phase 1 的 supporting doc）
-- `docs/40-phase1/PHASE_1_PLAN.md` — Phase 1 deliverables 清单
+- `docs/90-archive/phase1-demo/PHASE_1_PLAN.md` — Phase 1 deliverables 清单
 - `PHASE_1_7_SPEC.md` — Path A + Path B 实施 spec（"为什么 ProfileGapCard 替代 modal"）
-- `docs/40-phase1/PHASE_1_FOUNDER_E2E.md` — 12 段手动 walkthrough（每段都标了"看的是什么 UI"）
-- `docs/50-product-areas/NLU_CONSUMER_CONTRACT.md` — homepage chat 的 NLU 接入契约
-- `docs/30-provider-debug/EXECUTOR_V2_PIVOT.md` — 后端 executor 演进（不直接影响 UI 但 task facade 是它的产物）
+- `docs/90-archive/phase1-demo/PHASE_1_FOUNDER_E2E.md` — 12 段手动 walkthrough（每段都标了"看的是什么 UI"）
+- `docs/90-archive/phase2-product-areas/NLU_CONSUMER_CONTRACT.md` — homepage chat 的 NLU 接入契约
+- `docs/90-archive/old-provider-plans/EXECUTOR_V2_PIVOT.md` — 后端 executor 演进（不直接影响 UI 但 task facade 是它的产物）

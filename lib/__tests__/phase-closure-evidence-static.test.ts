@@ -3,7 +3,7 @@ import path from "node:path";
 import { describe, expect, it } from "vitest";
 
 const ROOT = process.cwd();
-const PACK_REL = "docs/00-start-here/PHASE_CLOSURE_EVIDENCE_PACK.md";
+const PACK_REL = "docs/90-archive/start-here-history/PHASE_CLOSURE_EVIDENCE_PACK.md";
 
 function read(relPath: string): string {
   return readFileSync(path.join(ROOT, relPath), "utf8");

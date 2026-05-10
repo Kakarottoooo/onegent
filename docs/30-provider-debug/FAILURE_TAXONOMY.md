@@ -277,7 +277,7 @@ Takeaway:       Inconclusive, not closure pass and not closure fail.
 
 - Pure module: `lib/operator-failure-taxonomy/`.
 - Restaurant runbook cross-reference:
-  `docs/20-phase0-restaurant/RESTAURANT_ARTIFACT_ANALYSIS.md`.
+  `docs/90-archive/phase0-restaurant/RESTAURANT_ARTIFACT_ANALYSIS.md`.
 - Provider runtime debug playbook:
   `docs/30-provider-debug/PROVIDER_RUNTIME_DEBUG_PLAYBOOK.md`.
 - Runtime forensics workbench:

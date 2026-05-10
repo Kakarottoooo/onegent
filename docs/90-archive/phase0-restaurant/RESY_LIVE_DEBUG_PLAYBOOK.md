@@ -183,7 +183,7 @@ npx tsx scripts/analyze-restaurant-artifact.ts .tmp\restaurant-artifact-bundle.j
 ```
 
 The bundle shape and state taxonomy live in
-`docs/20-phase0-restaurant/RESTAURANT_ARTIFACT_ANALYSIS.md`. The analyzer is
+`docs/90-archive/phase0-restaurant/RESTAURANT_ARTIFACT_ANALYSIS.md`. The analyzer is
 read-only and offline; it does not run providers, call OpenAI, bypass
 OTP/CAPTCHA/login, submit payment, or click final confirmation.
 
@@ -204,7 +204,7 @@ OTP/CAPTCHA/login, submit payment, or click final confirmation.
 ## Related docs
 
 - `R003_LIVE_SMOKE_RUNBOOK.md` — codex's pre-token-spend checklist
-- `docs/20-phase0-restaurant/RESY_AVAILABILITY_PROBE_PROTOCOL.md` — probe-first protocol context
+- `docs/90-archive/phase0-restaurant/RESY_AVAILABILITY_PROBE_PROTOCOL.md` — probe-first protocol context
 - `BENCHMARK_RESTAURANT_100.md` § 7.5 — OTP transitional rule
 - `WARM_SESSION_STRATEGY.md` — Phase 0 OTP path D PoC plan
 - `PHASE_STATUS.md` — Phase 0A overall status

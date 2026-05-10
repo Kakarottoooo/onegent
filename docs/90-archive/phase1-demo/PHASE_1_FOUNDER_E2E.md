@@ -22,7 +22,7 @@
 > 状态 / 安全 demo 脚本聚合到一个 founder-facing 页面。**演示前**先开
 > 它确认三张 verdict 卡（gate / founder-e2e / smoke）都是绿/黄，再走
 > 下面这条 walkthrough。Runbook:
-> `docs/40-phase1/DEMO_CONTROL_ROOM.md`。
+> `docs/90-archive/phase1-demo/DEMO_CONTROL_ROOM.md`。
 
 > 🤖 **2026-05-04 自动 runner**: 新增 `npm run e2e:founder` 一键自动跑 15 项
 > 渲染 + API + 安全边界 check，1-2 分钟出 verdict (pass / needs_polish /
@@ -36,9 +36,9 @@
 >    直接 paste 给 codex / Claude，按 surface 路由到对应 agent。
 >
 > Runner 严格不烧 token / 不碰 provider / 不点支付/OTP/最终确认。
-> 详见 `docs/40-phase1/AUTONOMOUS_FOUNDER_E2E.md`。
+> 详见 `docs/90-archive/phase1-demo/AUTONOMOUS_FOUNDER_E2E.md`。
 
-这个文档是 docs/40-phase1/PHASE_1_PLAN.md #8 — Founder E2E walkthrough。目标是在用户视角
+这个文档是 docs/90-archive/phase1-demo/PHASE_1_PLAN.md #8 — Founder E2E walkthrough。目标是在用户视角
 **手动**走完 Phase 1 的每个用户路径，找出 UX 缺口、复现 bug、签字 Phase 1
 是否真正"产品就绪"。
 
@@ -50,7 +50,7 @@
 底部有 **bug 记录模板** + **已知不在 Phase 1 范围内的事情**（不要花时间纠结这些）。
 
 > **R-003 live smoke 不在这个文档范围内**。那是 Phase 0A 的 Computer Use 真跑流程，
-> 由 codex 执行 + 烧 OpenAI token；checklist 在 `docs/20-phase0-restaurant/R003_LIVE_SMOKE_RUNBOOK.md`，不要把
+> 由 codex 执行 + 烧 OpenAI token；checklist 在 `docs/90-archive/phase0-restaurant/R003_LIVE_SMOKE_RUNBOOK.md`，不要把
 > 这条 founder walkthrough 跟 R-003 live 混做一锅。
 
 ---
@@ -261,7 +261,7 @@ npm run smoke:phase1
 并断言每个页面渲染出关键文案。**全过 (`exit 0`)** 才值得继续手动走 walkthrough；
 有 route fail 就先修页面再继续。
 
-详见 `docs/40-phase1/PHASE_1_E2E_SMOKE.md`（覆盖范围、失败排查、设计选择）。
+详见 `docs/90-archive/phase1-demo/PHASE_1_E2E_SMOKE.md`（覆盖范围、失败排查、设计选择）。
 
 ---
 
@@ -789,13 +789,13 @@ URL: http://localhost:3000
 ## 12. 引用文档
 
 - `docs/00-start-here/PHASE_STATUS.md` — 8 phase 总览（先看这个；Phase 1 在哪、相对其他 phase 关系）
-- `docs/40-phase1/PHASE_1_PLAN.md` — 8 deliverables 顺序 + 当前 status snapshot
+- `docs/90-archive/phase1-demo/PHASE_1_PLAN.md` — 8 deliverables 顺序 + 当前 status snapshot
 - `PHASE_1_UI_MERGE_NOTES.md` — Track B 88 文件 inventory（merge 视角）
-- `docs/40-phase1/PHASE_1_E2E_SMOKE.md` — `npm run smoke:phase1` 自动 smoke 的 runbook + 失败排查（A.2 / § 0.4 用到）
-- `docs/20-phase0-restaurant/R003_LIVE_SMOKE_RUNBOOK.md` — Phase 0A R-003 live smoke 的 codex 执行 checklist；**这条 walkthrough 不跑 R-003 live**，但如果 founder walkthrough 全过 → R-003 live 是下一步 Phase 0A 闭环动作
-- `docs/40-phase1/UI_MIGRATION_MAP.md` — 旧 UI vs 新 UI 对照（解释"我以前的页面去哪了"）
-- `docs/20-phase0-restaurant/BENCHMARK_RESTAURANT_100.md` § 7.5 — OTP transitional rule
-- `docs/20-phase0-restaurant/WARM_SESSION_STRATEGY.md` — Phase 0 OTP path D（BLOCKED 状态）
+- `docs/90-archive/phase1-demo/PHASE_1_E2E_SMOKE.md` — `npm run smoke:phase1` 自动 smoke 的 runbook + 失败排查（A.2 / § 0.4 用到）
+- `docs/90-archive/phase0-restaurant/R003_LIVE_SMOKE_RUNBOOK.md` — Phase 0A R-003 live smoke 的 codex 执行 checklist；**这条 walkthrough 不跑 R-003 live**，但如果 founder walkthrough 全过 → R-003 live 是下一步 Phase 0A 闭环动作
+- `docs/90-archive/phase1-demo/UI_MIGRATION_MAP.md` — 旧 UI vs 新 UI 对照（解释"我以前的页面去哪了"）
+- `docs/90-archive/phase0-restaurant/BENCHMARK_RESTAURANT_100.md` § 7.5 — OTP transitional rule
+- `docs/90-archive/phase0-restaurant/WARM_SESSION_STRATEGY.md` — Phase 0 OTP path D（BLOCKED 状态）
 - `docs/00-start-here/PROJECT_SUMMARY.md` § Recent Updates 2026-05-03 — 完整战略上下文
 - `CLAUDE.md` § 协作协议 — codex / Claude 分工 + commit 协议
 - `docs/10-coordination/claude.md` / `docs/10-coordination/codex.md` — 跨边状态同步

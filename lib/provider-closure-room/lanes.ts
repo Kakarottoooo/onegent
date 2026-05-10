@@ -128,23 +128,23 @@ const RESTAURANT_LANE: ProviderLane = {
     "wedge.",
   primaryRunbook: {
     label: "R-003 live smoke runbook",
-    ref: "docs/20-phase0-restaurant/R003_LIVE_SMOKE_RUNBOOK.md",
+    ref: "docs/90-archive/phase0-restaurant/R003_LIVE_SMOKE_RUNBOOK.md",
     kind: "runbook",
   },
   supportingReferences: [
     {
       label: "Resy live debug playbook",
-      ref: "docs/20-phase0-restaurant/RESY_LIVE_DEBUG_PLAYBOOK.md",
+      ref: "docs/90-archive/phase0-restaurant/RESY_LIVE_DEBUG_PLAYBOOK.md",
       kind: "runbook",
     },
     {
       label: "Resy availability probe protocol",
-      ref: "docs/20-phase0-restaurant/RESY_AVAILABILITY_PROBE_PROTOCOL.md",
+      ref: "docs/90-archive/phase0-restaurant/RESY_AVAILABILITY_PROBE_PROTOCOL.md",
       kind: "doc",
     },
     {
       label: "Restaurant artifact analysis",
-      ref: "docs/20-phase0-restaurant/RESTAURANT_ARTIFACT_ANALYSIS.md",
+      ref: "docs/90-archive/phase0-restaurant/RESTAURANT_ARTIFACT_ANALYSIS.md",
       kind: "doc",
     },
     {
@@ -328,13 +328,13 @@ const FLIGHT_LANE: ProviderLane = {
     "the manual-review boundary without a hard stop firing.",
   primaryRunbook: {
     label: "Expedia controlled retry runbook",
-    ref: "docs/50-product-areas/EXPEDIA_CONTROLLED_RETRY_RUNBOOK.md",
+    ref: "docs/90-archive/phase2-product-areas/EXPEDIA_CONTROLLED_RETRY_RUNBOOK.md",
     kind: "runbook",
   },
   supportingReferences: [
     {
       label: "Phase 2 vertical revival audit",
-      ref: "docs/50-product-areas/PHASE2_VERTICAL_REVIVAL_AUDIT.md",
+      ref: "docs/90-archive/phase2-product-areas/PHASE2_VERTICAL_REVIVAL_AUDIT.md",
       kind: "doc",
     },
     {
@@ -349,7 +349,7 @@ const FLIGHT_LANE: ProviderLane = {
     },
     {
       label: "Live artifact bridge",
-      ref: "docs/50-product-areas/LIVE_ARTIFACT_BRIDGE.md",
+      ref: "docs/90-archive/phase2-product-areas/LIVE_ARTIFACT_BRIDGE.md",
       kind: "doc",
     },
     {
@@ -534,18 +534,18 @@ const HOTEL_LANE: ProviderLane = {
     "manual-review boundary.",
   primaryRunbook: {
     label: "Hotel controlled retry runbook",
-    ref: "docs/50-product-areas/HOTEL_CONTROLLED_RETRY_RUNBOOK.md",
+    ref: "docs/90-archive/phase2-product-areas/HOTEL_CONTROLLED_RETRY_RUNBOOK.md",
     kind: "runbook",
   },
   supportingReferences: [
     {
       label: "Hotel vertical revival audit",
-      ref: "docs/50-product-areas/HOTEL_VERTICAL_REVIVAL_AUDIT.md",
+      ref: "docs/90-archive/phase2-product-areas/HOTEL_VERTICAL_REVIVAL_AUDIT.md",
       kind: "doc",
     },
     {
       label: "Phase 2 vertical revival audit",
-      ref: "docs/50-product-areas/PHASE2_VERTICAL_REVIVAL_AUDIT.md",
+      ref: "docs/90-archive/phase2-product-areas/PHASE2_VERTICAL_REVIVAL_AUDIT.md",
       kind: "doc",
     },
     {
@@ -555,7 +555,7 @@ const HOTEL_LANE: ProviderLane = {
     },
     {
       label: "Live artifact bridge",
-      ref: "docs/50-product-areas/LIVE_ARTIFACT_BRIDGE.md",
+      ref: "docs/90-archive/phase2-product-areas/LIVE_ARTIFACT_BRIDGE.md",
       kind: "doc",
     },
     {
@@ -640,7 +640,7 @@ const HOTEL_LANE: ProviderLane = {
       "Do not drive a live Booking.com retry without explicit founder " +
       "approval per the hotel controlled retry runbook; Hotels.com is " +
       "fallback only.",
-    ref: "docs/50-product-areas/HOTEL_CONTROLLED_RETRY_RUNBOOK.md",
+    ref: "docs/90-archive/phase2-product-areas/HOTEL_CONTROLLED_RETRY_RUNBOOK.md",
   },
   inspectAfterRun: [
     {

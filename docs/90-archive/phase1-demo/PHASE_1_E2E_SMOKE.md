@@ -5,7 +5,7 @@
 > **状态**: ✅ live on master via `scripts/smoke-phase1.mjs`
 > **预计耗时**: ~10 秒（headless chromium 串行 6 路由）
 
-这是 `docs/40-phase1/PHASE_1_FOUNDER_E2E.md` 12 段手动 walkthrough 的 **render-level 自动 smoke**。
+这是 `docs/90-archive/phase1-demo/PHASE_1_FOUNDER_E2E.md` 12 段手动 walkthrough 的 **render-level 自动 smoke**。
 目的不是替代手动 walkthrough（那个查 UX 质感、bug、复杂交互），而是：
 
 1. 每次 codex merge 前 **2 秒确认核心 surface 没崩** —— 比手动开 6 个 tab 快得多。
@@ -148,10 +148,10 @@ JS 执行错误。优先看：
 
 ## 关联文档
 
-- `docs/40-phase1/PHASE_1_FOUNDER_E2E.md` —— 完整 60-90 分钟人工 walkthrough（这个 smoke 是它的预热 gate）
-- `docs/40-phase1/PHASE_1_PLAN.md` —— Phase 1 整体计划（这个 smoke 属于 #8 founder E2E 的延伸）
+- `docs/90-archive/phase1-demo/PHASE_1_FOUNDER_E2E.md` —— 完整 60-90 分钟人工 walkthrough（这个 smoke 是它的预热 gate）
+- `docs/90-archive/phase1-demo/PHASE_1_PLAN.md` —— Phase 1 整体计划（这个 smoke 属于 #8 founder E2E 的延伸）
 - `PHASE_1_7_SPEC.md` —— Path B inline ProfileGapCard 实现 spec（smoke 验证 § 6 / `/dev/path-b-demo`）
-- `docs/20-phase0-restaurant/BENCHMARK_RESTAURANT_100.md` —— Phase 0 acceptance gate（smoke 验证 dashboard 入口 `/dev/benchmark-runs`）
+- `docs/90-archive/phase0-restaurant/BENCHMARK_RESTAURANT_100.md` —— Phase 0 acceptance gate（smoke 验证 dashboard 入口 `/dev/benchmark-runs`）
 
 ---
 
