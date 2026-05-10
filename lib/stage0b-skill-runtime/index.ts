@@ -73,9 +73,14 @@ export type {
 } from "./plan-registry";
 
 export {
+  STAGE0B_HARNESS_SENTINEL_END,
+  STAGE0B_HARNESS_SENTINEL_START,
+  buildBrowserHarnessPython,
+} from "./harness-script";
+
+export {
   parseStage0BLabRunnerArgs,
   selectStage0BLabEntries,
-  buildBrowserHarnessPython,
   parseBrowserHarnessPayload,
   buildStage0BLabResult,
   classifyStage0BOutcome,

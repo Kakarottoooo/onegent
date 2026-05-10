@@ -5,6 +5,8 @@ import {
   TICKETMASTER_SKILL_FORGE_PLAN,
   STUBHUB_SKILL_FORGE_PLAN,
   EVENTBRITE_SKILL_FORGE_PLAN,
+  STAGE0B_HARNESS_SENTINEL_END,
+  STAGE0B_HARNESS_SENTINEL_START,
   buildBrowserHarnessPython,
   buildStage0BLabResult,
   classifyStage0BOutcome,
@@ -182,6 +184,19 @@ describe("Stage 0B Browser Harness bridge code generation", () => {
     expect(python).not.toMatch(/type_text|fill_input|press_key/);
   });
 
+  it("keeps generated script sentinels and payload parser sentinels on the same exported contract", () => {
+    const python = buildBrowserHarnessPython(EXACT_EVENT, "C:/tmp/stage0b.png");
+    expect(python).toContain(STAGE0B_HARNESS_SENTINEL_START);
+    expect(python).toContain(STAGE0B_HARNESS_SENTINEL_END);
+
+    const payload = parseBrowserHarnessPayload([
+      STAGE0B_HARNESS_SENTINEL_START,
+      JSON.stringify({ ok: true, currentUrl: EXACT_EVENT.url }),
+      STAGE0B_HARNESS_SENTINEL_END,
+    ].join("\n"));
+    expect(payload).toMatchObject({ ok: true, currentUrl: EXACT_EVENT.url });
+  });
+
   it("keeps live lab tabs open only when explicitly requested", () => {
     const defaultPython = buildBrowserHarnessPython(EXACT_EVENT, "C:/tmp/stage0b.png");
     const keepOpenPython = buildBrowserHarnessPython(EXACT_EVENT, "C:/tmp/stage0b.png", true);
@@ -289,7 +304,7 @@ describe("Stage 0B Browser Harness bridge code generation", () => {
   it("parses a sentinel-delimited Browser Harness payload", () => {
     const payload = parseBrowserHarnessPayload([
       "noise before",
-      "ONEGENT_STAGE0B_RESULT_START",
+      STAGE0B_HARNESS_SENTINEL_START,
       JSON.stringify({
         ok: true,
         currentUrl: EXACT_EVENT.url,
@@ -304,7 +319,7 @@ describe("Stage 0B Browser Harness bridge code generation", () => {
         followTarget: { text: "Find Tickets", href: "https://www.ticketmaster.com/foo/event/abc" },
         hardStops: ["seat_selection_required", "not-real"],
       }),
-      "ONEGENT_STAGE0B_RESULT_END",
+      STAGE0B_HARNESS_SENTINEL_END,
     ].join("\n"));
     expect(payload.ok).toBe(true);
     expect(payload.visibleFacts?.title).toBe("Nashville SC");
