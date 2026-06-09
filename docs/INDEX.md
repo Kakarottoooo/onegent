@@ -1,10 +1,16 @@
 # Onegent Docs Index
 
-Last updated: 2026-05-10
+Last updated: 2026-06-09
 
 This is the repo documentation entrypoint. Read `AGENTS.md` first for behavior
 rules. Do not start by reading every markdown file. Most historical plans now
 live under `docs/90-archive/`.
+
+## Current Product Pivot
+
+Onegent is now being implemented as a B2B AI Agent Action Gateway MVP. The main
+product route is `/action-gateway`; the old consumer/travel agent is a legacy
+demo.
 
 ## New Agent Read Order
 
@@ -22,6 +28,10 @@ below.
 
 | Need | Read |
 |---|---|
+| Action Gateway MVP plan | `docs/action-gateway-implementation-plan.md` |
+| Action Gateway architecture | `docs/action-gateway-architecture.md` |
+| Action Gateway API example | `docs/action-gateway-api-example.md` |
+| Action Gateway customer validation | `docs/action-gateway-customer-validation.md` |
 | Current phase, blockers, nearest goal | `docs/00-start-here/PHASE_STATUS.md` |
 | Compact product/project overview | `docs/00-start-here/PROJECT_SUMMARY.md` |
 | Stage 0 operating plan | `docs/00-start-here/STAGE_0.md` |

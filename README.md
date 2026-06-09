@@ -1,83 +1,127 @@
 # Onegent
 
-**Live:** [onegent.one](https://onegent.one/)
+Onegent is now an **Action Gateway for AI Agents**: an MVP trust layer for
+capturing, reviewing, approving, verifying, and auditing high-risk business
+actions before agents touch real systems.
 
-## Project Docs
+## Onegent Action Gateway MVP
 
-Start here for current project state, phase status, handoffs, provider debugging,
-and archived plans:
+### What it is
 
-- [docs/INDEX.md](./docs/INDEX.md)
-- [docs/00-start-here/PROJECT_SUMMARY.md](./docs/00-start-here/PROJECT_SUMMARY.md)
-- [docs/00-start-here/PHASE_STATUS.md](./docs/00-start-here/PHASE_STATUS.md)
-- [docs/10-coordination/README.md](./docs/10-coordination/README.md)
+Onegent Action Gateway helps teams evaluate AI-agent actions such as:
 
-AI 决策代理——把"搜索 → 比较 → 筛选 → 推荐 → 执行 → 反馈 → 学习"整条链路交给 agent 自动完成，用户只做最终批准。
+- `SUBMIT`: submit a purchase order or operational form.
+- `PAY`: approve or pay an invoice.
+- `SEND`: send an important email or message.
+- `UPDATE`: update inventory, CRM, ERP, or operational records.
 
----
+The MVP workflow is:
 
-## 核心能力
+```text
+Agent prepares action
+-> Onegent captures the intent
+-> Onegent assesses risk
+-> Onegent evaluates policy
+-> Human approves or rejects when required
+-> Approved actions run mock execution only
+-> Onegent verifies expected vs observed demo state
+-> Onegent displays an audit timeline
+```
 
-### 多场景智能规划
-用自然语言描述需求，agent 自动生成结构化方案：
+### What it is not
 
-- **餐厅** — 约会、商务宴请、快速午餐、特殊饮食
-- **酒店** — 商务出差、周末度假、蜜月、家庭出游
-- **航班** — 最低价、红眼回避、时段过滤
-- **信用卡** — 组合缺口分析、开卡奖励排名
-- **数码** — 笔记本、手机、耳机选购
-- **活动票务** — Ticketmaster 真实票源
-- **礼物** — Google Shopping 三档选项
-- **健身** — 12 种运动类型，ClassPass / Mindbody 链接
+This MVP is not:
 
-**组合场景**：Date Night OS / Weekend Trip OS / City Trip OS / Big Purchase OS
+- a generic agent platform;
+- a consumer travel booking product;
+- a generic LLM eval or observability dashboard;
+- a production payment, email, ERP, CRM, vendor, or browser automation gateway;
+- a system that performs irreversible real-world actions.
 
-### Autopilot 自动执行
-方案批准后，agent 在后台自动操作预订平台：
-
-- **酒店**：Booking.com / Expedia / Hotels.com — 全链路（搜索 → 选房 → 填表 → 支付页暂停）
-- **餐厅**：OpenTable → Resy → Yelp → 官网直链 瀑布式回退
-- 遇到障碍自主决策（时段 fallback / 场馆切换 / 重试）
-- 实时浏览器直播（SSE 截图流，6fps）
-- 完成后 Web Push 通知到设备
-
-### 双人协作决策（Decision Room）
-两人各自提交约束 → AI 合并冲突 → 实时投票 → 双方同时确认即锁定
-
-### 持续学习
-三层反馈闭环（实时卡片 / 事后 24h / session 偏好提取）→ 偏好持久化 → 跨设备同步 → 打分权重自动修正
-
----
-
-## 技术栈
-
-| 层 | 技术 |
-|----|------|
-| 前端 | Next.js 14 (App Router) · TypeScript · Tailwind CSS |
-| AI | MiniMax（NLU / 排序 / 评论解析）· Claude Haiku（视觉感知）· Stagehand / GPT-4o-mini（浏览器自动化）|
-| 数据 | Google Places · SerpAPI · Tavily · Ticketmaster |
-| 自动化 | Playwright（RPA 兜底）· BrowserProvider 接口（6 个平台 Provider）|
-| 存储 | Neon PostgreSQL · localStorage |
-| 认证 | Clerk |
-| 推送 | Web Push (VAPID) · PWA |
-| 部署 | Vercel |
-
----
-
-## 本地开发
+### How to run locally
 
 ```bash
 npm install
-cp .env.local.example .env.local  # 填入 API keys
 npm run dev
 ```
 
-必需环境变量：`ANTHROPIC_API_KEY` · `POSTGRES_URL` · `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY` · `CLERK_SECRET_KEY` · `GOOGLE_PLACES_API_KEY`
+Open:
 
-完整环境变量列表见 `docs/00-start-here/PROJECT_SUMMARY.md`。
+```text
+http://localhost:3000/action-gateway
+```
 
----
+The Action Gateway MVP uses an isolated in-memory demo store, so it can run
+without real vendor credentials, payment systems, email systems, or production
+websites.
 
-## 文档
+### How to seed demo actions
 
-详细架构、执行流程、数据库表结构、版本历史 → [`docs/00-start-here/PROJECT_SUMMARY.md`](./docs/00-start-here/PROJECT_SUMMARY.md)
+Open:
+
+```text
+http://localhost:3000/action-gateway/demo
+```
+
+Click **Seed five demo actions**.
+
+The seed creates:
+
+1. A $4,850 purchase order to an approved vendor requiring approval.
+2. A $250 demo submit action that can be allowed and mock-verified.
+3. A payment to an unknown vendor that is blocked.
+4. An external email `SEND` action requiring approval.
+5. An inventory `UPDATE` changing quantity by more than 20%, requiring approval.
+
+### How to run tests
+
+```bash
+npm run test -- lib/__tests__/action-gateway.test.ts
+```
+
+Broader validation:
+
+```bash
+npx tsc --noEmit --pretty false
+npm run check-drift
+npm run gate:phase1 -- --allow-known-drift
+npm run build
+```
+
+### How to run the procurement demo
+
+1. Start the app with `npm run dev`.
+2. Open `/action-gateway/demo`.
+3. Click **Seed five demo actions**.
+4. Open the action titled:
+   `Procurement agent wants to submit a $4,850 purchase order`.
+5. Review the HIGH risk score and triggered policy.
+6. Approve the action.
+7. Confirm mock execution and verification move the action to `VERIFIED`.
+8. Review the audit timeline.
+
+### Safety limitations
+
+- No real purchase is made.
+- No real email is sent.
+- No real external form is submitted.
+- No real ERP, CRM, inventory, vendor, or payment system is modified.
+- No credentials or user secrets are required.
+- No external provider portal is scraped.
+- Storage is in-memory and demo-only.
+
+## Docs
+
+- [Implementation plan](./docs/action-gateway-implementation-plan.md)
+- [Architecture](./docs/action-gateway-architecture.md)
+- [API example](./docs/action-gateway-api-example.md)
+- [Customer validation script](./docs/action-gateway-customer-validation.md)
+- [Docs index](./docs/INDEX.md)
+
+## Legacy consumer demo
+
+The previous consumer/travel agent surface is retained as a legacy demo at:
+
+```text
+/legacy/consumer-agent
+```

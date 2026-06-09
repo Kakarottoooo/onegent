@@ -22,8 +22,8 @@ const dmSans = DM_Sans({
 });
 
 export const metadata: Metadata = {
-  title: "Onegent — Restaurant Recommendations",
-  description: "AI-powered restaurant discovery",
+  title: "Onegent - Action Gateway for AI Agents",
+  description: "Verify, approve, audit, and recover high-risk business actions before agents touch real systems.",
   manifest: "/manifest.json",
 };
 

@@ -26,9 +26,11 @@ import "./brand-strip.css";
  */
 export function BrandStrip() {
   const pathname = usePathname() ?? "/";
-  const current: "travelers" | "developers" = pathname.startsWith("/developers")
+  const current: "gateway" | "legacy" | "developers" = pathname.startsWith("/developers")
     ? "developers"
-    : "travelers";
+    : pathname.startsWith("/legacy")
+      ? "legacy"
+      : "gateway";
 
   // Hidden by default; revealed only by intentional wheel-on-nav.
   const [hidden, setHidden] = useState(true);
@@ -115,9 +117,17 @@ export function BrandStrip() {
           <Link
             href="/"
             className="brand-strip-tab"
-            data-current={current === "travelers"}
+            data-current={current === "gateway"}
           >
-            For travelers
+            Action Gateway
+          </Link>
+          <span className="brand-strip-divider" aria-hidden="true" />
+          <Link
+            href="/legacy/consumer-agent"
+            className="brand-strip-tab"
+            data-current={current === "legacy"}
+          >
+            Legacy demo
           </Link>
           <span className="brand-strip-divider" aria-hidden="true" />
           <Link
