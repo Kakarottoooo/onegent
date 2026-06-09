@@ -9,8 +9,9 @@ live under `docs/90-archive/`.
 ## Current Product Pivot
 
 Onegent is now being implemented as a B2B AI Agent Action Gateway MVP. The main
-product route is `/action-gateway`; the old consumer/travel agent is a legacy
-demo.
+product route is `/action-gateway`; the customer demo route is
+`/action-gateway/walkthrough/procurement`; the old consumer/travel agent is a
+legacy demo.
 
 ## New Agent Read Order
 
@@ -29,6 +30,7 @@ below.
 | Need | Read |
 |---|---|
 | Action Gateway MVP plan | `docs/action-gateway-implementation-plan.md` |
+| Procurement walkthrough plan | `docs/procurement-walkthrough-plan.md` |
 | Action Gateway architecture | `docs/action-gateway-architecture.md` |
 | Action Gateway API example | `docs/action-gateway-api-example.md` |
 | Action Gateway customer validation | `docs/action-gateway-customer-validation.md` |

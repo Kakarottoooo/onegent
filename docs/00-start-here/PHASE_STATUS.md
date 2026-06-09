@@ -40,12 +40,12 @@ The MVP must remain safe:
 
 | Lane | Status | Notes |
 | --- | --- | --- |
-| Domain model | In progress | ActionIntent, RiskAssessment, PolicyRule, ApprovalRequest, VerificationResult, AuditEvent. |
-| Risk and policy engine | In progress | Deterministic rules for SUBMIT, PAY, SEND, UPDATE. |
-| API routes | In progress | Capture/list/detail/approve/reject/verify/seed. |
-| UI | In progress | `/action-gateway`, `/action-gateway/demo`, `/action-gateway/actions/:id`. |
-| Procurement demo | In progress | $4,850 PO requiring approval and mock verification. |
-| Tests | In progress | Core policy, approval, rejection, and verification behavior. |
+| Domain model | MVP built | ActionIntent, RiskAssessment, PolicyRule, ApprovalRequest, VerificationResult, AuditEvent. |
+| Risk and policy engine | MVP built | Deterministic rules for SUBMIT, PAY, SEND, UPDATE. |
+| API routes | MVP built | Capture/list/detail/approve/reject/verify/seed plus procurement reset and audit packet. |
+| UI | MVP built | `/action-gateway`, `/action-gateway/demo`, `/action-gateway/actions/:id`. |
+| Procurement walkthrough | MVP built | `/action-gateway/walkthrough/procurement` runs $4,850 PO approval, Mock ERP update, verification, and audit export. |
+| Tests | MVP built | Core policy/approval/verification plus procurement walkthrough behavior. |
 | Customer validation | Ready for calls | Script in `docs/action-gateway-customer-validation.md`. |
 
 ## Legacy Boundary
@@ -64,11 +64,11 @@ work. They are historical implementation context only.
 The MVP is ready for initial customer validation when:
 
 1. `/action-gateway` dashboard works locally.
-2. Demo actions can be seeded.
+2. Dedicated procurement walkthrough can be started from one page.
 3. Manual mock actions can be captured.
 4. Risk/policy decisions are visible.
 5. Pending approvals can be approved or rejected.
 6. Approved actions run mock execution only.
-7. Verification and audit timeline are visible.
-8. Tests cover the core business logic.
+7. Verification, audit timeline, and audit packet export are visible.
+8. Tests cover the core business logic and procurement walkthrough.
 9. README and Action Gateway docs explain run/test/demo/safety limits.

@@ -43,7 +43,7 @@ describe("Action Gateway MVP policy and verification flow", () => {
     expect(review.riskAssessment.riskLevel).toBe("HIGH");
     expect(review.approvalRequest?.status).toBe("PENDING");
     expect(review.riskAssessment.triggeredPolicies).toContain(
-      "Require approval for high-value actions over $1,000",
+      "Purchase orders over $1,000 require human approval.",
     );
   });
 

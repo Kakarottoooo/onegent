@@ -32,9 +32,15 @@ The first polished demo is procurement:
 Procurement agent wants to submit a $4,850 purchase order.
 ```
 
+The dedicated walkthrough route is:
+
+```text
+/action-gateway/walkthrough/procurement
+```
+
 The vendor is approved, the amount exceeds the $1,000 approval threshold, a
-human reviewer approves, Onegent mock-executes, verifies the PO status changed
-from `DRAFT` to `SUBMITTED`, and records the audit trail.
+human reviewer approves, Onegent updates only the local Mock ERP state, verifies
+the PO status changed from `DRAFT` to `SUBMITTED`, and exports an audit packet.
 
 ## What This MVP Is Not
 
@@ -55,18 +61,25 @@ Core code:
 - `lib/action-gateway/store.ts`
 - `lib/action-gateway/service.ts`
 - `lib/action-gateway/demo-seeds.ts`
+- `lib/action-gateway/mock-procurement.ts`
+- `lib/action-gateway/procurement-walkthrough.ts`
 
 Routes:
 
 - `/action-gateway`
 - `/action-gateway/demo`
+- `/action-gateway/walkthrough/procurement`
 - `/action-gateway/actions/:id`
+- `/mock-systems/procurement/purchase-orders/:id`
 - `/api/action-gateway/actions`
 - `/api/action-gateway/actions/:id`
+- `/api/action-gateway/actions/:id/audit-packet`
 - `/api/action-gateway/actions/:id/approve`
 - `/api/action-gateway/actions/:id/reject`
 - `/api/action-gateway/actions/:id/verify`
 - `/api/action-gateway/demo/seed`
+- `/api/action-gateway/demo/procurement`
+- `/api/action-gateway/demo/procurement/reset`
 
 Storage is intentionally in-memory and demo-only so the MVP runs locally
 without real credentials or external systems.
@@ -74,6 +87,7 @@ without real credentials or external systems.
 ## Current Docs
 
 - `docs/action-gateway-implementation-plan.md`
+- `docs/procurement-walkthrough-plan.md`
 - `docs/action-gateway-architecture.md`
 - `docs/action-gateway-api-example.md`
 - `docs/action-gateway-customer-validation.md`

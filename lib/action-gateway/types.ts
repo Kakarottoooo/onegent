@@ -14,7 +14,7 @@ export type ActionIntentStatus =
 export type RiskLevel = "LOW" | "MEDIUM" | "HIGH" | "CRITICAL";
 export type PolicyEffect = "ALLOW" | "REQUIRE_APPROVAL" | "BLOCK";
 export type ApprovalStatus = "PENDING" | "APPROVED" | "REJECTED" | "EXPIRED";
-export type VerificationMethod = "MOCK" | "DOM_CHECK" | "API_CHECK" | "MANUAL";
+export type VerificationMethod = "MOCK" | "LOCAL_MOCK_ERP" | "DOM_CHECK" | "API_CHECK" | "MANUAL";
 export type AuditActorType = "AGENT" | "HUMAN" | "SYSTEM";
 
 export interface ActionFieldChange {
@@ -119,7 +119,8 @@ export interface AuditEvent {
     | "MOCK_EXECUTION_COMPLETED"
     | "VERIFICATION_PASSED"
     | "VERIFICATION_FAILED"
-    | "ACTION_CANCELLED";
+    | "ACTION_CANCELLED"
+    | "AUDIT_PACKET_GENERATED";
   actorType: AuditActorType;
   actorId: string;
   message: string;
@@ -160,6 +161,40 @@ export interface ActionReview {
   auditEvents: AuditEvent[];
   policyRules: PolicyRule[];
   blocked: boolean;
+}
+
+export interface MockPurchaseOrder {
+  id: string;
+  vendor: string;
+  amount: number;
+  currency: string;
+  status: "DRAFT" | "SUBMITTED";
+  vendorApproved: boolean;
+  lineItem: string;
+  lastUpdatedAt: string;
+  actionIntentId?: string;
+}
+
+export interface ActionExecutionSummary {
+  method: "MOCK" | "LOCAL_MOCK_ERP";
+  status: "NOT_EXECUTED" | "COMPLETED";
+  targetSystem: string;
+  previousState?: Record<string, unknown>;
+  observedState?: Record<string, unknown>;
+}
+
+export interface ActionAuditPacket {
+  demo: true;
+  product: "Onegent Action Gateway";
+  scenario: string;
+  actionIntent: ActionIntent;
+  riskAssessment: RiskAssessment;
+  triggeredPolicies: string[];
+  approvalRequest?: ApprovalRequest;
+  execution: ActionExecutionSummary;
+  verificationResult?: VerificationResult;
+  auditEvents: AuditEvent[];
+  disclaimer: string;
 }
 
 export interface ActionListFilters {

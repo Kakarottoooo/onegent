@@ -15,7 +15,7 @@ const policyTimestamp = "2026-06-09T00:00:00.000Z";
 export const DEFAULT_ACTION_GATEWAY_POLICIES: PolicyRule[] = [
   {
     id: "policy-pay-over-1000",
-    name: "Require approval for high-value actions over $1,000",
+    name: "Purchase orders over $1,000 require human approval.",
     description: "Any payment or high-value commercial action over $1,000 must be reviewed by a human.",
     enabled: true,
     actionTypes: ["SUBMIT", "PAY", "SEND", "UPDATE"],

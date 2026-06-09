@@ -76,7 +76,7 @@ The seed creates:
 ### How to run tests
 
 ```bash
-npm run test -- lib/__tests__/action-gateway.test.ts
+npm run test -- lib/__tests__/action-gateway.test.ts lib/__tests__/procurement-walkthrough.test.ts
 ```
 
 Broader validation:
@@ -91,14 +91,13 @@ npm run build
 ### How to run the procurement demo
 
 1. Start the app with `npm run dev`.
-2. Open `/action-gateway/demo`.
-3. Click **Seed five demo actions**.
-4. Open the action titled:
-   `Procurement agent wants to submit a $4,850 purchase order`.
-5. Review the HIGH risk score and triggered policy.
-6. Approve the action.
-7. Confirm mock execution and verification move the action to `VERIFIED`.
-8. Review the audit timeline.
+2. Open `/action-gateway/walkthrough/procurement`.
+3. Click **Start demo / Capture action**.
+4. Review the HIGH risk score, policy, and approval request.
+5. Approve the action.
+6. Confirm the local Mock ERP purchase order moves from `DRAFT` to `SUBMITTED`.
+7. Confirm verification passes against the local mock state.
+8. Export or copy the audit packet.
 
 ### Safety limitations
 
@@ -113,6 +112,7 @@ npm run build
 ## Docs
 
 - [Implementation plan](./docs/action-gateway-implementation-plan.md)
+- [Procurement walkthrough plan](./docs/procurement-walkthrough-plan.md)
 - [Architecture](./docs/action-gateway-architecture.md)
 - [API example](./docs/action-gateway-api-example.md)
 - [Customer validation script](./docs/action-gateway-customer-validation.md)

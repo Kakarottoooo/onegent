@@ -12,7 +12,7 @@ export default function HomePage() {
             <Link href="/action-gateway" className="text-[var(--text-primary)]">
               Dashboard
             </Link>
-            <Link href="/action-gateway/demo" className="rounded-lg bg-[var(--gold)] px-4 py-2 text-[var(--gold-text)]">
+            <Link href="/action-gateway/walkthrough/procurement" className="rounded-lg bg-[var(--gold)] px-4 py-2 text-[var(--gold-text)]">
               Run demo
             </Link>
           </nav>
@@ -45,7 +45,7 @@ export default function HomePage() {
                 Open Action Gateway
               </Link>
               <Link
-                href="/action-gateway/demo"
+                href="/action-gateway/walkthrough/procurement"
                 className="rounded-lg border border-[var(--border)] px-5 py-3 text-sm font-semibold"
               >
                 Run procurement demo

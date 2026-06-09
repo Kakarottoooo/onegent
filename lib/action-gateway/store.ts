@@ -2,6 +2,7 @@ import type {
   ActionIntent,
   ApprovalRequest,
   AuditEvent,
+  MockPurchaseOrder,
   RiskAssessment,
   VerificationResult,
 } from "@/lib/action-gateway/types";
@@ -13,6 +14,7 @@ export interface ActionGatewayState {
   verifications: Map<string, VerificationResult>;
   auditEvents: Map<string, AuditEvent[]>;
   mockObservedStates: Map<string, Record<string, unknown>>;
+  mockPurchaseOrders: Map<string, MockPurchaseOrder>;
 }
 
 const globalForActionGateway = globalThis as typeof globalThis & {
@@ -31,6 +33,7 @@ export function getActionGatewayStore(): ActionGatewayState {
       verifications: new Map(),
       auditEvents: new Map(),
       mockObservedStates: new Map(),
+      mockPurchaseOrders: new Map(),
     };
   }
   return globalForActionGateway.__onegentActionGatewayStore;
@@ -44,5 +47,6 @@ export function resetActionGatewayStore(): void {
     verifications: new Map(),
     auditEvents: new Map(),
     mockObservedStates: new Map(),
+    mockPurchaseOrders: new Map(),
   };
 }

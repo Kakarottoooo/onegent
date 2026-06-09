@@ -1,5 +1,6 @@
 import { randomUUID } from "crypto";
 import { DEFAULT_ACTION_GATEWAY_POLICIES, evaluatePolicies } from "@/lib/action-gateway/policies";
+import { executeMockProcurementSubmission, isMockProcurementAction } from "@/lib/action-gateway/mock-procurement";
 import { assessActionRisk } from "@/lib/action-gateway/risk";
 import { getActionGatewayStore, resetActionGatewayStore } from "@/lib/action-gateway/store";
 import type {
@@ -14,6 +15,7 @@ import type {
   AuditEvent,
   CreateActionIntentInput,
   RiskAssessment,
+  VerificationMethod,
   VerificationResult,
 } from "@/lib/action-gateway/types";
 
@@ -207,7 +209,7 @@ export function verifyAction(
     observedState: observed,
     success,
     differences,
-    verificationMethod: "MOCK",
+    verificationMethod: verificationMethodForAction(action),
     createdAt: new Date().toISOString(),
   };
   store.verifications.set(id, verification);
@@ -231,22 +233,40 @@ export function resetActionGatewayDemoStore(): void {
 function runMockExecution(id: string): void {
   const store = getActionGatewayStore();
   const action = getStoredAction(store, id);
+  const procurementExecution = executeMockProcurementSubmission(action);
   addAuditEvent(store, id, {
     eventType: "MOCK_EXECUTION_STARTED",
     actorType: "SYSTEM",
     actorId: "mock-executor",
     message: "Mock execution started. No external system was touched.",
+    metadata: procurementExecution
+      ? {
+          method: "LOCAL_MOCK_ERP",
+          previousState: procurementExecution.previousState,
+        }
+      : { method: "MOCK" },
   });
   action.status = "EXECUTED";
-  const observed = action.proposedAfterState ?? { mockExecuted: true };
+  const observed = procurementExecution?.observedState ??
+    action.proposedAfterState ??
+    { mockExecuted: true };
   store.mockObservedStates.set(id, observed);
   addAuditEvent(store, id, {
     eventType: "MOCK_EXECUTION_COMPLETED",
     actorType: "SYSTEM",
     actorId: "mock-executor",
-    message: "Mock execution completed against demo state only.",
-    metadata: { observedState: observed },
+    message: procurementExecution
+      ? "Mock ERP purchase order updated. No external system was touched."
+      : "Mock execution completed against demo state only.",
+    metadata: {
+      method: procurementExecution ? "LOCAL_MOCK_ERP" : "MOCK",
+      observedState: observed,
+    },
   });
+}
+
+function verificationMethodForAction(action: ActionIntent): VerificationMethod {
+  return isMockProcurementAction(action) ? "LOCAL_MOCK_ERP" : "MOCK";
 }
 
 function normalizeActionInput(input: CreateActionIntentInput, now: string): ActionIntent {

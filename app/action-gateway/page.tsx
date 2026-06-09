@@ -27,8 +27,14 @@ export default function ActionGatewayDashboardPage() {
           </div>
           <div className="flex flex-wrap gap-3">
             <Link
-              href="/action-gateway/demo"
+              href="/action-gateway/walkthrough/procurement"
               className="rounded-lg bg-[var(--gold)] px-4 py-3 text-sm font-semibold text-[var(--gold-text)] shadow-[var(--shadow-2)]"
+            >
+              Run procurement walkthrough
+            </Link>
+            <Link
+              href="/action-gateway/demo"
+              className="rounded-lg border border-[var(--border)] px-4 py-3 text-sm font-semibold text-[var(--text-primary)]"
             >
               Create demo action
             </Link>
@@ -68,10 +74,10 @@ export default function ActionGatewayDashboardPage() {
                 mock action manually.
               </p>
               <Link
-                href="/action-gateway/demo"
+                href="/action-gateway/walkthrough/procurement"
                 className="mt-4 inline-flex rounded-lg bg-[var(--gold)] px-4 py-3 text-sm font-semibold text-[var(--gold-text)]"
               >
-                Open demo capture
+                Run procurement walkthrough
               </Link>
             </div>
           ) : (
